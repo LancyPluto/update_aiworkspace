@@ -60,6 +60,7 @@ public class AuthInterceptor implements HandlerInterceptor {
                 || path.equals("/api/v1/ping")
                 || path.equals("/api/admin/v1/ping")
                 || path.startsWith("/api/v1/auth/")
+                || path.startsWith("/api/internal/v1/")
                 || path.equals("/api/v1/tool-categories")
                 || path.equals("/api/v1/tools")
                 || path.startsWith("/api/v1/tools/")

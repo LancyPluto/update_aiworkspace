@@ -74,6 +74,13 @@ public class TaskMapper {
         return tasks.stream().findFirst();
     }
 
+    public Optional<AiTask> findById(Long taskId) {
+        List<AiTask> tasks = jdbcTemplate.query(baseSql() + """
+                WHERE t.id = ?
+                """, taskRowMapper, taskId);
+        return tasks.stream().findFirst();
+    }
+
     public List<AiTask> findByUserId(Long userId) {
         return jdbcTemplate.query(baseSql() + """
                 WHERE t.user_id = ?
@@ -93,6 +100,43 @@ public class TaskMapper {
                 rs.getString("content_text")
         ), taskId);
         return results.stream().findFirst();
+    }
+
+    public void markProcessing(Long taskId, int progress, String progressMessage) {
+        jdbcTemplate.update("""
+                UPDATE ai_tasks
+                SET status = 'PROCESSING', progress = ?, progress_message = ?,
+                    started_at = COALESCE(started_at, CURRENT_TIMESTAMP),
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """, progress, progressMessage, taskId);
+    }
+
+    public void markSuccess(Long taskId) {
+        jdbcTemplate.update("""
+                UPDATE ai_tasks
+                SET status = 'SUCCESS', progress = 100, progress_message = ?,
+                    finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """, "生成完成", taskId);
+    }
+
+    public void markFailed(Long taskId, String errorCode, String errorMessage) {
+        jdbcTemplate.update("""
+                UPDATE ai_tasks
+                SET status = 'FAILED', progress = 100, progress_message = ?,
+                    error_code = ?, error_message = ?,
+                    finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """, errorMessage, errorCode, errorMessage, taskId);
+    }
+
+    public void insertResult(Long taskId, Long userId, String resourceType, String contentText) {
+        jdbcTemplate.update("""
+                INSERT INTO ai_result_resources
+                  (task_id, user_id, resource_type, content_text, sort_order)
+                VALUES (?, ?, ?, ?, 0)
+                """, taskId, userId, resourceType, contentText);
     }
 
     private String baseSql() {

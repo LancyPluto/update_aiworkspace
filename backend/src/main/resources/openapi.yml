@@ -18,6 +18,8 @@ tags:
     description: Public tool marketplace APIs
   - name: Admin Tools
     description: Minimal admin tool management APIs
+  - name: Internal Worker
+    description: Internal APIs for AI task workers
 
 paths:
   /api/health:
@@ -541,6 +543,129 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
 
+  /api/internal/v1/tasks/{taskId}/execution-context:
+    get:
+      tags:
+        - Internal Worker
+      summary: Get task execution context for worker
+      operationId: getTaskExecutionContext
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+          example: 1
+      responses:
+        "200":
+          description: Task context including params and active tool fields
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExecutionContextApiResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /api/internal/v1/tasks/{taskId}/processing:
+    post:
+      tags:
+        - Internal Worker
+      summary: Mark task as processing
+      operationId: markTaskProcessing
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+          example: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WorkerProcessingRequest"
+            example:
+              progress: 35
+              progressMessage: AI is generating
+      responses:
+        "200":
+          description: Updated task status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskStatusApiResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /api/internal/v1/tasks/{taskId}/success:
+    post:
+      tags:
+        - Internal Worker
+      summary: Mark task as success and write result
+      operationId: markTaskSuccess
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+          example: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WorkerSuccessRequest"
+            example:
+              resourceType: MARKDOWN
+              contentText: "# Generated result"
+      responses:
+        "200":
+          description: Task status changed to SUCCESS
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskStatusApiResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /api/internal/v1/tasks/{taskId}/failed:
+    post:
+      tags:
+        - Internal Worker
+      summary: Mark task as failed
+      operationId: markTaskFailed
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+          example: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WorkerFailedRequest"
+            example:
+              errorCode: MODEL_CALL_FAILED
+              errorMessage: model timeout
+      responses:
+        "200":
+          description: Task status changed to FAILED
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskStatusApiResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
 components:
   securitySchemes:
     bearerAuth:
@@ -834,6 +959,14 @@ components:
             data:
               $ref: "#/components/schemas/TaskPage"
 
+    ExecutionContextApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/ExecutionContext"
+
     LoginResponse:
       type: object
       properties:
@@ -1109,3 +1242,73 @@ components:
           type: integer
           format: int64
           example: 1
+
+    ExecutionContext:
+      type: object
+      properties:
+        taskId:
+          type: integer
+          format: int64
+          example: 1
+        taskNo:
+          type: string
+          example: T20260508AF040D708A
+        userId:
+          type: integer
+          format: int64
+          example: 2
+        toolId:
+          type: integer
+          format: int64
+          example: 1
+        toolCode:
+          type: string
+          example: xiaohongshu_copywriting
+        toolName:
+          type: string
+          example: 小红书文案生成
+        status:
+          type: string
+          example: QUEUED
+        params:
+          type: object
+          additionalProperties: true
+        fields:
+          type: array
+          items:
+            $ref: "#/components/schemas/ToolField"
+
+    WorkerProcessingRequest:
+      type: object
+      properties:
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 99
+          example: 35
+        progressMessage:
+          type: string
+          example: AI is generating
+
+    WorkerSuccessRequest:
+      type: object
+      required:
+        - resourceType
+        - contentText
+      properties:
+        resourceType:
+          type: string
+          example: MARKDOWN
+        contentText:
+          type: string
+          example: "# Generated result"
+
+    WorkerFailedRequest:
+      type: object
+      properties:
+        errorCode:
+          type: string
+          example: MODEL_CALL_FAILED
+        errorMessage:
+          type: string
+          example: model timeout
