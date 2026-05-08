@@ -6,10 +6,13 @@ import com.aiminilab.aitoolmarket.common.enums.ToolStatus;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.tool.dto.ToolCategoryResponse;
 import com.aiminilab.aitoolmarket.tool.dto.ToolDetailResponse;
+import com.aiminilab.aitoolmarket.tool.dto.ToolFieldRequest;
 import com.aiminilab.aitoolmarket.tool.dto.ToolFieldResponse;
 import com.aiminilab.aitoolmarket.tool.dto.ToolSummaryResponse;
+import com.aiminilab.aitoolmarket.tool.dto.UpdateToolFieldsRequest;
 import com.aiminilab.aitoolmarket.tool.dto.UpsertToolRequest;
 import com.aiminilab.aitoolmarket.tool.entity.AiTool;
+import com.aiminilab.aitoolmarket.tool.entity.ToolFieldItem;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolMapper;
 import com.aiminilab.aitoolmarket.tool.service.ToolService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -48,10 +51,7 @@ public class ToolServiceImpl implements ToolService {
         AiTool tool = toolMapper.findOnlineByCode(toolCode)
                 .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在或未上线"));
         ToolSummaryResponse summary = ToolSummaryResponse.from(tool);
-        List<ToolFieldResponse> fields = toolMapper.findActiveFields(tool.getId()).stream()
-                .map(field -> ToolFieldResponse.from(field, objectMapper))
-                .toList();
-        return ToolDetailResponse.of(summary, fields);
+        return ToolDetailResponse.of(summary, fields(tool.getId()));
     }
 
     @Override
@@ -68,33 +68,48 @@ public class ToolServiceImpl implements ToolService {
         Long toolId = toolMapper.insertTool(tool, operatorId);
         Long schemaId = toolMapper.createActiveDefaultSchema(toolId, operatorId);
         toolMapper.createDefaultFields(schemaId);
-        return toolMapper.findById(toolId)
-                .map(ToolSummaryResponse::from)
-                .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在"));
+        return findToolSummary(toolId);
     }
 
     @Override
     public ToolSummaryResponse updateTool(Long toolId, UpsertToolRequest request, Long operatorId) {
         ensureToolExists(toolId);
         toolMapper.updateTool(toolId, fromRequest(request), operatorId);
-        return toolMapper.findById(toolId)
-                .map(ToolSummaryResponse::from)
-                .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在"));
+        return findToolSummary(toolId);
     }
 
     @Override
     public ToolSummaryResponse publishTool(Long toolId, Long operatorId) {
         ensureToolExists(toolId);
         toolMapper.updateToolStatus(toolId, ToolStatus.ONLINE, operatorId);
-        return toolMapper.findById(toolId)
-                .map(ToolSummaryResponse::from)
-                .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在"));
+        return findToolSummary(toolId);
     }
 
     @Override
     public ToolSummaryResponse offlineTool(Long toolId, Long operatorId) {
         ensureToolExists(toolId);
         toolMapper.updateToolStatus(toolId, ToolStatus.OFFLINE, operatorId);
+        return findToolSummary(toolId);
+    }
+
+    @Override
+    public List<ToolFieldResponse> adminFields(Long toolId) {
+        ensureToolExists(toolId);
+        return fields(toolId);
+    }
+
+    @Override
+    public List<ToolFieldResponse> updateFields(Long toolId, UpdateToolFieldsRequest request) {
+        ensureToolExists(toolId);
+        Long schemaId = toolMapper.findActiveSchemaId(toolId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具字段配置不存在"));
+        toolMapper.replaceActiveFields(schemaId, request.fields().stream()
+                .map(this::toFieldItem)
+                .toList());
+        return fields(toolId);
+    }
+
+    private ToolSummaryResponse findToolSummary(Long toolId) {
         return toolMapper.findById(toolId)
                 .map(ToolSummaryResponse::from)
                 .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在"));
@@ -114,5 +129,23 @@ public class ToolServiceImpl implements ToolService {
     private void ensureToolExists(Long toolId) {
         toolMapper.findById(toolId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在"));
+    }
+
+    private List<ToolFieldResponse> fields(Long toolId) {
+        return toolMapper.findActiveFields(toolId).stream()
+                .map(field -> ToolFieldResponse.from(field, objectMapper))
+                .toList();
+    }
+
+    private ToolFieldItem toFieldItem(ToolFieldRequest request) {
+        ToolFieldItem item = new ToolFieldItem();
+        item.setFieldKey(request.fieldKey());
+        item.setFieldName(request.fieldName());
+        item.setFieldType(request.fieldType());
+        item.setPlaceholder(request.placeholder());
+        item.setOptionsJson(request.options() == null ? null : request.options().toString());
+        item.setRequired(request.required() == null || request.required());
+        item.setSortOrder(request.sortOrder() == null ? 0 : request.sortOrder());
+        return item;
     }
 }

@@ -3,7 +3,9 @@ package com.aiminilab.aitoolmarket.tool.controller;
 import com.aiminilab.aitoolmarket.auth.security.AuthContext;
 import com.aiminilab.aitoolmarket.common.dto.ApiResponse;
 import com.aiminilab.aitoolmarket.common.dto.PageResponse;
+import com.aiminilab.aitoolmarket.tool.dto.ToolFieldResponse;
 import com.aiminilab.aitoolmarket.tool.dto.ToolSummaryResponse;
+import com.aiminilab.aitoolmarket.tool.dto.UpdateToolFieldsRequest;
 import com.aiminilab.aitoolmarket.tool.dto.UpsertToolRequest;
 import com.aiminilab.aitoolmarket.tool.service.ToolService;
 import jakarta.validation.Valid;
@@ -14,6 +16,8 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/admin/v1/tools")
@@ -48,5 +52,16 @@ public class AdminToolController {
     @PostMapping("/{toolId}/offline")
     public ApiResponse<ToolSummaryResponse> offline(@PathVariable Long toolId) {
         return ApiResponse.success(toolService.offlineTool(toolId, AuthContext.get().userId()));
+    }
+
+    @GetMapping("/{toolId}/fields")
+    public ApiResponse<List<ToolFieldResponse>> fields(@PathVariable Long toolId) {
+        return ApiResponse.success(toolService.adminFields(toolId));
+    }
+
+    @PutMapping("/{toolId}/fields")
+    public ApiResponse<List<ToolFieldResponse>> updateFields(@PathVariable Long toolId,
+                                                             @Valid @RequestBody UpdateToolFieldsRequest request) {
+        return ApiResponse.success(toolService.updateFields(toolId, request));
     }
 }
