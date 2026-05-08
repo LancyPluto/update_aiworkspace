@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ArrowLeft } from '@element-plus/icons-vue'
 import type { FormInstance, FormRules } from 'element-plus'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -12,6 +12,7 @@ const route = useRoute()
 const router = useRouter()
 const formRef = ref<FormInstance>()
 const loading = ref(false)
+const submitting = ref(false)
 const categories = ref<ToolCategory[]>([])
 const toolId = computed(() => Number(route.params.toolId || 0))
 const isEdit = computed(() => Boolean(toolId.value))
@@ -22,13 +23,16 @@ const form = reactive<UpsertToolPayload>({
   categoryId: null,
   description: '',
   coverUrl: '',
-  estimatedCreditCost: 0
+  estimatedCreditCost: 1
 })
 
 const rules: FormRules = {
+  toolCode: [{ required: true, message: '请输入工具编码（小写字母/数字/下划线）', trigger: 'blur' }],
   toolName: [{ required: true, message: '请输入工具名称', trigger: 'blur' }],
   categoryId: [{ required: true, message: '请选择分类', trigger: 'change' }],
-  estimatedCreditCost: [{ required: true, type: 'number', min: 0, message: '算力消耗不能小于 0', trigger: 'change' }]
+  estimatedCreditCost: [
+    { required: true, type: 'number', min: 0, message: '算力消耗不能小于 0', trigger: 'change' }
+  ]
 }
 
 async function loadInitialData() {
@@ -59,18 +63,28 @@ async function loadInitialData() {
 
 async function submit() {
   await formRef.value?.validate()
-  loading.value = true
+  submitting.value = true
   try {
     if (isEdit.value) {
       await updateTool(toolId.value, form)
       ElMessage.success('工具已更新')
+      router.push('/tools')
     } else {
-      await createTool(form)
-      ElMessage.success('工具已创建')
+      const result = await createTool(form)
+      ElMessage.success('工具已创建并初始化默认字段 Schema 与 Prompt')
+      const next = await ElMessageBox.confirm(
+        '工具已创建，是否立即去配置字段 Schema？也可稍后到工具列表里点击「字段」「Prompt」按钮继续。',
+        '下一步',
+        { confirmButtonText: '去配置字段', cancelButtonText: '回到列表', type: 'success' }
+      ).catch(() => 'cancel' as const)
+      if (next === 'confirm') {
+        router.push(`/tools/${result.id}/fields`)
+      } else {
+        router.push('/tools')
+      }
     }
-    router.push('/tools')
   } finally {
-    loading.value = false
+    submitting.value = false
   }
 }
 
@@ -90,7 +104,8 @@ onMounted(loadInitialData)
     <el-card v-loading="loading" class="page-card form-card" shadow="never">
       <el-form ref="formRef" :model="form" :rules="rules" label-width="120px">
         <el-form-item label="工具编码" prop="toolCode">
-          <el-input v-model="form.toolCode" placeholder="如 image_text_extract，可留空由后端生成" />
+          <el-input v-model="form.toolCode" :disabled="isEdit" placeholder="如 image_text_extract" />
+          <div class="muted tip">创建后不可修改，前端/后端会以此作为唯一对接 key。</div>
         </el-form-item>
         <el-form-item label="工具名称" prop="toolName">
           <el-input v-model="form.toolName" placeholder="请输入工具名称" />
@@ -105,15 +120,25 @@ onMounted(loadInitialData)
         </el-form-item>
         <el-form-item label="预估算力" prop="estimatedCreditCost">
           <el-input-number v-model="form.estimatedCreditCost" :min="0" :step="1" />
+          <span class="muted tip">用户每次创建任务会扣减此值，请与产品对齐。</span>
         </el-form-item>
         <el-form-item label="工具描述" prop="description">
           <el-input v-model="form.description" type="textarea" :rows="5" placeholder="说明工具用途、适用场景和输入要求" />
         </el-form-item>
         <el-form-item>
-          <el-button type="primary" :loading="loading" @click="submit">{{ isEdit ? '保存修改' : '创建工具' }}</el-button>
+          <el-button type="primary" :loading="submitting" @click="submit">
+            {{ isEdit ? '保存修改' : '创建工具' }}
+          </el-button>
           <el-button @click="router.push('/tools')">取消</el-button>
         </el-form-item>
       </el-form>
     </el-card>
   </section>
 </template>
+
+<style scoped>
+.tip {
+  margin-top: 4px;
+  font-size: 12px;
+}
+</style>

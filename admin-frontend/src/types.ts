@@ -50,10 +50,12 @@ export interface UpsertToolPayload {
   estimatedCreditCost: number
 }
 
+export type FieldType = 'text' | 'textarea' | 'select' | 'number'
+
 export interface FieldItem {
   fieldKey: string
   fieldName: string
-  fieldType: 'text' | 'textarea' | 'select' | 'number'
+  fieldType: FieldType
   placeholder?: string
   required: boolean
   optionsJson?: string
@@ -62,29 +64,45 @@ export interface FieldItem {
 
 export interface FieldSchema {
   id: number
+  toolId: number
   schemaVersion: string
-  status: string
-  items: FieldItem[]
+  status: 'DRAFT' | 'ACTIVE' | 'INACTIVE' | string
+  fields: FieldItem[]
+  createdAt?: string
+  updatedAt?: string
 }
 
-export interface PromptDraft {
-  promptName: string
+export interface PromptRecord {
+  id: number
+  toolId: number
   promptCode: string
-  content: string
+  promptName: string
+  status: string
+  activeVersionId?: number | null
 }
 
-export interface AdminTask {
-  taskId: number
-  taskNo: string
-  toolCode: string
-  toolName: string
-  status: string
-  progress: number
-  progressMessage?: string
-  params?: Record<string, unknown>
-  result?: TaskResult | null
-  createdAt: string
-  finishedAt?: string
+export interface PromptVersionRecord {
+  id: number
+  promptId: number
+  versionNo: string
+  systemPrompt?: string
+  userPromptTemplate: string
+  outputFormat: string
+  status: 'DRAFT' | 'ACTIVE' | 'INACTIVE' | string
+  createdAt?: string
+  publishedAt?: string | null
+}
+
+export interface CreatePromptPayload {
+  promptCode: string
+  promptName: string
+}
+
+export interface CreatePromptVersionPayload {
+  versionNo: string
+  systemPrompt?: string
+  userPromptTemplate: string
+  outputFormat?: string
 }
 
 export interface TaskResult {
@@ -92,7 +110,54 @@ export interface TaskResult {
   contentText: string
 }
 
-export interface AdminTaskDetail extends AdminTask {}
+export interface TaskLog {
+  id: number
+  eventType: string
+  fromStatus?: string | null
+  toStatus?: string | null
+  message?: string | null
+  createdAt: string
+}
+
+export interface CreditLogItem {
+  id: number
+  logType: string
+  amount: number
+  balanceBefore: number
+  balanceAfter: number
+  reason?: string | null
+  createdAt: string
+}
+
+export interface AdminTaskRow {
+  taskId: number
+  taskNo: string
+  userId?: number
+  userNickname?: string | null
+  toolCode: string
+  toolName: string
+  status: string
+  progress: number
+  progressMessage?: string | null
+  consumedCredits?: number
+  errorCode?: string | null
+  errorMessage?: string | null
+  createdAt: string
+  finishedAt?: string | null
+}
+
+export interface AdminTaskDetail extends AdminTaskRow {
+  params?: Record<string, unknown>
+  result?: TaskResult | null
+  logs?: TaskLog[]
+  creditLogs?: CreditLogItem[]
+}
+
+export interface AdminTaskQuery {
+  status?: string
+  toolCode?: string
+  userId?: number
+}
 
 export interface CreditAccount {
   accountId: number
@@ -112,4 +177,22 @@ export interface AdminMember {
   status: string
   credits?: number
   createdAt?: string
+}
+
+export interface ManualAddCreditsPayload {
+  amount: number
+  reason?: string
+}
+
+export interface ManualAddCreditsResult {
+  userId: number
+  amount: number
+  balanceBefore: number
+  balanceAfter: number
+  reason?: string | null
+  createdAt: string
+}
+
+export interface TestGenerateResult {
+  output: string
 }
