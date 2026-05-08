@@ -69,9 +69,23 @@ public class UserMapper {
             ps.setString(7, user.getStatus());
             return ps;
         }, keyHolder);
-        Number key = keyHolder.getKeyList().isEmpty()
-                ? null
-                : (Number) keyHolder.getKeyList().get(0).get("id");
-        return key == null ? null : key.longValue();
+        return generatedId(keyHolder);
+    }
+
+    private Long generatedId(KeyHolder keyHolder) {
+        Number key = null;
+        if (!keyHolder.getKeyList().isEmpty()) {
+            Object value = keyHolder.getKeyList().get(0).values().stream().findFirst().orElse(null);
+            if (value instanceof Number number) {
+                key = number;
+            }
+        }
+        if (key == null) {
+            key = keyHolder.getKey();
+        }
+        if (key == null) {
+            throw new IllegalStateException("Generated id is missing");
+        }
+        return key.longValue();
     }
 }
