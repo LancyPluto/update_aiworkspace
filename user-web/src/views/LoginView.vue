@@ -27,7 +27,7 @@
       //登录模式
       if (mode.value === 'login') {
         await auth.login({
-          username: form.value.username.trim(),
+          account: form.value.username.trim(),
           password: form.value.password,
         })
         const redirect = /** @type {string} */ (route.query.redirect || '/tools')
@@ -41,7 +41,7 @@
           email: form.value.email.trim() || undefined,
         })
         await auth.login({
-          username: form.value.username.trim(),
+          account: form.value.username.trim(),
           password: form.value.password,
         })
         router.replace('/tools')
