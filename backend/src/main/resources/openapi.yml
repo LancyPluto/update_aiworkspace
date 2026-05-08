@@ -1,0 +1,832 @@
+openapi: 3.0.3
+info:
+  title: AI Tool Market V1 API
+  description: Current implemented API contract for the V1 development sprint. Only endpoints available on the dev branch are included.
+  version: 0.1.0
+servers:
+  - url: http://localhost:8080
+    description: Local Spring Boot server
+
+tags:
+  - name: Health
+    description: Health check and ping APIs
+  - name: User Auth
+    description: User registration, login, logout, and current profile APIs
+  - name: Admin Auth
+    description: Admin login, logout, and current profile APIs
+  - name: Tool Marketplace
+    description: Public tool marketplace APIs
+  - name: Admin Tools
+    description: Minimal admin tool management APIs
+
+paths:
+  /api/health:
+    get:
+      tags:
+        - Health
+      summary: Service health check
+      operationId: health
+      responses:
+        "200":
+          description: Health status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthApiResponse"
+
+  /api/v1/ping:
+    get:
+      tags:
+        - Health
+      summary: User API ping
+      operationId: userPing
+      responses:
+        "200":
+          description: Pong response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StringApiResponse"
+
+  /api/admin/v1/ping:
+    get:
+      tags:
+        - Health
+      summary: Admin API ping
+      operationId: adminPing
+      responses:
+        "200":
+          description: Pong response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StringApiResponse"
+
+  /api/v1/auth/register:
+    post:
+      tags:
+        - User Auth
+      summary: Register a normal user
+      operationId: registerUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+            example:
+              username: test001
+              password: "123456"
+              nickname: Test User
+      responses:
+        "200":
+          description: Registered and logged in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginApiResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /api/v1/auth/login:
+    post:
+      tags:
+        - User Auth
+      summary: Login as a normal user
+      operationId: loginUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+            example:
+              account: user1
+              password: "123456"
+      responses:
+        "200":
+          description: Login success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginApiResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /api/v1/auth/logout:
+    post:
+      tags:
+        - User Auth
+      summary: Logout current user
+      operationId: logoutUser
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Logout success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmptyApiResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/users/me:
+    get:
+      tags:
+        - User Auth
+      summary: Get current user profile
+      operationId: getCurrentUser
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Current user profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProfileApiResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/admin/v1/auth/login:
+    post:
+      tags:
+        - Admin Auth
+      summary: Login as an admin
+      operationId: loginAdmin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+            example:
+              account: admin
+              password: "123456"
+      responses:
+        "200":
+          description: Admin login success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginApiResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /api/admin/v1/auth/me:
+    get:
+      tags:
+        - Admin Auth
+      summary: Get current admin profile
+      operationId: getCurrentAdmin
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Current admin profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProfileApiResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/admin/v1/auth/logout:
+    post:
+      tags:
+        - Admin Auth
+      summary: Logout current admin
+      operationId: logoutAdmin
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Logout success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmptyApiResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/tool-categories:
+    get:
+      tags:
+        - Tool Marketplace
+      summary: Get active tool categories
+      operationId: listToolCategories
+      responses:
+        "200":
+          description: Active categories sorted by sortOrder and id
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ToolCategoryListApiResponse"
+
+  /api/v1/tools:
+    get:
+      tags:
+        - Tool Marketplace
+      summary: Get online tools
+      operationId: listUserTools
+      responses:
+        "200":
+          description: Online tool list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ToolPageApiResponse"
+
+  /api/v1/tools/{toolCode}:
+    get:
+      tags:
+        - Tool Marketplace
+      summary: Get online tool detail and active fields
+      operationId: getUserToolDetail
+      parameters:
+        - name: toolCode
+          in: path
+          required: true
+          schema:
+            type: string
+          example: xiaohongshu_copywriting
+      responses:
+        "200":
+          description: Online tool detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ToolDetailApiResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /api/admin/v1/tools:
+    get:
+      tags:
+        - Admin Tools
+      summary: Get all non-deleted tools
+      operationId: listAdminTools
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Tool list including draft, online, and offline tools
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ToolPageApiResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      tags:
+        - Admin Tools
+      summary: Create a draft tool
+      operationId: createAdminTool
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpsertToolRequest"
+            example:
+              toolCode: xiaohongshu_copywriting
+              toolName: 小红书文案生成
+              categoryId: 1
+              description: 根据产品信息生成小红书文案
+              coverUrl: ""
+              estimatedCreditCost: 10
+      responses:
+        "200":
+          description: Draft tool created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ToolSummaryApiResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/admin/v1/tools/{toolId}:
+    put:
+      tags:
+        - Admin Tools
+      summary: Update tool basic information
+      operationId: updateAdminTool
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: toolId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+          example: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateToolRequest"
+            example:
+              toolName: 小红书文案生成 Pro
+              categoryId: 1
+              description: 根据产品信息生成更完整的小红书文案
+              coverUrl: ""
+              estimatedCreditCost: 12
+      responses:
+        "200":
+          description: Tool updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ToolSummaryApiResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/admin/v1/tools/{toolId}/publish:
+    post:
+      tags:
+        - Admin Tools
+      summary: Publish a tool
+      operationId: publishAdminTool
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: toolId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+          example: 1
+      responses:
+        "200":
+          description: Tool status changed to ONLINE
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ToolSummaryApiResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/admin/v1/tools/{toolId}/offline:
+    post:
+      tags:
+        - Admin Tools
+      summary: Take a tool offline
+      operationId: offlineAdminTool
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: toolId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+          example: 1
+      responses:
+        "200":
+          description: Tool status changed to OFFLINE
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ToolSummaryApiResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  responses:
+    BadRequest:
+      description: Business or parameter error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/EmptyApiResponse"
+          example:
+            code: PARAM_ERROR
+            message: 参数错误
+            data: null
+            requestId: null
+    Unauthorized:
+      description: Missing or invalid token
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/EmptyApiResponse"
+          example:
+            code: UNAUTHORIZED
+            message: 未登录或 Token 失效
+            data: null
+            requestId: null
+    Forbidden:
+      description: Permission denied
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/EmptyApiResponse"
+          example:
+            code: ADMIN_FORBIDDEN
+            message: 管理员无权限
+            data: null
+            requestId: null
+
+  schemas:
+    RegisterRequest:
+      type: object
+      required:
+        - username
+        - password
+      properties:
+        username:
+          type: string
+          description: Unique username.
+          example: test001
+        password:
+          type: string
+          minLength: 6
+          maxLength: 64
+          example: "123456"
+        nickname:
+          type: string
+          nullable: true
+          description: Optional display name. Defaults to username when blank.
+          example: Test User
+
+    LoginRequest:
+      type: object
+      required:
+        - account
+        - password
+      properties:
+        account:
+          type: string
+          description: Username.
+          example: user1
+        password:
+          type: string
+          example: "123456"
+
+    UpsertToolRequest:
+      type: object
+      required:
+        - toolCode
+        - toolName
+        - categoryId
+        - estimatedCreditCost
+      properties:
+        toolCode:
+          type: string
+          description: Unique tool code. Required when creating a tool.
+          example: xiaohongshu_copywriting
+        toolName:
+          type: string
+          example: 小红书文案生成
+        categoryId:
+          type: integer
+          format: int64
+          example: 1
+        description:
+          type: string
+          nullable: true
+          example: 根据产品信息生成小红书文案
+        coverUrl:
+          type: string
+          nullable: true
+          example: ""
+        estimatedCreditCost:
+          type: integer
+          minimum: 0
+          example: 10
+
+    UpdateToolRequest:
+      type: object
+      required:
+        - toolName
+        - categoryId
+        - estimatedCreditCost
+      properties:
+        toolCode:
+          type: string
+          nullable: true
+          description: Ignored by current update implementation.
+        toolName:
+          type: string
+          example: 小红书文案生成 Pro
+        categoryId:
+          type: integer
+          format: int64
+          example: 1
+        description:
+          type: string
+          nullable: true
+          example: 根据产品信息生成更完整的小红书文案
+        coverUrl:
+          type: string
+          nullable: true
+          example: ""
+        estimatedCreditCost:
+          type: integer
+          minimum: 0
+          example: 12
+
+    ApiResponseBase:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+          enum:
+            - SUCCESS
+            - PARAM_ERROR
+            - UNAUTHORIZED
+            - FORBIDDEN
+            - ADMIN_UNAUTHORIZED
+            - ADMIN_FORBIDDEN
+            - TOOL_NOT_FOUND
+            - TOOL_OFFLINE
+            - CREDIT_NOT_ENOUGH
+            - TASK_NOT_FOUND
+            - TASK_STATUS_INVALID
+            - MODEL_CALL_FAILED
+            - SYSTEM_ERROR
+          example: SUCCESS
+        message:
+          type: string
+          example: ok
+        requestId:
+          type: string
+          nullable: true
+          example: null
+
+    EmptyApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              nullable: true
+              example: null
+
+    StringApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              type: string
+              example: pong
+
+    HealthApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/HealthStatus"
+
+    HealthStatus:
+      type: object
+      properties:
+        service:
+          type: string
+          example: backend
+        mysql:
+          type: string
+          example: ok
+        redis:
+          type: string
+          example: ok
+
+    LoginApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/LoginResponse"
+
+    UserProfileApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/UserProfile"
+
+    ToolCategoryListApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/ToolCategory"
+
+    ToolPageApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/ToolPage"
+
+    ToolSummaryApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/ToolSummary"
+
+    ToolDetailApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/ToolDetail"
+
+    LoginResponse:
+      type: object
+      properties:
+        accessToken:
+          type: string
+          description: JWT access token.
+          example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+        user:
+          $ref: "#/components/schemas/UserProfile"
+
+    UserProfile:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        username:
+          type: string
+          example: user1
+        nickname:
+          type: string
+          example: User One
+        userType:
+          type: string
+          enum:
+            - USER
+            - ADMIN
+          example: USER
+
+    ToolCategory:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        categoryCode:
+          type: string
+          example: copywriting
+        categoryName:
+          type: string
+          example: Copywriting
+        sortOrder:
+          type: integer
+          example: 1
+
+    ToolPage:
+      type: object
+      properties:
+        list:
+          type: array
+          items:
+            $ref: "#/components/schemas/ToolSummary"
+        total:
+          type: integer
+          format: int64
+          example: 1
+
+    ToolSummary:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        toolCode:
+          type: string
+          example: xiaohongshu_copywriting
+        toolName:
+          type: string
+          example: 小红书文案生成
+        categoryId:
+          type: integer
+          format: int64
+          example: 1
+        categoryName:
+          type: string
+          example: Copywriting
+        description:
+          type: string
+          nullable: true
+          example: 根据产品信息生成小红书文案
+        coverUrl:
+          type: string
+          nullable: true
+          example: ""
+        status:
+          type: string
+          enum:
+            - DRAFT
+            - ONLINE
+            - OFFLINE
+          example: ONLINE
+        estimatedCreditCost:
+          type: integer
+          example: 10
+
+    ToolDetail:
+      allOf:
+        - $ref: "#/components/schemas/ToolSummary"
+        - type: object
+          properties:
+            fields:
+              type: array
+              items:
+                $ref: "#/components/schemas/ToolField"
+
+    ToolField:
+      type: object
+      properties:
+        fieldKey:
+          type: string
+          example: productName
+        fieldName:
+          type: string
+          example: 产品名称
+        fieldType:
+          type: string
+          enum:
+            - text
+            - textarea
+            - select
+          example: text
+        placeholder:
+          type: string
+          nullable: true
+          example: 请输入产品名称
+        options:
+          nullable: true
+          oneOf:
+            - type: array
+              items:
+                $ref: "#/components/schemas/ToolFieldOption"
+            - type: object
+        required:
+          type: boolean
+          example: true
+        sortOrder:
+          type: integer
+          example: 1
+
+    ToolFieldOption:
+      type: object
+      properties:
+        label:
+          type: string
+          example: 种草
+        value:
+          type: string
+          example: 种草
