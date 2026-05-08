@@ -16,7 +16,23 @@ Bug 列表
 
 ## 测试数据
 
+<<<<<<< HEAD
 至少准备：
+=======
+
+| 模块     | 技术                              |
+| ------ | ------------------------------- |
+| 后端     | Spring Boot 3.x, Java 17, Maven |
+| 用户端    | Vue 3, Vite, Axios, Pinia       |
+| 管理后台   | Vue 3, Vite, Element Plus       |
+| Worker | Python 3                        |
+| 数据库    | MySQL 8                         |
+| 队列/缓存  | Redis                           |
+| 本地环境   | Docker Compose                  |
+
+
+## 推荐目录结构
+>>>>>>> origin/feature/admin-web
 
 ```text
 普通用户：user1 / 123456
@@ -95,6 +111,7 @@ WORKER-004 模型失败后任务变为 FAILED
 WORKER-005 重复 success 回写不重复扣费
 ```
 
+<<<<<<< HEAD
 ### 算力
 
 ```text
@@ -162,3 +179,5 @@ Worker 启动正常
 
 
 ## 必须交付
+=======
+>>>>>>> origin/feature/admin-web
