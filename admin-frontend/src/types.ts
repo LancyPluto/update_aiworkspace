@@ -38,6 +38,7 @@ export interface ToolCategory {
   id: number
   categoryCode: string
   categoryName: string
+  sortOrder?: number
 }
 
 export interface UpsertToolPayload {
@@ -75,21 +76,32 @@ export interface PromptDraft {
 export interface AdminTask {
   taskId: number
   taskNo: string
-  userNickname: string
+  toolCode: string
   toolName: string
   status: string
-  creditCost: number
-  errorCode?: string
+  progress: number
+  progressMessage?: string
+  params?: Record<string, unknown>
+  result?: TaskResult | null
   createdAt: string
-  completedAt?: string
+  finishedAt?: string
 }
 
-export interface AdminTaskDetail extends AdminTask {
-  inputParams?: Record<string, unknown>
-  result?: string
-  failReason?: string
-  logs?: string[]
-  creditLogs?: Array<{ type: string; amount: number; createdAt: string }>
+export interface TaskResult {
+  resourceType: string
+  contentText: string
+}
+
+export interface AdminTaskDetail extends AdminTask {}
+
+export interface CreditAccount {
+  accountId: number
+  userId: number
+  balance: number
+  frozen: number
+  totalGranted: number
+  totalConsumed: number
+  status: string
 }
 
 export interface AdminMember {

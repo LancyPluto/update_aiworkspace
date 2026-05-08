@@ -1,62 +1,50 @@
 <script setup lang="ts">
 import { Coin } from '@element-plus/icons-vue'
-import { computed, onMounted, reactive, ref } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 
-import { fetchUsers, manualAddCredits } from '@/api/users'
-import type { AdminMember } from '@/types'
+import { fetchMe } from '@/api/auth'
+import { fetchCreditAccount, manualAddCredits } from '@/api/users'
+import type { AdminUser, CreditAccount } from '@/types'
 import { ElMessage } from 'element-plus'
 
 const loading = ref(false)
 const dialogVisible = ref(false)
-const keyword = ref('')
-const users = ref<AdminMember[]>([])
-const selectedUser = ref<AdminMember | null>(null)
+const currentUser = ref<AdminUser | null>(null)
+const creditAccount = ref<CreditAccount | null>(null)
 const creditForm = reactive({
   amount: 100,
   reason: '运营手动加算力'
 })
 
-const filteredUsers = computed(() => {
-  const value = keyword.value.trim().toLowerCase()
-  if (!value) return users.value
-  return users.value.filter((user) =>
-    [user.username, user.nickname, user.userType, user.status].some((item) =>
-      String(item || '').toLowerCase().includes(value)
-    )
-  )
-})
-
-async function loadUsers() {
+async function loadAccount() {
   loading.value = true
   try {
-    const response = await fetchUsers()
-    users.value = response.list
-  } catch {
-    users.value = []
+    const [user, account] = await Promise.all([fetchMe(), fetchCreditAccount()])
+    currentUser.value = user
+    creditAccount.value = account
   } finally {
     loading.value = false
   }
 }
 
-function openCreditDialog(user: AdminMember) {
-  selectedUser.value = user
+function openCreditDialog() {
   creditForm.amount = 100
   creditForm.reason = '运营手动加算力'
   dialogVisible.value = true
 }
 
 async function submitCredit() {
-  if (!selectedUser.value) return
-  await manualAddCredits(selectedUser.value.id, {
+  if (!currentUser.value) return
+  await manualAddCredits(currentUser.value.id, {
     amount: creditForm.amount,
     reason: creditForm.reason
   })
   ElMessage.success('算力已增加')
   dialogVisible.value = false
-  loadUsers()
+  loadAccount()
 }
 
-onMounted(loadUsers)
+onMounted(loadAccount)
 </script>
 
 <template>
@@ -64,44 +52,61 @@ onMounted(loadUsers)
     <div class="page-header">
       <div>
         <h1 class="page-title">用户与算力</h1>
-        <p class="page-subtitle">查看用户列表，并通过弹窗进行手动加算力。</p>
+        <p class="page-subtitle">当前后端已提供当前账号资料和算力账户查询。</p>
       </div>
     </div>
 
     <el-alert
-      title="后端当前未提供后台用户接口时，这里会显示空态或 404 提示；接口路径已按文档对接。"
+      title="成员4文档要求 GET /api/admin/v1/users 和手动加算力接口；当前后端尚未提供后台用户列表/加算力接口，页面先展示真实可用的当前账号与算力账户。"
       type="info"
       show-icon
       :closable="false"
       style="margin-bottom: 16px"
     />
 
-    <el-card class="page-card" shadow="never">
-      <div class="toolbar">
-        <el-input v-model="keyword" clearable placeholder="搜索用户名、昵称、角色或状态" style="width: 320px" />
-        <el-button @click="loadUsers">刷新</el-button>
-      </div>
+    <el-row :gutter="16">
+      <el-col :span="10">
+        <el-card v-loading="loading" class="page-card" shadow="never">
+          <template #header>当前管理员</template>
+          <el-empty v-if="!currentUser" description="暂无当前用户信息" />
+          <el-descriptions v-else :column="1" border>
+            <el-descriptions-item label="用户 ID">{{ currentUser.id }}</el-descriptions-item>
+            <el-descriptions-item label="用户名">{{ currentUser.username }}</el-descriptions-item>
+            <el-descriptions-item label="昵称">{{ currentUser.nickname }}</el-descriptions-item>
+            <el-descriptions-item label="角色">{{ currentUser.userType }}</el-descriptions-item>
+          </el-descriptions>
+        </el-card>
+      </el-col>
 
-      <el-table v-loading="loading" :data="filteredUsers" row-key="id">
-        <el-table-column prop="id" label="用户 ID" width="100" />
-        <el-table-column prop="username" label="用户名" min-width="160" />
-        <el-table-column prop="nickname" label="昵称" min-width="160" />
-        <el-table-column prop="userType" label="角色" width="120" />
-        <el-table-column prop="status" label="状态" width="120" />
-        <el-table-column prop="credits" label="当前算力" width="120" />
-        <el-table-column prop="createdAt" label="注册时间" width="180" />
-        <el-table-column label="操作" width="150" fixed="right">
-          <template #default="{ row }">
-            <el-button type="primary" link :icon="Coin" @click="openCreditDialog(row)">手动加算力</el-button>
+      <el-col :span="14">
+        <el-card v-loading="loading" class="page-card" shadow="never">
+          <template #header>
+            <div class="card-header">
+              <span>当前算力账户</span>
+              <el-button @click="loadAccount">刷新</el-button>
+            </div>
           </template>
-        </el-table-column>
-      </el-table>
-    </el-card>
+          <el-empty v-if="!creditAccount" description="暂无算力账户信息" />
+          <el-descriptions v-else :column="2" border>
+            <el-descriptions-item label="账户 ID">{{ creditAccount.accountId }}</el-descriptions-item>
+            <el-descriptions-item label="状态">{{ creditAccount.status }}</el-descriptions-item>
+            <el-descriptions-item label="可用余额">{{ creditAccount.balance }}</el-descriptions-item>
+            <el-descriptions-item label="冻结算力">{{ creditAccount.frozen }}</el-descriptions-item>
+            <el-descriptions-item label="累计发放">{{ creditAccount.totalGranted }}</el-descriptions-item>
+            <el-descriptions-item label="累计消耗">{{ creditAccount.totalConsumed }}</el-descriptions-item>
+          </el-descriptions>
+          <div class="credit-actions">
+            <el-button type="primary" :icon="Coin" disabled @click="openCreditDialog">手动加算力</el-button>
+            <span class="muted">等待后端补齐 /api/admin/v1/users/{userId}/credits/manual-add 后启用</span>
+          </div>
+        </el-card>
+      </el-col>
+    </el-row>
 
     <el-dialog v-model="dialogVisible" title="手动加算力" width="460px">
       <el-form label-width="90px">
         <el-form-item label="用户">
-          <span>{{ selectedUser?.nickname || selectedUser?.username }}</span>
+          <span>{{ currentUser?.nickname || currentUser?.username }}</span>
         </el-form-item>
         <el-form-item label="增加数量">
           <el-input-number v-model="creditForm.amount" :min="1" :step="10" />
@@ -117,3 +122,18 @@ onMounted(loadUsers)
     </el-dialog>
   </section>
 </template>
+
+<style scoped>
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.credit-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-top: 18px;
+}
+</style>

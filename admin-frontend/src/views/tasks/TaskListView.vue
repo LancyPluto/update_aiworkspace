@@ -15,7 +15,7 @@ const filteredTasks = computed(() => {
   const value = keyword.value.trim().toLowerCase()
   if (!value) return tasks.value
   return tasks.value.filter((task) =>
-    [task.taskNo, task.userNickname, task.toolName, task.status, task.errorCode].some((item) =>
+    [task.taskNo, task.toolCode, task.toolName, task.status, task.progressMessage].some((item) =>
       String(item || '').toLowerCase().includes(value)
     )
   )
@@ -48,12 +48,12 @@ onMounted(loadTasks)
     <div class="page-header">
       <div>
         <h1 class="page-title">任务列表</h1>
-        <p class="page-subtitle">查看用户提交的 AI 任务、状态、消耗算力与失败原因。</p>
+        <p class="page-subtitle">查看当前登录账号可见的 AI 任务、状态、进度和生成结果。</p>
       </div>
     </div>
 
     <el-alert
-      title="后端当前未提供任务 Controller 时，这里会显示空态或 404 提示；接口路径已按文档对接。"
+      title="当前后端提供的是 /api/v1/tasks（按登录用户查询）；文档里的后台全量任务 /api/admin/v1/tasks 尚未提供。"
       type="info"
       show-icon
       :closable="false"
@@ -62,21 +62,25 @@ onMounted(loadTasks)
 
     <el-card class="page-card" shadow="never">
       <div class="toolbar">
-        <el-input v-model="keyword" clearable placeholder="搜索任务号、用户、工具、状态" style="width: 320px" />
+        <el-input v-model="keyword" clearable placeholder="搜索任务号、工具编码、工具名称或状态" style="width: 360px" />
         <el-button @click="loadTasks">刷新</el-button>
       </div>
       <el-table v-loading="loading" :data="filteredTasks" row-key="taskId">
         <el-table-column prop="taskId" label="taskId" width="90" />
         <el-table-column prop="taskNo" label="任务号" min-width="160" />
-        <el-table-column prop="userNickname" label="用户昵称" width="140" />
+        <el-table-column prop="toolCode" label="工具编码" min-width="150" />
         <el-table-column prop="toolName" label="工具名称" min-width="160" />
         <el-table-column label="状态" width="120">
           <template #default="{ row }"><el-tag :type="statusType(row.status)">{{ row.status }}</el-tag></template>
         </el-table-column>
-        <el-table-column prop="creditCost" label="消耗算力" width="110" />
-        <el-table-column prop="errorCode" label="错误码" width="140" />
+        <el-table-column label="进度" width="180">
+          <template #default="{ row }">
+            <el-progress :percentage="row.progress || 0" :stroke-width="8" />
+          </template>
+        </el-table-column>
+        <el-table-column prop="progressMessage" label="进度说明" min-width="180" show-overflow-tooltip />
         <el-table-column prop="createdAt" label="创建时间" width="180" />
-        <el-table-column prop="completedAt" label="完成时间" width="180" />
+        <el-table-column prop="finishedAt" label="完成时间" width="180" />
         <el-table-column label="操作" width="110" fixed="right">
           <template #default="{ row }">
             <el-button type="primary" link :icon="View" @click="router.push(`/tasks/${row.taskId}`)">详情</el-button>
