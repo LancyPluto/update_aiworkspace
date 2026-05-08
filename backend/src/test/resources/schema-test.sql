@@ -130,3 +130,42 @@ CREATE TABLE credit_logs (
   reason VARCHAR(512),
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE tool_prompts (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  tool_id BIGINT NOT NULL,
+  prompt_code VARCHAR(128) NOT NULL,
+  prompt_name VARCHAR(128) NOT NULL,
+  active_version_id BIGINT,
+  status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+CREATE TABLE tool_prompt_versions (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  prompt_id BIGINT NOT NULL,
+  version_no VARCHAR(32) NOT NULL,
+  system_prompt TEXT,
+  user_prompt_template MEDIUMTEXT NOT NULL,
+  output_format VARCHAR(32) NOT NULL DEFAULT 'MARKDOWN',
+  status VARCHAR(32) NOT NULL DEFAULT 'DRAFT',
+  created_by BIGINT,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  published_at DATETIME
+);
+
+CREATE TABLE ai_task_logs (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  task_id BIGINT NOT NULL,
+  from_status VARCHAR(32),
+  to_status VARCHAR(32),
+  event_type VARCHAR(64) NOT NULL,
+  message TEXT,
+  error_code VARCHAR(64),
+  error_message TEXT,
+  operator_type VARCHAR(32) NOT NULL DEFAULT 'SYSTEM',
+  operator_id BIGINT,
+  metadata_json JSON,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);

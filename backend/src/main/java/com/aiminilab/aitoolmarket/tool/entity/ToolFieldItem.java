@@ -2,6 +2,8 @@ package com.aiminilab.aitoolmarket.tool.entity;
 
 public class ToolFieldItem {
 
+    private Long id;
+    private Long schemaId;
     private String fieldKey;
     private String fieldName;
     private String fieldType;
@@ -9,6 +11,22 @@ public class ToolFieldItem {
     private String optionsJson;
     private Boolean required;
     private Integer sortOrder;
+
+    public Long getId() {
+        return id;
+    }
+
+    public void setId(Long id) {
+        this.id = id;
+    }
+
+    public Long getSchemaId() {
+        return schemaId;
+    }
+
+    public void setSchemaId(Long schemaId) {
+        this.schemaId = schemaId;
+    }
 
     public String getFieldKey() {
         return fieldKey;

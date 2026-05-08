@@ -47,8 +47,9 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         String message = request.progressMessage() == null || request.progressMessage().isBlank()
                 ? "AI is processing"
                 : request.progressMessage();
-        findTask(taskId);
+        AiTask before = findTask(taskId);
         taskMapper.markProcessing(taskId, progress, message);
+        taskMapper.insertLog(taskId, "TASK_PROCESSING", before.getStatus(), "PROCESSING", message, "WORKER", null);
         return TaskStatusResponse.from(findTask(taskId));
     }
 
@@ -58,6 +59,7 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         AiTask task = findTask(taskId);
         taskMapper.insertResult(taskId, task.getUserId(), request.resourceType(), request.contentText());
         taskMapper.markSuccess(taskId);
+        taskMapper.insertLog(taskId, "TASK_SUCCESS", task.getStatus(), "SUCCESS", "Worker 回写成功结果", "WORKER", null);
         return TaskStatusResponse.from(findTask(taskId));
     }
 
@@ -69,8 +71,9 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         String errorMessage = request.errorMessage() == null || request.errorMessage().isBlank()
                 ? "Worker execution failed"
                 : request.errorMessage();
-        findTask(taskId);
+        AiTask before = findTask(taskId);
         taskMapper.markFailed(taskId, errorCode, errorMessage);
+        taskMapper.insertLog(taskId, "TASK_FAILED", before.getStatus(), "FAILED", errorMessage, "WORKER", null);
         return TaskStatusResponse.from(findTask(taskId));
     }
 

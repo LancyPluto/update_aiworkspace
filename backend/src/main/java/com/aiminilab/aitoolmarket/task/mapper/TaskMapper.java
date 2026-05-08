@@ -1,6 +1,7 @@
 package com.aiminilab.aitoolmarket.task.mapper;
 
 import com.aiminilab.aitoolmarket.common.enums.TaskStatus;
+import com.aiminilab.aitoolmarket.task.dto.TaskLogResponse;
 import com.aiminilab.aitoolmarket.task.dto.TaskResultResponse;
 import com.aiminilab.aitoolmarket.task.entity.AiTask;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -35,11 +36,23 @@ public class TaskMapper {
         task.setParamsJson(rs.getString("params_json"));
         task.setIdempotencyKey(rs.getString("idempotency_key"));
         task.setEstimatedCreditCost(rs.getInt("estimated_credit_cost"));
+        task.setErrorCode(rs.getString("error_code"));
+        task.setErrorMessage(rs.getString("error_message"));
+        task.setUserNickname(rs.getString("user_nickname"));
         task.setCreatedAt(rs.getTimestamp("created_at").toLocalDateTime());
         Timestamp finishedAt = rs.getTimestamp("finished_at");
         task.setFinishedAt(finishedAt == null ? null : finishedAt.toLocalDateTime());
         return task;
     };
+
+    private final RowMapper<TaskLogResponse> logRowMapper = (rs, rowNum) -> new TaskLogResponse(
+            rs.getLong("id"),
+            rs.getString("event_type"),
+            rs.getString("from_status"),
+            rs.getString("to_status"),
+            rs.getString("message"),
+            rs.getTimestamp("created_at").toLocalDateTime()
+    );
 
     public TaskMapper(JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
@@ -122,6 +135,24 @@ public class TaskMapper {
         return results.stream().findFirst();
     }
 
+    public List<TaskLogResponse> findLogs(Long taskId) {
+        return jdbcTemplate.query("""
+                SELECT id, event_type, from_status, to_status, message, created_at
+                FROM ai_task_logs
+                WHERE task_id = ?
+                ORDER BY id ASC
+                """, logRowMapper, taskId);
+    }
+
+    public void insertLog(Long taskId, String eventType, String fromStatus, String toStatus, String message,
+                          String operatorType, Long operatorId) {
+        jdbcTemplate.update("""
+                INSERT INTO ai_task_logs
+                  (task_id, from_status, to_status, event_type, message, operator_type, operator_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, taskId, fromStatus, toStatus, eventType, message, operatorType, operatorId);
+    }
+
     public void markProcessing(Long taskId, int progress, String progressMessage) {
         jdbcTemplate.update("""
                 UPDATE ai_tasks
@@ -181,9 +212,10 @@ public class TaskMapper {
 
     private String baseSql() {
         return """
-                SELECT t.*, tool.tool_code, tool.tool_name
+                SELECT t.*, tool.tool_code, tool.tool_name, u.nickname AS user_nickname
                 FROM ai_tasks t
                 JOIN ai_tools tool ON tool.id = t.tool_id
+                LEFT JOIN users u ON u.id = t.user_id
                 """;
     }
 

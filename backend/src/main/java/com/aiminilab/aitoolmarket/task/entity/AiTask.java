@@ -15,6 +15,9 @@ public class AiTask {
     private String paramsJson;
     private String idempotencyKey;
     private Integer estimatedCreditCost;
+    private String errorCode;
+    private String errorMessage;
+    private String userNickname;
     private LocalDateTime createdAt;
     private LocalDateTime finishedAt;
 
@@ -112,6 +115,30 @@ public class AiTask {
 
     public void setEstimatedCreditCost(Integer estimatedCreditCost) {
         this.estimatedCreditCost = estimatedCreditCost;
+    }
+
+    public String getErrorCode() {
+        return errorCode;
+    }
+
+    public void setErrorCode(String errorCode) {
+        this.errorCode = errorCode;
+    }
+
+    public String getErrorMessage() {
+        return errorMessage;
+    }
+
+    public void setErrorMessage(String errorMessage) {
+        this.errorMessage = errorMessage;
+    }
+
+    public String getUserNickname() {
+        return userNickname;
+    }
+
+    public void setUserNickname(String userNickname) {
+        this.userNickname = userNickname;
     }
 
     public LocalDateTime getCreatedAt() {

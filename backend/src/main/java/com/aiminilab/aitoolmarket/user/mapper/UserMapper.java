@@ -53,6 +53,14 @@ public class UserMapper {
         return users.stream().findFirst();
     }
 
+    public List<User> findAllActive() {
+        return jdbcTemplate.query("""
+                SELECT * FROM users
+                WHERE is_deleted = 0
+                ORDER BY id DESC
+                """, rowMapper);
+    }
+
     public Long insert(User user) {
         KeyHolder keyHolder = new GeneratedKeyHolder();
         jdbcTemplate.update(connection -> {
