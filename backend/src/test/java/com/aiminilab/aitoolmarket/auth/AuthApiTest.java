@@ -10,6 +10,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.blankOrNullString;
+import static org.hamcrest.Matchers.notNullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -32,7 +33,7 @@ class AuthApiTest {
 
     @Test
     void registersAndLogsInUserThenReturnsCurrentUser() throws Exception {
-        mockMvc.perform(post("/api/v1/auth/register")
+        String registerResponse = mockMvc.perform(post("/api/v1/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
@@ -43,9 +44,22 @@ class AuthApiTest {
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.data.user.id", notNullValue()))
                 .andExpect(jsonPath("$.data.user.username").value("new_user"))
                 .andExpect(jsonPath("$.data.user.userType").value("USER"))
-                .andExpect(jsonPath("$.data.accessToken", not(blankOrNullString())));
+                .andExpect(jsonPath("$.data.accessToken", not(blankOrNullString())))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        String registerToken = registerResponse.replaceAll("(?s).*\\\"accessToken\\\"\\s*:\\s*\\\"([^\\\"]+)\\\".*", "$1");
+
+        mockMvc.perform(get("/api/v1/users/me")
+                        .header("Authorization", "Bearer " + registerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.data.username").value("new_user"))
+                .andExpect(jsonPath("$.data.userType").value("USER"));
 
         String loginResponse = mockMvc.perform(post("/api/v1/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -117,6 +131,32 @@ class AuthApiTest {
                         .header("Authorization", "Bearer " + userToken))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("ADMIN_FORBIDDEN"));
+    }
+
+    @Test
+    void rejectsDuplicateRegistrationAndWrongPassword() throws Exception {
+        mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "username": "user1",
+                                  "password": "123456",
+                                  "nickname": "Duplicate User"
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("PARAM_ERROR"));
+
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "account": "user1",
+                                  "password": "wrong-password"
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
     }
 
     @Test
