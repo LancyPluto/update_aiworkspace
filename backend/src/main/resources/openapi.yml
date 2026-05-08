@@ -18,6 +18,8 @@ tags:
     description: 用户端工具分类、工具列表、任务和算力接口
   - name: 后台工具管理
     description: 管理后台工具最小管理接口
+  - name: 后台任务管理
+    description: 管理员查询任务、重试失败任务、取消任务的最小管理接口
   - name: Worker内部接口
     description: AI Worker 获取任务上下文和回写任务结果的内部接口
 
@@ -543,12 +545,145 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
 
+  /api/admin/v1/tasks:
+    get:
+      tags:
+        - 后台任务管理
+      summary: 后台查询任务列表
+      operationId: listAdminTasks
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+          example: QUEUED
+        - name: toolCode
+          in: query
+          required: false
+          schema:
+            type: string
+          example: xiaohongshu_copywriting
+        - name: userId
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+          example: 2
+      responses:
+        "200":
+          description: 后台任务列表，返回字段包含 userId，便于后台定位用户任务
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskPageApiResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/admin/v1/tasks/{taskId}:
+    get:
+      tags:
+        - 后台任务管理
+      summary: 后台查询任务详情
+      operationId: getAdminTaskDetail
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+          example: 1
+      responses:
+        "200":
+          description: 后台任务详情
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskDetailApiResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/admin/v1/tasks/{taskId}/retry:
+    post:
+      tags:
+        - 后台任务管理
+      summary: 后台重试任务
+      operationId: retryAdminTask
+      description: 将任务重新置为 QUEUED，进度归零，清空错误信息。V1 用于人工处理失败任务。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+          example: 1
+      responses:
+        "200":
+          description: 任务已重新排队
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskStatusApiResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/admin/v1/tasks/{taskId}/cancel:
+    post:
+      tags:
+        - 后台任务管理
+      summary: 后台取消任务
+      operationId: cancelAdminTask
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+          example: 1
+      responses:
+        "200":
+          description: 任务状态已变更为 CANCELLED
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskStatusApiResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
   /api/internal/v1/tasks/{taskId}/execution-context:
     get:
       tags:
         - Worker内部接口
       summary: Worker 获取任务执行上下文
       operationId: getTaskExecutionContext
+      security:
+        - internalApiToken: []
       parameters:
         - name: taskId
           in: path
@@ -566,6 +701,8 @@ paths:
                 $ref: "#/components/schemas/ExecutionContextApiResponse"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /api/internal/v1/tasks/{taskId}/processing:
     post:
@@ -573,6 +710,8 @@ paths:
         - Worker内部接口
       summary: Worker 标记任务处理中
       operationId: markTaskProcessing
+      security:
+        - internalApiToken: []
       parameters:
         - name: taskId
           in: path
@@ -599,6 +738,8 @@ paths:
                 $ref: "#/components/schemas/TaskStatusApiResponse"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /api/internal/v1/tasks/{taskId}/success:
     post:
@@ -606,6 +747,8 @@ paths:
         - Worker内部接口
       summary: Worker 回写成功结果
       operationId: markTaskSuccess
+      security:
+        - internalApiToken: []
       parameters:
         - name: taskId
           in: path
@@ -632,6 +775,8 @@ paths:
                 $ref: "#/components/schemas/TaskStatusApiResponse"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /api/internal/v1/tasks/{taskId}/failed:
     post:
@@ -639,6 +784,8 @@ paths:
         - Worker内部接口
       summary: Worker 回写失败状态
       operationId: markTaskFailed
+      security:
+        - internalApiToken: []
       parameters:
         - name: taskId
           in: path
@@ -665,6 +812,8 @@ paths:
                 $ref: "#/components/schemas/TaskStatusApiResponse"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
 components:
   securitySchemes:
@@ -672,6 +821,11 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
+    internalApiToken:
+      type: apiKey
+      in: header
+      name: X-Internal-Token
+      description: Worker 内部接口令牌，本地默认值为 local-internal-token，部署时使用 INTERNAL_API_TOKEN 环境变量覆盖。
 
   responses:
     BadRequest:
@@ -1177,6 +1331,10 @@ components:
         taskNo:
           type: string
           example: T20260508AF040D708A
+        userId:
+          type: integer
+          format: int64
+          example: 2
         status:
           type: string
           enum:

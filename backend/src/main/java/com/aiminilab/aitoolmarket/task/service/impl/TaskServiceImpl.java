@@ -66,8 +66,7 @@ public class TaskServiceImpl implements TaskService {
 
     @Override
     public TaskDetailResponse detail(Long userId, Long taskId) {
-        AiTask task = findTask(taskId, userId);
-        return toDetail(task);
+        return toDetail(findTask(taskId, userId));
     }
 
     @Override
@@ -78,6 +77,33 @@ public class TaskServiceImpl implements TaskService {
         return new PageResponse<>(tasks, tasks.size());
     }
 
+    @Override
+    public PageResponse<TaskDetailResponse> adminList(String status, String toolCode, Long userId) {
+        List<TaskDetailResponse> tasks = taskMapper.findForAdmin(status, toolCode, userId).stream()
+                .map(this::toDetail)
+                .toList();
+        return new PageResponse<>(tasks, tasks.size());
+    }
+
+    @Override
+    public TaskDetailResponse adminDetail(Long taskId) {
+        return toDetail(findTask(taskId));
+    }
+
+    @Override
+    public TaskStatusResponse adminRetry(Long taskId) {
+        findTask(taskId);
+        taskMapper.resetToQueued(taskId);
+        return TaskStatusResponse.from(findTask(taskId));
+    }
+
+    @Override
+    public TaskStatusResponse adminCancel(Long taskId) {
+        findTask(taskId);
+        taskMapper.cancel(taskId);
+        return TaskStatusResponse.from(findTask(taskId));
+    }
+
     private TaskDetailResponse toDetail(AiTask task) {
         TaskResultResponse result = taskMapper.findFirstResult(task.getId()).orElse(null);
         return TaskDetailResponse.of(task, parseParams(task.getParamsJson()), result);
@@ -85,6 +111,11 @@ public class TaskServiceImpl implements TaskService {
 
     private AiTask findTask(Long taskId, Long userId) {
         return taskMapper.findByIdAndUserId(taskId, userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.TASK_NOT_FOUND, "任务不存在"));
+    }
+
+    private AiTask findTask(Long taskId) {
+        return taskMapper.findById(taskId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.TASK_NOT_FOUND, "任务不存在"));
     }
 

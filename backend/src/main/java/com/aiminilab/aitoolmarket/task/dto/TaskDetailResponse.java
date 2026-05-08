@@ -8,6 +8,7 @@ import java.time.LocalDateTime;
 public record TaskDetailResponse(
         Long taskId,
         String taskNo,
+        Long userId,
         String toolCode,
         String toolName,
         String status,
@@ -22,6 +23,7 @@ public record TaskDetailResponse(
         return new TaskDetailResponse(
                 task.getId(),
                 task.getTaskNo(),
+                task.getUserId(),
                 task.getToolCode(),
                 task.getToolName(),
                 task.getStatus(),

@@ -18,76 +18,44 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest
 @AutoConfigureMockMvc
 @TestPropertySource(properties = {
-        "spring.datasource.url=jdbc:h2:mem:worker_internal_api_test;MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1",
+        "spring.datasource.url=jdbc:h2:mem:admin_task_api_test;MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1",
         "spring.datasource.driver-class-name=org.h2.Driver",
         "spring.datasource.username=sa",
         "spring.datasource.password=",
         "spring.sql.init.mode=always",
         "spring.sql.init.schema-locations=classpath:schema-test.sql"
 })
-class WorkerInternalApiTest {
+class AdminTaskApiTest {
 
     @Autowired
     private MockMvc mockMvc;
 
     @Test
-    void workerCanReadContextMarkProcessingAndWriteSuccessResult() throws Exception {
+    void adminCanListViewRetryAndCancelTasks() throws Exception {
         String adminToken = login("/api/admin/v1/auth/login", "admin");
-        Long toolId = createTool(adminToken, "worker_copywriting", 10);
+        Long toolId = createTool(adminToken, "admin_task_tool", 1);
         publishTool(adminToken, toolId);
         String userToken = login("/api/v1/auth/login", "user1");
-        Long taskId = createTask(userToken, "worker_copywriting");
+        Long taskId = createTask(userToken, "admin_task_tool");
 
-        mockMvc.perform(get("/api/internal/v1/tasks/{taskId}/execution-context", taskId)
-                        .header("X-Internal-Token", "local-internal-token"))
+        mockMvc.perform(get("/api/admin/v1/tasks")
+                        .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.data.list[0].taskId").value(taskId.intValue()))
+                .andExpect(jsonPath("$.data.list[0].userId").exists())
+                .andExpect(jsonPath("$.data.list[0].status").value("QUEUED"));
+
+        mockMvc.perform(get("/api/admin/v1/tasks")
+                        .param("status", "QUEUED")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].taskId").value(taskId.intValue()));
+
+        mockMvc.perform(get("/api/admin/v1/tasks/{taskId}", taskId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.taskId").value(taskId.intValue()))
-                .andExpect(jsonPath("$.data.toolCode").value("worker_copywriting"))
-                .andExpect(jsonPath("$.data.params.productName").value("Worker Test Product"))
-                .andExpect(jsonPath("$.data.fields[0].fieldKey").value("productName"));
-
-        mockMvc.perform(post("/api/internal/v1/tasks/{taskId}/processing", taskId)
-                        .header("X-Internal-Token", "local-internal-token")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {
-                                  "progress": 35,
-                                  "progressMessage": "AI is generating"
-                                }
-                                """))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.status").value("PROCESSING"))
-                .andExpect(jsonPath("$.data.progress").value(35));
-
-        mockMvc.perform(post("/api/internal/v1/tasks/{taskId}/success", taskId)
-                        .header("X-Internal-Token", "local-internal-token")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {
-                                  "resourceType": "MARKDOWN",
-                                  "contentText": "# Generated result"
-                                }
-                                """))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.status").value("SUCCESS"))
-                .andExpect(jsonPath("$.data.progress").value(100));
-
-        mockMvc.perform(get("/api/v1/tasks/{taskId}", taskId)
-                        .header("Authorization", "Bearer " + userToken))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.status").value("SUCCESS"))
-                .andExpect(jsonPath("$.data.result.resourceType").value("MARKDOWN"))
-                .andExpect(jsonPath("$.data.result.contentText").value("# Generated result"));
-    }
-
-    @Test
-    void workerCanWriteFailedStatus() throws Exception {
-        String adminToken = login("/api/admin/v1/auth/login", "admin");
-        Long toolId = createTool(adminToken, "worker_failed_tool", 1);
-        publishTool(adminToken, toolId);
-        String userToken = login("/api/v1/auth/login", "user1");
-        Long taskId = createTask(userToken, "worker_failed_tool");
+                .andExpect(jsonPath("$.data.params.productName").value("Admin Task Product"));
 
         mockMvc.perform(post("/api/internal/v1/tasks/{taskId}/failed", taskId)
                         .header("X-Internal-Token", "local-internal-token")
@@ -99,33 +67,29 @@ class WorkerInternalApiTest {
                                 }
                                 """))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.status").value("FAILED"))
-                .andExpect(jsonPath("$.data.progress").value(100))
-                .andExpect(jsonPath("$.data.progressMessage").value("model timeout"));
+                .andExpect(jsonPath("$.data.status").value("FAILED"));
 
-        mockMvc.perform(get("/api/v1/tasks/{taskId}", taskId)
-                        .header("Authorization", "Bearer " + userToken))
+        mockMvc.perform(post("/api/admin/v1/tasks/{taskId}/retry", taskId)
+                        .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.status").value("FAILED"))
-                .andExpect(jsonPath("$.data.result").doesNotExist());
+                .andExpect(jsonPath("$.data.status").value("QUEUED"))
+                .andExpect(jsonPath("$.data.progress").value(0));
+
+        mockMvc.perform(post("/api/admin/v1/tasks/{taskId}/cancel", taskId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("CANCELLED"))
+                .andExpect(jsonPath("$.data.progress").value(100));
     }
 
     @Test
-    void workerInternalApiRejectsMissingOrWrongInternalToken() throws Exception {
-        String adminToken = login("/api/admin/v1/auth/login", "admin");
-        Long toolId = createTool(adminToken, "worker_token_tool", 1);
-        publishTool(adminToken, toolId);
+    void userTokenCannotAccessAdminTaskApi() throws Exception {
         String userToken = login("/api/v1/auth/login", "user1");
-        Long taskId = createTask(userToken, "worker_token_tool");
 
-        mockMvc.perform(get("/api/internal/v1/tasks/{taskId}/execution-context", taskId))
-                .andExpect(status().isUnauthorized())
-                .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
-
-        mockMvc.perform(get("/api/internal/v1/tasks/{taskId}/execution-context", taskId)
-                        .header("X-Internal-Token", "wrong-token"))
-                .andExpect(status().isUnauthorized())
-                .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
+        mockMvc.perform(get("/api/admin/v1/tasks")
+                        .header("Authorization", "Bearer " + userToken))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ADMIN_FORBIDDEN"));
     }
 
     private String login(String path, String account) throws Exception {
@@ -153,7 +117,7 @@ class WorkerInternalApiTest {
                                   "toolCode": "%s",
                                   "toolName": "%s",
                                   "categoryId": 1,
-                                  "description": "Worker test tool",
+                                  "description": "Admin task test tool",
                                   "coverUrl": "",
                                   "estimatedCreditCost": %d
                                 }
@@ -179,9 +143,9 @@ class WorkerInternalApiTest {
                                 {
                                   "toolCode": "%s",
                                   "params": {
-                                    "productName": "Worker Test Product",
-                                    "targetCustomer": "Young users",
-                                    "style": "planting"
+                                    "productName": "Admin Task Product",
+                                    "targetCustomer": "Team users",
+                                    "style": "admin test"
                                   },
                                   "clientRequestId": "%s-request"
                                 }

@@ -13,4 +13,12 @@ public interface TaskService {
     TaskDetailResponse detail(Long userId, Long taskId);
 
     PageResponse<TaskDetailResponse> list(Long userId);
+
+    PageResponse<TaskDetailResponse> adminList(String status, String toolCode, Long userId);
+
+    TaskDetailResponse adminDetail(Long taskId);
+
+    TaskStatusResponse adminRetry(Long taskId);
+
+    TaskStatusResponse adminCancel(Long taskId);
 }

@@ -9,6 +9,7 @@ import com.aiminilab.aitoolmarket.common.enums.UserType;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
@@ -22,16 +23,25 @@ public class AuthInterceptor implements HandlerInterceptor {
 
     private final JwtTokenProvider jwtTokenProvider;
     private final ObjectMapper objectMapper;
+    private final String internalApiToken;
 
-    public AuthInterceptor(JwtTokenProvider jwtTokenProvider, ObjectMapper objectMapper) {
+    public AuthInterceptor(JwtTokenProvider jwtTokenProvider,
+                           ObjectMapper objectMapper,
+                           @Value("${app.internal-api-token}") String internalApiToken) {
         this.jwtTokenProvider = jwtTokenProvider;
         this.objectMapper = objectMapper;
+        this.internalApiToken = internalApiToken;
     }
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
-        if ("OPTIONS".equalsIgnoreCase(request.getMethod()) || isPublicPath(request.getRequestURI())) {
+        String path = request.getRequestURI();
+        if ("OPTIONS".equalsIgnoreCase(request.getMethod()) || isPublicPath(path)) {
             return true;
+        }
+
+        if (path.startsWith("/api/internal/v1/")) {
+            return validateInternalToken(request, response);
         }
 
         Optional<AuthUser> authUser = extractAuthUser(request);
@@ -40,7 +50,7 @@ public class AuthInterceptor implements HandlerInterceptor {
             return false;
         }
 
-        if (request.getRequestURI().startsWith("/api/admin/v1/")
+        if (path.startsWith("/api/admin/v1/")
                 && !UserType.ADMIN.name().equals(authUser.get().userType())) {
             writeError(response, HttpStatus.FORBIDDEN, ErrorCode.ADMIN_FORBIDDEN, "管理员无权限");
             return false;
@@ -60,11 +70,19 @@ public class AuthInterceptor implements HandlerInterceptor {
                 || path.equals("/api/v1/ping")
                 || path.equals("/api/admin/v1/ping")
                 || path.startsWith("/api/v1/auth/")
-                || path.startsWith("/api/internal/v1/")
                 || path.equals("/api/v1/tool-categories")
                 || path.equals("/api/v1/tools")
                 || path.startsWith("/api/v1/tools/")
                 || path.equals("/api/admin/v1/auth/login");
+    }
+
+    private boolean validateInternalToken(HttpServletRequest request, HttpServletResponse response) throws Exception {
+        String token = request.getHeader("X-Internal-Token");
+        if (!internalApiToken.equals(token)) {
+            writeError(response, HttpStatus.UNAUTHORIZED, ErrorCode.UNAUTHORIZED, "内部接口 Token 无效");
+            return false;
+        }
+        return true;
     }
 
     private Optional<AuthUser> extractAuthUser(HttpServletRequest request) {

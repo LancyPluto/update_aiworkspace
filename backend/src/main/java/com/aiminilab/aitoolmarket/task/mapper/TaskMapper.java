@@ -12,6 +12,7 @@ import org.springframework.stereotype.Repository;
 import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.sql.Timestamp;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
@@ -88,6 +89,25 @@ public class TaskMapper {
                 """, taskRowMapper, userId);
     }
 
+    public List<AiTask> findForAdmin(String status, String toolCode, Long userId) {
+        StringBuilder sql = new StringBuilder(baseSql()).append(" WHERE 1 = 1");
+        List<Object> params = new ArrayList<>();
+        if (status != null && !status.isBlank()) {
+            sql.append(" AND t.status = ?");
+            params.add(status);
+        }
+        if (toolCode != null && !toolCode.isBlank()) {
+            sql.append(" AND tool.tool_code = ?");
+            params.add(toolCode);
+        }
+        if (userId != null) {
+            sql.append(" AND t.user_id = ?");
+            params.add(userId);
+        }
+        sql.append(" ORDER BY t.id DESC");
+        return jdbcTemplate.query(sql.toString(), taskRowMapper, params.toArray());
+    }
+
     public Optional<TaskResultResponse> findFirstResult(Long taskId) {
         List<TaskResultResponse> results = jdbcTemplate.query("""
                 SELECT resource_type, content_text
@@ -129,6 +149,26 @@ public class TaskMapper {
                     finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
                 """, errorMessage, errorCode, errorMessage, taskId);
+    }
+
+    public void resetToQueued(Long taskId) {
+        jdbcTemplate.update("""
+                UPDATE ai_tasks
+                SET status = 'QUEUED', progress = 0, progress_message = ?,
+                    error_code = NULL, error_message = NULL,
+                    queued_at = CURRENT_TIMESTAMP, started_at = NULL,
+                    finished_at = NULL, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """, "任务已重新排队", taskId);
+    }
+
+    public void cancel(Long taskId) {
+        jdbcTemplate.update("""
+                UPDATE ai_tasks
+                SET status = 'CANCELLED', progress = 100, progress_message = ?,
+                    finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """, "管理员已取消任务", taskId);
     }
 
     public void insertResult(Long taskId, Long userId, String resourceType, String contentText) {
