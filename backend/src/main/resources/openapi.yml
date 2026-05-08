@@ -263,6 +263,129 @@ paths:
         "400":
           $ref: "#/components/responses/BadRequest"
 
+  /api/v1/credits/account:
+    get:
+      tags:
+        - User Auth
+      summary: Get current user's credit account
+      operationId: getCreditAccount
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Current credit account. A new user gets 100 credits by default.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditAccountApiResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/tasks:
+    post:
+      tags:
+        - Tool Marketplace
+      summary: Create an AI task
+      operationId: createTask
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTaskRequest"
+            example:
+              toolCode: xiaohongshu_copywriting
+              params:
+                productName: Test Product
+                targetCustomer: Young users
+                style: 种草
+              clientRequestId: uuid-from-frontend
+      responses:
+        "200":
+          description: Task created and queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskStatusApiResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    get:
+      tags:
+        - Tool Marketplace
+      summary: Get current user's task list
+      operationId: listTasks
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Current user's tasks
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskPageApiResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/tasks/{taskId}/status:
+    get:
+      tags:
+        - Tool Marketplace
+      summary: Get task status
+      operationId: getTaskStatus
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+          example: 1
+      responses:
+        "200":
+          description: Task status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskStatusApiResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/tasks/{taskId}:
+    get:
+      tags:
+        - Tool Marketplace
+      summary: Get task detail
+      operationId: getTaskDetail
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+          example: 1
+      responses:
+        "200":
+          description: Task detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskDetailApiResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
   /api/admin/v1/tools:
     get:
       tags:
@@ -679,6 +802,38 @@ components:
             data:
               $ref: "#/components/schemas/ToolDetail"
 
+    CreditAccountApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/CreditAccount"
+
+    TaskStatusApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/TaskStatus"
+
+    TaskDetailApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/TaskDetail"
+
+    TaskPageApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/TaskPage"
+
     LoginResponse:
       type: object
       properties:
@@ -830,3 +985,127 @@ components:
         value:
           type: string
           example: 种草
+
+    CreditAccount:
+      type: object
+      properties:
+        accountId:
+          type: integer
+          format: int64
+          example: 1
+        userId:
+          type: integer
+          format: int64
+          example: 2
+        balance:
+          type: integer
+          example: 100
+        frozen:
+          type: integer
+          example: 0
+        totalGranted:
+          type: integer
+          example: 100
+        totalConsumed:
+          type: integer
+          example: 0
+        status:
+          type: string
+          example: ACTIVE
+
+    CreateTaskRequest:
+      type: object
+      required:
+        - toolCode
+        - params
+      properties:
+        toolCode:
+          type: string
+          example: xiaohongshu_copywriting
+        params:
+          type: object
+          additionalProperties: true
+          example:
+            productName: Test Product
+            targetCustomer: Young users
+            style: 种草
+        clientRequestId:
+          type: string
+          nullable: true
+          example: uuid-from-frontend
+
+    TaskStatus:
+      type: object
+      properties:
+        taskId:
+          type: integer
+          format: int64
+          example: 1
+        taskNo:
+          type: string
+          example: T20260508AF040D708A
+        status:
+          type: string
+          enum:
+            - CREATED
+            - QUEUED
+            - PROCESSING
+            - RETRYING
+            - SUCCESS
+            - FAILED
+            - TIMEOUT
+            - CANCELLED
+          example: QUEUED
+        progress:
+          type: integer
+          example: 0
+        progressMessage:
+          type: string
+          example: 任务已排队
+
+    TaskDetail:
+      allOf:
+        - $ref: "#/components/schemas/TaskStatus"
+        - type: object
+          properties:
+            toolCode:
+              type: string
+              example: xiaohongshu_copywriting
+            toolName:
+              type: string
+              example: 小红书文案生成
+            params:
+              type: object
+              additionalProperties: true
+            result:
+              nullable: true
+              $ref: "#/components/schemas/TaskResult"
+            createdAt:
+              type: string
+              format: date-time
+            finishedAt:
+              type: string
+              format: date-time
+              nullable: true
+
+    TaskResult:
+      type: object
+      properties:
+        resourceType:
+          type: string
+          example: MARKDOWN
+        contentText:
+          type: string
+          example: Generated content
+
+    TaskPage:
+      type: object
+      properties:
+        list:
+          type: array
+          items:
+            $ref: "#/components/schemas/TaskDetail"
+        total:
+          type: integer
+          format: int64
+          example: 1

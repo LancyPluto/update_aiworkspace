@@ -63,3 +63,70 @@ CREATE TABLE tool_field_schema_items (
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
+
+CREATE TABLE ai_tasks (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  task_no VARCHAR(64) NOT NULL UNIQUE,
+  user_id BIGINT NOT NULL,
+  tool_id BIGINT NOT NULL,
+  field_schema_id BIGINT,
+  prompt_version_id BIGINT,
+  status VARCHAR(32) NOT NULL DEFAULT 'CREATED',
+  progress TINYINT NOT NULL DEFAULT 0,
+  progress_message VARCHAR(255),
+  params_json JSON NOT NULL,
+  params_hash VARCHAR(128),
+  idempotency_key VARCHAR(128),
+  estimated_credit_cost INT NOT NULL DEFAULT 0,
+  retry_count INT NOT NULL DEFAULT 0,
+  max_retry_count INT NOT NULL DEFAULT 1,
+  error_code VARCHAR(64),
+  error_message TEXT,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  queued_at DATETIME,
+  started_at DATETIME,
+  finished_at DATETIME,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+CREATE TABLE ai_result_resources (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  task_id BIGINT NOT NULL,
+  user_id BIGINT NOT NULL,
+  resource_type VARCHAR(32) NOT NULL DEFAULT 'MARKDOWN',
+  content_text MEDIUMTEXT,
+  content_json JSON,
+  sort_order INT NOT NULL DEFAULT 0,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE credit_accounts (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  user_id BIGINT NOT NULL UNIQUE,
+  balance INT NOT NULL DEFAULT 0,
+  frozen INT NOT NULL DEFAULT 0,
+  total_granted INT NOT NULL DEFAULT 0,
+  total_consumed INT NOT NULL DEFAULT 0,
+  status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+CREATE TABLE credit_logs (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  user_id BIGINT NOT NULL,
+  account_id BIGINT NOT NULL,
+  task_id BIGINT,
+  log_type VARCHAR(32) NOT NULL,
+  amount INT NOT NULL DEFAULT 0,
+  frozen_amount INT NOT NULL DEFAULT 0,
+  balance_before INT NOT NULL,
+  balance_after INT NOT NULL,
+  frozen_before INT NOT NULL,
+  frozen_after INT NOT NULL,
+  idempotency_key VARCHAR(128),
+  operator_type VARCHAR(32) NOT NULL DEFAULT 'SYSTEM',
+  operator_id BIGINT,
+  reason VARCHAR(512),
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
