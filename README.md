@@ -23,15 +23,17 @@ AI Tool Market 是一个基于 **Spring Boot + Vue** 的 AI 工具超市项目�
 
 ## 技术栈
 
-| 模块 | 技术 |
-|---|---|
-| 后端 | Spring Boot 3.x, Java 17, Maven |
-| 用户端 | Vue 3, Vite, Axios, Pinia |
-| 管理后台 | Vue 3, Vite, Element Plus |
-| Worker | Python 3 |
-| 数据库 | MySQL 8 |
-| 队列/缓存 | Redis |
-| 本地环境 | Docker Compose |
+
+| 模块     | 技术                              |
+| ------ | ------------------------------- |
+| 后端     | Spring Boot 3.x, Java 17, Maven |
+| 用户端    | Vue 3, Vite, Axios, Pinia       |
+| 管理后台   | Vue 3, Vite, Element Plus       |
+| Worker | Python 3                        |
+| 数据库    | MySQL 8                         |
+| 队列/缓存  | Redis                           |
+| 本地环境   | Docker Compose                  |
+
 
 ## 推荐目录结构
 
