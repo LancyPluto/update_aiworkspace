@@ -1,112 +1,214 @@
-# AI Tool Market
+<br />
 
-AI Tool Market 是一个基于 **Spring Boot + Vue** 的 AI 工具超市项目。
+# ai-tool-market
 
-当前阶段目标是在 7 天内完成 V1 最小可演示版本：管理员可以在后台配置并发布 AI 工具，用户可以在前台选择工具、提交任务，由 Worker 调用 AI 模型生成结果，并在后台追踪任务状态。
+## V1 工具数量建议
 
-## V1 核心链路
+V1.0 先上线 6 个核心工具：
 
-```text
-管理员登录
-→ 后台创建/配置 AI 工具
-→ 配置动态字段和 Prompt
-→ 发布工具
-→ 用户登录
-→ 用户看到工具
-→ 用户提交任务
-→ 后端创建任务并入队
-→ Worker 调用 AI
-→ 保存结果
-→ 用户查看结果
-→ 后台查看任务和失败原因
+| 分类    | 工具          |
+| :---- | :---------- |
+| 内容创作  | AI 朋友圈文案生成器 |
+| 内容创作  | AI 小红书文案生成器 |
+| 短视频运营 | AI 短视频脚本生成器 |
+| 短视频运营 | AI 短视频选题生成器 |
+| 电商运营  | AI 商品标题优化器  |
+| 门店获客  | AI 门店活动策划器  |
+
+# AI 任务 Worker
+
+<br />
+
+&#x20;
+
+## 角色定位
+
+你负责 Redis 队列消费、Prompt 拼装、AI 模型调用、任务结果回写。不要直接绕过后端改核心业务表，算力和任务状态由后端统一处理。
+
+## 必须交付
+
+```
+Redis 队列消费者
+任务执行上下文获取
+Prompt 模板变量替换
+AI 模型调用
+成功结果回写
+失败状态回写
+Worker 启动说明
+
 ```
 
-## 技术栈
+## Redis 队列
 
-| 模块 | 技术 |
-|---|---|
-| 后端 | Spring Boot 3.x, Java 17, Maven |
-| 用户端 | Vue 3, Vite, Axios, Pinia |
-| 管理后台 | Vue 3, Vite, Element Plus |
-| Worker | Python 3 |
-| 数据库 | MySQL 8 |
-| 队列/缓存 | Redis |
-| 本地环境 | Docker Compose |
+队列名：
 
-## 推荐目录结构
+```
+ai:task:queue
 
-```text
-ai-tool-market/
-├── backend/       # Spring Boot 后端
-├── user-web/      # 用户端 Vue
-├── admin-web/     # 管理后台 Vue
-├── worker/        # Python AI Worker
-├── sql/           # 数据库初始化和迁移脚本
-├── deploy/        # Docker Compose 和部署配置
-├── docs/          # 项目文档
-└── README.md
 ```
 
-## V1 本周不做
+消息格式：
 
-```text
-支付订单
-套餐购买
-算力审批流
-复杂 RBAC 权限矩阵
-完整监控告警系统
+```
+{
+  "taskId": 90001,
+  "taskNo": "T202605070001",
+  "toolCode": "xiaohongshu_copywriting",
+  "traceId": "request-id",
+  "createdAt": "2026-05-07T10:00:00"
+}
+
+```
+
+## Worker 执行流程
+
+```
+1. 从 Redis 获取消息
+2. 调用 GET /api/internal/v1/tasks/{taskId}/execution-context
+3. 调用 POST /api/internal/v1/tasks/{taskId}/processing
+4. 根据 field inputs + prompt template 拼装 Prompt
+5. 调用 AI 模型
+6. 成功则调用 POST /api/internal/v1/tasks/{taskId}/success
+7. 失败则调用 POST /api/internal/v1/tasks/{taskId}/failed
+
+```
+
+## 执行上下文返回结构
+
+后端返回：
+
+```
+{
+  "taskId": 90001,
+  "taskNo": "T202605070001",
+  "toolCode": "xiaohongshu_copywriting",
+  "status": "QUEUED",
+  "params": {
+    "productName": "五一护理套餐",
+    "targetCustomer": "年轻女性",
+    "style": "种草"
+  },
+  "systemPrompt": "你是一个专业小红书文案助手。",
+  "userPromptTemplate": "请根据 {{productName}} 为 {{targetCustomer}} 生成一篇 {{style}} 风格文案。",
+  "outputFormat": "MARKDOWN",
+  "modelProviderCode": "deepseek",
+  "modelName": "deepseek-chat"
+}
+
+```
+
+## Prompt 变量替换规则
+
+```
+{{productName}} 替换为 params.productName
+{{targetCustomer}} 替换为 params.targetCustomer
+{{style}} 替换为 params.style
+缺少变量时，回写 FAILED，errorCode = PROMPT_VARIABLE_MISSING
+
+```
+
+## 成功回写
+
+```
+POST /api/internal/v1/tasks/{taskId}/success
+
+```
+
+```
+{
+  "resourceType": "MARKDOWN",
+  "contentText": "生成结果",
+  "contentJson": null,
+  "modelProviderCode": "deepseek",
+  "modelName": "deepseek-chat"
+}
+
+```
+
+## 失败回写
+
+```
+POST /api/internal/v1/tasks/{taskId}/failed
+
+```
+
+```
+{
+  "errorCode": "MODEL_CALL_FAILED",
+  "errorMessage": "模型调用失败"
+}
+
+```
+
+## V1 错误码
+
+错误码
+
+场景
+
+`PROMPT_VARIABLE_MISSING`
+
+Prompt 变量缺失
+
+`MODEL_CALL_FAILED`
+
+模型调用失败
+
+`MODEL_TIMEOUT`
+
+模型超时
+
+`MODEL_OUTPUT_EMPTY`
+
+模型返回空内容
+
+`WORKER_INTERNAL_ERROR`
+
+Worker 内部异常
+
+## 每日交付
+
+日期
+
+交付
+
+第 1 天
+
+Worker 项目启动、Redis 连接、消费空消息
+
+第 2 天
+
+execution-context 接口联调
+
+第 3 天
+
+任务状态 PROCESSING 回写
+
+第 4 天
+
+AI 调用和 SUCCESS/FAILED 回写
+
+第 5 天
+
+异常处理、超时处理、日志
+
+第 6 天
+
+联调修 Bug
+
+第 7 天
+
+Worker 启动文档和演示环境验证
+
+## 不做
+
+```
+多模型路由
 文件上传
-素材库/RAG
-图片/视频/数字人多模态
-复杂 Prompt 回滚
-多租户/企业空间
+图片/视频生成
+直接修改 credit_accounts
+直接修改 ai_tasks 成功状态
+复杂死信队列后台
+
 ```
 
-## 分支约定
-
-```text
-main：稳定交付分支
-dev：每日集成分支
-feature/backend-core：后端核心
-feature/user-web：用户端前端
-feature/worker-ai：AI Worker
-feature/admin-web：管理后台
-feature/test-docs：测试文档部署
-```
-
-## 每日协作节奏
-
-```text
-每天 17:00 前：各成员提交到个人 feature 分支
-每天 18:00 前：合并到 dev
-每天 20:00 前：测试同学基于 dev 跑核心链路
-第 6 天：冻结功能，只修 Bug
-第 7 天：本机演示和验收
-```
-
-## 第 1 天目标
-
-第 1 天只搭项目骨架，不开发复杂业务：
-
-```text
-后端 Spring Boot 能启动
-用户端 Vue 能启动
-管理后台 Vue 能启动
-Worker 能启动
-MySQL / Redis 能通过 Docker Compose 启动
-前端能请求后端 /api/health
-Worker 能消费 Redis 测试消息
-```
-
-## 最终验收标准
-
-```text
-1. 用户能登录
-2. 管理员能登录
-3. 管理员能创建并发布一个工具
-4. 用户能看到这个工具
-5. 用户能提交任务
-6. Worker 能完成 AI 生成
-7. 用户能看到生成结果
-8. 后台能看到任务状态和失败原因
-```

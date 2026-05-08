@@ -1,0 +1,86 @@
+import logging
+from typing import Any
+
+import requests
+
+from config import settings
+
+
+LOGGER = logging.getLogger(__name__)
+
+
+class BackendClientError(RuntimeError):
+    pass
+
+
+class BackendClient:
+    def __init__(self) -> None:
+        self.base_url = settings.backend_internal_base_url.rstrip("/")
+        self.timeout = (3, 15)
+        self.session = requests.Session()
+        self.session.headers.update(
+            {
+                "Content-Type": "application/json",
+                "X-Internal-Token": settings.internal_api_token,
+                "Authorization": f"Bearer {settings.internal_api_token}",
+            }
+        )
+
+    def get_execution_context(self, task_id: int) -> dict[str, Any]:
+        response = self.session.get(
+            self._url(f"/api/internal/v1/tasks/{task_id}/execution-context"),
+            timeout=self.timeout,
+        )
+        return self._parse_response(response)
+
+    def mark_processing(self, task_id: int) -> dict[str, Any]:
+        response = self.session.post(
+            self._url(f"/api/internal/v1/tasks/{task_id}/processing"),
+            json={},
+            timeout=self.timeout,
+        )
+        return self._parse_response(response)
+
+    def mark_success(self, task_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+        response = self.session.post(
+            self._url(f"/api/internal/v1/tasks/{task_id}/success"),
+            json=payload,
+            timeout=self.timeout,
+        )
+        return self._parse_response(response)
+
+    def mark_failed(self, task_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+        response = self.session.post(
+            self._url(f"/api/internal/v1/tasks/{task_id}/failed"),
+            json=payload,
+            timeout=self.timeout,
+        )
+        return self._parse_response(response)
+
+    def _url(self, path: str) -> str:
+        return f"{self.base_url}{path}"
+
+    def _parse_response(self, response: requests.Response) -> dict[str, Any]:
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as exc:
+            raise BackendClientError(
+                f"backend request failed: status={response.status_code}, body={response.text}"
+            ) from exc
+
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise BackendClientError("backend returned non-json response") from exc
+
+        code = payload.get("code")
+        if code != "SUCCESS":
+            raise BackendClientError(
+                f"backend business error: code={code}, message={payload.get('message', '')}"
+            )
+
+        data = payload.get("data")
+        if data is None:
+            LOGGER.debug("backend response data is empty: %s", payload)
+            return {}
+        return data
