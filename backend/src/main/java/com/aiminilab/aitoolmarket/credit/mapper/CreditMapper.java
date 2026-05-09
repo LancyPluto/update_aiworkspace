@@ -1,86 +1,102 @@
 package com.aiminilab.aitoolmarket.credit.mapper;
 
 import com.aiminilab.aitoolmarket.credit.entity.CreditAccount;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Update;
 import org.springframework.dao.DuplicateKeyException;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.core.RowMapper;
-import org.springframework.stereotype.Repository;
 
-import java.util.List;
 import java.util.Optional;
 
-@Repository
-public class CreditMapper {
+public interface CreditMapper extends BaseMapper<CreditAccount> {
 
-    public static final int DEFAULT_GRANTED_CREDITS = 100;
+    int DEFAULT_GRANTED_CREDITS = 100;
 
-    private final JdbcTemplate jdbcTemplate;
-
-    private final RowMapper<CreditAccount> accountRowMapper = (rs, rowNum) -> {
-        CreditAccount account = new CreditAccount();
-        account.setId(rs.getLong("id"));
-        account.setUserId(rs.getLong("user_id"));
-        account.setBalance(rs.getInt("balance"));
-        account.setFrozen(rs.getInt("frozen"));
-        account.setTotalGranted(rs.getInt("total_granted"));
-        account.setTotalConsumed(rs.getInt("total_consumed"));
-        account.setStatus(rs.getString("status"));
-        return account;
-    };
-
-    public CreditMapper(JdbcTemplate jdbcTemplate) {
-        this.jdbcTemplate = jdbcTemplate;
-    }
-
-    public CreditAccount getOrCreateAccount(Long userId) {
+    default CreditAccount getOrCreateAccount(Long userId) {
         Optional<CreditAccount> existing = findByUserId(userId);
         if (existing.isPresent()) {
             return existing.get();
         }
+
+        CreditAccount account = new CreditAccount();
+        account.setUserId(userId);
+        account.setBalance(DEFAULT_GRANTED_CREDITS);
+        account.setFrozen(0);
+        account.setTotalGranted(DEFAULT_GRANTED_CREDITS);
+        account.setTotalConsumed(0);
+        account.setStatus("ACTIVE");
         try {
-            jdbcTemplate.update("""
-                    INSERT INTO credit_accounts
-                      (user_id, balance, frozen, total_granted, total_consumed, status)
-                    VALUES (?, ?, 0, ?, 0, 'ACTIVE')
-                    """, userId, DEFAULT_GRANTED_CREDITS, DEFAULT_GRANTED_CREDITS);
+            insert(account);
         } catch (DuplicateKeyException ignored) {
             // Another request created the account first; read it below.
         }
         return findByUserId(userId).orElseThrow(() -> new IllegalStateException("Credit account is missing"));
     }
 
-    public boolean deduct(Long accountId, int amount) {
-        return jdbcTemplate.update("""
-                UPDATE credit_accounts
-                SET balance = balance - ?, total_consumed = total_consumed + ?, updated_at = CURRENT_TIMESTAMP
-                WHERE id = ? AND balance >= ? AND status = 'ACTIVE'
-                """, amount, amount, accountId, amount) == 1;
+    default Optional<CreditAccount> findByUserId(Long userId) {
+        return Optional.ofNullable(selectOne(new LambdaQueryWrapper<CreditAccount>()
+                .eq(CreditAccount::getUserId, userId)
+                .last("LIMIT 1")));
     }
 
-    public void insertDeductLog(CreditAccount before, Long taskId, int amount) {
-        jdbcTemplate.update("""
-                INSERT INTO credit_logs
-                  (user_id, account_id, task_id, log_type, amount, frozen_amount,
-                   balance_before, balance_after, frozen_before, frozen_after,
-                   operator_type, reason)
-                VALUES (?, ?, ?, 'DEDUCT', ?, 0, ?, ?, ?, ?, 'SYSTEM', ?)
-                """,
-                before.getUserId(),
-                before.getId(),
-                taskId,
-                amount,
-                before.getBalance(),
-                before.getBalance() - amount,
-                before.getFrozen(),
-                before.getFrozen(),
-                "Create AI task");
+    @Update("""
+            UPDATE credit_accounts
+            SET frozen = frozen + #{amount}, updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{accountId} AND balance - frozen >= #{amount} AND status = 'ACTIVE'
+            """)
+    int freezeRows(@Param("accountId") Long accountId, @Param("amount") int amount);
+
+    default boolean freeze(Long accountId, int amount) {
+        return freezeRows(accountId, amount) == 1;
     }
 
-    private Optional<CreditAccount> findByUserId(Long userId) {
-        List<CreditAccount> accounts = jdbcTemplate.query("""
-                SELECT * FROM credit_accounts
-                WHERE user_id = ?
-                """, accountRowMapper, userId);
-        return accounts.stream().findFirst();
+    @Update("""
+            UPDATE credit_accounts
+            SET balance = balance - #{amount},
+                frozen = frozen - #{amount},
+                total_consumed = total_consumed + #{amount},
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{accountId} AND frozen >= #{amount} AND balance >= #{amount} AND status = 'ACTIVE'
+            """)
+    int settleRows(@Param("accountId") Long accountId, @Param("amount") int amount);
+
+    default boolean settle(Long accountId, int amount) {
+        return settleRows(accountId, amount) == 1;
+    }
+
+    @Update("""
+            UPDATE credit_accounts
+            SET frozen = frozen - #{amount}, updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{accountId} AND frozen >= #{amount} AND status = 'ACTIVE'
+            """)
+    int releaseRows(@Param("accountId") Long accountId, @Param("amount") int amount);
+
+    default boolean release(Long accountId, int amount) {
+        return releaseRows(accountId, amount) == 1;
+    }
+
+    @Update("""
+            UPDATE credit_accounts
+            SET balance = balance + #{amount},
+                total_granted = total_granted + #{amount},
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{accountId} AND status = 'ACTIVE'
+            """)
+    int manualAddRows(@Param("accountId") Long accountId, @Param("amount") int amount);
+
+    default boolean manualAdd(Long accountId, int amount) {
+        return manualAddRows(accountId, amount) == 1;
+    }
+
+    @Update("""
+            UPDATE credit_accounts
+            SET balance = balance - #{amount}, updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{accountId} AND balance - frozen >= #{amount} AND status = 'ACTIVE'
+            """)
+    int manualDeductRows(@Param("accountId") Long accountId, @Param("amount") int amount);
+
+    default boolean manualDeduct(Long accountId, int amount) {
+        return manualDeductRows(accountId, amount) == 1;
     }
 }

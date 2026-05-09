@@ -7,6 +7,7 @@ public record CreditAccountResponse(
         Long userId,
         Integer balance,
         Integer frozen,
+        Integer available,
         Integer totalGranted,
         Integer totalConsumed,
         String status
@@ -17,6 +18,7 @@ public record CreditAccountResponse(
                 account.getUserId(),
                 account.getBalance(),
                 account.getFrozen(),
+                account.getBalance() - account.getFrozen(),
                 account.getTotalGranted(),
                 account.getTotalConsumed(),
                 account.getStatus()

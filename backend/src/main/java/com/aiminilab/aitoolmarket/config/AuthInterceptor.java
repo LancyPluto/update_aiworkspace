@@ -2,35 +2,77 @@ package com.aiminilab.aitoolmarket.config;
 
 import com.aiminilab.aitoolmarket.auth.security.AuthContext;
 import com.aiminilab.aitoolmarket.auth.security.AuthUser;
+import com.aiminilab.aitoolmarket.auth.security.InternalRequestSignatureVerifier;
 import com.aiminilab.aitoolmarket.auth.security.JwtTokenProvider;
 import com.aiminilab.aitoolmarket.common.dto.ApiResponse;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.enums.UserType;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.servlet.Filter;
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ReadListener;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.ServletInputStream;
+import jakarta.servlet.ServletRequest;
+import jakarta.servlet.ServletResponse;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletRequestWrapper;
 import jakarta.servlet.http.HttpServletResponse;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StreamUtils;
 import org.springframework.web.servlet.HandlerInterceptor;
 
+import java.io.BufferedReader;
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.Optional;
 
 @Component
-public class AuthInterceptor implements HandlerInterceptor {
+public class AuthInterceptor implements HandlerInterceptor, Filter {
+
+    private static final String INTERNAL_SIGNATURE_VERIFIED_ATTRIBUTE =
+            AuthInterceptor.class.getName() + ".internalSignatureVerified";
 
     private final JwtTokenProvider jwtTokenProvider;
     private final ObjectMapper objectMapper;
-    private final String internalApiToken;
+    private final InternalRequestSignatureVerifier internalRequestSignatureVerifier;
 
     public AuthInterceptor(JwtTokenProvider jwtTokenProvider,
                            ObjectMapper objectMapper,
-                           @Value("${app.internal-api-token}") String internalApiToken) {
+                           InternalRequestSignatureVerifier internalRequestSignatureVerifier) {
         this.jwtTokenProvider = jwtTokenProvider;
         this.objectMapper = objectMapper;
-        this.internalApiToken = internalApiToken;
+        this.internalRequestSignatureVerifier = internalRequestSignatureVerifier;
+    }
+
+    @Override
+    public void doFilter(ServletRequest servletRequest,
+                         ServletResponse servletResponse,
+                         FilterChain filterChain) throws IOException, ServletException {
+        HttpServletRequest request = (HttpServletRequest) servletRequest;
+        HttpServletResponse response = (HttpServletResponse) servletResponse;
+        if (!request.getRequestURI().startsWith("/api/internal/v1/")) {
+            filterChain.doFilter(servletRequest, servletResponse);
+            return;
+        }
+
+        byte[] body = StreamUtils.copyToByteArray(request.getInputStream());
+        CachedBodyRequest wrappedRequest = new CachedBodyRequest(request, body);
+        if (!verifyInternalSignature(wrappedRequest, body)) {
+            try {
+                writeError(response, HttpStatus.UNAUTHORIZED, ErrorCode.UNAUTHORIZED, "内部接口签名无效");
+            } catch (Exception exception) {
+                throw new ServletException(exception);
+            }
+            return;
+        }
+
+        wrappedRequest.setAttribute(INTERNAL_SIGNATURE_VERIFIED_ATTRIBUTE, Boolean.TRUE);
+        filterChain.doFilter(wrappedRequest, response);
     }
 
     @Override
@@ -41,7 +83,11 @@ public class AuthInterceptor implements HandlerInterceptor {
         }
 
         if (path.startsWith("/api/internal/v1/")) {
-            return validateInternalToken(request, response);
+            if (Boolean.TRUE.equals(request.getAttribute(INTERNAL_SIGNATURE_VERIFIED_ATTRIBUTE))) {
+                return true;
+            }
+            writeError(response, HttpStatus.UNAUTHORIZED, ErrorCode.UNAUTHORIZED, "内部接口签名无效");
+            return false;
         }
 
         Optional<AuthUser> authUser = extractAuthUser(request);
@@ -76,13 +122,15 @@ public class AuthInterceptor implements HandlerInterceptor {
                 || path.equals("/api/admin/v1/auth/login");
     }
 
-    private boolean validateInternalToken(HttpServletRequest request, HttpServletResponse response) throws Exception {
-        String token = request.getHeader("X-Internal-Token");
-        if (!internalApiToken.equals(token)) {
-            writeError(response, HttpStatus.UNAUTHORIZED, ErrorCode.UNAUTHORIZED, "内部接口 Token 无效");
-            return false;
-        }
-        return true;
+    private boolean verifyInternalSignature(HttpServletRequest request, byte[] body) {
+        return internalRequestSignatureVerifier.verify(
+                request.getMethod(),
+                request.getRequestURI(),
+                request.getHeader("X-Internal-Timestamp"),
+                request.getHeader("X-Internal-Nonce"),
+                request.getHeader("X-Internal-Signature"),
+                body
+        );
     }
 
     private Optional<AuthUser> extractAuthUser(HttpServletRequest request) {
@@ -98,5 +146,46 @@ public class AuthInterceptor implements HandlerInterceptor {
         response.setCharacterEncoding(StandardCharsets.UTF_8.name());
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         response.getWriter().write(objectMapper.writeValueAsString(ApiResponse.fail(errorCode, message)));
+    }
+
+    private static final class CachedBodyRequest extends HttpServletRequestWrapper {
+
+        private final byte[] body;
+
+        private CachedBodyRequest(HttpServletRequest request, byte[] body) {
+            super(request);
+            this.body = body;
+        }
+
+        @Override
+        public ServletInputStream getInputStream() {
+            ByteArrayInputStream inputStream = new ByteArrayInputStream(body);
+            return new ServletInputStream() {
+                @Override
+                public boolean isFinished() {
+                    return inputStream.available() == 0;
+                }
+
+                @Override
+                public boolean isReady() {
+                    return true;
+                }
+
+                @Override
+                public void setReadListener(ReadListener readListener) {
+                    throw new UnsupportedOperationException();
+                }
+
+                @Override
+                public int read() {
+                    return inputStream.read();
+                }
+            };
+        }
+
+        @Override
+        public BufferedReader getReader() {
+            return new BufferedReader(new InputStreamReader(getInputStream(), StandardCharsets.UTF_8));
+        }
     }
 }

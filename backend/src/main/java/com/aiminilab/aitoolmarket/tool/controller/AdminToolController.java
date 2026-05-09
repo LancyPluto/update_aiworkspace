@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -30,8 +31,17 @@ public class AdminToolController {
     }
 
     @GetMapping
-    public ApiResponse<PageResponse<ToolSummaryResponse>> tools() {
-        return ApiResponse.success(toolService.adminTools());
+    public ApiResponse<PageResponse<ToolSummaryResponse>> tools(@RequestParam(required = false) String keyword,
+                                                                @RequestParam(required = false) Long categoryId,
+                                                                @RequestParam(required = false) String status,
+                                                                @RequestParam(required = false) Integer pageNo,
+                                                                @RequestParam(required = false) Integer pageSize) {
+        return ApiResponse.success(toolService.adminTools(keyword, categoryId, status, pageNo, pageSize));
+    }
+
+    @GetMapping("/{toolId}")
+    public ApiResponse<?> detail(@PathVariable Long toolId) {
+        return ApiResponse.success(toolService.adminToolDetail(toolId));
     }
 
     @PostMapping

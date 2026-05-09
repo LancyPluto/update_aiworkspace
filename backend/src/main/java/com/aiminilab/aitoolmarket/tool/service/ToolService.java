@@ -14,11 +14,13 @@ public interface ToolService {
 
     List<ToolCategoryResponse> categories();
 
-    PageResponse<ToolSummaryResponse> userTools();
+    PageResponse<ToolSummaryResponse> userTools(String keyword, Long categoryId, Integer pageNo, Integer pageSize);
 
     ToolDetailResponse userToolDetail(String toolCode);
 
-    PageResponse<ToolSummaryResponse> adminTools();
+    PageResponse<ToolSummaryResponse> adminTools(String keyword, Long categoryId, String status, Integer pageNo, Integer pageSize);
+
+    ToolDetailResponse adminToolDetail(Long toolId);
 
     ToolSummaryResponse createTool(UpsertToolRequest request, Long operatorId);
 

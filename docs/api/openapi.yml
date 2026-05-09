@@ -1,33 +1,28 @@
 openapi: 3.0.3
 info:
-  title: AI 超市平台 V1 当前接口文档
-  description: 当前 dev 分支已实现接口契约，仅包含可联调的真实接口。
-  version: 0.1.0
+  title: AI 工具市场 V1 API
+  description: 当前后端实现的 V1 接口契约，供用户端、管理端、Worker 和测试联调统一使用。
+  version: 0.2.0
 servers:
   - url: http://localhost:8080
     description: 本地 Spring Boot 服务
 
 tags:
   - name: 健康检查
-    description: 服务健康检查和连通性测试接口
   - name: 用户认证
-    description: 用户注册、登录、退出和当前用户信息接口
   - name: 管理员认证
-    description: 管理员登录、退出和当前管理员信息接口
-  - name: 工具超市
-    description: 用户端工具分类、工具列表、任务和算力接口
+  - name: 工具市场
+  - name: 用户任务
+  - name: 算力账户
   - name: 后台工具管理
-    description: 管理后台工具最小管理接口
   - name: 后台任务管理
-    description: 管理员查询任务、重试失败任务、取消任务的最小管理接口
-  - name: Worker内部接口
-    description: AI Worker 获取任务上下文和回写任务结果的内部接口
+  - name: 后台用户管理
+  - name: Worker 内部接口
 
 paths:
   /api/health:
     get:
-      tags:
-        - 健康检查
+      tags: [健康检查]
       summary: 服务健康检查
       operationId: health
       responses:
@@ -40,13 +35,12 @@ paths:
 
   /api/v1/ping:
     get:
-      tags:
-        - 健康检查
+      tags: [健康检查]
       summary: 用户端接口连通性测试
       operationId: userPing
       responses:
         "200":
-          description: pong 连通性响应
+          description: pong
           content:
             application/json:
               schema:
@@ -54,13 +48,12 @@ paths:
 
   /api/admin/v1/ping:
     get:
-      tags:
-        - 健康检查
+      tags: [健康检查]
       summary: 管理端接口连通性测试
       operationId: adminPing
       responses:
         "200":
-          description: pong 连通性响应
+          description: pong
           content:
             application/json:
               schema:
@@ -68,8 +61,7 @@ paths:
 
   /api/v1/auth/register:
     post:
-      tags:
-        - 用户认证
+      tags: [用户认证]
       summary: 普通用户注册
       operationId: registerUser
       requestBody:
@@ -78,10 +70,6 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/RegisterRequest"
-            example:
-              username: test001
-              password: "123456"
-              nickname: 测试用户
       responses:
         "200":
           description: 注册成功并返回登录态
@@ -94,8 +82,7 @@ paths:
 
   /api/v1/auth/login:
     post:
-      tags:
-        - 用户认证
+      tags: [用户认证]
       summary: 普通用户登录
       operationId: loginUser
       requestBody:
@@ -104,9 +91,6 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/LoginRequest"
-            example:
-              account: user1
-              password: "123456"
       responses:
         "200":
           description: 登录成功
@@ -119,15 +103,14 @@ paths:
 
   /api/v1/auth/logout:
     post:
-      tags:
-        - 用户认证
+      tags: [用户认证]
       summary: 普通用户退出登录
       operationId: logoutUser
       security:
         - bearerAuth: []
       responses:
         "200":
-          description: 退出登录成功
+          description: 退出成功
           content:
             application/json:
               schema:
@@ -137,8 +120,7 @@ paths:
 
   /api/v1/users/me:
     get:
-      tags:
-        - 用户认证
+      tags: [用户认证]
       summary: 获取当前用户信息
       operationId: getCurrentUser
       security:
@@ -155,8 +137,7 @@ paths:
 
   /api/admin/v1/auth/login:
     post:
-      tags:
-        - 管理员认证
+      tags: [管理员认证]
       summary: 管理员登录
       operationId: loginAdmin
       requestBody:
@@ -165,12 +146,9 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/LoginRequest"
-            example:
-              account: admin
-              password: "123456"
       responses:
         "200":
-          description: 管理员登录成功
+          description: 登录成功
           content:
             application/json:
               schema:
@@ -178,10 +156,24 @@ paths:
         "400":
           $ref: "#/components/responses/BadRequest"
 
+  /api/admin/v1/auth/logout:
+    post:
+      tags: [管理员认证]
+      summary: 管理员退出登录
+      operationId: logoutAdmin
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 退出成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmptyApiResponse"
+
   /api/admin/v1/auth/me:
     get:
-      tags:
-        - 管理员认证
+      tags: [管理员认证]
       summary: 获取当前管理员信息
       operationId: getCurrentAdmin
       security:
@@ -193,38 +185,17 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/UserProfileApiResponse"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
 
-  /api/admin/v1/auth/logout:
-    post:
-      tags:
-        - 管理员认证
-      summary: 管理员退出登录
-      operationId: logoutAdmin
-      security:
-        - bearerAuth: []
-      responses:
-        "200":
-          description: 退出登录成功
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/EmptyApiResponse"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-
   /api/v1/tool-categories:
     get:
-      tags:
-        - 工具超市
+      tags: [工具市场]
       summary: 获取启用的工具分类列表
       operationId: listToolCategories
       responses:
         "200":
-          description: 启用分类列表，按 sortOrder 和 id 升序返回
+          description: 分类列表
           content:
             application/json:
               schema:
@@ -232,13 +203,34 @@ paths:
 
   /api/v1/tools:
     get:
-      tags:
-        - 工具超市
+      tags: [工具市场]
       summary: 获取已上线工具列表
       operationId: listUserTools
+      parameters:
+        - $ref: "#/components/parameters/Keyword"
+        - $ref: "#/components/parameters/CategoryId"
+        - $ref: "#/components/parameters/PageNo"
+        - $ref: "#/components/parameters/PageSize"
       responses:
         "200":
-          description: 已上线工具列表
+          description: 已上线工具分页列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ToolPageApiResponse"
+
+  /api/v1/tools/search:
+    get:
+      tags: [工具市场]
+      summary: 搜索已上线工具
+      operationId: searchUserTools
+      parameters:
+        - $ref: "#/components/parameters/RequiredKeyword"
+        - $ref: "#/components/parameters/PageNo"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: 搜索结果
           content:
             application/json:
               schema:
@@ -246,20 +238,14 @@ paths:
 
   /api/v1/tools/{toolCode}:
     get:
-      tags:
-        - 工具超市
-      summary: 获取工具详情和动态表单字段
+      tags: [工具市场]
+      summary: 获取工具详情和动态字段配置
       operationId: getUserToolDetail
       parameters:
-        - name: toolCode
-          in: path
-          required: true
-          schema:
-            type: string
-          example: xiaohongshu_copywriting
+        - $ref: "#/components/parameters/ToolCode"
       responses:
         "200":
-          description: 已上线工具详情
+          description: 工具详情
           content:
             application/json:
               schema:
@@ -267,28 +253,9 @@ paths:
         "400":
           $ref: "#/components/responses/BadRequest"
 
-  /api/v1/credits/account:
-    get:
-      tags:
-        - 用户认证
-      summary: 获取当前用户算力账户
-      operationId: getCreditAccount
-      security:
-        - bearerAuth: []
-      responses:
-        "200":
-          description: 当前用户算力账户，新用户默认 100 点算力
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/CreditAccountApiResponse"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-
   /api/v1/tasks:
     post:
-      tags:
-        - 工具超市
+      tags: [用户任务]
       summary: 创建 AI 任务
       operationId: createTask
       security:
@@ -299,16 +266,9 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/CreateTaskRequest"
-            example:
-              toolCode: xiaohongshu_copywriting
-              params:
-                productName: 测试产品
-                targetCustomer: 年轻用户
-                style: 种草
-              clientRequestId: uuid-from-frontend
       responses:
         "200":
-          description: 任务创建成功并进入队列
+          description: 任务创建成功，算力进入冻结状态
           content:
             application/json:
               schema:
@@ -318,15 +278,19 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
     get:
-      tags:
-        - 工具超市
+      tags: [用户任务]
       summary: 获取当前用户任务列表
-      operationId: listTasks
+      operationId: listUserTasks
       security:
         - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TaskStatusQuery"
+        - $ref: "#/components/parameters/ToolCodeQuery"
+        - $ref: "#/components/parameters/PageNo"
+        - $ref: "#/components/parameters/PageSize"
       responses:
         "200":
-          description: 当前用户的任务列表
+          description: 当前用户任务分页列表
           content:
             application/json:
               schema:
@@ -334,50 +298,15 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
-  /api/v1/tasks/{taskId}/status:
-    get:
-      tags:
-        - 工具超市
-      summary: 查询任务状态
-      operationId: getTaskStatus
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: taskId
-          in: path
-          required: true
-          schema:
-            type: integer
-            format: int64
-          example: 1
-      responses:
-        "200":
-          description: 任务状态
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/TaskStatusApiResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-
   /api/v1/tasks/{taskId}:
     get:
-      tags:
-        - 工具超市
-      summary: 查询任务详情
+      tags: [用户任务]
+      summary: 获取任务详情和结果
       operationId: getTaskDetail
       security:
         - bearerAuth: []
       parameters:
-        - name: taskId
-          in: path
-          required: true
-          schema:
-            type: integer
-            format: int64
-          example: 1
+        - $ref: "#/components/parameters/TaskId"
       responses:
         "200":
           description: 任务详情
@@ -385,34 +314,125 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/TaskDetailApiResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
 
-  /api/admin/v1/tools:
+  /api/v1/tasks/{taskId}/status:
     get:
-      tags:
-        - 后台工具管理
-      summary: 后台获取工具列表
-      operationId: listAdminTools
+      tags: [用户任务]
+      summary: 查询任务状态
+      operationId: getTaskStatus
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "200":
+          description: 任务状态
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskStatusApiResponse"
+
+  /api/v1/tasks/{taskId}/cancel:
+    post:
+      tags: [用户任务]
+      summary: 用户取消任务
+      operationId: cancelUserTask
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "200":
+          description: 取消成功，冻结算力释放
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskStatusApiResponse"
+
+  /api/v1/tasks/{taskId}/regenerate:
+    post:
+      tags: [用户任务]
+      summary: 基于历史任务重新生成
+      operationId: regenerateTask
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegenerateTaskRequest"
+      responses:
+        "200":
+          description: 新任务创建成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskStatusApiResponse"
+
+  /api/v1/credits/account:
+    get:
+      tags: [算力账户]
+      summary: 获取当前用户算力账户
+      operationId: getCreditAccount
       security:
         - bearerAuth: []
       responses:
         "200":
-          description: 后台工具列表，包含草稿、已上线、已下架工具
+          description: 当前用户算力账户
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditAccountApiResponse"
+
+  /api/v1/credits/logs:
+    get:
+      tags: [算力账户]
+      summary: 获取当前用户算力流水
+      operationId: listCreditLogs
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/LogType"
+        - $ref: "#/components/parameters/PageNo"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: 算力流水分页列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditLogPageApiResponse"
+
+  /api/admin/v1/tools:
+    get:
+      tags: [后台工具管理]
+      summary: 后台查询工具列表
+      operationId: listAdminTools
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/Keyword"
+        - $ref: "#/components/parameters/CategoryId"
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [DRAFT, ONLINE, OFFLINE]
+        - $ref: "#/components/parameters/PageNo"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: 后台工具分页列表
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ToolPageApiResponse"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
     post:
-      tags:
-        - 后台工具管理
-      summary: 后台新增草稿工具
+      tags: [后台工具管理]
+      summary: 新增工具草稿
       operationId: createAdminTool
       security:
         - bearerAuth: []
@@ -422,55 +442,44 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/UpsertToolRequest"
-            example:
-              toolCode: xiaohongshu_copywriting
-              toolName: 小红书文案生成
-              categoryId: 1
-              description: 根据产品信息生成小红书文案
-              coverUrl: ""
-              estimatedCreditCost: 10
       responses:
         "200":
-          description: 草稿工具创建成功
+          description: 工具创建成功
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ToolSummaryApiResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
 
   /api/admin/v1/tools/{toolId}:
+    get:
+      tags: [后台工具管理]
+      summary: 获取后台工具详情
+      operationId: getAdminToolDetail
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ToolId"
+      responses:
+        "200":
+          description: 工具详情
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ToolDetailApiResponse"
     put:
-      tags:
-        - 后台工具管理
-      summary: 后台编辑工具基础信息
+      tags: [后台工具管理]
+      summary: 编辑工具基础信息
       operationId: updateAdminTool
       security:
         - bearerAuth: []
       parameters:
-        - name: toolId
-          in: path
-          required: true
-          schema:
-            type: integer
-            format: int64
-          example: 1
+        - $ref: "#/components/parameters/ToolId"
       requestBody:
         required: true
         content:
           application/json:
             schema:
               $ref: "#/components/schemas/UpdateToolRequest"
-            example:
-              toolName: 小红书文案生成 Pro
-              categoryId: 1
-              description: 根据产品信息生成更完整的小红书文案
-              coverUrl: ""
-              estimatedCreditCost: 12
       responses:
         "200":
           description: 工具更新成功
@@ -478,426 +487,392 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ToolSummaryApiResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
 
   /api/admin/v1/tools/{toolId}/fields:
     get:
-      tags:
-        - 后台工具管理
-      summary: 后台获取工具字段配置
+      tags: [后台工具管理]
+      summary: 获取工具字段配置
       operationId: getAdminToolFields
       security:
         - bearerAuth: []
       parameters:
-        - name: toolId
-          in: path
-          required: true
-          schema:
-            type: integer
-            format: int64
-          example: 1
+        - $ref: "#/components/parameters/ToolId"
       responses:
         "200":
-          description: 当前工具 ACTIVE 字段配置
+          description: 当前字段配置
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ToolFieldListApiResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
     put:
-      tags:
-        - 后台工具管理
-      summary: 后台覆盖工具字段配置
+      tags: [后台工具管理]
+      summary: 覆盖工具字段配置
       operationId: updateAdminToolFields
-      description: 覆盖当前 ACTIVE Schema 下的字段项。用户端工具详情和 Worker 执行上下文会读取同一套字段配置。
       security:
         - bearerAuth: []
       parameters:
-        - name: toolId
-          in: path
-          required: true
-          schema:
-            type: integer
-            format: int64
-          example: 1
+        - $ref: "#/components/parameters/ToolId"
       requestBody:
         required: true
         content:
           application/json:
             schema:
               $ref: "#/components/schemas/UpdateToolFieldsRequest"
-            example:
-              fields:
-                - fieldKey: brandName
-                  fieldName: 品牌名称
-                  fieldType: text
-                  placeholder: 请输入品牌名称
-                  required: true
-                  sortOrder: 1
-                - fieldKey: tone
-                  fieldName: 语气
-                  fieldType: select
-                  placeholder: 请选择语气
-                  options:
-                    - label: 亲和
-                      value: friendly
-                    - label: 专业
-                      value: professional
-                  required: false
-                  sortOrder: 2
       responses:
         "200":
-          description: 字段配置已更新
+          description: 字段配置更新成功
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ToolFieldListApiResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
 
   /api/admin/v1/tools/{toolId}/publish:
     post:
-      tags:
-        - 后台工具管理
-      summary: 后台发布工具
+      tags: [后台工具管理]
+      summary: 发布工具
       operationId: publishAdminTool
       security:
         - bearerAuth: []
       parameters:
-        - name: toolId
-          in: path
-          required: true
-          schema:
-            type: integer
-            format: int64
-          example: 1
+        - $ref: "#/components/parameters/ToolId"
       responses:
         "200":
-          description: 工具状态已变更为 ONLINE
+          description: 工具状态变为 ONLINE
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ToolSummaryApiResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
 
   /api/admin/v1/tools/{toolId}/offline:
     post:
-      tags:
-        - 后台工具管理
-      summary: 后台下架工具
+      tags: [后台工具管理]
+      summary: 下架工具
       operationId: offlineAdminTool
       security:
         - bearerAuth: []
       parameters:
-        - name: toolId
-          in: path
-          required: true
-          schema:
-            type: integer
-            format: int64
-          example: 1
+        - $ref: "#/components/parameters/ToolId"
       responses:
         "200":
-          description: 工具状态已变更为 OFFLINE
+          description: 工具状态变为 OFFLINE
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ToolSummaryApiResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
 
   /api/admin/v1/tasks:
     get:
-      tags:
-        - 后台任务管理
+      tags: [后台任务管理]
       summary: 后台查询任务列表
       operationId: listAdminTasks
       security:
         - bearerAuth: []
       parameters:
-        - name: status
-          in: query
-          required: false
-          schema:
-            type: string
-          example: QUEUED
-        - name: toolCode
-          in: query
-          required: false
-          schema:
-            type: string
-          example: xiaohongshu_copywriting
+        - $ref: "#/components/parameters/TaskStatusQuery"
+        - $ref: "#/components/parameters/ToolCodeQuery"
         - name: userId
           in: query
-          required: false
           schema:
             type: integer
             format: int64
-          example: 2
+        - $ref: "#/components/parameters/PageNo"
+        - $ref: "#/components/parameters/PageSize"
       responses:
         "200":
-          description: 后台任务列表，返回字段包含 userId，便于后台定位用户任务
+          description: 后台任务分页列表
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/TaskPageApiResponse"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
 
   /api/admin/v1/tasks/{taskId}:
     get:
-      tags:
-        - 后台任务管理
+      tags: [后台任务管理]
       summary: 后台查询任务详情
       operationId: getAdminTaskDetail
       security:
         - bearerAuth: []
       parameters:
-        - name: taskId
-          in: path
-          required: true
-          schema:
-            type: integer
-            format: int64
-          example: 1
+        - $ref: "#/components/parameters/TaskId"
       responses:
         "200":
-          description: 后台任务详情
+          description: 任务详情
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/TaskDetailApiResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
 
   /api/admin/v1/tasks/{taskId}/retry:
     post:
-      tags:
-        - 后台任务管理
+      tags: [后台任务管理]
       summary: 后台重试任务
       operationId: retryAdminTask
-      description: 将任务重新置为 QUEUED，进度归零，清空错误信息。V1 用于人工处理失败任务。
       security:
         - bearerAuth: []
       parameters:
-        - name: taskId
-          in: path
-          required: true
-          schema:
-            type: integer
-            format: int64
-          example: 1
+        - $ref: "#/components/parameters/TaskId"
       responses:
         "200":
-          description: 任务已重新排队
+          description: 任务重新进入 QUEUED
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/TaskStatusApiResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
 
   /api/admin/v1/tasks/{taskId}/cancel:
     post:
-      tags:
-        - 后台任务管理
+      tags: [后台任务管理]
       summary: 后台取消任务
       operationId: cancelAdminTask
       security:
         - bearerAuth: []
       parameters:
-        - name: taskId
-          in: path
-          required: true
-          schema:
-            type: integer
-            format: int64
-          example: 1
+        - $ref: "#/components/parameters/TaskId"
       responses:
         "200":
-          description: 任务状态已变更为 CANCELLED
+          description: 任务变为 CANCELLED
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/TaskStatusApiResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
+
+  /api/admin/v1/users:
+    get:
+      tags: [后台用户管理]
+      summary: 后台查询用户列表
+      operationId: listAdminUsers
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/Keyword"
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [ACTIVE, DISABLED]
+        - name: userType
+          in: query
+          schema:
+            type: string
+            enum: [USER, ADMIN]
+        - $ref: "#/components/parameters/PageNo"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: 用户分页列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserPageApiResponse"
+
+  /api/admin/v1/users/{userId}:
+    get:
+      tags: [后台用户管理]
+      summary: 后台查询用户详情
+      operationId: getAdminUserDetail
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      responses:
+        "200":
+          description: 用户详情
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserApiResponse"
+
+  /api/admin/v1/users/{userId}/status:
+    patch:
+      tags: [后台用户管理]
+      summary: 启用或禁用用户
+      operationId: updateAdminUserStatus
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateUserStatusRequest"
+      responses:
+        "200":
+          description: 用户状态更新成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserApiResponse"
+
+  /api/admin/v1/users/{userId}/credits/account:
+    get:
+      tags: [后台用户管理]
+      summary: 查询指定用户算力账户
+      operationId: getAdminUserCreditAccount
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      responses:
+        "200":
+          description: 算力账户
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditAccountApiResponse"
+
+  /api/admin/v1/users/{userId}/credits/logs:
+    get:
+      tags: [后台用户管理]
+      summary: 查询指定用户算力流水
+      operationId: listAdminUserCreditLogs
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+        - $ref: "#/components/parameters/LogType"
+        - $ref: "#/components/parameters/PageNo"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: 算力流水
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditLogPageApiResponse"
+
+  /api/admin/v1/users/{userId}/credits/manual-add:
+    post:
+      tags: [后台用户管理]
+      summary: 后台手动增加算力
+      operationId: manualAddCredit
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ManualCreditRequest"
+      responses:
+        "200":
+          description: 增加后的算力账户
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditAccountApiResponse"
+
+  /api/admin/v1/users/{userId}/credits/manual-deduct:
+    post:
+      tags: [后台用户管理]
+      summary: 后台手动扣减算力
+      operationId: manualDeductCredit
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ManualCreditRequest"
+      responses:
+        "200":
+          description: 扣减后的算力账户
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditAccountApiResponse"
 
   /api/internal/v1/tasks/{taskId}/execution-context:
     get:
-      tags:
-        - Worker内部接口
+      tags: [Worker 内部接口]
       summary: Worker 获取任务执行上下文
       operationId: getTaskExecutionContext
       security:
         - internalApiToken: []
       parameters:
-        - name: taskId
-          in: path
-          required: true
-          schema:
-            type: integer
-            format: int64
-          example: 1
+        - $ref: "#/components/parameters/TaskId"
       responses:
         "200":
-          description: 任务执行上下文，包含用户参数和当前生效字段配置
+          description: 执行上下文
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ExecutionContextApiResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
 
   /api/internal/v1/tasks/{taskId}/processing:
     post:
-      tags:
-        - Worker内部接口
-      summary: Worker 标记任务处理中
+      tags: [Worker 内部接口]
+      summary: Worker 回写处理中进度
       operationId: markTaskProcessing
       security:
         - internalApiToken: []
       parameters:
-        - name: taskId
-          in: path
-          required: true
-          schema:
-            type: integer
-            format: int64
-          example: 1
+        - $ref: "#/components/parameters/TaskId"
       requestBody:
         required: true
         content:
           application/json:
             schema:
               $ref: "#/components/schemas/WorkerProcessingRequest"
-            example:
-              progress: 35
-              progressMessage: AI 正在生成内容
       responses:
         "200":
-          description: 任务状态已更新
+          description: 任务状态
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/TaskStatusApiResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
 
   /api/internal/v1/tasks/{taskId}/success:
     post:
-      tags:
-        - Worker内部接口
+      tags: [Worker 内部接口]
       summary: Worker 回写成功结果
       operationId: markTaskSuccess
       security:
         - internalApiToken: []
       parameters:
-        - name: taskId
-          in: path
-          required: true
-          schema:
-            type: integer
-            format: int64
-          example: 1
+        - $ref: "#/components/parameters/TaskId"
       requestBody:
         required: true
         content:
           application/json:
             schema:
               $ref: "#/components/schemas/WorkerSuccessRequest"
-            example:
-              resourceType: MARKDOWN
-              contentText: "# 生成结果"
       responses:
         "200":
-          description: 任务状态 changed to SUCCESS
+          description: 任务成功，冻结算力转为扣除
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/TaskStatusApiResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
 
   /api/internal/v1/tasks/{taskId}/failed:
     post:
-      tags:
-        - Worker内部接口
-      summary: Worker 回写失败状态
+      tags: [Worker 内部接口]
+      summary: Worker 回写失败结果
       operationId: markTaskFailed
       security:
         - internalApiToken: []
       parameters:
-        - name: taskId
-          in: path
-          required: true
-          schema:
-            type: integer
-            format: int64
-          example: 1
+        - $ref: "#/components/parameters/TaskId"
       requestBody:
         required: true
         content:
           application/json:
             schema:
               $ref: "#/components/schemas/WorkerFailedRequest"
-            example:
-              errorCode: MODEL_CALL_FAILED
-              errorMessage: 模型调用超时
       responses:
         "200":
-          description: 任务状态 changed to FAILED
+          description: 任务失败，冻结算力释放
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/TaskStatusApiResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
 
 components:
   securitySchemes:
@@ -909,7 +884,92 @@ components:
       type: apiKey
       in: header
       name: X-Internal-Token
-      description: Worker 内部接口令牌，本地默认值为 local-internal-token，部署时使用 INTERNAL_API_TOKEN 环境变量覆盖。
+      description: Worker 内部接口令牌，本地默认 local-internal-token。
+
+  parameters:
+    Keyword:
+      name: keyword
+      in: query
+      required: false
+      schema:
+        type: string
+    RequiredKeyword:
+      name: keyword
+      in: query
+      required: true
+      schema:
+        type: string
+    PageNo:
+      name: pageNo
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    PageSize:
+      name: pageSize
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    CategoryId:
+      name: categoryId
+      in: query
+      required: false
+      schema:
+        type: integer
+        format: int64
+    ToolId:
+      name: toolId
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+    ToolCode:
+      name: toolCode
+      in: path
+      required: true
+      schema:
+        type: string
+    ToolCodeQuery:
+      name: toolCode
+      in: query
+      required: false
+      schema:
+        type: string
+    TaskId:
+      name: taskId
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+    UserId:
+      name: userId
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+    TaskStatusQuery:
+      name: status
+      in: query
+      required: false
+      schema:
+        type: string
+        enum: [CREATED, QUEUED, PROCESSING, RETRYING, SUCCESS, FAILED, TIMEOUT, CANCELLED]
+    LogType:
+      name: logType
+      in: query
+      required: false
+      schema:
+        type: string
+        enum: [FREEZE, DEDUCT, RELEASE, MANUAL_ADD, MANUAL_DEDUCT]
 
   responses:
     BadRequest:
@@ -918,204 +978,25 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/EmptyApiResponse"
-          example:
-            code: PARAM_ERROR
-            message: 参数错误
-            data: null
-            requestId: null
     Unauthorized:
-      description: 未登录或 Token 无效
+      description: 未登录或令牌无效
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/EmptyApiResponse"
-          example:
-            code: UNAUTHORIZED
-            message: 未登录或 Token 失效
-            data: null
-            requestId: null
     Forbidden:
       description: 权限不足
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/EmptyApiResponse"
-          example:
-            code: ADMIN_FORBIDDEN
-            message: 管理员无权限
-            data: null
-            requestId: null
 
   schemas:
-    RegisterRequest:
-      type: object
-      required:
-        - username
-        - password
-      properties:
-        username:
-          type: string
-          description: 唯一用户名。
-          example: test001
-        password:
-          type: string
-          minLength: 6
-          maxLength: 64
-          example: "123456"
-        nickname:
-          type: string
-          nullable: true
-          description: 可选昵称，不传或为空时默认使用用户名。
-          example: 测试用户
-
-    LoginRequest:
-      type: object
-      required:
-        - account
-        - password
-      properties:
-        account:
-          type: string
-          description: 用户名。
-          example: user1
-        password:
-          type: string
-          example: "123456"
-
-    UpsertToolRequest:
-      type: object
-      required:
-        - toolCode
-        - toolName
-        - categoryId
-        - estimatedCreditCost
-      properties:
-        toolCode:
-          type: string
-          description: 工具唯一编码，新增工具时必填。
-          example: xiaohongshu_copywriting
-        toolName:
-          type: string
-          example: 小红书文案生成
-        categoryId:
-          type: integer
-          format: int64
-          example: 1
-        description:
-          type: string
-          nullable: true
-          example: 根据产品信息生成小红书文案
-        coverUrl:
-          type: string
-          nullable: true
-          example: ""
-        estimatedCreditCost:
-          type: integer
-          minimum: 0
-          example: 10
-
-    UpdateToolRequest:
-      type: object
-      required:
-        - toolName
-        - categoryId
-        - estimatedCreditCost
-      properties:
-        toolCode:
-          type: string
-          nullable: true
-          description: 当前编辑接口会忽略该字段。
-        toolName:
-          type: string
-          example: 小红书文案生成 Pro
-        categoryId:
-          type: integer
-          format: int64
-          example: 1
-        description:
-          type: string
-          nullable: true
-          example: 根据产品信息生成更完整的小红书文案
-        coverUrl:
-          type: string
-          nullable: true
-          example: ""
-        estimatedCreditCost:
-          type: integer
-          minimum: 0
-          example: 12
-
-    UpdateToolFieldsRequest:
-      type: object
-      required:
-        - fields
-      properties:
-        fields:
-          type: array
-          minItems: 1
-          items:
-            $ref: "#/components/schemas/ToolFieldInput"
-
-    ToolFieldInput:
-      type: object
-      required:
-        - fieldKey
-        - fieldName
-        - fieldType
-      properties:
-        fieldKey:
-          type: string
-          example: brandName
-        fieldName:
-          type: string
-          example: 品牌名称
-        fieldType:
-          type: string
-          enum:
-            - text
-            - textarea
-            - select
-          example: text
-        placeholder:
-          type: string
-          nullable: true
-          example: 请输入品牌名称
-        options:
-          nullable: true
-          oneOf:
-            - type: array
-              items:
-                $ref: "#/components/schemas/ToolFieldOption"
-            - type: object
-        required:
-          type: boolean
-          example: true
-        sortOrder:
-          type: integer
-          example: 1
-
     ApiResponseBase:
       type: object
-      required:
-        - code
-        - message
       properties:
         code:
           type: string
-          enum:
-            - SUCCESS
-            - PARAM_ERROR
-            - UNAUTHORIZED
-            - FORBIDDEN
-            - ADMIN_UNAUTHORIZED
-            - ADMIN_FORBIDDEN
-            - TOOL_NOT_FOUND
-            - TOOL_OFFLINE
-            - CREDIT_NOT_ENOUGH
-            - TASK_NOT_FOUND
-            - TASK_STATUS_INVALID
-            - MODEL_CALL_FAILED
-            - SYSTEM_ERROR
           example: SUCCESS
         message:
           type: string
@@ -1123,7 +1004,6 @@ components:
         requestId:
           type: string
           nullable: true
-          example: null
 
     EmptyApiResponse:
       allOf:
@@ -1132,7 +1012,6 @@ components:
           properties:
             data:
               nullable: true
-              example: null
 
     StringApiResponse:
       allOf:
@@ -1150,19 +1029,6 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/HealthStatus"
-
-    HealthStatus:
-      type: object
-      properties:
-        service:
-          type: string
-          example: backend
-        mysql:
-          type: string
-          example: ok
-        redis:
-          type: string
-          example: ok
 
     LoginApiResponse:
       allOf:
@@ -1196,7 +1062,7 @@ components:
         - type: object
           properties:
             data:
-              $ref: "#/components/schemas/ToolPage"
+              $ref: "#/components/schemas/PageToolSummary"
 
     ToolSummaryApiResponse:
       allOf:
@@ -1232,6 +1098,14 @@ components:
             data:
               $ref: "#/components/schemas/CreditAccount"
 
+    CreditLogPageApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/PageCreditLog"
+
     TaskStatusApiResponse:
       allOf:
         - $ref: "#/components/schemas/ApiResponseBase"
@@ -1254,7 +1128,23 @@ components:
         - type: object
           properties:
             data:
-              $ref: "#/components/schemas/TaskPage"
+              $ref: "#/components/schemas/PageTaskDetail"
+
+    AdminUserApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/AdminUser"
+
+    AdminUserPageApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/PageAdminUser"
 
     ExecutionContextApiResponse:
       allOf:
@@ -1264,13 +1154,48 @@ components:
             data:
               $ref: "#/components/schemas/ExecutionContext"
 
+    HealthStatus:
+      type: object
+      properties:
+        service:
+          type: string
+        mysql:
+          type: string
+        redis:
+          type: string
+
+    RegisterRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          example: test001
+        password:
+          type: string
+          minLength: 6
+          maxLength: 64
+          example: "123456"
+        nickname:
+          type: string
+          nullable: true
+
+    LoginRequest:
+      type: object
+      required: [account, password]
+      properties:
+        account:
+          type: string
+          example: user1
+        password:
+          type: string
+          example: "123456"
+
     LoginResponse:
       type: object
       properties:
         accessToken:
           type: string
-          description: JWT 访问令牌。
-          example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
         user:
           $ref: "#/components/schemas/UserProfile"
 
@@ -1280,19 +1205,133 @@ components:
         id:
           type: integer
           format: int64
-          example: 1
         username:
           type: string
-          example: user1
         nickname:
           type: string
-          example: 用户一
         userType:
           type: string
-          enum:
-            - USER
-            - ADMIN
-          example: USER
+          enum: [USER, ADMIN]
+
+    AdminUser:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        username:
+          type: string
+        phone:
+          type: string
+          nullable: true
+        email:
+          type: string
+          nullable: true
+        nickname:
+          type: string
+        userType:
+          type: string
+          enum: [USER, ADMIN]
+        status:
+          type: string
+          enum: [ACTIVE, DISABLED]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        creditAccount:
+          $ref: "#/components/schemas/CreditAccount"
+
+    UpdateUserStatusRequest:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ACTIVE, DISABLED]
+        reason:
+          type: string
+          nullable: true
+
+    UpsertToolRequest:
+      type: object
+      required: [toolCode, toolName, categoryId, estimatedCreditCost]
+      properties:
+        toolCode:
+          type: string
+        toolName:
+          type: string
+        categoryId:
+          type: integer
+          format: int64
+        description:
+          type: string
+          nullable: true
+        coverUrl:
+          type: string
+          nullable: true
+        estimatedCreditCost:
+          type: integer
+          minimum: 0
+
+    UpdateToolRequest:
+      type: object
+      required: [toolName, categoryId, estimatedCreditCost]
+      properties:
+        toolCode:
+          type: string
+          nullable: true
+          description: 更新接口会忽略该字段。
+        toolName:
+          type: string
+        categoryId:
+          type: integer
+          format: int64
+        description:
+          type: string
+          nullable: true
+        coverUrl:
+          type: string
+          nullable: true
+        estimatedCreditCost:
+          type: integer
+          minimum: 0
+
+    UpdateToolFieldsRequest:
+      type: object
+      required: [fields]
+      properties:
+        fields:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/ToolFieldInput"
+
+    ToolFieldInput:
+      type: object
+      required: [fieldKey, fieldName, fieldType]
+      properties:
+        fieldKey:
+          type: string
+        fieldName:
+          type: string
+        fieldType:
+          type: string
+          enum: [text, textarea, select]
+        placeholder:
+          type: string
+          nullable: true
+        options:
+          type: array
+          nullable: true
+          items:
+            $ref: "#/components/schemas/ToolFieldOption"
+        required:
+          type: boolean
+        sortOrder:
+          type: integer
 
     ToolCategory:
       type: object
@@ -1300,28 +1339,12 @@ components:
         id:
           type: integer
           format: int64
-          example: 1
         categoryCode:
           type: string
-          example: copywriting
         categoryName:
           type: string
-          example: 文案生成
         sortOrder:
           type: integer
-          example: 1
-
-    ToolPage:
-      type: object
-      properties:
-        list:
-          type: array
-          items:
-            $ref: "#/components/schemas/ToolSummary"
-        total:
-          type: integer
-          format: int64
-          example: 1
 
     ToolSummary:
       type: object
@@ -1329,38 +1352,26 @@ components:
         id:
           type: integer
           format: int64
-          example: 1
         toolCode:
           type: string
-          example: xiaohongshu_copywriting
         toolName:
           type: string
-          example: 小红书文案生成
         categoryId:
           type: integer
           format: int64
-          example: 1
         categoryName:
           type: string
-          example: 文案生成
         description:
           type: string
           nullable: true
-          example: 根据产品信息生成小红书文案
         coverUrl:
           type: string
           nullable: true
-          example: ""
         status:
           type: string
-          enum:
-            - DRAFT
-            - ONLINE
-            - OFFLINE
-          example: ONLINE
+          enum: [DRAFT, ONLINE, OFFLINE]
         estimatedCreditCost:
           type: integer
-          example: 10
 
     ToolDetail:
       allOf:
@@ -1377,92 +1388,55 @@ components:
       properties:
         fieldKey:
           type: string
-          example: productName
         fieldName:
           type: string
-          example: 产品名称
         fieldType:
           type: string
-          enum:
-            - text
-            - textarea
-            - select
-          example: text
+          enum: [text, textarea, select]
         placeholder:
           type: string
           nullable: true
-          example: 请输入产品名称
         options:
+          type: array
           nullable: true
-          oneOf:
-            - type: array
-              items:
-                $ref: "#/components/schemas/ToolFieldOption"
-            - type: object
+          items:
+            $ref: "#/components/schemas/ToolFieldOption"
         required:
           type: boolean
-          example: true
         sortOrder:
           type: integer
-          example: 1
 
     ToolFieldOption:
       type: object
       properties:
         label:
           type: string
-          example: 种草
         value:
           type: string
-          example: 种草
-
-    CreditAccount:
-      type: object
-      properties:
-        accountId:
-          type: integer
-          format: int64
-          example: 1
-        userId:
-          type: integer
-          format: int64
-          example: 2
-        balance:
-          type: integer
-          example: 100
-        frozen:
-          type: integer
-          example: 0
-        totalGranted:
-          type: integer
-          example: 100
-        totalConsumed:
-          type: integer
-          example: 0
-        status:
-          type: string
-          example: ACTIVE
 
     CreateTaskRequest:
       type: object
-      required:
-        - toolCode
-        - params
+      required: [toolCode, params]
       properties:
         toolCode:
           type: string
-          example: xiaohongshu_copywriting
         params:
           type: object
           additionalProperties: true
-          example:
-            productName: 测试产品
-            targetCustomer: 年轻用户
-            style: 种草
         clientRequestId:
           type: string
           nullable: true
-          example: uuid-from-frontend
+
+    RegenerateTaskRequest:
+      type: object
+      required: [params]
+      properties:
+        params:
+          type: object
+          additionalProperties: true
+        clientRequestId:
+          type: string
+          nullable: true
 
     TaskStatus:
       type: object
@@ -1470,44 +1444,28 @@ components:
         taskId:
           type: integer
           format: int64
-          example: 1
         taskNo:
           type: string
-          example: T20260508AF040D708A
-        userId:
-          type: integer
-          format: int64
-          example: 2
         status:
           type: string
-          enum:
-            - CREATED
-            - QUEUED
-            - PROCESSING
-            - RETRYING
-            - SUCCESS
-            - FAILED
-            - TIMEOUT
-            - CANCELLED
-          example: QUEUED
+          enum: [CREATED, QUEUED, PROCESSING, RETRYING, SUCCESS, FAILED, TIMEOUT, CANCELLED]
         progress:
           type: integer
-          example: 0
         progressMessage:
           type: string
-          example: 任务已排队
 
     TaskDetail:
       allOf:
         - $ref: "#/components/schemas/TaskStatus"
         - type: object
           properties:
+            userId:
+              type: integer
+              format: int64
             toolCode:
               type: string
-              example: xiaohongshu_copywriting
             toolName:
               type: string
-              example: 小红书文案生成
             params:
               type: object
               additionalProperties: true
@@ -1527,22 +1485,82 @@ components:
       properties:
         resourceType:
           type: string
-          example: MARKDOWN
         contentText:
           type: string
-          example: 生成内容
 
-    TaskPage:
+    CreditAccount:
       type: object
       properties:
-        list:
-          type: array
-          items:
-            $ref: "#/components/schemas/TaskDetail"
-        total:
+        accountId:
           type: integer
           format: int64
-          example: 1
+        userId:
+          type: integer
+          format: int64
+        balance:
+          type: integer
+        frozen:
+          type: integer
+        available:
+          type: integer
+        totalGranted:
+          type: integer
+        totalConsumed:
+          type: integer
+        status:
+          type: string
+          enum: [ACTIVE]
+
+    CreditLog:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        userId:
+          type: integer
+          format: int64
+        taskId:
+          type: integer
+          format: int64
+          nullable: true
+        logType:
+          type: string
+          enum: [FREEZE, DEDUCT, RELEASE, MANUAL_ADD, MANUAL_DEDUCT]
+        amount:
+          type: integer
+        frozenAmount:
+          type: integer
+        balanceBefore:
+          type: integer
+        balanceAfter:
+          type: integer
+        frozenBefore:
+          type: integer
+        frozenAfter:
+          type: integer
+        operatorType:
+          type: string
+        operatorId:
+          type: integer
+          format: int64
+          nullable: true
+        reason:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    ManualCreditRequest:
+      type: object
+      required: [amount]
+      properties:
+        amount:
+          type: integer
+          minimum: 1
+        reason:
+          type: string
+          nullable: true
 
     ExecutionContext:
       type: object
@@ -1550,27 +1568,20 @@ components:
         taskId:
           type: integer
           format: int64
-          example: 1
         taskNo:
           type: string
-          example: T20260508AF040D708A
         userId:
           type: integer
           format: int64
-          example: 2
         toolId:
           type: integer
           format: int64
-          example: 1
         toolCode:
           type: string
-          example: xiaohongshu_copywriting
         toolName:
           type: string
-          example: 小红书文案生成
         status:
           type: string
-          example: QUEUED
         params:
           type: object
           additionalProperties: true
@@ -1586,30 +1597,76 @@ components:
           type: integer
           minimum: 0
           maximum: 99
-          example: 35
         progressMessage:
           type: string
-          example: AI 正在生成内容
 
     WorkerSuccessRequest:
       type: object
-      required:
-        - resourceType
-        - contentText
+      required: [resourceType, contentText]
       properties:
         resourceType:
           type: string
           example: MARKDOWN
         contentText:
           type: string
-          example: "# Generated result"
 
     WorkerFailedRequest:
       type: object
       properties:
         errorCode:
           type: string
-          example: MODEL_CALL_FAILED
         errorMessage:
           type: string
-          example: 模型调用超时
+
+    PageToolSummary:
+      allOf:
+        - $ref: "#/components/schemas/PageBase"
+        - type: object
+          properties:
+            list:
+              type: array
+              items:
+                $ref: "#/components/schemas/ToolSummary"
+
+    PageTaskDetail:
+      allOf:
+        - $ref: "#/components/schemas/PageBase"
+        - type: object
+          properties:
+            list:
+              type: array
+              items:
+                $ref: "#/components/schemas/TaskDetail"
+
+    PageCreditLog:
+      allOf:
+        - $ref: "#/components/schemas/PageBase"
+        - type: object
+          properties:
+            list:
+              type: array
+              items:
+                $ref: "#/components/schemas/CreditLog"
+
+    PageAdminUser:
+      allOf:
+        - $ref: "#/components/schemas/PageBase"
+        - type: object
+          properties:
+            list:
+              type: array
+              items:
+                $ref: "#/components/schemas/AdminUser"
+
+    PageBase:
+      type: object
+      properties:
+        total:
+          type: integer
+          format: int64
+        pageNo:
+          type: integer
+        pageSize:
+          type: integer
+        hasNext:
+          type: boolean
