@@ -1,9 +1,16 @@
 package com.aiminilab.aitoolmarket.user.entity;
 
+import com.baomidou.mybatisplus.annotation.TableField;
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableLogic;
+import com.baomidou.mybatisplus.annotation.TableName;
+
 import java.time.LocalDateTime;
 
+@TableName("users")
 public class User {
 
+    @TableId
     private Long id;
     private String username;
     private String passwordHash;
@@ -14,6 +21,8 @@ public class User {
     private String status;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
+    @TableField("is_deleted")
+    @TableLogic(value = "0", delval = "1")
     private Boolean deleted;
 
     public Long getId() {

@@ -1,7 +1,12 @@
 package com.aiminilab.aitoolmarket.tool.entity;
 
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableName;
+
+@TableName("tool_categories")
 public class ToolCategory {
 
+    @TableId
     private Long id;
     private String categoryCode;
     private String categoryName;

@@ -2,6 +2,7 @@ package com.aiminilab.aitoolmarket.tool.mapper;
 
 import com.aiminilab.aitoolmarket.common.enums.ToolStatus;
 import com.aiminilab.aitoolmarket.tool.entity.AiTool;
+<<<<<<< HEAD
 import com.aiminilab.aitoolmarket.tool.entity.ToolCategory;
 import com.aiminilab.aitoolmarket.tool.entity.ToolFieldItem;
 import com.aiminilab.aitoolmarket.tool.entity.ToolFieldSchema;
@@ -16,38 +17,90 @@ import org.springframework.stereotype.Repository;
 import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.sql.Timestamp;
+=======
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Update;
+
+>>>>>>> origin/feature/backend-core
 import java.util.List;
 import java.util.Optional;
 
-@Repository
-public class ToolMapper {
+public interface ToolMapper extends BaseMapper<AiTool> {
 
-    private final JdbcTemplate jdbcTemplate;
+    @Select("""
+            <script>
+            SELECT t.*, c.category_name
+            FROM ai_tools t
+            JOIN tool_categories c ON c.id = t.category_id
+            WHERE t.is_deleted = 0
+            <if test="onlineOnly">
+              AND t.status = 'ONLINE'
+            </if>
+            <if test="!onlineOnly and status != null and status.trim() != ''">
+              AND t.status = #{status}
+            </if>
+            <if test="categoryId != null">
+              AND t.category_id = #{categoryId}
+            </if>
+            <if test="keyword != null and keyword.trim() != ''">
+              AND (
+                LOWER(t.tool_code) LIKE CONCAT('%', LOWER(#{keyword}), '%')
+                OR LOWER(t.tool_name) LIKE CONCAT('%', LOWER(#{keyword}), '%')
+                OR LOWER(t.description) LIKE CONCAT('%', LOWER(#{keyword}), '%')
+              )
+            </if>
+            ORDER BY t.id DESC
+            LIMIT #{limit} OFFSET #{offset}
+            </script>
+            """)
+    List<AiTool> findTools(@Param("onlineOnly") boolean onlineOnly,
+                           @Param("keyword") String keyword,
+                           @Param("categoryId") Long categoryId,
+                           @Param("status") String status,
+                           @Param("limit") int limit,
+                           @Param("offset") int offset);
 
-    private final RowMapper<ToolCategory> categoryRowMapper = (rs, rowNum) -> {
-        ToolCategory category = new ToolCategory();
-        category.setId(rs.getLong("id"));
-        category.setCategoryCode(rs.getString("category_code"));
-        category.setCategoryName(rs.getString("category_name"));
-        category.setSortOrder(rs.getInt("sort_order"));
-        category.setStatus(rs.getString("status"));
-        return category;
-    };
+    @Select("""
+            <script>
+            SELECT COUNT(*)
+            FROM ai_tools t
+            JOIN tool_categories c ON c.id = t.category_id
+            WHERE t.is_deleted = 0
+            <if test="onlineOnly">
+              AND t.status = 'ONLINE'
+            </if>
+            <if test="!onlineOnly and status != null and status.trim() != ''">
+              AND t.status = #{status}
+            </if>
+            <if test="categoryId != null">
+              AND t.category_id = #{categoryId}
+            </if>
+            <if test="keyword != null and keyword.trim() != ''">
+              AND (
+                LOWER(t.tool_code) LIKE CONCAT('%', LOWER(#{keyword}), '%')
+                OR LOWER(t.tool_name) LIKE CONCAT('%', LOWER(#{keyword}), '%')
+                OR LOWER(t.description) LIKE CONCAT('%', LOWER(#{keyword}), '%')
+              )
+            </if>
+            </script>
+            """)
+    long countTools(@Param("onlineOnly") boolean onlineOnly,
+                    @Param("keyword") String keyword,
+                    @Param("categoryId") Long categoryId,
+                    @Param("status") String status);
 
-    private final RowMapper<AiTool> toolRowMapper = (rs, rowNum) -> {
-        AiTool tool = new AiTool();
-        tool.setId(rs.getLong("id"));
-        tool.setToolCode(rs.getString("tool_code"));
-        tool.setToolName(rs.getString("tool_name"));
-        tool.setCategoryId(rs.getLong("category_id"));
-        tool.setCategoryName(rs.getString("category_name"));
-        tool.setDescription(rs.getString("description"));
-        tool.setCoverUrl(rs.getString("cover_url"));
-        tool.setStatus(rs.getString("status"));
-        tool.setEstimatedCreditCost(rs.getInt("estimated_credit_cost"));
-        return tool;
-    };
+    @Select("""
+            SELECT t.*, c.category_name
+            FROM ai_tools t
+            JOIN tool_categories c ON c.id = t.category_id
+            WHERE t.id = #{toolId} AND t.is_deleted = 0
+            LIMIT 1
+            """)
+    AiTool selectDetailById(@Param("toolId") Long toolId);
 
+<<<<<<< HEAD
     private final RowMapper<ToolFieldItem> fieldRowMapper = (rs, rowNum) -> {
         ToolFieldItem item = new ToolFieldItem();
         item.setId(rs.getLong("id"));
@@ -102,55 +155,67 @@ public class ToolMapper {
 
     public ToolMapper(JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
+=======
+    default Optional<AiTool> findById(Long toolId) {
+        return Optional.ofNullable(selectDetailById(toolId));
+>>>>>>> origin/feature/backend-core
     }
 
-    public void ensureDefaultCategory() {
-        jdbcTemplate.update("""
-                INSERT INTO tool_categories (category_code, category_name, sort_order, status)
-                VALUES ('copywriting', 'Copywriting', 1, 'ACTIVE')
-                ON DUPLICATE KEY UPDATE category_name = VALUES(category_name), status = VALUES(status)
-                """);
+    @Select("""
+            SELECT t.*, c.category_name
+            FROM ai_tools t
+            JOIN tool_categories c ON c.id = t.category_id
+            WHERE t.tool_code = #{toolCode} AND t.status = 'ONLINE' AND t.is_deleted = 0
+            LIMIT 1
+            """)
+    AiTool selectOnlineByCode(@Param("toolCode") String toolCode);
+
+    default Optional<AiTool> findOnlineByCode(String toolCode) {
+        return Optional.ofNullable(selectOnlineByCode(toolCode));
     }
 
-    public List<ToolCategory> findActiveCategories() {
-        return jdbcTemplate.query("""
-                SELECT * FROM tool_categories
-                WHERE status = 'ACTIVE'
-                ORDER BY sort_order ASC, id ASC
-                """, categoryRowMapper);
+    @Select("""
+            SELECT COUNT(*)
+            FROM ai_tools
+            WHERE tool_code = #{toolCode} AND is_deleted = 0
+            """)
+    long countByCode(@Param("toolCode") String toolCode);
+
+    default boolean existsByCode(String toolCode) {
+        return countByCode(toolCode) > 0;
     }
 
-    public List<AiTool> findTools(boolean onlineOnly) {
-        String statusCondition = onlineOnly ? "AND t.status = 'ONLINE'" : "";
-        return jdbcTemplate.query("""
-                SELECT t.*, c.category_name
-                FROM ai_tools t
-                JOIN tool_categories c ON c.id = t.category_id
-                WHERE t.is_deleted = 0 %s
-                ORDER BY t.id DESC
-                """.formatted(statusCondition), toolRowMapper);
+    default Long insertTool(AiTool tool, Long operatorId) {
+        tool.setStatus(ToolStatus.DRAFT.name());
+        tool.setCreatedBy(operatorId);
+        tool.setUpdatedBy(operatorId);
+        tool.setDeleted(false);
+        insert(tool);
+        return tool.getId();
     }
 
-    public Optional<AiTool> findById(Long toolId) {
-        List<AiTool> tools = jdbcTemplate.query("""
-                SELECT t.*, c.category_name
-                FROM ai_tools t
-                JOIN tool_categories c ON c.id = t.category_id
-                WHERE t.id = ? AND t.is_deleted = 0
-                """, toolRowMapper, toolId);
-        return tools.stream().findFirst();
-    }
+    @Update("""
+            UPDATE ai_tools
+            SET tool_name = #{tool.toolName}, category_id = #{tool.categoryId},
+                description = #{tool.description}, cover_url = #{tool.coverUrl},
+                estimated_credit_cost = #{tool.estimatedCreditCost},
+                updated_by = #{operatorId}, updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{toolId} AND is_deleted = 0
+            """)
+    void updateTool(@Param("toolId") Long toolId,
+                    @Param("tool") AiTool tool,
+                    @Param("operatorId") Long operatorId);
 
-    public Optional<AiTool> findOnlineByCode(String toolCode) {
-        List<AiTool> tools = jdbcTemplate.query("""
-                SELECT t.*, c.category_name
-                FROM ai_tools t
-                JOIN tool_categories c ON c.id = t.category_id
-                WHERE t.tool_code = ? AND t.status = 'ONLINE' AND t.is_deleted = 0
-                """, toolRowMapper, toolCode);
-        return tools.stream().findFirst();
-    }
+    @Update("""
+            UPDATE ai_tools
+            SET status = #{status}, updated_by = #{operatorId}, updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{toolId} AND is_deleted = 0
+            """)
+    void updateToolStatusValue(@Param("toolId") Long toolId,
+                               @Param("status") String status,
+                               @Param("operatorId") Long operatorId);
 
+<<<<<<< HEAD
     public Long insertTool(AiTool tool, Long operatorId) {
         KeyHolder keyHolder = new GeneratedKeyHolder();
         jdbcTemplate.update(connection -> {
@@ -483,5 +548,9 @@ public class ToolMapper {
             throw new IllegalStateException("Generated id is missing");
         }
         return key.longValue();
+=======
+    default void updateToolStatus(Long toolId, ToolStatus status, Long operatorId) {
+        updateToolStatusValue(toolId, status.name(), operatorId);
+>>>>>>> origin/feature/backend-core
     }
 }

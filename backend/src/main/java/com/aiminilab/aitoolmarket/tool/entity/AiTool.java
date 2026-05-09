@@ -1,16 +1,29 @@
 package com.aiminilab.aitoolmarket.tool.entity;
 
+import com.baomidou.mybatisplus.annotation.TableField;
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableLogic;
+import com.baomidou.mybatisplus.annotation.TableName;
+
+@TableName("ai_tools")
 public class AiTool {
 
+    @TableId
     private Long id;
     private String toolCode;
     private String toolName;
     private Long categoryId;
+    @TableField(exist = false)
     private String categoryName;
     private String description;
     private String coverUrl;
     private String status;
     private Integer estimatedCreditCost;
+    private Long createdBy;
+    private Long updatedBy;
+    @TableField("is_deleted")
+    @TableLogic(value = "0", delval = "1")
+    private Boolean deleted;
 
     public Long getId() {
         return id;
@@ -82,5 +95,29 @@ public class AiTool {
 
     public void setEstimatedCreditCost(Integer estimatedCreditCost) {
         this.estimatedCreditCost = estimatedCreditCost;
+    }
+
+    public Long getCreatedBy() {
+        return createdBy;
+    }
+
+    public void setCreatedBy(Long createdBy) {
+        this.createdBy = createdBy;
+    }
+
+    public Long getUpdatedBy() {
+        return updatedBy;
+    }
+
+    public void setUpdatedBy(Long updatedBy) {
+        this.updatedBy = updatedBy;
+    }
+
+    public Boolean getDeleted() {
+        return deleted;
+    }
+
+    public void setDeleted(Boolean deleted) {
+        this.deleted = deleted;
     }
 }

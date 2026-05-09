@@ -8,6 +8,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
+import static com.aiminilab.aitoolmarket.testsupport.InternalApiTestSupport.signed;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -85,8 +86,8 @@ class AdminToolFieldApiTest {
         String userToken = login("/api/v1/auth/login", "user1");
         Long taskId = createTask(userToken);
 
-        mockMvc.perform(get("/api/internal/v1/tasks/{taskId}/execution-context", taskId)
-                        .header("X-Internal-Token", "local-internal-token"))
+        mockMvc.perform(signed(get("/api/internal/v1/tasks/{taskId}/execution-context", taskId), "GET",
+                        "/api/internal/v1/tasks/%d/execution-context".formatted(taskId), ""))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.fields[0].fieldKey").value("brandName"))
                 .andExpect(jsonPath("$.data.fields[1].fieldKey").value("tone"));

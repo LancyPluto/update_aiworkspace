@@ -1,14 +1,28 @@
 package com.aiminilab.aitoolmarket.tool.entity;
 
+<<<<<<< HEAD
 import java.time.LocalDateTime;
 
 public class ToolFieldSchema {
+=======
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableName;
+
+@TableName("tool_field_schemas")
+public class ToolFieldSchema {
+
+    @TableId
+>>>>>>> origin/feature/backend-core
     private Long id;
     private Long toolId;
     private String schemaVersion;
     private String status;
+<<<<<<< HEAD
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
+=======
+    private Long createdBy;
+>>>>>>> origin/feature/backend-core
 
     public Long getId() {
         return id;
@@ -42,6 +56,7 @@ public class ToolFieldSchema {
         this.status = status;
     }
 
+<<<<<<< HEAD
     public LocalDateTime getCreatedAt() {
         return createdAt;
     }
@@ -56,5 +71,13 @@ public class ToolFieldSchema {
 
     public void setUpdatedAt(LocalDateTime updatedAt) {
         this.updatedAt = updatedAt;
+=======
+    public Long getCreatedBy() {
+        return createdBy;
+    }
+
+    public void setCreatedBy(Long createdBy) {
+        this.createdBy = createdBy;
+>>>>>>> origin/feature/backend-core
     }
 }

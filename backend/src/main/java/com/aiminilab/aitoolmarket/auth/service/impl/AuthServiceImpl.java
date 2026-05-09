@@ -41,7 +41,7 @@ public class AuthServiceImpl implements AuthService {
         user.setNickname(request.nickname() == null || request.nickname().isBlank() ? request.username() : request.nickname());
         user.setUserType(UserType.USER.name());
         user.setStatus(UserStatus.ACTIVE.name());
-        Long userId = userMapper.insert(user);
+        Long userId = userMapper.insertAndReturnId(user);
         user.setId(userId);
         return buildLoginResponse(user);
     }
