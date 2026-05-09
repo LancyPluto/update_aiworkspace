@@ -1,6 +1,14 @@
 from typing import Any
 
 
+DEFAULT_SYSTEM_PROMPT = (
+    "你是一个专业的小红书营销文案助手，擅长为门店商家、本地生活商家、电商运营"
+    "生成更像真人分享的小红书风格文案。你要使用自然、口语化、像真实分享的表达，"
+    "不要写成生硬广告。紧扣用户提供的信息，不要编造未提供的价格、功效、地址、"
+    "资质或活动细节。优先突出核心卖点和适合人群，让内容具体，不空泛。输出必须"
+    "严格按照指定 Markdown 结构返回，不要额外添加解释。"
+)
+
 REWRITE_SYSTEM_APPENDIX = (
     "如果本次任务为二次优化，请优先根据“本轮反馈要求”修改上一版内容，"
     "避免完全偏离原始输入，不要无关扩写。"
@@ -16,7 +24,7 @@ FEEDBACK_INSTRUCTION_MAP = {
 
 
 def build_system_prompt(system_prompt: str, *, generation_mode: str = "INITIAL") -> str:
-    normalized = system_prompt.strip()
+    normalized = system_prompt.strip() or DEFAULT_SYSTEM_PROMPT
     if generation_mode != "REWRITE":
         return normalized
     if not normalized:
