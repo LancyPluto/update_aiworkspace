@@ -30,7 +30,11 @@ public record ToolFieldResponse(
             return null;
         }
         try {
-            return objectMapper.readTree(json);
+            JsonNode node = objectMapper.readTree(json);
+            if (node.isTextual()) {
+                return objectMapper.readTree(node.asText());
+            }
+            return node;
         } catch (Exception exception) {
             return null;
         }

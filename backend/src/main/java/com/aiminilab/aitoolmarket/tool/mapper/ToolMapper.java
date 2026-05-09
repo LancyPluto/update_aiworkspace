@@ -184,13 +184,49 @@ public class ToolMapper {
                 """, fieldRowMapper, toolId);
     }
 
+    public Optional<Long> findActiveSchemaId(Long toolId) {
+        List<Long> schemaIds = jdbcTemplate.query("""
+                SELECT id
+                FROM tool_field_schemas
+                WHERE tool_id = ? AND status = 'ACTIVE'
+                ORDER BY id DESC
+                LIMIT 1
+                """, (rs, rowNum) -> rs.getLong("id"), toolId);
+        return schemaIds.stream().findFirst();
+    }
+
+    public void replaceActiveFields(Long schemaId, List<ToolFieldItem> fields) {
+        jdbcTemplate.update("""
+                UPDATE tool_field_schema_items
+                SET status = 'INACTIVE', updated_at = CURRENT_TIMESTAMP
+                WHERE schema_id = ?
+                """, schemaId);
+        for (ToolFieldItem field : fields) {
+            insertField(
+                    schemaId,
+                    field.getFieldKey(),
+                    field.getFieldName(),
+                    field.getFieldType(),
+                    field.getPlaceholder(),
+                    field.getOptionsJson(),
+                    field.getRequired() != null && field.getRequired(),
+                    field.getSortOrder()
+            );
+        }
+    }
+
     private void insertField(Long schemaId, String fieldKey, String fieldName, String fieldType,
                              String placeholder, String optionsJson, int sortOrder) {
+        insertField(schemaId, fieldKey, fieldName, fieldType, placeholder, optionsJson, true, sortOrder);
+    }
+
+    private void insertField(Long schemaId, String fieldKey, String fieldName, String fieldType,
+                             String placeholder, String optionsJson, boolean required, int sortOrder) {
         jdbcTemplate.update("""
                 INSERT INTO tool_field_schema_items
                   (schema_id, field_key, field_name, field_type, placeholder, options_json, required, sort_order, status)
-                VALUES (?, ?, ?, ?, ?, ?, 1, ?, 'ACTIVE')
-                """, schemaId, fieldKey, fieldName, fieldType, placeholder, optionsJson, sortOrder);
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE')
+                """, schemaId, fieldKey, fieldName, fieldType, placeholder, optionsJson, required ? 1 : 0, sortOrder);
     }
 
     private Long generatedId(KeyHolder keyHolder) {

@@ -485,6 +485,90 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
 
+  /api/admin/v1/tools/{toolId}/fields:
+    get:
+      tags:
+        - 后台工具管理
+      summary: 后台获取工具字段配置
+      operationId: getAdminToolFields
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: toolId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+          example: 1
+      responses:
+        "200":
+          description: 当前工具 ACTIVE 字段配置
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ToolFieldListApiResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    put:
+      tags:
+        - 后台工具管理
+      summary: 后台覆盖工具字段配置
+      operationId: updateAdminToolFields
+      description: 覆盖当前 ACTIVE Schema 下的字段项。用户端工具详情和 Worker 执行上下文会读取同一套字段配置。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: toolId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+          example: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateToolFieldsRequest"
+            example:
+              fields:
+                - fieldKey: brandName
+                  fieldName: 品牌名称
+                  fieldType: text
+                  placeholder: 请输入品牌名称
+                  required: true
+                  sortOrder: 1
+                - fieldKey: tone
+                  fieldName: 语气
+                  fieldType: select
+                  placeholder: 请选择语气
+                  options:
+                    - label: 亲和
+                      value: friendly
+                    - label: 专业
+                      value: professional
+                  required: false
+                  sortOrder: 2
+      responses:
+        "200":
+          description: 字段配置已更新
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ToolFieldListApiResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
   /api/admin/v1/tools/{toolId}/publish:
     post:
       tags:
@@ -961,6 +1045,55 @@ components:
           minimum: 0
           example: 12
 
+    UpdateToolFieldsRequest:
+      type: object
+      required:
+        - fields
+      properties:
+        fields:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/ToolFieldInput"
+
+    ToolFieldInput:
+      type: object
+      required:
+        - fieldKey
+        - fieldName
+        - fieldType
+      properties:
+        fieldKey:
+          type: string
+          example: brandName
+        fieldName:
+          type: string
+          example: 品牌名称
+        fieldType:
+          type: string
+          enum:
+            - text
+            - textarea
+            - select
+          example: text
+        placeholder:
+          type: string
+          nullable: true
+          example: 请输入品牌名称
+        options:
+          nullable: true
+          oneOf:
+            - type: array
+              items:
+                $ref: "#/components/schemas/ToolFieldOption"
+            - type: object
+        required:
+          type: boolean
+          example: true
+        sortOrder:
+          type: integer
+          example: 1
+
     ApiResponseBase:
       type: object
       required:
@@ -1080,6 +1213,16 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/ToolDetail"
+
+    ToolFieldListApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/ToolField"
 
     CreditAccountApiResponse:
       allOf:
