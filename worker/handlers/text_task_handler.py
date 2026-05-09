@@ -8,8 +8,18 @@ from client.model_client import (
     ModelOutputEmptyError,
     ModelTimeoutError,
 )
+from config import settings
 from prompt.renderer import PromptRenderError, render_prompt
 from tools import ToolResultBuildError, build_success_payload
+from tools.moments_copywriting_generator import (
+    build_prompt_payload as build_moments_prompt_payload,
+)
+from tools.product_title_optimizer import (
+    build_prompt_payload as build_product_title_prompt_payload,
+)
+from tools.wechat_longform_generator import (
+    build_prompt_payload as build_wechat_longform_prompt_payload,
+)
 from tools.xiaohongshu_copywriting import build_prompt_payload as build_xiaohongshu_prompt_payload
 
 
@@ -30,7 +40,9 @@ class TextTaskHandler:
         LOGGER.info("start processing task %s", task_id)
 
         try:
-            context = self.backend_client.get_execution_context(task_id)
+            context = self._normalize_execution_context(
+                self.backend_client.get_execution_context(task_id)
+            )
             self.backend_client.mark_processing(task_id)
 
             params = context.get("params") or {}
@@ -94,13 +106,32 @@ class TextTaskHandler:
         generation_mode = str(context.get("generationMode") or "").upper()
         has_rewrite_context = bool(context.get("rewriteContext"))
 
-        if tool_code == "xiaohongshu_copywriting" and (generation_mode == "REWRITE" or has_rewrite_context):
+        if tool_code == "xiaohongshu_copywriting":
             prompt_payload = build_xiaohongshu_prompt_payload(context)
+            return prompt_payload["system_prompt"], prompt_payload["user_prompt"]
+
+        if tool_code == "wechat_longform_generator":
+            prompt_payload = build_wechat_longform_prompt_payload(context)
+            return prompt_payload["system_prompt"], prompt_payload["user_prompt"]
+
+        if tool_code == "moments_copywriting_generator":
+            prompt_payload = build_moments_prompt_payload(context)
+            return prompt_payload["system_prompt"], prompt_payload["user_prompt"]
+
+        if tool_code == "product_title_optimizer":
+            prompt_payload = build_product_title_prompt_payload(context)
             return prompt_payload["system_prompt"], prompt_payload["user_prompt"]
 
         params = context.get("params") or {}
         user_prompt = render_prompt(context["userPromptTemplate"], params)
         return context.get("systemPrompt", ""), user_prompt
+
+    def _normalize_execution_context(self, context: dict[str, Any]) -> dict[str, Any]:
+        normalized = dict(context)
+        normalized.setdefault("outputFormat", "MARKDOWN")
+        normalized.setdefault("modelProviderCode", settings.model_provider)
+        normalized.setdefault("modelName", self.model_client.default_model_name)
+        return normalized
 
     def _mark_failed(self, task_id: int, *, error_code: str, error_message: str) -> dict[str, Any]:
         LOGGER.exception("task %s failed: %s", task_id, error_message)

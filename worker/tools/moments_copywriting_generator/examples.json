@@ -1,0 +1,28 @@
+[
+  {
+    "name": "门店活动宣传",
+    "input": {
+      "topic": "周末肩颈放松活动",
+      "targetAudience": "久坐上班族",
+      "tone": "亲切",
+      "scene": "活动宣传",
+      "sellingPoints": "限时体验价、到店即用、适合上班族放松",
+      "lengthLevel": "短",
+      "cta": "私信预约体验名额",
+      "extraInfo": "活动仅限本周末"
+    }
+  },
+  {
+    "name": "新品上新通知",
+    "input": {
+      "topic": "夏季清爽护理套餐上线",
+      "targetAudience": "老客与附近新客",
+      "tone": "种草",
+      "scene": "新品上线",
+      "sellingPoints": "流程升级、体验更舒适、到店有礼",
+      "lengthLevel": "中",
+      "cta": "留言领取到店福利",
+      "extraInfo": "避免硬广语气"
+    }
+  }
+]
