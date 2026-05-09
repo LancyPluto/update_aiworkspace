@@ -1,58 +1,38 @@
 package com.aiminilab.aitoolmarket.user.mapper;
 
 import com.aiminilab.aitoolmarket.user.entity.User;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.core.RowMapper;
-import org.springframework.jdbc.support.GeneratedKeyHolder;
-import org.springframework.jdbc.support.KeyHolder;
-import org.springframework.stereotype.Repository;
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Update;
 
-import java.sql.PreparedStatement;
-import java.sql.Statement;
 import java.util.List;
 import java.util.Optional;
 
-@Repository
-public class UserMapper {
+public interface UserMapper extends BaseMapper<User> {
 
-    private final JdbcTemplate jdbcTemplate;
-
-    private final RowMapper<User> rowMapper = (rs, rowNum) -> {
-        User user = new User();
-        user.setId(rs.getLong("id"));
-        user.setUsername(rs.getString("username"));
-        user.setPasswordHash(rs.getString("password_hash"));
-        user.setPhone(rs.getString("phone"));
-        user.setEmail(rs.getString("email"));
-        user.setNickname(rs.getString("nickname"));
-        user.setUserType(rs.getString("user_type"));
-        user.setStatus(rs.getString("status"));
-        user.setCreatedAt(rs.getTimestamp("created_at").toLocalDateTime());
-        user.setUpdatedAt(rs.getTimestamp("updated_at").toLocalDateTime());
-        user.setDeleted(rs.getInt("is_deleted") == 1);
-        return user;
-    };
-
-    public UserMapper(JdbcTemplate jdbcTemplate) {
-        this.jdbcTemplate = jdbcTemplate;
+    default Optional<User> findById(Long id) {
+        return Optional.ofNullable(selectById(id));
     }
 
-    public Optional<User> findById(Long id) {
-        List<User> users = jdbcTemplate.query("""
-                SELECT * FROM users
-                WHERE id = ? AND is_deleted = 0
-                """, rowMapper, id);
-        return users.stream().findFirst();
+    @Select("""
+            SELECT *
+            FROM users
+            WHERE username = #{username} AND is_deleted = 0
+            LIMIT 1
+            """)
+    User selectByUsername(@Param("username") String username);
+
+    default Optional<User> findByUsername(String username) {
+        return Optional.ofNullable(selectByUsername(username));
     }
 
-    public Optional<User> findByUsername(String username) {
-        List<User> users = jdbcTemplate.query("""
-                SELECT * FROM users
-                WHERE username = ? AND is_deleted = 0
-                """, rowMapper, username);
-        return users.stream().findFirst();
+    default Long insertAndReturnId(User user) {
+        insert(user);
+        return user.getId();
     }
 
+<<<<<<< HEAD
     public List<User> findAllActive() {
         return jdbcTemplate.query("""
                 SELECT * FROM users
@@ -79,21 +59,66 @@ public class UserMapper {
         }, keyHolder);
         return generatedId(keyHolder);
     }
+=======
+    @Select("""
+            <script>
+            SELECT *
+            FROM users
+            WHERE is_deleted = 0
+            <if test="keyword != null and keyword.trim() != ''">
+              AND (
+                LOWER(username) LIKE CONCAT('%', LOWER(#{keyword}), '%')
+                OR LOWER(nickname) LIKE CONCAT('%', LOWER(#{keyword}), '%')
+                OR phone LIKE CONCAT('%', #{keyword}, '%')
+                OR LOWER(email) LIKE CONCAT('%', LOWER(#{keyword}), '%')
+              )
+            </if>
+            <if test="status != null and status.trim() != ''">
+              AND status = #{status}
+            </if>
+            <if test="userType != null and userType.trim() != ''">
+              AND user_type = #{userType}
+            </if>
+            ORDER BY id DESC
+            LIMIT #{limit} OFFSET #{offset}
+            </script>
+            """)
+    List<User> findForAdmin(@Param("keyword") String keyword,
+                            @Param("status") String status,
+                            @Param("userType") String userType,
+                            @Param("limit") int limit,
+                            @Param("offset") int offset);
+>>>>>>> origin/feature/backend-core
 
-    private Long generatedId(KeyHolder keyHolder) {
-        Number key = null;
-        if (!keyHolder.getKeyList().isEmpty()) {
-            Object value = keyHolder.getKeyList().get(0).values().stream().findFirst().orElse(null);
-            if (value instanceof Number number) {
-                key = number;
-            }
-        }
-        if (key == null) {
-            key = keyHolder.getKey();
-        }
-        if (key == null) {
-            throw new IllegalStateException("Generated id is missing");
-        }
-        return key.longValue();
-    }
+    @Select("""
+            <script>
+            SELECT COUNT(*)
+            FROM users
+            WHERE is_deleted = 0
+            <if test="keyword != null and keyword.trim() != ''">
+              AND (
+                LOWER(username) LIKE CONCAT('%', LOWER(#{keyword}), '%')
+                OR LOWER(nickname) LIKE CONCAT('%', LOWER(#{keyword}), '%')
+                OR phone LIKE CONCAT('%', #{keyword}, '%')
+                OR LOWER(email) LIKE CONCAT('%', LOWER(#{keyword}), '%')
+              )
+            </if>
+            <if test="status != null and status.trim() != ''">
+              AND status = #{status}
+            </if>
+            <if test="userType != null and userType.trim() != ''">
+              AND user_type = #{userType}
+            </if>
+            </script>
+            """)
+    long countForAdmin(@Param("keyword") String keyword,
+                       @Param("status") String status,
+                       @Param("userType") String userType);
+
+    @Update("""
+            UPDATE users
+            SET status = #{status}, updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{userId} AND is_deleted = 0
+            """)
+    void updateStatus(@Param("userId") Long userId, @Param("status") String status);
 }

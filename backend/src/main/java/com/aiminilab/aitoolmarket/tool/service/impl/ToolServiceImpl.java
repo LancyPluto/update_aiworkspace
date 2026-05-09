@@ -21,9 +21,15 @@ import com.aiminilab.aitoolmarket.tool.dto.UpdateToolFieldsRequest;
 import com.aiminilab.aitoolmarket.tool.dto.UpsertToolRequest;
 import com.aiminilab.aitoolmarket.tool.entity.AiTool;
 import com.aiminilab.aitoolmarket.tool.entity.ToolFieldItem;
+<<<<<<< HEAD
 import com.aiminilab.aitoolmarket.tool.entity.ToolFieldSchema;
 import com.aiminilab.aitoolmarket.tool.entity.ToolPrompt;
 import com.aiminilab.aitoolmarket.tool.entity.ToolPromptVersion;
+=======
+import com.aiminilab.aitoolmarket.tool.mapper.ToolCategoryMapper;
+import com.aiminilab.aitoolmarket.tool.mapper.ToolFieldItemMapper;
+import com.aiminilab.aitoolmarket.tool.mapper.ToolFieldSchemaMapper;
+>>>>>>> origin/feature/backend-core
 import com.aiminilab.aitoolmarket.tool.mapper.ToolMapper;
 import com.aiminilab.aitoolmarket.tool.service.ToolService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -39,26 +45,39 @@ public class ToolServiceImpl implements ToolService {
     private static final Set<String> ALLOWED_FIELD_TYPES = Set.of("text", "textarea", "select", "number");
 
     private final ToolMapper toolMapper;
+    private final ToolCategoryMapper toolCategoryMapper;
+    private final ToolFieldSchemaMapper toolFieldSchemaMapper;
+    private final ToolFieldItemMapper toolFieldItemMapper;
     private final ObjectMapper objectMapper;
 
-    public ToolServiceImpl(ToolMapper toolMapper, ObjectMapper objectMapper) {
+    public ToolServiceImpl(ToolMapper toolMapper, ToolCategoryMapper toolCategoryMapper,
+                           ToolFieldSchemaMapper toolFieldSchemaMapper, ToolFieldItemMapper toolFieldItemMapper,
+                           ObjectMapper objectMapper) {
         this.toolMapper = toolMapper;
+        this.toolCategoryMapper = toolCategoryMapper;
+        this.toolFieldSchemaMapper = toolFieldSchemaMapper;
+        this.toolFieldItemMapper = toolFieldItemMapper;
         this.objectMapper = objectMapper;
     }
 
     @Override
     public List<ToolCategoryResponse> categories() {
-        return toolMapper.findActiveCategories().stream()
+        return toolCategoryMapper.findActiveCategories().stream()
                 .map(ToolCategoryResponse::from)
                 .toList();
     }
 
     @Override
-    public PageResponse<ToolSummaryResponse> userTools() {
-        List<ToolSummaryResponse> list = toolMapper.findTools(true).stream()
+    public PageResponse<ToolSummaryResponse> userTools(String keyword, Long categoryId, Integer pageNo, Integer pageSize) {
+        int normalizedPageSize = PageResponse.normalizePageSize(pageSize);
+        int offset = PageResponse.offset(pageNo, pageSize);
+        List<ToolSummaryResponse> list = toolMapper
+                .findTools(true, keyword, categoryId, null, normalizedPageSize, offset)
+                .stream()
                 .map(ToolSummaryResponse::from)
                 .toList();
-        return new PageResponse<>(list, list.size());
+        long total = toolMapper.countTools(true, keyword, categoryId, null);
+        return PageResponse.of(list, total, pageNo, pageSize);
     }
 
     @Override
@@ -70,24 +89,45 @@ public class ToolServiceImpl implements ToolService {
     }
 
     @Override
-    public PageResponse<ToolSummaryResponse> adminTools() {
-        List<ToolSummaryResponse> list = toolMapper.findTools(false).stream()
+    public PageResponse<ToolSummaryResponse> adminTools(String keyword, Long categoryId, String status,
+                                                        Integer pageNo, Integer pageSize) {
+        int normalizedPageSize = PageResponse.normalizePageSize(pageSize);
+        int offset = PageResponse.offset(pageNo, pageSize);
+        List<ToolSummaryResponse> list = toolMapper
+                .findTools(false, keyword, categoryId, status, normalizedPageSize, offset)
+                .stream()
                 .map(ToolSummaryResponse::from)
                 .toList();
-        return new PageResponse<>(list, list.size());
+        long total = toolMapper.countTools(false, keyword, categoryId, status);
+        return PageResponse.of(list, total, pageNo, pageSize);
+    }
+
+    @Override
+    public ToolDetailResponse adminToolDetail(Long toolId) {
+        ToolSummaryResponse summary = findToolSummary(toolId);
+        return ToolDetailResponse.of(summary, fields(toolId));
     }
 
     @Override
     @Transactional
     public ToolSummaryResponse createTool(UpsertToolRequest request, Long operatorId) {
+        if (toolMapper.existsByCode(request.toolCode())) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "工具编码已存在");
+        }
+
         AiTool tool = fromRequest(request);
         Long toolId = toolMapper.insertTool(tool, operatorId);
+<<<<<<< HEAD
         Long schemaId = toolMapper.createActiveDefaultSchema(toolId, operatorId);
         toolMapper.createDefaultFields(schemaId);
         Long promptId = toolMapper.createPrompt(toolId, "default", "默认 Prompt");
         Long versionId = toolMapper.createActivePromptVersion(promptId, "v1",
                 "请根据用户输入参数生成结果。", operatorId);
         toolMapper.setPromptActiveVersion(promptId, versionId);
+=======
+        Long schemaId = toolFieldSchemaMapper.createActiveDefaultSchema(toolId, operatorId);
+        toolFieldItemMapper.createDefaultFields(schemaId);
+>>>>>>> origin/feature/backend-core
         return findToolSummary(toolId);
     }
 
@@ -124,10 +164,14 @@ public class ToolServiceImpl implements ToolService {
     @Transactional
     public List<ToolFieldResponse> updateFields(Long toolId, UpdateToolFieldsRequest request) {
         ensureToolExists(toolId);
+<<<<<<< HEAD
         validateFieldTypes(request.fields());
         Long schemaId = toolMapper.findActiveSchemaId(toolId)
+=======
+        Long schemaId = toolFieldSchemaMapper.findActiveSchemaId(toolId)
+>>>>>>> origin/feature/backend-core
                 .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具字段配置不存在"));
-        toolMapper.replaceActiveFields(schemaId, request.fields().stream()
+        toolFieldItemMapper.replaceActiveFields(schemaId, request.fields().stream()
                 .map(this::toFieldItem)
                 .toList());
         return fields(toolId);
@@ -285,7 +329,7 @@ public class ToolServiceImpl implements ToolService {
     }
 
     private List<ToolFieldResponse> fields(Long toolId) {
-        return toolMapper.findActiveFields(toolId).stream()
+        return toolFieldItemMapper.findActiveFields(toolId).stream()
                 .map(field -> ToolFieldResponse.from(field, objectMapper))
                 .toList();
     }

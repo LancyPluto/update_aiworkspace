@@ -96,9 +96,49 @@ class ToolApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("OFFLINE"));
 
-        mockMvc.perform(get("/api/v1/tools"))
+        mockMvc.perform(get("/api/v1/tools")
+                        .param("keyword", "xiaohongshu_copywriting"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.total").value(0));
+    }
+
+    @Test
+    void userCanFilterAndSearchOnlineToolsAndAdminCanViewToolDetail() throws Exception {
+        String adminToken = loginAdmin();
+        Long writingToolId = createTool(adminToken, "search_copywriting", "Search Copy Tool", 1, "Write product copy", 3);
+        Long hiddenToolId = createTool(adminToken, "hidden_draft_tool", "Hidden Draft Tool", 1, "Draft only", 3);
+        publishTool(adminToken, writingToolId);
+
+        mockMvc.perform(get("/api/v1/tools")
+                        .param("keyword", "copy")
+                        .param("categoryId", "1")
+                        .param("pageNo", "1")
+                        .param("pageSize", "10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(1))
+                .andExpect(jsonPath("$.data.pageNo").value(1))
+                .andExpect(jsonPath("$.data.pageSize").value(10))
+                .andExpect(jsonPath("$.data.hasNext").value(false))
+                .andExpect(jsonPath("$.data.list[0].toolCode").value("search_copywriting"));
+
+        mockMvc.perform(get("/api/v1/tools/search")
+                        .param("keyword", "product"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(1))
+                .andExpect(jsonPath("$.data.list[0].toolCode").value("search_copywriting"));
+
+        mockMvc.perform(get("/api/admin/v1/tools")
+                        .param("status", "DRAFT")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(1))
+                .andExpect(jsonPath("$.data.list[0].id").value(hiddenToolId.intValue()));
+
+        mockMvc.perform(get("/api/admin/v1/tools/{toolId}", writingToolId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.toolCode").value("search_copywriting"))
+                .andExpect(jsonPath("$.data.fields[0].fieldKey").value("productName"));
     }
 
     private String loginAdmin() throws Exception {
@@ -115,5 +155,33 @@ class ToolApiTest {
                 .getResponse()
                 .getContentAsString();
         return response.replaceAll("(?s).*\\\"accessToken\\\"\\s*:\\s*\\\"([^\\\"]+)\\\".*", "$1");
+    }
+
+    private Long createTool(String adminToken, String toolCode, String toolName, long categoryId,
+                            String description, int estimatedCreditCost) throws Exception {
+        String response = mockMvc.perform(post("/api/admin/v1/tools")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "toolCode": "%s",
+                                  "toolName": "%s",
+                                  "categoryId": %d,
+                                  "description": "%s",
+                                  "coverUrl": "",
+                                  "estimatedCreditCost": %d
+                                }
+                                """.formatted(toolCode, toolName, categoryId, description, estimatedCreditCost)))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        return Long.parseLong(response.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
+    }
+
+    private void publishTool(String adminToken, Long toolId) throws Exception {
+        mockMvc.perform(post("/api/admin/v1/tools/{toolId}/publish", toolId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk());
     }
 }

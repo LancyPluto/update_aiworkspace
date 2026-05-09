@@ -33,7 +33,17 @@ class TextTaskHandler:
             context = self.backend_client.get_execution_context(task_id)
             self.backend_client.mark_processing(task_id)
 
+<<<<<<< HEAD
             system_prompt, user_prompt = self._build_model_prompts(context)
+=======
+            params = context.get("params") or {}
+            user_prompt_template = context.get("userPromptTemplate")
+            if user_prompt_template:
+                user_prompt = render_prompt(user_prompt_template, params)
+            else:
+                user_prompt = self._build_default_prompt(params)
+
+>>>>>>> origin/feature/backend-core
             generated_text = self.model_client.generate(
                 user_prompt,
                 system_prompt=system_prompt,
@@ -106,3 +116,10 @@ class TextTaskHandler:
             },
         )
         return {"status": "FAILED", "taskId": task_id, "errorCode": error_code}
+
+    @staticmethod
+    def _build_default_prompt(params: dict[str, Any]) -> str:
+        lines = ["Generate a result from the following user input:"]
+        for key, value in params.items():
+            lines.append(f"- {key}: {value}")
+        return "\n".join(lines)

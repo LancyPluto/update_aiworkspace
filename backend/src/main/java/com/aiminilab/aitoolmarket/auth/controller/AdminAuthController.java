@@ -3,9 +3,11 @@ package com.aiminilab.aitoolmarket.auth.controller;
 import com.aiminilab.aitoolmarket.auth.dto.LoginRequest;
 import com.aiminilab.aitoolmarket.auth.dto.LoginResponse;
 import com.aiminilab.aitoolmarket.auth.security.AuthContext;
+import com.aiminilab.aitoolmarket.auth.security.JwtTokenProvider;
 import com.aiminilab.aitoolmarket.auth.service.AuthService;
 import com.aiminilab.aitoolmarket.common.dto.ApiResponse;
 import com.aiminilab.aitoolmarket.user.dto.UserProfileResponse;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -18,9 +20,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class AdminAuthController {
 
     private final AuthService authService;
+    private final JwtTokenProvider jwtTokenProvider;
 
-    public AdminAuthController(AuthService authService) {
+    public AdminAuthController(AuthService authService, JwtTokenProvider jwtTokenProvider) {
         this.authService = authService;
+        this.jwtTokenProvider = jwtTokenProvider;
     }
 
     @PostMapping("/login")
@@ -34,7 +38,16 @@ public class AdminAuthController {
     }
 
     @PostMapping("/logout")
-    public ApiResponse<Void> logout() {
+    public ApiResponse<Void> logout(HttpServletRequest request) {
+        extractBearerToken(request).ifPresent(jwtTokenProvider::revokeToken);
         return ApiResponse.success(null);
+    }
+
+    private java.util.Optional<String> extractBearerToken(HttpServletRequest request) {
+        String authorization = request.getHeader("Authorization");
+        if (authorization == null || !authorization.startsWith("Bearer ")) {
+            return java.util.Optional.empty();
+        }
+        return java.util.Optional.of(authorization.substring("Bearer ".length()));
     }
 }
