@@ -45,17 +45,8 @@ class TextTaskHandler:
             )
             self.backend_client.mark_processing(task_id)
 
-<<<<<<< HEAD
             system_prompt, user_prompt = self._build_model_prompts(context)
-=======
-            params = context.get("params") or {}
-            user_prompt_template = context.get("userPromptTemplate")
-            if user_prompt_template:
-                user_prompt = render_prompt(user_prompt_template, params)
-            else:
-                user_prompt = self._build_default_prompt(params)
 
->>>>>>> origin/feature/backend-core
             generated_text = self.model_client.generate(
                 user_prompt,
                 system_prompt=system_prompt,
@@ -127,7 +118,11 @@ class TextTaskHandler:
             return prompt_payload["system_prompt"], prompt_payload["user_prompt"]
 
         params = context.get("params") or {}
-        user_prompt = render_prompt(context["userPromptTemplate"], params)
+        user_prompt_template = context.get("userPromptTemplate")
+        if user_prompt_template:
+            user_prompt = render_prompt(user_prompt_template, params)
+        else:
+            user_prompt = self._build_default_prompt(params)
         return context.get("systemPrompt", ""), user_prompt
 
     def _normalize_execution_context(self, context: dict[str, Any]) -> dict[str, Any]:

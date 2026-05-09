@@ -5,11 +5,7 @@ import com.aiminilab.aitoolmarket.common.enums.CreditLogType;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.credit.dto.CreditAccountResponse;
-<<<<<<< HEAD
-import com.aiminilab.aitoolmarket.credit.dto.ManualAddCreditsResponse;
-=======
 import com.aiminilab.aitoolmarket.credit.dto.CreditLogResponse;
->>>>>>> origin/feature/backend-core
 import com.aiminilab.aitoolmarket.credit.entity.CreditAccount;
 import com.aiminilab.aitoolmarket.credit.entity.CreditLog;
 import com.aiminilab.aitoolmarket.credit.mapper.CreditLogMapper;
@@ -18,11 +14,7 @@ import com.aiminilab.aitoolmarket.credit.service.CreditService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-<<<<<<< HEAD
-import java.time.LocalDateTime;
-=======
 import java.util.List;
->>>>>>> origin/feature/backend-core
 
 @Service
 public class CreditServiceImpl implements CreditService {
@@ -210,31 +202,5 @@ public class CreditServiceImpl implements CreditService {
 
     private String normalizeReason(String reason, String fallback) {
         return reason == null || reason.isBlank() ? fallback : reason.trim();
-    }
-
-    @Override
-    @Transactional
-    public ManualAddCreditsResponse manualAdd(Long userId, int amount, String reason, Long operatorId) {
-        if (amount <= 0) {
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "加算力数量必须大于 0");
-        }
-        CreditAccount before = creditMapper.getOrCreateAccount(userId);
-        creditMapper.increaseBalance(before.getId(), amount);
-        creditMapper.insertManualAddLog(before, amount, operatorId, reason);
-        return new ManualAddCreditsResponse(
-                userId,
-                amount,
-                before.getBalance(),
-                before.getBalance() + amount,
-                reason,
-                LocalDateTime.now()
-        );
-    }
-
-    @Override
-    public Integer balance(Long userId) {
-        return creditMapper.findOptionalAccountByUserId(userId)
-                .map(CreditAccount::getBalance)
-                .orElse(0);
     }
 }

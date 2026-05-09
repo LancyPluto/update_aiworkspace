@@ -8,7 +8,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 @Configuration
-@MapperScan("com.aiminilab.aitoolmarket.**.mapper")
+@MapperScan("com.aiminilab.aitoolmarket.*.mapper")
 public class MybatisPlusConfig {
 
     @Bean
