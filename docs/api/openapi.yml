@@ -488,17 +488,42 @@ paths:
               schema:
                 $ref: "#/components/schemas/ToolSummaryApiResponse"
 
-  /api/admin/v1/tools/{toolId}/fields:
+  /api/admin/v1/tools/{toolId}/field-schemas:
     get:
+<<<<<<< HEAD
+      tags:
+        - 后台工具管理
+      summary: 后台获取工具字段 Schema 列表
+      operationId: listAdminToolFieldSchemas
+=======
       tags: [后台工具管理]
       summary: 获取工具字段配置
       operationId: getAdminToolFields
+>>>>>>> origin/feature/backend-core
       security:
         - bearerAuth: []
       parameters:
         - $ref: "#/components/parameters/ToolId"
       responses:
         "200":
+<<<<<<< HEAD
+          description: 工具字段 Schema 列表（含 DRAFT/ACTIVE）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FieldSchemaListApiResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      tags:
+        - 后台工具管理
+      summary: 后台创建字段 Schema 草稿
+      operationId: createAdminToolFieldSchema
+=======
           description: 当前字段配置
           content:
             application/json:
@@ -508,6 +533,7 @@ paths:
       tags: [后台工具管理]
       summary: 覆盖工具字段配置
       operationId: updateAdminToolFields
+>>>>>>> origin/feature/backend-core
       security:
         - bearerAuth: []
       parameters:
@@ -517,6 +543,278 @@ paths:
         content:
           application/json:
             schema:
+<<<<<<< HEAD
+              $ref: "#/components/schemas/CreateFieldSchemaRequest"
+            example:
+              schemaVersion: v2
+              fields:
+                - fieldKey: brandName
+                  fieldName: 品牌名称
+                  fieldType: text
+                  placeholder: 请输入品牌名称
+                  required: true
+                  sortOrder: 1
+                - fieldKey: tone
+                  fieldName: 语气
+                  fieldType: select
+                  placeholder: 请选择语气
+                  optionsJson: '[{"label":"亲和","value":"friendly"},{"label":"专业","value":"professional"}]'
+                  required: false
+                  sortOrder: 2
+      responses:
+        "200":
+          description: 字段 Schema 草稿创建成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FieldSchemaApiResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/admin/v1/field-schemas/{schemaId}/publish:
+    post:
+      tags:
+        - 后台工具管理
+      summary: 发布字段 Schema
+      operationId: publishFieldSchema
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: schemaId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+          example: 11
+      responses:
+        "200":
+          description: 字段 Schema 已发布为 ACTIVE
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FieldSchemaApiResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/admin/v1/tools/{toolId}/prompts:
+    get:
+      tags:
+        - 后台工具管理
+      summary: 获取工具 Prompt 列表
+      operationId: listAdminToolPrompts
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: toolId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+          example: 1
+      responses:
+        "200":
+          description: 工具 Prompt 列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PromptListApiResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      tags:
+        - 后台工具管理
+      summary: 创建 Prompt 草稿
+      operationId: createAdminToolPrompt
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: toolId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+          example: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePromptRequest"
+            example:
+              promptCode: default
+              promptName: 默认 Prompt
+      responses:
+        "200":
+          description: Prompt 草稿创建成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PromptApiResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/admin/v1/prompts/{promptId}/versions:
+    get:
+      tags:
+        - 后台工具管理
+      summary: 列出指定 Prompt 的全部版本（按 id 倒序）
+      operationId: listPromptVersions
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: promptId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+          example: 3
+      responses:
+        "200":
+          description: Prompt 版本列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/PromptVersion"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      tags:
+        - 后台工具管理
+      summary: 新建 Prompt 版本草稿
+      operationId: createPromptVersion
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: promptId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+          example: 3
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePromptVersionRequest"
+            example:
+              versionNo: v1
+              systemPrompt: 你是专业文案助手
+              userPromptTemplate: |
+                请根据输入参数生成内容：{{input}}
+              outputFormat: MARKDOWN
+      responses:
+        "200":
+          description: Prompt 版本创建成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PromptVersionApiResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/admin/v1/prompt-versions/{promptVersionId}/test-generate:
+    post:
+      tags:
+        - 后台工具管理
+      summary: 测试 Prompt 版本生成
+      operationId: testGeneratePromptVersion
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: promptVersionId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+          example: 5
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TestGenerateRequest"
+      responses:
+        "200":
+          description: 测试生成成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TestGenerateApiResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/admin/v1/prompt-versions/{promptVersionId}/publish:
+    post:
+      tags:
+        - 后台工具管理
+      summary: 发布 Prompt 版本
+      operationId: publishPromptVersion
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: promptVersionId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+          example: 5
+      responses:
+        "200":
+          description: Prompt 版本已发布
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PromptVersionApiResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+=======
               $ref: "#/components/schemas/UpdateToolFieldsRequest"
       responses:
         "200":
@@ -525,6 +823,7 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ToolFieldListApiResponse"
+>>>>>>> origin/feature/backend-core
 
   /api/admin/v1/tools/{toolId}/publish:
     post:
@@ -788,6 +1087,65 @@ paths:
               schema:
                 $ref: "#/components/schemas/CreditAccountApiResponse"
 
+  /api/admin/v1/users:
+    get:
+      tags:
+        - 后台工具管理
+      summary: 后台查询用户列表
+      operationId: listAdminUsers
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 后台用户列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserPageApiResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/admin/v1/users/{userId}/credits/manual-add:
+    post:
+      tags:
+        - 后台工具管理
+      summary: 后台手动加算力
+      operationId: manualAddCredits
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+          example: 2
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ManualAddCreditsRequest"
+            example:
+              amount: 100
+              reason: 补偿算力
+      responses:
+        "200":
+          description: 加算力成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditManualAddApiResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
   /api/internal/v1/tasks/{taskId}/execution-context:
     get:
       tags: [Worker 内部接口]
@@ -992,6 +1350,214 @@ components:
             $ref: "#/components/schemas/EmptyApiResponse"
 
   schemas:
+<<<<<<< HEAD
+    RegisterRequest:
+      type: object
+      required:
+        - username
+        - password
+      properties:
+        username:
+          type: string
+          description: 唯一用户名。
+          example: test001
+        password:
+          type: string
+          minLength: 6
+          maxLength: 64
+          example: "123456"
+        nickname:
+          type: string
+          nullable: true
+          description: 可选昵称，不传或为空时默认使用用户名。
+          example: 测试用户
+
+    LoginRequest:
+      type: object
+      required:
+        - account
+        - password
+      properties:
+        account:
+          type: string
+          description: 用户名。
+          example: user1
+        password:
+          type: string
+          example: "123456"
+
+    UpsertToolRequest:
+      type: object
+      required:
+        - toolCode
+        - toolName
+        - categoryId
+        - estimatedCreditCost
+      properties:
+        toolCode:
+          type: string
+          description: 工具唯一编码，新增工具时必填。
+          example: xiaohongshu_copywriting
+        toolName:
+          type: string
+          example: 小红书文案生成
+        categoryId:
+          type: integer
+          format: int64
+          example: 1
+        description:
+          type: string
+          nullable: true
+          example: 根据产品信息生成小红书文案
+        coverUrl:
+          type: string
+          nullable: true
+          example: ""
+        estimatedCreditCost:
+          type: integer
+          minimum: 0
+          example: 10
+
+    UpdateToolRequest:
+      type: object
+      required:
+        - toolName
+        - categoryId
+        - estimatedCreditCost
+      properties:
+        toolCode:
+          type: string
+          nullable: true
+          description: 当前编辑接口会忽略该字段。
+        toolName:
+          type: string
+          example: 小红书文案生成 Pro
+        categoryId:
+          type: integer
+          format: int64
+          example: 1
+        description:
+          type: string
+          nullable: true
+          example: 根据产品信息生成更完整的小红书文案
+        coverUrl:
+          type: string
+          nullable: true
+          example: ""
+        estimatedCreditCost:
+          type: integer
+          minimum: 0
+          example: 12
+
+    CreateFieldSchemaRequest:
+      type: object
+      required:
+        - schemaVersion
+        - fields
+      properties:
+        schemaVersion:
+          type: string
+          example: v2
+        fields:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/FieldSchemaItemInput"
+
+    FieldSchemaItemInput:
+      type: object
+      required:
+        - fieldKey
+        - fieldName
+        - fieldType
+      properties:
+        fieldKey:
+          type: string
+          example: brandName
+        fieldName:
+          type: string
+          example: 品牌名称
+        fieldType:
+          type: string
+          enum:
+            - text
+            - textarea
+            - select
+            - number
+          example: text
+        placeholder:
+          type: string
+          nullable: true
+          example: 请输入品牌名称
+        optionsJson:
+          type: string
+          nullable: true
+          example: '[{"label":"A","value":"a"}]'
+        required:
+          type: boolean
+          example: true
+        sortOrder:
+          type: integer
+          example: 1
+
+    CreatePromptRequest:
+      type: object
+      required:
+        - promptCode
+        - promptName
+      properties:
+        promptCode:
+          type: string
+          example: default
+        promptName:
+          type: string
+          example: 默认 Prompt
+
+    CreatePromptVersionRequest:
+      type: object
+      required:
+        - versionNo
+        - userPromptTemplate
+      properties:
+        versionNo:
+          type: string
+          example: v1
+        systemPrompt:
+          type: string
+          nullable: true
+          example: 你是专业文案助手
+        userPromptTemplate:
+          type: string
+          example: 请根据输入参数输出内容：{{input}}
+        outputFormat:
+          type: string
+          example: MARKDOWN
+
+    TestGenerateRequest:
+      type: object
+      required:
+        - params
+      properties:
+        params:
+          type: object
+          additionalProperties: true
+
+    ManualAddCreditsRequest:
+      type: object
+      required:
+        - amount
+      properties:
+        amount:
+          type: integer
+          minimum: 1
+          example: 100
+        reason:
+          type: string
+          nullable: true
+          example: 补偿算力
+
+=======
+>>>>>>> origin/feature/backend-core
     ApiResponseBase:
       type: object
       properties:
@@ -1089,6 +1655,74 @@ components:
               type: array
               items:
                 $ref: "#/components/schemas/ToolField"
+
+    FieldSchemaListApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/FieldSchema"
+
+    FieldSchemaApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/FieldSchema"
+
+    PromptListApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/Prompt"
+
+    PromptApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/Prompt"
+
+    PromptVersionApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/PromptVersion"
+
+    TestGenerateApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/TestGenerateResult"
+
+    AdminUserPageApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/AdminUserPage"
+
+    CreditManualAddApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/CreditManualAddResult"
 
     CreditAccountApiResponse:
       allOf:
@@ -1392,6 +2026,22 @@ components:
           type: string
         fieldType:
           type: string
+<<<<<<< HEAD
+          enum:
+            - text
+            - textarea
+            - select
+            - number
+          example: text
+        placeholder:
+          type: string
+          nullable: true
+          example: 请输入产品名称
+        optionsJson:
+          type: string
+          nullable: true
+          example: '[{"label":"A","value":"a"}]'
+=======
           enum: [text, textarea, select]
         placeholder:
           type: string
@@ -1401,6 +2051,7 @@ components:
           nullable: true
           items:
             $ref: "#/components/schemas/ToolFieldOption"
+>>>>>>> origin/feature/backend-core
         required:
           type: boolean
         sortOrder:
@@ -1413,6 +2064,187 @@ components:
           type: string
         value:
           type: string
+<<<<<<< HEAD
+          example: 种草
+
+    FieldSchema:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 11
+        toolId:
+          type: integer
+          format: int64
+          example: 1
+        schemaVersion:
+          type: string
+          example: v2
+        status:
+          type: string
+          example: ACTIVE
+        fields:
+          type: array
+          items:
+            $ref: "#/components/schemas/ToolField"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    Prompt:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 3
+        toolId:
+          type: integer
+          format: int64
+          example: 1
+        promptCode:
+          type: string
+          example: default
+        promptName:
+          type: string
+          example: 默认 Prompt
+        activeVersionId:
+          type: integer
+          format: int64
+          nullable: true
+        status:
+          type: string
+          example: ACTIVE
+
+    PromptVersion:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 5
+        promptId:
+          type: integer
+          format: int64
+          example: 3
+        versionNo:
+          type: string
+          example: v1
+        systemPrompt:
+          type: string
+          nullable: true
+        userPromptTemplate:
+          type: string
+        outputFormat:
+          type: string
+          example: MARKDOWN
+        status:
+          type: string
+          example: ACTIVE
+        createdAt:
+          type: string
+          format: date-time
+        publishedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    TestGenerateResult:
+      type: object
+      properties:
+        output:
+          type: string
+          example: 这是测试生成内容
+
+    AdminUserSummary:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        username:
+          type: string
+        nickname:
+          type: string
+        userType:
+          type: string
+          example: USER
+        status:
+          type: string
+          example: ACTIVE
+        credits:
+          type: integer
+          example: 120
+        createdAt:
+          type: string
+          format: date-time
+
+    AdminUserPage:
+      type: object
+      properties:
+        list:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminUserSummary"
+        total:
+          type: integer
+          format: int64
+          example: 1
+
+    CreditManualAddResult:
+      type: object
+      properties:
+        userId:
+          type: integer
+          format: int64
+        amount:
+          type: integer
+          example: 100
+        balanceBefore:
+          type: integer
+          example: 20
+        balanceAfter:
+          type: integer
+          example: 120
+        reason:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    CreditAccount:
+      type: object
+      properties:
+        accountId:
+          type: integer
+          format: int64
+          example: 1
+        userId:
+          type: integer
+          format: int64
+          example: 2
+        balance:
+          type: integer
+          example: 100
+        frozen:
+          type: integer
+          example: 0
+        totalGranted:
+          type: integer
+          example: 100
+        totalConsumed:
+          type: integer
+          example: 0
+        status:
+          type: string
+          example: ACTIVE
+=======
+>>>>>>> origin/feature/backend-core
 
     CreateTaskRequest:
       type: object
@@ -1466,6 +2298,24 @@ components:
               type: string
             toolName:
               type: string
+<<<<<<< HEAD
+              example: 小红书文案生成
+            userNickname:
+              type: string
+              example: 用户一
+            consumedCredits:
+              type: integer
+              example: 10
+            errorCode:
+              type: string
+              nullable: true
+              example: MODEL_CALL_FAILED
+            errorMessage:
+              type: string
+              nullable: true
+              example: 模型调用超时
+=======
+>>>>>>> origin/feature/backend-core
             params:
               type: object
               additionalProperties: true
@@ -1479,6 +2329,14 @@ components:
               type: string
               format: date-time
               nullable: true
+            logs:
+              type: array
+              items:
+                $ref: "#/components/schemas/TaskLog"
+            creditLogs:
+              type: array
+              items:
+                $ref: "#/components/schemas/CreditLogItem"
 
     TaskResult:
       type: object
@@ -1488,7 +2346,58 @@ components:
         contentText:
           type: string
 
+<<<<<<< HEAD
+    TaskLog:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        eventType:
+          type: string
+          example: STATUS_CHANGED
+        fromStatus:
+          type: string
+          nullable: true
+        toStatus:
+          type: string
+          nullable: true
+        message:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    CreditLogItem:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        logType:
+          type: string
+          example: CONSUME
+        amount:
+          type: integer
+          example: 10
+        balanceBefore:
+          type: integer
+          example: 100
+        balanceAfter:
+          type: integer
+          example: 90
+        reason:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    TaskPage:
+=======
     CreditAccount:
+>>>>>>> origin/feature/backend-core
       type: object
       properties:
         accountId:

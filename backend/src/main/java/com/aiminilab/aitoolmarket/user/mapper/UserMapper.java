@@ -32,6 +32,34 @@ public interface UserMapper extends BaseMapper<User> {
         return user.getId();
     }
 
+<<<<<<< HEAD
+    public List<User> findAllActive() {
+        return jdbcTemplate.query("""
+                SELECT * FROM users
+                WHERE is_deleted = 0
+                ORDER BY id DESC
+                """, rowMapper);
+    }
+
+    public Long insert(User user) {
+        KeyHolder keyHolder = new GeneratedKeyHolder();
+        jdbcTemplate.update(connection -> {
+            PreparedStatement ps = connection.prepareStatement("""
+                    INSERT INTO users (username, password_hash, phone, email, nickname, user_type, status, is_deleted)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 0)
+                    """, Statement.RETURN_GENERATED_KEYS);
+            ps.setString(1, user.getUsername());
+            ps.setString(2, user.getPasswordHash());
+            ps.setString(3, user.getPhone());
+            ps.setString(4, user.getEmail());
+            ps.setString(5, user.getNickname());
+            ps.setString(6, user.getUserType());
+            ps.setString(7, user.getStatus());
+            return ps;
+        }, keyHolder);
+        return generatedId(keyHolder);
+    }
+=======
     @Select("""
             <script>
             SELECT *
@@ -60,6 +88,7 @@ public interface UserMapper extends BaseMapper<User> {
                             @Param("userType") String userType,
                             @Param("limit") int limit,
                             @Param("offset") int offset);
+>>>>>>> origin/feature/backend-core
 
     @Select("""
             <script>

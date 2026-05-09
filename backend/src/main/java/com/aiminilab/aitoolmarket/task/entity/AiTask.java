@@ -25,6 +25,10 @@ public class AiTask {
     private Integer estimatedCreditCost;
     private String errorCode;
     private String errorMessage;
+<<<<<<< HEAD
+    private String userNickname;
+=======
+>>>>>>> origin/feature/backend-core
     private LocalDateTime createdAt;
     private LocalDateTime queuedAt;
     private LocalDateTime startedAt;
@@ -142,6 +146,17 @@ public class AiTask {
         this.errorMessage = errorMessage;
     }
 
+<<<<<<< HEAD
+    public String getUserNickname() {
+        return userNickname;
+    }
+
+    public void setUserNickname(String userNickname) {
+        this.userNickname = userNickname;
+    }
+
+=======
+>>>>>>> origin/feature/backend-core
     public LocalDateTime getCreatedAt() {
         return createdAt;
     }

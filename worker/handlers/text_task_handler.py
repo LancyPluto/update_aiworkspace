@@ -45,6 +45,9 @@ class TextTaskHandler:
             )
             self.backend_client.mark_processing(task_id)
 
+<<<<<<< HEAD
+            system_prompt, user_prompt = self._build_model_prompts(context)
+=======
             params = context.get("params") or {}
             user_prompt_template = context.get("userPromptTemplate")
             if user_prompt_template:
@@ -52,6 +55,7 @@ class TextTaskHandler:
             else:
                 user_prompt = self._build_default_prompt(params)
 
+>>>>>>> origin/feature/backend-core
             generated_text = self.model_client.generate(
                 user_prompt,
                 system_prompt=system_prompt,
