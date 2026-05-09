@@ -1,9 +1,10 @@
 import { apiRequest } from "./client"
 import type {
-  AiTask,
   CreateTaskRequest,
   CreateTaskResponse,
   ListTasksQuery,
+  PageResult,
+  TaskDetail,
   TaskStatusPayload,
 } from "./types"
 
@@ -18,7 +19,7 @@ export async function createTask(
   })
 }
 
-/** GET /api/v1/tasks/{taskId}/status —— V1 轮询任务状态 */
+/** GET /api/v1/tasks/{taskId}/status —— 轮询任务状态 */
 export async function fetchTaskStatus(
   taskId: number | string,
   options?: { token?: string | null },
@@ -29,24 +30,35 @@ export async function fetchTaskStatus(
   })
 }
 
-/** GET /api/v1/tasks/{taskId} */
+/** GET /api/v1/tasks/{taskId} —— 任务详情 */
 export async function fetchTaskById(
   taskId: number | string,
   options?: { token?: string | null },
-): Promise<AiTask> {
+): Promise<TaskDetail> {
   const id = encodeURIComponent(String(taskId))
-  return apiRequest<AiTask>("GET", `/api/v1/tasks/${id}`, { token: options?.token })
+  return apiRequest<TaskDetail>("GET", `/api/v1/tasks/${id}`, { token: options?.token })
 }
 
-/** GET /api/v1/tasks */
+/** GET /api/v1/tasks —— 当前用户任务列表（分页） */
 export async function fetchTasks(
   options?: {
     token?: string | null
     query?: ListTasksQuery
   },
-): Promise<AiTask[]> {
-  return apiRequest<AiTask[]>("GET", "/api/v1/tasks", {
+): Promise<PageResult<TaskDetail>> {
+  return apiRequest<PageResult<TaskDetail>>("GET", "/api/v1/tasks", {
     token: options?.token,
     query: options?.query as Record<string, string | number | boolean | undefined> | undefined,
+  })
+}
+
+/** POST /api/v1/tasks/{taskId}/cancel —— 取消任务 */
+export async function cancelTask(
+  taskId: number | string,
+  options?: { token?: string | null },
+): Promise<TaskStatusPayload> {
+  const id = encodeURIComponent(String(taskId))
+  return apiRequest<TaskStatusPayload>("POST", `/api/v1/tasks/${id}/cancel`, {
+    token: options?.token,
   })
 }

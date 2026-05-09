@@ -10,7 +10,7 @@ const P = {
 /** POST /api/v1/auth/register */
 export async function register(body: RegisterRequest): Promise<LoginResponse> {
   const data = await apiRequest<LoginResponse | null>("POST", P.register, { body })
-  if (!data?.token) {
+  if (!data) {
     throw new Error("注册响应无效")
   }
   return data
