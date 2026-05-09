@@ -82,30 +82,64 @@ public class TaskMapper {
         return tasks.stream().findFirst();
     }
 
-    public List<AiTask> findByUserId(Long userId) {
-        return jdbcTemplate.query(baseSql() + """
-                WHERE t.user_id = ?
+    public Optional<AiTask> findByUserIdAndIdempotencyKey(Long userId, String idempotencyKey) {
+        if (idempotencyKey == null || idempotencyKey.isBlank()) {
+            return Optional.empty();
+        }
+        List<AiTask> tasks = jdbcTemplate.query(baseSql() + """
+                WHERE t.user_id = ? AND t.idempotency_key = ?
                 ORDER BY t.id DESC
-                """, taskRowMapper, userId);
+                LIMIT 1
+                """, taskRowMapper, userId, idempotencyKey);
+        return tasks.stream().findFirst();
     }
 
-    public List<AiTask> findForAdmin(String status, String toolCode, Long userId) {
+    public List<AiTask> findByUserId(Long userId, String status, String toolCode, int limit, int offset) {
+        StringBuilder sql = new StringBuilder(baseSql()).append(" WHERE t.user_id = ?");
+        List<Object> params = new ArrayList<>();
+        params.add(userId);
+        appendTaskFilters(sql, params, status, toolCode, null);
+        sql.append(" ORDER BY t.id DESC LIMIT ? OFFSET ?");
+        params.add(limit);
+        params.add(offset);
+        return jdbcTemplate.query(sql.toString(), taskRowMapper, params.toArray());
+    }
+
+    public long countByUserId(Long userId, String status, String toolCode) {
+        StringBuilder sql = new StringBuilder("""
+                SELECT COUNT(*)
+                FROM ai_tasks t
+                JOIN ai_tools tool ON tool.id = t.tool_id
+                WHERE t.user_id = ?
+                """);
+        List<Object> params = new ArrayList<>();
+        params.add(userId);
+        appendTaskFilters(sql, params, status, toolCode, null);
+        Long total = jdbcTemplate.queryForObject(sql.toString(), Long.class, params.toArray());
+        return total == null ? 0 : total;
+    }
+
+    public List<AiTask> findForAdmin(String status, String toolCode, Long userId, int limit, int offset) {
         StringBuilder sql = new StringBuilder(baseSql()).append(" WHERE 1 = 1");
         List<Object> params = new ArrayList<>();
-        if (status != null && !status.isBlank()) {
-            sql.append(" AND t.status = ?");
-            params.add(status);
-        }
-        if (toolCode != null && !toolCode.isBlank()) {
-            sql.append(" AND tool.tool_code = ?");
-            params.add(toolCode);
-        }
-        if (userId != null) {
-            sql.append(" AND t.user_id = ?");
-            params.add(userId);
-        }
-        sql.append(" ORDER BY t.id DESC");
+        appendTaskFilters(sql, params, status, toolCode, userId);
+        sql.append(" ORDER BY t.id DESC LIMIT ? OFFSET ?");
+        params.add(limit);
+        params.add(offset);
         return jdbcTemplate.query(sql.toString(), taskRowMapper, params.toArray());
+    }
+
+    public long countForAdmin(String status, String toolCode, Long userId) {
+        StringBuilder sql = new StringBuilder("""
+                SELECT COUNT(*)
+                FROM ai_tasks t
+                JOIN ai_tools tool ON tool.id = t.tool_id
+                WHERE 1 = 1
+                """);
+        List<Object> params = new ArrayList<>();
+        appendTaskFilters(sql, params, status, toolCode, userId);
+        Long total = jdbcTemplate.queryForObject(sql.toString(), Long.class, params.toArray());
+        return total == null ? 0 : total;
     }
 
     public Optional<TaskResultResponse> findFirstResult(Long taskId) {
@@ -185,6 +219,21 @@ public class TaskMapper {
                 FROM ai_tasks t
                 JOIN ai_tools tool ON tool.id = t.tool_id
                 """;
+    }
+
+    private void appendTaskFilters(StringBuilder sql, List<Object> params, String status, String toolCode, Long userId) {
+        if (status != null && !status.isBlank()) {
+            sql.append(" AND t.status = ?");
+            params.add(status.trim());
+        }
+        if (toolCode != null && !toolCode.isBlank()) {
+            sql.append(" AND tool.tool_code = ?");
+            params.add(toolCode.trim());
+        }
+        if (userId != null) {
+            sql.append(" AND t.user_id = ?");
+            params.add(userId);
+        }
     }
 
     private Long generatedId(KeyHolder keyHolder) {

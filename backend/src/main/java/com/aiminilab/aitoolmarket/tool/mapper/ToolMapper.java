@@ -12,6 +12,7 @@ import org.springframework.stereotype.Repository;
 
 import java.sql.PreparedStatement;
 import java.sql.Statement;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
@@ -76,15 +77,30 @@ public class ToolMapper {
                 """, categoryRowMapper);
     }
 
-    public List<AiTool> findTools(boolean onlineOnly) {
-        String statusCondition = onlineOnly ? "AND t.status = 'ONLINE'" : "";
-        return jdbcTemplate.query("""
+    public List<AiTool> findTools(boolean onlineOnly, String keyword, Long categoryId, String status, int limit, int offset) {
+        StringBuilder sql = new StringBuilder("""
                 SELECT t.*, c.category_name
                 FROM ai_tools t
                 JOIN tool_categories c ON c.id = t.category_id
-                WHERE t.is_deleted = 0 %s
-                ORDER BY t.id DESC
-                """.formatted(statusCondition), toolRowMapper);
+                WHERE t.is_deleted = 0
+                """);
+        List<Object> params = appendToolFilters(sql, onlineOnly, keyword, categoryId, status);
+        sql.append(" ORDER BY t.id DESC LIMIT ? OFFSET ?");
+        params.add(limit);
+        params.add(offset);
+        return jdbcTemplate.query(sql.toString(), toolRowMapper, params.toArray());
+    }
+
+    public long countTools(boolean onlineOnly, String keyword, Long categoryId, String status) {
+        StringBuilder sql = new StringBuilder("""
+                SELECT COUNT(*)
+                FROM ai_tools t
+                JOIN tool_categories c ON c.id = t.category_id
+                WHERE t.is_deleted = 0
+                """);
+        List<Object> params = appendToolFilters(sql, onlineOnly, keyword, categoryId, status);
+        Long total = jdbcTemplate.queryForObject(sql.toString(), Long.class, params.toArray());
+        return total == null ? 0 : total;
     }
 
     public Optional<AiTool> findById(Long toolId) {
@@ -105,6 +121,15 @@ public class ToolMapper {
                 WHERE t.tool_code = ? AND t.status = 'ONLINE' AND t.is_deleted = 0
                 """, toolRowMapper, toolCode);
         return tools.stream().findFirst();
+    }
+
+    public boolean existsByCode(String toolCode) {
+        Long count = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM ai_tools
+                WHERE tool_code = ? AND is_deleted = 0
+                """, Long.class, toolCode);
+        return count != null && count > 0;
     }
 
     public Long insertTool(AiTool tool, Long operatorId) {
@@ -244,5 +269,27 @@ public class ToolMapper {
             throw new IllegalStateException("Generated id is missing");
         }
         return key.longValue();
+    }
+
+    private List<Object> appendToolFilters(StringBuilder sql, boolean onlineOnly, String keyword, Long categoryId, String status) {
+        List<Object> params = new ArrayList<>();
+        if (onlineOnly) {
+            sql.append(" AND t.status = 'ONLINE'");
+        } else if (status != null && !status.isBlank()) {
+            sql.append(" AND t.status = ?");
+            params.add(status.trim());
+        }
+        if (categoryId != null) {
+            sql.append(" AND t.category_id = ?");
+            params.add(categoryId);
+        }
+        if (keyword != null && !keyword.isBlank()) {
+            sql.append(" AND (LOWER(t.tool_code) LIKE ? OR LOWER(t.tool_name) LIKE ? OR LOWER(t.description) LIKE ?)");
+            String likeKeyword = "%" + keyword.trim().toLowerCase() + "%";
+            params.add(likeKeyword);
+            params.add(likeKeyword);
+            params.add(likeKeyword);
+        }
+        return params;
     }
 }

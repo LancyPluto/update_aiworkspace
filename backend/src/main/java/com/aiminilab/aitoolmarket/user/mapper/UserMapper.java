@@ -9,6 +9,7 @@ import org.springframework.stereotype.Repository;
 
 import java.sql.PreparedStatement;
 import java.sql.Statement;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
@@ -72,6 +73,38 @@ public class UserMapper {
         return generatedId(keyHolder);
     }
 
+    public List<User> findForAdmin(String keyword, String status, String userType, int limit, int offset) {
+        StringBuilder sql = new StringBuilder("""
+                SELECT *
+                FROM users
+                WHERE is_deleted = 0
+                """);
+        List<Object> params = appendAdminFilters(sql, keyword, status, userType);
+        sql.append(" ORDER BY id DESC LIMIT ? OFFSET ?");
+        params.add(limit);
+        params.add(offset);
+        return jdbcTemplate.query(sql.toString(), rowMapper, params.toArray());
+    }
+
+    public long countForAdmin(String keyword, String status, String userType) {
+        StringBuilder sql = new StringBuilder("""
+                SELECT COUNT(*)
+                FROM users
+                WHERE is_deleted = 0
+                """);
+        List<Object> params = appendAdminFilters(sql, keyword, status, userType);
+        Long total = jdbcTemplate.queryForObject(sql.toString(), Long.class, params.toArray());
+        return total == null ? 0 : total;
+    }
+
+    public void updateStatus(Long userId, String status) {
+        jdbcTemplate.update("""
+                UPDATE users
+                SET status = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND is_deleted = 0
+                """, status, userId);
+    }
+
     private Long generatedId(KeyHolder keyHolder) {
         Number key = null;
         if (!keyHolder.getKeyList().isEmpty()) {
@@ -87,5 +120,26 @@ public class UserMapper {
             throw new IllegalStateException("Generated id is missing");
         }
         return key.longValue();
+    }
+
+    private List<Object> appendAdminFilters(StringBuilder sql, String keyword, String status, String userType) {
+        List<Object> params = new ArrayList<>();
+        if (keyword != null && !keyword.isBlank()) {
+            sql.append(" AND (LOWER(username) LIKE ? OR LOWER(nickname) LIKE ? OR phone LIKE ? OR LOWER(email) LIKE ?)");
+            String likeKeyword = "%" + keyword.trim().toLowerCase() + "%";
+            params.add(likeKeyword);
+            params.add(likeKeyword);
+            params.add("%" + keyword.trim() + "%");
+            params.add(likeKeyword);
+        }
+        if (status != null && !status.isBlank()) {
+            sql.append(" AND status = ?");
+            params.add(status.trim());
+        }
+        if (userType != null && !userType.isBlank()) {
+            sql.append(" AND user_type = ?");
+            params.add(userType.trim());
+        }
+        return params;
     }
 }

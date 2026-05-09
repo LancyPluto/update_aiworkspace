@@ -1,7 +1,9 @@
 package com.aiminilab.aitoolmarket.task.service.impl;
 
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
+import com.aiminilab.aitoolmarket.common.enums.TaskStatus;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
+import com.aiminilab.aitoolmarket.credit.service.CreditService;
 import com.aiminilab.aitoolmarket.task.dto.ExecutionContextResponse;
 import com.aiminilab.aitoolmarket.task.dto.TaskStatusResponse;
 import com.aiminilab.aitoolmarket.task.dto.WorkerFailedRequest;
@@ -25,11 +27,14 @@ public class InternalTaskServiceImpl implements InternalTaskService {
     private final TaskMapper taskMapper;
     private final ToolMapper toolMapper;
     private final ObjectMapper objectMapper;
+    private final CreditService creditService;
 
-    public InternalTaskServiceImpl(TaskMapper taskMapper, ToolMapper toolMapper, ObjectMapper objectMapper) {
+    public InternalTaskServiceImpl(TaskMapper taskMapper, ToolMapper toolMapper, ObjectMapper objectMapper,
+                                   CreditService creditService) {
         this.taskMapper = taskMapper;
         this.toolMapper = toolMapper;
         this.objectMapper = objectMapper;
+        this.creditService = creditService;
     }
 
     @Override
@@ -56,12 +61,17 @@ public class InternalTaskServiceImpl implements InternalTaskService {
     @Transactional
     public TaskStatusResponse markSuccess(Long taskId, WorkerSuccessRequest request) {
         AiTask task = findTask(taskId);
+        if (TaskStatus.SUCCESS.name().equals(task.getStatus())) {
+            return TaskStatusResponse.from(task);
+        }
+        creditService.settleForTask(task.getUserId(), taskId, task.getEstimatedCreditCost());
         taskMapper.insertResult(taskId, task.getUserId(), request.resourceType(), request.contentText());
         taskMapper.markSuccess(taskId);
         return TaskStatusResponse.from(findTask(taskId));
     }
 
     @Override
+    @Transactional
     public TaskStatusResponse markFailed(Long taskId, WorkerFailedRequest request) {
         String errorCode = request.errorCode() == null || request.errorCode().isBlank()
                 ? ErrorCode.MODEL_CALL_FAILED.name()
@@ -69,7 +79,11 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         String errorMessage = request.errorMessage() == null || request.errorMessage().isBlank()
                 ? "Worker execution failed"
                 : request.errorMessage();
-        findTask(taskId);
+        AiTask task = findTask(taskId);
+        if (!TaskStatus.SUCCESS.name().equals(task.getStatus()) && !TaskStatus.FAILED.name().equals(task.getStatus())
+                && !TaskStatus.CANCELLED.name().equals(task.getStatus())) {
+            creditService.releaseForTask(task.getUserId(), taskId, task.getEstimatedCreditCost());
+        }
         taskMapper.markFailed(taskId, errorCode, errorMessage);
         return TaskStatusResponse.from(findTask(taskId));
     }

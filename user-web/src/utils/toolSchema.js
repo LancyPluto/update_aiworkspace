@@ -52,9 +52,9 @@ export function normalizeToolForForm(tool) {
 }
 
 function normalizeField(raw) {
-  const key = String(raw.name ?? raw.key ?? raw.field ?? '')
-  const label = String(raw.label ?? raw.title ?? key)
-  const type = String(raw.type ?? 'text').toLowerCase()
+  const key = String(raw.fieldKey ?? raw.name ?? raw.key ?? raw.field ?? '')
+  const label = String(raw.fieldName ?? raw.label ?? raw.title ?? key)
+  const type = String(raw.fieldType ?? raw.type ?? 'text').toLowerCase()
   const required = Boolean(raw.required ?? raw.isRequired)
   const placeholder = raw.placeholder != null ? String(raw.placeholder) : ''
   let options = []

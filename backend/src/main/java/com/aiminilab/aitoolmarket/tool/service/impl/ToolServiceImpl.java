@@ -39,11 +39,16 @@ public class ToolServiceImpl implements ToolService {
     }
 
     @Override
-    public PageResponse<ToolSummaryResponse> userTools() {
-        List<ToolSummaryResponse> list = toolMapper.findTools(true).stream()
+    public PageResponse<ToolSummaryResponse> userTools(String keyword, Long categoryId, Integer pageNo, Integer pageSize) {
+        int normalizedPageSize = PageResponse.normalizePageSize(pageSize);
+        int offset = PageResponse.offset(pageNo, pageSize);
+        List<ToolSummaryResponse> list = toolMapper
+                .findTools(true, keyword, categoryId, null, normalizedPageSize, offset)
+                .stream()
                 .map(ToolSummaryResponse::from)
                 .toList();
-        return new PageResponse<>(list, list.size());
+        long total = toolMapper.countTools(true, keyword, categoryId, null);
+        return PageResponse.of(list, total, pageNo, pageSize);
     }
 
     @Override
@@ -55,15 +60,31 @@ public class ToolServiceImpl implements ToolService {
     }
 
     @Override
-    public PageResponse<ToolSummaryResponse> adminTools() {
-        List<ToolSummaryResponse> list = toolMapper.findTools(false).stream()
+    public PageResponse<ToolSummaryResponse> adminTools(String keyword, Long categoryId, String status,
+                                                        Integer pageNo, Integer pageSize) {
+        int normalizedPageSize = PageResponse.normalizePageSize(pageSize);
+        int offset = PageResponse.offset(pageNo, pageSize);
+        List<ToolSummaryResponse> list = toolMapper
+                .findTools(false, keyword, categoryId, status, normalizedPageSize, offset)
+                .stream()
                 .map(ToolSummaryResponse::from)
                 .toList();
-        return new PageResponse<>(list, list.size());
+        long total = toolMapper.countTools(false, keyword, categoryId, status);
+        return PageResponse.of(list, total, pageNo, pageSize);
+    }
+
+    @Override
+    public ToolDetailResponse adminToolDetail(Long toolId) {
+        ToolSummaryResponse summary = findToolSummary(toolId);
+        return ToolDetailResponse.of(summary, fields(toolId));
     }
 
     @Override
     public ToolSummaryResponse createTool(UpsertToolRequest request, Long operatorId) {
+        if (toolMapper.existsByCode(request.toolCode())) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "工具编码已存在");
+        }
+
         AiTool tool = fromRequest(request);
         Long toolId = toolMapper.insertTool(tool, operatorId);
         Long schemaId = toolMapper.createActiveDefaultSchema(toolId, operatorId);

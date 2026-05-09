@@ -9,6 +9,7 @@ import com.aiminilab.aitoolmarket.tool.service.ToolService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -29,8 +30,18 @@ public class ToolController {
     }
 
     @GetMapping("/tools")
-    public ApiResponse<PageResponse<ToolSummaryResponse>> tools() {
-        return ApiResponse.success(toolService.userTools());
+    public ApiResponse<PageResponse<ToolSummaryResponse>> tools(@RequestParam(required = false) String keyword,
+                                                                @RequestParam(required = false) Long categoryId,
+                                                                @RequestParam(required = false) Integer pageNo,
+                                                                @RequestParam(required = false) Integer pageSize) {
+        return ApiResponse.success(toolService.userTools(keyword, categoryId, pageNo, pageSize));
+    }
+
+    @GetMapping("/tools/search")
+    public ApiResponse<PageResponse<ToolSummaryResponse>> search(@RequestParam String keyword,
+                                                                 @RequestParam(required = false) Integer pageNo,
+                                                                 @RequestParam(required = false) Integer pageSize) {
+        return ApiResponse.success(toolService.userTools(keyword, null, pageNo, pageSize));
     }
 
     @GetMapping("/tools/{toolCode}")

@@ -96,8 +96,7 @@ onMounted(loadAccount)
             <el-descriptions-item label="累计消耗">{{ creditAccount.totalConsumed }}</el-descriptions-item>
           </el-descriptions>
           <div class="credit-actions">
-            <el-button type="primary" :icon="Coin" disabled @click="openCreditDialog">手动加算力</el-button>
-            <span class="muted">等待后端补齐 /api/admin/v1/users/{userId}/credits/manual-add 后启用</span>
+            <el-button type="primary" :icon="Coin" @click="openCreditDialog">手动加算力</el-button>
           </div>
         </el-card>
       </el-col>
