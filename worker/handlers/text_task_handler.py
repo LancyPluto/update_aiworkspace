@@ -11,6 +11,15 @@ from client.model_client import (
 from config import settings
 from prompt.renderer import PromptRenderError, render_prompt
 from tools import ToolResultBuildError, build_success_payload
+from tools.moments_copywriting_generator import (
+    build_prompt_payload as build_moments_prompt_payload,
+)
+from tools.product_title_optimizer import (
+    build_prompt_payload as build_product_title_prompt_payload,
+)
+from tools.wechat_longform_generator import (
+    build_prompt_payload as build_wechat_longform_prompt_payload,
+)
 from tools.xiaohongshu_copywriting import build_prompt_payload as build_xiaohongshu_prompt_payload
 
 
@@ -93,6 +102,18 @@ class TextTaskHandler:
 
         if tool_code == "xiaohongshu_copywriting":
             prompt_payload = build_xiaohongshu_prompt_payload(context)
+            return prompt_payload["system_prompt"], prompt_payload["user_prompt"]
+
+        if tool_code == "wechat_longform_generator":
+            prompt_payload = build_wechat_longform_prompt_payload(context)
+            return prompt_payload["system_prompt"], prompt_payload["user_prompt"]
+
+        if tool_code == "moments_copywriting_generator":
+            prompt_payload = build_moments_prompt_payload(context)
+            return prompt_payload["system_prompt"], prompt_payload["user_prompt"]
+
+        if tool_code == "product_title_optimizer":
+            prompt_payload = build_product_title_prompt_payload(context)
             return prompt_payload["system_prompt"], prompt_payload["user_prompt"]
 
         params = context.get("params") or {}
