@@ -1,0 +1,2 @@
+class ToolResultBuildError(ValueError):
+    pass
