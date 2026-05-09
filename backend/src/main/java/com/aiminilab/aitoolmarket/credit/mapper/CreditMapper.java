@@ -1,181 +1,102 @@
 package com.aiminilab.aitoolmarket.credit.mapper;
 
-import com.aiminilab.aitoolmarket.credit.dto.CreditLogResponse;
 import com.aiminilab.aitoolmarket.credit.entity.CreditAccount;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Update;
 import org.springframework.dao.DuplicateKeyException;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.core.RowMapper;
-import org.springframework.stereotype.Repository;
 
-import java.sql.Timestamp;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Optional;
 
-@Repository
-public class CreditMapper {
+public interface CreditMapper extends BaseMapper<CreditAccount> {
 
-    public static final int DEFAULT_GRANTED_CREDITS = 100;
+    int DEFAULT_GRANTED_CREDITS = 100;
 
-    private final JdbcTemplate jdbcTemplate;
-
-    private final RowMapper<CreditAccount> accountRowMapper = (rs, rowNum) -> {
-        CreditAccount account = new CreditAccount();
-        account.setId(rs.getLong("id"));
-        account.setUserId(rs.getLong("user_id"));
-        account.setBalance(rs.getInt("balance"));
-        account.setFrozen(rs.getInt("frozen"));
-        account.setTotalGranted(rs.getInt("total_granted"));
-        account.setTotalConsumed(rs.getInt("total_consumed"));
-        account.setStatus(rs.getString("status"));
-        return account;
-    };
-
-    private final RowMapper<CreditLogResponse> logRowMapper = (rs, rowNum) -> {
-        Timestamp createdAt = rs.getTimestamp("created_at");
-        return new CreditLogResponse(
-                rs.getLong("id"),
-                rs.getLong("user_id"),
-                rs.getObject("task_id", Long.class),
-                rs.getString("log_type"),
-                rs.getInt("amount"),
-                rs.getInt("frozen_amount"),
-                rs.getInt("balance_before"),
-                rs.getInt("balance_after"),
-                rs.getInt("frozen_before"),
-                rs.getInt("frozen_after"),
-                rs.getString("operator_type"),
-                rs.getObject("operator_id", Long.class),
-                rs.getString("reason"),
-                createdAt == null ? null : createdAt.toLocalDateTime()
-        );
-    };
-
-    public CreditMapper(JdbcTemplate jdbcTemplate) {
-        this.jdbcTemplate = jdbcTemplate;
-    }
-
-    public CreditAccount getOrCreateAccount(Long userId) {
+    default CreditAccount getOrCreateAccount(Long userId) {
         Optional<CreditAccount> existing = findByUserId(userId);
         if (existing.isPresent()) {
             return existing.get();
         }
+
+        CreditAccount account = new CreditAccount();
+        account.setUserId(userId);
+        account.setBalance(DEFAULT_GRANTED_CREDITS);
+        account.setFrozen(0);
+        account.setTotalGranted(DEFAULT_GRANTED_CREDITS);
+        account.setTotalConsumed(0);
+        account.setStatus("ACTIVE");
         try {
-            jdbcTemplate.update("""
-                    INSERT INTO credit_accounts
-                      (user_id, balance, frozen, total_granted, total_consumed, status)
-                    VALUES (?, ?, 0, ?, 0, 'ACTIVE')
-                    """, userId, DEFAULT_GRANTED_CREDITS, DEFAULT_GRANTED_CREDITS);
+            insert(account);
         } catch (DuplicateKeyException ignored) {
             // Another request created the account first; read it below.
         }
         return findByUserId(userId).orElseThrow(() -> new IllegalStateException("Credit account is missing"));
     }
 
-    public boolean freeze(Long accountId, int amount) {
-        return jdbcTemplate.update("""
-                UPDATE credit_accounts
-                SET frozen = frozen + ?, updated_at = CURRENT_TIMESTAMP
-                WHERE id = ? AND balance - frozen >= ? AND status = 'ACTIVE'
-                """, amount, accountId, amount) == 1;
+    default Optional<CreditAccount> findByUserId(Long userId) {
+        return Optional.ofNullable(selectOne(new LambdaQueryWrapper<CreditAccount>()
+                .eq(CreditAccount::getUserId, userId)
+                .last("LIMIT 1")));
     }
 
-    public boolean settle(Long accountId, int amount) {
-        return jdbcTemplate.update("""
-                UPDATE credit_accounts
-                SET balance = balance - ?, frozen = frozen - ?, total_consumed = total_consumed + ?,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ? AND frozen >= ? AND balance >= ? AND status = 'ACTIVE'
-                """, amount, amount, amount, accountId, amount, amount) == 1;
+    @Update("""
+            UPDATE credit_accounts
+            SET frozen = frozen + #{amount}, updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{accountId} AND balance - frozen >= #{amount} AND status = 'ACTIVE'
+            """)
+    int freezeRows(@Param("accountId") Long accountId, @Param("amount") int amount);
+
+    default boolean freeze(Long accountId, int amount) {
+        return freezeRows(accountId, amount) == 1;
     }
 
-    public boolean release(Long accountId, int amount) {
-        return jdbcTemplate.update("""
-                UPDATE credit_accounts
-                SET frozen = frozen - ?, updated_at = CURRENT_TIMESTAMP
-                WHERE id = ? AND frozen >= ? AND status = 'ACTIVE'
-                """, amount, accountId, amount) == 1;
+    @Update("""
+            UPDATE credit_accounts
+            SET balance = balance - #{amount},
+                frozen = frozen - #{amount},
+                total_consumed = total_consumed + #{amount},
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{accountId} AND frozen >= #{amount} AND balance >= #{amount} AND status = 'ACTIVE'
+            """)
+    int settleRows(@Param("accountId") Long accountId, @Param("amount") int amount);
+
+    default boolean settle(Long accountId, int amount) {
+        return settleRows(accountId, amount) == 1;
     }
 
-    public boolean manualAdd(Long accountId, int amount) {
-        return jdbcTemplate.update("""
-                UPDATE credit_accounts
-                SET balance = balance + ?, total_granted = total_granted + ?, updated_at = CURRENT_TIMESTAMP
-                WHERE id = ? AND status = 'ACTIVE'
-                """, amount, amount, accountId) == 1;
+    @Update("""
+            UPDATE credit_accounts
+            SET frozen = frozen - #{amount}, updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{accountId} AND frozen >= #{amount} AND status = 'ACTIVE'
+            """)
+    int releaseRows(@Param("accountId") Long accountId, @Param("amount") int amount);
+
+    default boolean release(Long accountId, int amount) {
+        return releaseRows(accountId, amount) == 1;
     }
 
-    public boolean manualDeduct(Long accountId, int amount) {
-        return jdbcTemplate.update("""
-                UPDATE credit_accounts
-                SET balance = balance - ?, updated_at = CURRENT_TIMESTAMP
-                WHERE id = ? AND balance - frozen >= ? AND status = 'ACTIVE'
-                """, amount, accountId, amount) == 1;
+    @Update("""
+            UPDATE credit_accounts
+            SET balance = balance + #{amount},
+                total_granted = total_granted + #{amount},
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{accountId} AND status = 'ACTIVE'
+            """)
+    int manualAddRows(@Param("accountId") Long accountId, @Param("amount") int amount);
+
+    default boolean manualAdd(Long accountId, int amount) {
+        return manualAddRows(accountId, amount) == 1;
     }
 
-    public List<CreditLogResponse> findLogs(Long userId, String logType, int limit, int offset) {
-        StringBuilder sql = new StringBuilder("""
-                SELECT *
-                FROM credit_logs
-                WHERE user_id = ?
-                """);
-        List<Object> params = new ArrayList<>();
-        params.add(userId);
-        if (logType != null && !logType.isBlank()) {
-            sql.append(" AND log_type = ?");
-            params.add(logType.trim());
-        }
-        sql.append(" ORDER BY id DESC LIMIT ? OFFSET ?");
-        params.add(limit);
-        params.add(offset);
-        return jdbcTemplate.query(sql.toString(), logRowMapper, params.toArray());
-    }
+    @Update("""
+            UPDATE credit_accounts
+            SET balance = balance - #{amount}, updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{accountId} AND balance - frozen >= #{amount} AND status = 'ACTIVE'
+            """)
+    int manualDeductRows(@Param("accountId") Long accountId, @Param("amount") int amount);
 
-    public long countLogs(Long userId, String logType) {
-        StringBuilder sql = new StringBuilder("""
-                SELECT COUNT(*)
-                FROM credit_logs
-                WHERE user_id = ?
-                """);
-        List<Object> params = new ArrayList<>();
-        params.add(userId);
-        if (logType != null && !logType.isBlank()) {
-            sql.append(" AND log_type = ?");
-            params.add(logType.trim());
-        }
-        Long total = jdbcTemplate.queryForObject(sql.toString(), Long.class, params.toArray());
-        return total == null ? 0 : total;
-    }
-
-    public void insertLog(CreditAccount before, Long taskId, String logType, int amount, int frozenAmount,
-                          int balanceAfter, int frozenAfter, String operatorType, Long operatorId, String reason) {
-        jdbcTemplate.update("""
-                INSERT INTO credit_logs
-                  (user_id, account_id, task_id, log_type, amount, frozen_amount,
-                   balance_before, balance_after, frozen_before, frozen_after,
-                   operator_type, operator_id, reason)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                before.getUserId(),
-                before.getId(),
-                taskId,
-                logType,
-                amount,
-                frozenAmount,
-                before.getBalance(),
-                balanceAfter,
-                before.getFrozen(),
-                frozenAfter,
-                operatorType,
-                operatorId,
-                reason);
-    }
-
-    private Optional<CreditAccount> findByUserId(Long userId) {
-        List<CreditAccount> accounts = jdbcTemplate.query("""
-                SELECT * FROM credit_accounts
-                WHERE user_id = ?
-                """, accountRowMapper, userId);
-        return accounts.stream().findFirst();
+    default boolean manualDeduct(Long accountId, int amount) {
+        return manualDeductRows(accountId, amount) == 1;
     }
 }

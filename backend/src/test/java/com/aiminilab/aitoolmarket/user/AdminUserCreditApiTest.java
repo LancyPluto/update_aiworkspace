@@ -8,6 +8,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
+import static com.aiminilab.aitoolmarket.testsupport.InternalApiTestSupport.signed;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -46,15 +47,16 @@ class AdminUserCreditApiTest {
                 .andExpect(jsonPath("$.data.available").value(90))
                 .andExpect(jsonPath("$.data.totalConsumed").value(0));
 
-        mockMvc.perform(post("/api/internal/v1/tasks/{taskId}/success", successTaskId)
-                        .header("X-Internal-Token", "local-internal-token")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
+        String successBody = """
                                 {
                                   "resourceType": "MARKDOWN",
                                   "contentText": "ok"
                                 }
-                                """))
+                                """;
+        mockMvc.perform(signed(post("/api/internal/v1/tasks/{taskId}/success", successTaskId), "POST",
+                        "/api/internal/v1/tasks/%d/success".formatted(successTaskId), successBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(successBody))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("SUCCESS"));
 
@@ -68,15 +70,16 @@ class AdminUserCreditApiTest {
 
         Long failedTaskId = createTask(userToken, "credit_lifecycle_tool", "credit-life-failed");
 
-        mockMvc.perform(post("/api/internal/v1/tasks/{taskId}/failed", failedTaskId)
-                        .header("X-Internal-Token", "local-internal-token")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
+        String failedBody = """
                                 {
                                   "errorCode": "MODEL_CALL_FAILED",
                                   "errorMessage": "model timeout"
                                 }
-                                """))
+                                """;
+        mockMvc.perform(signed(post("/api/internal/v1/tasks/{taskId}/failed", failedTaskId), "POST",
+                        "/api/internal/v1/tasks/%d/failed".formatted(failedTaskId), failedBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(failedBody))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("FAILED"));
 

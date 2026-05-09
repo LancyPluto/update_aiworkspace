@@ -151,7 +151,7 @@ public class TaskServiceImpl implements TaskService {
         task.setIdempotencyKey(clientRequestId);
         task.setEstimatedCreditCost(tool.getEstimatedCreditCost());
 
-        Long taskId = taskMapper.insert(task);
+        Long taskId = taskMapper.insertTask(task);
         creditService.freezeForTask(userId, taskId, tool.getEstimatedCreditCost());
         publishAfterCommit(taskId);
         return TaskStatusResponse.from(findTask(taskId, userId));

@@ -13,7 +13,7 @@ import com.aiminilab.aitoolmarket.task.entity.AiTask;
 import com.aiminilab.aitoolmarket.task.mapper.TaskMapper;
 import com.aiminilab.aitoolmarket.task.service.InternalTaskService;
 import com.aiminilab.aitoolmarket.tool.dto.ToolFieldResponse;
-import com.aiminilab.aitoolmarket.tool.mapper.ToolMapper;
+import com.aiminilab.aitoolmarket.tool.mapper.ToolFieldItemMapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
@@ -25,14 +25,14 @@ import java.util.List;
 public class InternalTaskServiceImpl implements InternalTaskService {
 
     private final TaskMapper taskMapper;
-    private final ToolMapper toolMapper;
+    private final ToolFieldItemMapper toolFieldItemMapper;
     private final ObjectMapper objectMapper;
     private final CreditService creditService;
 
-    public InternalTaskServiceImpl(TaskMapper taskMapper, ToolMapper toolMapper, ObjectMapper objectMapper,
+    public InternalTaskServiceImpl(TaskMapper taskMapper, ToolFieldItemMapper toolFieldItemMapper, ObjectMapper objectMapper,
                                    CreditService creditService) {
         this.taskMapper = taskMapper;
-        this.toolMapper = toolMapper;
+        this.toolFieldItemMapper = toolFieldItemMapper;
         this.objectMapper = objectMapper;
         this.creditService = creditService;
     }
@@ -40,7 +40,7 @@ public class InternalTaskServiceImpl implements InternalTaskService {
     @Override
     public ExecutionContextResponse executionContext(Long taskId) {
         AiTask task = findTask(taskId);
-        List<ToolFieldResponse> fields = toolMapper.findActiveFields(task.getToolId()).stream()
+        List<ToolFieldResponse> fields = toolFieldItemMapper.findActiveFields(task.getToolId()).stream()
                 .map(field -> ToolFieldResponse.from(field, objectMapper))
                 .toList();
         return ExecutionContextResponse.of(task, parseParams(task.getParamsJson()), fields);

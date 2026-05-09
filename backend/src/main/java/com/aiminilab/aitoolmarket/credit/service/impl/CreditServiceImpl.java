@@ -7,6 +7,8 @@ import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.credit.dto.CreditAccountResponse;
 import com.aiminilab.aitoolmarket.credit.dto.CreditLogResponse;
 import com.aiminilab.aitoolmarket.credit.entity.CreditAccount;
+import com.aiminilab.aitoolmarket.credit.entity.CreditLog;
+import com.aiminilab.aitoolmarket.credit.mapper.CreditLogMapper;
 import com.aiminilab.aitoolmarket.credit.mapper.CreditMapper;
 import com.aiminilab.aitoolmarket.credit.service.CreditService;
 import org.springframework.stereotype.Service;
@@ -18,9 +20,11 @@ import java.util.List;
 public class CreditServiceImpl implements CreditService {
 
     private final CreditMapper creditMapper;
+    private final CreditLogMapper creditLogMapper;
 
-    public CreditServiceImpl(CreditMapper creditMapper) {
+    public CreditServiceImpl(CreditMapper creditMapper, CreditLogMapper creditLogMapper) {
         this.creditMapper = creditMapper;
+        this.creditLogMapper = creditLogMapper;
     }
 
     @Override
@@ -41,7 +45,7 @@ public class CreditServiceImpl implements CreditService {
         if (!creditMapper.freeze(before.getId(), amount)) {
             throw new BusinessException(ErrorCode.CREDIT_NOT_ENOUGH, "算力不足");
         }
-        creditMapper.insertLog(
+        insertLog(
                 before,
                 taskId,
                 CreditLogType.FREEZE.name(),
@@ -65,7 +69,7 @@ public class CreditServiceImpl implements CreditService {
         if (!creditMapper.settle(before.getId(), amount)) {
             throw new BusinessException(ErrorCode.CREDIT_NOT_ENOUGH, "冻结算力不足，无法扣除");
         }
-        creditMapper.insertLog(
+        insertLog(
                 before,
                 taskId,
                 CreditLogType.DEDUCT.name(),
@@ -89,7 +93,7 @@ public class CreditServiceImpl implements CreditService {
         if (!creditMapper.release(before.getId(), amount)) {
             return;
         }
-        creditMapper.insertLog(
+        insertLog(
                 before,
                 taskId,
                 CreditLogType.RELEASE.name(),
@@ -110,7 +114,7 @@ public class CreditServiceImpl implements CreditService {
         if (!creditMapper.manualAdd(before.getId(), amount)) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "算力账户不可用");
         }
-        creditMapper.insertLog(
+        insertLog(
                 before,
                 null,
                 CreditLogType.MANUAL_ADD.name(),
@@ -132,7 +136,7 @@ public class CreditServiceImpl implements CreditService {
         if (before.getBalance() - before.getFrozen() < amount || !creditMapper.manualDeduct(before.getId(), amount)) {
             throw new BusinessException(ErrorCode.CREDIT_NOT_ENOUGH, "可用算力不足");
         }
-        creditMapper.insertLog(
+        insertLog(
                 before,
                 null,
                 CreditLogType.MANUAL_DEDUCT.name(),
@@ -151,9 +155,49 @@ public class CreditServiceImpl implements CreditService {
     public PageResponse<CreditLogResponse> logs(Long userId, String logType, Integer pageNo, Integer pageSize) {
         int normalizedPageSize = PageResponse.normalizePageSize(pageSize);
         int offset = PageResponse.offset(pageNo, pageSize);
-        List<CreditLogResponse> list = creditMapper.findLogs(userId, logType, normalizedPageSize, offset);
-        long total = creditMapper.countLogs(userId, logType);
+        List<CreditLogResponse> list = creditLogMapper.findLogs(userId, logType, normalizedPageSize, offset).stream()
+                .map(this::toResponse)
+                .toList();
+        long total = creditLogMapper.countLogs(userId, logType);
         return PageResponse.of(list, total, pageNo, pageSize);
+    }
+
+    private void insertLog(CreditAccount before, Long taskId, String logType, int amount, int frozenAmount,
+                           int balanceAfter, int frozenAfter, String operatorType, Long operatorId, String reason) {
+        CreditLog log = new CreditLog();
+        log.setUserId(before.getUserId());
+        log.setAccountId(before.getId());
+        log.setTaskId(taskId);
+        log.setLogType(logType);
+        log.setAmount(amount);
+        log.setFrozenAmount(frozenAmount);
+        log.setBalanceBefore(before.getBalance());
+        log.setBalanceAfter(balanceAfter);
+        log.setFrozenBefore(before.getFrozen());
+        log.setFrozenAfter(frozenAfter);
+        log.setOperatorType(operatorType);
+        log.setOperatorId(operatorId);
+        log.setReason(reason);
+        creditLogMapper.insert(log);
+    }
+
+    private CreditLogResponse toResponse(CreditLog log) {
+        return new CreditLogResponse(
+                log.getId(),
+                log.getUserId(),
+                log.getTaskId(),
+                log.getLogType(),
+                log.getAmount(),
+                log.getFrozenAmount(),
+                log.getBalanceBefore(),
+                log.getBalanceAfter(),
+                log.getFrozenBefore(),
+                log.getFrozenAfter(),
+                log.getOperatorType(),
+                log.getOperatorId(),
+                log.getReason(),
+                log.getCreatedAt()
+        );
     }
 
     private String normalizeReason(String reason, String fallback) {

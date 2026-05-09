@@ -13,6 +13,9 @@ import com.aiminilab.aitoolmarket.tool.dto.UpdateToolFieldsRequest;
 import com.aiminilab.aitoolmarket.tool.dto.UpsertToolRequest;
 import com.aiminilab.aitoolmarket.tool.entity.AiTool;
 import com.aiminilab.aitoolmarket.tool.entity.ToolFieldItem;
+import com.aiminilab.aitoolmarket.tool.mapper.ToolCategoryMapper;
+import com.aiminilab.aitoolmarket.tool.mapper.ToolFieldItemMapper;
+import com.aiminilab.aitoolmarket.tool.mapper.ToolFieldSchemaMapper;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolMapper;
 import com.aiminilab.aitoolmarket.tool.service.ToolService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -24,16 +27,24 @@ import java.util.List;
 public class ToolServiceImpl implements ToolService {
 
     private final ToolMapper toolMapper;
+    private final ToolCategoryMapper toolCategoryMapper;
+    private final ToolFieldSchemaMapper toolFieldSchemaMapper;
+    private final ToolFieldItemMapper toolFieldItemMapper;
     private final ObjectMapper objectMapper;
 
-    public ToolServiceImpl(ToolMapper toolMapper, ObjectMapper objectMapper) {
+    public ToolServiceImpl(ToolMapper toolMapper, ToolCategoryMapper toolCategoryMapper,
+                           ToolFieldSchemaMapper toolFieldSchemaMapper, ToolFieldItemMapper toolFieldItemMapper,
+                           ObjectMapper objectMapper) {
         this.toolMapper = toolMapper;
+        this.toolCategoryMapper = toolCategoryMapper;
+        this.toolFieldSchemaMapper = toolFieldSchemaMapper;
+        this.toolFieldItemMapper = toolFieldItemMapper;
         this.objectMapper = objectMapper;
     }
 
     @Override
     public List<ToolCategoryResponse> categories() {
-        return toolMapper.findActiveCategories().stream()
+        return toolCategoryMapper.findActiveCategories().stream()
                 .map(ToolCategoryResponse::from)
                 .toList();
     }
@@ -87,8 +98,8 @@ public class ToolServiceImpl implements ToolService {
 
         AiTool tool = fromRequest(request);
         Long toolId = toolMapper.insertTool(tool, operatorId);
-        Long schemaId = toolMapper.createActiveDefaultSchema(toolId, operatorId);
-        toolMapper.createDefaultFields(schemaId);
+        Long schemaId = toolFieldSchemaMapper.createActiveDefaultSchema(toolId, operatorId);
+        toolFieldItemMapper.createDefaultFields(schemaId);
         return findToolSummary(toolId);
     }
 
@@ -122,9 +133,9 @@ public class ToolServiceImpl implements ToolService {
     @Override
     public List<ToolFieldResponse> updateFields(Long toolId, UpdateToolFieldsRequest request) {
         ensureToolExists(toolId);
-        Long schemaId = toolMapper.findActiveSchemaId(toolId)
+        Long schemaId = toolFieldSchemaMapper.findActiveSchemaId(toolId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具字段配置不存在"));
-        toolMapper.replaceActiveFields(schemaId, request.fields().stream()
+        toolFieldItemMapper.replaceActiveFields(schemaId, request.fields().stream()
                 .map(this::toFieldItem)
                 .toList());
         return fields(toolId);
@@ -153,7 +164,7 @@ public class ToolServiceImpl implements ToolService {
     }
 
     private List<ToolFieldResponse> fields(Long toolId) {
-        return toolMapper.findActiveFields(toolId).stream()
+        return toolFieldItemMapper.findActiveFields(toolId).stream()
                 .map(field -> ToolFieldResponse.from(field, objectMapper))
                 .toList();
     }
