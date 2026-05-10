@@ -30,6 +30,14 @@ export interface ToolCategory {
   categoryCode: string
   categoryName: string
   sortOrder?: number
+  status?: string
+}
+
+export interface UpsertToolCategoryPayload {
+  categoryCode: string
+  categoryName: string
+  sortOrder?: number
+  status?: string
 }
 
 export interface ToolSummary {
@@ -184,6 +192,11 @@ export interface ManualAddCreditsResult {
   balanceAfter?: number
   reason?: string | null
   createdAt?: string
+}
+
+export interface UpdateUserStatusPayload {
+  status: string
+  reason?: string
 }
 
 export interface TestGenerateResult {

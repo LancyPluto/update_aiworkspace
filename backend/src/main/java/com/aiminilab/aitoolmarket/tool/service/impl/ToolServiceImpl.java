@@ -18,8 +18,10 @@ import com.aiminilab.aitoolmarket.tool.dto.ToolFieldRequest;
 import com.aiminilab.aitoolmarket.tool.dto.ToolFieldResponse;
 import com.aiminilab.aitoolmarket.tool.dto.ToolSummaryResponse;
 import com.aiminilab.aitoolmarket.tool.dto.UpdateToolFieldsRequest;
+import com.aiminilab.aitoolmarket.tool.dto.UpsertToolCategoryRequest;
 import com.aiminilab.aitoolmarket.tool.dto.UpsertToolRequest;
 import com.aiminilab.aitoolmarket.tool.entity.AiTool;
+import com.aiminilab.aitoolmarket.tool.entity.ToolCategory;
 import com.aiminilab.aitoolmarket.tool.entity.ToolFieldItem;
 import com.aiminilab.aitoolmarket.tool.entity.ToolFieldSchema;
 import com.aiminilab.aitoolmarket.tool.entity.ToolPrompt;
@@ -68,6 +70,39 @@ public class ToolServiceImpl implements ToolService {
         return toolCategoryMapper.findActiveCategories().stream()
                 .map(ToolCategoryResponse::from)
                 .toList();
+    }
+
+    @Override
+    public List<ToolCategoryResponse> adminCategories() {
+        return toolCategoryMapper.findAllCategories().stream()
+                .map(ToolCategoryResponse::from)
+                .toList();
+    }
+
+    @Override
+    public ToolCategoryResponse createCategory(UpsertToolCategoryRequest request) {
+        ToolCategory category = toCategory(request);
+        toolCategoryMapper.insert(category);
+        return ToolCategoryResponse.from(category);
+    }
+
+    @Override
+    public ToolCategoryResponse updateCategory(Long categoryId, UpsertToolCategoryRequest request) {
+        ToolCategory category = ensureCategoryExists(categoryId);
+        category.setCategoryCode(request.categoryCode());
+        category.setCategoryName(request.categoryName());
+        category.setSortOrder(request.sortOrder() == null ? 0 : request.sortOrder());
+        category.setStatus(normalizeCategoryStatus(request.status()));
+        toolCategoryMapper.updateById(category);
+        return ToolCategoryResponse.from(category);
+    }
+
+    @Override
+    public ToolCategoryResponse updateCategoryStatus(Long categoryId, String status) {
+        ToolCategory category = ensureCategoryExists(categoryId);
+        category.setStatus(normalizeCategoryStatus(status));
+        toolCategoryMapper.updateById(category);
+        return ToolCategoryResponse.from(category);
     }
 
     @Override
@@ -281,6 +316,30 @@ public class ToolServiceImpl implements ToolService {
     private void ensureToolExists(Long toolId) {
         toolMapper.findById(toolId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在"));
+    }
+
+    private ToolCategory ensureCategoryExists(Long categoryId) {
+        ToolCategory category = toolCategoryMapper.selectById(categoryId);
+        if (category == null) {
+            throw new BusinessException(ErrorCode.TOOL_NOT_FOUND, "Category not found");
+        }
+        return category;
+    }
+
+    private ToolCategory toCategory(UpsertToolCategoryRequest request) {
+        ToolCategory category = new ToolCategory();
+        category.setCategoryCode(request.categoryCode());
+        category.setCategoryName(request.categoryName());
+        category.setSortOrder(request.sortOrder() == null ? 0 : request.sortOrder());
+        category.setStatus(normalizeCategoryStatus(request.status()));
+        return category;
+    }
+
+    private String normalizeCategoryStatus(String status) {
+        if (status == null || status.isBlank()) {
+            return "ACTIVE";
+        }
+        return status.trim().toUpperCase();
     }
 
     private ToolPrompt ensurePromptExists(Long promptId) {

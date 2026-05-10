@@ -6,10 +6,15 @@ import type {
   ManualAddCreditsPayload,
   ManualAddCreditsResult,
   PageResponse,
+  UpdateUserStatusPayload,
 } from './types'
 
 export function fetchAdminUsers() {
   return http.get<PageResponse<AdminMember>>('/api/admin/v1/users')
+}
+
+export function updateUserStatus(userId: number, payload: UpdateUserStatusPayload) {
+  return http.patch<AdminMember>(`/api/admin/v1/users/${userId}/status`, payload)
 }
 
 export function manualAddCredits(userId: number, payload: ManualAddCreditsPayload) {

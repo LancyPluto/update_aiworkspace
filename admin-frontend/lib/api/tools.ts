@@ -3,11 +3,28 @@ import type {
   PageResponse,
   ToolCategory,
   ToolSummary,
+  UpsertToolCategoryPayload,
   UpsertToolPayload,
 } from './types'
 
 export function fetchToolCategories() {
   return http.get<ToolCategory[]>('/api/v1/tool-categories')
+}
+
+export function fetchAdminToolCategories() {
+  return http.get<ToolCategory[]>('/api/admin/v1/tool-categories')
+}
+
+export function createToolCategory(payload: UpsertToolCategoryPayload) {
+  return http.post<ToolCategory>('/api/admin/v1/tool-categories', payload)
+}
+
+export function updateToolCategory(categoryId: number, payload: UpsertToolCategoryPayload) {
+  return http.put<ToolCategory>(`/api/admin/v1/tool-categories/${categoryId}`, payload)
+}
+
+export function updateToolCategoryStatus(categoryId: number, status: string) {
+  return http.patch<ToolCategory>(`/api/admin/v1/tool-categories/${categoryId}/status`, { status })
 }
 
 export function fetchAdminTools() {

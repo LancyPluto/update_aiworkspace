@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue"
-import { Wallet, ReceiptText } from "lucide-vue-next"
+import { ReceiptText, Wallet } from "lucide-vue-next"
 import AppShell from "@/components/AppShell.vue"
 import { fetchCreditAccount, fetchCreditLogs } from "@/api/creditApi"
 import type { CreditAccount, CreditLog } from "@/api/types"
@@ -8,11 +8,13 @@ import { useAuthStore } from "@/store/authStore"
 
 const auth = useAuthStore()
 const loading = ref(false)
+const error = ref("")
 const account = ref<CreditAccount | null>(null)
 const logs = ref<CreditLog[]>([])
 
 async function loadBilling() {
   loading.value = true
+  error.value = ""
   try {
     const [accountRes, logRes] = await Promise.all([
       fetchCreditAccount({ token: auth.token }),
@@ -20,6 +22,8 @@ async function loadBilling() {
     ])
     account.value = accountRes
     logs.value = logRes.list
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : "加载算力数据失败"
   } finally {
     loading.value = false
   }
@@ -31,6 +35,10 @@ onMounted(loadBilling)
 <template>
   <AppShell title="会员与算力" description="实时读取后端算力账户和流水">
     <div class="space-y-6 px-6 py-6">
+      <div v-if="error" class="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
+        {{ error }}
+      </div>
+
       <div class="grid gap-4 md:grid-cols-4">
         <div class="rounded-lg border border-border bg-card p-4">
           <div class="flex items-center gap-2 text-sm text-muted-foreground">
@@ -57,7 +65,8 @@ onMounted(loadBilling)
           <ReceiptText class="h-4 w-4 text-primary" />
           <h2 class="text-sm font-semibold">算力流水</h2>
         </div>
-        <div class="overflow-x-auto">
+        <div v-if="loading" class="px-5 py-8 text-center text-sm text-muted-foreground">加载中...</div>
+        <div v-else class="overflow-x-auto">
           <table class="w-full min-w-[720px] text-sm">
             <thead class="bg-secondary/70 text-xs text-muted-foreground">
               <tr>
@@ -80,9 +89,7 @@ onMounted(loadBilling)
               </tr>
             </tbody>
           </table>
-        </div>
-        <div v-if="!loading && logs.length === 0" class="px-5 py-8 text-center text-sm text-muted-foreground">
-          暂无算力流水
+          <div v-if="logs.length === 0" class="px-5 py-8 text-center text-sm text-muted-foreground">暂无算力流水</div>
         </div>
       </section>
     </div>
