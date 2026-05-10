@@ -148,11 +148,13 @@ public class ToolServiceImpl implements ToolService {
 
     @Override
     public ToolSummaryResponse createTool(UpsertToolRequest request, Long operatorId) {
-        if (toolMapper.existsByCode(request.toolCode())) {
+        String toolCode = normalizeToolCode(request.toolCode(), request.toolName());
+        if (toolMapper.existsByCode(toolCode)) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "工具编码已存在");
         }
 
         AiTool tool = fromRequest(request);
+        tool.setToolCode(toolCode);
         Long toolId = toolMapper.insertTool(tool, operatorId);
         Long schemaId = toolFieldSchemaMapper.createActiveDefaultSchema(toolId, operatorId);
         toolFieldItemMapper.createDefaultFields(schemaId);
@@ -311,6 +313,27 @@ public class ToolServiceImpl implements ToolService {
         tool.setCoverUrl(request.coverUrl());
         tool.setEstimatedCreditCost(request.estimatedCreditCost());
         return tool;
+    }
+
+    private String normalizeToolCode(String requestedCode, String toolName) {
+        if (requestedCode != null && !requestedCode.isBlank()) {
+            return requestedCode.trim();
+        }
+
+        String baseCode = toolName == null ? "" : toolName.toLowerCase()
+                .replaceAll("[^a-z0-9]+", "_")
+                .replaceAll("^_+|_+$", "");
+        if (baseCode.isBlank()) {
+            baseCode = "tool";
+        }
+
+        String candidate = baseCode;
+        int suffix = 1;
+        while (toolMapper.existsByCode(candidate)) {
+            candidate = baseCode + "_" + suffix;
+            suffix++;
+        }
+        return candidate;
     }
 
     private void ensureToolExists(Long toolId) {

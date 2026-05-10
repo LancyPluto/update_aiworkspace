@@ -207,7 +207,8 @@ export default function ToolsPage() {
         description: form.description.trim() || undefined,
         estimatedCreditCost: Math.floor(credits),
       })
-      setToolList((prev) => [mapTool(created), ...prev])
+      const published = await publishTool(created.id)
+      setToolList((prev) => [mapTool(published), ...prev])
       setForm(initialForm)
       setIsAddDialogOpen(false)
     } catch (err) {

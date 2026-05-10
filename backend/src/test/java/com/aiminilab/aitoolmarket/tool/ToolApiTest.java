@@ -142,6 +142,41 @@ class ToolApiTest {
     }
 
     @Test
+    void adminCanCreateToolWithoutCodeAndPublishItForUserMarketplace() throws Exception {
+        String adminToken = loginAdmin();
+
+        String createResponse = mockMvc.perform(post("/api/admin/v1/tools")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "toolName": "No Code Tool",
+                                  "categoryId": 1,
+                                  "description": "Created from admin form",
+                                  "coverUrl": "",
+                                  "estimatedCreditCost": 5
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("DRAFT"))
+                .andExpect(jsonPath("$.data.toolCode").isNotEmpty())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        Long toolId = Long.parseLong(createResponse.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
+        String toolCode = createResponse.replaceAll("(?s).*\\\"toolCode\\\"\\s*:\\s*\\\"([^\\\"]+)\\\".*", "$1");
+
+        publishTool(adminToken, toolId);
+
+        mockMvc.perform(get("/api/v1/tools")
+                        .param("keyword", "No Code Tool"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(1))
+                .andExpect(jsonPath("$.data.list[0].toolCode").value(toolCode));
+    }
+
+    @Test
     void adminCanPersistPromptVersionsAndPublishActiveVersion() throws Exception {
         String adminToken = loginAdmin();
         Long toolId = createTool(adminToken, "prompt_tool", "Prompt Tool", 1, "Prompt persistence", 2);
