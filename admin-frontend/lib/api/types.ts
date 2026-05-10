@@ -8,6 +8,9 @@ export interface ApiResponse<T> {
 export interface PageResponse<T> {
   list: T[]
   total: number
+  pageNo?: number
+  pageSize?: number
+  hasNext?: boolean
 }
 
 export interface AdminUser {
@@ -99,10 +102,17 @@ export interface TaskLog {
 
 export interface CreditLogItem {
   id: number
+  userId?: number
+  taskId?: number | null
   logType: string
   amount: number
+  frozenAmount?: number
   balanceBefore: number
   balanceAfter: number
+  frozenBefore?: number
+  frozenAfter?: number
+  operatorType?: string
+  operatorId?: number | null
   reason?: string | null
   createdAt: string
 }
@@ -163,12 +173,17 @@ export interface ManualAddCreditsPayload {
 }
 
 export interface ManualAddCreditsResult {
+  accountId?: number
   userId: number
-  amount: number
-  balanceBefore: number
-  balanceAfter: number
+  amount?: number
+  balance?: number
+  frozen?: number
+  totalGranted?: number
+  totalConsumed?: number
+  balanceBefore?: number
+  balanceAfter?: number
   reason?: string | null
-  createdAt: string
+  createdAt?: string
 }
 
 export interface TestGenerateResult {

@@ -27,10 +27,14 @@ export default function LoginPage() {
       return
     }
     setErrorMessage(null)
-    setIsLoading(true)
+      setIsLoading(true)
     try {
       await adminLogin(email.trim(), password)
-      router.push("/")
+      const redirect =
+        typeof window !== "undefined"
+          ? new URLSearchParams(window.location.search).get("redirect")
+          : null
+      router.push(redirect || "/")
     } catch (err) {
       const message = err instanceof ApiError ? err.message : "登录失败，请稍后重试"
       setErrorMessage(message)

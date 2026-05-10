@@ -114,7 +114,7 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     throw new ApiError('网络异常，请检查后端服务是否启动', 'NETWORK_ERROR')
   }
 
-  if (response.status === 401 && !options.skipAuthRedirect) {
+  if ((response.status === 401 || response.status === 403) && !options.skipAuthRedirect) {
     clearSession()
     if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
       window.location.href = '/login'
