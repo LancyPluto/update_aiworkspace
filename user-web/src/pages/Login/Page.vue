@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { reactive, ref } from "vue"
-import { RouterLink, useRouter } from "vue-router"
+import { RouterLink, useRoute, useRouter } from "vue-router"
 import { Sparkles, ShieldCheck, Zap, Boxes, Loader2 } from "lucide-vue-next"
 import { useAuthStore } from "@/store/authStore"
 import { ApiBusinessError } from "@/api"
 
 const router = useRouter()
+const route = useRoute()
 const auth = useAuthStore()
 
 const form = reactive({
@@ -25,8 +26,8 @@ async function handleLogin() {
   submitting.value = true
   try {
     await auth.login({ account: form.account, password: form.password })
-    // 登录成功，跳转到工具超市
-    router.push({ name: "ToolList" })
+    const redirect = typeof route.query.redirect === "string" ? route.query.redirect : null
+    router.push(redirect || { name: "ToolList" })
   } catch (e) {
     if (e instanceof ApiBusinessError) {
       errorMsg.value = e.message

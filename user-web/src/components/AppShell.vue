@@ -29,7 +29,7 @@ const auth = useAuthStore()
 const credit = ref<CreditAccount | null>(null)
 
 const userNav = [
-  { href: "/marketplace" as const, label: "工作台", icon: LayoutGrid },
+  { href: "/dashboard" as const, label: "工作台", icon: LayoutGrid },
   { href: "/marketplace" as const, label: "AI 工具超市", icon: Store },
   { href: "/tasks" as const, label: "我的任务", icon: ListChecks },
   { href: "/library" as const, label: "素材库", icon: FolderHeart },
