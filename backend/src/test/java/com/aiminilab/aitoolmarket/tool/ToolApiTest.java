@@ -141,6 +141,84 @@ class ToolApiTest {
                 .andExpect(jsonPath("$.data.fields[0].fieldKey").value("productName"));
     }
 
+    @Test
+    void adminCanPersistPromptVersionsAndPublishActiveVersion() throws Exception {
+        String adminToken = loginAdmin();
+        Long toolId = createTool(adminToken, "prompt_tool", "Prompt Tool", 1, "Prompt persistence", 2);
+
+        String promptResponse = mockMvc.perform(post("/api/admin/v1/tools/{toolId}/prompts", toolId)
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "promptCode": "default",
+                                  "promptName": "Default Prompt"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.data.toolId").value(toolId.intValue()))
+                .andExpect(jsonPath("$.data.promptCode").value("default"))
+                .andExpect(jsonPath("$.data.activeVersionId").doesNotExist())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        Long promptId = Long.parseLong(promptResponse.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
+
+        String versionResponse = mockMvc.perform(post("/api/admin/v1/prompts/{promptId}/versions", promptId)
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "versionNo": "v1",
+                                  "systemPrompt": "You are a concise assistant.",
+                                  "userPromptTemplate": "Write about {{topic}} for {{audience}}.",
+                                  "outputFormat": "MARKDOWN"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.data.promptId").value(promptId.intValue()))
+                .andExpect(jsonPath("$.data.versionNo").value("v1"))
+                .andExpect(jsonPath("$.data.status").value("DRAFT"))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        Long versionId = Long.parseLong(versionResponse.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
+
+        mockMvc.perform(get("/api/admin/v1/prompts/{promptId}/versions", promptId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].id").value(versionId.intValue()))
+                .andExpect(jsonPath("$.data[0].userPromptTemplate").value("Write about {{topic}} for {{audience}}."));
+
+        mockMvc.perform(post("/api/admin/v1/prompt-versions/{versionId}/test-generate", versionId)
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "params": {
+                                    "topic": "AI tools",
+                                    "audience": "operators"
+                                  }
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.output").value("Write about AI tools for operators."));
+
+        mockMvc.perform(post("/api/admin/v1/prompt-versions/{versionId}/publish", versionId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("ACTIVE"))
+                .andExpect(jsonPath("$.data.publishedAt").exists());
+
+        mockMvc.perform(get("/api/admin/v1/tools/{toolId}/prompts", toolId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].id").value(promptId.intValue()))
+                .andExpect(jsonPath("$.data[0].activeVersionId").value(versionId.intValue()));
+    }
+
     private String loginAdmin() throws Exception {
         String response = mockMvc.perform(post("/api/admin/v1/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)

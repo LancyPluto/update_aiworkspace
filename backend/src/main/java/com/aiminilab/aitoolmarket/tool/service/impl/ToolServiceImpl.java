@@ -22,16 +22,22 @@ import com.aiminilab.aitoolmarket.tool.dto.UpsertToolRequest;
 import com.aiminilab.aitoolmarket.tool.entity.AiTool;
 import com.aiminilab.aitoolmarket.tool.entity.ToolFieldItem;
 import com.aiminilab.aitoolmarket.tool.entity.ToolFieldSchema;
+import com.aiminilab.aitoolmarket.tool.entity.ToolPrompt;
+import com.aiminilab.aitoolmarket.tool.entity.ToolPromptVersion;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolCategoryMapper;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolFieldItemMapper;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolFieldSchemaMapper;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolMapper;
+import com.aiminilab.aitoolmarket.tool.mapper.ToolPromptMapper;
+import com.aiminilab.aitoolmarket.tool.mapper.ToolPromptVersionMapper;
 import com.aiminilab.aitoolmarket.tool.service.ToolService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Map;
 
 @Service
 public class ToolServiceImpl implements ToolService {
@@ -40,15 +46,20 @@ public class ToolServiceImpl implements ToolService {
     private final ToolCategoryMapper toolCategoryMapper;
     private final ToolFieldSchemaMapper toolFieldSchemaMapper;
     private final ToolFieldItemMapper toolFieldItemMapper;
+    private final ToolPromptMapper toolPromptMapper;
+    private final ToolPromptVersionMapper toolPromptVersionMapper;
     private final ObjectMapper objectMapper;
 
     public ToolServiceImpl(ToolMapper toolMapper, ToolCategoryMapper toolCategoryMapper,
                            ToolFieldSchemaMapper toolFieldSchemaMapper, ToolFieldItemMapper toolFieldItemMapper,
+                           ToolPromptMapper toolPromptMapper, ToolPromptVersionMapper toolPromptVersionMapper,
                            ObjectMapper objectMapper) {
         this.toolMapper = toolMapper;
         this.toolCategoryMapper = toolCategoryMapper;
         this.toolFieldSchemaMapper = toolFieldSchemaMapper;
         this.toolFieldItemMapper = toolFieldItemMapper;
+        this.toolPromptMapper = toolPromptMapper;
+        this.toolPromptVersionMapper = toolPromptVersionMapper;
         this.objectMapper = objectMapper;
     }
 
@@ -191,33 +202,63 @@ public class ToolServiceImpl implements ToolService {
     @Override
     public List<PromptResponse> prompts(Long toolId) {
         ensureToolExists(toolId);
-        return List.of();
+        return toolPromptMapper.findByToolId(toolId).stream()
+                .map(this::toPromptResponse)
+                .toList();
     }
 
     @Override
     public PromptResponse createPrompt(Long toolId, CreatePromptRequest request) {
         ensureToolExists(toolId);
-        throw new BusinessException(ErrorCode.PARAM_ERROR, "Tool prompt persistence is not available in this merge");
+        ToolPrompt prompt = new ToolPrompt();
+        prompt.setToolId(toolId);
+        prompt.setPromptCode(request.promptCode());
+        prompt.setPromptName(request.promptName());
+        prompt.setStatus("ACTIVE");
+        toolPromptMapper.insert(prompt);
+        return toPromptResponse(prompt);
     }
 
     @Override
     public List<PromptVersionResponse> promptVersions(Long promptId) {
-        return List.of();
+        ensurePromptExists(promptId);
+        return toolPromptVersionMapper.findByPromptId(promptId).stream()
+                .map(this::toPromptVersionResponse)
+                .toList();
     }
 
     @Override
     public PromptVersionResponse createPromptVersion(Long promptId, CreatePromptVersionRequest request, Long operatorId) {
-        throw new BusinessException(ErrorCode.PARAM_ERROR, "Tool prompt version persistence is not available in this merge");
+        ensurePromptExists(promptId);
+        ToolPromptVersion version = new ToolPromptVersion();
+        version.setPromptId(promptId);
+        version.setVersionNo(request.versionNo());
+        version.setSystemPrompt(request.systemPrompt());
+        version.setUserPromptTemplate(request.userPromptTemplate());
+        version.setOutputFormat(request.outputFormat() == null || request.outputFormat().isBlank()
+                ? "MARKDOWN"
+                : request.outputFormat());
+        version.setStatus("DRAFT");
+        toolPromptVersionMapper.insert(version);
+        return toPromptVersionResponse(version);
     }
 
     @Override
     public TestGenerateResponse testGenerate(Long promptVersionId, TestGenerateRequest request) {
-        return new TestGenerateResponse("");
+        ToolPromptVersion version = findPromptVersion(promptVersionId);
+        return new TestGenerateResponse(renderPrompt(version.getUserPromptTemplate(), request.params()));
     }
 
     @Override
+    @Transactional
     public PromptVersionResponse publishPromptVersion(Long promptVersionId) {
-        throw new BusinessException(ErrorCode.PARAM_ERROR, "Tool prompt version persistence is not available in this merge");
+        ToolPromptVersion version = findPromptVersion(promptVersionId);
+        version.setStatus("ACTIVE");
+        version.setPublishedAt(java.time.LocalDateTime.now());
+        toolPromptVersionMapper.updateById(version);
+        toolPromptVersionMapper.deactivateOtherVersions(version.getPromptId(), version.getId());
+        toolPromptVersionMapper.updatePromptActiveVersion(version.getPromptId(), version.getId());
+        return toPromptVersionResponse(version);
     }
 
     private ToolSummaryResponse findToolSummary(Long toolId) {
@@ -242,6 +283,16 @@ public class ToolServiceImpl implements ToolService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在"));
     }
 
+    private ToolPrompt ensurePromptExists(Long promptId) {
+        return toolPromptMapper.findById(promptId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "Prompt not found"));
+    }
+
+    private ToolPromptVersion findPromptVersion(Long promptVersionId) {
+        return toolPromptVersionMapper.findById(promptVersionId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "Prompt version not found"));
+    }
+
     private List<ToolFieldResponse> fields(Long toolId) {
         return toolFieldItemMapper.findActiveFields(toolId).stream()
                 .map(field -> ToolFieldResponse.from(field, objectMapper))
@@ -260,6 +311,43 @@ public class ToolServiceImpl implements ToolService {
                 null,
                 null
         );
+    }
+
+    private PromptResponse toPromptResponse(ToolPrompt prompt) {
+        return new PromptResponse(
+                prompt.getId(),
+                prompt.getToolId(),
+                prompt.getPromptCode(),
+                prompt.getPromptName(),
+                prompt.getActiveVersionId(),
+                prompt.getStatus()
+        );
+    }
+
+    private PromptVersionResponse toPromptVersionResponse(ToolPromptVersion version) {
+        return new PromptVersionResponse(
+                version.getId(),
+                version.getPromptId(),
+                version.getVersionNo(),
+                version.getSystemPrompt(),
+                version.getUserPromptTemplate(),
+                version.getOutputFormat(),
+                version.getStatus(),
+                version.getCreatedAt(),
+                version.getPublishedAt()
+        );
+    }
+
+    private String renderPrompt(String template, Map<String, Object> params) {
+        String output = template == null ? "" : template;
+        if (params == null || params.isEmpty()) {
+            return output;
+        }
+        for (Map.Entry<String, Object> entry : params.entrySet()) {
+            String value = entry.getValue() == null ? "" : String.valueOf(entry.getValue());
+            output = output.replace("{{" + entry.getKey() + "}}", value);
+        }
+        return output;
     }
 
     private ToolFieldItem toFieldItem(ToolFieldRequest request) {

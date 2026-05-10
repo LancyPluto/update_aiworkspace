@@ -1,8 +1,13 @@
 package com.aiminilab.aitoolmarket.tool.entity;
 
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableName;
+
 import java.time.LocalDateTime;
 
+@TableName("tool_prompt_versions")
 public class ToolPromptVersion {
+    @TableId
     private Long id;
     private Long promptId;
     private String versionNo;
