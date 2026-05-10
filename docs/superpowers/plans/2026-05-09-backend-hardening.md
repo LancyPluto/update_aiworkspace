@@ -276,7 +276,7 @@ Expected: internal API security tests pass.
 - Test: `backend/src/test/java/com/aiminilab/aitoolmarket/task/TaskStateMachineTest.java`
 - Test: `backend/src/test/java/com/aiminilab/aitoolmarket/task/WorkerCallbackIdempotencyTest.java`
 
-- [ ] **Step 1: Centralize allowed transitions**
+- [x] **Step 1: Centralize allowed transitions**
 
 Allowed transitions:
 
@@ -292,7 +292,7 @@ Terminal states:
 - `SUCCESS`
 - `CANCELLED`
 
-- [ ] **Step 2: Add conditional SQL updates**
+- [x] **Step 2: Add conditional SQL updates**
 
 Every status update in `TaskMapper` should include expected current states:
 
@@ -303,7 +303,7 @@ WHERE id = #{taskId}
 
 Mapper methods should return affected row count.
 
-- [ ] **Step 3: Make worker success idempotent**
+- [x] **Step 3: Make worker success idempotent**
 
 Rules:
 
@@ -311,7 +311,7 @@ Rules:
 - If task is `CANCELLED`, ignore worker success and return current status.
 - If task is `FAILED`, do not allow success unless explicit retry moved it back to `QUEUED`.
 
-- [ ] **Step 4: Make failure/release idempotent**
+- [x] **Step 4: Make failure/release idempotent**
 
 Rules:
 
@@ -319,7 +319,7 @@ Rules:
 - If task is `SUCCESS`, do not release credits.
 - If task is `CANCELLED`, do not release credits again.
 
-- [ ] **Step 5: Add tests**
+- [x] **Step 5: Add tests**
 
 Test cases:
 
@@ -329,12 +329,12 @@ Test cases:
 - Admin retry from `FAILED` returns task to `QUEUED`.
 - Invalid transition returns business error.
 
-- [ ] **Step 6: Verify**
+- [x] **Step 6: Verify**
 
 Run:
 
 ```bash
-mvn test -Dtest=TaskStateMachineTest,WorkerCallbackIdempotencyTest,TaskCreditApiTest,WorkerInternalApiTest
+mvn test -Dtest=TaskStateMachineTest,WorkerCallbackIdempotencyTest,TaskCreditApiTest,WorkerInternalApiTest,AdminTaskApiTest
 ```
 
 Expected: task state and credit tests pass.

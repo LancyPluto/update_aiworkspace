@@ -14,6 +14,7 @@ import com.aiminilab.aitoolmarket.task.entity.AiTask;
 import com.aiminilab.aitoolmarket.task.mapper.TaskMapper;
 import com.aiminilab.aitoolmarket.task.service.TaskQueuePublisher;
 import com.aiminilab.aitoolmarket.task.service.TaskService;
+import com.aiminilab.aitoolmarket.task.service.TaskStateMachine;
 import com.aiminilab.aitoolmarket.tool.entity.AiTool;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolMapper;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -88,9 +89,14 @@ public class TaskServiceImpl implements TaskService {
     @Transactional
     public TaskStatusResponse cancel(Long userId, Long taskId) {
         AiTask task = findTask(taskId, userId);
-        ensureCancellable(task);
-        creditService.releaseForTask(task.getUserId(), taskId, task.getEstimatedCreditCost());
-        taskMapper.cancel(taskId);
+        TaskStateMachine.ensureTransition(task.getStatus(), TaskStatus.CANCELLED.name());
+        int updated = taskMapper.cancel(taskId, List.of(task.getStatus()));
+        if (updated == 0) {
+            AiTask current = findTask(taskId, userId);
+            TaskStateMachine.ensureTransition(current.getStatus(), TaskStatus.CANCELLED.name());
+        } else {
+            creditService.releaseForTask(task.getUserId(), taskId, task.getEstimatedCreditCost());
+        }
         return TaskStatusResponse.from(findTask(taskId, userId));
     }
 
@@ -122,8 +128,11 @@ public class TaskServiceImpl implements TaskService {
 
     @Override
     public TaskStatusResponse adminRetry(Long taskId) {
-        findTask(taskId);
-        taskMapper.resetToQueued(taskId);
+        AiTask task = findTask(taskId);
+        TaskStateMachine.ensureTransition(task.getStatus(), TaskStatus.QUEUED.name());
+        if (taskMapper.resetToQueued(taskId, List.of(TaskStatus.FAILED.name())) == 0) {
+            TaskStateMachine.ensureTransition(findTask(taskId).getStatus(), TaskStatus.QUEUED.name());
+        }
         publishAfterCommit(taskId);
         return TaskStatusResponse.from(findTask(taskId));
     }
@@ -131,11 +140,13 @@ public class TaskServiceImpl implements TaskService {
     @Override
     public TaskStatusResponse adminCancel(Long taskId) {
         AiTask task = findTask(taskId);
-        if (!TaskStatus.SUCCESS.name().equals(task.getStatus()) && !TaskStatus.FAILED.name().equals(task.getStatus())
-                && !TaskStatus.CANCELLED.name().equals(task.getStatus())) {
+        TaskStateMachine.ensureTransition(task.getStatus(), TaskStatus.CANCELLED.name());
+        int updated = taskMapper.cancel(taskId, List.of(TaskStatus.QUEUED.name(), TaskStatus.PROCESSING.name()));
+        if (updated == 0) {
+            TaskStateMachine.ensureTransition(findTask(taskId).getStatus(), TaskStatus.CANCELLED.name());
+        } else {
             creditService.releaseForTask(task.getUserId(), taskId, task.getEstimatedCreditCost());
         }
-        taskMapper.cancel(taskId);
         return TaskStatusResponse.from(findTask(taskId));
     }
 
@@ -155,14 +166,6 @@ public class TaskServiceImpl implements TaskService {
         creditService.freezeForTask(userId, taskId, tool.getEstimatedCreditCost());
         publishAfterCommit(taskId);
         return TaskStatusResponse.from(findTask(taskId, userId));
-    }
-
-    private void ensureCancellable(AiTask task) {
-        String status = task.getStatus();
-        if (TaskStatus.SUCCESS.name().equals(status) || TaskStatus.FAILED.name().equals(status)
-                || TaskStatus.CANCELLED.name().equals(status)) {
-            throw new BusinessException(ErrorCode.TASK_STATUS_INVALID, "当前任务状态不允许取消");
-        }
     }
 
     private TaskDetailResponse toDetail(AiTask task) {
