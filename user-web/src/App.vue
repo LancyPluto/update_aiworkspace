@@ -1,32 +1,7 @@
-<script setup>
-import { computed } from 'vue'
-import { useRoute } from 'vue-router'
-import AppHeader from './components/AppHeader.vue'
-
-const route = useRoute()
-const showHeader = computed(() => route.name !== 'login')
+<script setup lang="ts">
+import { RouterView } from "vue-router"
 </script>
 
 <template>
-  <div class="app-shell">
-    <AppHeader v-if="showHeader" />
-    <main class="app-main">
-      <RouterView />
-    </main>
-  </div>
+  <RouterView />
 </template>
-
-<style scoped>
-.app-shell {
-  display: flex;
-  flex-direction: column;
-  min-height: 100svh;
-  text-align: initial;
-}
-
-.app-main {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-}
-</style>

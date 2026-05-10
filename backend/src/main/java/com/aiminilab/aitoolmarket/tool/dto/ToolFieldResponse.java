@@ -10,6 +10,7 @@ public record ToolFieldResponse(
         String fieldType,
         String placeholder,
         JsonNode options,
+        String optionsJson,
         Boolean required,
         Integer sortOrder
 ) {
@@ -20,6 +21,7 @@ public record ToolFieldResponse(
                 item.getFieldType(),
                 item.getPlaceholder(),
                 parseJson(item.getOptionsJson(), objectMapper),
+                item.getOptionsJson(),
                 item.getRequired(),
                 item.getSortOrder()
         );

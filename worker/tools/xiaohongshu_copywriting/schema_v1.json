@@ -1,0 +1,56 @@
+{
+  "toolCode": "xiaohongshu_copywriting",
+  "toolName": "AI 小红书文案生成器",
+  "schemaVersion": "v1",
+  "inputFields": [
+    {
+      "fieldKey": "productName",
+      "fieldName": "产品/服务名称",
+      "fieldType": "TEXT",
+      "required": true,
+      "placeholder": "例如：五一护理套餐"
+    },
+    {
+      "fieldKey": "targetCustomer",
+      "fieldName": "目标用户",
+      "fieldType": "TEXT",
+      "required": true,
+      "placeholder": "例如：年轻女性、宝妈、学生党"
+    },
+    {
+      "fieldKey": "style",
+      "fieldName": "文案风格",
+      "fieldType": "SELECT",
+      "required": true,
+      "options": ["种草", "真实分享", "口语化", "专业"],
+      "placeholder": "例如：种草"
+    },
+    {
+      "fieldKey": "sellingPoints",
+      "fieldName": "核心卖点",
+      "fieldType": "TEXTAREA",
+      "required": true,
+      "placeholder": "例如：价格划算、适合新手、体验舒适"
+    },
+    {
+      "fieldKey": "extraInfo",
+      "fieldName": "补充说明",
+      "fieldType": "TEXTAREA",
+      "required": false,
+      "placeholder": "例如：活动时间、门店位置、价格信息、禁用词"
+    }
+  ],
+  "outputFields": [
+    "titles",
+    "content",
+    "hashtags",
+    "cta"
+  ],
+  "feedbackFields": [
+    "moreColloquial",
+    "lessAdvertising",
+    "highlightSellingPoints",
+    "shorterLength",
+    "retitle"
+  ]
+}

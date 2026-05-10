@@ -1,0 +1,44 @@
+[
+  {
+    "name": "淘宝防晒衣标题优化",
+    "input": {
+      "productName": "轻薄防晒外套",
+      "category": "女装/防晒衣",
+      "targetPlatform": "淘宝",
+      "targetCustomer": "夏季通勤女性",
+      "sellingPoints": "轻薄透气、防晒、显瘦、可收纳",
+      "keywords": "防晒衣、冰丝、夏季、显瘦",
+      "avoidWords": "最强、永久、第一",
+      "style": "搜索友好",
+      "extraInfo": "价格区间 99-129，适合日常通勤和短途出游"
+    },
+    "expected_output_outline": [
+      "## 优化标题",
+      "## 推荐标题",
+      "## 优化理由",
+      "## 关键词建议",
+      "## 使用提醒"
+    ]
+  },
+  {
+    "name": "抖音零食标题优化",
+    "input": {
+      "productName": "低脂鸡胸肉丸",
+      "category": "食品/即食肉制品",
+      "targetPlatform": "抖音",
+      "targetCustomer": "健身和控卡人群",
+      "sellingPoints": "低脂、高蛋白、开袋即食、口味丰富",
+      "keywords": "低脂零食、鸡胸肉丸、高蛋白",
+      "avoidWords": "减肥神器、吃不胖",
+      "style": "转化导向",
+      "extraInfo": "不要夸大减脂效果"
+    },
+    "expected_output_outline": [
+      "## 优化标题",
+      "## 推荐标题",
+      "## 优化理由",
+      "## 关键词建议",
+      "## 使用提醒"
+    ]
+  }
+]
