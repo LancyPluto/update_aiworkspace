@@ -1,5 +1,7 @@
 package com.aiminilab.aitoolmarket.auth.security;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
@@ -11,15 +13,19 @@ import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.HexFormat;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Component
 public class InternalRequestSignatureVerifier {
 
+    private static final Logger log = LoggerFactory.getLogger(InternalRequestSignatureVerifier.class);
     private static final Duration SIGNATURE_TTL = Duration.ofMinutes(5);
     private static final String NONCE_KEY_PREFIX = "internal-api:nonce:";
 
     private final StringRedisTemplate redisTemplate;
     private final String secret;
+    private final Map<String, Instant> localNonces = new ConcurrentHashMap<>();
 
     public InternalRequestSignatureVerifier(StringRedisTemplate redisTemplate,
                                             @Value("${app.internal-api-token}") String secret) {
@@ -45,9 +51,14 @@ public class InternalRequestSignatureVerifier {
             return false;
         }
 
-        Boolean stored = redisTemplate.opsForValue()
-                .setIfAbsent(NONCE_KEY_PREFIX + nonce, "1", SIGNATURE_TTL);
-        return Boolean.TRUE.equals(stored);
+        try {
+            Boolean stored = redisTemplate.opsForValue()
+                    .setIfAbsent(NONCE_KEY_PREFIX + nonce, "1", SIGNATURE_TTL);
+            return Boolean.TRUE.equals(stored);
+        } catch (RuntimeException exception) {
+            log.warn("Redis unavailable while storing internal API nonce; using local nonce fallback");
+            return storeLocalNonce(nonce);
+        }
     }
 
     private boolean timestampIsFresh(String timestamp) {
@@ -81,6 +92,13 @@ public class InternalRequestSignatureVerifier {
                 left.getBytes(StandardCharsets.UTF_8),
                 right.getBytes(StandardCharsets.UTF_8)
         );
+    }
+
+    private boolean storeLocalNonce(String nonce) {
+        Instant now = Instant.now();
+        Instant expiresAt = now.plus(SIGNATURE_TTL);
+        localNonces.entrySet().removeIf(entry -> !now.isBefore(entry.getValue()));
+        return localNonces.putIfAbsent(nonce, expiresAt) == null;
     }
 
     private boolean isBlank(String value) {
