@@ -354,7 +354,7 @@ Expected: task state and credit tests pass.
 - Modify: `backend/src/main/java/com/aiminilab/aitoolmarket/task/service/impl/TaskServiceImpl.java`
 - Test: `backend/src/test/java/com/aiminilab/aitoolmarket/task/TaskOutboxServiceTest.java`
 
-- [ ] **Step 1: Add outbox table**
+- [x] **Step 1: Add outbox table**
 
 Create table:
 
@@ -375,7 +375,7 @@ CREATE TABLE task_outbox_events (
 );
 ```
 
-- [ ] **Step 2: Write outbox event in the same transaction as task creation**
+- [x] **Step 2: Write outbox event in the same transaction as task creation**
 
 `TaskServiceImpl.createNewTask` should:
 
@@ -386,7 +386,7 @@ CREATE TABLE task_outbox_events (
 
 It should not directly publish to Redis inside the request transaction.
 
-- [ ] **Step 3: Add dispatcher**
+- [x] **Step 3: Add dispatcher**
 
 `TaskOutboxService` should:
 
@@ -395,7 +395,7 @@ It should not directly publish to Redis inside the request transaction.
 - Mark event as `SENT` after successful publish.
 - Increase `retry_count` and set `next_retry_at` after failure.
 
-- [ ] **Step 4: Add tests**
+- [x] **Step 4: Add tests**
 
 Test cases:
 
@@ -404,7 +404,7 @@ Test cases:
 - Retry later sends pending event.
 - Duplicate create with same idempotency key does not create duplicate outbox event.
 
-- [ ] **Step 5: Verify**
+- [x] **Step 5: Verify**
 
 Run:
 
@@ -671,7 +671,7 @@ Expected: migration test passes.
 - [ ] Internal Worker API rejects unsigned, stale, or replayed requests.
 - [ ] Task status updates use explicit state transitions and affected-row checks.
 - [ ] Repeated Worker callbacks do not double deduct or double release credits.
-- [ ] Task dispatch survives Redis temporary failure through outbox retry.
+- [x] Task dispatch survives Redis temporary failure through outbox retry.
 - [ ] Every error response can be correlated with `X-Request-Id`.
 - [ ] Unknown exceptions are logged with stack trace and trace id.
 - [ ] Actuator health and metrics endpoints are available with safe exposure.

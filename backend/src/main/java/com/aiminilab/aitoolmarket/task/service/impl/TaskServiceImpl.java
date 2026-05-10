@@ -12,7 +12,7 @@ import com.aiminilab.aitoolmarket.task.dto.TaskResultResponse;
 import com.aiminilab.aitoolmarket.task.dto.TaskStatusResponse;
 import com.aiminilab.aitoolmarket.task.entity.AiTask;
 import com.aiminilab.aitoolmarket.task.mapper.TaskMapper;
-import com.aiminilab.aitoolmarket.task.service.TaskQueuePublisher;
+import com.aiminilab.aitoolmarket.task.service.TaskOutboxService;
 import com.aiminilab.aitoolmarket.task.service.TaskService;
 import com.aiminilab.aitoolmarket.task.service.TaskStateMachine;
 import com.aiminilab.aitoolmarket.tool.entity.AiTool;
@@ -21,8 +21,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
@@ -38,20 +36,20 @@ public class TaskServiceImpl implements TaskService {
     private final ToolMapper toolMapper;
     private final CreditService creditService;
     private final ObjectMapper objectMapper;
-    private final TaskQueuePublisher taskQueuePublisher;
+    private final TaskOutboxService taskOutboxService;
 
     public TaskServiceImpl(
             TaskMapper taskMapper,
             ToolMapper toolMapper,
             CreditService creditService,
             ObjectMapper objectMapper,
-            TaskQueuePublisher taskQueuePublisher
+            TaskOutboxService taskOutboxService
     ) {
         this.taskMapper = taskMapper;
         this.toolMapper = toolMapper;
         this.creditService = creditService;
         this.objectMapper = objectMapper;
-        this.taskQueuePublisher = taskQueuePublisher;
+        this.taskOutboxService = taskOutboxService;
     }
 
     @Override
@@ -133,7 +131,7 @@ public class TaskServiceImpl implements TaskService {
         if (taskMapper.resetToQueued(taskId, List.of(TaskStatus.FAILED.name())) == 0) {
             TaskStateMachine.ensureTransition(findTask(taskId).getStatus(), TaskStatus.QUEUED.name());
         }
-        publishAfterCommit(taskId);
+        taskOutboxService.enqueueTaskRetry(taskId);
         return TaskStatusResponse.from(findTask(taskId));
     }
 
@@ -164,7 +162,7 @@ public class TaskServiceImpl implements TaskService {
 
         Long taskId = taskMapper.insertTask(task);
         creditService.freezeForTask(userId, taskId, tool.getEstimatedCreditCost());
-        publishAfterCommit(taskId);
+        taskOutboxService.enqueueTaskCreated(taskId);
         return TaskStatusResponse.from(findTask(taskId, userId));
     }
 
@@ -201,17 +199,4 @@ public class TaskServiceImpl implements TaskService {
         return "T" + date + suffix;
     }
 
-    private void publishAfterCommit(Long taskId) {
-        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
-            taskQueuePublisher.publish(taskId);
-            return;
-        }
-
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                taskQueuePublisher.publish(taskId);
-            }
-        });
-    }
 }

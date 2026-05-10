@@ -100,6 +100,21 @@ CREATE TABLE ai_result_resources (
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE task_outbox_events (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  task_id BIGINT NOT NULL,
+  event_type VARCHAR(64) NOT NULL,
+  payload_json TEXT NOT NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'PENDING',
+  retry_count INT NOT NULL DEFAULT 0,
+  next_retry_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_error TEXT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_task_outbox_status_retry (status, next_retry_at, id),
+  UNIQUE KEY uk_task_outbox_task_event (task_id, event_type)
+);
+
 CREATE TABLE credit_accounts (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   user_id BIGINT NOT NULL UNIQUE,
