@@ -17,66 +17,72 @@
 
 ### 2.1 已完成的核心功能
 
-| 功能模块 | 说明 | API 端点 |
-|---------|------|---------|
-| **健康检查** | 检测 MySQL、Redis、后端服务状态 | `GET /api/health` |
-| **用户注册** | 普通用户注册（bcrypt 密码加密） | `POST /api/v1/auth/register` |
-| **用户登录** | 用户名 + 密码登录，返回 JWT | `POST /api/v1/auth/login` |
-| **用户信息** | 获取当前登录用户个人信息 | `GET /api/v1/users/me` |
-| **管理员登录** | 仅限 ADMIN 角色的登录 | `POST /api/admin/v1/auth/login` |
-| **管理工具 CRUD** | 创建、编辑、查询工具 | `GET/POST/PUT /api/admin/v1/tools` |
-| **工具发布/下线** | 管理员上架/下架工具 | `POST /api/admin/v1/tools/{id}/publish` |
-| **工具分类查询** | 获取活跃的分类列表 | `GET /api/v1/tool-categories` |
-| **公开工具查询** | 用户查看已上线的工具列表和详情 | `GET /api/v1/tools` |
-| **创建 AI 任务** | 用户选定工具提交参数，创建任务 | `POST /api/v1/tasks` |
-| **任务状态查询** | 用户查询自己任务的实时状态 | `GET /api/v1/tasks/{id}/status` |
-| **任务详情** | 查看任务输入参数和生成结果 | `GET /api/v1/tasks/{id}` |
-| **任务列表** | 用户查看自己的所有任务 | `GET /api/v1/tasks` |
-| **算力账户查询** | 查看积分余额和消费记录 | `GET /api/v1/credits/account` |
-| **Worker 取任务上下文** | Worker 获取任务的参数和字段配置 | `GET /api/internal/v1/tasks/{id}/execution-context` |
-| **Worker 报告处理中** | Worker 更新任务为处理中状态 | `POST /api/internal/v1/tasks/{id}/processing` |
-| **Worker 报告成功** | Worker 提交 AI 生成结果 | `POST /api/internal/v1/tasks/{id}/success` |
-| **Worker 报告失败** | Worker 报告任务失败及错误信息 | `POST /api/internal/v1/tasks/{id}/failed` |
+
+| 功能模块              | 说明                    | API 端点                                              |
+| ----------------- | --------------------- | --------------------------------------------------- |
+| **健康检查**          | 检测 MySQL、Redis、后端服务状态 | `GET /api/health`                                   |
+| **用户注册**          | 普通用户注册（bcrypt 密码加密）   | `POST /api/v1/auth/register`                        |
+| **用户登录**          | 用户名 + 密码登录，返回 JWT     | `POST /api/v1/auth/login`                           |
+| **用户信息**          | 获取当前登录用户个人信息          | `GET /api/v1/users/me`                              |
+| **管理员登录**         | 仅限 ADMIN 角色的登录        | `POST /api/admin/v1/auth/login`                     |
+| **管理工具 CRUD**     | 创建、编辑、查询工具            | `GET/POST/PUT /api/admin/v1/tools`                  |
+| **工具发布/下线**       | 管理员上架/下架工具            | `POST /api/admin/v1/tools/{id}/publish`             |
+| **工具分类查询**        | 获取活跃的分类列表             | `GET /api/v1/tool-categories`                       |
+| **公开工具查询**        | 用户查看已上线的工具列表和详情       | `GET /api/v1/tools`                                 |
+| **创建 AI 任务**      | 用户选定工具提交参数，创建任务       | `POST /api/v1/tasks`                                |
+| **任务状态查询**        | 用户查询自己任务的实时状态         | `GET /api/v1/tasks/{id}/status`                     |
+| **任务详情**          | 查看任务输入参数和生成结果         | `GET /api/v1/tasks/{id}`                            |
+| **任务列表**          | 用户查看自己的所有任务           | `GET /api/v1/tasks`                                 |
+| **算力账户查询**        | 查看积分余额和消费记录           | `GET /api/v1/credits/account`                       |
+| **Worker 取任务上下文** | Worker 获取任务的参数和字段配置   | `GET /api/internal/v1/tasks/{id}/execution-context` |
+| **Worker 报告处理中**  | Worker 更新任务为处理中状态     | `POST /api/internal/v1/tasks/{id}/processing`       |
+| **Worker 报告成功**   | Worker 提交 AI 生成结果     | `POST /api/internal/v1/tasks/{id}/success`          |
+| **Worker 报告失败**   | Worker 报告任务失败及错误信息    | `POST /api/internal/v1/tasks/{id}/failed`           |
+
 
 ### 2.2 数据库表（共 16 张）
 
-| 表名 | 用途 |
-|------|------|
-| `users` | 用户表（支持 USER / ADMIN 两种角色） |
-| `roles` | 角色定义表（预置 USER, ADMIN） |
-| `user_roles` | 用户-角色关联表 |
-| `login_logs` | 登录日志 |
-| `tool_categories` | 工具分类（预置 Copywriting） |
-| `ai_tools` | AI 工具主表（支持草稿/上线/下线状态） |
-| `tool_field_schemas` | 工具字段模式版本 |
-| `tool_field_schema_items` | 工具字段定义（text/textarea/select） |
-| `tool_prompts` | 工具 Prompt 配置 |
-| `tool_prompt_versions` | Prompt 版本管理（支持 system_prompt / user_prompt_template） |
-| `ai_tasks` | AI 任务主表（支持幂等、重试、完整状态机） |
-| `ai_task_inputs` | 任务输入参数明细 |
-| `ai_task_logs` | 任务操作日志（完整的事件溯源） |
-| `ai_result_resources` | 任务结果资源存储 |
-| `credit_accounts` | 用户算力账户（余额/冻结/已消耗） |
-| `credit_logs` | 算力变更流水日志 |
-| `worker_heartbeats` | Worker 心跳记录 |
-| `admin_operation_logs` | 管理员操作审计日志 |
+
+| 表名                        | 用途                                                   |
+| ------------------------- | ---------------------------------------------------- |
+| `users`                   | 用户表（支持 USER / ADMIN 两种角色）                            |
+| `roles`                   | 角色定义表（预置 USER, ADMIN）                                |
+| `user_roles`              | 用户-角色关联表                                             |
+| `login_logs`              | 登录日志                                                 |
+| `tool_categories`         | 工具分类（预置 Copywriting）                                 |
+| `ai_tools`                | AI 工具主表（支持草稿/上线/下线状态）                                |
+| `tool_field_schemas`      | 工具字段模式版本                                             |
+| `tool_field_schema_items` | 工具字段定义（text/textarea/select）                         |
+| `tool_prompts`            | 工具 Prompt 配置                                         |
+| `tool_prompt_versions`    | Prompt 版本管理（支持 system_prompt / user_prompt_template） |
+| `ai_tasks`                | AI 任务主表（支持幂等、重试、完整状态机）                               |
+| `ai_task_inputs`          | 任务输入参数明细                                             |
+| `ai_task_logs`            | 任务操作日志（完整的事件溯源）                                      |
+| `ai_result_resources`     | 任务结果资源存储                                             |
+| `credit_accounts`         | 用户算力账户（余额/冻结/已消耗）                                    |
+| `credit_logs`             | 算力变更流水日志                                             |
+| `worker_heartbeats`       | Worker 心跳记录                                          |
+| `admin_operation_logs`    | 管理员操作审计日志                                            |
+
 
 > **说明**：数据库设计为全功能版本，但当前代码实际仅使用了 `users`、`tool_categories`、`ai_tools`、`tool_field_schemas`、`tool_field_schema_items`、`ai_tasks`、`ai_result_resources`、`credit_accounts`、`credit_logs` 等核心表。
 
 ### 2.3 技术栈
 
-| 模块 | 技术 | 版本 |
-|------|------|------|
-| 语言 | Java | 17 |
-| 框架 | Spring Boot | 3.3.5 |
-| 数据库 | MySQL (开发/生产) + H2 (测试) | 8.0 |
-| 缓存/队列 | Redis | 7 |
-| 认证 | 自实现 JWT（HS256 + HMAC-SHA256） | - |
-| 密码加密 | Spring Security Crypto (BCrypt) | - |
-| 数据访问 | Spring JDBC (`JdbcTemplate`) | - |
-| API 文档 | OpenAPI 3.0 YAML | - |
-| 部署 | Docker Compose | - |
-| 构建工具 | Maven | - |
+
+| 模块     | 技术                              | 版本    |
+| ------ | ------------------------------- | ----- |
+| 语言     | Java                            | 17    |
+| 框架     | Spring Boot                     | 3.3.5 |
+| 数据库    | MySQL (开发/生产) + H2 (测试)         | 8.0   |
+| 缓存/队列  | Redis                           | 7     |
+| 认证     | 自实现 JWT（HS256 + HMAC-SHA256）    | -     |
+| 密码加密   | Spring Security Crypto (BCrypt) | -     |
+| 数据访问   | Spring JDBC (`JdbcTemplate`)    | -     |
+| API 文档 | OpenAPI 3.0 YAML                | -     |
+| 部署     | Docker Compose                  | -     |
+| 构建工具   | Maven                           | -     |
+
 
 ---
 
@@ -111,17 +117,19 @@ com.aiminilab.aitoolmarket
 
 ### 3.3 关键设计决策
 
-| 决策 | 说明 |
-|------|------|
-| **无 ORM** | 使用 `JdbcTemplate` 替代 JPA / MyBatis，手写全部 SQL，精确控制查询 |
-| **接口 + Impl** | Service 层接口与实现分离，保留扩展性（部分模块尚未实现 Impl 类） |
-| **记录式 DTO** | 大量使用 Java 16+ `record` 类型（LoginRequest、ApiResponse、PageResponse 等） |
-| **ThreadLocal 上下文** | `AuthContext` 使用 `ThreadLocal<AuthUser>` 存储登录用户信息，在请求拦截器中设置和清理 |
-| **自定义 JWT** | 未使用 Spring Security / OAuth2，纯手动实现 JWT（HMAC-SHA256 签名 + Base64 URL 编码） |
-| **统一响应格式** | 所有 API 返回 `ApiResponse<T>`（code + message + data + requestId） |
-| **全局异常处理** | `@RestControllerAdvice` + `GlobalExceptionHandler`，业务异常使用 `BusinessException` |
-| **无 @Autowired** | 全部使用构造器注入 |
-| **测试用 H2** | 集成测试使用 H2 内存数据库 + MySQL 兼容模式 |
+
+| 决策                  | 说明                                                                            |
+| ------------------- | ----------------------------------------------------------------------------- |
+| **无 ORM**           | 使用 `JdbcTemplate` 替代 JPA / MyBatis，手写全部 SQL，精确控制查询                            |
+| **接口 + Impl**       | Service 层接口与实现分离，保留扩展性（部分模块尚未实现 Impl 类）                                       |
+| **记录式 DTO**         | 大量使用 Java 16+ `record` 类型（LoginRequest、ApiResponse、PageResponse 等）            |
+| **ThreadLocal 上下文** | `AuthContext` 使用 `ThreadLocal<AuthUser>` 存储登录用户信息，在请求拦截器中设置和清理                |
+| **自定义 JWT**         | 未使用 Spring Security / OAuth2，纯手动实现 JWT（HMAC-SHA256 签名 + Base64 URL 编码）        |
+| **统一响应格式**          | 所有 API 返回 `ApiResponse<T>`（code + message + data + requestId）                 |
+| **全局异常处理**          | `@RestControllerAdvice` + `GlobalExceptionHandler`，业务异常使用 `BusinessException` |
+| **无 @Autowired**    | 全部使用构造器注入                                                                     |
+| **测试用 H2**          | 集成测试使用 H2 内存数据库 + MySQL 兼容模式                                                  |
+
 
 ### 3.4 任务状态机
 
@@ -150,14 +158,17 @@ DRAFT → ONLINE ↔ OFFLINE
 
 ## 四、已实现的测试
 
-| 测试类 | 覆盖场景 | 行数 |
-|--------|---------|------|
-| `AuthApiTest` | 注册/登录/获取用户信息；管理员 vs 普通用户权限隔离；重复注册/密码错误拒绝 | 168 |
-| `ToolApiTest` | 管理员创建/编辑/发布/下架工具；用户端按状态查询工具详情 | 119 |
-| `TaskCreditApiTest` | 用户创建任务、扣减算力；余额不足拒绝；查询任务状态/详情/列表 | 169 |
-| `WorkerInternalApiTest` | Worker 获取上下文、报告处理中/成功/失败；端到端验证流程 | 174 |
+
+| 测试类                     | 覆盖场景                                     | 行数  |
+| ----------------------- | ---------------------------------------- | --- |
+| `AuthApiTest`           | 注册/登录/获取用户信息；管理员 vs 普通用户权限隔离；重复注册/密码错误拒绝 | 168 |
+| `ToolApiTest`           | 管理员创建/编辑/发布/下架工具；用户端按状态查询工具详情            | 119 |
+| `TaskCreditApiTest`     | 用户创建任务、扣减算力；余额不足拒绝；查询任务状态/详情/列表          | 169 |
+| `WorkerInternalApiTest` | Worker 获取上下文、报告处理中/成功/失败；端到端验证流程         | 174 |
+
 
 测试使用 `@SpringBootTest` + `@AutoConfigureMockMvc` + H2 内存数据库，每条测试类使用独立的数据库实例（隔离性良好）。但**未测试以下边界场景**：
+
 - 管理员查看全部工具（含草稿/已下线）
 - 用户查看非自己任务的权限隔离
 - 任务幂等性（同 `clientRequestId`）
@@ -176,18 +187,20 @@ DRAFT → ONLINE ↔ OFFLINE
 
 ### 5.2 后端待实现
 
-| 功能 | 说明 |
-|------|------|
-| 管理员工具字段配置 | `tool_field_schema_items` 的增删改查未实现 |
-| Prompt 配置 | `tool_prompts` 和 `tool_prompt_versions` 表已建但无 API |
-| 任务重试 | `ai_tasks.retry_count` 和 `max_retry_count` 列存在但未使用 |
-| Worker 心跳 | `worker_heartbeats` 表已建但无对应 API |
-| 管理员操作日志 | `admin_operation_logs` 表已建但未记录 |
-| 登录日志 | `login_logs` 表已建但未写入 |
-| Redis 消息队列 | 配置了 Redis 依赖但未实现任务队列出队/入队逻辑 |
-| 用户角色关联 | `user_roles` + `roles` 表已建但代码中通过 `user_type` 字段判断角色 |
-| 用户信息更新 | 无修改密码/更新资料的 API |
-| 分页/排序 | `PageResponse` 已定义但未实现真正的分页查询 |
+
+| 功能         | 说明                                                  |
+| ---------- | --------------------------------------------------- |
+| 管理员工具字段配置  | `tool_field_schema_items` 的增删改查未实现                  |
+| Prompt 配置  | `tool_prompts` 和 `tool_prompt_versions` 表已建但无 API   |
+| 任务重试       | `ai_tasks.retry_count` 和 `max_retry_count` 列存在但未使用  |
+| Worker 心跳  | `worker_heartbeats` 表已建但无对应 API                     |
+| 管理员操作日志    | `admin_operation_logs` 表已建但未记录                      |
+| 登录日志       | `login_logs` 表已建但未写入                                |
+| Redis 消息队列 | 配置了 Redis 依赖但未实现任务队列出队/入队逻辑                         |
+| 用户角色关联     | `user_roles` + `roles` 表已建但代码中通过 `user_type` 字段判断角色 |
+| 用户信息更新     | 无修改密码/更新资料的 API                                     |
+| 分页/排序      | `PageResponse` 已定义但未实现真正的分页查询                       |
+
 
 ### 5.3 V1 不做的功能
 
@@ -212,12 +225,14 @@ DRAFT → ONLINE ↔ OFFLINE
 
 ### 7.1 环境要求
 
-| 工具 | 版本要求 | 检查命令 |
-|------|---------|---------|
-| JDK | 17+ | `java -version` |
-| Maven | 3.8+ | `mvn -version` |
-| Docker | 20+ | `docker --version` |
-| Git | 任意 | `git --version` |
+
+| 工具     | 版本要求 | 检查命令               |
+| ------ | ---- | ------------------ |
+| JDK    | 17+  | `java -version`    |
+| Maven  | 3.8+ | `mvn -version`     |
+| Docker | 20+  | `docker --version` |
+| Git    | 任意   | `git --version`    |
+
 
 ### 7.2 快速启动（5 分钟）
 
@@ -254,16 +269,19 @@ curl http://localhost:8080/api/v1/ping
 
 ### 7.4 测试初始账号
 
-| 角色 | 账号 | 密码 |
-|------|------|------|
-| 管理员 | `admin` | `123456` |
+
+| 角色   | 账号      | 密码       |
+| ---- | ------- | -------- |
+| 管理员  | `admin` | `123456` |
 | 普通用户 | `user1` | `123456` |
+
 
 > 系统启动时会自动创建上述初始用户。
 
 ### 7.5 常见问题
 
 **Q: `mvn spring-boot:run` 启动报端口被占用？**
+
 ```bash
 # 修改端口（默认 8080）
 set SERVER_PORT=8081
@@ -271,6 +289,7 @@ mvn spring-boot:run
 ```
 
 **Q: Docker 启动 MySQL/Redis 失败？**
+
 ```bash
 # 查看容器日志
 docker logs ai-supermarket-mysql
@@ -281,10 +300,12 @@ docker compose -f deploy/docker-compose.yml restart
 ```
 
 **Q: 数据库连接失败？**
+
 - 确保 Docker 容器已启动：`docker ps`
 - MySQL 映射端口为 `3307`（非默认 3306），已配置在 `.env.example` 中
 
 **Q: 没有 Docker 怎么办？**
+
 - 可以本地安装 MySQL 8.0+ 和 Redis 7+，然后修改 `.env` 中的连接地址和端口
 
 ---
@@ -342,3 +363,4 @@ mvn test -Dtest=WorkerInternalApiTest
 5. **分页查询**：目前全部查全量数据回 List，后续需支持 `LIMIT/OFFSET`
 6. **空包清理**：`admin/`、`internal/` 下仅有 `.gitkeep` 文件，建议移除或填充实现
 7. **枚举集权**：部分枚举定义在 `common/enums`，部分以字符串形式散落各处，建议统一
+
