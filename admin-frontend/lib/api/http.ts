@@ -4,6 +4,7 @@ const TOKEN_STORAGE_KEY = 'admin_access_token'
 const USER_STORAGE_KEY = 'admin_user_profile'
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || ''
+const LOCAL_BACKEND_URL = 'http://127.0.0.1:8080'
 
 export class ApiError extends Error {
   code: string
@@ -74,7 +75,8 @@ interface RequestOptions {
 }
 
 function buildUrl(path: string, query?: RequestOptions['query']): string {
-  const url = `${BASE_URL}${path}`
+  const baseUrl = getBaseUrl()
+  const url = `${baseUrl}${path}`
   if (!query) return url
   const params = new URLSearchParams()
   for (const [key, value] of Object.entries(query)) {
@@ -85,6 +87,16 @@ function buildUrl(path: string, query?: RequestOptions['query']): string {
   }
   const qs = params.toString()
   return qs ? `${url}?${qs}` : url
+}
+
+function getBaseUrl(): string {
+  if (BASE_URL) return BASE_URL
+  if (typeof window === 'undefined') return ''
+  const { hostname, port } = window.location
+  if ((hostname === '127.0.0.1' || hostname === 'localhost') && port === '5174') {
+    return LOCAL_BACKEND_URL
+  }
+  return ''
 }
 
 export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
