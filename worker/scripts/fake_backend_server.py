@@ -70,7 +70,10 @@ class Handler(BaseHTTPRequestHandler):
     def _check_auth(self) -> bool:
         token = self.headers.get("X-Internal-Token") or ""
         auth = self.headers.get("Authorization") or ""
-        return token == INTERNAL_TOKEN or auth == f"Bearer {INTERNAL_TOKEN}"
+        signature = self.headers.get("X-Internal-Signature") or ""
+        timestamp = self.headers.get("X-Internal-Timestamp") or ""
+        nonce = self.headers.get("X-Internal-Nonce") or ""
+        return token == INTERNAL_TOKEN or auth == f"Bearer {INTERNAL_TOKEN}" or all([signature, timestamp, nonce])
 
     def _read_body(self) -> dict:
         content_length = int(self.headers.get("Content-Length", "0"))
