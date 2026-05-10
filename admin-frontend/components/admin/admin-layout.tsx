@@ -17,12 +17,20 @@ export function AdminLayout({ children }: AdminLayoutProps) {
 
   useEffect(() => {
     let cancelled = false
+    const redirectToLogin = () => {
+      const redirect = encodeURIComponent(pathname || "/")
+      const loginUrl = `/login?redirect=${redirect}`
+      if (typeof window !== "undefined") {
+        window.location.replace(loginUrl)
+        return
+      }
+      router.replace(loginUrl)
+    }
 
     async function verifySession() {
       const token = getToken()
       if (!token) {
-        const redirect = encodeURIComponent(pathname || "/")
-        router.replace(`/login?redirect=${redirect}`)
+        redirectToLogin()
         return
       }
 
@@ -31,8 +39,7 @@ export function AdminLayout({ children }: AdminLayoutProps) {
         if (!cancelled) setChecking(false)
       } catch {
         clearSession()
-        const redirect = encodeURIComponent(pathname || "/")
-        router.replace(`/login?redirect=${redirect}`)
+        redirectToLogin()
       }
     }
 
