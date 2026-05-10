@@ -4,6 +4,14 @@ import com.aiminilab.aitoolmarket.common.dto.PageResponse;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.enums.ToolStatus;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
+import com.aiminilab.aitoolmarket.tool.dto.CreateFieldSchemaRequest;
+import com.aiminilab.aitoolmarket.tool.dto.CreatePromptRequest;
+import com.aiminilab.aitoolmarket.tool.dto.CreatePromptVersionRequest;
+import com.aiminilab.aitoolmarket.tool.dto.FieldSchemaResponse;
+import com.aiminilab.aitoolmarket.tool.dto.PromptResponse;
+import com.aiminilab.aitoolmarket.tool.dto.PromptVersionResponse;
+import com.aiminilab.aitoolmarket.tool.dto.TestGenerateRequest;
+import com.aiminilab.aitoolmarket.tool.dto.TestGenerateResponse;
 import com.aiminilab.aitoolmarket.tool.dto.ToolCategoryResponse;
 import com.aiminilab.aitoolmarket.tool.dto.ToolDetailResponse;
 import com.aiminilab.aitoolmarket.tool.dto.ToolFieldRequest;
@@ -13,11 +21,13 @@ import com.aiminilab.aitoolmarket.tool.dto.UpdateToolFieldsRequest;
 import com.aiminilab.aitoolmarket.tool.dto.UpsertToolRequest;
 import com.aiminilab.aitoolmarket.tool.entity.AiTool;
 import com.aiminilab.aitoolmarket.tool.entity.ToolFieldItem;
+import com.aiminilab.aitoolmarket.tool.entity.ToolFieldSchema;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolCategoryMapper;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolFieldItemMapper;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolFieldSchemaMapper;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolMapper;
 import com.aiminilab.aitoolmarket.tool.service.ToolService;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 
@@ -141,6 +151,75 @@ public class ToolServiceImpl implements ToolService {
         return fields(toolId);
     }
 
+    @Override
+    public List<FieldSchemaResponse> fieldSchemas(Long toolId) {
+        ensureToolExists(toolId);
+        return toolFieldSchemaMapper.selectList(new LambdaQueryWrapper<ToolFieldSchema>()
+                        .eq(ToolFieldSchema::getToolId, toolId)
+                        .orderByDesc(ToolFieldSchema::getId))
+                .stream()
+                .map(this::toFieldSchemaResponse)
+                .toList();
+    }
+
+    @Override
+    public FieldSchemaResponse createFieldSchema(Long toolId, CreateFieldSchemaRequest request, Long operatorId) {
+        ensureToolExists(toolId);
+        ToolFieldSchema schema = new ToolFieldSchema();
+        schema.setToolId(toolId);
+        schema.setSchemaVersion(request.schemaVersion());
+        schema.setStatus("DRAFT");
+        schema.setCreatedBy(operatorId);
+        toolFieldSchemaMapper.insert(schema);
+        toolFieldItemMapper.replaceActiveFields(schema.getId(), request.fields().stream()
+                .map(this::toFieldItem)
+                .toList());
+        return toFieldSchemaResponse(schema);
+    }
+
+    @Override
+    public FieldSchemaResponse publishFieldSchema(Long schemaId) {
+        ToolFieldSchema schema = toolFieldSchemaMapper.selectById(schemaId);
+        if (schema == null) {
+            throw new BusinessException(ErrorCode.TOOL_NOT_FOUND, "Tool field schema not found");
+        }
+        schema.setStatus("ACTIVE");
+        toolFieldSchemaMapper.updateById(schema);
+        return toFieldSchemaResponse(schema);
+    }
+
+    @Override
+    public List<PromptResponse> prompts(Long toolId) {
+        ensureToolExists(toolId);
+        return List.of();
+    }
+
+    @Override
+    public PromptResponse createPrompt(Long toolId, CreatePromptRequest request) {
+        ensureToolExists(toolId);
+        throw new BusinessException(ErrorCode.PARAM_ERROR, "Tool prompt persistence is not available in this merge");
+    }
+
+    @Override
+    public List<PromptVersionResponse> promptVersions(Long promptId) {
+        return List.of();
+    }
+
+    @Override
+    public PromptVersionResponse createPromptVersion(Long promptId, CreatePromptVersionRequest request, Long operatorId) {
+        throw new BusinessException(ErrorCode.PARAM_ERROR, "Tool prompt version persistence is not available in this merge");
+    }
+
+    @Override
+    public TestGenerateResponse testGenerate(Long promptVersionId, TestGenerateRequest request) {
+        return new TestGenerateResponse("");
+    }
+
+    @Override
+    public PromptVersionResponse publishPromptVersion(Long promptVersionId) {
+        throw new BusinessException(ErrorCode.PARAM_ERROR, "Tool prompt version persistence is not available in this merge");
+    }
+
     private ToolSummaryResponse findToolSummary(Long toolId) {
         return toolMapper.findById(toolId)
                 .map(ToolSummaryResponse::from)
@@ -167,6 +246,20 @@ public class ToolServiceImpl implements ToolService {
         return toolFieldItemMapper.findActiveFields(toolId).stream()
                 .map(field -> ToolFieldResponse.from(field, objectMapper))
                 .toList();
+    }
+
+    private FieldSchemaResponse toFieldSchemaResponse(ToolFieldSchema schema) {
+        return new FieldSchemaResponse(
+                schema.getId(),
+                schema.getToolId(),
+                schema.getSchemaVersion(),
+                schema.getStatus(),
+                toolFieldItemMapper.findBySchemaId(schema.getId()).stream()
+                        .map(field -> ToolFieldResponse.from(field, objectMapper))
+                        .toList(),
+                null,
+                null
+        );
     }
 
     private ToolFieldItem toFieldItem(ToolFieldRequest request) {
