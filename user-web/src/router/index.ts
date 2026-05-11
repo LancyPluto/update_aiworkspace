@@ -4,7 +4,7 @@ import { useAuthStore } from "@/store/authStore"
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
-    { path: "/", redirect: "/login" },
+    { path: "/", redirect: "/agent" },
     {
       path: "/login",
       name: "Login",
@@ -16,6 +16,12 @@ const router = createRouter({
       name: "Dashboard",
       meta: { requiresAuth: true },
       component: () => import("@/pages/Dashboard/Page.vue"),
+    },
+    {
+      path: "/agent",
+      name: "AgentHome",
+      meta: { requiresAuth: true },
+      component: () => import("@/pages/AgentHome/Page.vue"),
     },
     {
       path: "/marketplace",
