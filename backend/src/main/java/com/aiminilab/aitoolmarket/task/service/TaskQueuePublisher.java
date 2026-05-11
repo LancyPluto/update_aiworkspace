@@ -28,12 +28,14 @@ public class TaskQueuePublisher {
         this.queueName = queueName;
     }
 
-    public void publish(Long taskId) {
+    public boolean publish(Long taskId) {
         try {
             String message = objectMapper.writeValueAsString(Map.of("taskId", taskId));
             redisTemplate.opsForList().rightPush(queueName, message);
+            return true;
         } catch (Exception exception) {
             LOGGER.warn("failed to publish task to redis queue, taskId={}, queue={}", taskId, queueName, exception);
+            return false;
         }
     }
 }

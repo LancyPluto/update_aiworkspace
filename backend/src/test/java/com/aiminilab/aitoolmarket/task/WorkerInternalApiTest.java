@@ -92,6 +92,19 @@ class WorkerInternalApiTest {
         String userToken = login("/api/v1/auth/login", "user1");
         Long taskId = createTask(userToken, "worker_failed_tool");
 
+        String processingBody = """
+                                {
+                                  "progress": 35,
+                                  "progressMessage": "AI is generating"
+                                }
+                                """;
+        mockMvc.perform(signed(post("/api/internal/v1/tasks/{taskId}/processing", taskId), "POST",
+                        "/api/internal/v1/tasks/%d/processing".formatted(taskId), processingBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(processingBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("PROCESSING"));
+
         String failedBody = """
                                 {
                                   "errorCode": "MODEL_CALL_FAILED",

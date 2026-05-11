@@ -1,440 +1,201 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { AdminLayout } from "@/components/admin/admin-layout"
 import { AdminHeader } from "@/components/admin/header"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
-import { Textarea } from "@/components/ui/textarea"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import {
-  Key,
-  Shield,
-  Bell,
-  Database,
-  Server,
-  Save,
-  Eye,
-  EyeOff,
-  RefreshCw,
-  CheckCircle,
-} from "lucide-react"
-import { cn } from "@/lib/utils"
+import { Textarea } from "@/components/ui/textarea"
+import { ApiError } from "@/lib/api/http"
+import { fetchSettings, updateSettings } from "@/lib/api/settings"
+import { CheckCircle, Database, RefreshCw, Save, Server, Shield } from "lucide-react"
+
+interface SettingsForm {
+  platformName: string
+  platformDescription: string
+  signupGrant: string
+  taskMaxRetry: string
+  queueEnabled: boolean
+  creditDeductEnabled: boolean
+  maintenanceMode: boolean
+  jwtHours: string
+  allowedCors: string
+}
+
+const defaults: SettingsForm = {
+  platformName: "AI 工具超市",
+  platformDescription: "一站式 AI 经营助手，帮助企业提升内容和运营效率",
+  signupGrant: "100",
+  taskMaxRetry: "3",
+  queueEnabled: true,
+  creditDeductEnabled: true,
+  maintenanceMode: false,
+  jwtHours: "24",
+  allowedCors: "http://127.0.0.1:5173\nhttp://127.0.0.1:5174",
+}
+
+function boolToString(value: boolean) {
+  return value ? "true" : "false"
+}
+
+function stringToBool(value: string | undefined, fallback: boolean) {
+  if (value == null || value === "") return fallback
+  return value === "true"
+}
 
 export default function SettingsPage() {
-  const [showApiKey, setShowApiKey] = useState(false)
-  const [isSaving, setIsSaving] = useState(false)
+  const [form, setForm] = useState<SettingsForm>(defaults)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
-  const handleSave = () => {
-    setIsSaving(true)
-    setTimeout(() => {
-      setIsSaving(false)
-      setSaved(true)
-      setTimeout(() => setSaved(false), 2000)
-    }, 1000)
+  async function loadSettings() {
+    setLoading(true)
+    setError(null)
+    try {
+      const data = await fetchSettings()
+      setForm({
+        platformName: data["platform.name"] ?? defaults.platformName,
+        platformDescription: data["platform.description"] ?? defaults.platformDescription,
+        signupGrant: data["credits.signupGrant"] ?? defaults.signupGrant,
+        taskMaxRetry: data["tasks.maxRetry"] ?? defaults.taskMaxRetry,
+        queueEnabled: stringToBool(data["tasks.queueEnabled"], defaults.queueEnabled),
+        creditDeductEnabled: stringToBool(data["credits.deductEnabled"], defaults.creditDeductEnabled),
+        maintenanceMode: stringToBool(data["system.maintenanceMode"], defaults.maintenanceMode),
+        jwtHours: data["security.jwtHours"] ?? defaults.jwtHours,
+        allowedCors: data["security.allowedCors"] ?? defaults.allowedCors,
+      })
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "加载系统配置失败")
+    } finally {
+      setLoading(false)
+    }
   }
+
+  useEffect(() => {
+    loadSettings()
+  }, [])
+
+  function updateForm<K extends keyof SettingsForm>(key: K, value: SettingsForm[K]) {
+    setForm((current) => ({ ...current, [key]: value }))
+  }
+
+  async function saveSettings() {
+    setSaving(true)
+    setSaved(false)
+    setError(null)
+    try {
+      await updateSettings({
+        "platform.name": form.platformName,
+        "platform.description": form.platformDescription,
+        "credits.signupGrant": form.signupGrant,
+        "tasks.maxRetry": form.taskMaxRetry,
+        "tasks.queueEnabled": boolToString(form.queueEnabled),
+        "credits.deductEnabled": boolToString(form.creditDeductEnabled),
+        "system.maintenanceMode": boolToString(form.maintenanceMode),
+        "security.jwtHours": form.jwtHours,
+        "security.allowedCors": form.allowedCors,
+      })
+      setSaved(true)
+      setTimeout(() => setSaved(false), 1800)
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "保存系统配置失败")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const description = error
+    ? `联调异常：${error}`
+    : loading
+      ? "正在从数据库加载系统配置"
+      : "系统配置会保存到后端 system_settings 表"
 
   return (
     <AdminLayout>
-      <AdminHeader
-        title="系统配置"
-        description="管理系统设置和 API 密钥"
-      />
+      <AdminHeader title="系统配置" description={description} />
 
       <div className="p-6">
-        <Tabs defaultValue="api" className="space-y-6">
-          <TabsList className="bg-secondary">
-            <TabsTrigger value="api" className="gap-2">
-              <Key className="h-4 w-4" />
-              API 配置
-            </TabsTrigger>
-            <TabsTrigger value="system" className="gap-2">
-              <Server className="h-4 w-4" />
-              系统设置
-            </TabsTrigger>
-            <TabsTrigger value="security" className="gap-2">
-              <Shield className="h-4 w-4" />
-              安全设置
-            </TabsTrigger>
-            <TabsTrigger value="notification" className="gap-2">
-              <Bell className="h-4 w-4" />
-              通知设置
-            </TabsTrigger>
+        <Tabs defaultValue="system" className="space-y-6">
+          <TabsList>
+            <TabsTrigger value="system" className="gap-2"><Server className="h-4 w-4" />基础设置</TabsTrigger>
+            <TabsTrigger value="features" className="gap-2"><Database className="h-4 w-4" />功能开关</TabsTrigger>
+            <TabsTrigger value="security" className="gap-2"><Shield className="h-4 w-4" />安全设置</TabsTrigger>
           </TabsList>
 
-          {/* API Configuration */}
-          <TabsContent value="api" className="space-y-6">
-            <div className="rounded-xl border border-border bg-card p-6">
-              <h3 className="text-lg font-semibold text-card-foreground mb-4">
-                AI 模型配置
-              </h3>
-              <div className="space-y-6">
-                <div className="grid gap-6 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label>默认模型</Label>
-                    <Select defaultValue="gpt-4">
-                      <SelectTrigger className="bg-secondary border-0">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent className="bg-card border-border">
-                        <SelectItem value="gpt-4">GPT-4</SelectItem>
-                        <SelectItem value="gpt-3.5">GPT-3.5 Turbo</SelectItem>
-                        <SelectItem value="claude-3">Claude 3</SelectItem>
-                        <SelectItem value="gemini">Gemini Pro</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>备用模型</Label>
-                    <Select defaultValue="gpt-3.5">
-                      <SelectTrigger className="bg-secondary border-0">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent className="bg-card border-border">
-                        <SelectItem value="gpt-4">GPT-4</SelectItem>
-                        <SelectItem value="gpt-3.5">GPT-3.5 Turbo</SelectItem>
-                        <SelectItem value="claude-3">Claude 3</SelectItem>
-                        <SelectItem value="gemini">Gemini Pro</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>OpenAI API Key</Label>
-                  <div className="flex gap-2">
-                    <div className="relative flex-1">
-                      <Input
-                        type={showApiKey ? "text" : "password"}
-                        defaultValue="sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-                        className="bg-secondary border-0 pr-10 font-mono"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowApiKey(!showApiKey)}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                      >
-                        {showApiKey ? (
-                          <EyeOff className="h-4 w-4" />
-                        ) : (
-                          <Eye className="h-4 w-4" />
-                        )}
-                      </button>
-                    </div>
-                    <Button variant="outline" size="icon">
-                      <RefreshCw className="h-4 w-4" />
-                    </Button>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    用于调用 OpenAI API 的密钥
-                  </p>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Anthropic API Key</Label>
-                  <div className="flex gap-2">
-                    <Input
-                      type="password"
-                      placeholder="sk-ant-xxxxxxxx"
-                      className="bg-secondary border-0 font-mono"
-                    />
-                    <Button variant="outline" size="icon">
-                      <RefreshCw className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-
-                <div className="grid gap-4 md:grid-cols-3">
-                  <div className="space-y-2">
-                    <Label>Temperature</Label>
-                    <Input
-                      type="number"
-                      defaultValue="0.7"
-                      step="0.1"
-                      min="0"
-                      max="2"
-                      className="bg-secondary border-0"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Max Tokens</Label>
-                    <Input
-                      type="number"
-                      defaultValue="2048"
-                      className="bg-secondary border-0"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>请求超时 (秒)</Label>
-                    <Input
-                      type="number"
-                      defaultValue="30"
-                      className="bg-secondary border-0"
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-border bg-card p-6">
-              <h3 className="text-lg font-semibold text-card-foreground mb-4">
-                API 限流配置
-              </h3>
-              <div className="grid gap-6 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label>单用户每分钟请求数</Label>
-                  <Input
-                    type="number"
-                    defaultValue="10"
-                    className="bg-secondary border-0"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>全局每分钟请求数</Label>
-                  <Input
-                    type="number"
-                    defaultValue="100"
-                    className="bg-secondary border-0"
-                  />
-                </div>
-              </div>
-            </div>
-          </TabsContent>
-
-          {/* System Settings */}
-          <TabsContent value="system" className="space-y-6">
-            <div className="rounded-xl border border-border bg-card p-6">
-              <h3 className="text-lg font-semibold text-card-foreground mb-4">
-                基础配置
-              </h3>
-              <div className="space-y-6">
+          <TabsContent value="system" className="space-y-5">
+            <section className="rounded-lg border border-border bg-card p-5">
+              <div className="grid gap-5 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label>平台名称</Label>
-                  <Input
-                    defaultValue="AI 工具超市"
-                    className="bg-secondary border-0"
-                  />
+                  <Input value={form.platformName} onChange={(event) => updateForm("platformName", event.target.value)} />
                 </div>
                 <div className="space-y-2">
-                  <Label>平台描述</Label>
-                  <Textarea
-                    defaultValue="一站式 AI 经营助手，帮助企业提升效率"
-                    className="bg-secondary border-0"
-                  />
-                </div>
-                <div className="grid gap-6 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label>新用户免费算力</Label>
-                    <Input
-                      type="number"
-                      defaultValue="100"
-                      className="bg-secondary border-0"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>任务最大重试次数</Label>
-                    <Input
-                      type="number"
-                      defaultValue="3"
-                      className="bg-secondary border-0"
-                    />
-                  </div>
+                  <Label>新用户免费算力</Label>
+                  <Input type="number" value={form.signupGrant} onChange={(event) => updateForm("signupGrant", event.target.value)} />
                 </div>
               </div>
-            </div>
-
-            <div className="rounded-xl border border-border bg-card p-6">
-              <h3 className="text-lg font-semibold text-card-foreground mb-4">
-                功能开关
-              </h3>
-              <div className="space-y-4">
-                {[
-                  { label: "启用用户注册", description: "允许新用户注册账号", enabled: true },
-                  { label: "启用任务队列", description: "使用 Redis 队列异步执行任务", enabled: true },
-                  { label: "启用 SSE 推送", description: "实时推送任务状态更新", enabled: true },
-                  { label: "启用算力扣除", description: "任务完成后自动扣除算力", enabled: true },
-                  { label: "维护模式", description: "开启后用户无法访问系统", enabled: false },
-                ].map((item) => (
-                  <div
-                    key={item.label}
-                    className="flex items-center justify-between rounded-lg bg-secondary p-4"
-                  >
-                    <div>
-                      <p className="font-medium">{item.label}</p>
-                      <p className="text-sm text-muted-foreground">
-                        {item.description}
-                      </p>
-                    </div>
-                    <Switch defaultChecked={item.enabled} />
-                  </div>
-                ))}
+              <div className="mt-5 space-y-2">
+                <Label>平台描述</Label>
+                <Textarea value={form.platformDescription} onChange={(event) => updateForm("platformDescription", event.target.value)} />
               </div>
-            </div>
+            </section>
           </TabsContent>
 
-          {/* Security Settings */}
-          <TabsContent value="security" className="space-y-6">
-            <div className="rounded-xl border border-border bg-card p-6">
-              <h3 className="text-lg font-semibold text-card-foreground mb-4">
-                安全配置
-              </h3>
-              <div className="space-y-6">
-                <div className="grid gap-6 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label>JWT 过期时间 (小时)</Label>
-                    <Input
-                      type="number"
-                      defaultValue="24"
-                      className="bg-secondary border-0"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>登录失败锁定次数</Label>
-                    <Input
-                      type="number"
-                      defaultValue="5"
-                      className="bg-secondary border-0"
-                    />
-                  </div>
-                </div>
+          <TabsContent value="features" className="space-y-5">
+            <section className="rounded-lg border border-border bg-card p-5">
+              <div className="grid gap-5 md:grid-cols-2">
                 <div className="space-y-2">
-                  <Label>允许的域名 (CORS)</Label>
-                  <Textarea
-                    defaultValue="https://ai-tools.com&#10;https://www.ai-tools.com"
-                    className="bg-secondary border-0 font-mono"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    每行一个域名
-                  </p>
+                  <Label>任务最大重试次数</Label>
+                  <Input type="number" value={form.taskMaxRetry} onChange={(event) => updateForm("taskMaxRetry", event.target.value)} />
                 </div>
               </div>
-            </div>
-
-            <div className="rounded-xl border border-border bg-card p-6">
-              <h3 className="text-lg font-semibold text-card-foreground mb-4">
-                安全开关
-              </h3>
-              <div className="space-y-4">
+              <div className="mt-5 space-y-3">
                 {[
-                  { label: "启用验证码", description: "登录时需要验证码", enabled: true },
-                  { label: "启用两步验证", description: "管理员登录需要两步验证", enabled: false },
-                  { label: "记录操作日志", description: "记录所有管理员操作", enabled: true },
-                  { label: "IP 白名单", description: "限制管理后台访问 IP", enabled: false },
+                  { key: "queueEnabled" as const, label: "启用任务队列", desc: "使用 Redis 队列异步执行任务" },
+                  { key: "creditDeductEnabled" as const, label: "启用算力扣除", desc: "任务完成后自动扣除算力" },
+                  { key: "maintenanceMode" as const, label: "维护模式", desc: "开启后可用于临时下线用户侧功能" },
                 ].map((item) => (
-                  <div
-                    key={item.label}
-                    className="flex items-center justify-between rounded-lg bg-secondary p-4"
-                  >
+                  <div key={item.key} className="flex items-center justify-between rounded-md bg-secondary p-4">
                     <div>
                       <p className="font-medium">{item.label}</p>
-                      <p className="text-sm text-muted-foreground">
-                        {item.description}
-                      </p>
+                      <p className="text-sm text-muted-foreground">{item.desc}</p>
                     </div>
-                    <Switch defaultChecked={item.enabled} />
+                    <Switch checked={form[item.key]} onCheckedChange={(value) => updateForm(item.key, value)} />
                   </div>
                 ))}
               </div>
-            </div>
+            </section>
           </TabsContent>
 
-          {/* Notification Settings */}
-          <TabsContent value="notification" className="space-y-6">
-            <div className="rounded-xl border border-border bg-card p-6">
-              <h3 className="text-lg font-semibold text-card-foreground mb-4">
-                通知配置
-              </h3>
-              <div className="space-y-6">
+          <TabsContent value="security" className="space-y-5">
+            <section className="rounded-lg border border-border bg-card p-5">
+              <div className="grid gap-5 md:grid-cols-2">
                 <div className="space-y-2">
-                  <Label>管理员邮箱</Label>
-                  <Input
-                    type="email"
-                    defaultValue="admin@ai-tools.com"
-                    className="bg-secondary border-0"
-                  />
-                </div>
-                <div className="grid gap-6 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label>SMTP 服务器</Label>
-                    <Input
-                      defaultValue="smtp.example.com"
-                      className="bg-secondary border-0"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>SMTP 端口</Label>
-                    <Input
-                      type="number"
-                      defaultValue="465"
-                      className="bg-secondary border-0"
-                    />
-                  </div>
+                  <Label>JWT 过期时间（小时）</Label>
+                  <Input type="number" value={form.jwtHours} onChange={(event) => updateForm("jwtHours", event.target.value)} />
                 </div>
               </div>
-            </div>
-
-            <div className="rounded-xl border border-border bg-card p-6">
-              <h3 className="text-lg font-semibold text-card-foreground mb-4">
-                通知开关
-              </h3>
-              <div className="space-y-4">
-                {[
-                  { label: "新用户注册通知", description: "有新用户注册时发送邮件", enabled: true },
-                  { label: "订单支付通知", description: "用户支付成功时发送邮件", enabled: true },
-                  { label: "任务失败告警", description: "任务失败率超过阈值时告警", enabled: true },
-                  { label: "API 额度告警", description: "API 消耗接近限额时告警", enabled: true },
-                ].map((item) => (
-                  <div
-                    key={item.label}
-                    className="flex items-center justify-between rounded-lg bg-secondary p-4"
-                  >
-                    <div>
-                      <p className="font-medium">{item.label}</p>
-                      <p className="text-sm text-muted-foreground">
-                        {item.description}
-                      </p>
-                    </div>
-                    <Switch defaultChecked={item.enabled} />
-                  </div>
-                ))}
+              <div className="mt-5 space-y-2">
+                <Label>允许的 CORS 来源</Label>
+                <Textarea className="font-mono" value={form.allowedCors} onChange={(event) => updateForm("allowedCors", event.target.value)} />
               </div>
-            </div>
+            </section>
           </TabsContent>
         </Tabs>
 
-        {/* Save Button */}
-        <div className="mt-6 flex justify-end">
-          <Button
-            onClick={handleSave}
-            disabled={isSaving}
-            className="gap-2 min-w-[120px]"
-          >
-            {saved ? (
-              <>
-                <CheckCircle className="h-4 w-4" />
-                已保存
-              </>
-            ) : isSaving ? (
-              <>
-                <RefreshCw className="h-4 w-4 animate-spin" />
-                保存中...
-              </>
-            ) : (
-              <>
-                <Save className="h-4 w-4" />
-                保存配置
-              </>
-            )}
+        <div className="mt-6 flex items-center justify-end gap-3">
+          <Button variant="outline" className="gap-2" onClick={loadSettings} disabled={loading || saving}>
+            <RefreshCw className={loading ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
+            刷新
+          </Button>
+          <Button className="gap-2 min-w-32" onClick={saveSettings} disabled={saving}>
+            {saved ? <CheckCircle className="h-4 w-4" /> : <Save className={saving ? "h-4 w-4 animate-spin" : "h-4 w-4"} />}
+            {saved ? "已保存" : saving ? "保存中..." : "保存配置"}
           </Button>
         </div>
       </div>

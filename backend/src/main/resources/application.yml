@@ -26,7 +26,7 @@ app:
   internal-api-token: ${INTERNAL_API_TOKEN:local-internal-token}
   ai-task-queue: ${AI_TASK_QUEUE:ai:task:queue}
   cors:
-    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:5174}
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174}
 
 mybatis-plus:
   configuration:

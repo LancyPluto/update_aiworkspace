@@ -12,6 +12,7 @@ import com.aiminilab.aitoolmarket.task.dto.WorkerSuccessRequest;
 import com.aiminilab.aitoolmarket.task.entity.AiTask;
 import com.aiminilab.aitoolmarket.task.mapper.TaskMapper;
 import com.aiminilab.aitoolmarket.task.service.InternalTaskService;
+import com.aiminilab.aitoolmarket.task.service.TaskStateMachine;
 import com.aiminilab.aitoolmarket.tool.dto.ToolFieldResponse;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolFieldItemMapper;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -52,9 +53,11 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         String message = request.progressMessage() == null || request.progressMessage().isBlank()
                 ? "AI is processing"
                 : request.progressMessage();
-        AiTask before = findTask(taskId);
-        taskMapper.markProcessing(taskId, progress, message);
-        taskMapper.insertLog(taskId, "TASK_PROCESSING", before.getStatus(), "PROCESSING", message, "WORKER", null);
+        AiTask task = findTask(taskId);
+        TaskStateMachine.ensureTransition(task.getStatus(), TaskStatus.PROCESSING.name());
+        if (taskMapper.markProcessing(taskId, progress, message, List.of(TaskStatus.QUEUED.name())) == 0) {
+            TaskStateMachine.ensureTransition(findTask(taskId).getStatus(), TaskStatus.PROCESSING.name());
+        }
         return TaskStatusResponse.from(findTask(taskId));
     }
 
@@ -65,10 +68,20 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         if (TaskStatus.SUCCESS.name().equals(task.getStatus())) {
             return TaskStatusResponse.from(task);
         }
+        if (TaskStatus.CANCELLED.name().equals(task.getStatus())) {
+            return TaskStatusResponse.from(task);
+        }
+        TaskStateMachine.ensureTransition(task.getStatus(), TaskStatus.SUCCESS.name());
+        int updated = taskMapper.markSuccess(taskId, List.of(TaskStatus.PROCESSING.name()));
+        if (updated == 0) {
+            AiTask current = findTask(taskId);
+            if (TaskStatus.SUCCESS.name().equals(current.getStatus()) || TaskStatus.CANCELLED.name().equals(current.getStatus())) {
+                return TaskStatusResponse.from(current);
+            }
+            TaskStateMachine.ensureTransition(current.getStatus(), TaskStatus.SUCCESS.name());
+        }
         creditService.settleForTask(task.getUserId(), taskId, task.getEstimatedCreditCost());
         taskMapper.insertResult(taskId, task.getUserId(), request.resourceType(), request.contentText());
-        taskMapper.markSuccess(taskId);
-        taskMapper.insertLog(taskId, "TASK_SUCCESS", task.getStatus(), "SUCCESS", "Worker 回写成功结果", "WORKER", null);
         return TaskStatusResponse.from(findTask(taskId));
     }
 
@@ -81,17 +94,22 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         String errorMessage = request.errorMessage() == null || request.errorMessage().isBlank()
                 ? "Worker execution failed"
                 : request.errorMessage();
-<<<<<<< HEAD
-        AiTask before = findTask(taskId);
-=======
         AiTask task = findTask(taskId);
-        if (!TaskStatus.SUCCESS.name().equals(task.getStatus()) && !TaskStatus.FAILED.name().equals(task.getStatus())
-                && !TaskStatus.CANCELLED.name().equals(task.getStatus())) {
-            creditService.releaseForTask(task.getUserId(), taskId, task.getEstimatedCreditCost());
+        if (TaskStatus.FAILED.name().equals(task.getStatus()) || TaskStatus.SUCCESS.name().equals(task.getStatus())
+                || TaskStatus.CANCELLED.name().equals(task.getStatus())) {
+            return TaskStatusResponse.from(task);
         }
->>>>>>> origin/feature/backend-core
-        taskMapper.markFailed(taskId, errorCode, errorMessage);
-        taskMapper.insertLog(taskId, "TASK_FAILED", before.getStatus(), "FAILED", errorMessage, "WORKER", null);
+        TaskStateMachine.ensureTransition(task.getStatus(), TaskStatus.FAILED.name());
+        int updated = taskMapper.markFailed(taskId, errorCode, errorMessage, List.of(TaskStatus.PROCESSING.name()));
+        if (updated == 0) {
+            AiTask current = findTask(taskId);
+            if (TaskStatus.FAILED.name().equals(current.getStatus()) || TaskStatus.SUCCESS.name().equals(current.getStatus())
+                    || TaskStatus.CANCELLED.name().equals(current.getStatus())) {
+                return TaskStatusResponse.from(current);
+            }
+            TaskStateMachine.ensureTransition(current.getStatus(), TaskStatus.FAILED.name());
+        }
+        creditService.releaseForTask(task.getUserId(), taskId, task.getEstimatedCreditCost());
         return TaskStatusResponse.from(findTask(taskId));
     }
 

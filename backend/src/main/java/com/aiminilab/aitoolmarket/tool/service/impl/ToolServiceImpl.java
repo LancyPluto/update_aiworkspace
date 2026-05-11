@@ -18,45 +18,50 @@ import com.aiminilab.aitoolmarket.tool.dto.ToolFieldRequest;
 import com.aiminilab.aitoolmarket.tool.dto.ToolFieldResponse;
 import com.aiminilab.aitoolmarket.tool.dto.ToolSummaryResponse;
 import com.aiminilab.aitoolmarket.tool.dto.UpdateToolFieldsRequest;
+import com.aiminilab.aitoolmarket.tool.dto.UpsertToolCategoryRequest;
 import com.aiminilab.aitoolmarket.tool.dto.UpsertToolRequest;
 import com.aiminilab.aitoolmarket.tool.entity.AiTool;
+import com.aiminilab.aitoolmarket.tool.entity.ToolCategory;
 import com.aiminilab.aitoolmarket.tool.entity.ToolFieldItem;
-<<<<<<< HEAD
 import com.aiminilab.aitoolmarket.tool.entity.ToolFieldSchema;
 import com.aiminilab.aitoolmarket.tool.entity.ToolPrompt;
 import com.aiminilab.aitoolmarket.tool.entity.ToolPromptVersion;
-=======
 import com.aiminilab.aitoolmarket.tool.mapper.ToolCategoryMapper;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolFieldItemMapper;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolFieldSchemaMapper;
->>>>>>> origin/feature/backend-core
 import com.aiminilab.aitoolmarket.tool.mapper.ToolMapper;
+import com.aiminilab.aitoolmarket.tool.mapper.ToolPromptMapper;
+import com.aiminilab.aitoolmarket.tool.mapper.ToolPromptVersionMapper;
 import com.aiminilab.aitoolmarket.tool.service.ToolService;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
-import java.util.Set;
+import java.util.Map;
 
 @Service
 public class ToolServiceImpl implements ToolService {
-
-    private static final Set<String> ALLOWED_FIELD_TYPES = Set.of("text", "textarea", "select", "number");
 
     private final ToolMapper toolMapper;
     private final ToolCategoryMapper toolCategoryMapper;
     private final ToolFieldSchemaMapper toolFieldSchemaMapper;
     private final ToolFieldItemMapper toolFieldItemMapper;
+    private final ToolPromptMapper toolPromptMapper;
+    private final ToolPromptVersionMapper toolPromptVersionMapper;
     private final ObjectMapper objectMapper;
 
     public ToolServiceImpl(ToolMapper toolMapper, ToolCategoryMapper toolCategoryMapper,
                            ToolFieldSchemaMapper toolFieldSchemaMapper, ToolFieldItemMapper toolFieldItemMapper,
+                           ToolPromptMapper toolPromptMapper, ToolPromptVersionMapper toolPromptVersionMapper,
                            ObjectMapper objectMapper) {
         this.toolMapper = toolMapper;
         this.toolCategoryMapper = toolCategoryMapper;
         this.toolFieldSchemaMapper = toolFieldSchemaMapper;
         this.toolFieldItemMapper = toolFieldItemMapper;
+        this.toolPromptMapper = toolPromptMapper;
+        this.toolPromptVersionMapper = toolPromptVersionMapper;
         this.objectMapper = objectMapper;
     }
 
@@ -65,6 +70,39 @@ public class ToolServiceImpl implements ToolService {
         return toolCategoryMapper.findActiveCategories().stream()
                 .map(ToolCategoryResponse::from)
                 .toList();
+    }
+
+    @Override
+    public List<ToolCategoryResponse> adminCategories() {
+        return toolCategoryMapper.findAllCategories().stream()
+                .map(ToolCategoryResponse::from)
+                .toList();
+    }
+
+    @Override
+    public ToolCategoryResponse createCategory(UpsertToolCategoryRequest request) {
+        ToolCategory category = toCategory(request);
+        toolCategoryMapper.insert(category);
+        return ToolCategoryResponse.from(category);
+    }
+
+    @Override
+    public ToolCategoryResponse updateCategory(Long categoryId, UpsertToolCategoryRequest request) {
+        ToolCategory category = ensureCategoryExists(categoryId);
+        category.setCategoryCode(request.categoryCode());
+        category.setCategoryName(request.categoryName());
+        category.setSortOrder(request.sortOrder() == null ? 0 : request.sortOrder());
+        category.setStatus(normalizeCategoryStatus(request.status()));
+        toolCategoryMapper.updateById(category);
+        return ToolCategoryResponse.from(category);
+    }
+
+    @Override
+    public ToolCategoryResponse updateCategoryStatus(Long categoryId, String status) {
+        ToolCategory category = ensureCategoryExists(categoryId);
+        category.setStatus(normalizeCategoryStatus(status));
+        toolCategoryMapper.updateById(category);
+        return ToolCategoryResponse.from(category);
     }
 
     @Override
@@ -109,25 +147,17 @@ public class ToolServiceImpl implements ToolService {
     }
 
     @Override
-    @Transactional
     public ToolSummaryResponse createTool(UpsertToolRequest request, Long operatorId) {
-        if (toolMapper.existsByCode(request.toolCode())) {
+        String toolCode = normalizeToolCode(request.toolCode(), request.toolName());
+        if (toolMapper.existsByCode(toolCode)) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "工具编码已存在");
         }
 
         AiTool tool = fromRequest(request);
+        tool.setToolCode(toolCode);
         Long toolId = toolMapper.insertTool(tool, operatorId);
-<<<<<<< HEAD
-        Long schemaId = toolMapper.createActiveDefaultSchema(toolId, operatorId);
-        toolMapper.createDefaultFields(schemaId);
-        Long promptId = toolMapper.createPrompt(toolId, "default", "默认 Prompt");
-        Long versionId = toolMapper.createActivePromptVersion(promptId, "v1",
-                "请根据用户输入参数生成结果。", operatorId);
-        toolMapper.setPromptActiveVersion(promptId, versionId);
-=======
         Long schemaId = toolFieldSchemaMapper.createActiveDefaultSchema(toolId, operatorId);
         toolFieldItemMapper.createDefaultFields(schemaId);
->>>>>>> origin/feature/backend-core
         return findToolSummary(toolId);
     }
 
@@ -139,10 +169,8 @@ public class ToolServiceImpl implements ToolService {
     }
 
     @Override
-    @Transactional
     public ToolSummaryResponse publishTool(Long toolId, Long operatorId) {
-        AiTool tool = ensureToolExists(toolId);
-        validateBeforePublish(tool);
+        ensureToolExists(toolId);
         toolMapper.updateToolStatus(toolId, ToolStatus.ONLINE, operatorId);
         return findToolSummary(toolId);
     }
@@ -161,15 +189,9 @@ public class ToolServiceImpl implements ToolService {
     }
 
     @Override
-    @Transactional
     public List<ToolFieldResponse> updateFields(Long toolId, UpdateToolFieldsRequest request) {
         ensureToolExists(toolId);
-<<<<<<< HEAD
-        validateFieldTypes(request.fields());
-        Long schemaId = toolMapper.findActiveSchemaId(toolId)
-=======
         Long schemaId = toolFieldSchemaMapper.findActiveSchemaId(toolId)
->>>>>>> origin/feature/backend-core
                 .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具字段配置不存在"));
         toolFieldItemMapper.replaceActiveFields(schemaId, request.fields().stream()
                 .map(this::toFieldItem)
@@ -180,130 +202,100 @@ public class ToolServiceImpl implements ToolService {
     @Override
     public List<FieldSchemaResponse> fieldSchemas(Long toolId) {
         ensureToolExists(toolId);
-        return toolMapper.findSchemas(toolId).stream()
+        return toolFieldSchemaMapper.selectList(new LambdaQueryWrapper<ToolFieldSchema>()
+                        .eq(ToolFieldSchema::getToolId, toolId)
+                        .orderByDesc(ToolFieldSchema::getId))
+                .stream()
                 .map(this::toFieldSchemaResponse)
                 .toList();
     }
 
     @Override
-    @Transactional
     public FieldSchemaResponse createFieldSchema(Long toolId, CreateFieldSchemaRequest request, Long operatorId) {
         ensureToolExists(toolId);
-        validateFieldTypes(request.fields());
-        Long schemaId = toolMapper.createFieldSchema(toolId, request.schemaVersion(), operatorId);
-        toolMapper.insertSchemaFields(schemaId, request.fields().stream()
+        ToolFieldSchema schema = new ToolFieldSchema();
+        schema.setToolId(toolId);
+        schema.setSchemaVersion(request.schemaVersion());
+        schema.setStatus("DRAFT");
+        schema.setCreatedBy(operatorId);
+        toolFieldSchemaMapper.insert(schema);
+        toolFieldItemMapper.replaceActiveFields(schema.getId(), request.fields().stream()
                 .map(this::toFieldItem)
                 .toList());
-        return toolMapper.findSchemaById(schemaId)
-                .map(this::toFieldSchemaResponse)
-                .orElseThrow(() -> new BusinessException(ErrorCode.SYSTEM_ERROR, "字段 Schema 创建失败"));
+        return toFieldSchemaResponse(schema);
     }
 
     @Override
-    @Transactional
     public FieldSchemaResponse publishFieldSchema(Long schemaId) {
-        ToolFieldSchema schema = toolMapper.findSchemaById(schemaId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.PARAM_ERROR, "字段 Schema 不存在"));
-        toolMapper.inactivateSchemas(schema.getToolId());
-        toolMapper.activateSchema(schemaId);
-        return toolMapper.findSchemaById(schemaId)
-                .map(this::toFieldSchemaResponse)
-                .orElseThrow(() -> new BusinessException(ErrorCode.SYSTEM_ERROR, "字段 Schema 发布失败"));
+        ToolFieldSchema schema = toolFieldSchemaMapper.selectById(schemaId);
+        if (schema == null) {
+            throw new BusinessException(ErrorCode.TOOL_NOT_FOUND, "Tool field schema not found");
+        }
+        schema.setStatus("ACTIVE");
+        toolFieldSchemaMapper.updateById(schema);
+        return toFieldSchemaResponse(schema);
     }
 
     @Override
     public List<PromptResponse> prompts(Long toolId) {
         ensureToolExists(toolId);
-        return toolMapper.findPrompts(toolId).stream()
+        return toolPromptMapper.findByToolId(toolId).stream()
                 .map(this::toPromptResponse)
-                .toList();
-    }
-
-    @Override
-    public List<PromptVersionResponse> promptVersions(Long promptId) {
-        toolMapper.findPromptById(promptId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.PARAM_ERROR, "Prompt 不存在"));
-        return toolMapper.findPromptVersions(promptId).stream()
-                .map(this::toPromptVersionResponse)
                 .toList();
     }
 
     @Override
     public PromptResponse createPrompt(Long toolId, CreatePromptRequest request) {
         ensureToolExists(toolId);
-        Long promptId = toolMapper.createPrompt(toolId, request.promptCode(), request.promptName());
-        return toolMapper.findPromptById(promptId)
-                .map(this::toPromptResponse)
-                .orElseThrow(() -> new BusinessException(ErrorCode.SYSTEM_ERROR, "Prompt 创建失败"));
+        ToolPrompt prompt = new ToolPrompt();
+        prompt.setToolId(toolId);
+        prompt.setPromptCode(request.promptCode());
+        prompt.setPromptName(request.promptName());
+        prompt.setStatus("ACTIVE");
+        toolPromptMapper.insert(prompt);
+        return toPromptResponse(prompt);
+    }
+
+    @Override
+    public List<PromptVersionResponse> promptVersions(Long promptId) {
+        ensurePromptExists(promptId);
+        return toolPromptVersionMapper.findByPromptId(promptId).stream()
+                .map(this::toPromptVersionResponse)
+                .toList();
     }
 
     @Override
     public PromptVersionResponse createPromptVersion(Long promptId, CreatePromptVersionRequest request, Long operatorId) {
-        toolMapper.findPromptById(promptId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.PARAM_ERROR, "Prompt 不存在"));
-        String outputFormat = request.outputFormat() == null || request.outputFormat().isBlank()
+        ensurePromptExists(promptId);
+        ToolPromptVersion version = new ToolPromptVersion();
+        version.setPromptId(promptId);
+        version.setVersionNo(request.versionNo());
+        version.setSystemPrompt(request.systemPrompt());
+        version.setUserPromptTemplate(request.userPromptTemplate());
+        version.setOutputFormat(request.outputFormat() == null || request.outputFormat().isBlank()
                 ? "MARKDOWN"
-                : request.outputFormat();
-        Long versionId = toolMapper.createPromptVersion(
-                promptId,
-                request.versionNo(),
-                request.systemPrompt(),
-                request.userPromptTemplate(),
-                outputFormat,
-                operatorId
-        );
-        return toolMapper.findPromptVersionById(versionId)
-                .map(this::toPromptVersionResponse)
-                .orElseThrow(() -> new BusinessException(ErrorCode.SYSTEM_ERROR, "Prompt 版本创建失败"));
+                : request.outputFormat());
+        version.setStatus("DRAFT");
+        toolPromptVersionMapper.insert(version);
+        return toPromptVersionResponse(version);
     }
 
     @Override
     public TestGenerateResponse testGenerate(Long promptVersionId, TestGenerateRequest request) {
-        ToolPromptVersion version = toolMapper.findPromptVersionById(promptVersionId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.PARAM_ERROR, "Prompt 版本不存在"));
-        String rendered = renderTemplate(version.getUserPromptTemplate(), request.params());
-        return new TestGenerateResponse(rendered);
+        ToolPromptVersion version = findPromptVersion(promptVersionId);
+        return new TestGenerateResponse(renderPrompt(version.getUserPromptTemplate(), request.params()));
     }
 
     @Override
     @Transactional
     public PromptVersionResponse publishPromptVersion(Long promptVersionId) {
-        ToolPromptVersion version = toolMapper.findPromptVersionById(promptVersionId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.PARAM_ERROR, "Prompt 版本不存在"));
-        toolMapper.inactivatePromptVersions(version.getPromptId());
-        toolMapper.activatePromptVersion(promptVersionId);
-        toolMapper.setPromptActiveVersion(version.getPromptId(), promptVersionId);
-        return toolMapper.findPromptVersionById(promptVersionId)
-                .map(this::toPromptVersionResponse)
-                .orElseThrow(() -> new BusinessException(ErrorCode.SYSTEM_ERROR, "Prompt 版本发布失败"));
-    }
-
-    private void validateBeforePublish(AiTool tool) {
-        if (tool.getToolName() == null || tool.getToolName().isBlank()
-                || tool.getCategoryId() == null
-                || tool.getEstimatedCreditCost() == null) {
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "工具基础信息不完整");
-        }
-        if (tool.getEstimatedCreditCost() < 0) {
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "预估算力消耗不能小于 0");
-        }
-        Long schemaId = toolMapper.findActiveSchemaId(tool.getId())
-                .orElseThrow(() -> new BusinessException(ErrorCode.PARAM_ERROR, "工具缺少 ACTIVE 字段 Schema"));
-        if (toolMapper.findFieldsBySchemaId(schemaId).isEmpty()) {
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "工具 ACTIVE 字段 Schema 至少需要一个字段");
-        }
-        if (!toolMapper.hasActivePromptVersion(tool.getId())) {
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "工具缺少 ACTIVE Prompt 版本");
-        }
-    }
-
-    private void validateFieldTypes(List<ToolFieldRequest> fields) {
-        for (ToolFieldRequest field : fields) {
-            if (!ALLOWED_FIELD_TYPES.contains(field.fieldType())) {
-                throw new BusinessException(ErrorCode.PARAM_ERROR,
-                        "不支持的字段类型：" + field.fieldType() + "，仅支持 text/textarea/select/number");
-            }
-        }
+        ToolPromptVersion version = findPromptVersion(promptVersionId);
+        version.setStatus("ACTIVE");
+        version.setPublishedAt(java.time.LocalDateTime.now());
+        toolPromptVersionMapper.updateById(version);
+        toolPromptVersionMapper.deactivateOtherVersions(version.getPromptId(), version.getId());
+        toolPromptVersionMapper.updatePromptActiveVersion(version.getPromptId(), version.getId());
+        return toPromptVersionResponse(version);
     }
 
     private ToolSummaryResponse findToolSummary(Long toolId) {
@@ -323,9 +315,64 @@ public class ToolServiceImpl implements ToolService {
         return tool;
     }
 
-    private AiTool ensureToolExists(Long toolId) {
-        return toolMapper.findById(toolId)
+    private String normalizeToolCode(String requestedCode, String toolName) {
+        if (requestedCode != null && !requestedCode.isBlank()) {
+            return requestedCode.trim();
+        }
+
+        String baseCode = toolName == null ? "" : toolName.toLowerCase()
+                .replaceAll("[^a-z0-9]+", "_")
+                .replaceAll("^_+|_+$", "");
+        if (baseCode.isBlank()) {
+            baseCode = "tool";
+        }
+
+        String candidate = baseCode;
+        int suffix = 1;
+        while (toolMapper.existsByCode(candidate)) {
+            candidate = baseCode + "_" + suffix;
+            suffix++;
+        }
+        return candidate;
+    }
+
+    private void ensureToolExists(Long toolId) {
+        toolMapper.findById(toolId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在"));
+    }
+
+    private ToolCategory ensureCategoryExists(Long categoryId) {
+        ToolCategory category = toolCategoryMapper.selectById(categoryId);
+        if (category == null) {
+            throw new BusinessException(ErrorCode.TOOL_NOT_FOUND, "Category not found");
+        }
+        return category;
+    }
+
+    private ToolCategory toCategory(UpsertToolCategoryRequest request) {
+        ToolCategory category = new ToolCategory();
+        category.setCategoryCode(request.categoryCode());
+        category.setCategoryName(request.categoryName());
+        category.setSortOrder(request.sortOrder() == null ? 0 : request.sortOrder());
+        category.setStatus(normalizeCategoryStatus(request.status()));
+        return category;
+    }
+
+    private String normalizeCategoryStatus(String status) {
+        if (status == null || status.isBlank()) {
+            return "ACTIVE";
+        }
+        return status.trim().toUpperCase();
+    }
+
+    private ToolPrompt ensurePromptExists(Long promptId) {
+        return toolPromptMapper.findById(promptId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "Prompt not found"));
+    }
+
+    private ToolPromptVersion findPromptVersion(Long promptVersionId) {
+        return toolPromptVersionMapper.findById(promptVersionId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "Prompt version not found"));
     }
 
     private List<ToolFieldResponse> fields(Long toolId) {
@@ -334,30 +381,17 @@ public class ToolServiceImpl implements ToolService {
                 .toList();
     }
 
-    private ToolFieldItem toFieldItem(ToolFieldRequest request) {
-        ToolFieldItem item = new ToolFieldItem();
-        item.setFieldKey(request.fieldKey());
-        item.setFieldName(request.fieldName());
-        item.setFieldType(request.fieldType());
-        item.setPlaceholder(request.placeholder());
-        item.setOptionsJson(request.resolveOptionsJson());
-        item.setRequired(request.required() == null || request.required());
-        item.setSortOrder(request.sortOrder() == null ? 0 : request.sortOrder());
-        return item;
-    }
-
     private FieldSchemaResponse toFieldSchemaResponse(ToolFieldSchema schema) {
-        List<ToolFieldResponse> fieldList = toolMapper.findFieldsBySchemaId(schema.getId()).stream()
-                .map(item -> ToolFieldResponse.from(item, objectMapper))
-                .toList();
         return new FieldSchemaResponse(
                 schema.getId(),
                 schema.getToolId(),
                 schema.getSchemaVersion(),
                 schema.getStatus(),
-                fieldList,
-                schema.getCreatedAt(),
-                schema.getUpdatedAt()
+                toolFieldItemMapper.findBySchemaId(schema.getId()).stream()
+                        .map(field -> ToolFieldResponse.from(field, objectMapper))
+                        .toList(),
+                null,
+                null
         );
     }
 
@@ -386,17 +420,27 @@ public class ToolServiceImpl implements ToolService {
         );
     }
 
-    private String renderTemplate(String template, java.util.Map<String, Object> params) {
-        if (template == null) {
-            return "";
+    private String renderPrompt(String template, Map<String, Object> params) {
+        String output = template == null ? "" : template;
+        if (params == null || params.isEmpty()) {
+            return output;
         }
-        String output = template;
-        if (params != null) {
-            for (java.util.Map.Entry<String, Object> entry : params.entrySet()) {
-                String value = entry.getValue() == null ? "" : String.valueOf(entry.getValue());
-                output = output.replace("{{" + entry.getKey() + "}}", value);
-            }
+        for (Map.Entry<String, Object> entry : params.entrySet()) {
+            String value = entry.getValue() == null ? "" : String.valueOf(entry.getValue());
+            output = output.replace("{{" + entry.getKey() + "}}", value);
         }
-        return "[TEST PREVIEW]\n" + output;
+        return output;
+    }
+
+    private ToolFieldItem toFieldItem(ToolFieldRequest request) {
+        ToolFieldItem item = new ToolFieldItem();
+        item.setFieldKey(request.fieldKey());
+        item.setFieldName(request.fieldName());
+        item.setFieldType(request.fieldType());
+        item.setPlaceholder(request.placeholder());
+        item.setOptionsJson(request.options() == null ? null : request.options().toString());
+        item.setRequired(request.required() == null || request.required());
+        item.setSortOrder(request.sortOrder() == null ? 0 : request.sortOrder());
+        return item;
     }
 }

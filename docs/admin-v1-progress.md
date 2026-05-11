@@ -1,7 +1,7 @@
 # Admin V1 后台最小交付 · 推进记录
 
 > 维护人：后端 Owner 艾相波 · 单一可信来源（接口契约见 `docs/api/openapi.yml`，数据库见 `sql/001_init_v1.sql`）。
-> 最近一次同步：**2026-05-09 00:55（Day 2 夜间挡）**
+> 最近一次同步：**2026-05-09 晚间（合并清理 + 启动链）** · 详见 **`docs/2026-05-09-code-progress.md`**
 > 关联分支：`feature/admin-web`（PR 待提）
 > 阅读建议：先看「环境快速启动 SOP」「最新一日进度」，再看「同伴必看」是否影响你的模块。
 
@@ -11,18 +11,33 @@
 
 > 任何时候启动失败，请按这个顺序排查，今晚的所有坑都来自这两步没做对。
 
+0. **一键脚本（Windows）**：仓库根目录执行 **`start-dev.bat`**，会依次启 Docker、`user-web` / `admin-frontend` 按需安装依赖、后端、**双前端新窗口**（用户端 5173 + 管理端 5174）。说明见 **`docs/2026-05-09-code-progress.md` §6**。
+
 1. **打开 Docker Desktop**，等任务栏鲸鱼图标变 Running，确认 `docker ps` 能看到 `ai-supermarket-mysql`（3307）+ `ai-supermarket-redis`（6379）。如果容器停了：
    ```pwsh
    docker compose -f deploy/docker-compose.yml up -d
    ```
 2. **后端**：`mvn -f backend/pom.xml spring-boot:run`，等到 `Started AiToolMarketApplication`。
-3. **admin 前端**：`cd admin-frontend && npm run dev`，访问 `http://127.0.0.1:5174/`（已用 `strictPort: true` 锁死端口）。
-4. 如果 `vite build` 报 `Cannot find module @rollup/rollup-win32-x64-msvc`（npm Windows 已知 bug），跑：
+3. **管理后台 `admin-frontend`（Next.js，与用户端分离）**：
    ```pwsh
    cd admin-frontend
+   npm install
+   npm run dev
+   ```
+   浏览器访问 **`http://127.0.0.1:5174/`**（`package.json` 中 `dev` 已固定 `-p 5174`）。若提示 **`'next' 不是内部或外部命令`**，说明 **`admin-frontend` 下未装好依赖**，请确认已执行 **`npm install`** 且当前目录为 `admin-frontend`。
+4. **用户端 `user-web`（Vite）**（若也要起）：
+   ```pwsh
+   cd user-web
+   npm install
+   npm run dev
+   ```
+   默认 **`http://127.0.0.1:5173/`**。若 `vite` 报找不到 **`@tailwindcss/vite`**，同样在 `user-web` 下执行 **`npm install`**。
+5. 若 **`user-web` 的 `vite build`** 报 `Cannot find module @rollup/rollup-win32-x64-msvc`（npm Windows 已知 bug），在 **`user-web`** 目录执行：
+   ```pwsh
+   cd user-web
    npm install --no-save @rollup/rollup-win32-x64-msvc
    ```
-5. 如果 5174 出 `ERR_EMPTY_RESPONSE`，说明有僵尸 vite 进程同抢端口，`netstat -ano | findstr :5174` + `taskkill /F /PID <pid>` 清掉再启。
+6. 若 **5174** 出现 `ERR_EMPTY_RESPONSE` 或端口被占，用 `netstat -ano | findstr :5174` 查占用进程，`taskkill /F /PID <pid>` 清掉后再启（Next 与旧 Vite 进程都可能占用该端口）。
 
 ---
 
@@ -78,6 +93,25 @@
 - 后端：补 `AdminUserApiTest`（list / manual-add 的成功 + 重复 + 非法 amount）+ `AdminTaskFiltersApiTest`（status/toolCode/userId 过滤、retry/cancel 状态迁移）。
 - 契约：写一个最小 diff 脚本（OpenAPI examples ↔ 真实返回 JSON 字段集），跑在 CI 前置。
 - 联调延伸：和 Worker 同事跑一遍真实 LLM 调用 → 任务详情 logs/creditLogs 串联。
+
+---
+
+## 2026-05-09 晚间（CTO 合并清理 + 启动链）
+
+> 与凌晨「Day 2 前端联调」条目独立：本节为 **仓库内冲突标记清理、后端 Mapper 扫描、双前端依赖与端口、Docker Compose 对齐** 的基建日。全文级说明见 **`docs/2026-05-09-code-progress.md`**。
+
+### 完成摘要
+
+- 清除已提交进历史的 **Git 冲突标记**；后端/OpenAPI 等与 `feature/backend-core` 线对齐的模块已恢复为可编译状态；Worker `text_task_handler` 合并工具链与默认 prompt 分支。
+- **`MybatisPlusConfig`**：`@MapperScan` 从 `**.mapper` 改为 `*.mapper`，修复 **`UserMapper` 未注册** 导致的 `spring-boot:run` 失败。
+- **`user-web`**：依赖装全后 Vite 可加载 `@tailwindcss/vite`。
+- **`admin-frontend`**：明确为 **Next.js**；`dev` / `dev:docker` 固定 **5174**；`deploy/docker-compose.yml` 中 `admin-frontend` 服务改为 `npm run dev:docker` 并使用 **`NEXT_PUBLIC_API_PROXY_TARGET`**（移除误用的 `VITE_*`）。
+
+### 仍建议跟进
+
+- 在 `backend` 目录完整执行 **`mvn test`**（全量）并纳入习惯/CI。
+- `feature/test-docs` 与 `dev` 在 **`PROJECT_REVIEW_README.md`** 等文档上的重叠，按需单独合并或 PR。
+- 本地 **`dev` 超前 `origin/dev`** 时，在验证通过后 **`git push origin dev`**，避免分叉拉大。
 
 ---
 

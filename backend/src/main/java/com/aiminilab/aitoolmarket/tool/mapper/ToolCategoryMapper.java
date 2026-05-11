@@ -22,4 +22,10 @@ public interface ToolCategoryMapper extends BaseMapper<ToolCategory> {
                 .orderByAsc(ToolCategory::getSortOrder)
                 .orderByAsc(ToolCategory::getId));
     }
+
+    default List<ToolCategory> findAllCategories() {
+        return selectList(new LambdaQueryWrapper<ToolCategory>()
+                .orderByAsc(ToolCategory::getSortOrder)
+                .orderByAsc(ToolCategory::getId));
+    }
 }

@@ -30,7 +30,16 @@ export default function LoginPage() {
     setIsLoading(true)
     try {
       await adminLogin(email.trim(), password)
-      router.push("/")
+      const redirect =
+        typeof window !== "undefined"
+          ? new URLSearchParams(window.location.search).get("redirect")
+          : null
+      const target = redirect || "/"
+      if (typeof window !== "undefined") {
+        window.location.replace(target)
+        return
+      }
+      router.replace(target)
     } catch (err) {
       const message = err instanceof ApiError ? err.message : "登录失败，请稍后重试"
       setErrorMessage(message)
@@ -230,6 +239,7 @@ export default function LoginPage() {
           {/* Social Login */}
           <div className="grid grid-cols-2 gap-4">
             <Button 
+              type="button"
               variant="outline" 
               className="h-12 border-border hover:bg-secondary transition-colors"
             >
@@ -254,6 +264,7 @@ export default function LoginPage() {
               Google
             </Button>
             <Button 
+              type="button"
               variant="outline" 
               className="h-12 border-border hover:bg-secondary transition-colors"
             >
