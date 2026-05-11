@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { RouterLink, useRoute } from "vue-router"
 import {
+  Bot,
   LayoutGrid,
   Store,
   ListChecks,
@@ -29,6 +30,7 @@ const auth = useAuthStore()
 const credit = ref<CreditAccount | null>(null)
 
 const userNav = [
+  { href: "/agent" as const, label: "Agent", icon: Bot },
   { href: "/dashboard" as const, label: "工作台", icon: LayoutGrid },
   { href: "/marketplace" as const, label: "AI 工具超市", icon: Store },
   { href: "/tasks" as const, label: "我的任务", icon: ListChecks },

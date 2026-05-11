@@ -13,6 +13,7 @@ public class CreditLog {
     private Long userId;
     private Long accountId;
     private Long taskId;
+    private Long agentRunId;
     private String logType;
     private Integer amount;
     private Integer frozenAmount;
@@ -55,6 +56,14 @@ public class CreditLog {
 
     public void setTaskId(Long taskId) {
         this.taskId = taskId;
+    }
+
+    public Long getAgentRunId() {
+        return agentRunId;
+    }
+
+    public void setAgentRunId(Long agentRunId) {
+        this.agentRunId = agentRunId;
     }
 
     public String getLogType() {

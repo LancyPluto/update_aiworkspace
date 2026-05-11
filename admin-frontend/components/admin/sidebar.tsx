@@ -4,15 +4,15 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
 import {
-  LayoutDashboard,
-  Users,
-  Wrench,
-  FolderTree,
-  FileText,
-  ListTodo,
   Coins,
+  FileText,
+  FolderTree,
+  LayoutDashboard,
+  ListTodo,
   Settings,
   Sparkles,
+  Users,
+  Wrench,
 } from "lucide-react"
 
 const navigation = [
@@ -32,20 +32,16 @@ export function AdminSidebar() {
   return (
     <aside className="fixed left-0 top-0 z-40 h-screen w-64 border-r border-border bg-sidebar">
       <div className="flex h-full flex-col">
-        {/* Logo */}
         <div className="flex h-16 items-center gap-3 border-b border-sidebar-border px-6">
           <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary">
             <Sparkles className="h-5 w-5 text-primary-foreground" />
           </div>
           <div>
-            <h1 className="text-base font-semibold text-sidebar-foreground">
-              AI 工具超市
-            </h1>
+            <h1 className="text-base font-semibold text-sidebar-foreground">AI 工具超市</h1>
             <p className="text-xs text-muted-foreground">管理后台</p>
           </div>
         </div>
 
-        {/* Navigation */}
         <nav className="flex-1 space-y-1 px-3 py-4">
           {navigation.map((item) => {
             const isActive = pathname === item.href
@@ -67,14 +63,11 @@ export function AdminSidebar() {
           })}
         </nav>
 
-        {/* Footer */}
         <div className="border-t border-sidebar-border p-4">
           <div className="flex items-center gap-3">
             <div className="h-8 w-8 rounded-full bg-secondary" />
             <div className="flex-1">
-              <p className="text-sm font-medium text-sidebar-foreground">
-                管理员
-              </p>
+              <p className="text-sm font-medium text-sidebar-foreground">管理员</p>
               <p className="text-xs text-muted-foreground">admin@ai.com</p>
             </div>
           </div>

@@ -17,8 +17,9 @@ import {
 import { fetchAdminUsers } from "@/lib/api/users"
 import { fetchAdminTools } from "@/lib/api/tools"
 import { fetchAdminTasks } from "@/lib/api/tasks"
+import { fetchDashboardOverview } from "@/lib/api/dashboard"
 import { ApiError } from "@/lib/api/http"
-import type { AdminTaskApiPayload } from "@/lib/api/types"
+import type { AdminTaskRow, DashboardChartPoint } from "@/lib/api/types"
 
 interface RecentTaskRow {
   id: string
@@ -93,7 +94,10 @@ export default function DashboardPage() {
   const [toolTotal, setToolTotal] = useState<number | null>(null)
   const [toolDraft, setToolDraft] = useState<number>(0)
   const [taskTotal, setTaskTotal] = useState<number | null>(null)
-  const [tasks, setTasks] = useState<AdminTaskApiPayload[]>([])
+  const [tasks, setTasks] = useState<AdminTaskRow[]>([])
+  const [taskTrend, setTaskTrend] = useState<DashboardChartPoint[]>([])
+  const [popularTools, setPopularTools] = useState<DashboardChartPoint[]>([])
+  const [apiCreditConsumed, setApiCreditConsumed] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -103,10 +107,11 @@ export default function DashboardPage() {
       setLoading(true)
       setError(null)
       try {
-        const [usersResp, toolsResp, tasksResp] = await Promise.all([
+        const [usersResp, toolsResp, tasksResp, overviewResp] = await Promise.all([
           fetchAdminUsers().catch(() => null),
           fetchAdminTools().catch(() => null),
           fetchAdminTasks().catch(() => null),
+          fetchDashboardOverview().catch(() => null),
         ])
         if (cancelled) return
         if (usersResp) setUserTotal(usersResp.total ?? usersResp.list.length)
@@ -119,6 +124,11 @@ export default function DashboardPage() {
         if (tasksResp) {
           setTaskTotal(tasksResp.total ?? tasksResp.list.length)
           setTasks(tasksResp.list)
+        }
+        if (overviewResp) {
+          setTaskTrend(overviewResp.taskTrend)
+          setPopularTools(overviewResp.popularTools)
+          setApiCreditConsumed(overviewResp.apiCreditConsumed)
         }
       } catch (err) {
         if (cancelled) return
@@ -154,6 +164,8 @@ export default function DashboardPage() {
   const toolValue = toolTotal == null ? (loading ? "—" : "0") : String(toolTotal)
   const toolChangeText =
     toolTotal == null ? (loading ? "加载中…" : "暂无数据") : `${toolDraft} 个待上线`
+  const apiCreditValue =
+    apiCreditConsumed == null ? (loading ? "—" : "0") : apiCreditConsumed.toLocaleString()
 
   return (
     <AdminLayout>
@@ -191,8 +203,8 @@ export default function DashboardPage() {
           />
           <StatCard
             title="API 消耗"
-            value="—"
-            change="V2 商业化版本开放"
+            value={apiCreditValue}
+            change={loading ? "正在加载..." : "累计任务算力消耗"}
             changeType="neutral"
             icon={Zap}
             iconColor="bg-chart-5/10 text-chart-5"
@@ -201,8 +213,8 @@ export default function DashboardPage() {
 
         {/* Charts */}
         <div className="grid gap-6 lg:grid-cols-2">
-          <TaskTrendChart />
-          <ToolUsageChart />
+          <TaskTrendChart data={taskTrend} />
+          <ToolUsageChart data={popularTools} />
         </div>
 
         {/* Recent Tasks */}
