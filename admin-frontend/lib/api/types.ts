@@ -213,3 +213,37 @@ export interface UpdateUserStatusPayload {
 export interface TestGenerateResult {
   output: string
 }
+
+export type AgentModelProvider = 'mock' | 'openai_compatible' | 'anthropic_compatible' | 'minimax'
+
+export interface AgentModelConfig {
+  id: number
+  provider: AgentModelProvider | string
+  modelName: string
+  baseUrl?: string | null
+  apiKeyMasked?: string | null
+  minimaxGroupId?: string | null
+  timeoutSeconds: number
+  enabled: boolean
+  createdAt?: string | null
+  updatedAt?: string | null
+}
+
+export interface AgentModelConfigPayload {
+  provider: AgentModelProvider | string
+  modelName: string
+  baseUrl?: string
+  apiKey?: string
+  minimaxGroupId?: string
+  timeoutSeconds?: number
+  enabled?: boolean
+}
+
+export interface AgentModelConfigTestResult {
+  success: boolean
+  provider: string
+  modelName: string
+  latencyMs: number
+  message: string
+  sample: string
+}

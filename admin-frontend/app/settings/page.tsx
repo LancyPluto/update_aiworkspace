@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { AdminLayout } from "@/components/admin/admin-layout"
+import { AgentModelSettings } from "@/components/admin/agent-model-settings"
 import { AdminHeader } from "@/components/admin/header"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -11,7 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { ApiError } from "@/lib/api/http"
 import { fetchSettings, updateSettings } from "@/lib/api/settings"
-import { CheckCircle, Database, RefreshCw, Save, Server, Shield } from "lucide-react"
+import { CheckCircle, Database, RefreshCw, Save, Server, Settings2, Shield } from "lucide-react"
 
 interface SettingsForm {
   platformName: string
@@ -27,7 +28,7 @@ interface SettingsForm {
 
 const defaults: SettingsForm = {
   platformName: "AI 工具超市",
-  platformDescription: "一站式 AI 经营助手，帮助企业提升内容和运营效率",
+  platformDescription: "一站式 AI 运营助手，帮助企业提升内容生产与运营效率。",
   signupGrant: "100",
   taskMaxRetry: "3",
   queueEnabled: true,
@@ -110,7 +111,7 @@ export default function SettingsPage() {
   }
 
   const description = error
-    ? `联调异常：${error}`
+    ? `配置加载异常：${error}`
     : loading
       ? "正在从数据库加载系统配置"
       : "系统配置会保存到后端 system_settings 表"
@@ -120,12 +121,29 @@ export default function SettingsPage() {
       <AdminHeader title="系统配置" description={description} />
 
       <div className="p-6">
-        <Tabs defaultValue="system" className="space-y-6">
-          <TabsList>
-            <TabsTrigger value="system" className="gap-2"><Server className="h-4 w-4" />基础设置</TabsTrigger>
-            <TabsTrigger value="features" className="gap-2"><Database className="h-4 w-4" />功能开关</TabsTrigger>
-            <TabsTrigger value="security" className="gap-2"><Shield className="h-4 w-4" />安全设置</TabsTrigger>
+        <Tabs defaultValue="model" className="space-y-6">
+          <TabsList className="flex h-auto flex-wrap justify-start gap-2 bg-transparent p-0">
+            <TabsTrigger value="model" className="gap-2">
+              <Settings2 className="h-4 w-4" />
+              大模型接入
+            </TabsTrigger>
+            <TabsTrigger value="system" className="gap-2">
+              <Server className="h-4 w-4" />
+              基础设置
+            </TabsTrigger>
+            <TabsTrigger value="features" className="gap-2">
+              <Database className="h-4 w-4" />
+              功能开关
+            </TabsTrigger>
+            <TabsTrigger value="security" className="gap-2">
+              <Shield className="h-4 w-4" />
+              安全设置
+            </TabsTrigger>
           </TabsList>
+
+          <TabsContent value="model">
+            <AgentModelSettings />
+          </TabsContent>
 
           <TabsContent value="system" className="space-y-5">
             <section className="rounded-lg border border-border bg-card p-5">
@@ -135,7 +153,7 @@ export default function SettingsPage() {
                   <Input value={form.platformName} onChange={(event) => updateForm("platformName", event.target.value)} />
                 </div>
                 <div className="space-y-2">
-                  <Label>新用户免费算力</Label>
+                  <Label>新用户赠送算力</Label>
                   <Input type="number" value={form.signupGrant} onChange={(event) => updateForm("signupGrant", event.target.value)} />
                 </div>
               </div>
@@ -156,9 +174,9 @@ export default function SettingsPage() {
               </div>
               <div className="mt-5 space-y-3">
                 {[
-                  { key: "queueEnabled" as const, label: "启用任务队列", desc: "使用 Redis 队列异步执行任务" },
-                  { key: "creditDeductEnabled" as const, label: "启用算力扣除", desc: "任务完成后自动扣除算力" },
-                  { key: "maintenanceMode" as const, label: "维护模式", desc: "开启后可用于临时下线用户侧功能" },
+                  { key: "queueEnabled" as const, label: "启用任务队列", desc: "使用 Redis 队列异步执行任务。" },
+                  { key: "creditDeductEnabled" as const, label: "启用算力扣减", desc: "任务完成后自动扣减用户算力。" },
+                  { key: "maintenanceMode" as const, label: "维护模式", desc: "开启后可临时关闭用户侧核心功能。" },
                 ].map((item) => (
                   <div key={item.key} className="flex items-center justify-between rounded-md bg-secondary p-4">
                     <div>
@@ -193,7 +211,7 @@ export default function SettingsPage() {
             <RefreshCw className={loading ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
             刷新
           </Button>
-          <Button className="gap-2 min-w-32" onClick={saveSettings} disabled={saving}>
+          <Button className="min-w-32 gap-2" onClick={saveSettings} disabled={saving}>
             {saved ? <CheckCircle className="h-4 w-4" /> : <Save className={saving ? "h-4 w-4 animate-spin" : "h-4 w-4"} />}
             {saved ? "已保存" : saving ? "保存中..." : "保存配置"}
           </Button>

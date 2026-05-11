@@ -1,7 +1,10 @@
 param(
     [string]$BaseUrl = "http://127.0.0.1:8080",
     [string]$Username = "user1",
-    [string]$Password = "123456"
+    [string]$Password = "123456",
+    [int]$ReadyAttempts = 30,
+    [int]$PollAttempts = 30,
+    [int]$PollDelaySeconds = 1
 )
 
 $ErrorActionPreference = "Stop"
@@ -37,7 +40,62 @@ function Invoke-AgentJson {
         $request["Body"] = $Body | ConvertTo-Json -Depth 10
     }
 
-    return Invoke-RestMethod @request
+    try {
+        return Invoke-RestMethod @request
+    } catch {
+        $detail = Get-HttpErrorDetail -ErrorRecord $_
+        throw "API $Method $Path failed. url=$($request.Uri) $detail"
+    }
+}
+
+function Get-HttpErrorDetail {
+    param([System.Management.Automation.ErrorRecord]$ErrorRecord)
+
+    $message = $ErrorRecord.Exception.Message
+    $status = $null
+    if ($null -ne $ErrorRecord.Exception.Response) {
+        try {
+            $status = [int]$ErrorRecord.Exception.Response.StatusCode
+        } catch {
+            $status = $ErrorRecord.Exception.Response.StatusCode
+        }
+    }
+
+    if ($status) {
+        return "status=$status message=$message"
+    }
+
+    return "message=$message"
+}
+
+function Invoke-AgentJsonWithRetry {
+    param(
+        [ValidateSet("GET", "POST")]
+        [string]$Method,
+        [string]$Path,
+        [object]$Body = $null,
+        [string]$Token = $null,
+        [int]$Attempts = 30,
+        [int]$DelaySeconds = 1,
+        [string]$Operation = "$Method $Path"
+    )
+
+    $lastError = $null
+    for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+        try {
+            return Invoke-AgentJson -Method $Method -Path $Path -Body $Body -Token $Token
+        } catch {
+            $lastError = $_.Exception.Message
+            if ($attempt -ge $Attempts) {
+                break
+            }
+
+            Write-Host "Service not ready for $Operation, retry $attempt/${Attempts}: $lastError"
+            Start-Sleep -Seconds $DelaySeconds
+        }
+    }
+
+    throw "Service did not become ready for $Operation after $Attempts attempts. lastError=$lastError"
 }
 
 function Get-ResponseData {
@@ -69,7 +127,69 @@ function Get-RequiredProperty {
     throw "Missing $Description. Tried properties: $($Names -join ', ')"
 }
 
-$loginResponse = Invoke-AgentJson -Method POST -Path "/api/v1/auth/login" -Body @{
+function Get-EventType {
+    param([object]$Event)
+    return Get-RequiredProperty -Value $Event -Names @("eventType", "type") -Description "event type"
+}
+
+function Get-EventId {
+    param([object]$Event)
+
+    foreach ($name in @("id", "eventId")) {
+        if ($null -ne $Event -and $Event.PSObject.Properties.Name -contains $name) {
+            return [string]$Event.$name
+        }
+    }
+
+    return ""
+}
+
+function Get-EventSummary {
+    param([object[]]$Events)
+
+    return $Events | ForEach-Object {
+        $eventType = Get-EventType $_
+        $eventId = Get-EventId $_
+        if (-not [string]::IsNullOrWhiteSpace($eventId)) {
+            return "$eventType#$eventId"
+        }
+        return $eventType
+    }
+}
+
+function Assert-ExpectedLifecycle {
+    param([object[]]$Events)
+
+    $expected = @("run.started", "intent.detected", "message.delta", "message.completed", "run.completed")
+    $eventTypes = @($Events | ForEach-Object { Get-EventType $_ })
+    $positions = @()
+
+    foreach ($expectedType in $expected) {
+        $index = [array]::IndexOf($eventTypes, $expectedType)
+        if ($index -lt 0) {
+            throw "Missing expected event '$expectedType'. expected=$($expected -join ' -> ') actual=$($eventTypes -join ' -> ')"
+        }
+        $positions += $index
+    }
+
+    for ($i = 1; $i -lt $positions.Count; $i++) {
+        if ($positions[$i] -le $positions[$i - 1]) {
+            throw "Expected lifecycle order was not preserved. expected=$($expected -join ' -> ') actual=$($eventTypes -join ' -> ')"
+        }
+    }
+
+    $duplicates = $eventTypes |
+        Group-Object |
+        Where-Object { $_.Count -gt 1 -and $_.Name -in @("run.started", "intent.detected", "message.completed", "run.completed") }
+
+    return [pscustomobject]@{
+        Expected = $expected
+        Actual = $eventTypes
+        DuplicateLifecycleEvents = @($duplicates | ForEach-Object { "$($_.Name)x$($_.Count)" })
+    }
+}
+
+$loginResponse = Invoke-AgentJsonWithRetry -Method POST -Path "/api/v1/auth/login" -Operation "login/backend readiness" -Attempts $ReadyAttempts -Body @{
     account = $Username
     password = $Password
 }
@@ -97,7 +217,7 @@ $runId = Get-RequiredProperty -Value $messageData -Names @("runId", "id") -Descr
 $allEvents = @()
 $successfulEvent = $null
 
-for ($attempt = 1; $attempt -le 20; $attempt++) {
+for ($attempt = 1; $attempt -le $PollAttempts; $attempt++) {
     $eventsResponse = Invoke-AgentJson -Method GET -Path "/api/v1/agent/runs/$runId/events?pageSize=200" -Token $token
     $eventsData = Get-ResponseData $eventsResponse
 
@@ -110,13 +230,14 @@ for ($attempt = 1; $attempt -le 20; $attempt++) {
 
     $allEvents = $events
     foreach ($event in $events) {
-        $eventType = Get-RequiredProperty -Value $event -Names @("eventType", "type") -Description "event type"
+        $eventType = Get-EventType $event
 
         if ($eventType -eq "run.failed") {
-            throw "Agent run failed. sessionId=$sessionId runId=$runId"
+            $eventSummary = Get-EventSummary $events
+            throw "Agent run failed. sessionId=$sessionId runId=$runId events=$($eventSummary -join ', ')"
         }
 
-        if ($eventType -eq "tool.confirmation_required" -or $eventType -eq "run.completed") {
+        if ($eventType -eq "run.completed") {
             $successfulEvent = $eventType
             break
         }
@@ -126,7 +247,8 @@ for ($attempt = 1; $attempt -le 20; $attempt++) {
         break
     }
 
-    Start-Sleep -Seconds 1
+    Write-Host "Waiting for run.completed attempt $attempt/$PollAttempts events=$($events.Count)"
+    Start-Sleep -Seconds $PollDelaySeconds
 }
 
 if ($allEvents.Count -eq 0) {
@@ -134,20 +256,20 @@ if ($allEvents.Count -eq 0) {
 }
 
 if (-not $successfulEvent) {
-    $eventTypes = $allEvents | ForEach-Object {
-        Get-RequiredProperty -Value $_ -Names @("eventType", "type") -Description "event type"
-    }
-    throw "Agent run did not reach tool.confirmation_required or run.completed. sessionId=$sessionId runId=$runId events=$($eventTypes -join ', ')"
+    $eventTypes = $allEvents | ForEach-Object { Get-EventType $_ }
+    throw "Agent run did not reach run.completed. sessionId=$sessionId runId=$runId events=$($eventTypes -join ', ')"
 }
 
-$eventSummary = $allEvents | ForEach-Object {
-    $eventType = Get-RequiredProperty -Value $_ -Names @("eventType", "type") -Description "event type"
-    if ($_.PSObject.Properties.Name -contains "id") {
-        return "$eventType#$($_.id)"
-    }
-    return $eventType
-}
+$lifecycle = Assert-ExpectedLifecycle -Events $allEvents
+$eventSummary = Get-EventSummary $allEvents
 
 Write-Host "sessionId=$sessionId"
 Write-Host "runId=$runId"
+Write-Host "expectedLifecycle=$($lifecycle.Expected -join ' -> ')"
+Write-Host "actualLifecycle=$($lifecycle.Actual -join ' -> ')"
+if ($lifecycle.DuplicateLifecycleEvents.Count -gt 0) {
+    throw "Duplicate lifecycle events detected: $($lifecycle.DuplicateLifecycleEvents -join ', ')"
+}
+Write-Host "duplicateLifecycleEvents=none"
 Write-Host "events=$($eventSummary -join ', ')"
+Write-Host "PASS: agent e2e smoke completed without duplicate lifecycle events"

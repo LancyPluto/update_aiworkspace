@@ -19,7 +19,7 @@ import java.util.Set;
 @Service
 public class AgentModelConfigServiceImpl implements AgentModelConfigService {
 
-    private static final Set<String> SUPPORTED_PROVIDERS = Set.of("mock", "openai_compatible", "minimax");
+    private static final Set<String> SUPPORTED_PROVIDERS = Set.of("mock", "openai_compatible", "anthropic_compatible", "minimax");
 
     private final AgentModelConfigMapper agentModelConfigMapper;
     private final AgentServiceClient agentServiceClient;
@@ -70,7 +70,8 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
     @Override
     public AgentModelConfigTestResponse adminTest(AgentModelConfigRequest request) {
         validate(request);
-        return agentServiceClient.testModelConfig(request);
+        AgentModelConfig existing = agentModelConfigMapper.findLatest();
+        return agentServiceClient.testModelConfig(mergeSecretFields(request, existing));
     }
 
     private AgentModelConfig findOrDefault() {
@@ -105,5 +106,20 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
 
     private String blankToNull(String value) {
         return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    private AgentModelConfigRequest mergeSecretFields(AgentModelConfigRequest request, AgentModelConfig existing) {
+        if (existing == null || request.apiKey() != null && !request.apiKey().isBlank()) {
+            return request;
+        }
+        return new AgentModelConfigRequest(
+                request.provider(),
+                request.modelName(),
+                request.baseUrl(),
+                existing.getApiKey(),
+                request.minimaxGroupId(),
+                request.timeoutSeconds(),
+                request.enabled()
+        );
     }
 }

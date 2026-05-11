@@ -25,7 +25,7 @@ import java.util.UUID;
 @Component
 public class HttpAgentServiceClient implements AgentServiceClient {
 
-    private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(5);
+    private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(75);
 
     private final AppProperties appProperties;
     private final HttpClient httpClient;

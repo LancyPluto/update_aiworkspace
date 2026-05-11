@@ -1,8 +1,7 @@
 from typing import Any, TypedDict
 
 from app.config import settings
-from app.clients.model_client import ModelClientError
-from app.core.event_types import INTENT_DETECTED, MESSAGE_COMPLETED, MESSAGE_DELTA, RUN_COMPLETED, TOOL_CONFIRMATION_REQUIRED, TOOL_SELECTED
+from app.core.event_types import INTENT_DETECTED, MESSAGE_COMPLETED, MESSAGE_DELTA, TOOL_CONFIRMATION_REQUIRED, TOOL_SELECTED
 from app.core.budget_guard import BudgetExceeded, BudgetGuard, BudgetState
 from app.core.intent_router import Intent, IntentResult, IntentRouter
 from app.core.schemas import ChatMessage, RunComplete, RunContext, RunEventCreate, RunFail, ToolDescriptor, WorkspaceMemoryItem
@@ -26,6 +25,7 @@ class AgentState(TypedDict, total=False):
     tool_result: dict[str, Any] | None
     budget: BudgetState
     needs_confirmation: bool
+    missing_tool_arguments: list[str]
     final_answer: str | None
     error_code: str | None
     error_message: str | None
@@ -145,6 +145,10 @@ class UniversalAgentGraph:
             if state.get("needs_confirmation"):
                 await self._request_tool_confirmation(state)
                 return
+            if state.get("missing_tool_arguments"):
+                state = await self._generate_clarifying_answer(state)
+                await self._complete_run(state)
+                return
             try:
                 state = await self._execute_tool(state)
             except BudgetExceeded as exception:
@@ -185,6 +189,8 @@ class UniversalAgentGraph:
         return "generate_chat_answer"
 
     def _route_after_tool_preference(self, state: AgentState) -> str:
+        if state.get("missing_tool_arguments"):
+            return "generate_clarifying_answer"
         return "request_tool_confirmation" if state.get("needs_confirmation") else "execute_tool"
 
     async def _select_tool(self, state: AgentState) -> AgentState:
@@ -208,7 +214,10 @@ class UniversalAgentGraph:
             preference.toolCode == tool.toolCode and preference.autoCallEnabled
             for preference in context.toolPreferences
         )
-        return {**state, "needs_confirmation": not auto_call_enabled}
+        missing_arguments = self.tool_bridge.missing_required_arguments(context, tool) if auto_call_enabled else []
+        if missing_arguments:
+            return {**state, "needs_confirmation": False, "missing_tool_arguments": missing_arguments}
+        return {**state, "needs_confirmation": not auto_call_enabled, "missing_tool_arguments": []}
 
     async def _request_tool_confirmation(self, state: AgentState) -> AgentState:
         context = state["context"]
@@ -232,6 +241,9 @@ class UniversalAgentGraph:
     async def _execute_tool(self, state: AgentState) -> AgentState:
         context = state["context"]
         tool = state["selected_tool"]
+        missing_arguments = self.tool_bridge.missing_required_arguments(context, tool)
+        if missing_arguments:
+            return {**state, "missing_tool_arguments": missing_arguments}
         budget = state["budget"]
         self.budget_guard.reserve_tool_call(budget, tool.estimatedCreditCost)
         result = await self.tool_bridge.execute(context, tool)
@@ -303,7 +315,6 @@ class UniversalAgentGraph:
             context.runId,
             RunComplete(finalAnswer=answer, intent=intent, modelProviderCode="agent-service", modelName=model_name, consumedCredits=consumed_credits),
         )
-        await self.backend.append_event(context.runId, RunEventCreate(eventType=RUN_COMPLETED, eventText="Agent run completed"))
         return state
 
     async def fail(self, run_id: int, error_code: str, error_message: str) -> None:

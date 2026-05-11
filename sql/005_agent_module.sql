@@ -1,11 +1,13 @@
 CREATE TABLE IF NOT EXISTS agent_sessions (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   user_id BIGINT NOT NULL,
+  workspace_id BIGINT NULL,
   title VARCHAR(120) NOT NULL,
   status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   KEY idx_agent_sessions_user_updated (user_id, updated_at),
+  KEY idx_agent_sessions_workspace (workspace_id),
   KEY idx_agent_sessions_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 

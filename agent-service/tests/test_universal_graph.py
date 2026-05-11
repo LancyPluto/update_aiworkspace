@@ -2,6 +2,7 @@ import pytest
 
 from app.core.schemas import AgentFileChunkContext, AgentFileContext, RunContext, ToolDescriptor, ToolPreference
 from app.graphs.universal_agent_graph import UniversalAgentGraph
+from app.tools.backend_tool import BackendToolBridge
 
 
 class FakeBackend:
@@ -46,6 +47,16 @@ def xiaohongshu_tool() -> ToolDescriptor:
     )
 
 
+def xiaohongshu_tool_requiring_topic() -> ToolDescriptor:
+    return ToolDescriptor(
+        toolCode="xiaohongshu_copywriting",
+        toolName="Xiaohongshu",
+        description="Xiaohongshu note copywriting",
+        autoCallable=True,
+        inputSchema={"type": "object", "required": ["topic"], "properties": {"topic": {"type": "string"}}},
+    )
+
+
 @pytest.mark.asyncio
 async def test_graph_completes_general_chat():
     backend = FakeBackend()
@@ -74,6 +85,64 @@ async def test_graph_executes_tool_use_when_preference_allows_auto_call():
     await graph.run(context)
 
     assert backend.tool_calls[0][1] == "xiaohongshu_copywriting"
+    assert backend.completed[0][2] == "tool_use"
+
+
+@pytest.mark.asyncio
+async def test_graph_asks_for_required_tool_arguments_before_auto_calling():
+    backend = FakeBackend()
+    graph = UniversalAgentGraph(backend, FakeModel())
+    context = RunContext(
+        runId=1,
+        sessionId=1,
+        userId=1,
+        message="please use xiaohongshu_copywriting",
+        availableTools=[xiaohongshu_tool_requiring_topic()],
+        toolPreferences=[ToolPreference(toolCode="xiaohongshu_copywriting", autoCallEnabled=True)],
+    )
+
+    await graph.run(context)
+
+    assert backend.tool_calls == []
+    assert backend.completed[0][2] == "tool_use"
+    assert any(event[1] == "message.completed" for event in backend.events)
+
+
+def test_tool_bridge_extracts_explicit_required_arguments_from_message():
+    bridge = BackendToolBridge(FakeBackend())
+    context = RunContext(runId=1, sessionId=1, userId=1, message="please use xiaohongshu_copywriting topic: sunscreen launch")
+    tool = xiaohongshu_tool_requiring_topic()
+
+    arguments = bridge.build_arguments(context, tool)
+
+    assert arguments["userRequest"] == "please use xiaohongshu_copywriting topic: sunscreen launch"
+    assert arguments["topic"] == "sunscreen launch"
+    assert bridge.missing_required_arguments(context, tool) == []
+
+
+@pytest.mark.asyncio
+async def test_graph_auto_calls_tool_when_required_arguments_are_explicit():
+    backend = FakeBackend()
+    graph = UniversalAgentGraph(backend, FakeModel())
+    context = RunContext(
+        runId=1,
+        sessionId=1,
+        userId=1,
+        message="please use xiaohongshu_copywriting topic: sunscreen launch",
+        availableTools=[xiaohongshu_tool_requiring_topic()],
+        toolPreferences=[ToolPreference(toolCode="xiaohongshu_copywriting", autoCallEnabled=True)],
+    )
+
+    await graph.run(context)
+
+    assert backend.tool_calls[0] == (
+        1,
+        "xiaohongshu_copywriting",
+        {
+            "userRequest": "please use xiaohongshu_copywriting topic: sunscreen launch",
+            "topic": "sunscreen launch",
+        },
+    )
     assert backend.completed[0][2] == "tool_use"
 
 

@@ -1,8 +1,7 @@
 from app.clients.backend_client import BackendClient, BackendClientError
 from app.clients.model_client import ModelClient, ModelClientError
 from app.config import Settings
-from app.core.event_types import RUN_FAILED, RUN_STARTED
-from app.core.schemas import RunEventCreate, RunFail
+from app.core.schemas import RunFail
 from app.graphs.universal_agent_graph import UniversalAgentGraph
 from app.runtime.router import RuntimeRouter
 from app.tools.backend_tool import ToolExecutionError
@@ -26,7 +25,6 @@ class AgentRuntime:
 
     async def execute_run(self, run_id: int) -> None:
         try:
-            await self.backend.append_event(run_id, RunEventCreate(eventType=RUN_STARTED, eventText="Agent service accepted run"))
             context = await self.backend.get_run_context(run_id)
             model_client = await self._model_client()
             engine = self.runtime_router_factory(
@@ -79,7 +77,6 @@ class AgentRuntime:
 
     async def _fail(self, run_id: int, error_code: str, error_message: str) -> None:
         try:
-            await self.backend.append_event(run_id, RunEventCreate(eventType=RUN_FAILED, eventText=error_message, eventJson={"errorCode": error_code}))
             await self.backend.fail_run(run_id, RunFail(errorCode=error_code, errorMessage=error_message))
         except Exception:
             pass

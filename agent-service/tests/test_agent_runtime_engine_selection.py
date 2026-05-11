@@ -1,6 +1,5 @@
 import pytest
 
-from app.core.event_types import RUN_STARTED
 from app.core.runtime import AgentRuntime
 from app.core.schemas import RunContext
 
@@ -61,7 +60,7 @@ async def test_agent_runtime_uses_runtime_router_selected_engine():
     assert router.deep_agents_enabled is False
     assert router.select_calls == [("route me", None)]
     assert router.engine.run_contexts == [backend.context]
-    assert backend.events[0][1] == RUN_STARTED
+    assert backend.events == []
 
 
 @pytest.mark.asyncio

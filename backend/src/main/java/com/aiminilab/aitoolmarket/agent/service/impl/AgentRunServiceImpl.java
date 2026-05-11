@@ -81,6 +81,7 @@ public class AgentRunServiceImpl implements AgentRunService {
     private static final Set<String> CANCELLABLE_STATUSES = Set.of("CREATED", "RUNNING", "WAITING_USER_CONFIRMATION");
     private static final Set<String> CONFIRMABLE_STATUSES = Set.of("RUNNING", "WAITING_USER_CONFIRMATION");
     private static final Set<String> TERMINAL_STATUSES = Set.of("SUCCESS", "FAILED", "CANCELLED", "TIMEOUT");
+    private static final Set<String> TOOL_CALL_TERMINAL_STATUSES = Set.of("SUCCESS", "FAILED");
     private final Map<Long, CopyOnWriteArrayList<SseEmitter>> eventStreams = new ConcurrentHashMap<>();
 
     private final AgentSessionMapper agentSessionMapper;
@@ -247,10 +248,14 @@ public class AgentRunServiceImpl implements AgentRunService {
             return AgentRunResponse.from(findRun(runId, userId));
         }
         agentToolDescriptorService.getToolForAgent(userId, request.toolCode());
-        if (Boolean.TRUE.equals(request.autoCallEnabled())) {
-            agentToolPreferenceService.update(userId, request.toolCode(), new UpdateAgentToolPreferenceRequest(true));
+        LocalDateTime now = LocalDateTime.now();
+        if (request.autoCallEnabled() != null) {
+            agentToolPreferenceService.update(userId, request.toolCode(), new UpdateAgentToolPreferenceRequest(request.autoCallEnabled()));
         }
-        appendEventInternal(runId, userId, "tool.confirmed", request.toolCode(), "{\"toolCode\":\"" + request.toolCode() + "\"}", LocalDateTime.now());
+        if ("WAITING_USER_CONFIRMATION".equals(run.getStatus())) {
+            agentRunMapper.markRunning(runId, now);
+        }
+        appendEventInternal(runId, userId, "tool.confirmed", request.toolCode(), "{\"toolCode\":\"" + request.toolCode() + "\"}", now);
         runAfterCommit(() -> notifyAgentService(run.getId(), () -> agentServiceClient.confirmTool(run.getId(), request.toolCode())));
         return AgentRunResponse.from(findRun(runId, userId));
     }
@@ -445,6 +450,9 @@ public class AgentRunServiceImpl implements AgentRunService {
     @Transactional
     public AgentToolCallResponse completeToolCall(Long toolCallId, CompleteAgentToolCallRequest request) {
         AgentToolCall call = findToolCall(toolCallId);
+        if (TOOL_CALL_TERMINAL_STATUSES.contains(call.getStatus())) {
+            return AgentToolCallResponse.from(call);
+        }
         LocalDateTime now = LocalDateTime.now();
         agentToolCallMapper.markSuccess(toolCallId, toJson(request.resultJson()), now);
         appendEventInternal(call.getRunId(), call.getUserId(), "tool.finished", "工具调用已完成", toJson(request.resultJson()), now);
@@ -455,6 +463,9 @@ public class AgentRunServiceImpl implements AgentRunService {
     @Transactional
     public AgentToolCallResponse failToolCall(Long toolCallId, FailAgentToolCallRequest request) {
         AgentToolCall call = findToolCall(toolCallId);
+        if (TOOL_CALL_TERMINAL_STATUSES.contains(call.getStatus())) {
+            return AgentToolCallResponse.from(call);
+        }
         LocalDateTime now = LocalDateTime.now();
         agentToolCallMapper.markFailed(toolCallId, request.errorCode(), request.errorMessage(), now);
         appendEventInternal(call.getRunId(), call.getUserId(), "tool.finished", request.errorMessage(), toJson(request), now);
@@ -482,7 +493,6 @@ public class AgentRunServiceImpl implements AgentRunService {
         creditService.settleForAgentRun(run.getUserId(), runId, consumedCredits);
         creditService.releaseForAgentRun(run.getUserId(), runId, estimatedCredits - consumedCredits);
         agentRunMapper.markSuccess(runId, request.intent(), request.modelProviderCode(), request.modelName(), consumedCredits, now);
-        appendEventInternal(runId, run.getUserId(), "message.completed", "回答已生成", null, now);
         appendEventInternal(runId, run.getUserId(), "run.completed", "Agent 运行已完成", null, now);
         agentSessionMapper.touch(run.getSessionId(), now);
         agentRateLimitService.decrementActiveRun(run.getUserId(), runId);

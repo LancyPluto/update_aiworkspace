@@ -13,7 +13,6 @@ from app.core.event_types import (
     MEMORY_CANDIDATE_CREATED,
     MESSAGE_COMPLETED,
     MESSAGE_DELTA,
-    RUN_COMPLETED,
     SUBAGENT_COMPLETED,
     SUBAGENT_FAILED,
     SUBAGENT_STARTED,
@@ -99,10 +98,6 @@ class DeepAgentsRuntimeEngine:
                 consumedCredits=settings.agent_default_consumed_credits,
             ),
         )
-        await self.backend_client.append_event(
-            context.runId,
-            RunEventCreate(eventType=RUN_COMPLETED, eventText="Deep Agents run completed"),
-        )
         await self._emit_memory_candidate(context.runId, answer, artifact)
 
     def ensure_available(self) -> ModuleType:
@@ -118,10 +113,6 @@ class DeepAgentsRuntimeEngine:
         return importlib.import_module("deepagents")
 
     async def _fail(self, run_id: int, error_code: str, error_message: str) -> None:
-        await self.backend_client.append_event(
-            run_id,
-            RunEventCreate(eventType="run.failed", eventText=error_message, eventJson={"errorCode": error_code}),
-        )
         await self.backend_client.fail_run(run_id, RunFail(errorCode=error_code, errorMessage=error_message))
 
     def _chat_model(self):

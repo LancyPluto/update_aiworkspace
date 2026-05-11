@@ -8,8 +8,6 @@ from app.core.event_types import (
     MEMORY_CANDIDATE_CREATED,
     MESSAGE_COMPLETED,
     MESSAGE_DELTA,
-    RUN_COMPLETED,
-    RUN_FAILED,
     SUBAGENT_COMPLETED,
     SUBAGENT_FAILED,
     SUBAGENT_STARTED,
@@ -76,9 +74,7 @@ async def test_deep_agents_engine_refuses_when_disabled():
 
     await engine.run(context)
 
-    assert backend.events[0][0] == 7
-    assert backend.events[0][1].eventType == RUN_FAILED
-    assert backend.events[0][1].eventJson == {"errorCode": "DEEP_AGENTS_DISABLED"}
+    assert backend.events == []
     assert backend.failed_runs[0][1].errorCode == "DEEP_AGENTS_DISABLED"
 
 
@@ -113,7 +109,6 @@ async def test_deep_agents_engine_invokes_deep_agent_and_completes_run():
     assert backend.events[0][1].eventType == MESSAGE_DELTA
     assert backend.events[1][1].eventType == MESSAGE_COMPLETED
     assert backend.events[1][1].eventText == "Deep plan ready"
-    assert backend.events[2][1].eventType == RUN_COMPLETED
     assert backend.completed_runs[0][0] == 11
     assert backend.completed_runs[0][1].finalAnswer == "Deep plan ready"
     assert backend.completed_runs[0][1].intent == "deep_agents"
@@ -123,6 +118,23 @@ async def test_deep_agents_engine_invokes_deep_agent_and_completes_run():
         "content": "Deep plan ready",
         "sourceRunId": 11,
     }
+
+
+@pytest.mark.asyncio
+async def test_deep_agents_engine_does_not_emit_backend_lifecycle_events():
+    from app.runtime.deep_agents_engine import DeepAgentsRuntimeEngine
+
+    backend = FakeBackend()
+    module = FakeDeepAgentsModule(final_answer="Deep plan ready")
+    engine = DeepAgentsRuntimeEngine(backend, object(), deep_agents_enabled=True, dependency_loader=lambda: module)
+
+    await engine.run(RunContext(runId=16, sessionId=4, userId=5, message="plan a long task"))
+
+    event_types = [event.eventType for _, event in backend.events]
+    assert "run.started" not in event_types
+    assert "run.completed" not in event_types
+    assert "run.failed" not in event_types
+    assert backend.completed_runs[0][0] == 16
 
 
 @pytest.mark.asyncio
@@ -258,8 +270,7 @@ async def test_deep_agents_engine_fails_cleanly_when_model_is_not_supported():
 
     await engine.run(RunContext(runId=12, sessionId=4, userId=5, message="plan"))
 
-    assert backend.events[0][1].eventType == RUN_FAILED
-    assert backend.events[0][1].eventJson == {"errorCode": "DEEP_AGENTS_MODEL_UNSUPPORTED"}
+    assert backend.events == []
     assert backend.failed_runs[0][1].errorCode == "DEEP_AGENTS_MODEL_UNSUPPORTED"
 
 

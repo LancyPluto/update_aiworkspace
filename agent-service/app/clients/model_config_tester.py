@@ -15,7 +15,7 @@ class ModelConfigTester:
                     ChatMessage(role="user", content="ping"),
                 ]
             )
-        except ModelClientError as exception:
+        except (ModelClientError, ValueError) as exception:
             return _result(False, config, started, str(exception), "")
         return _result(True, config, started, "ok", answer[:240])
 

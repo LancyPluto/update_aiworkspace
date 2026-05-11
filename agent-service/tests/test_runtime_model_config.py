@@ -56,6 +56,7 @@ async def test_runtime_builds_model_client_from_backend_active_model_config():
 
     assert FakeModelClient.created_settings[0].model_provider == "minimax"
     assert FakeModelClient.created_settings[0].model_name == "MiniMax-M2.7"
+    assert FakeModelClient.created_settings[0].model_api_base_url == "https://api.minimax.io/v1"
     assert FakeModelClient.created_settings[0].model_api_key == "secret"
     assert FakeModelClient.created_settings[0].minimax_group_id == "group"
     assert backend.completed[0][1] == "agent-service"

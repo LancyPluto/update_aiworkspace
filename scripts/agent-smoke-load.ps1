@@ -4,6 +4,7 @@ param(
     [string]$Password = "123456",
     [int]$Requests = 8,
     [int]$DelayMilliseconds = 250,
+    [int]$ReadyAttempts = 30,
     [switch]$DryRun
 )
 
@@ -47,20 +48,71 @@ function Invoke-AgentApi {
         }
         return $response
     } catch {
+        $detail = Get-HttpErrorDetail -ErrorRecord $_
         if ($AllowFailure) {
             return [pscustomobject]@{
                 code = "HTTP_ERROR"
-                message = $_.Exception.Message
+                message = $detail
                 data = $null
             }
         }
-        throw
+        throw "API $Method $Path failed. url=$($params.Uri) $detail"
     }
+}
+
+function Get-HttpErrorDetail {
+    param([System.Management.Automation.ErrorRecord]$ErrorRecord)
+
+    $message = $ErrorRecord.Exception.Message
+    $status = $null
+    if ($null -ne $ErrorRecord.Exception.Response) {
+        try {
+            $status = [int]$ErrorRecord.Exception.Response.StatusCode
+        } catch {
+            $status = $ErrorRecord.Exception.Response.StatusCode
+        }
+    }
+
+    if ($status) {
+        return "status=$status message=$message"
+    }
+
+    return "message=$message"
+}
+
+function Invoke-AgentApiWithRetry {
+    param(
+        [ValidateSet("GET", "POST")]
+        [string]$Method,
+        [string]$Path,
+        [object]$Body = $null,
+        [string]$Token = $null,
+        [int]$Attempts = 30,
+        [int]$DelaySeconds = 1,
+        [string]$Operation = "$Method $Path"
+    )
+
+    $lastError = $null
+    for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+        try {
+            return Invoke-AgentApi -Method $Method -Path $Path -Body $Body -Token $Token
+        } catch {
+            $lastError = $_.Exception.Message
+            if ($attempt -ge $Attempts) {
+                break
+            }
+
+            Write-Host "Service not ready for $Operation, retry $attempt/${Attempts}: $lastError"
+            Start-Sleep -Seconds $DelaySeconds
+        }
+    }
+
+    throw "Service did not become ready for $Operation after $Attempts attempts. lastError=$lastError"
 }
 
 function Get-OrCreateToken {
     try {
-        $login = Invoke-AgentApi -Method POST -Path "/api/v1/auth/login" -Body @{
+        $login = Invoke-AgentApiWithRetry -Method POST -Path "/api/v1/auth/login" -Operation "login/backend readiness" -Attempts $ReadyAttempts -Body @{
             account = $Username
             password = $Password
         }
@@ -90,6 +142,9 @@ $sessionId = $sessionResponse.data.id
 $accepted = 0
 $limited = 0
 $businessFailures = 0
+$httpFailures = 0
+$runIds = @()
+$failureDetails = @()
 
 for ($i = 1; $i -le $Requests; $i++) {
     $response = Invoke-AgentApi -Method POST -Path "/api/v1/agent/sessions/$sessionId/messages" -Token $token -AllowFailure -Body @{
@@ -100,6 +155,7 @@ for ($i = 1; $i -le $Requests; $i++) {
     switch ($response.code) {
         "SUCCESS" {
             $accepted++
+            $runIds += $response.data.runId
             Write-Host "request $i accepted: runId=$($response.data.runId)"
         }
         "AGENT_RATE_LIMITED" {
@@ -112,6 +168,10 @@ for ($i = 1; $i -le $Requests; $i++) {
         }
         default {
             $businessFailures++
+            if ($response.code -eq "HTTP_ERROR") {
+                $httpFailures++
+            }
+            $failureDetails += "request=$i code=$($response.code) message=$($response.message)"
             Write-Host "request $i failed: $($response.code) $($response.message)"
         }
     }
@@ -120,7 +180,13 @@ for ($i = 1; $i -le $Requests; $i++) {
 }
 
 if ($accepted -lt 1) {
-    throw "Smoke load did not get any accepted Agent request. limited=$limited failures=$businessFailures"
+    throw "Smoke load did not get any accepted Agent request. limited=$limited failures=$businessFailures httpFailures=$httpFailures details=$($failureDetails -join ' | ')"
 }
 
-Write-Host "PASS: agent smoke load accepted=$accepted limited=$limited failures=$businessFailures"
+Write-Host "acceptedRunIds=$($runIds -join ', ')"
+if ($failureDetails.Count -gt 0) {
+    Write-Host "failureDetails=$($failureDetails -join ' | ')"
+} else {
+    Write-Host "failureDetails=none"
+}
+Write-Host "PASS: agent smoke load accepted=$accepted limited=$limited failures=$businessFailures httpFailures=$httpFailures"

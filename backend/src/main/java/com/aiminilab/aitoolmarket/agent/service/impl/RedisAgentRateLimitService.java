@@ -7,6 +7,7 @@ import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.config.AppProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.redis.core.SetOperations;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
@@ -19,6 +20,7 @@ public class RedisAgentRateLimitService implements AgentRateLimitService {
     private static final Logger LOGGER = LoggerFactory.getLogger(RedisAgentRateLimitService.class);
     private static final DateTimeFormatter MINUTE_FORMAT = DateTimeFormatter.ofPattern("yyyyMMddHHmm");
     private static final DateTimeFormatter HOUR_FORMAT = DateTimeFormatter.ofPattern("yyyyMMddHH");
+    private static final Duration ACTIVE_RUN_TTL = Duration.ofHours(6);
 
     private final StringRedisTemplate redisTemplate;
     private final AgentRunMapper agentRunMapper;
@@ -58,6 +60,16 @@ public class RedisAgentRateLimitService implements AgentRateLimitService {
         if (activeRuns >= limit) {
             throw new BusinessException(ErrorCode.AGENT_ACTIVE_RUN_LIMIT, "已有 Agent 正在运行，请稍后再试");
         }
+        try {
+            Long redisActiveRuns = redisTemplate.opsForSet().size(activeRunKey(userId));
+            if (redisActiveRuns != null && redisActiveRuns >= limit) {
+                throw new BusinessException(ErrorCode.AGENT_ACTIVE_RUN_LIMIT, "已有 Agent 正在运行，请稍后再试");
+            }
+        } catch (BusinessException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            LOGGER.warn("agent active run rate limit degraded, userId={}", userId, exception);
+        }
     }
 
     @Override
@@ -81,11 +93,32 @@ public class RedisAgentRateLimitService implements AgentRateLimitService {
 
     @Override
     public void incrementActiveRun(Long userId, Long runId) {
-        // Phase 1.1 uses database state for active-run checks.
+        try {
+            SetOperations<String, String> setOperations = redisTemplate.opsForSet();
+            String key = activeRunKey(userId);
+            setOperations.add(key, String.valueOf(runId));
+            redisTemplate.expire(key, ACTIVE_RUN_TTL);
+        } catch (Exception exception) {
+            LOGGER.warn("agent active run increment degraded, userId={}, runId={}", userId, runId, exception);
+        }
     }
 
     @Override
     public void decrementActiveRun(Long userId, Long runId) {
-        // Phase 1.1 uses database state for active-run checks.
+        try {
+            SetOperations<String, String> setOperations = redisTemplate.opsForSet();
+            String key = activeRunKey(userId);
+            setOperations.remove(key, String.valueOf(runId));
+            Long remaining = setOperations.size(key);
+            if (remaining != null && remaining > 0) {
+                redisTemplate.expire(key, ACTIVE_RUN_TTL);
+            }
+        } catch (Exception exception) {
+            LOGGER.warn("agent active run decrement degraded, userId={}, runId={}", userId, runId, exception);
+        }
+    }
+
+    private String activeRunKey(Long userId) {
+        return "agent:rate:user:" + userId + ":active-runs";
     }
 }
