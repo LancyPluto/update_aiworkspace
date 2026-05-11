@@ -1,0 +1,334 @@
+package com.aiminilab.aitoolmarket.agent;
+
+import com.aiminilab.aitoolmarket.agent.client.AgentServiceClient;
+import com.aiminilab.aitoolmarket.agent.dto.AgentModelConfigTestResponse;
+import com.aiminilab.aitoolmarket.agent.service.AgentRateLimitService;
+import com.aiminilab.aitoolmarket.auth.security.InternalRequestSignatureVerifier;
+import com.aiminilab.aitoolmarket.auth.security.AuthTestTokens;
+import com.aiminilab.aitoolmarket.auth.security.TokenDenylistService;
+import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.http.MediaType;
+import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.web.servlet.MockMvc;
+
+import static com.aiminilab.aitoolmarket.testsupport.InternalApiTestSupport.signed;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+@SpringBootTest
+@AutoConfigureMockMvc
+@TestPropertySource(properties = {
+        "spring.datasource.url=jdbc:h2:mem:admin_agent_api_test;MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1",
+        "spring.datasource.driver-class-name=org.h2.Driver",
+        "spring.datasource.username=sa",
+        "spring.datasource.password=",
+        "spring.sql.init.mode=always",
+        "spring.sql.init.schema-locations=classpath:schema-test.sql",
+        "app.agent.max-active-runs-per-user=100",
+        "app.agent.max-messages-per-minute=100"
+})
+class AdminAgentApiTest {
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @MockBean
+    private TokenDenylistService tokenDenylistService;
+
+    @MockBean
+    private InternalRequestSignatureVerifier internalRequestSignatureVerifier;
+
+    @MockBean
+    private AgentRateLimitService agentRateLimitService;
+
+    @MockBean
+    private AgentServiceClient agentServiceClient;
+
+    @Test
+    void adminCanObserveAgentRunsEventsToolCallsAndCancelActiveRun() throws Exception {
+        mockExternalAuthDependencies();
+        String adminToken = login("/api/admin/v1/auth/login", "admin");
+        Long toolId = createTool(adminToken, "xiaohongshu_copywriting");
+        publishTool(adminToken, toolId);
+        String userToken = login("/api/v1/auth/login", "user1");
+        Long sessionId = createSession(userToken, "Admin Observability");
+        Long runId = sendMessage(userToken, sessionId, "Recommend a writing tool.");
+        Long toolCallId = createToolCall(runId);
+
+        mockMvc.perform(get("/api/admin/v1/agent/runs")
+                        .param("status", "RUNNING")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(1))
+                .andExpect(jsonPath("$.data.list[0].id").value(runId.intValue()))
+                .andExpect(jsonPath("$.data.list[0].userId").value(2))
+                .andExpect(jsonPath("$.data.list[0].status").value("RUNNING"))
+                .andExpect(jsonPath("$.data.list[0].eventCount").value(2))
+                .andExpect(jsonPath("$.data.list[0].toolCallCount").value(1));
+
+        mockMvc.perform(get("/api/admin/v1/agent/runs/stats")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalRuns").value(1))
+                .andExpect(jsonPath("$.data.activeRuns").value(1))
+                .andExpect(jsonPath("$.data.toolCalls").value(1));
+
+        mockMvc.perform(get("/api/admin/v1/agent/runs/{runId}", runId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.run.id").value(runId.intValue()))
+                .andExpect(jsonPath("$.data.events[0].eventType").value("run.started"))
+                .andExpect(jsonPath("$.data.toolCalls[0].id").value(toolCallId.intValue()))
+                .andExpect(jsonPath("$.data.toolCalls[0].toolCode").value("xiaohongshu_copywriting"));
+
+        mockMvc.perform(post("/api/admin/v1/agent/runs/{runId}/cancel", runId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("CANCELLED"));
+    }
+
+    @Test
+    void userTokenCannotAccessAdminAgentApi() throws Exception {
+        mockExternalAuthDependencies();
+        String userToken = login("/api/v1/auth/login", "user1");
+
+        mockMvc.perform(get("/api/admin/v1/agent/runs")
+                        .header("Authorization", "Bearer " + userToken))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ADMIN_FORBIDDEN"));
+    }
+
+    @Test
+    void adminCanSaveModelConfigAndInternalApiReturnsActiveConfig() throws Exception {
+        mockExternalAuthDependencies();
+        String adminToken = login("/api/admin/v1/auth/login", "admin");
+
+        String body = """
+                {
+                  "provider": "minimax",
+                  "modelName": "MiniMax-M2.7",
+                  "baseUrl": "https://api.minimax.io/v1",
+                  "apiKey": "secret-key",
+                  "minimaxGroupId": "group-123",
+                  "timeoutSeconds": 45,
+                  "enabled": true
+                }
+                """;
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put("/api/admin/v1/agent/model-config")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.provider").value("minimax"))
+                .andExpect(jsonPath("$.data.modelName").value("MiniMax-M2.7"))
+                .andExpect(jsonPath("$.data.apiKeyMasked").value("se***ey"))
+                .andExpect(jsonPath("$.data.apiKey").doesNotExist());
+
+        mockMvc.perform(get("/api/admin/v1/agent/model-config")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.provider").value("minimax"))
+                .andExpect(jsonPath("$.data.apiKeyMasked").value("se***ey"));
+
+        mockMvc.perform(signed(get("/api/internal/v1/agent/model-config"), "GET",
+                        "/api/internal/v1/agent/model-config", ""))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.provider").value("minimax"))
+                .andExpect(jsonPath("$.data.apiKey").value("secret-key"))
+                .andExpect(jsonPath("$.data.minimaxGroupId").value("group-123"));
+    }
+
+    @Test
+    void emptyApiKeyUpdateKeepsExistingModelSecret() throws Exception {
+        mockExternalAuthDependencies();
+        String adminToken = login("/api/admin/v1/auth/login", "admin");
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put("/api/admin/v1/agent/model-config")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "provider": "openai_compatible",
+                                  "modelName": "first-model",
+                                  "baseUrl": "https://first.example/v1",
+                                  "apiKey": "first-secret",
+                                  "timeoutSeconds": 30,
+                                  "enabled": true
+                                }
+                                """))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put("/api/admin/v1/agent/model-config")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "provider": "openai_compatible",
+                                  "modelName": "second-model",
+                                  "baseUrl": "https://second.example/v1",
+                                  "apiKey": "",
+                                  "timeoutSeconds": 60,
+                                  "enabled": true
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.modelName").value("second-model"))
+                .andExpect(jsonPath("$.data.apiKeyMasked").value("fi***et"));
+
+        mockMvc.perform(signed(get("/api/internal/v1/agent/model-config"), "GET",
+                        "/api/internal/v1/agent/model-config", ""))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.apiKey").value("first-secret"))
+                .andExpect(jsonPath("$.data.modelName").value("second-model"));
+    }
+
+    @Test
+    void adminCanTestModelConfigBeforeSaving() throws Exception {
+        mockExternalAuthDependencies();
+        Mockito.when(agentServiceClient.testModelConfig(any()))
+                .thenReturn(new com.aiminilab.aitoolmarket.agent.dto.AgentModelConfigTestResponse(
+                        true,
+                        "mock",
+                        "mock",
+                        12L,
+                        "ok",
+                        "pong"
+                ));
+        String adminToken = login("/api/admin/v1/auth/login", "admin");
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/admin/v1/agent/model-config/test")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "provider": "mock",
+                                  "modelName": "mock",
+                                  "timeoutSeconds": 30,
+                                  "enabled": true
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.success").value(true))
+                .andExpect(jsonPath("$.data.provider").value("mock"))
+                .andExpect(jsonPath("$.data.sample").value("pong"));
+
+        Mockito.verify(agentServiceClient).testModelConfig(any());
+    }
+
+    private void mockExternalAuthDependencies() {
+        Mockito.when(tokenDenylistService.isDenied(anyString())).thenReturn(false);
+        Mockito.when(agentServiceClient.testModelConfig(any()))
+                .thenReturn(new AgentModelConfigTestResponse(true, "mock", "mock", 1L, "ok", "pong"));
+        Mockito.when(internalRequestSignatureVerifier.verify(
+                        anyString(),
+                        anyString(),
+                        anyString(),
+                        anyString(),
+                        anyString(),
+                        any(byte[].class)
+                ))
+                .thenReturn(true);
+    }
+
+    private String login(String path, String account) throws Exception {
+        var result = mockMvc.perform(post(path)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "account": "%s",
+                                  "password": "123456"
+                                }
+                                """.formatted(account)))
+                .andExpect(status().isOk())
+                .andReturn();
+        if (path.contains("/admin/")) {
+            return AuthTestTokens.adminJwtFrom(result);
+        }
+        return AuthTestTokens.userJwtFrom(result);
+    }
+
+    private Long createSession(String token, String title) throws Exception {
+        String response = mockMvc.perform(post("/api/v1/agent/sessions")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"%s\"}".formatted(title)))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        return Long.parseLong(response.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
+    }
+
+    private Long createTool(String adminToken, String toolCode) throws Exception {
+        String response = mockMvc.perform(post("/api/admin/v1/tools")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "toolCode": "%s",
+                                  "toolName": "%s",
+                                  "categoryId": 1,
+                                  "description": "Agent admin test tool",
+                                  "coverUrl": "",
+                                  "estimatedCreditCost": 1
+                                }
+                                """.formatted(toolCode, toolCode)))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        return Long.parseLong(response.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
+    }
+
+    private void publishTool(String adminToken, Long toolId) throws Exception {
+        mockMvc.perform(post("/api/admin/v1/tools/{toolId}/publish", toolId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk());
+    }
+
+    private Long sendMessage(String token, Long sessionId, String content) throws Exception {
+        String response = mockMvc.perform(post("/api/v1/agent/sessions/{sessionId}/messages", sessionId)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "content": "%s",
+                                  "clientRequestId": "%s"
+                                }
+                                """.formatted(content, java.util.UUID.randomUUID())))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        Mockito.verify(agentServiceClient).executeRun(anyLong());
+        return Long.parseLong(response.replaceAll("(?s).*\\\"runId\\\"\\s*:\\s*(\\d+).*", "$1"));
+    }
+
+    private Long createToolCall(Long runId) throws Exception {
+        String body = """
+                {
+                  "toolCode": "xiaohongshu_copywriting",
+                  "argumentsJson": "{\\"topic\\":\\"coffee\\"}"
+                }
+                """;
+        String response = mockMvc.perform(signed(post("/api/internal/v1/agent/runs/{runId}/tool-calls", runId), "POST",
+                        "/api/internal/v1/agent/runs/%d/tool-calls".formatted(runId), body)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        return Long.parseLong(response.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
+    }
+}

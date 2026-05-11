@@ -34,6 +34,10 @@ public class JwtTokenProvider {
         this.expireMinutes = expireMinutes;
     }
 
+    public long getExpireMinutes() {
+        return expireMinutes;
+    }
+
     public String createToken(AuthUser authUser) {
         try {
             Map<String, Object> header = new LinkedHashMap<>();

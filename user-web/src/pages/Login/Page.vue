@@ -1,6 +1,48 @@
 <script setup lang="ts">
+<<<<<<< Updated upstream
 import { RouterLink } from "vue-router"
 import { Sparkles, ShieldCheck, Zap, Boxes } from "lucide-vue-next"
+=======
+  import { reactive, ref } from "vue"
+  import { RouterLink, useRoute, useRouter } from "vue-router"
+  import { Sparkles, ShieldCheck, Zap, Boxes, Loader2 } from "lucide-vue-next"
+  import { useAuthStore } from "@/store/authStore"
+  import { ApiBusinessError } from "@/api"
+
+  const router = useRouter()
+  const route = useRoute()
+  const auth = useAuthStore()
+
+  const form = reactive({
+    account: "user1",
+    password: "123456",
+  })
+
+  const errorMsg = ref<string | null>(null)
+  const submitting = ref(false)
+
+  async function handleLogin() {
+    if (!form.account || !form.password) {
+      errorMsg.value = "请输入账号和密码"
+      return
+    }
+    errorMsg.value = null
+    submitting.value = true
+    try {
+      await auth.login({ account: form.account, password: form.password })
+      const redirect = typeof route.query.redirect === "string" ? route.query.redirect : null
+      router.push(redirect || { name: "ToolList" })
+    } catch (e) {
+      if (e instanceof ApiBusinessError) {
+        errorMsg.value = e.message
+      } else {
+        errorMsg.value = (e as Error).message || "登录失败，请稍后重试"
+      }
+    } finally {
+      submitting.value = false
+    }
+  }
+>>>>>>> Stashed changes
 </script>
 
 <template>

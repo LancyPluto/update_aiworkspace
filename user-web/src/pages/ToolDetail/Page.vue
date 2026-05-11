@@ -14,17 +14,30 @@ import {
 } from "lucide-vue-next"
 import { computed, ref } from "vue"
 import AppShell from "@/components/AppShell.vue"
+<<<<<<< Updated upstream
 
+=======
+import { fetchToolByCode } from "@/api/toolApi"
+import type { ToolDetail } from "@/api/types"
+>>>>>>> Stashed changes
 const props = defineProps<{
   id: string
 }>()
 
+<<<<<<< Updated upstream
+=======
+const tool = ref<ToolDetail | null>(null)
+const loading = ref(true)
+const error = ref<string | null>(null)
+
+>>>>>>> Stashed changes
 const tab = ref<"intro" | "cases" | "input" | "output">("intro")
 
 const title = computed(() =>
   props.id === "ec-copy" ? "电商商品文案生成" : `工具 · ${props.id}`,
 )
 
+<<<<<<< Updated upstream
 const steps = [
   { title: "选择目标平台", desc: "选择投放的电商平台，AI 会根据平台特性调整文案风格与字数" },
   { title: "填写商品信息", desc: "输入商品名称、核心卖点、目标人群等关键信息" },
@@ -37,6 +50,17 @@ const inputFields = [
   { name: "核心卖点", required: true, type: "多行文本", desc: "3 - 5 个卖点" },
   { name: "目标人群", required: true, type: "选择", desc: "宝妈 / 白领 / 学生等" },
 ]
+=======
+onMounted(async () => {
+  try {
+    tool.value = await fetchToolByCode(props.id)
+  } catch (e) {
+    error.value = (e as Error).message || "加载工具详情失败"
+  } finally {
+    loading.value = false
+  }
+})
+>>>>>>> Stashed changes
 </script>
 
 <template>

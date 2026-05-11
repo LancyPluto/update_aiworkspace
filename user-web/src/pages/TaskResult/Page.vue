@@ -10,6 +10,7 @@
     taskId: string
   }>()
 
+<<<<<<< Updated upstream
   const blocks: ResultBlock[] = [
     {
       type: "text",
@@ -34,6 +35,22 @@
         "盛夏的海风，是连衣裙最好的搭档。海岸新季选用 100% 莫代尔冰丝面料，亲肤透气，体感比纯棉降温 4-6℃……",
     },
   ]
+=======
+onMounted(async () => {
+  loading.value = true
+  error.value = ""
+  try {
+    task.value = await fetchTaskById(props.taskId)
+    if (task.value.result?.contentText) {
+      blocks.value = [{ type: "text", title: "生成结果", content: task.value.result.contentText }]
+    }
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : "获取任务结果失败"
+  } finally {
+    loading.value = false
+  }
+})
+>>>>>>> Stashed changes
 </script>
 
 <template>

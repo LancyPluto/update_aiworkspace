@@ -21,6 +21,7 @@
 
   type TaskRunStatus = "running" | "success" | "failed" | "queued"
 
+<<<<<<< Updated upstream
   type TaskItem = {
     id: string
     name: string
@@ -32,6 +33,43 @@
     creator: string
     preview: string
     error?: string
+=======
+function mapStatus(status: TaskStatus): "running" | "success" | "failed" | "queued" {
+  if (status === "PROCESSING" || status === "RETRYING") return "running"
+  if (status === "SUCCESS") return "success"
+  if (status === "FAILED" || status === "TIMEOUT" || status === "CANCELLED") return "failed"
+  return "queued"
+}
+
+const statusFilters = computed(() => [
+  { id: "all", label: "全部任务", count: total.value, icon: Filter },
+  { id: "PROCESSING", label: "生成中", count: tasks.value.filter((task) => task.status === "PROCESSING" || task.status === "RETRYING").length, icon: Loader2 },
+  { id: "QUEUED", label: "排队中", count: tasks.value.filter((task) => task.status === "QUEUED" || task.status === "CREATED").length, icon: Clock },
+  { id: "SUCCESS", label: "已完成", count: tasks.value.filter((task) => task.status === "SUCCESS").length, icon: CheckCircle2 },
+  { id: "FAILED", label: "失败", count: tasks.value.filter((task) => task.status === "FAILED" || task.status === "TIMEOUT" || task.status === "CANCELLED").length, icon: XCircle },
+])
+
+async function loadTasks() {
+  loading.value = true
+  error.value = ""
+  try {
+    const query: Record<string, string | number | boolean | undefined> = {
+      pageNo: currentPage.value,
+      pageSize: 20,
+    }
+    if (selectedStatus.value !== "all") {
+      query.status = selectedStatus.value
+    }
+    const response = await fetchTasks({ query: query as any })
+    tasks.value = response.list
+    total.value = response.total
+  } catch (err) {
+    tasks.value = []
+    total.value = 0
+    error.value = err instanceof Error ? err.message : "加载任务失败"
+  } finally {
+    loading.value = false
+>>>>>>> Stashed changes
   }
 
   const statusFilters = [
@@ -42,6 +80,7 @@
     { id: "failed", label: "失败", count: 10, icon: XCircle },
   ]
 
+<<<<<<< Updated upstream
   const tasks: TaskItem[] = [
     {
       id: "T-20260509-1042",
@@ -86,6 +125,18 @@
       error: "输入素材识别失败：上传的参考视频时长超过 5 分钟",
     },
   ]
+=======
+async function handleCancel(taskId: number) {
+  try {
+    await cancelTask(taskId)
+    await loadTasks()
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : "取消任务失败"
+  }
+}
+
+onMounted(loadTasks)
+>>>>>>> Stashed changes
 </script>
 
 <template>

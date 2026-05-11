@@ -34,6 +34,24 @@ function isActive(href: string) {
   if (href === userRoutes.dashboard) return route.path === href
   return route.path === href || route.path.startsWith(href + "/")
 }
+<<<<<<< Updated upstream
+=======
+
+const creditPercent = computed(() => {
+  if (!credit.value) return 0
+  return Math.round((credit.value.available / (credit.value.totalGranted || 1)) * 100)
+})
+
+onMounted(async () => {
+  if (auth.isLoggedIn) {
+    try {
+      credit.value = await fetchCreditAccount()
+    } catch {
+      // 静默处理
+    }
+  }
+})
+>>>>>>> Stashed changes
 </script>
 
 <template>

@@ -1,5 +1,6 @@
 package com.aiminilab.aitoolmarket.config;
 
+import com.aiminilab.aitoolmarket.auth.security.AuthCookieSupport;
 import com.aiminilab.aitoolmarket.auth.security.AuthContext;
 import com.aiminilab.aitoolmarket.auth.security.AuthUser;
 import com.aiminilab.aitoolmarket.auth.security.JwtTokenProvider;
@@ -7,6 +8,17 @@ import com.aiminilab.aitoolmarket.common.dto.ApiResponse;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.enums.UserType;
 import com.fasterxml.jackson.databind.ObjectMapper;
+<<<<<<< Updated upstream
+=======
+import jakarta.servlet.Filter;
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ReadListener;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.ServletInputStream;
+import jakarta.servlet.ServletRequest;
+import jakarta.servlet.ServletResponse;
+import jakarta.servlet.http.Cookie;
+>>>>>>> Stashed changes
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Value;
@@ -86,11 +98,35 @@ public class AuthInterceptor implements HandlerInterceptor {
     }
 
     private Optional<AuthUser> extractAuthUser(HttpServletRequest request) {
+        return resolveRawJwt(request).flatMap(jwtTokenProvider::parseToken);
+    }
+
+    private Optional<String> resolveRawJwt(HttpServletRequest request) {
         String authorization = request.getHeader("Authorization");
-        if (authorization == null || !authorization.startsWith("Bearer ")) {
+        if (authorization != null && authorization.startsWith("Bearer ")) {
+            return Optional.of(authorization.substring("Bearer ".length()));
+        }
+        String path = request.getRequestURI();
+        String cookieName = path.startsWith("/api/admin/v1")
+                ? AuthCookieSupport.ADMIN_SESSION_COOKIE
+                : AuthCookieSupport.USER_SESSION_COOKIE;
+        return readCookieValue(request, cookieName);
+    }
+
+    private Optional<String> readCookieValue(HttpServletRequest request, String name) {
+        Cookie[] cookies = request.getCookies();
+        if (cookies == null) {
             return Optional.empty();
         }
-        return jwtTokenProvider.parseToken(authorization.substring("Bearer ".length()));
+        for (Cookie cookie : cookies) {
+            if (name.equals(cookie.getName())) {
+                String value = cookie.getValue();
+                if (value != null && !value.isBlank()) {
+                    return Optional.of(value);
+                }
+            }
+        }
+        return Optional.empty();
     }
 
     private void writeError(HttpServletResponse response, HttpStatus status, ErrorCode errorCode, String message) throws Exception {

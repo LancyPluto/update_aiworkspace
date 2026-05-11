@@ -1,4 +1,8 @@
 <script setup lang="ts">
+<<<<<<< Updated upstream
+=======
+import { ref, onMounted } from "vue"
+>>>>>>> Stashed changes
 import { RouterLink } from "vue-router"
 import {
   Search,
@@ -12,15 +16,21 @@ import {
   Video,
 } from "lucide-vue-next"
 import AppShell from "@/components/AppShell.vue"
+<<<<<<< Updated upstream
 
 const categories = [
   { id: "all", label: "全部工具", count: 86 },
   { id: "ec", label: "电商运营", count: 24 },
   { id: "content", label: "内容营销", count: 18 },
 ]
+=======
+import { fetchToolCategories, fetchTools, searchTools } from "@/api/toolApi"
+import type { ToolCategory, ToolSummary } from "@/api/types"
+>>>>>>> Stashed changes
 
 const hotTags = ["618 大促", "小红书爆款", "短视频脚本", "商品主图"]
 
+<<<<<<< Updated upstream
 const tools = [
   {
     name: "电商商品文案生成",
@@ -66,6 +76,68 @@ const tools = [
     slug: "video-script",
   },
 ]
+=======
+// 图标映射
+function getIcon(_name: string) {
+  // 简单轮转图标
+  const icons = [Pencil, Megaphone, ImageIcon, Video]
+  return icons[Math.floor(Math.random() * icons.length)]
+}
+
+async function loadCategories() {
+  try {
+    categories.value = await fetchToolCategories()
+  } catch {
+    // 静默处理
+  }
+}
+
+async function loadTools() {
+  loading.value = true
+  try {
+    const query: Record<string, string | number | boolean | undefined> = {
+      pageNo: currentPage.value,
+      pageSize,
+    }
+    if (selectedCategoryId.value) {
+      query.categoryId = selectedCategoryId.value
+    }
+    if (keyword.value) {
+      // 有搜索关键词时使用搜索接口
+      const res = await searchTools({
+        query: { keyword: keyword.value, pageNo: currentPage.value, pageSize },
+      })
+      tools.value = res.list
+      total.value = res.total
+    } else {
+      const res = await fetchTools({ query })
+      tools.value = res.list
+      total.value = res.total
+    }
+  } catch {
+    tools.value = []
+    total.value = 0
+  } finally {
+    loading.value = false
+  }
+}
+
+function selectCategory(categoryId?: number) {
+  selectedCategoryId.value = categoryId
+  currentPage.value = 1
+  loadTools()
+}
+
+function doSearch() {
+  currentPage.value = 1
+  loadTools()
+}
+
+onMounted(() => {
+  loadCategories()
+  loadTools()
+})
+>>>>>>> Stashed changes
 </script>
 
 <template>

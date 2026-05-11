@@ -8,6 +8,69 @@ import { userRoutes } from "@/router/userRoutes"
 defineProps<{
   taskId: string
 }>()
+<<<<<<< Updated upstream
+=======
+
+const auth = useAuthStore()
+
+const statusData = ref<TaskStatusPayload | null>(null)
+const loading = ref(true)
+const error = ref<string | null>(null)
+
+// 后端状态 → 前端标签状态
+function mapStatus(s: TaskStatus): "running" | "success" | "failed" | "queued" {
+  switch (s) {
+    case "PROCESSING":
+    case "RETRYING":
+      return "running"
+    case "SUCCESS":
+      return "success"
+    case "FAILED":
+    case "TIMEOUT":
+      return "failed"
+    case "CREATED":
+    case "QUEUED":
+    default:
+      return "queued"
+  }
+}
+
+// 是否已完成终态
+function isTerminal(s: TaskStatus): boolean {
+  return ["SUCCESS", "FAILED", "TIMEOUT", "CANCELLED"].includes(s)
+}
+
+async function loadStatus() {
+  if (!props.taskId) return
+  try {
+    statusData.value = await fetchTaskStatus(props.taskId)
+    error.value = null
+  } catch (e) {
+    error.value = (e as Error).message || "获取任务状态失败"
+  } finally {
+    loading.value = false
+  }
+}
+
+let intervalId: ReturnType<typeof setInterval> | undefined
+
+onMounted(() => {
+  loadStatus()
+  // 任务未完成时轮询
+  intervalId = setInterval(() => {
+    if (statusData.value && !isTerminal(statusData.value.status)) {
+      loadStatus()
+    } else if (statusData.value && isTerminal(statusData.value.status)) {
+      // 已完成则停止轮询
+      if (intervalId) clearInterval(intervalId)
+    }
+  }, 3000)
+})
+
+onUnmounted(() => {
+  if (intervalId) clearInterval(intervalId)
+})
+>>>>>>> Stashed changes
 </script>
 
 <template>

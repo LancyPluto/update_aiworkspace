@@ -1,5 +1,6 @@
 package com.aiminilab.aitoolmarket.task;
 
+import com.aiminilab.aitoolmarket.auth.security.AuthTestTokens;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -93,7 +94,7 @@ class AdminTaskApiTest {
     }
 
     private String login(String path, String account) throws Exception {
-        String response = mockMvc.perform(post(path)
+        var result = mockMvc.perform(post(path)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
@@ -102,10 +103,11 @@ class AdminTaskApiTest {
                                 }
                                 """.formatted(account)))
                 .andExpect(status().isOk())
-                .andReturn()
-                .getResponse()
-                .getContentAsString();
-        return response.replaceAll("(?s).*\\\"accessToken\\\"\\s*:\\s*\\\"([^\\\"]+)\\\".*", "$1");
+                .andReturn();
+        if (path.contains("/admin/")) {
+            return AuthTestTokens.adminJwtFrom(result);
+        }
+        return AuthTestTokens.userJwtFrom(result);
     }
 
     private Long createTool(String adminToken, String toolCode, int estimatedCreditCost) throws Exception {

@@ -5,10 +5,58 @@ import AppShell from "@/components/AppShell.vue"
 import DynamicForm from "@/components/DynamicForm/DynamicForm.vue"
 import TaskStatusTag from "@/components/TaskStatusTag/TaskStatusTag.vue"
 import { userRoutes } from "@/router/userRoutes"
+<<<<<<< Updated upstream
+=======
+import { fetchToolByCode, createTask } from "@/api"
+import type { ToolDetail } from "@/api/types"
+>>>>>>> Stashed changes
 
 defineProps<{
   id: string
 }>()
+<<<<<<< Updated upstream
+=======
+
+const router = useRouter()
+
+const tool = ref<ToolDetail | null>(null)
+const loading = ref(true)
+const error = ref<string | null>(null)
+const submitting = ref(false)
+const createdTask = ref<{ taskId: number; taskNo: string } | null>(null)
+
+const title = computed(() => tool.value?.toolName ?? `工具 · ${props.id}`)
+
+onMounted(async () => {
+  try {
+    tool.value = await fetchToolByCode(props.id)
+  } catch (e) {
+    error.value = (e as Error).message || "加载工具详情失败"
+  } finally {
+    loading.value = false
+  }
+})
+
+async function handleCreateTask() {
+  if (!tool.value) return
+  submitting.value = true
+  try {
+    const res = await createTask(
+      {
+        toolCode: tool.value.toolCode,
+        params: {},
+      },
+    )
+    createdTask.value = { taskId: res.taskId, taskNo: res.taskNo }
+    // 跳转到任务状态页
+    router.push(userRoutes.taskStatus(String(res.taskId)))
+  } catch (e) {
+    error.value = (e as Error).message || "创建任务失败"
+  } finally {
+    submitting.value = false
+  }
+}
+>>>>>>> Stashed changes
 </script>
 
 <template>
