@@ -22,6 +22,14 @@ CREATE TABLE tool_categories (
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
+CREATE TABLE system_settings (
+  setting_key VARCHAR(128) PRIMARY KEY,
+  setting_value TEXT,
+  setting_group VARCHAR(64) NOT NULL DEFAULT 'system',
+  description VARCHAR(255),
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
 CREATE TABLE ai_tools (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   tool_code VARCHAR(128) NOT NULL UNIQUE,
@@ -100,6 +108,21 @@ CREATE TABLE ai_result_resources (
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE task_outbox_events (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  task_id BIGINT NOT NULL,
+  event_type VARCHAR(64) NOT NULL,
+  payload_json TEXT NOT NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'PENDING',
+  retry_count INT NOT NULL DEFAULT 0,
+  next_retry_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_error TEXT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_task_outbox_status_retry (status, next_retry_at, id),
+  UNIQUE KEY uk_task_outbox_task_event (task_id, event_type)
+);
+
 CREATE TABLE credit_accounts (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   user_id BIGINT NOT NULL UNIQUE,
@@ -128,5 +151,44 @@ CREATE TABLE credit_logs (
   operator_type VARCHAR(32) NOT NULL DEFAULT 'SYSTEM',
   operator_id BIGINT,
   reason VARCHAR(512),
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE tool_prompts (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  tool_id BIGINT NOT NULL,
+  prompt_code VARCHAR(128) NOT NULL,
+  prompt_name VARCHAR(128) NOT NULL,
+  active_version_id BIGINT,
+  status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+CREATE TABLE tool_prompt_versions (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  prompt_id BIGINT NOT NULL,
+  version_no VARCHAR(32) NOT NULL,
+  system_prompt TEXT,
+  user_prompt_template MEDIUMTEXT NOT NULL,
+  output_format VARCHAR(32) NOT NULL DEFAULT 'MARKDOWN',
+  status VARCHAR(32) NOT NULL DEFAULT 'DRAFT',
+  created_by BIGINT,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  published_at DATETIME
+);
+
+CREATE TABLE ai_task_logs (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  task_id BIGINT NOT NULL,
+  from_status VARCHAR(32),
+  to_status VARCHAR(32),
+  event_type VARCHAR(64) NOT NULL,
+  message TEXT,
+  error_code VARCHAR(64),
+  error_message TEXT,
+  operator_type VARCHAR(32) NOT NULL DEFAULT 'SYSTEM',
+  operator_id BIGINT,
+  metadata_json JSON,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

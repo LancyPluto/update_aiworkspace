@@ -7,6 +7,9 @@
 *.log
 logs/
 
+# local tool bundles
+.tools/
+
 # Java
 target/
 *.class
@@ -15,6 +18,9 @@ target/
 node_modules/
 dist/
 .vite/
+*.tsbuildinfo
+admin-frontend/vite.config.js
+admin-frontend/vite.config.d.ts
 
 # Python
 __pycache__/

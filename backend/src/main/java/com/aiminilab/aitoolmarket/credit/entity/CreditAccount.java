@@ -1,6 +1,11 @@
 package com.aiminilab.aitoolmarket.credit.entity;
 
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableName;
+
+@TableName("credit_accounts")
 public class CreditAccount {
+    @TableId
     private Long id;
     private Long userId;
     private Integer balance;

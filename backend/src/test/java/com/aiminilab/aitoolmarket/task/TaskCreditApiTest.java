@@ -75,8 +75,10 @@ class TaskCreditApiTest {
         mockMvc.perform(get("/api/v1/credits/account")
                         .header("Authorization", "Bearer " + userToken))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.balance").value(90))
-                .andExpect(jsonPath("$.data.totalConsumed").value(10));
+                .andExpect(jsonPath("$.data.balance").value(100))
+                .andExpect(jsonPath("$.data.frozen").value(10))
+                .andExpect(jsonPath("$.data.available").value(90))
+                .andExpect(jsonPath("$.data.totalConsumed").value(0));
 
         mockMvc.perform(get("/api/v1/tasks/{taskId}/status", taskId)
                         .header("Authorization", "Bearer " + userToken))
@@ -124,6 +126,61 @@ class TaskCreditApiTest {
                 .andExpect(jsonPath("$.code").value("CREDIT_NOT_ENOUGH"));
     }
 
+    @Test
+    void userCanFilterCancelAndRegenerateOwnTasks() throws Exception {
+        String adminToken = login("/api/admin/v1/auth/login", "admin");
+        Long toolId = createTool(adminToken, "user_task_ops_tool", 5);
+        publishTool(adminToken, toolId);
+        String userToken = login("/api/v1/auth/login", "user1");
+
+        Long taskId = createTask(userToken, "user_task_ops_tool", "first-request", "Original Product");
+
+        mockMvc.perform(get("/api/v1/tasks")
+                        .param("status", "QUEUED")
+                        .param("toolCode", "user_task_ops_tool")
+                        .param("pageNo", "1")
+                        .param("pageSize", "10")
+                        .header("Authorization", "Bearer " + userToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(1))
+                .andExpect(jsonPath("$.data.pageNo").value(1))
+                .andExpect(jsonPath("$.data.pageSize").value(10))
+                .andExpect(jsonPath("$.data.hasNext").value(false))
+                .andExpect(jsonPath("$.data.list[0].taskId").value(taskId.intValue()));
+
+        mockMvc.perform(post("/api/v1/tasks/{taskId}/cancel", taskId)
+                        .header("Authorization", "Bearer " + userToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("CANCELLED"))
+                .andExpect(jsonPath("$.data.progress").value(100));
+
+        String regenerateResponse = mockMvc.perform(post("/api/v1/tasks/{taskId}/regenerate", taskId)
+                        .header("Authorization", "Bearer " + userToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "params": {
+                                    "productName": "Regenerated Product",
+                                    "targetCustomer": "Young users",
+                                    "style": "review"
+                                  },
+                                  "clientRequestId": "regenerate-request-001"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("QUEUED"))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        Long regeneratedTaskId = Long.parseLong(regenerateResponse.replaceAll("(?s).*\\\"taskId\\\"\\s*:\\s*(\\d+).*", "$1"));
+
+        mockMvc.perform(get("/api/v1/tasks/{taskId}", regeneratedTaskId)
+                        .header("Authorization", "Bearer " + userToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.params.productName").value("Regenerated Product"));
+    }
+
     private String login(String path, String account) throws Exception {
         String response = mockMvc.perform(post(path)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -165,5 +222,27 @@ class TaskCreditApiTest {
         mockMvc.perform(post("/api/admin/v1/tools/{toolId}/publish", toolId)
                         .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isOk());
+    }
+
+    private Long createTask(String userToken, String toolCode, String clientRequestId, String productName) throws Exception {
+        String response = mockMvc.perform(post("/api/v1/tasks")
+                        .header("Authorization", "Bearer " + userToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "toolCode": "%s",
+                                  "params": {
+                                    "productName": "%s",
+                                    "targetCustomer": "Young users",
+                                    "style": "planting"
+                                  },
+                                  "clientRequestId": "%s"
+                                }
+                                """.formatted(toolCode, productName, clientRequestId)))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        return Long.parseLong(response.replaceAll("(?s).*\\\"taskId\\\"\\s*:\\s*(\\d+).*", "$1"));
     }
 }

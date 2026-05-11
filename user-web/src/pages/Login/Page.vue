@@ -1,6 +1,43 @@
 <script setup lang="ts">
-import { RouterLink } from "vue-router"
-import { Sparkles, ShieldCheck, Zap, Boxes } from "lucide-vue-next"
+import { reactive, ref } from "vue"
+import { RouterLink, useRoute, useRouter } from "vue-router"
+import { Sparkles, ShieldCheck, Zap, Boxes, Loader2 } from "lucide-vue-next"
+import { useAuthStore } from "@/store/authStore"
+import { ApiBusinessError } from "@/api"
+
+const router = useRouter()
+const route = useRoute()
+const auth = useAuthStore()
+
+const form = reactive({
+  account: "user1",
+  password: "123456",
+})
+
+const errorMsg = ref<string | null>(null)
+const submitting = ref(false)
+
+async function handleLogin() {
+  if (!form.account || !form.password) {
+    errorMsg.value = "请输入账号和密码"
+    return
+  }
+  errorMsg.value = null
+  submitting.value = true
+  try {
+    await auth.login({ account: form.account, password: form.password })
+    const redirect = typeof route.query.redirect === "string" ? route.query.redirect : null
+    router.push(redirect || { name: "ToolList" })
+  } catch (e) {
+    if (e instanceof ApiBusinessError) {
+      errorMsg.value = e.message
+    } else {
+      errorMsg.value = (e as Error).message || "登录失败，请稍后重试"
+    }
+  } finally {
+    submitting.value = false
+  }
+}
 </script>
 
 <template>
@@ -53,34 +90,42 @@ import { Sparkles, ShieldCheck, Zap, Boxes } from "lucide-vue-next"
 
         <div class="login-header">
           <h2 class="login-title">登录账号</h2>
-          <p class="login-subtitle">使用企业邮箱或扫码登录，开始你的 AI 工作流</p>
+          <p class="login-subtitle">使用企业账号登录，开始你的 AI 工作流</p>
         </div>
 
-        <div class="login-card">
+        <form class="login-card" @submit.prevent="handleLogin">
           <label class="input-group">
-            <span class="input-label">企业邮箱</span>
+            <span class="input-label">账号</span>
             <input
-              type="email"
+              v-model="form.account"
+              type="text"
               class="input-field"
-              placeholder="name@company.com"
-              value="zhangwei@acme.com"
+              placeholder="请输入账号"
+              autocomplete="username"
             />
           </label>
           <label class="input-group">
             <span class="input-label">登录密码</span>
             <input
+              v-model="form.password"
               type="password"
               class="input-field"
               placeholder="请输入密码"
+              autocomplete="current-password"
             />
           </label>
-          <RouterLink
-            :to="{ name: 'ToolList' }"
+
+          <p v-if="errorMsg" class="error-message">{{ errorMsg }}</p>
+
+          <button
+            type="submit"
             class="login-btn"
+            :disabled="submitting"
           >
-            登录工作台
-          </RouterLink>
-        </div>
+            <Loader2 v-if="submitting" class="spin-icon" />
+            {{ submitting ? "登录中..." : "登录工作台" }}
+          </button>
+        </form>
 
         <p class="footer-link">
           <RouterLink :to="{ name: 'ToolList' }" class="toolstore-link">
@@ -297,12 +342,21 @@ import { Sparkles, ShieldCheck, Zap, Boxes } from "lucide-vue-next"
     outline: none;
     box-shadow: 2px solid var(--ring);
   }
+  .error-message {
+    color: var(--destructive);
+    font-size: 0.8rem;
+    padding: 0.5rem;
+    border-radius: 0.375rem;
+    background-color: var(--destructive) / 0.1;
+    border: 1px solid var(--destructive) / 0.3;
+  }
   .login-btn {
     display: inline-flex;
     height: 2.75rem;
     width: 100%;
     align-items: center;
     justify-content: center;
+    gap: 0.5rem;
     border-radius: 0.375rem;
     background-color: var(--primary);
     padding: 0 1rem;
@@ -310,9 +364,23 @@ import { Sparkles, ShieldCheck, Zap, Boxes } from "lucide-vue-next"
     font-weight: 500;
     color: var(--primary-foreground);
     text-decoration: none;
+    border: none;
+    cursor: pointer;
   }
   .login-btn:hover {
     opacity: 0.9;
+  }
+  .login-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+  .spin-icon {
+    height: 1rem;
+    width: 1rem;
+    animation: spin 1s linear infinite;
+  }
+  @keyframes spin {
+    to { transform: rotate(360deg); }
   }
   .footer-link {
     text-align: center;

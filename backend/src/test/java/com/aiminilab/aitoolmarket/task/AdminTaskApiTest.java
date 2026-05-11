@@ -8,6 +8,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
+import static com.aiminilab.aitoolmarket.testsupport.InternalApiTestSupport.signed;
 import static org.hamcrest.Matchers.blankOrNullString;
 import static org.hamcrest.Matchers.not;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -57,15 +58,29 @@ class AdminTaskApiTest {
                 .andExpect(jsonPath("$.data.taskId").value(taskId.intValue()))
                 .andExpect(jsonPath("$.data.params.productName").value("Admin Task Product"));
 
-        mockMvc.perform(post("/api/internal/v1/tasks/{taskId}/failed", taskId)
-                        .header("X-Internal-Token", "local-internal-token")
+        String processingBody = """
+                                {
+                                  "progress": 35,
+                                  "progressMessage": "AI is generating"
+                                }
+                                """;
+        mockMvc.perform(signed(post("/api/internal/v1/tasks/{taskId}/processing", taskId), "POST",
+                        "/api/internal/v1/tasks/%d/processing".formatted(taskId), processingBody)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
+                        .content(processingBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("PROCESSING"));
+
+        String failedBody = """
                                 {
                                   "errorCode": "MODEL_CALL_FAILED",
                                   "errorMessage": "model timeout"
                                 }
-                                """))
+                                """;
+        mockMvc.perform(signed(post("/api/internal/v1/tasks/{taskId}/failed", taskId), "POST",
+                        "/api/internal/v1/tasks/%d/failed".formatted(taskId), failedBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(failedBody))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("FAILED"));
 

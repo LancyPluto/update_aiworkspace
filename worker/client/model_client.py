@@ -38,6 +38,12 @@ class ModelClient:
         system_prompt: str = "",
         model_name: str | None = None,
     ) -> str:
+        if settings.model_provider == "mock":
+            return (
+                "Local demo result: Worker received the task and generated a mock response.\n\n"
+                f"Input:\n{prompt[:500]}"
+            )
+
         if not self.api_key or self.api_key == "replace-with-model-key":
             raise ModelClientError("MODEL_API_KEY is not configured")
 

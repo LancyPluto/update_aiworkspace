@@ -5,7 +5,16 @@ import com.aiminilab.aitoolmarket.tool.dto.ToolCategoryResponse;
 import com.aiminilab.aitoolmarket.tool.dto.ToolDetailResponse;
 import com.aiminilab.aitoolmarket.tool.dto.ToolFieldResponse;
 import com.aiminilab.aitoolmarket.tool.dto.ToolSummaryResponse;
+import com.aiminilab.aitoolmarket.tool.dto.CreateFieldSchemaRequest;
+import com.aiminilab.aitoolmarket.tool.dto.CreatePromptRequest;
+import com.aiminilab.aitoolmarket.tool.dto.CreatePromptVersionRequest;
+import com.aiminilab.aitoolmarket.tool.dto.FieldSchemaResponse;
+import com.aiminilab.aitoolmarket.tool.dto.PromptResponse;
+import com.aiminilab.aitoolmarket.tool.dto.PromptVersionResponse;
+import com.aiminilab.aitoolmarket.tool.dto.TestGenerateRequest;
+import com.aiminilab.aitoolmarket.tool.dto.TestGenerateResponse;
 import com.aiminilab.aitoolmarket.tool.dto.UpdateToolFieldsRequest;
+import com.aiminilab.aitoolmarket.tool.dto.UpsertToolCategoryRequest;
 import com.aiminilab.aitoolmarket.tool.dto.UpsertToolRequest;
 
 import java.util.List;
@@ -14,11 +23,21 @@ public interface ToolService {
 
     List<ToolCategoryResponse> categories();
 
-    PageResponse<ToolSummaryResponse> userTools();
+    List<ToolCategoryResponse> adminCategories();
+
+    ToolCategoryResponse createCategory(UpsertToolCategoryRequest request);
+
+    ToolCategoryResponse updateCategory(Long categoryId, UpsertToolCategoryRequest request);
+
+    ToolCategoryResponse updateCategoryStatus(Long categoryId, String status);
+
+    PageResponse<ToolSummaryResponse> userTools(String keyword, Long categoryId, Integer pageNo, Integer pageSize);
 
     ToolDetailResponse userToolDetail(String toolCode);
 
-    PageResponse<ToolSummaryResponse> adminTools();
+    PageResponse<ToolSummaryResponse> adminTools(String keyword, Long categoryId, String status, Integer pageNo, Integer pageSize);
+
+    ToolDetailResponse adminToolDetail(Long toolId);
 
     ToolSummaryResponse createTool(UpsertToolRequest request, Long operatorId);
 
@@ -31,4 +50,22 @@ public interface ToolService {
     List<ToolFieldResponse> adminFields(Long toolId);
 
     List<ToolFieldResponse> updateFields(Long toolId, UpdateToolFieldsRequest request);
+
+    List<FieldSchemaResponse> fieldSchemas(Long toolId);
+
+    FieldSchemaResponse createFieldSchema(Long toolId, CreateFieldSchemaRequest request, Long operatorId);
+
+    FieldSchemaResponse publishFieldSchema(Long schemaId);
+
+    List<PromptResponse> prompts(Long toolId);
+
+    PromptResponse createPrompt(Long toolId, CreatePromptRequest request);
+
+    List<PromptVersionResponse> promptVersions(Long promptId);
+
+    PromptVersionResponse createPromptVersion(Long promptId, CreatePromptVersionRequest request, Long operatorId);
+
+    TestGenerateResponse testGenerate(Long promptVersionId, TestGenerateRequest request);
+
+    PromptVersionResponse publishPromptVersion(Long promptVersionId);
 }

@@ -21,6 +21,16 @@ spring:
       timeout: 2s
 
 app:
+  production-mode: ${APP_PRODUCTION_MODE:false}
   jwt-secret: ${JWT_SECRET:local-dev-secret}
   internal-api-token: ${INTERNAL_API_TOKEN:local-internal-token}
   ai-task-queue: ${AI_TASK_QUEUE:ai:task:queue}
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174}
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    db-config:
+      id-type: auto

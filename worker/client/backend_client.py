@@ -1,5 +1,11 @@
 import logging
+import hashlib
+import hmac
+import json
+import time
+import uuid
 from typing import Any
+from urllib.parse import urlsplit
 
 import requests
 
@@ -21,44 +27,79 @@ class BackendClient:
         self.session.headers.update(
             {
                 "Content-Type": "application/json",
-                "X-Internal-Token": settings.internal_api_token,
-                "Authorization": f"Bearer {settings.internal_api_token}",
             }
         )
 
     def get_execution_context(self, task_id: int) -> dict[str, Any]:
-        response = self.session.get(
-            self._url(f"/api/internal/v1/tasks/{task_id}/execution-context"),
+        response = self._request(
+            "GET",
+            f"/api/internal/v1/tasks/{task_id}/execution-context",
             timeout=self.timeout,
         )
         return self._parse_response(response)
 
     def mark_processing(self, task_id: int) -> dict[str, Any]:
-        response = self.session.post(
-            self._url(f"/api/internal/v1/tasks/{task_id}/processing"),
-            json={},
+        response = self._request(
+            "POST",
+            f"/api/internal/v1/tasks/{task_id}/processing",
+            json_body={},
             timeout=self.timeout,
         )
         return self._parse_response(response)
 
     def mark_success(self, task_id: int, payload: dict[str, Any]) -> dict[str, Any]:
-        response = self.session.post(
-            self._url(f"/api/internal/v1/tasks/{task_id}/success"),
-            json=payload,
+        response = self._request(
+            "POST",
+            f"/api/internal/v1/tasks/{task_id}/success",
+            json_body=payload,
             timeout=self.timeout,
         )
         return self._parse_response(response)
 
     def mark_failed(self, task_id: int, payload: dict[str, Any]) -> dict[str, Any]:
-        response = self.session.post(
-            self._url(f"/api/internal/v1/tasks/{task_id}/failed"),
-            json=payload,
+        response = self._request(
+            "POST",
+            f"/api/internal/v1/tasks/{task_id}/failed",
+            json_body=payload,
             timeout=self.timeout,
         )
         return self._parse_response(response)
 
     def _url(self, path: str) -> str:
         return f"{self.base_url}{path}"
+
+    def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        json_body: dict[str, Any] | None = None,
+        timeout: tuple[int, int],
+    ) -> requests.Response:
+        body = b""
+        kwargs: dict[str, Any] = {"timeout": timeout}
+        if json_body is not None:
+            body = json.dumps(json_body, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+            kwargs["data"] = body
+        kwargs["headers"] = self._signature_headers(method, path, body)
+        return self.session.request(method, self._url(path), **kwargs)
+
+    def _signature_headers(self, method: str, path: str, body: bytes) -> dict[str, str]:
+        timestamp = str(int(time.time() * 1000))
+        nonce = str(uuid.uuid4())
+        request_path = urlsplit(path).path
+        body_hash = hashlib.sha256(body).hexdigest()
+        content = "\n".join([method.upper(), request_path, timestamp, nonce, body_hash])
+        signature = hmac.new(
+            settings.internal_api_token.encode("utf-8"),
+            content.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+        return {
+            "X-Internal-Timestamp": timestamp,
+            "X-Internal-Nonce": nonce,
+            "X-Internal-Signature": signature,
+        }
 
     def _parse_response(self, response: requests.Response) -> dict[str, Any]:
         try:
