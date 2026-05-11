@@ -1,13 +1,13 @@
 import { http } from './http'
 import type {
-  AdminTaskDetail,
+  AdminTaskApiPayload,
   AdminTaskQuery,
-  AdminTaskRow,
   PageResponse,
+  TaskStatusPayload,
 } from './types'
 
 export function fetchAdminTasks(query: AdminTaskQuery = {}) {
-  return http.get<PageResponse<AdminTaskRow>>('/api/admin/v1/tasks', {
+  return http.get<PageResponse<AdminTaskApiPayload>>('/api/admin/v1/tasks', {
     status: query.status,
     toolCode: query.toolCode,
     userId: query.userId,
@@ -15,13 +15,13 @@ export function fetchAdminTasks(query: AdminTaskQuery = {}) {
 }
 
 export function fetchAdminTaskDetail(taskId: number) {
-  return http.get<AdminTaskDetail>(`/api/admin/v1/tasks/${taskId}`)
+  return http.get<AdminTaskApiPayload>(`/api/admin/v1/tasks/${taskId}`)
 }
 
 export function retryAdminTask(taskId: number) {
-  return http.post<AdminTaskRow>(`/api/admin/v1/tasks/${taskId}/retry`)
+  return http.post<TaskStatusPayload>(`/api/admin/v1/tasks/${taskId}/retry`)
 }
 
 export function cancelAdminTask(taskId: number) {
-  return http.post<AdminTaskRow>(`/api/admin/v1/tasks/${taskId}/cancel`)
+  return http.post<TaskStatusPayload>(`/api/admin/v1/tasks/${taskId}/cancel`)
 }

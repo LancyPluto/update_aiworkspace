@@ -47,7 +47,9 @@ export default function CategoriesPage() {
       ])
       const counts: Record<number, number> = {}
       toolsResp.list.forEach((tool) => {
-        counts[tool.categoryId] = (counts[tool.categoryId] ?? 0) + 1
+        const cid = tool.categoryId
+        if (cid == null) return
+        counts[cid] = (counts[cid] ?? 0) + 1
       })
       setCategories(categoryResp)
       setToolCounts(counts)

@@ -24,6 +24,7 @@ import {
   fetchUserCreditLogs,
   manualAddCredits,
   manualDeductCredits,
+  memberAccountBalance,
 } from "@/lib/api/users"
 import { ApiError } from "@/lib/api/http"
 import type { AdminMember, CreditLogItem } from "@/lib/api/types"
@@ -53,7 +54,7 @@ function mapUser(user: AdminMember): CreditUserRow {
     rawId: user.id,
     name: user.nickname || user.username,
     account: user.username,
-    credits: user.credits ?? 0,
+    credits: memberAccountBalance(user),
     userType: user.userType,
   }
 }

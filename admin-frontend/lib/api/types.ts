@@ -44,7 +44,8 @@ export interface ToolSummary {
   id: number
   toolCode: string
   toolName: string
-  categoryId: number
+  /** 后端可能为 null（未归类） */
+  categoryId: number | null
   categoryName?: string | null
   description?: string | null
   coverUrl?: string | null
@@ -125,28 +126,36 @@ export interface CreditLogItem {
   createdAt: string
 }
 
-export interface AdminTaskRow {
+/**
+ * 与后端 TaskDetailResponse 一致（管理端任务列表项与详情主体）。
+ */
+export interface AdminTaskApiPayload {
   taskId: number
   taskNo: string
-  userId?: number
-  userNickname?: string | null
+  userId: number
   toolCode: string
   toolName: string
   status: string
   progress: number
   progressMessage?: string | null
-  consumedCredits?: number
-  errorCode?: string | null
-  errorMessage?: string | null
+  params?: unknown
+  result?: TaskResult | null
   createdAt: string
   finishedAt?: string | null
 }
 
-export interface AdminTaskDetail extends AdminTaskRow {
-  params?: Record<string, unknown> | null
-  result?: TaskResult | null
-  logs?: TaskLog[]
-  creditLogs?: CreditLogItem[]
+/** @deprecated 请使用 AdminTaskApiPayload */
+export type AdminTaskRow = AdminTaskApiPayload
+
+export type AdminTaskDetail = AdminTaskApiPayload
+
+/** 与后端 TaskStatusResponse 一致（重试、取消任务等） */
+export interface TaskStatusPayload {
+  taskId: number
+  taskNo: string
+  status: string
+  progress: number
+  progressMessage?: string | null
 }
 
 export interface AdminTaskQuery {
@@ -160,19 +169,25 @@ export interface CreditAccount {
   userId: number
   balance: number
   frozen: number
+  /** 后端 CreditAccountResponse.available */
+  available?: number
   totalGranted: number
   totalConsumed: number
   status: string
 }
 
+/** 与后端 AdminUserResponse 一致 */
 export interface AdminMember {
   id: number
   username: string
+  phone?: string | null
+  email?: string | null
   nickname: string
   userType: string
   status: string
-  credits?: number
-  createdAt?: string
+  createdAt?: string | null
+  updatedAt?: string | null
+  creditAccount?: CreditAccount | null
 }
 
 export interface ManualAddCreditsPayload {
@@ -180,19 +195,8 @@ export interface ManualAddCreditsPayload {
   reason?: string
 }
 
-export interface ManualAddCreditsResult {
-  accountId?: number
-  userId: number
-  amount?: number
-  balance?: number
-  frozen?: number
-  totalGranted?: number
-  totalConsumed?: number
-  balanceBefore?: number
-  balanceAfter?: number
-  reason?: string | null
-  createdAt?: string
-}
+/** 手动加减算力接口返回与 CreditAccountResponse 一致 */
+export type ManualAddCreditsResult = CreditAccount
 
 export interface UpdateUserStatusPayload {
   status: string
