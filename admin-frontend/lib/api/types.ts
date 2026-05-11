@@ -155,6 +155,17 @@ export interface AdminTaskQuery {
   userId?: number
 }
 
+export interface DashboardChartPoint {
+  name: string
+  value: number
+}
+
+export interface DashboardOverview {
+  taskTrend: DashboardChartPoint[]
+  popularTools: DashboardChartPoint[]
+  apiCreditConsumed: number
+}
+
 export interface CreditAccount {
   accountId: number
   userId: number
