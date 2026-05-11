@@ -1,6 +1,7 @@
 package com.aiminilab.aitoolmarket.tool.mapper;
 
 import com.aiminilab.aitoolmarket.common.enums.ToolStatus;
+import com.aiminilab.aitoolmarket.tool.dto.ToolFieldSchemaSummary;
 import com.aiminilab.aitoolmarket.tool.entity.AiTool;
 import com.aiminilab.aitoolmarket.tool.entity.ToolCategory;
 import com.aiminilab.aitoolmarket.tool.entity.ToolFieldItem;
@@ -182,6 +183,76 @@ public class ToolMapper {
                 WHERE s.tool_id = ? AND s.status = 'ACTIVE' AND i.status = 'ACTIVE'
                 ORDER BY i.sort_order ASC, i.id ASC
                 """, fieldRowMapper, toolId);
+    }
+
+    public List<ToolFieldSchemaSummary> listFieldSchemasByTool(Long toolId) {
+        return jdbcTemplate.query("""
+                SELECT id, schema_version, status
+                FROM tool_field_schemas
+                WHERE tool_id = ?
+                ORDER BY id DESC
+                """,
+                (rs, rowNum) -> new ToolFieldSchemaSummary(
+                        rs.getLong("id"),
+                        rs.getString("schema_version"),
+                        rs.getString("status")
+                ),
+                toolId);
+    }
+
+    public Optional<ToolFieldSchemaSummary> findSchemaSummary(Long schemaId) {
+        List<ToolFieldSchemaSummary> rows = jdbcTemplate.query("""
+                SELECT id, schema_version, status
+                FROM tool_field_schemas
+                WHERE id = ?
+                """,
+                (rs, rowNum) -> new ToolFieldSchemaSummary(
+                        rs.getLong("id"),
+                        rs.getString("schema_version"),
+                        rs.getString("status")
+                ),
+                schemaId);
+        return rows.stream().findFirst();
+    }
+
+    public List<ToolFieldItem> findFieldsForSchemaId(Long schemaId) {
+        return jdbcTemplate.query("""
+                SELECT field_key, field_name, field_type, placeholder, options_json, required, sort_order
+                FROM tool_field_schema_items
+                WHERE schema_id = ? AND status = 'ACTIVE'
+                ORDER BY sort_order ASC, id ASC
+                """, fieldRowMapper, schemaId);
+    }
+
+    public void updateSchemaVersion(Long schemaId, String schemaVersion) {
+        jdbcTemplate.update("""
+                UPDATE tool_field_schemas
+                SET schema_version = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """, schemaVersion, schemaId);
+    }
+
+    public Optional<Long> findToolIdBySchemaId(Long schemaId) {
+        List<Long> ids = jdbcTemplate.query("""
+                SELECT tool_id FROM tool_field_schemas WHERE id = ?
+                """, (rs, rowNum) -> rs.getLong("tool_id"), schemaId);
+        return ids.stream().findFirst();
+    }
+
+    public void publishSchemaExclusiveActive(Long schemaId) {
+        Long toolId = jdbcTemplate.queryForObject("""
+                SELECT tool_id FROM tool_field_schemas WHERE id = ?
+                """, Long.class, schemaId);
+        jdbcTemplate.update("""
+                UPDATE tool_field_schemas
+                SET status = 'ARCHIVED', updated_at = CURRENT_TIMESTAMP
+                WHERE tool_id = ? AND id <> ?
+                """, toolId, schemaId);
+        jdbcTemplate.update("""
+                UPDATE tool_field_schemas
+                SET status = 'ACTIVE', updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """, schemaId);
     }
 
     public Optional<Long> findActiveSchemaId(Long toolId) {

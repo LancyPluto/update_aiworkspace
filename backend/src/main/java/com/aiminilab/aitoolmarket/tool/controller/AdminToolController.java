@@ -3,9 +3,11 @@ package com.aiminilab.aitoolmarket.tool.controller;
 import com.aiminilab.aitoolmarket.auth.security.AuthContext;
 import com.aiminilab.aitoolmarket.common.dto.ApiResponse;
 import com.aiminilab.aitoolmarket.common.dto.PageResponse;
+import com.aiminilab.aitoolmarket.tool.dto.FieldSchemaAdminResponse;
 import com.aiminilab.aitoolmarket.tool.dto.ToolFieldResponse;
 import com.aiminilab.aitoolmarket.tool.dto.ToolSummaryResponse;
 import com.aiminilab.aitoolmarket.tool.dto.UpdateToolFieldsRequest;
+import com.aiminilab.aitoolmarket.tool.dto.UpsertFieldSchemaRequest;
 import com.aiminilab.aitoolmarket.tool.dto.UpsertToolRequest;
 import com.aiminilab.aitoolmarket.tool.service.ToolService;
 import jakarta.validation.Valid;
@@ -52,6 +54,17 @@ public class AdminToolController {
     @PostMapping("/{toolId}/offline")
     public ApiResponse<ToolSummaryResponse> offline(@PathVariable Long toolId) {
         return ApiResponse.success(toolService.offlineTool(toolId, AuthContext.get().userId()));
+    }
+
+    @GetMapping("/{toolId}/field-schemas")
+    public ApiResponse<List<FieldSchemaAdminResponse>> fieldSchemas(@PathVariable Long toolId) {
+        return ApiResponse.success(toolService.adminFieldSchemas(toolId));
+    }
+
+    @PostMapping("/{toolId}/field-schemas")
+    public ApiResponse<FieldSchemaAdminResponse> upsertFieldSchema(@PathVariable Long toolId,
+                                                                   @Valid @RequestBody UpsertFieldSchemaRequest request) {
+        return ApiResponse.success(toolService.upsertActiveFieldSchema(toolId, request, AuthContext.get().userId()));
     }
 
     @GetMapping("/{toolId}/fields")
