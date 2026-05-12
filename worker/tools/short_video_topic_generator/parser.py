@@ -2,6 +2,7 @@ import re
 from typing import Any
 
 from tools.errors import ToolResultBuildError
+from tools.text_publishable import bracket_section, numbered_lines, strip_blank_join
 
 
 SECTION_PATTERN = re.compile(
@@ -76,3 +77,25 @@ def _parse_topics(block: str) -> list[str]:
 def _normalize_block(block: str) -> str:
     lines = [line.strip() for line in block.splitlines() if line.strip()]
     return "\n".join(lines)
+
+
+def format_publishable_text(markdown_text: str) -> str:
+    data = parse_result_markdown(markdown_text)
+    parts: list[str] = []
+    if data["topics"]:
+        parts.append(
+            bracket_section(
+                "选题清单",
+                numbered_lines(list(data["topics"])),
+            )
+        )
+    parts.extend(
+        [
+            bracket_section("推荐优先级", data["priority"]),
+            bracket_section("创作角度", data["angles"]),
+            bracket_section("标题与标签建议", data["titles_and_tags"]),
+            bracket_section("执行建议", data["execution"]),
+            bracket_section("风险提醒", data["risk_note"]),
+        ]
+    )
+    return strip_blank_join(parts)
