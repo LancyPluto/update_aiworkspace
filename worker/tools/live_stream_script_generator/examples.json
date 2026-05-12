@@ -1,0 +1,54 @@
+[
+  {
+    "name": "抖音防晒衣直播话术",
+    "input": {
+      "liveTheme": "夏季通勤防晒穿搭专场",
+      "targetPlatform": "抖音",
+      "targetAudience": "25-35 岁通勤女性",
+      "productOrService": "轻薄防晒外套",
+      "sellingPoints": "轻薄透气、显瘦版型、可收纳、多色可选",
+      "liveGoal": "种草转化",
+      "liveDuration": "60 分钟",
+      "tone": "亲和种草",
+      "promotionMechanism": "前 50 名赠收纳袋，具体以直播间说明为准",
+      "interactionFocus": "尺码、颜色、通勤搭配、短途出游场景",
+      "avoidWords": "最强、第一、永久防晒",
+      "extraInfo": "防晒相关表达需要提醒以检测报告和实物吊牌为准"
+    },
+    "expected_output_outline": [
+      "## 开场话术",
+      "## 产品讲解话术",
+      "## 互动引导话术",
+      "## 促单转化话术",
+      "## 异议处理话术",
+      "## 直播节奏安排",
+      "## 合规提醒"
+    ]
+  },
+  {
+    "name": "小红书补水面膜直播话术",
+    "input": {
+      "liveTheme": "熬夜党日常补水护肤专场",
+      "targetPlatform": "小红书",
+      "targetAudience": "经常熬夜、预算有限的年轻上班族",
+      "productOrService": "补水面膜",
+      "sellingPoints": "使用方便、贴合度好、适合日常补水场景",
+      "liveGoal": "互动涨粉",
+      "liveDuration": "45 分钟",
+      "tone": "经验分享",
+      "promotionMechanism": "以直播间当前说明为准",
+      "interactionFocus": "肤质、使用频率、护肤流程",
+      "avoidWords": "急救、医美级、根治",
+      "extraInfo": "不要承诺治疗或改善皮肤疾病"
+    },
+    "expected_output_outline": [
+      "## 开场话术",
+      "## 产品讲解话术",
+      "## 互动引导话术",
+      "## 促单转化话术",
+      "## 异议处理话术",
+      "## 直播节奏安排",
+      "## 合规提醒"
+    ]
+  }
+]
