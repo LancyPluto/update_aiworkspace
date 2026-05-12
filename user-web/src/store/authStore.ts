@@ -1,7 +1,12 @@
 import { defineStore } from "pinia"
 import { ref, computed } from "vue"
-import type { LoginRequest, UserProfile } from "@/api/types"
-import { login as apiLogin, logout as apiLogout, getCurrentUser } from "@/api"
+import type { LoginRequest, RegisterRequest, UserProfile } from "@/api/types"
+import {
+  login as apiLogin,
+  logout as apiLogout,
+  register as apiRegister,
+  getCurrentUser,
+} from "@/api"
 
 const TOKEN_KEY = "ai_tool_market_token"
 
@@ -9,6 +14,8 @@ export const useAuthStore = defineStore("auth", () => {
   const token = ref<string | null>(localStorage.getItem(TOKEN_KEY))
   const user = ref<UserProfile | null>(null)
   const loading = ref(false)
+  /** 首次 init()（含 /me）是否已跑完；无 token 时也会在一次 init 后置 true */
+  const bootstrapComplete = ref(false)
 
   const isLoggedIn = computed(() => !!token.value)
   const isAdmin = computed(() => user.value?.userType === "ADMIN")
@@ -22,6 +29,21 @@ export const useAuthStore = defineStore("auth", () => {
       token.value = t
       localStorage.setItem(TOKEN_KEY, t)
       // 获取用户信息
+      await fetchCurrentUser()
+      return res
+    } finally {
+      loading.value = false
+    }
+  }
+
+  async function register(body: RegisterRequest) {
+    loading.value = true
+    try {
+      const res = await apiRegister(body)
+      const t = res.token ?? res.accessToken
+      if (!t) throw new Error("注册响应缺少 token")
+      token.value = t
+      localStorage.setItem(TOKEN_KEY, t)
       await fetchCurrentUser()
       return res
     } finally {
@@ -61,8 +83,12 @@ export const useAuthStore = defineStore("auth", () => {
 
   /** 初始化时尝试从 localStorage 恢复登录态 */
   async function init() {
-    if (token.value) {
-      await fetchCurrentUser()
+    try {
+      if (token.value) {
+        await fetchCurrentUser()
+      }
+    } finally {
+      bootstrapComplete.value = true
     }
   }
 
@@ -70,9 +96,11 @@ export const useAuthStore = defineStore("auth", () => {
     token,
     user,
     loading,
+    bootstrapComplete,
     isLoggedIn,
     isAdmin,
     login,
+    register,
     logout,
     fetchCurrentUser,
     init,

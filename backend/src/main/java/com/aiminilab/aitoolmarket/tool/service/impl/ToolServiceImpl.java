@@ -7,6 +7,8 @@ import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.tool.dto.CreateFieldSchemaRequest;
 import com.aiminilab.aitoolmarket.tool.dto.CreatePromptRequest;
 import com.aiminilab.aitoolmarket.tool.dto.CreatePromptVersionRequest;
+import com.aiminilab.aitoolmarket.tool.dto.FieldSchemaAdminResponse;
+import com.aiminilab.aitoolmarket.tool.dto.FieldSchemaItemRequest;
 import com.aiminilab.aitoolmarket.tool.dto.FieldSchemaResponse;
 import com.aiminilab.aitoolmarket.tool.dto.PromptResponse;
 import com.aiminilab.aitoolmarket.tool.dto.PromptVersionResponse;
@@ -18,6 +20,7 @@ import com.aiminilab.aitoolmarket.tool.dto.ToolFieldRequest;
 import com.aiminilab.aitoolmarket.tool.dto.ToolFieldResponse;
 import com.aiminilab.aitoolmarket.tool.dto.ToolSummaryResponse;
 import com.aiminilab.aitoolmarket.tool.dto.UpdateToolFieldsRequest;
+import com.aiminilab.aitoolmarket.tool.dto.UpsertFieldSchemaRequest;
 import com.aiminilab.aitoolmarket.tool.dto.UpsertToolCategoryRequest;
 import com.aiminilab.aitoolmarket.tool.dto.UpsertToolRequest;
 import com.aiminilab.aitoolmarket.tool.entity.AiTool;
@@ -197,6 +200,35 @@ public class ToolServiceImpl implements ToolService {
                 .map(this::toFieldItem)
                 .toList());
         return fields(toolId);
+    }
+
+    @Override
+    public List<FieldSchemaAdminResponse> adminFieldSchemas(Long toolId) {
+        return fieldSchemas(toolId).stream()
+                .map(this::toFieldSchemaAdminResponse)
+                .toList();
+    }
+
+    @Override
+    public FieldSchemaAdminResponse upsertActiveFieldSchema(Long toolId, UpsertFieldSchemaRequest request, Long operatorId) {
+        Long schemaId = toolFieldSchemaMapper.findActiveSchemaId(toolId).orElse(null);
+        CreateFieldSchemaRequest createRequest = new CreateFieldSchemaRequest(
+                request.schemaVersion(),
+                request.items().stream().map(this::toToolFieldRequest).toList()
+        );
+        FieldSchemaResponse response;
+        if (schemaId == null) {
+            response = createFieldSchema(toolId, createRequest, operatorId);
+        } else {
+            ToolFieldSchema schema = toolFieldSchemaMapper.selectById(schemaId);
+            schema.setSchemaVersion(request.schemaVersion());
+            toolFieldSchemaMapper.updateById(schema);
+            toolFieldItemMapper.replaceActiveFields(schemaId, createRequest.fields().stream()
+                    .map(this::toFieldItem)
+                    .toList());
+            response = toFieldSchemaResponse(schema);
+        }
+        return toFieldSchemaAdminResponse(response);
     }
 
     @Override
@@ -392,6 +424,28 @@ public class ToolServiceImpl implements ToolService {
                         .toList(),
                 null,
                 null
+        );
+    }
+
+    private FieldSchemaAdminResponse toFieldSchemaAdminResponse(FieldSchemaResponse response) {
+        return new FieldSchemaAdminResponse(
+                response.id(),
+                response.schemaVersion(),
+                response.status(),
+                response.fields()
+        );
+    }
+
+    private ToolFieldRequest toToolFieldRequest(FieldSchemaItemRequest item) {
+        return new ToolFieldRequest(
+                item.fieldKey(),
+                item.fieldName(),
+                item.fieldType(),
+                item.placeholder(),
+                null,
+                item.optionsJson(),
+                item.required(),
+                item.sortOrder()
         );
     }
 

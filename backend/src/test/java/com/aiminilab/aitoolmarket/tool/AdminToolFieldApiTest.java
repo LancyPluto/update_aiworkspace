@@ -1,5 +1,6 @@
 package com.aiminilab.aitoolmarket.tool;
 
+import com.aiminilab.aitoolmarket.auth.security.AuthTestTokens;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -29,6 +30,53 @@ class AdminToolFieldApiTest {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Test
+    void adminFieldSchemasContractPathWorks() throws Exception {
+        String adminToken = login("/api/admin/v1/auth/login", "admin");
+        Long toolId = createTool(adminToken, "schema_path_tool");
+
+        mockMvc.perform(get("/api/admin/v1/tools/{toolId}/field-schemas", toolId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].schemaVersion").exists())
+                .andExpect(jsonPath("$.data[0].items[0].fieldKey").value("productName"));
+
+        mockMvc.perform(post("/api/admin/v1/tools/{toolId}/field-schemas", toolId)
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "schemaVersion": "v2",
+                                  "items": [
+                                    {
+                                      "fieldKey": "topic",
+                                      "fieldName": "主题",
+                                      "fieldType": "text",
+                                      "placeholder": "输入主题",
+                                      "required": true,
+                                      "sortOrder": 1
+                                    }
+                                  ]
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.schemaVersion").value("v2"))
+                .andExpect(jsonPath("$.data.items[0].fieldKey").value("topic"));
+
+        String schemaId = mockMvc.perform(get("/api/admin/v1/tools/{toolId}/field-schemas", toolId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString()
+                .replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1");
+
+        mockMvc.perform(post("/api/admin/v1/field-schemas/{schemaId}/publish", Long.parseLong(schemaId))
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("ACTIVE"));
+    }
 
     @Test
     void adminCanReplaceFieldsAndUserAndWorkerReadSameFields() throws Exception {
@@ -110,7 +158,7 @@ class AdminToolFieldApiTest {
     }
 
     private String login(String path, String account) throws Exception {
-        String response = mockMvc.perform(post(path)
+        var result = mockMvc.perform(post(path)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
@@ -119,10 +167,11 @@ class AdminToolFieldApiTest {
                                 }
                                 """.formatted(account)))
                 .andExpect(status().isOk())
-                .andReturn()
-                .getResponse()
-                .getContentAsString();
-        return response.replaceAll("(?s).*\\\"accessToken\\\"\\s*:\\s*\\\"([^\\\"]+)\\\".*", "$1");
+                .andReturn();
+        if (path.contains("/admin/")) {
+            return AuthTestTokens.adminJwtFrom(result);
+        }
+        return AuthTestTokens.userJwtFrom(result);
     }
 
     private Long createTool(String adminToken, String toolCode) throws Exception {
