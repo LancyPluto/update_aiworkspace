@@ -9,6 +9,8 @@ export const useAuthStore = defineStore("auth", () => {
   const token = ref<string | null>(localStorage.getItem(TOKEN_KEY))
   const user = ref<UserProfile | null>(null)
   const loading = ref(false)
+  /** 首次 init()（含 /me）是否已跑完；无 token 时也会在一次 init 后置 true */
+  const bootstrapComplete = ref(false)
 
   const isLoggedIn = computed(() => !!token.value)
   const isAdmin = computed(() => user.value?.userType === "ADMIN")
@@ -61,8 +63,12 @@ export const useAuthStore = defineStore("auth", () => {
 
   /** 初始化时尝试从 localStorage 恢复登录态 */
   async function init() {
-    if (token.value) {
-      await fetchCurrentUser()
+    try {
+      if (token.value) {
+        await fetchCurrentUser()
+      }
+    } finally {
+      bootstrapComplete.value = true
     }
   }
 
@@ -70,6 +76,7 @@ export const useAuthStore = defineStore("auth", () => {
     token,
     user,
     loading,
+    bootstrapComplete,
     isLoggedIn,
     isAdmin,
     login,
