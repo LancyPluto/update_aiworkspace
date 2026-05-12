@@ -78,11 +78,12 @@ export interface LoginResponse {
   user?: UserProfile
 }
 
+/** POST /api/v1/auth/register —— 与后端 RegisterRequest 一致 */
 export interface RegisterRequest {
   username: string
   password: string
-  email?: string
-  phone?: string
+  /** 可选，不传或空则后端默认用 username */
+  nickname?: string
 }
 
 /** GET /api/v1/users/me —— UserProfile */

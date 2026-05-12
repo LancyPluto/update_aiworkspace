@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { reactive, ref } from "vue"
+import { reactive, ref, watch } from "vue"
 import { RouterLink, useRoute, useRouter } from "vue-router"
 import { Sparkles, ShieldCheck, Zap, Boxes, Loader2 } from "lucide-vue-next"
 import { useAuthStore } from "@/store/authStore"
@@ -9,13 +9,34 @@ const router = useRouter()
 const route = useRoute()
 const auth = useAuthStore()
 
+type AuthMode = "login" | "register"
+const mode = ref<AuthMode>("login")
+
 const form = reactive({
   account: "user1",
   password: "123456",
 })
 
+const registerForm = reactive({
+  username: "",
+  nickname: "",
+  password: "",
+  confirmPassword: "",
+})
+
 const errorMsg = ref<string | null>(null)
 const submitting = ref(false)
+
+watch(mode, () => {
+  errorMsg.value = null
+})
+
+function safeInternalRedirect(redirect: string | null): string | { name: "ToolList" } {
+  if (!redirect || !redirect.startsWith("/") || redirect.startsWith("//")) {
+    return { name: "ToolList" }
+  }
+  return redirect
+}
 
 async function handleLogin() {
   if (!form.account || !form.password) {
@@ -27,12 +48,56 @@ async function handleLogin() {
   try {
     await auth.login({ account: form.account, password: form.password })
     const redirect = typeof route.query.redirect === "string" ? route.query.redirect : null
-    router.push(redirect || { name: "ToolList" })
+    router.push(safeInternalRedirect(redirect))
   } catch (e) {
     if (e instanceof ApiBusinessError) {
       errorMsg.value = e.message
     } else {
       errorMsg.value = (e as Error).message || "登录失败，请稍后重试"
+    }
+  } finally {
+    submitting.value = false
+  }
+}
+
+async function handleRegister() {
+  const u = registerForm.username.trim()
+  if (!u) {
+    errorMsg.value = "请输入用户名"
+    return
+  }
+  if (!registerForm.password) {
+    errorMsg.value = "请设置密码"
+    return
+  }
+  if (registerForm.password.length < 6) {
+    errorMsg.value = "密码至少 6 位"
+    return
+  }
+  if (registerForm.password.length > 64) {
+    errorMsg.value = "密码最长 64 位"
+    return
+  }
+  if (registerForm.password !== registerForm.confirmPassword) {
+    errorMsg.value = "两次输入的密码不一致"
+    return
+  }
+  errorMsg.value = null
+  submitting.value = true
+  try {
+    const nick = registerForm.nickname.trim()
+    await auth.register({
+      username: u,
+      password: registerForm.password,
+      ...(nick ? { nickname: nick } : {}),
+    })
+    const redirect = typeof route.query.redirect === "string" ? route.query.redirect : null
+    router.push(safeInternalRedirect(redirect))
+  } catch (e) {
+    if (e instanceof ApiBusinessError) {
+      errorMsg.value = e.message
+    } else {
+      errorMsg.value = (e as Error).message || "注册失败，请稍后重试"
     }
   } finally {
     submitting.value = false
@@ -89,11 +154,40 @@ async function handleLogin() {
         </div>
 
         <div class="login-header">
-          <h2 class="login-title">登录账号</h2>
-          <p class="login-subtitle">使用企业账号登录，开始你的 AI 工作流</p>
+          <h2 class="login-title">{{ mode === "login" ? "登录账号" : "注册账号" }}</h2>
+          <p class="login-subtitle">
+            {{
+              mode === "login"
+                ? "使用企业账号登录，开始你的 AI 工作流"
+                : "创建新账号，加入智效 AI 工作台"
+            }}
+          </p>
         </div>
 
-        <form class="login-card" @submit.prevent="handleLogin">
+        <div class="auth-mode-tabs" role="tablist" aria-label="登录或注册">
+          <button
+            type="button"
+            role="tab"
+            class="auth-tab"
+            :class="{ active: mode === 'login' }"
+            :aria-selected="mode === 'login'"
+            @click="mode = 'login'"
+          >
+            登录
+          </button>
+          <button
+            type="button"
+            role="tab"
+            class="auth-tab"
+            :class="{ active: mode === 'register' }"
+            :aria-selected="mode === 'register'"
+            @click="mode = 'register'"
+          >
+            注册
+          </button>
+        </div>
+
+        <form v-if="mode === 'login'" class="login-card" @submit.prevent="handleLogin">
           <label class="input-group">
             <span class="input-label">账号</span>
             <input
@@ -124,6 +218,60 @@ async function handleLogin() {
           >
             <Loader2 v-if="submitting" class="spin-icon" />
             {{ submitting ? "登录中..." : "登录工作台" }}
+          </button>
+        </form>
+
+        <form v-else class="login-card" @submit.prevent="handleRegister">
+          <label class="input-group">
+            <span class="input-label">用户名</span>
+            <input
+              v-model="registerForm.username"
+              type="text"
+              class="input-field"
+              placeholder="用于登录，不可与他人重复"
+              autocomplete="username"
+            />
+          </label>
+          <label class="input-group">
+            <span class="input-label">昵称（可选）</span>
+            <input
+              v-model="registerForm.nickname"
+              type="text"
+              class="input-field"
+              placeholder="不填则默认与用户名相同"
+              autocomplete="nickname"
+            />
+          </label>
+          <label class="input-group">
+            <span class="input-label">密码</span>
+            <input
+              v-model="registerForm.password"
+              type="password"
+              class="input-field"
+              placeholder="至少 6 位，最长 64 位"
+              autocomplete="new-password"
+            />
+          </label>
+          <label class="input-group">
+            <span class="input-label">确认密码</span>
+            <input
+              v-model="registerForm.confirmPassword"
+              type="password"
+              class="input-field"
+              placeholder="再次输入密码"
+              autocomplete="new-password"
+            />
+          </label>
+
+          <p v-if="errorMsg" class="error-message">{{ errorMsg }}</p>
+
+          <button
+            type="submit"
+            class="login-btn"
+            :disabled="submitting"
+          >
+            <Loader2 v-if="submitting" class="spin-icon" />
+            {{ submitting ? "提交中..." : "创建账号并登录" }}
           </button>
         </form>
 
@@ -309,6 +457,35 @@ async function handleLogin() {
     font-size: 0.875rem;
     color: var(--muted-foreground);
   }
+
+  .auth-mode-tabs {
+    display: flex;
+    gap: 0.25rem;
+    padding: 0.25rem;
+    border-radius: 0.5rem;
+    border: 1px solid var(--border);
+    background-color: var(--muted) / 0.35;
+  }
+  .auth-tab {
+    flex: 1;
+    border: none;
+    border-radius: 0.375rem;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--muted-foreground);
+    background: transparent;
+    cursor: pointer;
+  }
+  .auth-tab:hover {
+    color: var(--foreground);
+  }
+  .auth-tab.active {
+    background-color: var(--card);
+    color: var(--foreground);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+  }
+
   .login-card {
     border-radius: 0.75rem;
     border: 1px solid var(--border);
