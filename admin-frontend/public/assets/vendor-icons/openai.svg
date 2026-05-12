@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" role="img" aria-label="OpenAI compatible">
+  <rect width="64" height="64" rx="14" fill="#ffffff"/>
+  <g transform="translate(32,32)" stroke="#10a37f" stroke-width="3" fill="none" stroke-linecap="round">
+    <circle r="18" />
+    <path d="M0,-18V-7M15.6,-9.4l-8.7,5M15.6,9.4l-8.7,-5M0,18V7M-15.6,9.4l8.7,-5M-15.6,-9.4l8.7,5" />
+  </g>
+</svg>
