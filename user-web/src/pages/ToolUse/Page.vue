@@ -7,7 +7,7 @@ import DynamicForm from "@/components/DynamicForm/DynamicForm.vue"
 import TaskStatusTag from "@/components/TaskStatusTag/TaskStatusTag.vue"
 import { userRoutes } from "@/router/userRoutes"
 import { fetchToolByCode, createTask } from "@/api"
-import type { ToolDetail } from "@/api/types"
+import type { ToolDetail, ToolField } from "@/api/types"
 import { useAuthStore } from "@/store/authStore"
 
 const props = defineProps<{
@@ -19,17 +19,41 @@ const auth = useAuthStore()
 
 const tool = ref<ToolDetail | null>(null)
 const loading = ref(true)
-const error = ref<string | null>(null)
+const pageError = ref<string | null>(null)
+const submitError = ref<string | null>(null)
 const submitting = ref(false)
 const createdTask = ref<{ taskId: number; taskNo: string } | null>(null)
+const formValues = ref<Record<string, unknown>>({})
 
 const title = computed(() => tool.value?.toolName ?? `工具 · ${props.id}`)
+
+function sanitizeParams(fields: ToolField[], values: Record<string, unknown>) {
+  const params: Record<string, unknown> = {}
+  const missingFields: string[] = []
+
+  for (const field of fields) {
+    const rawValue = values[field.fieldKey]
+    const normalizedValue = typeof rawValue === "string" ? rawValue.trim() : rawValue
+
+    if (field.required && (normalizedValue == null || normalizedValue === "")) {
+      missingFields.push(field.fieldName)
+      continue
+    }
+
+    if (normalizedValue != null && normalizedValue !== "") {
+      params[field.fieldKey] = normalizedValue
+    }
+  }
+
+  return { params, missingFields }
+}
 
 onMounted(async () => {
   try {
     tool.value = await fetchToolByCode(props.id, { token: auth.token })
+    formValues.value = {}
   } catch (e) {
-    error.value = (e as Error).message || "加载工具详情失败"
+    pageError.value = (e as Error).message || "加载工具详情失败"
   } finally {
     loading.value = false
   }
@@ -37,12 +61,20 @@ onMounted(async () => {
 
 async function handleCreateTask() {
   if (!tool.value) return
+
+  submitError.value = null
+  const { params, missingFields } = sanitizeParams(tool.value.fields, formValues.value)
+  if (missingFields.length > 0) {
+    submitError.value = `请先填写必填项：${missingFields.join("、")}`
+    return
+  }
+
   submitting.value = true
   try {
     const res = await createTask(
       {
         toolCode: tool.value.toolCode,
-        params: {},
+        params,
       },
       { token: auth.token },
     )
@@ -50,7 +82,7 @@ async function handleCreateTask() {
     // 跳转到任务状态页
     router.push(userRoutes.taskStatus(String(res.taskId)))
   } catch (e) {
-    error.value = (e as Error).message || "创建任务失败"
+    submitError.value = (e as Error).message || "创建任务失败"
   } finally {
     submitting.value = false
   }
@@ -76,14 +108,18 @@ async function handleCreateTask() {
       </div>
 
       <!-- 错误 -->
-      <div v-else-if="error" class="rounded-xl border border-destructive/30 bg-destructive/5 p-6 text-center">
-        <p class="text-sm text-destructive">{{ error }}</p>
+      <div v-else-if="pageError" class="rounded-xl border border-destructive/30 bg-destructive/5 p-6 text-center">
+        <p class="text-sm text-destructive">{{ pageError }}</p>
       </div>
 
       <template v-else-if="tool">
         <div class="grid gap-6 lg:grid-cols-[1fr_320px]">
           <div class="space-y-5">
-            <DynamicForm :fields="tool.fields" />
+            <DynamicForm v-model="formValues" :fields="tool.fields" />
+
+            <div v-if="submitError" class="rounded-xl border border-destructive/30 bg-destructive/5 p-4">
+              <p class="text-sm text-destructive">{{ submitError }}</p>
+            </div>
 
             <!-- 进度展示（任务创建后） -->
             <div v-if="createdTask" class="rounded-xl border border-primary/20 bg-accent/30 p-6 shadow-sm">

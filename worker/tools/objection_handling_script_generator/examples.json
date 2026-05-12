@@ -1,0 +1,56 @@
+[
+  {
+    "name": "微信价格异议处理",
+    "input": {
+      "objectionText": "价格有点贵，我再考虑一下",
+      "objectionType": "价格异议",
+      "communicationChannel": "微信/企微",
+      "customerType": "意向客户",
+      "salesStage": "报价后跟进",
+      "customerContext": "客户之前问过浅色和尺码，对通勤场景比较关注",
+      "productOrService": "轻薄防晒外套",
+      "valueProposition": "轻薄透气、显瘦版型、可收纳、多色可选",
+      "handlingGoal": "继续沟通",
+      "tone": "亲和克制",
+      "proofPoints": "有尺码表和上身实拍图，可按身高体重给参考",
+      "avoidWords": "保证、最低价、一定有效",
+      "extraInfo": "不要强压成交，先帮客户判断是否适合"
+    },
+    "expected_output_outline": [
+      "## 异议判断",
+      "## 回应策略",
+      "## 推荐话术",
+      "## 追问引导",
+      "## 替代表达",
+      "## 后续动作建议",
+      "## 合规提醒"
+    ]
+  },
+  {
+    "name": "电话效果异议处理",
+    "input": {
+      "objectionText": "我担心买回去没什么用",
+      "objectionType": "效果异议",
+      "communicationChannel": "电话",
+      "customerType": "新咨询客户",
+      "salesStage": "需求确认",
+      "customerContext": "客户还没有明确使用场景",
+      "productOrService": "补水面膜",
+      "valueProposition": "使用方便、贴合度好、适合日常补水场景",
+      "handlingGoal": "澄清需求",
+      "tone": "专业克制",
+      "proofPoints": "可说明适合日常补水场景，不涉及治疗承诺",
+      "avoidWords": "急救、医美级、根治",
+      "extraInfo": "不要承诺治疗或改善皮肤疾病"
+    },
+    "expected_output_outline": [
+      "## 异议判断",
+      "## 回应策略",
+      "## 推荐话术",
+      "## 追问引导",
+      "## 替代表达",
+      "## 后续动作建议",
+      "## 合规提醒"
+    ]
+  }
+]

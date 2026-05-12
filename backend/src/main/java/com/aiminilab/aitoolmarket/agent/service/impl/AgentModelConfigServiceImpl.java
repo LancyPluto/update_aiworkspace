@@ -71,7 +71,25 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
     public AgentModelConfigTestResponse adminTest(AgentModelConfigRequest request) {
         validate(request);
         AgentModelConfig existing = agentModelConfigMapper.findLatest();
-        return agentServiceClient.testModelConfig(mergeSecretFields(request, existing));
+        try {
+            return agentServiceClient.testModelConfig(mergeSecretFields(request, existing));
+        } catch (IllegalStateException exception) {
+            throw new BusinessException(ErrorCode.MODEL_CALL_FAILED, modelConfigTestFailureMessage(exception));
+        }
+    }
+
+    private static String modelConfigTestFailureMessage(IllegalStateException exception) {
+        String detail = exception.getMessage();
+        if (detail == null || detail.isBlank()) {
+            return "调用 agent-service 失败，请查看后端日志并确认服务与内网签名配置。";
+        }
+        if (detail.startsWith("Could not parse agent-service model config test response")) {
+            return "agent-service 返回内容无法解析为测试结果，请核对 agent-service 版本与接口是否正常，或查看后端日志。"
+                    + " 原始信息：" + detail;
+        }
+        return "连通性测试失败：请确认 agent-service 已启动，且后端 AGENT_SERVICE_BASE_URL 在运行环境中可解析"
+                + "（Docker 内通常为 http://agent-service:8090），并与 agent-service 共用同一 INTERNAL_API_TOKEN。"
+                + " 详情：" + detail;
     }
 
     private AgentModelConfig findOrDefault() {
