@@ -78,11 +78,30 @@ export interface LoginResponse {
   user?: UserProfile
 }
 
-/** POST /api/v1/auth/register —— 与后端 RegisterRequest 一致 */
+export type SmsCodeScene = "REGISTER" | "LOGIN"
+
+export interface SmsCodeRequest {
+  phone: string
+  scene: SmsCodeScene
+}
+
+export interface SmsCodeResponse {
+  expiresInSeconds: number
+  cooldownSeconds: number
+  debugCode?: string | null
+}
+
+export interface SmsAuthRequest {
+  phone: string
+  code: string
+  nickname?: string
+}
+
 export interface RegisterRequest {
-  username: string
+  username?: string
   password: string
-  /** 可选，不传或空则后端默认用 username */
+  phone?: string
+  email?: string
   nickname?: string
 }
 

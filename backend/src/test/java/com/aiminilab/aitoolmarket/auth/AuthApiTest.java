@@ -1,6 +1,8 @@
 package com.aiminilab.aitoolmarket.auth;
 
 import com.aiminilab.aitoolmarket.auth.security.AuthTestTokens;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -29,6 +31,9 @@ class AuthApiTest {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private ObjectMapper objectMapper;
 
     @Test
     void registersAndLogsInUserThenReturnsCurrentUser() throws Exception {
@@ -78,6 +83,107 @@ class AuthApiTest {
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.data.username").value("new_user"))
                 .andExpect(jsonPath("$.data.userType").value("USER"));
+    }
+
+    @Test
+    void registersAndLogsInUserByPhone() throws Exception {
+        var registerResult = mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "phone": "13800138000",
+                                  "password": "123456",
+                                  "nickname": "Phone User"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.data.user.id", notNullValue()))
+                .andExpect(jsonPath("$.data.user.username").value("13800138000"))
+                .andExpect(jsonPath("$.data.user.phone").value("13800138000"))
+                .andExpect(jsonPath("$.data.user.userType").value("USER"))
+                .andReturn();
+
+        String registerToken = AuthTestTokens.userJwtFrom(registerResult);
+
+        mockMvc.perform(get("/api/v1/users/me")
+                        .header("Authorization", "Bearer " + registerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.data.username").value("13800138000"))
+                .andExpect(jsonPath("$.data.phone").value("13800138000"))
+                .andExpect(jsonPath("$.data.userType").value("USER"));
+
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "account": "13800138000",
+                                  "password": "123456"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.data.user.username").value("13800138000"))
+                .andExpect(jsonPath("$.data.user.phone").value("13800138000"));
+    }
+
+    @Test
+    void registersAndLogsInUserBySmsCode() throws Exception {
+        String phone = "13900139000";
+        String registerCode = sendSmsCode(phone, "REGISTER");
+
+        var registerResult = mockMvc.perform(post("/api/v1/auth/sms-register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "phone": "%s",
+                                  "code": "%s",
+                                  "nickname": "Sms User"
+                                }
+                                """.formatted(phone, registerCode)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.data.user.username").value(phone))
+                .andExpect(jsonPath("$.data.user.phone").value(phone))
+                .andReturn();
+
+        String registerToken = AuthTestTokens.userJwtFrom(registerResult);
+
+        mockMvc.perform(get("/api/v1/users/me")
+                        .header("Authorization", "Bearer " + registerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.phone").value(phone));
+
+        String loginCode = sendSmsCode(phone, "LOGIN");
+        mockMvc.perform(post("/api/v1/auth/sms-login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "phone": "%s",
+                                  "code": "%s"
+                                }
+                                """.formatted(phone, loginCode)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.data.user.phone").value(phone));
+    }
+
+    @Test
+    void rejectsInvalidSmsCode() throws Exception {
+        String phone = "13700137000";
+        sendSmsCode(phone, "REGISTER");
+
+        mockMvc.perform(post("/api/v1/auth/sms-register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "phone": "%s",
+                                  "code": "000000"
+                                }
+                                """.formatted(phone)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("PARAM_ERROR"));
     }
 
     @Test
@@ -154,5 +260,22 @@ class AuthApiTest {
         mockMvc.perform(get("/api/v1/users/me"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
+    }
+
+    private String sendSmsCode(String phone, String scene) throws Exception {
+        var result = mockMvc.perform(post("/api/v1/auth/sms-code")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "phone": "%s",
+                                  "scene": "%s"
+                                }
+                                """.formatted(phone, scene)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.data.debugCode", notNullValue()))
+                .andReturn();
+        JsonNode root = objectMapper.readTree(result.getResponse().getContentAsString());
+        return root.path("data").path("debugCode").asText();
     }
 }
