@@ -1,4 +1,5 @@
 import type { ApiErrorCode, ApiResponse } from "./types"
+import { getSessionBearerJwt } from "./sessionBearer"
 
 /**
  * 后端 Origin，不含路径。例如 http://localhost:8080
@@ -22,9 +23,8 @@ export class ApiBusinessError extends Error {
 }
 
 export interface RequestOptions {
-  /** Bearer Token，未登录可不传 */
+  /** 可选 Bearer（脚本/调试）；浏览器会话使用 Cookie */
   token?: string | null
-  /** 附加查询参数（GET） */
   query?: Record<string, string | number | boolean | undefined>
 }
 
@@ -50,7 +50,8 @@ function buildUrl(path: string, query?: RequestOptions["query"]): string {
 }
 
 /**
- * 统一解析契约响应壳；code !== SUCCESS 时抛 ApiBusinessError
+ * 统一解析契约响应壳；code !== SUCCESS 时抛 ApiBusinessError。
+ * credentials + Cookie；Authorization 使用 options.token 或登录后 sessionBearer（与 Cookie 中 JWT 一致）。
  */
 export async function apiRequest<T>(
   method: string,
@@ -58,20 +59,29 @@ export async function apiRequest<T>(
   options?: RequestOptions & { body?: unknown },
 ): Promise<T> {
   const url = buildUrl(path, options?.query)
-  const headers: HeadersInit = {
+  const headers: Record<string, string> = {
     Accept: "application/json",
   }
-  if (options?.body !== undefined) {
+
+  const rawBody = options?.body
+  let bodyInit: BodyInit | undefined
+  if (rawBody instanceof FormData) {
+    bodyInit = rawBody
+  } else if (rawBody !== undefined) {
     headers["Content-Type"] = "application/json"
+    bodyInit = JSON.stringify(rawBody)
   }
-  if (options?.token) {
-    headers.Authorization = `Bearer ${options.token}`
+
+  const token = options?.token ?? getSessionBearerJwt()
+  if (token) {
+    headers.Authorization = `Bearer ${token}`
   }
 
   const res = await fetch(url, {
     method,
     headers,
-    body: options?.body !== undefined ? JSON.stringify(options.body) : undefined,
+    body: bodyInit,
+    credentials: "include",
   })
 
   let json: ApiResponse<T>

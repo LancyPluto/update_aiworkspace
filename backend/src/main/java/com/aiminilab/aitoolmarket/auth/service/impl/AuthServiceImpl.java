@@ -1,5 +1,6 @@
 package com.aiminilab.aitoolmarket.auth.service.impl;
 
+import com.aiminilab.aitoolmarket.auth.dto.AuthenticatedSession;
 import com.aiminilab.aitoolmarket.auth.dto.LoginRequest;
 import com.aiminilab.aitoolmarket.auth.dto.LoginResponse;
 import com.aiminilab.aitoolmarket.auth.dto.RegisterRequest;
@@ -30,7 +31,7 @@ public class AuthServiceImpl implements AuthService {
     }
 
     @Override
-    public LoginResponse register(RegisterRequest request) {
+    public AuthenticatedSession register(RegisterRequest request) {
         userMapper.findByUsername(request.username()).ifPresent(user -> {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "用户名已存在");
         });
@@ -47,7 +48,7 @@ public class AuthServiceImpl implements AuthService {
     }
 
     @Override
-    public LoginResponse login(LoginRequest request, boolean adminLogin) {
+    public AuthenticatedSession login(LoginRequest request, boolean adminLogin) {
         User user = userMapper.findByUsername(request.account())
                 .orElseThrow(() -> new BusinessException(ErrorCode.UNAUTHORIZED, "账号或密码错误"));
         if (!UserStatus.ACTIVE.name().equals(user.getStatus())) {
@@ -69,8 +70,8 @@ public class AuthServiceImpl implements AuthService {
         return UserProfileResponse.from(user);
     }
 
-    private LoginResponse buildLoginResponse(User user) {
+    private AuthenticatedSession buildLoginResponse(User user) {
         String token = jwtTokenProvider.createToken(new AuthUser(user.getId(), user.getUsername(), user.getUserType()));
-        return new LoginResponse(token, UserProfileResponse.from(user));
+        return new AuthenticatedSession(token, new LoginResponse(token, UserProfileResponse.from(user)));
     }
 }

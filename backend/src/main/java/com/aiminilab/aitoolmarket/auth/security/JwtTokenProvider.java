@@ -39,6 +39,10 @@ public class JwtTokenProvider {
         this.tokenDenylistService = tokenDenylistService;
     }
 
+    public long getExpireMinutes() {
+        return expireMinutes;
+    }
+
     public String createToken(AuthUser authUser) {
         Instant now = Instant.now();
         Instant expiresAt = now.plus(Duration.ofMinutes(expireMinutes));

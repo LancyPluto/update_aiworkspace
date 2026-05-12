@@ -13,6 +13,7 @@ public class AppProperties {
     private String internalApiToken;
     private String aiTaskQueue;
     private Agent agent = new Agent();
+    private Auth auth = new Auth();
     private Cors cors = new Cors();
 
     public boolean isProductionMode() {
@@ -55,6 +56,14 @@ public class AppProperties {
         this.agent = agent == null ? new Agent() : agent;
     }
 
+    public Auth getAuth() {
+        return auth;
+    }
+
+    public void setAuth(Auth auth) {
+        this.auth = auth == null ? new Auth() : auth;
+    }
+
     public Cors getCors() {
         return cors;
     }
@@ -72,6 +81,27 @@ public class AppProperties {
 
         public void setAllowedOrigins(List<String> allowedOrigins) {
             this.allowedOrigins = allowedOrigins == null ? new ArrayList<>() : allowedOrigins;
+        }
+    }
+
+    public static class Auth {
+        private String cookieSameSite = "Lax";
+        private Boolean cookieSecure;
+
+        public String getCookieSameSite() {
+            return cookieSameSite;
+        }
+
+        public void setCookieSameSite(String cookieSameSite) {
+            this.cookieSameSite = cookieSameSite == null || cookieSameSite.isBlank() ? "Lax" : cookieSameSite;
+        }
+
+        public Boolean getCookieSecure() {
+            return cookieSecure;
+        }
+
+        public void setCookieSecure(Boolean cookieSecure) {
+            this.cookieSecure = cookieSecure;
         }
     }
 

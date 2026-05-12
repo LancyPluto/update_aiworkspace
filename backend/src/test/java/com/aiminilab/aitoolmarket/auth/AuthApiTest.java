@@ -1,5 +1,6 @@
 package com.aiminilab.aitoolmarket.auth;
 
+import com.aiminilab.aitoolmarket.auth.security.AuthTestTokens;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -8,8 +9,6 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
-import static org.hamcrest.Matchers.not;
-import static org.hamcrest.Matchers.blankOrNullString;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -33,7 +32,7 @@ class AuthApiTest {
 
     @Test
     void registersAndLogsInUserThenReturnsCurrentUser() throws Exception {
-        String registerResponse = mockMvc.perform(post("/api/v1/auth/register")
+        var registerResult = mockMvc.perform(post("/api/v1/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
@@ -47,12 +46,9 @@ class AuthApiTest {
                 .andExpect(jsonPath("$.data.user.id", notNullValue()))
                 .andExpect(jsonPath("$.data.user.username").value("new_user"))
                 .andExpect(jsonPath("$.data.user.userType").value("USER"))
-                .andExpect(jsonPath("$.data.accessToken", not(blankOrNullString())))
-                .andReturn()
-                .getResponse()
-                .getContentAsString();
+                .andReturn();
 
-        String registerToken = registerResponse.replaceAll("(?s).*\\\"accessToken\\\"\\s*:\\s*\\\"([^\\\"]+)\\\".*", "$1");
+        String registerToken = AuthTestTokens.userJwtFrom(registerResult);
 
         mockMvc.perform(get("/api/v1/users/me")
                         .header("Authorization", "Bearer " + registerToken))
@@ -61,7 +57,7 @@ class AuthApiTest {
                 .andExpect(jsonPath("$.data.username").value("new_user"))
                 .andExpect(jsonPath("$.data.userType").value("USER"));
 
-        String loginResponse = mockMvc.perform(post("/api/v1/auth/login")
+        var loginResult = mockMvc.perform(post("/api/v1/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
@@ -72,11 +68,9 @@ class AuthApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.data.user.username").value("new_user"))
-                .andReturn()
-                .getResponse()
-                .getContentAsString();
+                .andReturn();
 
-        String token = loginResponse.replaceAll("(?s).*\\\"accessToken\\\"\\s*:\\s*\\\"([^\\\"]+)\\\".*", "$1");
+        String token = AuthTestTokens.userJwtFrom(loginResult);
 
         mockMvc.perform(get("/api/v1/users/me")
                         .header("Authorization", "Bearer " + token))
@@ -88,7 +82,7 @@ class AuthApiTest {
 
     @Test
     void adminLoginCanAccessAdminMeButUserTokenCannot() throws Exception {
-        String adminLoginResponse = mockMvc.perform(post("/api/admin/v1/auth/login")
+        var adminLoginResult = mockMvc.perform(post("/api/admin/v1/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
@@ -99,11 +93,9 @@ class AuthApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.data.user.userType").value("ADMIN"))
-                .andReturn()
-                .getResponse()
-                .getContentAsString();
+                .andReturn();
 
-        String adminToken = adminLoginResponse.replaceAll("(?s).*\\\"accessToken\\\"\\s*:\\s*\\\"([^\\\"]+)\\\".*", "$1");
+        String adminToken = AuthTestTokens.adminJwtFrom(adminLoginResult);
 
         mockMvc.perform(get("/api/admin/v1/auth/me")
                         .header("Authorization", "Bearer " + adminToken))
@@ -112,7 +104,7 @@ class AuthApiTest {
                 .andExpect(jsonPath("$.data.username").value("admin"))
                 .andExpect(jsonPath("$.data.userType").value("ADMIN"));
 
-        String userLoginResponse = mockMvc.perform(post("/api/v1/auth/login")
+        var userLoginResult = mockMvc.perform(post("/api/v1/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
@@ -121,11 +113,9 @@ class AuthApiTest {
                                 }
                                 """))
                 .andExpect(status().isOk())
-                .andReturn()
-                .getResponse()
-                .getContentAsString();
+                .andReturn();
 
-        String userToken = userLoginResponse.replaceAll("(?s).*\\\"accessToken\\\"\\s*:\\s*\\\"([^\\\"]+)\\\".*", "$1");
+        String userToken = AuthTestTokens.userJwtFrom(userLoginResult);
 
         mockMvc.perform(get("/api/admin/v1/auth/me")
                         .header("Authorization", "Bearer " + userToken))
