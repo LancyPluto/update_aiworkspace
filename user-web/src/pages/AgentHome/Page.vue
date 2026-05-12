@@ -1,6 +1,20 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref } from "vue"
-import { AlertTriangle, Bot, Check, FileText, Loader2, Plus, Send, Sparkles, Store, Upload, X } from "lucide-vue-next"
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue"
+import {
+  AlertTriangle,
+  Bot,
+  Check,
+  FileText,
+  Loader2,
+  PanelLeft,
+  PanelLeftClose,
+  Plus,
+  Send,
+  Sparkles,
+  Store,
+  Upload,
+  X,
+} from "lucide-vue-next"
 import AppShell from "@/components/AppShell.vue"
 import WorkspaceMemoryPanel from "./WorkspaceMemoryPanel.vue"
 import RunTimeline from "./RunTimeline.vue"
@@ -44,6 +58,18 @@ const confirmationError = ref<string | null>(null)
 const dismissedConfirmationIds = ref<Set<number>>(new Set())
 const bottomRef = ref<HTMLElement | null>(null)
 const fileInputRef = ref<HTMLInputElement | null>(null)
+
+/** Agent 页内「会话列表」侧栏：不随断点自动隐藏，仅手动切换 */
+const AGENT_SESSION_SIDEBAR_KEY = "ai_tool_market_agent_session_sidebar_open"
+const sessionSidebarOpen = ref(true)
+
+function toggleSessionSidebar() {
+  sessionSidebarOpen.value = !sessionSidebarOpen.value
+}
+
+watch(sessionSidebarOpen, (open) => {
+  localStorage.setItem(AGENT_SESSION_SIDEBAR_KEY, open ? "1" : "0")
+})
 
 const suggestions = [
   "帮我写一篇小红书种草笔记",
@@ -404,6 +430,10 @@ async function scrollBottom() {
 }
 
 onMounted(() => {
+  const saved = localStorage.getItem(AGENT_SESSION_SIDEBAR_KEY)
+  if (saved === "0") sessionSidebarOpen.value = false
+  if (saved === "1") sessionSidebarOpen.value = true
+
   void loadWorkspaces()
   void loadSessions()
 })
@@ -412,8 +442,8 @@ onUnmounted(stopRunUpdates)
 
 <template>
   <AppShell title="Agent" description="用自然语言让系统推荐、确认并调用工具">
-    <div class="agent-page">
-      <aside class="agent-sidebar">
+    <div class="agent-page" :class="{ 'agent-page--session-collapsed': !sessionSidebarOpen }">
+      <aside class="agent-sidebar" :class="{ 'agent-sidebar--collapsed': !sessionSidebarOpen }">
         <button class="new-chat" type="button" @click="startSession()">
           <Plus class="h-4 w-4" />
           新会话
@@ -434,6 +464,19 @@ onUnmounted(stopRunUpdates)
       </aside>
 
       <section class="chat-pane">
+        <div class="session-sidebar-toggle-row">
+          <button
+            type="button"
+            class="session-sidebar-toggle-btn"
+            :aria-label="sessionSidebarOpen ? '隐藏会话列表' : '显示会话列表'"
+            :aria-expanded="sessionSidebarOpen"
+            @click="toggleSessionSidebar"
+          >
+            <PanelLeftClose v-if="sessionSidebarOpen" class="h-4 w-4" aria-hidden="true" />
+            <PanelLeft v-else class="h-4 w-4" aria-hidden="true" />
+            <span>{{ sessionSidebarOpen ? "隐藏会话列表" : "显示会话列表" }}</span>
+          </button>
+        </div>
         <div class="message-scroll">
           <div v-if="loading" class="empty-state">
             <Loader2 class="h-5 w-5 animate-spin" />
@@ -560,7 +603,9 @@ onUnmounted(stopRunUpdates)
         </form>
       </section>
 
-      <WorkspaceMemoryPanel :workspace-id="activeWorkspaceId" :token="auth.token" />
+      <div class="agent-memory-panel">
+        <WorkspaceMemoryPanel :workspace-id="activeWorkspaceId" :token="auth.token" />
+      </div>
     </div>
   </AppShell>
 </template>
@@ -572,10 +617,26 @@ onUnmounted(stopRunUpdates)
   min-height: calc(100vh - 64px);
 }
 
+.agent-page--session-collapsed {
+  grid-template-columns: 0 minmax(0, 1fr) 320px;
+}
+
 .agent-sidebar {
   border-right: 1px solid var(--border);
   background: var(--card);
   padding: 14px;
+  min-width: 0;
+  transition: opacity 0.15s ease, padding 0.15s ease;
+}
+
+.agent-sidebar--collapsed {
+  width: 0;
+  max-width: 0;
+  padding: 0;
+  border-right-width: 0;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .new-chat,
@@ -630,8 +691,34 @@ onUnmounted(stopRunUpdates)
 
 .chat-pane {
   display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr) auto auto auto;
   min-width: 0;
+}
+
+.session-sidebar-toggle-row {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--card);
+  flex-shrink: 0;
+}
+
+.session-sidebar-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--background);
+  color: var(--foreground);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.session-sidebar-toggle-btn:hover {
+  background: var(--secondary);
 }
 
 .message-scroll {
@@ -946,18 +1033,28 @@ onUnmounted(stopRunUpdates)
   opacity: 0.5;
 }
 
+.agent-memory-panel {
+  min-width: 0;
+  min-height: 0;
+}
+
 @media (max-width: 900px) {
   .agent-page {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(140px, 36vw) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
   }
 
-  .agent-sidebar {
-    display: none;
+  .agent-page--session-collapsed {
+    grid-template-columns: 0 minmax(0, 1fr);
+  }
+
+  .agent-memory-panel {
+    grid-column: 1 / -1;
+    border-top: 1px solid var(--border);
   }
 
   :deep(.workspace-memory-panel) {
     border-left: 0;
-    border-top: 1px solid var(--border);
   }
 
   .suggestions {
