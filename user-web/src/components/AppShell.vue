@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { RouterLink, useRoute } from "vue-router"
+//侧边导航栏
 import {
   Bot,
   LayoutGrid,
@@ -10,8 +11,10 @@ import {
   Sparkles,
   ShieldCheck,
   ChevronRight,
+  PanelLeft,
+  PanelLeftClose,
 } from "lucide-vue-next"
-import { ref, onMounted, computed } from "vue"
+import { ref, onMounted, computed, watch } from "vue"
 import { fetchCreditAccount } from "@/api/creditApi"
 import type { CreditAccount } from "@/api/types"
 import { useAuthStore } from "@/store/authStore"
@@ -19,7 +22,7 @@ import { useAuthStore } from "@/store/authStore"
 withDefaults(
   defineProps<{
     title?: string
-    description?: string
+    description ?: string
   }>(),
   {},
 )
@@ -27,7 +30,19 @@ withDefaults(
 const route = useRoute()
 const auth = useAuthStore()
 
+const SIDEBAR_OPEN_KEY = "ai_tool_market_sidebar_open"
+
 const credit = ref<CreditAccount | null>(null)
+/** 大屏侧栏是否展开（小屏本不显示侧栏） */
+const sidebarOpen = ref(true)
+
+function toggleSidebar() {
+  sidebarOpen.value = !sidebarOpen.value
+}
+
+watch(sidebarOpen, (open) => {
+  localStorage.setItem(SIDEBAR_OPEN_KEY, open ? "1" : "0")
+})
 
 const userNav = [
   { href: "/agent" as const, label: "Agent", icon: Bot },
@@ -49,6 +64,10 @@ const creditPercent = computed(() => {
 })
 
 onMounted(async () => {
+  const saved = localStorage.getItem(SIDEBAR_OPEN_KEY)
+  if (saved === "0") sidebarOpen.value = false
+  if (saved === "1") sidebarOpen.value = true
+
   if (auth.isLoggedIn && auth.token) {
     try {
       credit.value = await fetchCreditAccount({ token: auth.token })
@@ -61,7 +80,10 @@ onMounted(async () => {
 
 <template>
   <div class="flex min-h-screen bg-background text-foreground">
-    <aside class="hidden lg:flex w-60 shrink-0 flex-col border-r border-border bg-card">
+    <aside
+      class="hidden w-60 shrink-0 flex-col border-r border-border bg-card"
+      :class="sidebarOpen ? 'lg:flex' : 'lg:hidden'"
+    >
       <div class="flex h-16 items-center gap-2.5 px-5 border-b border-border">
         <div class="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
           <Sparkles class="h-5 w-5" />
@@ -129,8 +151,18 @@ onMounted(async () => {
     </aside>
 
     <div class="flex flex-1 flex-col min-w-0">
-      <header class="sticky top-0 z-30 flex h-16 items-center border-b border-border bg-card/80 px-6 backdrop-blur">
-        <div class="min-w-0">
+      <header class="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-border bg-card/80 px-6 backdrop-blur">
+        <button
+          type="button"
+          class="hidden lg:inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border bg-background text-muted-foreground hover:bg-secondary hover:text-foreground"
+          :aria-label="sidebarOpen ? '隐藏侧栏' : '显示侧栏'"
+          :aria-expanded="sidebarOpen"
+          @click="toggleSidebar"
+        >
+          <PanelLeftClose v-if="sidebarOpen" class="h-4 w-4" aria-hidden="true" />
+          <PanelLeft v-else class="h-4 w-4" aria-hidden="true" />
+        </button>
+        <div class="min-w-0 flex-1">
           <h1 v-if="title" class="text-base font-semibold truncate">{{ title }}</h1>
           <p v-if="description" class="text-xs text-muted-foreground truncate">{{ description }}</p>
         </div>

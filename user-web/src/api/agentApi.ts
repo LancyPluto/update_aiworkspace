@@ -34,9 +34,10 @@ export function createAgentSession(body: { title?: string }, options?: { token?:
   })
 }
 
-export function fetchAgentMessages(sessionId: number, options?: { token?: string | null }) {
+export function fetchAgentMessages(sessionId: number, options?: { token?: string | null; signal?: AbortSignal }) {
   return apiRequest<PageResult<AgentMessage>>("GET", `/api/v1/agent/sessions/${sessionId}/messages`, {
     token: options?.token,
+    signal: options?.signal,
     query: { pageNo: 1, pageSize: 100 },
   })
 }
@@ -67,9 +68,10 @@ export function uploadAgentFile(sessionId: number, file: File, options?: { token
   })
 }
 
-export function fetchAgentRunEvents(runId: number, options?: { token?: string | null; afterEventId?: number }) {
+export function fetchAgentRunEvents(runId: number, options?: { token?: string | null; afterEventId?: number; signal?: AbortSignal }) {
   return apiRequest<PageResult<AgentRunEvent>>("GET", `/api/v1/agent/runs/${runId}/events`, {
     token: options?.token,
+    signal: options?.signal,
     query: { afterEventId: options?.afterEventId, pageSize: 100 },
   })
 }
