@@ -38,7 +38,7 @@ import {
   retryAdminTask,
 } from "@/lib/api/tasks"
 import { ApiError } from "@/lib/api/http"
-import type { AdminTaskDetail, AdminTaskRow } from "@/lib/api/types"
+import type { AdminTaskApiPayload } from "@/lib/api/types"
 
 type TaskStatus = "active" | "pending" | "error"
 
@@ -50,7 +50,8 @@ interface Task {
   status: TaskStatus
   statusLabel: string
   rawStatus: string
-  credits: number
+  /** 后端 TaskDetailResponse 未返回消耗字段时为 null，界面展示「—」 */
+  credits: number | null
   input: string
   output: string
   error: string
@@ -105,20 +106,27 @@ function buildParamsText(params: unknown): string {
   }
 }
 
-function rowToTask(row: AdminTaskRow): Task {
+/** 失败/取消时后端将原因写在 progressMessage */
+function taskFailureHint(row: AdminTaskApiPayload): string {
+  const st = (row.status || "").toUpperCase()
+  if (st !== "FAILED" && st !== "CANCELLED") return ""
+  return row.progressMessage?.trim() || ""
+}
+
+function rowToTask(row: AdminTaskApiPayload): Task {
   const mapped = mapStatus(row.status)
   return {
     id: row.taskNo || `T${row.taskId}`,
     rawId: row.taskId,
-    user: row.userNickname || (row.userId ? `用户 ${row.userId}` : "-"),
+    user: row.userId != null ? `用户 ${row.userId}` : "-",
     tool: row.toolName || row.toolCode,
     status: mapped.status,
     statusLabel: mapped.label,
     rawStatus: row.status,
-    credits: row.consumedCredits ?? 0,
+    credits: null,
     input: "",
     output: "",
-    error: row.errorMessage || "",
+    error: taskFailureHint(row),
     createdAt: formatDateTime(row.createdAt),
     completedAt: formatDateTime(row.finishedAt),
     duration: computeDuration(row.createdAt, row.finishedAt),
@@ -186,15 +194,16 @@ export default function TasksPage() {
     setSelectedTask(item)
     setDetailLoadingId(item.rawId)
     try {
-      const detail: AdminTaskDetail = await fetchAdminTaskDetail(item.rawId)
+      const detail = await fetchAdminTaskDetail(item.rawId)
+      const row = rowToTask(detail)
       setSelectedTask({
         ...item,
         input: buildParamsText(detail.params),
         output: detail.result?.contentText || "",
-        error: detail.errorMessage || item.error,
-        credits: detail.consumedCredits ?? item.credits,
-        completedAt: formatDateTime(detail.finishedAt),
-        duration: computeDuration(detail.createdAt, detail.finishedAt),
+        error: taskFailureHint(detail) || item.error,
+        credits: row.credits,
+        completedAt: row.completedAt,
+        duration: row.duration,
       })
     } catch (err) {
       const message = err instanceof ApiError ? err.message : "加载任务详情失败"
@@ -235,7 +244,9 @@ export default function TasksPage() {
     {
       key: "credits" as const,
       title: "消耗算力",
-      render: (value: unknown) => <span>{value as number} 点</span>,
+      render: (value: unknown) => (
+        <span>{value === null || value === undefined ? "—" : `${value as number} 点`}</span>
+      ),
     },
     { key: "duration" as const, title: "耗时" },
     { key: "createdAt" as const, title: "创建时间" },
@@ -320,7 +331,9 @@ export default function TasksPage() {
                 <div>
                   <p className="text-muted-foreground">消耗算力</p>
                   <p className="font-medium">
-                    {selectedTask?.credits ?? item.credits} 点
+                    {selectedTask?.credits != null || item.credits != null
+                      ? `${selectedTask?.credits ?? item.credits} 点`
+                      : "—"}
                   </p>
                 </div>
                 <div>

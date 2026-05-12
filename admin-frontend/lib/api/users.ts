@@ -4,10 +4,14 @@ import type {
   CreditAccount,
   CreditLogItem,
   ManualAddCreditsPayload,
-  ManualAddCreditsResult,
   PageResponse,
   UpdateUserStatusPayload,
 } from './types'
+
+/** 算力余额（嵌套在 AdminUserResponse.creditAccount） */
+export function memberAccountBalance(user: AdminMember): number {
+  return user.creditAccount?.balance ?? 0
+}
 
 export function fetchAdminUsers() {
   return http.get<PageResponse<AdminMember>>('/api/admin/v1/users')
@@ -18,14 +22,14 @@ export function updateUserStatus(userId: number, payload: UpdateUserStatusPayloa
 }
 
 export function manualAddCredits(userId: number, payload: ManualAddCreditsPayload) {
-  return http.post<ManualAddCreditsResult>(
+  return http.post<CreditAccount>(
     `/api/admin/v1/users/${userId}/credits/manual-add`,
     payload,
   )
 }
 
 export function manualDeductCredits(userId: number, payload: ManualAddCreditsPayload) {
-  return http.post<ManualAddCreditsResult>(
+  return http.post<CreditAccount>(
     `/api/admin/v1/users/${userId}/credits/manual-deduct`,
     payload,
   )
