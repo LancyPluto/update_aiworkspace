@@ -26,6 +26,8 @@ export interface RequestOptions {
   /** 可选 Bearer（脚本/调试）；浏览器会话使用 Cookie */
   token?: string | null
   query?: Record<string, string | number | boolean | undefined>
+  /** 取消进行中的请求（如离开页面、发起新请求前） */
+  signal?: AbortSignal
 }
 
 function buildUrl(path: string, query?: RequestOptions["query"]): string {
@@ -82,6 +84,7 @@ export async function apiRequest<T>(
     headers,
     body: bodyInit,
     credentials: "include",
+    signal: options?.signal,
   })
 
   let json: ApiResponse<T>

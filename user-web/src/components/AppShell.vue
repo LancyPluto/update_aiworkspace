@@ -22,7 +22,7 @@ import { useAuthStore } from "@/store/authStore"
 withDefaults(
   defineProps<{
     title?: string
-    description?: string
+    description ?: string
   }>(),
   {},
 )

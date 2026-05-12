@@ -50,6 +50,9 @@ const agentError = ref<string | null>(null)
 const rememberTool = ref(true)
 const activeRunId = ref<number | null>(null)
 const pollTimer = ref<number | null>(null)
+/** 当前处于 setInterval 轮询的 runId，用于切回前台时补拉一次 */
+const pollingRunId = ref<number | null>(null)
+let pollFetchAbort: AbortController | undefined
 const streamController = ref<AbortController | null>(null)
 const runConnectionStatus = ref<"idle" | "streaming" | "polling" | "completed" | "failed">("idle")
 const draftAssistantContent = ref("")
@@ -245,30 +248,39 @@ function formatAgentError(error: unknown) {
 
 async function pollRun(runId: number, reset = false) {
   if (!auth.token) return
-  const afterEventId = reset ? undefined : events.value.at(-1)?.id
-  const res = await fetchAgentRunEvents(runId, { token: auth.token, afterEventId })
-  if (reset) {
-    events.value = []
-    res.list.forEach(appendRunEvent)
+  pollFetchAbort?.abort()
+  pollFetchAbort = new AbortController()
+  const signal = pollFetchAbort.signal
+  try {
+    const afterEventId = reset ? undefined : events.value.at(-1)?.id
+    const res = await fetchAgentRunEvents(runId, { token: auth.token, afterEventId, signal })
+    if (reset) {
+      events.value = []
+      res.list.forEach(appendRunEvent)
+    } else res.list.forEach(appendRunEvent)
+    if (activeSessionId.value) {
+      const messageRes = await fetchAgentMessages(activeSessionId.value, { token: auth.token, signal })
+      messages.value = messageRes.list
+    }
+    if (events.value.some(isTerminalRunEvent)) {
+      stopRunUpdates()
+      settleRunStatus()
+      await refreshMessages()
+    }
+    await scrollBottom()
+  } catch (error) {
+    if (signal.aborted) return
+    throw error
   }
-  else res.list.forEach(appendRunEvent)
-  if (activeSessionId.value) {
-    const messageRes = await fetchAgentMessages(activeSessionId.value, { token: auth.token })
-    messages.value = messageRes.list
-  }
-  if (events.value.some(isTerminalRunEvent)) {
-    stopRunUpdates()
-    settleRunStatus()
-    await refreshMessages()
-  }
-  await scrollBottom()
 }
 
 function startPolling(runId: number) {
   stopRunUpdates()
+  pollingRunId.value = runId
   runConnectionStatus.value = "polling"
   pollTimer.value = window.setInterval(() => {
-    pollRun(runId).catch((error) => {
+    if (typeof document !== "undefined" && document.hidden) return
+    void pollRun(runId).catch((error) => {
       agentError.value = formatAgentError(error)
       runConnectionStatus.value = "failed"
       stopRunUpdates()
@@ -309,6 +321,9 @@ function stopRunUpdates() {
     window.clearInterval(pollTimer.value)
     pollTimer.value = null
   }
+  pollingRunId.value = null
+  pollFetchAbort?.abort()
+  pollFetchAbort = undefined
   streamController.value?.abort()
   streamController.value = null
 }
@@ -424,12 +439,24 @@ function formatFileSize(size: number) {
   return `${(size / 1024 / 1024).toFixed(1)} MB`
 }
 
+function onAgentVisibilityChange() {
+  if (typeof document === "undefined" || document.hidden) return
+  const rid = pollingRunId.value
+  if (rid == null || pollTimer.value == null) return
+  void pollRun(rid).catch((error) => {
+    agentError.value = formatAgentError(error)
+    runConnectionStatus.value = "failed"
+    stopRunUpdates()
+  })
+}
+
 async function scrollBottom() {
   await nextTick()
   bottomRef.value?.scrollIntoView({ block: "end" })
 }
 
 onMounted(() => {
+  document.addEventListener("visibilitychange", onAgentVisibilityChange)
   const saved = localStorage.getItem(AGENT_SESSION_SIDEBAR_KEY)
   if (saved === "0") sessionSidebarOpen.value = false
   if (saved === "1") sessionSidebarOpen.value = true
@@ -437,7 +464,10 @@ onMounted(() => {
   void loadWorkspaces()
   void loadSessions()
 })
-onUnmounted(stopRunUpdates)
+onUnmounted(() => {
+  document.removeEventListener("visibilitychange", onAgentVisibilityChange)
+  stopRunUpdates()
+})
 </script>
 
 <template>

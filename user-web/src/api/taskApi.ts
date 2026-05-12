@@ -22,11 +22,12 @@ export async function createTask(
 /** GET /api/v1/tasks/{taskId}/status —— 轮询任务状态 */
 export async function fetchTaskStatus(
   taskId: number | string,
-  options?: { token?: string | null },
+  options?: { token?: string | null; signal?: AbortSignal },
 ): Promise<TaskStatusPayload> {
   const id = encodeURIComponent(String(taskId))
   return apiRequest<TaskStatusPayload>("GET", `/api/v1/tasks/${id}/status`, {
     token: options?.token,
+    signal: options?.signal,
   })
 }
 

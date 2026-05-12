@@ -112,7 +112,12 @@ function formatError(error: unknown) {
         <p class="eyebrow">Workspace</p>
         <h2>Memory</h2>
       </div>
-      <button type="button" class="icon-btn" :disabled="loading || !canLoad" title="Refresh" @click="loadMemory">
+      <button 
+      type="button" 
+      class="icon-btn" 
+      :disabled="loading || !canLoad" 
+      title="Refresh" 
+      @click="loadMemory">
         <Loader2 v-if="loading" class="h-4 w-4 animate-spin" />
         <RefreshCcw v-else class="h-4 w-4" />
       </button>
