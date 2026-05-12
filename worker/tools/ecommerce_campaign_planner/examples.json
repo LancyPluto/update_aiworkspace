@@ -1,0 +1,32 @@
+[
+  {
+    "name": "夏季清凉节转化活动",
+    "input": {
+      "campaignGoal": "转化",
+      "campaignName": "夏季清凉节",
+      "targetPlatform": "抖音",
+      "campaignPeriod": "7天预热+3天爆发",
+      "targetAudience": "18-30岁女性用户",
+      "productScope": "主推防晒衣，连带冰袖和防晒帽",
+      "budgetRange": "3万-5万",
+      "discountPolicy": "满减+限时券+直播间福利",
+      "channelResources": "直播间、短视频、店铺首页、私域群",
+      "extraInfo": "避免夸大承诺，不要给出违规营销话术"
+    }
+  },
+  {
+    "name": "清库存促活活动",
+    "input": {
+      "campaignGoal": "清库存",
+      "campaignName": "换季清仓周",
+      "targetPlatform": "淘宝",
+      "campaignPeriod": "5天集中促销",
+      "targetAudience": "价格敏感型老客",
+      "productScope": "春款尾货和库存配件",
+      "budgetRange": "1万-2万",
+      "discountPolicy": "第二件半价+满减券",
+      "channelResources": "店铺首页、会员短信、私域社群",
+      "extraInfo": "重点关注毛利，避免过度让利"
+    }
+  }
+]

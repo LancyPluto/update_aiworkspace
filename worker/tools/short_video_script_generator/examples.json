@@ -1,0 +1,52 @@
+[
+  {
+    "name": "抖音防晒衣种草脚本",
+    "input": {
+      "videoTopic": "夏季通勤防晒穿搭",
+      "targetPlatform": "抖音",
+      "targetAudience": "25-35 岁通勤女性",
+      "promotionObject": "轻薄防晒外套",
+      "coreSellingPoints": "轻薄透气、防晒、显瘦、可收纳",
+      "scriptStyle": "种草带货",
+      "videoLength": "30 秒",
+      "shootingScenario": "通勤路上、办公室、周末短途出游",
+      "callToAction": "点击橱窗查看颜色和尺码",
+      "keywords": "防晒衣、通勤穿搭、夏季轻薄",
+      "avoidWords": "最强、第一、永久防晒",
+      "extraInfo": "防晒相关表达需要提醒以检测报告和实物吊牌为准"
+    },
+    "expected_output_outline": [
+      "## 开场钩子",
+      "## 分镜脚本",
+      "## 口播文案",
+      "## 拍摄与剪辑建议",
+      "## 标题与标签建议",
+      "## 合规提醒"
+    ]
+  },
+  {
+    "name": "小红书护肤品体验脚本",
+    "input": {
+      "videoTopic": "熬夜后快速护肤流程",
+      "targetPlatform": "小红书",
+      "targetAudience": "经常熬夜的上班族",
+      "promotionObject": "补水面膜",
+      "coreSellingPoints": "使用方便、贴合度好、适合日常补水场景",
+      "scriptStyle": "经验分享",
+      "videoLength": "60 秒",
+      "shootingScenario": "卧室梳妆台",
+      "callToAction": "评论区交流使用感受",
+      "keywords": "熬夜护肤、补水面膜、护肤流程",
+      "avoidWords": "急救、医美级、根治",
+      "extraInfo": "不要承诺治疗或改善皮肤疾病"
+    },
+    "expected_output_outline": [
+      "## 开场钩子",
+      "## 分镜脚本",
+      "## 口播文案",
+      "## 拍摄与剪辑建议",
+      "## 标题与标签建议",
+      "## 合规提醒"
+    ]
+  }
+]
