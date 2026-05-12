@@ -1,5 +1,14 @@
-@echo off
-chcp 65001 >nul
+@echo off
+
+chcp 65001 >nul
+
+REM Load local environment variables for backend/frontend dev processes.
+REM This keeps secrets in .env and lets mvn spring-boot:run read SMS_PROVIDER/IHUYI_*.
+if exist "%~dp0.env" (
+    for /f "usebackq eol=# tokens=1,* delims==" %%A in ("%~dp0.env") do (
+        if not "%%A"=="" set "%%A=%%B"
+    )
+)
 title AI Tool Market - 一键启动开发环境
 
 echo ============================================

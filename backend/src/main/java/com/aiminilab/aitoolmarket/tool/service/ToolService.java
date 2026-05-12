@@ -1,6 +1,7 @@
 package com.aiminilab.aitoolmarket.tool.service;
 
 import com.aiminilab.aitoolmarket.common.dto.PageResponse;
+import com.aiminilab.aitoolmarket.tool.dto.FieldSchemaAdminResponse;
 import com.aiminilab.aitoolmarket.tool.dto.ToolCategoryResponse;
 import com.aiminilab.aitoolmarket.tool.dto.ToolDetailResponse;
 import com.aiminilab.aitoolmarket.tool.dto.ToolFieldResponse;
@@ -14,6 +15,7 @@ import com.aiminilab.aitoolmarket.tool.dto.PromptVersionResponse;
 import com.aiminilab.aitoolmarket.tool.dto.TestGenerateRequest;
 import com.aiminilab.aitoolmarket.tool.dto.TestGenerateResponse;
 import com.aiminilab.aitoolmarket.tool.dto.UpdateToolFieldsRequest;
+import com.aiminilab.aitoolmarket.tool.dto.UpsertFieldSchemaRequest;
 import com.aiminilab.aitoolmarket.tool.dto.UpsertToolCategoryRequest;
 import com.aiminilab.aitoolmarket.tool.dto.UpsertToolRequest;
 
@@ -50,6 +52,10 @@ public interface ToolService {
     List<ToolFieldResponse> adminFields(Long toolId);
 
     List<ToolFieldResponse> updateFields(Long toolId, UpdateToolFieldsRequest request);
+
+    List<FieldSchemaAdminResponse> adminFieldSchemas(Long toolId);
+
+    FieldSchemaAdminResponse upsertActiveFieldSchema(Long toolId, UpsertFieldSchemaRequest request, Long operatorId);
 
     List<FieldSchemaResponse> fieldSchemas(Long toolId);
 

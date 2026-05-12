@@ -1,7 +1,14 @@
 import { defineStore } from "pinia"
-import { ref, computed } from "vue"
-import type { LoginRequest, UserProfile } from "@/api/types"
-import { login as apiLogin, logout as apiLogout, getCurrentUser } from "@/api"
+import { computed, ref } from "vue"
+import type { LoginRequest, LoginResponse, RegisterRequest, SmsAuthRequest, UserProfile } from "@/api/types"
+import {
+  getCurrentUser,
+  login as apiLogin,
+  logout as apiLogout,
+  register as apiRegister,
+  smsLogin as apiSmsLogin,
+  smsRegister as apiSmsRegister,
+} from "@/api"
 
 const TOKEN_KEY = "ai_tool_market_token"
 
@@ -9,6 +16,7 @@ export const useAuthStore = defineStore("auth", () => {
   const token = ref<string | null>(localStorage.getItem(TOKEN_KEY))
   const user = ref<UserProfile | null>(null)
   const loading = ref(false)
+  const bootstrapComplete = ref(false)
 
   const isLoggedIn = computed(() => !!token.value)
   const isAdmin = computed(() => user.value?.userType === "ADMIN")
@@ -17,13 +25,37 @@ export const useAuthStore = defineStore("auth", () => {
     loading.value = true
     try {
       const res = await apiLogin(body)
-      const t = res.token ?? res.accessToken
-      if (!t) throw new Error("登录响应缺少 token")
-      token.value = t
-      localStorage.setItem(TOKEN_KEY, t)
-      // 获取用户信息
-      await fetchCurrentUser()
-      return res
+      return await applyLoginResponse(res, "登录响应缺少 token")
+    } finally {
+      loading.value = false
+    }
+  }
+
+  async function register(body: RegisterRequest) {
+    loading.value = true
+    try {
+      const res = await apiRegister(body)
+      return await applyLoginResponse(res, "注册响应缺少 token")
+    } finally {
+      loading.value = false
+    }
+  }
+
+  async function smsRegister(body: SmsAuthRequest) {
+    loading.value = true
+    try {
+      const res = await apiSmsRegister(body)
+      return await applyLoginResponse(res, "注册响应缺少 token")
+    } finally {
+      loading.value = false
+    }
+  }
+
+  async function smsLogin(body: SmsAuthRequest) {
+    loading.value = true
+    try {
+      const res = await apiSmsLogin(body)
+      return await applyLoginResponse(res, "登录响应缺少 token")
     } finally {
       loading.value = false
     }
@@ -36,7 +68,6 @@ export const useAuthStore = defineStore("auth", () => {
       user.value = u
       return u
     } catch {
-      // Token 可能已过期
       clearAuth()
       return null
     }
@@ -47,7 +78,7 @@ export const useAuthStore = defineStore("auth", () => {
       try {
         await apiLogout({ token: token.value })
       } catch {
-        // 忽略退出失败
+        // Ignore logout failures and clear local state.
       }
     }
     clearAuth()
@@ -59,10 +90,22 @@ export const useAuthStore = defineStore("auth", () => {
     localStorage.removeItem(TOKEN_KEY)
   }
 
-  /** 初始化时尝试从 localStorage 恢复登录态 */
+  async function applyLoginResponse(res: LoginResponse, missingTokenMessage: string) {
+    const t = res.token ?? res.accessToken
+    if (!t) throw new Error(missingTokenMessage)
+    token.value = t
+    localStorage.setItem(TOKEN_KEY, t)
+    await fetchCurrentUser()
+    return res
+  }
+
   async function init() {
-    if (token.value) {
-      await fetchCurrentUser()
+    try {
+      if (token.value) {
+        await fetchCurrentUser()
+      }
+    } finally {
+      bootstrapComplete.value = true
     }
   }
 
@@ -70,9 +113,13 @@ export const useAuthStore = defineStore("auth", () => {
     token,
     user,
     loading,
+    bootstrapComplete,
     isLoggedIn,
     isAdmin,
     login,
+    register,
+    smsRegister,
+    smsLogin,
     logout,
     fetchCurrentUser,
     init,

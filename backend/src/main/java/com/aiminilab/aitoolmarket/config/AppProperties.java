@@ -13,6 +13,7 @@ public class AppProperties {
     private String internalApiToken;
     private String aiTaskQueue;
     private Agent agent = new Agent();
+    private Auth auth = new Auth();
     private Cors cors = new Cors();
 
     public boolean isProductionMode() {
@@ -55,6 +56,14 @@ public class AppProperties {
         this.agent = agent == null ? new Agent() : agent;
     }
 
+    public Auth getAuth() {
+        return auth;
+    }
+
+    public void setAuth(Auth auth) {
+        this.auth = auth == null ? new Auth() : auth;
+    }
+
     public Cors getCors() {
         return cors;
     }
@@ -72,6 +81,122 @@ public class AppProperties {
 
         public void setAllowedOrigins(List<String> allowedOrigins) {
             this.allowedOrigins = allowedOrigins == null ? new ArrayList<>() : allowedOrigins;
+        }
+    }
+
+    public static class Auth {
+        private String cookieSameSite = "Lax";
+        private Boolean cookieSecure;
+        private Sms sms = new Sms();
+
+        public String getCookieSameSite() {
+            return cookieSameSite;
+        }
+
+        public void setCookieSameSite(String cookieSameSite) {
+            this.cookieSameSite = cookieSameSite == null || cookieSameSite.isBlank() ? "Lax" : cookieSameSite;
+        }
+
+        public Boolean getCookieSecure() {
+            return cookieSecure;
+        }
+
+        public void setCookieSecure(Boolean cookieSecure) {
+            this.cookieSecure = cookieSecure;
+        }
+
+        public Sms getSms() {
+            return sms;
+        }
+
+        public void setSms(Sms sms) {
+            this.sms = sms == null ? new Sms() : sms;
+        }
+    }
+
+    public static class Sms {
+        private String provider = "local";
+        private String bmobApplicationId = "77eb212adf1cce7dac5ca58186fedc30";
+        private String bmobRestApiKey;
+        private String bmobBaseUrl = "https://api.bmob.cn";
+        private String bmobTemplate;
+        private String ihuyiApiId = "C78787480";
+        private String ihuyiApiKey;
+        private String ihuyiBaseUrl = "https://api.ihuyi.com/sms/Submit.json";
+        private String ihuyiTemplateId = "1";
+
+        public String getProvider() {
+            return provider;
+        }
+
+        public void setProvider(String provider) {
+            this.provider = provider == null || provider.isBlank() ? "local" : provider;
+        }
+
+        public String getBmobApplicationId() {
+            return bmobApplicationId;
+        }
+
+        public void setBmobApplicationId(String bmobApplicationId) {
+            this.bmobApplicationId = bmobApplicationId;
+        }
+
+        public String getBmobRestApiKey() {
+            return bmobRestApiKey;
+        }
+
+        public void setBmobRestApiKey(String bmobRestApiKey) {
+            this.bmobRestApiKey = bmobRestApiKey;
+        }
+
+        public String getBmobBaseUrl() {
+            return bmobBaseUrl;
+        }
+
+        public void setBmobBaseUrl(String bmobBaseUrl) {
+            this.bmobBaseUrl = bmobBaseUrl == null || bmobBaseUrl.isBlank() ? "https://api.bmob.cn" : bmobBaseUrl;
+        }
+
+        public String getBmobTemplate() {
+            return bmobTemplate;
+        }
+
+        public void setBmobTemplate(String bmobTemplate) {
+            this.bmobTemplate = bmobTemplate;
+        }
+
+        public String getIhuyiApiId() {
+            return ihuyiApiId;
+        }
+
+        public void setIhuyiApiId(String ihuyiApiId) {
+            this.ihuyiApiId = ihuyiApiId;
+        }
+
+        public String getIhuyiApiKey() {
+            return ihuyiApiKey;
+        }
+
+        public void setIhuyiApiKey(String ihuyiApiKey) {
+            this.ihuyiApiKey = ihuyiApiKey;
+        }
+
+        public String getIhuyiBaseUrl() {
+            return ihuyiBaseUrl;
+        }
+
+        public void setIhuyiBaseUrl(String ihuyiBaseUrl) {
+            this.ihuyiBaseUrl = ihuyiBaseUrl == null || ihuyiBaseUrl.isBlank()
+                    ? "https://api.ihuyi.com/sms/Submit.json"
+                    : ihuyiBaseUrl;
+        }
+
+        public String getIhuyiTemplateId() {
+            return ihuyiTemplateId;
+        }
+
+        public void setIhuyiTemplateId(String ihuyiTemplateId) {
+            this.ihuyiTemplateId = ihuyiTemplateId == null || ihuyiTemplateId.isBlank() ? "1" : ihuyiTemplateId;
         }
     }
 

@@ -11,14 +11,13 @@ async function bootstrap() {
   app.use(pinia)
   app.use(router)
 
-  // 等待路由就绪后初始化登录态
   await router.isReady()
 
-  // 尝试从 localStorage 恢复登录态
-  const auth = useAuthStore()
-  await auth.init()
-
+  // 先挂载再恢复会话，避免有 token 时长时间白屏（/me 在后台完成）
   app.mount("#app")
+
+  const auth = useAuthStore()
+  void auth.init()
 }
 
 bootstrap()
