@@ -133,6 +133,7 @@ export interface AdminTaskApiPayload {
   taskId: number
   taskNo: string
   userId: number
+  userNickname?: string | null
   toolCode: string
   toolName: string
   status: string
@@ -222,6 +223,8 @@ export type AgentModelProvider = 'mock' | 'openai_compatible' | 'anthropic_compa
 
 export interface AgentModelConfig {
   id: number
+  displayName?: string | null
+  configCode?: string | null
   provider: AgentModelProvider | string
   modelName: string
   baseUrl?: string | null
@@ -229,11 +232,14 @@ export interface AgentModelConfig {
   minimaxGroupId?: string | null
   timeoutSeconds: number
   enabled: boolean
+  isDefault?: boolean | null
   createdAt?: string | null
   updatedAt?: string | null
 }
 
 export interface AgentModelConfigPayload {
+  displayName?: string
+  configCode?: string
   provider: AgentModelProvider | string
   modelName: string
   baseUrl?: string
@@ -241,6 +247,7 @@ export interface AgentModelConfigPayload {
   minimaxGroupId?: string
   timeoutSeconds?: number
   enabled?: boolean
+  isDefault?: boolean
 }
 
 export interface AgentModelConfigTestResult {
