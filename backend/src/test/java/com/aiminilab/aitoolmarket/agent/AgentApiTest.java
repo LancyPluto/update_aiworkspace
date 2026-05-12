@@ -4,14 +4,18 @@ import com.aiminilab.aitoolmarket.agent.client.AgentServiceClient;
 import com.aiminilab.aitoolmarket.agent.dto.AgentFileParseChunk;
 import com.aiminilab.aitoolmarket.agent.dto.AgentFileParseResult;
 import com.aiminilab.aitoolmarket.agent.dto.AgentModelConfigTestResponse;
+import com.aiminilab.aitoolmarket.agent.mapper.AgentMessageMapper;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentFileChunkMapper;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentRunEventMapper;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentRunMapper;
+import com.aiminilab.aitoolmarket.agent.mapper.AgentToolCallMapper;
+import com.aiminilab.aitoolmarket.agent.mapper.AgentToolPreferenceMapper;
 import com.aiminilab.aitoolmarket.agent.service.AgentRateLimitService;
 import com.aiminilab.aitoolmarket.auth.security.InternalRequestSignatureVerifier;
-import com.aiminilab.aitoolmarket.auth.security.AuthTestTokens;
 import com.aiminilab.aitoolmarket.auth.security.TokenDenylistService;
 import com.aiminilab.aitoolmarket.credit.service.CreditService;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -19,11 +23,13 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
 import static com.aiminilab.aitoolmarket.testsupport.InternalApiTestSupport.signed;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -53,6 +59,12 @@ class AgentApiTest {
     @Autowired
     private MockMvc mockMvc;
 
+    @Autowired
+    private ObjectMapper objectMapper;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
     @MockBean
     private TokenDenylistService tokenDenylistService;
 
@@ -77,15 +89,29 @@ class AgentApiTest {
     @Autowired
     private AgentFileChunkMapper agentFileChunkMapper;
 
+    @Autowired
+    private AgentMessageMapper agentMessageMapper;
+
+    @Autowired
+    private AgentToolCallMapper agentToolCallMapper;
+
+    @Autowired
+    private AgentToolPreferenceMapper agentToolPreferenceMapper;
+
     @Test
     void userCanCreateSessionSendMessageAndListEvents() throws Exception {
         mockExternalAuthDependencies();
         register("agent_basic_user");
         String token = login("agent_basic_user");
         Long sessionId = createSession(token, "Agent Test");
-        Long runId = sendMessage(token, sessionId, "Please write a tool recommendation.");
+        SendMessageResult sendResult = sendMessage(token, sessionId, "Please write a tool recommendation.");
+        Long runId = sendResult.runId();
 
         Mockito.verify(agentServiceClient).executeRun(runId);
+        assertThat(sendResult.sessionId()).isEqualTo(sessionId);
+        assertThat(sendResult.messageId()).isNotNull();
+        assertThat(sendResult.runStatus()).isEqualTo("RUNNING");
+        assertThat(agentMessageMapper.findUserMessageByRunId(runId)).isNotNull();
 
         mockMvc.perform(get("/api/v1/agent/sessions/{sessionId}", sessionId)
                         .header("Authorization", "Bearer " + token))
@@ -106,6 +132,131 @@ class AgentApiTest {
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.list[0].eventType").value("run.started"));
+    }
+
+    @Test
+    void userCanReplayEventsAfterEventIdAndResumeWaitingRunOnConfirmation() throws Exception {
+        mockExternalAuthDependencies();
+        register("agent_confirm_resume_user");
+        LoginResult login = loginWithUser("agent_confirm_resume_user");
+        String token = login.token();
+        ensureOnlineTool("xiaohongshu_copywriting");
+        Long sessionId = createSession(token, "Confirm Resume");
+        Long runId = sendMessage(token, sessionId, "Please wait for tool confirmation.").runId();
+
+        agentRunMapper.updateById(waitingRun(runId));
+
+        String startedResponse = mockMvc.perform(signed(post("/api/internal/v1/agent/runs/{runId}/tool-calls", runId), "POST",
+                        "/api/internal/v1/agent/runs/%d/tool-calls".formatted(runId), """
+                                {
+                                  "toolCode": "xiaohongshu_copywriting",
+                                  "argumentsJson": {
+                                    "topic": "launch"
+                                  }
+                                }
+                                """)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "toolCode": "xiaohongshu_copywriting",
+                                  "argumentsJson": {
+                                    "topic": "launch"
+                                  }
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.id", notNullValue()))
+                .andExpect(jsonPath("$.data.status").value("RUNNING"))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        long toolCallId = objectMapper.readTree(startedResponse).path("data").path("id").asLong();
+
+        mockMvc.perform(post("/api/v1/agent/runs/{runId}/tool-confirmations", runId)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "toolCode": "xiaohongshu_copywriting",
+                                  "approved": true,
+                                  "autoCallEnabled": false
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("RUNNING"));
+
+        Mockito.verify(agentServiceClient).confirmTool(runId, "xiaohongshu_copywriting");
+        assertThat(agentRunMapper.findById(runId).orElseThrow().getStatus()).isEqualTo("RUNNING");
+        assertThat(agentToolPreferenceMapper.findByUserIdAndToolCode(login.userId(), "xiaohongshu_copywriting"))
+                .isNotNull()
+                .extracting("autoCallEnabled")
+                .isEqualTo(false);
+
+        String completeToolBody = """
+                {
+                  "resultJson": {
+                    "postId": "draft-001"
+                  }
+                }
+                """;
+        mockMvc.perform(signed(post("/api/internal/v1/agent/tool-calls/{toolCallId}/complete", toolCallId), "POST",
+                        "/api/internal/v1/agent/tool-calls/%d/complete".formatted(toolCallId), completeToolBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(completeToolBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("SUCCESS"));
+        mockMvc.perform(signed(post("/api/internal/v1/agent/tool-calls/{toolCallId}/complete", toolCallId), "POST",
+                        "/api/internal/v1/agent/tool-calls/%d/complete".formatted(toolCallId), completeToolBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(completeToolBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("SUCCESS"));
+        String failToolBody = """
+                {
+                  "errorCode": "RETRY_AFTER_SUCCESS",
+                  "errorMessage": "Should remain successful"
+                }
+                """;
+        mockMvc.perform(signed(post("/api/internal/v1/agent/tool-calls/{toolCallId}/fail", toolCallId), "POST",
+                        "/api/internal/v1/agent/tool-calls/%d/fail".formatted(toolCallId), failToolBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(failToolBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("SUCCESS"));
+
+        var calls = agentToolCallMapper.findByRunId(runId);
+        assertThat(calls).hasSize(1);
+        assertThat(calls.get(0).getStatus()).isEqualTo("SUCCESS");
+        assertThat(calls.get(0).getResultJson()).contains("draft-001");
+
+        String eventsResponse = mockMvc.perform(get("/api/v1/agent/runs/{runId}/events", runId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        JsonNode events = objectMapper.readTree(eventsResponse).path("data").path("list");
+        assertThat(events.size()).isEqualTo(4);
+        long firstEventId = events.get(0).path("id").asLong();
+        assertThat(events.get(0).path("eventType").asText()).isEqualTo("run.started");
+        assertThat(events.get(1).path("eventType").asText()).isEqualTo("tool.started");
+        assertThat(events.get(2).path("eventType").asText()).isEqualTo("tool.confirmed");
+        assertThat(events.get(3).path("eventType").asText()).isEqualTo("tool.finished");
+
+        mockMvc.perform(get("/api/v1/agent/runs/{runId}/events", runId)
+                        .header("Authorization", "Bearer " + token)
+                        .param("afterEventId", String.valueOf(firstEventId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list.length()").value(3))
+                .andExpect(jsonPath("$.data.list[0].eventType").value("tool.started"))
+                .andExpect(jsonPath("$.data.list[1].eventType").value("tool.confirmed"))
+                .andExpect(jsonPath("$.data.list[2].eventType").value("tool.finished"));
+
+        mockMvc.perform(get("/api/v1/agent/runs/{runId}/events/stream", runId)
+                        .header("Authorization", "Bearer " + token)
+                        .param("afterEventId", String.valueOf(firstEventId)))
+                .andExpect(status().isOk())
+                .andExpect(request().asyncStarted());
     }
 
     @Test
@@ -164,7 +315,7 @@ class AgentApiTest {
         String token = login("agent_workspace_context_user");
         Long workspaceId = defaultWorkspaceId(token);
         Long sessionId = createSession(token, "Workspace Context");
-        Long runId = sendMessage(token, sessionId, "Use workspace memory later.");
+        Long runId = sendMessage(token, sessionId, "Use workspace memory later.").runId();
 
         mockMvc.perform(signed(get("/api/internal/v1/agent/runs/{runId}/context", runId), "GET",
                         "/api/internal/v1/agent/runs/%d/context".formatted(runId), ""))
@@ -196,7 +347,7 @@ class AgentApiTest {
                 .andExpect(jsonPath("$.data.status").value("READY"))
                 .andExpect(jsonPath("$.data.extractedText").value("产品说明：标准版包含 3 个项目和团队协作。"));
 
-        Long runId = sendMessage(token, sessionId, "请基于上传文件总结标准版权益");
+        Long runId = sendMessage(token, sessionId, "请基于上传文件总结标准版权益").runId();
         mockMvc.perform(signed(get("/api/internal/v1/agent/runs/{runId}/context", runId), "GET",
                         "/api/internal/v1/agent/runs/%d/context".formatted(runId), ""))
                 .andExpect(status().isOk())
@@ -233,7 +384,7 @@ class AgentApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("READY"));
 
-        Long runId = sendMessage(token, sessionId, "What security features are included?");
+        Long runId = sendMessage(token, sessionId, "What security features are included?").runId();
         mockMvc.perform(signed(get("/api/internal/v1/agent/runs/{runId}/context", runId), "GET",
                         "/api/internal/v1/agent/runs/%d/context".formatted(runId), ""))
                 .andExpect(status().isOk())
@@ -248,7 +399,7 @@ class AgentApiTest {
         register("agent_artifact_user");
         LoginResult login = loginWithUser("agent_artifact_user");
         Long sessionId = createSession(login.token(), "Artifact Session");
-        Long runId = sendMessage(login.token(), sessionId, "Create a long-running artifact.");
+        Long runId = sendMessage(login.token(), sessionId, "Create a long-running artifact.").runId();
         Mockito.clearInvocations(agentServiceClient);
 
         String artifactBody = """
@@ -290,7 +441,7 @@ class AgentApiTest {
         register("agent_empty_artifact_user");
         String token = login("agent_empty_artifact_user");
         Long sessionId = createSession(token, "Empty Artifact Session");
-        Long runId = sendMessage(token, sessionId, "Create an empty artifact.");
+        Long runId = sendMessage(token, sessionId, "Create an empty artifact.").runId();
 
         String artifactBody = """
                 {
@@ -329,25 +480,30 @@ class AgentApiTest {
     void agentServiceNotificationFailureDoesNotFailSendMessageRequest() throws Exception {
         mockExternalAuthDependencies();
         register("agent_notify_failure_user");
-        String token = login("agent_notify_failure_user");
-        Long sessionId = createSession(token, "Agent Notify Failure");
+        LoginResult login = loginWithUser("agent_notify_failure_user");
+        Long sessionId = createSession(login.token(), "Agent Notify Failure");
         Mockito.doThrow(new IllegalStateException("agent-service rejected request"))
                 .when(agentServiceClient)
                 .executeRun(anyLong());
 
-        Long runId = sendMessage(token, sessionId, "Please handle notification failure.");
+        Long runId = sendMessage(login.token(), sessionId, "Please handle notification failure.").runId();
 
         mockMvc.perform(get("/api/v1/agent/runs/{runId}", runId)
-                        .header("Authorization", "Bearer " + token))
+                        .header("Authorization", "Bearer " + login.token()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("FAILED"))
                 .andExpect(jsonPath("$.data.errorCode").value("AGENT_SERVICE_NOTIFY_FAILED"));
 
         mockMvc.perform(get("/api/v1/agent/runs/{runId}/events", runId)
-                        .header("Authorization", "Bearer " + token))
+                        .header("Authorization", "Bearer " + login.token()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.list[0].eventType").value("run.started"))
                 .andExpect(jsonPath("$.data.list[1].eventType").value("run.failed"));
+
+        var account = creditService.account(login.userId());
+        org.assertj.core.api.Assertions.assertThat(account.balance()).isEqualTo(100);
+        org.assertj.core.api.Assertions.assertThat(account.frozen()).isZero();
+        org.assertj.core.api.Assertions.assertThat(account.available()).isEqualTo(100);
     }
 
     @Test
@@ -356,7 +512,7 @@ class AgentApiTest {
         register("agent_stream_user");
         String token = login("agent_stream_user");
         Long sessionId = createSession(token, "Agent Stream");
-        Long runId = sendMessage(token, sessionId, "Stream events please.");
+        Long runId = sendMessage(token, sessionId, "Stream events please.").runId();
 
         mockMvc.perform(get("/api/v1/agent/runs/{runId}/events/stream", runId)
                         .header("Authorization", "Bearer " + token))
@@ -372,7 +528,7 @@ class AgentApiTest {
         register("agent_other_user");
         String otherToken = login("agent_other_user");
         Long sessionId = createSession(ownerToken, "Private Session");
-        Long runId = sendMessage(ownerToken, sessionId, "Private message");
+        Long runId = sendMessage(ownerToken, sessionId, "Private message").runId();
 
         mockMvc.perform(get("/api/v1/agent/sessions/{sessionId}", sessionId)
                         .header("Authorization", "Bearer " + otherToken))
@@ -396,7 +552,7 @@ class AgentApiTest {
         register("agent_callback_user");
         String token = login("agent_callback_user");
         Long sessionId = createSession(token, "Callbacks");
-        Long runId = sendMessage(token, sessionId, "Callback message");
+        Long runId = sendMessage(token, sessionId, "Callback message").runId();
 
         mockMvc.perform(post("/api/internal/v1/agent/runs/{runId}/events", runId)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -439,6 +595,11 @@ class AgentApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.list[1].role").value("ASSISTANT"))
                 .andExpect(jsonPath("$.data.list[1].contentText").value("This is the final answer."));
+
+        assertThat(agentMessageMapper.findUserMessageByRunId(runId)).isNotNull();
+        assertThat(agentRunEventMapper.findEventsForAdmin(runId, 10))
+                .extracting("eventType")
+                .containsExactly("run.started", "intent.detected", "run.completed");
     }
 
     @Test
@@ -481,7 +642,7 @@ class AgentApiTest {
                 .andExpect(status().isOk());
 
         Long sessionId = createSession(token, "Preference Context");
-        Long runId = sendMessage(token, sessionId, "帮我写小红书笔记");
+        Long runId = sendMessage(token, sessionId, "帮我写小红书笔记").runId();
 
         mockMvc.perform(signed(get("/api/internal/v1/agent/runs/{runId}/context", runId), "GET",
                         "/api/internal/v1/agent/runs/%d/context".formatted(runId), ""))
@@ -496,7 +657,7 @@ class AgentApiTest {
         register("agent_finished_user");
         String token = login("agent_finished_user");
         Long sessionId = createSession(token, "Finished Run");
-        Long runId = sendMessage(token, sessionId, "Finish before confirm.");
+        Long runId = sendMessage(token, sessionId, "Finish before confirm.").runId();
 
         String completeBody = """
                 {
@@ -597,7 +758,7 @@ class AgentApiTest {
         LoginResult login = loginWithUser(username);
         Long sessionId = createSession(login.token(), "Agent Credit Success");
 
-        Long runId = sendMessage(login.token(), sessionId, "Use agent credits.");
+        Long runId = sendMessage(login.token(), sessionId, "Use agent credits.").runId();
         var frozen = creditService.account(login.userId());
         org.assertj.core.api.Assertions.assertThat(frozen.balance()).isEqualTo(100);
         org.assertj.core.api.Assertions.assertThat(frozen.frozen()).isEqualTo(20);
@@ -633,7 +794,7 @@ class AgentApiTest {
         LoginResult login = loginWithUser(username);
         Long sessionId = createSession(login.token(), "Agent Credit Cancel");
 
-        Long runId = sendMessage(login.token(), sessionId, "Cancel agent credits.");
+        Long runId = sendMessage(login.token(), sessionId, "Cancel agent credits.").runId();
         org.assertj.core.api.Assertions.assertThat(creditService.account(login.userId()).frozen()).isEqualTo(20);
 
         mockMvc.perform(post("/api/v1/agent/runs/{runId}/cancel", runId)
@@ -655,7 +816,7 @@ class AgentApiTest {
         LoginResult login = loginWithUser(username);
         Long sessionId = createSession(login.token(), "Agent Complete Idempotent");
 
-        Long runId = sendMessage(login.token(), sessionId, "Complete twice.");
+        Long runId = sendMessage(login.token(), sessionId, "Complete twice.").runId();
         String completeBody = """
                 {
                   "finalAnswer": "Only one answer.",
@@ -694,7 +855,7 @@ class AgentApiTest {
         LoginResult login = loginWithUser(username);
         Long sessionId = createSession(login.token(), "Agent Cancel Then Fail");
 
-        Long runId = sendMessage(login.token(), sessionId, "Cancel then fail.");
+        Long runId = sendMessage(login.token(), sessionId, "Cancel then fail.").runId();
         mockMvc.perform(post("/api/v1/agent/runs/{runId}/cancel", runId)
                         .header("Authorization", "Bearer " + login.token()))
                 .andExpect(status().isOk())
@@ -756,7 +917,7 @@ class AgentApiTest {
         return Long.parseLong(response.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
     }
 
-    private Long sendMessage(String token, Long sessionId, String content) throws Exception {
+    private SendMessageResult sendMessage(String token, Long sessionId, String content) throws Exception {
         String response = mockMvc.perform(post("/api/v1/agent/sessions/{sessionId}/messages", sessionId)
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -770,7 +931,13 @@ class AgentApiTest {
                 .andReturn()
                 .getResponse()
                 .getContentAsString();
-        return Long.parseLong(response.replaceAll("(?s).*\\\"runId\\\"\\s*:\\s*(\\d+).*", "$1"));
+        JsonNode data = objectMapper.readTree(response).path("data");
+        return new SendMessageResult(
+                data.path("sessionId").asLong(),
+                data.path("messageId").asLong(),
+                data.path("runId").asLong(),
+                data.path("runStatus").asText()
+        );
     }
 
     private org.springframework.test.web.servlet.ResultActions completeRun(Long runId, String completeBody) throws Exception {
@@ -785,7 +952,7 @@ class AgentApiTest {
     }
 
     private LoginResult loginWithUser(String account) throws Exception {
-        var result = mockMvc.perform(post("/api/v1/auth/login")
+        String response = mockMvc.perform(post("/api/v1/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
@@ -794,9 +961,10 @@ class AgentApiTest {
                                 }
                                 """.formatted(account)))
                 .andExpect(status().isOk())
-                .andReturn();
-        String response = result.getResponse().getContentAsString();
-        String token = AuthTestTokens.userJwtFrom(result);
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        String token = response.replaceAll("(?s).*\\\"accessToken\\\"\\s*:\\s*\\\"([^\\\"]+)\\\".*", "$1");
         Long userId = Long.parseLong(response.replaceAll("(?s).*\\\"user\\\"\\s*:\\s*\\{\\s*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
         return new LoginResult(token, userId);
     }
@@ -816,4 +984,86 @@ class AgentApiTest {
 
     private record LoginResult(String token, Long userId) {
     }
+
+    private record SendMessageResult(Long sessionId, Long messageId, Long runId, String runStatus) {
+    }
+
+    private com.aiminilab.aitoolmarket.agent.entity.AgentRun waitingRun(Long runId) {
+        var run = agentRunMapper.findById(runId).orElseThrow();
+        run.setStatus("WAITING_USER_CONFIRMATION");
+        return run;
+    }
+
+    private void ensureOnlineTool(String toolCode) {
+        Long existingToolId = jdbcTemplate.query(
+                "SELECT id FROM ai_tools WHERE tool_code = ? AND status = 'ONLINE' AND is_deleted = 0",
+                rs -> rs.next() ? rs.getLong(1) : null,
+                toolCode
+        );
+        if (existingToolId != null) {
+            return;
+        }
+
+        Long categoryId = jdbcTemplate.query(
+                "SELECT id FROM tool_categories WHERE category_code = ?",
+                rs -> rs.next() ? rs.getLong(1) : null,
+                "agent-test-category"
+        );
+        if (categoryId == null) {
+            jdbcTemplate.update(
+                    "INSERT INTO tool_categories(category_code, category_name, sort_order, status) VALUES (?, ?, ?, ?)",
+                    "agent-test-category",
+                    "Agent Test Category",
+                    0,
+                    "ACTIVE"
+            );
+            categoryId = jdbcTemplate.queryForObject(
+                    "SELECT id FROM tool_categories WHERE category_code = ?",
+                    Long.class,
+                    "agent-test-category"
+            );
+        }
+
+        jdbcTemplate.update(
+                """
+                INSERT INTO ai_tools(tool_code, tool_name, category_id, description, status, estimated_credit_cost, is_deleted)
+                VALUES (?, ?, ?, ?, 'ONLINE', ?, 0)
+                """,
+                toolCode,
+                "Agent Test Tool",
+                categoryId,
+                "Tool seeded for agent callback tests",
+                5
+        );
+        Long toolId = jdbcTemplate.queryForObject(
+                "SELECT id FROM ai_tools WHERE tool_code = ?",
+                Long.class,
+                toolCode
+        );
+        jdbcTemplate.update(
+                "INSERT INTO tool_field_schemas(tool_id, schema_version, status) VALUES (?, ?, 'ACTIVE')",
+                toolId,
+                "v1"
+        );
+        Long schemaId = jdbcTemplate.queryForObject(
+                "SELECT id FROM tool_field_schemas WHERE tool_id = ? AND schema_version = ?",
+                Long.class,
+                toolId,
+                "v1"
+        );
+        jdbcTemplate.update(
+                """
+                INSERT INTO tool_field_schema_items(schema_id, field_key, field_name, field_type, placeholder, required, sort_order, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'ACTIVE')
+                """,
+                schemaId,
+                "topic",
+                "Topic",
+                "text",
+                "Provide a topic",
+                1,
+                1
+        );
+    }
+
 }

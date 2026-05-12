@@ -1,6 +1,5 @@
 package com.aiminilab.aitoolmarket.auth;
 
-import com.aiminilab.aitoolmarket.auth.security.AuthTestTokens;
 import com.aiminilab.aitoolmarket.auth.security.TokenDenylistService;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -16,6 +15,8 @@ import java.time.Duration;
 import java.util.HashSet;
 import java.util.Set;
 
+import static org.hamcrest.Matchers.not;
+import static org.hamcrest.Matchers.blankOrNullString;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -53,7 +54,7 @@ class AuthLogoutApiTest {
         Mockito.when(tokenDenylistService.isDenied(anyString()))
                 .thenAnswer(invocation -> deniedTokenIds.contains(invocation.getArgument(0)));
 
-        var loginResult = mockMvc.perform(post("/api/v1/auth/login")
+        String loginResponse = mockMvc.perform(post("/api/v1/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
@@ -62,8 +63,11 @@ class AuthLogoutApiTest {
                                 }
                                 """))
                 .andExpect(status().isOk())
-                .andReturn();
-        String token = AuthTestTokens.userJwtFrom(loginResult);
+                .andExpect(jsonPath("$.data.accessToken", not(blankOrNullString())))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        String token = loginResponse.replaceAll("(?s).*\\\"accessToken\\\"\\s*:\\s*\\\"([^\\\"]+)\\\".*", "$1");
 
         mockMvc.perform(get("/api/v1/users/me")
                         .header("Authorization", "Bearer " + token))

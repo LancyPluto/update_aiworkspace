@@ -13,8 +13,8 @@ public class AppProperties {
     private String internalApiToken;
     private String aiTaskQueue;
     private Agent agent = new Agent();
-    private Cors cors = new Cors();
     private Auth auth = new Auth();
+    private Cors cors = new Cors();
 
     public boolean isProductionMode() {
         return productionMode;
@@ -56,14 +56,6 @@ public class AppProperties {
         this.agent = agent == null ? new Agent() : agent;
     }
 
-    public Cors getCors() {
-        return cors;
-    }
-
-    public void setCors(Cors cors) {
-        this.cors = cors == null ? new Cors() : cors;
-    }
-
     public Auth getAuth() {
         return auth;
     }
@@ -72,25 +64,12 @@ public class AppProperties {
         this.auth = auth == null ? new Auth() : auth;
     }
 
-    public static class Auth {
-        private Boolean cookieSecure;
-        private String cookieSameSite = "Lax";
+    public Cors getCors() {
+        return cors;
+    }
 
-        public Boolean getCookieSecure() {
-            return cookieSecure;
-        }
-
-        public void setCookieSecure(Boolean cookieSecure) {
-            this.cookieSecure = cookieSecure;
-        }
-
-        public String getCookieSameSite() {
-            return cookieSameSite == null || cookieSameSite.isBlank() ? "Lax" : cookieSameSite;
-        }
-
-        public void setCookieSameSite(String cookieSameSite) {
-            this.cookieSameSite = cookieSameSite;
-        }
+    public void setCors(Cors cors) {
+        this.cors = cors;
     }
 
     public static class Cors {
@@ -102,6 +81,27 @@ public class AppProperties {
 
         public void setAllowedOrigins(List<String> allowedOrigins) {
             this.allowedOrigins = allowedOrigins == null ? new ArrayList<>() : allowedOrigins;
+        }
+    }
+
+    public static class Auth {
+        private String cookieSameSite = "Lax";
+        private Boolean cookieSecure;
+
+        public String getCookieSameSite() {
+            return cookieSameSite;
+        }
+
+        public void setCookieSameSite(String cookieSameSite) {
+            this.cookieSameSite = cookieSameSite == null || cookieSameSite.isBlank() ? "Lax" : cookieSameSite;
+        }
+
+        public Boolean getCookieSecure() {
+            return cookieSecure;
+        }
+
+        public void setCookieSecure(Boolean cookieSecure) {
+            this.cookieSecure = cookieSecure;
         }
     }
 

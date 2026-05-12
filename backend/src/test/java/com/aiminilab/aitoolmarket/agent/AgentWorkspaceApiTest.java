@@ -3,7 +3,6 @@ package com.aiminilab.aitoolmarket.agent;
 import com.aiminilab.aitoolmarket.agent.client.AgentServiceClient;
 import com.aiminilab.aitoolmarket.agent.service.AgentRateLimitService;
 import com.aiminilab.aitoolmarket.auth.security.InternalRequestSignatureVerifier;
-import com.aiminilab.aitoolmarket.auth.security.AuthTestTokens;
 import com.aiminilab.aitoolmarket.auth.security.TokenDenylistService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -233,7 +232,7 @@ class AgentWorkspaceApiTest {
     }
 
     private String login(String account) throws Exception {
-        var result = mockMvc.perform(post("/api/v1/auth/login")
+        String response = mockMvc.perform(post("/api/v1/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
@@ -242,8 +241,10 @@ class AgentWorkspaceApiTest {
                                 }
                                 """.formatted(account)))
                 .andExpect(status().isOk())
-                .andReturn();
-        return AuthTestTokens.userJwtFrom(result);
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        return response.replaceAll("(?s).*\\\"accessToken\\\"\\s*:\\s*\\\"([^\\\"]+)\\\".*", "$1");
     }
 
     private long defaultWorkspaceId(String token) throws Exception {

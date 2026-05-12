@@ -1,5 +1,4 @@
 import { apiRequest, getApiOrigin } from "./client"
-import { getSessionBearerJwt } from "./sessionBearer"
 import type {
   AgentMessage,
   AgentRun,
@@ -88,14 +87,12 @@ export async function streamAgentRunEvents(
   const path = `/api/v1/agent/runs/${runId}/events/stream`
   const url = new URL(path, origin || window.location.origin)
   if (options.afterEventId) url.searchParams.set("afterEventId", String(options.afterEventId))
-  const bearer = options.token ?? getSessionBearerJwt()
   const response = await fetch(url.toString(), {
     method: "GET",
     signal: options.signal,
-    credentials: "include",
     headers: {
       Accept: "text/event-stream",
-      ...(bearer ? { Authorization: `Bearer ${bearer}` } : {}),
+      ...(options.token ? { Authorization: `Bearer ${options.token}` } : {}),
     },
   })
   if (!response.ok || !response.body) {

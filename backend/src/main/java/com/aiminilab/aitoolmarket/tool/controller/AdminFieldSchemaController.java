@@ -1,8 +1,7 @@
 package com.aiminilab.aitoolmarket.tool.controller;
 
-import com.aiminilab.aitoolmarket.auth.security.AuthContext;
 import com.aiminilab.aitoolmarket.common.dto.ApiResponse;
-import com.aiminilab.aitoolmarket.tool.dto.FieldSchemaAdminResponse;
+import com.aiminilab.aitoolmarket.tool.dto.FieldSchemaResponse;
 import com.aiminilab.aitoolmarket.tool.service.ToolService;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -20,7 +19,7 @@ public class AdminFieldSchemaController {
     }
 
     @PostMapping("/{schemaId}/publish")
-    public ApiResponse<FieldSchemaAdminResponse> publish(@PathVariable Long schemaId) {
-        return ApiResponse.success(toolService.publishFieldSchema(schemaId, AuthContext.get().userId()));
+    public ApiResponse<FieldSchemaResponse> publish(@PathVariable Long schemaId) {
+        return ApiResponse.success(toolService.publishFieldSchema(schemaId));
     }
 }

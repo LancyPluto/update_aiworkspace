@@ -15,6 +15,11 @@ services:
     command:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot123456"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
   redis:
     image: redis:7
@@ -25,6 +30,49 @@ services:
     volumes:
       - redis_data:/data
     command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    image: maven:3.9-eclipse-temurin-17
+    container_name: ai-supermarket-backend
+    working_dir: /app
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      SERVER_PORT: 8080
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_DATABASE: ai_supermarket_v1
+      MYSQL_USERNAME: root
+      MYSQL_PASSWORD: root123456
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ""
+      REDIS_DATABASE: 0
+      APP_PRODUCTION_MODE: ${APP_PRODUCTION_MODE:-false}
+      JWT_SECRET: ${JWT_SECRET:-local-dev-secret}
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-local-internal-token}
+      AI_TASK_QUEUE: ${AI_TASK_QUEUE:-ai:task:queue}
+      AGENT_ENABLED: ${AGENT_ENABLED:-true}
+      AGENT_SERVICE_BASE_URL: ${AGENT_SERVICE_BASE_URL:-http://agent-service:8090}
+      AGENT_MAX_ACTIVE_RUNS_PER_USER: ${AGENT_MAX_ACTIVE_RUNS_PER_USER:-1}
+      AGENT_MAX_MESSAGES_PER_MINUTE: ${AGENT_MAX_MESSAGES_PER_MINUTE:-10}
+      AGENT_MAX_RUNS_PER_HOUR: ${AGENT_MAX_RUNS_PER_HOUR:-30}
+      AGENT_DEFAULT_CREDIT_BUDGET: ${AGENT_DEFAULT_CREDIT_BUDGET:-20}
+    ports:
+      - "${BACKEND_PORT:-8080}:8080"
+    volumes:
+      - ../backend:/app
+      - maven_cache:/root/.m2
+    command: mvn spring-boot:run
 
   admin-frontend:
     image: node:22-alpine
@@ -32,15 +80,86 @@ services:
     working_dir: /app
     restart: unless-stopped
     environment:
-      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8080}
-      VITE_ADMIN_API_BASE_URL: ${VITE_ADMIN_API_BASE_URL:-http://localhost:8080}
+      NEXT_PUBLIC_API_PROXY_TARGET: ${ADMIN_NEXT_PUBLIC_API_PROXY_TARGET:-http://backend:8080}
+      NEXT_PUBLIC_API_BASE_URL: ${ADMIN_NEXT_PUBLIC_API_BASE_URL:-http://127.0.0.1:8080}
       CHOKIDAR_USEPOLLING: "true"
     ports:
       - "${ADMIN_FRONTEND_PORT:-5174}:5174"
     volumes:
       - ../admin-frontend:/app
-    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    command: sh -c "npm install && npm run dev:docker"
+
+  user-web:
+    image: node:22-alpine
+    container_name: ai-supermarket-user-web
+    working_dir: /app
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/api/v1}
+      VITE_DEV_PROXY_TARGET: ${VITE_DEV_PROXY_TARGET:-http://backend:8080}
+      CHOKIDAR_USEPOLLING: "true"
+    ports:
+      - "${USER_WEB_PORT:-5173}:5173"
+    volumes:
+      - ../user-web:/app
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5173"
+
+  worker:
+    image: python:3.12-slim
+    container_name: ai-supermarket-worker
+    working_dir: /app
+    restart: unless-stopped
+    depends_on:
+      - backend
+      - redis
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ""
+      REDIS_DATABASE: 0
+      AI_TASK_QUEUE: ${AI_TASK_QUEUE:-ai:task:queue}
+      BACKEND_INTERNAL_BASE_URL: http://backend:8080
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-local-internal-token}
+      MODEL_PROVIDER: ${MODEL_PROVIDER:-mock}
+      MODEL_API_BASE_URL: ${MODEL_API_BASE_URL:-https://api.deepseek.com}
+      MODEL_API_KEY: ${MODEL_API_KEY:-replace-with-model-key}
+      MODEL_NAME: ${MODEL_NAME:-deepseek-chat}
+    volumes:
+      - ../worker:/app
+    command: sh -c "pip install --no-cache-dir -r requirements.txt && python main.py"
+
+  agent-service:
+    image: python:3.12-slim
+    container_name: ai-supermarket-agent-service
+    working_dir: /app
+    restart: unless-stopped
+    depends_on:
+      - backend
+      - redis
+    environment:
+      APP_ENV: local
+      PORT: 8090
+      BACKEND_INTERNAL_BASE_URL: http://backend:8080
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-local-internal-token}
+      AGENT_VERIFY_INTERNAL_SIGNATURE: ${AGENT_VERIFY_INTERNAL_SIGNATURE:-false}
+      AGENT_EXECUTION_MODE: ${AGENT_EXECUTION_MODE:-sync}
+      MODEL_PROVIDER: ${MODEL_PROVIDER:-mock}
+      MODEL_API_BASE_URL: ${MODEL_API_BASE_URL:-https://api.deepseek.com}
+      MODEL_API_KEY: ${MODEL_API_KEY:-replace-with-model-key}
+      MODEL_NAME: ${MODEL_NAME:-deepseek-chat}
+      AGENT_MAX_TOOL_CALLS: ${AGENT_MAX_TOOL_CALLS:-3}
+      AGENT_MAX_MODEL_CALLS: ${AGENT_MAX_MODEL_CALLS:-5}
+      AGENT_MODEL_CALL_COST: ${AGENT_MODEL_CALL_COST:-1}
+      AGENT_DEFAULT_CONSUMED_CREDITS: ${AGENT_DEFAULT_CONSUMED_CREDITS:-1}
+    ports:
+      - "${AGENT_SERVICE_PORT:-8090}:8090"
+    volumes:
+      - ../agent-service:/app
+    command: sh -c "pip install --no-cache-dir -r requirements.txt && uvicorn app.main:app --host 0.0.0.0 --port 8090"
 
 volumes:
   mysql_data:
   redis_data:
+  maven_cache:

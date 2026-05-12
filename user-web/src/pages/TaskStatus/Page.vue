@@ -1,15 +1,17 @@
 <script setup lang="ts">
+import { ref, onMounted, onUnmounted } from "vue"
 import { RouterLink } from "vue-router"
-import { ArrowLeft, ChevronRight, CheckCircle2, Loader2 } from "lucide-vue-next"
+import { ArrowLeft, ChevronRight, CheckCircle2, Loader2, X as XIcon } from "lucide-vue-next"
 import AppShell from "@/components/AppShell.vue"
 import TaskStatusTag from "@/components/TaskStatusTag/TaskStatusTag.vue"
 import { userRoutes } from "@/router/userRoutes"
+import { fetchTaskStatus } from "@/api/taskApi"
+import type { TaskStatusPayload, TaskStatus } from "@/api/types"
+import { useAuthStore } from "@/store/authStore"
 
-defineProps<{
+const props = defineProps<{
   taskId: string
 }>()
-<<<<<<< Updated upstream
-=======
 
 const auth = useAuthStore()
 
@@ -43,7 +45,7 @@ function isTerminal(s: TaskStatus): boolean {
 async function loadStatus() {
   if (!props.taskId) return
   try {
-    statusData.value = await fetchTaskStatus(props.taskId)
+    statusData.value = await fetchTaskStatus(props.taskId, { token: auth.token })
     error.value = null
   } catch (e) {
     error.value = (e as Error).message || "获取任务状态失败"
@@ -70,7 +72,6 @@ onMounted(() => {
 onUnmounted(() => {
   if (intervalId) clearInterval(intervalId)
 })
->>>>>>> Stashed changes
 </script>
 
 <template>
@@ -84,45 +85,64 @@ onUnmounted(() => {
         <span class="text-foreground">任务进度</span>
       </nav>
 
-      <div class="rounded-xl border border-primary/20 bg-accent/30 p-6 shadow-sm">
-        <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
-          <div class="flex items-center gap-2">
-            <Loader2 class="h-4 w-4 text-primary animate-spin" />
-            <h3 class="text-sm font-semibold">生成进度</h3>
-            <TaskStatusTag status="running" />
-          </div>
-          <span class="text-xs text-muted-foreground font-mono">任务 ID：{{ taskId }}</span>
-        </div>
-        <div class="space-y-3">
-          <div class="flex items-center justify-between text-xs">
-            <span class="text-muted-foreground">正在生成第 3 / 5 条候选文案…</span>
-            <span class="font-medium">62%</span>
-          </div>
-          <div class="h-2 overflow-hidden rounded-full bg-secondary">
-            <div class="h-full w-[62%] rounded-full bg-gradient-to-r from-primary to-chart-2" />
-          </div>
-          <ul class="space-y-1.5 text-xs">
-            <li class="flex items-center gap-2 text-foreground">
-              <CheckCircle2 class="h-3.5 w-3.5 text-success" /> 解析输入参数与平台规则
-            </li>
-            <li class="flex items-center gap-2 text-foreground">
-              <CheckCircle2 class="h-3.5 w-3.5 text-success" /> 调用模型生成候选文案
-            </li>
-            <li class="flex items-center gap-2 text-primary font-medium">
-              <Loader2 class="h-3.5 w-3.5 animate-spin" /> 对候选文案进行打分排序
-            </li>
-            <li class="flex items-center gap-2 text-muted-foreground">
-              <span class="h-3.5 w-3.5 rounded-full border border-border" /> 格式化输出与合规检查
-            </li>
-          </ul>
-        </div>
+      <!-- 加载中 -->
+      <div v-if="loading" class="flex justify-center py-12">
+        <span class="text-sm text-muted-foreground">加载中…</span>
       </div>
 
-      <p class="text-xs text-muted-foreground text-center">
-        完成后可在
-        <RouterLink :to="userRoutes.taskResult(taskId)" class="text-primary hover:underline">任务结果</RouterLink>
-        查看输出。
-      </p>
+      <!-- 错误 -->
+      <div v-else-if="error" class="rounded-xl border border-destructive/30 bg-destructive/5 p-6 text-center">
+        <p class="text-sm text-destructive">{{ error }}</p>
+      </div>
+
+      <!-- 状态卡片 -->
+      <div v-else-if="statusData" class="rounded-xl border" :class="
+        mapStatus(statusData.status) === 'success'
+          ? 'border-success/30 bg-success/5'
+          : mapStatus(statusData.status) === 'failed'
+            ? 'border-destructive/30 bg-destructive/5'
+            : 'border-primary/20 bg-accent/30'
+      ">
+        <div class="p-6 shadow-sm">
+          <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+            <div class="flex items-center gap-2">
+              <Loader2 v-if="!isTerminal(statusData.status)" class="h-4 w-4 text-primary animate-spin" />
+              <CheckCircle2 v-else-if="mapStatus(statusData.status) === 'success'" class="h-4 w-4 text-success" />
+              <XIcon v-else class="h-4 w-4 text-destructive" />
+              <h3 class="text-sm font-semibold">任务状态</h3>
+              <TaskStatusTag :status="mapStatus(statusData.status)" />
+            </div>
+            <span class="text-xs text-muted-foreground font-mono">任务 ID：{{ statusData.taskNo }}</span>
+          </div>
+
+          <div v-if="statusData.progress != null" class="space-y-2">
+            <div class="flex items-center justify-between text-xs">
+              <span class="text-muted-foreground">{{ statusData.progressMessage || '处理中' }}</span>
+              <span class="font-medium">{{ statusData.progress }}%</span>
+            </div>
+            <div class="h-2 overflow-hidden rounded-full bg-secondary">
+              <div
+                class="h-full rounded-full bg-gradient-to-r from-primary to-chart-2"
+                :style="{ width: statusData.progress + '%' }"
+              />
+            </div>
+          </div>
+
+          <div class="mt-3 text-xs text-muted-foreground">
+            状态：{{ statusData.status }}
+          </div>
+        </div>
+
+        <!-- 完成后显示查看结果链接 -->
+        <div v-if="mapStatus(statusData.status) === 'success'" class="px-6 pb-6">
+          <RouterLink
+            :to="userRoutes.taskResult(taskId)"
+            class="inline-flex h-10 items-center justify-center rounded-md bg-primary px-6 text-sm font-medium text-primary-foreground hover:opacity-90"
+          >
+            查看结果
+          </RouterLink>
+        </div>
+      </div>
     </div>
   </AppShell>
 </template>

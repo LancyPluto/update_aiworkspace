@@ -9,6 +9,14 @@ class ModelClientError(RuntimeError):
     pass
 
 
+class ModelTimeoutError(ModelClientError):
+    pass
+
+
+class ModelOutputEmptyError(ModelClientError):
+    pass
+
+
 class ModelClient:
     def __init__(self) -> None:
         self.base_url = settings.model_api_base_url.rstrip("/")
@@ -30,6 +38,12 @@ class ModelClient:
         system_prompt: str = "",
         model_name: str | None = None,
     ) -> str:
+        if settings.model_provider == "mock":
+            return (
+                "Local demo result: Worker received the task and generated a mock response.\n\n"
+                f"Input:\n{prompt[:500]}"
+            )
+
         if not self.api_key or self.api_key == "replace-with-model-key":
             raise ModelClientError("MODEL_API_KEY is not configured")
 
@@ -38,15 +52,20 @@ class ModelClient:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
 
-        response = self.session.post(
-            f"{self.base_url}/chat/completions",
-            json={
-                "model": model_name or self.default_model_name,
-                "messages": messages,
-                "stream": False,
-            },
-            timeout=self.timeout,
-        )
+        try:
+            response = self.session.post(
+                f"{self.base_url}/chat/completions",
+                json={
+                    "model": model_name or self.default_model_name,
+                    "messages": messages,
+                    "stream": False,
+                },
+                timeout=self.timeout,
+            )
+        except requests.Timeout as exc:
+            raise ModelTimeoutError("model request timed out") from exc
+        except requests.RequestException as exc:
+            raise ModelClientError(f"model request failed: {exc}") from exc
 
         try:
             response.raise_for_status()
@@ -62,7 +81,7 @@ class ModelClient:
 
         content = self._extract_content(payload)
         if not content:
-            raise ModelClientError("model returned empty content")
+            raise ModelOutputEmptyError("model returned empty content")
         return content
 
     @staticmethod

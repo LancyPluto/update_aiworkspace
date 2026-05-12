@@ -10,26 +10,32 @@
 
 ### 1.1 基础设施 ✅
 
-| 组件 | 状态 | 端口 |
-|------|------|------|
-| MySQL (`docker-compose up -d mysql`) | ✅ 正常运行 | 3307 → 3306 |
-| Redis (`docker-compose up -d redis`) | ✅ 正常运行 | 6379 |
-| Admin Frontend (`docker-compose up -d admin-frontend`) | ✅ 正常运行 | 5174 |
+
+| 组件                                                     | 状态     | 端口          |
+| ------------------------------------------------------ | ------ | ----------- |
+| MySQL (`docker-compose up -d mysql`)                   | ✅ 正常运行 | 3307 → 3306 |
+| Redis (`docker-compose up -d redis`)                   | ✅ 正常运行 | 6379        |
+| Admin Frontend (`docker-compose up -d admin-frontend`) | ✅ 正常运行 | 5174        |
+
 
 ### 1.2 后端服务 ✅
 
-| 项目 | 状态 | 端口 |
-|------|------|------|
-| Spring Boot (`mvn spring-boot:run`) | ✅ 启动成功 | 8080 |
-| MySQL 连接池 | ✅ HikariPool 初始化完成 |
-| Redis 连接 | ✅ 正常 |
+
+| 项目                                  | 状态                 | 端口   |
+| ----------------------------------- | ------------------ | ---- |
+| Spring Boot (`mvn spring-boot:run`) | ✅ 启动成功             | 8080 |
+| MySQL 连接池                           | ✅ HikariPool 初始化完成 |      |
+| Redis 连接                            | ✅ 正常               |      |
+
 
 ### 1.3 前端服务 ✅
 
-| 项目 | 状态 | 端口 |
-|------|------|------|
+
+| 项目                       | 状态     | 端口   |
+| ------------------------ | ------ | ---- |
 | User Web (`npm run dev`) | ✅ 启动成功 | 5173 |
-| Admin Frontend (Docker) | ✅ 启动成功 | 5174 |
+| Admin Frontend (Docker)  | ✅ 启动成功 | 5174 |
+
 
 ### 1.4 健康检查接口 ✅
 
@@ -83,10 +89,12 @@ GET http://localhost:8080/api/health
 
 **涉及文件及修改：**
 
-| 文件 | 修改前 | 修改后 |
-|------|--------|--------|
+
+| 文件                                    | 修改前                                    | 修改后                                   |
+| ------------------------------------- | -------------------------------------- | ------------------------------------- |
 | `user-web/src/views/LoginView.vue:30` | `username: form.value.username.trim()` | `account: form.value.username.trim()` |
 | `user-web/src/views/LoginView.vue:44` | `username: form.value.username.trim()` | `account: form.value.username.trim()` |
+
 
 **修改前后对比：**
 
@@ -106,12 +114,14 @@ await auth.login({
 
 ### 2.2 各端字段名对照（统一使用 `account`）
 
-| 端 | 文件 | 字段名 | 是否合规 |
-|----|------|--------|---------|
-| 后端 DTO | `LoginRequest.java` | `account` | ✅ 统一标准 |
-| 后端 Service | `AuthServiceImpl.java` | `request.account()` | ✅ 一致 |
-| User-Web 登录 | `LoginView.vue` | ~~`username`~~ → `account` | ✅ 已修复 |
-| Admin-Frontend 登录 | `auth.ts` | `account` | ✅ 正确无需改 |
+
+| 端                 | 文件                     | 字段名                        | 是否合规    |
+| ----------------- | ---------------------- | -------------------------- | ------- |
+| 后端 DTO            | `LoginRequest.java`    | `account`                  | ✅ 统一标准  |
+| 后端 Service        | `AuthServiceImpl.java` | `request.account()`        | ✅ 一致    |
+| User-Web 登录       | `LoginView.vue`        | ~~`username`~~ → `account` | ✅ 已修复   |
+| Admin-Frontend 登录 | `auth.ts`              | `account`                  | ✅ 正确无需改 |
+
 
 ---
 
@@ -119,20 +129,22 @@ await auth.login({
 
 ### 3.1 修改清单
 
-| 序号 | 文件路径 | 修改内容 | 状态 |
-|------|---------|---------|------|
-| 1 | `user-web/src/views/LoginView.vue`（登录模式） | `username` → `account` | ✅ 已修复 |
-| 2 | `user-web/src/views/LoginView.vue`（注册后自动登录） | `username` → `account` | ✅ 已修复 |
+
+| 序号  | 文件路径                                        | 修改内容                   | 状态    |
+| --- | ------------------------------------------- | ---------------------- | ----- |
+| 1   | `user-web/src/views/LoginView.vue`（登录模式）    | `username` → `account` | ✅ 已修复 |
+| 2   | `user-web/src/views/LoginView.vue`（注册后自动登录） | `username` → `account` | ✅ 已修复 |
+
 
 > 后端 `LoginRequest.java` 和 `AuthServiceImpl.java` **未修改**，保持原有的 `account` 命名。
 
 ### 3.2 经验教训与规范建议
 
 1. **前端字段名必须与后端 DTO 一致**：API 契约以后端为准，前端应严格对齐。
-2. **`account` vs `username` 命名场景**：
-   - 登录场景使用 `account`（后端 `LoginRequest` 定义）
-   - 注册场景使用 `username`（后端 `RegisterRequest` 定义）
-   - 两个场景的业务含义不同，字段名合理分离
+2. `**account` vs `username` 命名场景**：
+  - 登录场景使用 `account`（后端 `LoginRequest` 定义）
+  - 注册场景使用 `username`（后端 `RegisterRequest` 定义）
+  - 两个场景的业务含义不同，字段名合理分离
 3. **联调前先通读后端接口文档/openapi.yml**，避免凭直觉猜字段名。
 
 ### 3.3 新增的一键启动脚本
@@ -145,19 +157,23 @@ start start-dev.bat
 ```
 
 脚本功能：
-| 步骤 | 操作 | 说明 |
-|------|------|------|
-| 1/5 | 前置检查 | Docker / Java / Maven / npm 环境检测 |
-| 2/5 | Docker 容器 | 启动 MySQL + Redis，等待就绪 |
-| 3/5 | 前端依赖 | 自动安装 `npm install`（如需要） |
-| 4/5 | 后端服务 | 新窗口运行 `mvn spring-boot:run` |
-| 5/5 | 前端服务 | 新窗口运行 `npm run dev` |
+
+
+| 步骤  | 操作        | 说明                               |
+| --- | --------- | -------------------------------- |
+| 1/5 | 前置检查      | Docker / Java / Maven / npm 环境检测 |
+| 2/5 | Docker 容器 | 启动 MySQL + Redis，等待就绪            |
+| 3/5 | 前端依赖      | 自动安装 `npm install`（如需要）          |
+| 4/5 | 后端服务      | 新窗口运行 `mvn spring-boot:run`      |
+| 5/5 | 前端服务      | 新窗口运行 `npm run dev`              |
+
 
 ### 3.4 测试通过的功能
 
-- [x] Docker 容器化环境（MySQL / Redis）正常运行
-- [x] 后端 Spring Boot 启动并连接数据库 + Redis
-- [x] 健康检查接口 `/api/health` 返回 SUCCESS
-- [x] 前端 User Web Vite Dev Server 启动正常
-- [x] 前后端代理配置正常（`/api` → `localhost:8080`）
-- [x] 新增 `start-dev.bat` 一键启动脚本
+- Docker 容器化环境（MySQL / Redis）正常运行
+- 后端 Spring Boot 启动并连接数据库 + Redis
+- 健康检查接口 `/api/health` 返回 SUCCESS
+- 前端 User Web Vite Dev Server 启动正常
+- 前后端代理配置正常（`/api` → `localhost:8080`）
+- 新增 `start-dev.bat` 一键启动脚本
+

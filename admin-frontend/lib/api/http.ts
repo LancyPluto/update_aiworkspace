@@ -118,7 +118,6 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
       headers,
       body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
       signal: options.signal,
-      credentials: 'include',
     })
   } catch (err) {
     if ((err as Error).name === 'AbortError') {

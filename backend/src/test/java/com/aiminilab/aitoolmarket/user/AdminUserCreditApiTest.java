@@ -1,6 +1,5 @@
 package com.aiminilab.aitoolmarket.user;
 
-import com.aiminilab.aitoolmarket.auth.security.AuthTestTokens;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -170,7 +169,7 @@ class AdminUserCreditApiTest {
     }
 
     private String login(String path, String account) throws Exception {
-        var result = mockMvc.perform(post(path)
+        String response = mockMvc.perform(post(path)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
@@ -179,15 +178,14 @@ class AdminUserCreditApiTest {
                                 }
                                 """.formatted(account)))
                 .andExpect(status().isOk())
-                .andReturn();
-        if (path.contains("/admin/")) {
-            return AuthTestTokens.adminJwtFrom(result);
-        }
-        return AuthTestTokens.userJwtFrom(result);
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        return response.replaceAll("(?s).*\\\"accessToken\\\"\\s*:\\s*\\\"([^\\\"]+)\\\".*", "$1");
     }
 
     private String register(String username) throws Exception {
-        var result = mockMvc.perform(post("/api/v1/auth/register")
+        String response = mockMvc.perform(post("/api/v1/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
@@ -197,8 +195,10 @@ class AdminUserCreditApiTest {
                                 }
                                 """.formatted(username, username)))
                 .andExpect(status().isOk())
-                .andReturn();
-        return AuthTestTokens.userJwtFrom(result);
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        return response.replaceAll("(?s).*\\\"accessToken\\\"\\s*:\\s*\\\"([^\\\"]+)\\\".*", "$1");
     }
 
     private Long createTool(String adminToken, String toolCode, int estimatedCreditCost) throws Exception {

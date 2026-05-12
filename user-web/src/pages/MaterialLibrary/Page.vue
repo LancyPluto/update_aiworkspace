@@ -22,6 +22,7 @@ async function loadMaterials() {
   error.value = ""
   try {
     const response = await fetchTasks({
+      token: auth.token,
       query: { status: "SUCCESS", pageNo: 1, pageSize: 50 },
     })
     tasks.value = response.list

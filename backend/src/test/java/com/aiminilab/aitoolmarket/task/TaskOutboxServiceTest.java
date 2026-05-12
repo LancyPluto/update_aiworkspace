@@ -1,6 +1,5 @@
 package com.aiminilab.aitoolmarket.task;
 
-import com.aiminilab.aitoolmarket.auth.security.AuthTestTokens;
 import com.aiminilab.aitoolmarket.task.service.TaskOutboxService;
 import com.aiminilab.aitoolmarket.task.service.TaskQueuePublisher;
 import org.junit.jupiter.api.Test;
@@ -92,7 +91,7 @@ class TaskOutboxServiceTest {
     }
 
     private String login(String path, String account) throws Exception {
-        var result = mockMvc.perform(post(path)
+        String response = mockMvc.perform(post(path)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
@@ -101,11 +100,10 @@ class TaskOutboxServiceTest {
                                 }
                                 """.formatted(account)))
                 .andExpect(status().isOk())
-                .andReturn();
-        if (path.contains("/admin/")) {
-            return AuthTestTokens.adminJwtFrom(result);
-        }
-        return AuthTestTokens.userJwtFrom(result);
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        return response.replaceAll("(?s).*\\\"accessToken\\\"\\s*:\\s*\\\"([^\\\"]+)\\\".*", "$1");
     }
 
     private Long createTool(String adminToken, String toolCode, int estimatedCreditCost) throws Exception {

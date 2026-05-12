@@ -4,7 +4,6 @@ import com.aiminilab.aitoolmarket.agent.client.AgentServiceClient;
 import com.aiminilab.aitoolmarket.agent.dto.AgentModelConfigTestResponse;
 import com.aiminilab.aitoolmarket.agent.service.AgentRateLimitService;
 import com.aiminilab.aitoolmarket.auth.security.InternalRequestSignatureVerifier;
-import com.aiminilab.aitoolmarket.auth.security.AuthTestTokens;
 import com.aiminilab.aitoolmarket.auth.security.TokenDenylistService;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -16,6 +15,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static com.aiminilab.aitoolmarket.testsupport.InternalApiTestSupport.signed;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -225,6 +225,52 @@ class AdminAgentApiTest {
         Mockito.verify(agentServiceClient).testModelConfig(any());
     }
 
+    @Test
+    void emptyApiKeyTestReusesSavedModelSecret() throws Exception {
+        mockExternalAuthDependencies();
+        String adminToken = login("/api/admin/v1/auth/login", "admin");
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put("/api/admin/v1/agent/model-config")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "provider": "openai_compatible",
+                                  "modelName": "saved-model",
+                                  "baseUrl": "https://saved.example/v1",
+                                  "apiKey": "saved-secret",
+                                  "timeoutSeconds": 30,
+                                  "enabled": true
+                                }
+                                """))
+                .andExpect(status().isOk());
+
+        Mockito.when(agentServiceClient.testModelConfig(any()))
+                .thenAnswer(invocation -> {
+                    var forwarded = invocation.getArgument(0, com.aiminilab.aitoolmarket.agent.dto.AgentModelConfigRequest.class);
+                    assertThat(forwarded.apiKey()).isEqualTo("saved-secret");
+                    assertThat(forwarded.modelName()).isEqualTo("saved-model");
+                    return new AgentModelConfigTestResponse(true, forwarded.provider(), forwarded.modelName(), 9L, "ok", "pong");
+                });
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/admin/v1/agent/model-config/test")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "provider": "openai_compatible",
+                                  "modelName": "saved-model",
+                                  "baseUrl": "https://saved.example/v1",
+                                  "apiKey": "",
+                                  "timeoutSeconds": 30,
+                                  "enabled": true
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.success").value(true))
+                .andExpect(jsonPath("$.data.modelName").value("saved-model"));
+    }
+
     private void mockExternalAuthDependencies() {
         Mockito.when(tokenDenylistService.isDenied(anyString())).thenReturn(false);
         Mockito.when(agentServiceClient.testModelConfig(any()))
@@ -241,7 +287,7 @@ class AdminAgentApiTest {
     }
 
     private String login(String path, String account) throws Exception {
-        var result = mockMvc.perform(post(path)
+        String response = mockMvc.perform(post(path)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
@@ -250,11 +296,10 @@ class AdminAgentApiTest {
                                 }
                                 """.formatted(account)))
                 .andExpect(status().isOk())
-                .andReturn();
-        if (path.contains("/admin/")) {
-            return AuthTestTokens.adminJwtFrom(result);
-        }
-        return AuthTestTokens.userJwtFrom(result);
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        return response.replaceAll("(?s).*\\\"accessToken\\\"\\s*:\\s*\\\"([^\\\"]+)\\\".*", "$1");
     }
 
     private Long createSession(String token, String title) throws Exception {

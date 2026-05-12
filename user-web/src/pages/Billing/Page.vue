@@ -17,8 +17,8 @@ async function loadBilling() {
   error.value = ""
   try {
     const [accountRes, logRes] = await Promise.all([
-      fetchCreditAccount(),
-      fetchCreditLogs({ query: { pageNo: 1, pageSize: 20 } }),
+      fetchCreditAccount({ token: auth.token }),
+      fetchCreditLogs({ token: auth.token, query: { pageNo: 1, pageSize: 20 } }),
     ])
     account.value = accountRes
     logs.value = logRes.list

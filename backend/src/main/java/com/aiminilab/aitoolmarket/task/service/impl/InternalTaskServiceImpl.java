@@ -1,7 +1,9 @@
 package com.aiminilab.aitoolmarket.task.service.impl;
 
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
+import com.aiminilab.aitoolmarket.common.enums.TaskStatus;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
+import com.aiminilab.aitoolmarket.credit.service.CreditService;
 import com.aiminilab.aitoolmarket.task.dto.ExecutionContextResponse;
 import com.aiminilab.aitoolmarket.task.dto.TaskStatusResponse;
 import com.aiminilab.aitoolmarket.task.dto.WorkerFailedRequest;
@@ -10,8 +12,9 @@ import com.aiminilab.aitoolmarket.task.dto.WorkerSuccessRequest;
 import com.aiminilab.aitoolmarket.task.entity.AiTask;
 import com.aiminilab.aitoolmarket.task.mapper.TaskMapper;
 import com.aiminilab.aitoolmarket.task.service.InternalTaskService;
+import com.aiminilab.aitoolmarket.task.service.TaskStateMachine;
 import com.aiminilab.aitoolmarket.tool.dto.ToolFieldResponse;
-import com.aiminilab.aitoolmarket.tool.mapper.ToolMapper;
+import com.aiminilab.aitoolmarket.tool.mapper.ToolFieldItemMapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
@@ -23,19 +26,22 @@ import java.util.List;
 public class InternalTaskServiceImpl implements InternalTaskService {
 
     private final TaskMapper taskMapper;
-    private final ToolMapper toolMapper;
+    private final ToolFieldItemMapper toolFieldItemMapper;
     private final ObjectMapper objectMapper;
+    private final CreditService creditService;
 
-    public InternalTaskServiceImpl(TaskMapper taskMapper, ToolMapper toolMapper, ObjectMapper objectMapper) {
+    public InternalTaskServiceImpl(TaskMapper taskMapper, ToolFieldItemMapper toolFieldItemMapper, ObjectMapper objectMapper,
+                                   CreditService creditService) {
         this.taskMapper = taskMapper;
-        this.toolMapper = toolMapper;
+        this.toolFieldItemMapper = toolFieldItemMapper;
         this.objectMapper = objectMapper;
+        this.creditService = creditService;
     }
 
     @Override
     public ExecutionContextResponse executionContext(Long taskId) {
         AiTask task = findTask(taskId);
-        List<ToolFieldResponse> fields = toolMapper.findActiveFields(task.getToolId()).stream()
+        List<ToolFieldResponse> fields = toolFieldItemMapper.findActiveFields(task.getToolId()).stream()
                 .map(field -> ToolFieldResponse.from(field, objectMapper))
                 .toList();
         return ExecutionContextResponse.of(task, parseParams(task.getParamsJson()), fields);
@@ -47,8 +53,11 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         String message = request.progressMessage() == null || request.progressMessage().isBlank()
                 ? "AI is processing"
                 : request.progressMessage();
-        findTask(taskId);
-        taskMapper.markProcessing(taskId, progress, message);
+        AiTask task = findTask(taskId);
+        TaskStateMachine.ensureTransition(task.getStatus(), TaskStatus.PROCESSING.name());
+        if (taskMapper.markProcessing(taskId, progress, message, List.of(TaskStatus.QUEUED.name())) == 0) {
+            TaskStateMachine.ensureTransition(findTask(taskId).getStatus(), TaskStatus.PROCESSING.name());
+        }
         return TaskStatusResponse.from(findTask(taskId));
     }
 
@@ -56,12 +65,28 @@ public class InternalTaskServiceImpl implements InternalTaskService {
     @Transactional
     public TaskStatusResponse markSuccess(Long taskId, WorkerSuccessRequest request) {
         AiTask task = findTask(taskId);
+        if (TaskStatus.SUCCESS.name().equals(task.getStatus())) {
+            return TaskStatusResponse.from(task);
+        }
+        if (TaskStatus.CANCELLED.name().equals(task.getStatus())) {
+            return TaskStatusResponse.from(task);
+        }
+        TaskStateMachine.ensureTransition(task.getStatus(), TaskStatus.SUCCESS.name());
+        int updated = taskMapper.markSuccess(taskId, List.of(TaskStatus.PROCESSING.name()));
+        if (updated == 0) {
+            AiTask current = findTask(taskId);
+            if (TaskStatus.SUCCESS.name().equals(current.getStatus()) || TaskStatus.CANCELLED.name().equals(current.getStatus())) {
+                return TaskStatusResponse.from(current);
+            }
+            TaskStateMachine.ensureTransition(current.getStatus(), TaskStatus.SUCCESS.name());
+        }
+        creditService.settleForTask(task.getUserId(), taskId, task.getEstimatedCreditCost());
         taskMapper.insertResult(taskId, task.getUserId(), request.resourceType(), request.contentText());
-        taskMapper.markSuccess(taskId);
         return TaskStatusResponse.from(findTask(taskId));
     }
 
     @Override
+    @Transactional
     public TaskStatusResponse markFailed(Long taskId, WorkerFailedRequest request) {
         String errorCode = request.errorCode() == null || request.errorCode().isBlank()
                 ? ErrorCode.MODEL_CALL_FAILED.name()
@@ -69,8 +94,22 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         String errorMessage = request.errorMessage() == null || request.errorMessage().isBlank()
                 ? "Worker execution failed"
                 : request.errorMessage();
-        findTask(taskId);
-        taskMapper.markFailed(taskId, errorCode, errorMessage);
+        AiTask task = findTask(taskId);
+        if (TaskStatus.FAILED.name().equals(task.getStatus()) || TaskStatus.SUCCESS.name().equals(task.getStatus())
+                || TaskStatus.CANCELLED.name().equals(task.getStatus())) {
+            return TaskStatusResponse.from(task);
+        }
+        TaskStateMachine.ensureTransition(task.getStatus(), TaskStatus.FAILED.name());
+        int updated = taskMapper.markFailed(taskId, errorCode, errorMessage, List.of(TaskStatus.PROCESSING.name()));
+        if (updated == 0) {
+            AiTask current = findTask(taskId);
+            if (TaskStatus.FAILED.name().equals(current.getStatus()) || TaskStatus.SUCCESS.name().equals(current.getStatus())
+                    || TaskStatus.CANCELLED.name().equals(current.getStatus())) {
+                return TaskStatusResponse.from(current);
+            }
+            TaskStateMachine.ensureTransition(current.getStatus(), TaskStatus.FAILED.name());
+        }
+        creditService.releaseForTask(task.getUserId(), taskId, task.getEstimatedCreditCost());
         return TaskStatusResponse.from(findTask(taskId));
     }
 

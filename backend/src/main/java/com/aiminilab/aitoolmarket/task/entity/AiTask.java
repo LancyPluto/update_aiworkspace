@@ -1,13 +1,21 @@
 package com.aiminilab.aitoolmarket.task.entity;
 
+import com.baomidou.mybatisplus.annotation.TableField;
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableName;
+
 import java.time.LocalDateTime;
 
+@TableName("ai_tasks")
 public class AiTask {
+    @TableId
     private Long id;
     private String taskNo;
     private Long userId;
     private Long toolId;
+    @TableField(exist = false)
     private String toolCode;
+    @TableField(exist = false)
     private String toolName;
     private String status;
     private Integer progress;
@@ -15,7 +23,11 @@ public class AiTask {
     private String paramsJson;
     private String idempotencyKey;
     private Integer estimatedCreditCost;
+    private String errorCode;
+    private String errorMessage;
     private LocalDateTime createdAt;
+    private LocalDateTime queuedAt;
+    private LocalDateTime startedAt;
     private LocalDateTime finishedAt;
 
     public Long getId() {
@@ -114,12 +126,44 @@ public class AiTask {
         this.estimatedCreditCost = estimatedCreditCost;
     }
 
+    public String getErrorCode() {
+        return errorCode;
+    }
+
+    public void setErrorCode(String errorCode) {
+        this.errorCode = errorCode;
+    }
+
+    public String getErrorMessage() {
+        return errorMessage;
+    }
+
+    public void setErrorMessage(String errorMessage) {
+        this.errorMessage = errorMessage;
+    }
+
     public LocalDateTime getCreatedAt() {
         return createdAt;
     }
 
     public void setCreatedAt(LocalDateTime createdAt) {
         this.createdAt = createdAt;
+    }
+
+    public LocalDateTime getQueuedAt() {
+        return queuedAt;
+    }
+
+    public void setQueuedAt(LocalDateTime queuedAt) {
+        this.queuedAt = queuedAt;
+    }
+
+    public LocalDateTime getStartedAt() {
+        return startedAt;
+    }
+
+    public void setStartedAt(LocalDateTime startedAt) {
+        this.startedAt = startedAt;
     }
 
     public LocalDateTime getFinishedAt() {

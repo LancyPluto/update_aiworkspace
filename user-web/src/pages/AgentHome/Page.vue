@@ -37,6 +37,11 @@ const rememberTool = ref(true)
 const activeRunId = ref<number | null>(null)
 const pollTimer = ref<number | null>(null)
 const streamController = ref<AbortController | null>(null)
+const runConnectionStatus = ref<"idle" | "streaming" | "polling" | "completed" | "failed">("idle")
+const draftAssistantContent = ref("")
+const confirmingEventIds = ref<Set<number>>(new Set())
+const confirmationError = ref<string | null>(null)
+const dismissedConfirmationIds = ref<Set<number>>(new Set())
 const bottomRef = ref<HTMLElement | null>(null)
 const fileInputRef = ref<HTMLInputElement | null>(null)
 
@@ -48,8 +53,8 @@ const suggestions = [
 ]
 
 async function loadWorkspaces() {
-  if (!auth.isLoggedIn) return
-  const res = await fetchAgentWorkspaces()
+  if (!auth.token) return
+  const res = await fetchAgentWorkspaces({ token: auth.token })
   workspaces.value = res.list
   if (!activeWorkspaceId.value && workspaces.value[0]) {
     activeWorkspaceId.value = workspaces.value[0].id
@@ -59,14 +64,28 @@ async function loadWorkspaces() {
 const confirmationEvents = computed(() =>
   events.value
     .filter((event) => event.eventType === "tool.confirmation_required")
+    .filter((event) => !dismissedConfirmationIds.value.has(event.id))
     .map((event) => ({ event, payload: parseEventJson(event.eventJson) })),
 )
 
+const runStatusText = computed(() => {
+  if (runConnectionStatus.value === "streaming") return "Agent 正在运行，实时接收回复"
+  if (runConnectionStatus.value === "polling") return "实时连接已断开，正在自动续传"
+  if (runConnectionStatus.value === "completed") return "Agent 已完成"
+  if (runConnectionStatus.value === "failed") return "Agent 运行失败"
+  return ""
+})
+
+const hasActiveRun = computed(() => {
+  if (!activeRunId.value) return false
+  return runConnectionStatus.value === "streaming" || runConnectionStatus.value === "polling"
+})
+
 async function loadSessions() {
-  if (!auth.isLoggedIn) return
+  if (!auth.token) return
   loading.value = true
   try {
-    const res = await fetchAgentSessions()
+    const res = await fetchAgentSessions({ token: auth.token })
     sessions.value = res.list
     if (!activeSessionId.value && sessions.value[0]) {
       await selectSession(sessions.value[0].id)
@@ -77,32 +96,40 @@ async function loadSessions() {
 }
 
 async function selectSession(sessionId: number) {
-  if (!auth.isLoggedIn) return
+  if (!auth.token) return
   activeSessionId.value = sessionId
   events.value = []
   agentError.value = null
+  confirmationError.value = null
+  draftAssistantContent.value = ""
+  activeRunId.value = null
+  runConnectionStatus.value = "idle"
   stopRunUpdates()
-  const res = await fetchAgentMessages(sessionId)
+  const res = await fetchAgentMessages(sessionId, { token: auth.token })
   messages.value = res.list
   await loadFiles(sessionId)
   await scrollBottom()
 }
 
 async function startSession(title = "新的 Agent 会话") {
-  if (!auth.isLoggedIn) return null
-  const session = await createAgentSession({ title })
+  if (!auth.token) return null
+  const session = await createAgentSession({ title }, { token: auth.token })
   sessions.value = [session, ...sessions.value.filter((item) => item.id !== session.id)]
   activeSessionId.value = session.id
   messages.value = []
   files.value = []
   events.value = []
   agentError.value = null
+  confirmationError.value = null
+  draftAssistantContent.value = ""
+  activeRunId.value = null
+  runConnectionStatus.value = "idle"
   return session
 }
 
 async function loadFiles(sessionId = activeSessionId.value) {
-  if (!auth.isLoggedIn || !sessionId) return
-  const res = await fetchAgentFiles(sessionId)
+  if (!auth.token || !sessionId) return
+  const res = await fetchAgentFiles(sessionId, { token: auth.token })
   files.value = res.list
 }
 
@@ -114,7 +141,7 @@ async function handleFileSelected(event: Event) {
   const target = event.target as HTMLInputElement
   const selected = target.files?.[0]
   target.value = ""
-  if (!selected || !auth.isLoggedIn || uploading.value) return
+  if (!selected || !auth.token || uploading.value) return
   uploading.value = true
   try {
     let sessionId = activeSessionId.value
@@ -123,7 +150,7 @@ async function handleFileSelected(event: Event) {
       sessionId = session?.id ?? null
     }
     if (!sessionId) return
-    const uploaded = await uploadAgentFile(sessionId, selected)
+    const uploaded = await uploadAgentFile(sessionId, selected, { token: auth.token })
     files.value = [uploaded, ...files.value.filter((item) => item.id !== uploaded.id)]
   } finally {
     uploading.value = false
@@ -132,9 +159,12 @@ async function handleFileSelected(event: Event) {
 
 async function submitMessage(content = input.value) {
   const text = content.trim()
-  if (!text || !auth.isLoggedIn || sending.value) return
+  if (!text || !auth.token || sending.value || hasActiveRun.value) return
   sending.value = true
   agentError.value = null
+  confirmationError.value = null
+  draftAssistantContent.value = ""
+  runConnectionStatus.value = "idle"
   try {
     let sessionId = activeSessionId.value
     if (!sessionId) {
@@ -150,13 +180,15 @@ async function submitMessage(content = input.value) {
       contentText: text,
       createdAt: new Date().toISOString(),
     })
-    const res = await sendAgentMessage(sessionId, {
-      content: text,
-      clientRequestId: crypto.randomUUID(),
-    })
+    const res = await sendAgentMessage(
+      sessionId,
+      { content: text, clientRequestId: crypto.randomUUID() },
+      { token: auth.token },
+    )
     activeRunId.value = res.runId
+    runConnectionStatus.value = "streaming"
     await pollRun(res.runId, true)
-    startRunStream(res.runId)
+    if (!events.value.some(isTerminalRunEvent)) startRunStream(res.runId)
   } catch (error) {
     agentError.value = formatAgentError(error)
   } finally {
@@ -170,6 +202,15 @@ function formatAgentError(error: unknown) {
     const detail = error.message ? `后端返回：${error.message}` : "后端没有返回更多细节。"
     return `模型连接验证失败。请在管理端检查 provider、baseUrl、API Key、模型名称和 MiniMax Group ID 后重试。${detail}`
   }
+  if (error instanceof ApiBusinessError && error.code === "AGENT_ACTIVE_RUN_LIMIT") {
+    return "当前已有 Agent 在运行，请等待上一次执行结束后再试。"
+  }
+  if (error instanceof ApiBusinessError && error.code === "AGENT_RATE_LIMITED") {
+    return "Agent 请求过于频繁，请稍后再试。"
+  }
+  if (error instanceof ApiBusinessError && error.code === "AGENT_CREDIT_NOT_ENOUGH") {
+    return "可用算力不足，暂时无法启动 Agent。请先补充或释放算力后再试。"
+  }
   if (error instanceof ApiBusinessError) {
     return error.message || error.code
   }
@@ -177,36 +218,56 @@ function formatAgentError(error: unknown) {
 }
 
 async function pollRun(runId: number, reset = false) {
-  if (!auth.isLoggedIn) return
+  if (!auth.token) return
   const afterEventId = reset ? undefined : events.value.at(-1)?.id
-  const res = await fetchAgentRunEvents(runId, { afterEventId })
-  if (reset) events.value = res.list
-  else events.value.push(...res.list)
+  const res = await fetchAgentRunEvents(runId, { token: auth.token, afterEventId })
+  if (reset) {
+    events.value = []
+    res.list.forEach(appendRunEvent)
+  }
+  else res.list.forEach(appendRunEvent)
   if (activeSessionId.value) {
-    const messageRes = await fetchAgentMessages(activeSessionId.value)
+    const messageRes = await fetchAgentMessages(activeSessionId.value, { token: auth.token })
     messages.value = messageRes.list
+  }
+  if (events.value.some(isTerminalRunEvent)) {
+    stopRunUpdates()
+    settleRunStatus()
+    await refreshMessages()
   }
   await scrollBottom()
 }
 
 function startPolling(runId: number) {
   stopRunUpdates()
+  runConnectionStatus.value = "polling"
   pollTimer.value = window.setInterval(() => {
-    pollRun(runId)
+    pollRun(runId).catch((error) => {
+      agentError.value = formatAgentError(error)
+      runConnectionStatus.value = "failed"
+      stopRunUpdates()
+    })
   }, 1600)
 }
 
 function startRunStream(runId: number) {
   stopRunUpdates()
+  runConnectionStatus.value = "streaming"
   const controller = new AbortController()
   streamController.value = controller
   streamAgentRunEvents(runId, {
+    token: auth.token,
     afterEventId: events.value.at(-1)?.id,
     signal: controller.signal,
     onEvent: async (event) => {
       appendRunEvent(event)
-      if (event.eventType === "message.completed" || event.eventType === "run.completed") {
+      if (event.eventType === "message.completed" || isTerminalRunEvent(event)) {
+        draftAssistantContent.value = ""
         await refreshMessages()
+      }
+      if (isTerminalRunEvent(event)) {
+        stopRunUpdates()
+        settleRunStatus()
       }
       await scrollBottom()
     },
@@ -226,22 +287,96 @@ function stopRunUpdates() {
   streamController.value = null
 }
 
-async function confirmTool(toolCode: string, approved: boolean) {
-  if (!auth.isLoggedIn || !activeRunId.value) return
-  await confirmAgentTool(activeRunId.value, { toolCode, approved, autoCallEnabled: approved && rememberTool.value })
-  if (approved) startRunStream(activeRunId.value)
-  else await pollRun(activeRunId.value)
+async function confirmTool(eventId: number, toolCode: string, approved: boolean) {
+  if (!auth.token || !activeRunId.value) return
+  confirmationError.value = null
+  const nextConfirming = new Set(confirmingEventIds.value)
+  nextConfirming.add(eventId)
+  confirmingEventIds.value = nextConfirming
+  try {
+    await confirmAgentTool(
+      activeRunId.value,
+      { toolCode, approved, autoCallEnabled: approved && rememberTool.value },
+      { token: auth.token },
+    )
+    const nextDismissed = new Set(dismissedConfirmationIds.value)
+    nextDismissed.add(eventId)
+    dismissedConfirmationIds.value = nextDismissed
+    if (approved) startRunStream(activeRunId.value)
+    else {
+      await pollRun(activeRunId.value)
+      await refreshMessages()
+    }
+  } catch (error) {
+    confirmationError.value = formatAgentError(error)
+  } finally {
+    const doneConfirming = new Set(confirmingEventIds.value)
+    doneConfirming.delete(eventId)
+    confirmingEventIds.value = doneConfirming
+  }
 }
 
 async function refreshMessages() {
-  if (!auth.isLoggedIn || !activeSessionId.value) return
-  const messageRes = await fetchAgentMessages(activeSessionId.value)
+  if (!auth.token || !activeSessionId.value) return
+  const messageRes = await fetchAgentMessages(activeSessionId.value, { token: auth.token })
   messages.value = messageRes.list
 }
 
 function appendRunEvent(event: AgentRunEvent) {
   if (events.value.some((item) => item.id === event.id)) return
   events.value.push(event)
+  if (event.eventType === "run.started") {
+    agentError.value = null
+    runConnectionStatus.value = "streaming"
+  }
+  if (event.eventType === "message.delta") {
+    draftAssistantContent.value += extractMessageDelta(event)
+  }
+  if (event.eventType === "run.failed") {
+    const payload = parseEventJson(event.eventJson)
+    const errorCode = typeof payload.errorCode === "string" ? payload.errorCode : ""
+    const errorMessage = typeof payload.errorMessage === "string" ? payload.errorMessage : event.eventText
+    if (errorCode === "AGENT_SECURITY_REJECTED") {
+      agentError.value = errorMessage || "这条请求包含敏感指令或内部信息索取要求，Agent 已拒绝执行。"
+      return
+    }
+    if (errorCode === "AGENT_RUN_BUDGET_EXCEEDED") {
+      agentError.value = errorMessage || "这次 Agent 运行超出了当前算力预算。"
+      return
+    }
+    if (errorCode === "AGENT_MODEL_CALL_LIMIT" || errorCode === "AGENT_TOOL_CALL_LIMIT") {
+      agentError.value = errorMessage || "这次 Agent 运行已达到安全限制，系统已停止继续执行。"
+      return
+    }
+    if (errorCode === "AGENT_SERVICE_NOTIFY_FAILED") {
+      agentError.value = errorMessage || "Agent 服务暂时不可用，请稍后重试。"
+      return
+    }
+    if (errorCode === "MODEL_CALL_FAILED") {
+      agentError.value = errorMessage || "模型调用失败，请稍后重试。"
+      return
+    }
+    agentError.value = errorMessage || "Agent 运行失败，请稍后再试。"
+  }
+}
+
+function settleRunStatus() {
+  const terminalEvent = [...events.value].reverse().find(isTerminalRunEvent)
+  runConnectionStatus.value = terminalEvent?.eventType === "run.failed" ? "failed" : "completed"
+  activeRunId.value = null
+  draftAssistantContent.value = ""
+}
+
+function extractMessageDelta(event: AgentRunEvent) {
+  const payload = parseEventJson(event.eventJson)
+  if (typeof payload.delta === "string") return payload.delta
+  if (typeof payload.content === "string") return payload.content
+  if (typeof payload.text === "string") return payload.text
+  return event.eventText || ""
+}
+
+function isTerminalRunEvent(event: AgentRunEvent) {
+  return event.eventType === "run.completed" || event.eventType === "run.failed"
 }
 
 function parseEventJson(value?: string | null) {
@@ -324,11 +459,33 @@ onUnmounted(stopRunUpdates)
               <div class="bubble">{{ message.contentText }}</div>
             </article>
 
+            <article v-if="draftAssistantContent" class="agent-message assistant streaming">
+              <div class="avatar">
+                <Bot class="h-4 w-4" />
+              </div>
+              <div class="bubble">{{ draftAssistantContent }}</div>
+            </article>
+
+            <article v-if="runStatusText" class="run-status-card" :class="runConnectionStatus">
+              <Loader2 v-if="runConnectionStatus === 'streaming' || runConnectionStatus === 'polling'" class="h-4 w-4 animate-spin" />
+              <Check v-else-if="runConnectionStatus === 'completed'" class="h-4 w-4" />
+              <AlertTriangle v-else-if="runConnectionStatus === 'failed'" class="h-4 w-4" />
+              <span>{{ runStatusText }}</span>
+            </article>
+
             <article v-if="agentError" class="agent-error-card">
               <div class="card-icon error"><AlertTriangle class="h-4 w-4" /></div>
               <div class="card-body error">
-                <p class="card-title">Agent 暂时无法启动</p>
+                <p class="card-title">Agent 暂时无法继续</p>
                 <p class="card-desc">{{ agentError }}</p>
+              </div>
+            </article>
+
+            <article v-if="confirmationError" class="agent-error-card">
+              <div class="card-icon error"><AlertTriangle class="h-4 w-4" /></div>
+              <div class="card-body error">
+                <p class="card-title">工具确认失败</p>
+                <p class="card-desc">{{ confirmationError }}</p>
               </div>
             </article>
 
@@ -346,12 +503,24 @@ onUnmounted(stopRunUpdates)
                   以后类似需求自动调用这个工具
                 </label>
                 <div class="card-actions">
-                  <button type="button" class="ghost-btn" @click="confirmTool(String(payload.toolCode || event.eventText), false)">
-                    <X class="h-4 w-4" />
+                  <button
+                    type="button"
+                    class="ghost-btn"
+                    :disabled="confirmingEventIds.has(event.id)"
+                    @click="confirmTool(event.id, String(payload.toolCode || event.eventText), false)"
+                  >
+                    <Loader2 v-if="confirmingEventIds.has(event.id)" class="h-4 w-4 animate-spin" />
+                    <X v-else class="h-4 w-4" />
                     取消
                   </button>
-                  <button type="button" class="primary-btn" @click="confirmTool(String(payload.toolCode || event.eventText), true)">
-                    <Check class="h-4 w-4" />
+                  <button
+                    type="button"
+                    class="primary-btn"
+                    :disabled="confirmingEventIds.has(event.id)"
+                    @click="confirmTool(event.id, String(payload.toolCode || event.eventText), true)"
+                  >
+                    <Loader2 v-if="confirmingEventIds.has(event.id)" class="h-4 w-4 animate-spin" />
+                    <Check v-else class="h-4 w-4" />
                     确认调用
                   </button>
                 </div>
@@ -373,24 +542,25 @@ onUnmounted(stopRunUpdates)
 
         <form class="composer" @submit.prevent="submitMessage()">
           <input ref="fileInputRef" type="file" class="sr-only" @change="handleFileSelected" />
-          <button class="upload-btn" type="button" :disabled="uploading || sending" @click="openFilePicker">
+          <button class="upload-btn" type="button" :disabled="uploading || sending || hasActiveRun" @click="openFilePicker">
             <Loader2 v-if="uploading" class="h-4 w-4 animate-spin" />
             <Upload v-else class="h-4 w-4" />
           </button>
           <textarea
             v-model="input"
             rows="1"
-            placeholder="描述你的目标，例如：帮我写一篇小红书种草笔记"
+            :placeholder="hasActiveRun ? 'Agent 正在处理当前请求' : '描述你的目标，例如：帮我写一篇小红书种草笔记'"
+            :disabled="hasActiveRun"
             @keydown.enter.exact.prevent="submitMessage()"
           />
-          <button class="send-btn" type="submit" :disabled="sending || !input.trim()">
+          <button class="send-btn" type="submit" :disabled="sending || hasActiveRun || !input.trim()">
             <Loader2 v-if="sending" class="h-4 w-4 animate-spin" />
             <Send v-else class="h-4 w-4" />
           </button>
         </form>
       </section>
 
-      <WorkspaceMemoryPanel :workspace-id="activeWorkspaceId" />
+      <WorkspaceMemoryPanel :workspace-id="activeWorkspaceId" :token="auth.token" />
     </div>
   </AppShell>
 </template>
@@ -561,6 +731,10 @@ onUnmounted(stopRunUpdates)
   white-space: pre-wrap;
 }
 
+.agent-message.streaming .bubble {
+  border-color: color-mix(in srgb, var(--foreground) 20%, var(--border));
+}
+
 .confirmation-card {
   display: grid;
   grid-template-columns: 34px minmax(0, 760px);
@@ -575,6 +749,40 @@ onUnmounted(stopRunUpdates)
   gap: 12px;
   max-width: 900px;
   margin: 18px auto;
+}
+
+.run-status-card {
+  width: fit-content;
+  max-width: min(860px, calc(100% - 32px));
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--muted-foreground);
+  font-size: 13px;
+  margin: 8px auto 18px;
+  padding: 8px 12px;
+}
+
+.run-status-card.polling {
+  border-color: #fedf89;
+  background: #fffcf5;
+  color: #93370d;
+}
+
+.run-status-card.completed {
+  border-color: #abefc6;
+  background: #f6fef9;
+  color: #027a48;
+}
+
+.run-status-card.failed {
+  border-color: #fecdca;
+  background: #fffbfa;
+  color: #b42318;
 }
 
 .card-icon.error {
@@ -624,6 +832,12 @@ onUnmounted(stopRunUpdates)
   height: 36px;
   border: 1px solid var(--border);
   padding: 0 12px;
+}
+
+.primary-btn:disabled,
+.ghost-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 
 .primary-btn {
@@ -715,6 +929,11 @@ onUnmounted(stopRunUpdates)
   line-height: 1.5;
 }
 
+.composer textarea:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
 .composer button {
   width: 44px;
   height: 42px;
@@ -749,6 +968,10 @@ onUnmounted(stopRunUpdates)
   .agent-error-card,
   .confirmation-card {
     grid-template-columns: 30px minmax(0, 1fr);
+  }
+
+  .run-status-card {
+    max-width: 100%;
   }
 }
 </style>

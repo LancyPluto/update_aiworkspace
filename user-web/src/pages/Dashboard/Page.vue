@@ -25,9 +25,9 @@ async function loadDashboard() {
   loading.value = true
   try {
     const [creditRes, toolRes, taskRes] = await Promise.all([
-      fetchCreditAccount(),
-      fetchTools({ query: { pageNo: 1, pageSize: 6 } }),
-      fetchTasks({ query: { pageNo: 1, pageSize: 6 } }),
+      fetchCreditAccount({ token: auth.token }),
+      fetchTools({ token: auth.token, query: { pageNo: 1, pageSize: 6 } }),
+      fetchTasks({ token: auth.token, query: { pageNo: 1, pageSize: 6 } }),
     ])
     credit.value = creditRes
     tools.value = toolRes.list

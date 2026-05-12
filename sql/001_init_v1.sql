@@ -54,6 +54,14 @@ CREATE TABLE IF NOT EXISTS tool_categories (
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE IF NOT EXISTS system_settings (
+  setting_key VARCHAR(128) PRIMARY KEY,
+  setting_value TEXT,
+  setting_group VARCHAR(64) NOT NULL DEFAULT 'system',
+  description VARCHAR(255),
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE IF NOT EXISTS ai_tools (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   tool_code VARCHAR(128) NOT NULL UNIQUE,
@@ -201,6 +209,21 @@ CREATE TABLE IF NOT EXISTS ai_result_resources (
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   KEY idx_result_task(task_id),
   KEY idx_result_user(user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS task_outbox_events (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  task_id BIGINT NOT NULL,
+  event_type VARCHAR(64) NOT NULL,
+  payload_json TEXT NOT NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'PENDING',
+  retry_count INT NOT NULL DEFAULT 0,
+  next_retry_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_error TEXT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_task_outbox_status_retry (status, next_retry_at, id),
+  UNIQUE KEY uk_task_outbox_task_event (task_id, event_type)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS credit_accounts (

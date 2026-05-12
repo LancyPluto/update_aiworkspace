@@ -9,6 +9,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
+import static com.aiminilab.aitoolmarket.testsupport.InternalApiTestSupport.signed;
 import static org.hamcrest.Matchers.blankOrNullString;
 import static org.hamcrest.Matchers.not;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -39,8 +40,8 @@ class WorkerInternalApiTest {
         String userToken = login("/api/v1/auth/login", "user1");
         Long taskId = createTask(userToken, "worker_copywriting");
 
-        mockMvc.perform(get("/api/internal/v1/tasks/{taskId}/execution-context", taskId)
-                        .header("X-Internal-Token", "local-internal-token"))
+        mockMvc.perform(signed(get("/api/internal/v1/tasks/{taskId}/execution-context", taskId), "GET",
+                        "/api/internal/v1/tasks/%d/execution-context".formatted(taskId), ""))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.data.taskId").value(taskId.intValue()))
@@ -48,28 +49,30 @@ class WorkerInternalApiTest {
                 .andExpect(jsonPath("$.data.params.productName").value("Worker Test Product"))
                 .andExpect(jsonPath("$.data.fields[0].fieldKey").value("productName"));
 
-        mockMvc.perform(post("/api/internal/v1/tasks/{taskId}/processing", taskId)
-                        .header("X-Internal-Token", "local-internal-token")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
+        String processingBody = """
                                 {
                                   "progress": 35,
                                   "progressMessage": "AI is generating"
                                 }
-                                """))
+                                """;
+        mockMvc.perform(signed(post("/api/internal/v1/tasks/{taskId}/processing", taskId), "POST",
+                        "/api/internal/v1/tasks/%d/processing".formatted(taskId), processingBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(processingBody))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("PROCESSING"))
                 .andExpect(jsonPath("$.data.progress").value(35));
 
-        mockMvc.perform(post("/api/internal/v1/tasks/{taskId}/success", taskId)
-                        .header("X-Internal-Token", "local-internal-token")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
+        String successBody = """
                                 {
                                   "resourceType": "MARKDOWN",
                                   "contentText": "# Generated result"
                                 }
-                                """))
+                                """;
+        mockMvc.perform(signed(post("/api/internal/v1/tasks/{taskId}/success", taskId), "POST",
+                        "/api/internal/v1/tasks/%d/success".formatted(taskId), successBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(successBody))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("SUCCESS"))
                 .andExpect(jsonPath("$.data.progress").value(100));
@@ -90,15 +93,29 @@ class WorkerInternalApiTest {
         String userToken = login("/api/v1/auth/login", "user1");
         Long taskId = createTask(userToken, "worker_failed_tool");
 
-        mockMvc.perform(post("/api/internal/v1/tasks/{taskId}/failed", taskId)
-                        .header("X-Internal-Token", "local-internal-token")
+        String processingBody = """
+                                {
+                                  "progress": 35,
+                                  "progressMessage": "AI is generating"
+                                }
+                                """;
+        mockMvc.perform(signed(post("/api/internal/v1/tasks/{taskId}/processing", taskId), "POST",
+                        "/api/internal/v1/tasks/%d/processing".formatted(taskId), processingBody)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
+                        .content(processingBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("PROCESSING"));
+
+        String failedBody = """
                                 {
                                   "errorCode": "MODEL_CALL_FAILED",
                                   "errorMessage": "model timeout"
                                 }
-                                """))
+                                """;
+        mockMvc.perform(signed(post("/api/internal/v1/tasks/{taskId}/failed", taskId), "POST",
+                        "/api/internal/v1/tasks/%d/failed".formatted(taskId), failedBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(failedBody))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("FAILED"))
                 .andExpect(jsonPath("$.data.progress").value(100))

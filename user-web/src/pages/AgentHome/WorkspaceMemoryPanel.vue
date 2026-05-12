@@ -10,6 +10,7 @@ import type { AgentWorkspaceMemoryItem, UpdateAgentWorkspaceMemoryRequest } from
 
 const props = defineProps<{
   workspaceId: number | null
+  token?: string | null
 }>()
 
 const items = ref<AgentWorkspaceMemoryItem[]>([])
@@ -24,10 +25,10 @@ const draft = ref<UpdateAgentWorkspaceMemoryRequest>({
   content: "",
 })
 
-const canLoad = computed(() => Boolean(props.workspaceId))
+const canLoad = computed(() => Boolean(props.workspaceId && props.token))
 
 watch(
-  () => props.workspaceId,
+  () => [props.workspaceId, props.token] as const,
   () => {
     void loadMemory()
   },
@@ -43,7 +44,7 @@ async function loadMemory() {
   loading.value = true
   errorMessage.value = null
   try {
-    const res = await fetchAgentWorkspaceMemory(props.workspaceId)
+    const res = await fetchAgentWorkspaceMemory(props.workspaceId, { token: props.token })
     items.value = res.list
   } catch (error) {
     errorMessage.value = formatError(error)
@@ -72,7 +73,7 @@ async function saveMemory(item: AgentWorkspaceMemoryItem) {
   savingId.value = item.id
   errorMessage.value = null
   try {
-    const updated = await updateAgentWorkspaceMemory(props.workspaceId, item.id, draft.value)
+    const updated = await updateAgentWorkspaceMemory(props.workspaceId, item.id, draft.value, { token: props.token })
     items.value = items.value.map((current) => (current.id === updated.id ? updated : current))
     cancelEdit()
   } catch (error) {
@@ -89,7 +90,7 @@ async function deleteMemory(item: AgentWorkspaceMemoryItem) {
   deletingId.value = item.id
   errorMessage.value = null
   try {
-    await deleteAgentWorkspaceMemory(props.workspaceId, item.id)
+    await deleteAgentWorkspaceMemory(props.workspaceId, item.id, { token: props.token })
     items.value = items.value.filter((current) => current.id !== item.id)
     if (editingId.value === item.id) cancelEdit()
   } catch (error) {

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { RouterLink, useRoute } from "vue-router"
 import {
+  Bot,
   LayoutGrid,
   Store,
   ListChecks,
@@ -10,7 +11,10 @@ import {
   ShieldCheck,
   ChevronRight,
 } from "lucide-vue-next"
-import { userRoutes } from "@/router/userRoutes"
+import { ref, onMounted, computed } from "vue"
+import { fetchCreditAccount } from "@/api/creditApi"
+import type { CreditAccount } from "@/api/types"
+import { useAuthStore } from "@/store/authStore"
 
 withDefaults(
   defineProps<{
@@ -21,21 +25,23 @@ withDefaults(
 )
 
 const route = useRoute()
+const auth = useAuthStore()
+
+const credit = ref<CreditAccount | null>(null)
 
 const userNav = [
-  { href: userRoutes.dashboard, label: "工作台", icon: LayoutGrid },
-  { href: userRoutes.toolList, label: "AI 工具超市", icon: Store },
-  { href: userRoutes.myTasks, label: "我的任务", icon: ListChecks },
-  { href: userRoutes.library, label: "素材库", icon: FolderHeart },
-  { href: userRoutes.billing, label: "会员与算力", icon: Wallet },
+  { href: "/agent" as const, label: "Agent", icon: Bot },
+  { href: "/dashboard" as const, label: "工作台", icon: LayoutGrid },
+  { href: "/marketplace" as const, label: "AI 工具超市", icon: Store },
+  { href: "/tasks" as const, label: "我的任务", icon: ListChecks },
+  { href: "/library" as const, label: "素材库", icon: FolderHeart },
+  { href: "/billing" as const, label: "会员与算力", icon: Wallet },
 ]
 
-function isActive(href: string) {
-  if (href === userRoutes.dashboard) return route.path === href
-  return route.path === href || route.path.startsWith(href + "/")
+function isActive(path: string) {
+  if (path === "/marketplace") return route.path === path
+  return route.path === path || route.path.startsWith(path + "/")
 }
-<<<<<<< Updated upstream
-=======
 
 const creditPercent = computed(() => {
   if (!credit.value) return 0
@@ -43,15 +49,14 @@ const creditPercent = computed(() => {
 })
 
 onMounted(async () => {
-  if (auth.isLoggedIn) {
+  if (auth.isLoggedIn && auth.token) {
     try {
-      credit.value = await fetchCreditAccount()
+      credit.value = await fetchCreditAccount({ token: auth.token })
     } catch {
       // 静默处理
     }
   }
 })
->>>>>>> Stashed changes
 </script>
 
 <template>
@@ -100,15 +105,21 @@ onMounted(async () => {
 
       <div class="border-t border-border p-4">
         <div class="rounded-lg border border-border bg-accent/40 p-3">
-          <p class="text-xs font-medium">本月剩余算力</p>
+          <p class="text-xs font-medium">本月已用算力</p>
           <p class="mt-1 text-lg font-semibold text-primary">
-            12,480 <span class="text-xs font-normal text-muted-foreground">/ 30,000</span>
+            {{ credit ? credit.totalConsumed.toLocaleString() : '---' }}
+            <span class="text-xs font-normal text-muted-foreground">
+              / {{ credit ? credit.totalGranted.toLocaleString() : '---' }}
+            </span>
           </p>
           <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-secondary">
-            <div class="h-full w-[42%] rounded-full bg-primary" />
+            <div
+              class="h-full rounded-full bg-primary"
+              :style="{ width: Math.min(creditPercent, 100) + '%' }"
+            />
           </div>
           <RouterLink
-            :to="userRoutes.billing"
+            :to="'/billing'"
             class="mt-3 block text-center text-xs font-medium text-primary hover:underline"
           >
             充值 / 升级套餐 →
@@ -122,6 +133,26 @@ onMounted(async () => {
         <div class="min-w-0">
           <h1 v-if="title" class="text-base font-semibold truncate">{{ title }}</h1>
           <p v-if="description" class="text-xs text-muted-foreground truncate">{{ description }}</p>
+        </div>
+        <div class="ml-auto flex items-center gap-3">
+          <template v-if="auth.isLoggedIn">
+            <span class="text-xs text-muted-foreground">{{ auth.user?.nickname || auth.user?.username }}</span>
+            <button
+              type="button"
+              class="text-xs text-muted-foreground hover:text-foreground"
+              @click="auth.logout()"
+            >
+              退出
+            </button>
+          </template>
+          <template v-else>
+            <RouterLink
+              :to="'/login'"
+              class="text-xs text-primary hover:underline"
+            >
+              登录
+            </RouterLink>
+          </template>
         </div>
       </header>
       <main class="flex-1 overflow-x-hidden">

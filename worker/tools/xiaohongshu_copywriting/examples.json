@@ -1,0 +1,32 @@
+[
+  {
+    "name": "门店活动宣传",
+    "input": {
+      "productName": "五一肩颈护理套餐",
+      "targetCustomer": "久坐上班族女性",
+      "style": "种草",
+      "sellingPoints": "价格划算、放松明显、适合节前放松",
+      "extraInfo": "团购价 99 元，限五一假期，门店在杭州拱墅区"
+    }
+  },
+  {
+    "name": "本地生活引流",
+    "input": {
+      "productName": "新开业皮肤管理体验卡",
+      "targetCustomer": "附近想做基础护肤的年轻女生",
+      "style": "真实分享",
+      "sellingPoints": "体验门槛低、环境干净、适合第一次尝试",
+      "extraInfo": "希望弱化促销感，强调体验感"
+    }
+  },
+  {
+    "name": "电商种草",
+    "input": {
+      "productName": "敏感肌修护面膜",
+      "targetCustomer": "换季容易泛红的学生党",
+      "style": "口语化",
+      "sellingPoints": "成分温和、敷完舒缓、价格友好",
+      "extraInfo": "不要夸大功效，不要写成硬广"
+    }
+  }
+]
