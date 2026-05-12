@@ -48,6 +48,7 @@ public class CreditServiceImpl implements CreditService {
         insertLog(
                 before,
                 taskId,
+                null,
                 CreditLogType.FREEZE.name(),
                 0,
                 amount,
@@ -72,6 +73,7 @@ public class CreditServiceImpl implements CreditService {
         insertLog(
                 before,
                 taskId,
+                null,
                 CreditLogType.DEDUCT.name(),
                 amount,
                 -amount,
@@ -96,6 +98,7 @@ public class CreditServiceImpl implements CreditService {
         insertLog(
                 before,
                 taskId,
+                null,
                 CreditLogType.RELEASE.name(),
                 0,
                 -amount,
@@ -109,6 +112,84 @@ public class CreditServiceImpl implements CreditService {
 
     @Override
     @Transactional
+    public void freezeForAgentRun(Long userId, Long runId, int amount) {
+        if (amount <= 0) {
+            return;
+        }
+        CreditAccount before = creditMapper.getOrCreateAccount(userId);
+        if (before.getBalance() - before.getFrozen() < amount) {
+            throw new BusinessException(ErrorCode.AGENT_CREDIT_NOT_ENOUGH, "Agent 可用算力不足");
+        }
+        if (!creditMapper.freeze(before.getId(), amount)) {
+            throw new BusinessException(ErrorCode.AGENT_CREDIT_NOT_ENOUGH, "Agent 可用算力不足");
+        }
+        insertLog(
+                before,
+                null,
+                runId,
+                CreditLogType.FREEZE.name(),
+                0,
+                amount,
+                before.getBalance(),
+                before.getFrozen() + amount,
+                "SYSTEM",
+                null,
+                "Agent 运行冻结算力"
+        );
+    }
+
+    @Override
+    @Transactional
+    public void settleForAgentRun(Long userId, Long runId, int amount) {
+        if (amount <= 0) {
+            return;
+        }
+        CreditAccount before = creditMapper.getOrCreateAccount(userId);
+        if (!creditMapper.settle(before.getId(), amount)) {
+            throw new BusinessException(ErrorCode.AGENT_CREDIT_NOT_ENOUGH, "Agent 冻结算力不足，无法扣除");
+        }
+        insertLog(
+                before,
+                null,
+                runId,
+                CreditLogType.DEDUCT.name(),
+                amount,
+                -amount,
+                before.getBalance() - amount,
+                before.getFrozen() - amount,
+                "SYSTEM",
+                null,
+                "Agent 运行成功扣除算力"
+        );
+    }
+
+    @Override
+    @Transactional
+    public void releaseForAgentRun(Long userId, Long runId, int amount) {
+        if (amount <= 0) {
+            return;
+        }
+        CreditAccount before = creditMapper.getOrCreateAccount(userId);
+        if (!creditMapper.release(before.getId(), amount)) {
+            return;
+        }
+        insertLog(
+                before,
+                null,
+                runId,
+                CreditLogType.RELEASE.name(),
+                0,
+                -amount,
+                before.getBalance(),
+                before.getFrozen() - amount,
+                "SYSTEM",
+                null,
+                "Agent 运行释放冻结算力"
+        );
+    }
+
+    @Override
+    @Transactional
     public CreditAccountResponse manualAdd(Long userId, int amount, String reason, Long operatorId) {
         CreditAccount before = creditMapper.getOrCreateAccount(userId);
         if (!creditMapper.manualAdd(before.getId(), amount)) {
@@ -116,6 +197,7 @@ public class CreditServiceImpl implements CreditService {
         }
         insertLog(
                 before,
+                null,
                 null,
                 CreditLogType.MANUAL_ADD.name(),
                 amount,
@@ -138,6 +220,7 @@ public class CreditServiceImpl implements CreditService {
         }
         insertLog(
                 before,
+                null,
                 null,
                 CreditLogType.MANUAL_DEDUCT.name(),
                 amount,
@@ -162,12 +245,13 @@ public class CreditServiceImpl implements CreditService {
         return PageResponse.of(list, total, pageNo, pageSize);
     }
 
-    private void insertLog(CreditAccount before, Long taskId, String logType, int amount, int frozenAmount,
+    private void insertLog(CreditAccount before, Long taskId, Long agentRunId, String logType, int amount, int frozenAmount,
                            int balanceAfter, int frozenAfter, String operatorType, Long operatorId, String reason) {
         CreditLog log = new CreditLog();
         log.setUserId(before.getUserId());
         log.setAccountId(before.getId());
         log.setTaskId(taskId);
+        log.setAgentRunId(agentRunId);
         log.setLogType(logType);
         log.setAmount(amount);
         log.setFrozenAmount(frozenAmount);
@@ -186,6 +270,7 @@ public class CreditServiceImpl implements CreditService {
                 log.getId(),
                 log.getUserId(),
                 log.getTaskId(),
+                log.getAgentRunId(),
                 log.getLogType(),
                 log.getAmount(),
                 log.getFrozenAmount(),

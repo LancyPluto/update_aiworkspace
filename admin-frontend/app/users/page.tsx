@@ -5,75 +5,57 @@ import { AdminLayout } from "@/components/admin/admin-layout"
 import { AdminHeader } from "@/components/admin/header"
 import { DataTable, StatusBadge } from "@/components/admin/data-table"
 import { Button } from "@/components/ui/button"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
-import { Search, Filter, Eye, Ban, Coins } from "lucide-react"
-import { fetchAdminUsers, manualAddCredits } from "@/lib/api/users"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ApiError } from "@/lib/api/http"
+import { fetchAdminUsers, manualAddCredits, updateUserStatus } from "@/lib/api/users"
 import type { AdminMember } from "@/lib/api/types"
+import { Ban, Coins, Eye, Filter, Search, Undo2 } from "lucide-react"
 
 interface UserRow {
   id: string
   rawId: number
   name: string
-  email: string
-  phone: string
-  plan: string
+  account: string
+  userType: string
   credits: number
-  tasks: number | string
   status: "active" | "inactive"
   statusLabel: string
   createdAt: string
 }
 
-function mapMember(m: AdminMember): UserRow {
-  const isActive = (m.status || "ACTIVE").toUpperCase() === "ACTIVE"
+function mapUser(user: AdminMember): UserRow {
+  const active = (user.status || "ACTIVE").toUpperCase() === "ACTIVE"
   return {
-    id: `U${String(m.id).padStart(3, "0")}`,
-    rawId: m.id,
-    name: m.nickname || m.username || `用户${m.id}`,
-    email: m.username || "-",
-    phone: "-",
-    plan: m.userType === "ADMIN" ? "管理员" : "普通用户",
-    credits: m.credits ?? 0,
-    tasks: "-",
-    status: isActive ? "active" : "inactive",
-    statusLabel: isActive ? "正常" : "已禁用",
-    createdAt: m.createdAt ? m.createdAt.replace("T", " ").slice(0, 19) : "-",
+    id: `U${String(user.id).padStart(3, "0")}`,
+    rawId: user.id,
+    name: user.nickname || user.username || `用户 ${user.id}`,
+    account: user.username,
+    userType: user.userType === "ADMIN" ? "管理员" : "普通用户",
+    credits: user.credits ?? 0,
+    status: active ? "active" : "inactive",
+    statusLabel: active ? "正常" : "已禁用",
+    createdAt: user.createdAt ? user.createdAt.replace("T", " ").slice(0, 19) : "-",
   }
 }
 
 export default function UsersPage() {
+  const [users, setUsers] = useState<UserRow[]>([])
   const [searchQuery, setSearchQuery] = useState("")
   const [statusFilter, setStatusFilter] = useState("all")
-  const [users, setUsers] = useState<UserRow[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [adjustingId, setAdjustingId] = useState<number | null>(null)
+  const [actionId, setActionId] = useState<number | null>(null)
 
-  const loadUsers = async () => {
+  async function loadUsers() {
     setLoading(true)
     setError(null)
     try {
-      const resp = await fetchAdminUsers()
-      setUsers(resp.list.map(mapMember))
+      const response = await fetchAdminUsers()
+      setUsers(response.list.map(mapUser))
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : "加载用户列表失败"
-      setError(message)
+      setError(err instanceof ApiError ? err.message : "加载用户列表失败")
     } finally {
       setLoading(false)
     }
@@ -83,93 +65,67 @@ export default function UsersPage() {
     loadUsers()
   }, [])
 
-  const filteredUsers = useMemo(() => {
+  const filtered = useMemo(() => {
+    const keyword = searchQuery.trim().toLowerCase()
     return users.filter((user) => {
-      const matchesSearch =
-        user.name.includes(searchQuery) ||
-        user.email.includes(searchQuery) ||
-        user.phone.includes(searchQuery)
-      const matchesStatus =
-        statusFilter === "all" || user.status === statusFilter
-      return matchesSearch && matchesStatus
+      const matchesKeyword = !keyword || [user.id, user.name, user.account, user.userType].some((value) => value.toLowerCase().includes(keyword))
+      const matchesStatus = statusFilter === "all" || user.status === statusFilter
+      return matchesKeyword && matchesStatus
     })
   }, [users, searchQuery, statusFilter])
 
-  const handleAdjustCredits = async (item: UserRow) => {
-    if (typeof window === "undefined") return
-    const input = window.prompt(
-      `为「${item.name}」(ID:${item.rawId}) 增加算力，当前余额：${item.credits}\n请输入要增加的算力数量：`,
-      "100",
-    )
-    if (input == null) return
-    const amount = Number(input.trim())
+  async function handleCredits(user: UserRow) {
+    const rawAmount = window.prompt(`为 ${user.name} 增加算力，当前余额 ${user.credits}`, "100")
+    if (rawAmount == null) return
+    const amount = Number(rawAmount)
     if (!Number.isFinite(amount) || amount <= 0) {
-      window.alert("请输入大于 0 的整数")
+      window.alert("请输入大于 0 的算力数量")
       return
     }
-    const reason =
-      window.prompt("请输入备注原因（将记录在算力流水中）", "运营手动加算力") ||
-      "运营手动加算力"
-    setAdjustingId(item.rawId)
+    const reason = window.prompt("请输入调整原因", "运营手动加算力") || "运营手动加算力"
+    setActionId(user.rawId)
     try {
-      const result = await manualAddCredits(item.rawId, {
-        amount: Math.floor(amount),
-        reason,
-      })
-      window.alert(
-        `已为 ${item.name} 增加 ${result.amount} 算力（${result.balanceBefore} → ${result.balanceAfter}）`,
-      )
+      await manualAddCredits(user.rawId, { amount: Math.floor(amount), reason })
       await loadUsers()
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : "加算力失败"
-      window.alert(message)
+      window.alert(err instanceof ApiError ? err.message : "调整算力失败")
     } finally {
-      setAdjustingId(null)
+      setActionId(null)
     }
   }
 
-  const userColumns = [
+  async function handleStatus(user: UserRow) {
+    const nextStatus = user.status === "active" ? "DISABLED" : "ACTIVE"
+    const reason = nextStatus === "ACTIVE" ? "管理员恢复用户" : "管理员禁用用户"
+    setActionId(user.rawId)
+    try {
+      await updateUserStatus(user.rawId, { status: nextStatus, reason })
+      await loadUsers()
+    } catch (err) {
+      window.alert(err instanceof ApiError ? err.message : "更新用户状态失败")
+    } finally {
+      setActionId(null)
+    }
+  }
+
+  const columns = [
     { key: "id" as const, title: "用户 ID" },
     {
       key: "name" as const,
       title: "用户",
       render: (_: unknown, item: UserRow) => (
-        <div className="flex items-center gap-3">
-          <div className="h-8 w-8 rounded-full bg-secondary flex items-center justify-center text-sm font-medium">
-            {item.name[0]}
-          </div>
-          <div>
-            <p className="font-medium">{item.name}</p>
-            <p className="text-xs text-muted-foreground">{item.email}</p>
-          </div>
+        <div>
+          <p className="font-medium">{item.name}</p>
+          <p className="text-xs text-muted-foreground">{item.account}</p>
         </div>
       ),
     },
-    { key: "phone" as const, title: "手机号" },
-    {
-      key: "plan" as const,
-      title: "套餐",
-      render: (value: unknown) => (
-        <span className="rounded-md bg-secondary px-2 py-1 text-xs font-medium">
-          {value as string}
-        </span>
-      ),
-    },
-    {
-      key: "credits" as const,
-      title: "算力余额",
-      render: (value: unknown) => <span>{value as number} 点</span>,
-    },
-    {
-      key: "tasks" as const,
-      title: "任务数",
-    },
+    { key: "userType" as const, title: "类型" },
+    { key: "credits" as const, title: "算力余额" },
     {
       key: "status" as const,
       title: "状态",
-      render: (_: unknown, item: UserRow) => (
-        <StatusBadge status={item.status} label={item.statusLabel} />
-      ),
+      render: (_: unknown, item: UserRow) => <StatusBadge status={item.status} label={item.statusLabel} />,
     },
     { key: "createdAt" as const, title: "注册时间" },
     {
@@ -183,58 +139,24 @@ export default function UsersPage() {
                 <Eye className="h-4 w-4" />
               </Button>
             </DialogTrigger>
-            <DialogContent className="bg-card border-border">
+            <DialogContent>
               <DialogHeader>
                 <DialogTitle>用户详情</DialogTitle>
-                <DialogDescription>查看用户 {item.name} 的详细信息</DialogDescription>
+                <DialogDescription>来自后端用户和算力账户数据</DialogDescription>
               </DialogHeader>
-              <div className="space-y-4 py-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <p className="text-sm text-muted-foreground">用户名</p>
-                    <p className="font-medium">{item.name}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-muted-foreground">邮箱</p>
-                    <p className="font-medium">{item.email}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-muted-foreground">手机号</p>
-                    <p className="font-medium">{item.phone}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-muted-foreground">套餐</p>
-                    <p className="font-medium">{item.plan}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-muted-foreground">算力余额</p>
-                    <p className="font-medium">{item.credits} 点</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-muted-foreground">任务数</p>
-                    <p className="font-medium">{item.tasks}</p>
-                  </div>
-                </div>
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div><p className="text-muted-foreground">账号</p><p className="font-medium">{item.account}</p></div>
+                <div><p className="text-muted-foreground">类型</p><p className="font-medium">{item.userType}</p></div>
+                <div><p className="text-muted-foreground">算力余额</p><p className="font-medium">{item.credits}</p></div>
+                <div><p className="text-muted-foreground">状态</p><p className="font-medium">{item.statusLabel}</p></div>
               </div>
             </DialogContent>
           </Dialog>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8"
-            disabled={adjustingId === item.rawId}
-            onClick={() => handleAdjustCredits(item)}
-          >
+          <Button variant="ghost" size="icon" className="h-8 w-8" disabled={actionId === item.rawId} onClick={() => handleCredits(item)}>
             <Coins className="h-4 w-4" />
           </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 text-destructive hover:text-destructive"
-            disabled
-            title="V1 暂不支持禁用用户"
-          >
-            <Ban className="h-4 w-4" />
+          <Button variant="ghost" size="icon" className="h-8 w-8" disabled={actionId === item.rawId} onClick={() => handleStatus(item)}>
+            {item.status === "active" ? <Ban className="h-4 w-4" /> : <Undo2 className="h-4 w-4" />}
           </Button>
         </div>
       ),
@@ -242,42 +164,33 @@ export default function UsersPage() {
   ]
 
   const description = error
-    ? `加载失败：${error}`
+    ? `联调异常：${error}`
     : loading
-      ? "正在加载用户列表..."
-      : "管理平台用户，查看用户信息和任务记录"
+      ? "正在从后端加载用户列表"
+      : "用户列表、算力调整和启停状态已连接数据库"
 
   return (
     <AdminLayout>
       <AdminHeader title="用户管理" description={description} />
-
       <div className="p-6 space-y-6">
-        {/* Filters */}
         <div className="flex items-center gap-4">
-          <div className="relative flex-1 max-w-md">
+          <div className="relative max-w-md flex-1">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              placeholder="搜索用户名、邮箱或手机号..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-9 bg-secondary border-0"
-            />
+            <Input value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="搜索用户、账号或类型" className="pl-9" />
           </div>
           <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="w-40 bg-secondary border-0">
+            <SelectTrigger className="w-40">
               <Filter className="mr-2 h-4 w-4" />
-              <SelectValue placeholder="状态筛选" />
+              <SelectValue />
             </SelectTrigger>
-            <SelectContent className="bg-card border-border">
+            <SelectContent>
               <SelectItem value="all">全部状态</SelectItem>
               <SelectItem value="active">正常</SelectItem>
               <SelectItem value="inactive">已禁用</SelectItem>
             </SelectContent>
           </Select>
         </div>
-
-        {/* Users Table */}
-        <DataTable columns={userColumns} data={filteredUsers} />
+        <DataTable columns={columns} data={filtered} />
       </div>
     </AdminLayout>
   )

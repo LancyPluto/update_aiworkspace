@@ -4,15 +4,24 @@ import { useAuthStore } from "@/store/authStore"
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
-    { path: "/", redirect: "/login" },
-    { path: "/dashboard", redirect: "/marketplace" },
-    { path: "/billing", redirect: "/marketplace" },
-    { path: "/library", redirect: "/marketplace" },
+    { path: "/", redirect: "/agent" },
     {
       path: "/login",
       name: "Login",
       meta: { requiresAuth: false },
       component: () => import("@/pages/Login/Page.vue"),
+    },
+    {
+      path: "/dashboard",
+      name: "Dashboard",
+      meta: { requiresAuth: true },
+      component: () => import("@/pages/Dashboard/Page.vue"),
+    },
+    {
+      path: "/agent",
+      name: "AgentHome",
+      meta: { requiresAuth: true },
+      component: () => import("@/pages/AgentHome/Page.vue"),
     },
     {
       path: "/marketplace",
@@ -39,6 +48,18 @@ const router = createRouter({
       name: "MyTasks",
       meta: { requiresAuth: true },
       component: () => import("@/pages/MyTasks/Page.vue"),
+    },
+    {
+      path: "/library",
+      name: "MaterialLibrary",
+      meta: { requiresAuth: true },
+      component: () => import("@/pages/MaterialLibrary/Page.vue"),
+    },
+    {
+      path: "/billing",
+      name: "Billing",
+      meta: { requiresAuth: true },
+      component: () => import("@/pages/Billing/Page.vue"),
     },
     {
       path: "/tasks/:taskId/status",

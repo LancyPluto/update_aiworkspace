@@ -14,6 +14,7 @@ import com.aiminilab.aitoolmarket.tool.dto.PromptVersionResponse;
 import com.aiminilab.aitoolmarket.tool.dto.TestGenerateRequest;
 import com.aiminilab.aitoolmarket.tool.dto.TestGenerateResponse;
 import com.aiminilab.aitoolmarket.tool.dto.UpdateToolFieldsRequest;
+import com.aiminilab.aitoolmarket.tool.dto.UpsertToolCategoryRequest;
 import com.aiminilab.aitoolmarket.tool.dto.UpsertToolRequest;
 
 import java.util.List;
@@ -21,6 +22,14 @@ import java.util.List;
 public interface ToolService {
 
     List<ToolCategoryResponse> categories();
+
+    List<ToolCategoryResponse> adminCategories();
+
+    ToolCategoryResponse createCategory(UpsertToolCategoryRequest request);
+
+    ToolCategoryResponse updateCategory(Long categoryId, UpsertToolCategoryRequest request);
+
+    ToolCategoryResponse updateCategoryStatus(Long categoryId, String status);
 
     PageResponse<ToolSummaryResponse> userTools(String keyword, Long categoryId, Integer pageNo, Integer pageSize);
 

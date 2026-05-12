@@ -6,14 +6,16 @@ public record ToolCategoryResponse(
         Long id,
         String categoryCode,
         String categoryName,
-        Integer sortOrder
+        Integer sortOrder,
+        String status
 ) {
     public static ToolCategoryResponse from(ToolCategory category) {
         return new ToolCategoryResponse(
                 category.getId(),
                 category.getCategoryCode(),
                 category.getCategoryName(),
-                category.getSortOrder()
+                category.getSortOrder(),
+                category.getStatus()
         );
     }
 }

@@ -178,52 +178,87 @@ public interface TaskMapper extends BaseMapper<AiTask> {
     }
 
     @Update("""
+            <script>
             UPDATE ai_tasks
             SET status = 'PROCESSING', progress = #{progress}, progress_message = #{progressMessage},
                 started_at = COALESCE(started_at, CURRENT_TIMESTAMP),
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = #{taskId}
+              AND status IN
+              <foreach collection="expectedStatuses" item="status" open="(" separator="," close=")">
+                #{status}
+              </foreach>
+            </script>
             """)
-    void markProcessing(@Param("taskId") Long taskId,
-                        @Param("progress") int progress,
-                        @Param("progressMessage") String progressMessage);
+    int markProcessing(@Param("taskId") Long taskId,
+                       @Param("progress") int progress,
+                       @Param("progressMessage") String progressMessage,
+                       @Param("expectedStatuses") List<String> expectedStatuses);
 
     @Update("""
+            <script>
             UPDATE ai_tasks
             SET status = 'SUCCESS', progress = 100, progress_message = '生成完成',
                 finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
             WHERE id = #{taskId}
+              AND status IN
+              <foreach collection="expectedStatuses" item="status" open="(" separator="," close=")">
+                #{status}
+              </foreach>
+            </script>
             """)
-    void markSuccess(@Param("taskId") Long taskId);
+    int markSuccess(@Param("taskId") Long taskId,
+                    @Param("expectedStatuses") List<String> expectedStatuses);
 
     @Update("""
+            <script>
             UPDATE ai_tasks
             SET status = 'FAILED', progress = 100, progress_message = #{errorMessage},
                 error_code = #{errorCode}, error_message = #{errorMessage},
                 finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
             WHERE id = #{taskId}
+              AND status IN
+              <foreach collection="expectedStatuses" item="status" open="(" separator="," close=")">
+                #{status}
+              </foreach>
+            </script>
             """)
-    void markFailed(@Param("taskId") Long taskId,
-                    @Param("errorCode") String errorCode,
-                    @Param("errorMessage") String errorMessage);
+    int markFailed(@Param("taskId") Long taskId,
+                   @Param("errorCode") String errorCode,
+                   @Param("errorMessage") String errorMessage,
+                   @Param("expectedStatuses") List<String> expectedStatuses);
 
     @Update("""
+            <script>
             UPDATE ai_tasks
             SET status = 'QUEUED', progress = 0, progress_message = '任务已重新排队',
                 error_code = NULL, error_message = NULL,
                 queued_at = CURRENT_TIMESTAMP, started_at = NULL,
                 finished_at = NULL, updated_at = CURRENT_TIMESTAMP
             WHERE id = #{taskId}
+              AND status IN
+              <foreach collection="expectedStatuses" item="status" open="(" separator="," close=")">
+                #{status}
+              </foreach>
+            </script>
             """)
-    void resetToQueued(@Param("taskId") Long taskId);
+    int resetToQueued(@Param("taskId") Long taskId,
+                      @Param("expectedStatuses") List<String> expectedStatuses);
 
     @Update("""
+            <script>
             UPDATE ai_tasks
             SET status = 'CANCELLED', progress = 100, progress_message = '管理员已取消任务',
                 finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
             WHERE id = #{taskId}
+              AND status IN
+              <foreach collection="expectedStatuses" item="status" open="(" separator="," close=")">
+                #{status}
+              </foreach>
+            </script>
             """)
-    void cancel(@Param("taskId") Long taskId);
+    int cancel(@Param("taskId") Long taskId,
+               @Param("expectedStatuses") List<String> expectedStatuses);
 
     @Insert("""
             INSERT INTO ai_result_resources

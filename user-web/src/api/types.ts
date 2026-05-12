@@ -17,6 +17,17 @@ export type ApiErrorCode =
   | "TASK_NOT_FOUND"
   | "TASK_STATUS_INVALID"
   | "MODEL_CALL_FAILED"
+  | "AGENT_SESSION_NOT_FOUND"
+  | "AGENT_RUN_NOT_FOUND"
+  | "AGENT_RUN_NOT_CANCELLABLE"
+  | "AGENT_TOOL_NOT_AVAILABLE"
+  | "AGENT_CREDIT_NOT_ENOUGH"
+  | "AGENT_RATE_LIMITED"
+  | "AGENT_ACTIVE_RUN_LIMIT"
+  | "AGENT_RUN_BUDGET_EXCEEDED"
+  | "AGENT_TOOL_CALL_LIMIT"
+  | "AGENT_MODEL_CALL_LIMIT"
+  | "AGENT_SECURITY_REJECTED"
   | "SYSTEM_ERROR"
 
 export interface ApiResponse<T> {
@@ -213,6 +224,7 @@ export interface CreditLog {
   id: number
   userId: number
   taskId?: number | null
+  agentRunId?: number | null
   logType: "FREEZE" | "DEDUCT" | "RELEASE" | "MANUAL_ADD" | "MANUAL_DEDUCT"
   amount: number
   frozenAmount: number
@@ -224,4 +236,132 @@ export interface CreditLog {
   operatorId?: number | null
   reason: string
   createdAt: string
+}
+
+/* ========== Agent ========== */
+
+export type AgentRunStatus = "CREATED" | "RUNNING" | "WAITING_USER_CONFIRMATION" | "SUCCESS" | "FAILED" | "CANCELLED" | "TIMEOUT"
+export type AgentMessageRole = "USER" | "ASSISTANT" | "SYSTEM"
+export type AgentRunEventType =
+  | "run.started"
+  | "intent.detected"
+  | "tool.selected"
+  | "tool.confirmation_required"
+  | "tool.started"
+  | "tool.finished"
+  | "subagent.started"
+  | "subagent.completed"
+  | "subagent.failed"
+  | "workspace_file.created"
+  | "workspace_file.updated"
+  | "workspace_file.read"
+  | "memory.context_injected"
+  | "memory.candidate_created"
+  | "message.delta"
+  | "message.completed"
+  | "run.completed"
+  | "run.failed"
+  | string
+
+export interface AgentSession {
+  id: number
+  title: string
+  status: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface AgentMessage {
+  id: number
+  sessionId: number
+  role: AgentMessageRole
+  contentText: string
+  contentJson?: string | null
+  runId?: number | null
+  createdAt: string
+}
+
+export interface CreateAgentMessageResponse {
+  sessionId: number
+  messageId: number
+  runId: number
+  runStatus: AgentRunStatus
+}
+
+export interface AgentRun {
+  id: number
+  sessionId: number
+  userId: number
+  status: AgentRunStatus
+  intent?: string | null
+  consumedCredits: number
+  estimatedCredits: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface AgentRunEvent {
+  id: number
+  runId: number
+  eventType: AgentRunEventType
+  eventText?: string | null
+  eventJson?: string | null
+  createdAt: string
+}
+
+export interface AgentFile {
+  id: number
+  sessionId: number
+  originalFilename: string
+  contentType?: string | null
+  fileSize: number
+  status: "PARSING" | "READY" | "FAILED"
+  extractedText?: string | null
+  errorMessage?: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface AgentToolPreference {
+  id: number
+  toolCode: string
+  autoCallEnabled: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export interface AgentWorkspace {
+  id: number
+  name: string
+  workspaceType: string
+  role: string
+  status: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface AgentWorkspaceMemoryItem {
+  id: number
+  workspaceId: number
+  userId: number
+  memoryType: string
+  title: string
+  content: string
+  sourceRunId?: number | null
+  status: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface CreateAgentWorkspaceMemoryRequest {
+  memoryType: string
+  title: string
+  content: string
+  sourceRunId?: number | null
+}
+
+export interface UpdateAgentWorkspaceMemoryRequest {
+  memoryType: string
+  title: string
+  content: string
 }

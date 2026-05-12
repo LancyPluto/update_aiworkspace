@@ -57,9 +57,16 @@ services:
       REDIS_PORT: 6379
       REDIS_PASSWORD: ""
       REDIS_DATABASE: 0
+      APP_PRODUCTION_MODE: ${APP_PRODUCTION_MODE:-false}
       JWT_SECRET: ${JWT_SECRET:-local-dev-secret}
       INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-local-internal-token}
       AI_TASK_QUEUE: ${AI_TASK_QUEUE:-ai:task:queue}
+      AGENT_ENABLED: ${AGENT_ENABLED:-true}
+      AGENT_SERVICE_BASE_URL: ${AGENT_SERVICE_BASE_URL:-http://agent-service:8090}
+      AGENT_MAX_ACTIVE_RUNS_PER_USER: ${AGENT_MAX_ACTIVE_RUNS_PER_USER:-1}
+      AGENT_MAX_MESSAGES_PER_MINUTE: ${AGENT_MAX_MESSAGES_PER_MINUTE:-10}
+      AGENT_MAX_RUNS_PER_HOUR: ${AGENT_MAX_RUNS_PER_HOUR:-30}
+      AGENT_DEFAULT_CREDIT_BUDGET: ${AGENT_DEFAULT_CREDIT_BUDGET:-20}
     ports:
       - "${BACKEND_PORT:-8080}:8080"
     volumes:
@@ -74,6 +81,7 @@ services:
     restart: unless-stopped
     environment:
       NEXT_PUBLIC_API_PROXY_TARGET: ${ADMIN_NEXT_PUBLIC_API_PROXY_TARGET:-http://backend:8080}
+      NEXT_PUBLIC_API_BASE_URL: ${ADMIN_NEXT_PUBLIC_API_BASE_URL:-http://127.0.0.1:8080}
       CHOKIDAR_USEPOLLING: "true"
     ports:
       - "${ADMIN_FRONTEND_PORT:-5174}:5174"
@@ -121,6 +129,35 @@ services:
     volumes:
       - ../worker:/app
     command: sh -c "pip install --no-cache-dir -r requirements.txt && python main.py"
+
+  agent-service:
+    image: python:3.12-slim
+    container_name: ai-supermarket-agent-service
+    working_dir: /app
+    restart: unless-stopped
+    depends_on:
+      - backend
+      - redis
+    environment:
+      APP_ENV: local
+      PORT: 8090
+      BACKEND_INTERNAL_BASE_URL: http://backend:8080
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-local-internal-token}
+      AGENT_VERIFY_INTERNAL_SIGNATURE: ${AGENT_VERIFY_INTERNAL_SIGNATURE:-false}
+      AGENT_EXECUTION_MODE: ${AGENT_EXECUTION_MODE:-sync}
+      MODEL_PROVIDER: ${MODEL_PROVIDER:-mock}
+      MODEL_API_BASE_URL: ${MODEL_API_BASE_URL:-https://api.deepseek.com}
+      MODEL_API_KEY: ${MODEL_API_KEY:-replace-with-model-key}
+      MODEL_NAME: ${MODEL_NAME:-deepseek-chat}
+      AGENT_MAX_TOOL_CALLS: ${AGENT_MAX_TOOL_CALLS:-3}
+      AGENT_MAX_MODEL_CALLS: ${AGENT_MAX_MODEL_CALLS:-5}
+      AGENT_MODEL_CALL_COST: ${AGENT_MODEL_CALL_COST:-1}
+      AGENT_DEFAULT_CONSUMED_CREDITS: ${AGENT_DEFAULT_CONSUMED_CREDITS:-1}
+    ports:
+      - "${AGENT_SERVICE_PORT:-8090}:8090"
+    volumes:
+      - ../agent-service:/app
+    command: sh -c "pip install --no-cache-dir -r requirements.txt && uvicorn app.main:app --host 0.0.0.0 --port 8090"
 
 volumes:
   mysql_data:

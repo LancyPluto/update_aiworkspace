@@ -11,25 +11,16 @@ import {
   YAxis,
 } from "recharts"
 
-const areaData = [
-  { name: "1月", value: 4000 },
-  { name: "2月", value: 3000 },
-  { name: "3月", value: 5000 },
-  { name: "4月", value: 4500 },
-  { name: "5月", value: 6000 },
-  { name: "6月", value: 5500 },
-  { name: "7月", value: 7000 },
-]
+interface ChartPoint {
+  name: string
+  value: number
+}
 
-const barData = [
-  { name: "文案生成", value: 4200 },
-  { name: "脚本创作", value: 3800 },
-  { name: "标题优化", value: 2800 },
-  { name: "话术生成", value: 2600 },
-  { name: "活动策划", value: 2200 },
-]
+interface ChartProps {
+  data: ChartPoint[]
+}
 
-export function TaskTrendChart() {
+export function TaskTrendChart({ data }: ChartProps) {
   return (
     <div className="rounded-2xl border border-border bg-card p-6">
       <div className="mb-6">
@@ -39,7 +30,7 @@ export function TaskTrendChart() {
         <p className="text-sm text-muted-foreground">过去 7 个月任务数量</p>
       </div>
       <ResponsiveContainer width="100%" height={240}>
-        <AreaChart data={areaData}>
+        <AreaChart data={data}>
           <defs>
             <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
               <stop
@@ -87,7 +78,7 @@ export function TaskTrendChart() {
   )
 }
 
-export function ToolUsageChart() {
+export function ToolUsageChart({ data }: ChartProps) {
   return (
     <div className="rounded-2xl border border-border bg-card p-6">
       <div className="mb-6">
@@ -97,7 +88,7 @@ export function ToolUsageChart() {
         <p className="text-sm text-muted-foreground">工具使用排行</p>
       </div>
       <ResponsiveContainer width="100%" height={240}>
-        <BarChart data={barData} layout="vertical">
+        <BarChart data={data} layout="vertical">
           <XAxis
             type="number"
             axisLine={false}

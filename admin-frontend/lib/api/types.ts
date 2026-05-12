@@ -8,6 +8,9 @@ export interface ApiResponse<T> {
 export interface PageResponse<T> {
   list: T[]
   total: number
+  pageNo?: number
+  pageSize?: number
+  hasNext?: boolean
 }
 
 export interface AdminUser {
@@ -27,6 +30,14 @@ export interface ToolCategory {
   categoryCode: string
   categoryName: string
   sortOrder?: number
+  status?: string
+}
+
+export interface UpsertToolCategoryPayload {
+  categoryCode: string
+  categoryName: string
+  sortOrder?: number
+  status?: string
 }
 
 export interface ToolSummary {
@@ -99,10 +110,17 @@ export interface TaskLog {
 
 export interface CreditLogItem {
   id: number
+  userId?: number
+  taskId?: number | null
   logType: string
   amount: number
+  frozenAmount?: number
   balanceBefore: number
   balanceAfter: number
+  frozenBefore?: number
+  frozenAfter?: number
+  operatorType?: string
+  operatorId?: number | null
   reason?: string | null
   createdAt: string
 }
@@ -137,6 +155,17 @@ export interface AdminTaskQuery {
   userId?: number
 }
 
+export interface DashboardChartPoint {
+  name: string
+  value: number
+}
+
+export interface DashboardOverview {
+  taskTrend: DashboardChartPoint[]
+  popularTools: DashboardChartPoint[]
+  apiCreditConsumed: number
+}
+
 export interface CreditAccount {
   accountId: number
   userId: number
@@ -163,14 +192,58 @@ export interface ManualAddCreditsPayload {
 }
 
 export interface ManualAddCreditsResult {
+  accountId?: number
   userId: number
-  amount: number
-  balanceBefore: number
-  balanceAfter: number
+  amount?: number
+  balance?: number
+  frozen?: number
+  totalGranted?: number
+  totalConsumed?: number
+  balanceBefore?: number
+  balanceAfter?: number
   reason?: string | null
-  createdAt: string
+  createdAt?: string
+}
+
+export interface UpdateUserStatusPayload {
+  status: string
+  reason?: string
 }
 
 export interface TestGenerateResult {
   output: string
+}
+
+export type AgentModelProvider = 'mock' | 'openai_compatible' | 'anthropic_compatible' | 'minimax'
+
+export interface AgentModelConfig {
+  id: number
+  provider: AgentModelProvider | string
+  modelName: string
+  baseUrl?: string | null
+  apiKeyMasked?: string | null
+  minimaxGroupId?: string | null
+  timeoutSeconds: number
+  enabled: boolean
+  createdAt?: string | null
+  updatedAt?: string | null
+}
+
+export interface AgentModelConfigPayload {
+  provider: AgentModelProvider | string
+  modelName: string
+  baseUrl?: string
+  apiKey?: string
+  minimaxGroupId?: string
+  timeoutSeconds?: number
+  enabled?: boolean
+}
+
+export interface AgentModelConfigTestResult {
+  success: boolean
+  provider: string
+  modelName: string
+  latencyMs: number
+  message: string
+  sample: string
 }

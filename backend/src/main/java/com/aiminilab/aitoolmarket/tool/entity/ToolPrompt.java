@@ -1,6 +1,11 @@
 package com.aiminilab.aitoolmarket.tool.entity;
 
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableName;
+
+@TableName("tool_prompts")
 public class ToolPrompt {
+    @TableId
     private Long id;
     private Long toolId;
     private String promptCode;
