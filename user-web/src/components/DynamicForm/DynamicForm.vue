@@ -21,6 +21,14 @@ function updateField(fieldKey: string, value: string) {
     [fieldKey]: value,
   })
 }
+
+function optionLabel(option: string | { label: string; value: string }): string {
+  return typeof option === "string" ? option : option.label
+}
+
+function optionValue(option: string | { label: string; value: string }): string {
+  return typeof option === "string" ? option : option.value
+}
 </script>
 
 <template>
@@ -57,17 +65,17 @@ function updateField(fieldKey: string, value: string) {
         <div v-else-if="f.fieldType === 'select' && f.options?.length" class="flex flex-wrap gap-2">
           <button
             v-for="opt in f.options"
-            :key="opt.value"
+            :key="optionValue(opt)"
             type="button"
             class="rounded-md border px-3 py-1.5 text-xs font-medium transition"
             :class="
-              fieldValue(f.fieldKey) === opt.value
+              fieldValue(f.fieldKey) === optionValue(opt)
                 ? 'border-primary bg-primary/10 text-primary'
                 : 'border-border bg-background text-foreground/70 hover:border-primary/40'
             "
-            @click="updateField(f.fieldKey, opt.value)"
+            @click="updateField(f.fieldKey, optionValue(opt))"
           >
-            {{ opt.label }}
+            {{ optionLabel(opt) }}
           </button>
         </div>
 

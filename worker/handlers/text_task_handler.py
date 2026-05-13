@@ -66,7 +66,7 @@ class TextTaskHandler:
 
         try:
             context = self._normalize_execution_context(
-                self.backend_client.get_execution_context(task_id)
+                message.get("__executionContext") or self.backend_client.get_execution_context(task_id)
             )
             self.backend_client.mark_processing(task_id)
 

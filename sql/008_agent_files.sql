@@ -1,3 +1,5 @@
+﻿SET NAMES utf8mb4;
+
 CREATE TABLE IF NOT EXISTS agent_files (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   session_id BIGINT NOT NULL,
@@ -15,3 +17,4 @@ CREATE TABLE IF NOT EXISTS agent_files (
   KEY idx_agent_files_user_id (user_id, id),
   KEY idx_agent_files_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+

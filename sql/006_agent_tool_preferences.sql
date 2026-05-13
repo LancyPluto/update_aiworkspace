@@ -1,3 +1,5 @@
+﻿SET NAMES utf8mb4;
+
 CREATE TABLE IF NOT EXISTS agent_tool_preferences (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   user_id BIGINT NOT NULL,
@@ -8,3 +10,4 @@ CREATE TABLE IF NOT EXISTS agent_tool_preferences (
   UNIQUE KEY uk_agent_tool_pref_user_tool (user_id, tool_code),
   KEY idx_agent_tool_pref_user (user_id)
 );
+

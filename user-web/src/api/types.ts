@@ -151,7 +151,7 @@ export interface ToolField {
   fieldName: string
   fieldType: "text" | "textarea" | "select"
   placeholder?: string | null
-  options?: ToolFieldOption[] | null
+  options?: Array<ToolFieldOption | string> | null
   required: boolean
   sortOrder: number
 }

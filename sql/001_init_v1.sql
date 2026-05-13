@@ -1,3 +1,5 @@
+﻿SET NAMES utf8mb4;
+
 CREATE TABLE IF NOT EXISTS users (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   username VARCHAR(64) UNIQUE,
@@ -291,5 +293,8 @@ VALUES ('USER', 'User'), ('ADMIN', 'Admin')
 ON DUPLICATE KEY UPDATE role_name = VALUES(role_name);
 
 INSERT INTO tool_categories (category_code, category_name, sort_order, status)
-VALUES ('copywriting', 'Copywriting', 1, 'ACTIVE')
+VALUES
+  ('copywriting', 'Copywriting', 1, 'ACTIVE'),
+  ('agent', '智能体', 2, 'ACTIVE')
 ON DUPLICATE KEY UPDATE category_name = VALUES(category_name), status = VALUES(status);
+

@@ -54,8 +54,10 @@ public class InternalTaskServiceImpl implements InternalTaskService {
                 ? "AI is processing"
                 : request.progressMessage();
         AiTask task = findTask(taskId);
-        TaskStateMachine.ensureTransition(task.getStatus(), TaskStatus.PROCESSING.name());
-        if (taskMapper.markProcessing(taskId, progress, message, List.of(TaskStatus.QUEUED.name())) == 0) {
+        if (!TaskStatus.PROCESSING.name().equals(task.getStatus())) {
+            TaskStateMachine.ensureTransition(task.getStatus(), TaskStatus.PROCESSING.name());
+        }
+        if (taskMapper.markProcessing(taskId, progress, message, List.of(TaskStatus.QUEUED.name(), TaskStatus.PROCESSING.name())) == 0) {
             TaskStateMachine.ensureTransition(findTask(taskId).getStatus(), TaskStatus.PROCESSING.name());
         }
         return TaskStatusResponse.from(findTask(taskId));

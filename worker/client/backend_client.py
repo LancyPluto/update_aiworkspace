@@ -38,11 +38,22 @@ class BackendClient:
         )
         return self._parse_response(response)
 
-    def mark_processing(self, task_id: int) -> dict[str, Any]:
+    def mark_processing(
+        self,
+        task_id: int,
+        *,
+        progress: int | None = None,
+        progress_message: str | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {}
+        if progress is not None:
+            payload["progress"] = progress
+        if progress_message:
+            payload["progressMessage"] = progress_message
         response = self._request(
             "POST",
             f"/api/internal/v1/tasks/{task_id}/processing",
-            json_body={},
+            json_body=payload,
             timeout=self.timeout,
         )
         return self._parse_response(response)

@@ -1,3 +1,5 @@
+﻿SET NAMES utf8mb4;
+
 CREATE TABLE IF NOT EXISTS agent_file_chunks (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   file_id BIGINT NOT NULL,
@@ -10,3 +12,4 @@ CREATE TABLE IF NOT EXISTS agent_file_chunks (
   INDEX idx_agent_file_chunks_file (file_id),
   INDEX idx_agent_file_chunks_session (user_id, session_id)
 );
+
