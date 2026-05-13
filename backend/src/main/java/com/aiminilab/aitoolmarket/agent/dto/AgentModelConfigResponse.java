@@ -6,6 +6,8 @@ import java.time.LocalDateTime;
 
 public record AgentModelConfigResponse(
         Long id,
+        String displayName,
+        String configCode,
         String provider,
         String modelName,
         String baseUrl,
@@ -13,12 +15,15 @@ public record AgentModelConfigResponse(
         String minimaxGroupId,
         Integer timeoutSeconds,
         Boolean enabled,
+        Boolean isDefault,
         LocalDateTime createdAt,
         LocalDateTime updatedAt
 ) {
     public static AgentModelConfigResponse from(AgentModelConfig config) {
         return new AgentModelConfigResponse(
                 config.getId(),
+                config.getDisplayName(),
+                config.getConfigCode(),
                 config.getProvider(),
                 config.getModelName(),
                 config.getBaseUrl(),
@@ -26,6 +31,7 @@ public record AgentModelConfigResponse(
                 config.getMinimaxGroupId(),
                 config.getTimeoutSeconds(),
                 config.getEnabled(),
+                config.getDefault(),
                 config.getCreatedAt(),
                 config.getUpdatedAt()
         );

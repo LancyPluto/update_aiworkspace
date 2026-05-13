@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import { useEffect, useMemo, useState } from "react"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -49,7 +49,7 @@ interface VendorMeta {
   label: string
   shortName: string
   mark: string
-  /** 对应 `public/assets/vendor-icons/{iconAsset}.svg`（白底素材） */
+  /** 瀵瑰簲 `public/assets/vendor-icons/{iconAsset}.svg`锛堢櫧搴曠礌鏉愶級 */
   iconAsset: string
 }
 
@@ -68,24 +68,24 @@ const providerOptions: Array<{
 }> = [
   {
     value: "openai_compatible",
-    label: "OpenAI 兼容接口",
+    label: "OpenAI compatible",
     packageName: "langchain-openai",
     defaultModel: "gpt-4o-mini",
     defaultBaseUrl: "https://api.openai.com/v1",
-    description: "适用于 OpenAI 协议和多数 OpenAI 兼容中转站。",
+    description: "Use an OpenAI-compatible chat completion endpoint.",
   },
   {
     value: "anthropic_compatible",
-    label: "Anthropic 兼容接口",
+    label: "Anthropic compatible",
     packageName: "langchain-anthropic",
     defaultModel: "MiniMax-M2.7",
     defaultBaseUrl: "https://api.minimaxi.com/anthropic",
-    description: "适用于 Anthropic 协议网关，例如 MiniMax M2.7 的 Anthropic 兼容接口。",
+    description: "Use an Anthropic-compatible gateway, such as MiniMax M2.7.",
   },
 ]
 
 const vendorFallback: VendorMeta = {
-  label: "模型 API",
+  label: "妯″瀷 API",
   shortName: "API",
   mark: "AI",
   iconAsset: "api",
@@ -96,16 +96,16 @@ const vendorCatalog: Record<string, VendorMeta> = {
   claude: { label: "Claude", shortName: "Claude", mark: "C", iconAsset: "claude" },
   anthropic: { label: "Anthropic", shortName: "Anthropic", mark: "A", iconAsset: "anthropic" },
   minimax: { label: "MiniMax", shortName: "MiniMax", mark: "MM", iconAsset: "minimax" },
-  siliconflow: { label: "SiliconFlow", shortName: "硅基", mark: "SF", iconAsset: "siliconflow" },
+  siliconflow: { label: "SiliconFlow", shortName: "SiliconFlow", mark: "SF", iconAsset: "siliconflow" },
   deepseek: { label: "DeepSeek", shortName: "DeepSeek", mark: "DS", iconAsset: "deepseek" },
   moonshot: { label: "Moonshot AI", shortName: "Kimi", mark: "K", iconAsset: "moonshot" },
-  zhipu: { label: "智谱 AI", shortName: "GLM", mark: "Z", iconAsset: "zhipu" },
-  qwen: { label: "阿里云百炼", shortName: "Qwen", mark: "QW", iconAsset: "qwen" },
-  alibabacloud: { label: "阿里云", shortName: "阿里云", mark: "ALI", iconAsset: "alibabacloud" },
+  zhipu: { label: "Zhipu AI", shortName: "GLM", mark: "Z", iconAsset: "zhipu" },
+  qwen: { label: "Qwen", shortName: "Qwen", mark: "QW", iconAsset: "qwen" },
+  alibabacloud: { label: "Alibaba Cloud", shortName: "Alibaba", mark: "ALI", iconAsset: "alibabacloud" },
   google: { label: "Google", shortName: "Gemini", mark: "G", iconAsset: "gemini" },
   openrouter: { label: "OpenRouter", shortName: "OpenRouter", mark: "OR", iconAsset: "openrouter" },
-  doubao: { label: "火山方舟", shortName: "豆包", mark: "豆", iconAsset: "doubao" },
-  baidu: { label: "百度", shortName: "文心", mark: "BD", iconAsset: "baidu" },
+  doubao: { label: "Doubao", shortName: "Doubao", mark: "DB", iconAsset: "doubao" },
+  baidu: { label: "Baidu", shortName: "ERNIE", mark: "BD", iconAsset: "baidu" },
 }
 
 const emptyForm: ModelForm = {
@@ -221,8 +221,8 @@ function VendorIcon({ vendor, size = "md" }: { vendor: VendorMeta; size?: "md" |
 }
 
 function testStatusBadge(config: ModelConfigWithTest) {
-  if (config.lastTestSuccess === true) return <Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-emerald-700">测试正常</Badge>
-  if (config.lastTestSuccess === false) return <Badge variant="outline" className="border-red-200 bg-red-50 text-red-700">测试失败</Badge>
+  if (config.lastTestSuccess === true) return <Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-emerald-700">娴嬭瘯姝ｅ父</Badge>
+  if (config.lastTestSuccess === false) return <Badge variant="outline" className="border-red-200 bg-red-50 text-red-700">娴嬭瘯澶辫触</Badge>
   return null
 }
 
@@ -264,7 +264,7 @@ export function AgentModelSettings() {
         list[0]
       setForm(selected ? toForm(selected) : emptyForm)
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "加载模型配置失败")
+      setError(err instanceof ApiError ? err.message : "鍔犺浇妯″瀷閰嶇疆澶辫触")
     } finally {
       setLoading(false)
     }
@@ -281,16 +281,21 @@ export function AgentModelSettings() {
     setTestResult(null)
   }
 
-  function createNew() {
-    setForm(emptyForm)
+  function editConfig(config: AgentModelConfig) {
+    setForm(toForm(config))
     setSaved(false)
     setTestResult(null)
     setError(null)
     setDialogOpen(true)
   }
 
-  function editConfig(config: AgentModelConfig) {
-    setForm(toForm(config))
+  function createConfig() {
+    setForm({
+      ...emptyForm,
+      configCode: "",
+      displayName: "",
+      isDefault: configs.length === 0,
+    })
     setSaved(false)
     setTestResult(null)
     setError(null)
@@ -319,12 +324,12 @@ export function AgentModelSettings() {
   }
 
   function validateForm(): string | null {
-    if (!form.displayName.trim()) return "请填写配置名称。"
-    if (!form.modelName.trim()) return "请填写模型名称。"
-    if (!form.baseUrl.trim()) return "请填写 Base URL。"
+    if (!form.displayName.trim()) return "Config name is required."
+    if (!form.modelName.trim()) return "Model name is required."
+    if (!form.baseUrl.trim()) return "Base URL is required."
     const timeout = Number(form.timeoutSeconds)
-    if (!Number.isFinite(timeout) || timeout < 1 || timeout > 300) return "超时时间必须在 1 到 300 秒之间。"
-    if (!form.apiKey.trim() && !form.apiKeyMasked) return "请填写 API Key。"
+    if (!Number.isFinite(timeout) || timeout < 1 || timeout > 300) return "Timeout must be between 1 and 300 seconds."
+    if (!form.apiKey.trim() && !form.apiKeyMasked) return "API Key is required."
     return null
   }
 
@@ -337,15 +342,43 @@ export function AgentModelSettings() {
     setSaving(true)
     setError(null)
     try {
-      const payload = toPayload(form)
       const savedConfig = form.id
-        ? await updateAgentModelConfig(form.id, payload)
-        : await createAgentModelConfig(payload)
+        ? await updateAgentModelConfig(form.id, toPayload(form))
+        : await createAgentModelConfig(toPayload(form))
       setSaved(true)
       await loadConfigs(savedConfig.id)
       setDialogOpen(false)
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "保存模型配置失败")
+      setError(err instanceof ApiError ? err.message : "淇濆瓨妯″瀷閰嶇疆澶辫触")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function setAsDefault(config: AgentModelConfig) {
+    setError(null)
+    try {
+      const updated = await setDefaultAgentModelConfig(config.id)
+      await loadConfigs(updated.id)
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "璁剧疆榛樿妯″瀷澶辫触")
+    }
+  }
+
+  async function deleteConfig() {
+    if (!form.id) return
+    if (typeof window !== "undefined") {
+      const ok = window.confirm(`Delete model config ${form.displayName || form.modelName}?`)
+      if (!ok) return
+    }
+    setSaving(true)
+    setError(null)
+    try {
+      await deleteAgentModelConfig(form.id)
+      setDialogOpen(false)
+      await loadConfigs()
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "鍒犻櫎妯″瀷閰嶇疆澶辫触")
     } finally {
       setSaving(false)
     }
@@ -362,34 +395,12 @@ export function AgentModelSettings() {
     setTestResult(null)
     try {
       setTestResult(form.id && !form.apiKey.trim()
-        ? await testSavedAgentModelConfig(form.id)
+        ? await testSavedAgentModelConfig()
         : await testAgentModelConfig(toPayload(form)))
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "连接测试失败")
+      setError(err instanceof ApiError ? err.message : "杩炴帴娴嬭瘯澶辫触")
     } finally {
       setTesting(false)
-    }
-  }
-
-  async function setDefault(configId: number) {
-    setError(null)
-    try {
-      await setDefaultAgentModelConfig(configId)
-      await loadConfigs(configId)
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "设置默认模型失败")
-    }
-  }
-
-  async function deleteConfig(configId: number) {
-    if (typeof window !== "undefined" && !window.confirm("确认删除这个模型配置吗？已绑定工具或默认模型不能删除。")) return
-    setError(null)
-    try {
-      await deleteAgentModelConfig(configId)
-      await loadConfigs(null)
-      setDialogOpen(false)
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "删除模型配置失败")
     }
   }
 
@@ -397,16 +408,16 @@ export function AgentModelSettings() {
     <div className="space-y-6">
       <Alert>
         <ServerCog className="h-4 w-4" />
-        <AlertTitle>大模型 API 池</AlertTitle>
+        <AlertTitle>Model API</AlertTitle>
         <AlertDescription>
-          管理平台统一维护模型 API。AI 工具可以绑定其中一个模型，未绑定时使用默认模型。
+          Maintain the global model API used by AI tools and agent runs.
         </AlertDescription>
       </Alert>
 
       {error && !dialogOpen ? (
         <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />
-          <AlertTitle>操作失败</AlertTitle>
+          <AlertTitle>Operation failed</AlertTitle>
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       ) : null}
@@ -414,36 +425,39 @@ export function AgentModelSettings() {
       <Card className="min-h-[420px]">
         <CardHeader className="flex flex-row items-start justify-between gap-3">
           <div>
-            <CardTitle>已配置模型</CardTitle>
-            <CardDescription>共 {configs.length} 个模型 API，点击卡片后在浮层中编辑。</CardDescription>
+            <CardTitle>Configured Model</CardTitle>
+            <CardDescription>{configs.length} model API config. Click the card to edit it.</CardDescription>
           </div>
-          <Button size="sm" className="gap-2" onClick={createNew}>
+          <Button className="gap-2" onClick={createConfig}>
             <Plus className="h-4 w-4" />
-            新增
+            Add model
           </Button>
         </CardHeader>
         <CardContent>
           {loading ? (
-            <p className="text-sm text-muted-foreground">正在加载...</p>
+            <p className="text-sm text-muted-foreground">Loading...</p>
           ) : configs.length === 0 ? (
             <div className="flex min-h-64 flex-col items-center justify-center rounded-xl border border-dashed bg-muted/20 p-8 text-center">
               <ServerCog className="mb-3 h-10 w-10 text-muted-foreground" />
-              <p className="font-medium">暂无模型配置</p>
-              <p className="mt-1 text-sm text-muted-foreground">先新增一个模型 API，后续 AI 工具就可以绑定使用。</p>
-              <Button className="mt-4 gap-2" onClick={createNew}>
-                <Plus className="h-4 w-4" />
-                新增模型 API
-              </Button>
+              <p className="font-medium">No model config</p>
+              <p className="mt-1 text-sm text-muted-foreground">The backend will use the built-in mock config until one is saved.</p>
             </div>
           ) : (
             <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
               {configs.map((config) => {
                 const vendor = detectModelVendor(config)
                 return (
-                  <button
+                  <div
                     key={config.id}
-                    type="button"
+                    role="button"
+                    tabIndex={0}
                     onClick={() => editConfig(config)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault()
+                        editConfig(config)
+                      }
+                    }}
                     className={`group w-full rounded-2xl border p-4 text-left transition hover:-translate-y-0.5 hover:border-primary hover:bg-secondary/40 hover:shadow-md ${selectedId === config.id ? "border-primary bg-secondary/70" : "border-border bg-card"}`}
                   >
                     <div className="flex items-start gap-3">
@@ -454,18 +468,33 @@ export function AgentModelSettings() {
                             <p className="truncate text-base font-semibold">{config.displayName || config.modelName}</p>
                             <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{config.modelName}</p>
                           </div>
-                          {config.isDefault ? <Badge>默认</Badge> : null}
+                          {config.isDefault ? <Badge>Default</Badge> : null}
                         </div>
                         <div className="mt-3 flex flex-wrap items-center gap-2">
                           <Badge variant="outline">{vendor.shortName}</Badge>
                           <Badge variant="secondary">{providerMeta(config.provider).label}</Badge>
-                          <Badge variant={config.enabled ? "default" : "secondary"}>{config.enabled ? "启用" : "停用"}</Badge>
+                          <Badge variant={config.enabled ? "default" : "secondary"}>{config.enabled ? "Enabled" : "Disabled"}</Badge>
                           {testStatusBadge(config)}
                         </div>
-                        <p className="mt-3 truncate text-xs text-muted-foreground">{config.baseUrl || "未配置 Base URL"}</p>
+                        {!config.isDefault ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="mt-3 gap-2"
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              setAsDefault(config)
+                            }}
+                          >
+                            <Star className="h-3.5 w-3.5" />
+                            Set default
+                          </Button>
+                        ) : null}
+                        <p className="mt-3 truncate text-xs text-muted-foreground">{config.baseUrl || "Base URL not configured"}</p>
                       </div>
                     </div>
-                  </button>
+                  </div>
                 )
               })}
             </div>
@@ -476,14 +505,14 @@ export function AgentModelSettings() {
       <Dialog open={dialogOpen} onOpenChange={handleDialogOpenChange}>
         <DialogContent className="max-h-[min(92vh,calc(100vh-2rem))] w-full overflow-y-auto sm:max-w-3xl">
           <DialogHeader>
-            <DialogTitle>{form.id ? "编辑模型 API" : "新增模型 API"}</DialogTitle>
+            <DialogTitle>{form.id ? "Edit Model API" : "Add Model API"}</DialogTitle>
             <DialogDescription>{meta.description}</DialogDescription>
           </DialogHeader>
 
           {error ? (
             <Alert variant="destructive">
               <AlertCircle className="h-4 w-4" />
-              <AlertTitle>操作失败</AlertTitle>
+              <AlertTitle>Operation failed</AlertTitle>
               <AlertDescription>{error}</AlertDescription>
             </Alert>
           ) : null}
@@ -491,18 +520,18 @@ export function AgentModelSettings() {
           <div className="space-y-5">
             <div className="grid gap-5 md:grid-cols-2">
               <div className="space-y-2">
-                <Label>配置名称</Label>
-                <Input value={form.displayName} placeholder="例如：MiniMax M2.7 主力模型" onChange={(event) => updateForm("displayName", event.target.value)} />
+                <Label>Config name</Label>
+                <Input value={form.displayName} placeholder="MiniMax M2.7 primary model" onChange={(event) => updateForm("displayName", event.target.value)} />
               </div>
               <div className="space-y-2">
-                <Label>配置编码</Label>
-                <Input value={form.configCode} placeholder="可选，例如 minimax_m27" onChange={(event) => updateForm("configCode", normalizeConfigCode(event.target.value))} />
+                <Label>Config code</Label>
+                <Input value={form.configCode} placeholder="Optional, e.g. minimax_m27" onChange={(event) => updateForm("configCode", normalizeConfigCode(event.target.value))} />
               </div>
             </div>
 
             <div className="grid gap-5 md:grid-cols-2">
               <div className="space-y-2">
-                <Label>供应商协议</Label>
+                <Label>Provider protocol</Label>
                 <Select value={form.provider} onValueChange={(value) => applyProvider(value as AgentModelProvider)}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
@@ -513,7 +542,7 @@ export function AgentModelSettings() {
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label>模型名称</Label>
+                <Label>Model name</Label>
                 <div className="flex items-center gap-3">
                   <VendorIcon vendor={liveVendor} size="sm" />
                   <Input
@@ -523,7 +552,7 @@ export function AgentModelSettings() {
                     onChange={(event) => updateForm("modelName", event.target.value)}
                   />
                 </div>
-                <p className="text-xs text-muted-foreground">根据名称、编码与 Base URL 自动匹配厂商图标：当前识别为「{liveVendor.label}」。</p>
+                <p className="text-xs text-muted-foreground">Detected vendor: {liveVendor.label}</p>
               </div>
             </div>
 
@@ -533,7 +562,7 @@ export function AgentModelSettings() {
                 <Input value={form.baseUrl} placeholder={meta.defaultBaseUrl} onChange={(event) => updateForm("baseUrl", event.target.value)} />
               </div>
               <div className="space-y-2">
-                <Label>超时时间（秒）</Label>
+                <Label>Timeout seconds</Label>
                 <Input type="number" min={1} max={300} value={form.timeoutSeconds} onChange={(event) => updateForm("timeoutSeconds", event.target.value)} />
               </div>
             </div>
@@ -547,21 +576,21 @@ export function AgentModelSettings() {
                     type="password"
                     className="pl-9"
                     value={form.apiKey}
-                    placeholder={form.apiKeyMasked ? `已保存：${form.apiKeyMasked}` : "请输入 API Key"}
+                    placeholder={form.apiKeyMasked ? `Saved: ${form.apiKeyMasked}` : "Enter API Key"}
                     onChange={(event) => updateForm("apiKey", event.target.value)}
                   />
                 </div>
               </div>
               <div className="space-y-2">
-                <Label>LangChain 包</Label>
+                <Label>LangChain package</Label>
                 <Input value={meta.packageName} readOnly />
               </div>
             </div>
 
             <div className="flex flex-wrap items-center justify-between gap-4 rounded-md bg-secondary p-4">
               <div>
-                <p className="font-medium">启用状态</p>
-                <p className="text-sm text-muted-foreground">停用后不会被工具绑定或默认运行使用。</p>
+                <p className="font-medium">Enabled</p>
+                <p className="text-sm text-muted-foreground">Disabled configs are not used by default model calls.</p>
               </div>
               <Switch checked={form.enabled} onCheckedChange={(value) => updateForm("enabled", value)} />
             </div>
@@ -575,42 +604,34 @@ export function AgentModelSettings() {
             {testResult ? (
               <Alert variant={testResult.success ? "default" : "destructive"}>
                 {testResult.success ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
-                <AlertTitle>{testResult.success ? "连接正常" : "连接失败"}</AlertTitle>
+                <AlertTitle>{testResult.success ? "Connection OK" : "Connection failed"}</AlertTitle>
                 <AlertDescription>
-                  {testResult.message}，延迟 {testResult.latencyMs} ms
-                  {testResult.sample ? `，示例：${testResult.sample}` : ""}
+                  {testResult.message}, latency {testResult.latencyMs} ms
+                  {testResult.sample ? `, sample: ${testResult.sample}` : ""}
                 </AlertDescription>
               </Alert>
             ) : null}
           </div>
 
-          <DialogFooter className="flex-wrap justify-between gap-3 sm:justify-between">
-            <div className="flex gap-2">
-              {form.id && !form.isDefault ? (
-                <Button variant="outline" className="gap-2" onClick={() => setDefault(form.id!)} disabled={saving || testing}>
-                  <Star className="h-4 w-4" />
-                  设为默认
-                </Button>
-              ) : null}
-              {form.id ? (
-                <Button variant="outline" className="gap-2 text-destructive" onClick={() => deleteConfig(form.id!)} disabled={saving || testing}>
-                  <Trash2 className="h-4 w-4" />
-                  删除
-                </Button>
-              ) : null}
-            </div>
-            <div className="flex gap-2">
+          <DialogFooter className="flex-wrap justify-end gap-3">
+            {form.id ? (
+              <Button variant="destructive" className="gap-2" onClick={deleteConfig} disabled={saving || testing}>
+                <Trash2 className="h-4 w-4" />
+                Delete
+              </Button>
+            ) : null}
+            <div className="flex flex-wrap gap-2">
               <Button variant="outline" className="gap-2" onClick={() => loadConfigs(form.id)} disabled={loading || saving || testing}>
                 <RefreshCw className={loading ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
-                刷新
+                Refresh
               </Button>
               <Button variant="outline" className="gap-2" onClick={testConfig} disabled={saving || testing}>
                 <Zap className={testing ? "h-4 w-4 animate-pulse" : "h-4 w-4"} />
-                {testing ? "测试中..." : "测试连接"}
+                {testing ? "Testing..." : "Test connection"}
               </Button>
               <Button className="min-w-32 gap-2" onClick={saveConfig} disabled={saving || testing}>
                 {saved ? <CheckCircle2 className="h-4 w-4" /> : <Save className={saving ? "h-4 w-4 animate-spin" : "h-4 w-4"} />}
-                {saved ? "已保存" : saving ? "保存中..." : "保存配置"}
+                {saved ? "Saved" : saving ? "Saving..." : form.id ? "Save config" : "Create config"}
               </Button>
             </div>
           </DialogFooter>

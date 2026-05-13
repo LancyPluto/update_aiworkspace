@@ -1,8 +1,12 @@
 import { http } from './http'
 import type {
   PageResponse,
+  FieldSchemaAdmin,
   ToolCategory,
+  ToolField,
+  ToolFieldPayload,
   ToolSummary,
+  UpsertFieldSchemaPayload,
   UpsertToolCategoryPayload,
   UpsertToolPayload,
 } from './types'
@@ -45,4 +49,20 @@ export function publishTool(toolId: number) {
 
 export function offlineTool(toolId: number) {
   return http.post<ToolSummary>(`/api/admin/v1/tools/${toolId}/offline`)
+}
+
+export function fetchToolFieldSchemas(toolId: number) {
+  return http.get<FieldSchemaAdmin[]>(`/api/admin/v1/tools/${toolId}/field-schemas`)
+}
+
+export function upsertToolFieldSchema(toolId: number, payload: UpsertFieldSchemaPayload) {
+  return http.post<FieldSchemaAdmin>(`/api/admin/v1/tools/${toolId}/field-schemas`, payload)
+}
+
+export function fetchToolFields(toolId: number) {
+  return http.get<ToolField[]>(`/api/admin/v1/tools/${toolId}/fields`)
+}
+
+export function updateToolFields(toolId: number, fields: ToolFieldPayload[]) {
+  return http.put<ToolField[]>(`/api/admin/v1/tools/${toolId}/fields`, { fields })
 }

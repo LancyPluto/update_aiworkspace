@@ -1,0 +1,56 @@
+[
+  {
+    "name": "微信二次跟进防晒衣咨询客户",
+    "input": {
+      "customerType": "新咨询客户",
+      "followupStage": "二次跟进",
+      "communicationChannel": "微信/企微",
+      "customerProfile": "25-35 岁通勤女性，之前咨询过防晒外套",
+      "customerPainPoints": "怕晒、怕闷、想要通勤显瘦",
+      "productOrService": "轻薄防晒外套",
+      "valueProposition": "轻薄透气、显瘦版型、可收纳、多色可选",
+      "followupGoal": "促成下单",
+      "tone": "亲和自然",
+      "lastInteraction": "客户问过浅色是否透、尺码怎么选，但还没有下单",
+      "objectionOrConcern": "担心闷热、尺码不合适",
+      "callToAction": "引导客户提供身高体重，确认尺码后下单",
+      "avoidWords": "保证、一定有效、最低价",
+      "extraInfo": "不要频繁催促，强调如实参考和可选方案"
+    },
+    "expected_output_outline": [
+      "## 客户情况分析",
+      "## 跟进话术",
+      "## 异议处理话术",
+      "## 触达节奏建议",
+      "## 跟进记录建议",
+      "## 合规提醒"
+    ]
+  },
+  {
+    "name": "老客户复购护肤品跟进",
+    "input": {
+      "customerType": "老客户",
+      "followupStage": "复购跟进",
+      "communicationChannel": "电话",
+      "customerProfile": "曾购买补水面膜，偏好温和沟通",
+      "customerPainPoints": "换季干燥、护肤流程想精简",
+      "productOrService": "补水面膜",
+      "valueProposition": "使用方便、贴合度好、适合日常补水场景",
+      "followupGoal": "复购提醒",
+      "tone": "专业克制",
+      "lastInteraction": "上次反馈使用感不错，但不希望频繁被打扰",
+      "objectionOrConcern": "担心囤货过多、使用频率不确定",
+      "callToAction": "确认当前库存和使用频率后再给建议",
+      "avoidWords": "急救、医美级、根治",
+      "extraInfo": "不要承诺治疗或改善皮肤疾病"
+    },
+    "expected_output_outline": [
+      "## 客户情况分析",
+      "## 跟进话术",
+      "## 异议处理话术",
+      "## 触达节奏建议",
+      "## 跟进记录建议",
+      "## 合规提醒"
+    ]
+  }
+]
