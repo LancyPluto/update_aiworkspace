@@ -11,6 +11,7 @@ from client.model_client import (
 from config import settings
 from prompt.renderer import PromptRenderError, render_prompt
 from tools import ToolResultBuildError, build_success_payload
+from tools.output_policy import apply_output_discipline
 from tools.customer_followup_script_generator import (
     build_prompt_payload as build_customer_followup_script_prompt_payload,
 )
@@ -28,6 +29,9 @@ from tools.product_detail_page_copywriter import (
 )
 from tools.product_title_optimizer import (
     build_prompt_payload as build_product_title_prompt_payload,
+)
+from tools.ecommerce_campaign_planner import (
+    build_prompt_payload as build_ecommerce_campaign_prompt_payload,
 )
 from tools.short_video_script_generator import (
     build_prompt_payload as build_short_video_script_prompt_payload,
@@ -67,6 +71,7 @@ class TextTaskHandler:
             self.backend_client.mark_processing(task_id)
 
             system_prompt, user_prompt = self._build_model_prompts(context)
+            system_prompt = apply_output_discipline(system_prompt)
 
             generated_text = self.model_client.generate(
                 user_prompt,
@@ -140,6 +145,10 @@ class TextTaskHandler:
 
         if tool_code == "product_detail_page_copywriter":
             prompt_payload = build_product_detail_copywriter_prompt_payload(context)
+            return prompt_payload["system_prompt"], prompt_payload["user_prompt"]
+
+        if tool_code == "ecommerce_campaign_planner":
+            prompt_payload = build_ecommerce_campaign_prompt_payload(context)
             return prompt_payload["system_prompt"], prompt_payload["user_prompt"]
 
         if tool_code == "short_video_script_generator":

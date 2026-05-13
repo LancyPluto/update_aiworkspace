@@ -2,6 +2,7 @@ import re
 from typing import Any
 
 from tools.errors import ToolResultBuildError
+from tools.text_publishable import bracket_section, strip_blank_join
 
 
 SECTION_PATTERN = re.compile(
@@ -26,9 +27,25 @@ def parse_result_markdown(markdown_text: str) -> dict[str, Any]:
         )
 
     return {
-        "sections": required,
-        "summary": sections["活动目标与策略概览"],
+        "活动目标与策略概览": sections["活动目标与策略概览"].strip(),
+        "活动节奏与阶段安排": sections["活动节奏与阶段安排"].strip(),
+        "玩法设计与资源分配": sections["玩法设计与资源分配"].strip(),
+        "投放与转化建议": sections["投放与转化建议"].strip(),
+        "核心指标与复盘建议": sections["核心指标与复盘建议"].strip(),
     }
+
+
+def format_publishable_text(markdown_text: str) -> str:
+    sections = parse_result_markdown(markdown_text)
+    order = (
+        "活动目标与策略概览",
+        "活动节奏与阶段安排",
+        "玩法设计与资源分配",
+        "投放与转化建议",
+        "核心指标与复盘建议",
+    )
+    parts = [bracket_section(title, sections[title]) for title in order if sections.get(title)]
+    return strip_blank_join(parts)
 
 
 def _extract_sections(markdown_text: str) -> dict[str, str]:

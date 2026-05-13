@@ -2,6 +2,7 @@ import re
 from typing import Any
 
 from tools.errors import ToolResultBuildError
+from tools.text_publishable import bracket_section, strip_blank_join
 
 
 SECTION_PATTERN = re.compile(
@@ -74,3 +75,19 @@ def _extract_sections(markdown_text: str) -> dict[str, str]:
 def _normalize_block(block: str) -> str:
     lines = [line.strip() for line in block.splitlines() if line.strip()]
     return "\n".join(lines)
+
+
+def format_publishable_text(markdown_text: str) -> str:
+    data = parse_result_markdown(markdown_text)
+    # 推荐话术、替代表达优先，便于直接复制发送
+    pairs = (
+        ("推荐话术", data["script"]),
+        ("替代表达", data["alternatives"]),
+        ("追问引导", data["questions"]),
+        ("回应策略", data["strategy"]),
+        ("异议判断", data["diagnosis"]),
+        ("后续动作建议", data["next_steps"]),
+        ("合规提醒", data["compliance"]),
+    )
+    parts = [bracket_section(t, body) for t, body in pairs]
+    return strip_blank_join(parts)

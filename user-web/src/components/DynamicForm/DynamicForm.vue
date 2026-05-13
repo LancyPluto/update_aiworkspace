@@ -1,9 +1,26 @@
 <script setup lang="ts">
 import type { ToolField } from "@/api/types"
 
-defineProps<{
+const props = defineProps<{
   fields: ToolField[]
+  modelValue?: Record<string, unknown>
 }>()
+
+const emit = defineEmits<{
+  (e: "update:modelValue", value: Record<string, unknown>): void
+}>()
+
+function fieldValue(fieldKey: string): string {
+  const value = props.modelValue?.[fieldKey]
+  return value == null ? "" : String(value)
+}
+
+function updateField(fieldKey: string, value: string) {
+  emit("update:modelValue", {
+    ...(props.modelValue ?? {}),
+    [fieldKey]: value,
+  })
+}
 </script>
 
 <template>
@@ -32,6 +49,8 @@ defineProps<{
           :placeholder="f.placeholder || '请输入' + f.fieldName"
           rows="4"
           class="w-full rounded-md border border-border bg-background px-3 py-2 text-sm resize-none"
+          :value="fieldValue(f.fieldKey)"
+          @input="updateField(f.fieldKey, ($event.target as HTMLTextAreaElement).value)"
         ></textarea>
 
         <!-- select 类型 -->
@@ -40,7 +59,13 @@ defineProps<{
             v-for="opt in f.options"
             :key="opt.value"
             type="button"
-            class="rounded-md border px-3 py-1.5 text-xs font-medium transition border-border bg-background text-foreground/70 hover:border-primary/40"
+            class="rounded-md border px-3 py-1.5 text-xs font-medium transition"
+            :class="
+              fieldValue(f.fieldKey) === opt.value
+                ? 'border-primary bg-primary/10 text-primary'
+                : 'border-border bg-background text-foreground/70 hover:border-primary/40'
+            "
+            @click="updateField(f.fieldKey, opt.value)"
           >
             {{ opt.label }}
           </button>
@@ -51,6 +76,8 @@ defineProps<{
           v-else
           :placeholder="f.placeholder || '请输入' + f.fieldName"
           class="flex h-10 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+          :value="fieldValue(f.fieldKey)"
+          @input="updateField(f.fieldKey, ($event.target as HTMLInputElement).value)"
         />
 
         <p v-if="f.placeholder" class="text-[11px] text-muted-foreground">{{ f.placeholder }}</p>

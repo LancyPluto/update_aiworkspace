@@ -42,12 +42,12 @@ public class HttpAgentServiceClient implements AgentServiceClient {
 
     @Override
     public void executeRun(Long runId) {
-        post("/internal/v1/agent/runs/" + runId + "/execute", "{}");
+        postInternal("/internal/v1/agent/runs/" + runId + "/execute", "{}");
     }
 
     @Override
     public void confirmTool(Long runId, String toolCode) {
-        post("/internal/v1/agent/runs/" + runId + "/confirm-tool", "{\"toolCode\":\"" + escapeJson(toolCode) + "\"}");
+        postInternal("/internal/v1/agent/runs/" + runId + "/confirm-tool", "{\"toolCode\":\"" + escapeJson(toolCode) + "\"}");
     }
 
     @Override
@@ -57,7 +57,7 @@ public class HttpAgentServiceClient implements AgentServiceClient {
                 "contentType", contentType == null ? "application/octet-stream" : contentType,
                 "contentBase64", java.util.Base64.getEncoder().encodeToString(content == null ? new byte[0] : content)
         ));
-        String response = post("/internal/v1/files/parse", jsonBody);
+        String response = postInternal("/internal/v1/files/parse", jsonBody);
         try {
             AgentFileParseResult result = objectMapper.readValue(response, AgentFileParseResult.class);
             return result == null ? AgentFileParseResult.fromText(filename, "") : result;
@@ -68,7 +68,18 @@ public class HttpAgentServiceClient implements AgentServiceClient {
 
     @Override
     public AgentModelConfigTestResponse testModelConfig(AgentModelConfigRequest request) {
-        String response = post("/internal/v1/agent/model-config/test", toJson(request));
+        if (!appProperties.getAgent().isEnabled()) {
+            return new AgentModelConfigTestResponse(
+                    false,
+                    request.provider(),
+                    request.modelName(),
+                    0L,
+                    "后端已关闭 Agent 集成（application.yml 中 app.agent.enabled=false），无法向 agent-service 发起测试。"
+                            + "请开启该项并确保 agent-service 可访问后再试。",
+                    ""
+            );
+        }
+        String response = postInternal("/internal/v1/agent/model-config/test", toJson(request));
         try {
             return objectMapper.readValue(response, AgentModelConfigTestResponse.class);
         } catch (JsonProcessingException exception) {
@@ -76,7 +87,7 @@ public class HttpAgentServiceClient implements AgentServiceClient {
         }
     }
 
-    private String post(String path, String jsonBody) {
+    private String postInternal(String path, String jsonBody) {
         if (!appProperties.getAgent().isEnabled()) {
             return "{}";
         }
