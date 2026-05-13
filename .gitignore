@@ -7,6 +7,9 @@
 *.log
 logs/
 
+# runtime data
+backend/data/agent-files/
+
 # local tool bundles
 .tools/
 
@@ -18,6 +21,8 @@ target/
 node_modules/
 dist/
 .vite/
+.next/
+admin-frontend/.next/
 *.tsbuildinfo
 admin-frontend/vite.config.js
 admin-frontend/vite.config.d.ts

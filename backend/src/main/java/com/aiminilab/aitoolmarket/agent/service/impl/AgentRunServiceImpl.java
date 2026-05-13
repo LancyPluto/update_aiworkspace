@@ -565,13 +565,16 @@ public class AgentRunServiceImpl implements AgentRunService {
             return new ModelConnectivityCheck(config, false, "Agent model config is disabled");
         }
         AgentModelConfigRequest request = new AgentModelConfigRequest(
+                null,
+                null,
                 config.provider(),
                 config.modelName(),
                 config.baseUrl(),
                 config.apiKey(),
                 config.minimaxGroupId(),
                 config.timeoutSeconds(),
-                config.enabled()
+                config.enabled(),
+                null
         );
         AgentModelConfigTestResponse result;
         try {
