@@ -38,6 +38,8 @@ import com.aiminilab.aitoolmarket.agent.mapper.AgentRunMapper;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentSessionMapper;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentToolCallMapper;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentToolPreferenceMapper;
+import com.aiminilab.aitoolmarket.agent.mapper.AgentModelConfigMapper;
+import com.aiminilab.aitoolmarket.admin.service.BillingService;
 import com.aiminilab.aitoolmarket.agent.service.AgentModelConfigService;
 import com.aiminilab.aitoolmarket.agent.service.AgentRateLimitService;
 import com.aiminilab.aitoolmarket.agent.service.AgentRunService;
@@ -92,12 +94,14 @@ public class AgentRunServiceImpl implements AgentRunService {
     private final AgentRunEventMapper agentRunEventMapper;
     private final AgentToolCallMapper agentToolCallMapper;
     private final AgentToolPreferenceMapper agentToolPreferenceMapper;
+    private final AgentModelConfigMapper agentModelConfigMapper;
     private final AgentRateLimitService agentRateLimitService;
     private final AgentToolDescriptorService agentToolDescriptorService;
     private final AgentToolPreferenceService agentToolPreferenceService;
     private final AgentModelConfigService agentModelConfigService;
     private final AgentServiceClient agentServiceClient;
     private final CreditService creditService;
+    private final BillingService billingService;
     private final AppProperties appProperties;
     private final ObjectMapper objectMapper;
 
@@ -110,12 +114,14 @@ public class AgentRunServiceImpl implements AgentRunService {
             AgentRunEventMapper agentRunEventMapper,
             AgentToolCallMapper agentToolCallMapper,
             AgentToolPreferenceMapper agentToolPreferenceMapper,
+            AgentModelConfigMapper agentModelConfigMapper,
             AgentRateLimitService agentRateLimitService,
             AgentToolDescriptorService agentToolDescriptorService,
             AgentToolPreferenceService agentToolPreferenceService,
             AgentModelConfigService agentModelConfigService,
             AgentServiceClient agentServiceClient,
             CreditService creditService,
+            BillingService billingService,
             AppProperties appProperties,
             ObjectMapper objectMapper
     ) {
@@ -127,12 +133,14 @@ public class AgentRunServiceImpl implements AgentRunService {
         this.agentRunEventMapper = agentRunEventMapper;
         this.agentToolCallMapper = agentToolCallMapper;
         this.agentToolPreferenceMapper = agentToolPreferenceMapper;
+        this.agentModelConfigMapper = agentModelConfigMapper;
         this.agentRateLimitService = agentRateLimitService;
         this.agentToolDescriptorService = agentToolDescriptorService;
         this.agentToolPreferenceService = agentToolPreferenceService;
         this.agentModelConfigService = agentModelConfigService;
         this.agentServiceClient = agentServiceClient;
         this.creditService = creditService;
+        this.billingService = billingService;
         this.appProperties = appProperties;
         this.objectMapper = objectMapper;
     }
@@ -492,6 +500,8 @@ public class AgentRunServiceImpl implements AgentRunService {
         int consumedCredits = request.consumedCredits() == null ? 0 : Math.max(0, Math.min(request.consumedCredits(), estimatedCredits));
         creditService.settleForAgentRun(run.getUserId(), runId, consumedCredits);
         creditService.releaseForAgentRun(run.getUserId(), runId, estimatedCredits - consumedCredits);
+        billingService.recordUsage("AGENT_RUN", runId, run.getUserId(), agentModelConfigMapper.findLatest(),
+                request.promptTokens(), request.completionTokens(), consumedCredits);
         agentRunMapper.markSuccess(runId, request.intent(), request.modelProviderCode(), request.modelName(), consumedCredits, now);
         appendEventInternal(runId, run.getUserId(), "run.completed", "Agent 运行已完成", null, now);
         agentSessionMapper.touch(run.getSessionId(), now);
@@ -573,6 +583,8 @@ public class AgentRunServiceImpl implements AgentRunService {
                 config.apiKey(),
                 config.minimaxGroupId(),
                 config.timeoutSeconds(),
+                null,
+                null,
                 config.enabled(),
                 null
         );

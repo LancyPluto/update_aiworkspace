@@ -1,0 +1,20 @@
+CREATE TABLE IF NOT EXISTS billing_usage_logs (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  source_type VARCHAR(32) NOT NULL,
+  source_id BIGINT NOT NULL,
+  user_id BIGINT NOT NULL,
+  model_config_id BIGINT,
+  provider VARCHAR(64),
+  model_name VARCHAR(128),
+  prompt_tokens INT NOT NULL DEFAULT 0,
+  completion_tokens INT NOT NULL DEFAULT 0,
+  total_tokens INT NOT NULL DEFAULT 0,
+  input_token_price_per_1k DECIMAL(18,8) NOT NULL DEFAULT 0,
+  output_token_price_per_1k DECIMAL(18,8) NOT NULL DEFAULT 0,
+  cost_amount DECIMAL(18,6) NOT NULL DEFAULT 0,
+  charged_credits INT NOT NULL DEFAULT 0,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_billing_usage_created (created_at),
+  KEY idx_billing_usage_user (user_id),
+  KEY idx_billing_usage_source (source_type, source_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

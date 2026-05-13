@@ -4,6 +4,8 @@ import jakarta.validation.constraints.NotBlank;
 
 public record WorkerSuccessRequest(
         @NotBlank String resourceType,
-        @NotBlank String contentText
+        @NotBlank String contentText,
+        Integer promptTokens,
+        Integer completionTokens
 ) {
 }

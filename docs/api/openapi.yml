@@ -17,6 +17,8 @@ tags:
   - name: 后台工具管理
   - name: 后台任务管理
   - name: 后台用户管理
+  - name: 后台 Agent 模型配置
+  - name: 后台计费管理
   - name: Worker 内部接口
 
 paths:
@@ -788,6 +790,198 @@ paths:
               schema:
                 $ref: "#/components/schemas/CreditAccountApiResponse"
 
+  /api/admin/v1/agent/model-config:
+    get:
+      tags: [后台 Agent 模型配置]
+      summary: 获取默认 Agent 模型配置
+      operationId: getAdminAgentModelConfig
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 默认模型配置
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentModelConfigApiResponse"
+    put:
+      tags: [后台 Agent 模型配置]
+      summary: 保存默认 Agent 模型配置
+      operationId: saveAdminAgentModelConfig
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentModelConfigRequest"
+      responses:
+        "200":
+          description: 保存后的模型配置
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentModelConfigApiResponse"
+    post:
+      tags: [后台 Agent 模型配置]
+      summary: 新增 Agent 模型配置
+      operationId: createAdminAgentModelConfig
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentModelConfigRequest"
+      responses:
+        "200":
+          description: 新增后的模型配置
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentModelConfigApiResponse"
+
+  /api/admin/v1/agent/model-config/list:
+    get:
+      tags: [后台 Agent 模型配置]
+      summary: 查询 Agent 模型配置列表
+      operationId: listAdminAgentModelConfigs
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 模型配置列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentModelConfigListApiResponse"
+
+  /api/admin/v1/agent/model-config/{id}:
+    put:
+      tags: [后台 Agent 模型配置]
+      summary: 更新 Agent 模型配置
+      operationId: updateAdminAgentModelConfig
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentModelConfigRequest"
+      responses:
+        "200":
+          description: 更新后的模型配置
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentModelConfigApiResponse"
+    delete:
+      tags: [后台 Agent 模型配置]
+      summary: 删除 Agent 模型配置
+      operationId: deleteAdminAgentModelConfig
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: 删除成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmptyApiResponse"
+
+  /api/admin/v1/agent/model-config/{id}/default:
+    post:
+      tags: [后台 Agent 模型配置]
+      summary: 设置默认 Agent 模型配置
+      operationId: setDefaultAdminAgentModelConfig
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: 设置默认后的模型配置
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentModelConfigApiResponse"
+
+  /api/admin/v1/agent/model-config/test:
+    post:
+      tags: [后台 Agent 模型配置]
+      summary: 测试 Agent 模型配置连通性
+      operationId: testAdminAgentModelConfig
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentModelConfigRequest"
+      responses:
+        "200":
+          description: 连通性测试结果
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentModelConfigTestApiResponse"
+
+  /api/admin/v1/billing/overview:
+    get:
+      tags: [后台计费管理]
+      summary: 查询今日 token 使用与模型成本概览
+      operationId: getAdminBillingOverview
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 今日计费概览
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingOverviewApiResponse"
+
+  /api/admin/v1/billing/usage-logs:
+    get:
+      tags: [后台计费管理]
+      summary: 查询模型计费日志分页
+      operationId: listAdminBillingUsageLogs
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PageNo"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: 计费日志分页
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingUsageLogPageApiResponse"
+
   /api/internal/v1/tasks/{taskId}/execution-context:
     get:
       tags: [Worker 内部接口]
@@ -1153,6 +1347,48 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/ExecutionContext"
+
+    AgentModelConfigApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/AgentModelConfig"
+
+    AgentModelConfigListApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/AgentModelConfig"
+
+    AgentModelConfigTestApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/AgentModelConfigTestResult"
+
+    BillingOverviewApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/BillingOverview"
+
+    BillingUsageLogPageApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/PageBillingUsageLog"
 
     HealthStatus:
       type: object
@@ -1590,6 +1826,203 @@ components:
           items:
             $ref: "#/components/schemas/ToolField"
 
+    AgentModelConfigRequest:
+      type: object
+      required: [provider, modelName]
+      properties:
+        displayName:
+          type: string
+          nullable: true
+        configCode:
+          type: string
+          nullable: true
+        provider:
+          type: string
+          example: openai
+        modelName:
+          type: string
+          example: gpt-image-1
+        baseUrl:
+          type: string
+          nullable: true
+        apiKey:
+          type: string
+          nullable: true
+        minimaxGroupId:
+          type: string
+          nullable: true
+        timeoutSeconds:
+          type: integer
+          minimum: 1
+          maximum: 300
+          nullable: true
+        inputTokenPricePer1k:
+          type: number
+          format: double
+          minimum: 0
+          nullable: true
+          description: 输入 token 每 1k 成本单价，用于后台成本看板。
+        outputTokenPricePer1k:
+          type: number
+          format: double
+          minimum: 0
+          nullable: true
+          description: 输出 token 每 1k 成本单价，用于后台成本看板。
+        enabled:
+          type: boolean
+          nullable: true
+        isDefault:
+          type: boolean
+          nullable: true
+
+    AgentModelConfig:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        displayName:
+          type: string
+        configCode:
+          type: string
+        provider:
+          type: string
+        modelName:
+          type: string
+        baseUrl:
+          type: string
+          nullable: true
+        apiKeyMasked:
+          type: string
+          description: 脱敏后的 API Key，不返回明文。
+        minimaxGroupId:
+          type: string
+          nullable: true
+        timeoutSeconds:
+          type: integer
+        inputTokenPricePer1k:
+          type: number
+          format: double
+        outputTokenPricePer1k:
+          type: number
+          format: double
+        enabled:
+          type: boolean
+        isDefault:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    AgentModelConfigTestResult:
+      type: object
+      properties:
+        success:
+          type: boolean
+        provider:
+          type: string
+        modelName:
+          type: string
+        latencyMs:
+          type: integer
+          format: int64
+          nullable: true
+        message:
+          type: string
+        sample:
+          type: string
+          nullable: true
+
+    BillingOverview:
+      type: object
+      properties:
+        todayPromptTokens:
+          type: integer
+          format: int64
+        todayCompletionTokens:
+          type: integer
+          format: int64
+        todayTotalTokens:
+          type: integer
+          format: int64
+        todayCostAmount:
+          type: number
+          format: double
+        todayChargedCredits:
+          type: integer
+          format: int64
+        todayUsageCount:
+          type: integer
+          format: int64
+        modelCosts:
+          type: array
+          items:
+            $ref: "#/components/schemas/BillingModelCostPoint"
+
+    BillingModelCostPoint:
+      type: object
+      properties:
+        provider:
+          type: string
+        modelName:
+          type: string
+        totalTokens:
+          type: integer
+          format: int64
+        costAmount:
+          type: number
+          format: double
+        chargedCredits:
+          type: integer
+          format: int64
+
+    BillingUsageLog:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        sourceType:
+          type: string
+          enum: [TASK, AGENT_RUN]
+        sourceId:
+          type: integer
+          format: int64
+        userId:
+          type: integer
+          format: int64
+        modelConfigId:
+          type: integer
+          format: int64
+          nullable: true
+        provider:
+          type: string
+        modelName:
+          type: string
+        promptTokens:
+          type: integer
+        completionTokens:
+          type: integer
+        totalTokens:
+          type: integer
+        inputTokenPricePer1k:
+          type: number
+          format: double
+        outputTokenPricePer1k:
+          type: number
+          format: double
+        costAmount:
+          type: number
+          format: double
+        chargedCredits:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+
     WorkerProcessingRequest:
       type: object
       properties:
@@ -1609,6 +2042,16 @@ components:
           example: MARKDOWN
         contentText:
           type: string
+        promptTokens:
+          type: integer
+          minimum: 0
+          nullable: true
+          description: Worker 实际使用的输入 token 数；传入后后台会写入 billing_usage_logs。
+        completionTokens:
+          type: integer
+          minimum: 0
+          nullable: true
+          description: Worker 实际使用的输出 token 数；传入后后台会按模型单价计算成本。
 
     WorkerFailedRequest:
       type: object
@@ -1657,6 +2100,16 @@ components:
               type: array
               items:
                 $ref: "#/components/schemas/AdminUser"
+
+    PageBillingUsageLog:
+      allOf:
+        - $ref: "#/components/schemas/PageBase"
+        - type: object
+          properties:
+            list:
+              type: array
+              items:
+                $ref: "#/components/schemas/BillingUsageLog"
 
     PageBase:
       type: object
