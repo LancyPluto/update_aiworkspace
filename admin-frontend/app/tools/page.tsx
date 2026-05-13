@@ -54,14 +54,17 @@ import {
   fetchToolFields,
   offlineTool,
   publishTool,
+  updateTool,
   updateToolFields,
 } from "@/lib/api/tools"
+import { fetchAgentModelConfigs } from "@/lib/api/agent-model"
 import { ApiError } from "@/lib/api/http"
-import type { ToolCategory, ToolField, ToolFieldPayload, ToolSummary } from "@/lib/api/types"
+import type { AgentModelConfig, ToolCategory, ToolField, ToolFieldPayload, ToolSummary } from "@/lib/api/types"
 
 interface ToolRow {
   id: string
   rawId: number
+  toolCode: string
   name: string
   description: string
   category: string
@@ -70,22 +73,27 @@ interface ToolRow {
   credits: number
   status: boolean
   rawStatus: string
+  modelConfigId: number | null
+  modelConfigName: string | null
+  modelName: string | null
 }
 
-interface CreateForm {
+interface ToolForm {
   toolCode: string
   toolName: string
   description: string
   categoryId: string
   estimatedCreditCost: string
+  modelConfigId: string
 }
 
-const initialForm: CreateForm = {
+const initialForm: ToolForm = {
   toolCode: "",
   toolName: "",
   description: "",
   categoryId: "",
   estimatedCreditCost: "5",
+  modelConfigId: "",
 }
 
 const CATEGORY_ICON_MAP: Record<string, LucideIcon> = {
@@ -106,6 +114,7 @@ function mapTool(tool: ToolSummary): ToolRow {
   return {
     id: String(tool.id),
     rawId: tool.id,
+    toolCode: tool.toolCode,
     name: tool.toolName,
     description: tool.description || "No description",
     category: tool.categoryName || "Uncategorized",
@@ -114,19 +123,24 @@ function mapTool(tool: ToolSummary): ToolRow {
     credits: tool.estimatedCreditCost ?? 0,
     status: (tool.status || "").toUpperCase() === "ONLINE",
     rawStatus: tool.status,
+    modelConfigId: tool.modelConfigId ?? null,
+    modelConfigName: tool.modelConfigName || null,
+    modelName: tool.modelName || null,
   }
 }
 
 export default function ToolsPage() {
   const [searchQuery, setSearchQuery] = useState("")
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
+  const [editingTool, setEditingTool] = useState<ToolRow | null>(null)
   const [toolList, setToolList] = useState<ToolRow[]>([])
   const [categories, setCategories] = useState<ToolCategory[]>([])
+  const [modelConfigs, setModelConfigs] = useState<AgentModelConfig[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [togglingId, setTogglingId] = useState<number | null>(null)
   const [submitting, setSubmitting] = useState(false)
-  const [form, setForm] = useState<CreateForm>(initialForm)
+  const [form, setForm] = useState<ToolForm>(initialForm)
   const [formError, setFormError] = useState<string | null>(null)
   const [fieldDialogOpen, setFieldDialogOpen] = useState(false)
   const [fieldTool, setFieldTool] = useState<ToolRow | null>(null)
@@ -145,6 +159,8 @@ export default function ToolsPage() {
       ])
       setToolList(toolsResp.list.map(mapTool))
       setCategories(cats)
+      const configs = await fetchAgentModelConfigs().catch(() => [] as AgentModelConfig[])
+      setModelConfigs(configs.filter((config) => config.enabled !== false))
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to load tools")
     } finally {
@@ -183,11 +199,25 @@ export default function ToolsPage() {
     }
   }
 
-  function updateForm<K extends keyof CreateForm>(key: K, value: CreateForm[K]) {
+  function updateForm<K extends keyof ToolForm>(key: K, value: ToolForm[K]) {
     setForm((prev) => ({ ...prev, [key]: value }))
   }
 
-  async function handleCreate() {
+  function openEditDialog(tool: ToolRow) {
+    setEditingTool(tool)
+    setForm({
+      toolCode: tool.toolCode,
+      toolName: tool.name,
+      description: tool.description === "No description" ? "" : tool.description,
+      categoryId: tool.categoryId ? String(tool.categoryId) : "",
+      estimatedCreditCost: String(tool.credits),
+      modelConfigId: tool.modelConfigId ? String(tool.modelConfigId) : "",
+    })
+    setFormError(null)
+    setIsAddDialogOpen(true)
+  }
+
+  async function handleSaveTool() {
     setFormError(null)
     if (!form.toolName.trim()) {
       setFormError("Tool name is required")
@@ -204,19 +234,27 @@ export default function ToolsPage() {
     }
     setSubmitting(true)
     try {
-      const created = await createTool({
+      const payload = {
         toolCode: form.toolCode.trim() || undefined,
         toolName: form.toolName.trim(),
         categoryId: Number(form.categoryId),
         description: form.description.trim() || undefined,
         estimatedCreditCost: Math.floor(credits),
-      })
-      const published = await publishTool(created.id)
-      setToolList((prev) => [mapTool(published), ...prev])
+        modelConfigId: form.modelConfigId ? Number(form.modelConfigId) : null,
+      }
+      if (editingTool) {
+        const updated = await updateTool(editingTool.rawId, payload)
+        setToolList((prev) => prev.map((tool) => (tool.rawId === editingTool.rawId ? mapTool(updated) : tool)))
+      } else {
+        const created = await createTool(payload)
+        const published = await publishTool(created.id)
+        setToolList((prev) => [mapTool(published), ...prev])
+      }
       setForm(initialForm)
+      setEditingTool(null)
       setIsAddDialogOpen(false)
     } catch (err) {
-      setFormError(err instanceof ApiError ? err.message : "Failed to create tool")
+      setFormError(err instanceof ApiError ? err.message : "Failed to save tool")
     } finally {
       setSubmitting(false)
     }
@@ -289,6 +327,7 @@ export default function ToolsPage() {
               setIsAddDialogOpen(open)
               if (!open) {
                 setForm(initialForm)
+                setEditingTool(null)
                 setFormError(null)
               }
             }}
@@ -301,8 +340,8 @@ export default function ToolsPage() {
             </DialogTrigger>
             <DialogContent className="bg-card border-border max-w-lg">
               <DialogHeader>
-                <DialogTitle>Add AI Tool</DialogTitle>
-                <DialogDescription>{formError || "Create a new AI tool."}</DialogDescription>
+                <DialogTitle>{editingTool ? "Edit AI Tool" : "Add AI Tool"}</DialogTitle>
+                <DialogDescription>{formError || "Configure the tool and its model binding."}</DialogDescription>
               </DialogHeader>
               <div className="space-y-4 py-4">
                 <div className="space-y-2">
@@ -340,15 +379,36 @@ export default function ToolsPage() {
                 </div>
                 <div className="space-y-2">
                   <Label>Tool code</Label>
-                  <Input value={form.toolCode} onChange={(event) => updateForm("toolCode", event.target.value)} placeholder="Optional" />
+                  <Input
+                    value={form.toolCode}
+                    onChange={(event) => updateForm("toolCode", event.target.value)}
+                    placeholder="Optional"
+                    disabled={Boolean(editingTool)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Model config</Label>
+                  <Select value={form.modelConfigId || "default"} onValueChange={(value) => updateForm("modelConfigId", value === "default" ? "" : value)}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Use default model config" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="default">Use default model config</SelectItem>
+                      {modelConfigs.map((config) => (
+                        <SelectItem key={config.id} value={String(config.id)}>
+                          {config.displayName || config.modelName} · {config.provider}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
               <DialogFooter>
                 <Button variant="outline" onClick={() => setIsAddDialogOpen(false)} disabled={submitting}>
                   Cancel
                 </Button>
-                <Button onClick={handleCreate} disabled={submitting}>
-                  {submitting ? "Creating..." : "Create Tool"}
+                <Button onClick={handleSaveTool} disabled={submitting}>
+                  {submitting ? "Saving..." : editingTool ? "Save Tool" : "Create Tool"}
                 </Button>
               </DialogFooter>
             </DialogContent>
@@ -381,7 +441,7 @@ export default function ToolsPage() {
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="bg-card border-border">
-                    <DropdownMenuItem className="gap-2" disabled>
+                    <DropdownMenuItem className="gap-2" onClick={() => openEditDialog(tool)}>
                       <Pencil className="h-4 w-4" /> Edit
                     </DropdownMenuItem>
                     <DropdownMenuItem className="gap-2" onClick={() => openFieldDialog(tool)}>
@@ -408,6 +468,9 @@ export default function ToolsPage() {
                   <div className="text-muted-foreground">{tool.rawStatus}</div>
                 </div>
                 <Switch checked={tool.status} disabled={togglingId === tool.rawId} onCheckedChange={() => toggleToolStatus(tool.id)} />
+              </div>
+              <div className="mt-3 rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+                Model: {tool.modelConfigName || tool.modelName || "Default model config"}
               </div>
             </div>
           ))}

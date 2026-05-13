@@ -76,7 +76,12 @@ class TextTaskHandler:
             generated_text = self.model_client.generate(
                 user_prompt,
                 system_prompt=system_prompt,
+                provider=context.get("modelProviderCode"),
                 model_name=context.get("modelName"),
+                base_url=context.get("modelApiBaseUrl"),
+                api_key=context.get("modelApiKey"),
+                timeout_seconds=context.get("modelTimeoutSeconds"),
+                max_tokens=context.get("modelMaxTokens"),
             )
 
             success_payload = build_success_payload(context, generated_text)
@@ -185,9 +190,18 @@ class TextTaskHandler:
 
     def _normalize_execution_context(self, context: dict[str, Any]) -> dict[str, Any]:
         normalized = dict(context)
+        model_config = normalized.get("modelConfig") or {}
         normalized.setdefault("outputFormat", "MARKDOWN")
-        normalized.setdefault("modelProviderCode", settings.model_provider)
-        normalized.setdefault("modelName", self.model_client.default_model_name)
+        normalized["modelProviderCode"] = (
+            normalized.get("modelProviderCode") or model_config.get("provider") or settings.model_provider
+        )
+        normalized["modelName"] = (
+            normalized.get("modelName") or model_config.get("modelName") or self.model_client.default_model_name
+        )
+        normalized["modelApiBaseUrl"] = model_config.get("baseUrl") or settings.model_api_base_url
+        normalized["modelApiKey"] = model_config.get("apiKey") or settings.model_api_key
+        normalized["modelTimeoutSeconds"] = model_config.get("timeoutSeconds")
+        normalized["modelMaxTokens"] = 1024
         return normalized
 
     def _mark_failed(self, task_id: int, *, error_code: str, error_message: str) -> dict[str, Any]:

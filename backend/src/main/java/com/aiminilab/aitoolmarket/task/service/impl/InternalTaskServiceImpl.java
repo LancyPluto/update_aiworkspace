@@ -1,10 +1,13 @@
 package com.aiminilab.aitoolmarket.task.service.impl;
 
+import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
+import com.aiminilab.aitoolmarket.agent.mapper.AgentModelConfigMapper;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.enums.TaskStatus;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.credit.service.CreditService;
 import com.aiminilab.aitoolmarket.task.dto.ExecutionContextResponse;
+import com.aiminilab.aitoolmarket.task.dto.ExecutionModelConfigResponse;
 import com.aiminilab.aitoolmarket.task.dto.TaskStatusResponse;
 import com.aiminilab.aitoolmarket.task.dto.WorkerFailedRequest;
 import com.aiminilab.aitoolmarket.task.dto.WorkerProcessingRequest;
@@ -26,13 +29,16 @@ import java.util.List;
 public class InternalTaskServiceImpl implements InternalTaskService {
 
     private final TaskMapper taskMapper;
+    private final AgentModelConfigMapper agentModelConfigMapper;
     private final ToolFieldItemMapper toolFieldItemMapper;
     private final ObjectMapper objectMapper;
     private final CreditService creditService;
 
-    public InternalTaskServiceImpl(TaskMapper taskMapper, ToolFieldItemMapper toolFieldItemMapper, ObjectMapper objectMapper,
+    public InternalTaskServiceImpl(TaskMapper taskMapper, AgentModelConfigMapper agentModelConfigMapper,
+                                   ToolFieldItemMapper toolFieldItemMapper, ObjectMapper objectMapper,
                                    CreditService creditService) {
         this.taskMapper = taskMapper;
+        this.agentModelConfigMapper = agentModelConfigMapper;
         this.toolFieldItemMapper = toolFieldItemMapper;
         this.objectMapper = objectMapper;
         this.creditService = creditService;
@@ -44,7 +50,9 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         List<ToolFieldResponse> fields = toolFieldItemMapper.findActiveFields(task.getToolId()).stream()
                 .map(field -> ToolFieldResponse.from(field, objectMapper))
                 .toList();
-        return ExecutionContextResponse.of(task, parseParams(task.getParamsJson()), fields);
+        AgentModelConfig modelConfig = agentModelConfigMapper.findForToolExecution(task.getToolId());
+        return ExecutionContextResponse.of(task, parseParams(task.getParamsJson()),
+                ExecutionModelConfigResponse.from(modelConfig), fields);
     }
 
     @Override
