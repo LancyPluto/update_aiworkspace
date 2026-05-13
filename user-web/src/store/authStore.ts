@@ -9,8 +9,9 @@ import {
   smsLogin as apiSmsLogin,
   smsRegister as apiSmsRegister,
 } from "@/api"
+import { SESSION_TOKEN_STORAGE_KEY } from "@/constants/authStorage"
 
-const TOKEN_KEY = "ai_tool_market_token"
+const TOKEN_KEY = SESSION_TOKEN_STORAGE_KEY
 
 export const useAuthStore = defineStore("auth", () => {
   const token = ref<string | null>(localStorage.getItem(TOKEN_KEY))

@@ -1,5 +1,6 @@
 import type { ApiErrorCode, ApiResponse } from "./types"
-import { getSessionBearerJwt } from "./sessionBearer"
+import { SESSION_TOKEN_STORAGE_KEY } from "@/constants/authStorage"
+import { clearSessionBearerJwt, getSessionBearerJwt } from "./sessionBearer"
 
 /**
  * 后端 Origin，不含路径。例如 http://localhost:8080
@@ -51,6 +52,23 @@ function buildUrl(path: string, query?: RequestOptions["query"]): string {
   return url.toString()
 }
 
+function redirectToLoginPage(): void {
+  if (typeof window === "undefined") return
+  const path = window.location.pathname
+  if (path === "/login" || path.endsWith("/login")) return
+  try {
+    localStorage.removeItem(SESSION_TOKEN_STORAGE_KEY)
+  } catch {
+    // ignore
+  }
+  clearSessionBearerJwt()
+  const full = `${window.location.pathname}${window.location.search}`
+  const base = import.meta.env.BASE_URL || "/"
+  const normalizedBase = base.endsWith("/") ? base.slice(0, -1) : base
+  const loginPath = (normalizedBase ? `${normalizedBase}/login` : "/login").replace(/\/+/g, "/")
+  window.location.assign(`${window.location.origin}${loginPath}?redirect=${encodeURIComponent(full)}`)
+}
+
 /**
  * 统一解析契约响应壳；code !== SUCCESS 时抛 ApiBusinessError。
  * credentials + Cookie；Authorization 使用 options.token 或登录后 sessionBearer（与 Cookie 中 JWT 一致）。
@@ -87,11 +105,21 @@ export async function apiRequest<T>(
     signal: options?.signal,
   })
 
+  const rawText = await res.text()
   let json: ApiResponse<T>
   try {
-    json = (await res.json()) as ApiResponse<T>
+    json = (rawText ? JSON.parse(rawText) : {}) as ApiResponse<T>
   } catch {
+    if (res.status === 401) {
+      redirectToLoginPage()
+      throw new ApiBusinessError("UNAUTHORIZED", "登录已失效，请重新登录", undefined)
+    }
     throw new ApiBusinessError("SYSTEM_ERROR", `无效响应 (${res.status})`, undefined)
+  }
+
+  if (res.status === 401 || json.code === "UNAUTHORIZED") {
+    redirectToLoginPage()
+    throw new ApiBusinessError(json.code ?? "UNAUTHORIZED", json.message ?? "登录已失效，请重新登录", json.requestId)
   }
 
   if (json.code !== "SUCCESS") {

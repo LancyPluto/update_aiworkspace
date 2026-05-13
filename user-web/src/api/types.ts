@@ -149,7 +149,7 @@ export interface ToolFieldOption {
 export interface ToolField {
   fieldKey: string
   fieldName: string
-  fieldType: "text" | "textarea" | "select"
+  fieldType: "text" | "textarea" | "select" | "number"
   placeholder?: string | null
   options?: ToolFieldOption[] | null
   required: boolean

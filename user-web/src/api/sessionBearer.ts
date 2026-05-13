@@ -29,3 +29,12 @@ export function getSessionBearerJwt(): string | null {
   }
   return null
 }
+
+export function clearSessionBearerJwt(): void {
+  memoryJwt = null
+  try {
+    sessionStorage.removeItem(STORAGE_KEY)
+  } catch {
+    // ignore
+  }
+}
