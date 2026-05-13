@@ -1,5 +1,5 @@
 export { apiRequest, ApiBusinessError } from "./client"
-export { login, logout, register } from "./authApi"
+export { login, logout, register, sendSmsCode, smsLogin, smsRegister } from "./authApi"
 export { getCurrentUser } from "./userApi"
 export { fetchToolCategories, fetchTools, searchTools, fetchToolByCode } from "./toolApi"
 export {

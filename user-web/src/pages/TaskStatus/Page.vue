@@ -44,33 +44,65 @@ function isTerminal(s: TaskStatus): boolean {
 
 async function loadStatus() {
   if (!props.taskId) return
+  statusLoadAbort?.abort()
+  statusLoadAbort = new AbortController()
+  const signal = statusLoadAbort.signal
   try {
-    statusData.value = await fetchTaskStatus(props.taskId, { token: auth.token })
+    statusData.value = await fetchTaskStatus(props.taskId, { token: auth.token, signal })
+    if (signal.aborted) return
     error.value = null
+    if (statusData.value && isTerminal(statusData.value.status)) {
+      clearStatusPolling()
+    }
   } catch (e) {
+    if (signal.aborted || isAbortError(e)) return
     error.value = (e as Error).message || "获取任务状态失败"
   } finally {
-    loading.value = false
+    if (!signal.aborted) loading.value = false
   }
 }
 
+function isAbortError(e: unknown): boolean {
+  return e instanceof DOMException && e.name === "AbortError"
+}
+
 let intervalId: ReturnType<typeof setInterval> | undefined
+let statusLoadAbort: AbortController | undefined
+
+function clearStatusPolling() {
+  if (intervalId !== undefined) {
+    clearInterval(intervalId)
+    intervalId = undefined
+  }
+  statusLoadAbort?.abort()
+  statusLoadAbort = undefined
+}
+
+function tickStatusPoll() {
+  if (typeof document !== "undefined" && document.hidden) return
+  if (statusData.value && isTerminal(statusData.value.status)) {
+    clearStatusPolling()
+    return
+  }
+  void loadStatus()
+}
+
+function onTaskStatusVisibilityChange() {
+  if (typeof document === "undefined" || document.hidden) return
+  if (!props.taskId) return
+  if (statusData.value && isTerminal(statusData.value.status)) return
+  void loadStatus()
+}
 
 onMounted(() => {
-  loadStatus()
-  // 任务未完成时轮询
-  intervalId = setInterval(() => {
-    if (statusData.value && !isTerminal(statusData.value.status)) {
-      loadStatus()
-    } else if (statusData.value && isTerminal(statusData.value.status)) {
-      // 已完成则停止轮询
-      if (intervalId) clearInterval(intervalId)
-    }
-  }, 3000)
+  void loadStatus()
+  intervalId = setInterval(tickStatusPoll, 3000)
+  document.addEventListener("visibilitychange", onTaskStatusVisibilityChange)
 })
 
 onUnmounted(() => {
-  if (intervalId) clearInterval(intervalId)
+  document.removeEventListener("visibilitychange", onTaskStatusVisibilityChange)
+  clearStatusPolling()
 })
 </script>
 

@@ -78,11 +78,31 @@ export interface LoginResponse {
   user?: UserProfile
 }
 
+export type SmsCodeScene = "REGISTER" | "LOGIN"
+
+export interface SmsCodeRequest {
+  phone: string
+  scene: SmsCodeScene
+}
+
+export interface SmsCodeResponse {
+  expiresInSeconds: number
+  cooldownSeconds: number
+  debugCode?: string | null
+}
+
+export interface SmsAuthRequest {
+  phone: string
+  code: string
+  nickname?: string
+}
+
 export interface RegisterRequest {
-  username: string
+  username?: string
   password: string
-  email?: string
   phone?: string
+  email?: string
+  nickname?: string
 }
 
 /** GET /api/v1/users/me —— UserProfile */
