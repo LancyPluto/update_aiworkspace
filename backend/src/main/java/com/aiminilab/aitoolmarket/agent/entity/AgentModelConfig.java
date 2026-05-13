@@ -3,6 +3,7 @@ package com.aiminilab.aitoolmarket.agent.entity;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @TableName("agent_model_configs")
@@ -17,6 +18,8 @@ public class AgentModelConfig {
     private String apiKey;
     private String minimaxGroupId;
     private Integer timeoutSeconds;
+    private BigDecimal inputTokenPricePer1k;
+    private BigDecimal outputTokenPricePer1k;
     private Boolean enabled;
     private Boolean isDefault;
     private LocalDateTime createdAt;
@@ -40,6 +43,10 @@ public class AgentModelConfig {
     public void setMinimaxGroupId(String minimaxGroupId) { this.minimaxGroupId = minimaxGroupId; }
     public Integer getTimeoutSeconds() { return timeoutSeconds; }
     public void setTimeoutSeconds(Integer timeoutSeconds) { this.timeoutSeconds = timeoutSeconds; }
+    public BigDecimal getInputTokenPricePer1k() { return inputTokenPricePer1k; }
+    public void setInputTokenPricePer1k(BigDecimal inputTokenPricePer1k) { this.inputTokenPricePer1k = inputTokenPricePer1k; }
+    public BigDecimal getOutputTokenPricePer1k() { return outputTokenPricePer1k; }
+    public void setOutputTokenPricePer1k(BigDecimal outputTokenPricePer1k) { this.outputTokenPricePer1k = outputTokenPricePer1k; }
     public Boolean getEnabled() { return enabled; }
     public void setEnabled(Boolean enabled) { this.enabled = enabled; }
     public Boolean getDefault() { return isDefault; }

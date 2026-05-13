@@ -50,6 +50,8 @@ export async function testSavedAgentModelConfig() {
     baseUrl: config.baseUrl || undefined,
     minimaxGroupId: config.minimaxGroupId || undefined,
     timeoutSeconds: config.timeoutSeconds,
+    inputTokenPricePer1k: config.inputTokenPricePer1k || 0,
+    outputTokenPricePer1k: config.outputTokenPricePer1k || 0,
     enabled: config.enabled,
     isDefault: config.isDefault ?? true,
   })

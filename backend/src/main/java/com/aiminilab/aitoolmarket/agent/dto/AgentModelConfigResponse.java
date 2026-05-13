@@ -2,6 +2,7 @@ package com.aiminilab.aitoolmarket.agent.dto;
 
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 public record AgentModelConfigResponse(
@@ -14,6 +15,8 @@ public record AgentModelConfigResponse(
         String apiKeyMasked,
         String minimaxGroupId,
         Integer timeoutSeconds,
+        BigDecimal inputTokenPricePer1k,
+        BigDecimal outputTokenPricePer1k,
         Boolean enabled,
         Boolean isDefault,
         LocalDateTime createdAt,
@@ -30,6 +33,8 @@ public record AgentModelConfigResponse(
                 mask(config.getApiKey()),
                 config.getMinimaxGroupId(),
                 config.getTimeoutSeconds(),
+                config.getInputTokenPricePer1k(),
+                config.getOutputTokenPricePer1k(),
                 config.getEnabled(),
                 config.getDefault(),
                 config.getCreatedAt(),

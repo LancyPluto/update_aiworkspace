@@ -340,9 +340,29 @@ CREATE TABLE agent_model_configs (
   api_key VARCHAR(512),
   minimax_group_id VARCHAR(128),
   timeout_seconds INT NOT NULL DEFAULT 60,
+  input_token_price_per_1k DECIMAL(18,8) NOT NULL DEFAULT 0,
+  output_token_price_per_1k DECIMAL(18,8) NOT NULL DEFAULT 0,
   enabled TINYINT NOT NULL DEFAULT 1,
   is_default TINYINT NOT NULL DEFAULT 0,
   is_deleted TINYINT NOT NULL DEFAULT 0,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE billing_usage_logs (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  source_type VARCHAR(32) NOT NULL,
+  source_id BIGINT NOT NULL,
+  user_id BIGINT NOT NULL,
+  model_config_id BIGINT,
+  provider VARCHAR(64),
+  model_name VARCHAR(128),
+  prompt_tokens INT NOT NULL DEFAULT 0,
+  completion_tokens INT NOT NULL DEFAULT 0,
+  total_tokens INT NOT NULL DEFAULT 0,
+  input_token_price_per_1k DECIMAL(18,8) NOT NULL DEFAULT 0,
+  output_token_price_per_1k DECIMAL(18,8) NOT NULL DEFAULT 0,
+  cost_amount DECIMAL(18,6) NOT NULL DEFAULT 0,
+  charged_credits INT NOT NULL DEFAULT 0,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
