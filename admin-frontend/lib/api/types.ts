@@ -133,6 +133,7 @@ export interface AdminTaskApiPayload {
   taskId: number
   taskNo: string
   userId: number
+  userNickname?: string | null
   toolCode: string
   toolName: string
   status: string
@@ -222,6 +223,8 @@ export type AgentModelProvider = 'mock' | 'openai_compatible' | 'anthropic_compa
 
 export interface AgentModelConfig {
   id: number
+  displayName?: string | null
+  configCode?: string | null
   provider: AgentModelProvider | string
   modelName: string
   baseUrl?: string | null
@@ -229,11 +232,48 @@ export interface AgentModelConfig {
   minimaxGroupId?: string | null
   timeoutSeconds: number
   enabled: boolean
+  isDefault?: boolean | null
   createdAt?: string | null
   updatedAt?: string | null
 }
 
+export interface ToolField {
+  fieldKey: string
+  fieldName: string
+  fieldType: string
+  placeholder?: string | null
+  options?: unknown
+  optionsJson?: string | null
+  required?: boolean
+  sortOrder?: number
+}
+
+export interface ToolFieldPayload {
+  fieldKey: string
+  fieldName: string
+  fieldType: string
+  placeholder?: string
+  optionsJson?: string
+  validationJson?: string
+  required?: boolean
+  sortOrder?: number
+}
+
+export interface FieldSchemaAdmin {
+  id: number
+  schemaVersion: string
+  status: string
+  items: ToolField[]
+}
+
+export interface UpsertFieldSchemaPayload {
+  schemaVersion: string
+  items: ToolFieldPayload[]
+}
+
 export interface AgentModelConfigPayload {
+  displayName?: string
+  configCode?: string
   provider: AgentModelProvider | string
   modelName: string
   baseUrl?: string
@@ -241,6 +281,7 @@ export interface AgentModelConfigPayload {
   minimaxGroupId?: string
   timeoutSeconds?: number
   enabled?: boolean
+  isDefault?: boolean
 }
 
 export interface AgentModelConfigTestResult {
@@ -250,4 +291,87 @@ export interface AgentModelConfigTestResult {
   latencyMs: number
   message: string
   sample: string
+}
+
+export interface AdminAgentRunListItem {
+  id: number
+  sessionId: number
+  userId: number
+  status: string
+  intent?: string | null
+  modelProviderCode?: string | null
+  modelName?: string | null
+  estimatedCredits?: number | null
+  consumedCredits?: number | null
+  errorCode?: string | null
+  errorMessage?: string | null
+  eventCount?: number | null
+  toolCallCount?: number | null
+  startedAt?: string | null
+  finishedAt?: string | null
+  createdAt?: string | null
+  updatedAt?: string | null
+}
+
+export interface AgentRunEvent {
+  id: number
+  runId: number
+  eventType: string
+  eventText?: string | null
+  eventJson?: string | null
+  createdAt?: string | null
+}
+
+export interface AgentToolCall {
+  id: number
+  runId: number
+  toolCode: string
+  toolName?: string | null
+  status: string
+  argumentsJson?: string | null
+  resultJson?: string | null
+  errorMessage?: string | null
+  createdAt?: string | null
+  updatedAt?: string | null
+}
+
+export interface AgentRun {
+  id: number
+  sessionId: number
+  userId: number
+  status: string
+  intent?: string | null
+  modelProviderCode?: string | null
+  modelName?: string | null
+  estimatedCredits?: number | null
+  consumedCredits?: number | null
+  errorCode?: string | null
+  errorMessage?: string | null
+  startedAt?: string | null
+  finishedAt?: string | null
+  createdAt?: string | null
+  updatedAt?: string | null
+}
+
+export interface AdminAgentRunDetail {
+  run: AgentRun
+  events: AgentRunEvent[]
+  toolCalls: AgentToolCall[]
+}
+
+export interface AdminAgentRunStats {
+  totalRuns: number
+  activeRuns: number
+  successRuns: number
+  failedRuns: number
+  cancelledRuns: number
+  toolCalls: number
+  totalConsumedCredits: number
+}
+
+export interface AdminAgentRunQuery {
+  status?: string
+  userId?: number
+  pageNo?: number
+  pageSize?: number
 }

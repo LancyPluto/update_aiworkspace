@@ -331,6 +331,8 @@ CREATE TABLE agent_file_chunks (
 
 CREATE TABLE agent_model_configs (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  display_name VARCHAR(128),
+  config_code VARCHAR(64),
   provider VARCHAR(64) NOT NULL,
   model_name VARCHAR(128) NOT NULL,
   base_url VARCHAR(512),
@@ -338,6 +340,8 @@ CREATE TABLE agent_model_configs (
   minimax_group_id VARCHAR(128),
   timeout_seconds INT NOT NULL DEFAULT 60,
   enabled TINYINT NOT NULL DEFAULT 1,
+  is_default TINYINT NOT NULL DEFAULT 0,
+  is_deleted TINYINT NOT NULL DEFAULT 0,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

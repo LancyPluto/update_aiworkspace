@@ -14,6 +14,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Set;
 
 @Service
@@ -35,31 +36,98 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
     }
 
     @Override
+    public List<AgentModelConfigResponse> adminList() {
+        List<AgentModelConfig> configs = agentModelConfigMapper.findAllActive();
+        if (configs.isEmpty()) {
+            return List.of(AgentModelConfigResponse.from(findOrDefault()));
+        }
+        return configs.stream().map(AgentModelConfigResponse::from).toList();
+    }
+
+    @Override
     @Transactional
-    public AgentModelConfigResponse adminSave(AgentModelConfigRequest request) {
+    public AgentModelConfigResponse adminCreate(AgentModelConfigRequest request) {
         validate(request);
         LocalDateTime now = LocalDateTime.now();
+        AgentModelConfig config = applyRequest(new AgentModelConfig(), request, null, now);
+        config.setCreatedAt(now);
+        agentModelConfigMapper.insertConfig(config);
+        if (Boolean.TRUE.equals(config.getDefault())) {
+            agentModelConfigMapper.clearDefaultExcept(config.getId());
+        }
+        return AgentModelConfigResponse.from(config);
+    }
+
+    @Override
+    @Transactional
+    public AgentModelConfigResponse adminUpdate(Long id, AgentModelConfigRequest request) {
+        validate(request);
+        AgentModelConfig existing = findActiveOrThrow(id);
+        AgentModelConfig config = applyRequest(existing, request, existing, LocalDateTime.now());
+        agentModelConfigMapper.updateConfig(config);
+        if (Boolean.TRUE.equals(config.getDefault())) {
+            agentModelConfigMapper.clearDefaultExcept(config.getId());
+        }
+        return AgentModelConfigResponse.from(config);
+    }
+
+    @Override
+    @Transactional
+    public AgentModelConfigResponse adminSave(AgentModelConfigRequest request) {
         AgentModelConfig existing = agentModelConfigMapper.findLatest();
-        AgentModelConfig config = existing == null ? new AgentModelConfig() : existing;
+        if (existing == null) {
+            return adminCreate(request);
+        }
+        return adminUpdate(existing.getId(), request);
+    }
+
+    @Override
+    @Transactional
+    public AgentModelConfigResponse adminSetDefault(Long id) {
+        AgentModelConfig existing = findActiveOrThrow(id);
+        agentModelConfigMapper.setDefault(id);
+        existing.setDefault(true);
+        existing.setUpdatedAt(LocalDateTime.now());
+        return AgentModelConfigResponse.from(existing);
+    }
+
+    @Override
+    @Transactional
+    public void adminDelete(Long id) {
+        AgentModelConfig existing = findActiveOrThrow(id);
+        if (Boolean.TRUE.equals(existing.getDefault())) {
+            List<AgentModelConfig> others = agentModelConfigMapper.findAllActive().stream()
+                    .filter(config -> !config.getId().equals(id))
+                    .toList();
+            if (!others.isEmpty()) {
+                agentModelConfigMapper.setDefault(others.get(0).getId());
+            }
+        }
+        agentModelConfigMapper.softDelete(id);
+    }
+
+    private AgentModelConfig applyRequest(AgentModelConfig config,
+                                          AgentModelConfigRequest request,
+                                          AgentModelConfig existing,
+                                          LocalDateTime now) {
+        config.setDisplayName(blankToNull(request.displayName()));
+        config.setConfigCode(blankToNull(request.configCode()));
         config.setProvider(request.provider().trim());
         config.setModelName(request.modelName().trim());
         config.setBaseUrl(blankToNull(request.baseUrl()));
         if (request.apiKey() != null && !request.apiKey().isBlank()) {
             config.setApiKey(request.apiKey().trim());
-        } else if (existing == null) {
+        } else if (existing != null) {
+            config.setApiKey(existing.getApiKey());
+        } else {
             config.setApiKey("");
         }
         config.setMinimaxGroupId(blankToNull(request.minimaxGroupId()));
         config.setTimeoutSeconds(request.timeoutSeconds() == null ? 60 : request.timeoutSeconds());
         config.setEnabled(request.enabled() == null || request.enabled());
+        config.setDefault(request.isDefault() != null && request.isDefault());
         config.setUpdatedAt(now);
-        if (existing == null) {
-            config.setCreatedAt(now);
-            agentModelConfigMapper.insertConfig(config);
-        } else {
-            agentModelConfigMapper.updateConfig(config);
-        }
-        return AgentModelConfigResponse.from(config);
+        return config;
     }
 
     @Override
@@ -100,6 +168,8 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         LocalDateTime now = LocalDateTime.now();
         AgentModelConfig fallback = new AgentModelConfig();
         fallback.setId(0L);
+        fallback.setDisplayName("Mock");
+        fallback.setConfigCode("mock");
         fallback.setProvider("mock");
         fallback.setModelName("mock");
         fallback.setBaseUrl(null);
@@ -107,6 +177,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         fallback.setMinimaxGroupId(null);
         fallback.setTimeoutSeconds(60);
         fallback.setEnabled(true);
+        fallback.setDefault(true);
         fallback.setCreatedAt(now);
         fallback.setUpdatedAt(now);
         return fallback;
@@ -131,13 +202,24 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
             return request;
         }
         return new AgentModelConfigRequest(
+                request.displayName(),
+                request.configCode(),
                 request.provider(),
                 request.modelName(),
                 request.baseUrl(),
                 existing.getApiKey(),
                 request.minimaxGroupId(),
                 request.timeoutSeconds(),
-                request.enabled()
+                request.enabled(),
+                request.isDefault()
         );
+    }
+
+    private AgentModelConfig findActiveOrThrow(Long id) {
+        AgentModelConfig config = agentModelConfigMapper.findActiveById(id);
+        if (config == null) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "model config not found");
+        }
+        return config;
     }
 }
