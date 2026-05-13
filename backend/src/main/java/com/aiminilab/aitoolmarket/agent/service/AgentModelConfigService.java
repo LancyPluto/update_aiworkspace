@@ -5,10 +5,22 @@ import com.aiminilab.aitoolmarket.agent.dto.AgentModelConfigResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AgentModelConfigTestResponse;
 import com.aiminilab.aitoolmarket.agent.dto.InternalAgentModelConfigResponse;
 
+import java.util.List;
+
 public interface AgentModelConfigService {
     AgentModelConfigResponse adminGet();
 
+    List<AgentModelConfigResponse> adminList();
+
+    AgentModelConfigResponse adminCreate(AgentModelConfigRequest request);
+
+    AgentModelConfigResponse adminUpdate(Long id, AgentModelConfigRequest request);
+
     AgentModelConfigResponse adminSave(AgentModelConfigRequest request);
+
+    AgentModelConfigResponse adminSetDefault(Long id);
+
+    void adminDelete(Long id);
 
     AgentModelConfigTestResponse adminTest(AgentModelConfigRequest request);
 

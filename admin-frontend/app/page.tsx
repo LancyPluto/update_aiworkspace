@@ -27,7 +27,7 @@ interface RecentTaskRow {
   tool: string
   status: "active" | "pending" | "error" | "inactive"
   statusLabel: string
-  credits: number
+  credits: number | null
   time: string
 }
 
@@ -81,7 +81,9 @@ const taskColumns = [
   {
     key: "credits" as const,
     title: "消耗算力",
-    render: (value: unknown) => <span>{value as number} 点</span>,
+    render: (value: unknown) => (
+      <span>{value === null || value === undefined ? "—" : `${value as number} 点`}</span>
+    ),
   },
   { key: "time" as const, title: "时间" },
 ]
@@ -147,11 +149,11 @@ export default function DashboardPage() {
       const mapped = mapStatus(t.status)
       return {
         id: t.taskNo || `T${t.taskId}`,
-        user: t.userNickname || (t.userId ? `用户 ${t.userId}` : "-"),
+        user: t.userNickname || (t.userId != null ? `用户 ${t.userId}` : "-"),
         tool: t.toolName || t.toolCode,
         status: mapped.status,
         statusLabel: mapped.label,
-        credits: t.consumedCredits ?? 0,
+        credits: t.consumedCredits ?? null,
         time: formatRelativeTime(t.createdAt),
       }
     })

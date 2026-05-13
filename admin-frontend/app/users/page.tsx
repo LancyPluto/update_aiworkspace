@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ApiError } from "@/lib/api/http"
-import { fetchAdminUsers, manualAddCredits, updateUserStatus } from "@/lib/api/users"
+import { fetchAdminUsers, manualAddCredits, memberAccountBalance, updateUserStatus } from "@/lib/api/users"
 import type { AdminMember } from "@/lib/api/types"
 import { Ban, Coins, Eye, Filter, Search, Undo2 } from "lucide-react"
 
@@ -18,6 +18,8 @@ interface UserRow {
   rawId: number
   name: string
   account: string
+  phone?: string | null
+  email?: string | null
   userType: string
   credits: number
   status: "active" | "inactive"
@@ -32,8 +34,10 @@ function mapUser(user: AdminMember): UserRow {
     rawId: user.id,
     name: user.nickname || user.username || `用户 ${user.id}`,
     account: user.username,
+    phone: user.phone,
+    email: user.email,
     userType: user.userType === "ADMIN" ? "管理员" : "普通用户",
-    credits: user.credits ?? 0,
+    credits: memberAccountBalance(user),
     status: active ? "active" : "inactive",
     statusLabel: active ? "正常" : "已禁用",
     createdAt: user.createdAt ? user.createdAt.replace("T", " ").slice(0, 19) : "-",
@@ -149,6 +153,12 @@ export default function UsersPage() {
                 <div><p className="text-muted-foreground">类型</p><p className="font-medium">{item.userType}</p></div>
                 <div><p className="text-muted-foreground">算力余额</p><p className="font-medium">{item.credits}</p></div>
                 <div><p className="text-muted-foreground">状态</p><p className="font-medium">{item.statusLabel}</p></div>
+                {item.phone ? (
+                  <div><p className="text-muted-foreground">手机</p><p className="font-medium">{item.phone}</p></div>
+                ) : null}
+                {item.email ? (
+                  <div><p className="text-muted-foreground">邮箱</p><p className="font-medium">{item.email}</p></div>
+                ) : null}
               </div>
             </DialogContent>
           </Dialog>

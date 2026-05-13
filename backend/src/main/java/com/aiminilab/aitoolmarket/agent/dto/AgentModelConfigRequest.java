@@ -5,12 +5,15 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 
 public record AgentModelConfigRequest(
+        String displayName,
+        String configCode,
         @NotBlank String provider,
         @NotBlank String modelName,
         String baseUrl,
         String apiKey,
         String minimaxGroupId,
         @Min(1) @Max(300) Integer timeoutSeconds,
-        Boolean enabled
+        Boolean enabled,
+        Boolean isDefault
 ) {
 }

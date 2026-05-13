@@ -15,9 +15,13 @@ public record ExecutionContextResponse(
         String toolName,
         String status,
         JsonNode params,
+        ExecutionModelConfigResponse modelConfig,
+        String modelProviderCode,
+        String modelName,
         List<ToolFieldResponse> fields
 ) {
-    public static ExecutionContextResponse of(AiTask task, JsonNode params, List<ToolFieldResponse> fields) {
+    public static ExecutionContextResponse of(AiTask task, JsonNode params, ExecutionModelConfigResponse modelConfig,
+                                              List<ToolFieldResponse> fields) {
         return new ExecutionContextResponse(
                 task.getId(),
                 task.getTaskNo(),
@@ -27,6 +31,9 @@ public record ExecutionContextResponse(
                 task.getToolName(),
                 task.getStatus(),
                 params,
+                modelConfig,
+                modelConfig == null ? null : modelConfig.provider(),
+                modelConfig == null ? null : modelConfig.modelName(),
                 fields
         );
     }

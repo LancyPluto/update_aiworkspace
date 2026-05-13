@@ -1,14 +1,18 @@
 package com.aiminilab.aitoolmarket.auth.controller;
 
+import com.aiminilab.aitoolmarket.auth.dto.AuthenticatedSession;
 import com.aiminilab.aitoolmarket.auth.dto.LoginRequest;
 import com.aiminilab.aitoolmarket.auth.dto.LoginResponse;
 import com.aiminilab.aitoolmarket.auth.security.AuthContext;
+import com.aiminilab.aitoolmarket.auth.security.AuthCookieSupport;
 import com.aiminilab.aitoolmarket.auth.security.JwtTokenProvider;
 import com.aiminilab.aitoolmarket.auth.service.AuthService;
 import com.aiminilab.aitoolmarket.common.dto.ApiResponse;
 import com.aiminilab.aitoolmarket.user.dto.UserProfileResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -21,15 +25,20 @@ public class AdminAuthController {
 
     private final AuthService authService;
     private final JwtTokenProvider jwtTokenProvider;
+    private final AuthCookieSupport authCookieSupport;
 
-    public AdminAuthController(AuthService authService, JwtTokenProvider jwtTokenProvider) {
+    public AdminAuthController(AuthService authService, JwtTokenProvider jwtTokenProvider, AuthCookieSupport authCookieSupport) {
         this.authService = authService;
         this.jwtTokenProvider = jwtTokenProvider;
+        this.authCookieSupport = authCookieSupport;
     }
 
     @PostMapping("/login")
-    public ApiResponse<LoginResponse> login(@Valid @RequestBody LoginRequest request) {
-        return ApiResponse.success(authService.login(request, true));
+    public ResponseEntity<ApiResponse<LoginResponse>> login(@Valid @RequestBody LoginRequest request) {
+        AuthenticatedSession session = authService.login(request, true);
+        return ResponseEntity.ok()
+                .header(HttpHeaders.SET_COOKIE, authCookieSupport.adminSessionCookie(session.jwt()).toString())
+                .body(ApiResponse.success(session.body()));
     }
 
     @GetMapping("/me")

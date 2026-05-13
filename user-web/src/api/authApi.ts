@@ -16,7 +16,7 @@ export async function register(body: RegisterRequest): Promise<LoginResponse> {
   return data
 }
 
-/** POST /api/v1/auth/login */
+/** POST /api/v1/auth/login（Set-Cookie 会话） */
 export async function login(body: LoginRequest, options?: { token?: string | null }): Promise<LoginResponse> {
   const data = await apiRequest<LoginResponse | null>("POST", P.login, {
     body,
@@ -28,7 +28,7 @@ export async function login(body: LoginRequest, options?: { token?: string | nul
   return data
 }
 
-/** POST /api/v1/auth/logout —— 需在 Header 带登录 Token */
+/** POST /api/v1/auth/logout（Cookie 或 Bearer） */
 export async function logout(options?: { token?: string | null }): Promise<void> {
   await apiRequest<unknown>("POST", P.logout, { token: options?.token })
 }

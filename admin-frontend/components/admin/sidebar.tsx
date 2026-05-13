@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
 import {
   Coins,
+  Bot,
   FileText,
   FolderTree,
   LayoutDashboard,
@@ -22,6 +23,7 @@ const navigation = [
   { name: "分类管理", href: "/categories", icon: FolderTree },
   { name: "Prompt 管理", href: "/prompts", icon: FileText },
   { name: "任务管理", href: "/tasks", icon: ListTodo },
+  { name: "Agent 运行", href: "/agent-runs", icon: Bot },
   { name: "会员算力", href: "/credits", icon: Coins },
   { name: "系统配置", href: "/settings", icon: Settings },
 ]
