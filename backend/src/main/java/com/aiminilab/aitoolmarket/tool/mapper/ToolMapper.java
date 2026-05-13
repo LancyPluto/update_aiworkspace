@@ -14,9 +14,12 @@ public interface ToolMapper extends BaseMapper<AiTool> {
 
     @Select("""
             <script>
-            SELECT t.*, c.category_name
+            SELECT t.*, c.category_name,
+                   COALESCE(m.display_name, m.model_name) AS model_config_name,
+                   m.model_name
             FROM ai_tools t
             JOIN tool_categories c ON c.id = t.category_id
+            LEFT JOIN agent_model_configs m ON m.id = t.model_config_id AND COALESCE(m.is_deleted, 0) = 0
             WHERE t.is_deleted = 0
             <if test="onlineOnly">
               AND t.status = 'ONLINE'
@@ -75,9 +78,12 @@ public interface ToolMapper extends BaseMapper<AiTool> {
                     @Param("status") String status);
 
     @Select("""
-            SELECT t.*, c.category_name
+            SELECT t.*, c.category_name,
+                   COALESCE(m.display_name, m.model_name) AS model_config_name,
+                   m.model_name
             FROM ai_tools t
             JOIN tool_categories c ON c.id = t.category_id
+            LEFT JOIN agent_model_configs m ON m.id = t.model_config_id AND COALESCE(m.is_deleted, 0) = 0
             WHERE t.id = #{toolId} AND t.is_deleted = 0
             LIMIT 1
             """)
@@ -88,9 +94,12 @@ public interface ToolMapper extends BaseMapper<AiTool> {
     }
 
     @Select("""
-            SELECT t.*, c.category_name
+            SELECT t.*, c.category_name,
+                   COALESCE(m.display_name, m.model_name) AS model_config_name,
+                   m.model_name
             FROM ai_tools t
             JOIN tool_categories c ON c.id = t.category_id
+            LEFT JOIN agent_model_configs m ON m.id = t.model_config_id AND COALESCE(m.is_deleted, 0) = 0
             WHERE t.tool_code = #{toolCode} AND t.status = 'ONLINE' AND t.is_deleted = 0
             LIMIT 1
             """)
@@ -125,6 +134,7 @@ public interface ToolMapper extends BaseMapper<AiTool> {
             SET tool_name = #{tool.toolName}, category_id = #{tool.categoryId},
                 description = #{tool.description}, cover_url = #{tool.coverUrl},
                 estimated_credit_cost = #{tool.estimatedCreditCost},
+                model_config_id = #{tool.modelConfigId},
                 updated_by = #{operatorId}, updated_at = CURRENT_TIMESTAMP
             WHERE id = #{toolId} AND is_deleted = 0
             """)

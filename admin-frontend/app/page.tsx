@@ -149,11 +149,11 @@ export default function DashboardPage() {
       const mapped = mapStatus(t.status)
       return {
         id: t.taskNo || `T${t.taskId}`,
-        user: t.userId != null ? `用户 ${t.userId}` : "-",
+        user: t.userNickname || (t.userId != null ? `用户 ${t.userId}` : "-"),
         tool: t.toolName || t.toolCode,
         status: mapped.status,
         statusLabel: mapped.label,
-        credits: null,
+        credits: t.consumedCredits ?? null,
         time: formatRelativeTime(t.createdAt),
       }
     })

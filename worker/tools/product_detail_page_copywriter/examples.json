@@ -1,0 +1,25 @@
+[
+  {
+    "name": "淘宝女装防晒详情",
+    "input": {
+      "productName": "轻薄防晒外套",
+      "category": "女装/防晒衣",
+      "targetPlatform": "淘宝",
+      "targetCustomer": "夏季通勤女性",
+      "sellingPoints": "轻薄透气、防晒、显瘦、可收纳",
+      "specsOrAttributes": "多色可选；防晒相关数值以吊牌与检测报告为准",
+      "tone": "活力种草",
+      "lengthPreference": "标准",
+      "keywords": "防晒衣、冰丝、通勤",
+      "avoidWords": "最强、第一",
+      "extraInfo": "店铺支持七天无理由"
+    },
+    "expected_output_outline": [
+      "## 卖点提炼",
+      "## 详情页主文案",
+      "## 分段排版建议",
+      "## 关键词建议",
+      "## 合规与发布提醒"
+    ]
+  }
+]

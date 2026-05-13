@@ -1,0 +1,58 @@
+[
+  {
+    "name": "社区女装店夏季活动",
+    "input": {
+      "storeType": "服装零售",
+      "storeNameOrPositioning": "社区女装店，主打通勤穿搭和基础款搭配",
+      "campaignGoal": "到店转化",
+      "campaignTheme": "夏季通勤焕新节",
+      "campaignPeriod": "预热 3 天 + 正式 2 天",
+      "targetCustomers": "周边 3 公里通勤女性、老会员、近期咨询防晒衣的顾客",
+      "productsOrServices": "防晒外套、通勤衬衫、搭配套装",
+      "budgetRange": "1000-3000 元",
+      "availableResources": "会员群、店员 3 人、橱窗陈列、朋友圈",
+      "promotionMechanism": "满 399 赠丝巾，老客带新到店享小礼",
+      "channels": "门店海报、朋友圈、社群、短视频",
+      "constraints": "不做大额折扣，防晒外套浅色库存有限",
+      "extraInfo": "希望提升老客复购和到店试穿"
+    },
+    "expected_output_outline": [
+      "## 活动总览",
+      "## 客群策略",
+      "## 活动玩法设计",
+      "## 执行排期",
+      "## 物料与话术建议",
+      "## 人员分工",
+      "## 复盘指标",
+      "## 风险提醒"
+    ]
+  },
+  {
+    "name": "美业门店会员唤醒活动",
+    "input": {
+      "storeType": "美业门店",
+      "storeNameOrPositioning": "社区美容护理门店，主打基础护理和老客维护",
+      "campaignGoal": "老客复购",
+      "campaignTheme": "换季护理回店周",
+      "campaignPeriod": "预热 2 天 + 活动 5 天",
+      "targetCustomers": "近 90 天未到店老会员、曾咨询换季护理的顾客",
+      "productsOrServices": "基础补水护理、肩颈放松护理",
+      "budgetRange": "3000-5000 元",
+      "availableResources": "会员群、前台 1 人、美容师 4 人、朋友圈",
+      "promotionMechanism": "老会员预约到店赠护理体验券，具体以门店说明为准",
+      "channels": "企微、社群、朋友圈、门店海报",
+      "constraints": "不承诺治疗效果，不做医疗化表达",
+      "extraInfo": "希望提升预约率和到店率"
+    },
+    "expected_output_outline": [
+      "## 活动总览",
+      "## 客群策略",
+      "## 活动玩法设计",
+      "## 执行排期",
+      "## 物料与话术建议",
+      "## 人员分工",
+      "## 复盘指标",
+      "## 风险提醒"
+    ]
+  }
+]

@@ -68,7 +68,7 @@ FROM (
     'topic' AS field_key,
     '文章主题' AS field_name,
     'TEXT' AS field_type,
-    '例如：夏季门店引流活动',
+    '例如：夏季门店引流活动' AS placeholder,
     NULL AS options_json,
     JSON_OBJECT('maxLength', 120) AS validation_json,
     1 AS required,

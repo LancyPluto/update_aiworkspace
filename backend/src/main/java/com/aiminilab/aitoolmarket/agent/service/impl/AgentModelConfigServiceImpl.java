@@ -14,6 +14,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Set;
 
 @Service
@@ -35,31 +36,98 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
     }
 
     @Override
+    public List<AgentModelConfigResponse> adminList() {
+        List<AgentModelConfig> configs = agentModelConfigMapper.findAllActive();
+        if (configs.isEmpty()) {
+            return List.of(AgentModelConfigResponse.from(findOrDefault()));
+        }
+        return configs.stream().map(AgentModelConfigResponse::from).toList();
+    }
+
+    @Override
     @Transactional
-    public AgentModelConfigResponse adminSave(AgentModelConfigRequest request) {
+    public AgentModelConfigResponse adminCreate(AgentModelConfigRequest request) {
         validate(request);
         LocalDateTime now = LocalDateTime.now();
+        AgentModelConfig config = applyRequest(new AgentModelConfig(), request, null, now);
+        config.setCreatedAt(now);
+        agentModelConfigMapper.insertConfig(config);
+        if (Boolean.TRUE.equals(config.getDefault())) {
+            agentModelConfigMapper.clearDefaultExcept(config.getId());
+        }
+        return AgentModelConfigResponse.from(config);
+    }
+
+    @Override
+    @Transactional
+    public AgentModelConfigResponse adminUpdate(Long id, AgentModelConfigRequest request) {
+        validate(request);
+        AgentModelConfig existing = findActiveOrThrow(id);
+        AgentModelConfig config = applyRequest(existing, request, existing, LocalDateTime.now());
+        agentModelConfigMapper.updateConfig(config);
+        if (Boolean.TRUE.equals(config.getDefault())) {
+            agentModelConfigMapper.clearDefaultExcept(config.getId());
+        }
+        return AgentModelConfigResponse.from(config);
+    }
+
+    @Override
+    @Transactional
+    public AgentModelConfigResponse adminSave(AgentModelConfigRequest request) {
         AgentModelConfig existing = agentModelConfigMapper.findLatest();
-        AgentModelConfig config = existing == null ? new AgentModelConfig() : existing;
+        if (existing == null) {
+            return adminCreate(request);
+        }
+        return adminUpdate(existing.getId(), request);
+    }
+
+    @Override
+    @Transactional
+    public AgentModelConfigResponse adminSetDefault(Long id) {
+        AgentModelConfig existing = findActiveOrThrow(id);
+        agentModelConfigMapper.setDefault(id);
+        existing.setDefault(true);
+        existing.setUpdatedAt(LocalDateTime.now());
+        return AgentModelConfigResponse.from(existing);
+    }
+
+    @Override
+    @Transactional
+    public void adminDelete(Long id) {
+        AgentModelConfig existing = findActiveOrThrow(id);
+        if (Boolean.TRUE.equals(existing.getDefault())) {
+            List<AgentModelConfig> others = agentModelConfigMapper.findAllActive().stream()
+                    .filter(config -> !config.getId().equals(id))
+                    .toList();
+            if (!others.isEmpty()) {
+                agentModelConfigMapper.setDefault(others.get(0).getId());
+            }
+        }
+        agentModelConfigMapper.softDelete(id);
+    }
+
+    private AgentModelConfig applyRequest(AgentModelConfig config,
+                                          AgentModelConfigRequest request,
+                                          AgentModelConfig existing,
+                                          LocalDateTime now) {
+        config.setDisplayName(blankToNull(request.displayName()));
+        config.setConfigCode(blankToNull(request.configCode()));
         config.setProvider(request.provider().trim());
         config.setModelName(request.modelName().trim());
         config.setBaseUrl(blankToNull(request.baseUrl()));
         if (request.apiKey() != null && !request.apiKey().isBlank()) {
             config.setApiKey(request.apiKey().trim());
-        } else if (existing == null) {
+        } else if (existing != null) {
+            config.setApiKey(existing.getApiKey());
+        } else {
             config.setApiKey("");
         }
         config.setMinimaxGroupId(blankToNull(request.minimaxGroupId()));
         config.setTimeoutSeconds(request.timeoutSeconds() == null ? 60 : request.timeoutSeconds());
         config.setEnabled(request.enabled() == null || request.enabled());
+        config.setDefault(request.isDefault() != null && request.isDefault());
         config.setUpdatedAt(now);
-        if (existing == null) {
-            config.setCreatedAt(now);
-            agentModelConfigMapper.insertConfig(config);
-        } else {
-            agentModelConfigMapper.updateConfig(config);
-        }
-        return AgentModelConfigResponse.from(config);
+        return config;
     }
 
     @Override
@@ -71,7 +139,25 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
     public AgentModelConfigTestResponse adminTest(AgentModelConfigRequest request) {
         validate(request);
         AgentModelConfig existing = agentModelConfigMapper.findLatest();
-        return agentServiceClient.testModelConfig(mergeSecretFields(request, existing));
+        try {
+            return agentServiceClient.testModelConfig(mergeSecretFields(request, existing));
+        } catch (IllegalStateException exception) {
+            throw new BusinessException(ErrorCode.MODEL_CALL_FAILED, modelConfigTestFailureMessage(exception));
+        }
+    }
+
+    private static String modelConfigTestFailureMessage(IllegalStateException exception) {
+        String detail = exception.getMessage();
+        if (detail == null || detail.isBlank()) {
+            return "调用 agent-service 失败，请查看后端日志并确认服务与内网签名配置。";
+        }
+        if (detail.startsWith("Could not parse agent-service model config test response")) {
+            return "agent-service 返回内容无法解析为测试结果，请核对 agent-service 版本与接口是否正常，或查看后端日志。"
+                    + " 原始信息：" + detail;
+        }
+        return "连通性测试失败：请确认 agent-service 已启动，且后端 AGENT_SERVICE_BASE_URL 在运行环境中可解析"
+                + "（Docker 内通常为 http://agent-service:8090），并与 agent-service 共用同一 INTERNAL_API_TOKEN。"
+                + " 详情：" + detail;
     }
 
     private AgentModelConfig findOrDefault() {
@@ -82,6 +168,8 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         LocalDateTime now = LocalDateTime.now();
         AgentModelConfig fallback = new AgentModelConfig();
         fallback.setId(0L);
+        fallback.setDisplayName("Mock");
+        fallback.setConfigCode("mock");
         fallback.setProvider("mock");
         fallback.setModelName("mock");
         fallback.setBaseUrl(null);
@@ -89,6 +177,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         fallback.setMinimaxGroupId(null);
         fallback.setTimeoutSeconds(60);
         fallback.setEnabled(true);
+        fallback.setDefault(true);
         fallback.setCreatedAt(now);
         fallback.setUpdatedAt(now);
         return fallback;
@@ -113,13 +202,24 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
             return request;
         }
         return new AgentModelConfigRequest(
+                request.displayName(),
+                request.configCode(),
                 request.provider(),
                 request.modelName(),
                 request.baseUrl(),
                 existing.getApiKey(),
                 request.minimaxGroupId(),
                 request.timeoutSeconds(),
-                request.enabled()
+                request.enabled(),
+                request.isDefault()
         );
+    }
+
+    private AgentModelConfig findActiveOrThrow(Long id) {
+        AgentModelConfig config = agentModelConfigMapper.findActiveById(id);
+        if (config == null) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "model config not found");
+        }
+        return config;
     }
 }

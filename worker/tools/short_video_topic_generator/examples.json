@@ -1,0 +1,50 @@
+[
+  {
+    "name": "抖音女装通勤选题",
+    "input": {
+      "accountPositioning": "女装通勤穿搭店铺账号，主打简洁实穿的日常穿搭",
+      "targetPlatform": "抖音",
+      "targetAudience": "25-35 岁通勤女性",
+      "contentGoal": "种草转化",
+      "topicDirection": "夏季穿搭、防晒、通勤场景、周末出游",
+      "productOrService": "轻薄防晒外套，主打轻薄透气、显瘦、可收纳",
+      "topicCount": "10 个",
+      "stylePreference": "实用干货",
+      "avoidTopics": "夸张挑战、低俗擦边、绝对化功效",
+      "keywords": "防晒衣、通勤穿搭、夏季轻薄",
+      "extraInfo": "防晒相关表达需要提醒以检测报告和实物吊牌为准"
+    },
+    "expected_output_outline": [
+      "## 选题清单",
+      "## 推荐优先级",
+      "## 创作角度",
+      "## 标题与标签建议",
+      "## 执行建议",
+      "## 风险提醒"
+    ]
+  },
+  {
+    "name": "小红书护肤账号选题",
+    "input": {
+      "accountPositioning": "面向上班族的日常护肤经验分享账号",
+      "targetPlatform": "小红书",
+      "targetAudience": "经常熬夜、预算有限的年轻上班族",
+      "contentGoal": "互动涨粉",
+      "topicDirection": "熬夜护肤、补水、精简护肤流程",
+      "productOrService": "补水面膜，主打日常补水场景",
+      "topicCount": "8 个",
+      "stylePreference": "经验分享",
+      "avoidTopics": "医美级、根治、急救",
+      "keywords": "熬夜护肤、补水面膜、护肤流程",
+      "extraInfo": "不要承诺治疗皮肤疾病"
+    },
+    "expected_output_outline": [
+      "## 选题清单",
+      "## 推荐优先级",
+      "## 创作角度",
+      "## 标题与标签建议",
+      "## 执行建议",
+      "## 风险提醒"
+    ]
+  }
+]

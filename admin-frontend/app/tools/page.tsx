@@ -3,21 +3,25 @@
 import { useEffect, useMemo, useState } from "react"
 import { AdminLayout } from "@/components/admin/admin-layout"
 import { AdminHeader } from "@/components/admin/header"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
-import { Switch } from "@/components/ui/switch"
+import { Button } from "@/components/ui/button"
 import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-  DialogFooter,
 } from "@/components/ui/dialog"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
 import {
   Select,
   SelectContent,
@@ -25,58 +29,80 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Switch } from "@/components/ui/switch"
+import { Textarea } from "@/components/ui/textarea"
 import {
+  Copy,
+  FileText,
+  MessageSquare,
+  MoreHorizontal,
+  Pencil,
   Plus,
   Search,
-  Pencil,
-  Trash2,
-  Copy,
-  MoreHorizontal,
-  Sparkles,
-  FileText,
-  Video,
   ShoppingBag,
-  MessageSquare,
+  Sparkles,
   Store,
+  Trash2,
+  Video,
   type LucideIcon,
 } from "lucide-react"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
 import {
   createTool,
   fetchAdminTools,
   fetchToolCategories,
+  fetchToolFields,
   offlineTool,
   publishTool,
+  updateTool,
+  updateToolFields,
 } from "@/lib/api/tools"
+import { fetchAgentModelConfigs } from "@/lib/api/agent-model"
 import { ApiError } from "@/lib/api/http"
-import type { ToolCategory, ToolSummary } from "@/lib/api/types"
+import type { AgentModelConfig, ToolCategory, ToolField, ToolFieldPayload, ToolSummary } from "@/lib/api/types"
 
 interface ToolRow {
   id: string
   rawId: number
+  toolCode: string
   name: string
   description: string
   category: string
   categoryId: number | null
   icon: LucideIcon
   credits: number
-  usageCount: number
   status: boolean
   rawStatus: string
+  modelConfigId: number | null
+  modelConfigName: string | null
+  modelName: string | null
+}
+
+interface ToolForm {
+  toolCode: string
+  toolName: string
+  description: string
+  categoryId: string
+  estimatedCreditCost: string
+  modelConfigId: string
+}
+
+const initialForm: ToolForm = {
+  toolCode: "",
+  toolName: "",
+  description: "",
+  categoryId: "",
+  estimatedCreditCost: "5",
+  modelConfigId: "",
 }
 
 const CATEGORY_ICON_MAP: Record<string, LucideIcon> = {
-  内容创作: FileText,
-  短视频运营: Video,
-  电商运营: ShoppingBag,
-  私域销售: MessageSquare,
-  门店获客: Store,
+  Copywriting: FileText,
+  Content: FileText,
+  Video,
+  Ecommerce: ShoppingBag,
+  Sales: MessageSquare,
+  Store,
 }
 
 function pickIcon(categoryName?: string | null): LucideIcon {
@@ -84,51 +110,46 @@ function pickIcon(categoryName?: string | null): LucideIcon {
   return CATEGORY_ICON_MAP[categoryName] || Sparkles
 }
 
-function mapTool(t: ToolSummary): ToolRow {
+function mapTool(tool: ToolSummary): ToolRow {
   return {
-    id: String(t.id),
-    rawId: t.id,
-    name: t.toolName,
-    description: t.description || "暂无描述",
-    category: t.categoryName || "未分类",
-    categoryId: t.categoryId ?? null,
-    icon: pickIcon(t.categoryName),
-    credits: t.estimatedCreditCost ?? 0,
-    usageCount: 0,
-    status: (t.status || "").toUpperCase() === "ONLINE",
-    rawStatus: t.status,
+    id: String(tool.id),
+    rawId: tool.id,
+    toolCode: tool.toolCode,
+    name: tool.toolName,
+    description: tool.description || "No description",
+    category: tool.categoryName || "Uncategorized",
+    categoryId: tool.categoryId ?? null,
+    icon: pickIcon(tool.categoryName),
+    credits: tool.estimatedCreditCost ?? 0,
+    status: (tool.status || "").toUpperCase() === "ONLINE",
+    rawStatus: tool.status,
+    modelConfigId: tool.modelConfigId ?? null,
+    modelConfigName: tool.modelConfigName || null,
+    modelName: tool.modelName || null,
   }
-}
-
-interface CreateForm {
-  toolCode: string
-  toolName: string
-  description: string
-  categoryId: string
-  estimatedCreditCost: string
-}
-
-const initialForm: CreateForm = {
-  toolCode: "",
-  toolName: "",
-  description: "",
-  categoryId: "",
-  estimatedCreditCost: "5",
 }
 
 export default function ToolsPage() {
   const [searchQuery, setSearchQuery] = useState("")
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
+  const [editingTool, setEditingTool] = useState<ToolRow | null>(null)
   const [toolList, setToolList] = useState<ToolRow[]>([])
   const [categories, setCategories] = useState<ToolCategory[]>([])
+  const [modelConfigs, setModelConfigs] = useState<AgentModelConfig[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [togglingId, setTogglingId] = useState<number | null>(null)
   const [submitting, setSubmitting] = useState(false)
-  const [form, setForm] = useState<CreateForm>(initialForm)
+  const [form, setForm] = useState<ToolForm>(initialForm)
   const [formError, setFormError] = useState<string | null>(null)
+  const [fieldDialogOpen, setFieldDialogOpen] = useState(false)
+  const [fieldTool, setFieldTool] = useState<ToolRow | null>(null)
+  const [fieldJson, setFieldJson] = useState("[]")
+  const [fieldError, setFieldError] = useState<string | null>(null)
+  const [fieldLoading, setFieldLoading] = useState(false)
+  const [fieldSaving, setFieldSaving] = useState(false)
 
-  const loadAll = async () => {
+  async function loadAll() {
     setLoading(true)
     setError(null)
     try {
@@ -138,9 +159,10 @@ export default function ToolsPage() {
       ])
       setToolList(toolsResp.list.map(mapTool))
       setCategories(cats)
+      const configs = await fetchAgentModelConfigs().catch(() => [] as AgentModelConfig[])
+      setModelConfigs(configs.filter((config) => config.enabled !== false))
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : "加载工具列表失败"
-      setError(message)
+      setError(err instanceof ApiError ? err.message : "Failed to load tools")
     } finally {
       setLoading(false)
     }
@@ -151,93 +173,151 @@ export default function ToolsPage() {
   }, [])
 
   const filteredTools = useMemo(() => {
-    return toolList.filter(
-      (tool) =>
-        tool.name.includes(searchQuery) ||
-        tool.description.includes(searchQuery) ||
-        tool.category.includes(searchQuery),
+    const keyword = searchQuery.trim().toLowerCase()
+    if (!keyword) return toolList
+    return toolList.filter((tool) =>
+      [tool.name, tool.description, tool.category].some((value) =>
+        value.toLowerCase().includes(keyword),
+      ),
     )
   }, [toolList, searchQuery])
 
-  const toggleToolStatus = async (id: string) => {
-    const target = toolList.find((t) => t.id === id)
+  async function toggleToolStatus(id: string) {
+    const target = toolList.find((tool) => tool.id === id)
     if (!target) return
     setTogglingId(target.rawId)
-    const desired = !target.status
     try {
-      const updated = desired
-        ? await publishTool(target.rawId)
-        : await offlineTool(target.rawId)
-      setToolList((prev) =>
-        prev.map((tool) => (tool.id === id ? mapTool(updated) : tool)),
-      )
+      const updated = target.status
+        ? await offlineTool(target.rawId)
+        : await publishTool(target.rawId)
+      setToolList((prev) => prev.map((tool) => (tool.id === id ? mapTool(updated) : tool)))
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : "状态更新失败"
+      const message = err instanceof ApiError ? err.message : "Failed to update tool status"
       if (typeof window !== "undefined") window.alert(message)
     } finally {
       setTogglingId(null)
     }
   }
 
-  const updateForm = <K extends keyof CreateForm>(key: K, value: CreateForm[K]) => {
+  function updateForm<K extends keyof ToolForm>(key: K, value: ToolForm[K]) {
     setForm((prev) => ({ ...prev, [key]: value }))
   }
 
-  const handleCreate = async () => {
+  function openEditDialog(tool: ToolRow) {
+    setEditingTool(tool)
+    setForm({
+      toolCode: tool.toolCode,
+      toolName: tool.name,
+      description: tool.description === "No description" ? "" : tool.description,
+      categoryId: tool.categoryId ? String(tool.categoryId) : "",
+      estimatedCreditCost: String(tool.credits),
+      modelConfigId: tool.modelConfigId ? String(tool.modelConfigId) : "",
+    })
+    setFormError(null)
+    setIsAddDialogOpen(true)
+  }
+
+  async function handleSaveTool() {
     setFormError(null)
     if (!form.toolName.trim()) {
-      setFormError("请输入工具名称")
+      setFormError("Tool name is required")
       return
     }
     if (!form.categoryId) {
-      setFormError("请选择分类")
+      setFormError("Category is required")
       return
     }
     const credits = Number(form.estimatedCreditCost)
     if (!Number.isFinite(credits) || credits < 0) {
-      setFormError("消耗算力必须是大于等于 0 的数字")
+      setFormError("Credit cost must be a non-negative number")
       return
     }
     setSubmitting(true)
     try {
-      const created = await createTool({
+      const payload = {
         toolCode: form.toolCode.trim() || undefined,
         toolName: form.toolName.trim(),
         categoryId: Number(form.categoryId),
         description: form.description.trim() || undefined,
         estimatedCreditCost: Math.floor(credits),
-      })
-      const published = await publishTool(created.id)
-      setToolList((prev) => [mapTool(published), ...prev])
+        modelConfigId: form.modelConfigId ? Number(form.modelConfigId) : null,
+      }
+      if (editingTool) {
+        const updated = await updateTool(editingTool.rawId, payload)
+        setToolList((prev) => prev.map((tool) => (tool.rawId === editingTool.rawId ? mapTool(updated) : tool)))
+      } else {
+        const created = await createTool(payload)
+        const published = await publishTool(created.id)
+        setToolList((prev) => [mapTool(published), ...prev])
+      }
       setForm(initialForm)
+      setEditingTool(null)
       setIsAddDialogOpen(false)
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : "创建工具失败"
-      setFormError(message)
+      setFormError(err instanceof ApiError ? err.message : "Failed to save tool")
     } finally {
       setSubmitting(false)
     }
   }
 
+  async function openFieldDialog(tool: ToolRow) {
+    setFieldTool(tool)
+    setFieldDialogOpen(true)
+    setFieldError(null)
+    setFieldLoading(true)
+    try {
+      const fields = await fetchToolFields(tool.rawId)
+      setFieldJson(JSON.stringify(fields.map(fieldToPayload), null, 2))
+    } catch (err) {
+      setFieldError(err instanceof ApiError ? err.message : "Failed to load fields")
+      setFieldJson("[]")
+    } finally {
+      setFieldLoading(false)
+    }
+  }
+
+  async function saveFields() {
+    if (!fieldTool) return
+    setFieldError(null)
+    let fields: ToolFieldPayload[]
+    try {
+      const parsed = JSON.parse(fieldJson)
+      if (!Array.isArray(parsed)) throw new Error("Field schema must be a JSON array")
+      fields = parsed.map(normalizeFieldPayload)
+    } catch (err) {
+      setFieldError(err instanceof Error ? err.message : "Invalid field JSON")
+      return
+    }
+    setFieldSaving(true)
+    try {
+      const saved = await updateToolFields(fieldTool.rawId, fields)
+      setFieldJson(JSON.stringify(saved.map(fieldToPayload), null, 2))
+      setFieldDialogOpen(false)
+    } catch (err) {
+      setFieldError(err instanceof ApiError ? err.message : "Failed to save fields")
+    } finally {
+      setFieldSaving(false)
+    }
+  }
+
   const headerDescription = error
-    ? `加载失败：${error}`
+    ? `Load failed: ${error}`
     : loading
-      ? "正在加载工具列表..."
-      : "管理平台 AI 工具，配置工具参数和上下架"
+      ? "Loading tool list..."
+      : "Manage AI tools, tool fields, and publishing status."
 
   return (
     <AdminLayout>
-      <AdminHeader title="AI 工具管理" description={headerDescription} />
+      <AdminHeader title="AI Tool Management" description={headerDescription} />
 
-      <div className="p-6 space-y-6">
-        {/* Actions */}
-        <div className="flex items-center justify-between">
+      <div className="space-y-6 p-6">
+        <div className="flex items-center justify-between gap-4">
           <div className="relative max-w-md flex-1">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
-              placeholder="搜索工具名称或描述..."
+              placeholder="Search tools..."
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={(event) => setSearchQuery(event.target.value)}
               className="pl-9 bg-secondary border-0"
             />
           </div>
@@ -247,6 +327,7 @@ export default function ToolsPage() {
               setIsAddDialogOpen(open)
               if (!open) {
                 setForm(initialForm)
+                setEditingTool(null)
                 setFormError(null)
               }
             }}
@@ -254,46 +335,31 @@ export default function ToolsPage() {
             <DialogTrigger asChild>
               <Button className="gap-2">
                 <Plus className="h-4 w-4" />
-                新增工具
+                Add Tool
               </Button>
             </DialogTrigger>
             <DialogContent className="bg-card border-border max-w-lg">
               <DialogHeader>
-                <DialogTitle>新增 AI 工具</DialogTitle>
-                <DialogDescription>
-                  {formError ? formError : "配置新的 AI 工具信息和参数"}
-                </DialogDescription>
+                <DialogTitle>{editingTool ? "Edit AI Tool" : "Add AI Tool"}</DialogTitle>
+                <DialogDescription>{formError || "Configure the tool and its model binding."}</DialogDescription>
               </DialogHeader>
               <div className="space-y-4 py-4">
                 <div className="space-y-2">
-                  <Label>工具名称</Label>
-                  <Input
-                    placeholder="输入工具名称"
-                    value={form.toolName}
-                    onChange={(e) => updateForm("toolName", e.target.value)}
-                    className="bg-secondary border-0"
-                  />
+                  <Label>Tool name</Label>
+                  <Input value={form.toolName} onChange={(event) => updateForm("toolName", event.target.value)} />
                 </div>
                 <div className="space-y-2">
-                  <Label>工具描述</Label>
-                  <Textarea
-                    placeholder="输入工具描述"
-                    value={form.description}
-                    onChange={(e) => updateForm("description", e.target.value)}
-                    className="bg-secondary border-0 min-h-[80px]"
-                  />
+                  <Label>Description</Label>
+                  <Textarea value={form.description} onChange={(event) => updateForm("description", event.target.value)} />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label>所属分类</Label>
-                    <Select
-                      value={form.categoryId}
-                      onValueChange={(v) => updateForm("categoryId", v)}
-                    >
-                      <SelectTrigger className="bg-secondary border-0">
-                        <SelectValue placeholder="选择分类" />
+                    <Label>Category</Label>
+                    <Select value={form.categoryId} onValueChange={(value) => updateForm("categoryId", value)}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select category" />
                       </SelectTrigger>
-                      <SelectContent className="bg-card border-border">
+                      <SelectContent>
                         {categories.map((cat) => (
                           <SelectItem key={cat.id} value={String(cat.id)}>
                             {cat.categoryName}
@@ -303,36 +369,52 @@ export default function ToolsPage() {
                     </Select>
                   </div>
                   <div className="space-y-2">
-                    <Label>消耗算力</Label>
+                    <Label>Credits</Label>
                     <Input
                       type="number"
-                      placeholder="5"
                       value={form.estimatedCreditCost}
-                      onChange={(e) =>
-                        updateForm("estimatedCreditCost", e.target.value)
-                      }
-                      className="bg-secondary border-0"
+                      onChange={(event) => updateForm("estimatedCreditCost", event.target.value)}
                     />
                   </div>
                 </div>
+                <div className="space-y-2">
+                  <Label>Tool code</Label>
+                  <Input
+                    value={form.toolCode}
+                    onChange={(event) => updateForm("toolCode", event.target.value)}
+                    placeholder="Optional"
+                    disabled={Boolean(editingTool)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Model config</Label>
+                  <Select value={form.modelConfigId || "default"} onValueChange={(value) => updateForm("modelConfigId", value === "default" ? "" : value)}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Use default model config" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="default">Use default model config</SelectItem>
+                      {modelConfigs.map((config) => (
+                        <SelectItem key={config.id} value={String(config.id)}>
+                          {config.displayName || config.modelName} · {config.provider}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
               <DialogFooter>
-                <Button
-                  variant="outline"
-                  onClick={() => setIsAddDialogOpen(false)}
-                  disabled={submitting}
-                >
-                  取消
+                <Button variant="outline" onClick={() => setIsAddDialogOpen(false)} disabled={submitting}>
+                  Cancel
                 </Button>
-                <Button onClick={handleCreate} disabled={submitting}>
-                  {submitting ? "创建中..." : "创建工具"}
+                <Button onClick={handleSaveTool} disabled={submitting}>
+                  {submitting ? "Saving..." : editingTool ? "Save Tool" : "Create Tool"}
                 </Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>
         </div>
 
-        {/* Tools Grid */}
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {filteredTools.map((tool) => (
             <div
@@ -348,72 +430,115 @@ export default function ToolsPage() {
                     <tool.icon className="h-5 w-5 text-primary" />
                   </div>
                   <div>
-                    <h3 className="font-semibold text-card-foreground">
-                      {tool.name}
-                    </h3>
-                    <Badge
-                      variant="secondary"
-                      className="mt-1 text-xs font-normal"
-                    >
-                      {tool.category}
-                    </Badge>
+                    <h3 className="font-semibold text-card-foreground">{tool.name}</h3>
+                    <Badge variant="secondary" className="mt-1 text-xs font-normal">{tool.category}</Badge>
                   </div>
                 </div>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
-                    >
+                    <Button variant="ghost" size="icon" className="h-8 w-8 opacity-0 transition-opacity group-hover:opacity-100">
                       <MoreHorizontal className="h-4 w-4" />
                     </Button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent
-                    align="end"
-                    className="bg-card border-border"
-                  >
-                    <DropdownMenuItem className="gap-2" disabled>
-                      <Pencil className="h-4 w-4" /> 编辑
+                  <DropdownMenuContent align="end" className="bg-card border-border">
+                    <DropdownMenuItem className="gap-2" onClick={() => openEditDialog(tool)}>
+                      <Pencil className="h-4 w-4" /> Edit
+                    </DropdownMenuItem>
+                    <DropdownMenuItem className="gap-2" onClick={() => openFieldDialog(tool)}>
+                      <FileText className="h-4 w-4" /> Fields
                     </DropdownMenuItem>
                     <DropdownMenuItem className="gap-2" disabled>
-                      <Copy className="h-4 w-4" /> 复制
+                      <Copy className="h-4 w-4" /> Duplicate
                     </DropdownMenuItem>
                     <DropdownMenuItem className="gap-2 text-destructive" disabled>
-                      <Trash2 className="h-4 w-4" /> 删除
+                      <Trash2 className="h-4 w-4" /> Delete
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>
 
-              <p className="mt-3 text-sm text-muted-foreground line-clamp-2">
-                {tool.description}
-              </p>
+              <p className="mt-3 line-clamp-2 text-sm text-muted-foreground">{tool.description}</p>
 
               <div className="mt-4 flex items-center justify-between border-t border-border pt-4">
                 <div className="flex items-center gap-4 text-sm">
                   <div className="flex items-center gap-1 text-muted-foreground">
                     <Sparkles className="h-4 w-4" />
-                    <span>{tool.credits} 点</span>
+                    <span>{tool.credits} credits</span>
                   </div>
-                  <div className="text-muted-foreground">
-                    {tool.rawStatus === "ONLINE"
-                      ? "已上架"
-                      : tool.rawStatus === "DRAFT"
-                        ? "草稿"
-                        : "已下架"}
-                  </div>
+                  <div className="text-muted-foreground">{tool.rawStatus}</div>
                 </div>
-                <Switch
-                  checked={tool.status}
-                  disabled={togglingId === tool.rawId}
-                  onCheckedChange={() => toggleToolStatus(tool.id)}
-                />
+                <Switch checked={tool.status} disabled={togglingId === tool.rawId} onCheckedChange={() => toggleToolStatus(tool.id)} />
+              </div>
+              <div className="mt-3 rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+                Model: {tool.modelConfigName || tool.modelName || "Default model config"}
               </div>
             </div>
           ))}
         </div>
       </div>
+
+      <Dialog open={fieldDialogOpen} onOpenChange={setFieldDialogOpen}>
+        <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto bg-card border-border">
+          <DialogHeader>
+            <DialogTitle>Field Schema</DialogTitle>
+            <DialogDescription>
+              {fieldTool ? `${fieldTool.name} user-facing form fields.` : "Configure tool fields."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            {fieldError ? (
+              <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+                {fieldError}
+              </div>
+            ) : null}
+            <Textarea
+              value={fieldJson}
+              onChange={(event) => setFieldJson(event.target.value)}
+              className="min-h-[420px] font-mono text-xs"
+              disabled={fieldLoading || fieldSaving}
+              placeholder='[{"fieldKey":"productName","fieldName":"Product name","fieldType":"TEXT","required":true,"sortOrder":1}]'
+            />
+            <p className="text-xs text-muted-foreground">
+              Supported keys: fieldKey, fieldName, fieldType, placeholder, optionsJson, required, sortOrder.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setFieldDialogOpen(false)} disabled={fieldSaving}>
+              Cancel
+            </Button>
+            <Button onClick={saveFields} disabled={fieldLoading || fieldSaving}>
+              {fieldSaving ? "Saving..." : "Save fields"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </AdminLayout>
   )
+}
+
+function fieldToPayload(field: ToolField): ToolFieldPayload {
+  return {
+    fieldKey: field.fieldKey,
+    fieldName: field.fieldName,
+    fieldType: field.fieldType,
+    placeholder: field.placeholder || "",
+    optionsJson: field.optionsJson || "",
+    required: field.required !== false,
+    sortOrder: field.sortOrder ?? 1,
+  }
+}
+
+function normalizeFieldPayload(field: Partial<ToolFieldPayload>, index: number): ToolFieldPayload {
+  if (!field.fieldKey || !field.fieldName || !field.fieldType) {
+    throw new Error(`Field ${index + 1} must include fieldKey, fieldName, and fieldType`)
+  }
+  return {
+    fieldKey: String(field.fieldKey).trim(),
+    fieldName: String(field.fieldName).trim(),
+    fieldType: String(field.fieldType).trim(),
+    placeholder: field.placeholder ? String(field.placeholder) : "",
+    optionsJson: field.optionsJson ? String(field.optionsJson) : undefined,
+    required: field.required !== false,
+    sortOrder: Number(field.sortOrder ?? index + 1),
+  }
 }

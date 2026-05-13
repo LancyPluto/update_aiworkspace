@@ -9,6 +9,8 @@ import java.time.LocalDateTime;
 public class AgentModelConfig {
     @TableId
     private Long id;
+    private String displayName;
+    private String configCode;
     private String provider;
     private String modelName;
     private String baseUrl;
@@ -16,11 +18,16 @@ public class AgentModelConfig {
     private String minimaxGroupId;
     private Integer timeoutSeconds;
     private Boolean enabled;
+    private Boolean isDefault;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
+    public String getDisplayName() { return displayName; }
+    public void setDisplayName(String displayName) { this.displayName = displayName; }
+    public String getConfigCode() { return configCode; }
+    public void setConfigCode(String configCode) { this.configCode = configCode; }
     public String getProvider() { return provider; }
     public void setProvider(String provider) { this.provider = provider; }
     public String getModelName() { return modelName; }
@@ -35,6 +42,8 @@ public class AgentModelConfig {
     public void setTimeoutSeconds(Integer timeoutSeconds) { this.timeoutSeconds = timeoutSeconds; }
     public Boolean getEnabled() { return enabled; }
     public void setEnabled(Boolean enabled) { this.enabled = enabled; }
+    public Boolean getDefault() { return isDefault; }
+    public void setDefault(Boolean isDefault) { this.isDefault = isDefault; }
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }
