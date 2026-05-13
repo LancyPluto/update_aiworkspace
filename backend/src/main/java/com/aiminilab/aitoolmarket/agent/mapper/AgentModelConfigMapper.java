@@ -37,6 +37,27 @@ public interface AgentModelConfigMapper extends BaseMapper<AgentModelConfig> {
             """)
     List<AgentModelConfig> findAllActive();
 
+    @Select("""
+            SELECT m.*
+            FROM ai_tools t
+            JOIN agent_model_configs m ON m.id = COALESCE(
+                t.model_config_id,
+                (
+                    SELECT d.id
+                    FROM agent_model_configs d
+                    WHERE COALESCE(d.is_deleted, 0) = 0 AND d.enabled = 1
+                    ORDER BY COALESCE(d.is_default, 0) DESC, d.id DESC
+                    LIMIT 1
+                )
+            )
+            WHERE t.id = #{toolId}
+              AND t.is_deleted = 0
+              AND COALESCE(m.is_deleted, 0) = 0
+              AND m.enabled = 1
+            LIMIT 1
+            """)
+    AgentModelConfig findForToolExecution(@Param("toolId") Long toolId);
+
     @Insert("""
             INSERT INTO agent_model_configs(display_name, config_code, provider, model_name, base_url, api_key,
                                             minimax_group_id, timeout_seconds, enabled, is_default, created_at, updated_at)

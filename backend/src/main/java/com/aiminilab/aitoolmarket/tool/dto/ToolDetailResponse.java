@@ -12,6 +12,9 @@ public record ToolDetailResponse(
         String coverUrl,
         String status,
         Integer estimatedCreditCost,
+        Long modelConfigId,
+        String modelConfigName,
+        String modelName,
         List<ToolFieldResponse> fields
 ) {
     public static ToolDetailResponse of(ToolSummaryResponse summary, List<ToolFieldResponse> fields) {
@@ -25,6 +28,9 @@ public record ToolDetailResponse(
                 summary.coverUrl(),
                 summary.status(),
                 summary.estimatedCreditCost(),
+                summary.modelConfigId(),
+                summary.modelConfigName(),
+                summary.modelName(),
                 fields
         );
     }

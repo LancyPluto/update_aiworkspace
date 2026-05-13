@@ -39,6 +39,7 @@ CREATE TABLE ai_tools (
   cover_url VARCHAR(512),
   status VARCHAR(32) NOT NULL DEFAULT 'DRAFT',
   estimated_credit_cost INT NOT NULL DEFAULT 0,
+  model_config_id BIGINT,
   created_by BIGINT,
   updated_by BIGINT,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,

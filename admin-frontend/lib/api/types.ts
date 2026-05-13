@@ -51,6 +51,9 @@ export interface ToolSummary {
   coverUrl?: string | null
   status: 'DRAFT' | 'ONLINE' | 'OFFLINE' | string
   estimatedCreditCost: number
+  modelConfigId?: number | null
+  modelConfigName?: string | null
+  modelName?: string | null
 }
 
 export interface UpsertToolPayload {
@@ -60,6 +63,7 @@ export interface UpsertToolPayload {
   description?: string
   coverUrl?: string
   estimatedCreditCost: number
+  modelConfigId?: number | null
 }
 
 export interface PromptRecord {
