@@ -73,7 +73,14 @@ class BackendHandler(BaseHTTPRequestHandler):
     def _authorized(self) -> bool:
         token = self.headers.get("X-Internal-Token", "")
         auth = self.headers.get("Authorization", "")
-        return token == "local-internal-token" or auth == "Bearer local-internal-token"
+        signature = self.headers.get("X-Internal-Signature", "")
+        timestamp = self.headers.get("X-Internal-Timestamp", "")
+        nonce = self.headers.get("X-Internal-Nonce", "")
+        return (
+            token == "local-internal-token"
+            or auth == "Bearer local-internal-token"
+            or all([signature, timestamp, nonce])
+        )
 
     def _read_body(self) -> dict:
         size = int(self.headers.get("Content-Length", "0"))

@@ -5,6 +5,12 @@ export const userRoutes = {
   get login() {
     return { name: "Login" }
   },
+  get dashboard() {
+    return { name: "Dashboard" }
+  },
+  get agent() {
+    return { name: "AgentHome" }
+  },
   get toolList() {
     return { name: "ToolList" }
   },
@@ -16,6 +22,12 @@ export const userRoutes = {
   },
   get myTasks() {
     return { name: "MyTasks" }
+  },
+  get materialLibrary() {
+    return { name: "MaterialLibrary" }
+  },
+  get billing() {
+    return { name: "Billing" }
   },
   taskStatus(taskId: string) {
     return { name: "TaskStatus", params: { taskId } }

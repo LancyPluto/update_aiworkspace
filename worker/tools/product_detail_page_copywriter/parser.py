@@ -2,6 +2,7 @@ import re
 from typing import Any
 
 from tools.errors import ToolResultBuildError
+from tools.text_publishable import bracket_section, strip_blank_join
 
 
 SECTION_PATTERN = re.compile(
@@ -75,3 +76,18 @@ def _parse_keywords_block(block: str) -> list[str]:
     if hashtags:
         return hashtags
     return [line.strip("- ").strip() for line in block.splitlines() if line.strip()]
+
+
+def format_publishable_text(markdown_text: str) -> str:
+    data = parse_result_markdown(markdown_text)
+    kw = data["keywords"]
+    kw_line = " ".join(str(k).strip() for k in kw if str(k).strip()) if kw else ""
+    # 主文案置顶，便于直接粘贴到商品详情
+    parts = [
+        bracket_section("详情页主文案", data["main_copy"]),
+        bracket_section("卖点提炼", data["selling_points"]),
+        bracket_section("分段排版建议", data["layout"]),
+        bracket_section("关键词建议", kw_line) if kw_line else "",
+        bracket_section("合规与发布提醒", data["compliance"]),
+    ]
+    return strip_blank_join(parts)

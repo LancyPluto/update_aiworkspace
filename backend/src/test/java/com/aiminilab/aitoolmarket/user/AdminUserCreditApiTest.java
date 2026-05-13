@@ -47,6 +47,8 @@ class AdminUserCreditApiTest {
                 .andExpect(jsonPath("$.data.available").value(90))
                 .andExpect(jsonPath("$.data.totalConsumed").value(0));
 
+        markProcessing(successTaskId);
+
         String successBody = """
                                 {
                                   "resourceType": "MARKDOWN",
@@ -69,6 +71,7 @@ class AdminUserCreditApiTest {
                 .andExpect(jsonPath("$.data.totalConsumed").value(10));
 
         Long failedTaskId = createTask(userToken, "credit_lifecycle_tool", "credit-life-failed");
+        markProcessing(failedTaskId);
 
         String failedBody = """
                                 {
@@ -243,5 +246,20 @@ class AdminUserCreditApiTest {
                 .getResponse()
                 .getContentAsString();
         return Long.parseLong(response.replaceAll("(?s).*\\\"taskId\\\"\\s*:\\s*(\\d+).*", "$1"));
+    }
+
+    private void markProcessing(Long taskId) throws Exception {
+        String processingBody = """
+                                {
+                                  "progress": 35,
+                                  "progressMessage": "AI is generating"
+                                }
+                                """;
+        mockMvc.perform(signed(post("/api/internal/v1/tasks/{taskId}/processing", taskId), "POST",
+                        "/api/internal/v1/tasks/%d/processing".formatted(taskId), processingBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(processingBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("PROCESSING"));
     }
 }

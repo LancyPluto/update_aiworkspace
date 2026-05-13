@@ -3,6 +3,7 @@ package com.aiminilab.aitoolmarket.user.service.impl;
 import com.aiminilab.aitoolmarket.common.dto.PageResponse;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
+import com.aiminilab.aitoolmarket.credit.dto.CreditAccountResponse;
 import com.aiminilab.aitoolmarket.credit.dto.ManualAddCreditsResponse;
 import com.aiminilab.aitoolmarket.credit.service.CreditService;
 import com.aiminilab.aitoolmarket.user.dto.AdminUserSummaryResponse;
@@ -11,6 +12,7 @@ import com.aiminilab.aitoolmarket.user.mapper.UserMapper;
 import com.aiminilab.aitoolmarket.user.service.AdminUserService;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 @Service
@@ -26,7 +28,7 @@ public class AdminUserServiceImpl implements AdminUserService {
 
     @Override
     public PageResponse<AdminUserSummaryResponse> list() {
-        List<AdminUserSummaryResponse> rows = userMapper.findAllActive().stream()
+        List<AdminUserSummaryResponse> rows = userMapper.findForAdmin(null, "ACTIVE", null, 100, 0).stream()
                 .map(this::toSummary)
                 .toList();
         return new PageResponse<>(rows, rows.size());
@@ -36,11 +38,20 @@ public class AdminUserServiceImpl implements AdminUserService {
     public ManualAddCreditsResponse manualAddCredits(Long userId, int amount, String reason, Long operatorId) {
         userMapper.findById(userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.PARAM_ERROR, "用户不存在"));
-        return creditService.manualAdd(userId, amount, reason, operatorId);
+        CreditAccountResponse before = creditService.account(userId);
+        CreditAccountResponse after = creditService.manualAdd(userId, amount, reason, operatorId);
+        return new ManualAddCreditsResponse(
+                userId,
+                amount,
+                before.balance(),
+                after.balance(),
+                reason,
+                LocalDateTime.now()
+        );
     }
 
     private AdminUserSummaryResponse toSummary(User user) {
-        Integer balance = creditService.balance(user.getId());
+        Integer balance = creditService.account(user.getId()).balance();
         return new AdminUserSummaryResponse(
                 user.getId(),
                 user.getUsername(),

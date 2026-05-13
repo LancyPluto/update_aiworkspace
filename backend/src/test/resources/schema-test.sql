@@ -22,6 +22,14 @@ CREATE TABLE tool_categories (
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
+CREATE TABLE system_settings (
+  setting_key VARCHAR(128) PRIMARY KEY,
+  setting_value TEXT,
+  setting_group VARCHAR(64) NOT NULL DEFAULT 'system',
+  description VARCHAR(255),
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
 CREATE TABLE ai_tools (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   tool_code VARCHAR(128) NOT NULL UNIQUE,
@@ -100,6 +108,21 @@ CREATE TABLE ai_result_resources (
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE task_outbox_events (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  task_id BIGINT NOT NULL,
+  event_type VARCHAR(64) NOT NULL,
+  payload_json TEXT NOT NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'PENDING',
+  retry_count INT NOT NULL DEFAULT 0,
+  next_retry_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_error TEXT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_task_outbox_status_retry (status, next_retry_at, id),
+  UNIQUE KEY uk_task_outbox_task_event (task_id, event_type)
+);
+
 CREATE TABLE credit_accounts (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   user_id BIGINT NOT NULL UNIQUE,
@@ -117,6 +140,7 @@ CREATE TABLE credit_logs (
   user_id BIGINT NOT NULL,
   account_id BIGINT NOT NULL,
   task_id BIGINT,
+  agent_run_id BIGINT,
   log_type VARCHAR(32) NOT NULL,
   amount INT NOT NULL DEFAULT 0,
   frozen_amount INT NOT NULL DEFAULT 0,
@@ -168,4 +192,152 @@ CREATE TABLE ai_task_logs (
   operator_id BIGINT,
   metadata_json JSON,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE agent_sessions (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  user_id BIGINT NOT NULL,
+  workspace_id BIGINT,
+  title VARCHAR(120) NOT NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE agent_workspaces (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  owner_user_id BIGINT NOT NULL,
+  name VARCHAR(120) NOT NULL,
+  workspace_type VARCHAR(32) NOT NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(owner_user_id, workspace_type)
+);
+
+CREATE TABLE agent_workspace_members (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  workspace_id BIGINT NOT NULL,
+  user_id BIGINT NOT NULL,
+  role VARCHAR(32) NOT NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(workspace_id, user_id)
+);
+
+CREATE TABLE agent_workspace_memory_items (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  workspace_id BIGINT NOT NULL,
+  user_id BIGINT NOT NULL,
+  memory_type VARCHAR(32) NOT NULL,
+  title VARCHAR(160) NOT NULL,
+  content CLOB NOT NULL,
+  source_run_id BIGINT,
+  status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE agent_messages (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  session_id BIGINT NOT NULL,
+  user_id BIGINT NOT NULL,
+  role VARCHAR(32) NOT NULL,
+  content_text CLOB NOT NULL,
+  content_json JSON,
+  run_id BIGINT,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE agent_runs (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  session_id BIGINT NOT NULL,
+  user_id BIGINT NOT NULL,
+  status VARCHAR(32) NOT NULL,
+  intent VARCHAR(64),
+  model_provider_code VARCHAR(64),
+  model_name VARCHAR(128),
+  estimated_credits INT NOT NULL DEFAULT 0,
+  consumed_credits INT NOT NULL DEFAULT 0,
+  error_code VARCHAR(64),
+  error_message VARCHAR(512),
+  started_at DATETIME,
+  finished_at DATETIME,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE agent_run_events (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  run_id BIGINT NOT NULL,
+  user_id BIGINT NOT NULL,
+  event_type VARCHAR(64) NOT NULL,
+  event_text CLOB,
+  event_json JSON,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE agent_tool_calls (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  run_id BIGINT NOT NULL,
+  user_id BIGINT NOT NULL,
+  tool_code VARCHAR(128) NOT NULL,
+  status VARCHAR(32) NOT NULL,
+  arguments_json JSON NOT NULL,
+  result_json JSON,
+  error_code VARCHAR(64),
+  error_message VARCHAR(512),
+  started_at DATETIME,
+  finished_at DATETIME,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE agent_tool_preferences (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  user_id BIGINT NOT NULL,
+  tool_code VARCHAR(128) NOT NULL,
+  auto_call_enabled TINYINT NOT NULL DEFAULT 0,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(user_id, tool_code)
+);
+
+CREATE TABLE agent_files (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  session_id BIGINT NOT NULL,
+  user_id BIGINT NOT NULL,
+  original_filename VARCHAR(255) NOT NULL,
+  content_type VARCHAR(128),
+  file_size BIGINT NOT NULL DEFAULT 0,
+  storage_path VARCHAR(1024) NOT NULL,
+  status VARCHAR(32) NOT NULL,
+  extracted_text CLOB,
+  error_message VARCHAR(512),
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE agent_file_chunks (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  file_id BIGINT NOT NULL,
+  session_id BIGINT NOT NULL,
+  user_id BIGINT NOT NULL,
+  chunk_index INT NOT NULL,
+  content_text CLOB NOT NULL,
+  metadata_json CLOB,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE agent_model_configs (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  provider VARCHAR(64) NOT NULL,
+  model_name VARCHAR(128) NOT NULL,
+  base_url VARCHAR(512),
+  api_key VARCHAR(512),
+  minimax_group_id VARCHAR(128),
+  timeout_seconds INT NOT NULL DEFAULT 60,
+  enabled TINYINT NOT NULL DEFAULT 1,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

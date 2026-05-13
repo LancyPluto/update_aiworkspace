@@ -1,214 +1,100 @@
-<br />
+# AI Tool Market
 
-# ai-tool-market
+AI 工具市场本地联调项目，包含用户端、管理端、后端、Worker、MySQL 和 Redis。
 
-## V1 工具数量建议
+## 一键启动
 
-V1.0 先上线 6 个核心工具：
+在项目根目录执行：
 
-| 分类    | 工具          |
-| :---- | :---------- |
-| 内容创作  | AI 朋友圈文案生成器 |
-| 内容创作  | AI 小红书文案生成器 |
-| 短视频运营 | AI 短视频脚本生成器 |
-| 短视频运营 | AI 短视频选题生成器 |
-| 电商运营  | AI 商品标题优化器  |
-| 门店获客  | AI 门店活动策划器  |
-
-# AI 任务 Worker
-
-<br />
-
-&#x20;
-
-## 角色定位
-
-你负责 Redis 队列消费、Prompt 拼装、AI 模型调用、任务结果回写。不要直接绕过后端改核心业务表，算力和任务状态由后端统一处理。
-
-## 必须交付
-
-```
-Redis 队列消费者
-任务执行上下文获取
-Prompt 模板变量替换
-AI 模型调用
-成功结果回写
-失败状态回写
-Worker 启动说明
-
+```powershell
+docker compose -f deploy/docker-compose.yml up -d
 ```
 
-## Redis 队列
+首次启动会下载镜像并安装 Maven、npm、pip 依赖，耗时会比较久。后续重启可以执行：
 
-队列名：
-
-```
-ai:task:queue
-
+```powershell
+docker compose -f deploy/docker-compose.yml restart
 ```
 
-消息格式：
+如果本机之前跑过旧版本容器，可以使用：
 
-```
-{
-  "taskId": 90001,
-  "taskNo": "T202605070001",
-  "toolCode": "xiaohongshu_copywriting",
-  "traceId": "request-id",
-  "createdAt": "2026-05-07T10:00:00"
-}
-
+```powershell
+docker compose -f deploy/docker-compose.yml up -d --remove-orphans
 ```
 
-## Worker 执行流程
+## 本地访问
 
-```
-1. 从 Redis 获取消息
-2. 调用 GET /api/internal/v1/tasks/{taskId}/execution-context
-3. 调用 POST /api/internal/v1/tasks/{taskId}/processing
-4. 根据 field inputs + prompt template 拼装 Prompt
-5. 调用 AI 模型
-6. 成功则调用 POST /api/internal/v1/tasks/{taskId}/success
-7. 失败则调用 POST /api/internal/v1/tasks/{taskId}/failed
+| 服务 | 地址 |
+| --- | --- |
+| 用户端 | http://127.0.0.1:5173 |
+| 管理端 | http://127.0.0.1:5174 |
+| 后端 API | http://127.0.0.1:8080 |
+| MySQL | 127.0.0.1:3307 |
+| Redis | 127.0.0.1:6379 |
 
-```
+## 测试账号
 
-## 执行上下文返回结构
+| 角色 | 账号 | 密码 |
+| --- | --- | --- |
+| 管理员 | admin | 123456 |
+| 普通用户 | user1 | 123456 |
+| 禁用用户 | disabled_user | 123456 |
 
-后端返回：
+## Docker 服务
 
-```
-{
-  "taskId": 90001,
-  "taskNo": "T202605070001",
-  "toolCode": "xiaohongshu_copywriting",
-  "status": "QUEUED",
-  "params": {
-    "productName": "五一护理套餐",
-    "targetCustomer": "年轻女性",
-    "style": "种草"
-  },
-  "systemPrompt": "你是一个专业小红书文案助手。",
-  "userPromptTemplate": "请根据 {{productName}} 为 {{targetCustomer}} 生成一篇 {{style}} 风格文案。",
-  "outputFormat": "MARKDOWN",
-  "modelProviderCode": "deepseek",
-  "modelName": "deepseek-chat"
-}
+`deploy/docker-compose.yml` 会启动以下服务：
 
+- `mysql`: MySQL 8，自动执行 `sql` 目录初始化脚本
+- `redis`: Redis 7
+- `backend`: Spring Boot 后端，端口 `8080`
+- `admin-frontend`: Next.js 管理端，端口 `5174`
+- `user-web`: Vite 用户端，端口 `5173`
+- `worker`: Python Worker，消费 Redis 队列并回写任务结果
+
+默认 Worker 使用：
+
+```env
+MODEL_PROVIDER=mock
 ```
 
-## Prompt 变量替换规则
+因此不配置真实大模型 Key 也可以测试任务创建、队列消费、结果回写和算力流水。接入真实模型时再配置：
 
-```
-{{productName}} 替换为 params.productName
-{{targetCustomer}} 替换为 params.targetCustomer
-{{style}} 替换为 params.style
-缺少变量时，回写 FAILED，errorCode = PROMPT_VARIABLE_MISSING
-
-```
-
-## 成功回写
-
-```
-POST /api/internal/v1/tasks/{taskId}/success
-
+```env
+MODEL_PROVIDER=deepseek
+MODEL_API_BASE_URL=https://api.deepseek.com
+MODEL_API_KEY=your-real-key
+MODEL_NAME=deepseek-chat
 ```
 
-```
-{
-  "resourceType": "MARKDOWN",
-  "contentText": "生成结果",
-  "contentJson": null,
-  "modelProviderCode": "deepseek",
-  "modelName": "deepseek-chat"
-}
+## 常用检查
 
+查看容器状态：
+
+```powershell
+docker compose -f deploy/docker-compose.yml ps
 ```
 
-## 失败回写
+查看后端日志：
 
-```
-POST /api/internal/v1/tasks/{taskId}/failed
-
-```
-
-```
-{
-  "errorCode": "MODEL_CALL_FAILED",
-  "errorMessage": "模型调用失败"
-}
-
+```powershell
+docker compose -f deploy/docker-compose.yml logs -f backend
 ```
 
-## V1 错误码
+查看 Worker 日志：
 
-错误码
-
-场景
-
-`PROMPT_VARIABLE_MISSING`
-
-Prompt 变量缺失
-
-`MODEL_CALL_FAILED`
-
-模型调用失败
-
-`MODEL_TIMEOUT`
-
-模型超时
-
-`MODEL_OUTPUT_EMPTY`
-
-模型返回空内容
-
-`WORKER_INTERNAL_ERROR`
-
-Worker 内部异常
-
-## 每日交付
-
-日期
-
-交付
-
-第 1 天
-
-Worker 项目启动、Redis 连接、消费空消息
-
-第 2 天
-
-execution-context 接口联调
-
-第 3 天
-
-任务状态 PROCESSING 回写
-
-第 4 天
-
-AI 调用和 SUCCESS/FAILED 回写
-
-第 5 天
-
-异常处理、超时处理、日志
-
-第 6 天
-
-联调修 Bug
-
-第 7 天
-
-Worker 启动文档和演示环境验证
-
-## 不做
-
-```
-多模型路由
-文件上传
-图片/视频生成
-直接修改 credit_accounts
-直接修改 ai_tasks 成功状态
-复杂死信队列后台
-
+```powershell
+docker compose -f deploy/docker-compose.yml logs -f worker
 ```
 
+验证后端接口：
+
+```powershell
+curl http://127.0.0.1:8080/api/v1/ping
+```
+
+## 注意事项
+
+- 本机端口 `8080`、`5173`、`5174`、`3307`、`6379` 不能被其他服务占用。
+- 如果数据库结构和种子数据异常，通常是旧 Docker volume 残留导致，可以在确认不需要旧数据后清理 volume 再启动。
+- 两个前端都连接同一个后端服务，用户端通过 Vite 代理访问后端，管理端在本地开发端口会直连 `http://127.0.0.1:8080`。
+- 当前分支用于团队后端核心集成和本地联调，推荐组员拉取 `integration/backend-core-team-merge-20260510` 后按本文档启动。
