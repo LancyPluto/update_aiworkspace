@@ -12,13 +12,17 @@ export function getApiOrigin(): string {
 
 export class ApiBusinessError extends Error {
   readonly code: ApiErrorCode
-  readonly requestId?: string
+  readonly traceId?: string
 
-  constructor(code: ApiErrorCode, message: string, requestId?: string) {
+  constructor(code: ApiErrorCode, message: string, traceId?: string) {
     super(message)
     this.name = "ApiBusinessError"
     this.code = code
-    this.requestId = requestId
+    this.traceId = traceId
+  }
+
+  get requestId(): string | undefined {
+    return this.traceId
   }
 }
 
@@ -95,7 +99,7 @@ export async function apiRequest<T>(
   }
 
   if (json.code !== "SUCCESS") {
-    throw new ApiBusinessError(json.code, json.message ?? json.code, json.requestId)
+    throw new ApiBusinessError(json.code, json.message ?? json.code, json.traceId ?? json.requestId)
   }
 
   return json.data as T

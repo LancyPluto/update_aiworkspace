@@ -45,6 +45,9 @@ class FakeModelClient:
     async def chat(self, messages):
         return "real model answer"
 
+    async def chat_stream(self, messages):
+        yield await self.chat(messages)
+
 
 @pytest.mark.asyncio
 async def test_runtime_builds_model_client_from_backend_active_model_config():

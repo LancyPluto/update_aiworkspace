@@ -1,8 +1,10 @@
 export { apiRequest, ApiBusinessError } from "./client"
+export { formatAgentRequestError, formatAgentRunFailure } from "./errorMapping"
 export { login, logout, register } from "./authApi"
 export { getCurrentUser } from "./userApi"
 export { fetchToolCategories, fetchTools, searchTools, fetchToolByCode } from "./toolApi"
 export {
+  cancelAgentRun,
   confirmAgentTool,
   createAgentSession,
   createAgentWorkspaceMemory,

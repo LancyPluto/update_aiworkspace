@@ -129,6 +129,44 @@ class WorkerInternalApiTest {
     }
 
     @Test
+    void agentServiceCanCreateAndReadTaskThroughInternalApi() throws Exception {
+        String adminToken = login("/api/admin/v1/auth/login", "admin");
+        Long toolId = createTool(adminToken, "agent_internal_task_tool", 1);
+        publishTool(adminToken, toolId);
+
+        String createBody = """
+                            {
+                              "userId": 1,
+                              "toolCode": "agent_internal_task_tool",
+                              "params": {
+                                "productName": "Agent Product",
+                                "targetCustomer": "Young users",
+                                "style": "planting"
+                              },
+                              "clientRequestId": "agent-run-1-tool-call-1"
+                            }
+                            """;
+        String response = mockMvc.perform(signed(post("/api/internal/v1/tasks"), "POST",
+                        "/api/internal/v1/tasks", createBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("QUEUED"))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        Long taskId = Long.parseLong(response.replaceAll("(?s).*\\\"taskId\\\"\\s*:\\s*(\\d+).*", "$1"));
+
+        mockMvc.perform(signed(get("/api/internal/v1/tasks/{taskId}", taskId)
+                                .queryParam("userId", "1"),
+                        "GET", "/api/internal/v1/tasks/%d".formatted(taskId), ""))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.taskId").value(taskId.intValue()))
+                .andExpect(jsonPath("$.data.toolCode").value("agent_internal_task_tool"))
+                .andExpect(jsonPath("$.data.params.productName").value("Agent Product"));
+    }
+
+    @Test
     void workerInternalApiRejectsMissingOrWrongInternalToken() throws Exception {
         String adminToken = login("/api/admin/v1/auth/login", "admin");
         Long toolId = createTool(adminToken, "worker_token_tool", 1);

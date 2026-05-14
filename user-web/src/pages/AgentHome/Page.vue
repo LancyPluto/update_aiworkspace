@@ -98,10 +98,27 @@ const confirmationEvents = computed(() =>
 )
 
 const runStatusText = computed(() => {
-  if (runConnectionStatus.value === "streaming") return "Agent 正在运行，实时接收回复"
-  if (runConnectionStatus.value === "polling") return "实时连接已断开，正在自动续传"
   if (runConnectionStatus.value === "completed") return "Agent 已完成"
   if (runConnectionStatus.value === "failed") return "Agent 运行失败"
+  if (runConnectionStatus.value === "polling") return "实时连接已断开，正在自动续传"
+  if (runConnectionStatus.value === "streaming") {
+    const last = [...events.value].reverse().find((e) => e.eventType !== "message.delta")
+    const payload = parseEventJson(last?.eventJson)
+    if (last?.eventType === "tool.confirmation_required") return "等待你确认工具调用"
+    if (last?.eventType === "tool.task_dispatched") return "工具任务已下发"
+    if (last?.eventType === "tool.task_progress") {
+      const status = typeof payload.status === "string" ? payload.status : ""
+      if (status === "PROCESSING") return "工具任务执行中"
+      if (status === "QUEUED") return "工具任务排队中"
+      return "工具进度更新"
+    }
+    if (last?.eventType === "tool.started") return "正在执行工具"
+    if (last?.eventType === "tool.finished") return "工具已结束，正在生成回复"
+    if (last?.eventType === "intent.detected") return "正在理解你的需求"
+    if (last?.eventType === "tool.selected") return "正在准备工具调用"
+    if (draftAssistantContent.value || last?.eventType === "message.completed") return "正在生成回复"
+    return "Agent 正在运行，实时接收回复"
+  }
   return ""
 })
 

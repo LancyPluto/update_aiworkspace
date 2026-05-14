@@ -4,8 +4,10 @@ import com.aiminilab.aitoolmarket.agent.dto.AgentFileParseResult;
 import com.aiminilab.aitoolmarket.agent.dto.AgentModelConfigRequest;
 import com.aiminilab.aitoolmarket.agent.dto.AgentModelConfigTestResponse;
 import com.aiminilab.aitoolmarket.config.AppProperties;
+import com.aiminilab.aitoolmarket.config.TraceIdFilter;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.MDC;
 import org.springframework.stereotype.Component;
 
 import javax.crypto.Mac;
@@ -104,6 +106,7 @@ public class HttpAgentServiceClient implements AgentServiceClient {
                 .header("X-Internal-Timestamp", timestamp)
                 .header("X-Internal-Nonce", nonce)
                 .header("X-Internal-Signature", signature)
+                .header(TraceIdFilter.REQUEST_ID_HEADER, currentTraceId())
                 .POST(HttpRequest.BodyPublishers.ofByteArray(body))
                 .build();
 
@@ -151,5 +154,10 @@ public class HttpAgentServiceClient implements AgentServiceClient {
 
     private String escapeJson(String value) {
         return value == null ? "" : value.replace("\\", "\\\\").replace("\"", "\\\"");
+    }
+
+    private String currentTraceId() {
+        String traceId = MDC.get(TraceIdFilter.TRACE_ID_KEY);
+        return traceId == null || traceId.isBlank() ? UUID.randomUUID().toString() : traceId;
     }
 }

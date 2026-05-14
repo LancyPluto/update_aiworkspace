@@ -83,10 +83,10 @@ class UniversalAgentGraph:
         if tool is None:
             state: AgentState = {
                 "run_id": context.runId,
-            "context": context,
-            "budget": BudgetState(credit_budget=context.creditBudget),
-            "intent": IntentResult(intent=Intent.NEEDS_CLARIFICATION, confidence=0.5, reason="confirmed_tool_unavailable"),
-        }
+                "context": context,
+                "budget": BudgetState(credit_budget=context.creditBudget),
+                "intent": IntentResult(intent=Intent.NEEDS_CLARIFICATION, confidence=0.5, reason="confirmed_tool_unavailable"),
+            }
             state = await self._generate_clarifying_answer(state)
             await self._complete_run(state)
             return
@@ -105,6 +105,10 @@ class UniversalAgentGraph:
             state = await self._execute_tool(state)
         except BudgetExceeded as exception:
             await self.fail(context.runId, exception.error_code, exception.message)
+            return
+        if state.get("missing_tool_arguments"):
+            state = await self._generate_clarifying_answer(state)
+            await self._complete_run(state)
             return
         state = await self._synthesize_tool_answer(state)
         await self._complete_run(state)
@@ -171,7 +175,14 @@ class UniversalAgentGraph:
             RunEventCreate(
                 eventType=INTENT_DETECTED,
                 eventText=intent.intent.value,
-                eventJson={"confidence": intent.confidence, "reason": intent.reason, "selectedToolCode": intent.selectedToolCode},
+                eventJson={
+                    "confidence": intent.confidence,
+                    "reason": intent.reason,
+                    "selectedToolCode": intent.selectedToolCode,
+                    "candidateToolCodes": intent.candidateToolCodes,
+                    "clarifyingQuestion": intent.clarifyingQuestion,
+                    "decisionSource": intent.decisionSource,
+                },
             ),
         )
         return {**state, "intent": intent}
@@ -264,13 +275,29 @@ class UniversalAgentGraph:
             messages.append(ChatMessage(role="system", content=file_context))
         messages.extend(context.history)
         messages.append(ChatMessage(role="user", content=context.message))
-        answer = await self.model.chat(messages)
-        await self._emit_answer_events(context.runId, answer)
+        answer = await self._stream_model_answer(context.runId, state["budget"], messages)
         return {**state, "final_answer": answer}
 
     async def _generate_clarifying_answer(self, state: AgentState) -> AgentState:
         context = state["context"]
-        answer = "请补充你想完成的目标、对象和期望输出，我再帮你选择合适的工具。"
+        intent = state.get("intent")
+        missing = state.get("missing_tool_arguments") or []
+        if missing:
+            answer = f"请先补充这些信息：{', '.join(missing)}"
+        elif intent and intent.clarifyingQuestion:
+            answer = intent.clarifyingQuestion
+        elif intent and intent.intent == Intent.NEEDS_CLARIFICATION and intent.candidateToolCodes:
+            registry = ToolRegistry(context)
+            names = []
+            for code in intent.candidateToolCodes:
+                tool = registry.get(code)
+                names.append(tool.toolName if tool else code)
+            if len(names) >= 2:
+                answer = f"你说的范围有点宽，我更想先确认你想用哪一种：{'、'.join(names)}。请补充更具体的需求或参数。"
+            else:
+                answer = "请补充你想完成的目标、对象和期望输出，我再帮你选择合适的工具。"
+        else:
+            answer = "请补充你想完成的目标、对象和期望输出，我再帮你选择合适的工具。"
         await self._emit_answer_events(context.runId, answer)
         return {**state, "final_answer": answer}
 
@@ -291,9 +318,29 @@ class UniversalAgentGraph:
         if workspace_memory_context:
             messages.append(ChatMessage(role="system", content=workspace_memory_context))
         messages.append(ChatMessage(role="user", content=f"User request: {context.message}\nTool result: {tool_result}"))
-        answer = await self.model.chat(messages)
-        await self._emit_answer_events(context.runId, answer)
+        answer = await self._stream_model_answer(context.runId, state["budget"], messages)
         return {**state, "final_answer": answer}
+
+    async def _stream_model_answer(self, run_id: int, budget: BudgetState, messages: list[ChatMessage]) -> str:
+        self.budget_guard.reserve_model_call(budget)
+        parts: list[str] = []
+        stream = getattr(self.model, "chat_stream", None)
+        if stream is None:
+            answer = await self.model.chat(messages)
+            await self._emit_answer_events(run_id, answer)
+            return answer
+        async for chunk in self.model.chat_stream(messages):
+            parts.append(chunk)
+            await self.backend.append_event(
+                run_id,
+                RunEventCreate(eventType=MESSAGE_DELTA, eventText=chunk, eventJson={"delta": chunk}),
+            )
+        answer = "".join(parts)
+        await self.backend.append_event(
+            run_id,
+            RunEventCreate(eventType=MESSAGE_COMPLETED, eventText=answer, eventJson={"content": answer}),
+        )
+        return answer
 
     async def _format_workspace_memory_context(self, context: RunContext) -> str:
         workspace_id = context.workspaceId
