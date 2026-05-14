@@ -9,6 +9,8 @@ import com.aiminilab.aitoolmarket.task.dto.TaskStatusResponse;
 public interface TaskService {
     TaskStatusResponse create(Long userId, CreateTaskRequest request);
 
+    TaskStatusResponse createForAgentTool(Long userId, CreateTaskRequest request);
+
     TaskStatusResponse status(Long userId, Long taskId);
 
     TaskDetailResponse detail(Long userId, Long taskId);

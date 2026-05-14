@@ -88,6 +88,12 @@ export function fetchAgentRunEvents(runId: number, options?: { token?: string | 
   })
 }
 
+export function cancelAgentRun(runId: number, options?: { token?: string | null }) {
+  return apiRequest<AgentRun>("POST", `/api/v1/agent/runs/${runId}/cancel`, {
+    token: options?.token,
+  })
+}
+
 export async function streamAgentRunEvents(
   runId: number,
   options: {

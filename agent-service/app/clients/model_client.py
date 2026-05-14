@@ -1,3 +1,4 @@
+from collections.abc import AsyncIterator
 from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -28,16 +29,38 @@ class ModelClient:
         return self._chat_model
 
     async def chat(self, messages: list[ChatMessage]) -> str:
+        return await self._invoke(messages)
+
+    async def chat_stream(self, messages: list[ChatMessage]) -> AsyncIterator[str]:
+        payload = [_to_langchain_message(message) for message in messages]
+        if not hasattr(self._chat_model, "astream"):
+            answer = await self._invoke(messages)
+            for chunk in _chunk_text(answer):
+                if chunk:
+                    yield chunk
+            return
+        emitted = False
         try:
-            result = await self._chat_model.ainvoke([_to_langchain_message(message) for message in messages])
+            async for chunk in self._chat_model.astream(payload):
+                content = _extract_content(getattr(chunk, "content", None))
+                if content:
+                    emitted = True
+                    yield content
         except Exception as exception:
             raise ModelClientError(f"model request failed: {exception}") from exception
-        content = getattr(result, "content", None)
-        if isinstance(content, str):
-            return content
-        if isinstance(content, list):
-            return _flatten_content(content)
-        raise ModelClientError("model returned invalid chat completion response")
+        if not emitted:
+            answer = await self._invoke(messages)
+            for chunk in _chunk_text(answer):
+                if chunk:
+                    yield chunk
+
+    async def _invoke(self, messages: list[ChatMessage]) -> str:
+        payload = [_to_langchain_message(message) for message in messages]
+        try:
+            result = await self._chat_model.ainvoke(payload)
+        except Exception as exception:
+            raise ModelClientError(f"model request failed: {exception}") from exception
+        return _extract_content(getattr(result, "content", None))
 
 
 def _to_langchain_message(message: ChatMessage):
@@ -59,3 +82,15 @@ def _flatten_content(content: list[Any]) -> str:
     if not parts:
         raise ModelClientError("model returned invalid chat completion response")
     return "".join(parts)
+
+
+def _extract_content(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return _flatten_content(content)
+    raise ModelClientError("model returned invalid chat completion response")
+
+
+def _chunk_text(value: str, size: int = 80) -> list[str]:
+    return [value[index : index + size] for index in range(0, len(value), size)] or [""]

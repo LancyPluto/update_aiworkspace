@@ -7,6 +7,7 @@ public record InternalAgentRunContextResponse(
         Long sessionId,
         Long workspaceId,
         Long userId,
+        String status,
         String message,
         List<InternalAgentMessageResponse> history,
         List<InternalAgentFileContextResponse> agentFiles,

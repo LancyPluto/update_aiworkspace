@@ -6,6 +6,8 @@ from app.graphs.universal_agent_graph import UniversalAgentGraph
 from app.runtime.router import RuntimeRouter
 from app.tools.backend_tool import ToolExecutionError
 
+TERMINAL_RUN_STATUSES = {"SUCCESS", "FAILED", "CANCELLED", "TIMEOUT"}
+
 
 class AgentRuntime:
     def __init__(
@@ -26,6 +28,8 @@ class AgentRuntime:
     async def execute_run(self, run_id: int) -> None:
         try:
             context = await self.backend.get_run_context(run_id)
+            if context.status in TERMINAL_RUN_STATUSES:
+                return
             model_client = await self._model_client()
             engine = self.runtime_router_factory(
                 self.backend,
@@ -48,6 +52,8 @@ class AgentRuntime:
     async def execute_confirmed_tool(self, run_id: int, tool_code: str) -> None:
         try:
             context = await self.backend.get_run_context(run_id)
+            if context.status in TERMINAL_RUN_STATUSES:
+                return
             await UniversalAgentGraph(self.backend, await self._model_client()).run_confirmed_tool(context, tool_code)
         except BackendClientError as exc:
             await self._fail(run_id, "BACKEND_CALL_FAILED", str(exc))

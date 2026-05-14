@@ -40,6 +40,8 @@ class Settings:
     agent_default_consumed_credits: int = int(os.getenv("AGENT_DEFAULT_CONSUMED_CREDITS", "1"))
     agent_model_call_cost: int = int(os.getenv("AGENT_MODEL_CALL_COST", "1"))
     agent_deep_agents_enabled: bool = _bool("AGENT_DEEP_AGENTS_ENABLED", False)
+    agent_tool_execution_timeout_seconds: int = int(os.getenv("AGENT_TOOL_EXECUTION_TIMEOUT_SECONDS", "120"))
+    agent_tool_poll_interval_seconds: float = float(os.getenv("AGENT_TOOL_POLL_INTERVAL_SECONDS", "1"))
 
 
 settings = Settings()

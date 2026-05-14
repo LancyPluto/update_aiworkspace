@@ -1,5 +1,5 @@
 from app.core.intent_router import Intent, IntentRouter
-from app.core.schemas import RunContext, ToolDescriptor
+from app.core.schemas import ChatMessage, RunContext, ToolDescriptor
 
 
 def context(message: str) -> RunContext:
@@ -45,13 +45,76 @@ def test_routes_vague_request_to_clarification():
     assert result.intent == Intent.NEEDS_CLARIFICATION
 
 
+def test_routes_short_chat_to_general_chat():
+    result = IntentRouter().classify(context("你是谁"))
+
+    assert result.intent == Intent.GENERAL_CHAT
+
+
 def test_routes_file_analysis_to_file_analysis():
     result = IntentRouter().classify(context("分析我上传的文件并总结"))
 
     assert result.intent == Intent.FILE_ANALYSIS
 
 
+def test_routes_ambiguous_tool_request_to_clarification():
+    ambiguous_context = RunContext(
+        runId=1,
+        sessionId=1,
+        userId=1,
+        message="帮我优化这个商品内容",
+        availableTools=[
+            ToolDescriptor(
+                toolCode="product_title_optimizer",
+                toolName="标题优化",
+                description="商品 标题 优化",
+                autoCallable=True,
+            ),
+            ToolDescriptor(
+                toolCode="wechat_longform_generator",
+                toolName="长文生成",
+                description="商品 长文 内容",
+                autoCallable=True,
+            ),
+        ],
+    )
+
+    result = IntentRouter().classify(ambiguous_context)
+
+    assert result.intent == Intent.NEEDS_CLARIFICATION
+    assert set(result.candidateToolCodes) == {"product_title_optimizer", "wechat_longform_generator"}
+
+
 def test_routes_normal_question_to_general_chat():
     result = IntentRouter().classify(context("你能介绍一下这个平台怎么用吗"))
 
     assert result.intent == Intent.GENERAL_CHAT
+
+
+def test_continues_tool_use_after_field_guidance_without_xiaohongshu_keywords():
+    history = [
+        ChatMessage(role="USER", content="帮我写一篇小红书种草笔记"),
+        ChatMessage(
+            role="ASSISTANT",
+            content='如果想使用「AI 小红书文案生成器」，请在同一条或下一条消息里按下面补充：\n\n• 产品/服务名称：例如：五一肩颈护理套餐',
+        ),
+    ]
+    ctx = RunContext(
+        runId=2,
+        sessionId=1,
+        userId=1,
+        message="你全部按照你给的例子来输入，把输出结果给我",
+        history=history,
+        availableTools=[
+            ToolDescriptor(
+                toolCode="xiaohongshu_copywriting",
+                toolName="AI 小红书文案生成器",
+                description="小红书 种草",
+                autoCallable=True,
+            ),
+        ],
+    )
+    result = IntentRouter().classify(ctx)
+    assert result.intent == Intent.TOOL_USE
+    assert result.selectedToolCode == "xiaohongshu_copywriting"
+    assert result.reason == "continuing_pending_tool_prompt"

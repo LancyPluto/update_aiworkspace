@@ -43,6 +43,16 @@ public interface AgentToolCallMapper extends BaseMapper<AgentToolCall> {
             """)
     List<AgentToolCall> findByRunId(@Param("runId") Long runId);
 
+    @Select("""
+            SELECT *
+            FROM agent_tool_calls
+            WHERE run_id = #{runId}
+              AND tool_code = #{toolCode}
+            ORDER BY id DESC
+            LIMIT 1
+            """)
+    AgentToolCall selectLatestByRunIdAndToolCode(@Param("runId") Long runId, @Param("toolCode") String toolCode);
+
     @Update("""
             UPDATE agent_tool_calls
             SET status = 'SUCCESS', result_json = #{resultJson}, finished_at = #{now}

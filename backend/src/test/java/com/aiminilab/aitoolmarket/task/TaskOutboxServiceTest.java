@@ -15,6 +15,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -58,7 +59,7 @@ class TaskOutboxServiceTest {
         String userToken = prepareOnlineTool("outbox_retry_tool", 4);
         Long taskId = createTask(userToken, "outbox_retry_tool", "outbox-retry-request");
 
-        Mockito.when(taskQueuePublisher.publish(taskId)).thenReturn(false, true);
+        Mockito.when(taskQueuePublisher.publish(taskId, anyString())).thenReturn(false, true);
 
         assertThat(taskOutboxService.dispatchPending(10)).isZero();
         assertThat(outboxStatus(taskId)).isEqualTo("PENDING");
@@ -67,7 +68,7 @@ class TaskOutboxServiceTest {
         jdbcTemplate.update("UPDATE task_outbox_events SET next_retry_at = CURRENT_TIMESTAMP WHERE task_id = ?", taskId);
         assertThat(taskOutboxService.dispatchPending(10)).isEqualTo(1);
         assertThat(outboxStatus(taskId)).isEqualTo("SENT");
-        Mockito.verify(taskQueuePublisher, Mockito.times(2)).publish(taskId);
+        Mockito.verify(taskQueuePublisher, Mockito.times(2)).publish(taskId, anyString());
     }
 
     @Test

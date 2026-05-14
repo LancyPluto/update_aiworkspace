@@ -8,6 +8,7 @@ from app.core.schemas import ChatMessage, RunComplete, RunContext, RunEventCreat
 from app.graphs.subagent_router import SubagentRouter, format_subagent_delegation_hint
 from app.security.prompt_guard import PromptGuard
 from app.tools.backend_tool import BackendToolBridge
+from app.tools.missing_argument_hints import format_missing_tool_arguments_message
 from app.tools.registry import ToolRegistry
 
 try:  # pragma: no cover - exercised when langgraph is installed in runtime images.
@@ -26,6 +27,7 @@ class AgentState(TypedDict, total=False):
     budget: BudgetState
     needs_confirmation: bool
     missing_tool_arguments: list[str]
+    extracted_arguments: dict[str, Any]
     final_answer: str | None
     error_code: str | None
     error_message: str | None
@@ -52,7 +54,7 @@ class UniversalAgentGraph:
         )
         self.prompt_guard = prompt_guard or PromptGuard()
         self.subagent_router = subagent_router or SubagentRouter()
-        self.tool_bridge = BackendToolBridge(backend_client)
+        self.tool_bridge = BackendToolBridge(backend_client, model_client=model_client)
         self._compiled_graph = self._build_langgraph()
 
     async def run(self, context: RunContext) -> None:
@@ -83,10 +85,10 @@ class UniversalAgentGraph:
         if tool is None:
             state: AgentState = {
                 "run_id": context.runId,
-            "context": context,
-            "budget": BudgetState(credit_budget=context.creditBudget),
-            "intent": IntentResult(intent=Intent.NEEDS_CLARIFICATION, confidence=0.5, reason="confirmed_tool_unavailable"),
-        }
+                "context": context,
+                "budget": BudgetState(credit_budget=context.creditBudget),
+                "intent": IntentResult(intent=Intent.NEEDS_CLARIFICATION, confidence=0.5, reason="confirmed_tool_unavailable"),
+            }
             state = await self._generate_clarifying_answer(state)
             await self._complete_run(state)
             return
@@ -105,6 +107,10 @@ class UniversalAgentGraph:
             state = await self._execute_tool(state)
         except BudgetExceeded as exception:
             await self.fail(context.runId, exception.error_code, exception.message)
+            return
+        if state.get("missing_tool_arguments"):
+            state = await self._generate_clarifying_answer(state)
+            await self._complete_run(state)
             return
         state = await self._synthesize_tool_answer(state)
         await self._complete_run(state)
@@ -142,12 +148,12 @@ class UniversalAgentGraph:
         if route == "select_tool":
             state = await self._select_tool(state)
             state = await self._check_tool_preference(state)
-            if state.get("needs_confirmation"):
-                await self._request_tool_confirmation(state)
-                return
             if state.get("missing_tool_arguments"):
                 state = await self._generate_clarifying_answer(state)
                 await self._complete_run(state)
+                return
+            if state.get("needs_confirmation"):
+                await self._request_tool_confirmation(state)
                 return
             try:
                 state = await self._execute_tool(state)
@@ -171,7 +177,14 @@ class UniversalAgentGraph:
             RunEventCreate(
                 eventType=INTENT_DETECTED,
                 eventText=intent.intent.value,
-                eventJson={"confidence": intent.confidence, "reason": intent.reason, "selectedToolCode": intent.selectedToolCode},
+                eventJson={
+                    "confidence": intent.confidence,
+                    "reason": intent.reason,
+                    "selectedToolCode": intent.selectedToolCode,
+                    "candidateToolCodes": intent.candidateToolCodes,
+                    "clarifyingQuestion": intent.clarifyingQuestion,
+                    "decisionSource": intent.decisionSource,
+                },
             ),
         )
         return {**state, "intent": intent}
@@ -214,10 +227,45 @@ class UniversalAgentGraph:
             preference.toolCode == tool.toolCode and preference.autoCallEnabled
             for preference in context.toolPreferences
         )
-        missing_arguments = self.tool_bridge.missing_required_arguments(context, tool) if auto_call_enabled else []
+        missing_arguments = self.tool_bridge.missing_required_arguments(context, tool)
         if missing_arguments:
-            return {**state, "needs_confirmation": False, "missing_tool_arguments": missing_arguments}
-        return {**state, "needs_confirmation": not auto_call_enabled, "missing_tool_arguments": []}
+            base_args = self.tool_bridge.build_arguments(context, tool, apply_placeholder_defaults=False)
+            enriched = await self.tool_bridge.enrich_arguments(
+                self.tool_bridge.conversation_argument_text(context),
+                tool,
+                existing_args=base_args,
+            )
+            still_missing = self._missing_from_enriched(enriched, tool)
+            if not still_missing:
+                return {
+                    **state,
+                    "needs_confirmation": not auto_call_enabled,
+                    "missing_tool_arguments": [],
+                    "extracted_arguments": enriched,
+                }
+            return {
+                **state,
+                "needs_confirmation": False,
+                "missing_tool_arguments": still_missing,
+                "extracted_arguments": enriched,
+            }
+        return {
+            **state,
+            "needs_confirmation": not auto_call_enabled,
+            "missing_tool_arguments": [],
+            "extracted_arguments": self.tool_bridge.build_arguments(context, tool, apply_placeholder_defaults=False),
+        }
+
+    @staticmethod
+    def _missing_from_enriched(arguments: dict[str, Any], tool: ToolDescriptor) -> list[str]:
+        required = tool.inputSchema.get("required", [])
+        if not isinstance(required, list):
+            return []
+        return [
+            name
+            for name in required
+            if isinstance(name, str) and (name not in arguments or arguments[name] in (None, ""))
+        ]
 
     async def _request_tool_confirmation(self, state: AgentState) -> AgentState:
         context = state["context"]
@@ -241,12 +289,23 @@ class UniversalAgentGraph:
     async def _execute_tool(self, state: AgentState) -> AgentState:
         context = state["context"]
         tool = state["selected_tool"]
-        missing_arguments = self.tool_bridge.missing_required_arguments(context, tool)
-        if missing_arguments:
-            return {**state, "missing_tool_arguments": missing_arguments}
+        extracted_args = state.get("extracted_arguments")
+        if extracted_args:
+            missing = self._missing_from_enriched(extracted_args, tool)
+        else:
+            base_args = self.tool_bridge.build_arguments(context, tool, apply_placeholder_defaults=False)
+            enriched = await self.tool_bridge.enrich_arguments(
+                self.tool_bridge.conversation_argument_text(context),
+                tool,
+                existing_args=base_args,
+            )
+            extracted_args = enriched
+            missing = self._missing_from_enriched(enriched, tool)
+        if missing:
+            return {**state, "missing_tool_arguments": missing}
         budget = state["budget"]
         self.budget_guard.reserve_tool_call(budget, tool.estimatedCreditCost)
-        result = await self.tool_bridge.execute(context, tool)
+        result = await self.tool_bridge.execute_with_args(context, tool, extracted_args)
         return {**state, "tool_result": result}
 
     async def _generate_chat_answer(self, state: AgentState) -> AgentState:
@@ -264,13 +323,30 @@ class UniversalAgentGraph:
             messages.append(ChatMessage(role="system", content=file_context))
         messages.extend(context.history)
         messages.append(ChatMessage(role="user", content=context.message))
-        answer = await self.model.chat(messages)
-        await self._emit_answer_events(context.runId, answer)
+        answer = await self._stream_model_answer(context.runId, state["budget"], messages)
         return {**state, "final_answer": answer}
 
     async def _generate_clarifying_answer(self, state: AgentState) -> AgentState:
         context = state["context"]
-        answer = "请补充你想完成的目标、对象和期望输出，我再帮你选择合适的工具。"
+        intent = state.get("intent")
+        missing = state.get("missing_tool_arguments") or []
+        if missing:
+            tool = state.get("selected_tool")
+            answer = format_missing_tool_arguments_message(tool, missing)
+        elif intent and intent.clarifyingQuestion:
+            answer = intent.clarifyingQuestion
+        elif intent and intent.intent == Intent.NEEDS_CLARIFICATION and intent.candidateToolCodes:
+            registry = ToolRegistry(context)
+            names = []
+            for code in intent.candidateToolCodes:
+                tool = registry.get(code)
+                names.append(tool.toolName if tool else code)
+            if len(names) >= 2:
+                answer = f"你说的范围有点宽，我更想先确认你想用哪一种：{'、'.join(names)}。请补充更具体的需求或参数。"
+            else:
+                answer = "请补充你想完成的目标、对象和期望输出，我再帮你选择合适的工具。"
+        else:
+            answer = "请补充你想完成的目标、对象和期望输出，我再帮你选择合适的工具。"
         await self._emit_answer_events(context.runId, answer)
         return {**state, "final_answer": answer}
 
@@ -284,16 +360,52 @@ class UniversalAgentGraph:
         context = state["context"]
         self.budget_guard.reserve_model_call(state["budget"])
         tool_result = state.get("tool_result") or {}
+        tool_arguments = tool_result.get("arguments") if isinstance(tool_result, dict) else {}
+        tool_data = tool_result.get("data") if isinstance(tool_result, dict) else {}
+        content_text = tool_data.get("contentText", "") if isinstance(tool_data, dict) else ""
         messages = [
             ChatMessage(role="system", content="Summarize the tool result for the user."),
         ]
         workspace_memory_context = await self._format_workspace_memory_context(context)
         if workspace_memory_context:
             messages.append(ChatMessage(role="system", content=workspace_memory_context))
-        messages.append(ChatMessage(role="user", content=f"User request: {context.message}\nTool result: {tool_result}"))
-        answer = await self.model.chat(messages)
-        await self._emit_answer_events(context.runId, answer)
+        if content_text:
+            messages.append(
+                ChatMessage(
+                    role="user",
+                    content=(
+                        f"User request: {context.message}\n"
+                        f"Tool arguments: {tool_arguments}\n"
+                        f"Tool output:\n{content_text}\n\n"
+                        "Use the tool output as the source of truth. Do not repeat identical paragraphs."
+                    ),
+                )
+            )
+        else:
+            messages.append(ChatMessage(role="user", content=f"User request: {context.message}\nTool result: {tool_result}"))
+        answer = await self._stream_model_answer(context.runId, state["budget"], messages)
         return {**state, "final_answer": answer}
+
+    async def _stream_model_answer(self, run_id: int, budget: BudgetState, messages: list[ChatMessage]) -> str:
+        self.budget_guard.reserve_model_call(budget)
+        parts: list[str] = []
+        stream = getattr(self.model, "chat_stream", None)
+        if stream is None:
+            answer = await self.model.chat(messages)
+            await self._emit_answer_events(run_id, answer)
+            return answer
+        async for chunk in self.model.chat_stream(messages):
+            parts.append(chunk)
+            await self.backend.append_event(
+                run_id,
+                RunEventCreate(eventType=MESSAGE_DELTA, eventText=chunk, eventJson={"delta": chunk}),
+            )
+        answer = "".join(parts)
+        await self.backend.append_event(
+            run_id,
+            RunEventCreate(eventType=MESSAGE_COMPLETED, eventText=answer, eventJson={"content": answer}),
+        )
+        return answer
 
     async def _format_workspace_memory_context(self, context: RunContext) -> str:
         workspace_id = context.workspaceId
@@ -321,9 +433,15 @@ class UniversalAgentGraph:
         await self.backend.fail_run(run_id, RunFail(errorCode=error_code, errorMessage=error_message))
 
     async def _emit_answer_events(self, run_id: int, answer: str) -> None:
-        for chunk in _chunks(answer, 80):
-            await self.backend.append_event(run_id, RunEventCreate(eventType=MESSAGE_DELTA, eventText=chunk))
-        await self.backend.append_event(run_id, RunEventCreate(eventType=MESSAGE_COMPLETED, eventText=answer))
+        for chunk in _chunks(answer, 32):
+            await self.backend.append_event(
+                run_id,
+                RunEventCreate(eventType=MESSAGE_DELTA, eventText=chunk, eventJson={"delta": chunk}),
+            )
+        await self.backend.append_event(
+            run_id,
+            RunEventCreate(eventType=MESSAGE_COMPLETED, eventText=answer, eventJson={"content": answer}),
+        )
 
 
 def _chunks(value: str, size: int) -> list[str]:

@@ -73,6 +73,7 @@ class RunContext(BaseModel):
     runId: int
     sessionId: int
     userId: int
+    status: str | None = None
     workspaceId: int | None = Field(default=None, validation_alias=AliasChoices("workspaceId", "workspace_id"))
     message: str = Field(default="", validation_alias=AliasChoices("message", "userMessage"))
     history: list[ChatMessage] = Field(default_factory=list)
@@ -133,3 +134,38 @@ class ToolCallResponse(BaseModel):
     resultJson: str | dict[str, Any] | None = None
     errorCode: str | None = None
     errorMessage: str | None = None
+
+
+class TaskCreate(BaseModel):
+    userId: int
+    toolCode: str
+    params: dict[str, Any] = Field(default_factory=dict)
+    clientRequestId: str | None = None
+
+
+class TaskStatusResponse(BaseModel):
+    taskId: int
+    taskNo: str | None = None
+    status: str
+    progress: int | None = None
+    progressMessage: str | None = None
+
+
+class TaskResultResponse(BaseModel):
+    resourceType: str | None = None
+    contentText: str | None = None
+
+
+class TaskDetailResponse(BaseModel):
+    taskId: int
+    taskNo: str | None = None
+    userId: int | None = None
+    toolCode: str | None = None
+    toolName: str | None = None
+    status: str
+    progress: int | None = None
+    progressMessage: str | None = None
+    errorCode: str | None = None
+    errorMessage: str | None = None
+    params: dict[str, Any] | None = None
+    result: TaskResultResponse | None = None

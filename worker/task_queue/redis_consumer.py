@@ -48,6 +48,7 @@ class RedisConsumer:
             return
 
         try:
+            LOGGER.info("processing redis message taskId=%s traceId=%s", message.get("taskId"), message.get("traceId", "-"))
             result = self.handler.handle(message)
             LOGGER.info("task handled result=%s", result)
         except Exception:
