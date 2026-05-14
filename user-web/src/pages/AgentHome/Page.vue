@@ -12,6 +12,7 @@ import {
   Send,
   Sparkles,
   Store,
+  Trash2,
   Upload,
   X,
 } from "lucide-vue-next"
@@ -23,6 +24,7 @@ import {
   ApiBusinessError,
   confirmAgentTool,
   createAgentSession,
+  deleteAgentSession,
   fetchAgentMessages,
   fetchAgentFiles,
   fetchAgentRunEvents,
@@ -65,6 +67,7 @@ const fileInputRef = ref<HTMLInputElement | null>(null)
 /** Agent 页内「会话列表」侧栏：不随断点自动隐藏，仅手动切换 */
 const AGENT_SESSION_SIDEBAR_KEY = "ai_tool_market_agent_session_sidebar_open"
 const sessionSidebarOpen = ref(true)
+const deletingSessionId = ref<number | null>(null)
 
 function toggleSessionSidebar() {
   sessionSidebarOpen.value = !sessionSidebarOpen.value
@@ -154,6 +157,40 @@ async function startSession(title = "新的 Agent 会话") {
   activeRunId.value = null
   runConnectionStatus.value = "idle"
   return session
+}
+
+async function removeSession(session: AgentSession, event: MouseEvent) {
+  event.stopPropagation()
+  if (!auth.token || deletingSessionId.value != null) return
+  if (session.id === activeSessionId.value && hasActiveRun.value) {
+    agentError.value = "当前会话 Agent 仍在运行，请稍后再删除。"
+    return
+  }
+  if (!confirm(`确定删除「${session.title}」？`)) return
+  deletingSessionId.value = session.id
+  agentError.value = null
+  try {
+    await deleteAgentSession(session.id, { token: auth.token })
+    const wasActive = activeSessionId.value === session.id
+    sessions.value = sessions.value.filter((item) => item.id !== session.id)
+    if (wasActive) {
+      stopRunUpdates()
+      activeSessionId.value = null
+      messages.value = []
+      files.value = []
+      events.value = []
+      activeRunId.value = null
+      runConnectionStatus.value = "idle"
+      draftAssistantContent.value = ""
+      confirmationError.value = null
+      const next = sessions.value[0]
+      if (next) await selectSession(next.id)
+    }
+  } catch (error) {
+    agentError.value = formatAgentError(error)
+  } finally {
+    deletingSessionId.value = null
+  }
 }
 
 async function loadFiles(sessionId = activeSessionId.value) {
@@ -479,17 +516,27 @@ onUnmounted(() => {
           新会话
         </button>
         <div class="session-list">
-          <button
+          <div
             v-for="session in sessions"
             :key="session.id"
-            type="button"
-            class="session-item"
+            class="session-row"
             :class="{ active: session.id === activeSessionId }"
-            @click="selectSession(session.id)"
           >
-            <Bot class="h-4 w-4" />
-            <span>{{ session.title }}</span>
-          </button>
+            <button type="button" class="session-item" @click="selectSession(session.id)">
+              <Bot class="h-4 w-4 shrink-0" />
+              <span>{{ session.title }}</span>
+            </button>
+            <button
+              type="button"
+              class="session-delete"
+              :disabled="deletingSessionId === session.id"
+              :aria-label="`删除会话：${session.title}`"
+              @click="removeSession(session, $event)"
+            >
+              <Loader2 v-if="deletingSessionId === session.id" class="h-4 w-4 animate-spin" aria-hidden="true" />
+              <Trash2 v-else class="h-4 w-4" aria-hidden="true" />
+            </button>
+          </div>
         </div>
       </aside>
 
@@ -671,6 +718,7 @@ onUnmounted(() => {
 
 .new-chat,
 .session-item,
+.session-delete,
 .composer button,
 .primary-btn,
 .ghost-btn {
@@ -697,11 +745,25 @@ onUnmounted(() => {
   gap: 6px;
 }
 
+.session-row {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  border-radius: 8px;
+  min-width: 0;
+}
+
+.session-row.active,
+.session-row:hover {
+  background: var(--secondary);
+}
+
 .session-item {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   border: 0;
   background: transparent;
-  padding: 10px;
+  padding: 10px 6px 10px 10px;
   color: var(--foreground);
   font-size: 13px;
   text-align: left;
@@ -714,9 +776,23 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 
-.session-item.active,
-.session-item:hover {
-  background: var(--secondary);
+.session-delete {
+  flex-shrink: 0;
+  width: 36px;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+
+.session-delete:hover:not(:disabled) {
+  color: var(--destructive);
+}
+
+.session-delete:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .chat-pane {
