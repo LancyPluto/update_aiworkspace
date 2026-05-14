@@ -145,9 +145,15 @@ class DeepAgentsRuntimeEngine:
         return workspace_file_context
 
     async def _emit_answer_events(self, run_id: int, answer: str) -> None:
-        for chunk in _chunks(answer, 80):
-            await self.backend_client.append_event(run_id, RunEventCreate(eventType=MESSAGE_DELTA, eventText=chunk))
-        await self.backend_client.append_event(run_id, RunEventCreate(eventType=MESSAGE_COMPLETED, eventText=answer))
+        for chunk in _chunks(answer, 32):
+            await self.backend_client.append_event(
+                run_id,
+                RunEventCreate(eventType=MESSAGE_DELTA, eventText=chunk, eventJson={"delta": chunk}),
+            )
+        await self.backend_client.append_event(
+            run_id,
+            RunEventCreate(eventType=MESSAGE_COMPLETED, eventText=answer, eventJson={"content": answer}),
+        )
 
     async def _create_artifact(self, run_id: int, artifact: "ArtifactDirective") -> None:
         response = await self.backend_client.create_run_artifact(

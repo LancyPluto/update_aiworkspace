@@ -74,6 +74,21 @@ watch(sessionSidebarOpen, (open) => {
   localStorage.setItem(AGENT_SESSION_SIDEBAR_KEY, open ? "1" : "0")
 })
 
+/** 轮询/SSE 任一路径漏掉 settle 时，用事件列表中的终态把连接状态拉回 completed/failed */
+watch(
+  () => events.value.map((e) => `${e.id}:${e.eventType}`).join("|"),
+  () => {
+    if (!(runConnectionStatus.value === "streaming" || runConnectionStatus.value === "polling")) return
+    if (!activeRunId.value) return
+    const terminal = events.value.some((e) => e.eventType === "run.completed" || e.eventType === "run.failed")
+    if (terminal) {
+      stopRunUpdates()
+      settleRunStatus()
+      void refreshMessages()
+    }
+  },
+)
+
 const suggestions = [
   "帮我写一篇小红书种草笔记",
   "帮我优化一个电商商品标题",
@@ -97,12 +112,23 @@ const confirmationEvents = computed(() =>
     .map((event) => ({ event, payload: parseEventJson(event.eventJson) })),
 )
 
+/** 当前 run 中「最后一条」非流式分片事件（按列表顺序，与后端 id 递增一致） */
+function lastNonDeltaEvent(list: AgentRunEvent[]) {
+  for (let i = list.length - 1; i >= 0; i--) {
+    if (list[i].eventType !== "message.delta") return list[i]
+  }
+  return undefined
+}
+
 const runStatusText = computed(() => {
   if (runConnectionStatus.value === "completed") return "Agent 已完成"
   if (runConnectionStatus.value === "failed") return "Agent 运行失败"
   if (runConnectionStatus.value === "polling") return "实时连接已断开，正在自动续传"
   if (runConnectionStatus.value === "streaming") {
-    const last = [...events.value].reverse().find((e) => e.eventType !== "message.delta")
+    // 事件已包含终态但连接状态尚未切到 completed 时，避免一直卡在「工具已结束」
+    if (events.value.some((e) => e.eventType === "run.completed")) return "正在同步会话…"
+    if (events.value.some((e) => e.eventType === "run.failed")) return "本次运行失败"
+    const last = lastNonDeltaEvent(events.value)
     const payload = parseEventJson(last?.eventJson)
     if (last?.eventType === "tool.confirmation_required") return "等待你确认工具调用"
     if (last?.eventType === "tool.task_dispatched") return "工具任务已下发"
@@ -113,10 +139,16 @@ const runStatusText = computed(() => {
       return "工具进度更新"
     }
     if (last?.eventType === "tool.started") return "正在执行工具"
-    if (last?.eventType === "tool.finished") return "工具已结束，正在生成回复"
+    // 模型流式输出阶段：最后一条非 delta 仍是 tool.finished，但已有 delta 或 message.completed
+    if (last?.eventType === "tool.finished") {
+      if (events.value.some((e) => e.eventType === "message.completed")) return "正在生成回复"
+      if (events.value.some((e) => e.eventType === "message.delta")) return "正在流式输出回复"
+      return "工具已结束，正在生成回复"
+    }
+    if (last?.eventType === "message.completed") return "正在生成回复"
     if (last?.eventType === "intent.detected") return "正在理解你的需求"
     if (last?.eventType === "tool.selected") return "正在准备工具调用"
-    if (draftAssistantContent.value || last?.eventType === "message.completed") return "正在生成回复"
+    if (showStreamingDraft.value) return "正在流式输出回复"
     return "Agent 正在运行，实时接收回复"
   }
   return ""
@@ -125,6 +157,16 @@ const runStatusText = computed(() => {
 const hasActiveRun = computed(() => {
   if (!activeRunId.value) return false
   return runConnectionStatus.value === "streaming" || runConnectionStatus.value === "polling"
+})
+
+/** 避免「已落库的助手消息 + 未清掉的草稿」同文叠成两个气泡（乱序 SSE / 竞态时常见） */
+const showStreamingDraft = computed(() => {
+  const d = draftAssistantContent.value.trim()
+  if (!d) return false
+  const assistants = messages.value.filter((m) => m.role === "ASSISTANT")
+  const last = assistants[assistants.length - 1]
+  if (last && (last.contentText || "").trim() === d) return false
+  return true
 })
 
 async function loadSessions() {
@@ -378,17 +420,37 @@ async function refreshMessages() {
   if (!auth.token || !activeSessionId.value) return
   const messageRes = await fetchAgentMessages(activeSessionId.value, { token: auth.token })
   messages.value = messageRes.list
+  const assistants = messages.value.filter((m) => m.role === "ASSISTANT")
+  const lastAssistant = assistants[assistants.length - 1]
+  if (lastAssistant && draftAssistantContent.value.trim()) {
+    const d = draftAssistantContent.value.trim()
+    const t = (lastAssistant.contentText || "").trim()
+    if (t === d) draftAssistantContent.value = ""
+  }
 }
 
 function appendRunEvent(event: AgentRunEvent) {
   if (events.value.some((item) => item.id === event.id)) return
+  const hadTerminal = events.value.some((e) => e.eventType === "run.completed" || e.eventType === "run.failed")
+  const hadMessageCompleted = events.value.some((e) => e.eventType === "message.completed")
   events.value.push(event)
+  events.value.sort((a, b) => a.id - b.id)
   if (event.eventType === "run.started") {
     agentError.value = null
     runConnectionStatus.value = "streaming"
   }
   if (event.eventType === "message.delta") {
-    draftAssistantContent.value += extractMessageDelta(event)
+    const terminalNow = events.value.some((e) => e.eventType === "run.completed" || e.eventType === "run.failed")
+    const messageCompletedNow = events.value.some((e) => e.eventType === "message.completed")
+    if (!hadTerminal && !terminalNow && !hadMessageCompleted && !messageCompletedNow) {
+      draftAssistantContent.value += extractMessageDelta(event)
+    }
+  }
+  if (event.eventType === "message.completed") {
+    draftAssistantContent.value = ""
+  }
+  if (event.eventType === "run.completed" || event.eventType === "run.failed") {
+    draftAssistantContent.value = ""
   }
   if (event.eventType === "run.failed") {
     const payload = parseEventJson(event.eventJson)
@@ -437,10 +499,11 @@ function isTerminalRunEvent(event: AgentRunEvent) {
   return event.eventType === "run.completed" || event.eventType === "run.failed"
 }
 
-function parseEventJson(value?: string | null) {
-  if (!value) return {} as Record<string, unknown>
+function parseEventJson(value?: string | null | Record<string, unknown>) {
+  if (value == null || value === "") return {} as Record<string, unknown>
+  if (typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>
   try {
-    return JSON.parse(value) as Record<string, unknown>
+    return JSON.parse(String(value)) as Record<string, unknown>
   } catch {
     return {} as Record<string, unknown>
   }
@@ -549,7 +612,7 @@ onUnmounted(() => {
               <div class="bubble">{{ message.contentText }}</div>
             </article>
 
-            <article v-if="draftAssistantContent" class="agent-message assistant streaming">
+            <article v-if="showStreamingDraft" class="agent-message assistant streaming">
               <div class="avatar">
                 <Bot class="h-4 w-4" />
               </div>

@@ -1,3 +1,4 @@
+import re
 from enum import StrEnum
 
 from pydantic import BaseModel, Field
@@ -47,6 +48,10 @@ class IntentRouter:
         if message_lower in self.short_chat_messages:
             return IntentResult(intent=Intent.GENERAL_CHAT, confidence=0.95, reason="short_general_chat")
 
+        continued = self._tool_use_from_pending_tool_prompt(context)
+        if continued is not None:
+            return continued
+
         registry = ToolRegistry(context)
         candidates = registry.rank_by_intent(message)
         if candidates:
@@ -91,3 +96,75 @@ class IntentRouter:
     def _looks_like_tool_request(self, message: str) -> bool:
         lowered = message.lower()
         return any(keyword in lowered for keyword in self.tool_action_keywords)
+
+    def _tool_use_from_pending_tool_prompt(self, context: RunContext) -> IntentResult | None:
+        """上一轮助手刚发过「如果想使用「xxx」…」补参说明时，本条用户话往往不含「小红书」等关键词，不能单靠当前句做工具匹配。"""
+        message = context.message.strip()
+        if len(message) < 4:
+            return None
+        assistant_text = self._latest_tool_guidance_assistant_text(context)
+        if not assistant_text:
+            return None
+        if not self._looks_like_tool_slot_followup(message):
+            return None
+        wanted = self._parse_tool_display_name_from_guidance(assistant_text)
+        if not wanted:
+            return None
+        registry = ToolRegistry(context)
+        for tool in registry.list_tools():
+            name = (tool.toolName or "").strip()
+            if not name:
+                continue
+            if wanted == name or wanted in name or name in wanted:
+                return IntentResult(
+                    intent=Intent.TOOL_USE,
+                    confidence=0.88,
+                    selectedToolCode=tool.toolCode,
+                    candidateToolCodes=[tool.toolCode],
+                    reason="continuing_pending_tool_prompt",
+                )
+        return None
+
+    @staticmethod
+    def _latest_tool_guidance_assistant_text(context: RunContext) -> str:
+        for item in reversed(context.history[-8:]):
+            role = (item.role or "").strip().lower()
+            if role not in {"assistant", "ai"}:
+                continue
+            body = (item.content or "").strip()
+            if "如果想使用「" in body:
+                return body
+        return ""
+
+    @staticmethod
+    def _parse_tool_display_name_from_guidance(assistant_text: str) -> str:
+        match = re.search(r"如果想使用「([^」]+)」", assistant_text)
+        if not match:
+            return ""
+        return match.group(1).strip()
+
+    @staticmethod
+    def _looks_like_tool_slot_followup(message: str) -> bool:
+        if re.search(r"[A-Za-z0-9_]+\s*[:：]", message):
+            return True
+        if "产品/服务名称" in message or "目标用户" in message:
+            return True
+        needles = (
+            "按照你给的例子",
+            "按照你的例子",
+            "按你的例子",
+            "按你给的例子",
+            "用你给的例子",
+            "用你的例子",
+            "照你给的例子",
+            "照你的例子",
+            "使用默认",
+            "就用默认",
+            "就用示例",
+            "全部按照",
+        )
+        if any(n in message for n in needles) and ("例子" in message or "默认" in message or "示例" in message):
+            return True
+        if "全部按照" in message and ("你给" in message or "你的" in message):
+            return True
+        return False

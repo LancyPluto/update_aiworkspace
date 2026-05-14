@@ -8,6 +8,7 @@ from app.core.schemas import ChatMessage, RunComplete, RunContext, RunEventCreat
 from app.graphs.subagent_router import SubagentRouter, format_subagent_delegation_hint
 from app.security.prompt_guard import PromptGuard
 from app.tools.backend_tool import BackendToolBridge
+from app.tools.missing_argument_hints import format_missing_tool_arguments_message
 from app.tools.registry import ToolRegistry
 
 try:  # pragma: no cover - exercised when langgraph is installed in runtime images.
@@ -146,12 +147,12 @@ class UniversalAgentGraph:
         if route == "select_tool":
             state = await self._select_tool(state)
             state = await self._check_tool_preference(state)
-            if state.get("needs_confirmation"):
-                await self._request_tool_confirmation(state)
-                return
             if state.get("missing_tool_arguments"):
                 state = await self._generate_clarifying_answer(state)
                 await self._complete_run(state)
+                return
+            if state.get("needs_confirmation"):
+                await self._request_tool_confirmation(state)
                 return
             try:
                 state = await self._execute_tool(state)
@@ -225,7 +226,7 @@ class UniversalAgentGraph:
             preference.toolCode == tool.toolCode and preference.autoCallEnabled
             for preference in context.toolPreferences
         )
-        missing_arguments = self.tool_bridge.missing_required_arguments(context, tool) if auto_call_enabled else []
+        missing_arguments = self.tool_bridge.missing_required_arguments(context, tool)
         if missing_arguments:
             return {**state, "needs_confirmation": False, "missing_tool_arguments": missing_arguments}
         return {**state, "needs_confirmation": not auto_call_enabled, "missing_tool_arguments": []}
@@ -283,7 +284,8 @@ class UniversalAgentGraph:
         intent = state.get("intent")
         missing = state.get("missing_tool_arguments") or []
         if missing:
-            answer = f"请先补充这些信息：{', '.join(missing)}"
+            tool = state.get("selected_tool")
+            answer = format_missing_tool_arguments_message(tool, missing)
         elif intent and intent.clarifyingQuestion:
             answer = intent.clarifyingQuestion
         elif intent and intent.intent == Intent.NEEDS_CLARIFICATION and intent.candidateToolCodes:
@@ -368,9 +370,15 @@ class UniversalAgentGraph:
         await self.backend.fail_run(run_id, RunFail(errorCode=error_code, errorMessage=error_message))
 
     async def _emit_answer_events(self, run_id: int, answer: str) -> None:
-        for chunk in _chunks(answer, 80):
-            await self.backend.append_event(run_id, RunEventCreate(eventType=MESSAGE_DELTA, eventText=chunk))
-        await self.backend.append_event(run_id, RunEventCreate(eventType=MESSAGE_COMPLETED, eventText=answer))
+        for chunk in _chunks(answer, 32):
+            await self.backend.append_event(
+                run_id,
+                RunEventCreate(eventType=MESSAGE_DELTA, eventText=chunk, eventJson={"delta": chunk}),
+            )
+        await self.backend.append_event(
+            run_id,
+            RunEventCreate(eventType=MESSAGE_COMPLETED, eventText=answer, eventJson={"content": answer}),
+        )
 
 
 def _chunks(value: str, size: int) -> list[str]:

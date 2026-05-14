@@ -196,7 +196,8 @@ async def test_graph_generates_tool_specific_clarification_for_missing_arguments
 
     await graph.run(context)
 
-    assert "请先补充这些信息：topic" in backend.completed[0][1]
+    assert "如果想使用" in backend.completed[0][1]
+    assert "主题" in backend.completed[0][1]
 
 
 def test_tool_bridge_extracts_explicit_required_arguments_from_message():
@@ -268,7 +269,8 @@ async def test_confirmed_tool_requests_missing_arguments_instead_of_faking_succe
 
     assert backend.tool_calls == []
     assert backend.completed[0][2] == "tool_use"
-    assert "请先补充这些信息：topic" in backend.completed[0][1]
+    assert "如果想使用" in backend.completed[0][1]
+    assert "主题" in backend.completed[0][1]
 
 
 @pytest.mark.asyncio

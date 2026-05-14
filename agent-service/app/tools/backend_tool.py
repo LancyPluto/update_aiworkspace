@@ -26,7 +26,8 @@ class BackendToolBridge:
         self.timeout_seconds = timeout_seconds or settings.agent_tool_execution_timeout_seconds
         self.poll_interval_seconds = poll_interval_seconds or settings.agent_tool_poll_interval_seconds
 
-    def build_arguments(self, context: RunContext, tool: ToolDescriptor) -> dict[str, Any]:
+    def build_arguments(self, context: RunContext, tool: ToolDescriptor, *, apply_placeholder_defaults: bool = True) -> dict[str, Any]:
+        """从用户消息解析参数。占位默认值仅应在「即将执行工具」时启用；缺参检测必须关闭，否则会静默填满 schema 导致从不追问。"""
         arguments: dict[str, Any] = {"userRequest": context.message}
         properties = tool.inputSchema.get("properties", {})
         if not isinstance(properties, dict):
@@ -36,12 +37,14 @@ class BackendToolBridge:
                 value = _extract_labeled_argument(context.message, name)
                 if value:
                     arguments[name] = value
-        if tool.toolCode == "xiaohongshu_copywriting":
+        if apply_placeholder_defaults and tool.toolCode == "xiaohongshu_copywriting":
             arguments = _with_xiaohongshu_defaults(context.message, arguments)
         return arguments
 
     def missing_required_arguments(self, context: RunContext, tool: ToolDescriptor) -> list[str]:
-        arguments = self.build_arguments(context, tool)
+        if tool.toolCode == "xiaohongshu_copywriting" and _user_accepts_builtin_examples(context.message):
+            return []
+        arguments = self.build_arguments(context, tool, apply_placeholder_defaults=False)
         required = tool.inputSchema.get("required", [])
         if not isinstance(required, list):
             return []
@@ -52,7 +55,7 @@ class BackendToolBridge:
         ]
 
     async def execute(self, context: RunContext, tool: ToolDescriptor) -> dict[str, Any]:
-        arguments = self.build_arguments(context, tool)
+        arguments = self.build_arguments(context, tool, apply_placeholder_defaults=True)
         call = await self.backend.create_tool_call(context.runId, ToolCallCreate(toolCode=tool.toolCode, argumentsJson=arguments))
         try:
             task = await self.backend.create_task(
@@ -132,6 +135,26 @@ class BackendToolBridge:
             await self.backend.cancel_task(user_id, task_id)
         except Exception:
             pass
+
+
+def _user_accepts_builtin_examples(message: str) -> bool:
+    """用户明确让系统沿用补参说明里的示例 / 默认占位时，不再卡缺参（与 IntentRouter 的续接话术对齐）。"""
+    text = message.strip()
+    if not text:
+        return False
+    if "使用默认" in text or "就用默认" in text or "就用示例" in text:
+        return True
+    if "按照你给的例子" in text or "按照你的例子" in text or "按你的例子" in text:
+        return True
+    if "用你给的例子" in text or "用你的例子" in text:
+        return True
+    if "照你给的例子" in text or "照你的例子" in text:
+        return True
+    if "全部按照" in text and ("你给" in text or "你的" in text):
+        return True
+    if "全部按照" in text and "例子" in text:
+        return True
+    return False
 
 
 def _extract_labeled_argument(message: str, name: str) -> str:

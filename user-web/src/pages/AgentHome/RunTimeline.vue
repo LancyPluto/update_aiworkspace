@@ -39,10 +39,11 @@ const visibleEvents = computed(() =>
     .slice(-14),
 )
 
-function parseEventJson(value?: string | null) {
-  if (!value) return {} as Record<string, unknown>
+function parseEventJson(value?: string | null | Record<string, unknown>) {
+  if (value == null || value === "") return {} as Record<string, unknown>
+  if (typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>
   try {
-    return JSON.parse(value) as Record<string, unknown>
+    return JSON.parse(String(value)) as Record<string, unknown>
   } catch {
     return {} as Record<string, unknown>
   }
