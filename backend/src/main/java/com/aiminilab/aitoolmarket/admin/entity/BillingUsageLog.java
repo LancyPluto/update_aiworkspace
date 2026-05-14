@@ -1,6 +1,7 @@
 package com.aiminilab.aitoolmarket.admin.entity;
 
 import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
 
 import java.math.BigDecimal;
@@ -19,7 +20,9 @@ public class BillingUsageLog {
     private Integer promptTokens;
     private Integer completionTokens;
     private Integer totalTokens;
+    @TableField("input_token_price_per_1k")
     private BigDecimal inputTokenPricePer1k;
+    @TableField("output_token_price_per_1k")
     private BigDecimal outputTokenPricePer1k;
     private BigDecimal costAmount;
     private Integer chargedCredits;

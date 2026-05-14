@@ -66,7 +66,9 @@ class WorkerInternalApiTest {
         String successBody = """
                                 {
                                   "resourceType": "MARKDOWN",
-                                  "contentText": "# Generated result"
+                                  "contentText": "# Generated result",
+                                  "promptTokens": 120,
+                                  "completionTokens": 35
                                 }
                                 """;
         mockMvc.perform(signed(post("/api/internal/v1/tasks/{taskId}/success", taskId), "POST",
@@ -83,6 +85,18 @@ class WorkerInternalApiTest {
                 .andExpect(jsonPath("$.data.status").value("SUCCESS"))
                 .andExpect(jsonPath("$.data.result.resourceType").value("MARKDOWN"))
                 .andExpect(jsonPath("$.data.result.contentText").value("# Generated result"));
+
+        mockMvc.perform(get("/api/admin/v1/billing/usage-logs")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .param("pageNo", "1")
+                        .param("pageSize", "10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].sourceType").value("TASK"))
+                .andExpect(jsonPath("$.data.list[0].sourceId").value(taskId.intValue()))
+                .andExpect(jsonPath("$.data.list[0].promptTokens").value(120))
+                .andExpect(jsonPath("$.data.list[0].completionTokens").value(35))
+                .andExpect(jsonPath("$.data.list[0].totalTokens").value(155))
+                .andExpect(jsonPath("$.data.list[0].chargedCredits").value(10));
     }
 
     @Test
