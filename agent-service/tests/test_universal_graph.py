@@ -1,5 +1,6 @@
 import pytest
 
+from app.core.budget_guard import BudgetState
 from app.core.schemas import AgentFileChunkContext, AgentFileContext, RunContext, ToolDescriptor, ToolPreference
 from app.graphs.universal_agent_graph import UniversalAgentGraph
 from app.tools.backend_tool import BackendToolBridge
@@ -416,3 +417,25 @@ async def test_langgraph_uses_shared_subagent_profiles_for_delegation_hint():
     assert "Subagent delegation hint" in prompt_text
     assert "researcher" in prompt_text
     assert "Research complex questions" in prompt_text
+
+
+@pytest.mark.asyncio
+async def test_tool_result_summary_prompt_avoids_duplicate_content():
+    backend = FakeBackend()
+    model = FakeModel(stream_responses=[["done"]])
+    graph = UniversalAgentGraph(backend, model)
+    state = {
+        "run_id": 1,
+        "context": RunContext(runId=1, sessionId=1, userId=1, message="给朋友圈生成一段新品文案"),
+        "budget": BudgetState(credit_budget=20),
+        "tool_result": {
+            "arguments": {"topic": "周末肩颈放松活动"},
+            "data": {"contentText": "周末到了，是时候给肩颈放个假。"},
+            "summary": "周末到了，是时候给肩颈放个假。",
+        },
+    }
+
+    await graph._synthesize_tool_answer(state)
+
+    prompt_text = "\n".join(message.content for message in model.stream_messages[0])
+    assert prompt_text.count("周末到了，是时候给肩颈放个假。") == 1

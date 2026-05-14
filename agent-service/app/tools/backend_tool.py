@@ -1,11 +1,12 @@
 import asyncio
+import json
 import re
 import time
 from typing import Any
 
 from app.config import settings
 from app.core.event_types import TOOL_TASK_DISPATCHED, TOOL_TASK_PROGRESS
-from app.core.schemas import RunContext, RunEventCreate, TaskCreate, ToolCallComplete, ToolCallCreate, ToolCallFail, ToolDescriptor
+from app.core.schemas import ChatMessage, RunContext, RunEventCreate, TaskCreate, ToolCallComplete, ToolCallCreate, ToolCallFail, ToolDescriptor
 
 
 class ToolExecutionError(RuntimeError):
@@ -21,8 +22,10 @@ class BackendToolBridge:
         backend_client,
         timeout_seconds: int | None = None,
         poll_interval_seconds: float | None = None,
+        model_client=None,
     ) -> None:
         self.backend = backend_client
+        self.model = model_client
         self.timeout_seconds = timeout_seconds or settings.agent_tool_execution_timeout_seconds
         self.poll_interval_seconds = poll_interval_seconds or settings.agent_tool_poll_interval_seconds
 
@@ -32,11 +35,15 @@ class BackendToolBridge:
         properties = tool.inputSchema.get("properties", {})
         if not isinstance(properties, dict):
             return arguments
-        for name in properties:
-            if isinstance(name, str) and name != "userRequest":
-                value = _extract_labeled_argument(context.message, name)
-                if value:
-                    arguments[name] = value
+        for message in _recent_user_messages(context):
+            for name, prop in properties.items():
+                if not isinstance(name, str) or name == "userRequest":
+                    continue
+                for alias in _field_aliases(name, prop):
+                    value = _extract_labeled_argument(message, alias)
+                    if value:
+                        arguments[name] = value
+                        break
         if apply_placeholder_defaults and tool.toolCode == "xiaohongshu_copywriting":
             arguments = _with_xiaohongshu_defaults(context.message, arguments)
         return arguments
@@ -54,8 +61,79 @@ class BackendToolBridge:
             if isinstance(name, str) and (name not in arguments or arguments[name] in (None, ""))
         ]
 
-    async def execute(self, context: RunContext, tool: ToolDescriptor) -> dict[str, Any]:
-        arguments = self.build_arguments(context, tool, apply_placeholder_defaults=True)
+    async def enrich_arguments(self, message: str, tool: ToolDescriptor, existing_args: dict[str, Any] | None = None) -> dict[str, Any]:
+        if self.model is None:
+            return existing_args or {}
+        properties = tool.inputSchema.get("properties", {})
+        if not isinstance(properties, dict) or not properties:
+            return existing_args or {}
+        field_descriptions = []
+        for key, prop in properties.items():
+            if key == "userRequest":
+                continue
+            title = prop.get("title", key) if isinstance(prop, dict) else key
+            desc = prop.get("description", "") if isinstance(prop, dict) else ""
+            enum_vals = prop.get("enum") if isinstance(prop, dict) else None
+            line = f"- {key} ({title})"
+            if desc:
+                line += f": {desc}"
+            if enum_vals and isinstance(enum_vals, list):
+                line += f" [可选值: {'/'.join(str(v) for v in enum_vals)}]"
+            field_descriptions.append(line)
+        if not field_descriptions:
+            return existing_args or {}
+        existing_info = ""
+        if existing_args:
+            existing_info = f"\n已从格式匹配中提取的参数 (不要覆盖): {json.dumps(existing_args, ensure_ascii=False)}"
+        prompt = (
+            f"从用户消息中提取工具参数。只提取消息中明确提到的字段值，不要编造。\n\n"
+            f"工具: {tool.toolName or tool.toolCode}\n"
+            f"描述: {tool.description or '无'}\n\n"
+            f"参数字段:\n{chr(10).join(field_descriptions)}\n"
+            f"{existing_info}\n"
+            f"用户消息: {message}\n\n"
+            f"返回纯 JSON 对象，key 用英文字段名，value 是提取的中文值。"
+            f"只包含能从消息中识别出的字段。不要添加任何解释文字，只返回 JSON。"
+        )
+        try:
+            raw = await self.model.chat([ChatMessage(role="user", content=prompt)])
+        except Exception:
+            return existing_args or {}
+        parsed = self._parse_json_block(raw)
+        if not isinstance(parsed, dict):
+            return existing_args or {}
+        merged = dict(existing_args or {})
+        for key, value in parsed.items():
+            if isinstance(key, str) and isinstance(value, str) and value.strip() and key not in merged:
+                merged[key] = value.strip()
+        return merged
+
+    def conversation_argument_text(self, context: RunContext) -> str:
+        return "\n".join(_recent_user_messages(context))
+
+    @staticmethod
+    def _parse_json_block(raw: str) -> Any:
+        text = raw.strip()
+        if text.startswith("```"):
+            lines = text.split("\n")
+            lines = lines[1:] if lines else []
+            if lines and lines[-1].strip() == "```":
+                lines = lines[:-1]
+            text = "\n".join(lines).strip()
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            match = re.search(r"\{.*\}", text, re.DOTALL)
+            if match:
+                try:
+                    return json.loads(match.group(0))
+                except json.JSONDecodeError:
+                    return None
+            return None
+
+    async def execute_with_args(self, context: RunContext, tool: ToolDescriptor, arguments: dict[str, Any]) -> dict[str, Any]:
+        if tool.toolCode == "xiaohongshu_copywriting":
+            arguments = _with_xiaohongshu_defaults(context.message, arguments)
         call = await self.backend.create_tool_call(context.runId, ToolCallCreate(toolCode=tool.toolCode, argumentsJson=arguments))
         try:
             task = await self.backend.create_task(
@@ -99,6 +177,10 @@ class BackendToolBridge:
         )
         await self.backend.complete_tool_call(call.id, ToolCallComplete(resultJson=result))
         return result
+
+    async def execute(self, context: RunContext, tool: ToolDescriptor) -> dict[str, Any]:
+        arguments = self.build_arguments(context, tool, apply_placeholder_defaults=True)
+        return await self.execute_with_args(context, tool, arguments)
 
     async def _wait_for_task(self, context: RunContext, tool_code: str, task_id: int):
         deadline = time.monotonic() + self.timeout_seconds
@@ -166,6 +248,44 @@ def _extract_labeled_argument(message: str, name: str) -> str:
     if match is None:
         return ""
     return match.group(1).strip().strip("\"'")
+
+
+def _field_aliases(field_key: str, prop: Any) -> list[str]:
+    aliases = [field_key]
+    if isinstance(prop, dict):
+        title = prop.get("title")
+        if isinstance(title, str) and title.strip() and title.strip() not in aliases:
+            aliases.append(title.strip())
+    return aliases
+
+
+def _recent_user_messages(context: RunContext) -> list[str]:
+    history_pairs: list[tuple[str, str]] = []
+    for item in context.history:
+        role = (item.role or "").strip().lower()
+        content = (item.content or "").strip()
+        if content:
+            history_pairs.append((role, content))
+    if not history_pairs or history_pairs[-1][1] != context.message.strip():
+        history_pairs.append(("user", context.message.strip()))
+
+    recent: list[str] = []
+    seen_user = False
+    for role, content in reversed(history_pairs):
+        if role in {"user", "human"}:
+            recent.append(content)
+            seen_user = True
+            continue
+        if role in {"assistant", "ai"} and _is_tool_guidance_message(content):
+            continue
+        if seen_user:
+            break
+    recent.reverse()
+    return recent or [context.message.strip()]
+
+
+def _is_tool_guidance_message(content: str) -> bool:
+    return "如果想使用「" in content and "请在同一条或下一条消息里按下面补充" in content
 
 
 def _with_xiaohongshu_defaults(message: str, arguments: dict[str, Any]) -> dict[str, Any]:

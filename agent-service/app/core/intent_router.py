@@ -145,9 +145,9 @@ class IntentRouter:
 
     @staticmethod
     def _looks_like_tool_slot_followup(message: str) -> bool:
-        if re.search(r"[A-Za-z0-9_]+\s*[:：]", message):
+        if re.search(r"[A-Za-z0-9_\u4e00-\u9fff]+\s*[:：]", message):
             return True
-        if "产品/服务名称" in message or "目标用户" in message:
+        if "产品/服务名称" in message or "目标用户" in message or "文案主题" in message or "目标人群" in message or "核心卖点" in message:
             return True
         needles = (
             "按照你给的例子",

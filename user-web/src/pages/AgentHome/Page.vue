@@ -165,7 +165,12 @@ const showStreamingDraft = computed(() => {
   if (!d) return false
   const assistants = messages.value.filter((m) => m.role === "ASSISTANT")
   const last = assistants[assistants.length - 1]
-  if (last && (last.contentText || "").trim() === d) return false
+  if (last) {
+    const t = (last.contentText || "").trim()
+    if (!t) return true
+    if (t === d) return false
+    if (t.startsWith(d) || d.startsWith(t)) return false
+  }
   return true
 })
 
@@ -275,8 +280,8 @@ async function submitMessage(content = input.value) {
     )
     activeRunId.value = res.runId
     runConnectionStatus.value = "streaming"
+    startRunStream(res.runId)
     await pollRun(res.runId, true)
-    if (!events.value.some(isTerminalRunEvent)) startRunStream(res.runId)
   } catch (error) {
     agentError.value = formatAgentError(error)
   } finally {
@@ -425,7 +430,18 @@ async function refreshMessages() {
   if (lastAssistant && draftAssistantContent.value.trim()) {
     const d = draftAssistantContent.value.trim()
     const t = (lastAssistant.contentText || "").trim()
-    if (t === d) draftAssistantContent.value = ""
+    if (t === d || t.startsWith(d) || d.startsWith(t)) draftAssistantContent.value = ""
+  }
+  if (
+    activeRunId.value &&
+    lastAssistant &&
+    lastAssistant.runId === activeRunId.value &&
+    runConnectionStatus.value !== "completed"
+  ) {
+    stopRunUpdates()
+    runConnectionStatus.value = "completed"
+    activeRunId.value = null
+    draftAssistantContent.value = ""
   }
 }
 
