@@ -5,6 +5,7 @@ from client.backend_client import BackendClient, BackendClientError
 from client.model_client import (
     ModelClient,
     ModelClientError,
+    ModelGenerationResult,
     ModelOutputEmptyError,
     ModelTimeoutError,
 )
@@ -73,7 +74,7 @@ class TextTaskHandler:
             system_prompt, user_prompt = self._build_model_prompts(context)
             system_prompt = apply_output_discipline(system_prompt)
 
-            generated_text = self.model_client.generate(
+            model_result = self._generate_model_result(
                 user_prompt,
                 system_prompt=system_prompt,
                 provider=context.get("modelProviderCode"),
@@ -84,7 +85,8 @@ class TextTaskHandler:
                 max_tokens=context.get("modelMaxTokens"),
             )
 
-            success_payload = build_success_payload(context, generated_text)
+            success_payload = build_success_payload(context, model_result.content)
+            self._attach_token_usage(success_payload, model_result)
             self.backend_client.mark_success(task_id, success_payload)
             LOGGER.info("task %s completed successfully", task_id)
             return {"status": "SUCCESS", "taskId": task_id}
@@ -204,6 +206,31 @@ class TextTaskHandler:
         normalized["modelMaxTokens"] = 1024
         return normalized
 
+    def _generate_model_result(self, prompt: str, **kwargs: Any) -> ModelGenerationResult:
+        generate_with_usage = getattr(self.model_client, "generate_with_usage", None)
+        if callable(generate_with_usage):
+            result = generate_with_usage(prompt, **kwargs)
+            if isinstance(result, ModelGenerationResult):
+                return result
+            if isinstance(result, dict):
+                return ModelGenerationResult(
+                    content=str(result.get("content") or result.get("text") or ""),
+                    prompt_tokens=self._non_negative_int(result.get("promptTokens") or result.get("prompt_tokens")),
+                    completion_tokens=self._non_negative_int(
+                        result.get("completionTokens") or result.get("completion_tokens")
+                    ),
+                )
+            return ModelGenerationResult(content=str(result or ""))
+
+        content = self.model_client.generate(prompt, **kwargs)
+        return ModelGenerationResult(content=content)
+
+    def _attach_token_usage(self, payload: dict[str, Any], result: ModelGenerationResult) -> None:
+        if result.prompt_tokens > 0:
+            payload["promptTokens"] = result.prompt_tokens
+        if result.completion_tokens > 0:
+            payload["completionTokens"] = result.completion_tokens
+
     def _mark_failed(self, task_id: int, *, error_code: str, error_message: str) -> dict[str, Any]:
         LOGGER.exception("task %s failed: %s", task_id, error_message)
         self.backend_client.mark_failed(
@@ -221,3 +248,10 @@ class TextTaskHandler:
         for key, value in params.items():
             lines.append(f"- {key}: {value}")
         return "\n".join(lines)
+
+    @staticmethod
+    def _non_negative_int(value: Any) -> int:
+        try:
+            return max(0, int(value or 0))
+        except (TypeError, ValueError):
+            return 0

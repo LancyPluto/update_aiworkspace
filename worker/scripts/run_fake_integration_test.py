@@ -165,6 +165,11 @@ class ModelHandler(BaseHTTPRequestHandler):
                     "finish_reason": "stop",
                 }
             ],
+            "usage": {
+                "prompt_tokens": 123,
+                "completion_tokens": 45,
+                "total_tokens": 168,
+            },
         }
         body = json.dumps(response, ensure_ascii=False).encode("utf-8")
         self.send_response(200)
@@ -237,6 +242,8 @@ def main() -> None:
     model_system_prompt = messages[0]["content"] if messages else ""
 
     assert success_payload["resourceType"] == "MARKDOWN", success_payload
+    assert success_payload["promptTokens"] == 123, success_payload
+    assert success_payload["completionTokens"] == 45, success_payload
     assert "## 标题建议" in success_payload["contentText"], success_payload
     assert "## 正文" in success_payload["contentText"], success_payload
     assert "## 标签建议" in success_payload["contentText"], success_payload
