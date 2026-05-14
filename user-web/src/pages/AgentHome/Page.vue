@@ -31,7 +31,6 @@ import {
   fetchAgentSessions,
   fetchAgentWorkspaces,
   sendAgentMessage,
-  streamAgentRunEvents,
   uploadAgentFile,
 } from "@/api"
 import type { AgentFile, AgentMessage, AgentRunEvent, AgentSession, AgentWorkspace } from "@/api/types"
@@ -253,8 +252,11 @@ async function submitMessage(content = input.value) {
     )
     activeRunId.value = res.runId
     runConnectionStatus.value = "streaming"
+    // 改为一次性接收：先同步历史，然后轮询直到 Run 完成，最后一次性拉取所有事件
     await pollRun(res.runId, true)
-    if (!events.value.some(isTerminalRunEvent)) startRunStream(res.runId)
+    if (!events.value.some(isTerminalRunEvent)) {
+      await waitForRunComplete(res.runId)
+    }
   } catch (error) {
     agentError.value = formatAgentError(error)
   } finally {
@@ -311,46 +313,57 @@ async function pollRun(runId: number, reset = false) {
   }
 }
 
-function startPolling(runId: number) {
-  stopRunUpdates()
-  pollingRunId.value = runId
-  runConnectionStatus.value = "polling"
-  pollTimer.value = window.setInterval(() => {
-    if (typeof document !== "undefined" && document.hidden) return
-    void pollRun(runId).catch((error) => {
-      agentError.value = formatAgentError(error)
-      runConnectionStatus.value = "failed"
-      stopRunUpdates()
-    })
-  }, 1600)
-}
-
-function startRunStream(runId: number) {
+/**
+ * 等待 Run 完成并一次性拉取所有事件（替代 SSE 流式接收）
+ */
+async function waitForRunComplete(runId: number) {
   stopRunUpdates()
   runConnectionStatus.value = "streaming"
-  const controller = new AbortController()
-  streamController.value = controller
-  streamAgentRunEvents(runId, {
-    token: auth.token,
-    afterEventId: events.value.at(-1)?.id,
-    signal: controller.signal,
-    onEvent: async (event) => {
-      appendRunEvent(event)
-      if (event.eventType === "message.completed" || isTerminalRunEvent(event)) {
-        draftAssistantContent.value = ""
-        await refreshMessages()
+
+  // 轮询间隔
+  const POLL_INTERVAL = 800
+  const MAX_WAIT_TIME = 5 * 60 * 1000 // 最大等待 5 分钟
+  const startTime = Date.now()
+
+  try {
+    // 轮询直到 Run 完成或超时
+    while (Date.now() - startTime < MAX_WAIT_TIME) {
+      const afterEventId = events.value.at(-1)?.id
+      const res = await fetchAgentRunEvents(runId, {
+        token: auth.token,
+        afterEventId,
+      })
+
+      // 追加新事件
+      if (res.list.length > 0) {
+        res.list.forEach(appendRunEvent)
+        await scrollBottom()
       }
-      if (isTerminalRunEvent(event)) {
-        stopRunUpdates()
-        settleRunStatus()
+
+      // 检查是否收到终止事件
+      if (res.list.some(isTerminalRunEvent) || events.value.some(isTerminalRunEvent)) {
+        break
       }
-      await scrollBottom()
-    },
-  }).catch(() => {
-    if (!controller.signal.aborted) {
-      startPolling(runId)
+
+      // 等待下一轮询
+      await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL))
     }
-  })
+
+    // Run 完成后，确保消息列表已更新
+    stopRunUpdates()
+    settleRunStatus()
+    await refreshMessages()
+    draftAssistantContent.value = ""
+  } catch (error) {
+    runConnectionStatus.value = "failed"
+    agentError.value = formatAgentError(error)
+    stopRunUpdates()
+  }
+}
+
+/** 保留旧函数签名但改为使用 waitForRunComplete（用于工具确认后恢复执行） */
+function startRunStream(runId: number) {
+  void waitForRunComplete(runId)
 }
 
 function stopRunUpdates() {
