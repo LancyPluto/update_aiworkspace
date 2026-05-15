@@ -67,6 +67,22 @@ class AgentModelConfig(BaseModel):
     enabled: bool = True
 
 
+class PendingToolContext(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: int | None = None
+    runId: int | None = None
+    sessionId: int | None = None
+    userId: int | None = None
+    selectedToolCode: str | None = None
+    candidateToolCodesJson: list[str] | None = None
+    collectedArgumentsJson: dict[str, Any] = Field(default_factory=dict)
+    missingArgumentsJson: list[str] = Field(default_factory=list)
+    clarifyingQuestion: str | None = None
+    confirmationRequired: bool = False
+    status: str = "ACTIVE"
+
+
 class RunContext(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -82,6 +98,7 @@ class RunContext(BaseModel):
     availableTools: list[ToolDescriptor] = Field(default_factory=list, validation_alias=AliasChoices("availableTools", "tools"))
     toolPreferences: list[ToolPreference] = Field(default_factory=list)
     creditBudget: int = 0
+    pendingToolContext: PendingToolContext | None = Field(default=None, validation_alias=AliasChoices("pendingToolContext", "pending_tool_context"))
 
 
 class RunEventCreate(BaseModel):

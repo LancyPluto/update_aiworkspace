@@ -31,7 +31,7 @@ class IntentResult(BaseModel):
 class IntentRouter:
     unsupported_keywords = ("上传", "文件", "知识库", "RAG", "向量", "多智能体", "工作流")
     vague_messages = {"帮我做一下", "帮我弄一下", "处理一下", "做一下"}
-    short_chat_messages = {"你是谁", "你能做什么", "你好", "hi", "hello", "在吗"}
+    short_chat_patterns = {"你是谁", "你能做什么", "你能帮我做什么", "你有什么工具", "有什么工具", "你好", "hi", "hello", "在吗"}
     tool_action_keywords = ("写", "生成", "优化", "改写", "润色", "做", "帮我", "输出", "文案", "标题", "笔记", "朋友圈", "公众号")
 
     def classify(self, context: RunContext) -> IntentResult:
@@ -45,8 +45,14 @@ class IntentRouter:
             return IntentResult(intent=Intent.UNSUPPORTED, confidence=0.9, reason="phase_unsupported_capability")
         if not message:
             return IntentResult(intent=Intent.NEEDS_CLARIFICATION, confidence=0.8, reason="empty_request")
-        if message_lower in self.short_chat_messages:
+
+        # Substring match for short/greeting chats (broader than exact match)
+        if self._is_short_chat(message_lower):
             return IntentResult(intent=Intent.GENERAL_CHAT, confidence=0.95, reason="short_general_chat")
+
+        continued = self._tool_use_from_pending_tool_context(context)
+        if continued is not None:
+            return continued
 
         continued = self._tool_use_from_pending_tool_prompt(context)
         if continued is not None:
@@ -89,13 +95,41 @@ class IntentRouter:
                     reason="weak_tool_signal",
                 )
 
-        if len(message) <= 6 or message in self.vague_messages:
-            return IntentResult(intent=Intent.NEEDS_CLARIFICATION, confidence=0.75, reason="request_too_vague")
+        # Short vague messages should suggest tools rather than asking for clarification
+        if len(message) <= 5 or message in self.vague_messages:
+            return IntentResult(intent=Intent.GENERAL_CHAT, confidence=0.6, reason="short_vague_message")
         return IntentResult(intent=Intent.GENERAL_CHAT, confidence=0.6, reason="default_general_chat")
+
+    def _is_short_chat(self, message_lower: str) -> bool:
+        """Check if the message matches known short chat/greeting patterns."""
+        if message_lower in self.short_chat_patterns:
+            return True
+        # Broader substring matching for common greetings
+        greetings = ("你好", "你是谁", "你能做什么", "你能帮我", "有什么工具", "你会什么")
+        for greeting in greetings:
+            if greeting in message_lower:
+                return True
+        return False
 
     def _looks_like_tool_request(self, message: str) -> bool:
         lowered = message.lower()
         return any(keyword in lowered for keyword in self.tool_action_keywords)
+
+    def _tool_use_from_pending_tool_context(self, context: RunContext) -> IntentResult | None:
+        """检查是否存在持久的待补参上下文（agent_pending_tool_context），用于多轮补参恢复。"""
+        pending = context.pendingToolContext
+        if pending is None or pending.status != "ACTIVE":
+            return None
+        if not pending.selectedToolCode:
+            return None
+        return IntentResult(
+            intent=Intent.TOOL_USE,
+            confidence=0.9,
+            selectedToolCode=pending.selectedToolCode,
+            candidateToolCodes=[pending.selectedToolCode],
+            reason="restored_from_pending_tool_context",
+            clarifyingQuestion=pending.clarifyingQuestion,
+        )
 
     def _tool_use_from_pending_tool_prompt(self, context: RunContext) -> IntentResult | None:
         """上一轮助手刚发过「如果想使用「xxx」…」补参说明时，本条用户话往往不含「小红书」等关键词，不能单靠当前句做工具匹配。"""

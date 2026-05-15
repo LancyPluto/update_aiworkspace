@@ -21,7 +21,7 @@ class ToolMatch:
 
 class ToolRegistry:
     def __init__(self, context: RunContext) -> None:
-        self._tools = {tool.toolCode: tool for tool in context.availableTools if tool.autoCallable}
+        self._tools = {tool.toolCode: tool for tool in context.availableTools}
 
     def list_tools(self) -> list[ToolDescriptor]:
         return list(self._tools.values())

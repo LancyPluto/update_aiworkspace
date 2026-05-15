@@ -14,6 +14,7 @@ public record InternalAgentRunContextResponse(
         List<InternalAgentFileChunkContextResponse> agentFileChunks,
         List<AgentToolDescriptorResponse> availableTools,
         List<AgentToolPreferenceResponse> toolPreferences,
-        Integer creditBudget
+        Integer creditBudget,
+        InternalPendingToolContextResponse pendingToolContext
 ) {
 }

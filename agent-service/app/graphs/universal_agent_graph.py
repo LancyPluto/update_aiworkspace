@@ -1,7 +1,7 @@
 from typing import Any, TypedDict
 
 from app.config import settings
-from app.core.event_types import INTENT_DETECTED, MESSAGE_COMPLETED, MESSAGE_DELTA, TOOL_CONFIRMATION_REQUIRED, TOOL_SELECTED
+from app.core.event_types import INTENT_DETECTED, MESSAGE_COMPLETED, MESSAGE_DELTA, RUN_STARTED, TOOL_ARGUMENTS_PREVIEW, TOOL_CONFIRMATION_REQUIRED, TOOL_RECOMMENDATIONS, TOOL_SELECTED
 from app.core.budget_guard import BudgetExceeded, BudgetGuard, BudgetState
 from app.core.intent_router import Intent, IntentResult, IntentRouter
 from app.core.schemas import ChatMessage, RunComplete, RunContext, RunEventCreate, RunFail, ToolDescriptor, WorkspaceMemoryItem
@@ -59,6 +59,10 @@ class UniversalAgentGraph:
 
     async def run(self, context: RunContext) -> None:
         state: AgentState = {"run_id": context.runId, "context": context, "budget": BudgetState(credit_budget=context.creditBudget)}
+        await self.backend.append_event(
+            context.runId,
+            RunEventCreate(eventType=RUN_STARTED, eventText="Agent 已开始处理", eventJson={"runId": context.runId}),
+        )
         guard_result = self.prompt_guard.inspect(context.message)
         if guard_result.rejected:
             state = {
@@ -187,6 +191,29 @@ class UniversalAgentGraph:
                 },
             ),
         )
+        if intent.candidateToolCodes and len(intent.candidateToolCodes) > 1:
+            registry = ToolRegistry(context)
+            candidates_info = []
+            for code in intent.candidateToolCodes:
+                t = registry.get(code)
+                candidates_info.append({
+                    "toolCode": code,
+                    "toolName": t.toolName if t else code,
+                    "description": t.description if t else "",
+                })
+            await self.backend.append_event(
+                context.runId,
+                RunEventCreate(
+                    eventType=TOOL_RECOMMENDATIONS,
+                    eventText=f"Recommended {len(intent.candidateToolCodes)} tools",
+                    eventJson={
+                        "candidates": candidates_info,
+                        "recommendedToolCode": intent.selectedToolCode,
+                        "reason": intent.reason,
+                        "disambiguationQuestion": intent.clarifyingQuestion or "请选择你想使用的工具",
+                    },
+                ),
+            )
         return {**state, "intent": intent}
 
     def _route_after_intent(self, state: AgentState) -> str:
@@ -236,25 +263,44 @@ class UniversalAgentGraph:
                 existing_args=base_args,
             )
             still_missing = self._missing_from_enriched(enriched, tool)
+            extracted_args = enriched
             if not still_missing:
-                return {
+                state = {
                     **state,
                     "needs_confirmation": not auto_call_enabled,
                     "missing_tool_arguments": [],
-                    "extracted_arguments": enriched,
+                    "extracted_arguments": extracted_args,
                 }
-            return {
+            else:
+                state = {
+                    **state,
+                    "needs_confirmation": False,
+                    "missing_tool_arguments": still_missing,
+                    "extracted_arguments": extracted_args,
+                }
+        else:
+            extracted_args = self.tool_bridge.build_arguments(context, tool, apply_placeholder_defaults=False)
+            state = {
                 **state,
-                "needs_confirmation": False,
-                "missing_tool_arguments": still_missing,
-                "extracted_arguments": enriched,
+                "needs_confirmation": not auto_call_enabled,
+                "missing_tool_arguments": [],
+                "extracted_arguments": extracted_args,
             }
-        return {
-            **state,
-            "needs_confirmation": not auto_call_enabled,
-            "missing_tool_arguments": [],
-            "extracted_arguments": self.tool_bridge.build_arguments(context, tool, apply_placeholder_defaults=False),
-        }
+        await self.backend.append_event(
+            context.runId,
+            RunEventCreate(
+                eventType=TOOL_ARGUMENTS_PREVIEW,
+                eventText=f"Tool {tool.toolCode} arguments preview",
+                eventJson={
+                    "toolCode": tool.toolCode,
+                    "toolName": tool.toolName,
+                    "arguments": extracted_args,
+                    "missingArguments": state.get("missing_tool_arguments", []),
+                    "needsConfirmation": state.get("needs_confirmation", False),
+                },
+            ),
+        )
+        return state
 
     @staticmethod
     def _missing_from_enriched(arguments: dict[str, Any], tool: ToolDescriptor) -> list[str]:
@@ -310,8 +356,23 @@ class UniversalAgentGraph:
 
     async def _generate_chat_answer(self, state: AgentState) -> AgentState:
         context = state["context"]
-        self.budget_guard.reserve_model_call(state["budget"])
-        messages = [ChatMessage(role="system", content="You are a helpful cloud agent for an AI tool marketplace.")]
+        # Build a system prompt that includes available tools so the agent can answer
+        # questions like "有什么工具" or "你能做什么" without external tool matching.
+        available_tools = context.availableTools or []
+        if available_tools:
+            tool_descriptions = []
+            for t in available_tools:
+                name = t.toolName or t.toolCode
+                desc = t.description or ""
+                tool_descriptions.append(f"- {name}: {desc}")
+            tool_list_text = "你可以使用的AI工具列表：\n" + "\n".join(tool_descriptions)
+        else:
+            tool_list_text = ""
+        system_prompt = "You are a helpful cloud agent for an AI tool marketplace."
+        if tool_list_text:
+            system_prompt += "\n\n" + tool_list_text
+
+        messages = [ChatMessage(role="system", content=system_prompt)]
         workspace_memory_context = await self._format_workspace_memory_context(context)
         if workspace_memory_context:
             messages.append(ChatMessage(role="system", content=workspace_memory_context))
@@ -332,7 +393,10 @@ class UniversalAgentGraph:
         missing = state.get("missing_tool_arguments") or []
         if missing:
             tool = state.get("selected_tool")
-            answer = format_missing_tool_arguments_message(tool, missing)
+            if tool is not None:
+                answer = format_missing_tool_arguments_message(tool, missing)
+            else:
+                answer = "请补充以下缺失参数：\n" + "\n".join(f"- {arg}" for arg in missing)
         elif intent and intent.clarifyingQuestion:
             answer = intent.clarifyingQuestion
         elif intent and intent.intent == Intent.NEEDS_CLARIFICATION and intent.candidateToolCodes:
@@ -358,7 +422,6 @@ class UniversalAgentGraph:
 
     async def _synthesize_tool_answer(self, state: AgentState) -> AgentState:
         context = state["context"]
-        self.budget_guard.reserve_model_call(state["budget"])
         tool_result = state.get("tool_result") or {}
         tool_arguments = tool_result.get("arguments") if isinstance(tool_result, dict) else {}
         tool_data = tool_result.get("data") if isinstance(tool_result, dict) else {}
