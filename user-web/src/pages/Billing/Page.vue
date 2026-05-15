@@ -2,6 +2,7 @@
 import { onMounted, ref } from "vue"
 import { ReceiptText, Wallet } from "lucide-vue-next"
 import AppShell from "@/components/AppShell.vue"
+import RechargeSection from "@/pages/Billing/RechargeSection.vue"
 import { fetchCreditAccount, fetchCreditLogs } from "@/api/creditApi"
 import type { CreditAccount, CreditLog } from "@/api/types"
 import { useAuthStore } from "@/store/authStore"
@@ -33,11 +34,13 @@ onMounted(loadBilling)
 </script>
 
 <template>
-  <AppShell title="会员与算力" description="实时读取后端算力账户和流水">
+  <AppShell title="会员与算力" description="充值套餐、算力账户与流水（套餐与支付接口待对接）">
     <div class="space-y-6 px-6 py-6">
       <div v-if="error" class="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
         {{ error }}
       </div>
+
+      <RechargeSection :account="account" @credits-updated="loadBilling" />
 
       <div class="grid gap-4 md:grid-cols-4">
         <div class="rounded-lg border border-border bg-card p-4">

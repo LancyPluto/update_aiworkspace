@@ -198,7 +198,14 @@ onMounted(() => {
             class="group rounded-xl border border-border bg-card p-5 transition hover:border-primary/40 hover:shadow-md"
           >
             <div class="flex items-start gap-3">
+              <img
+                v-if="tool.coverUrl"
+                :src="tool.coverUrl"
+                :alt="tool.toolName"
+                class="h-11 w-11 shrink-0 rounded-lg object-cover ring-1 ring-border"
+              />
               <div
+                v-else
                 class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-accent to-primary/10 text-primary"
               >
                 <component :is="getIcon(tool.toolName)" class="h-5 w-5" />

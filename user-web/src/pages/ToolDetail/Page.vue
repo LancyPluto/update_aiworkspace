@@ -31,6 +31,7 @@ const error = ref<string | null>(null)
 const tab = ref<"intro" | "cases" | "input" | "output">("intro")
 
 const title = computed(() => tool.value?.toolName ?? `工具 · ${props.id}`)
+const isOffline = computed(() => tool.value?.status === "OFFLINE")
 
 onMounted(async () => {
   try {
@@ -70,9 +71,23 @@ onMounted(async () => {
 
       <!-- 工具详情 -->
       <template v-else-if="tool">
+        <div
+          v-if="isOffline"
+          class="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-950 dark:text-amber-100"
+        >
+          该工具已下架，暂时无法使用。
+        </div>
+
         <div class="rounded-xl border border-border bg-card p-6 shadow-sm">
           <div class="flex flex-col md:flex-row md:items-start gap-5">
+            <img
+              v-if="tool.coverUrl"
+              :src="tool.coverUrl"
+              :alt="tool.toolName"
+              class="h-16 w-16 shrink-0 rounded-2xl object-cover ring-1 ring-border"
+            />
             <div
+              v-else
               class="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-primary to-chart-2 text-primary-foreground"
             >
               <Pencil class="h-8 w-8" />
@@ -104,11 +119,18 @@ onMounted(async () => {
                 <span class="text-xs text-muted-foreground">算力 / 次</span>
               </div>
               <RouterLink
+                v-if="!isOffline"
                 :to="'/tools/' + id + '/use'"
                 class="inline-flex h-11 items-center justify-center rounded-md bg-primary px-8 text-sm font-medium text-primary-foreground hover:opacity-90"
               >
                 开始使用 <ArrowRight class="ml-1.5 h-4 w-4" />
               </RouterLink>
+              <span
+                v-else
+                class="inline-flex h-11 cursor-not-allowed items-center justify-center rounded-md border border-border bg-muted px-8 text-sm font-medium text-muted-foreground"
+              >
+                已下架
+              </span>
               <div class="flex items-center gap-1 justify-end">
                 <button
                   type="button"
@@ -234,11 +256,18 @@ onMounted(async () => {
                 {{ tool.estimatedCreditCost }} <span class="text-sm font-normal text-muted-foreground">算力</span>
               </p>
               <RouterLink
+                v-if="!isOffline"
                 :to="'/tools/' + id + '/use'"
                 class="mt-4 flex h-11 w-full items-center justify-center rounded-md bg-primary text-sm font-medium text-primary-foreground hover:opacity-90"
               >
                 开始使用 <ArrowRight class="ml-1.5 h-4 w-4" />
               </RouterLink>
+              <span
+                v-else
+                class="mt-4 flex h-11 w-full cursor-not-allowed items-center justify-center rounded-md border border-border bg-muted text-sm font-medium text-muted-foreground"
+              >
+                已下架
+              </span>
             </div>
           </div>
         </div>

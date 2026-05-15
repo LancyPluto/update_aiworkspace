@@ -34,6 +34,12 @@ export function createAgentSession(body: { title?: string }, options?: { token?:
   })
 }
 
+export function deleteAgentSession(sessionId: number, options?: { token?: string | null }) {
+  return apiRequest<void>("DELETE", `/api/v1/agent/sessions/${sessionId}`, {
+    token: options?.token,
+  })
+}
+
 export function fetchAgentMessages(sessionId: number, options?: { token?: string | null; signal?: AbortSignal }) {
   return apiRequest<PageResult<AgentMessage>>("GET", `/api/v1/agent/sessions/${sessionId}/messages`, {
     token: options?.token,

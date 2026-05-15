@@ -8,6 +8,7 @@ import { cancelTask, fetchTasks } from "@/api/taskApi"
 import type { TaskDetail, TaskStatus } from "@/api/types"
 import { userRoutes } from "@/router/userRoutes"
 import { useAuthStore } from "@/store/authStore"
+import { taskStatusDocLabel } from "@/utils/taskStatusLabels"
 
 const auth = useAuthStore()
 const tasks = ref<TaskDetail[]>([])
@@ -106,7 +107,7 @@ onMounted(loadTasks)
           <div class="flex flex-wrap items-start justify-between gap-4">
             <div class="min-w-0 flex-1 space-y-2">
               <div class="flex flex-wrap items-center gap-2">
-                <TaskStatusTag :status="mapStatus(task.status)" />
+                <TaskStatusTag :status="mapStatus(task.status)" :label="taskStatusDocLabel(task.status)" />
                 <h3 class="truncate text-sm font-semibold">{{ task.toolName }}</h3>
               </div>
               <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">

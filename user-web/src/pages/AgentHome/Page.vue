@@ -12,6 +12,7 @@ import {
   Send,
   Sparkles,
   Store,
+  Trash2,
   Upload,
   X,
 } from "lucide-vue-next"
@@ -23,13 +24,13 @@ import {
   ApiBusinessError,
   confirmAgentTool,
   createAgentSession,
+  deleteAgentSession,
   fetchAgentMessages,
   fetchAgentFiles,
   fetchAgentRunEvents,
   fetchAgentSessions,
   fetchAgentWorkspaces,
   sendAgentMessage,
-  streamAgentRunEvents,
   uploadAgentFile,
 } from "@/api"
 import type { AgentFile, AgentMessage, AgentRunEvent, AgentSession, AgentWorkspace } from "@/api/types"
@@ -65,6 +66,7 @@ const fileInputRef = ref<HTMLInputElement | null>(null)
 /** Agent 页内「会话列表」侧栏：不随断点自动隐藏，仅手动切换 */
 const AGENT_SESSION_SIDEBAR_KEY = "ai_tool_market_agent_session_sidebar_open"
 const sessionSidebarOpen = ref(true)
+const deletingSessionId = ref<number | null>(null)
 
 function toggleSessionSidebar() {
   sessionSidebarOpen.value = !sessionSidebarOpen.value
@@ -73,21 +75,6 @@ function toggleSessionSidebar() {
 watch(sessionSidebarOpen, (open) => {
   localStorage.setItem(AGENT_SESSION_SIDEBAR_KEY, open ? "1" : "0")
 })
-
-/** 轮询/SSE 任一路径漏掉 settle 时，用事件列表中的终态把连接状态拉回 completed/failed */
-watch(
-  () => events.value.map((e) => `${e.id}:${e.eventType}`).join("|"),
-  () => {
-    if (!(runConnectionStatus.value === "streaming" || runConnectionStatus.value === "polling")) return
-    if (!activeRunId.value) return
-    const terminal = events.value.some((e) => e.eventType === "run.completed" || e.eventType === "run.failed")
-    if (terminal) {
-      stopRunUpdates()
-      settleRunStatus()
-      void refreshMessages()
-    }
-  },
-)
 
 const suggestions = [
   "帮我写一篇小红书种草笔记",
@@ -112,66 +99,17 @@ const confirmationEvents = computed(() =>
     .map((event) => ({ event, payload: parseEventJson(event.eventJson) })),
 )
 
-/** 当前 run 中「最后一条」非流式分片事件（按列表顺序，与后端 id 递增一致） */
-function lastNonDeltaEvent(list: AgentRunEvent[]) {
-  for (let i = list.length - 1; i >= 0; i--) {
-    if (list[i].eventType !== "message.delta") return list[i]
-  }
-  return undefined
-}
-
 const runStatusText = computed(() => {
+  if (runConnectionStatus.value === "streaming") return "Agent 正在运行，实时接收回复"
+  if (runConnectionStatus.value === "polling") return "实时连接已断开，正在自动续传"
   if (runConnectionStatus.value === "completed") return "Agent 已完成"
   if (runConnectionStatus.value === "failed") return "Agent 运行失败"
-  if (runConnectionStatus.value === "polling") return "实时连接已断开，正在自动续传"
-  if (runConnectionStatus.value === "streaming") {
-    // 事件已包含终态但连接状态尚未切到 completed 时，避免一直卡在「工具已结束」
-    if (events.value.some((e) => e.eventType === "run.completed")) return "正在同步会话…"
-    if (events.value.some((e) => e.eventType === "run.failed")) return "本次运行失败"
-    const last = lastNonDeltaEvent(events.value)
-    const payload = parseEventJson(last?.eventJson)
-    if (last?.eventType === "tool.confirmation_required") return "等待你确认工具调用"
-    if (last?.eventType === "tool.task_dispatched") return "工具任务已下发"
-    if (last?.eventType === "tool.task_progress") {
-      const status = typeof payload.status === "string" ? payload.status : ""
-      if (status === "PROCESSING") return "工具任务执行中"
-      if (status === "QUEUED") return "工具任务排队中"
-      return "工具进度更新"
-    }
-    if (last?.eventType === "tool.started") return "正在执行工具"
-    // 模型流式输出阶段：最后一条非 delta 仍是 tool.finished，但已有 delta 或 message.completed
-    if (last?.eventType === "tool.finished") {
-      if (events.value.some((e) => e.eventType === "message.completed")) return "正在生成回复"
-      if (events.value.some((e) => e.eventType === "message.delta")) return "正在流式输出回复"
-      return "工具已结束，正在生成回复"
-    }
-    if (last?.eventType === "message.completed") return "正在生成回复"
-    if (last?.eventType === "intent.detected") return "正在理解你的需求"
-    if (last?.eventType === "tool.selected") return "正在准备工具调用"
-    if (showStreamingDraft.value) return "正在流式输出回复"
-    return "Agent 正在运行，实时接收回复"
-  }
   return ""
 })
 
 const hasActiveRun = computed(() => {
   if (!activeRunId.value) return false
   return runConnectionStatus.value === "streaming" || runConnectionStatus.value === "polling"
-})
-
-/** 避免「已落库的助手消息 + 未清掉的草稿」同文叠成两个气泡（乱序 SSE / 竞态时常见） */
-const showStreamingDraft = computed(() => {
-  const d = draftAssistantContent.value.trim()
-  if (!d) return false
-  const assistants = messages.value.filter((m) => m.role === "ASSISTANT")
-  const last = assistants[assistants.length - 1]
-  if (last) {
-    const t = (last.contentText || "").trim()
-    if (!t) return true
-    if (t === d) return false
-    if (t.startsWith(d) || d.startsWith(t)) return false
-  }
-  return true
 })
 
 async function loadSessions() {
@@ -218,6 +156,40 @@ async function startSession(title = "新的 Agent 会话") {
   activeRunId.value = null
   runConnectionStatus.value = "idle"
   return session
+}
+
+async function removeSession(session: AgentSession, event: MouseEvent) {
+  event.stopPropagation()
+  if (!auth.token || deletingSessionId.value != null) return
+  if (session.id === activeSessionId.value && hasActiveRun.value) {
+    agentError.value = "当前会话 Agent 仍在运行，请稍后再删除。"
+    return
+  }
+  if (!confirm(`确定删除「${session.title}」？`)) return
+  deletingSessionId.value = session.id
+  agentError.value = null
+  try {
+    await deleteAgentSession(session.id, { token: auth.token })
+    const wasActive = activeSessionId.value === session.id
+    sessions.value = sessions.value.filter((item) => item.id !== session.id)
+    if (wasActive) {
+      stopRunUpdates()
+      activeSessionId.value = null
+      messages.value = []
+      files.value = []
+      events.value = []
+      activeRunId.value = null
+      runConnectionStatus.value = "idle"
+      draftAssistantContent.value = ""
+      confirmationError.value = null
+      const next = sessions.value[0]
+      if (next) await selectSession(next.id)
+    }
+  } catch (error) {
+    agentError.value = formatAgentError(error)
+  } finally {
+    deletingSessionId.value = null
+  }
 }
 
 async function loadFiles(sessionId = activeSessionId.value) {
@@ -280,8 +252,11 @@ async function submitMessage(content = input.value) {
     )
     activeRunId.value = res.runId
     runConnectionStatus.value = "streaming"
-    startRunStream(res.runId)
+    // 改为一次性接收：先同步历史，然后轮询直到 Run 完成，最后一次性拉取所有事件
     await pollRun(res.runId, true)
+    if (!events.value.some(isTerminalRunEvent)) {
+      await waitForRunComplete(res.runId)
+    }
   } catch (error) {
     agentError.value = formatAgentError(error)
   } finally {
@@ -338,46 +313,57 @@ async function pollRun(runId: number, reset = false) {
   }
 }
 
-function startPolling(runId: number) {
-  stopRunUpdates()
-  pollingRunId.value = runId
-  runConnectionStatus.value = "polling"
-  pollTimer.value = window.setInterval(() => {
-    if (typeof document !== "undefined" && document.hidden) return
-    void pollRun(runId).catch((error) => {
-      agentError.value = formatAgentError(error)
-      runConnectionStatus.value = "failed"
-      stopRunUpdates()
-    })
-  }, 1600)
-}
-
-function startRunStream(runId: number) {
+/**
+ * 等待 Run 完成并一次性拉取所有事件（替代 SSE 流式接收）
+ */
+async function waitForRunComplete(runId: number) {
   stopRunUpdates()
   runConnectionStatus.value = "streaming"
-  const controller = new AbortController()
-  streamController.value = controller
-  streamAgentRunEvents(runId, {
-    token: auth.token,
-    afterEventId: events.value.at(-1)?.id,
-    signal: controller.signal,
-    onEvent: async (event) => {
-      appendRunEvent(event)
-      if (event.eventType === "message.completed" || isTerminalRunEvent(event)) {
-        draftAssistantContent.value = ""
-        await refreshMessages()
+
+  // 轮询间隔
+  const POLL_INTERVAL = 800
+  const MAX_WAIT_TIME = 5 * 60 * 1000 // 最大等待 5 分钟
+  const startTime = Date.now()
+
+  try {
+    // 轮询直到 Run 完成或超时
+    while (Date.now() - startTime < MAX_WAIT_TIME) {
+      const afterEventId = events.value.at(-1)?.id
+      const res = await fetchAgentRunEvents(runId, {
+        token: auth.token,
+        afterEventId,
+      })
+
+      // 追加新事件
+      if (res.list.length > 0) {
+        res.list.forEach(appendRunEvent)
+        await scrollBottom()
       }
-      if (isTerminalRunEvent(event)) {
-        stopRunUpdates()
-        settleRunStatus()
+
+      // 检查是否收到终止事件
+      if (res.list.some(isTerminalRunEvent) || events.value.some(isTerminalRunEvent)) {
+        break
       }
-      await scrollBottom()
-    },
-  }).catch(() => {
-    if (!controller.signal.aborted) {
-      startPolling(runId)
+
+      // 等待下一轮询
+      await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL))
     }
-  })
+
+    // Run 完成后，确保消息列表已更新
+    stopRunUpdates()
+    settleRunStatus()
+    await refreshMessages()
+    draftAssistantContent.value = ""
+  } catch (error) {
+    runConnectionStatus.value = "failed"
+    agentError.value = formatAgentError(error)
+    stopRunUpdates()
+  }
+}
+
+/** 保留旧函数签名但改为使用 waitForRunComplete（用于工具确认后恢复执行） */
+function startRunStream(runId: number) {
+  void waitForRunComplete(runId)
 }
 
 function stopRunUpdates() {
@@ -425,48 +411,17 @@ async function refreshMessages() {
   if (!auth.token || !activeSessionId.value) return
   const messageRes = await fetchAgentMessages(activeSessionId.value, { token: auth.token })
   messages.value = messageRes.list
-  const assistants = messages.value.filter((m) => m.role === "ASSISTANT")
-  const lastAssistant = assistants[assistants.length - 1]
-  if (lastAssistant && draftAssistantContent.value.trim()) {
-    const d = draftAssistantContent.value.trim()
-    const t = (lastAssistant.contentText || "").trim()
-    if (t === d || t.startsWith(d) || d.startsWith(t)) draftAssistantContent.value = ""
-  }
-  if (
-    activeRunId.value &&
-    lastAssistant &&
-    lastAssistant.runId === activeRunId.value &&
-    runConnectionStatus.value !== "completed"
-  ) {
-    stopRunUpdates()
-    runConnectionStatus.value = "completed"
-    activeRunId.value = null
-    draftAssistantContent.value = ""
-  }
 }
 
 function appendRunEvent(event: AgentRunEvent) {
   if (events.value.some((item) => item.id === event.id)) return
-  const hadTerminal = events.value.some((e) => e.eventType === "run.completed" || e.eventType === "run.failed")
-  const hadMessageCompleted = events.value.some((e) => e.eventType === "message.completed")
   events.value.push(event)
-  events.value.sort((a, b) => a.id - b.id)
   if (event.eventType === "run.started") {
     agentError.value = null
     runConnectionStatus.value = "streaming"
   }
   if (event.eventType === "message.delta") {
-    const terminalNow = events.value.some((e) => e.eventType === "run.completed" || e.eventType === "run.failed")
-    const messageCompletedNow = events.value.some((e) => e.eventType === "message.completed")
-    if (!hadTerminal && !terminalNow && !hadMessageCompleted && !messageCompletedNow) {
-      draftAssistantContent.value += extractMessageDelta(event)
-    }
-  }
-  if (event.eventType === "message.completed") {
-    draftAssistantContent.value = ""
-  }
-  if (event.eventType === "run.completed" || event.eventType === "run.failed") {
-    draftAssistantContent.value = ""
+    draftAssistantContent.value += extractMessageDelta(event)
   }
   if (event.eventType === "run.failed") {
     const payload = parseEventJson(event.eventJson)
@@ -515,11 +470,10 @@ function isTerminalRunEvent(event: AgentRunEvent) {
   return event.eventType === "run.completed" || event.eventType === "run.failed"
 }
 
-function parseEventJson(value?: string | null | Record<string, unknown>) {
-  if (value == null || value === "") return {} as Record<string, unknown>
-  if (typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>
+function parseEventJson(value?: string | null) {
+  if (!value) return {} as Record<string, unknown>
   try {
-    return JSON.parse(String(value)) as Record<string, unknown>
+    return JSON.parse(value) as Record<string, unknown>
   } catch {
     return {} as Record<string, unknown>
   }
@@ -575,17 +529,27 @@ onUnmounted(() => {
           新会话
         </button>
         <div class="session-list">
-          <button
+          <div
             v-for="session in sessions"
             :key="session.id"
-            type="button"
-            class="session-item"
+            class="session-row"
             :class="{ active: session.id === activeSessionId }"
-            @click="selectSession(session.id)"
           >
-            <Bot class="h-4 w-4" />
-            <span>{{ session.title }}</span>
-          </button>
+            <button type="button" class="session-item" @click="selectSession(session.id)">
+              <Bot class="h-4 w-4 shrink-0" />
+              <span>{{ session.title }}</span>
+            </button>
+            <button
+              type="button"
+              class="session-delete"
+              :disabled="deletingSessionId === session.id"
+              :aria-label="`删除会话：${session.title}`"
+              @click="removeSession(session, $event)"
+            >
+              <Loader2 v-if="deletingSessionId === session.id" class="h-4 w-4 animate-spin" aria-hidden="true" />
+              <Trash2 v-else class="h-4 w-4" aria-hidden="true" />
+            </button>
+          </div>
         </div>
       </aside>
 
@@ -628,7 +592,7 @@ onUnmounted(() => {
               <div class="bubble">{{ message.contentText }}</div>
             </article>
 
-            <article v-if="showStreamingDraft" class="agent-message assistant streaming">
+            <article v-if="draftAssistantContent" class="agent-message assistant streaming">
               <div class="avatar">
                 <Bot class="h-4 w-4" />
               </div>
@@ -753,6 +717,13 @@ onUnmounted(() => {
   padding: 14px;
   min-width: 0;
   transition: opacity 0.15s ease, padding 0.15s ease;
+
+  /* 👇 下面这 4 行是新加的：左侧会话列表滚动 */
+  height: calc(100vh - 64px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .agent-sidebar--collapsed {
@@ -767,6 +738,7 @@ onUnmounted(() => {
 
 .new-chat,
 .session-item,
+.session-delete,
 .composer button,
 .primary-btn,
 .ghost-btn {
@@ -791,13 +763,29 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  flex: 1;        /* 让列表占满剩余高度 */
+  min-height: 0;  /* 必须加，否则滚动不生效 */
+}
+
+.session-row {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  border-radius: 8px;
+  min-width: 0;
+}
+
+.session-row.active,
+.session-row:hover {
+  background: var(--secondary);
 }
 
 .session-item {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   border: 0;
   background: transparent;
-  padding: 10px;
+  padding: 10px 6px 10px 10px;
   color: var(--foreground);
   font-size: 13px;
   text-align: left;
@@ -810,15 +798,31 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 
-.session-item.active,
-.session-item:hover {
-  background: var(--secondary);
+.session-delete {
+  flex-shrink: 0;
+  width: 36px;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+
+.session-delete:hover:not(:disabled) {
+  color: var(--destructive);
+}
+
+.session-delete:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .chat-pane {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto auto auto;
   min-width: 0;
+  min-height: 0;
+  height: 100%;
 }
 
 .session-sidebar-toggle-row {
@@ -848,8 +852,14 @@ onUnmounted(() => {
 }
 
 .message-scroll {
-  overflow-y: auto;
+  overflow-y: auto; /* 滚动在这里 */
+  height: 100%;
   padding: 28px clamp(18px, 4vw, 64px);
+
+  /* 关键代码 ↓ */
+  max-height: calc(100vh - 220px);
+  flex: 1;
+  min-height: 0;
 }
 
 .empty-state {
@@ -1196,5 +1206,19 @@ onUnmounted(() => {
   .run-status-card {
     max-width: 100%;
   }
+
+  /* 左侧边栏滚动条样式：默认隐藏，hover/滚动时显示 */
+.agent-sidebar::-webkit-scrollbar {
+  width: 4px;
+}
+.agent-sidebar::-webkit-scrollbar-thumb {
+  background: var(--muted-foreground);
+  border-radius: 4px;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.agent-sidebar:hover::-webkit-scrollbar-thumb {
+  opacity: 1;
+}
 }
 </style>

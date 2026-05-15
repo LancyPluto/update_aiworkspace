@@ -7,5 +7,7 @@
 			"path": "../../Note/Lenyer/ai超市开发文档"
 		}
 	],
-	"settings": {}
+	"settings": {
+		"java.compile.nullAnalysis.mode": "automatic"
+	}
 }
