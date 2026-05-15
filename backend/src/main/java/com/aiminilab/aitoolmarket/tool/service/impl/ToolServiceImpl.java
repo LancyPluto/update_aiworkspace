@@ -344,6 +344,7 @@ public class ToolServiceImpl implements ToolService {
         tool.setDescription(request.description());
         tool.setCoverUrl(request.coverUrl());
         tool.setEstimatedCreditCost(request.estimatedCreditCost());
+        tool.setModelConfigId(request.modelConfigId());
         return tool;
     }
 

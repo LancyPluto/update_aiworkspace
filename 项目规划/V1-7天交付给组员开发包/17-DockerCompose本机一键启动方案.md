@@ -200,4 +200,3 @@ Worker 日志显示 connected to redis
 可选：后端 + Worker Compose
 不建议：前端开发期容器化
 ```
-

@@ -73,13 +73,15 @@ CREATE TABLE IF NOT EXISTS ai_tools (
   cover_url VARCHAR(512),
   status VARCHAR(32) NOT NULL DEFAULT 'DRAFT',
   estimated_credit_cost INT NOT NULL DEFAULT 0,
+  model_config_id BIGINT NULL,
   created_by BIGINT,
   updated_by BIGINT,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   is_deleted TINYINT NOT NULL DEFAULT 0,
   KEY idx_tools_category(category_id),
-  KEY idx_tools_status(status)
+  KEY idx_tools_status(status),
+  KEY idx_tools_model_config(model_config_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS tool_field_schemas (
@@ -297,4 +299,3 @@ VALUES
   ('copywriting', 'Copywriting', 1, 'ACTIVE'),
   ('agent', '智能体', 2, 'ACTIVE')
 ON DUPLICATE KEY UPDATE category_name = VALUES(category_name), status = VALUES(status);
-

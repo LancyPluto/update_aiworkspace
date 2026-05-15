@@ -78,7 +78,7 @@ class FakeModelClient:
     def __init__(self) -> None:
         self.calls = []
 
-    def generate(self, prompt: str, *, system_prompt: str = "", model_name: str | None = None) -> str:
+    def generate(self, prompt: str, *, system_prompt: str = "", model_name: str | None = None, **kwargs) -> str:
         self.calls.append(
             {
                 "prompt": prompt,

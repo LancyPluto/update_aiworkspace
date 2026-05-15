@@ -2,9 +2,11 @@ package com.aiminilab.aitoolmarket.task.service.impl;
 
 import com.aiminilab.aitoolmarket.task.entity.TaskOutboxEvent;
 import com.aiminilab.aitoolmarket.task.mapper.TaskOutboxMapper;
+import com.aiminilab.aitoolmarket.task.metrics.TaskMetrics;
 import com.aiminilab.aitoolmarket.task.service.TaskOutboxService;
 import com.aiminilab.aitoolmarket.task.service.TaskQueuePublisher;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.MDC;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -22,13 +24,16 @@ public class TaskOutboxServiceImpl implements TaskOutboxService {
     private final TaskOutboxMapper taskOutboxMapper;
     private final TaskQueuePublisher taskQueuePublisher;
     private final ObjectMapper objectMapper;
+    private final TaskMetrics taskMetrics;
 
     public TaskOutboxServiceImpl(TaskOutboxMapper taskOutboxMapper,
                                  TaskQueuePublisher taskQueuePublisher,
-                                 ObjectMapper objectMapper) {
+                                 ObjectMapper objectMapper,
+                                 TaskMetrics taskMetrics) {
         this.taskOutboxMapper = taskOutboxMapper;
         this.taskQueuePublisher = taskQueuePublisher;
         this.objectMapper = objectMapper;
+        this.taskMetrics = taskMetrics;
     }
 
     @Override
@@ -70,12 +75,14 @@ public class TaskOutboxServiceImpl implements TaskOutboxService {
 
     private boolean publish(TaskOutboxEvent event) {
         try {
-            if (taskQueuePublisher.publish(event.getTaskId())) {
+            if (taskQueuePublisher.publish(event.getTaskId(), event.getPayloadJson())) {
                 return true;
             }
+            taskMetrics.recordQueuePublishFailure(event.getEventType());
             taskOutboxMapper.markFailed(event.getId(), LocalDateTime.now().plusMinutes(1), "publish returned false");
             return false;
         } catch (RuntimeException exception) {
+            taskMetrics.recordQueuePublishFailure(event.getEventType());
             taskOutboxMapper.markFailed(event.getId(), LocalDateTime.now().plusMinutes(1), exception.getMessage());
             return false;
         }
@@ -83,7 +90,11 @@ public class TaskOutboxServiceImpl implements TaskOutboxService {
 
     private String payload(Long taskId) {
         try {
-            return objectMapper.writeValueAsString(Map.of("taskId", taskId));
+            String traceId = MDC.get("traceId");
+            if (traceId == null || traceId.isBlank()) {
+                return objectMapper.writeValueAsString(Map.of("taskId", taskId));
+            }
+            return objectMapper.writeValueAsString(Map.of("taskId", taskId, "traceId", traceId));
         } catch (Exception exception) {
             throw new IllegalStateException("Could not serialize task outbox payload", exception);
         }

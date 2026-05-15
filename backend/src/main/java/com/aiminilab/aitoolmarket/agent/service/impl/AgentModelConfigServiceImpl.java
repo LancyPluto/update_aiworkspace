@@ -13,6 +13,7 @@ import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Set;
@@ -124,6 +125,8 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         }
         config.setMinimaxGroupId(blankToNull(request.minimaxGroupId()));
         config.setTimeoutSeconds(request.timeoutSeconds() == null ? 60 : request.timeoutSeconds());
+        config.setInputTokenPricePer1k(nonNegativeMoney(request.inputTokenPricePer1k()));
+        config.setOutputTokenPricePer1k(nonNegativeMoney(request.outputTokenPricePer1k()));
         config.setEnabled(request.enabled() == null || request.enabled());
         config.setDefault(request.isDefault() != null && request.isDefault());
         config.setUpdatedAt(now);
@@ -176,6 +179,8 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         fallback.setApiKey("");
         fallback.setMinimaxGroupId(null);
         fallback.setTimeoutSeconds(60);
+        fallback.setInputTokenPricePer1k(BigDecimal.ZERO);
+        fallback.setOutputTokenPricePer1k(BigDecimal.ZERO);
         fallback.setEnabled(true);
         fallback.setDefault(true);
         fallback.setCreatedAt(now);
@@ -191,10 +196,21 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         if (request.modelName() == null || request.modelName().isBlank()) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "modelName is required");
         }
+        if (isNegative(request.inputTokenPricePer1k()) || isNegative(request.outputTokenPricePer1k())) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "token price must be non-negative");
+        }
     }
 
     private String blankToNull(String value) {
         return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    private BigDecimal nonNegativeMoney(BigDecimal value) {
+        return value == null ? BigDecimal.ZERO : value.max(BigDecimal.ZERO);
+    }
+
+    private boolean isNegative(BigDecimal value) {
+        return value != null && value.signum() < 0;
     }
 
     private AgentModelConfigRequest mergeSecretFields(AgentModelConfigRequest request, AgentModelConfig existing) {
@@ -210,6 +226,8 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                 existing.getApiKey(),
                 request.minimaxGroupId(),
                 request.timeoutSeconds(),
+                request.inputTokenPricePer1k(),
+                request.outputTokenPricePer1k(),
                 request.enabled(),
                 request.isDefault()
         );

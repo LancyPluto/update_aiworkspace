@@ -34,6 +34,12 @@ export function createAgentSession(body: { title?: string }, options?: { token?:
   })
 }
 
+export function deleteAgentSession(sessionId: number, options?: { token?: string | null }) {
+  return apiRequest<void>("DELETE", `/api/v1/agent/sessions/${sessionId}`, {
+    token: options?.token,
+  })
+}
+
 export function fetchAgentMessages(sessionId: number, options?: { token?: string | null; signal?: AbortSignal }) {
   return apiRequest<PageResult<AgentMessage>>("GET", `/api/v1/agent/sessions/${sessionId}/messages`, {
     token: options?.token,
@@ -68,11 +74,24 @@ export function uploadAgentFile(sessionId: number, file: File, options?: { token
   })
 }
 
+export function fetchAgentRun(runId: number, options?: { token?: string | null; signal?: AbortSignal }) {
+  return apiRequest<AgentRun>("GET", `/api/v1/agent/runs/${runId}`, {
+    token: options?.token,
+    signal: options?.signal,
+  })
+}
+
 export function fetchAgentRunEvents(runId: number, options?: { token?: string | null; afterEventId?: number; signal?: AbortSignal }) {
   return apiRequest<PageResult<AgentRunEvent>>("GET", `/api/v1/agent/runs/${runId}/events`, {
     token: options?.token,
     signal: options?.signal,
     query: { afterEventId: options?.afterEventId, pageSize: 100 },
+  })
+}
+
+export function cancelAgentRun(runId: number, options?: { token?: string | null }) {
+  return apiRequest<AgentRun>("POST", `/api/v1/agent/runs/${runId}/cancel`, {
+    token: options?.token,
   })
 }
 

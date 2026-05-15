@@ -30,11 +30,12 @@ class BackendClient:
             }
         )
 
-    def get_execution_context(self, task_id: int) -> dict[str, Any]:
+    def get_execution_context(self, task_id: int, trace_id: str | None = None) -> dict[str, Any]:
         response = self._request(
             "GET",
             f"/api/internal/v1/tasks/{task_id}/execution-context",
             timeout=self.timeout,
+            trace_id=trace_id,
         )
         return self._parse_response(response)
 
@@ -52,6 +53,7 @@ class BackendClient:
         *,
         progress: int | None = None,
         progress_message: str | None = None,
+        trace_id: str | None = None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {}
         if progress is not None:
@@ -63,24 +65,27 @@ class BackendClient:
             f"/api/internal/v1/tasks/{task_id}/processing",
             json_body=payload,
             timeout=self.timeout,
+            trace_id=trace_id,
         )
         return self._parse_response(response)
 
-    def mark_success(self, task_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+    def mark_success(self, task_id: int, payload: dict[str, Any], trace_id: str | None = None) -> dict[str, Any]:
         response = self._request(
             "POST",
             f"/api/internal/v1/tasks/{task_id}/success",
             json_body=payload,
             timeout=self.timeout,
+            trace_id=trace_id,
         )
         return self._parse_response(response)
 
-    def mark_failed(self, task_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+    def mark_failed(self, task_id: int, payload: dict[str, Any], trace_id: str | None = None) -> dict[str, Any]:
         response = self._request(
             "POST",
             f"/api/internal/v1/tasks/{task_id}/failed",
             json_body=payload,
             timeout=self.timeout,
+            trace_id=trace_id,
         )
         return self._parse_response(response)
 
@@ -94,16 +99,17 @@ class BackendClient:
         *,
         json_body: dict[str, Any] | None = None,
         timeout: tuple[int, int],
+        trace_id: str | None = None,
     ) -> requests.Response:
         body = b""
         kwargs: dict[str, Any] = {"timeout": timeout}
         if json_body is not None:
             body = json.dumps(json_body, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
             kwargs["data"] = body
-        kwargs["headers"] = self._signature_headers(method, path, body)
+        kwargs["headers"] = self._signature_headers(method, path, body, trace_id=trace_id)
         return self.session.request(method, self._url(path), **kwargs)
 
-    def _signature_headers(self, method: str, path: str, body: bytes) -> dict[str, str]:
+    def _signature_headers(self, method: str, path: str, body: bytes, *, trace_id: str | None = None) -> dict[str, str]:
         timestamp = str(int(time.time() * 1000))
         nonce = str(uuid.uuid4())
         request_path = urlsplit(path).path
@@ -114,11 +120,14 @@ class BackendClient:
             content.encode("utf-8"),
             hashlib.sha256,
         ).hexdigest()
-        return {
+        headers = {
             "X-Internal-Timestamp": timestamp,
             "X-Internal-Nonce": nonce,
             "X-Internal-Signature": signature,
         }
+        if trace_id:
+            headers["X-Request-Id"] = trace_id
+        return headers
 
     def _parse_response(self, response: requests.Response) -> dict[str, Any]:
         try:

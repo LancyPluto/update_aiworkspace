@@ -77,4 +77,3 @@ CREATE TABLE IF NOT EXISTS agent_tool_calls (
   KEY idx_agent_tool_calls_user_id (user_id, id),
   KEY idx_agent_tool_calls_tool_code (tool_code)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-

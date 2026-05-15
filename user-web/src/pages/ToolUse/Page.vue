@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from "vue"
+import { ref, onMounted, computed, watch } from "vue"
 import { RouterLink, useRouter } from "vue-router"
 import { ArrowLeft, ChevronRight, Info, Loader2, Sparkles, Zap } from "lucide-vue-next"
 import AppShell from "@/components/AppShell.vue"
 import DynamicForm from "@/components/DynamicForm/DynamicForm.vue"
 import TaskStatusTag from "@/components/TaskStatusTag/TaskStatusTag.vue"
 import { userRoutes } from "@/router/userRoutes"
-import { fetchToolByCode, createTask } from "@/api"
+import { fetchToolByCode, createTask, ApiBusinessError } from "@/api"
 import type { ToolDetail, ToolField } from "@/api/types"
 import { useAuthStore } from "@/store/authStore"
 
@@ -24,26 +24,33 @@ const submitError = ref<string | null>(null)
 const submitting = ref(false)
 const createdTask = ref<{ taskId: number; taskNo: string } | null>(null)
 const formValues = ref<Record<string, unknown>>({})
+const dynamicFormRef = ref<InstanceType<typeof DynamicForm> | null>(null)
 
 const title = computed(() => tool.value?.toolName ?? `工具 · ${props.id}`)
+const isOffline = computed(() => tool.value?.status === "OFFLINE")
 
-function sanitizeParams(fields: ToolField[], values: Record<string, unknown>) {
-  const params: Record<string, unknown> = {}
-  const missingFields: string[] = []
+watch(
+  () => tool.value?.toolCode,
+  () => {
+    formValues.value = {}
+  },
+)
 
-  for (const field of fields) {
-    const rawValue = values[field.fieldKey]
-    const normalizedValue = typeof rawValue === "string" ? rawValue.trim() : rawValue
-
-    if (field.required && (normalizedValue == null || normalizedValue === "")) {
-      missingFields.push(field.fieldName)
-      continue
+function buildTaskParams(fields: ToolField[], raw: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const f of fields) {
+    const v = raw[f.fieldKey]
+    if (f.fieldType === "number") {
+      if (v === "" || v === undefined || v === null) {
+        if (!f.required) continue
+      }
+      const n = typeof v === "number" ? v : Number(v)
+      if (!Number.isNaN(n)) out[f.fieldKey] = n
+    } else if (v !== undefined && v !== null && v !== "") {
+      out[f.fieldKey] = typeof v === "string" ? v.trim() : v
     }
-
-    params[field.fieldKey] = normalizedValue ?? ""
   }
-
-  return { params, missingFields }
+  return out
 }
 
 onMounted(async () => {
@@ -61,11 +68,18 @@ async function handleCreateTask() {
   if (!tool.value) return
 
   submitError.value = null
-  const { params, missingFields } = sanitizeParams(tool.value.fields, formValues.value)
-  if (missingFields.length > 0) {
-    submitError.value = `请先填写必填项：${missingFields.join("、")}`
+  if (isOffline.value) {
+    submitError.value = "该工具已下架，暂时无法创建任务"
     return
   }
+
+  const check = dynamicFormRef.value?.validate()
+  if (check && !check.valid) {
+    submitError.value = check.message ?? "请完善必填项"
+    return
+  }
+
+  const params = buildTaskParams(tool.value.fields, formValues.value)
 
   submitting.value = true
   try {
@@ -73,13 +87,25 @@ async function handleCreateTask() {
       {
         toolCode: tool.value.toolCode,
         params,
+        clientRequestId: crypto.randomUUID(),
       },
       { token: auth.token },
     )
     createdTask.value = { taskId: res.taskId, taskNo: res.taskNo }
-    // 跳转到任务状态页
     router.push(userRoutes.taskStatus(String(res.taskId)))
   } catch (e) {
+    if (e instanceof ApiBusinessError) {
+      if (e.code === "CREDIT_NOT_ENOUGH" || e.code === "AGENT_CREDIT_NOT_ENOUGH") {
+        submitError.value = "算力不足，请前往会员与算力页充值后再试"
+        return
+      }
+      if (e.code === "TOOL_OFFLINE") {
+        submitError.value = "该工具已下架，无法创建任务"
+        return
+      }
+      submitError.value = e.message || "创建任务失败"
+      return
+    }
     submitError.value = (e as Error).message || "创建任务失败"
   } finally {
     submitting.value = false
@@ -100,26 +126,30 @@ async function handleCreateTask() {
         <span class="text-foreground">使用</span>
       </nav>
 
-      <!-- 加载中 -->
       <div v-if="loading" class="flex justify-center py-12">
         <span class="text-sm text-muted-foreground">加载中…</span>
       </div>
 
-      <!-- 错误 -->
       <div v-else-if="pageError" class="rounded-xl border border-destructive/30 bg-destructive/5 p-6 text-center">
         <p class="text-sm text-destructive">{{ pageError }}</p>
       </div>
 
       <template v-else-if="tool">
+        <div
+          v-if="isOffline"
+          class="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-950 dark:text-amber-100"
+        >
+          该工具已下架，暂时无法创建任务。请返回工具超市选择其他工具。
+        </div>
+
         <div class="grid gap-6 lg:grid-cols-[1fr_320px]">
           <div class="space-y-5">
-            <DynamicForm v-model="formValues" :fields="tool.fields" />
+            <DynamicForm ref="dynamicFormRef" v-model="formValues" :fields="tool.fields" />
 
             <div v-if="submitError" class="rounded-xl border border-destructive/30 bg-destructive/5 p-4">
               <p class="text-sm text-destructive">{{ submitError }}</p>
             </div>
 
-            <!-- 进度展示（任务创建后） -->
             <div v-if="createdTask" class="rounded-xl border border-primary/20 bg-accent/30 p-6 shadow-sm">
               <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
                 <div class="flex items-center gap-2">
@@ -167,13 +197,13 @@ async function handleCreateTask() {
 
               <button
                 type="button"
-                class="mt-4 inline-flex h-11 w-full items-center justify-center gap-2 rounded-md bg-primary text-sm font-medium text-primary-foreground hover:opacity-90"
-                :disabled="submitting"
+                class="mt-4 inline-flex h-11 w-full items-center justify-center gap-2 rounded-md bg-primary text-sm font-medium text-primary-foreground hover:opacity-90 disabled:pointer-events-none disabled:opacity-50"
+                :disabled="submitting || isOffline"
                 @click="handleCreateTask"
               >
                 <Loader2 v-if="submitting" class="h-4 w-4 animate-spin" />
                 <Sparkles v-else class="h-4 w-4" />
-                {{ submitting ? '创建中…' : '创建生成任务' }}
+                {{ submitting ? "创建中…" : isOffline ? "工具已下架" : "创建生成任务" }}
               </button>
 
               <div class="mt-3 flex items-center gap-2 rounded-md bg-secondary/60 p-2 text-[11px] text-muted-foreground">

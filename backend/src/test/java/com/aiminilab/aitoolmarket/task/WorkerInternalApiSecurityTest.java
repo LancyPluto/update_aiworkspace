@@ -6,6 +6,7 @@ import com.aiminilab.aitoolmarket.config.AuthInterceptor;
 import com.aiminilab.aitoolmarket.task.controller.InternalTaskController;
 import com.aiminilab.aitoolmarket.task.dto.TaskStatusResponse;
 import com.aiminilab.aitoolmarket.task.service.InternalTaskService;
+import com.aiminilab.aitoolmarket.task.service.TaskService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -31,12 +32,14 @@ class WorkerInternalApiSecurityTest {
 
     private InternalRequestSignatureVerifier verifier;
     private InternalTaskService internalTaskService;
+    private TaskService taskService;
     private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() throws Exception {
         verifier = mock(InternalRequestSignatureVerifier.class);
         internalTaskService = mock(InternalTaskService.class);
+        taskService = mock(TaskService.class);
         when(internalTaskService.markProcessing(eq(1L), any()))
                 .thenReturn(new TaskStatusResponse(1L, "TASK-1", "moments_copywriting_generator", "PROCESSING", 35, "AI is generating"));
 
@@ -47,7 +50,7 @@ class WorkerInternalApiSecurityTest {
         );
         authInterceptor.init(new MockFilterConfig());
 
-        mockMvc = MockMvcBuilders.standaloneSetup(new InternalTaskController(internalTaskService))
+        mockMvc = MockMvcBuilders.standaloneSetup(new InternalTaskController(internalTaskService, taskService))
                 .addFilters(authInterceptor)
                 .build();
     }

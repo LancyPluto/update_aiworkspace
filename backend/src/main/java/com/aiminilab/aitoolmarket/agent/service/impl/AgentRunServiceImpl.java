@@ -22,10 +22,12 @@ import com.aiminilab.aitoolmarket.agent.dto.InternalAgentModelConfigResponse;
 import com.aiminilab.aitoolmarket.agent.dto.InternalAgentMessageResponse;
 import com.aiminilab.aitoolmarket.agent.dto.InternalAgentRunContextResponse;
 import com.aiminilab.aitoolmarket.agent.dto.InternalAgentFileContextResponse;
+import com.aiminilab.aitoolmarket.agent.dto.InternalPendingToolContextResponse;
 import com.aiminilab.aitoolmarket.agent.dto.UpdateAgentToolPreferenceRequest;
 import com.aiminilab.aitoolmarket.agent.entity.AgentFile;
 import com.aiminilab.aitoolmarket.agent.entity.AgentFileChunk;
 import com.aiminilab.aitoolmarket.agent.entity.AgentMessage;
+import com.aiminilab.aitoolmarket.agent.entity.AgentPendingToolContext;
 import com.aiminilab.aitoolmarket.agent.entity.AgentRun;
 import com.aiminilab.aitoolmarket.agent.entity.AgentRunEvent;
 import com.aiminilab.aitoolmarket.agent.entity.AgentSession;
@@ -33,11 +35,15 @@ import com.aiminilab.aitoolmarket.agent.entity.AgentToolCall;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentFileChunkMapper;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentMessageMapper;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentFileMapper;
+import com.aiminilab.aitoolmarket.agent.mapper.AgentPendingToolContextMapper;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentRunEventMapper;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentRunMapper;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentSessionMapper;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentToolCallMapper;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentToolPreferenceMapper;
+import com.aiminilab.aitoolmarket.agent.mapper.AgentModelConfigMapper;
+import com.aiminilab.aitoolmarket.agent.metrics.AgentMetrics;
+import com.aiminilab.aitoolmarket.admin.service.BillingService;
 import com.aiminilab.aitoolmarket.agent.service.AgentModelConfigService;
 import com.aiminilab.aitoolmarket.agent.service.AgentRateLimitService;
 import com.aiminilab.aitoolmarket.agent.service.AgentRunService;
@@ -79,7 +85,7 @@ public class AgentRunServiceImpl implements AgentRunService {
     private static final int DEFAULT_EVENT_PAGE_SIZE = 100;
     private static final long EVENT_STREAM_TIMEOUT_MILLIS = 30 * 60 * 1000L;
     private static final Set<String> CANCELLABLE_STATUSES = Set.of("CREATED", "RUNNING", "WAITING_USER_CONFIRMATION");
-    private static final Set<String> CONFIRMABLE_STATUSES = Set.of("RUNNING", "WAITING_USER_CONFIRMATION");
+    private static final Set<String> CONFIRMABLE_STATUSES = Set.of("WAITING_USER_CONFIRMATION");
     private static final Set<String> TERMINAL_STATUSES = Set.of("SUCCESS", "FAILED", "CANCELLED", "TIMEOUT");
     private static final Set<String> TOOL_CALL_TERMINAL_STATUSES = Set.of("SUCCESS", "FAILED");
     private final Map<Long, CopyOnWriteArrayList<SseEmitter>> eventStreams = new ConcurrentHashMap<>();
@@ -92,14 +98,18 @@ public class AgentRunServiceImpl implements AgentRunService {
     private final AgentRunEventMapper agentRunEventMapper;
     private final AgentToolCallMapper agentToolCallMapper;
     private final AgentToolPreferenceMapper agentToolPreferenceMapper;
+    private final AgentModelConfigMapper agentModelConfigMapper;
+    private final AgentPendingToolContextMapper agentPendingToolContextMapper;
     private final AgentRateLimitService agentRateLimitService;
     private final AgentToolDescriptorService agentToolDescriptorService;
     private final AgentToolPreferenceService agentToolPreferenceService;
     private final AgentModelConfigService agentModelConfigService;
     private final AgentServiceClient agentServiceClient;
     private final CreditService creditService;
+    private final BillingService billingService;
     private final AppProperties appProperties;
     private final ObjectMapper objectMapper;
+    private final AgentMetrics agentMetrics;
 
     public AgentRunServiceImpl(
             AgentSessionMapper agentSessionMapper,
@@ -110,14 +120,18 @@ public class AgentRunServiceImpl implements AgentRunService {
             AgentRunEventMapper agentRunEventMapper,
             AgentToolCallMapper agentToolCallMapper,
             AgentToolPreferenceMapper agentToolPreferenceMapper,
+            AgentModelConfigMapper agentModelConfigMapper,
+            AgentPendingToolContextMapper agentPendingToolContextMapper,
             AgentRateLimitService agentRateLimitService,
             AgentToolDescriptorService agentToolDescriptorService,
             AgentToolPreferenceService agentToolPreferenceService,
             AgentModelConfigService agentModelConfigService,
             AgentServiceClient agentServiceClient,
             CreditService creditService,
+            BillingService billingService,
             AppProperties appProperties,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            AgentMetrics agentMetrics
     ) {
         this.agentSessionMapper = agentSessionMapper;
         this.agentMessageMapper = agentMessageMapper;
@@ -127,14 +141,18 @@ public class AgentRunServiceImpl implements AgentRunService {
         this.agentRunEventMapper = agentRunEventMapper;
         this.agentToolCallMapper = agentToolCallMapper;
         this.agentToolPreferenceMapper = agentToolPreferenceMapper;
+        this.agentModelConfigMapper = agentModelConfigMapper;
+        this.agentPendingToolContextMapper = agentPendingToolContextMapper;
         this.agentRateLimitService = agentRateLimitService;
         this.agentToolDescriptorService = agentToolDescriptorService;
         this.agentToolPreferenceService = agentToolPreferenceService;
         this.agentModelConfigService = agentModelConfigService;
         this.agentServiceClient = agentServiceClient;
         this.creditService = creditService;
+        this.billingService = billingService;
         this.appProperties = appProperties;
         this.objectMapper = objectMapper;
+        this.agentMetrics = agentMetrics;
     }
 
     @Override
@@ -225,10 +243,15 @@ public class AgentRunServiceImpl implements AgentRunService {
             throw new BusinessException(ErrorCode.AGENT_RUN_NOT_CANCELLABLE, "当前 Agent 运行不可取消");
         }
         LocalDateTime now = LocalDateTime.now();
-        agentRunMapper.markCancelled(runId, now);
+        if (agentRunMapper.markCancelled(runId, now) == 0) {
+            return AgentRunResponse.from(findRun(runId, userId));
+        }
+        failOpenToolCalls(runId, userId, "RUN_CANCELLED", "Agent 运行已取消", now);
         creditService.releaseForAgentRun(userId, runId, Math.max(0, run.getEstimatedCredits()));
         agentRateLimitService.decrementActiveRun(userId, runId);
         appendEventInternal(runId, userId, "run.failed", "Agent 运行已取消", "{\"status\":\"CANCELLED\"}", now);
+        agentMetrics.recordRunOutcome("CANCELLED", run.getIntent(), firstNonNull(run.getStartedAt(), run.getCreatedAt()), now);
+        cleanupEventStreams(runId);
         return AgentRunResponse.from(findRun(runId, userId));
     }
 
@@ -237,14 +260,22 @@ public class AgentRunServiceImpl implements AgentRunService {
     public AgentRunResponse confirmTool(Long userId, Long runId, ConfirmAgentToolRequest request) {
         AgentRun run = findRun(runId, userId);
         if (!CONFIRMABLE_STATUSES.contains(run.getStatus())) {
+            if ("RUNNING".equals(run.getStatus())) {
+                return AgentRunResponse.from(run);
+            }
             throw new BusinessException(ErrorCode.AGENT_RUN_NOT_CANCELLABLE, "当前 Agent 运行不可确认工具调用");
         }
         if (Boolean.FALSE.equals(request.approved())) {
             LocalDateTime now = LocalDateTime.now();
-            agentRunMapper.markCancelled(runId, now);
+            if (agentRunMapper.markCancelled(runId, now) == 0) {
+                return AgentRunResponse.from(findRun(runId, userId));
+            }
+            failOpenToolCalls(runId, userId, "TOOL_CONFIRMATION_REJECTED", "用户取消工具调用", now);
             creditService.releaseForAgentRun(userId, runId, Math.max(0, run.getEstimatedCredits()));
             agentRateLimitService.decrementActiveRun(userId, runId);
             appendEventInternal(runId, userId, "run.failed", "用户取消工具调用", "{\"status\":\"CANCELLED\"}", now);
+            agentMetrics.recordRunOutcome("CANCELLED", run.getIntent(), firstNonNull(run.getStartedAt(), run.getCreatedAt()), now);
+            cleanupEventStreams(runId);
             return AgentRunResponse.from(findRun(runId, userId));
         }
         agentToolDescriptorService.getToolForAgent(userId, request.toolCode());
@@ -252,8 +283,8 @@ public class AgentRunServiceImpl implements AgentRunService {
         if (request.autoCallEnabled() != null) {
             agentToolPreferenceService.update(userId, request.toolCode(), new UpdateAgentToolPreferenceRequest(request.autoCallEnabled()));
         }
-        if ("WAITING_USER_CONFIRMATION".equals(run.getStatus())) {
-            agentRunMapper.markRunning(runId, now);
+        if (agentRunMapper.markRunningIfStatus(runId, "WAITING_USER_CONFIRMATION", now) == 0) {
+            return AgentRunResponse.from(findRun(runId, userId));
         }
         appendEventInternal(runId, userId, "tool.confirmed", request.toolCode(), "{\"toolCode\":\"" + request.toolCode() + "\"}", now);
         runAfterCommit(() -> notifyAgentService(run.getId(), () -> agentServiceClient.confirmTool(run.getId(), request.toolCode())));
@@ -325,18 +356,37 @@ public class AgentRunServiceImpl implements AgentRunService {
                 .stream()
                 .map(com.aiminilab.aitoolmarket.agent.dto.AgentToolPreferenceResponse::from)
                 .toList();
+        InternalPendingToolContextResponse pendingToolContextResponse = null;
+        AgentPendingToolContext pendingCtx = agentPendingToolContextMapper.findActiveByRunId(runId);
+        if (pendingCtx != null) {
+            pendingToolContextResponse = new InternalPendingToolContextResponse(
+                    pendingCtx.getId(),
+                    pendingCtx.getRunId(),
+                    pendingCtx.getSessionId(),
+                    pendingCtx.getUserId(),
+                    pendingCtx.getSelectedToolCode(),
+                    pendingCtx.getCandidateToolCodesJson(),
+                    pendingCtx.getCollectedArgumentsJson(),
+                    pendingCtx.getMissingArgumentsJson(),
+                    pendingCtx.getClarifyingQuestion(),
+                    pendingCtx.getConfirmationRequired(),
+                    pendingCtx.getStatus()
+            );
+        }
         return new InternalAgentRunContextResponse(
                 run.getId(),
                 run.getSessionId(),
                 findSession(run.getUserId(), run.getSessionId()).getWorkspaceId(),
                 run.getUserId(),
+                run.getStatus(),
                 userMessage == null ? "" : userMessage.getContentText(),
                 history,
                 agentFiles,
                 agentFileChunks,
                 tools,
                 preferences,
-                run.getEstimatedCredits()
+                run.getEstimatedCredits(),
+                pendingToolContextResponse
         );
     }
 
@@ -417,13 +467,17 @@ public class AgentRunServiceImpl implements AgentRunService {
     @Transactional
     public AgentRunEventResponse appendEvent(Long runId, CreateAgentRunEventRequest request) {
         AgentRun run = findRun(runId);
+        LocalDateTime now = LocalDateTime.now();
+        if ("tool.confirmation_required".equals(request.eventType())) {
+            agentRunMapper.markWaitingForConfirmationIfStatus(runId, "RUNNING", now);
+        }
         return AgentRunEventResponse.from(appendEventInternal(
                 runId,
                 run.getUserId(),
                 request.eventType(),
                 request.eventText(),
                 toJson(request.eventJson()),
-                LocalDateTime.now()
+                now
         ));
     }
 
@@ -431,7 +485,14 @@ public class AgentRunServiceImpl implements AgentRunService {
     @Transactional
     public AgentToolCallResponse createToolCall(Long runId, CreateAgentToolCallRequest request) {
         AgentRun run = findRun(runId);
+        if (!"RUNNING".equals(run.getStatus())) {
+            throw new BusinessException(ErrorCode.AGENT_RUN_NOT_CANCELLABLE, "当前 Agent 运行不可创建工具调用");
+        }
         agentToolDescriptorService.getToolForAgent(run.getUserId(), request.toolCode());
+        AgentToolCall existing = agentToolCallMapper.selectLatestByRunIdAndToolCode(runId, request.toolCode());
+        if (existing != null) {
+            return AgentToolCallResponse.from(existing);
+        }
         LocalDateTime now = LocalDateTime.now();
         AgentToolCall call = new AgentToolCall();
         call.setRunId(runId);
@@ -453,9 +514,15 @@ public class AgentRunServiceImpl implements AgentRunService {
         if (TOOL_CALL_TERMINAL_STATUSES.contains(call.getStatus())) {
             return AgentToolCallResponse.from(call);
         }
+        AgentRun run = findRun(call.getRunId());
+        if (TERMINAL_STATUSES.contains(run.getStatus())) {
+            agentToolCallMapper.markFailed(toolCallId, "RUN_ALREADY_TERMINATED", "Agent 运行已结束", LocalDateTime.now());
+            return AgentToolCallResponse.from(findToolCall(toolCallId));
+        }
         LocalDateTime now = LocalDateTime.now();
         agentToolCallMapper.markSuccess(toolCallId, toJson(request.resultJson()), now);
         appendEventInternal(call.getRunId(), call.getUserId(), "tool.finished", "工具调用已完成", toJson(request.resultJson()), now);
+        agentMetrics.recordToolCallOutcome(call.getToolCode(), "SUCCESS", firstNonNull(call.getStartedAt(), call.getCreatedAt()), now);
         return AgentToolCallResponse.from(findToolCall(toolCallId));
     }
 
@@ -469,6 +536,7 @@ public class AgentRunServiceImpl implements AgentRunService {
         LocalDateTime now = LocalDateTime.now();
         agentToolCallMapper.markFailed(toolCallId, request.errorCode(), request.errorMessage(), now);
         appendEventInternal(call.getRunId(), call.getUserId(), "tool.finished", request.errorMessage(), toJson(request), now);
+        agentMetrics.recordToolCallOutcome(call.getToolCode(), "FAILED", firstNonNull(call.getStartedAt(), call.getCreatedAt()), now);
         return AgentToolCallResponse.from(findToolCall(toolCallId));
     }
 
@@ -487,16 +555,34 @@ public class AgentRunServiceImpl implements AgentRunService {
         assistant.setContentText(request.finalAnswer());
         assistant.setRunId(runId);
         assistant.setCreatedAt(now);
-        agentMessageMapper.insertMessage(assistant);
         int estimatedCredits = run.getEstimatedCredits() == null ? 0 : Math.max(0, run.getEstimatedCredits());
         int consumedCredits = request.consumedCredits() == null ? 0 : Math.max(0, Math.min(request.consumedCredits(), estimatedCredits));
+        if (agentRunMapper.markSuccess(runId, request.intent(), request.modelProviderCode(), request.modelName(), consumedCredits, now) == 0) {
+            return AgentRunResponse.from(findRun(runId));
+        }
+        agentMessageMapper.insertMessage(assistant);
         creditService.settleForAgentRun(run.getUserId(), runId, consumedCredits);
         creditService.releaseForAgentRun(run.getUserId(), runId, estimatedCredits - consumedCredits);
-        agentRunMapper.markSuccess(runId, request.intent(), request.modelProviderCode(), request.modelName(), consumedCredits, now);
+        billingService.recordUsage("AGENT_RUN", runId, run.getUserId(), agentModelConfigMapper.findLatest(),
+                request.promptTokens(), request.completionTokens(), consumedCredits);
         appendEventInternal(runId, run.getUserId(), "run.completed", "Agent 运行已完成", null, now);
         agentSessionMapper.touch(run.getSessionId(), now);
         agentRateLimitService.decrementActiveRun(run.getUserId(), runId);
+        agentPendingToolContextMapper.expireByRunId(runId);
+        agentMetrics.recordRunOutcome("SUCCESS", request.intent(), firstNonNull(run.getStartedAt(), run.getCreatedAt()), now);
+        cleanupEventStreams(runId);
         return AgentRunResponse.from(findRun(runId));
+    }
+
+    private void failOpenToolCalls(Long runId, Long userId, String errorCode, String errorMessage, LocalDateTime now) {
+        agentToolCallMapper.findByRunId(runId)
+                .stream()
+                .filter(call -> !TOOL_CALL_TERMINAL_STATUSES.contains(call.getStatus()))
+                .forEach(call -> {
+                    agentToolCallMapper.markFailed(call.getId(), errorCode, errorMessage, now);
+                    appendEventInternal(runId, userId, "tool.finished", errorMessage, toJson(new FailAgentToolCallRequest(errorCode, errorMessage)), now);
+                    agentMetrics.recordToolCallOutcome(call.getToolCode(), "FAILED", firstNonNull(call.getStartedAt(), call.getCreatedAt()), now);
+                });
     }
 
     @Override
@@ -507,10 +593,16 @@ public class AgentRunServiceImpl implements AgentRunService {
             return AgentRunResponse.from(run);
         }
         LocalDateTime now = LocalDateTime.now();
-        agentRunMapper.markFailed(runId, request.errorCode(), request.errorMessage(), now);
+        if (agentRunMapper.markFailed(runId, request.errorCode(), request.errorMessage(), now) == 0) {
+            return AgentRunResponse.from(findRun(runId));
+        }
+        failOpenToolCalls(runId, run.getUserId(), request.errorCode(), request.errorMessage(), now);
         creditService.releaseForAgentRun(run.getUserId(), runId, Math.max(0, run.getEstimatedCredits()));
         appendEventInternal(runId, run.getUserId(), "run.failed", request.errorMessage(), toJson(request), now);
         agentRateLimitService.decrementActiveRun(run.getUserId(), runId);
+        agentPendingToolContextMapper.expireByRunId(runId);
+        agentMetrics.recordRunOutcome("FAILED", run.getIntent(), firstNonNull(run.getStartedAt(), run.getCreatedAt()), now);
+        cleanupEventStreams(runId);
         return AgentRunResponse.from(findRun(runId));
     }
 
@@ -573,6 +665,8 @@ public class AgentRunServiceImpl implements AgentRunService {
                 config.apiKey(),
                 config.minimaxGroupId(),
                 config.timeoutSeconds(),
+                null,
+                null,
                 config.enabled(),
                 null
         );
@@ -596,6 +690,10 @@ public class AgentRunServiceImpl implements AgentRunService {
 
     private String messageOrDefault(String message, String fallback) {
         return message == null || message.isBlank() ? fallback : message;
+    }
+
+    private LocalDateTime firstNonNull(LocalDateTime primary, LocalDateTime fallback) {
+        return primary == null ? fallback : primary;
     }
 
     private record ModelConnectivityCheck(InternalAgentModelConfigResponse config, boolean success, String message) {
@@ -644,6 +742,20 @@ public class AgentRunServiceImpl implements AgentRunService {
         emitters.remove(emitter);
         if (emitters.isEmpty()) {
             eventStreams.remove(runId);
+        }
+    }
+
+    private void cleanupEventStreams(Long runId) {
+        CopyOnWriteArrayList<SseEmitter> emitters = eventStreams.remove(runId);
+        if (emitters == null) {
+            return;
+        }
+        for (SseEmitter emitter : emitters) {
+            try {
+                emitter.complete();
+            } catch (Exception ignored) {
+                // emitter already completed or errored
+            }
         }
     }
 

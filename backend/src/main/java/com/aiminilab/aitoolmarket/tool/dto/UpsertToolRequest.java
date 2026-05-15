@@ -10,6 +10,7 @@ public record UpsertToolRequest(
         @NotNull Long categoryId,
         String description,
         String coverUrl,
-        @NotNull @Min(0) Integer estimatedCreditCost
+        @NotNull @Min(0) Integer estimatedCreditCost,
+        Long modelConfigId
 ) {
 }

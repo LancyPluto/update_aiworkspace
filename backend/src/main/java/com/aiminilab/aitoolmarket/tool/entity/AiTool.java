@@ -19,6 +19,11 @@ public class AiTool {
     private String coverUrl;
     private String status;
     private Integer estimatedCreditCost;
+    private Long modelConfigId;
+    @TableField(exist = false)
+    private String modelConfigName;
+    @TableField(exist = false)
+    private String modelName;
     private Long createdBy;
     private Long updatedBy;
     @TableField("is_deleted")
@@ -95,6 +100,30 @@ public class AiTool {
 
     public void setEstimatedCreditCost(Integer estimatedCreditCost) {
         this.estimatedCreditCost = estimatedCreditCost;
+    }
+
+    public Long getModelConfigId() {
+        return modelConfigId;
+    }
+
+    public void setModelConfigId(Long modelConfigId) {
+        this.modelConfigId = modelConfigId;
+    }
+
+    public String getModelConfigName() {
+        return modelConfigName;
+    }
+
+    public void setModelConfigName(String modelConfigName) {
+        this.modelConfigName = modelConfigName;
+    }
+
+    public String getModelName() {
+        return modelName;
+    }
+
+    public void setModelName(String modelName) {
+        this.modelName = modelName;
     }
 
     public Long getCreatedBy() {

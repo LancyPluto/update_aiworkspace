@@ -51,6 +51,9 @@ export interface ToolSummary {
   coverUrl?: string | null
   status: 'DRAFT' | 'ONLINE' | 'OFFLINE' | string
   estimatedCreditCost: number
+  modelConfigId?: number | null
+  modelConfigName?: string | null
+  modelName?: string | null
 }
 
 export interface UpsertToolPayload {
@@ -60,6 +63,7 @@ export interface UpsertToolPayload {
   description?: string
   coverUrl?: string
   estimatedCreditCost: number
+  modelConfigId?: number | null
 }
 
 export interface PromptRecord {
@@ -231,6 +235,8 @@ export interface AgentModelConfig {
   apiKeyMasked?: string | null
   minimaxGroupId?: string | null
   timeoutSeconds: number
+  inputTokenPricePer1k?: number | null
+  outputTokenPricePer1k?: number | null
   enabled: boolean
   isDefault?: boolean | null
   createdAt?: string | null
@@ -280,6 +286,8 @@ export interface AgentModelConfigPayload {
   apiKey?: string
   minimaxGroupId?: string
   timeoutSeconds?: number
+  inputTokenPricePer1k?: number
+  outputTokenPricePer1k?: number
   enabled?: boolean
   isDefault?: boolean
 }
@@ -374,4 +382,40 @@ export interface AdminAgentRunQuery {
   userId?: number
   pageNo?: number
   pageSize?: number
+}
+
+export interface BillingModelCostPoint {
+  provider: string
+  modelName: string
+  totalTokens: number
+  costAmount: number
+  chargedCredits: number
+}
+
+export interface BillingOverview {
+  todayPromptTokens: number
+  todayCompletionTokens: number
+  todayTotalTokens: number
+  todayCostAmount: number
+  todayChargedCredits: number
+  todayUsageCount: number
+  modelCosts: BillingModelCostPoint[]
+}
+
+export interface BillingUsageLog {
+  id: number
+  sourceType: string
+  sourceId: number
+  userId: number
+  modelConfigId?: number | null
+  provider?: string | null
+  modelName?: string | null
+  promptTokens: number
+  completionTokens: number
+  totalTokens: number
+  inputTokenPricePer1k: number
+  outputTokenPricePer1k: number
+  costAmount: number
+  chargedCredits: number
+  createdAt: string
 }

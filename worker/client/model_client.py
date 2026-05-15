@@ -1,8 +1,8 @@
+from dataclasses import dataclass
 from typing import Any
 
 import requests
 
-from client.backend_client import BackendClient, BackendClientError
 from config import settings
 
 
@@ -18,62 +18,117 @@ class ModelOutputEmptyError(ModelClientError):
     pass
 
 
+@dataclass(frozen=True)
+class ModelGenerationResult:
+    content: str
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+
+
 class ModelClient:
-    def __init__(self, backend_client: BackendClient | None = None) -> None:
+    def __init__(self) -> None:
         self.base_url = settings.model_api_base_url.rstrip("/")
         self.api_key = settings.model_api_key
         self.default_model_name = settings.model_name
-        self.backend_client = backend_client or BackendClient()
         self.timeout = (5, 60)
         self.session = requests.Session()
-        self.session.headers.update({"Content-Type": "application/json"})
+        self.session.headers.update(
+            {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self.api_key}",
+            }
+        )
+
+    @property
+    def default_max_tokens(self) -> int:
+        return 1024
 
     def generate(
         self,
         prompt: str,
         *,
         system_prompt: str = "",
+        provider: str | None = None,
         model_name: str | None = None,
+        base_url: str | None = None,
+        api_key: str | None = None,
+        timeout_seconds: int | None = None,
+        max_tokens: int | None = None,
     ) -> str:
-        config = self._resolve_model_config()
-        provider = str(config.get("provider") or settings.model_provider).strip().lower()
-        if provider == "mock":
-            return (
+        return self.generate_with_usage(
+            prompt,
+            system_prompt=system_prompt,
+            provider=provider,
+            model_name=model_name,
+            base_url=base_url,
+            api_key=api_key,
+            timeout_seconds=timeout_seconds,
+            max_tokens=max_tokens,
+        ).content
+
+    def generate_with_usage(
+        self,
+        prompt: str,
+        *,
+        system_prompt: str = "",
+        provider: str | None = None,
+        model_name: str | None = None,
+        base_url: str | None = None,
+        api_key: str | None = None,
+        timeout_seconds: int | None = None,
+        max_tokens: int | None = None,
+    ) -> ModelGenerationResult:
+        effective_provider = provider or settings.model_provider
+        effective_base_url = (base_url or self.base_url).rstrip("/")
+        effective_api_key = api_key or self.api_key
+        effective_model_name = model_name or self.default_model_name
+        timeout = (5, timeout_seconds or self.timeout[1])
+        effective_max_tokens = max_tokens or self.default_max_tokens
+
+        if effective_provider == "mock":
+            content = (
                 "Local demo result: Worker received the task and generated a mock response.\n\n"
                 f"Input:\n{prompt[:500]}"
             )
+            return ModelGenerationResult(
+                content=content,
+                prompt_tokens=self._estimate_tokens(system_prompt, prompt),
+                completion_tokens=self._estimate_tokens(content),
+            )
 
-        api_key = str(config.get("apiKey") or "").strip()
-        if not api_key or api_key == "replace-with-model-key":
-            raise ModelClientError("admin model API key is not configured")
-
-        base_url = str(config.get("baseUrl") or self.base_url).rstrip("/")
-        resolved_model_name = str(config.get("modelName") or model_name or self.default_model_name).strip()
-        timeout_seconds = max(int(config.get("timeoutSeconds") or 60), 180)
-        timeout = (5, timeout_seconds)
+        if not effective_api_key or effective_api_key == "replace-with-model-key":
+            raise ModelClientError("MODEL_API_KEY is not configured")
 
         messages: list[dict[str, str]] = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
 
-        if provider == "anthropic_compatible":
-            response = self._post_anthropic_compatible(
-                base_url=base_url,
-                api_key=api_key,
-                model_name=resolved_model_name,
-                messages=messages,
+        if effective_provider == "anthropic_compatible":
+            return self._generate_anthropic_compatible(
+                prompt,
                 system_prompt=system_prompt,
+                model_name=effective_model_name,
+                base_url=effective_base_url,
+                api_key=effective_api_key,
                 timeout=timeout,
+                max_tokens=effective_max_tokens,
             )
-        else:
-            response = self._post_openai_compatible(
-                base_url=base_url,
-                api_key=api_key,
-                model_name=resolved_model_name,
-                messages=messages,
-                timeout=timeout,
-            )
+
+        response = self._post_with_timeout_retry(
+            f"{effective_base_url}/chat/completions",
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {effective_api_key}",
+            },
+            payload={
+                "model": effective_model_name,
+                "messages": messages,
+                "stream": False,
+                "max_tokens": effective_max_tokens,
+            },
+            timeout=timeout,
+        )
 
         try:
             response.raise_for_status()
@@ -90,96 +145,74 @@ class ModelClient:
         content = self._extract_content(payload)
         if not content:
             raise ModelOutputEmptyError("model returned empty content")
-        return content
+        prompt_tokens, completion_tokens = self._extract_openai_usage(payload)
+        return ModelGenerationResult(content, prompt_tokens, completion_tokens)
 
-    def _post_openai_compatible(
+    def _generate_anthropic_compatible(
         self,
+        prompt: str,
         *,
-        base_url: str,
-        api_key: str,
-        model_name: str,
-        messages: list[dict[str, str]],
-        timeout: tuple[int, int],
-    ) -> requests.Response:
-        try:
-            return self.session.post(
-                f"{base_url}/chat/completions",
-                json={
-                    "model": model_name,
-                    "messages": messages,
-                    "stream": False,
-                },
-                headers={"Authorization": f"Bearer {api_key}"},
-                timeout=timeout,
-            )
-        except requests.Timeout as exc:
-            raise ModelTimeoutError("model request timed out") from exc
-        except requests.RequestException as exc:
-            raise ModelClientError(f"model request failed: {exc}") from exc
-
-    def _post_anthropic_compatible(
-        self,
-        *,
-        base_url: str,
-        api_key: str,
-        model_name: str,
-        messages: list[dict[str, str]],
         system_prompt: str,
+        model_name: str,
+        base_url: str,
+        api_key: str,
+        timeout: tuple[int, int],
+        max_tokens: int,
+    ) -> ModelGenerationResult:
+        response = self._post_with_timeout_retry(
+            f"{base_url}/v1/messages",
+            headers={
+                "Content-Type": "application/json",
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+            },
+            payload={
+                "model": model_name,
+                "system": system_prompt,
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": max_tokens,
+            },
+            timeout=timeout,
+        )
+
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as exc:
+            raise ModelClientError(
+                f"model request failed: status={response.status_code}, body={response.text}"
+            ) from exc
+
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise ModelClientError("model returned non-json response") from exc
+
+        content = self._extract_anthropic_content(payload)
+        if not content:
+            raise ModelOutputEmptyError("model returned empty content")
+        prompt_tokens, completion_tokens = self._extract_anthropic_usage(payload)
+        return ModelGenerationResult(content, prompt_tokens, completion_tokens)
+
+    def _post_with_timeout_retry(
+        self,
+        url: str,
+        *,
+        headers: dict[str, str],
+        payload: dict[str, Any],
         timeout: tuple[int, int],
     ) -> requests.Response:
-        user_messages = [message for message in messages if message["role"] != "system"]
-        payload: dict[str, Any] = {
-            "model": model_name,
-            "messages": user_messages,
-            "max_tokens": 4096,
-        }
-        if system_prompt:
-            payload["system"] = system_prompt
-        try:
-            return self.session.post(
-                f"{base_url}/v1/messages",
-                json=payload,
-                headers={
-                    "x-api-key": api_key,
-                    "anthropic-version": "2023-06-01",
-                },
-                timeout=timeout,
-            )
-        except requests.Timeout as exc:
-            raise ModelTimeoutError("model request timed out") from exc
-        except requests.RequestException as exc:
-            raise ModelClientError(f"model request failed: {exc}") from exc
-
-    def _resolve_model_config(self) -> dict[str, Any]:
-        try:
-            config = self.backend_client.get_agent_model_config()
-        except BackendClientError:
-            return {
-                "provider": settings.model_provider,
-                "modelName": self.default_model_name,
-                "baseUrl": self.base_url,
-                "apiKey": self.api_key,
-                "timeoutSeconds": 60,
-                "enabled": True,
-            }
-
-        if config.get("enabled") is False:
-            raise ModelClientError("admin model config is disabled")
-        return config
+        last_timeout: requests.Timeout | None = None
+        for _ in range(2):
+            try:
+                return requests.post(url, headers=headers, json=payload, timeout=timeout)
+            except requests.Timeout as exc:
+                last_timeout = exc
+            except requests.RequestException as exc:
+                raise ModelClientError(f"model request failed: {exc}") from exc
+        raise ModelTimeoutError("model request timed out") from last_timeout
 
     @staticmethod
     def _extract_content(payload: dict[str, Any]) -> str:
-        anthropic_content = payload.get("content")
-        if isinstance(anthropic_content, list):
-            parts = [
-                str(item.get("text") or "").strip()
-                for item in anthropic_content
-                if isinstance(item, dict) and item.get("type") == "text"
-            ]
-            return "\n".join(part for part in parts if part).strip()
-        if isinstance(anthropic_content, str):
-            return anthropic_content.strip()
-
         choices = payload.get("choices") or []
         if not choices:
             return ""
@@ -189,3 +222,42 @@ class ModelClient:
         if isinstance(content, str):
             return content.strip()
         return ""
+
+    @staticmethod
+    def _extract_anthropic_content(payload: dict[str, Any]) -> str:
+        blocks = payload.get("content") or []
+        parts: list[str] = []
+        for block in blocks:
+            if isinstance(block, dict) and isinstance(block.get("text"), str):
+                parts.append(block["text"])
+        return "\n".join(part.strip() for part in parts if part.strip())
+
+    @staticmethod
+    def _extract_openai_usage(payload: dict[str, Any]) -> tuple[int, int]:
+        usage = payload.get("usage") or {}
+        return (
+            ModelClient._non_negative_int(usage.get("prompt_tokens") or usage.get("input_tokens")),
+            ModelClient._non_negative_int(usage.get("completion_tokens") or usage.get("output_tokens")),
+        )
+
+    @staticmethod
+    def _extract_anthropic_usage(payload: dict[str, Any]) -> tuple[int, int]:
+        usage = payload.get("usage") or {}
+        return (
+            ModelClient._non_negative_int(usage.get("input_tokens")),
+            ModelClient._non_negative_int(usage.get("output_tokens")),
+        )
+
+    @staticmethod
+    def _non_negative_int(value: Any) -> int:
+        try:
+            return max(0, int(value or 0))
+        except (TypeError, ValueError):
+            return 0
+
+    @staticmethod
+    def _estimate_tokens(*parts: str) -> int:
+        text = "\n".join(part for part in parts if part)
+        if not text:
+            return 0
+        return max(1, len(text) // 4)

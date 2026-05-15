@@ -41,6 +41,8 @@ interface ModelForm {
   apiKey: string
   apiKeyMasked: string
   timeoutSeconds: string
+  inputTokenPricePer1k: string
+  outputTokenPricePer1k: string
   enabled: boolean
   isDefault: boolean
 }
@@ -118,6 +120,8 @@ const emptyForm: ModelForm = {
   apiKey: "",
   apiKeyMasked: "",
   timeoutSeconds: "60",
+  inputTokenPricePer1k: "0",
+  outputTokenPricePer1k: "0",
   enabled: true,
   isDefault: false,
 }
@@ -139,6 +143,8 @@ function toForm(config: AgentModelConfig): ModelForm {
     apiKey: "",
     apiKeyMasked: config.apiKeyMasked || "",
     timeoutSeconds: String(config.timeoutSeconds || 60),
+    inputTokenPricePer1k: String(config.inputTokenPricePer1k ?? 0),
+    outputTokenPricePer1k: String(config.outputTokenPricePer1k ?? 0),
     enabled: config.enabled !== false,
     isDefault: Boolean(config.isDefault),
   }
@@ -153,6 +159,8 @@ function toPayload(form: ModelForm): AgentModelConfigPayload {
     baseUrl: form.baseUrl.trim(),
     apiKey: form.apiKey.trim(),
     timeoutSeconds: Number(form.timeoutSeconds) || 60,
+    inputTokenPricePer1k: Number(form.inputTokenPricePer1k) || 0,
+    outputTokenPricePer1k: Number(form.outputTokenPricePer1k) || 0,
     enabled: form.enabled,
     isDefault: form.isDefault,
   }
@@ -329,6 +337,10 @@ export function AgentModelSettings() {
     if (!form.baseUrl.trim()) return "Base URL is required."
     const timeout = Number(form.timeoutSeconds)
     if (!Number.isFinite(timeout) || timeout < 1 || timeout > 300) return "Timeout must be between 1 and 300 seconds."
+    const inputPrice = Number(form.inputTokenPricePer1k)
+    const outputPrice = Number(form.outputTokenPricePer1k)
+    if (!Number.isFinite(inputPrice) || inputPrice < 0) return "Input token price must be zero or greater."
+    if (!Number.isFinite(outputPrice) || outputPrice < 0) return "Output token price must be zero or greater."
     if (!form.apiKey.trim() && !form.apiKeyMasked) return "API Key is required."
     return null
   }
@@ -569,6 +581,29 @@ export function AgentModelSettings() {
 
             <div className="grid gap-5 md:grid-cols-2">
               <div className="space-y-2">
+                <Label>Input token price / 1K</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  step="0.000001"
+                  value={form.inputTokenPricePer1k}
+                  onChange={(event) => updateForm("inputTokenPricePer1k", event.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Output token price / 1K</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  step="0.000001"
+                  value={form.outputTokenPricePer1k}
+                  onChange={(event) => updateForm("outputTokenPricePer1k", event.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="grid gap-5 md:grid-cols-2">
+              <div className="space-y-2">
                 <Label>API Key</Label>
                 <div className="relative">
                   <KeyRound className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -598,7 +633,7 @@ export function AgentModelSettings() {
             <Textarea
               readOnly
               className="min-h-24 font-mono text-xs"
-              value={`provider=${form.provider}\nmodel=${form.modelName}\nbase_url=${form.baseUrl}\ntimeout=${form.timeoutSeconds}s`}
+              value={`provider=${form.provider}\nmodel=${form.modelName}\nbase_url=${form.baseUrl}\ntimeout=${form.timeoutSeconds}s\ninput_price_per_1k=${form.inputTokenPricePer1k}\noutput_price_per_1k=${form.outputTokenPricePer1k}`}
             />
 
             {testResult ? (

@@ -66,7 +66,9 @@ class WorkerInternalApiTest {
         String successBody = """
                                 {
                                   "resourceType": "MARKDOWN",
-                                  "contentText": "# Generated result"
+                                  "contentText": "# Generated result",
+                                  "promptTokens": 120,
+                                  "completionTokens": 35
                                 }
                                 """;
         mockMvc.perform(signed(post("/api/internal/v1/tasks/{taskId}/success", taskId), "POST",
@@ -83,6 +85,18 @@ class WorkerInternalApiTest {
                 .andExpect(jsonPath("$.data.status").value("SUCCESS"))
                 .andExpect(jsonPath("$.data.result.resourceType").value("MARKDOWN"))
                 .andExpect(jsonPath("$.data.result.contentText").value("# Generated result"));
+
+        mockMvc.perform(get("/api/admin/v1/billing/usage-logs")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .param("pageNo", "1")
+                        .param("pageSize", "10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].sourceType").value("TASK"))
+                .andExpect(jsonPath("$.data.list[0].sourceId").value(taskId.intValue()))
+                .andExpect(jsonPath("$.data.list[0].promptTokens").value(120))
+                .andExpect(jsonPath("$.data.list[0].completionTokens").value(35))
+                .andExpect(jsonPath("$.data.list[0].totalTokens").value(155))
+                .andExpect(jsonPath("$.data.list[0].chargedCredits").value(10));
     }
 
     @Test
@@ -126,6 +140,44 @@ class WorkerInternalApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("FAILED"))
                 .andExpect(jsonPath("$.data.result").doesNotExist());
+    }
+
+    @Test
+    void agentServiceCanCreateAndReadTaskThroughInternalApi() throws Exception {
+        String adminToken = login("/api/admin/v1/auth/login", "admin");
+        Long toolId = createTool(adminToken, "agent_internal_task_tool", 1);
+        publishTool(adminToken, toolId);
+
+        String createBody = """
+                            {
+                              "userId": 1,
+                              "toolCode": "agent_internal_task_tool",
+                              "params": {
+                                "productName": "Agent Product",
+                                "targetCustomer": "Young users",
+                                "style": "planting"
+                              },
+                              "clientRequestId": "agent-run-1-tool-call-1"
+                            }
+                            """;
+        String response = mockMvc.perform(signed(post("/api/internal/v1/tasks"), "POST",
+                        "/api/internal/v1/tasks", createBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("QUEUED"))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        Long taskId = Long.parseLong(response.replaceAll("(?s).*\\\"taskId\\\"\\s*:\\s*(\\d+).*", "$1"));
+
+        mockMvc.perform(signed(get("/api/internal/v1/tasks/{taskId}", taskId)
+                                .queryParam("userId", "1"),
+                        "GET", "/api/internal/v1/tasks/%d".formatted(taskId), ""))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.taskId").value(taskId.intValue()))
+                .andExpect(jsonPath("$.data.toolCode").value("agent_internal_task_tool"))
+                .andExpect(jsonPath("$.data.params.productName").value("Agent Product"));
     }
 
     @Test

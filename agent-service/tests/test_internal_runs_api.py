@@ -53,6 +53,16 @@ def test_execute_run_sync_mode_executes_runtime():
     assert runtime.executed == [123]
 
 
+def test_agent_service_preserves_request_id_header():
+    app = create_app(runtime=FakeRuntime(), execution_mode="sync", verify_signature=False)
+    client = TestClient(app)
+
+    response = client.post("/internal/v1/agent/runs/123/execute", headers={"X-Request-Id": "agent-trace-001"}, json={})
+
+    assert response.status_code == 200
+    assert response.headers["X-Request-Id"] == "agent-trace-001"
+
+
 def test_execute_run_rejects_missing_signature_when_enabled():
     app = create_app(runtime=FakeRuntime(), execution_mode="sync", verify_signature=True)
     client = TestClient(app)

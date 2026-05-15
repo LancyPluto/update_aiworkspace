@@ -2,6 +2,8 @@ package com.aiminilab.aitoolmarket.agent.service.impl;
 
 import com.aiminilab.aitoolmarket.agent.dto.AgentToolDescriptorResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AgentToolFieldDescriptorResponse;
+import com.aiminilab.aitoolmarket.agent.entity.AgentToolDescriptorExtension;
+import com.aiminilab.aitoolmarket.agent.mapper.AgentToolDescriptorExtensionMapper;
 import com.aiminilab.aitoolmarket.agent.service.AgentToolDescriptorService;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
@@ -9,34 +11,39 @@ import com.aiminilab.aitoolmarket.tool.dto.ToolFieldResponse;
 import com.aiminilab.aitoolmarket.tool.entity.AiTool;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolFieldItemMapper;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolMapper;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
+import java.util.Optional;
+import java.util.stream.Collectors;
+import java.util.stream.StreamSupport;
 
 @Service
 public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorService {
 
-    private static final Set<String> AUTO_CALLABLE_TOOLS = Set.of(
-            "xiaohongshu_copywriting",
-            "moments_copywriting_generator",
-            "product_title_optimizer",
-            "wechat_longform_generator"
-    );
+    private static final Logger LOGGER = LoggerFactory.getLogger(AgentToolDescriptorServiceImpl.class);
 
     private final ToolMapper toolMapper;
     private final ToolFieldItemMapper toolFieldItemMapper;
+    private final AgentToolDescriptorExtensionMapper extensionMapper;
     private final ObjectMapper objectMapper;
 
     public AgentToolDescriptorServiceImpl(ToolMapper toolMapper,
                                           ToolFieldItemMapper toolFieldItemMapper,
+                                          AgentToolDescriptorExtensionMapper extensionMapper,
                                           ObjectMapper objectMapper) {
         this.toolMapper = toolMapper;
         this.toolFieldItemMapper = toolFieldItemMapper;
+        this.extensionMapper = extensionMapper;
         this.objectMapper = objectMapper;
     }
 
@@ -44,6 +51,10 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
     public List<AgentToolDescriptorResponse> listAvailableToolsForUser(Long userId) {
         return toolMapper.findTools(true, null, null, null, 100, 0)
                 .stream()
+                .filter(tool -> {
+                    Optional<AgentToolDescriptorExtension> ext = extensionMapper.findByToolCode(tool.getToolCode());
+                    return ext.map(AgentToolDescriptorExtension::getAgentEnabled).orElse(true);
+                })
                 .map(this::toDescriptor)
                 .toList();
     }
@@ -70,7 +81,10 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
                         field.sortOrder()
                 ))
                 .toList();
-        boolean autoCallable = AUTO_CALLABLE_TOOLS.contains(tool.getToolCode()) && !fields.isEmpty();
+
+        AgentToolDescriptorExtension ext = extensionMapper.findByToolCode(tool.getToolCode()).orElse(null);
+        boolean autoCallable = ext != null ? Boolean.TRUE.equals(ext.getAgentAutoCallable()) : false;
+
         return new AgentToolDescriptorResponse(
                 tool.getToolCode(),
                 tool.getToolName(),
@@ -79,8 +93,32 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
                 toInputSchema(fields),
                 autoCallable,
                 fieldDescriptors,
-                hints(tool.getToolCode())
+                loadHints(tool.getToolCode(), ext)
         );
+    }
+
+    private Map<String, Object> loadHints(String toolCode, AgentToolDescriptorExtension ext) {
+        if (ext != null && ext.getKeywordsJson() != null && !ext.getKeywordsJson().isBlank()) {
+            try {
+                JsonNode node = objectMapper.readTree(ext.getKeywordsJson());
+                if (node.isArray()) {
+                    List<String> keywords = StreamSupport.stream(node.spliterator(), false)
+                            .filter(JsonNode::isTextual)
+                            .map(JsonNode::asText)
+                            .toList();
+                    return Map.of("keywords", keywords);
+                }
+            } catch (JsonProcessingException e) {
+                LOGGER.warn("Failed to parse keywords_json for tool_code={}: {}", toolCode, e.getMessage());
+            }
+        }
+        return switch (toolCode) {
+            case "xiaohongshu_copywriting" -> Map.of("keywords", List.of("小红书", "种草", "笔记"));
+            case "moments_copywriting_generator" -> Map.of("keywords", List.of("朋友圈", "微信朋友圈", "私域文案"));
+            case "product_title_optimizer" -> Map.of("keywords", List.of("商品标题", "标题优化", "电商标题"));
+            case "wechat_longform_generator" -> Map.of("keywords", List.of("公众号", "微信长文", "长文"));
+            default -> Map.of("keywords", List.of());
+        };
     }
 
     private ObjectNode toInputSchema(List<ToolFieldResponse> fields) {
@@ -129,15 +167,5 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
             return "boolean";
         }
         return "string";
-    }
-
-    private Map<String, Object> hints(String toolCode) {
-        return switch (toolCode) {
-            case "xiaohongshu_copywriting" -> Map.of("keywords", List.of("小红书", "种草", "笔记"));
-            case "moments_copywriting_generator" -> Map.of("keywords", List.of("朋友圈", "微信朋友圈", "私域文案"));
-            case "product_title_optimizer" -> Map.of("keywords", List.of("商品标题", "标题优化", "电商标题"));
-            case "wechat_longform_generator" -> Map.of("keywords", List.of("公众号", "微信长文", "长文"));
-            default -> Map.of("keywords", List.of());
-        };
     }
 }

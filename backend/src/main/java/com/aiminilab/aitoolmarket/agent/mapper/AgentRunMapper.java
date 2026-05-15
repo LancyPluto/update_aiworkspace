@@ -132,6 +132,26 @@ public interface AgentRunMapper extends BaseMapper<AgentRun> {
 
     @Update("""
             UPDATE agent_runs
+            SET status = 'RUNNING', started_at = COALESCE(started_at, #{now}), updated_at = #{now}
+            WHERE id = #{runId}
+              AND status = #{expectedStatus}
+            """)
+    int markRunningIfStatus(@Param("runId") Long runId,
+                            @Param("expectedStatus") String expectedStatus,
+                            @Param("now") LocalDateTime now);
+
+    @Update("""
+            UPDATE agent_runs
+            SET status = 'WAITING_USER_CONFIRMATION', updated_at = #{now}
+            WHERE id = #{runId}
+              AND status = #{expectedStatus}
+            """)
+    int markWaitingForConfirmationIfStatus(@Param("runId") Long runId,
+                                           @Param("expectedStatus") String expectedStatus,
+                                           @Param("now") LocalDateTime now);
+
+    @Update("""
+            UPDATE agent_runs
             SET model_provider_code = #{modelProviderCode}, model_name = #{modelName}, updated_at = #{now}
             WHERE id = #{runId}
             """)
@@ -146,29 +166,32 @@ public interface AgentRunMapper extends BaseMapper<AgentRun> {
                 model_name = #{modelName}, consumed_credits = #{consumedCredits},
                 finished_at = #{now}, updated_at = #{now}
             WHERE id = #{runId}
+              AND status NOT IN ('SUCCESS', 'FAILED', 'CANCELLED', 'TIMEOUT')
             """)
-    void markSuccess(@Param("runId") Long runId,
-                     @Param("intent") String intent,
-                     @Param("modelProviderCode") String modelProviderCode,
-                     @Param("modelName") String modelName,
-                     @Param("consumedCredits") int consumedCredits,
-                     @Param("now") LocalDateTime now);
+    int markSuccess(@Param("runId") Long runId,
+                    @Param("intent") String intent,
+                    @Param("modelProviderCode") String modelProviderCode,
+                    @Param("modelName") String modelName,
+                    @Param("consumedCredits") int consumedCredits,
+                    @Param("now") LocalDateTime now);
 
     @Update("""
             UPDATE agent_runs
             SET status = 'FAILED', error_code = #{errorCode}, error_message = #{errorMessage},
                 finished_at = #{now}, updated_at = #{now}
             WHERE id = #{runId}
+              AND status NOT IN ('SUCCESS', 'FAILED', 'CANCELLED', 'TIMEOUT')
             """)
-    void markFailed(@Param("runId") Long runId,
-                    @Param("errorCode") String errorCode,
-                    @Param("errorMessage") String errorMessage,
-                    @Param("now") LocalDateTime now);
+    int markFailed(@Param("runId") Long runId,
+                   @Param("errorCode") String errorCode,
+                   @Param("errorMessage") String errorMessage,
+                   @Param("now") LocalDateTime now);
 
     @Update("""
             UPDATE agent_runs
             SET status = 'CANCELLED', finished_at = #{now}, updated_at = #{now}
             WHERE id = #{runId}
+              AND status IN ('CREATED', 'RUNNING', 'WAITING_USER_CONFIRMATION')
             """)
-    void markCancelled(@Param("runId") Long runId, @Param("now") LocalDateTime now);
+    int markCancelled(@Param("runId") Long runId, @Param("now") LocalDateTime now);
 }
