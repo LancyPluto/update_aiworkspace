@@ -91,7 +91,11 @@ class DeepAgentsRuntimeEngine:
         intent_enum = intent.intent
 
         if intent_enum == Intent.FILE_ANALYSIS:
-            answer = await self._run_chat(context, intent)
+            try:
+                answer = await self._run_chat(context, intent)
+            except BudgetExceeded as exception:
+                await self._fail_run(context.runId, exception.error_code, exception.message)
+                return
             await self._complete_run(context, answer, intent=intent_enum.value)
             return
 
@@ -118,7 +122,11 @@ class DeepAgentsRuntimeEngine:
             return
 
         if intent_enum == Intent.GENERAL_CHAT:
-            answer = await self._run_chat(context, intent)
+            try:
+                answer = await self._run_chat(context, intent)
+            except BudgetExceeded as exception:
+                await self._fail_run(context.runId, exception.error_code, exception.message)
+                return
             await self._complete_run(context, answer, intent=intent_enum.value)
             return
 
@@ -156,7 +164,7 @@ class DeepAgentsRuntimeEngine:
             await self._complete_run(context, answer, intent=Intent.NEEDS_CLARIFICATION.value)
             return
 
-        answer = await self._synthesize_answer(context, tool, result)
+        answer = await self._synthesize_answer(context, tool, result, budget)
         await self._complete_run(context, answer, intent=Intent.TOOL_USE.value)
         await self._emit_memory_candidate(context.runId, answer, None)
 
@@ -257,7 +265,7 @@ class DeepAgentsRuntimeEngine:
                 except BudgetExceeded as exception:
                     await self._fail_run(context.runId, exception.error_code, exception.message)
                     return
-                answer = await self._synthesize_answer(context, tool, result)
+                answer = await self._synthesize_answer(context, tool, result, budget)
                 await self._complete_run(context, answer, intent=Intent.TOOL_USE.value)
                 await self._emit_memory_candidate(context.runId, answer, None)
                 return
@@ -285,7 +293,7 @@ class DeepAgentsRuntimeEngine:
             await self._fail_run(context.runId, exception.error_code, exception.message)
             return
 
-        answer = await self._synthesize_answer(context, tool, result)
+        answer = await self._synthesize_answer(context, tool, result, budget)
         await self._complete_run(context, answer, intent=Intent.TOOL_USE.value)
         await self._emit_memory_candidate(context.runId, answer, None)
 
@@ -386,7 +394,8 @@ class DeepAgentsRuntimeEngine:
             messages.append(ChatMessage(role="system", content=file_context))
         messages.extend(context.history)
         messages.append(ChatMessage(role="user", content=context.message))
-        return await self._stream_model_answer(context.runId, messages)
+        budget = BudgetState(credit_budget=context.creditBudget)
+        return await self._stream_model_answer(context.runId, messages, budget)
 
     def _format_clarifying_answer(self, context: RunContext, intent) -> str:
         if intent.clarifyingQuestion:
@@ -450,7 +459,7 @@ class DeepAgentsRuntimeEngine:
 
     # --- Synthesize tool answer ---
 
-    async def _synthesize_answer(self, context: RunContext, tool: ToolDescriptor, result: dict[str, Any]) -> str:
+    async def _synthesize_answer(self, context: RunContext, tool: ToolDescriptor, result: dict[str, Any], budget: BudgetState | None = None) -> str:
         tool_arguments = result.get("arguments") if isinstance(result, dict) else {}
         tool_data = result.get("data") if isinstance(result, dict) else {}
         content_text = tool_data.get("contentText", "") if isinstance(tool_data, dict) else ""
@@ -474,11 +483,13 @@ class DeepAgentsRuntimeEngine:
             )
         else:
             messages_list.append(ChatMessage(role="user", content=f"User request: {context.message}\nTool result: {result}"))
-        return await self._stream_model_answer(context.runId, messages_list)
+        return await self._stream_model_answer(context.runId, messages_list, budget)
 
     # --- Common helpers ---
 
-    async def _stream_model_answer(self, run_id: int, messages_list: list[ChatMessage]) -> str:
+    async def _stream_model_answer(self, run_id: int, messages_list: list[ChatMessage], budget: BudgetState | None = None) -> str:
+        if budget is not None:
+            self.budget_guard.reserve_model_call(budget)
         parts: list[str] = []
         stream = getattr(self.model, "chat_stream", None)
         if stream is None:

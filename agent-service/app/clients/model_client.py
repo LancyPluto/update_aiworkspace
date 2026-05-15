@@ -77,17 +77,29 @@ def _flatten_content(content: list[Any]) -> str:
     for item in content:
         if isinstance(item, str):
             parts.append(item)
-        elif isinstance(item, dict) and isinstance(item.get("text"), str):
-            parts.append(item["text"])
+        elif isinstance(item, dict):
+            if isinstance(item.get("text"), str):
+                parts.append(item["text"])
+            elif item.get("type") in ("thinking", "reasoning") or "thinking" in item or "reasoning" in item:
+                continue
     if not parts:
         raise ModelClientError("model returned invalid chat completion response")
     return "".join(parts)
+
+
+def _has_only_non_text_blocks(content: list[Any]) -> bool:
+    for item in content:
+        if isinstance(item, str) or (isinstance(item, dict) and isinstance(item.get("text"), str)):
+            return False
+    return True
 
 
 def _extract_content(content: Any) -> str:
     if isinstance(content, str):
         return content
     if isinstance(content, list):
+        if not content or _has_only_non_text_blocks(content):
+            return ""
         return _flatten_content(content)
     raise ModelClientError("model returned invalid chat completion response")
 
