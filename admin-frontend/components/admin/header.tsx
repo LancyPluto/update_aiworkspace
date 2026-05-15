@@ -1,7 +1,6 @@
 "use client"
 
 import { ThemeToggle } from "@/components/theme-toggle"
-import { NotificationCenter } from "./notification-center"
 
 interface HeaderProps {
   title: string
@@ -20,7 +19,6 @@ export function AdminHeader({ title, description }: HeaderProps) {
 
       <div className="flex items-center gap-3">
         <ThemeToggle />
-        <NotificationCenter />
       </div>
     </header>
   )

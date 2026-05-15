@@ -1,3 +1,5 @@
+﻿SET NAMES utf8mb4;
+
 CREATE TABLE IF NOT EXISTS agent_workspaces (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   owner_user_id BIGINT NOT NULL,

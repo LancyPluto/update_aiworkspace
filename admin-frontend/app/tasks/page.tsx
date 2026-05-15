@@ -37,6 +37,7 @@ import {
   fetchAdminTasks,
   retryAdminTask,
 } from "@/lib/api/tasks"
+import { AgentRunsContent } from "@/app/agent-runs/page"
 import { ApiError } from "@/lib/api/http"
 import type { AdminTaskApiPayload } from "@/lib/api/types"
 
@@ -365,62 +366,75 @@ export default function TasksPage() {
     ? `加载失败：${error}`
     : loading
       ? "正在加载任务列表..."
-      : "查看和管理所有 AI 任务执行记录"
+      : "查看和管理 AI 任务执行记录与 Agent 运行记录"
 
   return (
     <AdminLayout>
       <AdminHeader title="任务管理" description={headerDescription} />
 
       <div className="p-6 space-y-6">
-        {/* Stats */}
-        <div className="grid gap-4 md:grid-cols-4">
-          {stats.map((stat) => (
-            <div
-              key={stat.label}
-              className="rounded-xl border border-border bg-card p-4"
-            >
-              <div className="flex items-center gap-3">
-                <div className="rounded-lg bg-secondary p-2">
-                  <stat.icon className={`h-5 w-5 ${stat.color}`} />
+        <Tabs defaultValue="tasks" className="space-y-6">
+          <TabsList className="bg-secondary">
+            <TabsTrigger value="tasks">AI 任务</TabsTrigger>
+            <TabsTrigger value="agent-runs">Agent 运行</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="tasks" className="space-y-6">
+            {/* Stats */}
+            <div className="grid gap-4 md:grid-cols-4">
+              {stats.map((stat) => (
+                <div
+                  key={stat.label}
+                  className="rounded-xl border border-border bg-card p-4"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="rounded-lg bg-secondary p-2">
+                      <stat.icon className={`h-5 w-5 ${stat.color}`} />
+                    </div>
+                    <div>
+                      <p className="text-2xl font-semibold text-card-foreground">
+                        {stat.value.toLocaleString()}
+                      </p>
+                      <p className="text-sm text-muted-foreground">{stat.label}</p>
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-2xl font-semibold text-card-foreground">
-                    {stat.value.toLocaleString()}
-                  </p>
-                  <p className="text-sm text-muted-foreground">{stat.label}</p>
-                </div>
-              </div>
+              ))}
             </div>
-          ))}
-        </div>
 
-        {/* Filters */}
-        <div className="flex items-center gap-4">
-          <div className="relative flex-1 max-w-md">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              placeholder="搜索任务 ID、用户或工具..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-9 bg-secondary border-0"
-            />
-          </div>
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="w-40 bg-secondary border-0">
-              <Filter className="mr-2 h-4 w-4" />
-              <SelectValue placeholder="状态筛选" />
-            </SelectTrigger>
-            <SelectContent className="bg-card border-border">
-              <SelectItem value="all">全部状态</SelectItem>
-              <SelectItem value="active">已完成</SelectItem>
-              <SelectItem value="pending">生成中</SelectItem>
-              <SelectItem value="error">失败</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
+            {/* Filters */}
+            <div className="flex items-center gap-4">
+              <div className="relative flex-1 max-w-md">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  placeholder="搜索任务 ID、用户或工具..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-9 bg-secondary border-0"
+                />
+              </div>
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger className="w-40 bg-secondary border-0">
+                  <Filter className="mr-2 h-4 w-4" />
+                  <SelectValue placeholder="状态筛选" />
+                </SelectTrigger>
+                <SelectContent className="bg-card border-border">
+                  <SelectItem value="all">全部状态</SelectItem>
+                  <SelectItem value="active">已完成</SelectItem>
+                  <SelectItem value="pending">生成中</SelectItem>
+                  <SelectItem value="error">失败</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
 
-        {/* Tasks Table */}
-        <DataTable columns={taskColumns} data={filteredTasks} />
+            {/* Tasks Table */}
+            <DataTable columns={taskColumns} data={filteredTasks} />
+          </TabsContent>
+
+          <TabsContent value="agent-runs">
+            <AgentRunsContent />
+          </TabsContent>
+        </Tabs>
       </div>
     </AdminLayout>
   )

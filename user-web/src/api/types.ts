@@ -1,6 +1,6 @@
 /**
  * 与《openapi.yml》V1 契约对齐的类型与常量。
- * 响应壳：{ code, message, data, requestId? }
+ * 响应壳：{ code, message, data, traceId? }
  */
 
 /** §3 V1 保留错误码 */
@@ -34,6 +34,7 @@ export interface ApiResponse<T> {
   code: ApiErrorCode
   message: string
   data: T | null
+  traceId?: string
   requestId?: string
 }
 
@@ -149,9 +150,9 @@ export interface ToolFieldOption {
 export interface ToolField {
   fieldKey: string
   fieldName: string
-  fieldType: "text" | "textarea" | "select"
+  fieldType: "text" | "textarea" | "select" | "number"
   placeholder?: string | null
-  options?: ToolFieldOption[] | null
+  options?: Array<ToolFieldOption | string> | null
   required: boolean
   sortOrder: number
 }
@@ -190,6 +191,7 @@ export interface CreateTaskResponse {
 export interface TaskStatusPayload {
   taskId: number
   taskNo: string
+  toolCode?: string
   status: TaskStatus
   progress?: number
   progressMessage?: string
@@ -268,6 +270,8 @@ export type AgentRunEventType =
   | "tool.selected"
   | "tool.confirmation_required"
   | "tool.started"
+  | "tool.task_dispatched"
+  | "tool.task_progress"
   | "tool.finished"
   | "subagent.started"
   | "subagent.completed"

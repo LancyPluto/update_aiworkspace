@@ -13,7 +13,7 @@ class OpenApiContractTest {
 
     @Test
     void openApiDocumentsCurrentImplementedApiSurface() throws Exception {
-        String openApi = Files.readString(Path.of("..", "docs", "api", "openapi.yml"), StandardCharsets.UTF_8);
+        String openApi = Files.readString(openApiPath(), StandardCharsets.UTF_8);
 
         assertThat(openApi).contains("openapi: 3.0.3");
         assertThat(openApi).doesNotContain("�", "宸", "绠", "鐢", "浠", "閫", "鍙", "鏌", "璐");
@@ -64,5 +64,17 @@ class OpenApiContractTest {
                 "RegenerateTaskRequest:",
                 "internalApiToken:"
         );
+    }
+
+    private static Path openApiPath() {
+        List<Path> candidates = List.of(
+                Path.of("..", "docs", "api", "openapi.yml"),
+                Path.of("docs", "api", "openapi.yml"),
+                Path.of("/docs", "api", "openapi.yml")
+        );
+        return candidates.stream()
+                .filter(Files::isRegularFile)
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException("docs/api/openapi.yml not found"));
     }
 }

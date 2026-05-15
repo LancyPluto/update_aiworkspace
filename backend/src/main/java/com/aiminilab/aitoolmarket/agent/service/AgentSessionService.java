@@ -13,4 +13,6 @@ public interface AgentSessionService {
     AgentSessionResponse detail(Long userId, Long sessionId);
 
     PageResponse<AgentMessageResponse> messages(Long userId, Long sessionId, Integer pageNo, Integer pageSize);
+
+    void delete(Long userId, Long sessionId);
 }

@@ -264,8 +264,7 @@ class UniversalAgentGraph:
             messages.append(ChatMessage(role="system", content=file_context))
         messages.extend(context.history)
         messages.append(ChatMessage(role="user", content=context.message))
-        answer = await self.model.chat(messages)
-        await self._emit_answer_events(context.runId, answer)
+        answer = await self._stream_model_answer(context.runId, messages)
         return {**state, "final_answer": answer}
 
     async def _generate_clarifying_answer(self, state: AgentState) -> AgentState:
@@ -291,8 +290,7 @@ class UniversalAgentGraph:
         if workspace_memory_context:
             messages.append(ChatMessage(role="system", content=workspace_memory_context))
         messages.append(ChatMessage(role="user", content=f"User request: {context.message}\nTool result: {tool_result}"))
-        answer = await self.model.chat(messages)
-        await self._emit_answer_events(context.runId, answer)
+        answer = await self._stream_model_answer(context.runId, messages)
         return {**state, "final_answer": answer}
 
     async def _format_workspace_memory_context(self, context: RunContext) -> str:
@@ -322,8 +320,33 @@ class UniversalAgentGraph:
 
     async def _emit_answer_events(self, run_id: int, answer: str) -> None:
         for chunk in _chunks(answer, 80):
-            await self.backend.append_event(run_id, RunEventCreate(eventType=MESSAGE_DELTA, eventText=chunk))
-        await self.backend.append_event(run_id, RunEventCreate(eventType=MESSAGE_COMPLETED, eventText=answer))
+            await self._emit_answer_delta(run_id, chunk)
+        await self._emit_answer_completed(run_id, answer)
+
+    async def _stream_model_answer(self, run_id: int, messages: list[ChatMessage]) -> str:
+        if not hasattr(self.model, "chat_stream"):
+            answer = await self.model.chat(messages)
+            await self._emit_answer_events(run_id, answer)
+            return answer
+        chunks: list[str] = []
+        async for chunk in self.model.chat_stream(messages):
+            chunks.append(chunk)
+            await self._emit_answer_delta(run_id, chunk)
+        answer = "".join(chunks)
+        await self._emit_answer_completed(run_id, answer)
+        return answer
+
+    async def _emit_answer_delta(self, run_id: int, chunk: str) -> None:
+        await self.backend.append_event(
+            run_id,
+            RunEventCreate(eventType=MESSAGE_DELTA, eventText=chunk, eventJson={"delta": chunk}),
+        )
+
+    async def _emit_answer_completed(self, run_id: int, answer: str) -> None:
+        await self.backend.append_event(
+            run_id,
+            RunEventCreate(eventType=MESSAGE_COMPLETED, eventText=answer, eventJson={"content": answer}),
+        )
 
 
 def _chunks(value: str, size: int) -> list[str]:

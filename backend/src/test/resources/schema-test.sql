@@ -304,6 +304,42 @@ CREATE TABLE agent_tool_preferences (
   UNIQUE(user_id, tool_code)
 );
 
+CREATE TABLE agent_pending_tool_context (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  run_id BIGINT NOT NULL,
+  session_id BIGINT NOT NULL,
+  user_id BIGINT NOT NULL,
+  selected_tool_code VARCHAR(64),
+  candidate_tool_codes_json CLOB,
+  collected_arguments_json CLOB,
+  missing_arguments_json CLOB,
+  clarifying_question VARCHAR(2000),
+  confirmation_required TINYINT DEFAULT 0,
+  source VARCHAR(32) DEFAULT 'intent_router',
+  status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE agent_tool_descriptor_extension (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  tool_id BIGINT NOT NULL,
+  tool_code VARCHAR(64) NOT NULL UNIQUE,
+  agent_enabled TINYINT NOT NULL DEFAULT 1,
+  agent_recommendable TINYINT NOT NULL DEFAULT 1,
+  agent_auto_callable TINYINT NOT NULL DEFAULT 0,
+  confirmation_policy VARCHAR(32) DEFAULT 'auto',
+  risk_level VARCHAR(16) DEFAULT 'low',
+  keywords_json CLOB,
+  example_prompts_json CLOB,
+  applicable_scenarios_json CLOB,
+  not_applicable_scenarios_json CLOB,
+  result_schema_json CLOB,
+  output_type VARCHAR(32) DEFAULT 'text',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE agent_files (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   session_id BIGINT NOT NULL,

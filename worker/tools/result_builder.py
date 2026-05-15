@@ -1,3 +1,4 @@
+import logging
 import re
 from typing import Any
 
@@ -16,6 +17,8 @@ from tools.store_campaign_planner.parser import format_publishable_text as fmt_s
 from tools.wechat_longform_generator.parser import format_publishable_text as fmt_wechat_longform
 from tools.xiaohongshu_copywriting.parser import format_publishable_text as fmt_xiaohongshu
 from tools.errors import ToolResultBuildError
+
+LOGGER = logging.getLogger(__name__)
 
 _TOOL_PUBLISHABLE_FORMATTERS: dict[str, Any] = {
     "xiaohongshu_copywriting": fmt_xiaohongshu,
@@ -82,8 +85,13 @@ def _contains_any_anchor(text: str, anchors: list[str]) -> bool:
 
 def _validate_moments_relevance(context: dict[str, Any], markdown_text: str) -> None:
     params = context.get("params") or {}
-    topic_anchors = _extract_anchor_terms(str(params.get("topic") or ""))
-    if not topic_anchors:
+    relevance_anchors: list[str] = []
+    for key in ("topic", "sellingPoints", "cta"):
+        for anchor in _extract_anchor_terms(str(params.get(key) or "")):
+            if anchor not in relevance_anchors:
+                relevance_anchors.append(anchor)
+
+    if not relevance_anchors:
         return
 
     parsed = parse_moments(markdown_text)
@@ -94,8 +102,11 @@ def _validate_moments_relevance(context: dict[str, Any], markdown_text: str) -> 
             str(parsed.get("cta") or ""),
         ]
     )
-    if not _contains_any_anchor(combined_text, topic_anchors):
-        return
+    if not _contains_any_anchor(combined_text, relevance_anchors):
+        LOGGER.warning(
+            "moments output did not hit relevance anchors; allow result to avoid false rejection anchors=%s",
+            relevance_anchors,
+        )
 
 
 def _validate_short_video_relevance(context: dict[str, Any], markdown_text: str) -> None:
@@ -114,7 +125,9 @@ def _validate_short_video_relevance(context: dict[str, Any], markdown_text: str)
         ]
     )
     if not _contains_any_anchor(combined_text, promotion_anchors):
-        return
+        raise ToolResultBuildError(
+            "short video script output does not mention the requested promotion object; reject off-topic copy"
+        )
 
 
 def _validate_output_relevance(context: dict[str, Any], markdown_text: str) -> None:
@@ -131,11 +144,7 @@ def build_success_payload(context: dict[str, Any], generated_text: str) -> dict[
     tool_code = context.get("toolCode")
     formatter = _TOOL_PUBLISHABLE_FORMATTERS.get(str(tool_code or ""))
     if formatter is not None:
-        try:
-            generated_text = formatter(generated_text)
-        except ToolResultBuildError:
-            if not generated_text.strip():
-                raise
+        generated_text = formatter(generated_text)
 
     return {
         "resourceType": context.get("outputFormat", "MARKDOWN"),

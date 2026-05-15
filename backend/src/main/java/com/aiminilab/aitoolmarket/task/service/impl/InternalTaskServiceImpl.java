@@ -15,6 +15,7 @@ import com.aiminilab.aitoolmarket.task.dto.WorkerProcessingRequest;
 import com.aiminilab.aitoolmarket.task.dto.WorkerSuccessRequest;
 import com.aiminilab.aitoolmarket.task.entity.AiTask;
 import com.aiminilab.aitoolmarket.task.mapper.TaskMapper;
+import com.aiminilab.aitoolmarket.task.metrics.TaskMetrics;
 import com.aiminilab.aitoolmarket.task.service.InternalTaskService;
 import com.aiminilab.aitoolmarket.task.service.TaskStateMachine;
 import com.aiminilab.aitoolmarket.tool.dto.ToolFieldResponse;
@@ -35,16 +36,19 @@ public class InternalTaskServiceImpl implements InternalTaskService {
     private final ObjectMapper objectMapper;
     private final CreditService creditService;
     private final BillingService billingService;
+    private final TaskMetrics taskMetrics;
 
     public InternalTaskServiceImpl(TaskMapper taskMapper, AgentModelConfigMapper agentModelConfigMapper,
                                    ToolFieldItemMapper toolFieldItemMapper, ObjectMapper objectMapper,
-                                   CreditService creditService, BillingService billingService) {
+                                   CreditService creditService, BillingService billingService,
+                                   TaskMetrics taskMetrics) {
         this.taskMapper = taskMapper;
         this.agentModelConfigMapper = agentModelConfigMapper;
         this.toolFieldItemMapper = toolFieldItemMapper;
         this.objectMapper = objectMapper;
         this.creditService = creditService;
         this.billingService = billingService;
+        this.taskMetrics = taskMetrics;
     }
 
     @Override
@@ -65,8 +69,10 @@ public class InternalTaskServiceImpl implements InternalTaskService {
                 ? "AI is processing"
                 : request.progressMessage();
         AiTask task = findTask(taskId);
-        TaskStateMachine.ensureTransition(task.getStatus(), TaskStatus.PROCESSING.name());
-        if (taskMapper.markProcessing(taskId, progress, message, List.of(TaskStatus.QUEUED.name())) == 0) {
+        if (!TaskStatus.PROCESSING.name().equals(task.getStatus())) {
+            TaskStateMachine.ensureTransition(task.getStatus(), TaskStatus.PROCESSING.name());
+        }
+        if (taskMapper.markProcessing(taskId, progress, message, List.of(TaskStatus.QUEUED.name(), TaskStatus.PROCESSING.name())) == 0) {
             TaskStateMachine.ensureTransition(findTask(taskId).getStatus(), TaskStatus.PROCESSING.name());
         }
         return TaskStatusResponse.from(findTask(taskId));
@@ -95,6 +101,7 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         billingService.recordUsage("TASK", taskId, task.getUserId(), agentModelConfigMapper.findForToolExecution(task.getToolId()),
                 request.promptTokens(), request.completionTokens(), task.getEstimatedCreditCost());
         taskMapper.insertResult(taskId, task.getUserId(), request.resourceType(), request.contentText());
+        taskMetrics.recordTaskOutcome(task.getToolCode(), "SUCCESS", task.getCreatedAt(), findTask(taskId).getFinishedAt());
         return TaskStatusResponse.from(findTask(taskId));
     }
 
@@ -123,6 +130,7 @@ public class InternalTaskServiceImpl implements InternalTaskService {
             TaskStateMachine.ensureTransition(current.getStatus(), TaskStatus.FAILED.name());
         }
         creditService.releaseForTask(task.getUserId(), taskId, task.getEstimatedCreditCost());
+        taskMetrics.recordTaskOutcome(task.getToolCode(), "FAILED", task.getCreatedAt(), findTask(taskId).getFinishedAt());
         return TaskStatusResponse.from(findTask(taskId));
     }
 

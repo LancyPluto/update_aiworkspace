@@ -38,6 +38,13 @@ class FakeModel:
         return "model answer: " + messages[-1].content
 
 
+class FakeStreamingModel(FakeModel):
+    async def chat_stream(self, messages):
+        self.messages.append(messages)
+        for chunk in ("streamed ", "answer"):
+            yield chunk
+
+
 def xiaohongshu_tool() -> ToolDescriptor:
     return ToolDescriptor(
         toolCode="xiaohongshu_copywriting",
@@ -67,6 +74,24 @@ async def test_graph_completes_general_chat():
 
     assert backend.completed[0][2] == "general_chat"
     assert any(event[1] == "message.completed" for event in backend.events)
+
+
+@pytest.mark.asyncio
+async def test_graph_streams_model_answer_deltas_before_completion():
+    backend = FakeBackend()
+    graph = UniversalAgentGraph(backend, FakeStreamingModel())
+    context = RunContext(runId=1, sessionId=1, userId=1, message="tell me about this platform")
+
+    await graph.run(context)
+
+    message_events = [event for event in backend.events if event[1].startswith("message.")]
+    assert [(event[1], event[2]) for event in message_events] == [
+        ("message.delta", "streamed "),
+        ("message.delta", "answer"),
+        ("message.completed", "streamed answer"),
+    ]
+    assert message_events[0][3] == {"delta": "streamed "}
+    assert backend.completed[0][1] == "streamed answer"
 
 
 @pytest.mark.asyncio

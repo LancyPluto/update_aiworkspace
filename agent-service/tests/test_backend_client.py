@@ -3,7 +3,8 @@ import pytest
 
 from app.clients.backend_client import BackendBusinessError, BackendClient, BackendClientError
 from app.config import Settings
-from app.core.schemas import RunComplete, RunEventCreate
+from app.core.schemas import RunComplete, RunEventCreate, TaskCreate
+from app.observability.trace import reset_trace_id, set_trace_id
 
 
 @pytest.mark.asyncio
@@ -115,3 +116,66 @@ async def test_backend_client_fetches_active_model_config():
     assert config.provider == "minimax"
     assert config.modelName == "MiniMax-M2.7"
     assert config.apiKey == "secret"
+
+
+@pytest.mark.asyncio
+async def test_backend_client_can_create_and_read_internal_task():
+    paths: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        paths.append(request.url.path)
+        if request.url.path == "/api/internal/v1/tasks" and request.method == "POST":
+            return httpx.Response(
+                200,
+                json={"code": "SUCCESS", "message": "ok", "data": {"taskId": 11, "taskNo": "T11", "status": "QUEUED"}},
+            )
+        return httpx.Response(
+            200,
+            json={
+                "code": "SUCCESS",
+                "message": "ok",
+                "data": {
+                    "taskId": 11,
+                    "taskNo": "T11",
+                    "userId": 2,
+                    "toolCode": "xiaohongshu_copywriting",
+                    "status": "SUCCESS",
+                    "result": {"resourceType": "MARKDOWN", "contentText": "# Done"},
+                },
+            },
+        )
+
+    client = BackendClient(
+        Settings(backend_internal_base_url="http://backend"),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    created = await client.create_task(
+        TaskCreate(userId=2, toolCode="xiaohongshu_copywriting", params={"productName": "test"}, clientRequestId="agent-run-1")
+    )
+    detail = await client.get_task_detail(2, created.taskId)
+    await client.cancel_task(2, created.taskId)
+
+    assert paths == ["/api/internal/v1/tasks", "/api/internal/v1/tasks/11", "/api/internal/v1/tasks/11/cancel"]
+    assert detail.result.contentText == "# Done"
+
+
+@pytest.mark.asyncio
+async def test_backend_client_forwards_trace_id_header():
+    seen_headers: list[str | None] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_headers.append(request.headers.get("X-Request-Id"))
+        return httpx.Response(200, json={"code": "SUCCESS", "message": "ok", "data": {}})
+
+    client = BackendClient(
+        Settings(backend_internal_base_url="http://backend"),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+    token = set_trace_id("agent-trace-123")
+    try:
+        await client.append_event(7, RunEventCreate(eventType="run.started"))
+    finally:
+        reset_trace_id(token)
+
+    assert seen_headers == ["agent-trace-123"]

@@ -55,7 +55,13 @@ class FakeBackendClient:
             "modelName": "fake-model",
         }
 
-    def mark_processing(self, task_id: int) -> dict:
+    def mark_processing(
+        self,
+        task_id: int,
+        *,
+        progress: int | None = None,
+        progress_message: str | None = None,
+    ) -> dict:
         self.processing_called = True
         return {}
 

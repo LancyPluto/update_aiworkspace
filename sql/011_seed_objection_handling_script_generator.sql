@@ -1,3 +1,5 @@
+﻿SET NAMES utf8mb4;
+
 INSERT INTO ai_tools (
   tool_code,
   tool_name,

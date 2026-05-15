@@ -9,11 +9,17 @@ import {
   smsLogin as apiSmsLogin,
   smsRegister as apiSmsRegister,
 } from "@/api"
+import { SESSION_TOKEN_STORAGE_KEY } from "@/constants/authStorage"
+import { clearSessionBearerJwt, setSessionBearerJwt } from "@/api/sessionBearer"
 
-const TOKEN_KEY = "ai_tool_market_token"
+const TOKEN_KEY = SESSION_TOKEN_STORAGE_KEY
 
 export const useAuthStore = defineStore("auth", () => {
-  const token = ref<string | null>(localStorage.getItem(TOKEN_KEY))
+  const persisted = localStorage.getItem(TOKEN_KEY)
+  const token = ref<string | null>(persisted)
+  if (persisted) {
+    setSessionBearerJwt(persisted)
+  }
   const user = ref<UserProfile | null>(null)
   const loading = ref(false)
   const bootstrapComplete = ref(false)
@@ -88,6 +94,7 @@ export const useAuthStore = defineStore("auth", () => {
     token.value = null
     user.value = null
     localStorage.removeItem(TOKEN_KEY)
+    clearSessionBearerJwt()
   }
 
   async function applyLoginResponse(res: LoginResponse, missingTokenMessage: string) {
@@ -95,6 +102,7 @@ export const useAuthStore = defineStore("auth", () => {
     if (!t) throw new Error(missingTokenMessage)
     token.value = t
     localStorage.setItem(TOKEN_KEY, t)
+    setSessionBearerJwt(t)
     await fetchCurrentUser()
     return res
   }
