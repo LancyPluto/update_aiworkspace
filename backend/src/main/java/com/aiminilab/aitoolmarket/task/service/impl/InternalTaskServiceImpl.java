@@ -3,6 +3,7 @@ package com.aiminilab.aitoolmarket.task.service.impl;
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentModelConfigMapper;
 import com.aiminilab.aitoolmarket.admin.service.BillingService;
+import com.aiminilab.aitoolmarket.common.enums.CreditSourceType;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.enums.TaskStatus;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
@@ -97,7 +98,7 @@ public class InternalTaskServiceImpl implements InternalTaskService {
             }
             TaskStateMachine.ensureTransition(current.getStatus(), TaskStatus.SUCCESS.name());
         }
-        creditService.settleForTask(task.getUserId(), taskId, task.getEstimatedCreditCost());
+        creditService.settle(task.getUserId(), CreditSourceType.TASK, taskId, task.getEstimatedCreditCost());
         billingService.recordUsage("TASK", taskId, task.getUserId(), agentModelConfigMapper.findForToolExecution(task.getToolId()),
                 request.promptTokens(), request.completionTokens(), task.getEstimatedCreditCost());
         taskMapper.insertResult(taskId, task.getUserId(), request.resourceType(), request.contentText());
@@ -129,7 +130,7 @@ public class InternalTaskServiceImpl implements InternalTaskService {
             }
             TaskStateMachine.ensureTransition(current.getStatus(), TaskStatus.FAILED.name());
         }
-        creditService.releaseForTask(task.getUserId(), taskId, task.getEstimatedCreditCost());
+        creditService.release(task.getUserId(), CreditSourceType.TASK, taskId, task.getEstimatedCreditCost());
         taskMetrics.recordTaskOutcome(task.getToolCode(), "FAILED", task.getCreatedAt(), findTask(taskId).getFinishedAt());
         return TaskStatusResponse.from(findTask(taskId));
     }

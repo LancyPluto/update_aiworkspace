@@ -8,7 +8,6 @@ import {
   ListChecks,
   Wallet,
   FolderHeart,
-  Sparkles,
   ShieldCheck,
   ChevronRight,
   PanelLeft,
@@ -85,9 +84,7 @@ onMounted(async () => {
       :class="sidebarOpen ? 'lg:flex' : 'lg:hidden'"
     >
       <div class="flex h-16 items-center gap-2.5 px-5 border-b border-border">
-        <div class="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-          <Sparkles class="h-5 w-5" />
-        </div>
+        <img src="/logo.svg" alt="AI Tool Market" class="h-9 w-9 rounded-lg object-contain" />
         <div class="flex flex-col leading-tight">
           <span class="text-sm font-semibold">智擎 AI</span>
           <span class="text-[11px] text-muted-foreground">经营助手平台</span>

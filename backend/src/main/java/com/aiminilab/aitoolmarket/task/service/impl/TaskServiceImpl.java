@@ -1,6 +1,7 @@
 package com.aiminilab.aitoolmarket.task.service.impl;
 
 import com.aiminilab.aitoolmarket.common.dto.PageResponse;
+import com.aiminilab.aitoolmarket.common.enums.CreditSourceType;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.enums.TaskStatus;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
@@ -105,7 +106,7 @@ public class TaskServiceImpl implements TaskService {
             AiTask current = findTask(taskId, userId);
             TaskStateMachine.ensureTransition(current.getStatus(), TaskStatus.CANCELLED.name());
         } else {
-            creditService.releaseForTask(task.getUserId(), taskId, task.getEstimatedCreditCost());
+            creditService.release(task.getUserId(), CreditSourceType.TASK, taskId, task.getEstimatedCreditCost());
             taskMetrics.recordTaskOutcome(task.getToolCode(), "CANCELLED", task.getCreatedAt(), findTask(taskId, userId).getFinishedAt());
         }
         return TaskStatusResponse.from(findTask(taskId, userId));
@@ -156,7 +157,7 @@ public class TaskServiceImpl implements TaskService {
         if (updated == 0) {
             TaskStateMachine.ensureTransition(findTask(taskId).getStatus(), TaskStatus.CANCELLED.name());
         } else {
-            creditService.releaseForTask(task.getUserId(), taskId, task.getEstimatedCreditCost());
+            creditService.release(task.getUserId(), CreditSourceType.TASK, taskId, task.getEstimatedCreditCost());
             taskMetrics.recordTaskOutcome(task.getToolCode(), "CANCELLED", task.getCreatedAt(), findTask(taskId).getFinishedAt());
         }
         return TaskStatusResponse.from(findTask(taskId));
@@ -176,7 +177,7 @@ public class TaskServiceImpl implements TaskService {
 
         Long taskId = taskMapper.insertTask(task);
         if (chargeTaskCredits) {
-            creditService.freezeForTask(userId, taskId, tool.getEstimatedCreditCost());
+            creditService.freeze(userId, CreditSourceType.TASK, taskId, tool.getEstimatedCreditCost());
         }
         taskOutboxService.enqueueTaskCreated(taskId);
         return TaskStatusResponse.from(findTask(taskId, userId));

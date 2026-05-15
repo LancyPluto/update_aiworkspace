@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { Eye, EyeOff, Sparkles, ArrowRight, Shield, Zap, Lock } from "lucide-react"
+import { Eye, EyeOff, ArrowRight, Shield, Zap, Lock } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -81,9 +81,7 @@ export default function LoginPage() {
           {/* Logo */}
           <div className="flex items-center gap-3 mb-16">
             <div className="relative">
-              <div className="w-12 h-12 rounded-2xl bg-primary flex items-center justify-center">
-                <Sparkles className="w-6 h-6 text-primary-foreground" />
-              </div>
+              <img src="/logo.svg" alt="AI Tool Market" className="w-12 h-12 rounded-2xl object-contain" />
               <div className="absolute -inset-1 bg-primary/20 rounded-2xl blur-sm -z-10" />
             </div>
             <span className="text-2xl font-semibold tracking-tight">AI 工具超市</span>
@@ -128,9 +126,7 @@ export default function LoginPage() {
         <div className="w-full max-w-md">
           {/* Mobile Logo */}
           <div className="flex items-center gap-3 mb-8 lg:hidden">
-            <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center">
-              <Sparkles className="w-5 h-5 text-primary-foreground" />
-            </div>
+            <img src="/logo.svg" alt="AI Tool Market" className="w-10 h-10 rounded-xl object-contain" />
             <span className="text-xl font-semibold">AI 工具超市</span>
           </div>
 
