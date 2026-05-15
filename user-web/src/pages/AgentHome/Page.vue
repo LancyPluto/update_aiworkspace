@@ -717,6 +717,13 @@ onUnmounted(() => {
   padding: 14px;
   min-width: 0;
   transition: opacity 0.15s ease, padding 0.15s ease;
+
+  /* 👇 下面这 4 行是新加的：左侧会话列表滚动 */
+  height: calc(100vh - 64px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .agent-sidebar--collapsed {
@@ -756,6 +763,8 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  flex: 1;        /* 让列表占满剩余高度 */
+  min-height: 0;  /* 必须加，否则滚动不生效 */
 }
 
 .session-row {
@@ -812,6 +821,8 @@ onUnmounted(() => {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto auto auto;
   min-width: 0;
+  min-height: 0;
+  height: 100%;
 }
 
 .session-sidebar-toggle-row {
@@ -841,8 +852,14 @@ onUnmounted(() => {
 }
 
 .message-scroll {
-  overflow-y: auto;
+  overflow-y: auto; /* 滚动在这里 */
+  height: 100%;
   padding: 28px clamp(18px, 4vw, 64px);
+
+  /* 关键代码 ↓ */
+  max-height: calc(100vh - 220px);
+  flex: 1;
+  min-height: 0;
 }
 
 .empty-state {
@@ -1189,5 +1206,19 @@ onUnmounted(() => {
   .run-status-card {
     max-width: 100%;
   }
+
+  /* 左侧边栏滚动条样式：默认隐藏，hover/滚动时显示 */
+.agent-sidebar::-webkit-scrollbar {
+  width: 4px;
+}
+.agent-sidebar::-webkit-scrollbar-thumb {
+  background: var(--muted-foreground);
+  border-radius: 4px;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.agent-sidebar:hover::-webkit-scrollbar-thumb {
+  opacity: 1;
+}
 }
 </style>
