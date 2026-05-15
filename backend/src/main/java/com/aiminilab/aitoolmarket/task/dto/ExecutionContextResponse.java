@@ -14,6 +14,9 @@ public record ExecutionContextResponse(
         Long toolId,
         String toolCode,
         String toolName,
+        String toolType,
+        String inputModality,
+        String outputModality,
         String status,
         String traceId,
         JsonNode params,
@@ -31,6 +34,9 @@ public record ExecutionContextResponse(
                 task.getToolId(),
                 task.getToolCode(),
                 task.getToolName(),
+                defaultValue(task.getToolType(), "TEXT_GENERATION"),
+                defaultValue(task.getInputModality(), "TEXT"),
+                defaultValue(task.getOutputModality(), "TEXT"),
                 task.getStatus(),
                 MDC.get("traceId"),
                 params,
@@ -39,5 +45,9 @@ public record ExecutionContextResponse(
                 modelConfig == null ? null : modelConfig.modelName(),
                 fields
         );
+    }
+
+    private static String defaultValue(String value, String fallback) {
+        return value == null || value.isBlank() ? fallback : value;
     }
 }

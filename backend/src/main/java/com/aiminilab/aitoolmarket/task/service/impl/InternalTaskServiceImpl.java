@@ -100,7 +100,7 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         }
         creditService.settle(task.getUserId(), CreditSourceType.TASK, taskId, task.getEstimatedCreditCost());
         billingService.recordUsage("TASK", taskId, task.getUserId(), agentModelConfigMapper.findForToolExecution(task.getToolId()),
-                request.promptTokens(), request.completionTokens(), task.getEstimatedCreditCost());
+                request.promptTokens(), request.completionTokens(), request.billableUnits(), task.getEstimatedCreditCost());
         taskMapper.insertResult(taskId, task.getUserId(), request.resourceType(), request.contentText());
         taskMetrics.recordTaskOutcome(task.getToolCode(), "SUCCESS", task.getCreatedAt(), findTask(taskId).getFinishedAt());
         return TaskStatusResponse.from(findTask(taskId));

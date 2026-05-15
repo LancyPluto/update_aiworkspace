@@ -46,6 +46,8 @@ function buildTaskParams(fields: ToolField[], raw: Record<string, unknown>): Rec
       }
       const n = typeof v === "number" ? v : Number(v)
       if (!Number.isNaN(n)) out[f.fieldKey] = n
+    } else if (f.fieldType === "checkbox") {
+      out[f.fieldKey] = Boolean(v)
     } else if (v !== undefined && v !== null && v !== "") {
       out[f.fieldKey] = typeof v === "string" ? v.trim() : v
     }

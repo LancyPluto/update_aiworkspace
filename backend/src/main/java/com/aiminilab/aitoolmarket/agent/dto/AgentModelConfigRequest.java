@@ -14,9 +14,16 @@ public record AgentModelConfigRequest(
         String baseUrl,
         String apiKey,
         String minimaxGroupId,
+        String consoleUrl,
+        String balanceUrl,
+        String docsUrl,
         @Min(1) @Max(300) Integer timeoutSeconds,
         BigDecimal inputTokenPricePer1k,
         BigDecimal outputTokenPricePer1k,
+        BigDecimal inputTokenPricePer1m,
+        BigDecimal outputTokenPricePer1m,
+        String billingUnit,
+        BigDecimal unitPrice,
         Boolean enabled,
         Boolean isDefault
 ) {

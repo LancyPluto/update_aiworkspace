@@ -21,7 +21,17 @@ import java.util.Set;
 @Service
 public class AgentModelConfigServiceImpl implements AgentModelConfigService {
 
-    private static final Set<String> SUPPORTED_PROVIDERS = Set.of("mock", "openai_compatible", "anthropic_compatible", "minimax");
+    private static final String BILLING_UNIT_TOKEN_PER_M = "TOKEN_PER_M";
+    private static final String BILLING_UNIT_PER_CALL = "PER_CALL";
+    private static final BigDecimal TOKEN_UNIT_SCALE = BigDecimal.valueOf(1000);
+
+    private static final Set<String> SUPPORTED_PROVIDERS = Set.of(
+            "mock",
+            "openai_compatible",
+            "anthropic_compatible",
+            "minimax",
+            "siliconflow_images"
+    );
 
     private final AgentModelConfigMapper agentModelConfigMapper;
     private final AgentServiceClient agentServiceClient;
@@ -124,9 +134,18 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
             config.setApiKey("");
         }
         config.setMinimaxGroupId(blankToNull(request.minimaxGroupId()));
+        config.setConsoleUrl(blankToNull(request.consoleUrl()));
+        config.setBalanceUrl(blankToNull(request.balanceUrl()));
+        config.setDocsUrl(blankToNull(request.docsUrl()));
         config.setTimeoutSeconds(request.timeoutSeconds() == null ? 60 : request.timeoutSeconds());
-        config.setInputTokenPricePer1k(nonNegativeMoney(request.inputTokenPricePer1k()));
-        config.setOutputTokenPricePer1k(nonNegativeMoney(request.outputTokenPricePer1k()));
+        BigDecimal inputPricePer1m = resolveTokenPricePer1m(request.inputTokenPricePer1m(), request.inputTokenPricePer1k());
+        BigDecimal outputPricePer1m = resolveTokenPricePer1m(request.outputTokenPricePer1m(), request.outputTokenPricePer1k());
+        config.setInputTokenPricePer1m(inputPricePer1m);
+        config.setOutputTokenPricePer1m(outputPricePer1m);
+        config.setInputTokenPricePer1k(inputPricePer1m.divide(TOKEN_UNIT_SCALE));
+        config.setOutputTokenPricePer1k(outputPricePer1m.divide(TOKEN_UNIT_SCALE));
+        config.setBillingUnit(resolveBillingUnit(request.billingUnit(), request.provider()));
+        config.setUnitPrice(nonNegativeMoney(request.unitPrice()));
         config.setEnabled(request.enabled() == null || request.enabled());
         config.setDefault(request.isDefault() != null && request.isDefault());
         config.setUpdatedAt(now);
@@ -142,8 +161,19 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
     public AgentModelConfigTestResponse adminTest(AgentModelConfigRequest request) {
         validate(request);
         AgentModelConfig existing = agentModelConfigMapper.findLatest();
+        AgentModelConfigRequest merged = mergeSecretFields(request, existing);
+        if ("siliconflow_images".equals(merged.provider())) {
+            return new AgentModelConfigTestResponse(
+                    true,
+                    merged.provider(),
+                    merged.modelName(),
+                    0L,
+                    "image provider config accepted; worker will call /v1/images/generations at runtime",
+                    ""
+            );
+        }
         try {
-            return agentServiceClient.testModelConfig(mergeSecretFields(request, existing));
+            return agentServiceClient.testModelConfig(merged);
         } catch (IllegalStateException exception) {
             throw new BusinessException(ErrorCode.MODEL_CALL_FAILED, modelConfigTestFailureMessage(exception));
         }
@@ -178,9 +208,16 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         fallback.setBaseUrl(null);
         fallback.setApiKey("");
         fallback.setMinimaxGroupId(null);
+        fallback.setConsoleUrl(null);
+        fallback.setBalanceUrl(null);
+        fallback.setDocsUrl(null);
         fallback.setTimeoutSeconds(60);
         fallback.setInputTokenPricePer1k(BigDecimal.ZERO);
         fallback.setOutputTokenPricePer1k(BigDecimal.ZERO);
+        fallback.setInputTokenPricePer1m(BigDecimal.ZERO);
+        fallback.setOutputTokenPricePer1m(BigDecimal.ZERO);
+        fallback.setBillingUnit(BILLING_UNIT_TOKEN_PER_M);
+        fallback.setUnitPrice(BigDecimal.ZERO);
         fallback.setEnabled(true);
         fallback.setDefault(true);
         fallback.setCreatedAt(now);
@@ -196,8 +233,14 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         if (request.modelName() == null || request.modelName().isBlank()) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "modelName is required");
         }
-        if (isNegative(request.inputTokenPricePer1k()) || isNegative(request.outputTokenPricePer1k())) {
+        if (isNegative(request.inputTokenPricePer1k()) || isNegative(request.outputTokenPricePer1k())
+                || isNegative(request.inputTokenPricePer1m()) || isNegative(request.outputTokenPricePer1m())
+                || isNegative(request.unitPrice())) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "token price must be non-negative");
+        }
+        String billingUnit = resolveBillingUnit(request.billingUnit(), provider);
+        if (!Set.of(BILLING_UNIT_TOKEN_PER_M, BILLING_UNIT_PER_CALL).contains(billingUnit)) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "unsupported billing unit");
         }
     }
 
@@ -225,12 +268,33 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                 request.baseUrl(),
                 existing.getApiKey(),
                 request.minimaxGroupId(),
+                request.consoleUrl(),
+                request.balanceUrl(),
+                request.docsUrl(),
                 request.timeoutSeconds(),
                 request.inputTokenPricePer1k(),
                 request.outputTokenPricePer1k(),
+                request.inputTokenPricePer1m(),
+                request.outputTokenPricePer1m(),
+                request.billingUnit(),
+                request.unitPrice(),
                 request.enabled(),
                 request.isDefault()
         );
+    }
+
+    private BigDecimal resolveTokenPricePer1m(BigDecimal pricePer1m, BigDecimal legacyPricePer1k) {
+        if (pricePer1m != null) {
+            return nonNegativeMoney(pricePer1m);
+        }
+        return nonNegativeMoney(legacyPricePer1k).multiply(TOKEN_UNIT_SCALE);
+    }
+
+    private String resolveBillingUnit(String billingUnit, String provider) {
+        if (billingUnit != null && !billingUnit.isBlank()) {
+            return billingUnit.trim().toUpperCase();
+        }
+        return "siliconflow_images".equals(provider) ? BILLING_UNIT_PER_CALL : BILLING_UNIT_TOKEN_PER_M;
     }
 
     private AgentModelConfig findActiveOrThrow(Long id) {

@@ -79,7 +79,8 @@ public interface BillingUsageLogMapper extends BaseMapper<BillingUsageLog> {
     @Select("""
             SELECT id, source_type, source_id, user_id, model_config_id, provider, model_name,
                    prompt_tokens, completion_tokens, total_tokens, input_token_price_per_1k,
-                   output_token_price_per_1k, cost_amount, charged_credits, created_at
+                   output_token_price_per_1k, input_token_price_per_1m, output_token_price_per_1m,
+                   billing_unit, billable_units, unit_price, cost_amount, charged_credits, created_at
             FROM billing_usage_logs
             ORDER BY id DESC
             LIMIT #{limit} OFFSET #{offset}
@@ -97,6 +98,11 @@ public interface BillingUsageLogMapper extends BaseMapper<BillingUsageLog> {
             @Arg(column = "total_tokens", javaType = Integer.class),
             @Arg(column = "input_token_price_per_1k", javaType = BigDecimal.class),
             @Arg(column = "output_token_price_per_1k", javaType = BigDecimal.class),
+            @Arg(column = "input_token_price_per_1m", javaType = BigDecimal.class),
+            @Arg(column = "output_token_price_per_1m", javaType = BigDecimal.class),
+            @Arg(column = "billing_unit", javaType = String.class),
+            @Arg(column = "billable_units", javaType = Integer.class),
+            @Arg(column = "unit_price", javaType = BigDecimal.class),
             @Arg(column = "cost_amount", javaType = BigDecimal.class),
             @Arg(column = "charged_credits", javaType = Integer.class),
             @Arg(column = "created_at", javaType = LocalDateTime.class)

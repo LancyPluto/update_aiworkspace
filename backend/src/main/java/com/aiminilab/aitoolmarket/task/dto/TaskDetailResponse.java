@@ -11,6 +11,9 @@ public record TaskDetailResponse(
         Long userId,
         String toolCode,
         String toolName,
+        String toolType,
+        String inputModality,
+        String outputModality,
         String status,
         Integer progress,
         String progressMessage,
@@ -28,6 +31,9 @@ public record TaskDetailResponse(
                 task.getUserId(),
                 task.getToolCode(),
                 task.getToolName(),
+                defaultValue(task.getToolType(), "TEXT_GENERATION"),
+                defaultValue(task.getInputModality(), "TEXT"),
+                defaultValue(task.getOutputModality(), "TEXT"),
                 task.getStatus(),
                 task.getProgress(),
                 task.getProgressMessage(),
@@ -38,5 +44,9 @@ public record TaskDetailResponse(
                 task.getCreatedAt(),
                 task.getFinishedAt()
         );
+    }
+
+    private static String defaultValue(String value, String fallback) {
+        return value == null || value.isBlank() ? fallback : value;
     }
 }

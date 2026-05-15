@@ -6,6 +6,7 @@ public record WorkerSuccessRequest(
         @NotBlank String resourceType,
         @NotBlank String contentText,
         Integer promptTokens,
-        Integer completionTokens
+        Integer completionTokens,
+        Integer billableUnits
 ) {
 }

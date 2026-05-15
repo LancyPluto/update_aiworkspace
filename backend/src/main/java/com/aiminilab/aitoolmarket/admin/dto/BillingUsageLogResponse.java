@@ -16,6 +16,11 @@ public record BillingUsageLogResponse(
         Integer totalTokens,
         BigDecimal inputTokenPricePer1k,
         BigDecimal outputTokenPricePer1k,
+        BigDecimal inputTokenPricePer1m,
+        BigDecimal outputTokenPricePer1m,
+        String billingUnit,
+        Integer billableUnits,
+        BigDecimal unitPrice,
         BigDecimal costAmount,
         Integer chargedCredits,
         LocalDateTime createdAt

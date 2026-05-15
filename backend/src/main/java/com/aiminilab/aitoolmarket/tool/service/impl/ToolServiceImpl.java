@@ -2,7 +2,9 @@ package com.aiminilab.aitoolmarket.tool.service.impl;
 
 import com.aiminilab.aitoolmarket.common.dto.PageResponse;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
+import com.aiminilab.aitoolmarket.common.enums.ToolModality;
 import com.aiminilab.aitoolmarket.common.enums.ToolStatus;
+import com.aiminilab.aitoolmarket.common.enums.ToolType;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.tool.dto.CreateFieldSchemaRequest;
 import com.aiminilab.aitoolmarket.tool.dto.CreatePromptRequest;
@@ -343,6 +345,11 @@ public class ToolServiceImpl implements ToolService {
         tool.setCategoryId(request.categoryId());
         tool.setDescription(request.description());
         tool.setCoverUrl(request.coverUrl());
+        ToolType toolType = ToolType.fromNullable(request.toolType());
+        tool.setToolType(toolType.name());
+        tool.setInputModality(normalizeInputModality(toolType, request.inputModality()).name());
+        tool.setOutputModality(normalizeOutputModality(toolType, request.outputModality()).name());
+        tool.setConfigNote(blankToNull(request.configNote()));
         tool.setEstimatedCreditCost(request.estimatedCreditCost());
         tool.setModelConfigId(request.modelConfigId());
         return tool;
@@ -367,6 +374,38 @@ public class ToolServiceImpl implements ToolService {
             suffix++;
         }
         return candidate;
+    }
+
+    private ToolModality normalizeInputModality(ToolType toolType, String value) {
+        return ToolModality.fromNullable(value, defaultInputModality(toolType));
+    }
+
+    private ToolModality normalizeOutputModality(ToolType toolType, String value) {
+        return ToolModality.fromNullable(value, defaultOutputModality(toolType));
+    }
+
+    private ToolModality defaultInputModality(ToolType toolType) {
+        return switch (toolType) {
+            case IMAGE_TO_IMAGE, IMAGE_UNDERSTANDING -> ToolModality.IMAGE;
+            case SPEECH_TO_TEXT -> ToolModality.AUDIO;
+            case VIDEO_GENERATION -> ToolModality.TEXT;
+            case AGENT -> ToolModality.MULTIMODAL;
+            default -> ToolModality.TEXT;
+        };
+    }
+
+    private ToolModality defaultOutputModality(ToolType toolType) {
+        return switch (toolType) {
+            case IMAGE_GENERATION, IMAGE_TO_IMAGE -> ToolModality.IMAGE;
+            case TEXT_TO_SPEECH -> ToolModality.AUDIO;
+            case VIDEO_GENERATION -> ToolModality.VIDEO;
+            case EMBEDDING, RERANK -> ToolModality.JSON;
+            default -> ToolModality.TEXT;
+        };
+    }
+
+    private String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
     }
 
     private void ensureToolExists(Long toolId) {

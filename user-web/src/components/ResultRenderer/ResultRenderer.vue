@@ -213,6 +213,51 @@ function escapeXml(value: string): string {
         <p class="text-xs text-muted-foreground mb-1">{{ b.title }}</p>
         <p class="text-sm leading-relaxed whitespace-pre-wrap">{{ b.content }}</p>
       </template>
+      <template v-else-if="b.type === 'json'">
+        <p class="text-xs text-muted-foreground mb-2">{{ b.title }}</p>
+        <pre class="overflow-x-auto rounded-lg border border-border bg-background p-4 text-xs leading-relaxed text-foreground/90">{{ b.content }}</pre>
+      </template>
+      <template v-else-if="b.type === 'image'">
+        <div class="mb-3">
+          <p class="text-xs text-muted-foreground">图片结果</p>
+          <h2 class="text-base font-semibold text-foreground">{{ b.title }}</h2>
+        </div>
+        <div class="grid gap-3 sm:grid-cols-2">
+          <figure
+            v-for="image in b.images"
+            :key="image.url"
+            class="overflow-hidden rounded-lg border border-border bg-background"
+          >
+            <img :src="image.url" :alt="image.label ?? b.title" class="w-full object-contain" loading="lazy" />
+            <figcaption class="flex items-center justify-between gap-3 border-t border-border px-3 py-2 text-xs text-muted-foreground">
+              <span>{{ image.label ?? "图片" }}</span>
+              <a :href="image.url" download class="inline-flex items-center gap-1 text-foreground hover:text-primary">
+                <Download class="h-3.5 w-3.5" />
+                下载
+              </a>
+            </figcaption>
+          </figure>
+        </div>
+      </template>
+      <template v-else-if="b.type === 'audio'">
+        <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p class="text-xs text-muted-foreground">音频结果</p>
+            <h2 class="text-base font-semibold text-foreground">{{ b.title }}</h2>
+          </div>
+          <a
+            :href="b.url"
+            :download="b.downloadName ?? 'audio-result'"
+            class="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-border bg-background px-3 text-sm font-medium hover:bg-secondary"
+          >
+            <Download class="h-4 w-4" />
+            下载音频
+          </a>
+        </div>
+        <audio :src="b.url" controls preload="metadata" class="w-full">
+          当前浏览器不支持音频播放。
+        </audio>
+      </template>
       <template v-else-if="b.type === 'video'">
         <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
           <div>

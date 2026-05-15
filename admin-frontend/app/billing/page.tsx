@@ -26,6 +26,13 @@ function formatTime(value?: string | null) {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
 }
 
+function billingUnit(log: BillingUsageLog) {
+  if (log.billingUnit === "PER_CALL") {
+    return `${number(log.billableUnits)} 次 x ${money(log.unitPrice)}`
+  }
+  return "Token / 1M"
+}
+
 export default function BillingPage() {
   const [overview, setOverview] = useState<BillingOverview | null>(null)
   const [logs, setLogs] = useState<BillingUsageLog[]>([])
@@ -148,6 +155,7 @@ export default function BillingPage() {
                   <TableHead>用户</TableHead>
                   <TableHead>模型</TableHead>
                   <TableHead>输入/输出 Token</TableHead>
+                  <TableHead>计费单位</TableHead>
                   <TableHead>成本</TableHead>
                   <TableHead>积分</TableHead>
                   <TableHead>时间</TableHead>
@@ -167,6 +175,7 @@ export default function BillingPage() {
                       </div>
                     </TableCell>
                     <TableCell>{number(log.promptTokens)} / {number(log.completionTokens)}</TableCell>
+                    <TableCell>{billingUnit(log)}</TableCell>
                     <TableCell>{money(log.costAmount)}</TableCell>
                     <TableCell>{number(log.chargedCredits)}</TableCell>
                     <TableCell>{formatTime(log.createdAt)}</TableCell>
@@ -174,7 +183,7 @@ export default function BillingPage() {
                 ))}
                 {!loading && logs.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="h-24 text-center text-muted-foreground">
+                    <TableCell colSpan={8} className="h-24 text-center text-muted-foreground">
                       暂无计费日志
                     </TableCell>
                   </TableRow>
