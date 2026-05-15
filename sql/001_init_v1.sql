@@ -299,4 +299,3 @@ VALUES
   ('copywriting', 'Copywriting', 1, 'ACTIVE'),
   ('agent', '智能体', 2, 'ACTIVE')
 ON DUPLICATE KEY UPDATE category_name = VALUES(category_name), status = VALUES(status);
-

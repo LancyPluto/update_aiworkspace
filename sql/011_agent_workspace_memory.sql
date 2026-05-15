@@ -41,4 +41,3 @@ CREATE TABLE IF NOT EXISTS agent_workspace_memory_items (
   KEY idx_agent_workspace_memory_user (user_id, id),
   KEY idx_agent_workspace_memory_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-

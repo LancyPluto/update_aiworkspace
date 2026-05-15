@@ -21,4 +21,3 @@ CREATE TABLE IF NOT EXISTS agent_model_configs (
   KEY idx_agent_model_configs_enabled (enabled, is_deleted, id),
   KEY idx_agent_model_configs_default (is_default, is_deleted, id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-

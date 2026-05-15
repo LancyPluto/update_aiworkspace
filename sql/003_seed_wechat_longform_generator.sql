@@ -252,4 +252,3 @@ JOIN tool_prompt_versions v ON v.prompt_id = p.id AND v.version_no = 'v1'
 SET p.active_version_id = v.id
 WHERE t.tool_code = 'wechat_longform_generator'
   AND p.prompt_code = 'default';
-
