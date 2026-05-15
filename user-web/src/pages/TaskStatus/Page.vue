@@ -28,6 +28,24 @@ const digitalHumanStages = computed(() => [
   { label: "字幕整理与结果输出", progress: 96 },
 ])
 
+const enterpriseDiagnosisStages = computed(() => [
+  { label: "整理企业名称", progress: 12 },
+  { label: "准备诊断提示词", progress: 28 },
+  { label: "联网检索与分析", progress: 55 },
+  { label: "生成诊断报告", progress: 86 },
+  { label: "保存报告结果", progress: 94 },
+])
+
+const visibleStages = computed(() => {
+  if (statusData.value?.toolCode === "enterprise_diagnosis_agent") {
+    return enterpriseDiagnosisStages.value
+  }
+  if (statusData.value?.toolCode === "digital_human_agent") {
+    return digitalHumanStages.value
+  }
+  return []
+})
+
 function stageState(stageProgress: number): "done" | "current" | "pending" {
   const progress = statusData.value?.progress ?? 0
   if (progress >= stageProgress) return "done"
@@ -213,9 +231,9 @@ onUnmounted(() => {
             状态：{{ statusData.status }}
           </div>
 
-          <div v-if="!isTerminal(statusData.status)" class="mt-5 grid gap-2 sm:grid-cols-5">
+          <div v-if="!isTerminal(statusData.status) && visibleStages.length > 0" class="mt-5 grid gap-2 sm:grid-cols-5">
             <div
-              v-for="stage in digitalHumanStages"
+              v-for="stage in visibleStages"
               :key="stage.label"
               class="rounded-lg border px-3 py-2 text-xs"
               :class="

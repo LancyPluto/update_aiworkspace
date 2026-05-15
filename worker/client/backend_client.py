@@ -38,6 +38,14 @@ class BackendClient:
         )
         return self._parse_response(response)
 
+    def get_agent_model_config(self) -> dict[str, Any]:
+        response = self._request(
+            "GET",
+            "/api/internal/v1/agent/model-config",
+            timeout=self.timeout,
+        )
+        return self._parse_response(response)
+
     def mark_processing(
         self,
         task_id: int,

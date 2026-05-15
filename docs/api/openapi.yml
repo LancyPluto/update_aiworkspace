@@ -1326,6 +1326,10 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
+    internalApiToken:
+      type: apiKey
+      in: header
+      name: X-Internal-Signature
 
   parameters:
     PageNo:
@@ -1446,6 +1450,19 @@ components:
           type: string
           nullable: true
           description: 当前实现使用 traceId；旧规划中的 requestId 视为同类追踪字段。
+
+    PageBase:
+      type: object
+      properties:
+        total:
+          type: integer
+          format: int64
+        pageNo:
+          type: integer
+        pageSize:
+          type: integer
+        hasNext:
+          type: boolean
 
     ErrorApiResponse:
       allOf:
@@ -1869,6 +1886,14 @@ components:
           type: string
           nullable: true
           description: 前端幂等请求 ID，对应规划里的 clientRequestId。
+
+    RegenerateTaskRequest:
+      type: object
+      properties:
+        params:
+          type: object
+          additionalProperties: true
+          description: 重新生成时覆盖原任务参数；为空则沿用原参数。
 
     TaskStatusApiResponse:
       allOf:

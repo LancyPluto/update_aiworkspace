@@ -68,18 +68,22 @@ class TextTaskHandler:
             context = self._normalize_execution_context(
                 message.get("__executionContext") or self.backend_client.get_execution_context(task_id)
             )
-            self.backend_client.mark_processing(task_id)
+            self._report_progress(context, task_id, 12, "任务已开始，正在整理输入参数")
 
             system_prompt, user_prompt = self._build_model_prompts(context)
+            self._report_progress(context, task_id, 28, "已生成企业诊断提示词，正在准备调用管理端大模型")
             system_prompt = apply_output_discipline(system_prompt)
 
+            self._report_progress(context, task_id, 55, "正在调用管理端配置的大模型联网检索企业公开信息并分析经营情况")
             generated_text = self.model_client.generate(
                 user_prompt,
                 system_prompt=system_prompt,
                 model_name=context.get("modelName"),
             )
 
+            self._report_progress(context, task_id, 86, "企业诊断报告已生成，正在整理报告结构")
             success_payload = build_success_payload(context, generated_text)
+            self._report_progress(context, task_id, 94, "正在保存企业诊断报告，准备生成结果页")
             self.backend_client.mark_success(task_id, success_payload)
             LOGGER.info("task %s completed successfully", task_id)
             return {"status": "SUCCESS", "taskId": task_id}
@@ -189,6 +193,17 @@ class TextTaskHandler:
         normalized.setdefault("modelProviderCode", settings.model_provider)
         normalized.setdefault("modelName", self.model_client.default_model_name)
         return normalized
+
+    def _report_progress(self, context: dict[str, Any], task_id: int, progress: int, message: str) -> None:
+        if context.get("toolCode") == "enterprise_diagnosis_agent":
+            self.backend_client.mark_processing(
+                task_id,
+                progress=progress,
+                progress_message=message,
+            )
+            return
+        if progress == 12:
+            self.backend_client.mark_processing(task_id)
 
     def _mark_failed(self, task_id: int, *, error_code: str, error_message: str) -> dict[str, Any]:
         LOGGER.exception("task %s failed: %s", task_id, error_message)

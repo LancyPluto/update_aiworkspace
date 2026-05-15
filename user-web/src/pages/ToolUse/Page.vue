@@ -40,9 +40,7 @@ function sanitizeParams(fields: ToolField[], values: Record<string, unknown>) {
       continue
     }
 
-    if (normalizedValue != null && normalizedValue !== "") {
-      params[field.fieldKey] = normalizedValue
-    }
+    params[field.fieldKey] = normalizedValue ?? ""
   }
 
   return { params, missingFields }

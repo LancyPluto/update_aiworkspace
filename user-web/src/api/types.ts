@@ -190,6 +190,7 @@ export interface CreateTaskResponse {
 export interface TaskStatusPayload {
   taskId: number
   taskNo: string
+  toolCode?: string
   status: TaskStatus
   progress?: number
   progressMessage?: string

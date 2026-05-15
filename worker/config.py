@@ -40,6 +40,19 @@ class Settings:
     siliconflow_video_timeout_seconds: int = int(
         os.getenv('SILICONFLOW_VIDEO_TIMEOUT_SECONDS', '600')
     )
+    digital_human_video_provider: str = os.getenv('DIGITAL_HUMAN_VIDEO_PROVIDER', 'siliconflow')
+    skywork_base_url: str = os.getenv('SKYWORK_BASE_URL', 'https://api-tools.skywork.ai/theme-gateway')
+    skywork_api_key: str = os.getenv('SKYWORK_API_KEY', '')
+    skywork_video_model: str = os.getenv('SKYWORK_VIDEO_MODEL', 'seedance/seedance-2.0')
+    skywork_video_endpoint: str = os.getenv('SKYWORK_VIDEO_ENDPOINT', '/api/sse/video/create')
+    skywork_video_timeout_seconds: int = int(os.getenv('SKYWORK_VIDEO_TIMEOUT_SECONDS', '900'))
+    generated_media_dir: str = os.getenv('GENERATED_MEDIA_DIR', '/data/generated-media')
+    generated_media_public_base_url: str = os.getenv(
+        'GENERATED_MEDIA_PUBLIC_BASE_URL',
+        '/generated',
+    )
+    ffmpeg_binary: str = os.getenv('FFMPEG_BINARY', 'ffmpeg')
+    ffprobe_binary: str = os.getenv('FFPROBE_BINARY', 'ffprobe')
 
 
 settings = Settings()
