@@ -113,16 +113,7 @@ onMounted(async () => {
           </li>
         </ul>
 
-        <p class="px-3 pt-6 pb-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">管理</p>
-        <div
-          class="flex items-center justify-between rounded-md px-3 py-2 text-sm text-muted-foreground opacity-70 cursor-not-allowed"
-        >
-          <span class="flex items-center gap-3">
-            <ShieldCheck class="h-4 w-4" />
-            进入管理后台
-          </span>
-          <ChevronRight class="h-4 w-4" />
-        </div>
+
       </nav>
 
       <div class="border-t border-border p-4">

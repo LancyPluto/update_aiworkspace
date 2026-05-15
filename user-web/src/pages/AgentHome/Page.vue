@@ -19,7 +19,7 @@
     X,
   } from "lucide-vue-next"
   import AppShell from "@/components/AppShell.vue"
-  import WorkspaceMemoryPanel from "./WorkspaceMemoryPanel.vue"
+  {/* import WorkspaceMemoryPanel from "./WorkspaceMemoryPanel.vue" */}
   import RunTimeline from "./RunTimeline.vue"
   import ChatMessage from "./ChatMessage.vue"
   import { useAuthStore } from "@/store/authStore"
