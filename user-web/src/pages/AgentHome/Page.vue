@@ -12,7 +12,6 @@ import {
   Send,
   Sparkles,
   Store,
-  Trash2,
   Upload,
   X,
 } from "lucide-vue-next"
@@ -24,13 +23,13 @@ import {
   ApiBusinessError,
   confirmAgentTool,
   createAgentSession,
-  deleteAgentSession,
   fetchAgentMessages,
   fetchAgentFiles,
   fetchAgentRunEvents,
   fetchAgentSessions,
   fetchAgentWorkspaces,
   sendAgentMessage,
+  streamAgentRunEvents,
   uploadAgentFile,
 } from "@/api"
 import type { AgentFile, AgentMessage, AgentRunEvent, AgentSession, AgentWorkspace } from "@/api/types"
@@ -66,7 +65,6 @@ const fileInputRef = ref<HTMLInputElement | null>(null)
 /** Agent 页内「会话列表」侧栏：不随断点自动隐藏，仅手动切换 */
 const AGENT_SESSION_SIDEBAR_KEY = "ai_tool_market_agent_session_sidebar_open"
 const sessionSidebarOpen = ref(true)
-const deletingSessionId = ref<number | null>(null)
 
 function toggleSessionSidebar() {
   sessionSidebarOpen.value = !sessionSidebarOpen.value
@@ -158,40 +156,6 @@ async function startSession(title = "新的 Agent 会话") {
   return session
 }
 
-async function removeSession(session: AgentSession, event: MouseEvent) {
-  event.stopPropagation()
-  if (!auth.token || deletingSessionId.value != null) return
-  if (session.id === activeSessionId.value && hasActiveRun.value) {
-    agentError.value = "当前会话 Agent 仍在运行，请稍后再删除。"
-    return
-  }
-  if (!confirm(`确定删除「${session.title}」？`)) return
-  deletingSessionId.value = session.id
-  agentError.value = null
-  try {
-    await deleteAgentSession(session.id, { token: auth.token })
-    const wasActive = activeSessionId.value === session.id
-    sessions.value = sessions.value.filter((item) => item.id !== session.id)
-    if (wasActive) {
-      stopRunUpdates()
-      activeSessionId.value = null
-      messages.value = []
-      files.value = []
-      events.value = []
-      activeRunId.value = null
-      runConnectionStatus.value = "idle"
-      draftAssistantContent.value = ""
-      confirmationError.value = null
-      const next = sessions.value[0]
-      if (next) await selectSession(next.id)
-    }
-  } catch (error) {
-    agentError.value = formatAgentError(error)
-  } finally {
-    deletingSessionId.value = null
-  }
-}
-
 async function loadFiles(sessionId = activeSessionId.value) {
   if (!auth.token || !sessionId) return
   const res = await fetchAgentFiles(sessionId, { token: auth.token })
@@ -252,11 +216,8 @@ async function submitMessage(content = input.value) {
     )
     activeRunId.value = res.runId
     runConnectionStatus.value = "streaming"
-    // 改为一次性接收：先同步历史，然后轮询直到 Run 完成，最后一次性拉取所有事件
     await pollRun(res.runId, true)
-    if (!events.value.some(isTerminalRunEvent)) {
-      await waitForRunComplete(res.runId)
-    }
+    if (!events.value.some(isTerminalRunEvent)) startRunStream(res.runId)
   } catch (error) {
     agentError.value = formatAgentError(error)
   } finally {
@@ -313,57 +274,44 @@ async function pollRun(runId: number, reset = false) {
   }
 }
 
-/**
- * 等待 Run 完成并一次性拉取所有事件（替代 SSE 流式接收）
- */
-async function waitForRunComplete(runId: number) {
+function startPolling(runId: number) {
   stopRunUpdates()
-  runConnectionStatus.value = "streaming"
-
-  // 轮询间隔
-  const POLL_INTERVAL = 800
-  const MAX_WAIT_TIME = 5 * 60 * 1000 // 最大等待 5 分钟
-  const startTime = Date.now()
-
-  try {
-    // 轮询直到 Run 完成或超时
-    while (Date.now() - startTime < MAX_WAIT_TIME) {
-      const afterEventId = events.value.at(-1)?.id
-      const res = await fetchAgentRunEvents(runId, {
-        token: auth.token,
-        afterEventId,
-      })
-
-      // 追加新事件
-      if (res.list.length > 0) {
-        res.list.forEach(appendRunEvent)
-        await scrollBottom()
-      }
-
-      // 检查是否收到终止事件
-      if (res.list.some(isTerminalRunEvent) || events.value.some(isTerminalRunEvent)) {
-        break
-      }
-
-      // 等待下一轮询
-      await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL))
-    }
-
-    // Run 完成后，确保消息列表已更新
-    stopRunUpdates()
-    settleRunStatus()
-    await refreshMessages()
-    draftAssistantContent.value = ""
-  } catch (error) {
-    runConnectionStatus.value = "failed"
-    agentError.value = formatAgentError(error)
-    stopRunUpdates()
-  }
+  pollingRunId.value = runId
+  runConnectionStatus.value = "polling"
+  pollTimer.value = window.setInterval(() => {
+    if (typeof document !== "undefined" && document.hidden) return
+    void pollRun(runId).catch((error) => {
+      agentError.value = formatAgentError(error)
+      runConnectionStatus.value = "failed"
+      stopRunUpdates()
+    })
+  }, 1600)
 }
 
-/** 保留旧函数签名但改为使用 waitForRunComplete（用于工具确认后恢复执行） */
 function startRunStream(runId: number) {
-  void waitForRunComplete(runId)
+  stopRunUpdates()
+  runConnectionStatus.value = "streaming"
+  const controller = new AbortController()
+  streamController.value = controller
+  streamAgentRunEvents(runId, {
+    token: auth.token,
+    afterEventId: events.value.at(-1)?.id,
+    signal: controller.signal,
+    onEvent: async (event) => {
+      appendRunEvent(event)
+      if (isTerminalRunEvent(event)) {
+        draftAssistantContent.value = ""
+        await refreshMessages()
+        stopRunUpdates()
+        settleRunStatus()
+      }
+      await scrollBottom()
+    },
+  }).catch(() => {
+    if (!controller.signal.aborted) {
+      startPolling(runId)
+    }
+  })
 }
 
 function stopRunUpdates() {
@@ -529,27 +477,17 @@ onUnmounted(() => {
           新会话
         </button>
         <div class="session-list">
-          <div
+          <button
             v-for="session in sessions"
             :key="session.id"
-            class="session-row"
+            type="button"
+            class="session-item"
             :class="{ active: session.id === activeSessionId }"
+            @click="selectSession(session.id)"
           >
-            <button type="button" class="session-item" @click="selectSession(session.id)">
-              <Bot class="h-4 w-4 shrink-0" />
-              <span>{{ session.title }}</span>
-            </button>
-            <button
-              type="button"
-              class="session-delete"
-              :disabled="deletingSessionId === session.id"
-              :aria-label="`删除会话：${session.title}`"
-              @click="removeSession(session, $event)"
-            >
-              <Loader2 v-if="deletingSessionId === session.id" class="h-4 w-4 animate-spin" aria-hidden="true" />
-              <Trash2 v-else class="h-4 w-4" aria-hidden="true" />
-            </button>
-          </div>
+            <Bot class="h-4 w-4" />
+            <span>{{ session.title }}</span>
+          </button>
         </div>
       </aside>
 
@@ -717,13 +655,6 @@ onUnmounted(() => {
   padding: 14px;
   min-width: 0;
   transition: opacity 0.15s ease, padding 0.15s ease;
-
-  /* 👇 下面这 4 行是新加的：左侧会话列表滚动 */
-  height: calc(100vh - 64px);
-  overflow-y: auto;
-  overflow-x: hidden;
-  display: flex;
-  flex-direction: column;
 }
 
 .agent-sidebar--collapsed {
@@ -738,7 +669,6 @@ onUnmounted(() => {
 
 .new-chat,
 .session-item,
-.session-delete,
 .composer button,
 .primary-btn,
 .ghost-btn {
@@ -763,29 +693,13 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  flex: 1;        /* 让列表占满剩余高度 */
-  min-height: 0;  /* 必须加，否则滚动不生效 */
-}
-
-.session-row {
-  display: flex;
-  align-items: stretch;
-  gap: 2px;
-  border-radius: 8px;
-  min-width: 0;
-}
-
-.session-row.active,
-.session-row:hover {
-  background: var(--secondary);
 }
 
 .session-item {
-  flex: 1;
-  min-width: 0;
+  width: 100%;
   border: 0;
   background: transparent;
-  padding: 10px 6px 10px 10px;
+  padding: 10px;
   color: var(--foreground);
   font-size: 13px;
   text-align: left;
@@ -798,31 +712,15 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 
-.session-delete {
-  flex-shrink: 0;
-  width: 36px;
-  border: 0;
-  background: transparent;
-  padding: 0;
-  color: var(--muted-foreground);
-  cursor: pointer;
-}
-
-.session-delete:hover:not(:disabled) {
-  color: var(--destructive);
-}
-
-.session-delete:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
+.session-item.active,
+.session-item:hover {
+  background: var(--secondary);
 }
 
 .chat-pane {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto auto auto;
   min-width: 0;
-  min-height: 0;
-  height: 100%;
 }
 
 .session-sidebar-toggle-row {
@@ -852,14 +750,8 @@ onUnmounted(() => {
 }
 
 .message-scroll {
-  overflow-y: auto; /* 滚动在这里 */
-  height: 100%;
+  overflow-y: auto;
   padding: 28px clamp(18px, 4vw, 64px);
-
-  /* 关键代码 ↓ */
-  max-height: calc(100vh - 220px);
-  flex: 1;
-  min-height: 0;
 }
 
 .empty-state {
@@ -1206,19 +1098,5 @@ onUnmounted(() => {
   .run-status-card {
     max-width: 100%;
   }
-
-  /* 左侧边栏滚动条样式：默认隐藏，hover/滚动时显示 */
-.agent-sidebar::-webkit-scrollbar {
-  width: 4px;
-}
-.agent-sidebar::-webkit-scrollbar-thumb {
-  background: var(--muted-foreground);
-  border-radius: 4px;
-  opacity: 0;
-  transition: opacity 0.2s;
-}
-.agent-sidebar:hover::-webkit-scrollbar-thumb {
-  opacity: 1;
-}
 }
 </style>

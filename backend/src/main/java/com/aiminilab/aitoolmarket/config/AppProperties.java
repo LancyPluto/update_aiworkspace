@@ -12,6 +12,7 @@ public class AppProperties {
     private String jwtSecret;
     private String internalApiToken;
     private String aiTaskQueue;
+    private String generatedMediaDir = "data/generated-media";
     private Agent agent = new Agent();
     private Auth auth = new Auth();
     private Cors cors = new Cors();
@@ -46,6 +47,16 @@ public class AppProperties {
 
     public void setAiTaskQueue(String aiTaskQueue) {
         this.aiTaskQueue = aiTaskQueue;
+    }
+
+    public String getGeneratedMediaDir() {
+        return generatedMediaDir;
+    }
+
+    public void setGeneratedMediaDir(String generatedMediaDir) {
+        this.generatedMediaDir = generatedMediaDir == null || generatedMediaDir.isBlank()
+                ? "data/generated-media"
+                : generatedMediaDir;
     }
 
     public Agent getAgent() {
@@ -116,11 +127,11 @@ public class AppProperties {
 
     public static class Sms {
         private String provider = "local";
-        private String bmobApplicationId = "77eb212adf1cce7dac5ca58186fedc30";
+        private String bmobApplicationId = "";
         private String bmobRestApiKey;
         private String bmobBaseUrl = "https://api.bmob.cn";
         private String bmobTemplate;
-        private String ihuyiApiId = "C78787480";
+        private String ihuyiApiId = "";
         private String ihuyiApiKey;
         private String ihuyiBaseUrl = "https://api.ihuyi.com/sms/Submit.json";
         private String ihuyiTemplateId = "1";

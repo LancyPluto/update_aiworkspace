@@ -68,15 +68,17 @@ class TextTaskHandler:
 
         try:
             context = self._normalize_execution_context(
-                self.backend_client.get_execution_context(task_id, trace_id=trace_id)
+                message.get("__executionContext") or self.backend_client.get_execution_context(task_id, trace_id=trace_id)
             )
             trace_id = trace_id or context.get("traceId")
             context["traceId"] = trace_id
-            self.backend_client.mark_processing(task_id, trace_id=trace_id)
+            self._report_progress(context, task_id, 12, "任务已开始，正在整理输入参数", trace_id=trace_id)
 
             system_prompt, user_prompt = self._build_model_prompts(context)
+            self._report_progress(context, task_id, 28, "已生成企业诊断提示词，正在准备调用管理端大模型", trace_id=trace_id)
             system_prompt = apply_output_discipline(system_prompt)
 
+            self._report_progress(context, task_id, 55, "正在调用管理端配置的大模型联网检索企业公开信息并分析经营情况", trace_id=trace_id)
             model_result = self._generate_model_result(
                 user_prompt,
                 system_prompt=system_prompt,
@@ -88,8 +90,10 @@ class TextTaskHandler:
                 max_tokens=context.get("modelMaxTokens"),
             )
 
+            self._report_progress(context, task_id, 86, "企业诊断报告已生成，正在整理报告结构", trace_id=trace_id)
             success_payload = build_success_payload(context, model_result.content)
             self._attach_token_usage(success_payload, model_result)
+            self._report_progress(context, task_id, 94, "正在保存企业诊断报告，准备生成结果页", trace_id=trace_id)
             self.backend_client.mark_success(task_id, success_payload, trace_id=trace_id)
             LOGGER.info("task %s completed successfully traceId=%s", task_id, trace_id or "-")
             return {"status": "SUCCESS", "taskId": task_id, "traceId": trace_id}
@@ -251,6 +255,25 @@ class TextTaskHandler:
             trace_id=trace_id,
         )
         return {"status": "FAILED", "taskId": task_id, "errorCode": error_code, "traceId": trace_id}
+
+    def _report_progress(
+        self,
+        context: dict[str, Any],
+        task_id: int,
+        progress: int,
+        message: str,
+        trace_id: str | None = None,
+    ) -> None:
+        if context.get("toolCode") == "enterprise_diagnosis_agent":
+            self.backend_client.mark_processing(
+                task_id,
+                progress=progress,
+                progress_message=message,
+                trace_id=trace_id,
+            )
+            return
+        if progress == 12:
+            self.backend_client.mark_processing(task_id, trace_id=trace_id)
 
     @staticmethod
     def _build_default_prompt(params: dict[str, Any]) -> str:

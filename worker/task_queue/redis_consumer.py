@@ -4,7 +4,9 @@ from typing import Any
 
 import redis
 
+from client.backend_client import BackendClient
 from config import settings
+from handlers.digital_human_video_handler import DigitalHumanVideoHandler
 from handlers.text_task_handler import TextTaskHandler
 
 
@@ -12,9 +14,9 @@ LOGGER = logging.getLogger(__name__)
 
 
 class RedisConsumer:
-    def __init__(self, handler: TextTaskHandler | None = None) -> None:
+    def __init__(self, handler: Any | None = None) -> None:
         self.queue_name = settings.ai_task_queue
-        self.handler = handler or TextTaskHandler()
+        self.handler = handler or TaskHandlerRouter()
         self.client = redis.Redis(
             host=settings.redis_host,
             port=settings.redis_port,
@@ -53,3 +55,22 @@ class RedisConsumer:
             LOGGER.info("task handled result=%s", result)
         except Exception:
             LOGGER.exception("task handling crashed, message=%s", message)
+
+
+class TaskHandlerRouter:
+    def __init__(
+        self,
+        text_handler: TextTaskHandler | None = None,
+        digital_human_handler: DigitalHumanVideoHandler | None = None,
+        backend_client: BackendClient | None = None,
+    ) -> None:
+        self.text_handler = text_handler or TextTaskHandler()
+        self.digital_human_handler = digital_human_handler or DigitalHumanVideoHandler()
+        self.backend_client = backend_client or BackendClient()
+
+    def handle(self, message: dict[str, Any]) -> dict[str, Any]:
+        context = self.backend_client.get_execution_context(int(message["taskId"]))
+        routed_message = {**message, "__executionContext": context}
+        if context.get("toolCode") == "digital_human_agent":
+            return self.digital_human_handler.handle(routed_message)
+        return self.text_handler.handle(routed_message)

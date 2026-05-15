@@ -152,7 +152,7 @@ export interface ToolField {
   fieldName: string
   fieldType: "text" | "textarea" | "select" | "number"
   placeholder?: string | null
-  options?: ToolFieldOption[] | null
+  options?: Array<ToolFieldOption | string> | null
   required: boolean
   sortOrder: number
 }
@@ -191,6 +191,7 @@ export interface CreateTaskResponse {
 export interface TaskStatusPayload {
   taskId: number
   taskNo: string
+  toolCode?: string
   status: TaskStatus
   progress?: number
   progressMessage?: string

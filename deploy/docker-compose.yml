@@ -69,11 +69,14 @@ services:
       AGENT_MAX_MESSAGES_PER_MINUTE: ${AGENT_MAX_MESSAGES_PER_MINUTE:-10}
       AGENT_MAX_RUNS_PER_HOUR: ${AGENT_MAX_RUNS_PER_HOUR:-30}
       AGENT_DEFAULT_CREDIT_BUDGET: ${AGENT_DEFAULT_CREDIT_BUDGET:-20}
+      GENERATED_MEDIA_DIR: /data/generated-media
     ports:
       - "${BACKEND_PORT:-8080}:8080"
     volumes:
       - ../backend:/app
+      - ../docs:/docs:ro
       - maven_cache:/root/.m2
+      - generated_media:/data/generated-media
     command: mvn spring-boot:run
 
   admin-frontend:
@@ -109,7 +112,7 @@ services:
     command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5173"
 
   worker:
-    image: python:3.12-slim
+    image: python:3.12-slim-bookworm
     container_name: ai-supermarket-worker
     working_dir: /app
     restart: unless-stopped
@@ -126,8 +129,11 @@ services:
       AI_TASK_QUEUE: ${AI_TASK_QUEUE:-ai:task:queue}
       BACKEND_INTERNAL_BASE_URL: http://backend:8080
       INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-local-internal-token}
+      GENERATED_MEDIA_DIR: /data/generated-media
+      GENERATED_MEDIA_PUBLIC_BASE_URL: /generated
     volumes:
       - ../worker:/app
+      - generated_media:/data/generated-media
     command: sh -c "pip install --no-cache-dir -r requirements.txt && python main.py"
 
   agent-service:
@@ -146,7 +152,7 @@ services:
       BACKEND_INTERNAL_BASE_URL: http://backend:8080
       INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-local-internal-token}
       AGENT_VERIFY_INTERNAL_SIGNATURE: ${AGENT_VERIFY_INTERNAL_SIGNATURE:-false}
-      AGENT_EXECUTION_MODE: ${AGENT_EXECUTION_MODE:-sync}
+      AGENT_EXECUTION_MODE: ${AGENT_EXECUTION_MODE:-background}
       AGENT_MAX_TOOL_CALLS: ${AGENT_MAX_TOOL_CALLS:-3}
       AGENT_MAX_MODEL_CALLS: ${AGENT_MAX_MODEL_CALLS:-5}
       AGENT_MODEL_CALL_COST: ${AGENT_MODEL_CALL_COST:-1}
@@ -161,3 +167,4 @@ volumes:
   mysql_data:
   redis_data:
   maven_cache:
+  generated_media:
