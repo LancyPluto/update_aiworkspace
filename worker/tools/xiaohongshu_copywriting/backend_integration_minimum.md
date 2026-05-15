@@ -1,5 +1,8 @@
 # 小红书工具最小联调清单
 
+> 这份文档只保留小红书工具的最小联调提示。
+> Worker 与后端的统一字段契约请以 `worker/WORKER_BACKEND_FINAL_CONTRACT.md` 为准。
+
 ## 后端最少需要给到的能力
 
 - 能创建 `xiaohongshu_copywriting` 任务

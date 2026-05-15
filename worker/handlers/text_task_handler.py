@@ -63,13 +63,16 @@ class TextTaskHandler:
 
     def handle(self, message: dict[str, Any]) -> dict[str, Any]:
         task_id = int(message["taskId"])
-        LOGGER.info("start processing task %s", task_id)
+        trace_id = message.get("traceId")
+        LOGGER.info("start processing task %s traceId=%s", task_id, trace_id or "-")
 
         try:
             context = self._normalize_execution_context(
-                self.backend_client.get_execution_context(task_id)
+                self.backend_client.get_execution_context(task_id, trace_id=trace_id)
             )
-            self.backend_client.mark_processing(task_id)
+            trace_id = trace_id or context.get("traceId")
+            context["traceId"] = trace_id
+            self.backend_client.mark_processing(task_id, trace_id=trace_id)
 
             system_prompt, user_prompt = self._build_model_prompts(context)
             system_prompt = apply_output_discipline(system_prompt)
@@ -87,38 +90,43 @@ class TextTaskHandler:
 
             success_payload = build_success_payload(context, model_result.content)
             self._attach_token_usage(success_payload, model_result)
-            self.backend_client.mark_success(task_id, success_payload)
-            LOGGER.info("task %s completed successfully", task_id)
-            return {"status": "SUCCESS", "taskId": task_id}
+            self.backend_client.mark_success(task_id, success_payload, trace_id=trace_id)
+            LOGGER.info("task %s completed successfully traceId=%s", task_id, trace_id or "-")
+            return {"status": "SUCCESS", "taskId": task_id, "traceId": trace_id}
         except PromptRenderError as exc:
             return self._mark_failed(
                 task_id,
                 error_code="PROMPT_VARIABLE_MISSING",
                 error_message=str(exc),
+                trace_id=trace_id,
             )
         except ModelTimeoutError as exc:
             return self._mark_failed(
                 task_id,
                 error_code="MODEL_TIMEOUT",
                 error_message=str(exc),
+                trace_id=trace_id,
             )
         except ModelOutputEmptyError as exc:
             return self._mark_failed(
                 task_id,
                 error_code="MODEL_OUTPUT_EMPTY",
                 error_message=str(exc),
+                trace_id=trace_id,
             )
         except ToolResultBuildError as exc:
             return self._mark_failed(
                 task_id,
                 error_code="MODEL_OUTPUT_EMPTY",
                 error_message=str(exc),
+                trace_id=trace_id,
             )
         except ModelClientError as exc:
             return self._mark_failed(
                 task_id,
                 error_code="MODEL_CALL_FAILED",
                 error_message=str(exc),
+                trace_id=trace_id,
             )
         except BackendClientError:
             raise
@@ -127,6 +135,7 @@ class TextTaskHandler:
                 task_id,
                 error_code="WORKER_INTERNAL_ERROR",
                 error_message=str(exc),
+                trace_id=trace_id,
             )
 
     def _build_model_prompts(self, context: dict[str, Any]) -> tuple[str, str]:
@@ -231,16 +240,17 @@ class TextTaskHandler:
         if result.completion_tokens > 0:
             payload["completionTokens"] = result.completion_tokens
 
-    def _mark_failed(self, task_id: int, *, error_code: str, error_message: str) -> dict[str, Any]:
-        LOGGER.exception("task %s failed: %s", task_id, error_message)
+    def _mark_failed(self, task_id: int, *, error_code: str, error_message: str, trace_id: str | None = None) -> dict[str, Any]:
+        LOGGER.exception("task %s failed traceId=%s errorCode=%s: %s", task_id, trace_id or "-", error_code, error_message)
         self.backend_client.mark_failed(
             task_id,
             {
                 "errorCode": error_code,
                 "errorMessage": error_message,
             },
+            trace_id=trace_id,
         )
-        return {"status": "FAILED", "taskId": task_id, "errorCode": error_code}
+        return {"status": "FAILED", "taskId": task_id, "errorCode": error_code, "traceId": trace_id}
 
     @staticmethod
     def _build_default_prompt(params: dict[str, Any]) -> str:

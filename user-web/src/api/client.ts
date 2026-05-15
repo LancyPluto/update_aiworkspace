@@ -1,5 +1,6 @@
 import type { ApiErrorCode, ApiResponse } from "./types"
-import { getSessionBearerJwt } from "./sessionBearer"
+import { SESSION_TOKEN_STORAGE_KEY } from "@/constants/authStorage"
+import { clearSessionBearerJwt, getSessionBearerJwt } from "./sessionBearer"
 
 /**
  * 后端 Origin，不含路径。例如 http://localhost:8080
@@ -12,13 +13,17 @@ export function getApiOrigin(): string {
 
 export class ApiBusinessError extends Error {
   readonly code: ApiErrorCode
-  readonly requestId?: string
+  readonly traceId?: string
 
-  constructor(code: ApiErrorCode, message: string, requestId?: string) {
+  constructor(code: ApiErrorCode, message: string, traceId?: string) {
     super(message)
     this.name = "ApiBusinessError"
     this.code = code
-    this.requestId = requestId
+    this.traceId = traceId
+  }
+
+  get requestId(): string | undefined {
+    return this.traceId
   }
 }
 
@@ -49,6 +54,23 @@ function buildUrl(path: string, query?: RequestOptions["query"]): string {
     }
   }
   return url.toString()
+}
+
+function redirectToLoginPage(): void {
+  if (typeof window === "undefined") return
+  const path = window.location.pathname
+  if (path === "/login" || path.endsWith("/login")) return
+  try {
+    localStorage.removeItem(SESSION_TOKEN_STORAGE_KEY)
+  } catch {
+    // ignore
+  }
+  clearSessionBearerJwt()
+  const full = `${window.location.pathname}${window.location.search}`
+  const base = import.meta.env.BASE_URL || "/"
+  const normalizedBase = base.endsWith("/") ? base.slice(0, -1) : base
+  const loginPath = (normalizedBase ? `${normalizedBase}/login` : "/login").replace(/\/+/g, "/")
+  window.location.assign(`${window.location.origin}${loginPath}?redirect=${encodeURIComponent(full)}`)
 }
 
 /**
@@ -87,15 +109,25 @@ export async function apiRequest<T>(
     signal: options?.signal,
   })
 
+  const rawText = await res.text()
   let json: ApiResponse<T>
   try {
-    json = (await res.json()) as ApiResponse<T>
+    json = (rawText ? JSON.parse(rawText) : {}) as ApiResponse<T>
   } catch {
+    if (res.status === 401) {
+      redirectToLoginPage()
+      throw new ApiBusinessError("UNAUTHORIZED", "登录已失效，请重新登录", undefined)
+    }
     throw new ApiBusinessError("SYSTEM_ERROR", `无效响应 (${res.status})`, undefined)
   }
 
+  if (res.status === 401 || json.code === "UNAUTHORIZED") {
+    redirectToLoginPage()
+    throw new ApiBusinessError(json.code ?? "UNAUTHORIZED", json.message ?? "登录已失效，请重新登录", json.requestId)
+  }
+
   if (json.code !== "SUCCESS") {
-    throw new ApiBusinessError(json.code, json.message ?? json.code, json.requestId)
+    throw new ApiBusinessError(json.code, json.message ?? json.code, json.traceId ?? json.requestId)
   }
 
   return json.data as T

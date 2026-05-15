@@ -34,6 +34,12 @@ export function createAgentSession(body: { title?: string }, options?: { token?:
   })
 }
 
+export function deleteAgentSession(sessionId: number, options?: { token?: string | null }) {
+  return apiRequest<void>("DELETE", `/api/v1/agent/sessions/${sessionId}`, {
+    token: options?.token,
+  })
+}
+
 export function fetchAgentMessages(sessionId: number, options?: { token?: string | null; signal?: AbortSignal }) {
   return apiRequest<PageResult<AgentMessage>>("GET", `/api/v1/agent/sessions/${sessionId}/messages`, {
     token: options?.token,
@@ -73,6 +79,12 @@ export function fetchAgentRunEvents(runId: number, options?: { token?: string | 
     token: options?.token,
     signal: options?.signal,
     query: { afterEventId: options?.afterEventId, pageSize: 100 },
+  })
+}
+
+export function cancelAgentRun(runId: number, options?: { token?: string | null }) {
+  return apiRequest<AgentRun>("POST", `/api/v1/agent/runs/${runId}/cancel`, {
+    token: options?.token,
   })
 }
 

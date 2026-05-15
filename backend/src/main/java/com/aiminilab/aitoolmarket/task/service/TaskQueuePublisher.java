@@ -28,9 +28,12 @@ public class TaskQueuePublisher {
         this.queueName = queueName;
     }
 
-    public boolean publish(Long taskId) {
+    public boolean publish(Long taskId, String payloadJson) {
         try {
-            String message = objectMapper.writeValueAsString(Map.of("taskId", taskId));
+            String message = payloadJson;
+            if (message == null || message.isBlank()) {
+                message = objectMapper.writeValueAsString(Map.of("taskId", taskId));
+            }
             redisTemplate.opsForList().rightPush(queueName, message);
             return true;
         } catch (Exception exception) {

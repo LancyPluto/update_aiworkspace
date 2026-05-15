@@ -2,6 +2,15 @@
 
 Python Worker for consuming Redis tasks, rendering prompts, calling AI models, and reporting results back to backend internal APIs.
 
+## Contract Source Of Truth
+
+Use `worker/WORKER_BACKEND_FINAL_CONTRACT.md` as the authoritative contract for:
+
+- Redis queue message fields
+- `execution-context` response fields
+- `processing / success / failed` callback payloads
+- error codes and field sources
+
 ## Directory Layout
 
 - `client/`: backend internal API calls and model API calls

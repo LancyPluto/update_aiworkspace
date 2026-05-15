@@ -3,38 +3,22 @@ from uuid import uuid4
 
 import pytest
 
-from app.config import Settings
 from app.core.event_types import (
+    INTENT_DETECTED,
     MEMORY_CANDIDATE_CREATED,
     MESSAGE_COMPLETED,
     MESSAGE_DELTA,
+    RUN_STARTED,
     SUBAGENT_COMPLETED,
     SUBAGENT_FAILED,
     SUBAGENT_STARTED,
+    TOOL_CONFIRMATION_REQUIRED,
+    TOOL_RECOMMENDATIONS,
+    TOOL_SELECTED,
     WORKSPACE_FILE_CREATED,
     WORKSPACE_FILE_READ,
 )
-from app.core.schemas import AgentFileChunkContext, AgentFileContext, RunContext, WorkspaceMemoryItem
-from app.runtime.langgraph_engine import LangGraphRuntimeEngine
-from app.runtime.router import RuntimeRouter
-
-
-def test_deep_agents_disabled_by_default():
-    assert Settings().agent_deep_agents_enabled is False
-
-
-def test_router_deep_agents_feature_flag_selects_preview_engine_only_when_enabled():
-    from app.runtime.deep_agents_engine import DeepAgentsRuntimeEngine
-
-    backend = object()
-    model = object()
-
-    disabled_router = RuntimeRouter(backend_client=backend, model_client=model, deep_agents_enabled=False)
-    enabled_router = RuntimeRouter(backend_client=backend, model_client=model, deep_agents_enabled=True)
-
-    assert isinstance(disabled_router.select_engine(message="plan", requested_runtime="deep_agents"), LangGraphRuntimeEngine)
-    assert isinstance(enabled_router.select_engine(message="plan", requested_runtime="deep_agents"), DeepAgentsRuntimeEngine)
-    assert isinstance(enabled_router.select_engine(message="hello"), LangGraphRuntimeEngine)
+from app.core.schemas import AgentFileChunkContext, AgentFileContext, RunContext, ToolDescriptor, ToolPreference, WorkspaceMemoryItem
 
 
 class FakeBackend:
@@ -64,27 +48,29 @@ class FakeBackend:
         return {"id": 31, "filename": filename, "contentType": content_type}
 
 
-@pytest.mark.asyncio
-async def test_deep_agents_engine_refuses_when_disabled():
-    from app.runtime.deep_agents_engine import DeepAgentsRuntimeEngine
+class FakeModel:
+    def __init__(self, response: str = ""):
+        self.response = response
 
-    backend = FakeBackend()
-    engine = DeepAgentsRuntimeEngine(backend, object(), deep_agents_enabled=False)
-    context = RunContext(runId=7, sessionId=2, userId=3, message="plan from files")
+    async def chat(self, messages):
+        return self.response
 
-    await engine.run(context)
+    @property
+    def chat_stream(self):
+        return None
 
-    assert backend.events == []
-    assert backend.failed_runs[0][1].errorCode == "DEEP_AGENTS_DISABLED"
+    @property
+    def model_name(self):
+        return "test-model"
 
 
 def test_deep_agents_engine_reports_missing_optional_dependency():
     from app.runtime.deep_agents_engine import DeepAgentsRuntimeEngine
 
-    engine = DeepAgentsRuntimeEngine(object(), object(), deep_agents_enabled=True, dependency_loader=lambda: None)
+    engine = DeepAgentsRuntimeEngine(object(), object(), dependency_loader=lambda: None)
 
     with pytest.raises(RuntimeError, match="deepagents package is not installed"):
-        engine.ensure_available()
+        engine._get_available_module()
 
 
 @pytest.mark.asyncio
@@ -93,22 +79,25 @@ async def test_deep_agents_engine_invokes_deep_agent_and_completes_run():
 
     backend = FakeBackend()
     module = FakeDeepAgentsModule(final_answer="Deep plan ready")
-    engine = DeepAgentsRuntimeEngine(backend, object(), deep_agents_enabled=True, dependency_loader=lambda: module)
+    engine = DeepAgentsRuntimeEngine(backend, FakeModel(), dependency_loader=lambda: module)
     context = RunContext(runId=11, sessionId=4, userId=5, message="plan a long task")
 
     await engine.run(context)
 
+    # RUN_STARTED emitted first
+    assert any(event.eventType == RUN_STARTED for _, event in backend.events)
     assert module.created_agents[0]["system_prompt"]
-    assert module.created_agents[0]["tools"] == []
     assert {subagent["name"] for subagent in module.created_agents[0]["subagents"]} >= {
         "researcher",
         "file-analyst",
         "tool-operator",
     }
     assert module.invocations[0]["messages"][-1] == {"role": "user", "content": "plan a long task"}
-    assert backend.events[0][1].eventType == MESSAGE_DELTA
-    assert backend.events[1][1].eventType == MESSAGE_COMPLETED
-    assert backend.events[1][1].eventText == "Deep plan ready"
+    # MESSAGE_DELTA and MESSAGE_COMPLETED emitted
+    delta_events = [event for _, event in backend.events if event.eventType == MESSAGE_DELTA]
+    assert len(delta_events) > 0
+    completed_events = [event for _, event in backend.events if event.eventType == MESSAGE_COMPLETED]
+    assert completed_events[0].eventText == "Deep plan ready"
     assert backend.completed_runs[0][0] == 11
     assert backend.completed_runs[0][1].finalAnswer == "Deep plan ready"
     assert backend.completed_runs[0][1].intent == "deep_agents"
@@ -121,29 +110,12 @@ async def test_deep_agents_engine_invokes_deep_agent_and_completes_run():
 
 
 @pytest.mark.asyncio
-async def test_deep_agents_engine_does_not_emit_backend_lifecycle_events():
-    from app.runtime.deep_agents_engine import DeepAgentsRuntimeEngine
-
-    backend = FakeBackend()
-    module = FakeDeepAgentsModule(final_answer="Deep plan ready")
-    engine = DeepAgentsRuntimeEngine(backend, object(), deep_agents_enabled=True, dependency_loader=lambda: module)
-
-    await engine.run(RunContext(runId=16, sessionId=4, userId=5, message="plan a long task"))
-
-    event_types = [event.eventType for _, event in backend.events]
-    assert "run.started" not in event_types
-    assert "run.completed" not in event_types
-    assert "run.failed" not in event_types
-    assert backend.completed_runs[0][0] == 16
-
-
-@pytest.mark.asyncio
 async def test_deep_agents_engine_writes_artifact_directive_and_emits_workspace_file_created():
     from app.runtime.deep_agents_engine import DeepAgentsRuntimeEngine
 
     backend = FakeBackend()
     module = FakeDeepAgentsModule(final_answer="[artifact:summary.md]\n# Summary\n\nShip the release notes.")
-    engine = DeepAgentsRuntimeEngine(backend, object(), deep_agents_enabled=True, dependency_loader=lambda: module)
+    engine = DeepAgentsRuntimeEngine(backend, FakeModel(), dependency_loader=lambda: module)
     context = RunContext(runId=15, sessionId=4, userId=5, message="write release notes")
 
     await engine.run(context)
@@ -175,7 +147,7 @@ async def test_deep_agents_engine_injects_workspace_memory_into_messages():
         )
     ]
     module = FakeDeepAgentsModule(final_answer="Deep plan ready")
-    engine = DeepAgentsRuntimeEngine(backend, object(), deep_agents_enabled=True, dependency_loader=lambda: module)
+    engine = DeepAgentsRuntimeEngine(backend, FakeModel(), dependency_loader=lambda: module)
     context = RunContext(runId=11, sessionId=4, userId=5, workspaceId=7, message="plan pricing rollout")
 
     await engine.run(context)
@@ -197,21 +169,14 @@ async def test_deep_agents_engine_passes_workspace_file_context_to_native_runtim
 
     backend = FakeBackend()
     module = FakeDeepAgentsModule(final_answer="Deep plan ready")
-    engine = DeepAgentsRuntimeEngine(backend, object(), deep_agents_enabled=True, dependency_loader=lambda: module)
+    engine = DeepAgentsRuntimeEngine(backend, FakeModel(), dependency_loader=lambda: module)
     context = RunContext(
         runId=21,
         sessionId=4,
         userId=5,
-        message="summarize the uploaded files",
-        agentFiles=[
-            AgentFileContext(
-                id=7,
-                originalFilename="C:\\Users\\alice\\Desktop\\product.txt",
-                status="READY",
-                extractedText="Pricing: Pro plan includes audit exports.",
-            )
-        ],
-        agentFileChunks=[
+            message="plan a long task using the uploaded files",
+            agentFiles=[],
+            agentFileChunks=[
             AgentFileChunkContext(
                 id=11,
                 fileId=7,
@@ -252,7 +217,7 @@ async def test_deep_agents_engine_skips_workspace_memory_without_workspace_id():
         )
     ]
     module = FakeDeepAgentsModule(final_answer="Deep plan ready")
-    engine = DeepAgentsRuntimeEngine(backend, object(), deep_agents_enabled=True, dependency_loader=lambda: module)
+    engine = DeepAgentsRuntimeEngine(backend, FakeModel(), dependency_loader=lambda: module)
     context = RunContext(runId=11, sessionId=4, userId=5, message="plan pricing rollout")
 
     await engine.run(context)
@@ -266,11 +231,10 @@ async def test_deep_agents_engine_fails_cleanly_when_model_is_not_supported():
 
     backend = FakeBackend()
     module = FakeDeepAgentsModule(final_answer="unused", create_error=AttributeError("'MockChatModel' object has no attribute 'count'"))
-    engine = DeepAgentsRuntimeEngine(backend, object(), deep_agents_enabled=True, dependency_loader=lambda: module)
+    engine = DeepAgentsRuntimeEngine(backend, FakeModel(), dependency_loader=lambda: module)
 
     await engine.run(RunContext(runId=12, sessionId=4, userId=5, message="plan"))
 
-    assert backend.events == []
     assert backend.failed_runs[0][1].errorCode == "DEEP_AGENTS_MODEL_UNSUPPORTED"
 
 
@@ -280,7 +244,7 @@ async def test_deep_agents_engine_traces_subagent_start_and_completion_events():
 
     backend = FakeBackend()
     module = FakeDeepAgentsModule(final_answer="Deep plan ready", tool_events=[("start", "researcher"), ("end", "researcher")])
-    engine = DeepAgentsRuntimeEngine(backend, object(), deep_agents_enabled=True, dependency_loader=lambda: module)
+    engine = DeepAgentsRuntimeEngine(backend, FakeModel(), dependency_loader=lambda: module)
 
     await engine.run(RunContext(runId=13, sessionId=4, userId=5, message="research competitors"))
 
@@ -308,7 +272,7 @@ async def test_deep_agents_engine_traces_subagent_failure_events():
 
     backend = FakeBackend()
     module = FakeDeepAgentsModule(final_answer="Recovered", tool_events=[("start", "file-analyst"), ("error", "file-analyst")])
-    engine = DeepAgentsRuntimeEngine(backend, object(), deep_agents_enabled=True, dependency_loader=lambda: module)
+    engine = DeepAgentsRuntimeEngine(backend, FakeModel(), dependency_loader=lambda: module)
 
     await engine.run(RunContext(runId=14, sessionId=4, userId=5, message="analyze files"))
 
@@ -317,6 +281,94 @@ async def test_deep_agents_engine_traces_subagent_failure_events():
         "subagentName": "file-analyst",
         "error": "subagent failed",
     }
+
+
+@pytest.mark.asyncio
+async def test_deep_agents_engine_chat_for_general_message():
+    """When intent is GENERAL_CHAT and no deepagents package, fall back to chat."""
+    from app.runtime.deep_agents_engine import DeepAgentsRuntimeEngine
+
+    backend = FakeBackend()
+    model = FakeModel(response="Hello! How can I help?")
+    engine = DeepAgentsRuntimeEngine(backend, model, dependency_loader=lambda: None)
+    context = RunContext(runId=20, sessionId=4, userId=5, message="你好")
+
+    await engine.run(context)
+
+    # Should emit RUN_STARTED, INTENT_DETECTED, MESSAGE_DELTA*, MESSAGE_COMPLETED
+    intent_events = [event for _, event in backend.events if event.eventType == INTENT_DETECTED]
+    assert len(intent_events) == 1
+    assert intent_events[0].eventText == "general_chat"
+    completed_events = [event for _, event in backend.events if event.eventType == MESSAGE_COMPLETED]
+    assert len(completed_events) > 0
+    assert backend.completed_runs[0][1].finalAnswer
+    assert backend.completed_runs[0][1].intent == "general_chat"
+
+
+@pytest.mark.asyncio
+async def test_deep_agents_engine_tool_use_routes_to_confirmation():
+    """When a tool is not auto-callable, emit confirmation-required event."""
+    from app.runtime.deep_agents_engine import DeepAgentsRuntimeEngine
+
+    backend = FakeBackend()
+    model = FakeModel()
+
+    all_tools = [
+        ToolDescriptor(
+            toolCode="xiaohongshu_copywriting",
+            toolName="小红书文案生成",
+            description="Generate Xiaohongshu-style copywriting for products",
+            inputSchema={
+                "type": "object",
+                "properties": {"userRequest": {"type": "string", "title": "用户请求"}},
+                "required": [],
+            },
+        )
+    ]
+
+    engine = DeepAgentsRuntimeEngine(backend, model)
+    context = RunContext(
+        runId=30,
+        sessionId=4,
+        userId=5,
+        message="帮我生成小红书文案",
+        availableTools=all_tools,
+        toolPreferences=[ToolPreference(toolCode="xiaohongshu_copywriting", autoCallEnabled=False)],
+    )
+
+    await engine.run(context)
+
+    # Should have emitted intent detected for tool use
+    assert any(event.eventText == "tool_use" for _, event in backend.events)
+    # TOOL_SELECTED should be emitted
+    select_events = [event for _, event in backend.events if event.eventType == TOOL_SELECTED]
+    assert len(select_events) > 0
+    # TOOL_CONFIRMATION_REQUIRED should be emitted
+    confirm_events = [event for _, event in backend.events if event.eventType == TOOL_CONFIRMATION_REQUIRED]
+    assert len(confirm_events) > 0
+
+
+@pytest.mark.asyncio
+async def test_deep_agents_engine_routes_file_analysis_to_chat():
+    """FILE_ANALYSIS intent routes directly to chat mode."""
+    from app.runtime.deep_agents_engine import DeepAgentsRuntimeEngine
+
+    backend = FakeBackend()
+    model = FakeModel(response="Here is my analysis of the file.")
+    engine = DeepAgentsRuntimeEngine(backend, model, dependency_loader=lambda: None)
+    context = RunContext(
+        runId=25,
+        sessionId=4,
+        userId=5,
+        message="分析这个文件",
+        agentFiles=[AgentFileContext(id=1, originalFilename="test.txt", status="READY", extractedText="file content")],
+    )
+
+    await engine.run(context)
+
+    completed_events = [event for _, event in backend.events if event.eventType == MESSAGE_COMPLETED]
+    assert len(completed_events) > 0
+    assert backend.completed_runs[0][1].intent == "file_analysis"
 
 
 class FakeDeepAgentsModule:

@@ -5,6 +5,7 @@ export { fetchToolCategories, fetchTools, searchTools, fetchToolByCode } from ".
 export {
   confirmAgentTool,
   createAgentSession,
+  deleteAgentSession,
   createAgentWorkspaceMemory,
   deleteAgentWorkspaceMemory,
   fetchAgentFiles,
