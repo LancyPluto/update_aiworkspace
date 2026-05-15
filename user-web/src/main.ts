@@ -10,7 +10,6 @@ async function bootstrap() {
   const pinia = createPinia()
   app.use(pinia)
   app.use(router)
-
   await router.isReady()
 
   // 先挂载再恢复会话，避免有 token 时长时间白屏（/me 在后台完成）

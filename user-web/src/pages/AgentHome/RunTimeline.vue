@@ -5,6 +5,7 @@ import type { AgentRunEvent } from "@/api/types"
 
 const props = defineProps<{
   events: AgentRunEvent[]
+  inlineMode?: boolean
 }>()
 
 type TimelineTone = "info" | "success" | "warning" | "error"
@@ -166,7 +167,12 @@ function toggleExpanded(eventId: number) {
 </script>
 
 <template>
-  <section v-if="visibleEvents.length > 0" class="run-timeline" aria-label="Agent run timeline">
+  <section
+    v-if="visibleEvents.length > 0"
+    class="run-timeline"
+    :class="{ inline: inlineMode }"
+    aria-label="Agent run timeline"
+  >
     <article v-for="event in visibleEvents" :key="event.id" class="timeline-row" :class="toneFor(event)">
       <div class="timeline-icon">
         <component :is="iconFor(event)" class="h-4 w-4" />
@@ -186,13 +192,21 @@ function toggleExpanded(eventId: number) {
 
 <style scoped>
 .run-timeline {
-  width: min(860px, calc(100% - 32px));
-  max-height: 180px;
-  margin: 0 auto 10px;
+  width: 100%;
+  max-height: 200px;
   overflow-y: auto;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--card);
+  margin: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+}
+
+.run-timeline.inline {
+  max-height: 150px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
 }
 
 .timeline-row {
@@ -283,5 +297,20 @@ function toggleExpanded(eventId: number) {
   line-height: 1.5;
   padding: 8px;
   white-space: pre-wrap;
+}
+
+.timeline-title {
+  font-size: 12px;
+}
+.timeline-detail {
+  font-size: 11px;
+}
+
+.run-timeline::-webkit-scrollbar {
+  width: 4px;
+}
+.run-timeline::-webkit-scrollbar-thumb {
+  background: var(--muted-foreground);
+  border-radius: 4px;
 }
 </style>
