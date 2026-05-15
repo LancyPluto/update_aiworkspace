@@ -121,6 +121,27 @@ async def test_deep_agents_engine_invokes_deep_agent_and_completes_run():
 
 
 @pytest.mark.asyncio
+async def test_deep_agents_engine_streams_native_agent_events():
+    from app.runtime.deep_agents_engine import DeepAgentsRuntimeEngine
+
+    backend = FakeBackend()
+    module = FakeDeepAgentsModule(final_answer="Deep plan ready", stream_chunks=["Deep ", "plan ", "ready"])
+    engine = DeepAgentsRuntimeEngine(backend, object(), deep_agents_enabled=True, dependency_loader=lambda: module)
+
+    await engine.run(RunContext(runId=17, sessionId=4, userId=5, message="plan a long task"))
+
+    message_events = [event for _, event in backend.events if event.eventType.startswith("message.")]
+    assert [(event.eventType, event.eventText) for event in message_events] == [
+        (MESSAGE_DELTA, "Deep "),
+        (MESSAGE_DELTA, "plan "),
+        (MESSAGE_DELTA, "ready"),
+        (MESSAGE_COMPLETED, "Deep plan ready"),
+    ]
+    assert message_events[0].eventJson == {"delta": "Deep "}
+    assert backend.completed_runs[0][1].finalAnswer == "Deep plan ready"
+
+
+@pytest.mark.asyncio
 async def test_deep_agents_engine_does_not_emit_backend_lifecycle_events():
     from app.runtime.deep_agents_engine import DeepAgentsRuntimeEngine
 
@@ -320,10 +341,17 @@ async def test_deep_agents_engine_traces_subagent_failure_events():
 
 
 class FakeDeepAgentsModule:
-    def __init__(self, final_answer: str, create_error: Exception | None = None, tool_events: list[tuple[str, str]] | None = None):
+    def __init__(
+        self,
+        final_answer: str,
+        create_error: Exception | None = None,
+        tool_events: list[tuple[str, str]] | None = None,
+        stream_chunks: list[str] | None = None,
+    ):
         self.final_answer = final_answer
         self.create_error = create_error
         self.tool_events = tool_events or []
+        self.stream_chunks = stream_chunks
         self.created_agents = []
         self.invocations = []
 
@@ -331,6 +359,8 @@ class FakeDeepAgentsModule:
         if self.create_error is not None:
             raise self.create_error
         self.created_agents.append({"tools": tools, "system_prompt": system_prompt, "model": model, "subagents": subagents or [], "memory": memory or []})
+        if self.stream_chunks is not None:
+            return FakeStreamingDeepAgent(self)
         return FakeDeepAgent(self)
 
 
@@ -343,6 +373,14 @@ class FakeDeepAgent:
         for event_type, subagent_name in self.module.tool_events:
             await _emit_fake_tool_event(config, event_type, subagent_name)
         return {"messages": [{"role": "assistant", "content": self.module.final_answer}]}
+
+
+class FakeStreamingDeepAgent(FakeDeepAgent):
+    async def astream_events(self, payload, config=None, version=None):
+        self.module.invocations.append(payload)
+        for chunk in self.module.stream_chunks or []:
+            yield {"event": "on_chat_model_stream", "data": {"chunk": type("Chunk", (), {"content": chunk})()}}
+        yield {"event": "on_chain_end", "data": {"output": {"messages": [{"role": "assistant", "content": self.module.final_answer}]}}}
 
 
 async def _emit_fake_tool_event(config, event_type: str, subagent_name: str):

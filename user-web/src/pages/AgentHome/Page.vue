@@ -299,11 +299,9 @@ function startRunStream(runId: number) {
     signal: controller.signal,
     onEvent: async (event) => {
       appendRunEvent(event)
-      if (event.eventType === "message.completed" || isTerminalRunEvent(event)) {
+      if (isTerminalRunEvent(event)) {
         draftAssistantContent.value = ""
         await refreshMessages()
-      }
-      if (isTerminalRunEvent(event)) {
         stopRunUpdates()
         settleRunStatus()
       }

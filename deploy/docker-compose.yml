@@ -74,6 +74,7 @@ services:
       - "${BACKEND_PORT:-8080}:8080"
     volumes:
       - ../backend:/app
+      - ../docs:/docs:ro
       - maven_cache:/root/.m2
       - generated_media:/data/generated-media
     command: mvn spring-boot:run
@@ -151,7 +152,7 @@ services:
       BACKEND_INTERNAL_BASE_URL: http://backend:8080
       INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-local-internal-token}
       AGENT_VERIFY_INTERNAL_SIGNATURE: ${AGENT_VERIFY_INTERNAL_SIGNATURE:-false}
-      AGENT_EXECUTION_MODE: ${AGENT_EXECUTION_MODE:-sync}
+      AGENT_EXECUTION_MODE: ${AGENT_EXECUTION_MODE:-background}
       AGENT_MAX_TOOL_CALLS: ${AGENT_MAX_TOOL_CALLS:-3}
       AGENT_MAX_MODEL_CALLS: ${AGENT_MAX_MODEL_CALLS:-5}
       AGENT_MODEL_CALL_COST: ${AGENT_MODEL_CALL_COST:-1}

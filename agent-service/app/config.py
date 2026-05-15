@@ -27,7 +27,7 @@ class Settings:
     backend_internal_base_url: str = os.getenv("BACKEND_INTERNAL_BASE_URL", "http://127.0.0.1:8080")
     internal_api_token: str = os.getenv("INTERNAL_API_TOKEN", "local-internal-token")
     agent_verify_internal_signature: bool = _bool("AGENT_VERIFY_INTERNAL_SIGNATURE", False)
-    agent_execution_mode: str = os.getenv("AGENT_EXECUTION_MODE", "sync")
+    agent_execution_mode: str = os.getenv("AGENT_EXECUTION_MODE", "background")
     model_provider: str = os.getenv("MODEL_PROVIDER", "mock")
     model_api_base_url: str = os.getenv("MODEL_API_BASE_URL", "https://api.deepseek.com")
     model_api_key: str = os.getenv("MODEL_API_KEY", "replace-with-model-key")

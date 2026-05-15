@@ -1,8 +1,8 @@
 import importlib.util
 import inspect
 import re
+from collections.abc import AsyncIterable, Callable, Iterable
 from dataclasses import dataclass
-from collections.abc import Callable
 from types import ModuleType
 from typing import Any
 
@@ -78,16 +78,29 @@ class DeepAgentsRuntimeEngine:
             )
             return
         workspace_memory_context = _format_workspace_memory_context(workspace_memory_items)
-        result = await _invoke_agent(
+        stream_result = await _invoke_agent_streaming(
             agent,
             {"messages": _messages(context, workspace_memory_context, workspace_file_context.prompt_context)},
+            context.runId,
+            self.backend_client,
             config={"callbacks": [SubagentTraceCallbackHandler(context.runId, self.backend_client)]},
         )
-        answer = _extract_final_answer(result)
+        if stream_result.result is not None:
+            answer = _extract_final_answer(stream_result.result)
+        elif stream_result.streamed_text:
+            answer = stream_result.streamed_text
+        else:
+            raise RuntimeError("deepagents returned no final answer")
         artifact = _parse_artifact_directive(answer)
         if artifact is not None:
             await self._create_artifact(context.runId, artifact)
-        await self._emit_answer_events(context.runId, answer)
+        if stream_result.streamed_text:
+            missing_delta = _completion_suffix(answer, stream_result.streamed_text)
+            if missing_delta:
+                await _append_answer_delta(self.backend_client, context.runId, missing_delta)
+            await _append_answer_completed(self.backend_client, context.runId, answer)
+        else:
+            await self._emit_answer_events(context.runId, answer)
         await self.backend_client.complete_run(
             context.runId,
             RunComplete(
@@ -146,8 +159,8 @@ class DeepAgentsRuntimeEngine:
 
     async def _emit_answer_events(self, run_id: int, answer: str) -> None:
         for chunk in _chunks(answer, 80):
-            await self.backend_client.append_event(run_id, RunEventCreate(eventType=MESSAGE_DELTA, eventText=chunk))
-        await self.backend_client.append_event(run_id, RunEventCreate(eventType=MESSAGE_COMPLETED, eventText=answer))
+            await _append_answer_delta(self.backend_client, run_id, chunk)
+        await _append_answer_completed(self.backend_client, run_id, answer)
 
     async def _create_artifact(self, run_id: int, artifact: "ArtifactDirective") -> None:
         response = await self.backend_client.create_run_artifact(
@@ -195,6 +208,175 @@ async def _invoke_agent(agent, payload: dict, config: dict | None = None):
     if inspect.isawaitable(result):
         return await result
     return result
+
+
+@dataclass(frozen=True)
+class AgentStreamResult:
+    result: Any | None
+    streamed_text: str
+
+
+async def _invoke_agent_streaming(agent, payload: dict, run_id: int, backend_client, config: dict | None = None) -> AgentStreamResult:
+    stream_result = await _try_stream_events(agent, payload, run_id, backend_client, config)
+    if stream_result is not None:
+        return stream_result
+    result = await _invoke_agent(agent, payload, config=config)
+    return AgentStreamResult(result=result, streamed_text="")
+
+
+async def _try_stream_events(agent, payload: dict, run_id: int, backend_client, config: dict | None = None) -> AgentStreamResult | None:
+    for method_name in ("stream_events", "astream_events"):
+        method = getattr(agent, method_name, None)
+        if not callable(method):
+            continue
+        try:
+            stream = await _call_stream_events(method, payload, config=config)
+        except TypeError:
+            continue
+        result = await _consume_agent_event_stream(stream, run_id, backend_client)
+        if result.streamed_text or result.result is not None:
+            return result
+    return None
+
+
+async def _call_stream_events(method, payload: dict, config: dict | None = None):
+    try:
+        stream = method(payload, config=config, version="v2")
+    except TypeError:
+        try:
+            stream = method(payload, config=config)
+        except TypeError:
+            stream = method(payload)
+    if inspect.isawaitable(stream):
+        return await stream
+    return stream
+
+
+async def _consume_agent_event_stream(stream, run_id: int, backend_client) -> AgentStreamResult:
+    chunks: list[str] = []
+    result: Any | None = None
+    projection_messages = getattr(stream, "messages", None)
+    if projection_messages is not None:
+        if callable(projection_messages):
+            projection_messages = projection_messages()
+        async for message in _iterate_maybe_async(projection_messages):
+            chunk = _stream_delta_content(message)
+            if chunk:
+                chunks.append(chunk)
+                await _append_answer_delta(backend_client, run_id, chunk)
+        result = await _stream_output(stream)
+        return AgentStreamResult(result=result, streamed_text="".join(chunks))
+    async for event in _iterate_maybe_async(stream):
+        chunk = _event_delta(event)
+        if chunk:
+            chunks.append(chunk)
+            await _append_answer_delta(backend_client, run_id, chunk)
+        final_output = _event_final_output(event)
+        if final_output is not None:
+            result = final_output
+    return AgentStreamResult(result=result, streamed_text="".join(chunks))
+
+
+async def _iterate_maybe_async(value):
+    if inspect.isawaitable(value):
+        value = await value
+    if isinstance(value, AsyncIterable):
+        async for item in value:
+            yield item
+        return
+    if isinstance(value, Iterable) and not isinstance(value, (str, bytes, dict)):
+        for item in value:
+            yield item
+        return
+    return
+
+
+async def _stream_output(stream):
+    output = getattr(stream, "output", None)
+    if callable(output):
+        output = output()
+    if inspect.isawaitable(output):
+        output = await output
+    return output
+
+
+async def _append_answer_delta(backend_client, run_id: int, chunk: str) -> None:
+    await backend_client.append_event(
+        run_id,
+        RunEventCreate(eventType=MESSAGE_DELTA, eventText=chunk, eventJson={"delta": chunk}),
+    )
+
+
+async def _append_answer_completed(backend_client, run_id: int, answer: str) -> None:
+    await backend_client.append_event(
+        run_id,
+        RunEventCreate(eventType=MESSAGE_COMPLETED, eventText=answer, eventJson={"content": answer}),
+    )
+
+
+def _event_delta(event) -> str:
+    if not isinstance(event, dict):
+        return _stream_delta_content(event)
+    event_name = event.get("event") or event.get("eventType")
+    if event_name not in {"message.delta", "on_chat_model_stream", "on_llm_stream"}:
+        return ""
+    data = event.get("data")
+    if isinstance(data, dict):
+        for key in ("delta", "text", "content"):
+            value = data.get(key)
+            if isinstance(value, str):
+                return value
+        return _stream_delta_content(data.get("chunk") or data.get("message") or data.get("output"))
+    return _stream_delta_content(event.get("delta") or event.get("content"))
+
+
+def _event_final_output(event) -> Any | None:
+    if not isinstance(event, dict):
+        return None
+    event_name = event.get("event") or event.get("eventType")
+    if event_name not in {"message.completed", "on_chain_end", "on_graph_end", "run.completed"}:
+        return None
+    data = event.get("data")
+    if isinstance(data, dict):
+        for key in ("output", "result", "final_answer", "finalAnswer"):
+            if key in data:
+                return data[key]
+    for key in ("output", "result", "final_answer", "finalAnswer"):
+        if key in event:
+            return event[key]
+    return None
+
+
+def _stream_delta_content(value) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        for key in ("delta", "text", "content"):
+            content = value.get(key)
+            if isinstance(content, str):
+                return content
+        content = value.get("chunk") or value.get("message")
+    else:
+        content = getattr(value, "content", None)
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict) and isinstance(item.get("text"), str):
+                parts.append(item["text"])
+        return "".join(parts)
+    return ""
+
+
+def _completion_suffix(answer: str, streamed_text: str) -> str:
+    if not answer or answer == streamed_text:
+        return ""
+    return answer[len(streamed_text) :] if answer.startswith(streamed_text) else ""
 
 
 class SubagentTraceCallbackHandler(AsyncCallbackHandler):

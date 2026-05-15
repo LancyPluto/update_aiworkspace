@@ -21,6 +21,11 @@ class FakeLangChainModel:
             raise self.response
         return FakeLangChainMessage(self.response)
 
+    async def astream(self, messages):
+        self.messages.append(messages)
+        for chunk in self.response:
+            yield FakeLangChainMessage(chunk)
+
 
 @pytest.mark.asyncio
 async def test_mock_model_returns_deterministic_answer():
@@ -65,3 +70,17 @@ def test_model_client_exposes_langchain_chat_model_for_agent_runtimes():
     )
 
     assert client.chat_model is langchain_model
+
+
+@pytest.mark.asyncio
+async def test_model_client_streams_langchain_chat_chunks():
+    langchain_model = FakeLangChainModel(["hello ", "world"])
+    client = ModelClient(
+        Settings(model_provider="openai_compatible", model_api_base_url="http://model", model_api_key="key"),
+        chat_model=langchain_model,
+    )
+
+    chunks = [chunk async for chunk in client.chat_stream([ChatMessage(role="user", content="hello")])]
+
+    assert chunks == ["hello ", "world"]
+    assert langchain_model.messages[0][0].type == "human"
