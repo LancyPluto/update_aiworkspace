@@ -565,7 +565,7 @@ public class AgentRunServiceImpl implements AgentRunService {
         creditService.settle(run.getUserId(), CreditSourceType.AGENT_RUN, runId, consumedCredits);
         creditService.release(run.getUserId(), CreditSourceType.AGENT_RUN, runId, estimatedCredits - consumedCredits);
         billingService.recordUsage("AGENT_RUN", runId, run.getUserId(), agentModelConfigMapper.findLatest(),
-                request.promptTokens(), request.completionTokens(), consumedCredits);
+                request.promptTokens(), request.completionTokens(), null, consumedCredits);
         appendEventInternal(runId, run.getUserId(), "run.completed", "Agent 运行已完成", null, now);
         agentSessionMapper.touch(run.getSessionId(), now);
         agentRateLimitService.decrementActiveRun(run.getUserId(), runId);
@@ -665,9 +665,16 @@ public class AgentRunServiceImpl implements AgentRunService {
                 config.baseUrl(),
                 config.apiKey(),
                 config.minimaxGroupId(),
+                null,
+                null,
+                null,
                 config.timeoutSeconds(),
                 null,
                 null,
+                null,
+                null,
+                config.billingUnit(),
+                config.unitPrice(),
                 config.enabled(),
                 null
         );

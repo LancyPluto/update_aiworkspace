@@ -20,6 +20,7 @@ import static com.aiminilab.aitoolmarket.testsupport.InternalApiTestSupport.sign
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -269,6 +270,33 @@ class AdminAgentApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.success").value(true))
                 .andExpect(jsonPath("$.data.modelName").value("saved-model"));
+    }
+
+    @Test
+    void siliconflowImageModelConfigTestDoesNotCallAgentService() throws Exception {
+        mockExternalAuthDependencies();
+        String adminToken = login("/api/admin/v1/auth/login", "admin");
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/admin/v1/agent/model-config/test")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "provider": "siliconflow_images",
+                                  "modelName": "Tongyi-MAI/Z-Image-Turbo",
+                                  "baseUrl": "https://api.siliconflow.cn",
+                                  "apiKey": "fake-key",
+                                  "timeoutSeconds": 60,
+                                  "enabled": true
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.success").value(true))
+                .andExpect(jsonPath("$.data.provider").value("siliconflow_images"))
+                .andExpect(jsonPath("$.data.modelName").value("Tongyi-MAI/Z-Image-Turbo"));
+
+        Mockito.verify(agentServiceClient, Mockito.never()).testModelConfig(argThat(request ->
+                "siliconflow_images".equals(request.provider())));
     }
 
     private void mockExternalAuthDependencies() {

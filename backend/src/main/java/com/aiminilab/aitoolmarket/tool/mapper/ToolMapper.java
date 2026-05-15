@@ -133,6 +133,10 @@ public interface ToolMapper extends BaseMapper<AiTool> {
             UPDATE ai_tools
             SET tool_name = #{tool.toolName}, category_id = #{tool.categoryId},
                 description = #{tool.description}, cover_url = #{tool.coverUrl},
+                tool_type = #{tool.toolType},
+                input_modality = #{tool.inputModality},
+                output_modality = #{tool.outputModality},
+                config_note = #{tool.configNote},
                 estimated_credit_cost = #{tool.estimatedCreditCost},
                 model_config_id = #{tool.modelConfigId},
                 updated_by = #{operatorId}, updated_at = CURRENT_TIMESTAMP

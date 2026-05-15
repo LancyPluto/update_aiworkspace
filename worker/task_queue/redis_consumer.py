@@ -7,10 +7,12 @@ import redis
 from client.backend_client import BackendClient
 from config import settings
 from handlers.digital_human_video_handler import DigitalHumanVideoHandler
+from handlers.image_generation_handler import ImageGenerationHandler
 from handlers.text_task_handler import TextTaskHandler
 
 
 LOGGER = logging.getLogger(__name__)
+TERMINAL_TASK_STATUSES = {"SUCCESS", "FAILED", "CANCELLED"}
 
 
 class RedisConsumer:
@@ -62,15 +64,23 @@ class TaskHandlerRouter:
         self,
         text_handler: TextTaskHandler | None = None,
         digital_human_handler: DigitalHumanVideoHandler | None = None,
+        image_generation_handler: ImageGenerationHandler | None = None,
         backend_client: BackendClient | None = None,
     ) -> None:
         self.text_handler = text_handler or TextTaskHandler()
         self.digital_human_handler = digital_human_handler or DigitalHumanVideoHandler()
+        self.image_generation_handler = image_generation_handler or ImageGenerationHandler()
         self.backend_client = backend_client or BackendClient()
 
     def handle(self, message: dict[str, Any]) -> dict[str, Any]:
         context = self.backend_client.get_execution_context(int(message["taskId"]))
+        status = str(context.get("status") or "").upper()
+        if status in TERMINAL_TASK_STATUSES:
+            LOGGER.info("skip terminal task taskId=%s status=%s", message.get("taskId"), status)
+            return {"status": "SKIPPED", "taskId": int(message["taskId"]), "taskStatus": status}
         routed_message = {**message, "__executionContext": context}
         if context.get("toolCode") == "digital_human_agent":
             return self.digital_human_handler.handle(routed_message)
+        if str(context.get("toolType") or "").upper() == "IMAGE_GENERATION":
+            return self.image_generation_handler.handle(routed_message)
         return self.text_handler.handle(routed_message)

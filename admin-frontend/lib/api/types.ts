@@ -49,6 +49,10 @@ export interface ToolSummary {
   categoryName?: string | null
   description?: string | null
   coverUrl?: string | null
+  toolType?: string | null
+  inputModality?: string | null
+  outputModality?: string | null
+  configNote?: string | null
   status: 'DRAFT' | 'ONLINE' | 'OFFLINE' | string
   estimatedCreditCost: number
   modelConfigId?: number | null
@@ -62,6 +66,10 @@ export interface UpsertToolPayload {
   categoryId: number | null
   description?: string
   coverUrl?: string
+  toolType?: string
+  inputModality?: string
+  outputModality?: string
+  configNote?: string
   estimatedCreditCost: number
   modelConfigId?: number | null
 }
@@ -140,6 +148,9 @@ export interface AdminTaskApiPayload {
   userNickname?: string | null
   toolCode: string
   toolName: string
+  toolType?: string | null
+  inputModality?: string | null
+  outputModality?: string | null
   status: string
   progress: number
   progressMessage?: string | null
@@ -223,7 +234,7 @@ export interface TestGenerateResult {
   output: string
 }
 
-export type AgentModelProvider = 'mock' | 'openai_compatible' | 'anthropic_compatible' | 'minimax'
+export type AgentModelProvider = 'mock' | 'openai_compatible' | 'anthropic_compatible' | 'minimax' | 'siliconflow_images'
 
 export interface AgentModelConfig {
   id: number
@@ -234,9 +245,16 @@ export interface AgentModelConfig {
   baseUrl?: string | null
   apiKeyMasked?: string | null
   minimaxGroupId?: string | null
+  consoleUrl?: string | null
+  balanceUrl?: string | null
+  docsUrl?: string | null
   timeoutSeconds: number
   inputTokenPricePer1k?: number | null
   outputTokenPricePer1k?: number | null
+  inputTokenPricePer1m?: number | null
+  outputTokenPricePer1m?: number | null
+  billingUnit?: 'TOKEN_PER_M' | 'PER_CALL' | string | null
+  unitPrice?: number | null
   enabled: boolean
   isDefault?: boolean | null
   createdAt?: string | null
@@ -285,9 +303,16 @@ export interface AgentModelConfigPayload {
   baseUrl?: string
   apiKey?: string
   minimaxGroupId?: string
+  consoleUrl?: string
+  balanceUrl?: string
+  docsUrl?: string
   timeoutSeconds?: number
   inputTokenPricePer1k?: number
   outputTokenPricePer1k?: number
+  inputTokenPricePer1m?: number
+  outputTokenPricePer1m?: number
+  billingUnit?: 'TOKEN_PER_M' | 'PER_CALL' | string
+  unitPrice?: number
   enabled?: boolean
   isDefault?: boolean
 }
@@ -415,6 +440,11 @@ export interface BillingUsageLog {
   totalTokens: number
   inputTokenPricePer1k: number
   outputTokenPricePer1k: number
+  inputTokenPricePer1m?: number
+  outputTokenPricePer1m?: number
+  billingUnit?: string
+  billableUnits?: number
+  unitPrice?: number
   costAmount: number
   chargedCredits: number
   createdAt: string

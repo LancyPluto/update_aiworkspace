@@ -143,6 +143,72 @@ class WorkerInternalApiTest {
     }
 
     @Test
+    void perCallModelUsageRecordsBillableUnitsAndCost() throws Exception {
+        String adminToken = login("/api/admin/v1/auth/login", "admin");
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put("/api/admin/v1/agent/model-config")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "provider": "siliconflow_images",
+                                  "modelName": "Tongyi-MAI/Z-Image-Turbo",
+                                  "baseUrl": "https://api.siliconflow.cn",
+                                  "apiKey": "fake-key",
+                                  "timeoutSeconds": 60,
+                                  "billingUnit": "PER_CALL",
+                                  "unitPrice": 0.03,
+                                  "enabled": true
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.billingUnit").value("PER_CALL"))
+                .andExpect(jsonPath("$.data.unitPrice").value(0.03));
+
+        Long toolId = createTool(adminToken, "worker_per_call_image_tool", 5);
+        publishTool(adminToken, toolId);
+        String userToken = login("/api/v1/auth/login", "user1");
+        Long taskId = createTask(userToken, "worker_per_call_image_tool");
+
+        String processingBody = """
+                                {
+                                  "progress": 35,
+                                  "progressMessage": "AI is generating image"
+                                }
+                                """;
+        mockMvc.perform(signed(post("/api/internal/v1/tasks/{taskId}/processing", taskId), "POST",
+                        "/api/internal/v1/tasks/%d/processing".formatted(taskId), processingBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(processingBody))
+                .andExpect(status().isOk());
+
+        String successBody = """
+                                {
+                                  "resourceType": "IMAGE",
+                                  "contentText": "{\\"images\\":[{\\"url\\":\\"/generated/a.png\\"},{\\"url\\":\\"/generated/b.png\\"}]}",
+                                  "billableUnits": 2
+                                }
+                                """;
+        mockMvc.perform(signed(post("/api/internal/v1/tasks/{taskId}/success", taskId), "POST",
+                        "/api/internal/v1/tasks/%d/success".formatted(taskId), successBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(successBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("SUCCESS"));
+
+        mockMvc.perform(get("/api/admin/v1/billing/usage-logs")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .param("pageNo", "1")
+                        .param("pageSize", "10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].sourceId").value(taskId.intValue()))
+                .andExpect(jsonPath("$.data.list[0].billingUnit").value("PER_CALL"))
+                .andExpect(jsonPath("$.data.list[0].billableUnits").value(2))
+                .andExpect(jsonPath("$.data.list[0].unitPrice").value(0.03))
+                .andExpect(jsonPath("$.data.list[0].costAmount").value(0.06))
+                .andExpect(jsonPath("$.data.list[0].chargedCredits").value(5));
+    }
+
+    @Test
     void agentServiceCanCreateAndReadTaskThroughInternalApi() throws Exception {
         String adminToken = login("/api/admin/v1/auth/login", "admin");
         Long toolId = createTool(adminToken, "agent_internal_task_tool", 1);

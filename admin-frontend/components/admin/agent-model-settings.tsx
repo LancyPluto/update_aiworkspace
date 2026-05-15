@@ -40,9 +40,14 @@ interface ModelForm {
   baseUrl: string
   apiKey: string
   apiKeyMasked: string
+  consoleUrl: string
+  balanceUrl: string
+  docsUrl: string
   timeoutSeconds: string
-  inputTokenPricePer1k: string
-  outputTokenPricePer1k: string
+  inputTokenPricePer1m: string
+  outputTokenPricePer1m: string
+  billingUnit: "TOKEN_PER_M" | "PER_CALL"
+  unitPrice: string
   enabled: boolean
   isDefault: boolean
 }
@@ -84,6 +89,14 @@ const providerOptions: Array<{
     defaultBaseUrl: "https://api.minimaxi.com/anthropic",
     description: "Use an Anthropic-compatible gateway, such as MiniMax M2.7.",
   },
+  {
+    value: "siliconflow_images",
+    label: "SiliconFlow images",
+    packageName: "worker adapter",
+    defaultModel: "Tongyi-MAI/Z-Image-Turbo",
+    defaultBaseUrl: "https://api.siliconflow.cn",
+    description: "Use SiliconFlow /v1/images/generations for image generation tools.",
+  },
 ]
 
 const vendorFallback: VendorMeta = {
@@ -119,9 +132,14 @@ const emptyForm: ModelForm = {
   baseUrl: "https://api.openai.com/v1",
   apiKey: "",
   apiKeyMasked: "",
+  consoleUrl: "",
+  balanceUrl: "",
+  docsUrl: "",
   timeoutSeconds: "60",
-  inputTokenPricePer1k: "0",
-  outputTokenPricePer1k: "0",
+  inputTokenPricePer1m: "0",
+  outputTokenPricePer1m: "0",
+  billingUnit: "TOKEN_PER_M",
+  unitPrice: "0",
   enabled: true,
   isDefault: false,
 }
@@ -131,7 +149,9 @@ function providerMeta(provider: string) {
 }
 
 function toForm(config: AgentModelConfig): ModelForm {
-  const provider = config.provider === "anthropic_compatible" ? "anthropic_compatible" : "openai_compatible"
+  const provider = providerOptions.some((item) => item.value === config.provider)
+    ? (config.provider as AgentModelProvider)
+    : "openai_compatible"
   const meta = providerMeta(provider)
   return {
     id: config.id,
@@ -142,9 +162,14 @@ function toForm(config: AgentModelConfig): ModelForm {
     baseUrl: config.baseUrl || meta.defaultBaseUrl,
     apiKey: "",
     apiKeyMasked: config.apiKeyMasked || "",
+    consoleUrl: config.consoleUrl || "",
+    balanceUrl: config.balanceUrl || "",
+    docsUrl: config.docsUrl || "",
     timeoutSeconds: String(config.timeoutSeconds || 60),
-    inputTokenPricePer1k: String(config.inputTokenPricePer1k ?? 0),
-    outputTokenPricePer1k: String(config.outputTokenPricePer1k ?? 0),
+    inputTokenPricePer1m: String(config.inputTokenPricePer1m ?? ((config.inputTokenPricePer1k ?? 0) * 1000)),
+    outputTokenPricePer1m: String(config.outputTokenPricePer1m ?? ((config.outputTokenPricePer1k ?? 0) * 1000)),
+    billingUnit: config.billingUnit === "PER_CALL" ? "PER_CALL" : "TOKEN_PER_M",
+    unitPrice: String(config.unitPrice ?? 0),
     enabled: config.enabled !== false,
     isDefault: Boolean(config.isDefault),
   }
@@ -158,9 +183,14 @@ function toPayload(form: ModelForm): AgentModelConfigPayload {
     modelName: form.modelName.trim(),
     baseUrl: form.baseUrl.trim(),
     apiKey: form.apiKey.trim(),
+    consoleUrl: form.consoleUrl.trim(),
+    balanceUrl: form.balanceUrl.trim(),
+    docsUrl: form.docsUrl.trim(),
     timeoutSeconds: Number(form.timeoutSeconds) || 60,
-    inputTokenPricePer1k: Number(form.inputTokenPricePer1k) || 0,
-    outputTokenPricePer1k: Number(form.outputTokenPricePer1k) || 0,
+    inputTokenPricePer1m: Number(form.inputTokenPricePer1m) || 0,
+    outputTokenPricePer1m: Number(form.outputTokenPricePer1m) || 0,
+    billingUnit: form.billingUnit,
+    unitPrice: Number(form.unitPrice) || 0,
     enabled: form.enabled,
     isDefault: form.isDefault,
   }
@@ -326,6 +356,7 @@ export function AgentModelSettings() {
       provider: value,
       modelName: current.modelName && current.modelName !== providerMeta(current.provider).defaultModel ? current.modelName : next.defaultModel,
       baseUrl: next.defaultBaseUrl,
+      billingUnit: value === "siliconflow_images" ? "PER_CALL" : current.billingUnit,
     }))
     setSaved(false)
     setTestResult(null)
@@ -337,10 +368,12 @@ export function AgentModelSettings() {
     if (!form.baseUrl.trim()) return "Base URL is required."
     const timeout = Number(form.timeoutSeconds)
     if (!Number.isFinite(timeout) || timeout < 1 || timeout > 300) return "Timeout must be between 1 and 300 seconds."
-    const inputPrice = Number(form.inputTokenPricePer1k)
-    const outputPrice = Number(form.outputTokenPricePer1k)
+    const inputPrice = Number(form.inputTokenPricePer1m)
+    const outputPrice = Number(form.outputTokenPricePer1m)
+    const unitPrice = Number(form.unitPrice)
     if (!Number.isFinite(inputPrice) || inputPrice < 0) return "Input token price must be zero or greater."
     if (!Number.isFinite(outputPrice) || outputPrice < 0) return "Output token price must be zero or greater."
+    if (!Number.isFinite(unitPrice) || unitPrice < 0) return "Unit price must be zero or greater."
     if (!form.apiKey.trim() && !form.apiKeyMasked) return "API Key is required."
     return null
   }
@@ -503,6 +536,23 @@ export function AgentModelSettings() {
                             Set default
                           </Button>
                         ) : null}
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {config.consoleUrl ? (
+                            <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" asChild onClick={(event) => event.stopPropagation()}>
+                              <a href={config.consoleUrl} target="_blank" rel="noreferrer">控制台</a>
+                            </Button>
+                          ) : null}
+                          {config.balanceUrl ? (
+                            <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" asChild onClick={(event) => event.stopPropagation()}>
+                              <a href={config.balanceUrl} target="_blank" rel="noreferrer">余额</a>
+                            </Button>
+                          ) : null}
+                          {config.docsUrl ? (
+                            <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" asChild onClick={(event) => event.stopPropagation()}>
+                              <a href={config.docsUrl} target="_blank" rel="noreferrer">文档</a>
+                            </Button>
+                          ) : null}
+                        </div>
                         <p className="mt-3 truncate text-xs text-muted-foreground">{config.baseUrl || "Base URL not configured"}</p>
                       </div>
                     </div>
@@ -581,24 +631,71 @@ export function AgentModelSettings() {
 
             <div className="grid gap-5 md:grid-cols-2">
               <div className="space-y-2">
-                <Label>Input token price / 1K</Label>
+                <Label>Input token price / 1M</Label>
                 <Input
                   type="number"
                   min={0}
                   step="0.000001"
-                  value={form.inputTokenPricePer1k}
-                  onChange={(event) => updateForm("inputTokenPricePer1k", event.target.value)}
+                  value={form.inputTokenPricePer1m}
+                  onChange={(event) => updateForm("inputTokenPricePer1m", event.target.value)}
                 />
               </div>
               <div className="space-y-2">
-                <Label>Output token price / 1K</Label>
+                <Label>Output token price / 1M</Label>
                 <Input
                   type="number"
                   min={0}
                   step="0.000001"
-                  value={form.outputTokenPricePer1k}
-                  onChange={(event) => updateForm("outputTokenPricePer1k", event.target.value)}
+                  value={form.outputTokenPricePer1m}
+                  onChange={(event) => updateForm("outputTokenPricePer1m", event.target.value)}
                 />
+              </div>
+            </div>
+
+            <div className="grid gap-5 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label>Billing unit</Label>
+                <Select value={form.billingUnit} onValueChange={(value) => updateForm("billingUnit", value as ModelForm["billingUnit"])}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="TOKEN_PER_M">Token / 1M</SelectItem>
+                    <SelectItem value="PER_CALL">Per generated item</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Unit price</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  step="0.000001"
+                  value={form.unitPrice}
+                  onChange={(event) => updateForm("unitPrice", event.target.value)}
+                  placeholder={form.billingUnit === "PER_CALL" ? "Cost per image/video call" : "Usually 0 for token billing"}
+                />
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-border bg-secondary/30 p-4">
+              <div className="mb-3">
+                <p className="text-sm font-medium">供应商入口</p>
+                <p className="text-xs text-muted-foreground">
+                  用于管理员快速跳转查看控制台、账号余额和接口文档；余额自动监控后续按供应商适配。
+                </p>
+              </div>
+              <div className="grid gap-4 md:grid-cols-3">
+                <div className="space-y-2">
+                  <Label>控制台链接</Label>
+                  <Input value={form.consoleUrl} placeholder="https://..." onChange={(event) => updateForm("consoleUrl", event.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label>余额链接</Label>
+                  <Input value={form.balanceUrl} placeholder="https://..." onChange={(event) => updateForm("balanceUrl", event.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label>文档链接</Label>
+                  <Input value={form.docsUrl} placeholder="https://..." onChange={(event) => updateForm("docsUrl", event.target.value)} />
+                </div>
               </div>
             </div>
 
@@ -633,7 +730,7 @@ export function AgentModelSettings() {
             <Textarea
               readOnly
               className="min-h-24 font-mono text-xs"
-              value={`provider=${form.provider}\nmodel=${form.modelName}\nbase_url=${form.baseUrl}\ntimeout=${form.timeoutSeconds}s\ninput_price_per_1k=${form.inputTokenPricePer1k}\noutput_price_per_1k=${form.outputTokenPricePer1k}`}
+              value={`provider=${form.provider}\nmodel=${form.modelName}\nbase_url=${form.baseUrl}\ntimeout=${form.timeoutSeconds}s\nbilling_unit=${form.billingUnit}\ninput_price_per_1m=${form.inputTokenPricePer1m}\noutput_price_per_1m=${form.outputTokenPricePer1m}\nunit_price=${form.unitPrice}`}
             />
 
             {testResult ? (

@@ -17,6 +17,12 @@ public class AiTask {
     private String toolCode;
     @TableField(exist = false)
     private String toolName;
+    @TableField(exist = false)
+    private String toolType;
+    @TableField(exist = false)
+    private String inputModality;
+    @TableField(exist = false)
+    private String outputModality;
     private String status;
     private Integer progress;
     private String progressMessage;
@@ -76,6 +82,30 @@ public class AiTask {
 
     public void setToolName(String toolName) {
         this.toolName = toolName;
+    }
+
+    public String getToolType() {
+        return toolType;
+    }
+
+    public void setToolType(String toolType) {
+        this.toolType = toolType;
+    }
+
+    public String getInputModality() {
+        return inputModality;
+    }
+
+    public void setInputModality(String inputModality) {
+        this.inputModality = inputModality;
+    }
+
+    public String getOutputModality() {
+        return outputModality;
+    }
+
+    public void setOutputModality(String outputModality) {
+        this.outputModality = outputModality;
     }
 
     public String getStatus() {

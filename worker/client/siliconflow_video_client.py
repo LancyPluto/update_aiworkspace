@@ -16,9 +16,9 @@ class SiliconFlowVideoTimeoutError(SiliconFlowVideoError):
 
 
 class SiliconFlowVideoClient:
-    def __init__(self) -> None:
-        self.base_url = settings.siliconflow_base_url.rstrip("/")
-        self.api_key = settings.siliconflow_api_key
+    def __init__(self, *, base_url: str | None = None, api_key: str | None = None) -> None:
+        self.base_url = (base_url or settings.siliconflow_base_url).rstrip("/")
+        self.api_key = api_key if api_key is not None else settings.siliconflow_api_key
         self.default_model = settings.siliconflow_video_model
         self.poll_interval_seconds = settings.siliconflow_video_poll_interval_seconds
         self.timeout_seconds = settings.siliconflow_video_timeout_seconds
@@ -61,16 +61,40 @@ class SiliconFlowVideoClient:
         model: str | None = None,
         image_size: str = "1024x1024",
     ) -> str:
+        return self.generate_images(prompt=prompt, model=model, image_size=image_size, batch_size=1)[0]
+
+    def generate_images(
+        self,
+        *,
+        prompt: str,
+        model: str | None = None,
+        image_size: str = "1024x1024",
+        batch_size: int = 1,
+        negative_prompt: str = "",
+        seed: int | None = None,
+        guidance_scale: float | None = None,
+        num_inference_steps: int | None = None,
+    ) -> list[str]:
         if not self.api_key or self.api_key.startswith("replace-with-"):
             raise SiliconFlowVideoError("SILICONFLOW_API_KEY is not configured")
 
-        payload = {
+        payload: dict[str, Any] = {
             "model": model or settings.siliconflow_image_model,
             "prompt": prompt,
             "image_size": image_size,
         }
+        if batch_size > 1:
+            payload["batch_size"] = batch_size
+        if negative_prompt.strip():
+            payload["negative_prompt"] = negative_prompt.strip()
+        if seed is not None:
+            payload["seed"] = seed
+        if guidance_scale is not None:
+            payload["guidance_scale"] = guidance_scale
+        if num_inference_steps is not None:
+            payload["num_inference_steps"] = num_inference_steps
         response = self._post("/v1/images/generations", payload)
-        return self._extract_image_url(response)
+        return self._extract_image_urls(response)
 
     def generate_speech_data_url(
         self,
@@ -212,17 +236,28 @@ class SiliconFlowVideoClient:
 
     @staticmethod
     def _extract_image_url(payload: dict[str, Any]) -> str:
+        urls = SiliconFlowVideoClient._extract_image_urls(payload)
+        if not urls:
+            raise SiliconFlowVideoError("siliconflow image response missing image url")
+        return urls[0]
+
+    @staticmethod
+    def _extract_image_urls(payload: dict[str, Any]) -> list[str]:
         containers = []
         for key in ("images", "data"):
             value = payload.get(key)
             if isinstance(value, list):
                 containers.append(value)
+        urls: list[str] = []
         for container in containers:
             if not container:
                 continue
-            first = container[0]
-            if isinstance(first, dict):
-                url = first.get("url") or first.get("image_url")
+            for item in container:
+                if not isinstance(item, dict):
+                    continue
+                url = item.get("url") or item.get("image_url")
                 if isinstance(url, str) and url.strip():
-                    return url.strip()
+                    urls.append(url.strip())
+        if urls:
+            return urls
         raise SiliconFlowVideoError("siliconflow image response missing image url")

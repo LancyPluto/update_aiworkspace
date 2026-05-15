@@ -33,27 +33,104 @@ onMounted(async () => {
 })
 
 function buildResultBlocks(content: string, detail?: TaskDetail): ResultBlock[] {
-  const result: ResultBlock[] = []
+  const outputModality = (detail?.outputModality || detail?.result?.resourceType || "TEXT").toUpperCase()
+  const parsed = parseJson(content)
   const finalVideoUrl = extractFinalVideoUrl(content)
-  if (finalVideoUrl) {
-    result.push({
-      type: "video",
-      title: "最终成片",
-      url: normalizeMediaUrl(finalVideoUrl),
-      downloadName: `${detail?.taskNo ?? "digital-human"}-final.mp4`,
-    })
-  }
+
   if (detail?.toolCode === "enterprise_diagnosis_agent") {
-    result.push({
-      type: "report",
-      title: detail.toolName || "企业诊断报告",
-      content,
-      filename: `${detail.taskNo ?? "enterprise-diagnosis"}-report`,
-    })
-    return result
+    return [
+      {
+        type: "report",
+        title: detail.toolName || "企业诊断报告",
+        content,
+        filename: `${detail.taskNo ?? "enterprise-diagnosis"}-report`,
+      },
+    ]
   }
-  result.push({ type: "text", title: "生成结果", content })
-  return result
+
+  if (outputModality === "VIDEO" || finalVideoUrl) {
+    const videoUrl = finalVideoUrl || collectUrls(parsed ?? content)[0]
+    if (videoUrl) {
+      return [
+        {
+          type: "video",
+          title: "最终成片",
+          url: normalizeMediaUrl(videoUrl),
+          downloadName: `${detail?.taskNo ?? "video"}-final.mp4`,
+        },
+      ]
+    }
+  }
+
+  if (outputModality === "IMAGE") {
+    const images = collectUrls(parsed ?? content).map((url, index) => ({
+      url: normalizeMediaUrl(url),
+      label: `图片 ${index + 1}`,
+    }))
+    if (images.length > 0) {
+      return [{ type: "image", title: "图片结果", images }]
+    }
+  }
+
+  if (outputModality === "AUDIO") {
+    const audioUrl = collectUrls(parsed ?? content)[0]
+    if (audioUrl) {
+      return [
+        {
+          type: "audio",
+          title: "音频结果",
+          url: normalizeMediaUrl(audioUrl),
+          downloadName: `${detail?.taskNo ?? "audio"}-result`,
+        },
+      ]
+    }
+  }
+
+  if (parsed !== null && outputModality !== "TEXT") {
+    return [{ type: "json", title: "结构化结果", content: JSON.stringify(parsed, null, 2) }]
+  }
+  return [{ type: "text", title: "生成结果", content }]
+}
+
+function parseJson(content: string): unknown | null {
+  const trimmed = content.trim()
+  if (!trimmed || (!trimmed.startsWith("{") && !trimmed.startsWith("["))) {
+    return null
+  }
+  try {
+    return JSON.parse(trimmed)
+  } catch {
+    return null
+  }
+}
+
+function collectUrls(value: unknown): string[] {
+  const urls = new Set<string>()
+  const visit = (item: unknown) => {
+    if (typeof item === "string") {
+      extractUrlsFromText(item).forEach((url) => urls.add(sanitizeUrl(url)))
+      return
+    }
+    if (Array.isArray(item)) {
+      item.forEach(visit)
+      return
+    }
+    if (item && typeof item === "object") {
+      Object.values(item).forEach(visit)
+    }
+  }
+  visit(value)
+  return Array.from(urls)
+}
+
+function extractUrlsFromText(value: string): string[] {
+  const trimmed = value.trim()
+  const direct = /^(https?:\/\/\S+|\/\S+|data:(?:image|audio|video)\/\S+;base64,\S+)$/i
+  if (direct.test(trimmed)) {
+    return [trimmed]
+  }
+  const matches = trimmed.match(/(?:https?:\/\/|\/)[^\s"'<>]+/g)
+  return matches ?? []
 }
 
 function extractFinalVideoUrl(content: string): string {
@@ -77,7 +154,7 @@ function sanitizeUrl(value: string): string {
 }
 
 function normalizeMediaUrl(value: string): string {
-  if (value.startsWith("http://") || value.startsWith("https://")) {
+  if (value.startsWith("http://") || value.startsWith("https://") || value.startsWith("data:")) {
     return value
   }
   return value.startsWith("/") ? value : `/${value}`
