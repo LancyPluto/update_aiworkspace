@@ -76,15 +76,22 @@
 
   function toggleComposerExpanded() {
     composerExpanded.value = !composerExpanded.value
+    void nextTick(() => {
+      const el = composerTextareaRef.value
+      if (el) el.style.removeProperty("height")
+      adjustComposerTextareaHeight()
+    })
   }
 
-  /** 按内容自动调整输入框高度（受当前折叠/放大上限约束） */
+  /** 按内容自动调整输入框高度（受当前折叠/放大上限约束）；先压到 0 再量 scrollHeight，避免只能增高不能收回 */
   function adjustComposerTextareaHeight() {
     const el = composerTextareaRef.value
     if (!el) return
     const minH = composerExpanded.value ? 120 : 42
     const maxH = composerExpanded.value ? Math.min(window.innerHeight * 0.5, 420) : 160
-    el.style.height = "auto"
+    el.style.overflowY = "hidden"
+    el.style.height = "0px"
+    void el.offsetHeight
     const scrollH = el.scrollHeight
     const target = Math.min(Math.max(scrollH, minH), maxH)
     el.style.height = `${target}px`
@@ -1178,7 +1185,6 @@
     line-height: 1.5;
     padding-right: 36px;
     box-sizing: border-box;
-    transition: max-height 0.2s ease, min-height 0.2s ease;
   }
 
   .composer-textarea--expanded {

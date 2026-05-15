@@ -1,17 +1,24 @@
 server:
   port: ${SERVER_PORT:8080}
+  servlet:
+    encoding:
+      charset: UTF-8
+      enabled: true
+      force: true
 
 spring:
   application:
     name: ai-tool-market-backend
   datasource:
-    url: jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3307}/${MYSQL_DATABASE:ai_supermarket_v1}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+    # utf8mb4：与库表一致，避免中文乱码；勿用 JDBC 的 utf8（MySQL 历史 3 字节别名）
+    url: jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3307}/${MYSQL_DATABASE:ai_supermarket_v1}?useUnicode=true&characterEncoding=UTF-8&connectionCollation=utf8mb4_unicode_ci&serverTimezone=Asia/Shanghai
     username: ${MYSQL_USERNAME:root}
     password: ${MYSQL_PASSWORD:root123456}
     driver-class-name: com.mysql.cj.jdbc.Driver
     hikari:
       connection-timeout: 2000
       validation-timeout: 1000
+      connection-init-sql: SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci
   data:
     redis:
       host: ${REDIS_HOST:127.0.0.1}
