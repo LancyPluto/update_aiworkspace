@@ -10,6 +10,7 @@ export {
   deleteAgentWorkspaceMemory,
   fetchAgentFiles,
   fetchAgentMessages,
+  fetchAgentRun,
   fetchAgentRunEvents,
   fetchAgentSessions,
   fetchAgentWorkspaces,
