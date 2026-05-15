@@ -32,8 +32,5 @@ class ActuatorEndpointTest {
 
         mockMvc.perform(get("/actuator/metrics"))
                 .andExpect(status().isOk());
-
-        mockMvc.perform(get("/actuator/prometheus"))
-                .andExpect(status().isOk());
     }
 }

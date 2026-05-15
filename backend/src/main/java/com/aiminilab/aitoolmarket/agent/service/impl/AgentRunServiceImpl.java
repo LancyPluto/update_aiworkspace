@@ -260,7 +260,7 @@ public class AgentRunServiceImpl implements AgentRunService {
     public AgentRunResponse confirmTool(Long userId, Long runId, ConfirmAgentToolRequest request) {
         AgentRun run = findRun(runId, userId);
         if (!CONFIRMABLE_STATUSES.contains(run.getStatus())) {
-            if (TERMINAL_STATUSES.contains(run.getStatus()) || "RUNNING".equals(run.getStatus())) {
+            if ("RUNNING".equals(run.getStatus())) {
                 return AgentRunResponse.from(run);
             }
             throw new BusinessException(ErrorCode.AGENT_RUN_NOT_CANCELLABLE, "当前 Agent 运行不可确认工具调用");
