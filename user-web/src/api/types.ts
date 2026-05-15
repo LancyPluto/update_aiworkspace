@@ -17,6 +17,9 @@ export type ApiErrorCode =
   | "TASK_NOT_FOUND"
   | "TASK_STATUS_INVALID"
   | "MODEL_CALL_FAILED"
+  | "SUBSCRIPTION_REQUIRED"
+  | "CHANNEL_UNAVAILABLE"
+  | "PAYMENT_ORDER_NOT_FOUND"
   | "AGENT_SESSION_NOT_FOUND"
   | "AGENT_RUN_NOT_FOUND"
   | "AGENT_RUN_NOT_CANCELLABLE"
@@ -35,6 +38,7 @@ export interface ApiResponse<T> {
   message: string
   data: T | null
   requestId?: string
+  traceId?: string
 }
 
 /** §4 统一任务状态 */
@@ -78,11 +82,30 @@ export interface LoginResponse {
   user?: UserProfile
 }
 
-/** POST /api/v1/auth/register —— 与后端 RegisterRequest 一致 */
+export type SmsCodeScene = "REGISTER" | "LOGIN"
+
+export interface SmsCodeRequest {
+  phone: string
+  scene: SmsCodeScene
+}
+
+export interface SmsCodeResponse {
+  expiresInSeconds: number
+  cooldownSeconds: number
+  debugCode?: string | null
+}
+
+export interface SmsAuthRequest {
+  phone: string
+  code: string
+  nickname?: string
+}
+
 export interface RegisterRequest {
-  username: string
+  username?: string
   password: string
-  /** 可选，不传或空则后端默认用 username */
+  phone?: string
+  email?: string
   nickname?: string
 }
 
@@ -130,7 +153,7 @@ export interface ToolFieldOption {
 export interface ToolField {
   fieldKey: string
   fieldName: string
-  fieldType: "text" | "textarea" | "select"
+  fieldType: "text" | "textarea" | "select" | "number"
   placeholder?: string | null
   options?: ToolFieldOption[] | null
   required: boolean
@@ -365,4 +388,147 @@ export interface UpdateAgentWorkspaceMemoryRequest {
   memoryType: string
   title: string
   content: string
+}
+
+export interface ModelPool {
+  id: number
+  poolCode?: string
+  pool_code?: string
+  poolName?: string
+  pool_name?: string
+  provider: string
+  modelName?: string
+  model_name?: string
+  specLabel?: string
+  spec_label?: string
+  description?: string | null
+  nodeCount?: number
+  node_count?: number
+  availableNodes?: number
+  available_nodes?: number
+}
+
+export interface ModelNode {
+  id: number
+  poolId?: number
+  pool_id?: number
+  nodeCode?: string
+  node_code?: string
+  displayLabel?: string | null
+  display_label?: string | null
+  modelName?: string | null
+  model_name?: string | null
+  maxConcurrency?: number
+  max_concurrency?: number
+  currentConcurrency?: number
+  current_concurrency?: number
+  todayUsed?: number
+  today_used?: number
+  status: string
+  healthStatus?: string
+  health_status?: string
+  warningLevel?: string
+  warning_level?: string
+  warningReason?: string
+  warning_reason?: string
+}
+
+export interface ModelChatSession {
+  id: number
+  title: string
+  poolId?: number
+  pool_id?: number
+  nodeId?: number
+  node_id?: number
+  poolName?: string
+  pool_name?: string
+  nodeCode?: string
+  node_code?: string
+  createdAt?: string
+  created_at?: string
+  updatedAt?: string
+  updated_at?: string
+}
+
+export interface ModelChatMessage {
+  id: number
+  sessionId?: number
+  session_id?: number
+  role: "USER" | "ASSISTANT" | "SYSTEM"
+  contentText?: string
+  content_text?: string
+  createdAt?: string
+  created_at?: string
+}
+
+export interface SubscriptionPlan {
+  id: number
+  planCode?: string
+  plan_code?: string
+  planName?: string
+  plan_name?: string
+  planType?: string
+  plan_type?: string
+  durationDays?: number
+  duration_days?: number
+  priceCents?: number
+  price_cents?: number
+  creditAmount?: number
+  credit_amount?: number
+  status: string
+  description?: string | null
+  entitledPools?: string | null
+  entitled_pools?: string | null
+  hourlyLimit?: number | null
+  hourly_limit?: number | null
+  dailyLimit?: number | null
+  daily_limit?: number | null
+}
+
+export interface UserSubscription {
+  id: number
+  userId?: number
+  user_id?: number
+  planId?: number
+  plan_id?: number
+  planCode?: string
+  plan_code?: string
+  planName?: string
+  plan_name?: string
+  planType?: string
+  plan_type?: string
+  status: string
+  startsAt?: string
+  starts_at?: string
+  expiresAt?: string
+  expires_at?: string
+  sourceOrderId?: number | null
+  source_order_id?: number | null
+  description?: string | null
+  entitledPools?: string | null
+  entitled_pools?: string | null
+  hourlyLimit?: number | null
+  hourly_limit?: number | null
+  dailyLimit?: number | null
+  daily_limit?: number | null
+}
+
+export interface PaymentOrder {
+  id: number
+  orderNo?: string
+  order_no?: string
+  productType?: string
+  product_type?: string
+  productId?: number
+  product_id?: number
+  channel: string
+  amountCents?: number
+  amount_cents?: number
+  status: string
+  paymentUrl?: string
+  payment_url?: string
+  createdAt?: string
+  created_at?: string
+  paidAt?: string | null
+  paid_at?: string | null
 }

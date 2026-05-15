@@ -78,9 +78,9 @@ const providerOptions: Array<{
     value: "anthropic_compatible",
     label: "Anthropic compatible",
     packageName: "langchain-anthropic",
-    defaultModel: "MiniMax-M2.7",
-    defaultBaseUrl: "https://api.minimaxi.com/anthropic",
-    description: "Use an Anthropic-compatible gateway, such as MiniMax M2.7.",
+    defaultModel: "claude-3-5-sonnet-latest",
+    defaultBaseUrl: "https://api.anthropic.com",
+    description: "Use an Anthropic-compatible messages endpoint.",
   },
 ]
 
@@ -160,6 +160,17 @@ function toPayload(form: ModelForm): AgentModelConfigPayload {
 
 function normalizeConfigCode(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "")
+}
+
+function uniqueConfigCode(baseValue: string, configs: AgentModelConfig[]) {
+  const base = normalizeConfigCode(baseValue) || "model_config"
+  const used = new Set(configs.map((item) => normalizeConfigCode(item.configCode || "")).filter(Boolean))
+  if (!used.has(base)) return base
+  for (let index = 2; index < 1000; index += 1) {
+    const candidate = `${base}_${index}`
+    if (!used.has(candidate)) return candidate
+  }
+  return `${base}_${Date.now()}`
 }
 
 function resolveVendorMeta(parts: {
@@ -292,7 +303,7 @@ export function AgentModelSettings() {
   function createConfig() {
     setForm({
       ...emptyForm,
-      configCode: "",
+      configCode: uniqueConfigCode(emptyForm.modelName, configs),
       displayName: "",
       isDefault: configs.length === 0,
     })

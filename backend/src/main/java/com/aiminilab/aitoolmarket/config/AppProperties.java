@@ -12,8 +12,11 @@ public class AppProperties {
     private String jwtSecret;
     private String internalApiToken;
     private String aiTaskQueue;
+    private String taskQueueBackend = "rabbitmq";
+    private Rabbitmq rabbitmq = new Rabbitmq();
     private Agent agent = new Agent();
     private Auth auth = new Auth();
+    private Payment payment = new Payment();
     private Cors cors = new Cors();
 
     public boolean isProductionMode() {
@@ -48,6 +51,22 @@ public class AppProperties {
         this.aiTaskQueue = aiTaskQueue;
     }
 
+    public String getTaskQueueBackend() {
+        return taskQueueBackend;
+    }
+
+    public void setTaskQueueBackend(String taskQueueBackend) {
+        this.taskQueueBackend = taskQueueBackend == null || taskQueueBackend.isBlank() ? "rabbitmq" : taskQueueBackend;
+    }
+
+    public Rabbitmq getRabbitmq() {
+        return rabbitmq;
+    }
+
+    public void setRabbitmq(Rabbitmq rabbitmq) {
+        this.rabbitmq = rabbitmq == null ? new Rabbitmq() : rabbitmq;
+    }
+
     public Agent getAgent() {
         return agent;
     }
@@ -62,6 +81,14 @@ public class AppProperties {
 
     public void setAuth(Auth auth) {
         this.auth = auth == null ? new Auth() : auth;
+    }
+
+    public Payment getPayment() {
+        return payment;
+    }
+
+    public void setPayment(Payment payment) {
+        this.payment = payment == null ? new Payment() : payment;
     }
 
     public Cors getCors() {
@@ -84,9 +111,72 @@ public class AppProperties {
         }
     }
 
+    public static class Rabbitmq {
+        private String taskExchange = "ai.task.exchange";
+        private String taskRoutingKey = "tool.normal";
+        private String taskQueue = "ai.tool.normal";
+        private String deadQueue = "ai.tool.normal.dead";
+        private String retryQueuePrefix = "ai.tool.normal.retry";
+        private List<Integer> retryDelaysMs = new ArrayList<>(List.of(5000, 30000, 120000));
+
+        public String getTaskExchange() {
+            return taskExchange;
+        }
+
+        public void setTaskExchange(String taskExchange) {
+            this.taskExchange = taskExchange == null || taskExchange.isBlank() ? "ai.task.exchange" : taskExchange;
+        }
+
+        public String getTaskRoutingKey() {
+            return taskRoutingKey;
+        }
+
+        public void setTaskRoutingKey(String taskRoutingKey) {
+            this.taskRoutingKey = taskRoutingKey == null || taskRoutingKey.isBlank() ? "tool.normal" : taskRoutingKey;
+        }
+
+        public String getTaskQueue() {
+            return taskQueue;
+        }
+
+        public void setTaskQueue(String taskQueue) {
+            this.taskQueue = taskQueue == null || taskQueue.isBlank() ? "ai.tool.normal" : taskQueue;
+        }
+
+        public String getDeadQueue() {
+            return deadQueue;
+        }
+
+        public void setDeadQueue(String deadQueue) {
+            this.deadQueue = deadQueue == null || deadQueue.isBlank() ? this.taskQueue + ".dead" : deadQueue;
+        }
+
+        public String getRetryQueuePrefix() {
+            return retryQueuePrefix;
+        }
+
+        public void setRetryQueuePrefix(String retryQueuePrefix) {
+            this.retryQueuePrefix = retryQueuePrefix == null || retryQueuePrefix.isBlank()
+                    ? this.taskQueue + ".retry"
+                    : retryQueuePrefix;
+        }
+
+        public List<Integer> getRetryDelaysMs() {
+            return retryDelaysMs;
+        }
+
+        public void setRetryDelaysMs(List<Integer> retryDelaysMs) {
+            this.retryDelaysMs = retryDelaysMs == null || retryDelaysMs.isEmpty()
+                    ? new ArrayList<>(List.of(5000, 30000, 120000))
+                    : retryDelaysMs;
+        }
+
+    }
+
     public static class Auth {
         private String cookieSameSite = "Lax";
         private Boolean cookieSecure;
+        private Sms sms = new Sms();
 
         public String getCookieSameSite() {
             return cookieSameSite;
@@ -102,6 +192,255 @@ public class AppProperties {
 
         public void setCookieSecure(Boolean cookieSecure) {
             this.cookieSecure = cookieSecure;
+        }
+
+        public Sms getSms() {
+            return sms;
+        }
+
+        public void setSms(Sms sms) {
+            this.sms = sms == null ? new Sms() : sms;
+        }
+    }
+
+    public static class Sms {
+        private String provider = "local";
+        private String bmobApplicationId;
+        private String bmobRestApiKey;
+        private String bmobBaseUrl = "https://api.bmob.cn";
+        private String bmobTemplate;
+        private String ihuyiApiId;
+        private String ihuyiApiKey;
+        private String ihuyiBaseUrl = "https://api.ihuyi.com/sms/Submit.json";
+        private String ihuyiTemplateId = "1";
+
+        public String getProvider() {
+            return provider;
+        }
+
+        public void setProvider(String provider) {
+            this.provider = provider == null || provider.isBlank() ? "local" : provider;
+        }
+
+        public String getBmobApplicationId() {
+            return bmobApplicationId;
+        }
+
+        public void setBmobApplicationId(String bmobApplicationId) {
+            this.bmobApplicationId = bmobApplicationId;
+        }
+
+        public String getBmobRestApiKey() {
+            return bmobRestApiKey;
+        }
+
+        public void setBmobRestApiKey(String bmobRestApiKey) {
+            this.bmobRestApiKey = bmobRestApiKey;
+        }
+
+        public String getBmobBaseUrl() {
+            return bmobBaseUrl;
+        }
+
+        public void setBmobBaseUrl(String bmobBaseUrl) {
+            this.bmobBaseUrl = bmobBaseUrl == null || bmobBaseUrl.isBlank() ? "https://api.bmob.cn" : bmobBaseUrl;
+        }
+
+        public String getBmobTemplate() {
+            return bmobTemplate;
+        }
+
+        public void setBmobTemplate(String bmobTemplate) {
+            this.bmobTemplate = bmobTemplate;
+        }
+
+        public String getIhuyiApiId() {
+            return ihuyiApiId;
+        }
+
+        public void setIhuyiApiId(String ihuyiApiId) {
+            this.ihuyiApiId = ihuyiApiId;
+        }
+
+        public String getIhuyiApiKey() {
+            return ihuyiApiKey;
+        }
+
+        public void setIhuyiApiKey(String ihuyiApiKey) {
+            this.ihuyiApiKey = ihuyiApiKey;
+        }
+
+        public String getIhuyiBaseUrl() {
+            return ihuyiBaseUrl;
+        }
+
+        public void setIhuyiBaseUrl(String ihuyiBaseUrl) {
+            this.ihuyiBaseUrl = ihuyiBaseUrl == null || ihuyiBaseUrl.isBlank()
+                    ? "https://api.ihuyi.com/sms/Submit.json"
+                    : ihuyiBaseUrl;
+        }
+
+        public String getIhuyiTemplateId() {
+            return ihuyiTemplateId;
+        }
+
+        public void setIhuyiTemplateId(String ihuyiTemplateId) {
+            this.ihuyiTemplateId = ihuyiTemplateId == null || ihuyiTemplateId.isBlank() ? "1" : ihuyiTemplateId;
+        }
+    }
+
+    public static class Payment {
+        private Wechat wechat = new Wechat();
+        private Alipay alipay = new Alipay();
+
+        public Wechat getWechat() {
+            return wechat;
+        }
+
+        public void setWechat(Wechat wechat) {
+            this.wechat = wechat == null ? new Wechat() : wechat;
+        }
+
+        public Alipay getAlipay() {
+            return alipay;
+        }
+
+        public void setAlipay(Alipay alipay) {
+            this.alipay = alipay == null ? new Alipay() : alipay;
+        }
+
+        public static class Wechat {
+            private boolean enabled;
+            private String appId;
+            private String mchId;
+            private String apiV3Key;
+            private String merchantSerialNo;
+            private String merchantPrivateKeyPath;
+            private String platformCertificatePath;
+            private String notifyUrl;
+
+            public boolean isEnabled() {
+                return enabled;
+            }
+
+            public void setEnabled(boolean enabled) {
+                this.enabled = enabled;
+            }
+
+            public String getAppId() {
+                return appId;
+            }
+
+            public void setAppId(String appId) {
+                this.appId = appId;
+            }
+
+            public String getMchId() {
+                return mchId;
+            }
+
+            public void setMchId(String mchId) {
+                this.mchId = mchId;
+            }
+
+            public String getApiV3Key() {
+                return apiV3Key;
+            }
+
+            public void setApiV3Key(String apiV3Key) {
+                this.apiV3Key = apiV3Key;
+            }
+
+            public String getMerchantSerialNo() {
+                return merchantSerialNo;
+            }
+
+            public void setMerchantSerialNo(String merchantSerialNo) {
+                this.merchantSerialNo = merchantSerialNo;
+            }
+
+            public String getMerchantPrivateKeyPath() {
+                return merchantPrivateKeyPath;
+            }
+
+            public void setMerchantPrivateKeyPath(String merchantPrivateKeyPath) {
+                this.merchantPrivateKeyPath = merchantPrivateKeyPath;
+            }
+
+            public String getPlatformCertificatePath() {
+                return platformCertificatePath;
+            }
+
+            public void setPlatformCertificatePath(String platformCertificatePath) {
+                this.platformCertificatePath = platformCertificatePath;
+            }
+
+            public String getNotifyUrl() {
+                return notifyUrl;
+            }
+
+            public void setNotifyUrl(String notifyUrl) {
+                this.notifyUrl = notifyUrl;
+            }
+        }
+
+        public static class Alipay {
+            private boolean enabled;
+            private String appId;
+            private String merchantPrivateKey;
+            private String alipayPublicKey;
+            private String gatewayUrl = "https://openapi.alipay.com/gateway.do";
+            private String notifyUrl;
+
+            public boolean isEnabled() {
+                return enabled;
+            }
+
+            public void setEnabled(boolean enabled) {
+                this.enabled = enabled;
+            }
+
+            public String getAppId() {
+                return appId;
+            }
+
+            public void setAppId(String appId) {
+                this.appId = appId;
+            }
+
+            public String getMerchantPrivateKey() {
+                return merchantPrivateKey;
+            }
+
+            public void setMerchantPrivateKey(String merchantPrivateKey) {
+                this.merchantPrivateKey = merchantPrivateKey;
+            }
+
+            public String getAlipayPublicKey() {
+                return alipayPublicKey;
+            }
+
+            public void setAlipayPublicKey(String alipayPublicKey) {
+                this.alipayPublicKey = alipayPublicKey;
+            }
+
+            public String getGatewayUrl() {
+                return gatewayUrl;
+            }
+
+            public void setGatewayUrl(String gatewayUrl) {
+                this.gatewayUrl = gatewayUrl == null || gatewayUrl.isBlank()
+                        ? "https://openapi.alipay.com/gateway.do"
+                        : gatewayUrl;
+            }
+
+            public String getNotifyUrl() {
+                return notifyUrl;
+            }
+
+            public void setNotifyUrl(String notifyUrl) {
+                this.notifyUrl = notifyUrl;
+            }
         }
     }
 

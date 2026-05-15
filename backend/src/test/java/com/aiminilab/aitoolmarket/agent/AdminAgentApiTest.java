@@ -12,6 +12,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -41,6 +42,9 @@ class AdminAgentApiTest {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @MockBean
     private TokenDenylistService tokenDenylistService;
@@ -269,6 +273,52 @@ class AdminAgentApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.success").value(true))
                 .andExpect(jsonPath("$.data.modelName").value("saved-model"));
+    }
+
+    @Test
+    void adminCanReuseConfigCodeFromSoftDeletedModelConfig() throws Exception {
+        mockExternalAuthDependencies();
+        String adminToken = login("/api/admin/v1/auth/login", "admin");
+        jdbcTemplate.update("""
+                INSERT INTO agent_model_configs(display_name, config_code, provider, model_name, base_url, api_key,
+                                                timeout_seconds, enabled, is_default, is_deleted)
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                "Deleted GLM",
+                "glm_5_1",
+                "openai_compatible",
+                "old-glm",
+                "https://api.siliconflow.cn/v1",
+                "old-secret",
+                60,
+                true,
+                false,
+                true);
+
+        mockMvc.perform(post("/api/admin/v1/agent/model-config")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "displayName": "GLM-5.1",
+                                  "configCode": "glm_5_1",
+                                  "provider": "openai_compatible",
+                                  "modelName": "Pro/zai-org/GLM-5.1",
+                                  "baseUrl": "https://api.siliconflow.cn/v1",
+                                  "apiKey": "new-secret",
+                                  "timeoutSeconds": 60,
+                                  "enabled": true,
+                                  "isDefault": false
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.configCode").value("glm_5_1"))
+                .andExpect(jsonPath("$.data.modelName").value("Pro/zai-org/GLM-5.1"));
+
+        Integer archivedRows = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM agent_model_configs WHERE is_deleted = 1 AND config_code LIKE 'glm_5_1__deleted_%'",
+                Integer.class);
+        assertThat(archivedRows).isEqualTo(1);
     }
 
     private void mockExternalAuthDependencies() {

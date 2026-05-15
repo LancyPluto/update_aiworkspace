@@ -1,6 +1,7 @@
 package com.aiminilab.aitoolmarket.config;
 
 import com.aiminilab.aitoolmarket.auth.security.AuthContext;
+import com.aiminilab.aitoolmarket.auth.security.AuthCookieSupport;
 import com.aiminilab.aitoolmarket.auth.security.AuthUser;
 import com.aiminilab.aitoolmarket.auth.security.InternalRequestSignatureVerifier;
 import com.aiminilab.aitoolmarket.auth.security.JwtTokenProvider;
@@ -15,6 +16,7 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.ServletInputStream;
 import jakarta.servlet.ServletRequest;
 import jakarta.servlet.ServletResponse;
+import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletRequestWrapper;
 import jakarta.servlet.http.HttpServletResponse;
@@ -116,6 +118,7 @@ public class AuthInterceptor implements HandlerInterceptor, Filter {
                 || path.equals("/api/v1/ping")
                 || path.equals("/api/admin/v1/ping")
                 || path.startsWith("/api/v1/auth/")
+                || (path.startsWith("/api/v1/payments/") && path.endsWith("/callback"))
                 || path.equals("/api/v1/tool-categories")
                 || path.equals("/api/v1/tools")
                 || path.startsWith("/api/v1/tools/")
@@ -134,11 +137,44 @@ public class AuthInterceptor implements HandlerInterceptor, Filter {
     }
 
     private Optional<AuthUser> extractAuthUser(HttpServletRequest request) {
+        Optional<String> bearerToken = extractBearerToken(request);
+        if (bearerToken.isPresent()) {
+            return jwtTokenProvider.parseToken(bearerToken.get());
+        }
+        return extractSessionCookieToken(request)
+                .flatMap(jwtTokenProvider::parseToken);
+    }
+
+    private Optional<String> extractBearerToken(HttpServletRequest request) {
         String authorization = request.getHeader("Authorization");
         if (authorization == null || !authorization.startsWith("Bearer ")) {
             return Optional.empty();
         }
-        return jwtTokenProvider.parseToken(authorization.substring("Bearer ".length()));
+        return Optional.of(authorization.substring("Bearer ".length()));
+    }
+
+    private Optional<String> extractSessionCookieToken(HttpServletRequest request) {
+        Cookie[] cookies = request.getCookies();
+        if (cookies == null || cookies.length == 0) {
+            return Optional.empty();
+        }
+        String preferredCookie = request.getRequestURI().startsWith("/api/admin/v1/")
+                ? AuthCookieSupport.ADMIN_SESSION_COOKIE
+                : AuthCookieSupport.USER_SESSION_COOKIE;
+        Optional<String> preferred = cookieValue(cookies, preferredCookie);
+        if (preferred.isPresent()) {
+            return preferred;
+        }
+        return cookieValue(cookies, AuthCookieSupport.ADMIN_SESSION_COOKIE);
+    }
+
+    private Optional<String> cookieValue(Cookie[] cookies, String name) {
+        for (Cookie cookie : cookies) {
+            if (name.equals(cookie.getName()) && cookie.getValue() != null && !cookie.getValue().isBlank()) {
+                return Optional.of(cookie.getValue());
+            }
+        }
+        return Optional.empty();
     }
 
     private void writeError(HttpServletResponse response, HttpStatus status, ErrorCode errorCode, String message) throws Exception {

@@ -3,6 +3,7 @@ import { RouterLink, useRoute } from "vue-router"
 //侧边导航栏
 import {
   Bot,
+  Boxes,
   LayoutGrid,
   Store,
   ListChecks,
@@ -46,6 +47,7 @@ watch(sidebarOpen, (open) => {
 
 const userNav = [
   { href: "/agent" as const, label: "Agent", icon: Bot },
+  { href: "/models" as const, label: "Global Models", icon: Boxes },
   { href: "/dashboard" as const, label: "工作台", icon: LayoutGrid },
   { href: "/marketplace" as const, label: "AI 工具超市", icon: Store },
   { href: "/tasks" as const, label: "我的任务", icon: ListChecks },
@@ -68,7 +70,7 @@ onMounted(async () => {
   if (saved === "0") sidebarOpen.value = false
   if (saved === "1") sidebarOpen.value = true
 
-  if (auth.isLoggedIn && auth.token) {
+  if (auth.isLoggedIn) {
     try {
       credit.value = await fetchCreditAccount({ token: auth.token })
     } catch {

@@ -1,10 +1,7 @@
 import type { ApiErrorCode, ApiResponse } from "./types"
-import { getSessionBearerJwt } from "./sessionBearer"
+import { SESSION_TOKEN_STORAGE_KEY } from "@/constants/authStorage"
+import { clearSessionBearerJwt, getSessionBearerJwt } from "./sessionBearer"
 
-/**
- * 后端 Origin，不含路径。例如 http://localhost:8080
- * 接口路径本身已含 /api/v1/...（见契约 §8）
- */
 export function getApiOrigin(): string {
   const raw = import.meta.env.VITE_API_BASE ?? ""
   return raw.replace(/\/$/, "")
@@ -23,10 +20,8 @@ export class ApiBusinessError extends Error {
 }
 
 export interface RequestOptions {
-  /** 可选 Bearer（脚本/调试）；浏览器会话使用 Cookie */
   token?: string | null
   query?: Record<string, string | number | boolean | undefined>
-  /** 取消进行中的请求（如离开页面、发起新请求前） */
   signal?: AbortSignal
 }
 
@@ -51,10 +46,24 @@ function buildUrl(path: string, query?: RequestOptions["query"]): string {
   return url.toString()
 }
 
-/**
- * 统一解析契约响应壳；code !== SUCCESS 时抛 ApiBusinessError。
- * credentials + Cookie；Authorization 使用 options.token 或登录后 sessionBearer（与 Cookie 中 JWT 一致）。
- */
+function redirectToLoginPage(): void {
+  if (typeof window === "undefined") return
+  const path = window.location.pathname
+  if (path === "/login" || path.endsWith("/login")) return
+  try {
+    sessionStorage.removeItem(SESSION_TOKEN_STORAGE_KEY)
+    localStorage.removeItem(SESSION_TOKEN_STORAGE_KEY)
+  } catch {
+    // ignore storage errors
+  }
+  clearSessionBearerJwt()
+  const full = `${window.location.pathname}${window.location.search}`
+  const base = import.meta.env.BASE_URL || "/"
+  const normalizedBase = base.endsWith("/") ? base.slice(0, -1) : base
+  const loginPath = (normalizedBase ? `${normalizedBase}/login` : "/login").replace(/\/+/g, "/")
+  window.location.assign(`${window.location.origin}${loginPath}?redirect=${encodeURIComponent(full)}`)
+}
+
 export async function apiRequest<T>(
   method: string,
   path: string,
@@ -87,15 +96,26 @@ export async function apiRequest<T>(
     signal: options?.signal,
   })
 
+  const rawText = await res.text()
   let json: ApiResponse<T>
   try {
-    json = (await res.json()) as ApiResponse<T>
+    json = (rawText ? JSON.parse(rawText) : {}) as ApiResponse<T>
   } catch {
+    if (res.status === 401) {
+      redirectToLoginPage()
+      throw new ApiBusinessError("UNAUTHORIZED", "登录已失效，请重新登录", undefined)
+    }
     throw new ApiBusinessError("SYSTEM_ERROR", `无效响应 (${res.status})`, undefined)
   }
 
+  const requestId = json.requestId ?? json.traceId
+  if (res.status === 401 || json.code === "UNAUTHORIZED") {
+    redirectToLoginPage()
+    throw new ApiBusinessError(json.code ?? "UNAUTHORIZED", json.message ?? "登录已失效，请重新登录", requestId)
+  }
+
   if (json.code !== "SUCCESS") {
-    throw new ApiBusinessError(json.code, json.message ?? json.code, json.requestId)
+    throw new ApiBusinessError(json.code, json.message ?? json.code, requestId)
   }
 
   return json.data as T

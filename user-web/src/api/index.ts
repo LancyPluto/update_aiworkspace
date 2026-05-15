@@ -1,5 +1,5 @@
 export { apiRequest, ApiBusinessError } from "./client"
-export { login, logout, register } from "./authApi"
+export { login, logout, register, sendSmsCode, smsLogin, smsRegister } from "./authApi"
 export { getCurrentUser } from "./userApi"
 export { fetchToolCategories, fetchTools, searchTools, fetchToolByCode } from "./toolApi"
 export {
@@ -21,4 +21,15 @@ export {
 } from "./agentApi"
 export { createTask, fetchTasks, fetchTaskStatus, fetchTaskById, cancelTask } from "./taskApi"
 export { fetchCreditAccount, fetchCreditLogs } from "./creditApi"
+export {
+  createModelChatSession,
+  createPaymentOrder,
+  fetchModelChatMessages,
+  fetchModelChatSessions,
+  fetchModelNodes,
+  fetchModelPlans,
+  fetchModelPools,
+  mockPayOrder,
+  sendModelChatMessage,
+} from "./modelWorkbenchApi"
 export * from "./types"

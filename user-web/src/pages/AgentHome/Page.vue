@@ -82,7 +82,7 @@ const suggestions = [
 ]
 
 async function loadWorkspaces() {
-  if (!auth.token) return
+  if (!auth.isLoggedIn) return
   const res = await fetchAgentWorkspaces({ token: auth.token })
   workspaces.value = res.list
   if (!activeWorkspaceId.value && workspaces.value[0]) {
@@ -111,7 +111,7 @@ const hasActiveRun = computed(() => {
 })
 
 async function loadSessions() {
-  if (!auth.token) return
+  if (!auth.isLoggedIn) return
   loading.value = true
   try {
     const res = await fetchAgentSessions({ token: auth.token })
@@ -125,7 +125,7 @@ async function loadSessions() {
 }
 
 async function selectSession(sessionId: number) {
-  if (!auth.token) return
+  if (!auth.isLoggedIn) return
   activeSessionId.value = sessionId
   events.value = []
   agentError.value = null
@@ -141,7 +141,7 @@ async function selectSession(sessionId: number) {
 }
 
 async function startSession(title = "新的 Agent 会话") {
-  if (!auth.token) return null
+  if (!auth.isLoggedIn) return null
   const session = await createAgentSession({ title }, { token: auth.token })
   sessions.value = [session, ...sessions.value.filter((item) => item.id !== session.id)]
   activeSessionId.value = session.id
@@ -157,7 +157,7 @@ async function startSession(title = "新的 Agent 会话") {
 }
 
 async function loadFiles(sessionId = activeSessionId.value) {
-  if (!auth.token || !sessionId) return
+  if (!auth.isLoggedIn || !sessionId) return
   const res = await fetchAgentFiles(sessionId, { token: auth.token })
   files.value = res.list
 }
@@ -170,7 +170,7 @@ async function handleFileSelected(event: Event) {
   const target = event.target as HTMLInputElement
   const selected = target.files?.[0]
   target.value = ""
-  if (!selected || !auth.token || uploading.value) return
+  if (!selected || !auth.isLoggedIn || uploading.value) return
   uploading.value = true
   try {
     let sessionId = activeSessionId.value
@@ -188,7 +188,7 @@ async function handleFileSelected(event: Event) {
 
 async function submitMessage(content = input.value) {
   const text = content.trim()
-  if (!text || !auth.token || sending.value || hasActiveRun.value) return
+  if (!text || !auth.isLoggedIn || sending.value || hasActiveRun.value) return
   sending.value = true
   agentError.value = null
   confirmationError.value = null
@@ -247,7 +247,7 @@ function formatAgentError(error: unknown) {
 }
 
 async function pollRun(runId: number, reset = false) {
-  if (!auth.token) return
+  if (!auth.isLoggedIn) return
   pollFetchAbort?.abort()
   pollFetchAbort = new AbortController()
   const signal = pollFetchAbort.signal
@@ -329,7 +329,7 @@ function stopRunUpdates() {
 }
 
 async function confirmTool(eventId: number, toolCode: string, approved: boolean) {
-  if (!auth.token || !activeRunId.value) return
+  if (!auth.isLoggedIn || !activeRunId.value) return
   confirmationError.value = null
   const nextConfirming = new Set(confirmingEventIds.value)
   nextConfirming.add(eventId)
@@ -358,7 +358,7 @@ async function confirmTool(eventId: number, toolCode: string, approved: boolean)
 }
 
 async function refreshMessages() {
-  if (!auth.token || !activeSessionId.value) return
+  if (!auth.isLoggedIn || !activeSessionId.value) return
   const messageRes = await fetchAgentMessages(activeSessionId.value, { token: auth.token })
   messages.value = messageRes.list
 }

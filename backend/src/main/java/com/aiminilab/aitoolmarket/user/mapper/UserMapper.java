@@ -27,6 +27,30 @@ public interface UserMapper extends BaseMapper<User> {
         return Optional.ofNullable(selectByUsername(username));
     }
 
+    @Select("""
+            SELECT *
+            FROM users
+            WHERE phone = #{phone} AND is_deleted = 0
+            LIMIT 1
+            """)
+    User selectByPhone(@Param("phone") String phone);
+
+    default Optional<User> findByPhone(String phone) {
+        return Optional.ofNullable(selectByPhone(phone));
+    }
+
+    @Select("""
+            SELECT *
+            FROM users
+            WHERE (username = #{account} OR phone = #{account}) AND is_deleted = 0
+            LIMIT 1
+            """)
+    User selectByUsernameOrPhone(@Param("account") String account);
+
+    default Optional<User> findByUsernameOrPhone(String account) {
+        return Optional.ofNullable(selectByUsernameOrPhone(account));
+    }
+
     default Long insertAndReturnId(User user) {
         insert(user);
         return user.getId();

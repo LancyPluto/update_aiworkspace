@@ -19,12 +19,53 @@ spring:
       password: ${REDIS_PASSWORD:}
       database: ${REDIS_DATABASE:0}
       timeout: 2s
+  rabbitmq:
+    host: ${RABBITMQ_HOST:127.0.0.1}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
 
 app:
   production-mode: ${APP_PRODUCTION_MODE:false}
   jwt-secret: ${JWT_SECRET:local-dev-secret}
   internal-api-token: ${INTERNAL_API_TOKEN:local-internal-token}
   ai-task-queue: ${AI_TASK_QUEUE:ai:task:queue}
+  task-queue-backend: ${TASK_QUEUE_BACKEND:rabbitmq}
+  rabbitmq:
+    task-exchange: ${RABBITMQ_TASK_EXCHANGE:ai.task.exchange}
+    task-routing-key: ${RABBITMQ_TASK_ROUTING_KEY:tool.normal}
+    task-queue: ${RABBITMQ_TASK_QUEUE:ai.tool.normal}
+    dead-queue: ${RABBITMQ_DEAD_QUEUE:ai.tool.normal.dead}
+    retry-queue-prefix: ${RABBITMQ_RETRY_QUEUE_PREFIX:ai.tool.normal.retry}
+    retry-delays-ms: ${RABBITMQ_RETRY_DELAYS_MS:5000,30000,120000}
+  auth:
+    sms:
+      provider: ${SMS_PROVIDER:local}
+      bmob-application-id: ${BMOB_APPLICATION_ID:}
+      bmob-rest-api-key: ${BMOB_REST_API_KEY:}
+      bmob-base-url: ${BMOB_BASE_URL:https://api.bmob.cn}
+      bmob-template: ${BMOB_SMS_TEMPLATE:}
+      ihuyi-api-id: ${IHUYI_API_ID:}
+      ihuyi-api-key: ${IHUYI_API_KEY:}
+      ihuyi-base-url: ${IHUYI_BASE_URL:https://api.ihuyi.com/sms/Submit.json}
+      ihuyi-template-id: ${IHUYI_TEMPLATE_ID:1}
+  payment:
+    wechat:
+      enabled: ${WECHAT_PAY_ENABLED:false}
+      app-id: ${WECHAT_PAY_APP_ID:}
+      mch-id: ${WECHAT_PAY_MCH_ID:}
+      api-v3-key: ${WECHAT_PAY_API_V3_KEY:}
+      merchant-serial-no: ${WECHAT_PAY_MERCHANT_SERIAL_NO:}
+      merchant-private-key-path: ${WECHAT_PAY_MERCHANT_PRIVATE_KEY_PATH:}
+      platform-certificate-path: ${WECHAT_PAY_PLATFORM_CERTIFICATE_PATH:}
+      notify-url: ${WECHAT_PAY_NOTIFY_URL:}
+    alipay:
+      enabled: ${ALIPAY_ENABLED:false}
+      app-id: ${ALIPAY_APP_ID:}
+      merchant-private-key: ${ALIPAY_MERCHANT_PRIVATE_KEY:}
+      alipay-public-key: ${ALIPAY_PUBLIC_KEY:}
+      gateway-url: ${ALIPAY_GATEWAY_URL:https://openapi.alipay.com/gateway.do}
+      notify-url: ${ALIPAY_NOTIFY_URL:}
   agent:
     enabled: ${AGENT_ENABLED:true}
     service-base-url: ${AGENT_SERVICE_BASE_URL:http://127.0.0.1:8090}

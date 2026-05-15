@@ -48,6 +48,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
     @Transactional
     public AgentModelConfigResponse adminCreate(AgentModelConfigRequest request) {
         validate(request);
+        ensureConfigCodeAvailable(request.configCode(), null);
         LocalDateTime now = LocalDateTime.now();
         AgentModelConfig config = applyRequest(new AgentModelConfig(), request, null, now);
         config.setCreatedAt(now);
@@ -63,6 +64,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
     public AgentModelConfigResponse adminUpdate(Long id, AgentModelConfigRequest request) {
         validate(request);
         AgentModelConfig existing = findActiveOrThrow(id);
+        ensureConfigCodeAvailable(request.configCode(), existing.getId());
         AgentModelConfig config = applyRequest(existing, request, existing, LocalDateTime.now());
         agentModelConfigMapper.updateConfig(config);
         if (Boolean.TRUE.equals(config.getDefault())) {
@@ -191,6 +193,17 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         if (request.modelName() == null || request.modelName().isBlank()) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "modelName is required");
         }
+    }
+
+    private void ensureConfigCodeAvailable(String configCode, Long excludeId) {
+        String normalized = blankToNull(configCode);
+        if (normalized == null) {
+            return;
+        }
+        if (agentModelConfigMapper.countActiveByConfigCode(normalized, excludeId) > 0) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "configCode already exists");
+        }
+        agentModelConfigMapper.archiveDeletedConfigCode(normalized);
     }
 
     private String blankToNull(String value) {

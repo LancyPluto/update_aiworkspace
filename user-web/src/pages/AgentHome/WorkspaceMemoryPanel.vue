@@ -25,10 +25,10 @@ const draft = ref<UpdateAgentWorkspaceMemoryRequest>({
   content: "",
 })
 
-const canLoad = computed(() => Boolean(props.workspaceId && props.token))
+const canLoad = computed(() => Boolean(props.workspaceId))
 
 watch(
-  () => [props.workspaceId, props.token] as const,
+  () => props.workspaceId,
   () => {
     void loadMemory()
   },
