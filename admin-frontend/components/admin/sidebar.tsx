@@ -11,7 +11,6 @@ import {
   ListTodo,
   ReceiptText,
   Settings,
-  Sparkles,
   Users,
   Wrench,
 } from "lucide-react"
@@ -35,9 +34,7 @@ export function AdminSidebar() {
     <aside className="fixed left-0 top-0 z-40 h-screen w-64 border-r border-border bg-sidebar">
       <div className="flex h-full flex-col">
         <div className="flex h-16 items-center gap-3 border-b border-sidebar-border px-6">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary">
-            <Sparkles className="h-5 w-5 text-primary-foreground" />
-          </div>
+          <img src="/logo.svg" alt="AI Tool Market" className="h-9 w-9 rounded-xl object-contain" />
           <div>
             <h1 className="text-base font-semibold text-sidebar-foreground">AI 工具超市</h1>
             <p className="text-xs text-muted-foreground">管理后台</p>

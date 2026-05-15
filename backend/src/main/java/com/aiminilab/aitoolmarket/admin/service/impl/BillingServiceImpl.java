@@ -52,7 +52,8 @@ public class BillingServiceImpl implements BillingService {
                             Integer promptTokens, Integer completionTokens, Integer chargedCredits) {
         int prompt = nonNegative(promptTokens);
         int completion = nonNegative(completionTokens);
-        if (prompt == 0 && completion == 0) {
+        int charged = nonNegative(chargedCredits);
+        if (prompt == 0 && completion == 0 && charged == 0) {
             return;
         }
         BigDecimal inputPrice = price(modelConfig == null ? null : modelConfig.getInputTokenPricePer1k());
@@ -70,7 +71,7 @@ public class BillingServiceImpl implements BillingService {
         log.setInputTokenPricePer1k(inputPrice);
         log.setOutputTokenPricePer1k(outputPrice);
         log.setCostAmount(cost(prompt, inputPrice).add(cost(completion, outputPrice)));
-        log.setChargedCredits(nonNegative(chargedCredits));
+        log.setChargedCredits(charged);
         log.setCreatedAt(LocalDateTime.now());
         billingUsageLogMapper.insert(log);
     }

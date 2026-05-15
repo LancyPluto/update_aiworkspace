@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, reactive, ref } from "vue"
 import { RouterLink, useRoute, useRouter } from "vue-router"
-import { Boxes, KeyRound, Loader2, MessageSquareText, ShieldCheck, Sparkles, UserPlus, Zap } from "lucide-vue-next"
+import { Boxes, KeyRound, Loader2, MessageSquareText, ShieldCheck, UserPlus, Zap } from "lucide-vue-next"
 import { ApiBusinessError, sendSmsCode } from "@/api"
 import type { SmsCodeScene } from "@/api/types"
 import { useAuthStore } from "@/store/authStore"
@@ -167,9 +167,7 @@ onBeforeUnmount(() => {
   <div class="login-layout">
     <aside class="hero-side">
       <div class="brand">
-        <div class="brand-icon">
-          <Sparkles class="icon" />
-        </div>
+        <img src="/logo.svg" alt="AI Tool Market" class="brand-logo" />
         <span class="brand-name">AI Tool Market</span>
       </div>
 
@@ -201,9 +199,7 @@ onBeforeUnmount(() => {
     <main class="login-main">
       <div class="login-container">
         <div class="mobile-brand">
-          <div class="brand-icon">
-            <Sparkles class="icon" />
-          </div>
+          <img src="/logo.svg" alt="AI Tool Market" class="brand-logo" />
           <span class="brand-name">AI Tool Market</span>
         </div>
 
@@ -350,20 +346,11 @@ onBeforeUnmount(() => {
   gap: 0.5rem;
 }
 
-.brand-icon {
-  display: flex;
+.brand-logo {
   height: 2.25rem;
   width: 2.25rem;
-  align-items: center;
-  justify-content: center;
   border-radius: 0.5rem;
-  background: var(--primary);
-  color: var(--primary-foreground);
-}
-
-.icon {
-  height: 1.25rem;
-  width: 1.25rem;
+  object-fit: contain;
 }
 
 .brand-name {
