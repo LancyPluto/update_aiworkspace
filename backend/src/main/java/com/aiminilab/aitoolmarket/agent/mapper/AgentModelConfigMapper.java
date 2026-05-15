@@ -16,7 +16,7 @@ public interface AgentModelConfigMapper extends BaseMapper<AgentModelConfig> {
             SELECT *
             FROM agent_model_configs
             WHERE COALESCE(is_deleted, 0) = 0
-            ORDER BY id DESC
+            ORDER BY COALESCE(is_default, 0) DESC, id DESC
             LIMIT 1
             """)
     AgentModelConfig findLatest();
