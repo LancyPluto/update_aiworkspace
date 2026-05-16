@@ -27,6 +27,7 @@ public class AgentModelConfig {
     private BigDecimal outputTokenPricePer1m;
     private String billingUnit;
     private BigDecimal unitPrice;
+    private String capabilities;
     private Boolean enabled;
     private Boolean isDefault;
     private LocalDateTime createdAt;
@@ -68,6 +69,8 @@ public class AgentModelConfig {
     public void setBillingUnit(String billingUnit) { this.billingUnit = billingUnit; }
     public BigDecimal getUnitPrice() { return unitPrice; }
     public void setUnitPrice(BigDecimal unitPrice) { this.unitPrice = unitPrice; }
+    public String getCapabilities() { return capabilities; }
+    public void setCapabilities(String capabilities) { this.capabilities = capabilities; }
     public Boolean getEnabled() { return enabled; }
     public void setEnabled(Boolean enabled) { this.enabled = enabled; }
     public Boolean getDefault() { return isDefault; }

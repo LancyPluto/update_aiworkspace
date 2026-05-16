@@ -2,6 +2,9 @@ package com.aiminilab.aitoolmarket.task.service.impl;
 
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentModelConfigMapper;
+import com.aiminilab.aitoolmarket.agent.service.ModelCapabilityService;
+import com.aiminilab.aitoolmarket.tool.mapper.ToolMapper;
+import com.aiminilab.aitoolmarket.tool.entity.AiTool;
 import com.aiminilab.aitoolmarket.admin.service.BillingService;
 import com.aiminilab.aitoolmarket.common.enums.CreditSourceType;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
@@ -32,19 +35,25 @@ import java.util.List;
 public class InternalTaskServiceImpl implements InternalTaskService {
 
     private final TaskMapper taskMapper;
+    private final ToolMapper toolMapper;
     private final AgentModelConfigMapper agentModelConfigMapper;
+    private final ModelCapabilityService modelCapabilityService;
     private final ToolFieldItemMapper toolFieldItemMapper;
     private final ObjectMapper objectMapper;
     private final CreditService creditService;
     private final BillingService billingService;
     private final TaskMetrics taskMetrics;
 
-    public InternalTaskServiceImpl(TaskMapper taskMapper, AgentModelConfigMapper agentModelConfigMapper,
+    public InternalTaskServiceImpl(TaskMapper taskMapper, ToolMapper toolMapper,
+                                   AgentModelConfigMapper agentModelConfigMapper,
+                                   ModelCapabilityService modelCapabilityService,
                                    ToolFieldItemMapper toolFieldItemMapper, ObjectMapper objectMapper,
                                    CreditService creditService, BillingService billingService,
                                    TaskMetrics taskMetrics) {
         this.taskMapper = taskMapper;
+        this.toolMapper = toolMapper;
         this.agentModelConfigMapper = agentModelConfigMapper;
+        this.modelCapabilityService = modelCapabilityService;
         this.toolFieldItemMapper = toolFieldItemMapper;
         this.objectMapper = objectMapper;
         this.creditService = creditService;
@@ -58,9 +67,13 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         List<ToolFieldResponse> fields = toolFieldItemMapper.findActiveFields(task.getToolId()).stream()
                 .map(field -> ToolFieldResponse.from(field, objectMapper))
                 .toList();
+        AiTool tool = toolMapper.findById(task.getToolId())
+                .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在"));
         AgentModelConfig modelConfig = agentModelConfigMapper.findForToolExecution(task.getToolId());
+        modelCapabilityService.validateExecution(tool, modelConfig);
+        List<String> caps = modelCapabilityService.resolveCapabilities(modelConfig);
         return ExecutionContextResponse.of(task, parseParams(task.getParamsJson()),
-                ExecutionModelConfigResponse.from(modelConfig), fields);
+                ExecutionModelConfigResponse.from(modelConfig, caps), fields);
     }
 
     @Override

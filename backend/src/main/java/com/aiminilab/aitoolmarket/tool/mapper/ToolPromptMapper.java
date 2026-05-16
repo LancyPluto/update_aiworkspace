@@ -18,4 +18,13 @@ public interface ToolPromptMapper extends BaseMapper<ToolPrompt> {
     default Optional<ToolPrompt> findById(Long promptId) {
         return Optional.ofNullable(selectById(promptId));
     }
+
+    default Optional<ToolPrompt> findByToolIdAndCode(Long toolId, String promptCode) {
+        return selectList(new LambdaQueryWrapper<ToolPrompt>()
+                .eq(ToolPrompt::getToolId, toolId)
+                .eq(ToolPrompt::getPromptCode, promptCode)
+                .last("LIMIT 1"))
+                .stream()
+                .findFirst();
+    }
 }

@@ -57,6 +57,16 @@ import {
   updateTool,
   updateToolFields,
 } from "@/lib/api/tools"
+import { applyToolTemplate, fetchToolTemplates, type ToolTemplateSummary } from "@/lib/api/tool-templates"
+import { FieldSchemaEditor } from "@/components/admin/field-schema-editor"
+import {
+  editableFromToolField,
+  parseFieldsJson,
+  serializeFields,
+  toFieldPayload,
+  type EditableField,
+} from "@/lib/tool-fields"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { fetchAgentModelConfigs } from "@/lib/api/agent-model"
 import { ApiError } from "@/lib/api/http"
 import type { AgentModelConfig, ToolCategory, ToolField, ToolFieldPayload, ToolSummary } from "@/lib/api/types"
@@ -80,6 +90,7 @@ interface ToolRow {
   modelConfigId: number | null
   modelConfigName: string | null
   modelName: string | null
+  executionHandler?: string | null
 }
 
 interface ToolForm {
@@ -93,6 +104,7 @@ interface ToolForm {
   configNote: string
   estimatedCreditCost: string
   modelConfigId: string
+  templateCode: string
 }
 
 const initialForm: ToolForm = {
@@ -106,6 +118,7 @@ const initialForm: ToolForm = {
   configNote: "",
   estimatedCreditCost: "5",
   modelConfigId: "",
+  templateCode: "text_generation_default",
 }
 
 const toolTypeOptions = [
@@ -144,64 +157,30 @@ const defaultModalitiesByType: Record<string, { input: string; output: string }>
   AGENT: { input: "MULTIMODAL", output: "TEXT" },
 }
 
+function executionCapabilityForTool(toolType: string, toolCode: string, executionHandler?: string | null): string {
+  const eh = executionHandler?.trim()
+  if (eh) return eh.toUpperCase()
+  const code = (toolCode || "").trim()
+  if (code === "digital_human_agent") return "DIGITAL_HUMAN"
+  return (toolType || "TEXT_GENERATION").toUpperCase()
+}
+
+function modelConfigSupportsCapability(config: AgentModelConfig, capability: string): boolean {
+  const caps = config.capabilities
+  if (!caps || caps.length === 0) return true
+  const want = capability.toUpperCase()
+  return caps.some((c) => (c || "").toUpperCase() === want)
+}
+
 function optionLabel(options: Array<{ value: string; label: string }>, value?: string | null) {
   return options.find((item) => item.value === value)?.label || value || "-"
 }
 
-function optionsJson(options: Array<string | { label: string; value: string }>) {
-  return JSON.stringify(options.map((option) => (typeof option === "string" ? { label: option, value: option } : option)))
-}
-
-const toolFieldTemplates: Record<string, ToolFieldPayload[]> = {
-  TEXT_GENERATION: [
-    { fieldKey: "topic", fieldName: "主题", fieldType: "textarea", placeholder: "说明要生成的内容主题、产品或场景", required: true, sortOrder: 1 },
-    { fieldKey: "tone", fieldName: "语气风格", fieldType: "select", optionsJson: optionsJson(["专业", "亲切", "种草", "高级", "幽默"]), required: true, sortOrder: 2 },
-    { fieldKey: "length", fieldName: "字数", fieldType: "number", placeholder: "例如 200", required: false, sortOrder: 3 },
-    { fieldKey: "requirements", fieldName: "补充要求", fieldType: "textarea", placeholder: "禁用词、必须包含的信息、目标人群等", required: false, sortOrder: 4 },
-  ],
-  IMAGE_GENERATION: [
-    { fieldKey: "prompt", fieldName: "画面描述", fieldType: "textarea", placeholder: "描述主体、场景、光线、构图和细节", required: true, sortOrder: 1 },
-    { fieldKey: "aspectRatio", fieldName: "画面比例", fieldType: "radio", optionsJson: optionsJson(["1:1", "4:3", "3:4", "16:9", "9:16"]), required: true, sortOrder: 2 },
-    { fieldKey: "style", fieldName: "风格", fieldType: "select", optionsJson: optionsJson(["写实", "电商", "插画", "动漫", "极简", "国潮"]), required: false, sortOrder: 3 },
-    { fieldKey: "count", fieldName: "生成数量", fieldType: "number", placeholder: "例如 1", required: false, sortOrder: 4 },
-    { fieldKey: "negativePrompt", fieldName: "反向提示词", fieldType: "textarea", placeholder: "不希望出现的元素", required: false, sortOrder: 5 },
-  ],
-  IMAGE_TO_IMAGE: [
-    { fieldKey: "referenceImage", fieldName: "参考图 URL", fieldType: "image", placeholder: "粘贴图片 URL；文件上传将在后续接入", required: true, sortOrder: 1 },
-    { fieldKey: "prompt", fieldName: "修改要求", fieldType: "textarea", placeholder: "说明要保留和修改的部分", required: true, sortOrder: 2 },
-    { fieldKey: "strength", fieldName: "改动强度", fieldType: "slider", placeholder: "0-100", required: false, sortOrder: 3 },
-    { fieldKey: "aspectRatio", fieldName: "画面比例", fieldType: "radio", optionsJson: optionsJson(["保持原图", "1:1", "4:3", "3:4", "16:9", "9:16"]), required: false, sortOrder: 4 },
-  ],
-  IMAGE_UNDERSTANDING: [
-    { fieldKey: "imageUrl", fieldName: "图片 URL", fieldType: "image", placeholder: "粘贴需要分析的图片 URL；文件上传将在后续接入", required: true, sortOrder: 1 },
-    { fieldKey: "question", fieldName: "分析问题", fieldType: "textarea", placeholder: "例如：识别商品卖点并生成标题", required: true, sortOrder: 2 },
-  ],
-  SPEECH_TO_TEXT: [
-    { fieldKey: "audioUrl", fieldName: "音频 URL", fieldType: "file", placeholder: "粘贴音频文件 URL；文件上传将在后续接入", required: true, sortOrder: 1 },
-    { fieldKey: "language", fieldName: "语言", fieldType: "select", optionsJson: optionsJson(["中文", "英文", "自动识别"]), required: false, sortOrder: 2 },
-    { fieldKey: "punctuation", fieldName: "自动标点", fieldType: "checkbox", required: false, sortOrder: 3 },
-  ],
-  TEXT_TO_SPEECH: [
-    { fieldKey: "text", fieldName: "朗读文本", fieldType: "textarea", placeholder: "输入需要转语音的内容", required: true, sortOrder: 1 },
-    { fieldKey: "voice", fieldName: "音色", fieldType: "select", optionsJson: optionsJson(["女声", "男声", "童声", "沉稳", "活泼"]), required: false, sortOrder: 2 },
-    { fieldKey: "speed", fieldName: "语速", fieldType: "slider", placeholder: "0-100", required: false, sortOrder: 3 },
-  ],
-  VIDEO_GENERATION: [
-    { fieldKey: "prompt", fieldName: "视频描述", fieldType: "textarea", placeholder: "描述镜头、主体、动作、风格和时长", required: true, sortOrder: 1 },
-    { fieldKey: "aspectRatio", fieldName: "视频比例", fieldType: "radio", optionsJson: optionsJson(["16:9", "9:16", "1:1"]), required: true, sortOrder: 2 },
-    { fieldKey: "duration", fieldName: "时长秒数", fieldType: "number", placeholder: "例如 5", required: false, sortOrder: 3 },
-  ],
-  EMBEDDING: [
-    { fieldKey: "text", fieldName: "向量化文本", fieldType: "textarea", placeholder: "输入需要转向量的文本", required: true, sortOrder: 1 },
-  ],
-  RERANK: [
-    { fieldKey: "query", fieldName: "查询语句", fieldType: "textarea", required: true, sortOrder: 1 },
-    { fieldKey: "documents", fieldName: "候选文本", fieldType: "textarea", placeholder: "每行一条候选内容", required: true, sortOrder: 2 },
-  ],
-  AGENT: [
-    { fieldKey: "goal", fieldName: "任务目标", fieldType: "textarea", placeholder: "说明希望 Agent 完成什么", required: true, sortOrder: 1 },
-    { fieldKey: "constraints", fieldName: "限制条件", fieldType: "textarea", placeholder: "预算、风格、不能做的事等", required: false, sortOrder: 2 },
-  ],
+const templateCodeByToolType: Record<string, string> = {
+  TEXT_GENERATION: "text_generation_default",
+  IMAGE_GENERATION: "image_generation_default",
+  VIDEO_GENERATION: "video_generation_default",
+  AGENT: "digital_human_default",
 }
 
 const CATEGORY_ICON_MAP: Record<string, LucideIcon> = {
@@ -238,6 +217,7 @@ function mapTool(tool: ToolSummary): ToolRow {
     modelConfigId: tool.modelConfigId ?? null,
     modelConfigName: tool.modelConfigName || null,
     modelName: tool.modelName || null,
+    executionHandler: tool.executionHandler ?? null,
   }
 }
 
@@ -260,6 +240,9 @@ export default function ToolsPage() {
   const [fieldError, setFieldError] = useState<string | null>(null)
   const [fieldLoading, setFieldLoading] = useState(false)
   const [fieldSaving, setFieldSaving] = useState(false)
+  const [fieldEditorMode, setFieldEditorMode] = useState<"visual" | "json">("visual")
+  const [editableFields, setEditableFields] = useState<EditableField[]>([])
+  const [toolTemplates, setToolTemplates] = useState<ToolTemplateSummary[]>([])
 
   async function loadAll() {
     setLoading(true)
@@ -273,6 +256,8 @@ export default function ToolsPage() {
       setCategories(cats)
       const configs = await fetchAgentModelConfigs().catch(() => [] as AgentModelConfig[])
       setModelConfigs(configs.filter((config) => config.enabled !== false))
+      const templates = await fetchToolTemplates().catch(() => [] as ToolTemplateSummary[])
+      setToolTemplates(templates)
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to load tools")
     } finally {
@@ -293,6 +278,18 @@ export default function ToolsPage() {
       ),
     )
   }, [toolList, searchQuery])
+
+  const requiredModelCapability = useMemo(() => {
+    const code = editingTool?.toolCode ?? form.toolCode ?? ""
+    const type = editingTool?.toolType ?? form.toolType
+    const eh = editingTool?.executionHandler ?? null
+    return executionCapabilityForTool(type, code, eh)
+  }, [editingTool, form.toolType, form.toolCode])
+
+  const filteredModelConfigs = useMemo(
+    () => modelConfigs.filter((c) => modelConfigSupportsCapability(c, requiredModelCapability)),
+    [modelConfigs, requiredModelCapability],
+  )
 
   async function toggleToolStatus(id: string) {
     const target = toolList.find((tool) => tool.id === id)
@@ -322,6 +319,20 @@ export default function ToolsPage() {
       toolType: value,
       inputModality: defaults.input,
       outputModality: defaults.output,
+      templateCode: templateCodeByToolType[value] || prev.templateCode,
+    }))
+  }
+
+  function applyTemplateToForm(templateCode: string) {
+    const template = toolTemplates.find((item) => item.templateCode === templateCode)
+    if (!template) return
+    setForm((prev) => ({
+      ...prev,
+      templateCode,
+      toolType: template.toolType,
+      inputModality: template.inputModality,
+      outputModality: template.outputModality,
+      configNote: template.configNote || "",
     }))
   }
 
@@ -338,6 +349,7 @@ export default function ToolsPage() {
       configNote: tool.configNote || "",
       estimatedCreditCost: String(tool.credits),
       modelConfigId: tool.modelConfigId ? String(tool.modelConfigId) : "",
+      templateCode: "",
     })
     setFormError(null)
     setIsAddDialogOpen(true)
@@ -371,6 +383,7 @@ export default function ToolsPage() {
         configNote: form.configNote.trim() || undefined,
         estimatedCreditCost: Math.floor(credits),
         modelConfigId: form.modelConfigId ? Number(form.modelConfigId) : null,
+        templateCode: !editingTool && form.templateCode ? form.templateCode : undefined,
       }
       if (editingTool) {
         const updated = await updateTool(editingTool.rawId, payload)
@@ -390,27 +403,66 @@ export default function ToolsPage() {
     }
   }
 
+  function applyLoadedFields(fields: ToolField[]) {
+    const editable = fields.map((field, index) => editableFromToolField(field, index))
+    setEditableFields(editable)
+    setFieldJson(serializeFields(editable))
+  }
+
   async function openFieldDialog(tool: ToolRow) {
     setFieldTool(tool)
     setFieldDialogOpen(true)
+    setFieldEditorMode("visual")
     setFieldError(null)
     setFieldLoading(true)
     try {
       const fields = await fetchToolFields(tool.rawId)
-      setFieldJson(JSON.stringify(fields.map(fieldToPayload), null, 2))
+      applyLoadedFields(fields)
     } catch (err) {
       setFieldError(err instanceof ApiError ? err.message : "Failed to load fields")
+      setEditableFields([])
       setFieldJson("[]")
     } finally {
       setFieldLoading(false)
     }
   }
 
-  function applyFieldTemplate() {
+  function switchFieldEditorMode(mode: "visual" | "json") {
+    if (mode === fieldEditorMode) return
+    try {
+      if (mode === "json") {
+        setFieldJson(serializeFields(editableFields))
+      } else {
+        setEditableFields(parseFieldsJson(fieldJson))
+      }
+      setFieldEditorMode(mode)
+      setFieldError(null)
+    } catch (err) {
+      setFieldError(err instanceof Error ? err.message : "字段配置格式错误")
+    }
+  }
+
+  async function applyFieldTemplate() {
     if (!fieldTool) return
-    const template = toolFieldTemplates[fieldTool.toolType] || toolFieldTemplates.TEXT_GENERATION
-    setFieldJson(JSON.stringify(template, null, 2))
+    const templateCode =
+      toolTemplates.find((item) => item.toolType === fieldTool.toolType)?.templateCode
+      || templateCodeByToolType[fieldTool.toolType]
+      || "text_generation_default"
+    setFieldSaving(true)
     setFieldError(null)
+    try {
+      await applyToolTemplate(fieldTool.rawId, {
+        templateCode,
+        applyMetadata: false,
+        overwritePrompt: true,
+      })
+      const fields = await fetchToolFields(fieldTool.rawId)
+      applyLoadedFields(fields)
+    } catch (err) {
+      setFieldError(err instanceof ApiError ? err.message : "应用模板失败")
+    } finally {
+      setFieldSaving(false)
+    }
   }
 
   async function saveFields() {
@@ -418,17 +470,16 @@ export default function ToolsPage() {
     setFieldError(null)
     let fields: ToolFieldPayload[]
     try {
-      const parsed = JSON.parse(fieldJson)
-      if (!Array.isArray(parsed)) throw new Error("Field schema must be a JSON array")
-      fields = parsed.map(normalizeFieldPayload)
+      const editable = fieldEditorMode === "visual" ? editableFields : parseFieldsJson(fieldJson)
+      fields = editable.map((field, index) => toFieldPayload(field, index))
     } catch (err) {
-      setFieldError(err instanceof Error ? err.message : "Invalid field JSON")
+      setFieldError(err instanceof Error ? err.message : "字段配置无效")
       return
     }
     setFieldSaving(true)
     try {
       const saved = await updateToolFields(fieldTool.rawId, fields)
-      setFieldJson(JSON.stringify(saved.map(fieldToPayload), null, 2))
+      applyLoadedFields(saved)
       setFieldDialogOpen(false)
     } catch (err) {
       setFieldError(err instanceof ApiError ? err.message : "Failed to save fields")
@@ -514,6 +565,29 @@ export default function ToolsPage() {
                     />
                   </div>
                 </div>
+                {!editingTool ? (
+                  <div className="space-y-2">
+                    <Label>工具模板</Label>
+                    <Select
+                      value={form.templateCode}
+                      onValueChange={(value) => {
+                        updateForm("templateCode", value)
+                        applyTemplateToForm(value)
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="选择蓝图模板" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {toolTemplates.map((item) => (
+                          <SelectItem key={item.templateCode} value={item.templateCode}>
+                            {item.templateName} ({item.executionHandler})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                ) : null}
                 <div className="space-y-2 rounded-lg border border-border bg-secondary/30 p-3">
                   <Label>模型能力类型</Label>
                   <Select value={form.toolType} onValueChange={updateToolType}>
@@ -589,7 +663,7 @@ export default function ToolsPage() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="default">Use default model config</SelectItem>
-                      {modelConfigs.map((config) => (
+                      {filteredModelConfigs.map((config) => (
                         <SelectItem key={config.id} value={String(config.id)}>
                           {config.displayName || config.modelName} · {config.provider}
                         </SelectItem>
@@ -681,18 +755,20 @@ export default function ToolsPage() {
       <Dialog open={fieldDialogOpen} onOpenChange={setFieldDialogOpen}>
         <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto bg-card border-border">
           <DialogHeader>
-            <DialogTitle>Field Schema</DialogTitle>
+            <DialogTitle>用户端表单字段</DialogTitle>
             <DialogDescription>
-              {fieldTool ? `${fieldTool.name} user-facing form fields.` : "Configure tool fields."}
+              {fieldTool
+                ? `配置「${fieldTool.name}」参数。画面比例等请用「单选/下拉」并配置选项，用户只能点选。`
+                : "配置工具字段。"}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 py-2">
             {fieldTool ? (
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-secondary/30 p-3">
                 <div>
-                  <p className="text-sm font-medium">通用字段模板</p>
+                  <p className="text-sm font-medium">从工具模板填充</p>
                   <p className="text-xs text-muted-foreground">
-                    当前类型：{optionLabel(toolTypeOptions, fieldTool.toolType)}。模板使用平台通用字段，不绑定具体供应商 API。
+                    当前类型：{optionLabel(toolTypeOptions, fieldTool.toolType)}。应用后可再在下方微调各字段选项。
                   </p>
                 </div>
                 <Button type="button" variant="outline" size="sm" onClick={applyFieldTemplate} disabled={fieldLoading || fieldSaving}>
@@ -705,23 +781,45 @@ export default function ToolsPage() {
                 {fieldError}
               </div>
             ) : null}
-            <Textarea
-              value={fieldJson}
-              onChange={(event) => setFieldJson(event.target.value)}
-              className="min-h-[420px] font-mono text-xs"
-              disabled={fieldLoading || fieldSaving}
-              placeholder='[{"fieldKey":"productName","fieldName":"Product name","fieldType":"TEXT","required":true,"sortOrder":1}]'
-            />
-            <p className="text-xs text-muted-foreground">
-              Supported fieldType: text, textarea, select, number, radio, checkbox, slider, image, file.
-            </p>
+            <Tabs value={fieldEditorMode} onValueChange={(value) => switchFieldEditorMode(value as "visual" | "json")}>
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="visual" disabled={fieldLoading || fieldSaving}>
+                  可视化配置
+                </TabsTrigger>
+                <TabsTrigger value="json" disabled={fieldLoading || fieldSaving}>
+                  高级 JSON
+                </TabsTrigger>
+              </TabsList>
+              <TabsContent value="visual" className="mt-3 max-h-[55vh] overflow-y-auto pr-1">
+                <FieldSchemaEditor
+                  fields={editableFields}
+                  disabled={fieldLoading || fieldSaving}
+                  onChange={(next) => {
+                    setEditableFields(next)
+                    setFieldJson(serializeFields(next))
+                  }}
+                />
+              </TabsContent>
+              <TabsContent value="json" className="mt-3">
+                <Textarea
+                  value={fieldJson}
+                  onChange={(event) => setFieldJson(event.target.value)}
+                  className="min-h-[420px] font-mono text-xs"
+                  disabled={fieldLoading || fieldSaving}
+                  placeholder='[{"fieldKey":"aspectRatio","fieldName":"画面比例","fieldType":"radio"}]'
+                />
+                <p className="mt-2 text-xs text-muted-foreground">
+                  radio / select 需带 optionsJson。日常请优先使用「可视化配置」。
+                </p>
+              </TabsContent>
+            </Tabs>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setFieldDialogOpen(false)} disabled={fieldSaving}>
-              Cancel
+              取消
             </Button>
             <Button onClick={saveFields} disabled={fieldLoading || fieldSaving}>
-              {fieldSaving ? "Saving..." : "Save fields"}
+              {fieldSaving ? "保存中..." : "保存字段"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -730,29 +828,3 @@ export default function ToolsPage() {
   )
 }
 
-function fieldToPayload(field: ToolField): ToolFieldPayload {
-  return {
-    fieldKey: field.fieldKey,
-    fieldName: field.fieldName,
-    fieldType: field.fieldType,
-    placeholder: field.placeholder || "",
-    optionsJson: field.optionsJson || "",
-    required: field.required !== false,
-    sortOrder: field.sortOrder ?? 1,
-  }
-}
-
-function normalizeFieldPayload(field: Partial<ToolFieldPayload>, index: number): ToolFieldPayload {
-  if (!field.fieldKey || !field.fieldName || !field.fieldType) {
-    throw new Error(`Field ${index + 1} must include fieldKey, fieldName, and fieldType`)
-  }
-  return {
-    fieldKey: String(field.fieldKey).trim(),
-    fieldName: String(field.fieldName).trim(),
-    fieldType: String(field.fieldType).trim(),
-    placeholder: field.placeholder ? String(field.placeholder) : "",
-    optionsJson: field.optionsJson ? String(field.optionsJson) : undefined,
-    required: field.required !== false,
-    sortOrder: Number(field.sortOrder ?? index + 1),
-  }
-}

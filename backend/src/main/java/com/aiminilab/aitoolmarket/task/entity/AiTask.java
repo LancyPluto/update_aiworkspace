@@ -23,6 +23,8 @@ public class AiTask {
     private String inputModality;
     @TableField(exist = false)
     private String outputModality;
+    @TableField(exist = false)
+    private String executionHandler;
     private String status;
     private Integer progress;
     private String progressMessage;
@@ -106,6 +108,14 @@ public class AiTask {
 
     public void setOutputModality(String outputModality) {
         this.outputModality = outputModality;
+    }
+
+    public String getExecutionHandler() {
+        return executionHandler;
+    }
+
+    public void setExecutionHandler(String executionHandler) {
+        this.executionHandler = executionHandler;
     }
 
     public String getStatus() {

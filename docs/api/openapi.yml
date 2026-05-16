@@ -1017,6 +1017,104 @@ paths:
               schema:
                 $ref: "#/components/schemas/ToolSummaryApiResponse"
 
+  /api/admin/v1/tools/{toolId}/field-schemas:
+    get:
+      tags: [AdminTools]
+      summary: List field schema versions for a tool
+      operationId: listAdminToolFieldSchemas
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ToolId"
+      responses:
+        "200":
+          description: Field schema versions
+    post:
+      tags: [AdminTools]
+      summary: Upsert active field schema for a tool
+      operationId: upsertAdminToolFieldSchema
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ToolId"
+      responses:
+        "200":
+          description: Field schema saved
+
+  /api/admin/v1/tools/{toolId}/apply-template:
+    post:
+      tags: [AdminTools]
+      summary: Apply a reusable tool template blueprint to a tool instance
+      operationId: applyAdminToolTemplate
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ToolId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApplyToolTemplateRequest"
+      responses:
+        "200":
+          description: Template applied
+
+  /api/admin/v1/tool-templates:
+    get:
+      tags: [AdminTools]
+      summary: List reusable tool templates
+      operationId: listAdminToolTemplates
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Tool template list
+    post:
+      tags: [AdminTools]
+      summary: Create a custom tool template
+      operationId: createAdminToolTemplate
+      security:
+        - bearerAuth: []
+      responses:
+        "201":
+          description: Template created
+
+  /api/admin/v1/tool-templates/{templateCode}:
+    get:
+      tags: [AdminTools]
+      summary: Get tool template detail by code
+      operationId: getAdminToolTemplate
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: templateCode
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Tool template detail
+
+  /api/admin/v1/field-schemas/{schemaId}/publish:
+    post:
+      tags: [AdminTools]
+      summary: Publish a field schema version
+      operationId: publishAdminFieldSchema
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: schemaId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: Field schema published
+
   /api/admin/v1/tasks:
     get:
       tags: [AdminTasks]
@@ -1278,6 +1376,49 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/BillingUsageLogPageApiResponse"
+
+  /api/admin/v1/model-providers:
+    get:
+      tags: [AdminModelConfig]
+      summary: List registered model provider protocols
+      operationId: listModelProviders
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: capability
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Filter providers that declare this execution capability (e.g. IMAGE_GENERATION).
+      responses:
+        "200":
+          description: Provider descriptors
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelProviderListApiResponse"
+
+  /api/admin/v1/model-providers/{code}:
+    get:
+      tags: [AdminModelConfig]
+      summary: Get model provider descriptor by code
+      operationId: getModelProvider
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Provider descriptor
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelProviderApiResponse"
 
   /api/admin/v1/agent/model-config:
     get:
@@ -1955,6 +2096,10 @@ components:
         estimatedCreditCost:
           type: integer
           example: 1
+        executionHandler:
+          type: string
+          nullable: true
+          description: Worker-side execution handler key for this tool.
 
     ToolDetailApiResponse:
       allOf:
@@ -2429,6 +2574,53 @@ components:
               items:
                 $ref: "#/components/schemas/AgentModelConfig"
 
+    ModelProviderDescriptor:
+      type: object
+      properties:
+        code:
+          type: string
+        label:
+          type: string
+        capabilities:
+          type: array
+          items:
+            type: string
+        defaultBaseUrl:
+          type: string
+          nullable: true
+        defaultModel:
+          type: string
+          nullable: true
+        billingDefault:
+          type: string
+          nullable: true
+        testStrategy:
+          type: string
+          nullable: true
+        workerReady:
+          type: boolean
+        description:
+          type: string
+          nullable: true
+
+    ModelProviderApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponse"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/ModelProviderDescriptor"
+
+    ModelProviderListApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponse"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/ModelProviderDescriptor"
+
     AgentModelConfig:
       type: object
       properties:
@@ -2443,7 +2635,6 @@ components:
           nullable: true
         provider:
           type: string
-          enum: [mock, openai_compatible, anthropic_compatible, minimax, siliconflow_images]
         modelName:
           type: string
         baseUrl:
@@ -2482,6 +2673,11 @@ components:
           type: boolean
         isDefault:
           type: boolean
+        capabilities:
+          type: array
+          items:
+            type: string
+          description: Execution capabilities supported by this credential set.
 
     AgentModelConfigRequest:
       type: object
@@ -2493,7 +2689,6 @@ components:
           type: string
         provider:
           type: string
-          enum: [mock, openai_compatible, anthropic_compatible, minimax, siliconflow_images]
         modelName:
           type: string
         baseUrl:
@@ -2531,6 +2726,10 @@ components:
           type: boolean
         isDefault:
           type: boolean
+        capabilities:
+          type: array
+          items:
+            type: string
 
     AgentModelConfigTestApiResponse:
       allOf:
@@ -2718,6 +2917,12 @@ components:
           nullable: true
         timeoutSeconds:
           type: integer
+        capabilities:
+          type: array
+          items:
+            type: string
+          nullable: true
+          description: Declared execution capabilities for this resolved model credential.
 
     ProcessingRequest:
       type: object

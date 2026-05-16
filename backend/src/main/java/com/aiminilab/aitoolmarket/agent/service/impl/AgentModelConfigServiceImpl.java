@@ -1,5 +1,7 @@
 package com.aiminilab.aitoolmarket.agent.service.impl;
 
+import com.aiminilab.aitoolmarket.agent.config.ModelProviderDefinition;
+import com.aiminilab.aitoolmarket.agent.config.ModelProviderRegistry;
 import com.aiminilab.aitoolmarket.agent.dto.AgentModelConfigRequest;
 import com.aiminilab.aitoolmarket.agent.dto.AgentModelConfigResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AgentModelConfigTestResponse;
@@ -8,6 +10,8 @@ import com.aiminilab.aitoolmarket.agent.dto.InternalAgentModelConfigResponse;
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentModelConfigMapper;
 import com.aiminilab.aitoolmarket.agent.service.AgentModelConfigService;
+import com.aiminilab.aitoolmarket.agent.service.ModelCapabilityService;
+import com.aiminilab.aitoolmarket.agent.support.ModelCapabilitiesCodec;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import org.springframework.stereotype.Service;
@@ -24,35 +28,38 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
     private static final String BILLING_UNIT_TOKEN_PER_M = "TOKEN_PER_M";
     private static final String BILLING_UNIT_PER_CALL = "PER_CALL";
     private static final BigDecimal TOKEN_UNIT_SCALE = BigDecimal.valueOf(1000);
-
-    private static final Set<String> SUPPORTED_PROVIDERS = Set.of(
-            "mock",
-            "openai_compatible",
-            "anthropic_compatible",
-            "minimax",
-            "siliconflow_images"
-    );
+    private static final String TEST_STRATEGY_ACCEPT_ONLY = "accept_only";
 
     private final AgentModelConfigMapper agentModelConfigMapper;
     private final AgentServiceClient agentServiceClient;
+    private final ModelProviderRegistry providerRegistry;
+    private final ModelCapabilityService modelCapabilityService;
+    private final ModelCapabilitiesCodec capabilitiesCodec;
 
-    public AgentModelConfigServiceImpl(AgentModelConfigMapper agentModelConfigMapper, AgentServiceClient agentServiceClient) {
+    public AgentModelConfigServiceImpl(AgentModelConfigMapper agentModelConfigMapper,
+                                       AgentServiceClient agentServiceClient,
+                                       ModelProviderRegistry providerRegistry,
+                                       ModelCapabilityService modelCapabilityService,
+                                       ModelCapabilitiesCodec capabilitiesCodec) {
         this.agentModelConfigMapper = agentModelConfigMapper;
         this.agentServiceClient = agentServiceClient;
+        this.providerRegistry = providerRegistry;
+        this.modelCapabilityService = modelCapabilityService;
+        this.capabilitiesCodec = capabilitiesCodec;
     }
 
     @Override
     public AgentModelConfigResponse adminGet() {
-        return AgentModelConfigResponse.from(findOrDefault());
+        return toResponse(findOrDefault());
     }
 
     @Override
     public List<AgentModelConfigResponse> adminList() {
         List<AgentModelConfig> configs = agentModelConfigMapper.findAllActive();
         if (configs.isEmpty()) {
-            return List.of(AgentModelConfigResponse.from(findOrDefault()));
+            return List.of(toResponse(findOrDefault()));
         }
-        return configs.stream().map(AgentModelConfigResponse::from).toList();
+        return configs.stream().map(this::toResponse).toList();
     }
 
     @Override
@@ -66,7 +73,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         if (Boolean.TRUE.equals(config.getDefault())) {
             agentModelConfigMapper.clearDefaultExcept(config.getId());
         }
-        return AgentModelConfigResponse.from(config);
+        return toResponse(config);
     }
 
     @Override
@@ -79,7 +86,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         if (Boolean.TRUE.equals(config.getDefault())) {
             agentModelConfigMapper.clearDefaultExcept(config.getId());
         }
-        return AgentModelConfigResponse.from(config);
+        return toResponse(config);
     }
 
     @Override
@@ -99,7 +106,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         agentModelConfigMapper.setDefault(id);
         existing.setDefault(true);
         existing.setUpdatedAt(LocalDateTime.now());
-        return AgentModelConfigResponse.from(existing);
+        return toResponse(existing);
     }
 
     @Override
@@ -146,6 +153,22 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         config.setOutputTokenPricePer1k(outputPricePer1m.divide(TOKEN_UNIT_SCALE));
         config.setBillingUnit(resolveBillingUnit(request.billingUnit(), request.provider()));
         config.setUnitPrice(nonNegativeMoney(request.unitPrice()));
+        String providerTrimmed = request.provider().trim();
+        boolean providerChanged = existing != null
+                && existing.getProvider() != null
+                && !existing.getProvider().trim().equalsIgnoreCase(providerTrimmed);
+        List<String> capabilities;
+        if (request.capabilities() != null && !request.capabilities().isEmpty()) {
+            capabilities = modelCapabilityService.normalizeCapabilities(providerTrimmed, request.capabilities());
+        } else if (!providerChanged && existing != null && existing.getCapabilities() != null && !existing.getCapabilities().isBlank()) {
+            capabilities = capabilitiesCodec.parse(existing.getCapabilities());
+            if (capabilities.isEmpty()) {
+                capabilities = modelCapabilityService.normalizeCapabilities(providerTrimmed, List.of());
+            }
+        } else {
+            capabilities = modelCapabilityService.normalizeCapabilities(providerTrimmed, List.of());
+        }
+        config.setCapabilities(capabilitiesCodec.serialize(capabilities));
         config.setEnabled(request.enabled() == null || request.enabled());
         config.setDefault(request.isDefault() != null && request.isDefault());
         config.setUpdatedAt(now);
@@ -162,13 +185,17 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         validate(request);
         AgentModelConfig existing = agentModelConfigMapper.findLatest();
         AgentModelConfigRequest merged = mergeSecretFields(request, existing);
-        if ("siliconflow_images".equals(merged.provider())) {
+        ModelProviderDefinition provider = providerRegistry.findByCode(merged.provider())
+                .orElseThrow(() -> new BusinessException(ErrorCode.PARAM_ERROR, "unsupported model provider"));
+        if (TEST_STRATEGY_ACCEPT_ONLY.equalsIgnoreCase(provider.testStrategy())) {
             return new AgentModelConfigTestResponse(
                     true,
                     merged.provider(),
                     merged.modelName(),
                     0L,
-                    "image provider config accepted; worker will call /v1/images/generations at runtime",
+                    provider.description().isBlank()
+                            ? "provider config accepted; worker will validate at runtime"
+                            : provider.description(),
                     ""
             );
         }
@@ -218,6 +245,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         fallback.setOutputTokenPricePer1m(BigDecimal.ZERO);
         fallback.setBillingUnit(BILLING_UNIT_TOKEN_PER_M);
         fallback.setUnitPrice(BigDecimal.ZERO);
+        fallback.setCapabilities(capabilitiesCodec.serialize(providerRegistry.defaultCapabilities("mock")));
         fallback.setEnabled(true);
         fallback.setDefault(true);
         fallback.setCreatedAt(now);
@@ -225,9 +253,13 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         return fallback;
     }
 
+    private AgentModelConfigResponse toResponse(AgentModelConfig config) {
+        return AgentModelConfigResponse.from(config, capabilitiesCodec);
+    }
+
     private void validate(AgentModelConfigRequest request) {
         String provider = request.provider() == null ? "" : request.provider().trim();
-        if (!SUPPORTED_PROVIDERS.contains(provider)) {
+        if (!providerRegistry.isSupported(provider)) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "unsupported model provider");
         }
         if (request.modelName() == null || request.modelName().isBlank()) {
@@ -279,7 +311,8 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                 request.billingUnit(),
                 request.unitPrice(),
                 request.enabled(),
-                request.isDefault()
+                request.isDefault(),
+                request.capabilities()
         );
     }
 
@@ -294,7 +327,11 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         if (billingUnit != null && !billingUnit.isBlank()) {
             return billingUnit.trim().toUpperCase();
         }
-        return "siliconflow_images".equals(provider) ? BILLING_UNIT_PER_CALL : BILLING_UNIT_TOKEN_PER_M;
+        String defaultUnit = providerRegistry.defaultBillingUnit(provider);
+        if (BILLING_UNIT_PER_CALL.equalsIgnoreCase(defaultUnit)) {
+            return BILLING_UNIT_PER_CALL;
+        }
+        return BILLING_UNIT_TOKEN_PER_M;
     }
 
     private AgentModelConfig findActiveOrThrow(Long id) {

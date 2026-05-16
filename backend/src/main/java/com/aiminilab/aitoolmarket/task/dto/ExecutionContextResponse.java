@@ -15,6 +15,7 @@ public record ExecutionContextResponse(
         String toolCode,
         String toolName,
         String toolType,
+        String executionHandler,
         String inputModality,
         String outputModality,
         String status,
@@ -35,6 +36,7 @@ public record ExecutionContextResponse(
                 task.getToolCode(),
                 task.getToolName(),
                 defaultValue(task.getToolType(), "TEXT_GENERATION"),
+                resolveExecutionHandler(task),
                 defaultValue(task.getInputModality(), "TEXT"),
                 defaultValue(task.getOutputModality(), "TEXT"),
                 task.getStatus(),
@@ -49,5 +51,19 @@ public record ExecutionContextResponse(
 
     private static String defaultValue(String value, String fallback) {
         return value == null || value.isBlank() ? fallback : value;
+    }
+
+    private static String resolveExecutionHandler(AiTask task) {
+        if (task.getExecutionHandler() != null && !task.getExecutionHandler().isBlank()) {
+            return task.getExecutionHandler();
+        }
+        if ("digital_human_agent".equals(task.getToolCode())) {
+            return "DIGITAL_HUMAN";
+        }
+        String toolType = task.getToolType();
+        if (toolType != null && !toolType.isBlank()) {
+            return toolType.trim().toUpperCase();
+        }
+        return "TEXT_GENERATION";
     }
 }

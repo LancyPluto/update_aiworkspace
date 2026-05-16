@@ -15,6 +15,7 @@ from client.skywork_video_client import (
 )
 from config import settings
 from handlers.digital_human_postprocessor import DigitalHumanPostprocessError, DigitalHumanPostprocessor
+from providers import registry as provider_registry
 
 
 LOGGER = logging.getLogger(__name__)
@@ -40,6 +41,10 @@ class DigitalHumanVideoHandler:
         try:
             context = message.get("__executionContext") or self.backend_client.get_execution_context(task_id)
             self._report(task_id, 8, "数字人任务已启动，正在整理脚本与参数")
+            model_config = context.get("modelConfig") or {}
+            provider = str(model_config.get("provider") or context.get("modelProviderCode") or "").lower()
+            provider_registry.require_capability(provider, "DIGITAL_HUMAN")
+            provider_registry.require_worker_ready(provider)
 
             params = context.get("params") or {}
             prompt = self._build_video_prompt(params)

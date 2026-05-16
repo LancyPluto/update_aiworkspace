@@ -11,6 +11,7 @@ import {
   ListTodo,
   ReceiptText,
   Settings,
+  Sparkles,
   Users,
   Wrench,
 } from "lucide-react"
@@ -19,6 +20,7 @@ const navigation = [
   { name: "数据概览", href: "/", icon: LayoutDashboard },
   { name: "用户管理", href: "/users", icon: Users },
   { name: "AI 工具管理", href: "/tools", icon: Wrench },
+  { name: "工具模板", href: "/tool-templates", icon: Sparkles },
   { name: "分类管理", href: "/categories", icon: FolderTree },
   { name: "Prompt 管理", href: "/prompts", icon: FileText },
   { name: "任务管理", href: "/tasks", icon: ListTodo },

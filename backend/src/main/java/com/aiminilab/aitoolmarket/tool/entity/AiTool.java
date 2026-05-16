@@ -24,6 +24,8 @@ public class AiTool {
     private String status;
     private Integer estimatedCreditCost;
     private Long modelConfigId;
+    private Long templateId;
+    private String executionHandler;
     @TableField(exist = false)
     private String modelConfigName;
     @TableField(exist = false)
@@ -144,6 +146,22 @@ public class AiTool {
 
     public void setModelConfigId(Long modelConfigId) {
         this.modelConfigId = modelConfigId;
+    }
+
+    public Long getTemplateId() {
+        return templateId;
+    }
+
+    public void setTemplateId(Long templateId) {
+        this.templateId = templateId;
+    }
+
+    public String getExecutionHandler() {
+        return executionHandler;
+    }
+
+    public void setExecutionHandler(String executionHandler) {
+        this.executionHandler = executionHandler;
     }
 
     public String getModelConfigName() {

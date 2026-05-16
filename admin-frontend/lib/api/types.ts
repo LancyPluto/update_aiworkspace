@@ -53,6 +53,8 @@ export interface ToolSummary {
   inputModality?: string | null
   outputModality?: string | null
   configNote?: string | null
+  /** 任务路由用，未设置时由 toolType 推导 */
+  executionHandler?: string | null
   status: 'DRAFT' | 'ONLINE' | 'OFFLINE' | string
   estimatedCreditCost: number
   modelConfigId?: number | null
@@ -72,6 +74,7 @@ export interface UpsertToolPayload {
   configNote?: string
   estimatedCreditCost: number
   modelConfigId?: number | null
+  templateCode?: string
 }
 
 export interface PromptRecord {
@@ -234,13 +237,23 @@ export interface TestGenerateResult {
   output: string
 }
 
-export type AgentModelProvider = 'mock' | 'openai_compatible' | 'anthropic_compatible' | 'minimax' | 'siliconflow_images'
+export interface ModelProviderDescriptor {
+  code: string
+  label: string
+  capabilities: string[]
+  defaultBaseUrl: string
+  defaultModel: string
+  billingDefault: string
+  testStrategy: string
+  workerReady: boolean
+  description: string
+}
 
 export interface AgentModelConfig {
   id: number
   displayName?: string | null
   configCode?: string | null
-  provider: AgentModelProvider | string
+  provider: string
   modelName: string
   baseUrl?: string | null
   apiKeyMasked?: string | null
@@ -257,6 +270,8 @@ export interface AgentModelConfig {
   unitPrice?: number | null
   enabled: boolean
   isDefault?: boolean | null
+  /** 该凭证可用于的执行能力（与 executionHandler / toolType 对齐） */
+  capabilities?: string[] | null
   createdAt?: string | null
   updatedAt?: string | null
 }
@@ -298,7 +313,7 @@ export interface UpsertFieldSchemaPayload {
 export interface AgentModelConfigPayload {
   displayName?: string
   configCode?: string
-  provider: AgentModelProvider | string
+  provider: string
   modelName: string
   baseUrl?: string
   apiKey?: string
@@ -315,6 +330,7 @@ export interface AgentModelConfigPayload {
   unitPrice?: number
   enabled?: boolean
   isDefault?: boolean
+  capabilities?: string[]
 }
 
 export interface AgentModelConfigTestResult {
