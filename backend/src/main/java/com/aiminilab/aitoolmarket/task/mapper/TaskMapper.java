@@ -28,7 +28,7 @@ public interface TaskMapper extends BaseMapper<AiTask> {
     }
 
     @Select("""
-            SELECT t.*, tool.tool_code, tool.tool_name, tool.tool_type, tool.input_modality, tool.output_modality
+            SELECT t.*, tool.tool_code, tool.tool_name, tool.tool_type, tool.execution_handler, tool.input_modality, tool.output_modality
             FROM ai_tasks t
             JOIN ai_tools tool ON tool.id = t.tool_id
             WHERE t.id = #{taskId} AND t.user_id = #{userId}
@@ -40,7 +40,7 @@ public interface TaskMapper extends BaseMapper<AiTask> {
     }
 
     @Select("""
-            SELECT t.*, tool.tool_code, tool.tool_name, tool.tool_type, tool.input_modality, tool.output_modality
+            SELECT t.*, tool.tool_code, tool.tool_name, tool.tool_type, tool.execution_handler, tool.input_modality, tool.output_modality
             FROM ai_tasks t
             JOIN ai_tools tool ON tool.id = t.tool_id
             WHERE t.id = #{taskId}
@@ -53,7 +53,7 @@ public interface TaskMapper extends BaseMapper<AiTask> {
 
     @Select("""
             <script>
-            SELECT t.*, tool.tool_code, tool.tool_name, tool.tool_type, tool.input_modality, tool.output_modality
+            SELECT t.*, tool.tool_code, tool.tool_name, tool.tool_type, tool.execution_handler, tool.input_modality, tool.output_modality
             FROM ai_tasks t
             JOIN ai_tools tool ON tool.id = t.tool_id
             WHERE t.user_id = #{userId}
@@ -76,7 +76,7 @@ public interface TaskMapper extends BaseMapper<AiTask> {
 
     @Select("""
             <script>
-            SELECT t.*, tool.tool_code, tool.tool_name, tool.tool_type, tool.input_modality, tool.output_modality
+            SELECT t.*, tool.tool_code, tool.tool_name, tool.tool_type, tool.execution_handler, tool.input_modality, tool.output_modality
             FROM ai_tasks t
             JOIN ai_tools tool ON tool.id = t.tool_id
             WHERE t.user_id = #{userId}
@@ -116,7 +116,7 @@ public interface TaskMapper extends BaseMapper<AiTask> {
 
     @Select("""
             <script>
-            SELECT t.*, tool.tool_code, tool.tool_name, tool.tool_type, tool.input_modality, tool.output_modality
+            SELECT t.*, tool.tool_code, tool.tool_name, tool.tool_type, tool.execution_handler, tool.input_modality, tool.output_modality
             FROM ai_tasks t
             JOIN ai_tools tool ON tool.id = t.tool_id
             WHERE 1 = 1

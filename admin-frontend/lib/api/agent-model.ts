@@ -56,6 +56,7 @@ export async function testSavedAgentModelConfig() {
     unitPrice: config.unitPrice || 0,
     enabled: config.enabled,
     isDefault: config.isDefault ?? true,
+    capabilities: config.capabilities ?? undefined,
   })
 }
 

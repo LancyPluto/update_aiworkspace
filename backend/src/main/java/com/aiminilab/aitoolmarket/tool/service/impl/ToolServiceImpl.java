@@ -37,7 +37,10 @@ import com.aiminilab.aitoolmarket.tool.mapper.ToolFieldSchemaMapper;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolMapper;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolPromptMapper;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolPromptVersionMapper;
+import com.aiminilab.aitoolmarket.agent.service.ModelCapabilityService;
+import com.aiminilab.aitoolmarket.tool.dto.ApplyToolTemplateRequest;
 import com.aiminilab.aitoolmarket.tool.service.ToolService;
+import com.aiminilab.aitoolmarket.tool.service.ToolTemplateService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
@@ -56,11 +59,14 @@ public class ToolServiceImpl implements ToolService {
     private final ToolPromptMapper toolPromptMapper;
     private final ToolPromptVersionMapper toolPromptVersionMapper;
     private final ObjectMapper objectMapper;
+    private final ToolTemplateService toolTemplateService;
+    private final ModelCapabilityService modelCapabilityService;
 
     public ToolServiceImpl(ToolMapper toolMapper, ToolCategoryMapper toolCategoryMapper,
                            ToolFieldSchemaMapper toolFieldSchemaMapper, ToolFieldItemMapper toolFieldItemMapper,
                            ToolPromptMapper toolPromptMapper, ToolPromptVersionMapper toolPromptVersionMapper,
-                           ObjectMapper objectMapper) {
+                           ObjectMapper objectMapper, ToolTemplateService toolTemplateService,
+                           ModelCapabilityService modelCapabilityService) {
         this.toolMapper = toolMapper;
         this.toolCategoryMapper = toolCategoryMapper;
         this.toolFieldSchemaMapper = toolFieldSchemaMapper;
@@ -68,6 +74,8 @@ public class ToolServiceImpl implements ToolService {
         this.toolPromptMapper = toolPromptMapper;
         this.toolPromptVersionMapper = toolPromptVersionMapper;
         this.objectMapper = objectMapper;
+        this.toolTemplateService = toolTemplateService;
+        this.modelCapabilityService = modelCapabilityService;
     }
 
     @Override
@@ -161,15 +169,44 @@ public class ToolServiceImpl implements ToolService {
         AiTool tool = fromRequest(request);
         tool.setToolCode(toolCode);
         Long toolId = toolMapper.insertTool(tool, operatorId);
-        Long schemaId = toolFieldSchemaMapper.createActiveDefaultSchema(toolId, operatorId);
-        toolFieldItemMapper.createDefaultFields(schemaId);
+        toolFieldSchemaMapper.createActiveDefaultSchema(toolId, operatorId);
+        if (request.templateCode() != null && !request.templateCode().isBlank()) {
+            toolTemplateService.applyToTool(toolId,
+                    new ApplyToolTemplateRequest(request.templateCode(), true, true),
+                    operatorId);
+        } else {
+            Long schemaId = toolFieldSchemaMapper.findActiveSchemaId(toolId)
+                    .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具字段配置不存在"));
+            toolFieldItemMapper.createDefaultFields(schemaId);
+        }
+        AiTool persisted = toolMapper.findById(toolId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在"));
+        modelCapabilityService.validateToolModelBinding(persisted);
         return findToolSummary(toolId);
+    }
+
+    @Override
+    @Transactional
+    public void applyTemplate(Long toolId, ApplyToolTemplateRequest request, Long operatorId) {
+        ensureToolExists(toolId);
+        toolTemplateService.applyToTool(toolId, request, operatorId);
+        AiTool persisted = toolMapper.findById(toolId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在"));
+        modelCapabilityService.validateToolModelBinding(persisted);
     }
 
     @Override
     public ToolSummaryResponse updateTool(Long toolId, UpsertToolRequest request, Long operatorId) {
         ensureToolExists(toolId);
-        toolMapper.updateTool(toolId, fromRequest(request), operatorId);
+        AiTool tool = fromRequest(request);
+        tool.setId(toolId);
+        AiTool existing = toolMapper.findById(toolId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在"));
+        if (tool.getExecutionHandler() == null || tool.getExecutionHandler().isBlank()) {
+            tool.setExecutionHandler(existing.getExecutionHandler());
+        }
+        modelCapabilityService.validateToolModelBinding(tool);
+        toolMapper.updateTool(toolId, tool, operatorId);
         return findToolSummary(toolId);
     }
 
@@ -532,7 +569,7 @@ public class ToolServiceImpl implements ToolService {
         item.setFieldName(request.fieldName());
         item.setFieldType(request.fieldType());
         item.setPlaceholder(request.placeholder());
-        item.setOptionsJson(request.options() == null ? null : request.options().toString());
+        item.setOptionsJson(request.resolveOptionsJson());
         item.setRequired(request.required() == null || request.required());
         item.setSortOrder(request.sortOrder() == null ? 0 : request.sortOrder());
         return item;

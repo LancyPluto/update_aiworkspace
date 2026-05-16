@@ -9,6 +9,7 @@ from client.siliconflow_video_client import (
     SiliconFlowVideoTimeoutError,
 )
 from handlers.generated_image_persister import GeneratedImagePersistError, GeneratedImagePersister
+from providers import registry as provider_registry
 
 
 LOGGER = logging.getLogger(__name__)
@@ -40,6 +41,8 @@ class ImageGenerationHandler:
             model_config = context.get("modelConfig") or {}
             self._mark_processing_safe(task_id, progress=12, progress_message="Image generation task started", trace_id=trace_id)
             provider = str(model_config.get("provider") or context.get("modelProviderCode") or "").lower()
+            provider_registry.require_capability(provider, "IMAGE_GENERATION")
+            provider_registry.require_worker_ready(provider)
             if provider not in {"siliconflow_images", "siliconflow"}:
                 raise SiliconFlowVideoError(f"unsupported image provider: {provider or 'empty'}")
 

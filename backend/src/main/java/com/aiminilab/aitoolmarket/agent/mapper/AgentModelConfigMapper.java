@@ -63,13 +63,13 @@ public interface AgentModelConfigMapper extends BaseMapper<AgentModelConfig> {
                                             minimax_group_id, console_url, balance_url, docs_url,
                                             timeout_seconds, input_token_price_per_1k, output_token_price_per_1k,
                                             input_token_price_per_1m, output_token_price_per_1m,
-                                            billing_unit, unit_price, enabled, is_default, created_at, updated_at)
+                                            billing_unit, unit_price, capabilities, enabled, is_default, created_at, updated_at)
             VALUES(#{config.displayName}, #{config.configCode}, #{config.provider}, #{config.modelName},
                    #{config.baseUrl}, #{config.apiKey}, #{config.minimaxGroupId},
                    #{config.consoleUrl}, #{config.balanceUrl}, #{config.docsUrl}, #{config.timeoutSeconds},
                    #{config.inputTokenPricePer1k}, #{config.outputTokenPricePer1k},
                    #{config.inputTokenPricePer1m}, #{config.outputTokenPricePer1m},
-                   #{config.billingUnit}, #{config.unitPrice},
+                   #{config.billingUnit}, #{config.unitPrice}, #{config.capabilities},
                    #{config.enabled}, #{config.default}, #{config.createdAt}, #{config.updatedAt})
             """)
     @Options(useGeneratedKeys = true, keyProperty = "config.id")
@@ -94,6 +94,7 @@ public interface AgentModelConfigMapper extends BaseMapper<AgentModelConfig> {
                 output_token_price_per_1m = #{config.outputTokenPricePer1m},
                 billing_unit = #{config.billingUnit},
                 unit_price = #{config.unitPrice},
+                capabilities = #{config.capabilities},
                 enabled = #{config.enabled},
                 is_default = #{config.default},
                 updated_at = #{config.updatedAt}

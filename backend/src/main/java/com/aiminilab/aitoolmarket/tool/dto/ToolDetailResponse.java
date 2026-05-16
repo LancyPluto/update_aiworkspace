@@ -19,6 +19,7 @@ public record ToolDetailResponse(
         Long modelConfigId,
         String modelConfigName,
         String modelName,
+        String executionHandler,
         List<ToolFieldResponse> fields
 ) {
     public static ToolDetailResponse of(ToolSummaryResponse summary, List<ToolFieldResponse> fields) {
@@ -39,6 +40,7 @@ public record ToolDetailResponse(
                 summary.modelConfigId(),
                 summary.modelConfigName(),
                 summary.modelName(),
+                summary.executionHandler(),
                 fields
         );
     }

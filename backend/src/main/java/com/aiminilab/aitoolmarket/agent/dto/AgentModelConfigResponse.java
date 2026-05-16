@@ -2,8 +2,11 @@ package com.aiminilab.aitoolmarket.agent.dto;
 
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
 
+import com.aiminilab.aitoolmarket.agent.support.ModelCapabilitiesCodec;
+
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.List;
 
 public record AgentModelConfigResponse(
         Long id,
@@ -26,10 +29,15 @@ public record AgentModelConfigResponse(
         BigDecimal unitPrice,
         Boolean enabled,
         Boolean isDefault,
+        List<String> capabilities,
         LocalDateTime createdAt,
         LocalDateTime updatedAt
 ) {
     public static AgentModelConfigResponse from(AgentModelConfig config) {
+        return from(config, new ModelCapabilitiesCodec(new com.fasterxml.jackson.databind.ObjectMapper()));
+    }
+
+    public static AgentModelConfigResponse from(AgentModelConfig config, ModelCapabilitiesCodec codec) {
         return new AgentModelConfigResponse(
                 config.getId(),
                 config.getDisplayName(),
@@ -51,6 +59,7 @@ public record AgentModelConfigResponse(
                 config.getUnitPrice(),
                 config.getEnabled(),
                 config.getDefault(),
+                codec.parse(config.getCapabilities()),
                 config.getCreatedAt(),
                 config.getUpdatedAt()
         );

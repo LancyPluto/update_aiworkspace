@@ -15,6 +15,7 @@ public record UpsertToolRequest(
         String outputModality,
         String configNote,
         @NotNull @Min(0) Integer estimatedCreditCost,
-        Long modelConfigId
+        Long modelConfigId,
+        String templateCode
 ) {
 }

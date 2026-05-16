@@ -5,6 +5,7 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 
 import java.math.BigDecimal;
+import java.util.List;
 
 public record AgentModelConfigRequest(
         String displayName,
@@ -25,6 +26,7 @@ public record AgentModelConfigRequest(
         String billingUnit,
         BigDecimal unitPrice,
         Boolean enabled,
-        Boolean isDefault
+        Boolean isDefault,
+        List<String> capabilities
 ) {
 }

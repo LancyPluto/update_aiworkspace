@@ -676,6 +676,7 @@ public class AgentRunServiceImpl implements AgentRunService {
                 config.billingUnit(),
                 config.unitPrice(),
                 config.enabled(),
+                null,
                 null
         );
         AgentModelConfigTestResponse result;

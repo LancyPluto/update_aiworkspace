@@ -28,14 +28,21 @@ import {
   testSavedAgentModelConfig,
   updateAgentModelConfig,
 } from "@/lib/api/agent-model"
-import type { AgentModelConfig, AgentModelConfigPayload, AgentModelConfigTestResult, AgentModelProvider } from "@/lib/api/types"
+import { fetchModelProviders } from "@/lib/api/model-providers"
+import type {
+  AgentModelConfig,
+  AgentModelConfigPayload,
+  AgentModelConfigTestResult,
+  ModelProviderDescriptor,
+} from "@/lib/api/types"
 import { AlertCircle, CheckCircle2, KeyRound, Plus, RefreshCw, Save, ServerCog, Star, Trash2, Zap } from "lucide-react"
+import { Checkbox } from "@/components/ui/checkbox"
 
 interface ModelForm {
   id: number | null
   displayName: string
   configCode: string
-  provider: AgentModelProvider
+  provider: string
   modelName: string
   baseUrl: string
   apiKey: string
@@ -50,6 +57,7 @@ interface ModelForm {
   unitPrice: string
   enabled: boolean
   isDefault: boolean
+  capabilities: string[]
 }
 
 interface VendorMeta {
@@ -65,39 +73,21 @@ type ModelConfigWithTest = AgentModelConfig & {
   lastTestSuccess?: boolean | null
 }
 
-const providerOptions: Array<{
-  value: AgentModelProvider
-  label: string
-  packageName: string
-  defaultModel: string
-  defaultBaseUrl: string
-  description: string
-}> = [
-  {
-    value: "openai_compatible",
-    label: "OpenAI compatible",
-    packageName: "langchain-openai",
-    defaultModel: "gpt-4o-mini",
-    defaultBaseUrl: "https://api.openai.com/v1",
-    description: "Use an OpenAI-compatible chat completion endpoint.",
-  },
-  {
-    value: "anthropic_compatible",
-    label: "Anthropic compatible",
-    packageName: "langchain-anthropic",
-    defaultModel: "MiniMax-M2.7",
-    defaultBaseUrl: "https://api.minimaxi.com/anthropic",
-    description: "Use an Anthropic-compatible gateway, such as MiniMax M2.7.",
-  },
-  {
-    value: "siliconflow_images",
-    label: "SiliconFlow images",
-    packageName: "worker adapter",
-    defaultModel: "Tongyi-MAI/Z-Image-Turbo",
-    defaultBaseUrl: "https://api.siliconflow.cn",
-    description: "Use SiliconFlow /v1/images/generations for image generation tools.",
-  },
-]
+const FALLBACK_PROVIDER: ModelProviderDescriptor = {
+  code: "openai_compatible",
+  label: "OpenAI compatible",
+  capabilities: ["TEXT_GENERATION"],
+  defaultBaseUrl: "https://api.openai.com/v1",
+  defaultModel: "gpt-4o-mini",
+  billingDefault: "TOKEN_PER_M",
+  testStrategy: "agent_service",
+  workerReady: true,
+  description: "OpenAI-compatible chat completion endpoint.",
+}
+
+function pickMeta(catalog: ModelProviderDescriptor[], code: string): ModelProviderDescriptor {
+  return catalog.find((item) => item.code === code) || FALLBACK_PROVIDER
+}
 
 const vendorFallback: VendorMeta = {
   label: "妯″瀷 API",
@@ -142,22 +132,18 @@ const emptyForm: ModelForm = {
   unitPrice: "0",
   enabled: true,
   isDefault: false,
+  capabilities: ["TEXT_GENERATION"],
 }
 
-function providerMeta(provider: string) {
-  return providerOptions.find((item) => item.value === provider) || providerOptions[0]
-}
-
-function toForm(config: AgentModelConfig): ModelForm {
-  const provider = providerOptions.some((item) => item.value === config.provider)
-    ? (config.provider as AgentModelProvider)
-    : "openai_compatible"
-  const meta = providerMeta(provider)
+function toForm(config: AgentModelConfig, catalog: ModelProviderDescriptor[]): ModelForm {
+  const meta = pickMeta(catalog, config.provider)
+  const caps =
+    config.capabilities && config.capabilities.length > 0 ? [...config.capabilities] : [...meta.capabilities]
   return {
     id: config.id,
     displayName: config.displayName || config.modelName || "",
     configCode: config.configCode || "",
-    provider,
+    provider: config.provider,
     modelName: config.modelName || meta.defaultModel,
     baseUrl: config.baseUrl || meta.defaultBaseUrl,
     apiKey: "",
@@ -172,6 +158,7 @@ function toForm(config: AgentModelConfig): ModelForm {
     unitPrice: String(config.unitPrice ?? 0),
     enabled: config.enabled !== false,
     isDefault: Boolean(config.isDefault),
+    capabilities: caps,
   }
 }
 
@@ -193,6 +180,7 @@ function toPayload(form: ModelForm): AgentModelConfigPayload {
     unitPrice: Number(form.unitPrice) || 0,
     enabled: form.enabled,
     isDefault: form.isDefault,
+    capabilities: form.capabilities,
   }
 }
 
@@ -266,6 +254,7 @@ function testStatusBadge(config: ModelConfigWithTest) {
 
 export function AgentModelSettings() {
   const [configs, setConfigs] = useState<ModelConfigWithTest[]>([])
+  const [providerCatalog, setProviderCatalog] = useState<ModelProviderDescriptor[]>([])
   const [form, setForm] = useState<ModelForm>(emptyForm)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -275,7 +264,9 @@ export function AgentModelSettings() {
   const [saved, setSaved] = useState(false)
   const [testResult, setTestResult] = useState<AgentModelConfigTestResult | null>(null)
 
-  const meta = useMemo(() => providerMeta(form.provider), [form.provider])
+  const catalogResolved = providerCatalog.length > 0 ? providerCatalog : [FALLBACK_PROVIDER]
+
+  const meta = useMemo(() => pickMeta(catalogResolved, form.provider), [catalogResolved, form.provider])
   const liveVendor = useMemo(
     () =>
       resolveVendorMeta({
@@ -293,14 +284,19 @@ export function AgentModelSettings() {
     setLoading(true)
     setError(null)
     try {
-      const list = await fetchAgentModelConfigs()
+      const [list, catalog] = await Promise.all([
+        fetchAgentModelConfigs(),
+        fetchModelProviders().catch(() => [] as ModelProviderDescriptor[]),
+      ])
+      const resolved = catalog.length > 0 ? catalog : [FALLBACK_PROVIDER]
+      setProviderCatalog(resolved)
       setConfigs(list)
       const selected =
         list.find((item) => item.id === nextSelectedId) ||
         list.find((item) => item.id === selectedId) ||
         list.find((item) => item.isDefault) ||
         list[0]
-      setForm(selected ? toForm(selected) : emptyForm)
+      setForm(selected ? toForm(selected, resolved) : { ...emptyForm, capabilities: [...pickMeta(resolved, emptyForm.provider).capabilities] })
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "鍔犺浇妯″瀷閰嶇疆澶辫触")
     } finally {
@@ -320,7 +316,7 @@ export function AgentModelSettings() {
   }
 
   function editConfig(config: AgentModelConfig) {
-    setForm(toForm(config))
+    setForm(toForm(config, catalogResolved))
     setSaved(false)
     setTestResult(null)
     setError(null)
@@ -328,11 +324,16 @@ export function AgentModelSettings() {
   }
 
   function createConfig() {
+    const m = pickMeta(catalogResolved, emptyForm.provider)
     setForm({
       ...emptyForm,
       configCode: "",
       displayName: "",
       isDefault: configs.length === 0,
+      capabilities: [...m.capabilities],
+      baseUrl: m.defaultBaseUrl,
+      modelName: m.defaultModel,
+      billingUnit: m.billingDefault === "PER_CALL" ? "PER_CALL" : "TOKEN_PER_M",
     })
     setSaved(false)
     setTestResult(null)
@@ -349,15 +350,33 @@ export function AgentModelSettings() {
     }
   }
 
-  function applyProvider(value: AgentModelProvider) {
-    const next = providerMeta(value)
+  function applyProvider(value: string) {
+    const next = pickMeta(catalogResolved, value)
     setForm((current) => ({
       ...current,
       provider: value,
-      modelName: current.modelName && current.modelName !== providerMeta(current.provider).defaultModel ? current.modelName : next.defaultModel,
+      modelName:
+        current.modelName && current.modelName !== pickMeta(catalogResolved, current.provider).defaultModel
+          ? current.modelName
+          : next.defaultModel,
       baseUrl: next.defaultBaseUrl,
-      billingUnit: value === "siliconflow_images" ? "PER_CALL" : current.billingUnit,
+      billingUnit: next.billingDefault === "PER_CALL" ? "PER_CALL" : "TOKEN_PER_M",
+      capabilities: [...next.capabilities],
     }))
+    setSaved(false)
+    setTestResult(null)
+  }
+
+  function toggleCapability(cap: string) {
+    setForm((current) => {
+      const set = new Set(current.capabilities)
+      if (set.has(cap)) {
+        set.delete(cap)
+      } else {
+        set.add(cap)
+      }
+      return { ...current, capabilities: Array.from(set) }
+    })
     setSaved(false)
     setTestResult(null)
   }
@@ -365,7 +384,12 @@ export function AgentModelSettings() {
   function validateForm(): string | null {
     if (!form.displayName.trim()) return "Config name is required."
     if (!form.modelName.trim()) return "Model name is required."
-    if (!form.baseUrl.trim()) return "Base URL is required."
+    if (form.provider !== "mock" && !form.baseUrl.trim()) return "Base URL is required."
+    if (!form.capabilities.length) return "Select at least one capability."
+    const allowed = new Set(meta.capabilities.map((c) => c.toUpperCase()))
+    for (const cap of form.capabilities) {
+      if (!allowed.has(cap.toUpperCase())) return `Capability ${cap} is not valid for provider ${form.provider}.`
+    }
     const timeout = Number(form.timeoutSeconds)
     if (!Number.isFinite(timeout) || timeout < 1 || timeout > 300) return "Timeout must be between 1 and 300 seconds."
     const inputPrice = Number(form.inputTokenPricePer1m)
@@ -517,7 +541,7 @@ export function AgentModelSettings() {
                         </div>
                         <div className="mt-3 flex flex-wrap items-center gap-2">
                           <Badge variant="outline">{vendor.shortName}</Badge>
-                          <Badge variant="secondary">{providerMeta(config.provider).label}</Badge>
+                          <Badge variant="secondary">{pickMeta(catalogResolved, config.provider).label}</Badge>
                           <Badge variant={config.enabled ? "default" : "secondary"}>{config.enabled ? "Enabled" : "Disabled"}</Badge>
                           {testStatusBadge(config)}
                         </div>
@@ -594,11 +618,13 @@ export function AgentModelSettings() {
             <div className="grid gap-5 md:grid-cols-2">
               <div className="space-y-2">
                 <Label>Provider protocol</Label>
-                <Select value={form.provider} onValueChange={(value) => applyProvider(value as AgentModelProvider)}>
+                <Select value={form.provider} onValueChange={(value) => applyProvider(value)}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {providerOptions.map((item) => (
-                      <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>
+                    {catalogResolved.map((item) => (
+                      <SelectItem key={item.code} value={item.code}>
+                        {item.label}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -616,6 +642,21 @@ export function AgentModelSettings() {
                 </div>
                 <p className="text-xs text-muted-foreground">Detected vendor: {liveVendor.label}</p>
               </div>
+            </div>
+
+            <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-4">
+              <Label>Capabilities（须与工具 executionHandler 一致）</Label>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {meta.capabilities.map((cap) => (
+                  <label key={cap} className="flex cursor-pointer items-center gap-2 text-sm">
+                    <Checkbox checked={form.capabilities.includes(cap)} onCheckedChange={() => toggleCapability(cap)} />
+                    <span>{cap}</span>
+                  </label>
+                ))}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                连通性测试：{meta.testStrategy} · Worker：{meta.workerReady ? "就绪" : "未就绪（仅保存凭证）"}
+              </p>
             </div>
 
             <div className="grid gap-5 md:grid-cols-2">
@@ -714,8 +755,12 @@ export function AgentModelSettings() {
                 </div>
               </div>
               <div className="space-y-2">
-                <Label>LangChain package</Label>
-                <Input value={meta.packageName} readOnly />
+                <Label>Runtime</Label>
+                <Input
+                  value={`test=${meta.testStrategy} · workerReady=${meta.workerReady}`}
+                  readOnly
+                  className="text-muted-foreground"
+                />
               </div>
             </div>
 

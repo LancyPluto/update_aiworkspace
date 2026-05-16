@@ -18,7 +18,8 @@ public record ToolSummaryResponse(
         Integer estimatedCreditCost,
         Long modelConfigId,
         String modelConfigName,
-        String modelName
+        String modelName,
+        String executionHandler
 ) {
     public static ToolSummaryResponse from(AiTool tool) {
         return new ToolSummaryResponse(
@@ -37,7 +38,8 @@ public record ToolSummaryResponse(
                 tool.getEstimatedCreditCost(),
                 tool.getModelConfigId(),
                 tool.getModelConfigName(),
-                tool.getModelName()
+                tool.getModelName(),
+                tool.getExecutionHandler()
         );
     }
 }

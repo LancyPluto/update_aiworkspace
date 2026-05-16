@@ -9,6 +9,7 @@ from config import settings
 from handlers.digital_human_video_handler import DigitalHumanVideoHandler
 from handlers.image_generation_handler import ImageGenerationHandler
 from handlers.text_task_handler import TextTaskHandler
+from handlers.video_generation_handler import VideoGenerationHandler
 
 
 LOGGER = logging.getLogger(__name__)
@@ -65,11 +66,13 @@ class TaskHandlerRouter:
         text_handler: TextTaskHandler | None = None,
         digital_human_handler: DigitalHumanVideoHandler | None = None,
         image_generation_handler: ImageGenerationHandler | None = None,
+        video_generation_handler: VideoGenerationHandler | None = None,
         backend_client: BackendClient | None = None,
     ) -> None:
         self.text_handler = text_handler or TextTaskHandler()
         self.digital_human_handler = digital_human_handler or DigitalHumanVideoHandler()
         self.image_generation_handler = image_generation_handler or ImageGenerationHandler()
+        self.video_generation_handler = video_generation_handler or VideoGenerationHandler()
         self.backend_client = backend_client or BackendClient()
 
     def handle(self, message: dict[str, Any]) -> dict[str, Any]:
@@ -79,8 +82,17 @@ class TaskHandlerRouter:
             LOGGER.info("skip terminal task taskId=%s status=%s", message.get("taskId"), status)
             return {"status": "SKIPPED", "taskId": int(message["taskId"]), "taskStatus": status}
         routed_message = {**message, "__executionContext": context}
+        handler = str(context.get("executionHandler") or "").upper()
+        if handler == "DIGITAL_HUMAN":
+            return self.digital_human_handler.handle(routed_message)
+        if handler == "IMAGE_GENERATION":
+            return self.image_generation_handler.handle(routed_message)
+        if handler == "VIDEO_GENERATION":
+            return self.video_generation_handler.handle(routed_message)
         if context.get("toolCode") == "digital_human_agent":
             return self.digital_human_handler.handle(routed_message)
         if str(context.get("toolType") or "").upper() == "IMAGE_GENERATION":
             return self.image_generation_handler.handle(routed_message)
+        if str(context.get("toolType") or "").upper() == "VIDEO_GENERATION":
+            return self.video_generation_handler.handle(routed_message)
         return self.text_handler.handle(routed_message)

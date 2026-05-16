@@ -5,6 +5,7 @@ import com.aiminilab.aitoolmarket.common.enums.UserStatus;
 import com.aiminilab.aitoolmarket.common.enums.UserType;
 import com.aiminilab.aitoolmarket.user.entity.User;
 import com.aiminilab.aitoolmarket.user.mapper.UserMapper;
+import com.aiminilab.aitoolmarket.tool.config.ToolTemplateBootstrap;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolCategoryMapper;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -24,20 +25,23 @@ public class DataInitializer implements CommandLineRunner {
     private final SystemSettingMapper systemSettingMapper;
     private final PasswordEncoder passwordEncoder;
     private final DataSource dataSource;
+    private final ToolTemplateBootstrap toolTemplateBootstrap;
 
     public DataInitializer(UserMapper userMapper, ToolCategoryMapper toolCategoryMapper,
                            SystemSettingMapper systemSettingMapper, PasswordEncoder passwordEncoder,
-                           JdbcTemplate jdbcTemplate) {
+                           JdbcTemplate jdbcTemplate, ToolTemplateBootstrap toolTemplateBootstrap) {
         this.userMapper = userMapper;
         this.toolCategoryMapper = toolCategoryMapper;
         this.systemSettingMapper = systemSettingMapper;
         this.passwordEncoder = passwordEncoder;
         this.dataSource = jdbcTemplate.getDataSource();
+        this.toolTemplateBootstrap = toolTemplateBootstrap;
     }
 
     @Override
     public void run(String... args) {
         ensureSchemaCompatibility();
+        toolTemplateBootstrap.ensureSchemaAndSeed();
         createUserIfAbsent("admin", "123456", "Admin", UserType.ADMIN);
         createUserIfAbsent("user1", "123456", "User One", UserType.USER);
         toolCategoryMapper.ensureDefaultCategory();
@@ -61,6 +65,7 @@ public class DataInitializer implements CommandLineRunner {
         ensureColumn("agent_model_configs", "output_token_price_per_1m", "ALTER TABLE agent_model_configs ADD COLUMN output_token_price_per_1m DECIMAL(18,8) NOT NULL DEFAULT 0");
         ensureColumn("agent_model_configs", "billing_unit", "ALTER TABLE agent_model_configs ADD COLUMN billing_unit VARCHAR(32) NOT NULL DEFAULT 'TOKEN_PER_M'");
         ensureColumn("agent_model_configs", "unit_price", "ALTER TABLE agent_model_configs ADD COLUMN unit_price DECIMAL(18,8) NOT NULL DEFAULT 0");
+        ensureColumn("agent_model_configs", "capabilities", "ALTER TABLE agent_model_configs ADD COLUMN capabilities TEXT NULL");
         executeSql("""
                 UPDATE agent_model_configs
                 SET input_token_price_per_1m = input_token_price_per_1k * 1000

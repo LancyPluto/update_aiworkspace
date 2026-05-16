@@ -4,6 +4,7 @@ import com.aiminilab.aitoolmarket.auth.security.AuthContext;
 import com.aiminilab.aitoolmarket.common.dto.ApiResponse;
 import com.aiminilab.aitoolmarket.common.dto.PageResponse;
 import com.aiminilab.aitoolmarket.tool.dto.FieldSchemaAdminResponse;
+import com.aiminilab.aitoolmarket.tool.dto.ApplyToolTemplateRequest;
 import com.aiminilab.aitoolmarket.tool.dto.ToolFieldResponse;
 import com.aiminilab.aitoolmarket.tool.dto.ToolSummaryResponse;
 import com.aiminilab.aitoolmarket.tool.dto.UpdateToolFieldsRequest;
@@ -86,5 +87,12 @@ public class AdminToolController {
     public ApiResponse<List<ToolFieldResponse>> updateFields(@PathVariable Long toolId,
                                                              @Valid @RequestBody UpdateToolFieldsRequest request) {
         return ApiResponse.success(toolService.updateFields(toolId, request));
+    }
+
+    @PostMapping("/{toolId}/apply-template")
+    public ApiResponse<Void> applyTemplate(@PathVariable Long toolId,
+                                           @Valid @RequestBody ApplyToolTemplateRequest request) {
+        toolService.applyTemplate(toolId, request, AuthContext.get().userId());
+        return ApiResponse.success(null);
     }
 }
