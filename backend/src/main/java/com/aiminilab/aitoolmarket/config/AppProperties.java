@@ -12,7 +12,7 @@ public class AppProperties {
     private String jwtSecret;
     private String internalApiToken;
     private String aiTaskQueue;
-    private String generatedMediaDir = "data/generated-media";
+    private String generatedMediaDir = "../data/generated-media";
     private Agent agent = new Agent();
     private Auth auth = new Auth();
     private Cors cors = new Cors();
@@ -55,7 +55,7 @@ public class AppProperties {
 
     public void setGeneratedMediaDir(String generatedMediaDir) {
         this.generatedMediaDir = generatedMediaDir == null || generatedMediaDir.isBlank()
-                ? "data/generated-media"
+                ? "../data/generated-media"
                 : generatedMediaDir;
     }
 

@@ -74,10 +74,10 @@ public class ToolTemplateBootstrap {
         ensureColumn("ai_tools", "template_id", "ALTER TABLE ai_tools ADD COLUMN template_id BIGINT NULL");
         ensureColumn("ai_tools", "execution_handler", "ALTER TABLE ai_tools ADD COLUMN execution_handler VARCHAR(32) NULL");
         backfillExecutionHandlers();
-        if (toolTemplateMapper.selectCount(null) > 0) {
-            return;
+        if (toolTemplateMapper.selectCount(null) == 0) {
+            seedSystemTemplates();
         }
-        seedSystemTemplates();
+        ensureTextToSpeechTemplate();
     }
 
     private void backfillExecutionHandlers() {
@@ -97,6 +97,12 @@ public class ToolTemplateBootstrap {
                 UPDATE ai_tools
                 SET execution_handler = 'VIDEO_GENERATION'
                 WHERE tool_type = 'VIDEO_GENERATION'
+                  AND (execution_handler IS NULL OR execution_handler = '')
+                """);
+        executeSql("""
+                UPDATE ai_tools
+                SET execution_handler = 'TEXT_TO_SPEECH'
+                WHERE tool_type = 'TEXT_TO_SPEECH'
                   AND (execution_handler IS NULL OR execution_handler = '')
                 """);
         executeSql("""
@@ -200,6 +206,38 @@ public class ToolTemplateBootstrap {
                         field("brandName", "品牌/产品", "text", "例如：澄光实验室补水精华", null, false, 7),
                         field("visualRequirements", "画面要求", "textarea", "例如：明亮干净、人物半身出镜", null, false, 8),
                         field("negativePrompt", "负面提示词", "textarea", "例如：画面变形、字幕错乱", null, false, 9)
+                )
+        );
+        insertTextToSpeechTemplate();
+    }
+
+    private void ensureTextToSpeechTemplate() {
+        if (toolTemplateMapper.findByCode("text_to_speech_default").isPresent()) {
+            return;
+        }
+        insertTextToSpeechTemplate();
+    }
+
+    private void insertTextToSpeechTemplate() {
+        insertTemplate(
+                "text_to_speech_default",
+                "Text to speech",
+                ToolType.TEXT_TO_SPEECH,
+                ExecutionHandler.TEXT_TO_SPEECH,
+                ToolModality.TEXT,
+                ToolModality.AUDIO,
+                "TTS tool: input text, voice, speed, audio format, and optional language boost settings.",
+                null,
+                null,
+                5,
+                List.of(
+                        field("text", "Text", "textarea", "Text to synthesize", null, true, 1),
+                        field("voice", "Voice", "text", "Provider voice id, for example English_expressive_narrator", null, false, 2),
+                        field("speed", "Speed", "number", "1.0", null, false, 3),
+                        field("format", "Audio format", "select", null,
+                                options("mp3", "wav", "flac"), false, 4),
+                        field("languageBoost", "Language boost", "select", null,
+                                options("auto", "Chinese", "English", "Japanese", "Korean"), false, 5)
                 )
         );
     }

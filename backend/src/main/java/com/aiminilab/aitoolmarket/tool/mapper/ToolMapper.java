@@ -160,4 +160,15 @@ public interface ToolMapper extends BaseMapper<AiTool> {
     default void updateToolStatus(Long toolId, ToolStatus status, Long operatorId) {
         updateToolStatusValue(toolId, status.name(), operatorId);
     }
+
+    @Update("""
+            UPDATE ai_tools
+            SET is_deleted = 1,
+                status = 'OFFLINE',
+                updated_by = #{operatorId},
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{toolId} AND is_deleted = 0
+            """)
+    int softDeleteTool(@Param("toolId") Long toolId,
+                       @Param("operatorId") Long operatorId);
 }

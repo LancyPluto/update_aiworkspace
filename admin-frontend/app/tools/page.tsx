@@ -49,8 +49,9 @@ import {
 import { cn } from "@/lib/utils"
 import {
   createTool,
+  deleteTool,
+  fetchAdminToolCategories,
   fetchAdminTools,
-  fetchToolCategories,
   fetchToolFields,
   offlineTool,
   publishTool,
@@ -68,8 +69,9 @@ import {
 } from "@/lib/tool-fields"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { fetchAgentModelConfigs } from "@/lib/api/agent-model"
+import { fetchModelProviders } from "@/lib/api/model-providers"
 import { ApiError } from "@/lib/api/http"
-import type { AgentModelConfig, ToolCategory, ToolField, ToolFieldPayload, ToolSummary } from "@/lib/api/types"
+import type { AgentModelConfig, ModelProviderDescriptor, ToolCategory, ToolField, ToolFieldPayload, ToolSummary } from "@/lib/api/types"
 
 interface ToolRow {
   id: string
@@ -157,19 +159,71 @@ const defaultModalitiesByType: Record<string, { input: string; output: string }>
   AGENT: { input: "MULTIMODAL", output: "TEXT" },
 }
 
-function executionCapabilityForTool(toolType: string, toolCode: string, executionHandler?: string | null): string {
+function executionCapabilityForTool(
+  toolType: string,
+  toolCode: string,
+  executionHandler?: string | null,
+  inputModality?: string | null,
+  outputModality?: string | null,
+): string {
   const eh = executionHandler?.trim()
   if (eh) return eh.toUpperCase()
   const code = (toolCode || "").trim()
   if (code === "digital_human_agent") return "DIGITAL_HUMAN"
+  const input = (inputModality || "").trim().toUpperCase()
+  const output = (outputModality || "").trim().toUpperCase()
+  if (input === "TEXT" && output === "AUDIO") return "TEXT_TO_SPEECH"
+  if (input === "AUDIO" && output === "TEXT") return "SPEECH_TO_TEXT"
+  if (input === "TEXT" && output === "IMAGE") return "IMAGE_GENERATION"
+  if (input === "IMAGE" && output === "IMAGE") return "IMAGE_TO_IMAGE"
+  if (input === "IMAGE" && output === "TEXT") return "IMAGE_UNDERSTANDING"
+  if (output === "VIDEO") return "VIDEO_GENERATION"
+  if (output === "JSON" && (toolType || "").trim().toUpperCase() === "EMBEDDING") return "EMBEDDING"
+  if (output === "JSON" && (toolType || "").trim().toUpperCase() === "RERANK") return "RERANK"
   return (toolType || "TEXT_GENERATION").toUpperCase()
 }
 
-function modelConfigSupportsCapability(config: AgentModelConfig, capability: string): boolean {
-  const caps = config.capabilities
-  if (!caps || caps.length === 0) return true
+const fallbackProviderCapabilities: Record<string, string[]> = {
+  mock: ["TEXT_GENERATION"],
+  openai_compatible: ["TEXT_GENERATION"],
+  anthropic_compatible: ["TEXT_GENERATION"],
+  minimax: ["TEXT_GENERATION"],
+  siliconflow: ["IMAGE_GENERATION", "DIGITAL_HUMAN"],
+  siliconflow_images: ["IMAGE_GENERATION", "DIGITAL_HUMAN"],
+  minimax_speech: ["TEXT_TO_SPEECH"],
+  siliconflow_speech: ["TEXT_TO_SPEECH"],
+  worker_video: ["VIDEO_GENERATION"],
+}
+
+function modelConfigSupportsCapability(
+  config: AgentModelConfig,
+  capability: string,
+  providerCapabilities: Record<string, string[]> = fallbackProviderCapabilities,
+): boolean {
+  const caps = resolvedModelCapabilities(config, providerCapabilities)
+  if (caps.length === 0) return false
   const want = capability.toUpperCase()
   return caps.some((c) => (c || "").toUpperCase() === want)
+}
+
+function resolvedModelCapabilities(
+  config: AgentModelConfig,
+  providerCapabilities: Record<string, string[]> = fallbackProviderCapabilities,
+): string[] {
+  if (config.capabilities && config.capabilities.length > 0) {
+    return config.capabilities
+      .filter((capability) => capability && capability.trim())
+      .map((capability) => capability.trim().toUpperCase())
+  }
+  const provider = (config.provider || "").trim().toLowerCase()
+  return (providerCapabilities[provider] || fallbackProviderCapabilities[provider] || [])
+    .filter((capability) => capability && capability.trim())
+    .map((capability) => capability.trim().toUpperCase())
+}
+
+function capabilityLabel(capability: string): string {
+  const value = capability.toUpperCase()
+  return toolTypeOptions.find((item) => item.value === value)?.label || value
 }
 
 function optionLabel(options: Array<{ value: string; label: string }>, value?: string | null) {
@@ -179,6 +233,7 @@ function optionLabel(options: Array<{ value: string; label: string }>, value?: s
 const templateCodeByToolType: Record<string, string> = {
   TEXT_GENERATION: "text_generation_default",
   IMAGE_GENERATION: "image_generation_default",
+  TEXT_TO_SPEECH: "text_to_speech_default",
   VIDEO_GENERATION: "video_generation_default",
   AGENT: "digital_human_default",
 }
@@ -228,9 +283,11 @@ export default function ToolsPage() {
   const [toolList, setToolList] = useState<ToolRow[]>([])
   const [categories, setCategories] = useState<ToolCategory[]>([])
   const [modelConfigs, setModelConfigs] = useState<AgentModelConfig[]>([])
+  const [providerCapabilities, setProviderCapabilities] = useState<Record<string, string[]>>(fallbackProviderCapabilities)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [togglingId, setTogglingId] = useState<number | null>(null)
+  const [deletingId, setDeletingId] = useState<number | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [form, setForm] = useState<ToolForm>(initialForm)
   const [formError, setFormError] = useState<string | null>(null)
@@ -248,12 +305,21 @@ export default function ToolsPage() {
     setLoading(true)
     setError(null)
     try {
-      const [toolsResp, cats] = await Promise.all([
+      const [toolsResp, cats, providers] = await Promise.all([
         fetchAdminTools(),
-        fetchToolCategories().catch(() => [] as ToolCategory[]),
+        fetchAdminToolCategories().catch(() => [] as ToolCategory[]),
+        fetchModelProviders().catch(() => [] as ModelProviderDescriptor[]),
       ])
       setToolList(toolsResp.list.map(mapTool))
       setCategories(cats)
+      if (providers.length > 0) {
+        setProviderCapabilities(
+          providers.reduce<Record<string, string[]>>((acc, provider) => {
+            acc[provider.code.trim().toLowerCase()] = provider.capabilities || []
+            return acc
+          }, { ...fallbackProviderCapabilities }),
+        )
+      }
       const configs = await fetchAgentModelConfigs().catch(() => [] as AgentModelConfig[])
       setModelConfigs(configs.filter((config) => config.enabled !== false))
       const templates = await fetchToolTemplates().catch(() => [] as ToolTemplateSummary[])
@@ -283,13 +349,47 @@ export default function ToolsPage() {
     const code = editingTool?.toolCode ?? form.toolCode ?? ""
     const type = editingTool?.toolType ?? form.toolType
     const eh = editingTool?.executionHandler ?? null
-    return executionCapabilityForTool(type, code, eh)
-  }, [editingTool, form.toolType, form.toolCode])
+    const input = form.inputModality || editingTool?.inputModality
+    const output = form.outputModality || editingTool?.outputModality
+    return executionCapabilityForTool(type, code, eh, input, output)
+  }, [editingTool, form.toolType, form.toolCode, form.inputModality, form.outputModality])
 
   const filteredModelConfigs = useMemo(
-    () => modelConfigs.filter((c) => modelConfigSupportsCapability(c, requiredModelCapability)),
-    [modelConfigs, requiredModelCapability],
+    () => modelConfigs.filter((c) => modelConfigSupportsCapability(c, requiredModelCapability, providerCapabilities)),
+    [modelConfigs, providerCapabilities, requiredModelCapability],
   )
+
+  const defaultModelConfig = useMemo(
+    () => modelConfigs.find((config) => config.isDefault) || modelConfigs[0] || null,
+    [modelConfigs],
+  )
+
+  const defaultModelSupportsRequiredCapability = useMemo(
+    () => !defaultModelConfig || modelConfigSupportsCapability(defaultModelConfig, requiredModelCapability, providerCapabilities),
+    [defaultModelConfig, providerCapabilities, requiredModelCapability],
+  )
+
+  const modelSelectValue = form.modelConfigId
+    ? form.modelConfigId
+    : defaultModelSupportsRequiredCapability
+      ? "default"
+      : "__select_matching_model"
+
+  const configuredModelRows = useMemo(
+    () => modelConfigs.map((config) => ({
+      config,
+      capabilities: resolvedModelCapabilities(config, providerCapabilities),
+    })),
+    [modelConfigs, providerCapabilities],
+  )
+
+  useEffect(() => {
+    if (!form.modelConfigId) return
+    const selected = modelConfigs.find((config) => String(config.id) === form.modelConfigId)
+    if (selected && !modelConfigSupportsCapability(selected, requiredModelCapability, providerCapabilities)) {
+      updateForm("modelConfigId", "")
+    }
+  }, [form.modelConfigId, modelConfigs, providerCapabilities, requiredModelCapability])
 
   async function toggleToolStatus(id: string) {
     const target = toolList.find((tool) => tool.id === id)
@@ -310,6 +410,17 @@ export default function ToolsPage() {
 
   function updateForm<K extends keyof ToolForm>(key: K, value: ToolForm[K]) {
     setForm((prev) => ({ ...prev, [key]: value }))
+  }
+
+  function openCreateDialog() {
+    setEditingTool(null)
+    setForm({
+      ...initialForm,
+      categoryId: categories[0] ? String(categories[0].id) : "",
+      templateCode: templateCodeByToolType[initialForm.toolType] || "",
+    })
+    setFormError(null)
+    setIsAddDialogOpen(true)
   }
 
   function updateToolType(value: string) {
@@ -358,16 +469,20 @@ export default function ToolsPage() {
   async function handleSaveTool() {
     setFormError(null)
     if (!form.toolName.trim()) {
-      setFormError("Tool name is required")
+      setFormError("请填写工具名称。")
       return
     }
     if (!form.categoryId) {
-      setFormError("Category is required")
+      setFormError(categories.length === 0 ? "请先在「分类管理」中创建一个工具分类。" : "请选择工具分类。")
       return
     }
     const credits = Number(form.estimatedCreditCost)
     if (!Number.isFinite(credits) || credits < 0) {
-      setFormError("Credit cost must be a non-negative number")
+      setFormError("消耗算力必须是大于等于 0 的数字。")
+      return
+    }
+    if (!form.modelConfigId && !defaultModelSupportsRequiredCapability) {
+      setFormError(`默认模型不支持「${capabilityLabel(requiredModelCapability)}」，请选择一个匹配的模型配置。`)
       return
     }
     setSubmitting(true)
@@ -397,9 +512,31 @@ export default function ToolsPage() {
       setEditingTool(null)
       setIsAddDialogOpen(false)
     } catch (err) {
-      setFormError(err instanceof ApiError ? err.message : "Failed to save tool")
+      const message = err instanceof ApiError ? err.message : "保存工具失败，请稍后重试。"
+      console.error("[AI Tool Management] 保存工具失败", err)
+      setFormError(message)
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  async function handleDeleteTool(tool: ToolRow) {
+    if (typeof window !== "undefined") {
+      const confirmed = window.confirm(`确定删除「${tool.name}」吗？删除后该工具会从管理列表和用户端下线。`)
+      if (!confirmed) return
+    }
+    setDeletingId(tool.rawId)
+    setError(null)
+    try {
+      await deleteTool(tool.rawId)
+      setToolList((prev) => prev.filter((item) => item.rawId !== tool.rawId))
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : "删除工具失败，请查看后端日志。"
+      console.error("[AI Tool Management] 删除工具失败", { toolId: tool.rawId, toolCode: tool.toolCode, error: err })
+      setError(message)
+      if (typeof window !== "undefined") window.alert(message)
+    } finally {
+      setDeletingId(null)
     }
   }
 
@@ -489,10 +626,10 @@ export default function ToolsPage() {
   }
 
   const headerDescription = error
-    ? `Load failed: ${error}`
+    ? `操作失败：${error}`
     : loading
-      ? "Loading tool list..."
-      : "Manage AI tools, tool fields, and publishing status."
+      ? "正在加载工具列表..."
+      : "管理 AI 工具、字段配置和发布状态。"
 
   return (
     <AdminLayout>
@@ -521,31 +658,33 @@ export default function ToolsPage() {
             }}
           >
             <DialogTrigger asChild>
-              <Button className="gap-2">
+              <Button className="gap-2" onClick={openCreateDialog}>
                 <Plus className="h-4 w-4" />
-                Add Tool
+                新建工具
               </Button>
             </DialogTrigger>
             <DialogContent className="bg-card border-border max-w-lg">
               <DialogHeader>
-                <DialogTitle>{editingTool ? "Edit AI Tool" : "Add AI Tool"}</DialogTitle>
-                <DialogDescription>{formError || "Configure the tool and its model binding."}</DialogDescription>
+                <DialogTitle>{editingTool ? "编辑 AI 工具" : "新建 AI 工具"}</DialogTitle>
+                <DialogDescription className={formError ? "text-destructive" : undefined}>
+                  {formError || "配置工具信息、能力类型和模型绑定。"}
+                </DialogDescription>
               </DialogHeader>
               <div className="space-y-4 py-4">
                 <div className="space-y-2">
-                  <Label>Tool name</Label>
-                  <Input value={form.toolName} onChange={(event) => updateForm("toolName", event.target.value)} />
+                  <Label>工具名称</Label>
+                  <Input value={form.toolName} onChange={(event) => updateForm("toolName", event.target.value)} placeholder="例如：文字转语音" />
                 </div>
                 <div className="space-y-2">
-                  <Label>Description</Label>
+                  <Label>工具描述</Label>
                   <Textarea value={form.description} onChange={(event) => updateForm("description", event.target.value)} />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label>Category</Label>
+                    <Label>分类</Label>
                     <Select value={form.categoryId} onValueChange={(value) => updateForm("categoryId", value)}>
                       <SelectTrigger>
-                        <SelectValue placeholder="Select category" />
+                        <SelectValue placeholder={categories.length === 0 ? "暂无分类，请先创建分类" : "选择分类"} />
                       </SelectTrigger>
                       <SelectContent>
                         {categories.map((cat) => (
@@ -557,7 +696,7 @@ export default function ToolsPage() {
                     </Select>
                   </div>
                   <div className="space-y-2">
-                    <Label>Credits</Label>
+                    <Label>消耗算力</Label>
                     <Input
                       type="number"
                       value={form.estimatedCreditCost}
@@ -647,41 +786,93 @@ export default function ToolsPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label>Tool code</Label>
+                  <Label>工具编码</Label>
                   <Input
                     value={form.toolCode}
                     onChange={(event) => updateForm("toolCode", event.target.value)}
-                    placeholder="Optional"
+                    placeholder="不填则自动生成"
                     disabled={Boolean(editingTool)}
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label>Model config</Label>
-                  <Select value={form.modelConfigId || "default"} onValueChange={(value) => updateForm("modelConfigId", value === "default" ? "" : value)}>
+                  <Label>模型配置</Label>
+                  <Select
+                    value={modelSelectValue}
+                    onValueChange={(value) => updateForm("modelConfigId", value === "default" || value === "__select_matching_model" ? "" : value)}
+                  >
                     <SelectTrigger>
-                      <SelectValue placeholder="Use default model config" />
+                      <SelectValue placeholder="选择匹配的模型配置" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="default">Use default model config</SelectItem>
+                      {!defaultModelSupportsRequiredCapability ? (
+                        <SelectItem value="__select_matching_model" disabled>
+                          请选择支持「{capabilityLabel(requiredModelCapability)}」的模型
+                        </SelectItem>
+                      ) : null}
+                      <SelectItem value="default" disabled={!defaultModelSupportsRequiredCapability}>
+                        使用默认模型配置
+                      </SelectItem>
                       {filteredModelConfigs.map((config) => (
                         <SelectItem key={config.id} value={String(config.id)}>
                           {config.displayName || config.modelName} · {config.provider}
                         </SelectItem>
                       ))}
+                      {filteredModelConfigs.length === 0 ? (
+                        <SelectItem value="__no_matching_models" disabled>
+                          暂无匹配模型配置
+                        </SelectItem>
+                      ) : null}
                     </SelectContent>
                   </Select>
+                  <p className="text-xs text-muted-foreground">需要模型能力：{capabilityLabel(requiredModelCapability)}</p>
                 </div>
               </div>
               <DialogFooter>
                 <Button variant="outline" onClick={() => setIsAddDialogOpen(false)} disabled={submitting}>
-                  Cancel
+                  取消
                 </Button>
                 <Button onClick={handleSaveTool} disabled={submitting}>
-                  {submitting ? "Saving..." : editingTool ? "Save Tool" : "Create Tool"}
+                  {submitting ? "保存中..." : editingTool ? "保存工具" : "创建工具"}
                 </Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>
+        </div>
+
+        <div className="rounded-2xl border border-border bg-card p-5">
+          <div className="mb-4 flex items-center justify-between gap-4">
+            <div>
+              <h2 className="text-base font-semibold text-card-foreground">已配置模型能力</h2>
+              <p className="text-sm text-muted-foreground">确认当前后台可绑定到不同模态工具的模型配置。</p>
+            </div>
+            <Badge variant="secondary">{configuredModelRows.length} models</Badge>
+          </div>
+          {configuredModelRows.length === 0 ? (
+            <p className="text-sm text-muted-foreground">暂无可用模型配置。</p>
+          ) : (
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {configuredModelRows.map(({ config, capabilities }) => (
+                <div key={config.id} className="rounded-xl border border-border/70 bg-secondary/40 p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate font-medium text-card-foreground">{config.displayName || config.modelName}</p>
+                      <p className="truncate text-xs text-muted-foreground">{config.provider} · {config.modelName}</p>
+                    </div>
+                    {config.isDefault ? <Badge variant="outline">Default</Badge> : null}
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {capabilities.length > 0 ? capabilities.map((capability) => (
+                      <Badge key={capability} variant="secondary" className="text-xs">
+                        {capabilityLabel(capability)}
+                      </Badge>
+                    )) : (
+                      <Badge variant="destructive" className="text-xs">未识别能力</Badge>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -711,16 +902,20 @@ export default function ToolsPage() {
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="bg-card border-border">
                     <DropdownMenuItem className="gap-2" onClick={() => openEditDialog(tool)}>
-                      <Pencil className="h-4 w-4" /> Edit
+                      <Pencil className="h-4 w-4" /> 编辑
                     </DropdownMenuItem>
                     <DropdownMenuItem className="gap-2" onClick={() => openFieldDialog(tool)}>
-                      <FileText className="h-4 w-4" /> Fields
+                      <FileText className="h-4 w-4" /> 字段配置
                     </DropdownMenuItem>
                     <DropdownMenuItem className="gap-2" disabled>
-                      <Copy className="h-4 w-4" /> Duplicate
+                      <Copy className="h-4 w-4" /> 复制
                     </DropdownMenuItem>
-                    <DropdownMenuItem className="gap-2 text-destructive" disabled>
-                      <Trash2 className="h-4 w-4" /> Delete
+                    <DropdownMenuItem
+                      className="gap-2 text-destructive"
+                      disabled={deletingId === tool.rawId}
+                      onClick={() => handleDeleteTool(tool)}
+                    >
+                      <Trash2 className="h-4 w-4" /> {deletingId === tool.rawId ? "删除中..." : "删除"}
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
@@ -827,4 +1022,3 @@ export default function ToolsPage() {
     </AdminLayout>
   )
 }
-

@@ -143,17 +143,20 @@ function Start-InfraIfNeeded {
         Pop-Location
     }
 
-    Write-Host "[..] Waiting for MySQL container..."
+    Write-Host "[..] Waiting for MySQL + Redis containers..."
     $Deadline = (Get-Date).AddSeconds(90)
     while ((Get-Date) -lt $Deadline) {
         cmd /c "docker exec ai-supermarket-mysql mysqladmin ping -uroot -proot123456 --silent >nul 2>nul"
-        if ($LASTEXITCODE -eq 0) {
+        $MysqlReady = $LASTEXITCODE -eq 0
+        cmd /c "docker exec ai-supermarket-redis redis-cli ping >nul 2>nul"
+        $RedisReady = $LASTEXITCODE -eq 0
+        if ($MysqlReady -and $RedisReady) {
             Write-Host "[OK] MySQL + Redis are ready"
             return
         }
         Start-Sleep -Seconds 2
     }
-    throw "Timed out waiting for MySQL container."
+    throw "Timed out waiting for MySQL/Redis containers."
 }
 
 Import-DotEnv (Join-Path $Root ".env")
@@ -166,6 +169,8 @@ Set-DefaultEnv "SERVER_PORT" "8080"
 Set-DefaultEnv "REDIS_HOST" "127.0.0.1"
 Set-DefaultEnv "REDIS_PORT" "6379"
 Set-DefaultEnv "AI_TASK_QUEUE" "ai:task:queue"
+Set-DefaultEnv "GENERATED_MEDIA_DIR" (Join-Path $Root "data\generated-media")
+Set-DefaultEnv "GENERATED_MEDIA_PUBLIC_BASE_URL" "/generated"
 
 Write-Section "AI Tool Market - Local Dev Launcher"
 Write-Host "Root:          $Root"

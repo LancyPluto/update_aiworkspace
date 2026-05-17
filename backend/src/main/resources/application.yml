@@ -29,7 +29,7 @@ app:
   jwt-secret: ${JWT_SECRET:local-dev-secret}
   internal-api-token: ${INTERNAL_API_TOKEN:local-internal-token}
   ai-task-queue: ${AI_TASK_QUEUE:ai:task:queue}
-  generated-media-dir: ${GENERATED_MEDIA_DIR:data/generated-media}
+  generated-media-dir: ${GENERATED_MEDIA_DIR:../data/generated-media}
   auth:
     sms:
       provider: ${SMS_PROVIDER:local}

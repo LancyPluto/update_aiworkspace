@@ -43,6 +43,8 @@ import com.aiminilab.aitoolmarket.tool.service.ToolService;
 import com.aiminilab.aitoolmarket.tool.service.ToolTemplateService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -51,6 +53,8 @@ import java.util.Map;
 
 @Service
 public class ToolServiceImpl implements ToolService {
+
+    private static final Logger log = LoggerFactory.getLogger(ToolServiceImpl.class);
 
     private final ToolMapper toolMapper;
     private final ToolCategoryMapper toolCategoryMapper;
@@ -208,6 +212,18 @@ public class ToolServiceImpl implements ToolService {
         modelCapabilityService.validateToolModelBinding(tool);
         toolMapper.updateTool(toolId, tool, operatorId);
         return findToolSummary(toolId);
+    }
+
+    @Override
+    public void deleteTool(Long toolId, Long operatorId) {
+        AiTool existing = toolMapper.findById(toolId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在或已删除"));
+        int updated = toolMapper.softDeleteTool(toolId, operatorId);
+        if (updated == 0) {
+            throw new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在或已删除");
+        }
+        log.info("Admin deleted AI tool: toolId={}, toolCode={}, toolName={}, operatorId={}",
+                toolId, existing.getToolCode(), existing.getToolName(), operatorId);
     }
 
     @Override

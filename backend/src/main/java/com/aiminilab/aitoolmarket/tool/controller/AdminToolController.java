@@ -13,6 +13,7 @@ import com.aiminilab.aitoolmarket.tool.dto.UpsertToolRequest;
 import com.aiminilab.aitoolmarket.tool.service.ToolService;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -55,6 +56,12 @@ public class AdminToolController {
     @PutMapping("/{toolId}")
     public ApiResponse<ToolSummaryResponse> update(@PathVariable Long toolId, @Valid @RequestBody UpsertToolRequest request) {
         return ApiResponse.success(toolService.updateTool(toolId, request, AuthContext.get().userId()));
+    }
+
+    @DeleteMapping("/{toolId}")
+    public ApiResponse<Void> delete(@PathVariable Long toolId) {
+        toolService.deleteTool(toolId, AuthContext.get().userId());
+        return ApiResponse.success(null);
     }
 
     @PostMapping("/{toolId}/publish")

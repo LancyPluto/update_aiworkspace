@@ -36,12 +36,21 @@ class AdminToolTemplateApiTest {
         mockMvc.perform(get("/api/admin/v1/tool-templates")
                         .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data[?(@.templateCode=='image_generation_default')]").exists());
+                .andExpect(jsonPath("$.data[?(@.templateCode=='image_generation_default')]").exists())
+                .andExpect(jsonPath("$.data[?(@.templateCode=='text_to_speech_default')]").exists());
 
         mockMvc.perform(get("/api/admin/v1/tool-templates/image_generation_default")
                         .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.fields[0].fieldKey").value("prompt"));
+
+        mockMvc.perform(get("/api/admin/v1/tool-templates/text_to_speech_default")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.toolType").value("TEXT_TO_SPEECH"))
+                .andExpect(jsonPath("$.data.executionHandler").value("TEXT_TO_SPEECH"))
+                .andExpect(jsonPath("$.data.outputModality").value("AUDIO"))
+                .andExpect(jsonPath("$.data.fields[0].fieldKey").value("text"));
 
         Long toolId = createToolWithTemplate(adminToken, "tpl_image_tool", "image_generation_default");
 

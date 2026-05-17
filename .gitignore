@@ -8,6 +8,7 @@ logs/
 
 # runtime data
 backend/data/agent-files/
+data/generated-media/
 
 # local tool bundles
 .tools/
