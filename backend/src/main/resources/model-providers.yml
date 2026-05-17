@@ -66,6 +66,17 @@ providers:
     workerReady: false
     description: MiniMax /v1/music_generation (worker handler pending).
 
+  - code: minimax_speech
+    label: MiniMax speech
+    capabilities:
+      - TEXT_TO_SPEECH
+    defaultBaseUrl: https://api.minimaxi.com
+    defaultModel: speech-2.8-hd
+    billingDefault: PER_CALL
+    testStrategy: accept_only
+    workerReady: true
+    description: MiniMax /v1/t2a_async_v2 asynchronous text-to-speech.
+
   - code: siliconflow_speech
     label: SiliconFlow TTS
     capabilities:
@@ -74,8 +85,8 @@ providers:
     defaultModel: FunAudioLLM/CosyVoice2-0.5B
     billingDefault: PER_CALL
     testStrategy: accept_only
-    workerReady: false
-    description: SiliconFlow /v1/audio/speech for standalone TTS tools (handler pending).
+    workerReady: true
+    description: SiliconFlow /v1/audio/speech for standalone TTS tools.
 
   - code: worker_video
     label: Video generation (stub)

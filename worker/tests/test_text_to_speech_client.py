@@ -1,0 +1,157 @@
+import sys
+import io
+import tarfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+import requests
+
+
+WORKER_ROOT = Path(__file__).resolve().parents[1]
+if str(WORKER_ROOT) not in sys.path:
+    sys.path.insert(0, str(WORKER_ROOT))
+
+from client.text_to_speech_client import TextToSpeechClient, TextToSpeechError
+
+
+class FakeJsonResponse:
+    status_code = 200
+    text = ""
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return {
+            "base_resp": {"status_code": 0},
+            "data": {"audio": "617564696f"},
+            "trace_id": "provider-trace",
+        }
+
+
+class FakeAsyncCreateResponse:
+    status_code = 200
+    text = ""
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return {
+            "base_resp": {"status_code": 0},
+            "task_id": "task-1",
+            "usage_characters": 5,
+        }
+
+
+class FakeAsyncQueryResponse:
+    status_code = 200
+    text = ""
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return {
+            "base_resp": {"status_code": 0},
+            "status": "success",
+            "file_id": "file-1",
+        }
+
+
+class FakeAudioFileResponse:
+    status_code = 200
+    text = ""
+    content = b"async-audio"
+    headers = {"Content-Type": "application/octet-stream"}
+
+    def raise_for_status(self):
+        return None
+
+
+class TextToSpeechClientTest(unittest.TestCase):
+    def test_minimax_async_create_query_and_downloads_file(self):
+        client = TextToSpeechClient()
+        with patch("client.text_to_speech_client.time.sleep"), patch(
+            "client.text_to_speech_client.requests.post",
+            return_value=FakeAsyncCreateResponse(),
+        ) as post, patch(
+            "client.text_to_speech_client.requests.request",
+            side_effect=[FakeAsyncQueryResponse(), _fake_tar_audio_response(b"async-audio")],
+        ) as request:
+            result = client.generate(
+                provider="minimax_speech",
+                model="speech-2.8-hd",
+                text="hello",
+                base_url="https://api.minimaxi.com",
+                api_key="secret",
+                params={"minimaxGroupId": "group-secret"},
+            )
+
+        self.assertEqual(result.audio_bytes, b"async-audio")
+        self.assertEqual(result.extension, "mp3")
+        self.assertEqual(result.metadata["taskId"], "task-1")
+        self.assertEqual(result.metadata["fileId"], "file-1")
+        self.assertIn("/v1/t2a_async_v2", post.call_args.args[0])
+        self.assertIn("/v1/query/t2a_async_query_v2", request.call_args_list[0].args[1])
+        self.assertIn("/v1/files/retrieve_content", request.call_args_list[1].args[1])
+        self.assertNotIn("group-secret", request.call_args_list[1].args[1].split("?", 1)[0])
+
+    def test_minimax_sync_retries_retryable_ssl_error_once(self):
+        client = TextToSpeechClient()
+        with patch("client.text_to_speech_client.time.sleep"), patch(
+            "client.text_to_speech_client.requests.post",
+            side_effect=[requests.exceptions.SSLError("EOF occurred in violation of protocol"), FakeJsonResponse()],
+        ) as post:
+            result = client.generate(
+                provider="minimax_speech",
+                model="speech-2.8-hd",
+                text="hello",
+                base_url="https://api.minimax.io",
+                api_key="secret",
+                params={"ttsMode": "sync"},
+            )
+
+        self.assertEqual(post.call_count, 2)
+        self.assertEqual(result.audio_bytes, b"audio")
+        self.assertEqual(result.metadata["traceId"], "provider-trace")
+        headers = post.call_args.kwargs["headers"]
+        self.assertEqual(headers["Connection"], "close")
+        self.assertEqual(headers["User-Agent"], "ai-tool-market-worker/tts")
+
+    def test_minimax_sync_transport_error_message_contains_safe_debug_context(self):
+        client = TextToSpeechClient()
+        with patch(
+            "client.text_to_speech_client.requests.post",
+            side_effect=requests.exceptions.SSLError("EOF occurred in violation of protocol"),
+        ):
+            with self.assertRaises(TextToSpeechError) as raised:
+                client.generate(
+                    provider="minimax_speech",
+                    model="speech-2.8-hd",
+                    text="hello",
+                    base_url="https://api.minimax.io",
+                    api_key="secret",
+                    params={"minimaxGroupId": "group-secret", "ttsMode": "sync"},
+                )
+
+        message = str(raised.exception)
+        self.assertIn("url=https://api.minimax.io/v1/t2a_v2", message)
+        self.assertIn("errorType=SSLError", message)
+        self.assertNotIn("group-secret", message)
+
+
+def _fake_tar_audio_response(audio_bytes: bytes):
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w") as archive:
+        info = tarfile.TarInfo("content.mp3")
+        info.size = len(audio_bytes)
+        archive.addfile(info, io.BytesIO(audio_bytes))
+    response = FakeAudioFileResponse()
+    response.content = buffer.getvalue()
+    return response
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -17,6 +17,7 @@ class Settings:
     redis_port: int = int(os.getenv('REDIS_PORT', '6379'))
     redis_password: str = os.getenv('REDIS_PASSWORD', '')
     redis_database: int = int(os.getenv('REDIS_DATABASE', '0'))
+    redis_retry_interval_seconds: float = float(os.getenv('REDIS_RETRY_INTERVAL_SECONDS', '5'))
     ai_task_queue: str = os.getenv('AI_TASK_QUEUE', 'ai:task:queue')
     backend_internal_base_url: str = os.getenv('BACKEND_INTERNAL_BASE_URL', 'http://localhost:8080')
     internal_api_token: str = os.getenv('INTERNAL_API_TOKEN', 'replace-with-internal-token')
@@ -46,7 +47,7 @@ class Settings:
     skywork_video_model: str = os.getenv('SKYWORK_VIDEO_MODEL', 'seedance/seedance-2.0')
     skywork_video_endpoint: str = os.getenv('SKYWORK_VIDEO_ENDPOINT', '/api/sse/video/create')
     skywork_video_timeout_seconds: int = int(os.getenv('SKYWORK_VIDEO_TIMEOUT_SECONDS', '900'))
-    generated_media_dir: str = os.getenv('GENERATED_MEDIA_DIR', '/data/generated-media')
+    generated_media_dir: str = os.getenv('GENERATED_MEDIA_DIR', '../data/generated-media')
     generated_media_public_base_url: str = os.getenv(
         'GENERATED_MEDIA_PUBLIC_BASE_URL',
         '/generated',

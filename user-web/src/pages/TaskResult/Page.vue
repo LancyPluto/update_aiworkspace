@@ -4,6 +4,7 @@ import { RouterLink } from "vue-router"
 import { ArrowLeft, ChevronRight } from "lucide-vue-next"
 import AppShell from "@/components/AppShell.vue"
 import ResultRenderer from "@/components/ResultRenderer/ResultRenderer.vue"
+import { getApiOrigin } from "@/api/client"
 import { fetchTaskById } from "@/api/taskApi"
 import type { TaskDetail } from "@/api/types"
 import type { ResultBlock } from "@/types/result"
@@ -157,7 +158,9 @@ function normalizeMediaUrl(value: string): string {
   if (value.startsWith("http://") || value.startsWith("https://") || value.startsWith("data:")) {
     return value
   }
-  return value.startsWith("/") ? value : `/${value}`
+  const path = value.startsWith("/") ? value : `/${value}`
+  const apiOrigin = getApiOrigin()
+  return apiOrigin ? `${apiOrigin}${path}` : path
 }
 </script>
 

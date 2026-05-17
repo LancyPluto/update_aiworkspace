@@ -48,6 +48,8 @@ public interface ToolService {
 
     ToolSummaryResponse updateTool(Long toolId, UpsertToolRequest request, Long operatorId);
 
+    void deleteTool(Long toolId, Long operatorId);
+
     ToolSummaryResponse publishTool(Long toolId, Long operatorId);
 
     ToolSummaryResponse offlineTool(Long toolId, Long operatorId);
