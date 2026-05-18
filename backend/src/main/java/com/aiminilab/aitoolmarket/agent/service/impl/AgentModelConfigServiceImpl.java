@@ -128,9 +128,11 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                                           AgentModelConfigRequest request,
                                           AgentModelConfig existing,
                                           LocalDateTime now) {
+        String previousProvider = existing != null ? existing.getProvider() : null;
         config.setDisplayName(blankToNull(request.displayName()));
         config.setConfigCode(blankToNull(request.configCode()));
-        config.setProvider(request.provider().trim());
+        String providerTrimmed = request.provider().trim();
+        config.setProvider(providerTrimmed);
         config.setModelName(request.modelName().trim());
         config.setBaseUrl(blankToNull(request.baseUrl()));
         if (request.apiKey() != null && !request.apiKey().isBlank()) {
@@ -153,10 +155,8 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         config.setOutputTokenPricePer1k(outputPricePer1m.divide(TOKEN_UNIT_SCALE));
         config.setBillingUnit(resolveBillingUnit(request.billingUnit(), request.provider()));
         config.setUnitPrice(nonNegativeMoney(request.unitPrice()));
-        String providerTrimmed = request.provider().trim();
-        boolean providerChanged = existing != null
-                && existing.getProvider() != null
-                && !existing.getProvider().trim().equalsIgnoreCase(providerTrimmed);
+        boolean providerChanged = previousProvider != null
+                && !previousProvider.trim().equalsIgnoreCase(providerTrimmed);
         List<String> capabilities;
         if (request.capabilities() != null && !request.capabilities().isEmpty()) {
             capabilities = modelCapabilityService.normalizeCapabilities(providerTrimmed, request.capabilities());

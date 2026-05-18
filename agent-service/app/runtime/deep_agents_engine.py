@@ -9,19 +9,31 @@ from typing import Any
 from app.config import settings
 from langchain_core.callbacks import AsyncCallbackHandler
 
+from app.core.budget_guard import BudgetExceeded, BudgetGuard, BudgetState
 from app.core.event_types import (
+    INTENT_DETECTED,
     MEMORY_CANDIDATE_CREATED,
     MESSAGE_COMPLETED,
     MESSAGE_DELTA,
+    RUN_STARTED,
     SUBAGENT_COMPLETED,
     SUBAGENT_FAILED,
     SUBAGENT_STARTED,
+    TOOL_ARGUMENTS_PREVIEW,
+    TOOL_CONFIRMATION_REQUIRED,
+    TOOL_RECOMMENDATIONS,
+    TOOL_SELECTED,
     WORKSPACE_FILE_CREATED,
     WORKSPACE_FILE_READ,
 )
-from app.core.schemas import ChatMessage, RunComplete, RunContext, RunEventCreate, RunFail, WorkspaceMemoryItem
+from app.core.intent_router import Intent, IntentRouter
+from app.core.schemas import ChatMessage, RunComplete, RunContext, RunEventCreate, RunFail, ToolDescriptor, WorkspaceMemoryItem
 from app.runtime.subagent_profiles import default_subagent_profiles, profiles_to_deepagents_subagents
 from app.runtime.workspace_files import WorkspaceFileContext, build_workspace_file_context
+from app.security.prompt_guard import PromptGuard
+from app.tools.backend_tool import BackendToolBridge
+from app.tools.missing_argument_hints import format_missing_tool_arguments_message
+from app.tools.registry import ToolRegistry
 
 
 DEEP_AGENTS_INTENT = "deep_agents"
@@ -39,11 +51,25 @@ class DeepAgentsRuntimeEngine:
         *,
         deep_agents_enabled: bool = False,
         dependency_loader: Callable[[], ModuleType | None] | None = None,
+        intent_router: IntentRouter | None = None,
+        prompt_guard: PromptGuard | None = None,
+        budget_guard: BudgetGuard | None = None,
     ) -> None:
         self.backend_client = backend_client
+        self.backend = backend_client
         self.model_client = model_client
+        self.model = model_client
         self.deep_agents_enabled = deep_agents_enabled
         self.dependency_loader = dependency_loader or self._load_deepagents
+        self.intent_router = intent_router or IntentRouter()
+        self.prompt_guard = prompt_guard or PromptGuard()
+        self.budget_guard = budget_guard or BudgetGuard(
+            max_model_calls=settings.agent_max_model_calls,
+            max_tool_calls=settings.agent_max_tool_calls,
+            model_call_cost=settings.agent_model_call_cost,
+            default_consumed_credits=settings.agent_default_consumed_credits,
+        )
+        self.tool_bridge = BackendToolBridge(backend_client)
 
     async def run(self, context: RunContext) -> None:
         state = {
@@ -514,14 +540,13 @@ class DeepAgentsRuntimeEngine:
         await self.backend.complete_run(
             context.runId,
             RunComplete(
-                finalAnswer=answer,
-                intent=DEEP_AGENTS_INTENT,
-                modelProviderCode="deepagents",
-                modelName=getattr(self.model_client, "model_name", settings.model_name),
-                consumedCredits=settings.agent_default_consumed_credits,
+                finalAnswer=final_answer,
+                intent=intent,
+                modelProviderCode="agent-service",
+                modelName=model_name,
+                consumedCredits=consumed_credits,
             ),
         )
-        await self._emit_memory_candidate(context.runId, answer, artifact)
 
     def ensure_available(self) -> ModuleType:
         module = self.dependency_loader()
@@ -538,8 +563,14 @@ class DeepAgentsRuntimeEngine:
     async def _fail(self, run_id: int, error_code: str, error_message: str) -> None:
         await self.backend_client.fail_run(run_id, RunFail(errorCode=error_code, errorMessage=error_message))
 
+    async def _fail_run(self, run_id: int, error_code: str, error_message: str) -> None:
+        await self._fail(run_id, error_code, error_message)
+
     def _chat_model(self):
         return getattr(self.model_client, "chat_model", self.model_client)
+
+    async def _fetch_workspace_memory_context(self, context: RunContext) -> str:
+        return _format_workspace_memory_context(await self._workspace_memory_items(context))
 
     async def _workspace_memory_items(self, context: RunContext) -> list[WorkspaceMemoryItem]:
         workspace_id = context.workspaceId

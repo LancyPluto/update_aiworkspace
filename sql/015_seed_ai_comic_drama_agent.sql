@@ -30,6 +30,12 @@ WHERE tc.category_code = 'agent'
     WHERE t.tool_code = 'ai_comic_drama_agent'
   );
 
+UPDATE ai_tools
+SET execution_handler = 'DIGITAL_HUMAN',
+    output_modality = 'VIDEO',
+    estimated_credit_cost = 3
+WHERE tool_code = 'ai_comic_drama_agent';
+
 INSERT INTO tool_field_schemas (
   tool_id,
   schema_version,
@@ -210,6 +216,22 @@ FROM (
     NULL,
     1,
     9
+  FROM tool_field_schemas s
+  JOIN ai_tools t ON t.id = s.tool_id
+  WHERE t.tool_code = 'ai_comic_drama_agent' AND s.schema_version = 'v1'
+
+  UNION ALL
+
+  SELECT
+    s.id,
+    'resolution',
+    '视频清晰度',
+    'select',
+    '选择图生视频清晰度；480p 成本更低、生成更快',
+    JSON_ARRAY('480p', '720p 高清'),
+    NULL,
+    1,
+    10
   FROM tool_field_schemas s
   JOIN ai_tools t ON t.id = s.tool_id
   WHERE t.tool_code = 'ai_comic_drama_agent' AND s.schema_version = 'v1'

@@ -9,6 +9,7 @@ import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.tool.entity.AiTool;
 import org.springframework.stereotype.Service;
 
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 
@@ -55,6 +56,27 @@ public class ModelCapabilityService {
         return capabilities;
     }
 
+    public AgentModelConfig resolveModelConfigForTool(AiTool tool) {
+        if (tool == null) {
+            return null;
+        }
+        if (tool.getModelConfigId() != null) {
+            AgentModelConfig bound = agentModelConfigMapper.findActiveById(tool.getModelConfigId());
+            if (bound != null) {
+                return bound;
+            }
+        }
+        String requiredCapability = resolveRequiredCapability(tool);
+        return agentModelConfigMapper.findAllActive().stream()
+                .filter(config -> resolveCapabilities(config).stream()
+                        .anyMatch(capability -> capability.equalsIgnoreCase(requiredCapability)))
+                .sorted(Comparator
+                        .comparing((AgentModelConfig config) -> Boolean.TRUE.equals(config.getDefault()) ? 0 : 1)
+                        .thenComparing(AgentModelConfig::getId, Comparator.reverseOrder()))
+                .findFirst()
+                .orElse(null);
+    }
+
     public void validateToolModelBinding(AiTool tool) {
         if (tool == null || tool.getModelConfigId() == null) {
             return;
@@ -67,8 +89,12 @@ public class ModelCapabilityService {
     }
 
     public void validateExecution(AiTool tool, AgentModelConfig modelConfig) {
-        if (tool == null || modelConfig == null) {
+        if (tool == null) {
             return;
+        }
+        if (modelConfig == null) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR,
+                    "no enabled model config supports " + resolveRequiredCapability(tool));
         }
         String requiredCapability = resolveRequiredCapability(tool);
         List<String> configCapabilities = resolveCapabilities(modelConfig);

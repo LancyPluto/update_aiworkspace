@@ -19,9 +19,8 @@ class SiliconFlowVideoClient:
     def __init__(self, *, base_url: str | None = None, api_key: str | None = None) -> None:
         self.base_url = (base_url or settings.siliconflow_base_url).rstrip("/")
         self.api_key = api_key if api_key is not None else settings.siliconflow_api_key
-        self.default_model = settings.siliconflow_video_model
-        self.poll_interval_seconds = settings.siliconflow_video_poll_interval_seconds
-        self.timeout_seconds = settings.siliconflow_video_timeout_seconds
+        self.poll_interval_seconds = 5
+        self.timeout_seconds = 600
         self.timeout = (5, 60)
         self.session = requests.Session()
         self.session.headers.update(

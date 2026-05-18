@@ -8,7 +8,13 @@ import { clearSessionBearerJwt, getSessionBearerJwt } from "./sessionBearer"
  */
 export function getApiOrigin(): string {
   const raw = import.meta.env.VITE_API_BASE ?? import.meta.env.VITE_API_BASE_URL ?? ""
-  return raw.replace(/\/$/, "")
+  const value = raw.trim().replace(/\/$/, "")
+  if (!value || value.startsWith("/")) return ""
+  try {
+    return new URL(value).origin
+  } catch {
+    return ""
+  }
 }
 
 export class ApiBusinessError extends Error {

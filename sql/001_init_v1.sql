@@ -296,6 +296,6 @@ ON DUPLICATE KEY UPDATE role_name = VALUES(role_name);
 
 INSERT INTO tool_categories (category_code, category_name, sort_order, status)
 VALUES
-  ('copywriting', 'Copywriting', 1, 'ACTIVE'),
+  ('copywriting', '文案生成', 1, 'ACTIVE'),
   ('agent', '智能体', 2, 'ACTIVE')
 ON DUPLICATE KEY UPDATE category_name = VALUES(category_name), status = VALUES(status);

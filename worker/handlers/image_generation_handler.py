@@ -8,6 +8,7 @@ from client.siliconflow_video_client import (
     SiliconFlowVideoError,
     SiliconFlowVideoTimeoutError,
 )
+from config import resolve_siliconflow_api_key
 from handlers.generated_image_persister import GeneratedImagePersistError, GeneratedImagePersister
 from providers import registry as provider_registry
 
@@ -59,7 +60,7 @@ class ImageGenerationHandler:
 
             client = self.image_client or SiliconFlowVideoClient(
                 base_url=model_config.get("baseUrl"),
-                api_key=model_config.get("apiKey"),
+                api_key=resolve_siliconflow_api_key(model_config),
             )
             urls = client.generate_images(
                 prompt=prompt,

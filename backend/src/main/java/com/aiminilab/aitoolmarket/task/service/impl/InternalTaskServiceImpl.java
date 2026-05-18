@@ -69,7 +69,7 @@ public class InternalTaskServiceImpl implements InternalTaskService {
                 .toList();
         AiTool tool = toolMapper.findById(task.getToolId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在"));
-        AgentModelConfig modelConfig = agentModelConfigMapper.findForToolExecution(task.getToolId());
+        AgentModelConfig modelConfig = modelCapabilityService.resolveModelConfigForTool(tool);
         modelCapabilityService.validateExecution(tool, modelConfig);
         List<String> caps = modelCapabilityService.resolveCapabilities(modelConfig);
         return ExecutionContextResponse.of(task, parseParams(task.getParamsJson()),
@@ -112,7 +112,9 @@ public class InternalTaskServiceImpl implements InternalTaskService {
             TaskStateMachine.ensureTransition(current.getStatus(), TaskStatus.SUCCESS.name());
         }
         creditService.settle(task.getUserId(), CreditSourceType.TASK, taskId, task.getEstimatedCreditCost());
-        billingService.recordUsage("TASK", taskId, task.getUserId(), agentModelConfigMapper.findForToolExecution(task.getToolId()),
+        AiTool billingTool = toolMapper.findById(task.getToolId())
+                .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在"));
+        billingService.recordUsage("TASK", taskId, task.getUserId(), modelCapabilityService.resolveModelConfigForTool(billingTool),
                 request.promptTokens(), request.completionTokens(), request.billableUnits(), task.getEstimatedCreditCost());
         taskMapper.insertResult(taskId, task.getUserId(), request.resourceType(), request.contentText());
         taskMetrics.recordTaskOutcome(task.getToolCode(), "SUCCESS", task.getCreatedAt(), findTask(taskId).getFinishedAt());

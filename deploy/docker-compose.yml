@@ -103,7 +103,7 @@ services:
     depends_on:
       - backend
     environment:
-      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/api/v1}
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
       VITE_DEV_PROXY_TARGET: ${VITE_DEV_PROXY_TARGET:-http://backend:8080}
       CHOKIDAR_USEPOLLING: "true"
     ports:
@@ -135,7 +135,7 @@ services:
     volumes:
       - ../worker:/app
       - generated_media:/data/generated-media
-    command: sh -c "pip install --no-cache-dir -r requirements.txt && python main.py"
+    command: sh -c "for i in 1 2 3; do apt-get update && apt-get install -y --no-install-recommends --fix-missing fontconfig fonts-noto-cjk && break; echo font install retry $$i; sleep 5; done && fc-match 'Noto Sans CJK SC' && rm -rf /var/lib/apt/lists/* && pip install --no-cache-dir -r requirements.txt && python main.py"
 
   agent-service:
     image: python:3.12-slim

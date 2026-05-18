@@ -9,6 +9,13 @@ class TraceIdFilter(logging.Filter):
         return True
 
 
+class TraceIdFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        if not hasattr(record, "trace_id"):
+            record.trace_id = "-"
+        return super().format(record)
+
+
 def configure_logging(level: str = "INFO") -> None:
     logging.basicConfig(
         level=getattr(logging, level.upper(), logging.INFO),
@@ -18,3 +25,6 @@ def configure_logging(level: str = "INFO") -> None:
     has_trace_filter = any(isinstance(existing, TraceIdFilter) for existing in root_logger.filters)
     if not has_trace_filter:
         root_logger.addFilter(TraceIdFilter())
+    for handler in root_logger.handlers:
+        if not isinstance(handler.formatter, TraceIdFormatter):
+            handler.setFormatter(TraceIdFormatter("%(asctime)s %(levelname)s [traceId=%(trace_id)s] %(name)s - %(message)s"))
