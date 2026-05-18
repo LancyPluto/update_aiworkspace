@@ -55,7 +55,24 @@
   const messages = ref<AgentMessage[]>([])
   const files = ref<AgentFile[]>([])
   const events = ref<AgentRunEvent[]>([])
-  const input = ref("")
+
+  // ====================== 【修改开始：会话级草稿隔离】 ======================
+  // 草稿存储：每个会话保存自己的输入内容
+  const sessionDrafts = ref<Record<number, string>>({})
+
+  // 计算属性：自动绑定当前会话的草稿
+  const input = computed({
+    get() {
+      if (!activeSessionId.value) return ""
+      return sessionDrafts.value[activeSessionId.value] || ""
+    },
+    set(val) {
+      if (!activeSessionId.value) return
+      sessionDrafts.value[activeSessionId.value] = val
+    },
+  })
+  // ====================== 【修改结束】 ======================
+
   const loading = ref(false)
   const sending = ref(false)
   const uploading = ref(false)
@@ -278,7 +295,10 @@
         sessionId = session?.id ?? null
       }
       if (!sessionId) return
+
+      // 发送后清空当前会话草稿
       input.value = ""
+
       messages.value.push({
         id: Date.now(),
         sessionId,
@@ -412,7 +432,7 @@
       else {
         await syncRunEvents(activeRunId.value)
         await refreshMessages()
-        const run = await fetchAgentRun(activeRunId.value, { token: auth.token })
+        const run = await fetchAgentRun(runId, { token: auth.token })
         if (isTerminalRunStatus(run.status)) {
           stopRunUpdates()
           settleRunStatus(run)
