@@ -11,6 +11,18 @@ export function getApiOrigin(): string {
   return raw.replace(/\/$/, "")
 }
 
+/** 供 `new URL()` 使用的绝对 base（http(s) origin）；相对配置如 `/api/v1` 回退到当前页面 origin */
+export function getRequestBaseUrl(): string {
+  const raw = getApiOrigin()
+  if (!raw) {
+    return typeof window !== "undefined" ? window.location.origin : "http://localhost"
+  }
+  if (/^https?:\/\//i.test(raw)) {
+    return raw
+  }
+  return typeof window !== "undefined" ? window.location.origin : "http://localhost"
+}
+
 export class ApiBusinessError extends Error {
   readonly code: ApiErrorCode
   readonly traceId?: string
@@ -36,17 +48,13 @@ export interface RequestOptions {
 }
 
 function buildUrl(path: string, query?: RequestOptions["query"]): string {
-  const origin = getApiOrigin()
   const pathPart = path.startsWith("/") ? path : `/${path}`
   let url: URL
   if (path.startsWith("http")) {
     url = new URL(path)
-  } else if (origin) {
-    url = new URL(pathPart, origin.endsWith("/") ? origin : `${origin}/`)
-  } else if (typeof window !== "undefined") {
-    url = new URL(pathPart, window.location.origin)
   } else {
-    url = new URL(pathPart, "http://localhost")
+    const base = getRequestBaseUrl()
+    url = new URL(pathPart, base.endsWith("/") ? base : `${base}/`)
   }
   if (query) {
     for (const [k, v] of Object.entries(query)) {

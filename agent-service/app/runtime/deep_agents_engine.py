@@ -1,33 +1,44 @@
 import importlib.util
 import inspect
 import re
-from collections.abc import AsyncIterable, Callable, Iterable
+from collections.abc import Callable
 from dataclasses import dataclass
 from types import ModuleType
 from typing import Any
 
 from app.config import settings
-from langchain_core.callbacks import AsyncCallbackHandler
-
+from app.core.budget_guard import BudgetExceeded, BudgetGuard, BudgetState
 from app.core.event_types import (
+    INTENT_DETECTED,
     MEMORY_CANDIDATE_CREATED,
     MESSAGE_COMPLETED,
     MESSAGE_DELTA,
+    RUN_STARTED,
     SUBAGENT_COMPLETED,
     SUBAGENT_FAILED,
     SUBAGENT_STARTED,
+    TOOL_ARGUMENTS_PREVIEW,
+    TOOL_CONFIRMATION_REQUIRED,
+    TOOL_RECOMMENDATIONS,
+    TOOL_SELECTED,
     WORKSPACE_FILE_CREATED,
     WORKSPACE_FILE_READ,
 )
-from app.core.schemas import ChatMessage, RunComplete, RunContext, RunEventCreate, RunFail, WorkspaceMemoryItem
+from app.core.intent_router import Intent, IntentRouter
+from app.core.schemas import ChatMessage, RunComplete, RunContext, RunEventCreate, RunFail, ToolDescriptor, WorkspaceMemoryItem
 from app.runtime.subagent_profiles import default_subagent_profiles, profiles_to_deepagents_subagents
 from app.runtime.workspace_files import WorkspaceFileContext, build_workspace_file_context
-
+from app.security.prompt_guard import PromptGuard
+from app.tools.backend_tool import BackendToolBridge
+from app.tools.missing_argument_hints import format_missing_tool_arguments_message
+from app.tools.registry import ToolRegistry
+from langchain_core.callbacks import AsyncCallbackHandler
 
 DEEP_AGENTS_INTENT = "deep_agents"
 DEEP_AGENTS_SYSTEM_PROMPT = (
-    "You are a workspace agent for an AI tool marketplace. Plan and execute long-running tasks carefully, "
-    "use available context from the conversation and files, and return a concise final answer for the user."
+    "You are a workspace agent for an AI tool marketplace. Plan and execute tasks carefully, "
+    "use available context from the conversation, workspace memory, and files, "
+    "and return a concise final answer for the user."
 )
 
 
@@ -37,13 +48,23 @@ class DeepAgentsRuntimeEngine:
         backend_client,
         model_client,
         *,
-        deep_agents_enabled: bool = False,
+        intent_router: IntentRouter | None = None,
+        budget_guard: BudgetGuard | None = None,
+        prompt_guard: PromptGuard | None = None,
         dependency_loader: Callable[[], ModuleType | None] | None = None,
     ) -> None:
-        self.backend_client = backend_client
-        self.model_client = model_client
-        self.deep_agents_enabled = deep_agents_enabled
+        self.backend = backend_client
+        self.model = model_client
+        self.intent_router = intent_router or IntentRouter()
+        self.budget_guard = budget_guard or BudgetGuard(
+            max_model_calls=settings.agent_max_model_calls,
+            max_tool_calls=settings.agent_max_tool_calls,
+            model_call_cost=settings.agent_model_call_cost,
+            default_consumed_credits=settings.agent_default_consumed_credits,
+        )
+        self.prompt_guard = prompt_guard or PromptGuard()
         self.dependency_loader = dependency_loader or self._load_deepagents
+        self.tool_bridge = BackendToolBridge(backend_client, model_client=model_client)
 
     async def run(self, context: RunContext) -> None:
         state = {
@@ -397,15 +418,16 @@ class DeepAgentsRuntimeEngine:
             await self._complete_run(context, answer, intent=intent.intent.value if intent else Intent.GENERAL_CHAT.value)
             return
 
-        module = self.ensure_available()
         create_deep_agent = getattr(module, "create_deep_agent", None)
         if not callable(create_deep_agent):
-            raise RuntimeError("deepagents package does not expose create_deep_agent")
+            answer = await self._run_chat(context, intent)
+            await self._complete_run(context, answer, intent=intent.intent.value if intent else Intent.GENERAL_CHAT.value)
+            return
 
         try:
             chat_model = self._chat_model()
-            workspace_memory_items = await self._workspace_memory_items(context)
-            workspace_file_context = await self._workspace_file_context(context)
+            workspace_memory_items = await self._fetch_workspace_memory_items(context)
+            workspace_file_context = await self._build_workspace_file_context(context)
             agent = create_deep_agent(
                 tools=[],
                 system_prompt=DEEP_AGENTS_SYSTEM_PROMPT,
@@ -418,26 +440,16 @@ class DeepAgentsRuntimeEngine:
                 memory=_format_workspace_memory_items(workspace_memory_items) + workspace_file_context.memory_items,
             )
         except AttributeError as exception:
-            await self._fail(
-                context.runId,
-                "DEEP_AGENTS_MODEL_UNSUPPORTED",
-                f"Deep Agents requires a LangChain-compatible chat model: {exception}",
-            )
+            await self._fail_run(context.runId, "DEEP_AGENTS_MODEL_UNSUPPORTED", f"Deep Agents requires a LangChain-compatible chat model: {exception}")
             return
+
         workspace_memory_context = _format_workspace_memory_context(workspace_memory_items)
-        stream_result = await _invoke_agent_streaming(
+        result = await _invoke_agent(
             agent,
             {"messages": _messages(context, workspace_memory_context, workspace_file_context.prompt_context)},
-            context.runId,
-            self.backend_client,
-            config={"callbacks": [SubagentTraceCallbackHandler(context.runId, self.backend_client)]},
+            config={"callbacks": [SubagentTraceCallbackHandler(context.runId, self.backend)]},
         )
-        if stream_result.result is not None:
-            answer = _extract_final_answer(stream_result.result)
-        elif stream_result.streamed_text:
-            answer = stream_result.streamed_text
-        else:
-            raise RuntimeError("deepagents returned no final answer")
+        answer = _extract_final_answer(result)
         artifact = _parse_artifact_directive(answer)
         if artifact is not None:
             await self._create_artifact(context.runId, artifact)
@@ -514,47 +526,40 @@ class DeepAgentsRuntimeEngine:
         await self.backend.complete_run(
             context.runId,
             RunComplete(
-                finalAnswer=answer,
-                intent=DEEP_AGENTS_INTENT,
-                modelProviderCode="deepagents",
-                modelName=getattr(self.model_client, "model_name", settings.model_name),
-                consumedCredits=settings.agent_default_consumed_credits,
+                finalAnswer=final_answer,
+                intent=intent,
+                modelProviderCode="agent-service",
+                modelName=model_name,
+                consumedCredits=consumed_credits,
             ),
         )
-        await self._emit_memory_candidate(context.runId, answer, artifact)
 
-    def ensure_available(self) -> ModuleType:
-        module = self.dependency_loader()
-        if module is None:
-            raise RuntimeError("deepagents package is not installed; enable the preview runtime only after installing it")
-        return module
-
-    @staticmethod
-    def _load_deepagents() -> ModuleType | None:
-        if importlib.util.find_spec("deepagents") is None:
-            return None
-        return importlib.import_module("deepagents")
-
-    async def _fail(self, run_id: int, error_code: str, error_message: str) -> None:
-        await self.backend_client.fail_run(run_id, RunFail(errorCode=error_code, errorMessage=error_message))
+    async def _fail_run(self, run_id: int, error_code: str, error_message: str) -> None:
+        await self.backend.fail_run(run_id, RunFail(errorCode=error_code, errorMessage=error_message))
 
     def _chat_model(self):
-        return getattr(self.model_client, "chat_model", self.model_client)
+        return getattr(self.model, "chat_model", self.model)
 
-    async def _workspace_memory_items(self, context: RunContext) -> list[WorkspaceMemoryItem]:
+    # --- Workspace memory & files ---
+
+    async def _fetch_workspace_memory_items(self, context: RunContext) -> list[WorkspaceMemoryItem]:
         workspace_id = context.workspaceId
         if workspace_id is None:
             return []
         try:
-            return await self.backend_client.retrieve_workspace_memory(workspace_id=workspace_id, query=context.message, limit=5)
+            return await self.backend.retrieve_workspace_memory(workspace_id=workspace_id, query=context.message, limit=5)
         except Exception:
             return []
 
-    async def _workspace_file_context(self, context: RunContext) -> WorkspaceFileContext:
+    async def _fetch_workspace_memory_context(self, context: RunContext) -> str:
+        items = await self._fetch_workspace_memory_items(context)
+        return _format_workspace_memory_context(items)
+
+    async def _build_workspace_file_context(self, context: RunContext) -> WorkspaceFileContext:
         workspace_file_context = build_workspace_file_context(context)
         if workspace_file_context.is_empty:
             return workspace_file_context
-        await self.backend_client.append_event(
+        await self.backend.append_event(
             context.runId,
             RunEventCreate(
                 eventType=WORKSPACE_FILE_READ,
@@ -567,13 +572,8 @@ class DeepAgentsRuntimeEngine:
         )
         return workspace_file_context
 
-    async def _emit_answer_events(self, run_id: int, answer: str) -> None:
-        for chunk in _chunks(answer, 80):
-            await _append_answer_delta(self.backend_client, run_id, chunk)
-        await _append_answer_completed(self.backend_client, run_id, answer)
-
     async def _create_artifact(self, run_id: int, artifact: "ArtifactDirective") -> None:
-        response = await self.backend_client.create_run_artifact(
+        response = await self.backend.create_run_artifact(
             run_id=run_id,
             filename=artifact.filename,
             content=artifact.content,
@@ -581,7 +581,7 @@ class DeepAgentsRuntimeEngine:
         )
         if _backend_emitted_workspace_file_created(response):
             return
-        await self.backend_client.append_event(
+        await self.backend.append_event(
             run_id,
             RunEventCreate(
                 eventType=WORKSPACE_FILE_CREATED,
@@ -598,7 +598,7 @@ class DeepAgentsRuntimeEngine:
     async def _emit_memory_candidate(self, run_id: int, answer: str, artifact: "ArtifactDirective | None") -> None:
         content = artifact.content if artifact is not None else answer
         title = artifact.filename if artifact is not None else _memory_candidate_title(content)
-        await self.backend_client.append_event(
+        await self.backend.append_event(
             run_id,
             RunEventCreate(
                 eventType=MEMORY_CANDIDATE_CREATED,
@@ -620,176 +620,9 @@ async def _invoke_agent(agent, payload: dict, config: dict | None = None):
     return result
 
 
-@dataclass(frozen=True)
-class AgentStreamResult:
-    result: Any | None
-    streamed_text: str
-
-
-async def _invoke_agent_streaming(agent, payload: dict, run_id: int, backend_client, config: dict | None = None) -> AgentStreamResult:
-    stream_result = await _try_stream_events(agent, payload, run_id, backend_client, config)
-    if stream_result is not None:
-        return stream_result
-    result = await _invoke_agent(agent, payload, config=config)
-    return AgentStreamResult(result=result, streamed_text="")
-
-
-async def _try_stream_events(agent, payload: dict, run_id: int, backend_client, config: dict | None = None) -> AgentStreamResult | None:
-    for method_name in ("stream_events", "astream_events"):
-        method = getattr(agent, method_name, None)
-        if not callable(method):
-            continue
-        try:
-            stream = await _call_stream_events(method, payload, config=config)
-        except TypeError:
-            continue
-        result = await _consume_agent_event_stream(stream, run_id, backend_client)
-        if result.streamed_text or result.result is not None:
-            return result
-    return None
-
-
-async def _call_stream_events(method, payload: dict, config: dict | None = None):
-    try:
-        stream = method(payload, config=config, version="v2")
-    except TypeError:
-        try:
-            stream = method(payload, config=config)
-        except TypeError:
-            stream = method(payload)
-    if inspect.isawaitable(stream):
-        return await stream
-    return stream
-
-
-async def _consume_agent_event_stream(stream, run_id: int, backend_client) -> AgentStreamResult:
-    chunks: list[str] = []
-    result: Any | None = None
-    projection_messages = getattr(stream, "messages", None)
-    if projection_messages is not None:
-        if callable(projection_messages):
-            projection_messages = projection_messages()
-        async for message in _iterate_maybe_async(projection_messages):
-            chunk = _stream_delta_content(message)
-            if chunk:
-                chunks.append(chunk)
-                await _append_answer_delta(backend_client, run_id, chunk)
-        result = await _stream_output(stream)
-        return AgentStreamResult(result=result, streamed_text="".join(chunks))
-    async for event in _iterate_maybe_async(stream):
-        chunk = _event_delta(event)
-        if chunk:
-            chunks.append(chunk)
-            await _append_answer_delta(backend_client, run_id, chunk)
-        final_output = _event_final_output(event)
-        if final_output is not None:
-            result = final_output
-    return AgentStreamResult(result=result, streamed_text="".join(chunks))
-
-
-async def _iterate_maybe_async(value):
-    if inspect.isawaitable(value):
-        value = await value
-    if isinstance(value, AsyncIterable):
-        async for item in value:
-            yield item
-        return
-    if isinstance(value, Iterable) and not isinstance(value, (str, bytes, dict)):
-        for item in value:
-            yield item
-        return
-    return
-
-
-async def _stream_output(stream):
-    output = getattr(stream, "output", None)
-    if callable(output):
-        output = output()
-    if inspect.isawaitable(output):
-        output = await output
-    return output
-
-
-async def _append_answer_delta(backend_client, run_id: int, chunk: str) -> None:
-    await backend_client.append_event(
-        run_id,
-        RunEventCreate(eventType=MESSAGE_DELTA, eventText=chunk, eventJson={"delta": chunk}),
-    )
-
-
-async def _append_answer_completed(backend_client, run_id: int, answer: str) -> None:
-    await backend_client.append_event(
-        run_id,
-        RunEventCreate(eventType=MESSAGE_COMPLETED, eventText=answer, eventJson={"content": answer}),
-    )
-
-
-def _event_delta(event) -> str:
-    if not isinstance(event, dict):
-        return _stream_delta_content(event)
-    event_name = event.get("event") or event.get("eventType")
-    if event_name not in {"message.delta", "on_chat_model_stream", "on_llm_stream"}:
-        return ""
-    data = event.get("data")
-    if isinstance(data, dict):
-        for key in ("delta", "text", "content"):
-            value = data.get(key)
-            if isinstance(value, str):
-                return value
-        return _stream_delta_content(data.get("chunk") or data.get("message") or data.get("output"))
-    return _stream_delta_content(event.get("delta") or event.get("content"))
-
-
-def _event_final_output(event) -> Any | None:
-    if not isinstance(event, dict):
-        return None
-    event_name = event.get("event") or event.get("eventType")
-    if event_name not in {"message.completed", "on_chain_end", "on_graph_end", "run.completed"}:
-        return None
-    data = event.get("data")
-    if isinstance(data, dict):
-        for key in ("output", "result", "final_answer", "finalAnswer"):
-            if key in data:
-                return data[key]
-    for key in ("output", "result", "final_answer", "finalAnswer"):
-        if key in event:
-            return event[key]
-    return None
-
-
-def _stream_delta_content(value) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, str):
-        return value
-    if isinstance(value, dict):
-        for key in ("delta", "text", "content"):
-            content = value.get(key)
-            if isinstance(content, str):
-                return content
-        content = value.get("chunk") or value.get("message")
-    else:
-        content = getattr(value, "content", None)
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts = []
-        for item in content:
-            if isinstance(item, str):
-                parts.append(item)
-            elif isinstance(item, dict) and isinstance(item.get("text"), str):
-                parts.append(item["text"])
-        return "".join(parts)
-    return ""
-
-
-def _completion_suffix(answer: str, streamed_text: str) -> str:
-    if not answer or answer == streamed_text:
-        return ""
-    return answer[len(streamed_text) :] if answer.startswith(streamed_text) else ""
-
-
 class SubagentTraceCallbackHandler(AsyncCallbackHandler):
+    """Tracks subagent lifecycle events via LangChain / deepagents tool callbacks."""
+
     def __init__(self, run_id: int, backend_client) -> None:
         self.run_id = run_id
         self.backend_client = backend_client
@@ -873,13 +706,13 @@ def _task_description_from_inputs(inputs: dict[str, Any] | None, input_str: str)
 
 
 def _messages(context: RunContext, workspace_memory_context: str = "", workspace_file_context: str = "") -> list[dict[str, str]]:
-    messages = [_message(message) for message in context.history]
+    messages_list = [_message(message) for message in context.history]
     if workspace_memory_context:
-        messages.append({"role": "system", "content": workspace_memory_context})
+        messages_list.append({"role": "system", "content": workspace_memory_context})
     if workspace_file_context:
-        messages.append({"role": "system", "content": workspace_file_context})
-    messages.append({"role": "user", "content": context.message})
-    return messages
+        messages_list.append({"role": "system", "content": workspace_file_context})
+    messages_list.append({"role": "user", "content": context.message})
+    return messages_list
 
 
 def _message(message: ChatMessage) -> dict[str, str]:
@@ -982,14 +815,18 @@ def _chunks(value: str, size: int) -> list[str]:
 def _format_file_context(context: RunContext) -> str:
     ready_chunks = [chunk for chunk in context.agentFileChunks if chunk.contentText.strip()]
     if ready_chunks:
-        sections = ["Relevant excerpts retrieved from the user's uploaded files:"]
+        sections = [
+            "Relevant excerpts have been retrieved from the user's uploaded files. Use them when relevant, and cite filenames in your answer."
+        ]
         for chunk in ready_chunks:
             sections.append(f"\n[File: {chunk.originalFilename}, chunk {chunk.chunkIndex}]\n{chunk.contentText[:4000]}")
         return "\n".join(sections)
     ready_files = [file for file in context.agentFiles if file.status == "READY" and file.extractedText.strip()]
     if not ready_files:
         return ""
-    sections = ["Uploaded file context:"]
+    sections = [
+        "The user has uploaded files. Use this file context when it is relevant, and cite filenames in your answer."
+    ]
     for file in ready_files:
         sections.append(f"\n[File: {file.originalFilename}]\n{file.extractedText[:12000]}")
     return "\n".join(sections)
