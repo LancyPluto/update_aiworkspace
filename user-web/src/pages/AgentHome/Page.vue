@@ -697,6 +697,14 @@
               <FileText class="h-4 w-4" />
               <span class="file-name">{{ file.originalFilename }}</span>
               <span class="file-meta">{{ file.status }} · {{ formatFileSize(file.fileSize) }}</span>
+              <button 
+                  <button 
+                  type="button"
+                  class="file-delete-btn"
+                  @click="files = files.filter(item => item.id !== file.id)"
+                >
+                  <X class="h-3 w-3" />
+                </button>
             </div>
           </div>
 
@@ -1138,7 +1146,28 @@
     overflow-x: auto;
   }
 
+.file-delete-btn {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: none;
+  background: #00000080;
+  color: white;
+  cursor: pointer;
+  opacity: 0; /* 默认隐藏 */
+  transition: opacity 0.15s ease;
+}
+
+.file-chip:hover .file-delete-btn {
+  opacity: 1; /* hover 时才显示 */
+}
   .file-chip {
+    position: relative;
     min-width: 0;
     max-width: 260px;
     display: inline-grid;
