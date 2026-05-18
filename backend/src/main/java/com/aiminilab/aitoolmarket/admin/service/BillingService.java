@@ -11,5 +11,5 @@ public interface BillingService {
     PageResponse<BillingUsageLogResponse> logs(Integer pageNo, Integer pageSize);
 
     void recordUsage(String sourceType, Long sourceId, Long userId, AgentModelConfig modelConfig,
-                     Integer promptTokens, Integer completionTokens, Integer chargedCredits);
+                     Integer promptTokens, Integer completionTokens, Integer billableUnits, Integer chargedCredits);
 }

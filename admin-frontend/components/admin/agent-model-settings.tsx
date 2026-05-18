@@ -28,23 +28,36 @@ import {
   testSavedAgentModelConfig,
   updateAgentModelConfig,
 } from "@/lib/api/agent-model"
-import type { AgentModelConfig, AgentModelConfigPayload, AgentModelConfigTestResult, AgentModelProvider } from "@/lib/api/types"
+import { fetchModelProviders } from "@/lib/api/model-providers"
+import type {
+  AgentModelConfig,
+  AgentModelConfigPayload,
+  AgentModelConfigTestResult,
+  ModelProviderDescriptor,
+} from "@/lib/api/types"
 import { AlertCircle, CheckCircle2, KeyRound, Plus, RefreshCw, Save, ServerCog, Star, Trash2, Zap } from "lucide-react"
+import { Checkbox } from "@/components/ui/checkbox"
 
 interface ModelForm {
   id: number | null
   displayName: string
   configCode: string
-  provider: AgentModelProvider
+  provider: string
   modelName: string
   baseUrl: string
   apiKey: string
   apiKeyMasked: string
+  consoleUrl: string
+  balanceUrl: string
+  docsUrl: string
   timeoutSeconds: string
-  inputTokenPricePer1k: string
-  outputTokenPricePer1k: string
+  inputTokenPricePer1m: string
+  outputTokenPricePer1m: string
+  billingUnit: "TOKEN_PER_M" | "PER_CALL"
+  unitPrice: string
   enabled: boolean
   isDefault: boolean
+  capabilities: string[]
 }
 
 interface VendorMeta {
@@ -60,31 +73,21 @@ type ModelConfigWithTest = AgentModelConfig & {
   lastTestSuccess?: boolean | null
 }
 
-const providerOptions: Array<{
-  value: AgentModelProvider
-  label: string
-  packageName: string
-  defaultModel: string
-  defaultBaseUrl: string
-  description: string
-}> = [
-  {
-    value: "openai_compatible",
-    label: "OpenAI compatible",
-    packageName: "langchain-openai",
-    defaultModel: "gpt-4o-mini",
-    defaultBaseUrl: "https://api.openai.com/v1",
-    description: "Use an OpenAI-compatible chat completion endpoint.",
-  },
-  {
-    value: "anthropic_compatible",
-    label: "Anthropic compatible",
-    packageName: "langchain-anthropic",
-    defaultModel: "MiniMax-M2.7",
-    defaultBaseUrl: "https://api.minimaxi.com/anthropic",
-    description: "Use an Anthropic-compatible gateway, such as MiniMax M2.7.",
-  },
-]
+const FALLBACK_PROVIDER: ModelProviderDescriptor = {
+  code: "openai_compatible",
+  label: "OpenAI compatible",
+  capabilities: ["TEXT_GENERATION"],
+  defaultBaseUrl: "https://api.openai.com/v1",
+  defaultModel: "gpt-4o-mini",
+  billingDefault: "TOKEN_PER_M",
+  testStrategy: "agent_service",
+  workerReady: true,
+  description: "OpenAI-compatible chat completion endpoint.",
+}
+
+function pickMeta(catalog: ModelProviderDescriptor[], code: string): ModelProviderDescriptor {
+  return catalog.find((item) => item.code === code) || FALLBACK_PROVIDER
+}
 
 const vendorFallback: VendorMeta = {
   label: "妯″瀷 API",
@@ -119,34 +122,43 @@ const emptyForm: ModelForm = {
   baseUrl: "https://api.openai.com/v1",
   apiKey: "",
   apiKeyMasked: "",
+  consoleUrl: "",
+  balanceUrl: "",
+  docsUrl: "",
   timeoutSeconds: "60",
-  inputTokenPricePer1k: "0",
-  outputTokenPricePer1k: "0",
+  inputTokenPricePer1m: "0",
+  outputTokenPricePer1m: "0",
+  billingUnit: "TOKEN_PER_M",
+  unitPrice: "0",
   enabled: true,
   isDefault: false,
+  capabilities: ["TEXT_GENERATION"],
 }
 
-function providerMeta(provider: string) {
-  return providerOptions.find((item) => item.value === provider) || providerOptions[0]
-}
-
-function toForm(config: AgentModelConfig): ModelForm {
-  const provider = config.provider === "anthropic_compatible" ? "anthropic_compatible" : "openai_compatible"
-  const meta = providerMeta(provider)
+function toForm(config: AgentModelConfig, catalog: ModelProviderDescriptor[]): ModelForm {
+  const meta = pickMeta(catalog, config.provider)
+  const caps =
+    config.capabilities && config.capabilities.length > 0 ? [...config.capabilities] : [...meta.capabilities]
   return {
     id: config.id,
     displayName: config.displayName || config.modelName || "",
     configCode: config.configCode || "",
-    provider,
+    provider: config.provider,
     modelName: config.modelName || meta.defaultModel,
     baseUrl: config.baseUrl || meta.defaultBaseUrl,
     apiKey: "",
     apiKeyMasked: config.apiKeyMasked || "",
+    consoleUrl: config.consoleUrl || "",
+    balanceUrl: config.balanceUrl || "",
+    docsUrl: config.docsUrl || "",
     timeoutSeconds: String(config.timeoutSeconds || 60),
-    inputTokenPricePer1k: String(config.inputTokenPricePer1k ?? 0),
-    outputTokenPricePer1k: String(config.outputTokenPricePer1k ?? 0),
+    inputTokenPricePer1m: String(config.inputTokenPricePer1m ?? ((config.inputTokenPricePer1k ?? 0) * 1000)),
+    outputTokenPricePer1m: String(config.outputTokenPricePer1m ?? ((config.outputTokenPricePer1k ?? 0) * 1000)),
+    billingUnit: config.billingUnit === "PER_CALL" ? "PER_CALL" : "TOKEN_PER_M",
+    unitPrice: String(config.unitPrice ?? 0),
     enabled: config.enabled !== false,
     isDefault: Boolean(config.isDefault),
+    capabilities: caps,
   }
 }
 
@@ -158,11 +170,17 @@ function toPayload(form: ModelForm): AgentModelConfigPayload {
     modelName: form.modelName.trim(),
     baseUrl: form.baseUrl.trim(),
     apiKey: form.apiKey.trim(),
+    consoleUrl: form.consoleUrl.trim(),
+    balanceUrl: form.balanceUrl.trim(),
+    docsUrl: form.docsUrl.trim(),
     timeoutSeconds: Number(form.timeoutSeconds) || 60,
-    inputTokenPricePer1k: Number(form.inputTokenPricePer1k) || 0,
-    outputTokenPricePer1k: Number(form.outputTokenPricePer1k) || 0,
+    inputTokenPricePer1m: Number(form.inputTokenPricePer1m) || 0,
+    outputTokenPricePer1m: Number(form.outputTokenPricePer1m) || 0,
+    billingUnit: form.billingUnit,
+    unitPrice: Number(form.unitPrice) || 0,
     enabled: form.enabled,
     isDefault: form.isDefault,
+    capabilities: form.capabilities,
   }
 }
 
@@ -236,6 +254,7 @@ function testStatusBadge(config: ModelConfigWithTest) {
 
 export function AgentModelSettings() {
   const [configs, setConfigs] = useState<ModelConfigWithTest[]>([])
+  const [providerCatalog, setProviderCatalog] = useState<ModelProviderDescriptor[]>([])
   const [form, setForm] = useState<ModelForm>(emptyForm)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -245,7 +264,9 @@ export function AgentModelSettings() {
   const [saved, setSaved] = useState(false)
   const [testResult, setTestResult] = useState<AgentModelConfigTestResult | null>(null)
 
-  const meta = useMemo(() => providerMeta(form.provider), [form.provider])
+  const catalogResolved = providerCatalog.length > 0 ? providerCatalog : [FALLBACK_PROVIDER]
+
+  const meta = useMemo(() => pickMeta(catalogResolved, form.provider), [catalogResolved, form.provider])
   const liveVendor = useMemo(
     () =>
       resolveVendorMeta({
@@ -263,14 +284,19 @@ export function AgentModelSettings() {
     setLoading(true)
     setError(null)
     try {
-      const list = await fetchAgentModelConfigs()
+      const [list, catalog] = await Promise.all([
+        fetchAgentModelConfigs(),
+        fetchModelProviders().catch(() => [] as ModelProviderDescriptor[]),
+      ])
+      const resolved = catalog.length > 0 ? catalog : [FALLBACK_PROVIDER]
+      setProviderCatalog(resolved)
       setConfigs(list)
       const selected =
         list.find((item) => item.id === nextSelectedId) ||
         list.find((item) => item.id === selectedId) ||
         list.find((item) => item.isDefault) ||
         list[0]
-      setForm(selected ? toForm(selected) : emptyForm)
+      setForm(selected ? toForm(selected, resolved) : { ...emptyForm, capabilities: [...pickMeta(resolved, emptyForm.provider).capabilities] })
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "鍔犺浇妯″瀷閰嶇疆澶辫触")
     } finally {
@@ -290,7 +316,7 @@ export function AgentModelSettings() {
   }
 
   function editConfig(config: AgentModelConfig) {
-    setForm(toForm(config))
+    setForm(toForm(config, catalogResolved))
     setSaved(false)
     setTestResult(null)
     setError(null)
@@ -298,11 +324,16 @@ export function AgentModelSettings() {
   }
 
   function createConfig() {
+    const m = pickMeta(catalogResolved, emptyForm.provider)
     setForm({
       ...emptyForm,
       configCode: "",
       displayName: "",
       isDefault: configs.length === 0,
+      capabilities: [...m.capabilities],
+      baseUrl: m.defaultBaseUrl,
+      modelName: m.defaultModel,
+      billingUnit: m.billingDefault === "PER_CALL" ? "PER_CALL" : "TOKEN_PER_M",
     })
     setSaved(false)
     setTestResult(null)
@@ -319,14 +350,33 @@ export function AgentModelSettings() {
     }
   }
 
-  function applyProvider(value: AgentModelProvider) {
-    const next = providerMeta(value)
+  function applyProvider(value: string) {
+    const next = pickMeta(catalogResolved, value)
     setForm((current) => ({
       ...current,
       provider: value,
-      modelName: current.modelName && current.modelName !== providerMeta(current.provider).defaultModel ? current.modelName : next.defaultModel,
+      modelName:
+        current.modelName && current.modelName !== pickMeta(catalogResolved, current.provider).defaultModel
+          ? current.modelName
+          : next.defaultModel,
       baseUrl: next.defaultBaseUrl,
+      billingUnit: next.billingDefault === "PER_CALL" ? "PER_CALL" : "TOKEN_PER_M",
+      capabilities: [...next.capabilities],
     }))
+    setSaved(false)
+    setTestResult(null)
+  }
+
+  function toggleCapability(cap: string) {
+    setForm((current) => {
+      const set = new Set(current.capabilities)
+      if (set.has(cap)) {
+        set.delete(cap)
+      } else {
+        set.add(cap)
+      }
+      return { ...current, capabilities: Array.from(set) }
+    })
     setSaved(false)
     setTestResult(null)
   }
@@ -334,13 +384,20 @@ export function AgentModelSettings() {
   function validateForm(): string | null {
     if (!form.displayName.trim()) return "Config name is required."
     if (!form.modelName.trim()) return "Model name is required."
-    if (!form.baseUrl.trim()) return "Base URL is required."
+    if (form.provider !== "mock" && !form.baseUrl.trim()) return "Base URL is required."
+    if (!form.capabilities.length) return "Select at least one capability."
+    const allowed = new Set(meta.capabilities.map((c) => c.toUpperCase()))
+    for (const cap of form.capabilities) {
+      if (!allowed.has(cap.toUpperCase())) return `Capability ${cap} is not valid for provider ${form.provider}.`
+    }
     const timeout = Number(form.timeoutSeconds)
     if (!Number.isFinite(timeout) || timeout < 1 || timeout > 300) return "Timeout must be between 1 and 300 seconds."
-    const inputPrice = Number(form.inputTokenPricePer1k)
-    const outputPrice = Number(form.outputTokenPricePer1k)
+    const inputPrice = Number(form.inputTokenPricePer1m)
+    const outputPrice = Number(form.outputTokenPricePer1m)
+    const unitPrice = Number(form.unitPrice)
     if (!Number.isFinite(inputPrice) || inputPrice < 0) return "Input token price must be zero or greater."
     if (!Number.isFinite(outputPrice) || outputPrice < 0) return "Output token price must be zero or greater."
+    if (!Number.isFinite(unitPrice) || unitPrice < 0) return "Unit price must be zero or greater."
     if (!form.apiKey.trim() && !form.apiKeyMasked) return "API Key is required."
     return null
   }
@@ -484,7 +541,7 @@ export function AgentModelSettings() {
                         </div>
                         <div className="mt-3 flex flex-wrap items-center gap-2">
                           <Badge variant="outline">{vendor.shortName}</Badge>
-                          <Badge variant="secondary">{providerMeta(config.provider).label}</Badge>
+                          <Badge variant="secondary">{pickMeta(catalogResolved, config.provider).label}</Badge>
                           <Badge variant={config.enabled ? "default" : "secondary"}>{config.enabled ? "Enabled" : "Disabled"}</Badge>
                           {testStatusBadge(config)}
                         </div>
@@ -503,6 +560,23 @@ export function AgentModelSettings() {
                             Set default
                           </Button>
                         ) : null}
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {config.consoleUrl ? (
+                            <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" asChild onClick={(event) => event.stopPropagation()}>
+                              <a href={config.consoleUrl} target="_blank" rel="noreferrer">控制台</a>
+                            </Button>
+                          ) : null}
+                          {config.balanceUrl ? (
+                            <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" asChild onClick={(event) => event.stopPropagation()}>
+                              <a href={config.balanceUrl} target="_blank" rel="noreferrer">余额</a>
+                            </Button>
+                          ) : null}
+                          {config.docsUrl ? (
+                            <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" asChild onClick={(event) => event.stopPropagation()}>
+                              <a href={config.docsUrl} target="_blank" rel="noreferrer">文档</a>
+                            </Button>
+                          ) : null}
+                        </div>
                         <p className="mt-3 truncate text-xs text-muted-foreground">{config.baseUrl || "Base URL not configured"}</p>
                       </div>
                     </div>
@@ -544,11 +618,13 @@ export function AgentModelSettings() {
             <div className="grid gap-5 md:grid-cols-2">
               <div className="space-y-2">
                 <Label>Provider protocol</Label>
-                <Select value={form.provider} onValueChange={(value) => applyProvider(value as AgentModelProvider)}>
+                <Select value={form.provider} onValueChange={(value) => applyProvider(value)}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {providerOptions.map((item) => (
-                      <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>
+                    {catalogResolved.map((item) => (
+                      <SelectItem key={item.code} value={item.code}>
+                        {item.label}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -568,6 +644,21 @@ export function AgentModelSettings() {
               </div>
             </div>
 
+            <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-4">
+              <Label>Capabilities（须与工具 executionHandler 一致）</Label>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {meta.capabilities.map((cap) => (
+                  <label key={cap} className="flex cursor-pointer items-center gap-2 text-sm">
+                    <Checkbox checked={form.capabilities.includes(cap)} onCheckedChange={() => toggleCapability(cap)} />
+                    <span>{cap}</span>
+                  </label>
+                ))}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                连通性测试：{meta.testStrategy} · Worker：{meta.workerReady ? "就绪" : "未就绪（仅保存凭证）"}
+              </p>
+            </div>
+
             <div className="grid gap-5 md:grid-cols-2">
               <div className="space-y-2">
                 <Label>Base URL</Label>
@@ -581,24 +672,71 @@ export function AgentModelSettings() {
 
             <div className="grid gap-5 md:grid-cols-2">
               <div className="space-y-2">
-                <Label>Input token price / 1K</Label>
+                <Label>Input token price / 1M</Label>
                 <Input
                   type="number"
                   min={0}
                   step="0.000001"
-                  value={form.inputTokenPricePer1k}
-                  onChange={(event) => updateForm("inputTokenPricePer1k", event.target.value)}
+                  value={form.inputTokenPricePer1m}
+                  onChange={(event) => updateForm("inputTokenPricePer1m", event.target.value)}
                 />
               </div>
               <div className="space-y-2">
-                <Label>Output token price / 1K</Label>
+                <Label>Output token price / 1M</Label>
                 <Input
                   type="number"
                   min={0}
                   step="0.000001"
-                  value={form.outputTokenPricePer1k}
-                  onChange={(event) => updateForm("outputTokenPricePer1k", event.target.value)}
+                  value={form.outputTokenPricePer1m}
+                  onChange={(event) => updateForm("outputTokenPricePer1m", event.target.value)}
                 />
+              </div>
+            </div>
+
+            <div className="grid gap-5 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label>Billing unit</Label>
+                <Select value={form.billingUnit} onValueChange={(value) => updateForm("billingUnit", value as ModelForm["billingUnit"])}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="TOKEN_PER_M">Token / 1M</SelectItem>
+                    <SelectItem value="PER_CALL">Per generated item</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Unit price</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  step="0.000001"
+                  value={form.unitPrice}
+                  onChange={(event) => updateForm("unitPrice", event.target.value)}
+                  placeholder={form.billingUnit === "PER_CALL" ? "Cost per image/video call" : "Usually 0 for token billing"}
+                />
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-border bg-secondary/30 p-4">
+              <div className="mb-3">
+                <p className="text-sm font-medium">供应商入口</p>
+                <p className="text-xs text-muted-foreground">
+                  用于管理员快速跳转查看控制台、账号余额和接口文档；余额自动监控后续按供应商适配。
+                </p>
+              </div>
+              <div className="grid gap-4 md:grid-cols-3">
+                <div className="space-y-2">
+                  <Label>控制台链接</Label>
+                  <Input value={form.consoleUrl} placeholder="https://..." onChange={(event) => updateForm("consoleUrl", event.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label>余额链接</Label>
+                  <Input value={form.balanceUrl} placeholder="https://..." onChange={(event) => updateForm("balanceUrl", event.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label>文档链接</Label>
+                  <Input value={form.docsUrl} placeholder="https://..." onChange={(event) => updateForm("docsUrl", event.target.value)} />
+                </div>
               </div>
             </div>
 
@@ -617,8 +755,12 @@ export function AgentModelSettings() {
                 </div>
               </div>
               <div className="space-y-2">
-                <Label>LangChain package</Label>
-                <Input value={meta.packageName} readOnly />
+                <Label>Runtime</Label>
+                <Input
+                  value={`test=${meta.testStrategy} · workerReady=${meta.workerReady}`}
+                  readOnly
+                  className="text-muted-foreground"
+                />
               </div>
             </div>
 
@@ -633,7 +775,7 @@ export function AgentModelSettings() {
             <Textarea
               readOnly
               className="min-h-24 font-mono text-xs"
-              value={`provider=${form.provider}\nmodel=${form.modelName}\nbase_url=${form.baseUrl}\ntimeout=${form.timeoutSeconds}s\ninput_price_per_1k=${form.inputTokenPricePer1k}\noutput_price_per_1k=${form.outputTokenPricePer1k}`}
+              value={`provider=${form.provider}\nmodel=${form.modelName}\nbase_url=${form.baseUrl}\ntimeout=${form.timeoutSeconds}s\nbilling_unit=${form.billingUnit}\ninput_price_per_1m=${form.inputTokenPricePer1m}\noutput_price_per_1m=${form.outputTokenPricePer1m}\nunit_price=${form.unitPrice}`}
             />
 
             {testResult ? (

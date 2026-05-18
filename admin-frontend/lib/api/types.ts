@@ -49,6 +49,12 @@ export interface ToolSummary {
   categoryName?: string | null
   description?: string | null
   coverUrl?: string | null
+  toolType?: string | null
+  inputModality?: string | null
+  outputModality?: string | null
+  configNote?: string | null
+  /** 任务路由用，未设置时由 toolType 推导 */
+  executionHandler?: string | null
   status: 'DRAFT' | 'ONLINE' | 'OFFLINE' | string
   estimatedCreditCost: number
   modelConfigId?: number | null
@@ -62,8 +68,13 @@ export interface UpsertToolPayload {
   categoryId: number | null
   description?: string
   coverUrl?: string
+  toolType?: string
+  inputModality?: string
+  outputModality?: string
+  configNote?: string
   estimatedCreditCost: number
   modelConfigId?: number | null
+  templateCode?: string
 }
 
 export interface PromptRecord {
@@ -140,6 +151,9 @@ export interface AdminTaskApiPayload {
   userNickname?: string | null
   toolCode: string
   toolName: string
+  toolType?: string | null
+  inputModality?: string | null
+  outputModality?: string | null
   status: string
   progress: number
   progressMessage?: string | null
@@ -223,22 +237,41 @@ export interface TestGenerateResult {
   output: string
 }
 
-export type AgentModelProvider = 'mock' | 'openai_compatible' | 'anthropic_compatible' | 'minimax'
+export interface ModelProviderDescriptor {
+  code: string
+  label: string
+  capabilities: string[]
+  defaultBaseUrl: string
+  defaultModel: string
+  billingDefault: string
+  testStrategy: string
+  workerReady: boolean
+  description: string
+}
 
 export interface AgentModelConfig {
   id: number
   displayName?: string | null
   configCode?: string | null
-  provider: AgentModelProvider | string
+  provider: string
   modelName: string
   baseUrl?: string | null
   apiKeyMasked?: string | null
   minimaxGroupId?: string | null
+  consoleUrl?: string | null
+  balanceUrl?: string | null
+  docsUrl?: string | null
   timeoutSeconds: number
   inputTokenPricePer1k?: number | null
   outputTokenPricePer1k?: number | null
+  inputTokenPricePer1m?: number | null
+  outputTokenPricePer1m?: number | null
+  billingUnit?: 'TOKEN_PER_M' | 'PER_CALL' | string | null
+  unitPrice?: number | null
   enabled: boolean
   isDefault?: boolean | null
+  /** 该凭证可用于的执行能力（与 executionHandler / toolType 对齐） */
+  capabilities?: string[] | null
   createdAt?: string | null
   updatedAt?: string | null
 }
@@ -280,16 +313,24 @@ export interface UpsertFieldSchemaPayload {
 export interface AgentModelConfigPayload {
   displayName?: string
   configCode?: string
-  provider: AgentModelProvider | string
+  provider: string
   modelName: string
   baseUrl?: string
   apiKey?: string
   minimaxGroupId?: string
+  consoleUrl?: string
+  balanceUrl?: string
+  docsUrl?: string
   timeoutSeconds?: number
   inputTokenPricePer1k?: number
   outputTokenPricePer1k?: number
+  inputTokenPricePer1m?: number
+  outputTokenPricePer1m?: number
+  billingUnit?: 'TOKEN_PER_M' | 'PER_CALL' | string
+  unitPrice?: number
   enabled?: boolean
   isDefault?: boolean
+  capabilities?: string[]
 }
 
 export interface AgentModelConfigTestResult {
@@ -415,6 +456,11 @@ export interface BillingUsageLog {
   totalTokens: number
   inputTokenPricePer1k: number
   outputTokenPricePer1k: number
+  inputTokenPricePer1m?: number
+  outputTokenPricePer1m?: number
+  billingUnit?: string
+  billableUnits?: number
+  unitPrice?: number
   costAmount: number
   chargedCredits: number
   createdAt: string

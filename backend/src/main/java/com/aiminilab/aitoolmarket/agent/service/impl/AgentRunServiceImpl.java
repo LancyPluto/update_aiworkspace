@@ -50,6 +50,7 @@ import com.aiminilab.aitoolmarket.agent.service.AgentRunService;
 import com.aiminilab.aitoolmarket.agent.service.AgentToolDescriptorService;
 import com.aiminilab.aitoolmarket.agent.service.AgentToolPreferenceService;
 import com.aiminilab.aitoolmarket.common.dto.PageResponse;
+import com.aiminilab.aitoolmarket.common.enums.CreditSourceType;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.config.AppProperties;
@@ -221,7 +222,7 @@ public class AgentRunServiceImpl implements AgentRunService {
             throw new BusinessException(ErrorCode.MODEL_CALL_FAILED, errorMessage);
         }
 
-        creditService.freezeForAgentRun(userId, run.getId(), creditBudget);
+        creditService.freeze(userId, CreditSourceType.AGENT_RUN, run.getId(), creditBudget);
         agentRunMapper.markRunning(run.getId(), now);
         agentRateLimitService.incrementActiveRun(userId, run.getId());
         appendEventInternal(run.getId(), userId, "run.started", "Agent 已开始处理", null, now);
@@ -247,7 +248,7 @@ public class AgentRunServiceImpl implements AgentRunService {
             return AgentRunResponse.from(findRun(runId, userId));
         }
         failOpenToolCalls(runId, userId, "RUN_CANCELLED", "Agent 运行已取消", now);
-        creditService.releaseForAgentRun(userId, runId, Math.max(0, run.getEstimatedCredits()));
+        creditService.release(userId, CreditSourceType.AGENT_RUN, runId, Math.max(0, run.getEstimatedCredits()));
         agentRateLimitService.decrementActiveRun(userId, runId);
         appendEventInternal(runId, userId, "run.failed", "Agent 运行已取消", "{\"status\":\"CANCELLED\"}", now);
         agentMetrics.recordRunOutcome("CANCELLED", run.getIntent(), firstNonNull(run.getStartedAt(), run.getCreatedAt()), now);
@@ -271,7 +272,7 @@ public class AgentRunServiceImpl implements AgentRunService {
                 return AgentRunResponse.from(findRun(runId, userId));
             }
             failOpenToolCalls(runId, userId, "TOOL_CONFIRMATION_REJECTED", "用户取消工具调用", now);
-            creditService.releaseForAgentRun(userId, runId, Math.max(0, run.getEstimatedCredits()));
+            creditService.release(userId, CreditSourceType.AGENT_RUN, runId, Math.max(0, run.getEstimatedCredits()));
             agentRateLimitService.decrementActiveRun(userId, runId);
             appendEventInternal(runId, userId, "run.failed", "用户取消工具调用", "{\"status\":\"CANCELLED\"}", now);
             agentMetrics.recordRunOutcome("CANCELLED", run.getIntent(), firstNonNull(run.getStartedAt(), run.getCreatedAt()), now);
@@ -561,10 +562,10 @@ public class AgentRunServiceImpl implements AgentRunService {
             return AgentRunResponse.from(findRun(runId));
         }
         agentMessageMapper.insertMessage(assistant);
-        creditService.settleForAgentRun(run.getUserId(), runId, consumedCredits);
-        creditService.releaseForAgentRun(run.getUserId(), runId, estimatedCredits - consumedCredits);
+        creditService.settle(run.getUserId(), CreditSourceType.AGENT_RUN, runId, consumedCredits);
+        creditService.release(run.getUserId(), CreditSourceType.AGENT_RUN, runId, estimatedCredits - consumedCredits);
         billingService.recordUsage("AGENT_RUN", runId, run.getUserId(), agentModelConfigMapper.findLatest(),
-                request.promptTokens(), request.completionTokens(), consumedCredits);
+                request.promptTokens(), request.completionTokens(), null, consumedCredits);
         appendEventInternal(runId, run.getUserId(), "run.completed", "Agent 运行已完成", null, now);
         agentSessionMapper.touch(run.getSessionId(), now);
         agentRateLimitService.decrementActiveRun(run.getUserId(), runId);
@@ -597,7 +598,7 @@ public class AgentRunServiceImpl implements AgentRunService {
             return AgentRunResponse.from(findRun(runId));
         }
         failOpenToolCalls(runId, run.getUserId(), request.errorCode(), request.errorMessage(), now);
-        creditService.releaseForAgentRun(run.getUserId(), runId, Math.max(0, run.getEstimatedCredits()));
+        creditService.release(run.getUserId(), CreditSourceType.AGENT_RUN, runId, Math.max(0, run.getEstimatedCredits()));
         appendEventInternal(runId, run.getUserId(), "run.failed", request.errorMessage(), toJson(request), now);
         agentRateLimitService.decrementActiveRun(run.getUserId(), runId);
         agentPendingToolContextMapper.expireByRunId(runId);
@@ -664,10 +665,18 @@ public class AgentRunServiceImpl implements AgentRunService {
                 config.baseUrl(),
                 config.apiKey(),
                 config.minimaxGroupId(),
+                null,
+                null,
+                null,
                 config.timeoutSeconds(),
                 null,
                 null,
+                null,
+                null,
+                config.billingUnit(),
+                config.unitPrice(),
                 config.enabled(),
+                null,
                 null
         );
         AgentModelConfigTestResponse result;

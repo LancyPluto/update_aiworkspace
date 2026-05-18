@@ -1,0 +1,31 @@
+package com.aiminilab.aitoolmarket.agent.dto;
+
+import com.aiminilab.aitoolmarket.agent.config.ModelProviderDefinition;
+
+import java.util.List;
+
+public record ModelProviderResponse(
+        String code,
+        String label,
+        List<String> capabilities,
+        String defaultBaseUrl,
+        String defaultModel,
+        String billingDefault,
+        String testStrategy,
+        boolean workerReady,
+        String description
+) {
+    public static ModelProviderResponse from(ModelProviderDefinition definition) {
+        return new ModelProviderResponse(
+                definition.code(),
+                definition.label(),
+                definition.capabilities(),
+                definition.defaultBaseUrl(),
+                definition.defaultModel(),
+                definition.billingDefault(),
+                definition.testStrategy(),
+                definition.workerReady(),
+                definition.description()
+        );
+    }
+}

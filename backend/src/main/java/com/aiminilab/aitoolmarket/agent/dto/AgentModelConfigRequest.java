@@ -5,6 +5,7 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 
 import java.math.BigDecimal;
+import java.util.List;
 
 public record AgentModelConfigRequest(
         String displayName,
@@ -14,10 +15,18 @@ public record AgentModelConfigRequest(
         String baseUrl,
         String apiKey,
         String minimaxGroupId,
+        String consoleUrl,
+        String balanceUrl,
+        String docsUrl,
         @Min(1) @Max(300) Integer timeoutSeconds,
         BigDecimal inputTokenPricePer1k,
         BigDecimal outputTokenPricePer1k,
+        BigDecimal inputTokenPricePer1m,
+        BigDecimal outputTokenPricePer1m,
+        String billingUnit,
+        BigDecimal unitPrice,
         Boolean enabled,
-        Boolean isDefault
+        Boolean isDefault,
+        List<String> capabilities
 ) {
 }

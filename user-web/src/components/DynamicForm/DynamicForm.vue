@@ -19,7 +19,9 @@ function optionValue(option: FieldOption): string {
 }
 
 function defaultVal(f: ToolField): unknown {
-  if (f.fieldType === "select" && f.options?.length) return optionValue(f.options[0])
+  if ((f.fieldType === "select" || f.fieldType === "radio") && f.options?.length) return optionValue(f.options[0])
+  if (f.fieldType === "checkbox") return false
+  if (f.fieldType === "slider") return 50
   if (f.fieldType === "number") return ""
   return ""
 }
@@ -77,7 +79,7 @@ function validate(): { valid: boolean; message?: string } {
     if (typeof v === "string" && v.trim() === "") {
       return { valid: false, message: `请填写：${f.fieldName}` }
     }
-    if (f.fieldType === "number" && v === "") {
+    if ((f.fieldType === "number" || f.fieldType === "slider") && v === "") {
       return { valid: false, message: `请填写：${f.fieldName}` }
     }
   }
@@ -116,7 +118,7 @@ defineExpose({ validate })
           @input="setField(f.fieldKey, ($event.target as HTMLTextAreaElement).value)"
         />
 
-        <div v-else-if="f.fieldType === 'select' && f.options?.length" class="flex flex-wrap gap-2">
+        <div v-else-if="(f.fieldType === 'select' || f.fieldType === 'radio') && f.options?.length" class="flex flex-wrap gap-2">
           <button
             v-for="opt in f.options"
             :key="optionValue(opt)"
@@ -134,12 +136,36 @@ defineExpose({ validate })
         </div>
 
         <input
-          v-else-if="f.fieldType === 'number'"
+          v-else-if="f.fieldType === 'number' || f.fieldType === 'slider'"
           type="number"
+          :min="f.fieldType === 'slider' ? 0 : undefined"
+          :max="f.fieldType === 'slider' ? 100 : undefined"
           :value="model[f.fieldKey] === '' || model[f.fieldKey] === undefined ? '' : model[f.fieldKey]"
           :placeholder="f.placeholder || '请输入数字'"
           class="flex h-10 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
           @input="onNumberInput(f.fieldKey, $event)"
+        />
+
+        <label
+          v-else-if="f.fieldType === 'checkbox'"
+          class="flex min-h-10 items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm"
+        >
+          <input
+            type="checkbox"
+            :checked="Boolean(model[f.fieldKey])"
+            class="h-4 w-4 accent-primary"
+            @change="setField(f.fieldKey, ($event.target as HTMLInputElement).checked)"
+          />
+          <span>{{ f.placeholder || f.fieldName }}</span>
+        </label>
+
+        <input
+          v-else-if="f.fieldType === 'image' || f.fieldType === 'file'"
+          type="url"
+          :value="strVal(f.fieldKey)"
+          :placeholder="f.placeholder || '请输入资源 URL'"
+          class="flex h-10 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+          @input="setField(f.fieldKey, ($event.target as HTMLInputElement).value)"
         />
 
         <input

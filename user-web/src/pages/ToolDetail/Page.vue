@@ -33,6 +33,33 @@ const tab = ref<"intro" | "cases" | "input" | "output">("intro")
 const title = computed(() => tool.value?.toolName ?? `工具 · ${props.id}`)
 const isOffline = computed(() => tool.value?.status === "OFFLINE")
 
+const toolTypeLabels: Record<string, string> = {
+  TEXT_GENERATION: "文本生成",
+  IMAGE_GENERATION: "文生图",
+  IMAGE_TO_IMAGE: "图生图",
+  IMAGE_UNDERSTANDING: "图片理解",
+  SPEECH_TO_TEXT: "语音转文字",
+  TEXT_TO_SPEECH: "文字转语音",
+  VIDEO_GENERATION: "视频生成",
+  EMBEDDING: "Embedding",
+  RERANK: "Rerank",
+  AGENT: "Agent 编排",
+}
+
+const modalityLabels: Record<string, string> = {
+  TEXT: "文本",
+  IMAGE: "图片",
+  AUDIO: "音频",
+  VIDEO: "视频",
+  JSON: "JSON",
+  FILE: "文件",
+  MULTIMODAL: "多模态",
+}
+
+function labelOf(labels: Record<string, string>, value?: string | null) {
+  return value ? labels[value] || value : "-"
+}
+
 onMounted(async () => {
   try {
     tool.value = await fetchToolByCode(props.id, { token: auth.token })
@@ -102,6 +129,9 @@ onMounted(async () => {
                   HOT
                 </span>
                 <span class="rounded bg-secondary px-1.5 py-0.5 text-[10px] text-muted-foreground">{{ tool.categoryName }}</span>
+                <span class="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">
+                  {{ labelOf(toolTypeLabels, tool.toolType || 'TEXT_GENERATION') }}
+                </span>
               </div>
               <p class="mt-2 text-sm text-muted-foreground leading-relaxed">
                 {{ tool.description || '暂无描述' }}
@@ -109,6 +139,11 @@ onMounted(async () => {
               <div class="mt-3 flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
                 <span class="inline-flex items-center gap-1">
                   <Star class="h-3.5 w-3.5 fill-warning text-warning" /> 4.9 / 5.0
+                </span>
+                <span>
+                  {{ labelOf(modalityLabels, tool.inputModality || 'TEXT') }}
+                  →
+                  {{ labelOf(modalityLabels, tool.outputModality || 'TEXT') }}
                 </span>
               </div>
             </div>

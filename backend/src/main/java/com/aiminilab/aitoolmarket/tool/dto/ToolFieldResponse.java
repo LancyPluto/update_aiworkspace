@@ -1,6 +1,7 @@
 package com.aiminilab.aitoolmarket.tool.dto;
 
 import com.aiminilab.aitoolmarket.tool.entity.ToolFieldItem;
+import com.aiminilab.aitoolmarket.tool.entity.ToolTemplateField;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -15,6 +16,19 @@ public record ToolFieldResponse(
         Integer sortOrder
 ) {
     public static ToolFieldResponse from(ToolFieldItem item, ObjectMapper objectMapper) {
+        return new ToolFieldResponse(
+                item.getFieldKey(),
+                item.getFieldName(),
+                item.getFieldType(),
+                item.getPlaceholder(),
+                parseJson(item.getOptionsJson(), objectMapper),
+                item.getOptionsJson(),
+                item.getRequired(),
+                item.getSortOrder()
+        );
+    }
+
+    public static ToolFieldResponse fromTemplateField(ToolTemplateField item, ObjectMapper objectMapper) {
         return new ToolFieldResponse(
                 item.getFieldKey(),
                 item.getFieldName(),

@@ -16,6 +16,7 @@ import java.time.LocalDateTime;
 
 @Service
 public class BillingServiceImpl implements BillingService {
+    private static final String BILLING_UNIT_PER_CALL = "PER_CALL";
 
     private final BillingUsageLogMapper billingUsageLogMapper;
 
@@ -49,14 +50,22 @@ public class BillingServiceImpl implements BillingService {
 
     @Override
     public void recordUsage(String sourceType, Long sourceId, Long userId, AgentModelConfig modelConfig,
-                            Integer promptTokens, Integer completionTokens, Integer chargedCredits) {
+                            Integer promptTokens, Integer completionTokens, Integer billableUnits, Integer chargedCredits) {
         int prompt = nonNegative(promptTokens);
         int completion = nonNegative(completionTokens);
-        if (prompt == 0 && completion == 0) {
+        int units = nonNegative(billableUnits);
+        int charged = nonNegative(chargedCredits);
+        if (prompt == 0 && completion == 0 && units == 0 && charged == 0) {
             return;
         }
-        BigDecimal inputPrice = price(modelConfig == null ? null : modelConfig.getInputTokenPricePer1k());
-        BigDecimal outputPrice = price(modelConfig == null ? null : modelConfig.getOutputTokenPricePer1k());
+        BigDecimal inputPricePer1m = price(modelConfig == null ? null : modelConfig.getInputTokenPricePer1m());
+        BigDecimal outputPricePer1m = price(modelConfig == null ? null : modelConfig.getOutputTokenPricePer1m());
+        BigDecimal inputPricePer1k = price(modelConfig == null ? null : modelConfig.getInputTokenPricePer1k());
+        BigDecimal outputPricePer1k = price(modelConfig == null ? null : modelConfig.getOutputTokenPricePer1k());
+        BigDecimal unitPrice = price(modelConfig == null ? null : modelConfig.getUnitPrice());
+        String billingUnit = modelConfig == null || modelConfig.getBillingUnit() == null || modelConfig.getBillingUnit().isBlank()
+                ? "TOKEN_PER_M"
+                : modelConfig.getBillingUnit();
         BillingUsageLog log = new BillingUsageLog();
         log.setSourceType(sourceType);
         log.setSourceId(sourceId);
@@ -67,17 +76,31 @@ public class BillingServiceImpl implements BillingService {
         log.setPromptTokens(prompt);
         log.setCompletionTokens(completion);
         log.setTotalTokens(prompt + completion);
-        log.setInputTokenPricePer1k(inputPrice);
-        log.setOutputTokenPricePer1k(outputPrice);
-        log.setCostAmount(cost(prompt, inputPrice).add(cost(completion, outputPrice)));
-        log.setChargedCredits(nonNegative(chargedCredits));
+        log.setInputTokenPricePer1k(inputPricePer1k);
+        log.setOutputTokenPricePer1k(outputPricePer1k);
+        log.setInputTokenPricePer1m(inputPricePer1m);
+        log.setOutputTokenPricePer1m(outputPricePer1m);
+        log.setBillingUnit(billingUnit);
+        log.setBillableUnits(units);
+        log.setUnitPrice(unitPrice);
+        log.setCostAmount(costPerMillion(prompt, inputPricePer1m)
+                .add(costPerMillion(completion, outputPricePer1m))
+                .add(perCallCost(billingUnit, units, unitPrice)));
+        log.setChargedCredits(charged);
         log.setCreatedAt(LocalDateTime.now());
         billingUsageLogMapper.insert(log);
     }
 
-    private BigDecimal cost(int tokens, BigDecimal pricePer1k) {
-        return pricePer1k.multiply(BigDecimal.valueOf(tokens))
-                .divide(BigDecimal.valueOf(1000), 6, RoundingMode.HALF_UP);
+    private BigDecimal costPerMillion(int tokens, BigDecimal pricePer1m) {
+        return pricePer1m.multiply(BigDecimal.valueOf(tokens))
+                .divide(BigDecimal.valueOf(1_000_000), 6, RoundingMode.HALF_UP);
+    }
+
+    private BigDecimal perCallCost(String billingUnit, int units, BigDecimal unitPrice) {
+        if (!BILLING_UNIT_PER_CALL.equals(billingUnit) || units <= 0) {
+            return BigDecimal.ZERO;
+        }
+        return unitPrice.multiply(BigDecimal.valueOf(units)).setScale(6, RoundingMode.HALF_UP);
     }
 
     private BigDecimal price(BigDecimal value) {

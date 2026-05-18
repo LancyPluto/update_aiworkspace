@@ -4,6 +4,7 @@ import com.aiminilab.aitoolmarket.auth.security.AuthContext;
 import com.aiminilab.aitoolmarket.common.dto.ApiResponse;
 import com.aiminilab.aitoolmarket.common.dto.PageResponse;
 import com.aiminilab.aitoolmarket.tool.dto.FieldSchemaAdminResponse;
+import com.aiminilab.aitoolmarket.tool.dto.ApplyToolTemplateRequest;
 import com.aiminilab.aitoolmarket.tool.dto.ToolFieldResponse;
 import com.aiminilab.aitoolmarket.tool.dto.ToolSummaryResponse;
 import com.aiminilab.aitoolmarket.tool.dto.UpdateToolFieldsRequest;
@@ -12,6 +13,7 @@ import com.aiminilab.aitoolmarket.tool.dto.UpsertToolRequest;
 import com.aiminilab.aitoolmarket.tool.service.ToolService;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -56,6 +58,12 @@ public class AdminToolController {
         return ApiResponse.success(toolService.updateTool(toolId, request, AuthContext.get().userId()));
     }
 
+    @DeleteMapping("/{toolId}")
+    public ApiResponse<Void> delete(@PathVariable Long toolId) {
+        toolService.deleteTool(toolId, AuthContext.get().userId());
+        return ApiResponse.success(null);
+    }
+
     @PostMapping("/{toolId}/publish")
     public ApiResponse<ToolSummaryResponse> publish(@PathVariable Long toolId) {
         return ApiResponse.success(toolService.publishTool(toolId, AuthContext.get().userId()));
@@ -86,5 +94,12 @@ public class AdminToolController {
     public ApiResponse<List<ToolFieldResponse>> updateFields(@PathVariable Long toolId,
                                                              @Valid @RequestBody UpdateToolFieldsRequest request) {
         return ApiResponse.success(toolService.updateFields(toolId, request));
+    }
+
+    @PostMapping("/{toolId}/apply-template")
+    public ApiResponse<Void> applyTemplate(@PathVariable Long toolId,
+                                           @Valid @RequestBody ApplyToolTemplateRequest request) {
+        toolService.applyTemplate(toolId, request, AuthContext.get().userId());
+        return ApiResponse.success(null);
     }
 }

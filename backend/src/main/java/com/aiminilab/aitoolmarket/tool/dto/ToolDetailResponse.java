@@ -10,11 +10,16 @@ public record ToolDetailResponse(
         String categoryName,
         String description,
         String coverUrl,
+        String toolType,
+        String inputModality,
+        String outputModality,
+        String configNote,
         String status,
         Integer estimatedCreditCost,
         Long modelConfigId,
         String modelConfigName,
         String modelName,
+        String executionHandler,
         List<ToolFieldResponse> fields
 ) {
     public static ToolDetailResponse of(ToolSummaryResponse summary, List<ToolFieldResponse> fields) {
@@ -26,11 +31,16 @@ public record ToolDetailResponse(
                 summary.categoryName(),
                 summary.description(),
                 summary.coverUrl(),
+                summary.toolType(),
+                summary.inputModality(),
+                summary.outputModality(),
+                summary.configNote(),
                 summary.status(),
                 summary.estimatedCreditCost(),
                 summary.modelConfigId(),
                 summary.modelConfigName(),
                 summary.modelName(),
+                summary.executionHandler(),
                 fields
         );
     }

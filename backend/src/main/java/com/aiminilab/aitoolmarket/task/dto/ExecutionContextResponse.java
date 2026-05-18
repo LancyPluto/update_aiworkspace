@@ -14,6 +14,10 @@ public record ExecutionContextResponse(
         Long toolId,
         String toolCode,
         String toolName,
+        String toolType,
+        String executionHandler,
+        String inputModality,
+        String outputModality,
         String status,
         String traceId,
         JsonNode params,
@@ -31,6 +35,10 @@ public record ExecutionContextResponse(
                 task.getToolId(),
                 task.getToolCode(),
                 task.getToolName(),
+                defaultValue(task.getToolType(), "TEXT_GENERATION"),
+                resolveExecutionHandler(task),
+                defaultValue(task.getInputModality(), "TEXT"),
+                defaultValue(task.getOutputModality(), "TEXT"),
                 task.getStatus(),
                 MDC.get("traceId"),
                 params,
@@ -39,5 +47,23 @@ public record ExecutionContextResponse(
                 modelConfig == null ? null : modelConfig.modelName(),
                 fields
         );
+    }
+
+    private static String defaultValue(String value, String fallback) {
+        return value == null || value.isBlank() ? fallback : value;
+    }
+
+    private static String resolveExecutionHandler(AiTask task) {
+        if (task.getExecutionHandler() != null && !task.getExecutionHandler().isBlank()) {
+            return task.getExecutionHandler();
+        }
+        if ("digital_human_agent".equals(task.getToolCode())) {
+            return "DIGITAL_HUMAN";
+        }
+        String toolType = task.getToolType();
+        if (toolType != null && !toolType.isBlank()) {
+            return toolType.trim().toUpperCase();
+        }
+        return "TEXT_GENERATION";
     }
 }

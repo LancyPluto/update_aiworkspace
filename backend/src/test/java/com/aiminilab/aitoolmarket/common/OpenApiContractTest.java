@@ -38,6 +38,11 @@ class OpenApiContractTest {
                 "/api/admin/v1/tools:",
                 "/api/admin/v1/tools/{toolId}:",
                 "/api/admin/v1/tools/{toolId}/fields:",
+                "/api/admin/v1/tools/{toolId}/field-schemas:",
+                "/api/admin/v1/tools/{toolId}/apply-template:",
+                "/api/admin/v1/tool-templates:",
+                "/api/admin/v1/tool-templates/{templateCode}:",
+                "/api/admin/v1/field-schemas/{schemaId}/publish:",
                 "/api/admin/v1/tasks:",
                 "/api/admin/v1/tasks/{taskId}:",
                 "/api/admin/v1/tasks/{taskId}/retry:",
@@ -49,6 +54,8 @@ class OpenApiContractTest {
                 "/api/admin/v1/users/{userId}/credits/logs:",
                 "/api/admin/v1/users/{userId}/credits/manual-add:",
                 "/api/admin/v1/users/{userId}/credits/manual-deduct:",
+                "/api/admin/v1/model-providers:",
+                "/api/admin/v1/model-providers/{code}:",
                 "/api/internal/v1/tasks/{taskId}/execution-context:",
                 "/api/internal/v1/tasks/{taskId}/processing:",
                 "/api/internal/v1/tasks/{taskId}/success:",
@@ -62,7 +69,8 @@ class OpenApiContractTest {
                 "ManualCreditRequest:",
                 "AdminUser:",
                 "RegenerateTaskRequest:",
-                "internalApiToken:"
+                "internalApiToken:",
+                "ModelProviderDescriptor:"
         );
     }
 

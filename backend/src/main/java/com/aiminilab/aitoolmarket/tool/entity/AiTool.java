@@ -17,9 +17,15 @@ public class AiTool {
     private String categoryName;
     private String description;
     private String coverUrl;
+    private String toolType;
+    private String inputModality;
+    private String outputModality;
+    private String configNote;
     private String status;
     private Integer estimatedCreditCost;
     private Long modelConfigId;
+    private Long templateId;
+    private String executionHandler;
     @TableField(exist = false)
     private String modelConfigName;
     @TableField(exist = false)
@@ -86,6 +92,38 @@ public class AiTool {
         this.coverUrl = coverUrl;
     }
 
+    public String getToolType() {
+        return toolType;
+    }
+
+    public void setToolType(String toolType) {
+        this.toolType = toolType;
+    }
+
+    public String getInputModality() {
+        return inputModality;
+    }
+
+    public void setInputModality(String inputModality) {
+        this.inputModality = inputModality;
+    }
+
+    public String getOutputModality() {
+        return outputModality;
+    }
+
+    public void setOutputModality(String outputModality) {
+        this.outputModality = outputModality;
+    }
+
+    public String getConfigNote() {
+        return configNote;
+    }
+
+    public void setConfigNote(String configNote) {
+        this.configNote = configNote;
+    }
+
     public String getStatus() {
         return status;
     }
@@ -108,6 +146,22 @@ public class AiTool {
 
     public void setModelConfigId(Long modelConfigId) {
         this.modelConfigId = modelConfigId;
+    }
+
+    public Long getTemplateId() {
+        return templateId;
+    }
+
+    public void setTemplateId(Long templateId) {
+        this.templateId = templateId;
+    }
+
+    public String getExecutionHandler() {
+        return executionHandler;
+    }
+
+    public void setExecutionHandler(String executionHandler) {
+        this.executionHandler = executionHandler;
     }
 
     public String getModelConfigName() {

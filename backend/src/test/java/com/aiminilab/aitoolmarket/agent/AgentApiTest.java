@@ -890,6 +890,12 @@ class AgentApiTest {
         org.assertj.core.api.Assertions.assertThat(settled.balance()).isEqualTo(93);
         org.assertj.core.api.Assertions.assertThat(settled.frozen()).isEqualTo(0);
         org.assertj.core.api.Assertions.assertThat(settled.available()).isEqualTo(93);
+        Integer billingCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM billing_usage_logs WHERE source_type = 'AGENT_RUN' AND source_id = ? AND charged_credits = 7 AND prompt_tokens = 0 AND completion_tokens = 0",
+                Integer.class,
+                runId
+        );
+        org.assertj.core.api.Assertions.assertThat(billingCount).isEqualTo(1);
 
         mockMvc.perform(get("/api/v1/agent/sessions/{sessionId}/messages", sessionId)
                         .header("Authorization", "Bearer " + login.token()))

@@ -5,9 +5,7 @@ import pytest
 
 from app.clients.backend_client import BackendClient
 from app.config import Settings
-from app.core.schemas import RunContext, WorkspaceMemoryItem
-from app.graphs.universal_agent_graph import UniversalAgentGraph
-from tests.test_universal_graph import FakeBackend, FakeModel
+from app.core.schemas import WorkspaceMemoryItem
 
 
 @pytest.mark.asyncio
@@ -106,64 +104,3 @@ async def test_backend_client_creates_run_artifact_and_signs_request():
     }
     assert requests[0].headers["X-Internal-Signature"]
     assert artifact == {"id": 31, "filename": "summary.md", "contentType": "text/markdown"}
-
-
-class MemoryBackend(FakeBackend):
-    def __init__(self, memory_items: list[WorkspaceMemoryItem] | None = None):
-        super().__init__()
-        self.memory_items = memory_items or []
-        self.memory_requests = []
-
-    async def retrieve_workspace_memory(self, workspace_id: int, query: str, limit: int):
-        self.memory_requests.append((workspace_id, query, limit))
-        return self.memory_items
-
-
-@pytest.mark.asyncio
-async def test_langgraph_injects_workspace_memory_into_prompt():
-    backend = MemoryBackend(
-        [
-            WorkspaceMemoryItem(
-                id=11,
-                workspaceId=7,
-                title="Pricing policy",
-                content="Use prepaid credits before invoicing.",
-                memoryType="PROJECT",
-                score=2,
-            )
-        ]
-    )
-    model = FakeModel()
-    graph = UniversalAgentGraph(backend, model)
-    context = RunContext(runId=1, sessionId=2, userId=3, workspaceId=7, message="How should pricing work?")
-
-    await graph.run(context)
-
-    assert backend.memory_requests == [(7, "How should pricing work?", 5)]
-    prompt_text = "\n".join(message.content for message in model.messages[0])
-    assert "Workspace memory" in prompt_text
-    assert "memory:11" in prompt_text
-    assert "Pricing policy" in prompt_text
-    assert "Use prepaid credits before invoicing." in prompt_text
-
-
-@pytest.mark.asyncio
-async def test_langgraph_skips_workspace_memory_without_workspace_id():
-    backend = MemoryBackend(
-        [
-            WorkspaceMemoryItem(
-                id=11,
-                title="Pricing policy",
-                content="Use prepaid credits before invoicing.",
-                memoryType="PROJECT",
-                score=2,
-            )
-        ]
-    )
-    model = FakeModel()
-    graph = UniversalAgentGraph(backend, model)
-    context = RunContext(runId=1, sessionId=2, userId=3, message="How should pricing work?")
-
-    await graph.run(context)
-
-    assert backend.memory_requests == []

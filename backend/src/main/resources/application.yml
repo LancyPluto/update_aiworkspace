@@ -4,6 +4,10 @@ server:
 spring:
   application:
     name: ai-tool-market-backend
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 10MB
   datasource:
     url: jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3307}/${MYSQL_DATABASE:ai_supermarket_v1}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
     username: ${MYSQL_USERNAME:root}
@@ -25,7 +29,7 @@ app:
   jwt-secret: ${JWT_SECRET:local-dev-secret}
   internal-api-token: ${INTERNAL_API_TOKEN:local-internal-token}
   ai-task-queue: ${AI_TASK_QUEUE:ai:task:queue}
-  generated-media-dir: ${GENERATED_MEDIA_DIR:data/generated-media}
+  generated-media-dir: ${GENERATED_MEDIA_DIR:../data/generated-media}
   auth:
     sms:
       provider: ${SMS_PROVIDER:local}
