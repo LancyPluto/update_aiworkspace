@@ -1,4 +1,4 @@
-import { apiRequest, getApiOrigin } from "./client"
+import { apiRequest, getRequestBaseUrl } from "./client"
 import type {
   AgentMessage,
   AgentRun,
@@ -104,9 +104,9 @@ export async function streamAgentRunEvents(
     onEvent: (event: AgentRunEvent) => void
   },
 ) {
-  const origin = getApiOrigin()
   const path = `/api/v1/agent/runs/${runId}/events/stream`
-  const url = new URL(path, origin || window.location.origin)
+  const base = getRequestBaseUrl()
+  const url = new URL(path, base.endsWith("/") ? base : `${base}/`)
   if (options.afterEventId) url.searchParams.set("afterEventId", String(options.afterEventId))
   const response = await fetch(url.toString(), {
     method: "GET",

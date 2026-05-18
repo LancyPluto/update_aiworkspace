@@ -284,26 +284,6 @@ onMounted(async () => {
                 </li>
               </ol>
             </div>
-
-            <div class="rounded-xl border border-primary/20 bg-accent/40 p-5">
-              <p class="text-xs text-muted-foreground">本次开始使用</p>
-              <p class="mt-2 text-3xl font-semibold text-primary inline-flex items-baseline gap-1">
-                {{ tool.estimatedCreditCost }} <span class="text-sm font-normal text-muted-foreground">算力</span>
-              </p>
-              <RouterLink
-                v-if="!isOffline"
-                :to="'/tools/' + id + '/use'"
-                class="mt-4 flex h-11 w-full items-center justify-center rounded-md bg-primary text-sm font-medium text-primary-foreground hover:opacity-90"
-              >
-                开始使用 <ArrowRight class="ml-1.5 h-4 w-4" />
-              </RouterLink>
-              <span
-                v-else
-                class="mt-4 flex h-11 w-full cursor-not-allowed items-center justify-center rounded-md border border-border bg-muted text-sm font-medium text-muted-foreground"
-              >
-                已下架
-              </span>
-            </div>
           </div>
         </div>
       </template>
