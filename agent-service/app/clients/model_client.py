@@ -29,38 +29,23 @@ class ModelClient:
         return self._chat_model
 
     async def chat(self, messages: list[ChatMessage]) -> str:
-        return await self._invoke(messages)
+        try:
+            result = await self._chat_model.ainvoke(_to_langchain_messages(messages))
+        except Exception as exception:
+            raise ModelClientError(f"model request failed: {exception}") from exception
+        return _message_content(result)
 
     async def chat_stream(self, messages: list[ChatMessage]) -> AsyncIterator[str]:
-        payload = [_to_langchain_message(message) for message in messages]
         if not hasattr(self._chat_model, "astream"):
-            answer = await self._invoke(messages)
-            for chunk in _chunk_text(answer):
-                if chunk:
-                    yield chunk
+            yield await self.chat(messages)
             return
-        emitted = False
         try:
-            async for chunk in self._chat_model.astream(payload):
-                content = _extract_content(getattr(chunk, "content", None))
-                if content:
-                    emitted = True
-                    yield content
+            async for chunk in self._chat_model.astream(_to_langchain_messages(messages)):
+                text = _message_content(chunk, allow_empty=True)
+                if text:
+                    yield text
         except Exception as exception:
-            raise ModelClientError(f"model request failed: {exception}") from exception
-        if not emitted:
-            answer = await self._invoke(messages)
-            for chunk in _chunk_text(answer):
-                if chunk:
-                    yield chunk
-
-    async def _invoke(self, messages: list[ChatMessage]) -> str:
-        payload = [_to_langchain_message(message) for message in messages]
-        try:
-            result = await self._chat_model.ainvoke(payload)
-        except Exception as exception:
-            raise ModelClientError(f"model request failed: {exception}") from exception
-        return _extract_content(getattr(result, "content", None))
+            raise ModelClientError(f"model stream failed: {exception}") from exception
 
 
 def _to_langchain_message(message: ChatMessage):
@@ -72,22 +57,52 @@ def _to_langchain_message(message: ChatMessage):
     return HumanMessage(content=message.content)
 
 
-def _flatten_content(content: list[Any]) -> str:
+def _to_langchain_messages(messages: list[ChatMessage]):
+    return [_to_langchain_message(message) for message in messages]
+
+
+def _message_content(message, *, allow_empty: bool = False) -> str:
+    content = getattr(message, "content", None)
+    if isinstance(content, str):
+        if content or allow_empty:
+            return content
+    if isinstance(content, list):
+        return _flatten_content(content, allow_empty=allow_empty)
+    if allow_empty:
+        return ""
+    raise ModelClientError("model returned invalid chat completion response")
+
+
+def _flatten_content(content: list[Any], *, allow_empty: bool = False) -> str:
     parts: list[str] = []
     for item in content:
         if isinstance(item, str):
             parts.append(item)
-        elif isinstance(item, dict) and isinstance(item.get("text"), str):
-            parts.append(item["text"])
+        elif isinstance(item, dict):
+            if isinstance(item.get("text"), str):
+                parts.append(item["text"])
+            elif item.get("type") in ("thinking", "reasoning") or "thinking" in item or "reasoning" in item:
+                continue
     if not parts:
+        if allow_empty:
+            return ""
         raise ModelClientError("model returned invalid chat completion response")
     return "".join(parts)
+
+
+def _has_only_non_text_blocks(content: list[Any]) -> bool:
+    for item in content:
+        if isinstance(item, str) or (isinstance(item, dict) and isinstance(item.get("text"), str)):
+            return False
+    return True
 
 
 def _extract_content(content: Any) -> str:
     if isinstance(content, str):
         return content
     if isinstance(content, list):
+        if not content or _has_only_non_text_blocks(content):
+            return ""
         return _flatten_content(content)
     raise ModelClientError("model returned invalid chat completion response")
 

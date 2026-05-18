@@ -2,6 +2,11 @@ package com.aiminilab.aitoolmarket.task.service.impl;
 
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentModelConfigMapper;
+import com.aiminilab.aitoolmarket.agent.service.ModelCapabilityService;
+import com.aiminilab.aitoolmarket.tool.mapper.ToolMapper;
+import com.aiminilab.aitoolmarket.tool.entity.AiTool;
+import com.aiminilab.aitoolmarket.admin.service.BillingService;
+import com.aiminilab.aitoolmarket.common.enums.CreditSourceType;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.enums.TaskStatus;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
@@ -30,20 +35,29 @@ import java.util.List;
 public class InternalTaskServiceImpl implements InternalTaskService {
 
     private final TaskMapper taskMapper;
+    private final ToolMapper toolMapper;
     private final AgentModelConfigMapper agentModelConfigMapper;
+    private final ModelCapabilityService modelCapabilityService;
     private final ToolFieldItemMapper toolFieldItemMapper;
     private final ObjectMapper objectMapper;
     private final CreditService creditService;
+    private final BillingService billingService;
     private final TaskMetrics taskMetrics;
 
-    public InternalTaskServiceImpl(TaskMapper taskMapper, AgentModelConfigMapper agentModelConfigMapper,
+    public InternalTaskServiceImpl(TaskMapper taskMapper, ToolMapper toolMapper,
+                                   AgentModelConfigMapper agentModelConfigMapper,
+                                   ModelCapabilityService modelCapabilityService,
                                    ToolFieldItemMapper toolFieldItemMapper, ObjectMapper objectMapper,
-                                   CreditService creditService, TaskMetrics taskMetrics) {
+                                   CreditService creditService, BillingService billingService,
+                                   TaskMetrics taskMetrics) {
         this.taskMapper = taskMapper;
+        this.toolMapper = toolMapper;
         this.agentModelConfigMapper = agentModelConfigMapper;
+        this.modelCapabilityService = modelCapabilityService;
         this.toolFieldItemMapper = toolFieldItemMapper;
         this.objectMapper = objectMapper;
         this.creditService = creditService;
+        this.billingService = billingService;
         this.taskMetrics = taskMetrics;
     }
 
@@ -53,9 +67,13 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         List<ToolFieldResponse> fields = toolFieldItemMapper.findActiveFields(task.getToolId()).stream()
                 .map(field -> ToolFieldResponse.from(field, objectMapper))
                 .toList();
+        AiTool tool = toolMapper.findById(task.getToolId())
+                .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在"));
         AgentModelConfig modelConfig = agentModelConfigMapper.findForToolExecution(task.getToolId());
+        modelCapabilityService.validateExecution(tool, modelConfig);
+        List<String> caps = modelCapabilityService.resolveCapabilities(modelConfig);
         return ExecutionContextResponse.of(task, parseParams(task.getParamsJson()),
-                ExecutionModelConfigResponse.from(modelConfig), fields);
+                ExecutionModelConfigResponse.from(modelConfig, caps), fields);
     }
 
     @Override
@@ -65,8 +83,10 @@ public class InternalTaskServiceImpl implements InternalTaskService {
                 ? "AI is processing"
                 : request.progressMessage();
         AiTask task = findTask(taskId);
-        TaskStateMachine.ensureTransition(task.getStatus(), TaskStatus.PROCESSING.name());
-        if (taskMapper.markProcessing(taskId, progress, message, List.of(TaskStatus.QUEUED.name())) == 0) {
+        if (!TaskStatus.PROCESSING.name().equals(task.getStatus())) {
+            TaskStateMachine.ensureTransition(task.getStatus(), TaskStatus.PROCESSING.name());
+        }
+        if (taskMapper.markProcessing(taskId, progress, message, List.of(TaskStatus.QUEUED.name(), TaskStatus.PROCESSING.name())) == 0) {
             TaskStateMachine.ensureTransition(findTask(taskId).getStatus(), TaskStatus.PROCESSING.name());
         }
         return TaskStatusResponse.from(findTask(taskId));
@@ -91,7 +111,9 @@ public class InternalTaskServiceImpl implements InternalTaskService {
             }
             TaskStateMachine.ensureTransition(current.getStatus(), TaskStatus.SUCCESS.name());
         }
-        creditService.settleForTask(task.getUserId(), taskId, task.getEstimatedCreditCost());
+        creditService.settle(task.getUserId(), CreditSourceType.TASK, taskId, task.getEstimatedCreditCost());
+        billingService.recordUsage("TASK", taskId, task.getUserId(), agentModelConfigMapper.findForToolExecution(task.getToolId()),
+                request.promptTokens(), request.completionTokens(), request.billableUnits(), task.getEstimatedCreditCost());
         taskMapper.insertResult(taskId, task.getUserId(), request.resourceType(), request.contentText());
         taskMetrics.recordTaskOutcome(task.getToolCode(), "SUCCESS", task.getCreatedAt(), findTask(taskId).getFinishedAt());
         return TaskStatusResponse.from(findTask(taskId));
@@ -121,7 +143,7 @@ public class InternalTaskServiceImpl implements InternalTaskService {
             }
             TaskStateMachine.ensureTransition(current.getStatus(), TaskStatus.FAILED.name());
         }
-        creditService.releaseForTask(task.getUserId(), taskId, task.getEstimatedCreditCost());
+        creditService.release(task.getUserId(), CreditSourceType.TASK, taskId, task.getEstimatedCreditCost());
         taskMetrics.recordTaskOutcome(task.getToolCode(), "FAILED", task.getCreatedAt(), findTask(taskId).getFinishedAt());
         return TaskStatusResponse.from(findTask(taskId));
     }

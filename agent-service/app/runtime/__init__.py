@@ -1,4 +1,4 @@
-__all__ = ["AgentRuntimeEngine", "DeepAgentsRuntimeEngine", "LangGraphRuntimeEngine", "RuntimeRouter"]
+__all__ = ["AgentRuntimeEngine", "DeepAgentsRuntimeEngine", "RuntimeRouter"]
 
 
 def __getattr__(name: str):
@@ -10,10 +10,6 @@ def __getattr__(name: str):
         from app.runtime.deep_agents_engine import DeepAgentsRuntimeEngine
 
         return DeepAgentsRuntimeEngine
-    if name == "LangGraphRuntimeEngine":
-        from app.runtime.langgraph_engine import LangGraphRuntimeEngine
-
-        return LangGraphRuntimeEngine
     if name == "RuntimeRouter":
         from app.runtime.router import RuntimeRouter
 

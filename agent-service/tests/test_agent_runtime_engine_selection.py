@@ -27,10 +27,9 @@ class FakeEngine:
 class FakeRuntimeRouter:
     instances = []
 
-    def __init__(self, backend_client=None, model_client=None, deep_agents_enabled=False):
+    def __init__(self, backend_client=None, model_client=None):
         self.backend_client = backend_client
         self.model_client = model_client
-        self.deep_agents_enabled = deep_agents_enabled
         self.engine = FakeEngine()
         self.select_calls = []
         FakeRuntimeRouter.instances.append(self)
@@ -49,7 +48,6 @@ async def test_agent_runtime_uses_runtime_router_selected_engine():
         backend,
         model_client=model_client,
         runtime_router_factory=FakeRuntimeRouter,
-        default_settings=type("Settings", (), {"agent_deep_agents_enabled": False})(),
     )
 
     await runtime.execute_run(9)
@@ -57,24 +55,6 @@ async def test_agent_runtime_uses_runtime_router_selected_engine():
     router = FakeRuntimeRouter.instances[0]
     assert router.backend_client is backend
     assert router.model_client is model_client
-    assert router.deep_agents_enabled is False
     assert router.select_calls == [("route me", None)]
     assert router.engine.run_contexts == [backend.context]
     assert backend.events == []
-
-
-@pytest.mark.asyncio
-async def test_agent_runtime_requests_deep_agents_when_feature_flag_enabled():
-    FakeRuntimeRouter.instances = []
-    backend = FakeBackend()
-    runtime = AgentRuntime(
-        backend,
-        model_client=object(),
-        runtime_router_factory=FakeRuntimeRouter,
-        default_settings=type("Settings", (), {"agent_deep_agents_enabled": True})(),
-    )
-
-    await runtime.execute_run(9)
-
-    router = FakeRuntimeRouter.instances[0]
-    assert router.select_calls == [("route me", "deep_agents")]

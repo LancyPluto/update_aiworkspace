@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed, watch } from "vue"
+import { computed, onMounted, onUnmounted, ref, watch } from "vue"
 import { RouterLink } from "vue-router"
-import { ArrowLeft, ChevronRight, CheckCircle2, Loader2, X as XIcon } from "lucide-vue-next"
+import { ArrowLeft, CheckCircle2, ChevronRight, Loader2, X as XIcon } from "lucide-vue-next"
 import AppShell from "@/components/AppShell.vue"
 import TaskStatusTag from "@/components/TaskStatusTag/TaskStatusTag.vue"
+import { fetchTaskById, fetchTaskStatus, streamTaskStatus } from "@/api/taskApi"
+import type { TaskDetail, TaskStatus, TaskStatusPayload } from "@/api/types"
 import { userRoutes } from "@/router/userRoutes"
-import { fetchTaskById, fetchTaskStatus } from "@/api/taskApi"
-import type { TaskDetail, TaskStatusPayload, TaskStatus } from "@/api/types"
 import { useAuthStore } from "@/store/authStore"
 import { taskStatusDocLabel } from "@/utils/taskStatusLabels"
 
@@ -20,6 +20,22 @@ const statusData = ref<TaskStatusPayload | null>(null)
 const taskDetailFail = ref<TaskDetail | null>(null)
 const loading = ref(true)
 const error = ref<string | null>(null)
+const streamConnected = ref(false)
+
+const digitalHumanStages = computed(() => [
+  { label: "脚本与语音准备", progress: 18 },
+  { label: "数字人形象生成", progress: 36 },
+  { label: "背景画面生成", progress: 52 },
+  { label: "形象驱动视频生成", progress: 78 },
+  { label: "字幕整理与结果输出", progress: 96 },
+])
+
+function stageState(stageProgress: number): "done" | "current" | "pending" {
+  const progress = statusData.value?.progress ?? 0
+  if (progress >= stageProgress) return "done"
+  if (progress >= stageProgress - 18) return "current"
+  return "pending"
+}
 
 function mapStatus(s: TaskStatus): "running" | "success" | "failed" | "queued" {
   switch (s) {
@@ -60,6 +76,7 @@ const failureHint = computed(() => {
 
 let pollTimer: ReturnType<typeof setTimeout> | null = null
 let statusLoadAbort: AbortController | undefined
+let statusStreamAbort: AbortController | undefined
 
 function clearPollTimer() {
   if (pollTimer !== null) {
@@ -72,6 +89,12 @@ function clearStatusPolling() {
   clearPollTimer()
   statusLoadAbort?.abort()
   statusLoadAbort = undefined
+}
+
+function clearStatusStream() {
+  statusStreamAbort?.abort()
+  statusStreamAbort = undefined
+  streamConnected.value = false
 }
 
 function scheduleNextPoll() {
@@ -98,23 +121,30 @@ async function loadFailDetailOnce() {
   }
 }
 
+async function applyStatus(payload: TaskStatusPayload) {
+  statusData.value = payload
+  loading.value = false
+  error.value = null
+  if (isTerminal(payload.status)) {
+    clearStatusPolling()
+    clearStatusStream()
+    if (mapStatus(payload.status) === "failed") {
+      await loadFailDetailOnce()
+    }
+  } else {
+    scheduleNextPoll()
+  }
+}
+
 async function loadStatus() {
   if (!props.taskId) return
   statusLoadAbort?.abort()
   statusLoadAbort = new AbortController()
   const signal = statusLoadAbort.signal
   try {
-    statusData.value = await fetchTaskStatus(props.taskId, { token: auth.token, signal })
+    const payload = await fetchTaskStatus(props.taskId, { token: auth.token, signal })
     if (signal.aborted) return
-    error.value = null
-    if (statusData.value && isTerminal(statusData.value.status)) {
-      clearPollTimer()
-      if (mapStatus(statusData.value.status) === "failed") {
-        await loadFailDetailOnce()
-      }
-    } else {
-      scheduleNextPoll()
-    }
+    await applyStatus(payload)
   } catch (e) {
     if (signal.aborted || isAbortError(e)) return
     error.value = (e as Error).message || "获取任务状态失败"
@@ -122,6 +152,23 @@ async function loadStatus() {
   } finally {
     if (!signal.aborted) loading.value = false
   }
+}
+
+function startStatusStream() {
+  clearStatusStream()
+  if (!props.taskId) return
+  statusStreamAbort = new AbortController()
+  void streamTaskStatus(
+    props.taskId,
+    (payload) => {
+      streamConnected.value = true
+      void applyStatus(payload)
+    },
+    { token: auth.token, signal: statusStreamAbort.signal },
+  ).catch((e) => {
+    if (isAbortError(e)) return
+    streamConnected.value = false
+  })
 }
 
 function onTaskStatusVisibilityChange() {
@@ -139,18 +186,21 @@ watch(
     loading.value = true
     error.value = null
     clearStatusPolling()
+    startStatusStream()
     void loadStatus()
   },
 )
 
 onMounted(() => {
   void loadStatus()
+  startStatusStream()
   document.addEventListener("visibilitychange", onTaskStatusVisibilityChange)
 })
 
 onUnmounted(() => {
   document.removeEventListener("visibilitychange", onTaskStatusVisibilityChange)
   clearStatusPolling()
+  clearStatusStream()
 })
 </script>
 
@@ -166,7 +216,7 @@ onUnmounted(() => {
       </nav>
 
       <div v-if="loading" class="flex justify-center py-12">
-        <span class="text-sm text-muted-foreground">加载中…</span>
+        <span class="text-sm text-muted-foreground">加载中...</span>
       </div>
 
       <div v-else-if="error" class="rounded-xl border border-destructive/30 bg-destructive/5 p-6 text-center">
@@ -196,7 +246,10 @@ onUnmounted(() => {
                 :label="taskStatusDocLabel(statusData.status)"
               />
             </div>
-            <span class="text-xs text-muted-foreground font-mono">任务 ID：{{ statusData.taskNo }}</span>
+            <div class="flex items-center gap-2 text-xs text-muted-foreground">
+              <span>{{ streamConnected ? '实时进度已连接' : '轮询进度更新中' }}</span>
+              <span class="font-mono">任务 ID：{{ statusData.taskNo }}</span>
+            </div>
           </div>
 
           <div v-if="statusData.progress != null" class="space-y-2">
@@ -221,6 +274,23 @@ onUnmounted(() => {
             class="mt-4 rounded-lg border border-destructive/25 bg-destructive/5 p-3 text-sm text-destructive"
           >
             {{ failureHint }}
+          </div>
+
+          <div v-if="!isTerminal(statusData.status)" class="mt-5 grid gap-2 sm:grid-cols-5">
+            <div
+              v-for="stage in digitalHumanStages"
+              :key="stage.label"
+              class="rounded-lg border px-3 py-2 text-xs"
+              :class="
+                stageState(stage.progress) === 'done'
+                  ? 'border-success/30 bg-success/10 text-success'
+                  : stageState(stage.progress) === 'current'
+                    ? 'border-primary/30 bg-primary/10 text-primary'
+                    : 'border-border bg-background text-muted-foreground'
+              "
+            >
+              {{ stage.label }}
+            </div>
           </div>
         </div>
 

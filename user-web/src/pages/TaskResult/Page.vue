@@ -4,8 +4,10 @@ import { RouterLink } from "vue-router"
 import { ArrowLeft, ChevronRight } from "lucide-vue-next"
 import AppShell from "@/components/AppShell.vue"
 import ResultRenderer from "@/components/ResultRenderer/ResultRenderer.vue"
+import { getApiOrigin } from "@/api/client"
 import { fetchTaskById } from "@/api/taskApi"
 import type { TaskDetail } from "@/api/types"
+import type { ResultBlock } from "@/types/result"
 import { userRoutes } from "@/router/userRoutes"
 import { useAuthStore } from "@/store/authStore"
 
@@ -14,7 +16,7 @@ const auth = useAuthStore()
 const task = ref<TaskDetail | null>(null)
 const loading = ref(true)
 const error = ref("")
-const blocks = ref<{ type: "text"; title: string; content: string }[]>([])
+const blocks = ref<ResultBlock[]>([])
 
 onMounted(async () => {
   loading.value = true
@@ -22,7 +24,7 @@ onMounted(async () => {
   try {
     task.value = await fetchTaskById(props.taskId, { token: auth.token })
     if (task.value.result?.contentText) {
-      blocks.value = [{ type: "text", title: "生成结果", content: task.value.result.contentText }]
+      blocks.value = buildResultBlocks(task.value.result.contentText, task.value)
     }
   } catch (err) {
     error.value = err instanceof Error ? err.message : "获取任务结果失败"
@@ -30,6 +32,136 @@ onMounted(async () => {
     loading.value = false
   }
 })
+
+function buildResultBlocks(content: string, detail?: TaskDetail): ResultBlock[] {
+  const outputModality = (detail?.outputModality || detail?.result?.resourceType || "TEXT").toUpperCase()
+  const parsed = parseJson(content)
+  const finalVideoUrl = extractFinalVideoUrl(content)
+
+  if (detail?.toolCode === "enterprise_diagnosis_agent") {
+    return [
+      {
+        type: "report",
+        title: detail.toolName || "企业诊断报告",
+        content,
+        filename: `${detail.taskNo ?? "enterprise-diagnosis"}-report`,
+      },
+    ]
+  }
+
+  if (outputModality === "VIDEO" || finalVideoUrl) {
+    const videoUrl = finalVideoUrl || collectUrls(parsed ?? content)[0]
+    if (videoUrl) {
+      return [
+        {
+          type: "video",
+          title: "最终成片",
+          url: normalizeMediaUrl(videoUrl),
+          downloadName: `${detail?.taskNo ?? "video"}-final.mp4`,
+        },
+      ]
+    }
+  }
+
+  if (outputModality === "IMAGE") {
+    const images = collectUrls(parsed ?? content).map((url, index) => ({
+      url: normalizeMediaUrl(url),
+      label: `图片 ${index + 1}`,
+    }))
+    if (images.length > 0) {
+      return [{ type: "image", title: "图片结果", images }]
+    }
+  }
+
+  if (outputModality === "AUDIO") {
+    const audioUrl = collectUrls(parsed ?? content)[0]
+    if (audioUrl) {
+      return [
+        {
+          type: "audio",
+          title: "音频结果",
+          url: normalizeMediaUrl(audioUrl),
+          downloadName: `${detail?.taskNo ?? "audio"}-result`,
+        },
+      ]
+    }
+  }
+
+  if (parsed !== null && outputModality !== "TEXT") {
+    return [{ type: "json", title: "结构化结果", content: JSON.stringify(parsed, null, 2) }]
+  }
+  return [{ type: "text", title: "生成结果", content }]
+}
+
+function parseJson(content: string): unknown | null {
+  const trimmed = content.trim()
+  if (!trimmed || (!trimmed.startsWith("{") && !trimmed.startsWith("["))) {
+    return null
+  }
+  try {
+    return JSON.parse(trimmed)
+  } catch {
+    return null
+  }
+}
+
+function collectUrls(value: unknown): string[] {
+  const urls = new Set<string>()
+  const visit = (item: unknown) => {
+    if (typeof item === "string") {
+      extractUrlsFromText(item).forEach((url) => urls.add(sanitizeUrl(url)))
+      return
+    }
+    if (Array.isArray(item)) {
+      item.forEach(visit)
+      return
+    }
+    if (item && typeof item === "object") {
+      Object.values(item).forEach(visit)
+    }
+  }
+  visit(value)
+  return Array.from(urls)
+}
+
+function extractUrlsFromText(value: string): string[] {
+  const trimmed = value.trim()
+  const direct = /^(https?:\/\/\S+|\/\S+|data:(?:image|audio|video)\/\S+;base64,\S+)$/i
+  if (direct.test(trimmed)) {
+    return [trimmed]
+  }
+  const matches = trimmed.match(/(?:https?:\/\/|\/)[^\s"'<>]+/g)
+  return matches ?? []
+}
+
+function extractFinalVideoUrl(content: string): string {
+  const patterns = [
+    /最终成片[：:]\s*(\S+)/,
+    /final\.mp4[)\]]?\s*[:：]?\s*(\S+)/i,
+    /(\/generated\/\S+?\.mp4)/,
+    /(https?:\/\/\S+?\.mp4(?:\?\S*)?)/,
+  ]
+  for (const pattern of patterns) {
+    const match = content.match(pattern)
+    if (match?.[1]) {
+      return sanitizeUrl(match[1])
+    }
+  }
+  return ""
+}
+
+function sanitizeUrl(value: string): string {
+  return value.trim().replace(/[)\]，。,.]+$/g, "")
+}
+
+function normalizeMediaUrl(value: string): string {
+  if (value.startsWith("http://") || value.startsWith("https://") || value.startsWith("data:")) {
+    return value
+  }
+  const path = value.startsWith("/") ? value : `/${value}`
+  const apiOrigin = getApiOrigin()
+  return apiOrigin ? `${apiOrigin}${path}` : path
+}
 </script>
 
 <template>
@@ -53,7 +185,7 @@ onMounted(async () => {
         暂无结果数据
       </div>
 
-      <ResultRenderer v-else :blocks="blocks as any" />
+      <ResultRenderer v-else :blocks="blocks" />
 
       <div class="flex flex-wrap justify-center gap-2 pt-2">
         <RouterLink :to="userRoutes.myTasks" class="inline-flex h-10 items-center justify-center rounded-md border border-border bg-background px-4 text-sm hover:bg-secondary">

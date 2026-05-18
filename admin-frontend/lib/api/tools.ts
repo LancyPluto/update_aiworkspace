@@ -43,6 +43,10 @@ export function updateTool(toolId: number, payload: UpsertToolPayload) {
   return http.put<ToolSummary>(`/api/admin/v1/tools/${toolId}`, payload)
 }
 
+export function deleteTool(toolId: number) {
+  return http.delete<void>(`/api/admin/v1/tools/${toolId}`)
+}
+
 export function publishTool(toolId: number) {
   return http.post<ToolSummary>(`/api/admin/v1/tools/${toolId}/publish`)
 }

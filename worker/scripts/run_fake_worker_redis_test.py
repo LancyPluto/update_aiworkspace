@@ -55,7 +55,13 @@ class FakeBackendClient:
             "modelName": "fake-model",
         }
 
-    def mark_processing(self, task_id: int) -> dict:
+    def mark_processing(
+        self,
+        task_id: int,
+        *,
+        progress: int | None = None,
+        progress_message: str | None = None,
+    ) -> dict:
         self.processing_called = True
         return {}
 
@@ -72,7 +78,7 @@ class FakeModelClient:
     def __init__(self) -> None:
         self.calls = []
 
-    def generate(self, prompt: str, *, system_prompt: str = "", model_name: str | None = None) -> str:
+    def generate(self, prompt: str, *, system_prompt: str = "", model_name: str | None = None, **kwargs) -> str:
         self.calls.append(
             {
                 "prompt": prompt,

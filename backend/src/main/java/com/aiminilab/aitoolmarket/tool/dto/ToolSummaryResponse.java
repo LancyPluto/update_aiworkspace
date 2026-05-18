@@ -10,11 +10,16 @@ public record ToolSummaryResponse(
         String categoryName,
         String description,
         String coverUrl,
+        String toolType,
+        String inputModality,
+        String outputModality,
+        String configNote,
         String status,
         Integer estimatedCreditCost,
         Long modelConfigId,
         String modelConfigName,
-        String modelName
+        String modelName,
+        String executionHandler
 ) {
     public static ToolSummaryResponse from(AiTool tool) {
         return new ToolSummaryResponse(
@@ -25,11 +30,16 @@ public record ToolSummaryResponse(
                 tool.getCategoryName(),
                 tool.getDescription(),
                 tool.getCoverUrl(),
+                tool.getToolType(),
+                tool.getInputModality(),
+                tool.getOutputModality(),
+                tool.getConfigNote(),
                 tool.getStatus(),
                 tool.getEstimatedCreditCost(),
                 tool.getModelConfigId(),
                 tool.getModelConfigName(),
-                tool.getModelName()
+                tool.getModelName(),
+                tool.getExecutionHandler()
         );
     }
 }

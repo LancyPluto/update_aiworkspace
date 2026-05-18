@@ -17,6 +17,7 @@ import com.aiminilab.aitoolmarket.tool.dto.TestGenerateResponse;
 import com.aiminilab.aitoolmarket.tool.dto.UpdateToolFieldsRequest;
 import com.aiminilab.aitoolmarket.tool.dto.UpsertFieldSchemaRequest;
 import com.aiminilab.aitoolmarket.tool.dto.UpsertToolCategoryRequest;
+import com.aiminilab.aitoolmarket.tool.dto.ApplyToolTemplateRequest;
 import com.aiminilab.aitoolmarket.tool.dto.UpsertToolRequest;
 
 import java.util.List;
@@ -43,7 +44,11 @@ public interface ToolService {
 
     ToolSummaryResponse createTool(UpsertToolRequest request, Long operatorId);
 
+    void applyTemplate(Long toolId, ApplyToolTemplateRequest request, Long operatorId);
+
     ToolSummaryResponse updateTool(Long toolId, UpsertToolRequest request, Long operatorId);
+
+    void deleteTool(Long toolId, Long operatorId);
 
     ToolSummaryResponse publishTool(Long toolId, Long operatorId);
 

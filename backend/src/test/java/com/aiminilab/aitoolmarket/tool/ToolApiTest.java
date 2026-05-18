@@ -10,6 +10,7 @@ import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -175,6 +176,27 @@ class ToolApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.total").value(1))
                 .andExpect(jsonPath("$.data.list[0].toolCode").value(toolCode));
+    }
+
+    @Test
+    void adminCanDeleteToolFromManagementList() throws Exception {
+        String adminToken = loginAdmin();
+        Long toolId = createTool(adminToken, "delete_me_tool", "Delete Me Tool", 1, "temporary", 1);
+
+        mockMvc.perform(delete("/api/admin/v1/tools/{toolId}", toolId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"));
+
+        mockMvc.perform(get("/api/admin/v1/tools")
+                        .param("keyword", "delete_me_tool")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(0));
+
+        mockMvc.perform(delete("/api/admin/v1/tools/{toolId}", toolId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().is4xxClientError());
     }
 
     @Test

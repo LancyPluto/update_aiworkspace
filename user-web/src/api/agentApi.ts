@@ -34,16 +34,10 @@ export function createAgentSession(body: { title?: string }, options?: { token?:
   })
 }
 
-/**
- * 软删除当前用户的 Agent 会话（后端预期：`DELETE /api/v1/agent/sessions/{sessionId}`，将 `status` 置为 `DELETED`）。
- * 占位：后端未接入时不发起请求；页面仍会乐观更新列表，刷新后会话会重新出现。
- */
-export async function deleteAgentSession(sessionId: number, options?: { token?: string | null }): Promise<void> {
-  void sessionId
-  void options
-  // return apiRequest<void>("DELETE", `/api/v1/agent/sessions/${sessionId}`, {
-  //   token: options?.token,
-  // })
+export function deleteAgentSession(sessionId: number, options?: { token?: string | null }) {
+  return apiRequest<void>("DELETE", `/api/v1/agent/sessions/${sessionId}`, {
+    token: options?.token,
+  })
 }
 
 export function fetchAgentMessages(sessionId: number, options?: { token?: string | null; signal?: AbortSignal }) {

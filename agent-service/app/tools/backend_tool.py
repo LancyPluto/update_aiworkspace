@@ -169,6 +169,7 @@ class BackendToolBridge:
         content_text = task_detail.result.contentText if task_detail.result is not None else ""
         result = _tool_result(
             tool.toolCode,
+            call.id,
             arguments,
             task_detail.taskId,
             task_detail.status,
@@ -301,6 +302,7 @@ def _with_xiaohongshu_defaults(message: str, arguments: dict[str, Any]) -> dict[
 
 def _tool_result(
     tool_code: str,
+    tool_call_id: int,
     arguments: dict[str, Any],
     task_id: int,
     task_status: str,
@@ -310,9 +312,11 @@ def _tool_result(
     return {
         "success": True,
         "toolCode": tool_code,
+        "toolCallId": tool_call_id,
         "taskId": task_id,
         "status": task_status,
         "arguments": arguments,
+        "resultSummary": content_text or "",
         "data": {
             "resourceType": resource_type,
             "contentText": content_text or "",

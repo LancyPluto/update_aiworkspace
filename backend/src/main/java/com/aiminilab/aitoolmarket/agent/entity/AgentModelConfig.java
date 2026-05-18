@@ -3,6 +3,7 @@ package com.aiminilab.aitoolmarket.agent.entity;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @TableName("agent_model_configs")
@@ -16,7 +17,17 @@ public class AgentModelConfig {
     private String baseUrl;
     private String apiKey;
     private String minimaxGroupId;
+    private String consoleUrl;
+    private String balanceUrl;
+    private String docsUrl;
     private Integer timeoutSeconds;
+    private BigDecimal inputTokenPricePer1k;
+    private BigDecimal outputTokenPricePer1k;
+    private BigDecimal inputTokenPricePer1m;
+    private BigDecimal outputTokenPricePer1m;
+    private String billingUnit;
+    private BigDecimal unitPrice;
+    private String capabilities;
     private Boolean enabled;
     private Boolean isDefault;
     private LocalDateTime createdAt;
@@ -38,8 +49,28 @@ public class AgentModelConfig {
     public void setApiKey(String apiKey) { this.apiKey = apiKey; }
     public String getMinimaxGroupId() { return minimaxGroupId; }
     public void setMinimaxGroupId(String minimaxGroupId) { this.minimaxGroupId = minimaxGroupId; }
+    public String getConsoleUrl() { return consoleUrl; }
+    public void setConsoleUrl(String consoleUrl) { this.consoleUrl = consoleUrl; }
+    public String getBalanceUrl() { return balanceUrl; }
+    public void setBalanceUrl(String balanceUrl) { this.balanceUrl = balanceUrl; }
+    public String getDocsUrl() { return docsUrl; }
+    public void setDocsUrl(String docsUrl) { this.docsUrl = docsUrl; }
     public Integer getTimeoutSeconds() { return timeoutSeconds; }
     public void setTimeoutSeconds(Integer timeoutSeconds) { this.timeoutSeconds = timeoutSeconds; }
+    public BigDecimal getInputTokenPricePer1k() { return inputTokenPricePer1k; }
+    public void setInputTokenPricePer1k(BigDecimal inputTokenPricePer1k) { this.inputTokenPricePer1k = inputTokenPricePer1k; }
+    public BigDecimal getOutputTokenPricePer1k() { return outputTokenPricePer1k; }
+    public void setOutputTokenPricePer1k(BigDecimal outputTokenPricePer1k) { this.outputTokenPricePer1k = outputTokenPricePer1k; }
+    public BigDecimal getInputTokenPricePer1m() { return inputTokenPricePer1m; }
+    public void setInputTokenPricePer1m(BigDecimal inputTokenPricePer1m) { this.inputTokenPricePer1m = inputTokenPricePer1m; }
+    public BigDecimal getOutputTokenPricePer1m() { return outputTokenPricePer1m; }
+    public void setOutputTokenPricePer1m(BigDecimal outputTokenPricePer1m) { this.outputTokenPricePer1m = outputTokenPricePer1m; }
+    public String getBillingUnit() { return billingUnit; }
+    public void setBillingUnit(String billingUnit) { this.billingUnit = billingUnit; }
+    public BigDecimal getUnitPrice() { return unitPrice; }
+    public void setUnitPrice(BigDecimal unitPrice) { this.unitPrice = unitPrice; }
+    public String getCapabilities() { return capabilities; }
+    public void setCapabilities(String capabilities) { this.capabilities = capabilities; }
     public Boolean getEnabled() { return enabled; }
     public void setEnabled(Boolean enabled) { this.enabled = enabled; }
     public Boolean getDefault() { return isDefault; }

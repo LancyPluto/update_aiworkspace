@@ -27,6 +27,21 @@ public interface ToolFieldItemMapper extends BaseMapper<ToolFieldItem> {
             """)
     void inactiveBySchemaId(@Param("schemaId") Long schemaId);
 
+    @Update("""
+            UPDATE tool_field_schema_items
+            SET field_name = #{field.fieldName},
+                field_type = #{field.fieldType},
+                placeholder = #{field.placeholder},
+                options_json = #{field.optionsJson},
+                required = #{field.required},
+                sort_order = #{field.sortOrder},
+                status = 'ACTIVE',
+                updated_at = CURRENT_TIMESTAMP
+            WHERE schema_id = #{field.schemaId}
+              AND field_key = #{field.fieldKey}
+            """)
+    int reactivateAndUpdateBySchemaAndKey(@Param("field") ToolFieldItem field);
+
     default void createDefaultFields(Long schemaId) {
         insertField(schemaId, "productName", "产品名称", "text", "请输入产品名称", null, true, 1);
         insertField(schemaId, "targetCustomer", "目标用户", "textarea", "请输入目标用户", null, true, 2);
@@ -62,7 +77,9 @@ public interface ToolFieldItemMapper extends BaseMapper<ToolFieldItem> {
         item.setRequired(required);
         item.setSortOrder(sortOrder);
         item.setStatus("ACTIVE");
-        insert(item);
+        if (reactivateAndUpdateBySchemaAndKey(item) == 0) {
+            insert(item);
+        }
     }
 
     default List<ToolFieldItem> findBySchemaId(Long schemaId) {

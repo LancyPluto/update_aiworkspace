@@ -9,6 +9,8 @@ public record InternalAgentModelConfigResponse(
         String apiKey,
         String minimaxGroupId,
         Integer timeoutSeconds,
+        String billingUnit,
+        java.math.BigDecimal unitPrice,
         Boolean enabled
 ) {
     public static InternalAgentModelConfigResponse from(AgentModelConfig config) {
@@ -19,6 +21,8 @@ public record InternalAgentModelConfigResponse(
                 config.getApiKey(),
                 config.getMinimaxGroupId(),
                 config.getTimeoutSeconds(),
+                config.getBillingUnit(),
+                config.getUnitPrice(),
                 config.getEnabled()
         );
     }

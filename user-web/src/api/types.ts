@@ -136,6 +136,10 @@ export interface ToolSummary {
   categoryName: string
   description?: string | null
   coverUrl?: string | null
+  toolType?: string | null
+  inputModality?: string | null
+  outputModality?: string | null
+  configNote?: string | null
   status: ToolBizStatus
   estimatedCreditCost: number
 }
@@ -150,9 +154,9 @@ export interface ToolFieldOption {
 export interface ToolField {
   fieldKey: string
   fieldName: string
-  fieldType: "text" | "textarea" | "select" | "number"
+  fieldType: "text" | "textarea" | "select" | "number" | "radio" | "checkbox" | "slider" | "image" | "file"
   placeholder?: string | null
-  options?: ToolFieldOption[] | null
+  options?: Array<ToolFieldOption | string> | null
   required: boolean
   sortOrder: number
 }
@@ -166,6 +170,10 @@ export interface ToolDetail {
   categoryName: string
   description?: string | null
   coverUrl?: string | null
+  toolType?: string | null
+  inputModality?: string | null
+  outputModality?: string | null
+  configNote?: string | null
   status: ToolBizStatus
   estimatedCreditCost: number
   /** 动态字段列表 */
@@ -191,6 +199,7 @@ export interface CreateTaskResponse {
 export interface TaskStatusPayload {
   taskId: number
   taskNo: string
+  toolCode?: string
   status: TaskStatus
   progress?: number
   progressMessage?: string
@@ -212,6 +221,9 @@ export interface TaskDetail {
   userId: number
   toolCode: string
   toolName: string
+  toolType?: string
+  inputModality?: string
+  outputModality?: string
   params?: Record<string, unknown>
   result?: TaskResult | null
   createdAt: string

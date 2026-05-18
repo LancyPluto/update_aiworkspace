@@ -1,6 +1,7 @@
 package com.aiminilab.aitoolmarket.task.service.impl;
 
 import com.aiminilab.aitoolmarket.common.dto.PageResponse;
+import com.aiminilab.aitoolmarket.common.enums.CreditSourceType;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.enums.TaskStatus;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
@@ -12,10 +13,13 @@ import com.aiminilab.aitoolmarket.task.dto.TaskResultResponse;
 import com.aiminilab.aitoolmarket.task.dto.TaskStatusResponse;
 import com.aiminilab.aitoolmarket.task.entity.AiTask;
 import com.aiminilab.aitoolmarket.task.mapper.TaskMapper;
+import com.aiminilab.aitoolmarket.agent.mapper.AgentModelConfigMapper;
+import com.aiminilab.aitoolmarket.agent.service.ModelCapabilityService;
 import com.aiminilab.aitoolmarket.task.service.TaskOutboxService;
 import com.aiminilab.aitoolmarket.task.service.TaskService;
 import com.aiminilab.aitoolmarket.task.service.TaskStateMachine;
 import com.aiminilab.aitoolmarket.task.metrics.TaskMetrics;
+import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
 import com.aiminilab.aitoolmarket.tool.entity.AiTool;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolMapper;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -35,6 +39,8 @@ public class TaskServiceImpl implements TaskService {
 
     private final TaskMapper taskMapper;
     private final ToolMapper toolMapper;
+    private final AgentModelConfigMapper agentModelConfigMapper;
+    private final ModelCapabilityService modelCapabilityService;
     private final CreditService creditService;
     private final ObjectMapper objectMapper;
     private final TaskOutboxService taskOutboxService;
@@ -43,6 +49,8 @@ public class TaskServiceImpl implements TaskService {
     public TaskServiceImpl(
             TaskMapper taskMapper,
             ToolMapper toolMapper,
+            AgentModelConfigMapper agentModelConfigMapper,
+            ModelCapabilityService modelCapabilityService,
             CreditService creditService,
             ObjectMapper objectMapper,
             TaskOutboxService taskOutboxService,
@@ -50,6 +58,8 @@ public class TaskServiceImpl implements TaskService {
     ) {
         this.taskMapper = taskMapper;
         this.toolMapper = toolMapper;
+        this.agentModelConfigMapper = agentModelConfigMapper;
+        this.modelCapabilityService = modelCapabilityService;
         this.creditService = creditService;
         this.objectMapper = objectMapper;
         this.taskOutboxService = taskOutboxService;
@@ -105,7 +115,7 @@ public class TaskServiceImpl implements TaskService {
             AiTask current = findTask(taskId, userId);
             TaskStateMachine.ensureTransition(current.getStatus(), TaskStatus.CANCELLED.name());
         } else {
-            creditService.releaseForTask(task.getUserId(), taskId, task.getEstimatedCreditCost());
+            creditService.release(task.getUserId(), CreditSourceType.TASK, taskId, task.getEstimatedCreditCost());
             taskMetrics.recordTaskOutcome(task.getToolCode(), "CANCELLED", task.getCreatedAt(), findTask(taskId, userId).getFinishedAt());
         }
         return TaskStatusResponse.from(findTask(taskId, userId));
@@ -156,7 +166,7 @@ public class TaskServiceImpl implements TaskService {
         if (updated == 0) {
             TaskStateMachine.ensureTransition(findTask(taskId).getStatus(), TaskStatus.CANCELLED.name());
         } else {
-            creditService.releaseForTask(task.getUserId(), taskId, task.getEstimatedCreditCost());
+            creditService.release(task.getUserId(), CreditSourceType.TASK, taskId, task.getEstimatedCreditCost());
             taskMetrics.recordTaskOutcome(task.getToolCode(), "CANCELLED", task.getCreatedAt(), findTask(taskId).getFinishedAt());
         }
         return TaskStatusResponse.from(findTask(taskId));
@@ -165,6 +175,8 @@ public class TaskServiceImpl implements TaskService {
     private TaskStatusResponse createNewTask(Long userId, String toolCode, JsonNode params, String clientRequestId, boolean chargeTaskCredits) {
         AiTool tool = toolMapper.findOnlineByCode(toolCode)
                 .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在或未上线"));
+        AgentModelConfig modelConfig = agentModelConfigMapper.findForToolExecution(tool.getId());
+        modelCapabilityService.validateExecution(tool, modelConfig);
 
         AiTask task = new AiTask();
         task.setTaskNo(generateTaskNo());
@@ -176,7 +188,7 @@ public class TaskServiceImpl implements TaskService {
 
         Long taskId = taskMapper.insertTask(task);
         if (chargeTaskCredits) {
-            creditService.freezeForTask(userId, taskId, tool.getEstimatedCreditCost());
+            creditService.freeze(userId, CreditSourceType.TASK, taskId, tool.getEstimatedCreditCost());
         }
         taskOutboxService.enqueueTaskCreated(taskId);
         return TaskStatusResponse.from(findTask(taskId, userId));

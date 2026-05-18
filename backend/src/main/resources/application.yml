@@ -9,6 +9,10 @@ server:
 spring:
   application:
     name: ai-tool-market-backend
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 10MB
   datasource:
     # utf8mb4：与库表一致，避免中文乱码；勿用 JDBC 的 utf8（MySQL 历史 3 字节别名）
     url: jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3307}/${MYSQL_DATABASE:ai_supermarket_v1}?useUnicode=true&characterEncoding=UTF-8&connectionCollation=utf8mb4_unicode_ci&serverTimezone=Asia/Shanghai
@@ -32,14 +36,15 @@ app:
   jwt-secret: ${JWT_SECRET:local-dev-secret}
   internal-api-token: ${INTERNAL_API_TOKEN:local-internal-token}
   ai-task-queue: ${AI_TASK_QUEUE:ai:task:queue}
+  generated-media-dir: ${GENERATED_MEDIA_DIR:../data/generated-media}
   auth:
     sms:
       provider: ${SMS_PROVIDER:local}
-      bmob-application-id: ${BMOB_APPLICATION_ID:77eb212adf1cce7dac5ca58186fedc30}
+      bmob-application-id: ${BMOB_APPLICATION_ID:}
       bmob-rest-api-key: ${BMOB_REST_API_KEY:}
       bmob-base-url: ${BMOB_BASE_URL:https://api.bmob.cn}
       bmob-template: ${BMOB_SMS_TEMPLATE:}
-      ihuyi-api-id: ${IHUYI_API_ID:C78787480}
+      ihuyi-api-id: ${IHUYI_API_ID:}
       ihuyi-api-key: ${IHUYI_API_KEY:}
       ihuyi-base-url: ${IHUYI_BASE_URL:https://api.ihuyi.com/sms/Submit.json}
       ihuyi-template-id: ${IHUYI_TEMPLATE_ID:1}

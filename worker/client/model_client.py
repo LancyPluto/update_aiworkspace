@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from typing import Any
 
 import requests
@@ -15,6 +16,13 @@ class ModelTimeoutError(ModelClientError):
 
 class ModelOutputEmptyError(ModelClientError):
     pass
+
+
+@dataclass(frozen=True)
+class ModelGenerationResult:
+    content: str
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
 
 
 class ModelClient:
@@ -47,6 +55,29 @@ class ModelClient:
         timeout_seconds: int | None = None,
         max_tokens: int | None = None,
     ) -> str:
+        return self.generate_with_usage(
+            prompt,
+            system_prompt=system_prompt,
+            provider=provider,
+            model_name=model_name,
+            base_url=base_url,
+            api_key=api_key,
+            timeout_seconds=timeout_seconds,
+            max_tokens=max_tokens,
+        ).content
+
+    def generate_with_usage(
+        self,
+        prompt: str,
+        *,
+        system_prompt: str = "",
+        provider: str | None = None,
+        model_name: str | None = None,
+        base_url: str | None = None,
+        api_key: str | None = None,
+        timeout_seconds: int | None = None,
+        max_tokens: int | None = None,
+    ) -> ModelGenerationResult:
         effective_provider = provider or settings.model_provider
         effective_base_url = (base_url or self.base_url).rstrip("/")
         effective_api_key = api_key or self.api_key
@@ -55,9 +86,14 @@ class ModelClient:
         effective_max_tokens = max_tokens or self.default_max_tokens
 
         if effective_provider == "mock":
-            return (
+            content = (
                 "Local demo result: Worker received the task and generated a mock response.\n\n"
                 f"Input:\n{prompt[:500]}"
+            )
+            return ModelGenerationResult(
+                content=content,
+                prompt_tokens=self._estimate_tokens(system_prompt, prompt),
+                completion_tokens=self._estimate_tokens(content),
             )
 
         if not effective_api_key or effective_api_key == "replace-with-model-key":
@@ -109,7 +145,8 @@ class ModelClient:
         content = self._extract_content(payload)
         if not content:
             raise ModelOutputEmptyError("model returned empty content")
-        return content
+        prompt_tokens, completion_tokens = self._extract_openai_usage(payload)
+        return ModelGenerationResult(content, prompt_tokens, completion_tokens)
 
     def _generate_anthropic_compatible(
         self,
@@ -121,7 +158,7 @@ class ModelClient:
         api_key: str,
         timeout: tuple[int, int],
         max_tokens: int,
-    ) -> str:
+    ) -> ModelGenerationResult:
         response = self._post_with_timeout_retry(
             f"{base_url}/v1/messages",
             headers={
@@ -153,7 +190,8 @@ class ModelClient:
         content = self._extract_anthropic_content(payload)
         if not content:
             raise ModelOutputEmptyError("model returned empty content")
-        return content
+        prompt_tokens, completion_tokens = self._extract_anthropic_usage(payload)
+        return ModelGenerationResult(content, prompt_tokens, completion_tokens)
 
     def _post_with_timeout_retry(
         self,
@@ -193,3 +231,33 @@ class ModelClient:
             if isinstance(block, dict) and isinstance(block.get("text"), str):
                 parts.append(block["text"])
         return "\n".join(part.strip() for part in parts if part.strip())
+
+    @staticmethod
+    def _extract_openai_usage(payload: dict[str, Any]) -> tuple[int, int]:
+        usage = payload.get("usage") or {}
+        return (
+            ModelClient._non_negative_int(usage.get("prompt_tokens") or usage.get("input_tokens")),
+            ModelClient._non_negative_int(usage.get("completion_tokens") or usage.get("output_tokens")),
+        )
+
+    @staticmethod
+    def _extract_anthropic_usage(payload: dict[str, Any]) -> tuple[int, int]:
+        usage = payload.get("usage") or {}
+        return (
+            ModelClient._non_negative_int(usage.get("input_tokens")),
+            ModelClient._non_negative_int(usage.get("output_tokens")),
+        )
+
+    @staticmethod
+    def _non_negative_int(value: Any) -> int:
+        try:
+            return max(0, int(value or 0))
+        except (TypeError, ValueError):
+            return 0
+
+    @staticmethod
+    def _estimate_tokens(*parts: str) -> int:
+        text = "\n".join(part for part in parts if part)
+        if not text:
+            return 0
+        return max(1, len(text) // 4)

@@ -1,8 +1,8 @@
 import importlib.util
 import inspect
 import re
+from collections.abc import AsyncIterable, Callable, Iterable
 from dataclasses import dataclass
-from collections.abc import Callable
 from types import ModuleType
 from typing import Any
 
@@ -46,8 +46,355 @@ class DeepAgentsRuntimeEngine:
         self.dependency_loader = dependency_loader or self._load_deepagents
 
     async def run(self, context: RunContext) -> None:
-        if not self.deep_agents_enabled:
-            await self._fail(context.runId, "DEEP_AGENTS_DISABLED", "Deep Agents runtime is disabled")
+        state = {
+            "run_id": context.runId,
+            "context": context,
+            "budget": BudgetState(credit_budget=context.creditBudget),
+        }
+        await self.backend.append_event(
+            context.runId,
+            RunEventCreate(eventType=RUN_STARTED, eventText="Agent 已开始处理", eventJson={"runId": context.runId}),
+        )
+
+        guard_result = self.prompt_guard.inspect(context.message)
+        if guard_result.rejected:
+            await self._emit_answer_events(context.runId, guard_result.message or "")
+            await self._complete_run(context, guard_result.message or "", intent=Intent.SECURITY_REJECTED.value)
+            return
+
+        # 1. Classify intent
+        intent = self.intent_router.classify(context)
+        await self._emit_intent_event(context, intent)
+
+        # 2. Route by intent
+        intent_enum = intent.intent
+
+        if intent_enum == Intent.FILE_ANALYSIS:
+            try:
+                answer = await self._run_chat(context, intent)
+            except BudgetExceeded as exception:
+                await self._fail_run(context.runId, exception.error_code, exception.message)
+                return
+            await self._complete_run(context, answer, intent=intent_enum.value)
+            return
+
+        if intent_enum == Intent.TOOL_USE:
+            await self._handle_tool_use(context, intent)
+            return
+
+        if intent_enum == Intent.NEEDS_CLARIFICATION:
+            answer = self._format_clarifying_answer(context, intent)
+            await self._emit_answer_events(context.runId, answer)
+            await self._complete_run(context, answer, intent=intent_enum.value)
+            return
+
+        if intent_enum == Intent.UNSUPPORTED:
+            answer = "当前阶段暂不支持文件分析、知识库检索或复杂工作流。我可以先帮你完成通用问答或调用已开放的工具。"
+            await self._emit_answer_events(context.runId, answer)
+            await self._complete_run(context, answer, intent=intent_enum.value)
+            return
+
+        if intent_enum == Intent.SECURITY_REJECTED:
+            answer = intent.reason or "该请求被安全策略拒绝。"
+            await self._emit_answer_events(context.runId, answer)
+            await self._complete_run(context, answer, intent=intent_enum.value)
+            return
+
+        if intent_enum == Intent.GENERAL_CHAT:
+            try:
+                answer = await self._run_chat(context, intent)
+            except BudgetExceeded as exception:
+                await self._fail_run(context.runId, exception.error_code, exception.message)
+                return
+            await self._complete_run(context, answer, intent=intent_enum.value)
+            return
+
+        # Fallback for any other intent — try deep agents if available, else fall back to chat
+        await self._run_deep_agents_or_chat(context, intent)
+
+    async def run_confirmed_tool(self, context: RunContext, tool_code: str) -> None:
+        tool = ToolRegistry(context).get(tool_code)
+        if tool is None:
+            intent = self.intent_router.classify(context)
+            from app.core.intent_router import IntentResult
+            intent_result = IntentResult(
+                intent=Intent.NEEDS_CLARIFICATION, confidence=0.5, reason="confirmed_tool_unavailable"
+            )
+            answer = self._format_clarifying_answer(context, intent_result)
+            await self._emit_answer_events(context.runId, answer)
+            await self._complete_run(context, answer, intent=Intent.NEEDS_CLARIFICATION.value)
+            return
+
+        await self.backend.append_event(
+            context.runId,
+            RunEventCreate(eventType=TOOL_SELECTED, eventText=tool.toolCode, eventJson={"toolCode": tool.toolCode, "confirmed": True}),
+        )
+
+        budget = BudgetState(credit_budget=context.creditBudget)
+        try:
+            result = await self._execute_tool_with_guard(context, tool, budget)
+        except BudgetExceeded as exception:
+            await self._fail_run(context.runId, exception.error_code, exception.message)
+            return
+
+        if result.get("missing_tool_arguments"):
+            answer = self._format_missing_arguments_message(tool, result["missing_tool_arguments"])
+            await self._emit_answer_events(context.runId, answer)
+            await self._complete_run(context, answer, intent=Intent.NEEDS_CLARIFICATION.value)
+            return
+
+        answer = await self._synthesize_answer(context, tool, result, budget)
+        await self._complete_run(context, answer, intent=Intent.TOOL_USE.value)
+        await self._emit_memory_candidate(context.runId, answer, None)
+
+    def _get_available_module(self) -> ModuleType:
+        module = self.dependency_loader()
+        if module is None:
+            raise RuntimeError("deepagents package is not installed; enable the preview runtime only after installing it")
+        return module
+
+    @staticmethod
+    def _load_deepagents() -> ModuleType | None:
+        if importlib.util.find_spec("deepagents") is None:
+            return None
+        return importlib.import_module("deepagents")
+
+    # --- Intent helpers ---
+
+    async def _emit_intent_event(self, context: RunContext, intent) -> None:
+        await self.backend.append_event(
+            context.runId,
+            RunEventCreate(
+                eventType=INTENT_DETECTED,
+                eventText=intent.intent.value,
+                eventJson={
+                    "confidence": intent.confidence,
+                    "reason": intent.reason,
+                    "selectedToolCode": intent.selectedToolCode,
+                    "candidateToolCodes": intent.candidateToolCodes,
+                    "clarifyingQuestion": intent.clarifyingQuestion,
+                    "decisionSource": intent.decisionSource,
+                },
+            ),
+        )
+        if intent.candidateToolCodes and len(intent.candidateToolCodes) > 1:
+            registry = ToolRegistry(context)
+            candidates_info = []
+            for code in intent.candidateToolCodes:
+                t = registry.get(code)
+                candidates_info.append({
+                    "toolCode": code,
+                    "toolName": t.toolName if t else code,
+                    "description": t.description if t else "",
+                })
+            await self.backend.append_event(
+                context.runId,
+                RunEventCreate(
+                    eventType=TOOL_RECOMMENDATIONS,
+                    eventText=f"Recommended {len(intent.candidateToolCodes)} tools",
+                    eventJson={
+                        "candidates": candidates_info,
+                        "recommendedToolCode": intent.selectedToolCode,
+                        "reason": intent.reason,
+                        "disambiguationQuestion": intent.clarifyingQuestion or "请选择你想使用的工具",
+                    },
+                ),
+            )
+
+    # --- Tool use flow ---
+
+    async def _handle_tool_use(self, context: RunContext, intent) -> None:
+        tool = ToolRegistry(context).get(intent.selectedToolCode or "") if intent.selectedToolCode else None
+        if tool is None:
+            from app.core.intent_router import IntentResult
+            intent_result = IntentResult(
+                intent=Intent.NEEDS_CLARIFICATION, confidence=0.5, reason="tool_unavailable"
+            )
+            answer = self._format_clarifying_answer(context, intent_result)
+            await self._emit_answer_events(context.runId, answer)
+            await self._complete_run(context, answer, intent=Intent.NEEDS_CLARIFICATION.value)
+            return
+
+        await self.backend.append_event(
+            context.runId,
+            RunEventCreate(eventType=TOOL_SELECTED, eventText=tool.toolCode, eventJson={"toolCode": tool.toolCode}),
+        )
+
+        budget = BudgetState(credit_budget=context.creditBudget)
+        missing_args = self.tool_bridge.missing_required_arguments(context, tool)
+        extracted_args = None
+
+        if missing_args:
+            base_args = self.tool_bridge.build_arguments(context, tool, apply_placeholder_defaults=False)
+            enriched = await self.tool_bridge.enrich_arguments(
+                self.tool_bridge.conversation_argument_text(context), tool, existing_args=base_args,
+            )
+            still_missing = self._missing_from_enriched(enriched, tool)
+            extracted_args = enriched
+            auto_call = any(
+                p.toolCode == tool.toolCode and p.autoCallEnabled for p in context.toolPreferences
+            )
+            if not still_missing:
+                await self._emit_arguments_preview(context, tool, extracted_args, [], not auto_call)
+                if not auto_call:
+                    await self._request_confirmation(context, tool)
+                    return
+                try:
+                    result = await self._execute_tool_with_guard(context, tool, budget, arguments=enriched)
+                except BudgetExceeded as exception:
+                    await self._fail_run(context.runId, exception.error_code, exception.message)
+                    return
+                answer = await self._synthesize_answer(context, tool, result, budget)
+                await self._complete_run(context, answer, intent=Intent.TOOL_USE.value)
+                await self._emit_memory_candidate(context.runId, answer, None)
+                return
+            else:
+                await self._emit_arguments_preview(context, tool, enriched, still_missing, False)
+                answer = self._format_missing_arguments_message(tool, still_missing)
+                await self._emit_answer_events(context.runId, answer)
+                await self._complete_run(context, answer, intent=Intent.NEEDS_CLARIFICATION.value)
+                return
+
+        auto_call = any(
+            p.toolCode == tool.toolCode and p.autoCallEnabled for p in context.toolPreferences
+        )
+        if not extracted_args:
+            extracted_args = self.tool_bridge.build_arguments(context, tool, apply_placeholder_defaults=False)
+        await self._emit_arguments_preview(context, tool, extracted_args, [], not auto_call)
+
+        if not auto_call:
+            await self._request_confirmation(context, tool)
+            return
+
+        try:
+            result = await self._execute_tool_with_guard(context, tool, budget)
+        except BudgetExceeded as exception:
+            await self._fail_run(context.runId, exception.error_code, exception.message)
+            return
+
+        answer = await self._synthesize_answer(context, tool, result, budget)
+        await self._complete_run(context, answer, intent=Intent.TOOL_USE.value)
+        await self._emit_memory_candidate(context.runId, answer, None)
+
+    async def _execute_tool_with_guard(
+        self, context: RunContext, tool: ToolDescriptor, budget: BudgetState, arguments: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if arguments:
+            missing = self._missing_from_enriched(arguments, tool)
+            if missing:
+                return {"missing_tool_arguments": missing}
+        else:
+            base_args = self.tool_bridge.build_arguments(context, tool, apply_placeholder_defaults=False)
+            enriched = await self.tool_bridge.enrich_arguments(
+                self.tool_bridge.conversation_argument_text(context), tool, existing_args=base_args,
+            )
+            missing = self._missing_from_enriched(enriched, tool)
+            arguments = enriched
+            if missing:
+                return {"missing_tool_arguments": missing}
+
+        self.budget_guard.reserve_tool_call(budget, tool.estimatedCreditCost)
+        result = await self.tool_bridge.execute_with_args(context, tool, arguments)
+        return result
+
+    async def _emit_arguments_preview(
+        self, context: RunContext, tool: ToolDescriptor, extracted_args: dict[str, Any],
+        missing: list[str], needs_confirmation: bool,
+    ) -> None:
+        await self.backend.append_event(
+            context.runId,
+            RunEventCreate(
+                eventType=TOOL_ARGUMENTS_PREVIEW,
+                eventText=f"Tool {tool.toolCode} arguments preview",
+                eventJson={
+                    "toolCode": tool.toolCode,
+                    "toolName": tool.toolName,
+                    "arguments": extracted_args,
+                    "missingArguments": missing,
+                    "needsConfirmation": needs_confirmation,
+                },
+            ),
+        )
+
+    async def _request_confirmation(self, context: RunContext, tool: ToolDescriptor) -> None:
+        await self.backend.append_event(
+            context.runId,
+            RunEventCreate(
+                eventType=TOOL_CONFIRMATION_REQUIRED,
+                eventText=tool.toolCode,
+                eventJson={
+                    "toolCode": tool.toolCode,
+                    "toolName": tool.toolName,
+                    "description": tool.description,
+                    "creditCost": tool.estimatedCreditCost,
+                    "inputSchema": tool.inputSchema,
+                },
+            ),
+        )
+
+    @staticmethod
+    def _missing_from_enriched(arguments: dict[str, Any], tool: ToolDescriptor) -> list[str]:
+        required = tool.inputSchema.get("required", [])
+        if not isinstance(required, list):
+            return []
+        return [
+            name
+            for name in required
+            if isinstance(name, str) and (name not in arguments or arguments[name] in (None, ""))
+        ]
+
+    @staticmethod
+    def _format_missing_arguments_message(tool: ToolDescriptor, missing: list[str]) -> str:
+        return format_missing_tool_arguments_message(tool, missing)
+
+    # --- Chat / Deep Agents flow ---
+
+    async def _run_chat(self, context: RunContext, intent=None) -> str:
+        available_tools = context.availableTools or []
+        if available_tools:
+            tool_descriptions = []
+            for t in available_tools:
+                name = t.toolName or t.toolCode
+                desc = t.description or ""
+                tool_descriptions.append(f"- {name}: {desc}")
+            tool_list_text = "你可以使用的AI工具列表：\n" + "\n".join(tool_descriptions)
+        else:
+            tool_list_text = ""
+        system_prompt = "You are a helpful cloud agent for an AI tool marketplace."
+        if tool_list_text:
+            system_prompt += "\n\n" + tool_list_text
+
+        messages = [ChatMessage(role="system", content=system_prompt)]
+        workspace_memory_context = await self._fetch_workspace_memory_context(context)
+        if workspace_memory_context:
+            messages.append(ChatMessage(role="system", content=workspace_memory_context))
+        file_context = _format_file_context(context)
+        if file_context:
+            messages.append(ChatMessage(role="system", content=file_context))
+        messages.extend(context.history)
+        messages.append(ChatMessage(role="user", content=context.message))
+        budget = BudgetState(credit_budget=context.creditBudget)
+        return await self._stream_model_answer(context.runId, messages, budget)
+
+    def _format_clarifying_answer(self, context: RunContext, intent) -> str:
+        if intent.clarifyingQuestion:
+            return intent.clarifyingQuestion
+        if intent.candidateToolCodes:
+            registry = ToolRegistry(context)
+            names = []
+            for code in intent.candidateToolCodes:
+                tool = registry.get(code)
+                names.append(tool.toolName if tool else code)
+            if len(names) >= 2:
+                return f"你说的范围有点宽，我更想先确认你想用哪一种：{'、'.join(names)}。请补充更具体的需求或参数。"
+            return "请补充你想完成的目标、对象和期望输出，我再帮你选择合适的工具。"
+        return "请补充你想完成的目标、对象和期望输出，我再帮你选择合适的工具。"
+
+    async def _run_deep_agents_or_chat(self, context: RunContext, intent=None) -> None:
+        module = self.dependency_loader()
+        if module is None:
+            answer = await self._run_chat(context, intent)
+            await self._complete_run(context, answer, intent=intent.intent.value if intent else Intent.GENERAL_CHAT.value)
             return
 
         module = self.ensure_available()
@@ -78,17 +425,93 @@ class DeepAgentsRuntimeEngine:
             )
             return
         workspace_memory_context = _format_workspace_memory_context(workspace_memory_items)
-        result = await _invoke_agent(
+        stream_result = await _invoke_agent_streaming(
             agent,
             {"messages": _messages(context, workspace_memory_context, workspace_file_context.prompt_context)},
+            context.runId,
+            self.backend_client,
             config={"callbacks": [SubagentTraceCallbackHandler(context.runId, self.backend_client)]},
         )
-        answer = _extract_final_answer(result)
+        if stream_result.result is not None:
+            answer = _extract_final_answer(stream_result.result)
+        elif stream_result.streamed_text:
+            answer = stream_result.streamed_text
+        else:
+            raise RuntimeError("deepagents returned no final answer")
         artifact = _parse_artifact_directive(answer)
         if artifact is not None:
             await self._create_artifact(context.runId, artifact)
         await self._emit_answer_events(context.runId, answer)
-        await self.backend_client.complete_run(
+        await self._complete_run(context, answer, intent=DEEP_AGENTS_INTENT)
+        await self._emit_memory_candidate(context.runId, answer, artifact)
+
+    # --- Synthesize tool answer ---
+
+    async def _synthesize_answer(self, context: RunContext, tool: ToolDescriptor, result: dict[str, Any], budget: BudgetState | None = None) -> str:
+        tool_arguments = result.get("arguments") if isinstance(result, dict) else {}
+        tool_data = result.get("data") if isinstance(result, dict) else {}
+        content_text = tool_data.get("contentText", "") if isinstance(tool_data, dict) else ""
+        messages_list = [
+            ChatMessage(role="system", content="Summarize the tool result for the user."),
+        ]
+        workspace_memory_context = await self._fetch_workspace_memory_context(context)
+        if workspace_memory_context:
+            messages_list.append(ChatMessage(role="system", content=workspace_memory_context))
+        if content_text:
+            messages_list.append(
+                ChatMessage(
+                    role="user",
+                    content=(
+                        f"User request: {context.message}\n"
+                        f"Tool arguments: {tool_arguments}\n"
+                        f"Tool output:\n{content_text}\n\n"
+                        "Use the tool output as the source of truth. Do not repeat identical paragraphs."
+                    ),
+                )
+            )
+        else:
+            messages_list.append(ChatMessage(role="user", content=f"User request: {context.message}\nTool result: {result}"))
+        return await self._stream_model_answer(context.runId, messages_list, budget)
+
+    # --- Common helpers ---
+
+    async def _stream_model_answer(self, run_id: int, messages_list: list[ChatMessage], budget: BudgetState | None = None) -> str:
+        if budget is not None:
+            self.budget_guard.reserve_model_call(budget)
+        parts: list[str] = []
+        stream = getattr(self.model, "chat_stream", None)
+        if stream is None:
+            answer = await self.model.chat(messages_list)
+            await self._emit_answer_events(run_id, answer)
+            return answer
+        async for chunk in self.model.chat_stream(messages_list):
+            parts.append(chunk)
+            await self.backend.append_event(
+                run_id,
+                RunEventCreate(eventType=MESSAGE_DELTA, eventText=chunk, eventJson={"delta": chunk}),
+            )
+        answer = "".join(parts)
+        await self.backend.append_event(
+            run_id,
+            RunEventCreate(eventType=MESSAGE_COMPLETED, eventText=answer, eventJson={"content": answer}),
+        )
+        return answer
+
+    async def _emit_answer_events(self, run_id: int, answer: str) -> None:
+        for chunk in _chunks(answer, 32):
+            await self.backend.append_event(
+                run_id,
+                RunEventCreate(eventType=MESSAGE_DELTA, eventText=chunk, eventJson={"delta": chunk}),
+            )
+        await self.backend.append_event(
+            run_id,
+            RunEventCreate(eventType=MESSAGE_COMPLETED, eventText=answer, eventJson={"content": answer}),
+        )
+
+    async def _complete_run(self, context: RunContext, final_answer: str, intent: str = Intent.GENERAL_CHAT.value) -> None:
+        consumed_credits = self.budget_guard.default_consumed_credits
+        model_name = getattr(self.model, "model_name", settings.model_name)
+        await self.backend.complete_run(
             context.runId,
             RunComplete(
                 finalAnswer=answer,
@@ -145,15 +568,9 @@ class DeepAgentsRuntimeEngine:
         return workspace_file_context
 
     async def _emit_answer_events(self, run_id: int, answer: str) -> None:
-        for chunk in _chunks(answer, 32):
-            await self.backend_client.append_event(
-                run_id,
-                RunEventCreate(eventType=MESSAGE_DELTA, eventText=chunk, eventJson={"delta": chunk}),
-            )
-        await self.backend_client.append_event(
-            run_id,
-            RunEventCreate(eventType=MESSAGE_COMPLETED, eventText=answer, eventJson={"content": answer}),
-        )
+        for chunk in _chunks(answer, 80):
+            await _append_answer_delta(self.backend_client, run_id, chunk)
+        await _append_answer_completed(self.backend_client, run_id, answer)
 
     async def _create_artifact(self, run_id: int, artifact: "ArtifactDirective") -> None:
         response = await self.backend_client.create_run_artifact(
@@ -201,6 +618,175 @@ async def _invoke_agent(agent, payload: dict, config: dict | None = None):
     if inspect.isawaitable(result):
         return await result
     return result
+
+
+@dataclass(frozen=True)
+class AgentStreamResult:
+    result: Any | None
+    streamed_text: str
+
+
+async def _invoke_agent_streaming(agent, payload: dict, run_id: int, backend_client, config: dict | None = None) -> AgentStreamResult:
+    stream_result = await _try_stream_events(agent, payload, run_id, backend_client, config)
+    if stream_result is not None:
+        return stream_result
+    result = await _invoke_agent(agent, payload, config=config)
+    return AgentStreamResult(result=result, streamed_text="")
+
+
+async def _try_stream_events(agent, payload: dict, run_id: int, backend_client, config: dict | None = None) -> AgentStreamResult | None:
+    for method_name in ("stream_events", "astream_events"):
+        method = getattr(agent, method_name, None)
+        if not callable(method):
+            continue
+        try:
+            stream = await _call_stream_events(method, payload, config=config)
+        except TypeError:
+            continue
+        result = await _consume_agent_event_stream(stream, run_id, backend_client)
+        if result.streamed_text or result.result is not None:
+            return result
+    return None
+
+
+async def _call_stream_events(method, payload: dict, config: dict | None = None):
+    try:
+        stream = method(payload, config=config, version="v2")
+    except TypeError:
+        try:
+            stream = method(payload, config=config)
+        except TypeError:
+            stream = method(payload)
+    if inspect.isawaitable(stream):
+        return await stream
+    return stream
+
+
+async def _consume_agent_event_stream(stream, run_id: int, backend_client) -> AgentStreamResult:
+    chunks: list[str] = []
+    result: Any | None = None
+    projection_messages = getattr(stream, "messages", None)
+    if projection_messages is not None:
+        if callable(projection_messages):
+            projection_messages = projection_messages()
+        async for message in _iterate_maybe_async(projection_messages):
+            chunk = _stream_delta_content(message)
+            if chunk:
+                chunks.append(chunk)
+                await _append_answer_delta(backend_client, run_id, chunk)
+        result = await _stream_output(stream)
+        return AgentStreamResult(result=result, streamed_text="".join(chunks))
+    async for event in _iterate_maybe_async(stream):
+        chunk = _event_delta(event)
+        if chunk:
+            chunks.append(chunk)
+            await _append_answer_delta(backend_client, run_id, chunk)
+        final_output = _event_final_output(event)
+        if final_output is not None:
+            result = final_output
+    return AgentStreamResult(result=result, streamed_text="".join(chunks))
+
+
+async def _iterate_maybe_async(value):
+    if inspect.isawaitable(value):
+        value = await value
+    if isinstance(value, AsyncIterable):
+        async for item in value:
+            yield item
+        return
+    if isinstance(value, Iterable) and not isinstance(value, (str, bytes, dict)):
+        for item in value:
+            yield item
+        return
+    return
+
+
+async def _stream_output(stream):
+    output = getattr(stream, "output", None)
+    if callable(output):
+        output = output()
+    if inspect.isawaitable(output):
+        output = await output
+    return output
+
+
+async def _append_answer_delta(backend_client, run_id: int, chunk: str) -> None:
+    await backend_client.append_event(
+        run_id,
+        RunEventCreate(eventType=MESSAGE_DELTA, eventText=chunk, eventJson={"delta": chunk}),
+    )
+
+
+async def _append_answer_completed(backend_client, run_id: int, answer: str) -> None:
+    await backend_client.append_event(
+        run_id,
+        RunEventCreate(eventType=MESSAGE_COMPLETED, eventText=answer, eventJson={"content": answer}),
+    )
+
+
+def _event_delta(event) -> str:
+    if not isinstance(event, dict):
+        return _stream_delta_content(event)
+    event_name = event.get("event") or event.get("eventType")
+    if event_name not in {"message.delta", "on_chat_model_stream", "on_llm_stream"}:
+        return ""
+    data = event.get("data")
+    if isinstance(data, dict):
+        for key in ("delta", "text", "content"):
+            value = data.get(key)
+            if isinstance(value, str):
+                return value
+        return _stream_delta_content(data.get("chunk") or data.get("message") or data.get("output"))
+    return _stream_delta_content(event.get("delta") or event.get("content"))
+
+
+def _event_final_output(event) -> Any | None:
+    if not isinstance(event, dict):
+        return None
+    event_name = event.get("event") or event.get("eventType")
+    if event_name not in {"message.completed", "on_chain_end", "on_graph_end", "run.completed"}:
+        return None
+    data = event.get("data")
+    if isinstance(data, dict):
+        for key in ("output", "result", "final_answer", "finalAnswer"):
+            if key in data:
+                return data[key]
+    for key in ("output", "result", "final_answer", "finalAnswer"):
+        if key in event:
+            return event[key]
+    return None
+
+
+def _stream_delta_content(value) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        for key in ("delta", "text", "content"):
+            content = value.get(key)
+            if isinstance(content, str):
+                return content
+        content = value.get("chunk") or value.get("message")
+    else:
+        content = getattr(value, "content", None)
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict) and isinstance(item.get("text"), str):
+                parts.append(item["text"])
+        return "".join(parts)
+    return ""
+
+
+def _completion_suffix(answer: str, streamed_text: str) -> str:
+    if not answer or answer == streamed_text:
+        return ""
+    return answer[len(streamed_text) :] if answer.startswith(streamed_text) else ""
 
 
 class SubagentTraceCallbackHandler(AsyncCallbackHandler):

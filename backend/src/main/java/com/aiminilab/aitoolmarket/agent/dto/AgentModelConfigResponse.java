@@ -2,7 +2,11 @@ package com.aiminilab.aitoolmarket.agent.dto;
 
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
 
+import com.aiminilab.aitoolmarket.agent.support.ModelCapabilitiesCodec;
+
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.List;
 
 public record AgentModelConfigResponse(
         Long id,
@@ -13,13 +17,27 @@ public record AgentModelConfigResponse(
         String baseUrl,
         String apiKeyMasked,
         String minimaxGroupId,
+        String consoleUrl,
+        String balanceUrl,
+        String docsUrl,
         Integer timeoutSeconds,
+        BigDecimal inputTokenPricePer1k,
+        BigDecimal outputTokenPricePer1k,
+        BigDecimal inputTokenPricePer1m,
+        BigDecimal outputTokenPricePer1m,
+        String billingUnit,
+        BigDecimal unitPrice,
         Boolean enabled,
         Boolean isDefault,
+        List<String> capabilities,
         LocalDateTime createdAt,
         LocalDateTime updatedAt
 ) {
     public static AgentModelConfigResponse from(AgentModelConfig config) {
+        return from(config, new ModelCapabilitiesCodec(new com.fasterxml.jackson.databind.ObjectMapper()));
+    }
+
+    public static AgentModelConfigResponse from(AgentModelConfig config, ModelCapabilitiesCodec codec) {
         return new AgentModelConfigResponse(
                 config.getId(),
                 config.getDisplayName(),
@@ -29,9 +47,19 @@ public record AgentModelConfigResponse(
                 config.getBaseUrl(),
                 mask(config.getApiKey()),
                 config.getMinimaxGroupId(),
+                config.getConsoleUrl(),
+                config.getBalanceUrl(),
+                config.getDocsUrl(),
                 config.getTimeoutSeconds(),
+                config.getInputTokenPricePer1k(),
+                config.getOutputTokenPricePer1k(),
+                config.getInputTokenPricePer1m(),
+                config.getOutputTokenPricePer1m(),
+                config.getBillingUnit(),
+                config.getUnitPrice(),
                 config.getEnabled(),
                 config.getDefault(),
+                codec.parse(config.getCapabilities()),
                 config.getCreatedAt(),
                 config.getUpdatedAt()
         );

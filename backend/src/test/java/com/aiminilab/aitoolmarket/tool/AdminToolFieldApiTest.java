@@ -64,6 +64,42 @@ class AdminToolFieldApiTest {
                 .andExpect(jsonPath("$.data.schemaVersion").value("v2"))
                 .andExpect(jsonPath("$.data.items[0].fieldKey").value("topic"));
 
+        mockMvc.perform(post("/api/admin/v1/tools/{toolId}/field-schemas", toolId)
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "schemaVersion": "v3",
+                                  "items": [
+                                    {
+                                      "fieldKey": "topic",
+                                      "fieldName": "主题",
+                                      "fieldType": "textarea",
+                                      "placeholder": "输入新的主题",
+                                      "required": false,
+                                      "sortOrder": 1
+                                    },
+                                    {
+                                      "fieldKey": "style",
+                                      "fieldName": "风格",
+                                      "fieldType": "select",
+                                      "options": [
+                                        {"label": "写实", "value": "写实"},
+                                        {"label": "电商", "value": "电商"}
+                                      ],
+                                      "required": true,
+                                      "sortOrder": 2
+                                    }
+                                  ]
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.schemaVersion").value("v3"))
+                .andExpect(jsonPath("$.data.items[0].fieldKey").value("topic"))
+                .andExpect(jsonPath("$.data.items[0].fieldType").value("textarea"))
+                .andExpect(jsonPath("$.data.items[0].required").value(false))
+                .andExpect(jsonPath("$.data.items[1].fieldKey").value("style"));
+
         String schemaId = mockMvc.perform(get("/api/admin/v1/tools/{toolId}/field-schemas", toolId)
                         .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isOk())

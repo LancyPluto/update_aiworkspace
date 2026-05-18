@@ -26,10 +26,13 @@ import {
   Search,
   Filter,
   Eye,
+  Download,
+  ExternalLink,
   RefreshCw,
   AlertCircle,
   CheckCircle,
   Clock,
+  Music,
   XCircle,
 } from "lucide-react"
 import {
@@ -37,6 +40,7 @@ import {
   fetchAdminTasks,
   retryAdminTask,
 } from "@/lib/api/tasks"
+import { AgentRunsContent } from "@/app/agent-runs/page"
 import { ApiError } from "@/lib/api/http"
 import type { AdminTaskApiPayload } from "@/lib/api/types"
 
@@ -54,6 +58,7 @@ interface Task {
   credits: number | null
   input: string
   output: string
+  outputResourceType: string
   error: string
   createdAt: string
   completedAt: string
@@ -125,12 +130,137 @@ function rowToTask(row: AdminTaskApiPayload): Task {
     rawStatus: row.status,
     credits: null,
     input: "",
-    output: "",
+    output: row.result?.contentText || "",
+    outputResourceType: row.result?.resourceType || "",
     error: taskFailureHint(row),
     createdAt: formatDateTime(row.createdAt),
     completedAt: formatDateTime(row.finishedAt),
     duration: computeDuration(row.createdAt, row.finishedAt),
   }
+}
+
+interface AudioResultItem {
+  url?: string
+  sourceUrl?: string
+  contentType?: string
+}
+
+interface AudioResultPayload {
+  provider?: string
+  model?: string
+  audios?: AudioResultItem[]
+  metadata?: Record<string, unknown>
+}
+
+function parseJsonObject(value: string): Record<string, unknown> | null {
+  if (!value.trim()) return null
+  try {
+    const parsed = JSON.parse(value)
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null
+  } catch {
+    return null
+  }
+}
+
+function resolveMediaUrl(url?: string): string {
+  if (!url) return ""
+  if (/^https?:\/\//i.test(url)) return url
+  const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL
+    || (typeof window !== "undefined"
+      && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
+      && window.location.port === "5174"
+      ? "http://127.0.0.1:8080"
+      : "")
+  return `${baseUrl}${url.startsWith("/") ? url : `/${url}`}`
+}
+
+function formatBytes(value: unknown): string {
+  const bytes = Number(value)
+  if (!Number.isFinite(bytes) || bytes <= 0) return "-"
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(2)} MB`
+}
+
+function formatAudioLength(value: unknown): string {
+  const milliseconds = Number(value)
+  if (!Number.isFinite(milliseconds) || milliseconds <= 0) return "-"
+  const seconds = milliseconds / 1000
+  return seconds < 60 ? `${seconds.toFixed(1)} 秒` : `${Math.floor(seconds / 60)} 分 ${Math.round(seconds % 60)} 秒`
+}
+
+function renderTaskOutput(task?: Task | null) {
+  const content = task?.output || ""
+  const resourceType = (task?.outputResourceType || "").toUpperCase()
+  const parsed = parseJsonObject(content) as AudioResultPayload | null
+  const audios = Array.isArray(parsed?.audios) ? parsed.audios.filter((item) => item?.url) : []
+
+  if ((resourceType === "AUDIO" || audios.length > 0) && audios.length > 0) {
+    const metadata = parsed?.metadata || {}
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center gap-3">
+          <div className="rounded-lg bg-primary/10 p-2">
+            <Music className="h-5 w-5 text-primary" />
+          </div>
+          <div>
+            <p className="font-medium text-card-foreground">音频已生成</p>
+            <p className="text-xs text-muted-foreground">
+              {parsed?.provider || "TTS"}{parsed?.model ? ` · ${parsed.model}` : ""}
+            </p>
+          </div>
+        </div>
+        {audios.map((audio, index) => {
+          const mediaUrl = resolveMediaUrl(audio.url)
+          return (
+            <div key={`${audio.url}-${index}`} className="rounded-lg border border-border bg-background p-4">
+              <audio controls preload="metadata" className="w-full" src={mediaUrl}>
+                当前浏览器不支持音频播放。
+              </audio>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button asChild size="sm" variant="outline">
+                  <a href={mediaUrl} download>
+                    <Download className="mr-2 h-4 w-4" />
+                    下载音频
+                  </a>
+                </Button>
+                <Button asChild size="sm" variant="ghost">
+                  <a href={mediaUrl} target="_blank" rel="noreferrer">
+                    <ExternalLink className="mr-2 h-4 w-4" />
+                    新窗口打开
+                  </a>
+                </Button>
+              </div>
+            </div>
+          )
+        })}
+        <div className="grid gap-3 text-sm sm:grid-cols-2">
+          <div className="rounded-md bg-background p-3">
+            <p className="text-muted-foreground">时长</p>
+            <p className="font-medium">{formatAudioLength(metadata.audio_length)}</p>
+          </div>
+          <div className="rounded-md bg-background p-3">
+            <p className="text-muted-foreground">文件大小</p>
+            <p className="font-medium">{formatBytes(metadata.audio_size)}</p>
+          </div>
+          <div className="rounded-md bg-background p-3">
+            <p className="text-muted-foreground">采样率</p>
+            <p className="font-medium">{metadata.audio_sample_rate ? `${metadata.audio_sample_rate} Hz` : "-"}</p>
+          </div>
+          <div className="rounded-md bg-background p-3">
+            <p className="text-muted-foreground">计费字符</p>
+            <p className="font-medium">{metadata.usage_characters ?? "-"}</p>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <pre className="whitespace-pre-wrap text-sm">
+      {content || "暂无输出"}
+    </pre>
+  )
 }
 
 export default function TasksPage() {
@@ -200,6 +330,7 @@ export default function TasksPage() {
         ...item,
         input: buildParamsText(detail.params),
         output: detail.result?.contentText || "",
+        outputResourceType: detail.result?.resourceType || "",
         error: taskFailureHint(detail) || item.error,
         credits: row.credits,
         completedAt: row.completedAt,
@@ -292,9 +423,7 @@ export default function TasksPage() {
                 </TabsContent>
                 <TabsContent value="output" className="mt-4">
                   <div className="rounded-lg bg-secondary p-4">
-                    <pre className="whitespace-pre-wrap text-sm">
-                      {selectedTask?.output || "暂无输出"}
-                    </pre>
+                    {renderTaskOutput(selectedTask)}
                   </div>
                 </TabsContent>
                 {(selectedTask?.error || item.error) && (
@@ -365,62 +494,75 @@ export default function TasksPage() {
     ? `加载失败：${error}`
     : loading
       ? "正在加载任务列表..."
-      : "查看和管理所有 AI 任务执行记录"
+      : "查看和管理 AI 任务执行记录与 Agent 运行记录"
 
   return (
     <AdminLayout>
       <AdminHeader title="任务管理" description={headerDescription} />
 
       <div className="p-6 space-y-6">
-        {/* Stats */}
-        <div className="grid gap-4 md:grid-cols-4">
-          {stats.map((stat) => (
-            <div
-              key={stat.label}
-              className="rounded-xl border border-border bg-card p-4"
-            >
-              <div className="flex items-center gap-3">
-                <div className="rounded-lg bg-secondary p-2">
-                  <stat.icon className={`h-5 w-5 ${stat.color}`} />
+        <Tabs defaultValue="tasks" className="space-y-6">
+          <TabsList className="bg-secondary">
+            <TabsTrigger value="tasks">AI 任务</TabsTrigger>
+            <TabsTrigger value="agent-runs">Agent 运行</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="tasks" className="space-y-6">
+            {/* Stats */}
+            <div className="grid gap-4 md:grid-cols-4">
+              {stats.map((stat) => (
+                <div
+                  key={stat.label}
+                  className="rounded-xl border border-border bg-card p-4"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="rounded-lg bg-secondary p-2">
+                      <stat.icon className={`h-5 w-5 ${stat.color}`} />
+                    </div>
+                    <div>
+                      <p className="text-2xl font-semibold text-card-foreground">
+                        {stat.value.toLocaleString()}
+                      </p>
+                      <p className="text-sm text-muted-foreground">{stat.label}</p>
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-2xl font-semibold text-card-foreground">
-                    {stat.value.toLocaleString()}
-                  </p>
-                  <p className="text-sm text-muted-foreground">{stat.label}</p>
-                </div>
-              </div>
+              ))}
             </div>
-          ))}
-        </div>
 
-        {/* Filters */}
-        <div className="flex items-center gap-4">
-          <div className="relative flex-1 max-w-md">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              placeholder="搜索任务 ID、用户或工具..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-9 bg-secondary border-0"
-            />
-          </div>
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="w-40 bg-secondary border-0">
-              <Filter className="mr-2 h-4 w-4" />
-              <SelectValue placeholder="状态筛选" />
-            </SelectTrigger>
-            <SelectContent className="bg-card border-border">
-              <SelectItem value="all">全部状态</SelectItem>
-              <SelectItem value="active">已完成</SelectItem>
-              <SelectItem value="pending">生成中</SelectItem>
-              <SelectItem value="error">失败</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
+            {/* Filters */}
+            <div className="flex items-center gap-4">
+              <div className="relative flex-1 max-w-md">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  placeholder="搜索任务 ID、用户或工具..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-9 bg-secondary border-0"
+                />
+              </div>
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger className="w-40 bg-secondary border-0">
+                  <Filter className="mr-2 h-4 w-4" />
+                  <SelectValue placeholder="状态筛选" />
+                </SelectTrigger>
+                <SelectContent className="bg-card border-border">
+                  <SelectItem value="all">全部状态</SelectItem>
+                  <SelectItem value="active">已完成</SelectItem>
+                  <SelectItem value="pending">生成中</SelectItem>
+                  <SelectItem value="error">失败</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
 
-        {/* Tasks Table */}
-        <DataTable columns={taskColumns} data={filteredTasks} />
+            {/* Tasks Table */}
+            <DataTable columns={taskColumns} data={filteredTasks} />
+          </TabsContent>
+
+          <TabsContent value="agent-runs">
+            <AgentRunsContent />
+          </TabsContent>
+        </Tabs>
       </div>
     </AdminLayout>
   )

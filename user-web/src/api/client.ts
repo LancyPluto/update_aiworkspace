@@ -7,7 +7,7 @@ import { clearSessionBearerJwt, getSessionBearerJwt } from "./sessionBearer"
  * 接口路径本身已含 /api/v1/...（见契约 §8）
  */
 export function getApiOrigin(): string {
-  const raw = import.meta.env.VITE_API_BASE ?? ""
+  const raw = import.meta.env.VITE_API_BASE ?? import.meta.env.VITE_API_BASE_URL ?? ""
   return raw.replace(/\/$/, "")
 }
 

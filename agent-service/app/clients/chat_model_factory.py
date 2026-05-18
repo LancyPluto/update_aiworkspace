@@ -19,6 +19,11 @@ class MockChatModel:
         last = messages[-1].content if messages else ""
         return type("MockMessage", (), {"content": f"Mock agent answer for: {last}"})()
 
+    async def astream(self, messages: list[Any]):
+        last = messages[-1].content if messages else ""
+        for chunk in ("Mock agent answer for: ", str(last)):
+            yield type("MockMessageChunk", (), {"content": chunk})()
+
 
 class ChatModelFactory:
     def __init__(

@@ -11,6 +11,7 @@ import com.aiminilab.aitoolmarket.auth.security.AuthContext;
 import com.aiminilab.aitoolmarket.common.dto.ApiResponse;
 import com.aiminilab.aitoolmarket.common.dto.PageResponse;
 import jakarta.validation.Valid;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -52,6 +53,12 @@ public class AgentSessionController {
                                                                     @RequestParam(required = false) Integer pageNo,
                                                                     @RequestParam(required = false) Integer pageSize) {
         return ApiResponse.success(agentSessionService.messages(AuthContext.get().userId(), sessionId, pageNo, pageSize));
+    }
+
+    @DeleteMapping("/{sessionId}")
+    public ApiResponse<Void> delete(@PathVariable Long sessionId) {
+        agentSessionService.delete(AuthContext.get().userId(), sessionId);
+        return ApiResponse.success(null);
     }
 
     @PostMapping("/{sessionId}/messages")

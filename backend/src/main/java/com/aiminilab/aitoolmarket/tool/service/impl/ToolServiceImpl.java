@@ -2,7 +2,9 @@ package com.aiminilab.aitoolmarket.tool.service.impl;
 
 import com.aiminilab.aitoolmarket.common.dto.PageResponse;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
+import com.aiminilab.aitoolmarket.common.enums.ToolModality;
 import com.aiminilab.aitoolmarket.common.enums.ToolStatus;
+import com.aiminilab.aitoolmarket.common.enums.ToolType;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.tool.dto.CreateFieldSchemaRequest;
 import com.aiminilab.aitoolmarket.tool.dto.CreatePromptRequest;
@@ -35,9 +37,14 @@ import com.aiminilab.aitoolmarket.tool.mapper.ToolFieldSchemaMapper;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolMapper;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolPromptMapper;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolPromptVersionMapper;
+import com.aiminilab.aitoolmarket.agent.service.ModelCapabilityService;
+import com.aiminilab.aitoolmarket.tool.dto.ApplyToolTemplateRequest;
 import com.aiminilab.aitoolmarket.tool.service.ToolService;
+import com.aiminilab.aitoolmarket.tool.service.ToolTemplateService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -47,6 +54,8 @@ import java.util.Map;
 @Service
 public class ToolServiceImpl implements ToolService {
 
+    private static final Logger log = LoggerFactory.getLogger(ToolServiceImpl.class);
+
     private final ToolMapper toolMapper;
     private final ToolCategoryMapper toolCategoryMapper;
     private final ToolFieldSchemaMapper toolFieldSchemaMapper;
@@ -54,11 +63,14 @@ public class ToolServiceImpl implements ToolService {
     private final ToolPromptMapper toolPromptMapper;
     private final ToolPromptVersionMapper toolPromptVersionMapper;
     private final ObjectMapper objectMapper;
+    private final ToolTemplateService toolTemplateService;
+    private final ModelCapabilityService modelCapabilityService;
 
     public ToolServiceImpl(ToolMapper toolMapper, ToolCategoryMapper toolCategoryMapper,
                            ToolFieldSchemaMapper toolFieldSchemaMapper, ToolFieldItemMapper toolFieldItemMapper,
                            ToolPromptMapper toolPromptMapper, ToolPromptVersionMapper toolPromptVersionMapper,
-                           ObjectMapper objectMapper) {
+                           ObjectMapper objectMapper, ToolTemplateService toolTemplateService,
+                           ModelCapabilityService modelCapabilityService) {
         this.toolMapper = toolMapper;
         this.toolCategoryMapper = toolCategoryMapper;
         this.toolFieldSchemaMapper = toolFieldSchemaMapper;
@@ -66,6 +78,8 @@ public class ToolServiceImpl implements ToolService {
         this.toolPromptMapper = toolPromptMapper;
         this.toolPromptVersionMapper = toolPromptVersionMapper;
         this.objectMapper = objectMapper;
+        this.toolTemplateService = toolTemplateService;
+        this.modelCapabilityService = modelCapabilityService;
     }
 
     @Override
@@ -159,16 +173,57 @@ public class ToolServiceImpl implements ToolService {
         AiTool tool = fromRequest(request);
         tool.setToolCode(toolCode);
         Long toolId = toolMapper.insertTool(tool, operatorId);
-        Long schemaId = toolFieldSchemaMapper.createActiveDefaultSchema(toolId, operatorId);
-        toolFieldItemMapper.createDefaultFields(schemaId);
+        toolFieldSchemaMapper.createActiveDefaultSchema(toolId, operatorId);
+        if (request.templateCode() != null && !request.templateCode().isBlank()) {
+            toolTemplateService.applyToTool(toolId,
+                    new ApplyToolTemplateRequest(request.templateCode(), true, true),
+                    operatorId);
+        } else {
+            Long schemaId = toolFieldSchemaMapper.findActiveSchemaId(toolId)
+                    .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具字段配置不存在"));
+            toolFieldItemMapper.createDefaultFields(schemaId);
+        }
+        AiTool persisted = toolMapper.findById(toolId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在"));
+        modelCapabilityService.validateToolModelBinding(persisted);
         return findToolSummary(toolId);
+    }
+
+    @Override
+    @Transactional
+    public void applyTemplate(Long toolId, ApplyToolTemplateRequest request, Long operatorId) {
+        ensureToolExists(toolId);
+        toolTemplateService.applyToTool(toolId, request, operatorId);
+        AiTool persisted = toolMapper.findById(toolId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在"));
+        modelCapabilityService.validateToolModelBinding(persisted);
     }
 
     @Override
     public ToolSummaryResponse updateTool(Long toolId, UpsertToolRequest request, Long operatorId) {
         ensureToolExists(toolId);
-        toolMapper.updateTool(toolId, fromRequest(request), operatorId);
+        AiTool tool = fromRequest(request);
+        tool.setId(toolId);
+        AiTool existing = toolMapper.findById(toolId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在"));
+        if (tool.getExecutionHandler() == null || tool.getExecutionHandler().isBlank()) {
+            tool.setExecutionHandler(existing.getExecutionHandler());
+        }
+        modelCapabilityService.validateToolModelBinding(tool);
+        toolMapper.updateTool(toolId, tool, operatorId);
         return findToolSummary(toolId);
+    }
+
+    @Override
+    public void deleteTool(Long toolId, Long operatorId) {
+        AiTool existing = toolMapper.findById(toolId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在或已删除"));
+        int updated = toolMapper.softDeleteTool(toolId, operatorId);
+        if (updated == 0) {
+            throw new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在或已删除");
+        }
+        log.info("Admin deleted AI tool: toolId={}, toolCode={}, toolName={}, operatorId={}",
+                toolId, existing.getToolCode(), existing.getToolName(), operatorId);
     }
 
     @Override
@@ -343,6 +398,11 @@ public class ToolServiceImpl implements ToolService {
         tool.setCategoryId(request.categoryId());
         tool.setDescription(request.description());
         tool.setCoverUrl(request.coverUrl());
+        ToolType toolType = ToolType.fromNullable(request.toolType());
+        tool.setToolType(toolType.name());
+        tool.setInputModality(normalizeInputModality(toolType, request.inputModality()).name());
+        tool.setOutputModality(normalizeOutputModality(toolType, request.outputModality()).name());
+        tool.setConfigNote(blankToNull(request.configNote()));
         tool.setEstimatedCreditCost(request.estimatedCreditCost());
         tool.setModelConfigId(request.modelConfigId());
         return tool;
@@ -367,6 +427,38 @@ public class ToolServiceImpl implements ToolService {
             suffix++;
         }
         return candidate;
+    }
+
+    private ToolModality normalizeInputModality(ToolType toolType, String value) {
+        return ToolModality.fromNullable(value, defaultInputModality(toolType));
+    }
+
+    private ToolModality normalizeOutputModality(ToolType toolType, String value) {
+        return ToolModality.fromNullable(value, defaultOutputModality(toolType));
+    }
+
+    private ToolModality defaultInputModality(ToolType toolType) {
+        return switch (toolType) {
+            case IMAGE_TO_IMAGE, IMAGE_UNDERSTANDING -> ToolModality.IMAGE;
+            case SPEECH_TO_TEXT -> ToolModality.AUDIO;
+            case VIDEO_GENERATION -> ToolModality.TEXT;
+            case AGENT -> ToolModality.MULTIMODAL;
+            default -> ToolModality.TEXT;
+        };
+    }
+
+    private ToolModality defaultOutputModality(ToolType toolType) {
+        return switch (toolType) {
+            case IMAGE_GENERATION, IMAGE_TO_IMAGE -> ToolModality.IMAGE;
+            case TEXT_TO_SPEECH -> ToolModality.AUDIO;
+            case VIDEO_GENERATION -> ToolModality.VIDEO;
+            case EMBEDDING, RERANK -> ToolModality.JSON;
+            default -> ToolModality.TEXT;
+        };
+    }
+
+    private String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
     }
 
     private void ensureToolExists(Long toolId) {
@@ -493,7 +585,7 @@ public class ToolServiceImpl implements ToolService {
         item.setFieldName(request.fieldName());
         item.setFieldType(request.fieldType());
         item.setPlaceholder(request.placeholder());
-        item.setOptionsJson(request.options() == null ? null : request.options().toString());
+        item.setOptionsJson(request.resolveOptionsJson());
         item.setRequired(request.required() == null || request.required());
         item.setSortOrder(request.sortOrder() == null ? 0 : request.sortOrder());
         return item;
