@@ -1,6 +1,6 @@
 <script setup lang="ts">
   import { onMounted, ref, watch } from "vue"
-  import { Bot, Loader2, Plus, Sparkles, Trash2 } from "lucide-vue-next"
+  import { Bot, ChevronLeft, ChevronRight, Loader2, Plus, Sparkles, Trash2 } from "lucide-vue-next"
   import AppShell from "@/components/AppShell.vue"
   import WorkspaceMemoryPanel from "./WorkspaceMemoryPanel.vue"
   import AgentChatPane from "./AgentChatPane.vue"
@@ -127,6 +127,12 @@
 <template>
   <AppShell title="Agent" description="用自然语言让系统推荐、确认并调用工具">
     <div class="agent-page" :class="{ 'agent-page--session-collapsed': !sessionSidebarOpen }">
+      <!-- 侧边栏切换按钮 -->
+      <button class="sidebar-toggle-btn" @click="toggleSessionSidebar">
+        <ChevronRight v-if="!sessionSidebarOpen" class="h-4 w-4" />
+        <ChevronLeft v-else class="h-4 w-4" />
+      </button>
+
       <aside class="agent-sidebar" :class="{ 'agent-sidebar--collapsed': !sessionSidebarOpen }">
         <button class="new-chat" type="button" @click="startSession()">
           <Plus class="h-4 w-4" />
@@ -196,11 +202,31 @@
   .agent-page {
     display: grid;
     grid-template-columns: 280px minmax(0, 1fr) 320px;
-    min-height: calc(100vh - 64px);
+    height: calc(100vh - 64px);
+    overflow: hidden;
+    position: relative;
   }
 
   .agent-page--session-collapsed {
     grid-template-columns: 0 minmax(0, 1fr) 320px;
+  }
+
+  /* 侧边栏显隐按钮样式 */
+  .sidebar-toggle-btn {
+    position: absolute;
+    left: 10px;
+    top: 12px;
+    z-index: 10;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: 1px solid var(--border);
+    background: var(--card);
+    color: var(--foreground);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
   }
 
   .agent-sidebar {
@@ -245,6 +271,7 @@
     color: var(--primary-foreground);
     font-size: 14px;
     cursor: pointer;
+    margin-top: 30px;
   }
 
   .sidebar-error {
@@ -326,11 +353,11 @@
     min-width: 0;
     min-height: 0;
     height: 100%;
+    overflow: hidden;
   }
 
   .chat-pane-empty {
     flex: 1;
-    min-height: 58vh;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -370,12 +397,16 @@
   .agent-memory-panel {
     min-width: 0;
     min-height: 0;
+    height: 100%;
+    overflow: hidden;
   }
 
   @media (max-width: 900px) {
     .agent-page {
       grid-template-columns: minmax(140px, 36vw) minmax(0, 1fr);
       grid-template-rows: minmax(0, 1fr) auto;
+      height: calc(100vh - 64px);
+      overflow: hidden;
     }
 
     .agent-page--session-collapsed {
