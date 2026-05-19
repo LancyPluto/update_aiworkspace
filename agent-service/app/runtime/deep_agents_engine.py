@@ -11,6 +11,7 @@ from app.core.budget_guard import BudgetExceeded, BudgetGuard, BudgetState
 from app.core.event_types import (
     INTENT_DETECTED,
     MEMORY_CANDIDATE_CREATED,
+    MEMORY_CONTEXT_FROZEN,
     MESSAGE_COMPLETED,
     MESSAGE_DELTA,
     RUN_STARTED,
@@ -30,6 +31,7 @@ from app.runtime.subagent_profiles import default_subagent_profiles, profiles_to
 from app.runtime.workspace_files import WorkspaceFileContext, build_workspace_file_context
 from app.security.prompt_guard import PromptGuard
 from app.tools.backend_tool import BackendToolBridge
+from app.tools.memory_tool import MEMORY_TOOL_SYSTEM_PROMPT, MemoryTool, _format_memory_tool_definitions
 from app.tools.missing_argument_hints import format_missing_tool_arguments_message
 from app.tools.registry import ToolRegistry
 from langchain_core.callbacks import AsyncCallbackHandler
@@ -388,14 +390,36 @@ class DeepAgentsRuntimeEngine:
         messages = [ChatMessage(role="system", content=system_prompt)]
         workspace_memory_context = await self._fetch_workspace_memory_context(context)
         if workspace_memory_context:
-            messages.append(ChatMessage(role="system", content=workspace_memory_context))
+            messages.append(ChatMessage(
+                role="system",
+                content=f"<!-- frozen memory snapshot -->\n{workspace_memory_context}",
+            ))
+
+        # Emit frozen event so frontend/tracing can see the snapshot state
+        await self.backend.append_event(
+            context.runId,
+            RunEventCreate(
+                eventType=MEMORY_CONTEXT_FROZEN,
+                eventJson={
+                    "frozen": bool(workspace_memory_context),
+                    "count": len(workspace_memory_context) if workspace_memory_context else 0,
+                },
+            ),
+        )
+
         file_context = _format_file_context(context)
         if file_context:
             messages.append(ChatMessage(role="system", content=file_context))
+
+        memory_tool = None
+        if context.workspaceId and settings.agent_memory_auto_save_enabled:
+            memory_tool = MemoryTool(self.backend, context.workspaceId, context.userId, run_id=context.runId)
+            messages.append(ChatMessage(role="system", content=MEMORY_TOOL_SYSTEM_PROMPT))
+
         messages.extend(context.history)
         messages.append(ChatMessage(role="user", content=context.message))
         budget = BudgetState(credit_budget=context.creditBudget)
-        return await self._stream_model_answer(context.runId, messages, budget)
+        return await self._stream_model_answer(context.runId, messages, budget, memory_tool=memory_tool)
 
     def _format_clarifying_answer(self, context: RunContext, intent) -> str:
         if intent.clarifyingQuestion:
@@ -444,6 +468,19 @@ class DeepAgentsRuntimeEngine:
             return
 
         workspace_memory_context = _format_workspace_memory_context(workspace_memory_items)
+
+        # Emit frozen event for deep agents path
+        await self.backend.append_event(
+            context.runId,
+            RunEventCreate(
+                eventType=MEMORY_CONTEXT_FROZEN,
+                eventJson={
+                    "frozen": bool(workspace_memory_context),
+                    "count": len(workspace_memory_items),
+                },
+            ),
+        )
+
         result = await _invoke_agent(
             agent,
             {"messages": _messages(context, workspace_memory_context, workspace_file_context.prompt_context)},
@@ -469,6 +506,10 @@ class DeepAgentsRuntimeEngine:
         workspace_memory_context = await self._fetch_workspace_memory_context(context)
         if workspace_memory_context:
             messages_list.append(ChatMessage(role="system", content=workspace_memory_context))
+        memory_tool = None
+        if context.workspaceId and settings.agent_memory_auto_save_enabled:
+            memory_tool = MemoryTool(self.backend, context.workspaceId, context.userId, run_id=context.runId)
+            messages_list.append(ChatMessage(role="system", content=MEMORY_TOOL_SYSTEM_PROMPT))
         if content_text:
             messages_list.append(
                 ChatMessage(
@@ -483,20 +524,27 @@ class DeepAgentsRuntimeEngine:
             )
         else:
             messages_list.append(ChatMessage(role="user", content=f"User request: {context.message}\nTool result: {result}"))
-        return await self._stream_model_answer(context.runId, messages_list, budget)
+        return await self._stream_model_answer(context.runId, messages_list, budget, memory_tool=memory_tool)
 
     # --- Common helpers ---
 
-    async def _stream_model_answer(self, run_id: int, messages_list: list[ChatMessage], budget: BudgetState | None = None) -> str:
+    async def _stream_model_answer(
+        self, run_id: int, messages_list: list[ChatMessage],
+        budget: BudgetState | None = None,
+        memory_tool: MemoryTool | None = None,
+    ) -> str:
         if budget is not None:
             self.budget_guard.reserve_model_call(budget)
         parts: list[str] = []
         stream = getattr(self.model, "chat_stream", None)
+        extra_kwargs: dict[str, Any] = {}
+        if memory_tool is not None and settings.agent_memory_auto_save_enabled:
+            extra_kwargs["tools"] = _format_memory_tool_definitions()
         if stream is None:
-            answer = await self.model.chat(messages_list)
+            answer = await self.model.chat(messages_list, tools=extra_kwargs.get("tools"))
             await self._emit_answer_events(run_id, answer)
             return answer
-        async for chunk in self.model.chat_stream(messages_list):
+        async for chunk in self.model.chat_stream(messages_list, tools=extra_kwargs.get("tools")):
             parts.append(chunk)
             await self.backend.append_event(
                 run_id,
@@ -547,7 +595,11 @@ class DeepAgentsRuntimeEngine:
         if workspace_id is None:
             return []
         try:
-            return await self.backend.retrieve_workspace_memory(workspace_id=workspace_id, query=context.message, limit=5)
+            return await self.backend.retrieve_workspace_memory(
+                workspace_id=workspace_id,
+                query=context.message,
+                limit=settings.agent_memory_retrieval_limit,
+            )
         except Exception:
             return []
 
@@ -833,23 +885,38 @@ def _format_file_context(context: RunContext) -> str:
 
 
 def _format_workspace_memory_context(items: list[WorkspaceMemoryItem]) -> str:
-    active_items = [item for item in items[:5] if item.content.strip() or item.title.strip()]
+    active_items = [item for item in items if item.content.strip() or item.title.strip()]
     if not active_items:
         return ""
-    sections = [
-        "Workspace memory: Long-term memories retrieved for this workspace. Use them when relevant, and cite them with memory:<id> labels when they inform the answer."
-    ]
-    for item in active_items:
-        title = item.title.strip() or "Untitled memory"
-        content = item.content.strip()
-        memory_type = item.memoryType.strip() or "memory"
-        sections.append(f"\n[memory:{item.id}] {title} ({memory_type}, score={item.score})\n{content[:4000]}")
-    return "\n".join(sections)
+
+    sections = []
+    profiles = [it for it in active_items if it.memoryType == "user_profile"]
+    knowledge = [it for it in active_items if it.memoryType == "project_knowledge"]
+    others = [it for it in active_items if it.memoryType not in ("user_profile", "project_knowledge")]
+
+    if profiles:
+        sections.append("[User Profile]")
+        for item in profiles:
+            sections.append(f"  - {item.content[:4000]}")
+        sections.append("")
+
+    if knowledge:
+        sections.append("[Project Knowledge]")
+        for item in knowledge:
+            sections.append(f"  [memory:{item.id}] {item.title} (score={item.score})\n  {item.content[:4000]}")
+        sections.append("")
+
+    if others:
+        sections.append("[Other Notes]")
+        for item in others:
+            sections.append(f"  [memory:{item.id}] {item.title} ({item.memoryType}, score={item.score})\n  {item.content[:4000]}")
+
+    return "\n".join(sections).strip()
 
 
 def _format_workspace_memory_items(items: list[WorkspaceMemoryItem]) -> list[str]:
     memory_items = []
-    for item in items[:5]:
+    for item in items:
         if not item.content.strip() and not item.title.strip():
             continue
         title = item.title.strip() or "Untitled memory"

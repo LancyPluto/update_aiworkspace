@@ -54,6 +54,45 @@ class BackendClient:
         )
         return [WorkspaceMemoryItem.model_validate(item) for item in data.get("list", [])]
 
+    async def create_workspace_memory(
+        self, workspace_id: int, user_id: int,
+        memory_type: str, title: str, content: str,
+        source_run_id: int | None = None,
+    ) -> dict[str, Any]:
+        return await self._request(
+            "POST",
+            f"/api/internal/v1/agent/workspaces/{workspace_id}/memory",
+            {
+                "memoryType": memory_type,
+                "title": title,
+                "content": content,
+                "sourceRunId": source_run_id,
+                "userId": user_id,
+            },
+        )
+
+    async def update_workspace_memory(
+        self, workspace_id: int, memory_id: int,
+        memory_type: str, title: str, content: str,
+    ) -> dict[str, Any]:
+        return await self._request(
+            "PUT",
+            f"/api/internal/v1/agent/workspaces/{workspace_id}/memory/{memory_id}",
+            {
+                "memoryType": memory_type,
+                "title": title,
+                "content": content,
+            },
+        )
+
+    async def delete_workspace_memory(
+        self, workspace_id: int, memory_id: int,
+    ) -> dict[str, Any]:
+        return await self._request(
+            "DELETE",
+            f"/api/internal/v1/agent/workspaces/{workspace_id}/memory/{memory_id}",
+        )
+
     async def append_event(self, run_id: int, event: RunEventCreate) -> None:
         await self._request("POST", f"/api/internal/v1/agent/runs/{run_id}/events", event)
 

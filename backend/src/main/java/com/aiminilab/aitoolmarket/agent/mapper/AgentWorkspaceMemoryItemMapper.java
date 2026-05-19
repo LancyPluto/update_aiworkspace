@@ -1,5 +1,6 @@
 package com.aiminilab.aitoolmarket.agent.mapper;
 
+import com.aiminilab.aitoolmarket.agent.dto.InternalWorkspaceMemoryItemResponse;
 import com.aiminilab.aitoolmarket.agent.entity.AgentWorkspaceMemoryItem;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Insert;
@@ -60,4 +61,34 @@ public interface AgentWorkspaceMemoryItemMapper extends BaseMapper<AgentWorkspac
               AND status = 'ACTIVE'
             """)
     int softDelete(@Param("workspaceId") Long workspaceId, @Param("memoryId") Long memoryId);
+
+    @Select("""
+            SELECT id, workspace_id, source_run_id, title, content, memory_type, status,
+                   MATCH(title, content) AGAINST(#{query} IN NATURAL LANGUAGE MODE) AS score,
+                   updated_at
+            FROM agent_workspace_memory_items
+            WHERE workspace_id = #{workspaceId}
+              AND status = 'ACTIVE'
+              AND MATCH(title, content) AGAINST(#{query} IN NATURAL LANGUAGE MODE)
+            ORDER BY score DESC, updated_at DESC
+            LIMIT #{limit}
+            """)
+    List<InternalWorkspaceMemoryItemResponse> searchByFulltext(
+            @Param("workspaceId") Long workspaceId,
+            @Param("query") String query,
+            @Param("limit") int limit
+    );
+
+    @Select("""
+            SELECT id, workspace_id, source_run_id, title, content, memory_type, status,
+                   updated_at
+            FROM agent_workspace_memory_items
+            WHERE workspace_id = #{workspaceId} AND status = 'ACTIVE'
+            ORDER BY updated_at DESC
+            LIMIT #{limit}
+            """)
+    List<InternalWorkspaceMemoryItemResponse> findLatestByWorkspace(
+            @Param("workspaceId") Long workspaceId,
+            @Param("limit") int limit
+    );
 }

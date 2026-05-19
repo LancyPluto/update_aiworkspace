@@ -19,7 +19,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.Collections;
 import java.util.Comparator;
+import java.util.List;
 
 @Service
 public class AgentWorkspaceServiceImpl implements AgentWorkspaceService {
@@ -127,19 +129,36 @@ public class AgentWorkspaceServiceImpl implements AgentWorkspaceService {
 
     @Override
     public PageResponse<InternalWorkspaceMemoryItemResponse> retrieveMemory(Long workspaceId, InternalWorkspaceMemoryRetrieveRequest request) {
-        String query = request == null || request.query() == null ? "" : request.query().trim().toLowerCase();
+        String query = request == null || request.query() == null ? "" : request.query().trim();
         int limit = request == null || request.limit() == null ? 5 : Math.max(1, Math.min(request.limit(), 20));
-        var items = agentWorkspaceMemoryItemMapper.findActiveByWorkspaceId(workspaceId)
-                .stream()
-                .map(item -> new ScoredMemoryItem(item, score(item, query)))
-                .filter(item -> query.isBlank() || item.score() > 0)
-                .sorted(Comparator.comparingInt(ScoredMemoryItem::score).reversed()
-                        .thenComparing(item -> item.item().getUpdatedAt(), Comparator.reverseOrder())
-                        .thenComparing(item -> item.item().getId(), Comparator.reverseOrder()))
-                .limit(limit)
-                .map(item -> toInternalMemoryResponse(item.item(), item.score()))
-                .toList();
-        return new PageResponse<>(items, items.size(), 1, limit, items.size() == limit);
+
+        if (query.isBlank()) {
+            var items = agentWorkspaceMemoryItemMapper.findLatestByWorkspace(workspaceId, limit);
+            return new PageResponse<>(items, items.size(), 1, limit, items.size() == limit);
+        }
+
+        var items = agentWorkspaceMemoryItemMapper.findActiveByWorkspaceId(workspaceId);
+        if (items.isEmpty()) {
+            return new PageResponse<>(Collections.emptyList(), 0, 1, limit, false);
+        }
+
+        // 先尝试 FULLTEXT 搜索
+        try {
+            var ftItems = agentWorkspaceMemoryItemMapper.searchByFulltext(workspaceId, query, limit);
+            return new PageResponse<>(ftItems, ftItems.size(), 1, limit, ftItems.size() == limit);
+        } catch (Exception e) {
+            // FULLTEXT 搜索失败（如查询词为停用词导致语法错误），降级为子串匹配
+            var fallback = items.stream()
+                    .map(item -> new ScoredMemoryItem(item, score(item, query.toLowerCase())))
+                    .filter(item -> item.score() > 0)
+                    .sorted(Comparator.comparingInt(ScoredMemoryItem::score).reversed()
+                            .thenComparing(item -> item.item().getUpdatedAt(), Comparator.reverseOrder())
+                            .thenComparing(item -> item.item().getId(), Comparator.reverseOrder()))
+                    .limit(limit)
+                    .map(item -> toInternalMemoryResponse(item.item(), item.score()))
+                    .toList();
+            return new PageResponse<>(fallback, fallback.size(), 1, limit, fallback.size() == limit);
+        }
     }
 
     private AgentWorkspace ensureDefaultWorkspace(Long userId) {

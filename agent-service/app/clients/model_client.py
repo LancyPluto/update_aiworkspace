@@ -2,6 +2,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.utils.function_calling import convert_to_openai_tool
 
 from app.clients.chat_model_factory import ChatModelFactory, ChatModelProviderError
 from app.config import Settings, settings as default_settings
@@ -28,19 +29,25 @@ class ModelClient:
     def chat_model(self):
         return self._chat_model
 
-    async def chat(self, messages: list[ChatMessage]) -> str:
+    async def chat(self, messages: list[ChatMessage], tools: list[dict[str, Any]] | None = None) -> str:
+        kwargs = {}
+        if tools:
+            kwargs["tools"] = tools
         try:
-            result = await self._chat_model.ainvoke(_to_langchain_messages(messages))
+            result = await self._chat_model.ainvoke(_to_langchain_messages(messages), **kwargs)
         except Exception as exception:
             raise ModelClientError(f"model request failed: {exception}") from exception
         return _message_content(result)
 
-    async def chat_stream(self, messages: list[ChatMessage]) -> AsyncIterator[str]:
+    async def chat_stream(self, messages: list[ChatMessage], tools: list[dict[str, Any]] | None = None) -> AsyncIterator[str]:
         if not hasattr(self._chat_model, "astream"):
             yield await self.chat(messages)
             return
+        kwargs = {}
+        if tools:
+            kwargs["tools"] = tools
         try:
-            async for chunk in self._chat_model.astream(_to_langchain_messages(messages)):
+            async for chunk in self._chat_model.astream(_to_langchain_messages(messages), **kwargs):
                 text = _message_content(chunk, allow_empty=True)
                 if text:
                     yield text
