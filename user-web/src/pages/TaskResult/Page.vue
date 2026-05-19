@@ -4,7 +4,7 @@ import { RouterLink } from "vue-router"
 import { ArrowLeft, ChevronRight } from "lucide-vue-next"
 import AppShell from "@/components/AppShell.vue"
 import ResultRenderer from "@/components/ResultRenderer/ResultRenderer.vue"
-import { getApiOrigin } from "@/api/client"
+import { getRequestBaseUrl } from "@/api/client"
 import { fetchTaskById } from "@/api/taskApi"
 import type { TaskDetail } from "@/api/types"
 import type { ResultBlock } from "@/types/result"
@@ -166,8 +166,8 @@ function normalizeMediaUrl(value: string, cacheKey?: string | number | null): st
     return withCacheKey(value)
   }
   const path = value.startsWith("/") ? value : `/${value}`
-  const apiOrigin = getApiOrigin()
-  return withCacheKey(apiOrigin ? `${apiOrigin}${path}` : path)
+  const base = getRequestBaseUrl()
+  return withCacheKey(new URL(path, base.endsWith("/") ? base : `${base}/`).toString())
 }
 </script>
 
