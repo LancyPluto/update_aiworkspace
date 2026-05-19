@@ -43,3 +43,22 @@ def test_model_config_can_override_output_budget():
 
     assert context["modelMaxTokens"] == 6000
     assert context["modelTimeoutSeconds"] == 180
+
+
+def test_social_media_comment_insights_uses_report_budget():
+    handler = TextTaskHandler(backend_client=object(), model_client=DummyModelClient())
+
+    context = handler._normalize_execution_context(
+        {
+            "toolCode": "social_media_comment_insights_agent",
+            "params": {},
+            "modelConfig": {
+                "provider": "mock",
+                "baseUrl": "http://model.local",
+                "apiKey": "key",
+            },
+        }
+    )
+
+    assert context["modelMaxTokens"] == 4096
+    assert context["modelTimeoutSeconds"] == 180

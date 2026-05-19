@@ -34,7 +34,7 @@ public class CreditServiceImpl implements CreditService {
     }
 
     @Override
-    @Transactional
+    @Transactional(noRollbackFor = BusinessException.class)
     public void freeze(Long userId, CreditSourceType sourceType, Long sourceId, int amount) {
         if (amount <= 0) {
             return;
