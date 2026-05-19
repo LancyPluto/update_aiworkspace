@@ -6,6 +6,7 @@ import com.aiminilab.aitoolmarket.common.dto.PageResponse;
 import com.aiminilab.aitoolmarket.tool.dto.FieldSchemaAdminResponse;
 import com.aiminilab.aitoolmarket.tool.dto.ApplyToolTemplateRequest;
 import com.aiminilab.aitoolmarket.tool.dto.ToolFieldResponse;
+import com.aiminilab.aitoolmarket.tool.dto.ToolCoverUploadResponse;
 import com.aiminilab.aitoolmarket.tool.dto.ToolSummaryResponse;
 import com.aiminilab.aitoolmarket.tool.dto.UpdateToolFieldsRequest;
 import com.aiminilab.aitoolmarket.tool.dto.UpsertFieldSchemaRequest;
@@ -21,6 +22,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 
@@ -51,6 +53,14 @@ public class AdminToolController {
     @PostMapping
     public ApiResponse<ToolSummaryResponse> create(@Valid @RequestBody UpsertToolRequest request) {
         return ApiResponse.success(toolService.createTool(request, AuthContext.get().userId()));
+    }
+
+    @PostMapping("/cover-upload")
+    public ApiResponse<ToolCoverUploadResponse> uploadCover(@RequestParam("file") MultipartFile file,
+                                                            @RequestParam(required = false) String toolName,
+                                                            @RequestParam(required = false) String toolCode,
+                                                            @RequestParam(required = false) String modelName) {
+        return ApiResponse.success(toolService.uploadToolCover(file, toolName, toolCode, modelName));
     }
 
     @PutMapping("/{toolId}")

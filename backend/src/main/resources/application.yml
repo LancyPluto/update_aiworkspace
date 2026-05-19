@@ -11,8 +11,8 @@ spring:
     name: ai-tool-market-backend
   servlet:
     multipart:
-      max-file-size: 10MB
-      max-request-size: 10MB
+      max-file-size: 25MB
+      max-request-size: 30MB
   datasource:
     # utf8mb4：与库表一致，避免中文乱码；勿用 JDBC 的 utf8（MySQL 历史 3 字节别名）
     url: jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3307}/${MYSQL_DATABASE:ai_supermarket_v1}?useUnicode=true&characterEncoding=UTF-8&connectionCollation=utf8mb4_unicode_ci&serverTimezone=Asia/Shanghai
@@ -22,7 +22,7 @@ spring:
     hikari:
       connection-timeout: 2000
       validation-timeout: 1000
-      connection-init-sql: SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci
+      connection-init-sql: ${MYSQL_CONNECTION_INIT_SQL:}
   data:
     redis:
       host: ${REDIS_HOST:127.0.0.1}
