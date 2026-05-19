@@ -221,12 +221,31 @@ def _format_memory_tool_definitions() -> list[dict[str, Any]]:
     ]
 
 
+_MEMORY_PROMISE_KEYWORDS = [
+    "记住了",
+    "记下来了",
+    "我记下",
+    "我记住了",
+    "已经记下",
+    "已记录",
+    "已记住",
+]
+
+
+def _contains_memory_promise(text: str) -> bool:
+    """检查 LLM 回复中是否包含'记住了'等承诺性表述。"""
+    lower = text.lower()
+    return any(kw in lower for kw in _MEMORY_PROMISE_KEYWORDS)
+
+
 MEMORY_TOOL_SYSTEM_PROMPT = (
     "你有一个记忆系统，可以通过 memory_add / memory_replace / memory_remove 工具管理长期记忆。\n"
-    "当你发现以下情况时，请主动使用记忆工具：\n"
-    "- 用户告诉你关于自己的偏好或习惯 → 用 user_profile 类型记下\n"
-    "- 你发现了一个项目级的事实或工作流 → 用 project_knowledge 类型记下\n"
-    "- 用户明确要求你记住某件事 → 判断类型后记下\n"
-    "- 用户告诉你某条旧信息已经过时 → 用 memory_replace 或 memory_remove 更新\n"
-    "注意：不要过度写入，每条记忆应该有明确的长期价值。优先用 add 新增，只有信息变化时才用 replace。"
+    "当你发现以下情况时，必须立即使用对应的记忆工具，**不要只是口头答应**：\n"
+    "- 用户告诉你关于自己的偏好或习惯 → 立即调 memory_add，type=user_profile\n"
+    "- 用户告诉你项目事实、业务规则、配置信息 → 立即调 memory_add，type=project_knowledge\n"
+    "- 用户明确要求你记住某件事 → 立即调 memory_add\n"
+    "- 用户告诉你某条旧信息已经过时 → 调 memory_replace 或 memory_remove\n"
+    "规则：如果你准备回复'记住了'、'已记录'之类的话，必须先调 memory_add 把信息真实写入记忆系统，"
+    "然后再回复用户。不要只口头答应而不实际写入。\n"
+    "注意：不要过度写入，每条记忆应该有明确的长期价值。"
 )

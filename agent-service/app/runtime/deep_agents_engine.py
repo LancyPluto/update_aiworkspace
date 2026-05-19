@@ -31,7 +31,12 @@ from app.runtime.subagent_profiles import default_subagent_profiles, profiles_to
 from app.runtime.workspace_files import WorkspaceFileContext, build_workspace_file_context
 from app.security.prompt_guard import PromptGuard
 from app.tools.backend_tool import BackendToolBridge
-from app.tools.memory_tool import MEMORY_TOOL_SYSTEM_PROMPT, MemoryTool, _format_memory_tool_definitions
+from app.tools.memory_tool import (
+    MEMORY_TOOL_SYSTEM_PROMPT,
+    MemoryTool,
+    _contains_memory_promise,
+    _format_memory_tool_definitions,
+)
 from app.tools.missing_argument_hints import format_missing_tool_arguments_message
 from app.tools.registry import ToolRegistry
 from langchain_core.callbacks import AsyncCallbackHandler
@@ -98,6 +103,7 @@ class DeepAgentsRuntimeEngine:
             except BudgetExceeded as exception:
                 await self._fail_run(context.runId, exception.error_code, exception.message)
                 return
+            await self._maybe_save_memory(context, answer)
             await self._complete_run(context, answer, intent=intent_enum.value)
             return
 
@@ -129,6 +135,7 @@ class DeepAgentsRuntimeEngine:
             except BudgetExceeded as exception:
                 await self._fail_run(context.runId, exception.error_code, exception.message)
                 return
+            await self._maybe_save_memory(context, answer)
             await self._complete_run(context, answer, intent=intent_enum.value)
             return
 
@@ -657,6 +664,25 @@ class DeepAgentsRuntimeEngine:
                 eventText=title,
                 eventJson={"title": title, "content": content, "sourceRunId": run_id},
             ),
+        )
+
+    async def _maybe_save_memory(self, context: RunContext, answer: str) -> None:
+        """兜底：当 LLM 口头承诺'记住了'但未调用 memory_add 时，自动提取并写入。"""
+        if not context.workspaceId or not settings.agent_memory_auto_save_enabled:
+            return
+        if not _contains_memory_promise(answer):
+            return
+        text = context.message.strip()
+        if not text or len(text) < 4:
+            return
+        # 提取用户消息中的有效信息作为记忆内容
+        from app.tools.memory_tool import MemoryTool as MT
+        tool = MT(self.backend, context.workspaceId, context.userId, run_id=context.runId)
+        await tool.add_memory(
+            memory_type="project_knowledge",
+            title=text[:60],
+            content=text,
+            source_run_id=context.runId,
         )
 
 

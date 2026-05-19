@@ -26,13 +26,18 @@ class ModelClient:
         return self.settings.model_name
 
     @property
+    def model_provider(self) -> str:
+        return self.settings.model_provider
+
+    @property
     def chat_model(self):
         return self._chat_model
 
     async def chat(self, messages: list[ChatMessage], tools: list[dict[str, Any]] | None = None) -> str:
         kwargs = {}
-        if tools:
-            kwargs["tools"] = tools
+        safe_tools = _sanitize_tools(tools)
+        if safe_tools:
+            kwargs["tools"] = safe_tools
         try:
             result = await self._chat_model.ainvoke(_to_langchain_messages(messages), **kwargs)
         except Exception as exception:
@@ -44,8 +49,9 @@ class ModelClient:
             yield await self.chat(messages)
             return
         kwargs = {}
-        if tools:
-            kwargs["tools"] = tools
+        safe_tools = _sanitize_tools(tools)
+        if safe_tools:
+            kwargs["tools"] = safe_tools
         try:
             async for chunk in self._chat_model.astream(_to_langchain_messages(messages), **kwargs):
                 text = _message_content(chunk, allow_empty=True)
@@ -66,6 +72,34 @@ def _to_langchain_message(message: ChatMessage):
 
 def _to_langchain_messages(messages: list[ChatMessage]):
     return [_to_langchain_message(message) for message in messages]
+
+
+def _sanitize_tools(tools: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
+    """Validate and sanitize tool definitions before sending to the model API.
+
+    Some providers (e.g. MiniMax) reject tools with empty function names or
+    parameters (error 2013). This function filters out malformed tools and
+    returns None if no valid tools remain.
+    """
+    if not tools:
+        return None
+    valid = []
+    for tool in tools:
+        if not isinstance(tool, dict):
+            continue
+        if tool.get("type") != "function":
+            continue
+        func = tool.get("function")
+        if not isinstance(func, dict):
+            continue
+        name = func.get("name", "").strip()
+        if not name:
+            continue
+        params = func.get("parameters")
+        if params is None or (isinstance(params, dict) and not params.get("properties")):
+            continue
+        valid.append(tool)
+    return valid if valid else None
 
 
 def _message_content(message, *, allow_empty: bool = False) -> str:
@@ -116,3 +150,9 @@ def _extract_content(content: Any) -> str:
 
 def _chunk_text(value: str, size: int = 80) -> list[str]:
     return [value[index : index + size] for index in range(0, len(value), size)] or [""]
+
+
+def _sanitize_tools(tools: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
+    if not tools:
+        return None
+    return tools
