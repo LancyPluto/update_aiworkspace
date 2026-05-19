@@ -508,7 +508,7 @@ class DeepAgentsRuntimeEngine:
         tool_data = result.get("data") if isinstance(result, dict) else {}
         content_text = tool_data.get("contentText", "") if isinstance(tool_data, dict) else ""
         messages_list = [
-            ChatMessage(role="system", content="Summarize the tool result for the user."),
+            ChatMessage(role="system", content="请直接展示工具返回的结果，不要添加额外的总结说明。"),
         ]
         workspace_memory_context = await self._fetch_workspace_memory_context(context)
         if workspace_memory_context:
