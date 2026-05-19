@@ -66,4 +66,13 @@ public interface AgentSessionMapper extends BaseMapper<AgentSession> {
     void deleteByIdAndUserId(@Param("sessionId") Long sessionId,
                              @Param("userId") Long userId,
                              @Param("updatedAt") LocalDateTime updatedAt);
+
+    @Update("""
+            UPDATE agent_sessions
+            SET title = #{title}, updated_at = #{updatedAt}
+            WHERE id = #{sessionId}
+            """)
+    void updateTitle(@Param("sessionId") Long sessionId,
+                     @Param("title") String title,
+                     @Param("updatedAt") LocalDateTime updatedAt);
 }
