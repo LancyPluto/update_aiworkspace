@@ -59,9 +59,13 @@ class DeepAgentsRuntimeEngine:
         budget_guard: BudgetGuard | None = None,
         prompt_guard: PromptGuard | None = None,
         dependency_loader: Callable[[], ModuleType | None] | None = None,
+        deep_agents_enabled: bool = False,
     ) -> None:
+        self.backend_client = backend_client
         self.backend = backend_client
+        self.model_client = model_client
         self.model = model_client
+        self.deep_agents_enabled = deep_agents_enabled
         self.intent_router = intent_router or IntentRouter()
         self.budget_guard = budget_guard or BudgetGuard(
             max_model_calls=settings.agent_max_model_calls,

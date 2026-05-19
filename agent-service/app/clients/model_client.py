@@ -45,8 +45,12 @@ class ModelClient:
         return _message_content(result)
 
     async def chat_stream(self, messages: list[ChatMessage], tools: list[dict[str, Any]] | None = None) -> AsyncIterator[str]:
+        if self._should_stream_locally():
+            for chunk in _chunk_text(await self.chat(messages, tools=tools)):
+                yield chunk
+            return
         if not hasattr(self._chat_model, "astream"):
-            yield await self.chat(messages)
+            yield await self.chat(messages, tools=tools)
             return
         kwargs = {}
         safe_tools = _sanitize_tools(tools)
@@ -58,7 +62,12 @@ class ModelClient:
                 if text:
                     yield text
         except Exception as exception:
-            raise ModelClientError(f"model stream failed: {exception}") from exception
+            raise ModelClientError(f"model stream failed: {_format_exception(exception)}") from exception
+
+    def _should_stream_locally(self) -> bool:
+        provider = self.settings.model_provider.strip().lower()
+        base_url = self.settings.model_api_base_url.strip().lower()
+        return provider == "openai_compatible" and "siliconflow.cn" in base_url
 
 
 def _to_langchain_message(message: ChatMessage):
@@ -152,7 +161,8 @@ def _chunk_text(value: str, size: int = 80) -> list[str]:
     return [value[index : index + size] for index in range(0, len(value), size)] or [""]
 
 
-def _sanitize_tools(tools: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
-    if not tools:
-        return None
-    return tools
+def _format_exception(exception: Exception) -> str:
+    message = str(exception).strip()
+    if message:
+        return message
+    return exception.__class__.__name__

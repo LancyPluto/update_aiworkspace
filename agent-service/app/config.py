@@ -28,6 +28,7 @@ class Settings:
     internal_api_token: str = os.getenv("INTERNAL_API_TOKEN", "local-internal-token")
     agent_verify_internal_signature: bool = _bool("AGENT_VERIFY_INTERNAL_SIGNATURE", False)
     agent_execution_mode: str = os.getenv("AGENT_EXECUTION_MODE", "background")
+    agent_deep_agents_enabled: bool = _bool("AGENT_DEEP_AGENTS_ENABLED", False)
     model_provider: str = os.getenv("MODEL_PROVIDER", "mock")
     model_api_base_url: str = os.getenv("MODEL_API_BASE_URL", "https://api.deepseek.com")
     model_api_key: str = os.getenv("MODEL_API_KEY", "replace-with-model-key")

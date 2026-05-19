@@ -88,6 +88,18 @@ providers:
     workerReady: true
     description: SiliconFlow /v1/audio/speech for standalone TTS tools.
 
+  - code: seedance
+    label: Seedance video
+    capabilities:
+      - VIDEO_GENERATION
+      - DIGITAL_HUMAN
+    defaultBaseUrl: https://ark.cn-beijing.volces.com
+    defaultModel: doubao-seedance-1-5-pro-251215
+    billingDefault: PER_CALL
+    testStrategy: accept_only
+    workerReady: true
+    description: Seedance image-to-video generation used by digital-human and comic-drama pipelines.
+
   - code: worker_video
     label: Video generation (stub)
     capabilities:

@@ -14,6 +14,7 @@ class FakeLangChainModel:
     def __init__(self, response):
         self.response = response
         self.messages = []
+        self.stream_calls = 0
 
     async def ainvoke(self, messages):
         self.messages.append(messages)
@@ -22,6 +23,7 @@ class FakeLangChainModel:
         return FakeLangChainMessage(self.response)
 
     async def astream(self, messages):
+        self.stream_calls += 1
         self.messages.append(messages)
         for chunk in self.response:
             yield FakeLangChainMessage(chunk)
@@ -83,4 +85,23 @@ async def test_model_client_streams_langchain_chat_chunks():
     chunks = [chunk async for chunk in client.chat_stream([ChatMessage(role="user", content="hello")])]
 
     assert chunks == ["hello ", "world"]
+    assert langchain_model.messages[0][0].type == "human"
+
+
+@pytest.mark.asyncio
+async def test_model_client_streams_siliconflow_locally():
+    langchain_model = FakeLangChainModel("provider answer")
+    client = ModelClient(
+        Settings(
+            model_provider="openai_compatible",
+            model_api_base_url="https://api.siliconflow.cn/v1",
+            model_api_key="key",
+        ),
+        chat_model=langchain_model,
+    )
+
+    chunks = [chunk async for chunk in client.chat_stream([ChatMessage(role="user", content="hello")])]
+
+    assert chunks == ["provider answer"]
+    assert langchain_model.stream_calls == 0
     assert langchain_model.messages[0][0].type == "human"

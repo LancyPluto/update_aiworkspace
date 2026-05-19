@@ -12,6 +12,7 @@ PROVIDERS: dict[str, dict[str, Any]] = {
     "minimax": {"capabilities": {"TEXT_GENERATION"}, "worker_ready": True},
     "siliconflow": {"capabilities": {"IMAGE_GENERATION", "DIGITAL_HUMAN"}, "worker_ready": True},
     "siliconflow_images": {"capabilities": {"IMAGE_GENERATION", "DIGITAL_HUMAN"}, "worker_ready": True},
+    "seedance": {"capabilities": {"VIDEO_GENERATION", "DIGITAL_HUMAN"}, "worker_ready": True},
     "worker_video": {"capabilities": {"VIDEO_GENERATION"}, "worker_ready": True},
     "minimax_speech": {"capabilities": {"TEXT_TO_SPEECH"}, "worker_ready": True},
     "minimax_music": {"capabilities": {"MUSIC_GENERATION"}, "worker_ready": False},

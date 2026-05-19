@@ -41,4 +41,4 @@ CREATE TABLE IF NOT EXISTS tool_template_fields (
   KEY idx_template_fields_template (template_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- ai_tools.template_id / execution_handler 由 DataInitializer 在启动时补齐
+-- ai_tools.template_id / execution_handler 见 013_ai_tools_modality_columns.sql；Java bootstrap 仍会做幂等补齐

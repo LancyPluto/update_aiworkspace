@@ -51,6 +51,29 @@ from tools.xiaohongshu_copywriting import build_prompt_payload as build_xiaohong
 
 LOGGER = logging.getLogger(__name__)
 
+LONG_OUTPUT_MODEL_TOKENS = {
+    "wechat_longform_generator": 4096,
+    "product_detail_page_copywriter": 4096,
+    "ecommerce_campaign_planner": 4096,
+    "store_campaign_planner": 4096,
+    "live_stream_script_generator": 4096,
+    "customer_followup_script_generator": 3072,
+    "objection_handling_script_generator": 3072,
+    "short_video_script_generator": 3072,
+    "short_video_topic_generator": 2048,
+    "xiaohongshu_copywriting": 2048,
+    "moments_copywriting_generator": 2048,
+    "product_title_optimizer": 2048,
+}
+
+LONG_OUTPUT_TIMEOUT_SECONDS = {
+    "wechat_longform_generator": 120,
+    "product_detail_page_copywriter": 120,
+    "ecommerce_campaign_planner": 120,
+    "store_campaign_planner": 120,
+    "live_stream_script_generator": 120,
+}
+
 
 class TextTaskHandler:
     def __init__(
@@ -215,8 +238,15 @@ class TextTaskHandler:
         )
         normalized["modelApiBaseUrl"] = model_config.get("baseUrl") or settings.model_api_base_url
         normalized["modelApiKey"] = model_config.get("apiKey") or settings.model_api_key
-        normalized["modelTimeoutSeconds"] = model_config.get("timeoutSeconds")
-        normalized["modelMaxTokens"] = 1024
+        tool_code = str(normalized.get("toolCode") or "")
+        normalized["modelTimeoutSeconds"] = self._positive_int(
+            model_config.get("timeoutSeconds") or model_config.get("timeout_seconds"),
+            default=LONG_OUTPUT_TIMEOUT_SECONDS.get(tool_code),
+        )
+        normalized["modelMaxTokens"] = self._positive_int(
+            model_config.get("maxTokens") or model_config.get("max_tokens"),
+            default=LONG_OUTPUT_MODEL_TOKENS.get(tool_code, 2048),
+        )
         return normalized
 
     def _generate_model_result(self, prompt: str, **kwargs: Any) -> ModelGenerationResult:
@@ -288,3 +318,11 @@ class TextTaskHandler:
             return max(0, int(value or 0))
         except (TypeError, ValueError):
             return 0
+
+    @staticmethod
+    def _positive_int(value: Any, *, default: int | None = None) -> int | None:
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            return default
+        return parsed if parsed > 0 else default

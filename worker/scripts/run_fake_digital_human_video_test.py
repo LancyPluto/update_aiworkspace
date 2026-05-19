@@ -6,7 +6,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from config import settings
-from client.skywork_video_client import SkyworkVideoClient, SkyworkVideoConfigurationError, SkyworkVideoError
+from client.seedance_video_client import SeedanceVideoError
 from handlers.digital_human_postprocessor import DigitalHumanPostprocessor
 from handlers.digital_human_video_handler import DigitalHumanVideoHandler
 from task_queue.redis_consumer import TaskHandlerRouter
@@ -24,6 +24,7 @@ class FakeBackendClient:
         return {
             "taskId": task_id,
             "toolCode": "digital_human_agent",
+            "modelProviderCode": "siliconflow_images",
             "params": {
                 "videoTopic": "Digital human launch video",
                 "script": "Hello, this is a short digital human video used for worker validation.",
@@ -31,6 +32,7 @@ class FakeBackendClient:
                 "scene": "Product demo studio",
                 "aspectRatio": "9:16 vertical",
                 "duration": "5 seconds",
+                "resolution": "480p",
                 "brandName": "Test Lab",
                 "referenceImageUrl": "https://example.com/avatar.png",
                 "visualRequirements": "Half-body shot, bright lighting, facing the camera.",
@@ -59,9 +61,11 @@ class FakeSiliconFlowClient:
         self.request_payload: dict | None = None
         self.image_prompts: list[str] = []
         self.speech_calls = 0
+        self.speech_payload: dict | None = None
 
     def generate_speech_data_url(self, **kwargs) -> str:
         self.speech_calls += 1
+        self.speech_payload = kwargs
         return "data:audio/mpeg;base64,ZmFrZQ=="
 
     def generate_image(self, **kwargs) -> str:
@@ -70,24 +74,24 @@ class FakeSiliconFlowClient:
 
     def generate_video(self, **kwargs) -> dict:
         self.request_payload = kwargs
-        return fake_video_result("siliconflow_fake_001")
+        return fake_video_result("siliconflow_fake_001", provider="siliconflow")
 
 
-class FakeSkyworkClient:
+class FakeSeedanceClient:
     def __init__(self) -> None:
         self.request_payload: dict | None = None
 
     def generate_video(self, **kwargs) -> dict:
         self.request_payload = kwargs
-        return fake_video_result("skywork_fake_001", provider="skywork")
+        return fake_video_result("seedance_fake_001", provider="seedance", resolution=kwargs.get("resolution", "480p"))
 
 
-class FailingSkyworkClient:
+class FailingSeedanceClient:
     def generate_video(self, **kwargs) -> dict:
-        raise SkyworkVideoError("skywork unauthorized")
+        raise SeedanceVideoError("seedance unauthorized")
 
 
-def fake_video_result(request_id: str, *, provider: str = "siliconflow") -> dict:
+def fake_video_result(request_id: str, *, provider: str, resolution: str = "480p") -> dict:
     return {
         "requestId": request_id,
         "status": "Succeed",
@@ -96,12 +100,15 @@ def fake_video_result(request_id: str, *, provider: str = "siliconflow") -> dict
         "seed": 123,
         "timings": {"inference": 456},
         "provider": provider,
+        "model": "doubao-seedance-1-5-pro-251215",
+        "resolution": resolution,
     }
 
 
 @dataclass(slots=True)
 class FakePostprocessResult:
     video_url: str
+    subtitle_url: str = "/generated/digital-human/99002/subtitle.srt"
 
 
 class FakePostprocessor:
@@ -129,25 +136,22 @@ class UnexpectedTextHandler:
 
 def main() -> None:
     original_provider = settings.digital_human_video_provider
-    original_skywork_model = settings.skywork_video_model
-    settings.digital_human_video_provider = "skywork"
-    settings.skywork_video_model = "seedance/seedance-2.0"
+    settings.digital_human_video_provider = "seedance"
     try:
         backend = FakeBackendClient()
         siliconflow = FakeSiliconFlowClient()
-        skywork = FakeSkyworkClient()
+        seedance = FakeSeedanceClient()
         postprocessor = FakePostprocessor()
         handler = DigitalHumanVideoHandler(
             backend_client=backend,
             video_client=siliconflow,
-            skywork_video_client=skywork,
+            seedance_video_client=seedance,
             postprocessor=postprocessor,
         )
 
         result = handler.handle({"taskId": 99002, "toolCode": "digital_human_agent"})
     finally:
         settings.digital_human_video_provider = original_provider
-        settings.skywork_video_model = original_skywork_model
 
     assert result["status"] == "SUCCESS", result
     assert backend.events == [
@@ -157,18 +161,21 @@ def main() -> None:
         "processing",
         "processing",
         "processing",
+        "processing",
         "success",
     ], backend.events
     assert siliconflow.request_payload is None
-    assert skywork.request_payload is not None
-    assert skywork.request_payload["image_size"] == "720x1280", skywork.request_payload
-    assert skywork.request_payload["image"] == "https://example.com/avatar.png", skywork.request_payload
-    assert skywork.request_payload["model"] == "seedance/seedance-2.0", skywork.request_payload
-    assert skywork.request_payload["duration"] == "5 seconds", skywork.request_payload
-    assert len(siliconflow.image_prompts) == 0, siliconflow.image_prompts
     assert siliconflow.speech_calls == 1, siliconflow.speech_calls
-    assert "Create a realistic digital human presenter video" in skywork.request_payload["prompt"]
-    assert "Test Lab" in skywork.request_payload["prompt"]
+    assert siliconflow.speech_payload["voice"] == "FunAudioLLM/CosyVoice2-0.5B:anna", siliconflow.speech_payload
+    assert seedance.request_payload is not None
+    assert seedance.request_payload["image_size"] == "480x854", seedance.request_payload
+    assert seedance.request_payload["image"] == "https://example.com/avatar.png", seedance.request_payload
+    assert seedance.request_payload["model"] == "doubao-seedance-1-5-pro-251215", seedance.request_payload
+    assert seedance.request_payload["duration"] == "5 seconds", seedance.request_payload
+    assert seedance.request_payload["resolution"] == "480p", seedance.request_payload
+    assert len(siliconflow.image_prompts) == 0, siliconflow.image_prompts
+    assert "Create a realistic digital human presenter video" in seedance.request_payload["prompt"]
+    assert "Test Lab" in seedance.request_payload["prompt"]
     assert postprocessor.payload is not None
     assert postprocessor.payload["video_url"] == "https://example.com/fake-video.mp4"
     assert postprocessor.payload["subtitle_text"] == "Hello, this is a short digital human video used for worker validation."
@@ -176,19 +183,20 @@ def main() -> None:
     assert backend.success_payload["resourceType"] == "MARKDOWN"
     assert "/generated/digital-human/99002/final.mp4" in backend.success_payload["contentText"]
     assert "https://example.com/fake-video.mp4" in backend.success_payload["contentText"]
-    assert "skywork_fake_001" in backend.success_payload["contentText"]
+    assert "seedance_fake_001" in backend.success_payload["contentText"]
+    assert "480p" in backend.success_payload["contentText"]
+    assert "subtitle.srt" in backend.success_payload["contentText"]
 
     failing_backend = FakeBackendClient()
     failing_siliconflow = FakeSiliconFlowClient()
-    failing_skywork = FailingSkyworkClient()
     failing_handler = DigitalHumanVideoHandler(
         backend_client=failing_backend,
         video_client=failing_siliconflow,
-        skywork_video_client=failing_skywork,
+        seedance_video_client=FailingSeedanceClient(),
         postprocessor=FakePostprocessor(),
     )
     original_provider = settings.digital_human_video_provider
-    settings.digital_human_video_provider = "skywork"
+    settings.digital_human_video_provider = "seedance"
     try:
         failed_result = failing_handler.handle({"taskId": 99003, "toolCode": "digital_human_agent"})
     finally:
@@ -196,14 +204,8 @@ def main() -> None:
     assert failed_result["status"] == "FAILED", failed_result
     assert failing_backend.failed_payload is not None
     assert failing_backend.failed_payload["errorCode"] == "MODEL_CALL_FAILED"
-    assert failing_siliconflow.speech_calls == 0, failing_siliconflow.speech_calls
+    assert failing_siliconflow.speech_calls == 1, failing_siliconflow.speech_calls
     assert failing_siliconflow.image_prompts == [], failing_siliconflow.image_prompts
-
-    gateway_error = SkyworkVideoClient._error_from_event(
-        {"code": 630104, "message": "get host proxy config is null", "data": {}}
-    )
-    assert isinstance(gateway_error, SkyworkVideoConfigurationError)
-    assert "SKYWORK_VIDEO_ENDPOINT" in str(gateway_error)
 
     srt = DigitalHumanPostprocessor._build_srt("First sentence!Second sentence!Third sentence!", 9.0)
     assert "00:00:00,000 --> 00:00:03,000" in srt

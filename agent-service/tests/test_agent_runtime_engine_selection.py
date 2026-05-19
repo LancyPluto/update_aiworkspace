@@ -19,17 +19,22 @@ class FakeBackend:
 class FakeEngine:
     def __init__(self):
         self.run_contexts = []
+        self.confirmed_tool_calls = []
 
     async def run(self, context):
         self.run_contexts.append(context)
+
+    async def run_confirmed_tool(self, context, tool_code):
+        self.confirmed_tool_calls.append((context, tool_code))
 
 
 class FakeRuntimeRouter:
     instances = []
 
-    def __init__(self, backend_client=None, model_client=None):
+    def __init__(self, backend_client=None, model_client=None, deep_agents_enabled=False):
         self.backend_client = backend_client
         self.model_client = model_client
+        self.deep_agents_enabled = deep_agents_enabled
         self.engine = FakeEngine()
         self.select_calls = []
         FakeRuntimeRouter.instances.append(self)
@@ -55,6 +60,25 @@ async def test_agent_runtime_uses_runtime_router_selected_engine():
     router = FakeRuntimeRouter.instances[0]
     assert router.backend_client is backend
     assert router.model_client is model_client
+    assert router.deep_agents_enabled is False
     assert router.select_calls == [("route me", None)]
     assert router.engine.run_contexts == [backend.context]
     assert backend.events == []
+
+
+@pytest.mark.asyncio
+async def test_agent_runtime_uses_selected_engine_for_confirmed_tools():
+    FakeRuntimeRouter.instances = []
+    backend = FakeBackend()
+    model_client = object()
+    runtime = AgentRuntime(
+        backend,
+        model_client=model_client,
+        runtime_router_factory=FakeRuntimeRouter,
+    )
+
+    await runtime.execute_confirmed_tool(9, "xiaohongshu_copywriting")
+
+    router = FakeRuntimeRouter.instances[0]
+    assert router.select_calls == [("route me", None)]
+    assert router.engine.confirmed_tool_calls == [(backend.context, "xiaohongshu_copywriting")]

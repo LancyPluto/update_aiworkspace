@@ -175,7 +175,7 @@ public class TaskServiceImpl implements TaskService {
     private TaskStatusResponse createNewTask(Long userId, String toolCode, JsonNode params, String clientRequestId, boolean chargeTaskCredits) {
         AiTool tool = toolMapper.findOnlineByCode(toolCode)
                 .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在或未上线"));
-        AgentModelConfig modelConfig = agentModelConfigMapper.findForToolExecution(tool.getId());
+        AgentModelConfig modelConfig = modelCapabilityService.resolveModelConfigForTool(tool);
         modelCapabilityService.validateExecution(tool, modelConfig);
 
         AiTask task = new AiTask();
