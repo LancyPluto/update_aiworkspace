@@ -104,7 +104,7 @@ self.__SERVER_FILES_MANIFEST={
         "transform": "lodash/{{member}}"
       }
     },
-    "outputFileTracingRoot": "C:\\ai\\ai-tool-market\\admin-frontend",
+    "outputFileTracingRoot": "D:\\AIMarket\\ai-tool-market\\admin-frontend",
     "allowedDevOrigins": [
       "127.0.0.1",
       "localhost"
@@ -308,7 +308,7 @@ self.__SERVER_FILES_MANIFEST={
     "bundlePagesRouterDependencies": false,
     "configFileName": "next.config.mjs",
     "turbopack": {
-      "root": "C:\\ai\\ai-tool-market\\admin-frontend"
+      "root": "D:\\AIMarket\\ai-tool-market\\admin-frontend"
     },
     "distDirRoot": ".next",
     "_originalRewrites": {
@@ -322,7 +322,7 @@ self.__SERVER_FILES_MANIFEST={
       "fallback": []
     }
   },
-  "appDir": "C:\\ai\\ai-tool-market\\admin-frontend",
+  "appDir": "D:\\AIMarket\\ai-tool-market\\admin-frontend",
   "relativeAppDir": "",
   "files": [
     ".next\\routes-manifest.json",

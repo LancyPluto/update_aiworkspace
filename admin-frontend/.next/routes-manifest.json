@@ -48,12 +48,6 @@
       "namedRegex": "^/_not\\-found(?:/)?$"
     },
     {
-      "page": "/agent-runs",
-      "regex": "^/agent\\-runs(?:/)?$",
-      "routeKeys": {},
-      "namedRegex": "^/agent\\-runs(?:/)?$"
-    },
-    {
       "page": "/categories",
       "regex": "^/categories(?:/)?$",
       "routeKeys": {},
