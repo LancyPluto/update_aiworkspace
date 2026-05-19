@@ -227,6 +227,9 @@ public class AgentRunServiceImpl implements AgentRunService {
         agentRateLimitService.incrementActiveRun(userId, run.getId());
         appendEventInternal(run.getId(), userId, "run.started", "Agent 已开始处理", null, now);
         agentSessionMapper.touch(sessionId, now);
+        // 自动更新会话标题：如果还是默认值，用第一条消息内容截取前 20 字
+        autoUpdateSessionTitle(session, request.content().trim(), now);
+
         runAfterCommit(() -> notifyAgentService(run.getId(), () -> agentServiceClient.executeRun(run.getId())));
         return new CreateAgentMessageResponse(sessionId, message.getId(), run.getId(), "RUNNING");
     }
@@ -610,6 +613,14 @@ public class AgentRunServiceImpl implements AgentRunService {
     private AgentSession findSession(Long userId, Long sessionId) {
         return agentSessionMapper.findByIdAndUserId(sessionId, userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.AGENT_SESSION_NOT_FOUND, "会话不存在"));
+    }
+
+    private void autoUpdateSessionTitle(AgentSession session, String messageContent, LocalDateTime now) {
+        if (!"新对话".equals(session.getTitle()) || messageContent.isBlank()) {
+            return;
+        }
+        String title = messageContent.length() > 20 ? messageContent.substring(0, 20) + "…" : messageContent;
+        agentSessionMapper.updateTitle(session.getId(), title, now);
     }
 
     private AgentRun findRun(Long runId, Long userId) {

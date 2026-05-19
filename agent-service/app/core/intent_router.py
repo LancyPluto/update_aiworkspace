@@ -73,10 +73,18 @@ class IntentRouter:
                     reason="high_confidence_tool_match",
                 )
             if len(candidates) > 1 and top.score >= 4 and top.score - second_score <= 2 and self._looks_like_tool_request(message):
+                names = []
+                for c in candidates[:3]:
+                    names.append(c.tool.toolName or c.tool.toolCode)
+                clarifying = (
+                    f"我识别到多个可能适合的工具：{'、'.join(names)}。\n"
+                    f"请告诉我你想用哪个工具，以及具体需求是什么？"
+                )
                 return IntentResult(
                     intent=Intent.NEEDS_CLARIFICATION,
                     confidence=0.7,
                     candidateToolCodes=candidate_codes,
+                    clarifyingQuestion=clarifying,
                     reason="ambiguous_tool_candidates",
                 )
             if top.score >= 4 and self._looks_like_tool_request(message):
@@ -88,10 +96,31 @@ class IntentRouter:
                     reason="scored_tool_match",
                 )
             if self._looks_like_tool_request(message):
+                # 给出候选工具的提示，避免第一次提示太过笼统
+                top_tool = candidates[0].tool
+                top_name = top_tool.toolName or top_tool.toolCode
+                required_params = top_tool.inputSchema.get("required", [])
+                props = top_tool.inputSchema.get("properties", {})
+                if required_params and isinstance(required_params, list) and isinstance(props, dict):
+                    param_hints = []
+                    for p in required_params[:5]:
+                        prop = props.get(p, {})
+                        title = prop.get("title", p) if isinstance(prop, dict) else p
+                        param_hints.append(f"「{title}」")
+                    clarifying = (
+                        f"看起来你想使用「{top_name}」工具。\n"
+                        f"这个工具需要补充以下信息：{'、'.join(param_hints)}。\n"
+                        f"请告诉我具体内容，我会帮你完成。"
+                    )
+                else:
+                    clarifying = (
+                        f"看起来你想使用「{top_name}」工具，请告诉我具体需求（包括产品/服务、目标场景等），我来帮你完成。"
+                    )
                 return IntentResult(
                     intent=Intent.NEEDS_CLARIFICATION,
                     confidence=0.65,
                     candidateToolCodes=candidate_codes,
+                    clarifyingQuestion=clarifying,
                     reason="weak_tool_signal",
                 )
 
