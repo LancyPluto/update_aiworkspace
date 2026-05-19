@@ -49,23 +49,6 @@ app:
       ihuyi-api-key: ${IHUYI_API_KEY:}
       ihuyi-base-url: ${IHUYI_BASE_URL:https://api.ihuyi.com/sms/Submit.json}
       ihuyi-template-id: ${IHUYI_TEMPLATE_ID:1}
-  payment:
-    wechat:
-      enabled: ${WECHAT_PAY_ENABLED:false}
-      app-id: ${WECHAT_PAY_APP_ID:}
-      mch-id: ${WECHAT_PAY_MCH_ID:}
-      api-v3-key: ${WECHAT_PAY_API_V3_KEY:}
-      merchant-serial-no: ${WECHAT_PAY_MERCHANT_SERIAL_NO:}
-      merchant-private-key-path: ${WECHAT_PAY_MERCHANT_PRIVATE_KEY_PATH:}
-      platform-certificate-path: ${WECHAT_PAY_PLATFORM_CERTIFICATE_PATH:}
-      notify-url: ${WECHAT_PAY_NOTIFY_URL:}
-    alipay:
-      enabled: ${ALIPAY_ENABLED:false}
-      app-id: ${ALIPAY_APP_ID:}
-      merchant-private-key: ${ALIPAY_MERCHANT_PRIVATE_KEY:}
-      alipay-public-key: ${ALIPAY_PUBLIC_KEY:}
-      gateway-url: ${ALIPAY_GATEWAY_URL:https://openapi.alipay.com/gateway.do}
-      notify-url: ${ALIPAY_NOTIFY_URL:}
   agent:
     enabled: ${AGENT_ENABLED:true}
     service-base-url: ${AGENT_SERVICE_BASE_URL:http://127.0.0.1:8090}

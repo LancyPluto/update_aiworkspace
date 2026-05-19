@@ -16,7 +16,6 @@ public class AppProperties {
     private Rabbitmq rabbitmq = new Rabbitmq();
     private Agent agent = new Agent();
     private Auth auth = new Auth();
-    private Payment payment = new Payment();
     private Cors cors = new Cors();
 
     public boolean isProductionMode() {
@@ -81,14 +80,6 @@ public class AppProperties {
 
     public void setAuth(Auth auth) {
         this.auth = auth == null ? new Auth() : auth;
-    }
-
-    public Payment getPayment() {
-        return payment;
-    }
-
-    public void setPayment(Payment payment) {
-        this.payment = payment == null ? new Payment() : payment;
     }
 
     public Cors getCors() {
@@ -286,161 +277,6 @@ public class AppProperties {
 
         public void setIhuyiTemplateId(String ihuyiTemplateId) {
             this.ihuyiTemplateId = ihuyiTemplateId == null || ihuyiTemplateId.isBlank() ? "1" : ihuyiTemplateId;
-        }
-    }
-
-    public static class Payment {
-        private Wechat wechat = new Wechat();
-        private Alipay alipay = new Alipay();
-
-        public Wechat getWechat() {
-            return wechat;
-        }
-
-        public void setWechat(Wechat wechat) {
-            this.wechat = wechat == null ? new Wechat() : wechat;
-        }
-
-        public Alipay getAlipay() {
-            return alipay;
-        }
-
-        public void setAlipay(Alipay alipay) {
-            this.alipay = alipay == null ? new Alipay() : alipay;
-        }
-
-        public static class Wechat {
-            private boolean enabled;
-            private String appId;
-            private String mchId;
-            private String apiV3Key;
-            private String merchantSerialNo;
-            private String merchantPrivateKeyPath;
-            private String platformCertificatePath;
-            private String notifyUrl;
-
-            public boolean isEnabled() {
-                return enabled;
-            }
-
-            public void setEnabled(boolean enabled) {
-                this.enabled = enabled;
-            }
-
-            public String getAppId() {
-                return appId;
-            }
-
-            public void setAppId(String appId) {
-                this.appId = appId;
-            }
-
-            public String getMchId() {
-                return mchId;
-            }
-
-            public void setMchId(String mchId) {
-                this.mchId = mchId;
-            }
-
-            public String getApiV3Key() {
-                return apiV3Key;
-            }
-
-            public void setApiV3Key(String apiV3Key) {
-                this.apiV3Key = apiV3Key;
-            }
-
-            public String getMerchantSerialNo() {
-                return merchantSerialNo;
-            }
-
-            public void setMerchantSerialNo(String merchantSerialNo) {
-                this.merchantSerialNo = merchantSerialNo;
-            }
-
-            public String getMerchantPrivateKeyPath() {
-                return merchantPrivateKeyPath;
-            }
-
-            public void setMerchantPrivateKeyPath(String merchantPrivateKeyPath) {
-                this.merchantPrivateKeyPath = merchantPrivateKeyPath;
-            }
-
-            public String getPlatformCertificatePath() {
-                return platformCertificatePath;
-            }
-
-            public void setPlatformCertificatePath(String platformCertificatePath) {
-                this.platformCertificatePath = platformCertificatePath;
-            }
-
-            public String getNotifyUrl() {
-                return notifyUrl;
-            }
-
-            public void setNotifyUrl(String notifyUrl) {
-                this.notifyUrl = notifyUrl;
-            }
-        }
-
-        public static class Alipay {
-            private boolean enabled;
-            private String appId;
-            private String merchantPrivateKey;
-            private String alipayPublicKey;
-            private String gatewayUrl = "https://openapi.alipay.com/gateway.do";
-            private String notifyUrl;
-
-            public boolean isEnabled() {
-                return enabled;
-            }
-
-            public void setEnabled(boolean enabled) {
-                this.enabled = enabled;
-            }
-
-            public String getAppId() {
-                return appId;
-            }
-
-            public void setAppId(String appId) {
-                this.appId = appId;
-            }
-
-            public String getMerchantPrivateKey() {
-                return merchantPrivateKey;
-            }
-
-            public void setMerchantPrivateKey(String merchantPrivateKey) {
-                this.merchantPrivateKey = merchantPrivateKey;
-            }
-
-            public String getAlipayPublicKey() {
-                return alipayPublicKey;
-            }
-
-            public void setAlipayPublicKey(String alipayPublicKey) {
-                this.alipayPublicKey = alipayPublicKey;
-            }
-
-            public String getGatewayUrl() {
-                return gatewayUrl;
-            }
-
-            public void setGatewayUrl(String gatewayUrl) {
-                this.gatewayUrl = gatewayUrl == null || gatewayUrl.isBlank()
-                        ? "https://openapi.alipay.com/gateway.do"
-                        : gatewayUrl;
-            }
-
-            public String getNotifyUrl() {
-                return notifyUrl;
-            }
-
-            public void setNotifyUrl(String notifyUrl) {
-                this.notifyUrl = notifyUrl;
-            }
         }
     }
 

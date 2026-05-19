@@ -301,21 +301,21 @@ export default function ToolsPage() {
   }
 
   const headerDescription = error
-    ? `Load failed: ${error}`
+    ? `加载失败：${error}`
     : loading
-      ? "Loading tool list..."
-      : "Manage AI tools, tool fields, and publishing status."
+      ? "正在加载工具列表..."
+      : "管理 AI 工具、表单字段、模型绑定和发布状态。"
 
   return (
     <AdminLayout>
-      <AdminHeader title="AI Tool Management" description={headerDescription} />
+      <AdminHeader title="AI 工具管理" description={headerDescription} />
 
       <div className="space-y-6 p-6">
         <div className="flex items-center justify-between gap-4">
           <div className="relative max-w-md flex-1">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
-              placeholder="Search tools..."
+              placeholder="搜索工具..."
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
               className="pl-9 bg-secondary border-0"
@@ -335,29 +335,29 @@ export default function ToolsPage() {
             <DialogTrigger asChild>
               <Button className="gap-2">
                 <Plus className="h-4 w-4" />
-                Add Tool
+                新增工具
               </Button>
             </DialogTrigger>
             <DialogContent className="bg-card border-border max-w-lg">
               <DialogHeader>
-                <DialogTitle>{editingTool ? "Edit AI Tool" : "Add AI Tool"}</DialogTitle>
-                <DialogDescription>{formError || "Configure the tool and its model binding."}</DialogDescription>
+                <DialogTitle>{editingTool ? "编辑 AI 工具" : "新增 AI 工具"}</DialogTitle>
+                <DialogDescription>{formError || "配置工具信息和模型绑定。"}</DialogDescription>
               </DialogHeader>
               <div className="space-y-4 py-4">
                 <div className="space-y-2">
-                  <Label>Tool name</Label>
+                  <Label>工具名称</Label>
                   <Input value={form.toolName} onChange={(event) => updateForm("toolName", event.target.value)} />
                 </div>
                 <div className="space-y-2">
-                  <Label>Description</Label>
+                  <Label>描述</Label>
                   <Textarea value={form.description} onChange={(event) => updateForm("description", event.target.value)} />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label>Category</Label>
+                    <Label>分类</Label>
                     <Select value={form.categoryId} onValueChange={(value) => updateForm("categoryId", value)}>
                       <SelectTrigger>
-                        <SelectValue placeholder="Select category" />
+                        <SelectValue placeholder="选择分类" />
                       </SelectTrigger>
                       <SelectContent>
                         {categories.map((cat) => (
@@ -369,7 +369,7 @@ export default function ToolsPage() {
                     </Select>
                   </div>
                   <div className="space-y-2">
-                    <Label>Credits</Label>
+                    <Label>算力消耗</Label>
                     <Input
                       type="number"
                       value={form.estimatedCreditCost}
@@ -378,22 +378,22 @@ export default function ToolsPage() {
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <Label>Tool code</Label>
+                  <Label>工具编码</Label>
                   <Input
                     value={form.toolCode}
                     onChange={(event) => updateForm("toolCode", event.target.value)}
-                    placeholder="Optional"
+                    placeholder="可选"
                     disabled={Boolean(editingTool)}
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label>Model config</Label>
+                  <Label>模型配置</Label>
                   <Select value={form.modelConfigId || "default"} onValueChange={(value) => updateForm("modelConfigId", value === "default" ? "" : value)}>
                     <SelectTrigger>
-                      <SelectValue placeholder="Use default model config" />
+                      <SelectValue placeholder="使用默认模型配置" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="default">Use default model config</SelectItem>
+                      <SelectItem value="default">使用默认模型配置</SelectItem>
                       {modelConfigs.map((config) => (
                         <SelectItem key={config.id} value={String(config.id)}>
                           {config.displayName || config.modelName} · {config.provider}
@@ -405,10 +405,10 @@ export default function ToolsPage() {
               </div>
               <DialogFooter>
                 <Button variant="outline" onClick={() => setIsAddDialogOpen(false)} disabled={submitting}>
-                  Cancel
+                  取消
                 </Button>
                 <Button onClick={handleSaveTool} disabled={submitting}>
-                  {submitting ? "Saving..." : editingTool ? "Save Tool" : "Create Tool"}
+                  {submitting ? "保存中..." : editingTool ? "保存工具" : "创建工具"}
                 </Button>
               </DialogFooter>
             </DialogContent>
@@ -442,16 +442,16 @@ export default function ToolsPage() {
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="bg-card border-border">
                     <DropdownMenuItem className="gap-2" onClick={() => openEditDialog(tool)}>
-                      <Pencil className="h-4 w-4" /> Edit
+                      <Pencil className="h-4 w-4" /> 编辑
                     </DropdownMenuItem>
                     <DropdownMenuItem className="gap-2" onClick={() => openFieldDialog(tool)}>
-                      <FileText className="h-4 w-4" /> Fields
+                      <FileText className="h-4 w-4" /> 字段
                     </DropdownMenuItem>
                     <DropdownMenuItem className="gap-2" disabled>
-                      <Copy className="h-4 w-4" /> Duplicate
+                      <Copy className="h-4 w-4" /> 复制
                     </DropdownMenuItem>
                     <DropdownMenuItem className="gap-2 text-destructive" disabled>
-                      <Trash2 className="h-4 w-4" /> Delete
+                      <Trash2 className="h-4 w-4" /> 删除
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
@@ -463,14 +463,14 @@ export default function ToolsPage() {
                 <div className="flex items-center gap-4 text-sm">
                   <div className="flex items-center gap-1 text-muted-foreground">
                     <Sparkles className="h-4 w-4" />
-                    <span>{tool.credits} credits</span>
+                    <span>{tool.credits} 算力</span>
                   </div>
                   <div className="text-muted-foreground">{tool.rawStatus}</div>
                 </div>
                 <Switch checked={tool.status} disabled={togglingId === tool.rawId} onCheckedChange={() => toggleToolStatus(tool.id)} />
               </div>
               <div className="mt-3 rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
-                Model: {tool.modelConfigName || tool.modelName || "Default model config"}
+                模型：{tool.modelConfigName || tool.modelName || "默认模型配置"}
               </div>
             </div>
           ))}
@@ -480,9 +480,9 @@ export default function ToolsPage() {
       <Dialog open={fieldDialogOpen} onOpenChange={setFieldDialogOpen}>
         <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto bg-card border-border">
           <DialogHeader>
-            <DialogTitle>Field Schema</DialogTitle>
+            <DialogTitle>字段 Schema</DialogTitle>
             <DialogDescription>
-              {fieldTool ? `${fieldTool.name} user-facing form fields.` : "Configure tool fields."}
+              {fieldTool ? `${fieldTool.name} 的用户端表单字段。` : "配置工具字段。"}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 py-2">
@@ -496,18 +496,18 @@ export default function ToolsPage() {
               onChange={(event) => setFieldJson(event.target.value)}
               className="min-h-[420px] font-mono text-xs"
               disabled={fieldLoading || fieldSaving}
-              placeholder='[{"fieldKey":"productName","fieldName":"Product name","fieldType":"TEXT","required":true,"sortOrder":1}]'
+              placeholder='[{"fieldKey":"productName","fieldName":"商品名称","fieldType":"TEXT","required":true,"sortOrder":1}]'
             />
             <p className="text-xs text-muted-foreground">
-              Supported keys: fieldKey, fieldName, fieldType, placeholder, optionsJson, required, sortOrder.
+              支持字段：fieldKey、fieldName、fieldType、placeholder、optionsJson、required、sortOrder。
             </p>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setFieldDialogOpen(false)} disabled={fieldSaving}>
-              Cancel
+              取消
             </Button>
             <Button onClick={saveFields} disabled={fieldLoading || fieldSaving}>
-              {fieldSaving ? "Saving..." : "Save fields"}
+              {fieldSaving ? "保存中..." : "保存字段"}
             </Button>
           </DialogFooter>
         </DialogContent>

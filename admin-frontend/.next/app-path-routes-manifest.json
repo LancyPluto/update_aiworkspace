@@ -1,6 +1,7 @@
 {
   "/_global-error/page": "/_global-error",
   "/_not-found/page": "/_not-found",
+  "/agent-runs/page": "/agent-runs",
   "/categories/page": "/categories",
   "/credits/page": "/credits",
   "/login/page": "/login",

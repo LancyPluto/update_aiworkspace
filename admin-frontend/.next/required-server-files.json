@@ -104,7 +104,7 @@
         "transform": "lodash/{{member}}"
       }
     },
-    "outputFileTracingRoot": "D:\\AIMarket\\ai-tool-market\\admin-frontend",
+    "outputFileTracingRoot": "C:\\ai\\ai-tool-market\\admin-frontend",
     "allowedDevOrigins": [
       "127.0.0.1",
       "localhost"
@@ -308,7 +308,7 @@
     "bundlePagesRouterDependencies": false,
     "configFileName": "next.config.mjs",
     "turbopack": {
-      "root": "D:\\AIMarket\\ai-tool-market\\admin-frontend"
+      "root": "C:\\ai\\ai-tool-market\\admin-frontend"
     },
     "distDirRoot": ".next",
     "_originalRewrites": {
@@ -322,7 +322,7 @@
       "fallback": []
     }
   },
-  "appDir": "D:\\AIMarket\\ai-tool-market\\admin-frontend",
+  "appDir": "C:\\ai\\ai-tool-market\\admin-frontend",
   "relativeAppDir": "",
   "files": [
     ".next\\routes-manifest.json",

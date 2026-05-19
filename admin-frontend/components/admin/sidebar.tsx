@@ -4,9 +4,8 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
 import {
-  Boxes,
-  Coins,
   Bot,
+  Coins,
   FileText,
   FolderTree,
   LayoutDashboard,
@@ -25,7 +24,6 @@ const navigation = [
   { name: "Prompt 管理", href: "/prompts", icon: FileText },
   { name: "任务管理", href: "/tasks", icon: ListTodo },
   { name: "Agent 运行", href: "/agent-runs", icon: Bot },
-  { name: "模型运营", href: "/commerce", icon: Boxes },
   { name: "会员算力", href: "/credits", icon: Coins },
   { name: "系统配置", href: "/settings", icon: Settings },
 ]
@@ -57,7 +55,7 @@ export function AdminSidebar() {
                   "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200",
                   isActive
                     ? "bg-sidebar-accent text-sidebar-foreground"
-                    : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+                    : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground",
                 )}
               >
                 <item.icon className="h-4.5 w-4.5" />

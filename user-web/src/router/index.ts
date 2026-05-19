@@ -62,12 +62,6 @@ const router = createRouter({
       component: () => import("@/pages/Billing/Page.vue"),
     },
     {
-      path: "/models",
-      name: "ModelWorkbench",
-      meta: { requiresAuth: true },
-      component: () => import("@/pages/ModelWorkbench/Page.vue"),
-    },
-    {
       path: "/tasks/:taskId/status",
       name: "TaskStatus",
       meta: { requiresAuth: true },

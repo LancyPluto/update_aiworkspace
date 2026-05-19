@@ -1,21 +1,19 @@
 <script setup lang="ts">
+import { computed, onMounted, ref, watch } from "vue"
 import { RouterLink, useRoute } from "vue-router"
-//侧边导航栏
 import {
   Bot,
-  Boxes,
-  LayoutGrid,
-  Store,
-  ListChecks,
-  Wallet,
-  FolderHeart,
-  Sparkles,
-  ShieldCheck,
   ChevronRight,
+  FolderHeart,
+  LayoutGrid,
+  ListChecks,
   PanelLeft,
   PanelLeftClose,
+  ShieldCheck,
+  Sparkles,
+  Store,
+  Wallet,
 } from "lucide-vue-next"
-import { ref, onMounted, computed, watch } from "vue"
 import { fetchCreditAccount } from "@/api/creditApi"
 import type { CreditAccount } from "@/api/types"
 import { useAuthStore } from "@/store/authStore"
@@ -23,7 +21,7 @@ import { useAuthStore } from "@/store/authStore"
 withDefaults(
   defineProps<{
     title?: string
-    description ?: string
+    description?: string
   }>(),
   {},
 )
@@ -34,35 +32,33 @@ const auth = useAuthStore()
 const SIDEBAR_OPEN_KEY = "ai_tool_market_sidebar_open"
 
 const credit = ref<CreditAccount | null>(null)
-/** 大屏侧栏是否展开（小屏本不显示侧栏） */
 const sidebarOpen = ref(true)
-
-function toggleSidebar() {
-  sidebarOpen.value = !sidebarOpen.value
-}
-
-watch(sidebarOpen, (open) => {
-  localStorage.setItem(SIDEBAR_OPEN_KEY, open ? "1" : "0")
-})
 
 const userNav = [
   { href: "/agent" as const, label: "Agent", icon: Bot },
-  { href: "/models" as const, label: "Global Models", icon: Boxes },
   { href: "/dashboard" as const, label: "工作台", icon: LayoutGrid },
   { href: "/marketplace" as const, label: "AI 工具超市", icon: Store },
   { href: "/tasks" as const, label: "我的任务", icon: ListChecks },
   { href: "/library" as const, label: "素材库", icon: FolderHeart },
-  { href: "/billing" as const, label: "会员与算力", icon: Wallet },
+  { href: "/billing" as const, label: "算力中心", icon: Wallet },
 ]
+
+const creditPercent = computed(() => {
+  if (!credit.value || credit.value.totalGranted <= 0) return 0
+  return Math.round((credit.value.available / credit.value.totalGranted) * 100)
+})
+
+function toggleSidebar() {
+  sidebarOpen.value = !sidebarOpen.value
+}
 
 function isActive(path: string) {
   if (path === "/marketplace") return route.path === path
   return route.path === path || route.path.startsWith(path + "/")
 }
 
-const creditPercent = computed(() => {
-  if (!credit.value) return 0
-  return Math.round((credit.value.available / (credit.value.totalGranted || 1)) * 100)
+watch(sidebarOpen, (open) => {
+  localStorage.setItem(SIDEBAR_OPEN_KEY, open ? "1" : "0")
 })
 
 onMounted(async () => {
@@ -74,7 +70,7 @@ onMounted(async () => {
     try {
       credit.value = await fetchCreditAccount({ token: auth.token })
     } catch {
-      // 静默处理
+      // 侧边栏不阻断主页面加载。
     }
   }
 })
@@ -86,7 +82,7 @@ onMounted(async () => {
       class="hidden w-60 shrink-0 flex-col border-r border-border bg-card"
       :class="sidebarOpen ? 'lg:flex' : 'lg:hidden'"
     >
-      <div class="flex h-16 items-center gap-2.5 px-5 border-b border-border">
+      <div class="flex h-16 items-center gap-2.5 border-b border-border px-5">
         <div class="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
           <Sparkles class="h-5 w-5" />
         </div>
@@ -103,11 +99,7 @@ onMounted(async () => {
             <RouterLink
               :to="item.href"
               class="flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors"
-              :class="
-                isActive(item.href)
-                  ? 'bg-primary/10 text-primary'
-                  : 'text-foreground/80 hover:bg-secondary'
-              "
+              :class="isActive(item.href) ? 'bg-primary/10 text-primary' : 'text-foreground/80 hover:bg-secondary'"
             >
               <component :is="item.icon" class="h-4 w-4" />
               <span>{{ item.label }}</span>
@@ -115,10 +107,8 @@ onMounted(async () => {
           </li>
         </ul>
 
-        <p class="px-3 pt-6 pb-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">管理</p>
-        <div
-          class="flex items-center justify-between rounded-md px-3 py-2 text-sm text-muted-foreground opacity-70 cursor-not-allowed"
-        >
+        <p class="px-3 pb-2 pt-6 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">管理</p>
+        <div class="flex cursor-not-allowed items-center justify-between rounded-md px-3 py-2 text-sm text-muted-foreground opacity-70">
           <span class="flex items-center gap-3">
             <ShieldCheck class="h-4 w-4" />
             进入管理后台
@@ -137,27 +127,21 @@ onMounted(async () => {
             </span>
           </p>
           <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-secondary">
-            <div
-              class="h-full rounded-full bg-primary"
-              :style="{ width: Math.min(creditPercent, 100) + '%' }"
-            />
+            <div class="h-full rounded-full bg-primary" :style="{ width: Math.min(creditPercent, 100) + '%' }" />
           </div>
-          <RouterLink
-            :to="'/billing'"
-            class="mt-3 block text-center text-xs font-medium text-primary hover:underline"
-          >
-            充值 / 升级套餐 →
+          <RouterLink :to="'/billing'" class="mt-3 block text-center text-xs font-medium text-primary hover:underline">
+            查看算力明细
           </RouterLink>
         </div>
       </div>
     </aside>
 
-    <div class="flex flex-1 flex-col min-w-0">
+    <div class="flex min-w-0 flex-1 flex-col">
       <header class="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-border bg-card/80 px-6 backdrop-blur">
         <button
           type="button"
-          class="hidden lg:inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border bg-background text-muted-foreground hover:bg-secondary hover:text-foreground"
-          :aria-label="sidebarOpen ? '隐藏侧栏' : '显示侧栏'"
+          class="hidden h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border bg-background text-muted-foreground hover:bg-secondary hover:text-foreground lg:inline-flex"
+          :aria-label="sidebarOpen ? '隐藏侧边栏' : '显示侧边栏'"
           :aria-expanded="sidebarOpen"
           @click="toggleSidebar"
         >
@@ -165,25 +149,18 @@ onMounted(async () => {
           <PanelLeft v-else class="h-4 w-4" aria-hidden="true" />
         </button>
         <div class="min-w-0 flex-1">
-          <h1 v-if="title" class="text-base font-semibold truncate">{{ title }}</h1>
-          <p v-if="description" class="text-xs text-muted-foreground truncate">{{ description }}</p>
+          <h1 v-if="title" class="truncate text-base font-semibold">{{ title }}</h1>
+          <p v-if="description" class="truncate text-xs text-muted-foreground">{{ description }}</p>
         </div>
         <div class="ml-auto flex items-center gap-3">
           <template v-if="auth.isLoggedIn">
             <span class="text-xs text-muted-foreground">{{ auth.user?.nickname || auth.user?.username }}</span>
-            <button
-              type="button"
-              class="text-xs text-muted-foreground hover:text-foreground"
-              @click="auth.logout()"
-            >
+            <button type="button" class="text-xs text-muted-foreground hover:text-foreground" @click="auth.logout()">
               退出
             </button>
           </template>
           <template v-else>
-            <RouterLink
-              :to="'/login'"
-              class="text-xs text-primary hover:underline"
-            >
+            <RouterLink :to="'/login'" class="text-xs text-primary hover:underline">
               登录
             </RouterLink>
           </template>

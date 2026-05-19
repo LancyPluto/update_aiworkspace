@@ -12,12 +12,16 @@ import org.springframework.amqp.rabbit.core.RabbitAdmin;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
 
 @Configuration
 public class RabbitMqConfig {
+
+    private static final Logger log = LoggerFactory.getLogger(RabbitMqConfig.class);
 
     @Bean
     public RabbitAdmin rabbitAdmin(ConnectionFactory connectionFactory) {
@@ -28,7 +32,13 @@ public class RabbitMqConfig {
 
     @Bean
     public ApplicationRunner rabbitTopologyInitializer(RabbitAdmin rabbitAdmin) {
-        return args -> rabbitAdmin.initialize();
+        return args -> {
+            try {
+                rabbitAdmin.initialize();
+            } catch (Exception exception) {
+                log.warn("RabbitMQ topology initialization skipped: {}", exception.getMessage());
+            }
+        };
     }
 
     @Bean

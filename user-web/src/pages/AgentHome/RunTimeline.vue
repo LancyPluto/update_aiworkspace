@@ -43,18 +43,18 @@ function parseEventJson(value?: string | null) {
 
 function titleFor(event: AgentRunEvent) {
   const payload = parseEventJson(event.eventJson)
-  if (event.eventType === "subagent.started") return `Sub-agent started: ${payload.subagentName || event.eventText || "agent"}`
-  if (event.eventType === "subagent.completed") return `Sub-agent completed: ${payload.subagentName || event.eventText || "agent"}`
-  if (event.eventType === "subagent.failed") return `Sub-agent failed: ${payload.subagentName || event.eventText || "agent"}`
-  if (event.eventType === "memory.context_injected") return "Workspace memory injected"
-  if (event.eventType === "memory.candidate_created") return "Memory candidate created"
-  if (event.eventType === "workspace_file.created") return `Artifact created: ${payload.filename || event.eventText || "file"}`
-  if (event.eventType === "workspace_file.updated") return `Artifact updated: ${payload.filename || event.eventText || "file"}`
-  if (event.eventType === "workspace_file.read") return "Workspace files read"
-  if (event.eventType === "tool.started") return `Tool started: ${payload.toolCode || event.eventText || "tool"}`
-  if (event.eventType === "tool.finished") return `Tool finished: ${payload.toolCode || event.eventText || "tool"}`
-  if (event.eventType === "run.completed") return "Run completed"
-  if (event.eventType === "run.failed") return "Run failed"
+  if (event.eventType === "subagent.started") return `子 Agent 已启动：${payload.subagentName || event.eventText || "agent"}`
+  if (event.eventType === "subagent.completed") return `子 Agent 已完成：${payload.subagentName || event.eventText || "agent"}`
+  if (event.eventType === "subagent.failed") return `子 Agent 失败：${payload.subagentName || event.eventText || "agent"}`
+  if (event.eventType === "memory.context_injected") return "已注入工作区记忆"
+  if (event.eventType === "memory.candidate_created") return "已生成记忆候选"
+  if (event.eventType === "workspace_file.created") return `已创建产物：${payload.filename || event.eventText || "文件"}`
+  if (event.eventType === "workspace_file.updated") return `已更新产物：${payload.filename || event.eventText || "文件"}`
+  if (event.eventType === "workspace_file.read") return "已读取工作区文件"
+  if (event.eventType === "tool.started") return `工具已启动：${payload.toolCode || event.eventText || "工具"}`
+  if (event.eventType === "tool.finished") return `工具已完成：${payload.toolCode || event.eventText || "工具"}`
+  if (event.eventType === "run.completed") return "运行已完成"
+  if (event.eventType === "run.failed") return "运行失败"
   return event.eventType
 }
 
@@ -101,7 +101,7 @@ function toggleExpanded(eventId: number) {
 </script>
 
 <template>
-  <section v-if="visibleEvents.length > 0" class="run-timeline" aria-label="Agent run timeline">
+  <section v-if="visibleEvents.length > 0" class="run-timeline" aria-label="Agent 运行时间线">
     <article v-for="event in visibleEvents" :key="event.id" class="timeline-row" :class="toneFor(event)">
       <div class="timeline-icon">
         <component :is="iconFor(event)" class="h-4 w-4" />
@@ -111,7 +111,7 @@ function toggleExpanded(eventId: number) {
         <p v-if="detailFor(event)" class="timeline-detail">{{ detailFor(event) }}</p>
         <button v-if="detailJson(event)" class="detail-toggle" type="button" @click="toggleExpanded(event.id)">
           <ChevronDown class="h-3 w-3" :class="{ open: expandedEventIds.has(event.id) }" />
-          Details
+          详情
         </button>
         <pre v-if="expandedEventIds.has(event.id) && detailJson(event)" class="detail-json">{{ detailJson(event) }}</pre>
       </div>
