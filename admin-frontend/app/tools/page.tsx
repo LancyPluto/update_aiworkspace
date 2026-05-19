@@ -43,6 +43,7 @@ import {
   Sparkles,
   Store,
   Trash2,
+  UploadCloud,
   Video,
   type LucideIcon,
 } from "lucide-react"
@@ -57,6 +58,7 @@ import {
   publishTool,
   updateTool,
   updateToolFields,
+  uploadToolCover,
 } from "@/lib/api/tools"
 import { applyToolTemplate, fetchToolTemplates, type ToolTemplateSummary } from "@/lib/api/tool-templates"
 import { FieldSchemaEditor } from "@/components/admin/field-schema-editor"
@@ -70,7 +72,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { fetchAgentModelConfigs } from "@/lib/api/agent-model"
 import { fetchModelProviders } from "@/lib/api/model-providers"
-import { ApiError } from "@/lib/api/http"
+import { ApiError, getBaseUrl } from "@/lib/api/http"
 import type { AgentModelConfig, ModelProviderDescriptor, ToolCategory, ToolField, ToolFieldPayload, ToolSummary } from "@/lib/api/types"
 
 interface ToolRow {
@@ -85,6 +87,7 @@ interface ToolRow {
   inputModality: string
   outputModality: string
   configNote: string | null
+  coverUrl: string | null
   icon: LucideIcon
   credits: number
   status: boolean
@@ -104,6 +107,7 @@ interface ToolForm {
   inputModality: string
   outputModality: string
   configNote: string
+  coverUrl: string
   estimatedCreditCost: string
   modelConfigId: string
   templateCode: string
@@ -118,6 +122,7 @@ const initialForm: ToolForm = {
   inputModality: "TEXT",
   outputModality: "TEXT",
   configNote: "",
+  coverUrl: "",
   estimatedCreditCost: "5",
   modelConfigId: "",
   templateCode: "text_generation_default",
@@ -190,6 +195,7 @@ const fallbackProviderCapabilities: Record<string, string[]> = {
   minimax: ["TEXT_GENERATION"],
   siliconflow: ["IMAGE_GENERATION", "DIGITAL_HUMAN"],
   siliconflow_images: ["IMAGE_GENERATION", "DIGITAL_HUMAN"],
+  volcengine_images: ["IMAGE_GENERATION"],
   minimax_speech: ["TEXT_TO_SPEECH"],
   siliconflow_speech: ["TEXT_TO_SPEECH"],
   worker_video: ["VIDEO_GENERATION"],
@@ -252,6 +258,21 @@ function pickIcon(categoryName?: string | null): LucideIcon {
   return CATEGORY_ICON_MAP[categoryName] || Sparkles
 }
 
+function isVideoPreviewUrl(url?: string | null): boolean {
+  if (!url) return false
+  const normalized = url.split(/[?#]/)[0]?.toLowerCase() || ""
+  return [".mp4", ".webm", ".mov", ".m4v"].some((ext) => normalized.endsWith(ext))
+}
+
+function normalizeToolMediaUrl(url?: string | null): string {
+  const raw = url?.trim()
+  if (!raw) return ""
+  if (raw.startsWith("http://") || raw.startsWith("https://") || raw.startsWith("data:")) return raw
+  const path = raw.startsWith("/") ? raw : `/${raw}`
+  const baseUrl = getBaseUrl().replace(/\/$/, "")
+  return baseUrl ? `${baseUrl}${path}` : path
+}
+
 function mapTool(tool: ToolSummary): ToolRow {
   return {
     id: String(tool.id),
@@ -265,6 +286,7 @@ function mapTool(tool: ToolSummary): ToolRow {
     inputModality: tool.inputModality || "TEXT",
     outputModality: tool.outputModality || "TEXT",
     configNote: tool.configNote || null,
+    coverUrl: tool.coverUrl || null,
     icon: pickIcon(tool.categoryName),
     credits: tool.estimatedCreditCost ?? 0,
     status: (tool.status || "").toUpperCase() === "ONLINE",
@@ -289,6 +311,8 @@ export default function ToolsPage() {
   const [togglingId, setTogglingId] = useState<number | null>(null)
   const [deletingId, setDeletingId] = useState<number | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [coverUploading, setCoverUploading] = useState(false)
+  const [coverDragging, setCoverDragging] = useState(false)
   const [form, setForm] = useState<ToolForm>(initialForm)
   const [formError, setFormError] = useState<string | null>(null)
   const [fieldDialogOpen, setFieldDialogOpen] = useState(false)
@@ -412,6 +436,35 @@ export default function ToolsPage() {
     setForm((prev) => ({ ...prev, [key]: value }))
   }
 
+  function selectedModelName(): string {
+    const selected = form.modelConfigId
+      ? modelConfigs.find((config) => String(config.id) === form.modelConfigId)
+      : defaultModelConfig
+    return selected?.displayName || selected?.modelName || ""
+  }
+
+  async function handleCoverUpload(file?: File | null) {
+    if (!file) return
+    setFormError(null)
+    setCoverUploading(true)
+    try {
+      const uploaded = await uploadToolCover({
+        file,
+        toolName: form.toolName.trim(),
+        toolCode: form.toolCode.trim(),
+        modelName: selectedModelName(),
+      })
+      updateForm("coverUrl", uploaded.url)
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : "工具展示素材上传失败，请查看后端日志。"
+      console.error("[AI Tool Management] 工具展示素材上传失败", err)
+      setFormError(message)
+    } finally {
+      setCoverUploading(false)
+      setCoverDragging(false)
+    }
+  }
+
   function openCreateDialog() {
     setEditingTool(null)
     setForm({
@@ -420,6 +473,8 @@ export default function ToolsPage() {
       templateCode: templateCodeByToolType[initialForm.toolType] || "",
     })
     setFormError(null)
+    setCoverUploading(false)
+    setCoverDragging(false)
     setIsAddDialogOpen(true)
   }
 
@@ -458,11 +513,14 @@ export default function ToolsPage() {
       inputModality: tool.inputModality,
       outputModality: tool.outputModality,
       configNote: tool.configNote || "",
+      coverUrl: tool.coverUrl || "",
       estimatedCreditCost: String(tool.credits),
       modelConfigId: tool.modelConfigId ? String(tool.modelConfigId) : "",
       templateCode: "",
     })
     setFormError(null)
+    setCoverUploading(false)
+    setCoverDragging(false)
     setIsAddDialogOpen(true)
   }
 
@@ -496,6 +554,7 @@ export default function ToolsPage() {
         inputModality: form.inputModality,
         outputModality: form.outputModality,
         configNote: form.configNote.trim() || undefined,
+        coverUrl: form.coverUrl.trim() || undefined,
         estimatedCreditCost: Math.floor(credits),
         modelConfigId: form.modelConfigId ? Number(form.modelConfigId) : null,
         templateCode: !editingTool && form.templateCode ? form.templateCode : undefined,
@@ -654,6 +713,8 @@ export default function ToolsPage() {
                 setForm(initialForm)
                 setEditingTool(null)
                 setFormError(null)
+                setCoverUploading(false)
+                setCoverDragging(false)
               }
             }}
           >
@@ -663,7 +724,7 @@ export default function ToolsPage() {
                 新建工具
               </Button>
             </DialogTrigger>
-            <DialogContent className="bg-card border-border max-w-lg">
+            <DialogContent className="max-h-[92vh] overflow-y-auto bg-card border-border max-w-lg">
               <DialogHeader>
                 <DialogTitle>{editingTool ? "编辑 AI 工具" : "新建 AI 工具"}</DialogTitle>
                 <DialogDescription className={formError ? "text-destructive" : undefined}>
@@ -678,6 +739,81 @@ export default function ToolsPage() {
                 <div className="space-y-2">
                   <Label>工具描述</Label>
                   <Textarea value={form.description} onChange={(event) => updateForm("description", event.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label>工具展示素材 URL</Label>
+                  <Input
+                    value={form.coverUrl}
+                    onChange={(event) => updateForm("coverUrl", event.target.value)}
+                    placeholder="可填图片、GIF、MP4/WebM/MOV 地址；不填则使用默认图标"
+                  />
+                  <label
+                    className={cn(
+                      "flex cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-border bg-secondary/30 px-4 py-5 text-center transition",
+                      coverDragging && "border-primary bg-primary/5",
+                      coverUploading && "pointer-events-none opacity-70",
+                    )}
+                    onDragEnter={(event) => {
+                      event.preventDefault()
+                      setCoverDragging(true)
+                    }}
+                    onDragOver={(event) => {
+                      event.preventDefault()
+                      setCoverDragging(true)
+                    }}
+                    onDragLeave={(event) => {
+                      event.preventDefault()
+                      setCoverDragging(false)
+                    }}
+                    onDrop={(event) => {
+                      event.preventDefault()
+                      const file = event.dataTransfer.files?.[0]
+                      void handleCoverUpload(file)
+                    }}
+                  >
+                    <UploadCloud className="mb-2 h-5 w-5 text-primary" />
+                    <span className="text-sm font-medium">
+                      {coverUploading ? "上传中..." : "拖拽图片、GIF 或视频到这里"}
+                    </span>
+                    <span className="mt-1 text-xs text-muted-foreground">
+                      也可以点击选择文件；系统会按工具名和模型自动命名。
+                    </span>
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime,video/x-m4v"
+                      className="hidden"
+                      onChange={(event) => {
+                        const file = event.target.files?.[0]
+                        void handleCoverUpload(file)
+                        event.currentTarget.value = ""
+                      }}
+                    />
+                  </label>
+                  {form.coverUrl.trim() ? (
+                    <div className="overflow-hidden rounded-lg border border-border bg-muted/40">
+                      {isVideoPreviewUrl(form.coverUrl) ? (
+                        <video
+                          src={normalizeToolMediaUrl(form.coverUrl)}
+                          className="aspect-video w-full object-cover"
+                          muted
+                          loop
+                          playsInline
+                          controls
+                          preload="metadata"
+                        />
+                      ) : (
+                        <img
+                          src={normalizeToolMediaUrl(form.coverUrl)}
+                          alt="工具展示素材预览"
+                          className="aspect-video w-full object-cover"
+                        />
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      建议使用 16:9 横图；GIF 可直接作为图片使用，视频建议 MP4/WebM。
+                    </p>
+                  )}
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
@@ -884,6 +1020,22 @@ export default function ToolsPage() {
                 !tool.status && "opacity-60",
               )}
             >
+              {tool.coverUrl ? (
+                <div className="-mx-6 -mt-6 mb-5 overflow-hidden border-b border-border bg-muted">
+                  {isVideoPreviewUrl(tool.coverUrl) ? (
+                    <video
+                      src={normalizeToolMediaUrl(tool.coverUrl)}
+                      className="aspect-video w-full object-cover"
+                      muted
+                      loop
+                      playsInline
+                      preload="metadata"
+                    />
+                  ) : (
+                    <img src={normalizeToolMediaUrl(tool.coverUrl)} alt={tool.name} className="aspect-video w-full object-cover" />
+                  )}
+                </div>
+              ) : null}
               <div className="flex items-start justify-between">
                 <div className="flex items-center gap-3">
                   <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10">

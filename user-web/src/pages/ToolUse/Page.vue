@@ -5,6 +5,7 @@ import { ArrowLeft, ChevronRight, Info, Loader2, Sparkles, Zap } from "lucide-vu
 import AppShell from "@/components/AppShell.vue"
 import DynamicForm from "@/components/DynamicForm/DynamicForm.vue"
 import TaskStatusTag from "@/components/TaskStatusTag/TaskStatusTag.vue"
+import { getApiOrigin } from "@/api/client"
 import { userRoutes } from "@/router/userRoutes"
 import { fetchToolByCode, createTask, ApiBusinessError } from "@/api"
 import type { ToolDetail, ToolField } from "@/api/types"
@@ -28,6 +29,8 @@ const dynamicFormRef = ref<InstanceType<typeof DynamicForm> | null>(null)
 
 const title = computed(() => tool.value?.toolName ?? `工具 · ${props.id}`)
 const isOffline = computed(() => tool.value?.status === "OFFLINE")
+const coverMediaUrl = computed(() => normalizeToolMediaUrl(tool.value?.coverUrl))
+const coverIsVideo = computed(() => isVideoPreviewUrl(tool.value?.coverUrl))
 
 watch(
   () => tool.value?.toolCode,
@@ -53,6 +56,20 @@ function buildTaskParams(fields: ToolField[], raw: Record<string, unknown>): Rec
     }
   }
   return out
+}
+
+function normalizeToolMediaUrl(value?: string | null): string {
+  const raw = value?.trim()
+  if (!raw) return ""
+  if (raw.startsWith("http://") || raw.startsWith("https://") || raw.startsWith("data:")) return raw
+  const path = raw.startsWith("/") ? raw : `/${raw}`
+  const apiOrigin = getApiOrigin()
+  return apiOrigin ? `${apiOrigin}${path}` : path
+}
+
+function isVideoPreviewUrl(value?: string | null): boolean {
+  const raw = value?.split(/[?#]/)[0]?.toLowerCase() || ""
+  return [".mp4", ".webm", ".mov", ".m4v"].some((ext) => raw.endsWith(ext))
 }
 
 onMounted(async () => {
@@ -170,6 +187,25 @@ async function handleCreateTask() {
           </div>
 
           <aside class="space-y-4">
+            <div v-if="coverMediaUrl" class="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+              <video
+                v-if="coverIsVideo"
+                :src="coverMediaUrl"
+                class="aspect-video w-full object-cover"
+                muted
+                loop
+                playsinline
+                autoplay
+                controls
+                preload="metadata"
+              />
+              <img
+                v-else
+                :src="coverMediaUrl"
+                :alt="tool.toolName"
+                class="aspect-video w-full object-cover"
+              />
+            </div>
             <div class="rounded-xl border border-border bg-card p-5 shadow-sm lg:sticky lg:top-20">
               <h3 class="text-sm font-semibold mb-3 flex items-center gap-2">
                 <Sparkles class="h-4 w-4 text-primary" /> 任务说明
