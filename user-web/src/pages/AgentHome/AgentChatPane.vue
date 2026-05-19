@@ -72,6 +72,7 @@ const bottomRef = ref<HTMLElement | null>(null)
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const composerTextareaRef = ref<HTMLTextAreaElement | null>(null)
 const composerExpanded = ref(false)
+const messagesKey = computed(() => `agent_messages_${props.sessionId}`)
 
 const input = computed({
   get: () => props.draft,
@@ -711,7 +712,7 @@ defineExpose({
           <button class="tool-btn">
             <Store class="h-4 w-4" />
             智能搜索
-          </button>
+          </button> 
         </div>
 
         <button

@@ -2,7 +2,7 @@
   import { onMounted, ref, watch } from "vue"
   import { Bot, ChevronLeft, ChevronRight, Loader2, Plus, Sparkles, Trash2 } from "lucide-vue-next"
   import AppShell from "@/components/AppShell.vue"
-  import WorkspaceMemoryPanel from "./WorkspaceMemoryPanel.vue"
+  {/* import WorkspaceMemoryPanel from "./WorkspaceMemoryPanel.vue" */}  //记忆功能模块暂无实际作用，暂不引入
   import AgentChatPane from "./AgentChatPane.vue"
   import { useAuthStore } from "@/store/authStore"
   import {
@@ -77,7 +77,7 @@
     deleteSessionError.value = null
   }
 
-  async function startSession(title = "?? Agent ??") {
+  async function startSession(title = "新对话") {
     if (!auth.token) return
     const session = await createAgentSession({ title }, { token: auth.token })
     sessions.value = [session, ...sessions.value.filter((item) => item.id !== session.id)]
