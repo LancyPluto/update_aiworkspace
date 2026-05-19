@@ -1,17 +1,28 @@
 server:
   port: ${SERVER_PORT:8080}
+  servlet:
+    encoding:
+      charset: UTF-8
+      enabled: true
+      force: true
 
 spring:
   application:
     name: ai-tool-market-backend
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 10MB
   datasource:
-    url: jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3307}/${MYSQL_DATABASE:ai_supermarket_v1}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+    # utf8mb4：与库表一致，避免中文乱码；勿用 JDBC 的 utf8（MySQL 历史 3 字节别名）
+    url: jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3307}/${MYSQL_DATABASE:ai_supermarket_v1}?useUnicode=true&characterEncoding=UTF-8&connectionCollation=utf8mb4_unicode_ci&serverTimezone=Asia/Shanghai
     username: ${MYSQL_USERNAME:root}
     password: ${MYSQL_PASSWORD:root123456}
     driver-class-name: com.mysql.cj.jdbc.Driver
     hikari:
       connection-timeout: 2000
       validation-timeout: 1000
+      connection-init-sql: SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci
   data:
     redis:
       host: ${REDIS_HOST:127.0.0.1}
@@ -19,11 +30,6 @@ spring:
       password: ${REDIS_PASSWORD:}
       database: ${REDIS_DATABASE:0}
       timeout: 2s
-  rabbitmq:
-    host: ${RABBITMQ_HOST:127.0.0.1}
-    port: ${RABBITMQ_PORT:5672}
-    username: ${RABBITMQ_USERNAME:guest}
-    password: ${RABBITMQ_PASSWORD:guest}
 
 app:
   production-mode: ${APP_PRODUCTION_MODE:false}
@@ -31,13 +37,14 @@ app:
   internal-api-token: ${INTERNAL_API_TOKEN:local-internal-token}
   ai-task-queue: ${AI_TASK_QUEUE:ai:task:queue}
   task-queue-backend: ${TASK_QUEUE_BACKEND:rabbitmq}
+  generated-media-dir: ${GENERATED_MEDIA_DIR:../data/generated-media}
   rabbitmq:
     task-exchange: ${RABBITMQ_TASK_EXCHANGE:ai.task.exchange}
     task-routing-key: ${RABBITMQ_TASK_ROUTING_KEY:tool.normal}
     task-queue: ${RABBITMQ_TASK_QUEUE:ai.tool.normal}
-    dead-queue: ${RABBITMQ_DEAD_QUEUE:ai.tool.normal.dead}
-    retry-queue-prefix: ${RABBITMQ_RETRY_QUEUE_PREFIX:ai.tool.normal.retry}
-    retry-delays-ms: ${RABBITMQ_RETRY_DELAYS_MS:5000,30000,120000}
+    dead-queue: ${RABBITMQ_TASK_DEAD_QUEUE:ai.tool.normal.dead}
+    retry-queue-prefix: ${RABBITMQ_TASK_RETRY_QUEUE_PREFIX:ai.tool.normal.retry}
+    retry-delays-ms: ${RABBITMQ_TASK_RETRY_DELAYS_MS:5000,30000,120000}
   auth:
     sms:
       provider: ${SMS_PROVIDER:local}
@@ -66,3 +73,13 @@ mybatis-plus:
   global-config:
     db-config:
       id-type: auto
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true

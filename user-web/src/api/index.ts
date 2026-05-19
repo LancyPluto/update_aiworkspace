@@ -3,12 +3,15 @@ export { login, logout, register, sendSmsCode, smsLogin, smsRegister } from "./a
 export { getCurrentUser } from "./userApi"
 export { fetchToolCategories, fetchTools, searchTools, fetchToolByCode } from "./toolApi"
 export {
+  cancelAgentRun,
   confirmAgentTool,
   createAgentSession,
+  deleteAgentSession,
   createAgentWorkspaceMemory,
   deleteAgentWorkspaceMemory,
   fetchAgentFiles,
   fetchAgentMessages,
+  fetchAgentRun,
   fetchAgentRunEvents,
   fetchAgentSessions,
   fetchAgentWorkspaces,

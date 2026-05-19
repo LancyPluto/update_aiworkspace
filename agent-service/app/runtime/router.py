@@ -14,6 +14,6 @@ class RuntimeRouter:
             return DeepAgentsRuntimeEngine(
                 self.backend_client,
                 self.model_client,
-                deep_agents_enabled=self.deep_agents_enabled,
+                deep_agents_enabled=True,
             )
         return LangGraphRuntimeEngine(self.backend_client, self.model_client)

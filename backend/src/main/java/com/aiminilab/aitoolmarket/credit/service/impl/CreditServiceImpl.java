@@ -2,6 +2,7 @@ package com.aiminilab.aitoolmarket.credit.service.impl;
 
 import com.aiminilab.aitoolmarket.common.dto.PageResponse;
 import com.aiminilab.aitoolmarket.common.enums.CreditLogType;
+import com.aiminilab.aitoolmarket.common.enums.CreditSourceType;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.credit.dto.CreditAccountResponse;
@@ -34,21 +35,21 @@ public class CreditServiceImpl implements CreditService {
 
     @Override
     @Transactional
-    public void freezeForTask(Long userId, Long taskId, int amount) {
+    public void freeze(Long userId, CreditSourceType sourceType, Long sourceId, int amount) {
         if (amount <= 0) {
             return;
         }
         CreditAccount before = creditMapper.getOrCreateAccount(userId);
         if (before.getBalance() - before.getFrozen() < amount) {
-            throw new BusinessException(ErrorCode.CREDIT_NOT_ENOUGH, "算力不足");
+            throw new BusinessException(notEnoughErrorCode(sourceType), sourceLabel(sourceType) + "可用算力不足");
         }
         if (!creditMapper.freeze(before.getId(), amount)) {
-            throw new BusinessException(ErrorCode.CREDIT_NOT_ENOUGH, "算力不足");
+            throw new BusinessException(notEnoughErrorCode(sourceType), sourceLabel(sourceType) + "可用算力不足");
         }
         insertLog(
                 before,
-                taskId,
-                null,
+                taskId(sourceType, sourceId),
+                agentRunId(sourceType, sourceId),
                 CreditLogType.FREEZE.name(),
                 0,
                 amount,
@@ -56,24 +57,24 @@ public class CreditServiceImpl implements CreditService {
                 before.getFrozen() + amount,
                 "SYSTEM",
                 null,
-                "创建任务冻结算力"
+                sourceLabel(sourceType) + "冻结算力"
         );
     }
 
     @Override
     @Transactional
-    public void settleForTask(Long userId, Long taskId, int amount) {
+    public void settle(Long userId, CreditSourceType sourceType, Long sourceId, int amount) {
         if (amount <= 0) {
             return;
         }
         CreditAccount before = creditMapper.getOrCreateAccount(userId);
         if (!creditMapper.settle(before.getId(), amount)) {
-            throw new BusinessException(ErrorCode.CREDIT_NOT_ENOUGH, "冻结算力不足，无法扣除");
+            throw new BusinessException(notEnoughErrorCode(sourceType), sourceLabel(sourceType) + "冻结算力不足，无法扣除");
         }
         insertLog(
                 before,
-                taskId,
-                null,
+                taskId(sourceType, sourceId),
+                agentRunId(sourceType, sourceId),
                 CreditLogType.DEDUCT.name(),
                 amount,
                 -amount,
@@ -81,13 +82,13 @@ public class CreditServiceImpl implements CreditService {
                 before.getFrozen() - amount,
                 "SYSTEM",
                 null,
-                "任务成功扣除算力"
+                sourceLabel(sourceType) + "成功扣除算力"
         );
     }
 
     @Override
     @Transactional
-    public void releaseForTask(Long userId, Long taskId, int amount) {
+    public void release(Long userId, CreditSourceType sourceType, Long sourceId, int amount) {
         if (amount <= 0) {
             return;
         }
@@ -97,8 +98,8 @@ public class CreditServiceImpl implements CreditService {
         }
         insertLog(
                 before,
-                taskId,
-                null,
+                taskId(sourceType, sourceId),
+                agentRunId(sourceType, sourceId),
                 CreditLogType.RELEASE.name(),
                 0,
                 -amount,
@@ -106,85 +107,7 @@ public class CreditServiceImpl implements CreditService {
                 before.getFrozen() - amount,
                 "SYSTEM",
                 null,
-                "任务失败或取消释放算力"
-        );
-    }
-
-    @Override
-    @Transactional
-    public void freezeForAgentRun(Long userId, Long runId, int amount) {
-        if (amount <= 0) {
-            return;
-        }
-        CreditAccount before = creditMapper.getOrCreateAccount(userId);
-        if (before.getBalance() - before.getFrozen() < amount) {
-            throw new BusinessException(ErrorCode.AGENT_CREDIT_NOT_ENOUGH, "Agent 可用算力不足");
-        }
-        if (!creditMapper.freeze(before.getId(), amount)) {
-            throw new BusinessException(ErrorCode.AGENT_CREDIT_NOT_ENOUGH, "Agent 可用算力不足");
-        }
-        insertLog(
-                before,
-                null,
-                runId,
-                CreditLogType.FREEZE.name(),
-                0,
-                amount,
-                before.getBalance(),
-                before.getFrozen() + amount,
-                "SYSTEM",
-                null,
-                "Agent 运行冻结算力"
-        );
-    }
-
-    @Override
-    @Transactional
-    public void settleForAgentRun(Long userId, Long runId, int amount) {
-        if (amount <= 0) {
-            return;
-        }
-        CreditAccount before = creditMapper.getOrCreateAccount(userId);
-        if (!creditMapper.settle(before.getId(), amount)) {
-            throw new BusinessException(ErrorCode.AGENT_CREDIT_NOT_ENOUGH, "Agent 冻结算力不足，无法扣除");
-        }
-        insertLog(
-                before,
-                null,
-                runId,
-                CreditLogType.DEDUCT.name(),
-                amount,
-                -amount,
-                before.getBalance() - amount,
-                before.getFrozen() - amount,
-                "SYSTEM",
-                null,
-                "Agent 运行成功扣除算力"
-        );
-    }
-
-    @Override
-    @Transactional
-    public void releaseForAgentRun(Long userId, Long runId, int amount) {
-        if (amount <= 0) {
-            return;
-        }
-        CreditAccount before = creditMapper.getOrCreateAccount(userId);
-        if (!creditMapper.release(before.getId(), amount)) {
-            return;
-        }
-        insertLog(
-                before,
-                null,
-                runId,
-                CreditLogType.RELEASE.name(),
-                0,
-                -amount,
-                before.getBalance(),
-                before.getFrozen() - amount,
-                "SYSTEM",
-                null,
-                "Agent 运行释放冻结算力"
+                sourceLabel(sourceType) + "释放冻结算力"
         );
     }
 
@@ -287,5 +210,21 @@ public class CreditServiceImpl implements CreditService {
 
     private String normalizeReason(String reason, String fallback) {
         return reason == null || reason.isBlank() ? fallback : reason.trim();
+    }
+
+    private ErrorCode notEnoughErrorCode(CreditSourceType sourceType) {
+        return sourceType == CreditSourceType.AGENT_RUN ? ErrorCode.AGENT_CREDIT_NOT_ENOUGH : ErrorCode.CREDIT_NOT_ENOUGH;
+    }
+
+    private Long taskId(CreditSourceType sourceType, Long sourceId) {
+        return sourceType == CreditSourceType.TASK ? sourceId : null;
+    }
+
+    private Long agentRunId(CreditSourceType sourceType, Long sourceId) {
+        return sourceType == CreditSourceType.AGENT_RUN ? sourceId : null;
+    }
+
+    private String sourceLabel(CreditSourceType sourceType) {
+        return sourceType == CreditSourceType.AGENT_RUN ? "Agent 运行" : "任务";
     }
 }

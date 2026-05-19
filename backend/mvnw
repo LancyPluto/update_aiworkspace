@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if ! command -v brew >/dev/null 2>&1; then
+  echo "Homebrew is required. Install it first: https://brew.sh/"
+  exit 1
+fi
+
+BREW_PREFIX="$(brew --prefix)"
+MAVEN_BIN="$BREW_PREFIX/opt/maven/bin/mvn"
+JAVA_HOME_DEFAULT="$BREW_PREFIX/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home"
+
+if [[ ! -x "$MAVEN_BIN" ]]; then
+  echo "Maven is missing. Run ../scripts/setup-test-env.sh first."
+  exit 1
+fi
+
+if [[ ! -d "$JAVA_HOME_DEFAULT" ]]; then
+  echo "openjdk@17 is missing. Run ../scripts/setup-test-env.sh first."
+  exit 1
+fi
+
+export JAVA_HOME="${JAVA_HOME:-$JAVA_HOME_DEFAULT}"
+export PATH="$BREW_PREFIX/opt/maven/bin:$JAVA_HOME/bin:$PATH"
+
+exec "$MAVEN_BIN" "$@"

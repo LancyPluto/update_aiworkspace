@@ -5,6 +5,7 @@ import tailwindcss from "@tailwindcss/vite"
 
 export default defineConfig({
   plugins: [vue(), tailwindcss()],
+  publicDir: "asset",
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
@@ -14,6 +15,10 @@ export default defineConfig({
     port: 5173,
     proxy: {
       "/api": {
+        target: process.env.VITE_DEV_PROXY_TARGET ?? "http://127.0.0.1:8080",
+        changeOrigin: true,
+      },
+      "/generated": {
         target: process.env.VITE_DEV_PROXY_TARGET ?? "http://127.0.0.1:8080",
         changeOrigin: true,
       },

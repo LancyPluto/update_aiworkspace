@@ -1,4 +1,4 @@
-import { apiRequest, getApiOrigin } from "./client"
+import { apiRequest, getRequestBaseUrl } from "./client"
 import type {
   AgentMessage,
   AgentRun,
@@ -31,6 +31,12 @@ export function createAgentSession(body: { title?: string }, options?: { token?:
   return apiRequest<AgentSession>("POST", "/api/v1/agent/sessions", {
     token: options?.token,
     body,
+  })
+}
+
+export function deleteAgentSession(sessionId: number, options?: { token?: string | null }) {
+  return apiRequest<void>("DELETE", `/api/v1/agent/sessions/${sessionId}`, {
+    token: options?.token,
   })
 }
 
@@ -68,11 +74,24 @@ export function uploadAgentFile(sessionId: number, file: File, options?: { token
   })
 }
 
+export function fetchAgentRun(runId: number, options?: { token?: string | null; signal?: AbortSignal }) {
+  return apiRequest<AgentRun>("GET", `/api/v1/agent/runs/${runId}`, {
+    token: options?.token,
+    signal: options?.signal,
+  })
+}
+
 export function fetchAgentRunEvents(runId: number, options?: { token?: string | null; afterEventId?: number; signal?: AbortSignal }) {
   return apiRequest<PageResult<AgentRunEvent>>("GET", `/api/v1/agent/runs/${runId}/events`, {
     token: options?.token,
     signal: options?.signal,
     query: { afterEventId: options?.afterEventId, pageSize: 100 },
+  })
+}
+
+export function cancelAgentRun(runId: number, options?: { token?: string | null }) {
+  return apiRequest<AgentRun>("POST", `/api/v1/agent/runs/${runId}/cancel`, {
+    token: options?.token,
   })
 }
 
@@ -85,9 +104,9 @@ export async function streamAgentRunEvents(
     onEvent: (event: AgentRunEvent) => void
   },
 ) {
-  const origin = getApiOrigin()
   const path = `/api/v1/agent/runs/${runId}/events/stream`
-  const url = new URL(path, origin || window.location.origin)
+  const base = getRequestBaseUrl()
+  const url = new URL(path, base.endsWith("/") ? base : `${base}/`)
   if (options.afterEventId) url.searchParams.set("afterEventId", String(options.afterEventId))
   const response = await fetch(url.toString(), {
     method: "GET",

@@ -43,12 +43,23 @@ public interface AgentToolCallMapper extends BaseMapper<AgentToolCall> {
             """)
     List<AgentToolCall> findByRunId(@Param("runId") Long runId);
 
+    @Select("""
+            SELECT *
+            FROM agent_tool_calls
+            WHERE run_id = #{runId}
+              AND tool_code = #{toolCode}
+            ORDER BY id DESC
+            LIMIT 1
+            """)
+    AgentToolCall selectLatestByRunIdAndToolCode(@Param("runId") Long runId, @Param("toolCode") String toolCode);
+
     @Update("""
             UPDATE agent_tool_calls
             SET status = 'SUCCESS', result_json = #{resultJson}, finished_at = #{now}
             WHERE id = #{toolCallId}
+              AND status NOT IN ('SUCCESS', 'FAILED')
             """)
-    void markSuccess(@Param("toolCallId") Long toolCallId,
+    int markSuccess(@Param("toolCallId") Long toolCallId,
                      @Param("resultJson") String resultJson,
                      @Param("now") LocalDateTime now);
 
@@ -56,8 +67,9 @@ public interface AgentToolCallMapper extends BaseMapper<AgentToolCall> {
             UPDATE agent_tool_calls
             SET status = 'FAILED', error_code = #{errorCode}, error_message = #{errorMessage}, finished_at = #{now}
             WHERE id = #{toolCallId}
+              AND status NOT IN ('SUCCESS', 'FAILED')
             """)
-    void markFailed(@Param("toolCallId") Long toolCallId,
+    int markFailed(@Param("toolCallId") Long toolCallId,
                     @Param("errorCode") String errorCode,
                     @Param("errorMessage") String errorMessage,
                     @Param("now") LocalDateTime now);

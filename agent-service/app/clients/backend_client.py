@@ -10,6 +10,9 @@ from app.core.schemas import (
     RunContext,
     RunEventCreate,
     RunFail,
+    TaskCreate,
+    TaskDetailResponse,
+    TaskStatusResponse,
     AgentModelConfig,
     ToolCallComplete,
     ToolCallCreate,
@@ -17,6 +20,7 @@ from app.core.schemas import (
     ToolCallResponse,
     WorkspaceMemoryItem,
 )
+from app.observability.trace import TRACE_ID_HEADER, current_trace_id
 from app.security.signature import signature_headers
 
 
@@ -50,6 +54,45 @@ class BackendClient:
         )
         return [WorkspaceMemoryItem.model_validate(item) for item in data.get("list", [])]
 
+    async def create_workspace_memory(
+        self, workspace_id: int, user_id: int,
+        memory_type: str, title: str, content: str,
+        source_run_id: int | None = None,
+    ) -> dict[str, Any]:
+        return await self._request(
+            "POST",
+            f"/api/internal/v1/agent/workspaces/{workspace_id}/memory",
+            {
+                "memoryType": memory_type,
+                "title": title,
+                "content": content,
+                "sourceRunId": source_run_id,
+                "userId": user_id,
+            },
+        )
+
+    async def update_workspace_memory(
+        self, workspace_id: int, memory_id: int,
+        memory_type: str, title: str, content: str,
+    ) -> dict[str, Any]:
+        return await self._request(
+            "PUT",
+            f"/api/internal/v1/agent/workspaces/{workspace_id}/memory/{memory_id}",
+            {
+                "memoryType": memory_type,
+                "title": title,
+                "content": content,
+            },
+        )
+
+    async def delete_workspace_memory(
+        self, workspace_id: int, memory_id: int,
+    ) -> dict[str, Any]:
+        return await self._request(
+            "DELETE",
+            f"/api/internal/v1/agent/workspaces/{workspace_id}/memory/{memory_id}",
+        )
+
     async def append_event(self, run_id: int, event: RunEventCreate) -> None:
         await self._request("POST", f"/api/internal/v1/agent/runs/{run_id}/events", event)
 
@@ -70,6 +113,17 @@ class BackendClient:
     async def fail_tool_call(self, tool_call_id: int, request: ToolCallFail) -> None:
         await self._request("POST", f"/api/internal/v1/agent/tool-calls/{tool_call_id}/fail", request)
 
+    async def create_task(self, request: TaskCreate) -> TaskStatusResponse:
+        data = await self._request("POST", "/api/internal/v1/tasks", request)
+        return TaskStatusResponse.model_validate(data)
+
+    async def get_task_detail(self, user_id: int, task_id: int) -> TaskDetailResponse:
+        data = await self._request("GET", f"/api/internal/v1/tasks/{task_id}?userId={user_id}")
+        return TaskDetailResponse.model_validate(data)
+
+    async def cancel_task(self, user_id: int, task_id: int) -> None:
+        await self._request("POST", f"/api/internal/v1/tasks/{task_id}/cancel?userId={user_id}")
+
     async def complete_run(self, run_id: int, request: RunComplete) -> None:
         await self._request("POST", f"/api/internal/v1/agent/runs/{run_id}/complete", request)
 
@@ -83,6 +137,9 @@ class BackendClient:
             data = payload.model_dump(mode="json", by_alias=True, exclude_none=True) if hasattr(payload, "model_dump") else payload
             body = json.dumps(data, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
         headers.update(signature_headers(method, path, body, self.settings.internal_api_token))
+        trace_id = current_trace_id()
+        if trace_id:
+            headers[TRACE_ID_HEADER] = trace_id
         try:
             response = await self._client.request(method, self.base_url + path, content=body if payload is not None else None, headers=headers)
         except httpx.HTTPError as exc:

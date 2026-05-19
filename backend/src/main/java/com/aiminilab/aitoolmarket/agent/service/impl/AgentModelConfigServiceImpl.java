@@ -1,5 +1,7 @@
 package com.aiminilab.aitoolmarket.agent.service.impl;
 
+import com.aiminilab.aitoolmarket.agent.config.ModelProviderDefinition;
+import com.aiminilab.aitoolmarket.agent.config.ModelProviderRegistry;
 import com.aiminilab.aitoolmarket.agent.dto.AgentModelConfigRequest;
 import com.aiminilab.aitoolmarket.agent.dto.AgentModelConfigResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AgentModelConfigTestResponse;
@@ -8,11 +10,14 @@ import com.aiminilab.aitoolmarket.agent.dto.InternalAgentModelConfigResponse;
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentModelConfigMapper;
 import com.aiminilab.aitoolmarket.agent.service.AgentModelConfigService;
+import com.aiminilab.aitoolmarket.agent.service.ModelCapabilityService;
+import com.aiminilab.aitoolmarket.agent.support.ModelCapabilitiesCodec;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Set;
@@ -20,28 +25,41 @@ import java.util.Set;
 @Service
 public class AgentModelConfigServiceImpl implements AgentModelConfigService {
 
-    private static final Set<String> SUPPORTED_PROVIDERS = Set.of("mock", "openai_compatible", "anthropic_compatible", "minimax");
+    private static final String BILLING_UNIT_TOKEN_PER_M = "TOKEN_PER_M";
+    private static final String BILLING_UNIT_PER_CALL = "PER_CALL";
+    private static final BigDecimal TOKEN_UNIT_SCALE = BigDecimal.valueOf(1000);
+    private static final String TEST_STRATEGY_ACCEPT_ONLY = "accept_only";
 
     private final AgentModelConfigMapper agentModelConfigMapper;
     private final AgentServiceClient agentServiceClient;
+    private final ModelProviderRegistry providerRegistry;
+    private final ModelCapabilityService modelCapabilityService;
+    private final ModelCapabilitiesCodec capabilitiesCodec;
 
-    public AgentModelConfigServiceImpl(AgentModelConfigMapper agentModelConfigMapper, AgentServiceClient agentServiceClient) {
+    public AgentModelConfigServiceImpl(AgentModelConfigMapper agentModelConfigMapper,
+                                       AgentServiceClient agentServiceClient,
+                                       ModelProviderRegistry providerRegistry,
+                                       ModelCapabilityService modelCapabilityService,
+                                       ModelCapabilitiesCodec capabilitiesCodec) {
         this.agentModelConfigMapper = agentModelConfigMapper;
         this.agentServiceClient = agentServiceClient;
+        this.providerRegistry = providerRegistry;
+        this.modelCapabilityService = modelCapabilityService;
+        this.capabilitiesCodec = capabilitiesCodec;
     }
 
     @Override
     public AgentModelConfigResponse adminGet() {
-        return AgentModelConfigResponse.from(findOrDefault());
+        return toResponse(findOrDefault());
     }
 
     @Override
     public List<AgentModelConfigResponse> adminList() {
         List<AgentModelConfig> configs = agentModelConfigMapper.findAllActive();
         if (configs.isEmpty()) {
-            return List.of(AgentModelConfigResponse.from(findOrDefault()));
+            return List.of(toResponse(findOrDefault()));
         }
-        return configs.stream().map(AgentModelConfigResponse::from).toList();
+        return configs.stream().map(this::toResponse).toList();
     }
 
     @Override
@@ -56,7 +74,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         if (Boolean.TRUE.equals(config.getDefault())) {
             agentModelConfigMapper.clearDefaultExcept(config.getId());
         }
-        return AgentModelConfigResponse.from(config);
+        return toResponse(config);
     }
 
     @Override
@@ -70,7 +88,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         if (Boolean.TRUE.equals(config.getDefault())) {
             agentModelConfigMapper.clearDefaultExcept(config.getId());
         }
-        return AgentModelConfigResponse.from(config);
+        return toResponse(config);
     }
 
     @Override
@@ -90,7 +108,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         agentModelConfigMapper.setDefault(id);
         existing.setDefault(true);
         existing.setUpdatedAt(LocalDateTime.now());
-        return AgentModelConfigResponse.from(existing);
+        return toResponse(existing);
     }
 
     @Override
@@ -112,9 +130,11 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                                           AgentModelConfigRequest request,
                                           AgentModelConfig existing,
                                           LocalDateTime now) {
+        String previousProvider = existing != null ? existing.getProvider() : null;
         config.setDisplayName(blankToNull(request.displayName()));
         config.setConfigCode(blankToNull(request.configCode()));
-        config.setProvider(request.provider().trim());
+        String providerTrimmed = request.provider().trim();
+        config.setProvider(providerTrimmed);
         config.setModelName(request.modelName().trim());
         config.setBaseUrl(blankToNull(request.baseUrl()));
         if (request.apiKey() != null && !request.apiKey().isBlank()) {
@@ -125,7 +145,32 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
             config.setApiKey("");
         }
         config.setMinimaxGroupId(blankToNull(request.minimaxGroupId()));
+        config.setConsoleUrl(blankToNull(request.consoleUrl()));
+        config.setBalanceUrl(blankToNull(request.balanceUrl()));
+        config.setDocsUrl(blankToNull(request.docsUrl()));
         config.setTimeoutSeconds(request.timeoutSeconds() == null ? 60 : request.timeoutSeconds());
+        BigDecimal inputPricePer1m = resolveTokenPricePer1m(request.inputTokenPricePer1m(), request.inputTokenPricePer1k());
+        BigDecimal outputPricePer1m = resolveTokenPricePer1m(request.outputTokenPricePer1m(), request.outputTokenPricePer1k());
+        config.setInputTokenPricePer1m(inputPricePer1m);
+        config.setOutputTokenPricePer1m(outputPricePer1m);
+        config.setInputTokenPricePer1k(inputPricePer1m.divide(TOKEN_UNIT_SCALE));
+        config.setOutputTokenPricePer1k(outputPricePer1m.divide(TOKEN_UNIT_SCALE));
+        config.setBillingUnit(resolveBillingUnit(request.billingUnit(), request.provider()));
+        config.setUnitPrice(nonNegativeMoney(request.unitPrice()));
+        boolean providerChanged = previousProvider != null
+                && !previousProvider.trim().equalsIgnoreCase(providerTrimmed);
+        List<String> capabilities;
+        if (request.capabilities() != null && !request.capabilities().isEmpty()) {
+            capabilities = modelCapabilityService.normalizeCapabilities(providerTrimmed, request.capabilities());
+        } else if (!providerChanged && existing != null && existing.getCapabilities() != null && !existing.getCapabilities().isBlank()) {
+            capabilities = capabilitiesCodec.parse(existing.getCapabilities());
+            if (capabilities.isEmpty()) {
+                capabilities = modelCapabilityService.normalizeCapabilities(providerTrimmed, List.of());
+            }
+        } else {
+            capabilities = modelCapabilityService.normalizeCapabilities(providerTrimmed, List.of());
+        }
+        config.setCapabilities(capabilitiesCodec.serialize(capabilities));
         config.setEnabled(request.enabled() == null || request.enabled());
         config.setDefault(request.isDefault() != null && request.isDefault());
         config.setUpdatedAt(now);
@@ -141,8 +186,23 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
     public AgentModelConfigTestResponse adminTest(AgentModelConfigRequest request) {
         validate(request);
         AgentModelConfig existing = agentModelConfigMapper.findLatest();
+        AgentModelConfigRequest merged = mergeSecretFields(request, existing);
+        ModelProviderDefinition provider = providerRegistry.findByCode(merged.provider())
+                .orElseThrow(() -> new BusinessException(ErrorCode.PARAM_ERROR, "unsupported model provider"));
+        if (TEST_STRATEGY_ACCEPT_ONLY.equalsIgnoreCase(provider.testStrategy())) {
+            return new AgentModelConfigTestResponse(
+                    true,
+                    merged.provider(),
+                    merged.modelName(),
+                    0L,
+                    provider.description().isBlank()
+                            ? "provider config accepted; worker will validate at runtime"
+                            : provider.description(),
+                    ""
+            );
+        }
         try {
-            return agentServiceClient.testModelConfig(mergeSecretFields(request, existing));
+            return agentServiceClient.testModelConfig(merged);
         } catch (IllegalStateException exception) {
             throw new BusinessException(ErrorCode.MODEL_CALL_FAILED, modelConfigTestFailureMessage(exception));
         }
@@ -177,7 +237,17 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         fallback.setBaseUrl(null);
         fallback.setApiKey("");
         fallback.setMinimaxGroupId(null);
+        fallback.setConsoleUrl(null);
+        fallback.setBalanceUrl(null);
+        fallback.setDocsUrl(null);
         fallback.setTimeoutSeconds(60);
+        fallback.setInputTokenPricePer1k(BigDecimal.ZERO);
+        fallback.setOutputTokenPricePer1k(BigDecimal.ZERO);
+        fallback.setInputTokenPricePer1m(BigDecimal.ZERO);
+        fallback.setOutputTokenPricePer1m(BigDecimal.ZERO);
+        fallback.setBillingUnit(BILLING_UNIT_TOKEN_PER_M);
+        fallback.setUnitPrice(BigDecimal.ZERO);
+        fallback.setCapabilities(capabilitiesCodec.serialize(providerRegistry.defaultCapabilities("mock")));
         fallback.setEnabled(true);
         fallback.setDefault(true);
         fallback.setCreatedAt(now);
@@ -185,13 +255,26 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         return fallback;
     }
 
+    private AgentModelConfigResponse toResponse(AgentModelConfig config) {
+        return AgentModelConfigResponse.from(config, capabilitiesCodec);
+    }
+
     private void validate(AgentModelConfigRequest request) {
         String provider = request.provider() == null ? "" : request.provider().trim();
-        if (!SUPPORTED_PROVIDERS.contains(provider)) {
+        if (!providerRegistry.isSupported(provider)) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "unsupported model provider");
         }
         if (request.modelName() == null || request.modelName().isBlank()) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "modelName is required");
+        }
+        if (isNegative(request.inputTokenPricePer1k()) || isNegative(request.outputTokenPricePer1k())
+                || isNegative(request.inputTokenPricePer1m()) || isNegative(request.outputTokenPricePer1m())
+                || isNegative(request.unitPrice())) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "token price must be non-negative");
+        }
+        String billingUnit = resolveBillingUnit(request.billingUnit(), provider);
+        if (!Set.of(BILLING_UNIT_TOKEN_PER_M, BILLING_UNIT_PER_CALL).contains(billingUnit)) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "unsupported billing unit");
         }
     }
 
@@ -210,6 +293,14 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         return value == null || value.isBlank() ? null : value.trim();
     }
 
+    private BigDecimal nonNegativeMoney(BigDecimal value) {
+        return value == null ? BigDecimal.ZERO : value.max(BigDecimal.ZERO);
+    }
+
+    private boolean isNegative(BigDecimal value) {
+        return value != null && value.signum() < 0;
+    }
+
     private AgentModelConfigRequest mergeSecretFields(AgentModelConfigRequest request, AgentModelConfig existing) {
         if (existing == null || request.apiKey() != null && !request.apiKey().isBlank()) {
             return request;
@@ -222,10 +313,38 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                 request.baseUrl(),
                 existing.getApiKey(),
                 request.minimaxGroupId(),
+                request.consoleUrl(),
+                request.balanceUrl(),
+                request.docsUrl(),
                 request.timeoutSeconds(),
+                request.inputTokenPricePer1k(),
+                request.outputTokenPricePer1k(),
+                request.inputTokenPricePer1m(),
+                request.outputTokenPricePer1m(),
+                request.billingUnit(),
+                request.unitPrice(),
                 request.enabled(),
-                request.isDefault()
+                request.isDefault(),
+                request.capabilities()
         );
+    }
+
+    private BigDecimal resolveTokenPricePer1m(BigDecimal pricePer1m, BigDecimal legacyPricePer1k) {
+        if (pricePer1m != null) {
+            return nonNegativeMoney(pricePer1m);
+        }
+        return nonNegativeMoney(legacyPricePer1k).multiply(TOKEN_UNIT_SCALE);
+    }
+
+    private String resolveBillingUnit(String billingUnit, String provider) {
+        if (billingUnit != null && !billingUnit.isBlank()) {
+            return billingUnit.trim().toUpperCase();
+        }
+        String defaultUnit = providerRegistry.defaultBillingUnit(provider);
+        if (BILLING_UNIT_PER_CALL.equalsIgnoreCase(defaultUnit)) {
+            return BILLING_UNIT_PER_CALL;
+        }
+        return BILLING_UNIT_TOKEN_PER_M;
     }
 
     private AgentModelConfig findActiveOrThrow(Long id) {

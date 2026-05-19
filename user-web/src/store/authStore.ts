@@ -14,21 +14,17 @@ import { clearSessionBearerJwt, setSessionBearerJwt } from "@/api/sessionBearer"
 
 const TOKEN_KEY = SESSION_TOKEN_STORAGE_KEY
 
-function readSessionToken(): string | null {
-  try {
-    return sessionStorage.getItem(TOKEN_KEY)
-  } catch {
-    return null
-  }
-}
-
 export const useAuthStore = defineStore("auth", () => {
-  const token = ref<string | null>(readSessionToken())
+  const persisted = localStorage.getItem(TOKEN_KEY)
+  const token = ref<string | null>(persisted)
+  if (persisted) {
+    setSessionBearerJwt(persisted)
+  }
   const user = ref<UserProfile | null>(null)
   const loading = ref(false)
   const bootstrapComplete = ref(false)
 
-  const isLoggedIn = computed(() => !!token.value || !!user.value)
+  const isLoggedIn = computed(() => !!token.value)
   const isAdmin = computed(() => user.value?.userType === "ADMIN")
 
   async function login(body: LoginRequest) {
@@ -72,6 +68,7 @@ export const useAuthStore = defineStore("auth", () => {
   }
 
   async function fetchCurrentUser() {
+    if (!token.value) return null
     try {
       const u = await getCurrentUser({ token: token.value })
       user.value = u
@@ -83,10 +80,12 @@ export const useAuthStore = defineStore("auth", () => {
   }
 
   async function logout() {
-    try {
-      await apiLogout({ token: token.value })
-    } catch {
-      // Ignore logout failures and clear local state.
+    if (token.value) {
+      try {
+        await apiLogout({ token: token.value })
+      } catch {
+        // Ignore logout failures and clear local state.
+      }
     }
     clearAuth()
   }
@@ -94,33 +93,25 @@ export const useAuthStore = defineStore("auth", () => {
   function clearAuth() {
     token.value = null
     user.value = null
+    localStorage.removeItem(TOKEN_KEY)
     clearSessionBearerJwt()
-    try {
-      sessionStorage.removeItem(TOKEN_KEY)
-      localStorage.removeItem(TOKEN_KEY)
-    } catch {
-      // ignore storage errors
-    }
   }
 
   async function applyLoginResponse(res: LoginResponse, missingTokenMessage: string) {
     const t = res.token ?? res.accessToken
     if (!t) throw new Error(missingTokenMessage)
     token.value = t
+    localStorage.setItem(TOKEN_KEY, t)
     setSessionBearerJwt(t)
-    try {
-      sessionStorage.setItem(TOKEN_KEY, t)
-      localStorage.removeItem(TOKEN_KEY)
-    } catch {
-      // ignore storage errors
-    }
     await fetchCurrentUser()
     return res
   }
 
   async function init() {
     try {
-      await fetchCurrentUser()
+      if (token.value) {
+        await fetchCurrentUser()
+      }
     } finally {
       bootstrapComplete.value = true
     }

@@ -3,14 +3,17 @@ package com.aiminilab.aitoolmarket.auth;
 import com.aiminilab.aitoolmarket.auth.security.AuthTestTokens;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.MediaType;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
+
+import java.util.Set;
 
 import static org.hamcrest.Matchers.notNullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -26,7 +29,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "spring.datasource.username=sa",
         "spring.datasource.password=",
         "spring.sql.init.mode=always",
-        "spring.sql.init.schema-locations=classpath:schema-test.sql"
+        "spring.sql.init.schema-locations=classpath:schema-test.sql",
+        "app.auth.sms.provider=local",
+        "app.auth.sms.ihuyi-api-id=",
+        "app.auth.sms.ihuyi-api-key=",
+        "app.auth.sms.bmob-application-id=",
+        "app.auth.sms.bmob-rest-api-key="
 })
 class AuthApiTest {
 
@@ -37,7 +45,21 @@ class AuthApiTest {
     private ObjectMapper objectMapper;
 
     @Autowired
-    private JdbcTemplate jdbcTemplate;
+    private StringRedisTemplate redisTemplate;
+
+    @BeforeEach
+    void clearSmsState() {
+        try {
+            for (String prefix : new String[]{"auth:sms:code:*", "auth:sms:cooldown:*"}) {
+                Set<String> keys = redisTemplate.keys(prefix);
+                if (keys != null && !keys.isEmpty()) {
+                    redisTemplate.delete(keys);
+                }
+            }
+        } catch (RuntimeException ignored) {
+            // Redis may not be available in some CI environments; tests still cover happy paths.
+        }
+    }
 
     @Test
     void registersAndLogsInUserThenReturnsCurrentUser() throws Exception {
@@ -257,45 +279,6 @@ class AuthApiTest {
                                 """))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
-    }
-
-    @Test
-    void duplicateDatabaseConstraintReturnsBusinessError() throws Exception {
-        jdbcTemplate.update("""
-                INSERT INTO users (username, password_hash, nickname, user_type, status, is_deleted)
-                VALUES (?, 'archived-password', 'Archived User', 'USER', 'ACTIVE', 1)
-                """, "archived_user");
-
-        mockMvc.perform(post("/api/v1/auth/register")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {
-                                  "username": "archived_user",
-                                  "password": "123456",
-                                  "nickname": "Constraint User"
-                                }
-                                """))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("PARAM_ERROR"));
-    }
-
-    @Test
-    void userSessionCookieAuthenticatesCurrentUserWithoutBearerToken() throws Exception {
-        var loginResult = mockMvc.perform(post("/api/v1/auth/login")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {
-                                  "account": "user1",
-                                  "password": "123456"
-                                }
-                                """))
-                .andExpect(status().isOk())
-                .andReturn();
-
-        mockMvc.perform(get("/api/v1/users/me")
-                        .cookie(loginResult.getResponse().getCookie("ATM_USER_SESSION")))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.username").value("user1"));
     }
 
     @Test

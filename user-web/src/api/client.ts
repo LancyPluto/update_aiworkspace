@@ -2,41 +2,65 @@ import type { ApiErrorCode, ApiResponse } from "./types"
 import { SESSION_TOKEN_STORAGE_KEY } from "@/constants/authStorage"
 import { clearSessionBearerJwt, getSessionBearerJwt } from "./sessionBearer"
 
+/**
+ * 后端 Origin，不含路径。例如 http://localhost:8080
+ * 接口路径本身已含 /api/v1/...（见契约 §8）
+ */
 export function getApiOrigin(): string {
-  const raw = import.meta.env.VITE_API_BASE ?? ""
-  return raw.replace(/\/$/, "")
+  const raw = import.meta.env.VITE_API_BASE ?? import.meta.env.VITE_API_BASE_URL ?? ""
+  const value = raw.trim().replace(/\/$/, "")
+  if (!value || value.startsWith("/")) return ""
+  try {
+    return new URL(value).origin
+  } catch {
+    return ""
+  }
+}
+
+/** 供 `new URL()` 使用的绝对 base（http(s) origin）；相对配置如 `/api/v1` 回退到当前页面 origin */
+export function getRequestBaseUrl(): string {
+  const raw = getApiOrigin()
+  if (!raw) {
+    return typeof window !== "undefined" ? window.location.origin : "http://localhost"
+  }
+  if (/^https?:\/\//i.test(raw)) {
+    return raw
+  }
+  return typeof window !== "undefined" ? window.location.origin : "http://localhost"
 }
 
 export class ApiBusinessError extends Error {
   readonly code: ApiErrorCode
-  readonly requestId?: string
+  readonly traceId?: string
 
-  constructor(code: ApiErrorCode, message: string, requestId?: string) {
+  constructor(code: ApiErrorCode, message: string, traceId?: string) {
     super(message)
     this.name = "ApiBusinessError"
     this.code = code
-    this.requestId = requestId
+    this.traceId = traceId
+  }
+
+  get requestId(): string | undefined {
+    return this.traceId
   }
 }
 
 export interface RequestOptions {
+  /** 可选 Bearer（脚本/调试）；浏览器会话使用 Cookie */
   token?: string | null
   query?: Record<string, string | number | boolean | undefined>
+  /** 取消进行中的请求（如离开页面、发起新请求前） */
   signal?: AbortSignal
 }
 
 function buildUrl(path: string, query?: RequestOptions["query"]): string {
-  const origin = getApiOrigin()
   const pathPart = path.startsWith("/") ? path : `/${path}`
   let url: URL
   if (path.startsWith("http")) {
     url = new URL(path)
-  } else if (origin) {
-    url = new URL(pathPart, origin.endsWith("/") ? origin : `${origin}/`)
-  } else if (typeof window !== "undefined") {
-    url = new URL(pathPart, window.location.origin)
   } else {
-    url = new URL(pathPart, "http://localhost")
+    const base = getRequestBaseUrl()
+    url = new URL(pathPart, base.endsWith("/") ? base : `${base}/`)
   }
   if (query) {
     for (const [k, v] of Object.entries(query)) {
@@ -51,10 +75,9 @@ function redirectToLoginPage(): void {
   const path = window.location.pathname
   if (path === "/login" || path.endsWith("/login")) return
   try {
-    sessionStorage.removeItem(SESSION_TOKEN_STORAGE_KEY)
     localStorage.removeItem(SESSION_TOKEN_STORAGE_KEY)
   } catch {
-    // ignore storage errors
+    // ignore
   }
   clearSessionBearerJwt()
   const full = `${window.location.pathname}${window.location.search}`
@@ -64,6 +87,10 @@ function redirectToLoginPage(): void {
   window.location.assign(`${window.location.origin}${loginPath}?redirect=${encodeURIComponent(full)}`)
 }
 
+/**
+ * 统一解析契约响应壳；code !== SUCCESS 时抛 ApiBusinessError。
+ * credentials + Cookie；Authorization 使用 options.token 或登录后 sessionBearer（与 Cookie 中 JWT 一致）。
+ */
 export async function apiRequest<T>(
   method: string,
   path: string,
@@ -108,14 +135,13 @@ export async function apiRequest<T>(
     throw new ApiBusinessError("SYSTEM_ERROR", `无效响应 (${res.status})`, undefined)
   }
 
-  const requestId = json.requestId ?? json.traceId
   if (res.status === 401 || json.code === "UNAUTHORIZED") {
     redirectToLoginPage()
-    throw new ApiBusinessError(json.code ?? "UNAUTHORIZED", json.message ?? "登录已失效，请重新登录", requestId)
+    throw new ApiBusinessError(json.code ?? "UNAUTHORIZED", json.message ?? "登录已失效，请重新登录", json.requestId)
   }
 
   if (json.code !== "SUCCESS") {
-    throw new ApiBusinessError(json.code, json.message ?? json.code, requestId)
+    throw new ApiBusinessError(json.code, json.message ?? json.code, json.traceId ?? json.requestId)
   }
 
   return json.data as T

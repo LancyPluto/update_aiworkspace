@@ -31,6 +31,34 @@ const error = ref<string | null>(null)
 const tab = ref<"intro" | "cases" | "input" | "output">("intro")
 
 const title = computed(() => tool.value?.toolName ?? `工具 · ${props.id}`)
+const isOffline = computed(() => tool.value?.status === "OFFLINE")
+
+const toolTypeLabels: Record<string, string> = {
+  TEXT_GENERATION: "文本生成",
+  IMAGE_GENERATION: "文生图",
+  IMAGE_TO_IMAGE: "图生图",
+  IMAGE_UNDERSTANDING: "图片理解",
+  SPEECH_TO_TEXT: "语音转文字",
+  TEXT_TO_SPEECH: "文字转语音",
+  VIDEO_GENERATION: "视频生成",
+  EMBEDDING: "Embedding",
+  RERANK: "Rerank",
+  AGENT: "Agent 编排",
+}
+
+const modalityLabels: Record<string, string> = {
+  TEXT: "文本",
+  IMAGE: "图片",
+  AUDIO: "音频",
+  VIDEO: "视频",
+  JSON: "JSON",
+  FILE: "文件",
+  MULTIMODAL: "多模态",
+}
+
+function labelOf(labels: Record<string, string>, value?: string | null) {
+  return value ? labels[value] || value : "-"
+}
 
 onMounted(async () => {
   try {
@@ -70,9 +98,23 @@ onMounted(async () => {
 
       <!-- 工具详情 -->
       <template v-else-if="tool">
+        <div
+          v-if="isOffline"
+          class="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-950 dark:text-amber-100"
+        >
+          该工具已下架，暂时无法使用。
+        </div>
+
         <div class="rounded-xl border border-border bg-card p-6 shadow-sm">
           <div class="flex flex-col md:flex-row md:items-start gap-5">
+            <img
+              v-if="tool.coverUrl"
+              :src="tool.coverUrl"
+              :alt="tool.toolName"
+              class="h-16 w-16 shrink-0 rounded-2xl object-cover ring-1 ring-border"
+            />
             <div
+              v-else
               class="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-primary to-chart-2 text-primary-foreground"
             >
               <Pencil class="h-8 w-8" />
@@ -87,6 +129,9 @@ onMounted(async () => {
                   HOT
                 </span>
                 <span class="rounded bg-secondary px-1.5 py-0.5 text-[10px] text-muted-foreground">{{ tool.categoryName }}</span>
+                <span class="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">
+                  {{ labelOf(toolTypeLabels, tool.toolType || 'TEXT_GENERATION') }}
+                </span>
               </div>
               <p class="mt-2 text-sm text-muted-foreground leading-relaxed">
                 {{ tool.description || '暂无描述' }}
@@ -94,6 +139,11 @@ onMounted(async () => {
               <div class="mt-3 flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
                 <span class="inline-flex items-center gap-1">
                   <Star class="h-3.5 w-3.5 fill-warning text-warning" /> 4.9 / 5.0
+                </span>
+                <span>
+                  {{ labelOf(modalityLabels, tool.inputModality || 'TEXT') }}
+                  →
+                  {{ labelOf(modalityLabels, tool.outputModality || 'TEXT') }}
                 </span>
               </div>
             </div>
@@ -104,11 +154,18 @@ onMounted(async () => {
                 <span class="text-xs text-muted-foreground">算力 / 次</span>
               </div>
               <RouterLink
+                v-if="!isOffline"
                 :to="'/tools/' + id + '/use'"
                 class="inline-flex h-11 items-center justify-center rounded-md bg-primary px-8 text-sm font-medium text-primary-foreground hover:opacity-90"
               >
                 开始使用 <ArrowRight class="ml-1.5 h-4 w-4" />
               </RouterLink>
+              <span
+                v-else
+                class="inline-flex h-11 cursor-not-allowed items-center justify-center rounded-md border border-border bg-muted px-8 text-sm font-medium text-muted-foreground"
+              >
+                已下架
+              </span>
               <div class="flex items-center gap-1 justify-end">
                 <button
                   type="button"
@@ -226,19 +283,6 @@ onMounted(async () => {
                   </div>
                 </li>
               </ol>
-            </div>
-
-            <div class="rounded-xl border border-primary/20 bg-accent/40 p-5">
-              <p class="text-xs text-muted-foreground">本次开始使用</p>
-              <p class="mt-2 text-3xl font-semibold text-primary inline-flex items-baseline gap-1">
-                {{ tool.estimatedCreditCost }} <span class="text-sm font-normal text-muted-foreground">算力</span>
-              </p>
-              <RouterLink
-                :to="'/tools/' + id + '/use'"
-                class="mt-4 flex h-11 w-full items-center justify-center rounded-md bg-primary text-sm font-medium text-primary-foreground hover:opacity-90"
-              >
-                开始使用 <ArrowRight class="ml-1.5 h-4 w-4" />
-              </RouterLink>
             </div>
           </div>
         </div>

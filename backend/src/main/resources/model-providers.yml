@@ -1,0 +1,112 @@
+providers:
+  - code: mock
+    label: Mock (dev)
+    capabilities:
+      - TEXT_GENERATION
+    defaultBaseUrl: ""
+    defaultModel: mock
+    billingDefault: TOKEN_PER_M
+    testStrategy: agent_service
+    workerReady: true
+    description: Local development mock responses.
+
+  - code: openai_compatible
+    label: OpenAI compatible
+    capabilities:
+      - TEXT_GENERATION
+    defaultBaseUrl: https://api.openai.com/v1
+    defaultModel: gpt-4o-mini
+    billingDefault: TOKEN_PER_M
+    testStrategy: agent_service
+    workerReady: true
+    description: OpenAI-compatible chat completions endpoint.
+
+  - code: anthropic_compatible
+    label: Anthropic compatible
+    capabilities:
+      - TEXT_GENERATION
+    defaultBaseUrl: https://api.minimaxi.com/anthropic
+    defaultModel: MiniMax-M2.7
+    billingDefault: TOKEN_PER_M
+    testStrategy: agent_service
+    workerReady: true
+    description: Anthropic-compatible gateway (e.g. MiniMax M2.7).
+
+  - code: minimax
+    label: MiniMax chat
+    capabilities:
+      - TEXT_GENERATION
+    defaultBaseUrl: https://api.minimaxi.com/v1
+    defaultModel: MiniMax-M2.7
+    billingDefault: TOKEN_PER_M
+    testStrategy: agent_service
+    workerReady: true
+    description: MiniMax chat completion API for text tools and agent.
+
+  - code: siliconflow_images
+    label: SiliconFlow images
+    capabilities:
+      - IMAGE_GENERATION
+      - DIGITAL_HUMAN
+    defaultBaseUrl: https://api.siliconflow.cn
+    defaultModel: Tongyi-MAI/Z-Image-Turbo
+    billingDefault: PER_CALL
+    testStrategy: accept_only
+    workerReady: true
+    description: SiliconFlow /v1/images/generations and digital-human worker pipeline.
+
+  - code: minimax_music
+    label: MiniMax music
+    capabilities:
+      - MUSIC_GENERATION
+    defaultBaseUrl: https://api.minimaxi.com
+    defaultModel: music-2.6-free
+    billingDefault: PER_CALL
+    testStrategy: accept_only
+    workerReady: false
+    description: MiniMax /v1/music_generation (worker handler pending).
+
+  - code: minimax_speech
+    label: MiniMax speech
+    capabilities:
+      - TEXT_TO_SPEECH
+    defaultBaseUrl: https://api.minimaxi.com
+    defaultModel: speech-2.8-hd
+    billingDefault: PER_CALL
+    testStrategy: accept_only
+    workerReady: true
+    description: MiniMax /v1/t2a_async_v2 asynchronous text-to-speech.
+
+  - code: siliconflow_speech
+    label: SiliconFlow TTS
+    capabilities:
+      - TEXT_TO_SPEECH
+    defaultBaseUrl: https://api.siliconflow.cn
+    defaultModel: FunAudioLLM/CosyVoice2-0.5B
+    billingDefault: PER_CALL
+    testStrategy: accept_only
+    workerReady: true
+    description: SiliconFlow /v1/audio/speech for standalone TTS tools.
+
+  - code: seedance
+    label: Seedance video
+    capabilities:
+      - VIDEO_GENERATION
+      - DIGITAL_HUMAN
+    defaultBaseUrl: https://ark.cn-beijing.volces.com
+    defaultModel: doubao-seedance-1-5-pro-251215
+    billingDefault: PER_CALL
+    testStrategy: accept_only
+    workerReady: true
+    description: Seedance image-to-video generation used by digital-human and comic-drama pipelines.
+
+  - code: worker_video
+    label: Video generation (stub)
+    capabilities:
+      - VIDEO_GENERATION
+    defaultBaseUrl: https://api.siliconflow.cn
+    defaultModel: video-stub
+    billingDefault: PER_CALL
+    testStrategy: accept_only
+    workerReady: true
+    description: Video generation worker placeholder until provider API is wired.

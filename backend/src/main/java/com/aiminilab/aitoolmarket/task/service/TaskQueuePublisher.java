@@ -1,10 +1,10 @@
 package com.aiminilab.aitoolmarket.task.service;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.aiminilab.aitoolmarket.config.AppProperties;
-import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
@@ -36,9 +36,12 @@ public class TaskQueuePublisher {
         this.appProperties = appProperties;
     }
 
-    public boolean publish(Long taskId) {
+    public boolean publish(Long taskId, String payloadJson) {
         try {
-            String message = objectMapper.writeValueAsString(Map.of("taskId", taskId));
+            String message = payloadJson;
+            if (message == null || message.isBlank()) {
+                message = objectMapper.writeValueAsString(Map.of("taskId", taskId));
+            }
             if ("rabbitmq".equalsIgnoreCase(appProperties.getTaskQueueBackend())) {
                 rabbitTemplate.convertAndSend(
                         appProperties.getRabbitmq().getTaskExchange(),

@@ -1,0 +1,2967 @@
+﻿openapi: 3.0.3
+info:
+  title: AI 宸ュ叿甯傚満 V1 API
+  version: 0.3.0
+  description: |
+    AI 宸ュ叿甯傚満 V1 鎺ュ彛濂戠害锛岀敤浜庣敤鎴风銆佺鐞嗙銆乄orker 鍜岃嚜鍔ㄥ寲娴嬭瘯鑱旇皟銆?
+
+    鏈枃浠舵寜 `椤圭洰瑙勫垝/V1-7澶╀氦浠樼粰缁勫憳寮€鍙戝寘` 涓殑 V1 鑼冨洿鏁寸悊锛?
+    - 瑕嗙洊鍋ュ悍妫€鏌ャ€佺櫥褰曢壌鏉冦€佸伐鍏峰競鍦恒€佷换鍔°€佺畻鍔涖€佺鐞嗙鍜?Worker 鍐呴儴鍥炲啓涓婚摼璺€?
+    - V1 涓嶅０鏄庤鍗曘€佸椁愩€佹敮浠樸€佸鎵广€佸妯℃€併€佸紑鏀?API 绛夋湭绾冲叆鏈懆楠屾敹鐨勮兘鍔涖€?
+    - 鑷姩鍖栨祴璇曞彲璇诲彇鏍硅妭鐐?`x-test-scenarios` 鎵ц P0 鍦烘櫙銆?
+  contact:
+    name: AI miniLab
+
+servers:
+  - url: http://localhost:8080
+    description: Docker Compose 鏈湴鍚庣
+
+tags:
+  - name: Health
+    description: 鏈嶅姟涓庝緷璧栧仴搴锋鏌?
+  - name: UserAuth
+    description: 鐢ㄦ埛璁よ瘉
+  - name: AdminAuth
+    description: 绠＄悊鍛樿璇?
+  - name: Marketplace
+    description: 鐢ㄦ埛绔伐鍏峰競鍦?
+  - name: Tasks
+    description: 鐢ㄦ埛绔?AI 浠诲姟
+  - name: Credits
+    description: 鐢ㄦ埛绔畻鍔涜处鎴?
+  - name: AdminTools
+    description: 绠＄悊绔伐鍏烽厤缃?
+  - name: AdminTasks
+    description: 绠＄悊绔换鍔¤拷韪?
+  - name: AdminUsers
+    description: 绠＄悊绔敤鎴蜂笌绠楀姏
+  - name: AdminBilling
+    description: Admin billing logs and model costs
+  - name: AdminModelConfig
+    description: Admin model API configuration
+  - name: InternalWorker
+    description: Worker 鍐呴儴鎺ュ彛
+
+x-test-data:
+  users:
+    normal:
+      account: user1
+      password: "123456"
+      expectedUserType: USER
+    disabled:
+      account: disabled_user
+      password: "123456"
+      expectedErrorCode: FORBIDDEN
+    admin:
+      account: admin
+      password: "123456"
+      expectedUserType: ADMIN
+  tools:
+    primary:
+      toolCode: xiaohongshu_copywriting
+      expectedStatus: ONLINE
+      requiredParams:
+        productName: 浜斾竴鎶ょ悊濂楅
+        targetCustomer: 骞磋交濂虫€?
+        style: 绉嶈崏
+  credits:
+    defaultUserBalance: 100
+    minimumDemoBalance: 50
+
+x-test-scenarios:
+  - id: HEALTH-001
+    name: Docker 鐜渚濊禆鍋ュ悍妫€鏌?
+    priority: P0
+    steps:
+      - operationId: health
+        expect:
+          status: 200
+          body:
+            code: SUCCESS
+            data.mysql: ok
+            data.redis: ok
+      - operationId: userPing
+        expect:
+          status: 200
+          body:
+            code: SUCCESS
+      - operationId: adminPing
+        expect:
+          status: 200
+          body:
+            code: SUCCESS
+
+  - id: AUTH-USER-HAPPY
+    name: 鐢ㄦ埛鐧诲綍骞惰鍙栧綋鍓嶇敤鎴?
+    priority: P0
+    steps:
+      - operationId: loginUser
+        save:
+          userToken: $.data.accessToken
+          userId: $.data.user.id
+        request:
+          account: user1
+          password: "123456"
+        expect:
+          status: 200
+          body:
+            code: SUCCESS
+            data.user.userType: USER
+      - operationId: getCurrentUser
+        auth: userToken
+        expect:
+          status: 200
+          body:
+            code: SUCCESS
+            data.userType: USER
+
+  - id: AUTH-ERRORS
+    name: 璁よ瘉澶辫触鍜屾潈闄愯竟鐣?
+    priority: P0
+    steps:
+      - operationId: loginUser
+        request:
+          account: user1
+          password: wrong-password
+        expect:
+          status: 400
+          body:
+            code: PARAM_ERROR
+      - operationId: loginUser
+        request:
+          account: disabled_user
+          password: "123456"
+        expect:
+          status: 400
+          body:
+            code: FORBIDDEN
+      - operationId: getCurrentUser
+        expect:
+          status: 401
+          body:
+            code: UNAUTHORIZED
+      - operationId: listAdminUsers
+        auth: userToken
+        expect:
+          status: 403
+          body:
+            code: FORBIDDEN
+
+  - id: AUTH-ADMIN-HAPPY
+    name: 绠＄悊鍛樼櫥褰曞苟璇诲彇褰撳墠绠＄悊鍛?
+    priority: P0
+    steps:
+      - operationId: loginAdmin
+        save:
+          adminToken: $.data.accessToken
+          adminId: $.data.user.id
+        request:
+          account: admin
+          password: "123456"
+        expect:
+          status: 200
+          body:
+            code: SUCCESS
+            data.user.userType: ADMIN
+      - operationId: getCurrentAdmin
+        auth: adminToken
+        expect:
+          status: 200
+          body:
+            code: SUCCESS
+            data.userType: ADMIN
+
+  - id: TOOL-USER-VISIBLE
+    name: 鐢ㄦ埛绔兘鐪嬪埌宸蹭笂绾垮伐鍏峰苟璇诲彇鍔ㄦ€佽〃鍗?
+    priority: P0
+    steps:
+      - operationId: listToolCategories
+        expect:
+          status: 200
+          body:
+            code: SUCCESS
+      - operationId: listUserTools
+        request:
+          pageNo: 1
+          pageSize: 20
+        expect:
+          status: 200
+          body:
+            code: SUCCESS
+            data.total: ">=1"
+      - operationId: getUserToolDetail
+        path:
+          toolCode: xiaohongshu_copywriting
+        expect:
+          status: 200
+          body:
+            code: SUCCESS
+            data.toolCode: xiaohongshu_copywriting
+            data.fields: "non-empty"
+
+  - id: TASK-WORKER-SUCCESS
+    name: 鍒涘缓浠诲姟銆乄orker 鎴愬姛鍥炲啓銆佺畻鍔涙墸闄?
+    priority: P0
+    dependsOn: [AUTH-USER-HAPPY]
+    steps:
+      - operationId: getCreditAccount
+        auth: userToken
+        save:
+          balanceBefore: $.data.balance
+          frozenBefore: $.data.frozen
+        expect:
+          status: 200
+          body:
+            code: SUCCESS
+      - operationId: createTask
+        auth: userToken
+        save:
+          taskId: $.data.taskId
+          taskNo: $.data.taskNo
+        request:
+          toolCode: xiaohongshu_copywriting
+          params:
+            productName: 浜斾竴鎶ょ悊濂楅
+            targetCustomer: 骞磋交濂虫€?
+            style: 绉嶈崏
+          clientRequestId: auto-task-success-001
+        expect:
+          status: 200
+          body:
+            code: SUCCESS
+            data.status: QUEUED
+      - operationId: getTaskStatus
+        auth: userToken
+        path:
+          taskId: "{{taskId}}"
+        expect:
+          status: 200
+          body:
+            code: SUCCESS
+            data.status: QUEUED
+      - operationId: getTaskExecutionContext
+        path:
+          taskId: "{{taskId}}"
+        expect:
+          status: 200
+          body:
+            code: SUCCESS
+            data.toolCode: xiaohongshu_copywriting
+      - operationId: markTaskProcessing
+        path:
+          taskId: "{{taskId}}"
+        request:
+          progressMessage: AI 姝ｅ湪鐢熸垚鍐呭
+        expect:
+          status: 200
+          body:
+            code: SUCCESS
+      - operationId: markTaskSuccess
+        path:
+          taskId: "{{taskId}}"
+        request:
+          resourceType: MARKDOWN
+          contentText: "# Generated result\n\nThis is acceptance test content."
+        expect:
+          status: 200
+          body:
+            code: SUCCESS
+      - operationId: getTaskDetail
+        auth: userToken
+        path:
+          taskId: "{{taskId}}"
+        expect:
+          status: 200
+          body:
+            code: SUCCESS
+            data.status: SUCCESS
+            data.result.resourceType: MARKDOWN
+      - operationId: getCreditLogs
+        auth: userToken
+        request:
+          pageNo: 1
+          pageSize: 20
+        expect:
+          status: 200
+          body:
+            code: SUCCESS
+
+  - id: TASK-WORKER-FAILED
+    name: Worker 澶辫触鍥炲啓鍚庝换鍔″け璐ュ苟閲婃斁绠楀姏
+    priority: P0
+    dependsOn: [AUTH-USER-HAPPY]
+    steps:
+      - operationId: createTask
+        auth: userToken
+        save:
+          failedTaskId: $.data.taskId
+        request:
+          toolCode: xiaohongshu_copywriting
+          params:
+            productName: 寮傚父娴佺▼娴嬭瘯浜у搧
+            targetCustomer: 骞磋交濂虫€?
+            style: 涓撲笟
+          clientRequestId: auto-task-failed-001
+        expect:
+          status: 200
+          body:
+            code: SUCCESS
+            data.status: QUEUED
+      - operationId: markTaskProcessing
+        path:
+          taskId: "{{failedTaskId}}"
+        request:
+          progressMessage: AI 姝ｅ湪鐢熸垚鍐呭
+        expect:
+          status: 200
+          body:
+            code: SUCCESS
+      - operationId: markTaskFailed
+        path:
+          taskId: "{{failedTaskId}}"
+        request:
+          errorCode: MODEL_CALL_FAILED
+          errorMessage: 妯″瀷璋冪敤澶辫触
+        expect:
+          status: 200
+          body:
+            code: SUCCESS
+      - operationId: getTaskDetail
+        auth: userToken
+        path:
+          taskId: "{{failedTaskId}}"
+        expect:
+          status: 200
+          body:
+            code: SUCCESS
+            data.status: FAILED
+            data.errorCode: MODEL_CALL_FAILED
+
+  - id: CREDIT-ADMIN-MANUAL-ADD
+    name: 绠＄悊鍛樻墜鍔ㄥ姞绠楀姏鍚庣敤鎴疯处鎴峰拰娴佹按鍙煡璇?
+    priority: P0
+    dependsOn: [AUTH-USER-HAPPY, AUTH-ADMIN-HAPPY]
+    steps:
+      - operationId: manualAddCredits
+        auth: adminToken
+        path:
+          userId: "{{userId}}"
+        request:
+          amount: 50
+          reason: 鑷姩鍖栨祴璇曡ˉ鍏呯畻鍔?
+        expect:
+          status: 200
+          body:
+            code: SUCCESS
+      - operationId: getCreditAccount
+        auth: userToken
+        expect:
+          status: 200
+          body:
+            code: SUCCESS
+            data.available: ">=50"
+      - operationId: getCreditLogs
+        auth: userToken
+        request:
+          pageNo: 1
+          pageSize: 20
+        expect:
+          status: 200
+          body:
+            code: SUCCESS
+
+paths:
+  /api/health:
+    get:
+      tags: [Health]
+      summary: 鏈嶅姟鍋ュ悍妫€鏌?
+      operationId: health
+      responses:
+        "200":
+          description: MySQL 鍜?Redis 鍧囧彲鐢?
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthApiResponse"
+
+  /api/v1/ping:
+    get:
+      tags: [Health]
+      summary: 鐢ㄦ埛绔帴鍙ｈ繛閫氭€ф祴璇?
+      operationId: userPing
+      responses:
+        "200":
+          description: pong
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PingApiResponse"
+
+  /api/admin/v1/ping:
+    get:
+      tags: [Health]
+      summary: 绠＄悊绔帴鍙ｈ繛閫氭€ф祴璇?
+      operationId: adminPing
+      responses:
+        "200":
+          description: pong
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PingApiResponse"
+
+  /api/v1/auth/register:
+    post:
+      tags: [UserAuth]
+      summary: 鐢ㄦ埛璐﹀彿瀵嗙爜娉ㄥ唽
+      operationId: registerUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+            examples:
+              normal:
+                value:
+                  username: auto_user_001
+                  password: "123456"
+                  nickname: 鑷姩鍖栨祴璇曠敤鎴?
+      responses:
+        "200":
+          description: 娉ㄥ唽鎴愬姛骞惰繑鍥炵櫥褰曟€?
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginApiResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /api/v1/auth/login:
+    post:
+      tags: [UserAuth]
+      summary: 鐢ㄦ埛璐﹀彿瀵嗙爜鐧诲綍
+      operationId: loginUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+            examples:
+              user1:
+                value:
+                  account: user1
+                  password: "123456"
+              wrongPassword:
+                value:
+                  account: user1
+                  password: wrong-password
+      responses:
+        "200":
+          description: 鐧诲綍鎴愬姛
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginApiResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /api/v1/auth/sms-code:
+    post:
+      tags: [UserAuth]
+      summary: 鍙戦€佺煭淇￠獙璇佺爜
+      operationId: sendSmsCode
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SmsCodeRequest"
+      responses:
+        "200":
+          description: 楠岃瘉鐮佸凡鍙戦€佹垨杩涘叆鍐峰嵈
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmptyApiResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /api/v1/auth/sms-register:
+    post:
+      tags: [UserAuth]
+      summary: 鎵嬫満鍙烽獙璇佺爜娉ㄥ唽
+      operationId: smsRegister
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SmsAuthRequest"
+      responses:
+        "200":
+          description: 娉ㄥ唽鎴愬姛骞惰繑鍥炵櫥褰曟€?
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginApiResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /api/v1/auth/sms-login:
+    post:
+      tags: [UserAuth]
+      summary: 鎵嬫満鍙烽獙璇佺爜鐧诲綍
+      operationId: smsLogin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SmsAuthRequest"
+      responses:
+        "200":
+          description: 鐧诲綍鎴愬姛
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginApiResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /api/v1/auth/logout:
+    post:
+      tags: [UserAuth]
+      summary: 鐢ㄦ埛閫€鍑虹櫥褰?
+      operationId: logoutUser
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 閫€鍑烘垚鍔?
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmptyApiResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/users/me:
+    get:
+      tags: [UserAuth]
+      summary: 鑾峰彇褰撳墠鐢ㄦ埛淇℃伅
+      operationId: getCurrentUser
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 褰撳墠鐢ㄦ埛
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProfileApiResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/admin/v1/auth/login:
+    post:
+      tags: [AdminAuth]
+      summary: 绠＄悊鍛樼櫥褰?
+      operationId: loginAdmin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+            examples:
+              admin:
+                value:
+                  account: admin
+                  password: "123456"
+      responses:
+        "200":
+          description: 鐧诲綍鎴愬姛
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginApiResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /api/admin/v1/auth/me:
+    get:
+      tags: [AdminAuth]
+      summary: 鑾峰彇褰撳墠绠＄悊鍛樹俊鎭?
+      operationId: getCurrentAdmin
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 褰撳墠绠＄悊鍛?
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProfileApiResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/admin/v1/auth/logout:
+    post:
+      tags: [AdminAuth]
+      summary: 绠＄悊鍛橀€€鍑虹櫥褰?
+      operationId: logoutAdmin
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 閫€鍑烘垚鍔?
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmptyApiResponse"
+
+  /api/v1/tool-categories:
+    get:
+      tags: [Marketplace]
+      summary: 鑾峰彇宸插惎鐢ㄥ伐鍏峰垎绫?
+      operationId: listToolCategories
+      responses:
+        "200":
+          description: 鍒嗙被鍒楄〃
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ToolCategoryListApiResponse"
+
+  /api/v1/tools:
+    get:
+      tags: [Marketplace]
+      summary: 鑾峰彇鐢ㄦ埛绔凡涓婄嚎宸ュ叿鍒楄〃
+      operationId: listUserTools
+      parameters:
+        - $ref: "#/components/parameters/Keyword"
+        - $ref: "#/components/parameters/CategoryId"
+        - $ref: "#/components/parameters/PageNo"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: 宸ュ叿鍒嗛〉鍒楄〃
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ToolPageApiResponse"
+
+  /api/v1/tools/search:
+    get:
+      tags: [Marketplace]
+      summary: 鎼滅储鐢ㄦ埛绔凡涓婄嚎宸ュ叿
+      operationId: searchUserTools
+      parameters:
+        - $ref: "#/components/parameters/KeywordRequired"
+        - $ref: "#/components/parameters/PageNo"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: 宸ュ叿鍒嗛〉鍒楄〃
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ToolPageApiResponse"
+
+  /api/v1/tools/{toolCode}:
+    get:
+      tags: [Marketplace]
+      summary: 鑾峰彇宸ュ叿璇︽儏鍜屽姩鎬佽〃鍗曞瓧娈?
+      operationId: getUserToolDetail
+      parameters:
+        - $ref: "#/components/parameters/ToolCode"
+      responses:
+        "200":
+          description: 宸ュ叿璇︽儏
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ToolDetailApiResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/tasks:
+    post:
+      tags: [Tasks]
+      summary: 鍒涘缓 AI 浠诲姟
+      operationId: createTask
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTaskRequest"
+            examples:
+              xiaohongshu:
+                value:
+                  toolCode: xiaohongshu_copywriting
+                  params:
+                    productName: 浜斾竴鎶ょ悊濂楅
+                    targetCustomer: 骞磋交濂虫€?
+                    style: 绉嶈崏
+                  clientRequestId: auto-task-001
+      responses:
+        "200":
+          description: 浠诲姟宸插垱寤哄苟鍏ラ槦
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskStatusApiResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    get:
+      tags: [Tasks]
+      summary: 鑾峰彇褰撳墠鐢ㄦ埛浠诲姟鍒楄〃
+      operationId: listUserTasks
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PageNo"
+        - $ref: "#/components/parameters/PageSize"
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/TaskStatus"
+      responses:
+        "200":
+          description: 浠诲姟鍒嗛〉鍒楄〃
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskPageApiResponse"
+
+  /api/v1/tasks/{taskId}:
+    get:
+      tags: [Tasks]
+      summary: 鑾峰彇浠诲姟璇︽儏鍜岀粨鏋?
+      operationId: getTaskDetail
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "200":
+          description: 浠诲姟璇︽儏
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskDetailApiResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/tasks/{taskId}/status:
+    get:
+      tags: [Tasks]
+      summary: 鑾峰彇浠诲姟鐘舵€?
+      operationId: getTaskStatus
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "200":
+          description: 浠诲姟鐘舵€?
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskStatusApiResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/tasks/{taskId}/cancel:
+    post:
+      tags: [Tasks]
+      summary: 鍙栨秷浠诲姟
+      operationId: cancelTask
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "200":
+          description: 鍙栨秷鍚庣殑浠诲姟鐘舵€?
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskStatusApiResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /api/v1/tasks/{taskId}/regenerate:
+    post:
+      tags: [Tasks]
+      summary: 閲嶆柊鐢熸垚浠诲姟
+      operationId: regenerateTask
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "200":
+          description: 鏂颁换鍔＄姸鎬?
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskStatusApiResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /api/v1/credits/account:
+    get:
+      tags: [Credits]
+      summary: 鑾峰彇褰撳墠鐢ㄦ埛绠楀姏璐︽埛
+      operationId: getCreditAccount
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 绠楀姏璐︽埛
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditAccountApiResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/credits/logs:
+    get:
+      tags: [Credits]
+      summary: 鑾峰彇褰撳墠鐢ㄦ埛绠楀姏娴佹按
+      operationId: getCreditLogs
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PageNo"
+        - $ref: "#/components/parameters/PageSize"
+        - name: logType
+          in: query
+          schema:
+            $ref: "#/components/schemas/CreditLogType"
+      responses:
+        "200":
+          description: 绠楀姏娴佹按鍒嗛〉鍒楄〃
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditLogPageApiResponse"
+
+  /api/admin/v1/tools:
+    get:
+      tags: [AdminTools]
+      summary: 绠＄悊绔伐鍏峰垪琛?
+      operationId: listAdminTools
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/Keyword"
+        - $ref: "#/components/parameters/CategoryId"
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/ToolStatus"
+        - $ref: "#/components/parameters/PageNo"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: 宸ュ叿鍒嗛〉鍒楄〃
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ToolPageApiResponse"
+    post:
+      tags: [AdminTools]
+      summary: 鍒涘缓宸ュ叿鑽夌
+      operationId: createAdminTool
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpsertToolRequest"
+      responses:
+        "200":
+          description: 鍒涘缓鎴愬姛
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ToolSummaryApiResponse"
+
+  /api/admin/v1/tools/{toolId}:
+    get:
+      tags: [AdminTools]
+      summary: 绠＄悊绔伐鍏疯鎯?
+      operationId: getAdminToolDetail
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ToolId"
+      responses:
+        "200":
+          description: 宸ュ叿璇︽儏
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ToolDetailApiResponse"
+    put:
+      tags: [AdminTools]
+      summary: 鏇存柊宸ュ叿
+      operationId: updateAdminTool
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ToolId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpsertToolRequest"
+      responses:
+        "200":
+          description: 鏇存柊鎴愬姛
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ToolSummaryApiResponse"
+
+  /api/admin/v1/tools/{toolId}/fields:
+    get:
+      tags: [AdminTools]
+      summary: 绠＄悊绔幏鍙栧伐鍏峰瓧娈甸厤缃?
+      operationId: getAdminToolFields
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ToolId"
+      responses:
+        "200":
+          description: 瀛楁閰嶇疆
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ToolFieldListApiResponse"
+    put:
+      tags: [AdminTools]
+      summary: 绠＄悊绔繚瀛樺伐鍏峰瓧娈甸厤缃?
+      operationId: updateAdminToolFields
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ToolId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateToolFieldsRequest"
+      responses:
+        "200":
+          description: 瀛楁閰嶇疆
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ToolFieldListApiResponse"
+
+  /api/admin/v1/tools/{toolId}/publish:
+    post:
+      tags: [AdminTools]
+      summary: 鍙戝竷宸ュ叿
+      operationId: publishAdminTool
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ToolId"
+      responses:
+        "200":
+          description: 鍙戝竷鎴愬姛
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ToolSummaryApiResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /api/admin/v1/tools/{toolId}/offline:
+    post:
+      tags: [AdminTools]
+      summary: 涓嬫灦宸ュ叿
+      operationId: offlineAdminTool
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ToolId"
+      responses:
+        "200":
+          description: 涓嬫灦鎴愬姛
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ToolSummaryApiResponse"
+
+  /api/admin/v1/tools/{toolId}/field-schemas:
+    get:
+      tags: [AdminTools]
+      summary: List field schema versions for a tool
+      operationId: listAdminToolFieldSchemas
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ToolId"
+      responses:
+        "200":
+          description: Field schema versions
+    post:
+      tags: [AdminTools]
+      summary: Upsert active field schema for a tool
+      operationId: upsertAdminToolFieldSchema
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ToolId"
+      responses:
+        "200":
+          description: Field schema saved
+
+  /api/admin/v1/tools/{toolId}/apply-template:
+    post:
+      tags: [AdminTools]
+      summary: Apply a reusable tool template blueprint to a tool instance
+      operationId: applyAdminToolTemplate
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ToolId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApplyToolTemplateRequest"
+      responses:
+        "200":
+          description: Template applied
+
+  /api/admin/v1/tool-templates:
+    get:
+      tags: [AdminTools]
+      summary: List reusable tool templates
+      operationId: listAdminToolTemplates
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Tool template list
+    post:
+      tags: [AdminTools]
+      summary: Create a custom tool template
+      operationId: createAdminToolTemplate
+      security:
+        - bearerAuth: []
+      responses:
+        "201":
+          description: Template created
+
+  /api/admin/v1/tool-templates/{templateCode}:
+    get:
+      tags: [AdminTools]
+      summary: Get tool template detail by code
+      operationId: getAdminToolTemplate
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: templateCode
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Tool template detail
+
+  /api/admin/v1/field-schemas/{schemaId}/publish:
+    post:
+      tags: [AdminTools]
+      summary: Publish a field schema version
+      operationId: publishAdminFieldSchema
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: schemaId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: Field schema published
+
+  /api/admin/v1/tasks:
+    get:
+      tags: [AdminTasks]
+      summary: 绠＄悊绔换鍔″垪琛?
+      operationId: listAdminTasks
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/TaskStatus"
+        - $ref: "#/components/parameters/PageNo"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: 浠诲姟鍒嗛〉鍒楄〃
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskPageApiResponse"
+
+  /api/admin/v1/tasks/{taskId}:
+    get:
+      tags: [AdminTasks]
+      summary: 绠＄悊绔换鍔¤鎯?
+      operationId: getAdminTaskDetail
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "200":
+          description: 浠诲姟璇︽儏
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskDetailApiResponse"
+
+  /api/admin/v1/tasks/{taskId}/retry:
+    post:
+      tags: [AdminTasks]
+      summary: 绠＄悊绔噸璇曚换鍔?
+      operationId: retryAdminTask
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "200":
+          description: 浠诲姟鐘舵€?
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskStatusApiResponse"
+
+  /api/admin/v1/tasks/{taskId}/cancel:
+    post:
+      tags: [AdminTasks]
+      summary: 绠＄悊绔彇娑堜换鍔?
+      operationId: cancelAdminTask
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "200":
+          description: 浠诲姟鐘舵€?
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskStatusApiResponse"
+
+  /api/admin/v1/users:
+    get:
+      tags: [AdminUsers]
+      summary: 绠＄悊绔敤鎴峰垪琛?
+      operationId: listAdminUsers
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/Keyword"
+        - $ref: "#/components/parameters/PageNo"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: 鐢ㄦ埛鍒嗛〉鍒楄〃
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserPageApiResponse"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/admin/v1/users/{userId}:
+    get:
+      tags: [AdminUsers]
+      summary: 绠＄悊绔敤鎴疯鎯?
+      operationId: getAdminUserDetail
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      responses:
+        "200":
+          description: 鐢ㄦ埛璇︽儏
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserApiResponse"
+
+  /api/admin/v1/users/{userId}/status:
+    patch:
+      tags: [AdminUsers]
+      summary: 绠＄悊鍛樺惎鐢ㄦ垨绂佺敤鐢ㄦ埛
+      operationId: updateAdminUserStatus
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateUserStatusRequest"
+            examples:
+              disable:
+                value:
+                  status: DISABLED
+      responses:
+        "200":
+          description: 鏇存柊鍚庣殑鐢ㄦ埛淇℃伅
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserApiResponse"
+
+  /api/admin/v1/users/{userId}/credits/account:
+    get:
+      tags: [AdminUsers]
+      summary: 绠＄悊绔煡鐪嬬敤鎴风畻鍔涜处鎴?
+      operationId: getAdminUserCreditAccount
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      responses:
+        "200":
+          description: 绠楀姏璐︽埛
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditAccountApiResponse"
+
+  /api/admin/v1/users/{userId}/credits/logs:
+    get:
+      tags: [AdminUsers]
+      summary: 绠＄悊绔煡鐪嬬敤鎴风畻鍔涙祦姘?
+      operationId: getAdminUserCreditLogs
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+        - $ref: "#/components/parameters/PageNo"
+        - $ref: "#/components/parameters/PageSize"
+        - name: logType
+          in: query
+          schema:
+            $ref: "#/components/schemas/CreditLogType"
+      responses:
+        "200":
+          description: 绠楀姏娴佹按
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditLogPageApiResponse"
+
+  /api/admin/v1/users/{userId}/credits/manual-add:
+    post:
+      tags: [AdminUsers]
+      summary: 绠＄悊鍛樻墜鍔ㄥ鍔犵畻鍔?
+      operationId: manualAddCredits
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ManualCreditRequest"
+            examples:
+              add:
+                value:
+                  amount: 50
+                  reason: 鑷姩鍖栨祴璇曡ˉ鍏呯畻鍔?
+      responses:
+        "200":
+          description: 澧炲姞鍚庣殑璐︽埛
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditAccountApiResponse"
+
+  /api/admin/v1/users/{userId}/credits/manual-deduct:
+    post:
+      tags: [AdminUsers]
+      summary: 绠＄悊鍛樻墜鍔ㄦ墸鍑忕畻鍔?
+      operationId: manualDeductCredits
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ManualCreditRequest"
+      responses:
+        "200":
+          description: 鎵ｅ噺鍚庣殑璐︽埛
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditAccountApiResponse"
+
+  /api/admin/v1/billing/overview:
+    get:
+      tags: [AdminBilling]
+      summary: Get today billing overview
+      operationId: getBillingOverview
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Billing overview
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingOverviewApiResponse"
+
+  /api/admin/v1/billing/usage-logs:
+    get:
+      tags: [AdminBilling]
+      summary: List billing usage logs
+      operationId: listBillingUsageLogs
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PageNo"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: Billing usage log page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingUsageLogPageApiResponse"
+
+  /api/admin/v1/model-providers:
+    get:
+      tags: [AdminModelConfig]
+      summary: List registered model provider protocols
+      operationId: listModelProviders
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: capability
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Filter providers that declare this execution capability (e.g. IMAGE_GENERATION).
+      responses:
+        "200":
+          description: Provider descriptors
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelProviderListApiResponse"
+
+  /api/admin/v1/model-providers/{code}:
+    get:
+      tags: [AdminModelConfig]
+      summary: Get model provider descriptor by code
+      operationId: getModelProvider
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Provider descriptor
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelProviderApiResponse"
+
+  /api/admin/v1/agent/model-config:
+    get:
+      tags: [AdminModelConfig]
+      summary: Get default model API config
+      operationId: getAgentModelConfig
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Model config
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentModelConfigApiResponse"
+    put:
+      tags: [AdminModelConfig]
+      summary: Save default model API config
+      operationId: saveAgentModelConfig
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentModelConfigRequest"
+      responses:
+        "200":
+          description: Saved model config
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentModelConfigApiResponse"
+    post:
+      tags: [AdminModelConfig]
+      summary: Create model API config
+      operationId: createAgentModelConfig
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentModelConfigRequest"
+      responses:
+        "200":
+          description: Created model config
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentModelConfigApiResponse"
+
+  /api/admin/v1/agent/model-config/list:
+    get:
+      tags: [AdminModelConfig]
+      summary: List model API configs
+      operationId: listAgentModelConfigs
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Model config list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentModelConfigListApiResponse"
+
+  /api/admin/v1/agent/model-config/{id}:
+    put:
+      tags: [AdminModelConfig]
+      summary: Update model API config
+      operationId: updateAgentModelConfig
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentModelConfigRequest"
+      responses:
+        "200":
+          description: Updated model config
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentModelConfigApiResponse"
+    delete:
+      tags: [AdminModelConfig]
+      summary: Delete model API config
+      operationId: deleteAgentModelConfig
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+
+  /api/admin/v1/agent/model-config/{id}/default:
+    post:
+      tags: [AdminModelConfig]
+      summary: Set default model API config
+      operationId: setDefaultAgentModelConfig
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: Default model config
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentModelConfigApiResponse"
+
+  /api/admin/v1/agent/model-config/test:
+    post:
+      tags: [AdminModelConfig]
+      summary: Test model API connectivity
+      operationId: testAgentModelConfig
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentModelConfigRequest"
+      responses:
+        "200":
+          description: Connectivity test result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentModelConfigTestApiResponse"
+
+  /api/internal/v1/tasks/{taskId}/execution-context:
+    get:
+      tags: [InternalWorker]
+      summary: Worker 鑾峰彇浠诲姟鎵ц涓婁笅鏂?
+      operationId: getTaskExecutionContext
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "200":
+          description: 浠诲姟鎵ц涓婁笅鏂?
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskExecutionContextApiResponse"
+
+  /api/internal/v1/tasks/{taskId}/processing:
+    post:
+      tags: [InternalWorker]
+      summary: Worker 鏍囪浠诲姟澶勭悊涓?
+      operationId: markTaskProcessing
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProcessingRequest"
+      responses:
+        "200":
+          description: 鏍囪鎴愬姛
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskStatusApiResponse"
+
+  /api/internal/v1/tasks/{taskId}/success:
+    post:
+      tags: [InternalWorker]
+      summary: Worker 鍥炲啓鎴愬姛缁撴灉
+      operationId: markTaskSuccess
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskSuccessRequest"
+      responses:
+        "200":
+          description: 鍥炲啓鎴愬姛
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskStatusApiResponse"
+
+  /api/internal/v1/tasks/{taskId}/failed:
+    post:
+      tags: [InternalWorker]
+      summary: Worker 鍥炲啓澶辫触
+      operationId: markTaskFailed
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskFailedRequest"
+      responses:
+        "200":
+          description: 鍥炲啓鎴愬姛
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskStatusApiResponse"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    internalApiToken:
+      type: apiKey
+      in: header
+      name: X-Internal-Signature
+
+  parameters:
+    PageNo:
+      name: pageNo
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    PageSize:
+      name: pageSize
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    Keyword:
+      name: keyword
+      in: query
+      schema:
+        type: string
+    KeywordRequired:
+      name: keyword
+      in: query
+      required: true
+      schema:
+        type: string
+    CategoryId:
+      name: categoryId
+      in: query
+      schema:
+        type: integer
+        format: int64
+    ToolCode:
+      name: toolCode
+      in: path
+      required: true
+      schema:
+        type: string
+        example: xiaohongshu_copywriting
+    ToolId:
+      name: toolId
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+    TaskId:
+      name: taskId
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+    UserId:
+      name: userId
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+
+  responses:
+    BadRequest:
+      description: 鍙傛暟閿欒鎴栦笟鍔¤鍒欎笉鍏佽
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorApiResponse"
+    Unauthorized:
+      description: 鏈櫥褰曟垨 Token 澶辨晥
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorApiResponse"
+    Forbidden:
+      description: 鏃犳潈闄?
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorApiResponse"
+    NotFound:
+      description: 璧勬簮涓嶅瓨鍦?
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorApiResponse"
+
+  schemas:
+    ErrorCode:
+      type: string
+      enum:
+        - SUCCESS
+        - PARAM_ERROR
+        - UNAUTHORIZED
+        - FORBIDDEN
+        - ADMIN_UNAUTHORIZED
+        - ADMIN_FORBIDDEN
+        - TOOL_NOT_FOUND
+        - TOOL_OFFLINE
+        - CREDIT_NOT_ENOUGH
+        - TASK_NOT_FOUND
+        - TASK_STATUS_INVALID
+        - MODEL_CALL_FAILED
+        - SYSTEM_ERROR
+
+    ApiResponse:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          $ref: "#/components/schemas/ErrorCode"
+        message:
+          type: string
+          example: ok
+        traceId:
+          type: string
+          nullable: true
+          description: 褰撳墠瀹炵幇浣跨敤 traceId锛涙棫瑙勫垝涓殑 requestId 瑙嗕负鍚岀被杩借釜瀛楁銆?
+
+    PageBase:
+      type: object
+      properties:
+        total:
+          type: integer
+          format: int64
+        pageNo:
+          type: integer
+        pageSize:
+          type: integer
+        hasNext:
+          type: boolean
+
+    ErrorApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponse"
+        - type: object
+          properties:
+            data:
+              type: object
+              nullable: true
+              example: null
+
+    EmptyApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponse"
+        - type: object
+          properties:
+            data:
+              type: object
+              nullable: true
+              example: null
+
+    PingApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponse"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/PingStatus"
+
+    HealthApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponse"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/HealthStatus"
+
+    HealthStatus:
+      type: object
+      properties:
+        service:
+          type: string
+          example: backend
+        mysql:
+          type: string
+          example: ok
+        redis:
+          type: string
+          example: ok
+
+    PingStatus:
+      type: object
+      required: [scope, status]
+      properties:
+        scope:
+          type: string
+          enum: [user, admin]
+          example: user
+        status:
+          type: string
+          enum: [ok]
+          example: ok
+
+    RegisterRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          example: auto_user_001
+        password:
+          type: string
+          format: password
+          example: "123456"
+        nickname:
+          type: string
+          example: 鑷姩鍖栨祴璇曠敤鎴?
+        phone:
+          type: string
+          example: "13376644413"
+        email:
+          type: string
+          example: user@example.com
+
+    LoginRequest:
+      type: object
+      required: [account, password]
+      properties:
+        account:
+          type: string
+          example: user1
+        password:
+          type: string
+          format: password
+          example: "123456"
+
+    SmsCodeRequest:
+      type: object
+      required: [phone]
+      properties:
+        phone:
+          type: string
+          example: "13376644413"
+        scene:
+          type: string
+          enum: [REGISTER, LOGIN]
+          default: REGISTER
+
+    SmsAuthRequest:
+      type: object
+      required: [phone, code]
+      properties:
+        phone:
+          type: string
+          example: "13376644413"
+        code:
+          type: string
+          example: "123456"
+        nickname:
+          type: string
+          example: 鎵嬫満鐢ㄦ埛
+
+    LoginApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponse"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/LoginResult"
+
+    LoginResult:
+      type: object
+      required: [accessToken, user]
+      properties:
+        accessToken:
+          type: string
+          example: eyJhbGciOiJIUzI1NiJ9...
+        user:
+          $ref: "#/components/schemas/UserProfile"
+
+    UserProfileApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponse"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/UserProfile"
+
+    UserProfile:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 2
+        username:
+          type: string
+          nullable: true
+          example: user1
+        nickname:
+          type: string
+          nullable: true
+          example: User One
+        userType:
+          type: string
+          enum: [USER, ADMIN]
+          example: USER
+        status:
+          type: string
+          enum: [ACTIVE, DISABLED]
+          example: ACTIVE
+        phone:
+          type: string
+          nullable: true
+        email:
+          type: string
+          nullable: true
+
+    ToolStatus:
+      type: string
+      enum: [DRAFT, ONLINE, OFFLINE]
+
+    ToolCategoryListApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponse"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/ToolCategory"
+
+    ToolCategory:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        categoryCode:
+          type: string
+          example: copywriting
+        categoryName:
+          type: string
+          example: Copywriting
+        sortOrder:
+          type: integer
+        status:
+          type: string
+          example: ACTIVE
+
+    ToolPageApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponse"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/ToolPage"
+
+    ToolPage:
+      type: object
+      properties:
+        list:
+          type: array
+          items:
+            $ref: "#/components/schemas/ToolSummary"
+        total:
+          type: integer
+          format: int64
+        pageNo:
+          type: integer
+        pageSize:
+          type: integer
+        hasNext:
+          type: boolean
+
+    ToolSummaryApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponse"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/ToolSummary"
+
+    ToolSummary:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        toolCode:
+          type: string
+          example: xiaohongshu_copywriting
+        toolName:
+          type: string
+          example: AI 灏忕孩涔︽枃妗堢敓鎴愬櫒
+        categoryId:
+          type: integer
+          format: int64
+        categoryName:
+          type: string
+          example: Copywriting
+        description:
+          type: string
+        coverUrl:
+          type: string
+          nullable: true
+        toolType:
+          type: string
+          enum: [TEXT_GENERATION, IMAGE_GENERATION, VIDEO_GENERATION, AUDIO_GENERATION, DIGITAL_HUMAN]
+          example: TEXT_GENERATION
+        inputModality:
+          type: string
+          enum: [TEXT, IMAGE, AUDIO, VIDEO, FILE, MULTIMODAL]
+          example: TEXT
+        outputModality:
+          type: string
+          enum: [TEXT, IMAGE, AUDIO, VIDEO, REPORT, JSON]
+          example: TEXT
+        configNote:
+          type: string
+          nullable: true
+        modelConfigId:
+          type: integer
+          format: int64
+          nullable: true
+        modelConfigName:
+          type: string
+          nullable: true
+        modelName:
+          type: string
+          nullable: true
+        status:
+          $ref: "#/components/schemas/ToolStatus"
+        estimatedCreditCost:
+          type: integer
+          example: 1
+        executionHandler:
+          type: string
+          nullable: true
+          description: Worker-side execution handler key for this tool.
+
+    ToolDetailApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponse"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/ToolDetail"
+
+    ToolDetail:
+      allOf:
+        - $ref: "#/components/schemas/ToolSummary"
+        - type: object
+          properties:
+            fields:
+              type: array
+              items:
+                $ref: "#/components/schemas/ToolField"
+
+    ToolFieldListApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponse"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/ToolField"
+
+    ToolField:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        fieldKey:
+          type: string
+          example: productName
+        fieldName:
+          type: string
+          example: 浜у搧鍚嶇О
+        fieldType:
+          type: string
+          enum: [text, textarea, select, number, radio, checkbox, slider, image, file]
+        placeholder:
+          type: string
+          nullable: true
+        options:
+          type: array
+          nullable: true
+          items:
+            $ref: "#/components/schemas/SelectOption"
+        optionsJson:
+          type: string
+          nullable: true
+        validationJson:
+          type: string
+          nullable: true
+        required:
+          type: boolean
+        sortOrder:
+          type: integer
+        status:
+          type: string
+          example: ACTIVE
+
+    SelectOption:
+      type: object
+      properties:
+        label:
+          type: string
+        value:
+          type: string
+
+    UpsertToolRequest:
+      type: object
+      required: [toolCode, toolName, categoryId, status, estimatedCreditCost]
+      properties:
+        toolCode:
+          type: string
+        toolName:
+          type: string
+        categoryId:
+          type: integer
+          format: int64
+        description:
+          type: string
+        coverUrl:
+          type: string
+          nullable: true
+        toolType:
+          type: string
+          enum: [TEXT_GENERATION, IMAGE_GENERATION, VIDEO_GENERATION, AUDIO_GENERATION, DIGITAL_HUMAN]
+        inputModality:
+          type: string
+          enum: [TEXT, IMAGE, AUDIO, VIDEO, FILE, MULTIMODAL]
+        outputModality:
+          type: string
+          enum: [TEXT, IMAGE, AUDIO, VIDEO, REPORT, JSON]
+        configNote:
+          type: string
+          nullable: true
+        modelConfigId:
+          type: integer
+          format: int64
+          nullable: true
+        status:
+          $ref: "#/components/schemas/ToolStatus"
+        estimatedCreditCost:
+          type: integer
+          minimum: 0
+
+    UpdateToolFieldsRequest:
+      type: object
+      required: [fields]
+      properties:
+        fields:
+          type: array
+          items:
+            $ref: "#/components/schemas/ToolFieldRequest"
+
+    ToolFieldRequest:
+      type: object
+      required: [fieldKey, fieldName, fieldType, required, sortOrder]
+      properties:
+        fieldKey:
+          type: string
+        fieldName:
+          type: string
+        fieldType:
+          type: string
+          enum: [text, textarea, select, number, radio, checkbox, slider, image, file]
+        placeholder:
+          type: string
+          nullable: true
+        optionsJson:
+          type: string
+          nullable: true
+        validationJson:
+          type: string
+          nullable: true
+        required:
+          type: boolean
+        sortOrder:
+          type: integer
+
+    TaskStatus:
+      type: string
+      enum: [CREATED, QUEUED, PROCESSING, RETRYING, SUCCESS, FAILED, TIMEOUT, CANCELLED]
+
+    CreateTaskRequest:
+      type: object
+      required: [toolCode, params]
+      properties:
+        toolCode:
+          type: string
+          example: xiaohongshu_copywriting
+        params:
+          type: object
+          additionalProperties: true
+          example:
+            productName: 浜斾竴鎶ょ悊濂楅
+            targetCustomer: 骞磋交濂虫€?
+            style: 绉嶈崏
+        clientRequestId:
+          type: string
+          nullable: true
+          description: 鍓嶇骞傜瓑璇锋眰 ID锛屽搴旇鍒掗噷鐨?clientRequestId銆?
+
+    RegenerateTaskRequest:
+      type: object
+      properties:
+        params:
+          type: object
+          additionalProperties: true
+          description: 閲嶆柊鐢熸垚鏃惰鐩栧師浠诲姟鍙傛暟锛涗负绌哄垯娌跨敤鍘熷弬鏁般€?
+
+    TaskStatusApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponse"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/TaskStatusResult"
+
+    TaskStatusResult:
+      type: object
+      properties:
+        taskId:
+          type: integer
+          format: int64
+        taskNo:
+          type: string
+          example: T202605070001
+        status:
+          $ref: "#/components/schemas/TaskStatus"
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+        progressMessage:
+          type: string
+          nullable: true
+
+    TaskPageApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponse"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/TaskPage"
+
+    TaskPage:
+      type: object
+      properties:
+        list:
+          type: array
+          items:
+            $ref: "#/components/schemas/TaskDetail"
+        total:
+          type: integer
+          format: int64
+        pageNo:
+          type: integer
+        pageSize:
+          type: integer
+        hasNext:
+          type: boolean
+
+    TaskDetailApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponse"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/TaskDetail"
+
+    TaskDetail:
+      type: object
+      properties:
+        taskId:
+          type: integer
+          format: int64
+        taskNo:
+          type: string
+        toolCode:
+          type: string
+        toolName:
+          type: string
+        status:
+          $ref: "#/components/schemas/TaskStatus"
+        progress:
+          type: integer
+        progressMessage:
+          type: string
+          nullable: true
+        params:
+          type: object
+          additionalProperties: true
+        result:
+          $ref: "#/components/schemas/TaskResult"
+        results:
+          type: array
+          nullable: true
+          items:
+            $ref: "#/components/schemas/TaskResult"
+        errorCode:
+          type: string
+          nullable: true
+        errorMessage:
+          type: string
+          nullable: true
+        estimatedCreditCost:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+        finishedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    TaskResult:
+      type: object
+      nullable: true
+      properties:
+        resourceType:
+          type: string
+          enum: [TEXT, MARKDOWN, JSON, IMAGE, AUDIO, VIDEO, REPORT]
+        contentText:
+          type: string
+          nullable: true
+        contentJson:
+          type: object
+          additionalProperties: true
+          nullable: true
+        sortOrder:
+          type: integer
+          nullable: true
+
+    CreditAccountApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponse"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/CreditAccount"
+
+    CreditAccount:
+      type: object
+      properties:
+        userId:
+          type: integer
+          format: int64
+        balance:
+          type: integer
+          example: 100
+        frozen:
+          type: integer
+          example: 0
+        available:
+          type: integer
+          example: 100
+        totalGranted:
+          type: integer
+        totalConsumed:
+          type: integer
+        status:
+          type: string
+          enum: [ACTIVE, DISABLED]
+
+    CreditLogType:
+      type: string
+      enum: [FREEZE, DEDUCT, RELEASE, MANUAL_ADD, MANUAL_DEDUCT]
+
+    CreditLogPageApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponse"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/CreditLogPage"
+
+    CreditLogPage:
+      type: object
+      properties:
+        list:
+          type: array
+          items:
+            $ref: "#/components/schemas/CreditLog"
+        total:
+          type: integer
+          format: int64
+        pageNo:
+          type: integer
+        pageSize:
+          type: integer
+        hasNext:
+          type: boolean
+
+    CreditLog:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        taskId:
+          type: integer
+          format: int64
+          nullable: true
+        logType:
+          $ref: "#/components/schemas/CreditLogType"
+        amount:
+          type: integer
+        frozenAmount:
+          type: integer
+        balanceBefore:
+          type: integer
+        balanceAfter:
+          type: integer
+        frozenBefore:
+          type: integer
+        frozenAfter:
+          type: integer
+        operatorType:
+          type: string
+          enum: [SYSTEM, ADMIN, USER]
+        reason:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    ManualCreditRequest:
+      type: object
+      required: [amount]
+      properties:
+        amount:
+          type: integer
+          minimum: 1
+          example: 50
+        reason:
+          type: string
+          example: 鑷姩鍖栨祴璇曡ˉ鍏呯畻鍔?
+
+    AdminUserPageApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponse"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/AdminUserPage"
+
+    AdminUserPage:
+      type: object
+      properties:
+        list:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminUser"
+        total:
+          type: integer
+          format: int64
+        pageNo:
+          type: integer
+        pageSize:
+          type: integer
+        hasNext:
+          type: boolean
+
+    AdminUserApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponse"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/AdminUser"
+
+    AdminUser:
+      allOf:
+        - $ref: "#/components/schemas/UserProfile"
+        - type: object
+          properties:
+            creditAccount:
+              $ref: "#/components/schemas/CreditAccount"
+
+    UpdateUserStatusRequest:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ACTIVE, DISABLED]
+          example: DISABLED
+
+    AgentModelConfigApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponse"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/AgentModelConfig"
+
+    AgentModelConfigListApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponse"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/AgentModelConfig"
+
+    ModelProviderDescriptor:
+      type: object
+      properties:
+        code:
+          type: string
+        label:
+          type: string
+        capabilities:
+          type: array
+          items:
+            type: string
+        defaultBaseUrl:
+          type: string
+          nullable: true
+        defaultModel:
+          type: string
+          nullable: true
+        billingDefault:
+          type: string
+          nullable: true
+        testStrategy:
+          type: string
+          nullable: true
+        workerReady:
+          type: boolean
+        description:
+          type: string
+          nullable: true
+
+    ModelProviderApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponse"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/ModelProviderDescriptor"
+
+    ModelProviderListApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponse"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/ModelProviderDescriptor"
+
+    AgentModelConfig:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        displayName:
+          type: string
+          nullable: true
+        configCode:
+          type: string
+          nullable: true
+        provider:
+          type: string
+        modelName:
+          type: string
+        baseUrl:
+          type: string
+          nullable: true
+        apiKeyMasked:
+          type: string
+          nullable: true
+        minimaxGroupId:
+          type: string
+          nullable: true
+        consoleUrl:
+          type: string
+          nullable: true
+        balanceUrl:
+          type: string
+          nullable: true
+        docsUrl:
+          type: string
+          nullable: true
+        timeoutSeconds:
+          type: integer
+        inputTokenPricePer1m:
+          type: number
+          format: double
+        outputTokenPricePer1m:
+          type: number
+          format: double
+        billingUnit:
+          type: string
+          enum: [TOKEN_PER_M, PER_CALL]
+        unitPrice:
+          type: number
+          format: double
+        enabled:
+          type: boolean
+        isDefault:
+          type: boolean
+        capabilities:
+          type: array
+          items:
+            type: string
+          description: Execution capabilities supported by this credential set.
+
+    AgentModelConfigRequest:
+      type: object
+      required: [provider, modelName]
+      properties:
+        displayName:
+          type: string
+        configCode:
+          type: string
+        provider:
+          type: string
+        modelName:
+          type: string
+        baseUrl:
+          type: string
+        apiKey:
+          type: string
+        minimaxGroupId:
+          type: string
+        consoleUrl:
+          type: string
+        balanceUrl:
+          type: string
+        docsUrl:
+          type: string
+        timeoutSeconds:
+          type: integer
+          minimum: 1
+          maximum: 300
+        inputTokenPricePer1m:
+          type: number
+          format: double
+          description: Input token cost per 1M tokens.
+        outputTokenPricePer1m:
+          type: number
+          format: double
+          description: Output token cost per 1M tokens.
+        billingUnit:
+          type: string
+          enum: [TOKEN_PER_M, PER_CALL]
+        unitPrice:
+          type: number
+          format: double
+          description: Cost per billable generated item when billingUnit is PER_CALL.
+        enabled:
+          type: boolean
+        isDefault:
+          type: boolean
+        capabilities:
+          type: array
+          items:
+            type: string
+
+    AgentModelConfigTestApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponse"
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                provider:
+                  type: string
+                modelName:
+                  type: string
+                latencyMs:
+                  type: integer
+                message:
+                  type: string
+                sample:
+                  type: string
+
+    BillingOverviewApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponse"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/BillingOverview"
+
+    BillingOverview:
+      type: object
+      properties:
+        todayPromptTokens:
+          type: integer
+          format: int64
+        todayCompletionTokens:
+          type: integer
+          format: int64
+        todayTotalTokens:
+          type: integer
+          format: int64
+        todayCostAmount:
+          type: number
+          format: double
+        todayChargedCredits:
+          type: integer
+          format: int64
+        todayUsageCount:
+          type: integer
+          format: int64
+
+    BillingUsageLogPageApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponse"
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                list:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/BillingUsageLog"
+                total:
+                  type: integer
+                  format: int64
+
+    BillingUsageLog:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        sourceType:
+          type: string
+          enum: [TASK, AGENT_RUN]
+        sourceId:
+          type: integer
+          format: int64
+        userId:
+          type: integer
+          format: int64
+        provider:
+          type: string
+          nullable: true
+        modelName:
+          type: string
+          nullable: true
+        promptTokens:
+          type: integer
+        completionTokens:
+          type: integer
+        totalTokens:
+          type: integer
+        inputTokenPricePer1m:
+          type: number
+          format: double
+        outputTokenPricePer1m:
+          type: number
+          format: double
+        billingUnit:
+          type: string
+          enum: [TOKEN_PER_M, PER_CALL]
+        billableUnits:
+          type: integer
+        unitPrice:
+          type: number
+          format: double
+        costAmount:
+          type: number
+          format: double
+        chargedCredits:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+
+    TaskExecutionContextApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponse"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/TaskExecutionContext"
+
+    TaskExecutionContext:
+      type: object
+      properties:
+        taskId:
+          type: integer
+          format: int64
+        taskNo:
+          type: string
+        userId:
+          type: integer
+          format: int64
+        toolCode:
+          type: string
+        toolName:
+          type: string
+        toolType:
+          type: string
+          enum: [TEXT_GENERATION, IMAGE_GENERATION, VIDEO_GENERATION, AUDIO_GENERATION, DIGITAL_HUMAN]
+        inputModality:
+          type: string
+          enum: [TEXT, IMAGE, AUDIO, VIDEO, FILE, MULTIMODAL]
+        outputModality:
+          type: string
+          enum: [TEXT, IMAGE, AUDIO, VIDEO, REPORT, JSON]
+        params:
+          type: object
+          additionalProperties: true
+        fields:
+          type: array
+          items:
+            $ref: "#/components/schemas/ToolField"
+        systemPrompt:
+          type: string
+          nullable: true
+        userPromptTemplate:
+          type: string
+          nullable: true
+        estimatedCreditCost:
+          type: integer
+        modelConfig:
+          $ref: "#/components/schemas/ExecutionModelConfig"
+
+    ExecutionModelConfig:
+      type: object
+      nullable: true
+      properties:
+        provider:
+          type: string
+        modelName:
+          type: string
+        baseUrl:
+          type: string
+          nullable: true
+        apiKey:
+          type: string
+          nullable: true
+        minimaxGroupId:
+          type: string
+          nullable: true
+        timeoutSeconds:
+          type: integer
+        capabilities:
+          type: array
+          items:
+            type: string
+          nullable: true
+          description: Declared execution capabilities for this resolved model credential.
+
+    ProcessingRequest:
+      type: object
+      properties:
+        progressMessage:
+          type: string
+          example: AI 姝ｅ湪鐢熸垚鍐呭
+
+    TaskSuccessRequest:
+      type: object
+      required: [resourceType, contentText]
+      properties:
+        resourceType:
+          type: string
+          enum: [TEXT, MARKDOWN, JSON, IMAGE, AUDIO, VIDEO, REPORT]
+          example: MARKDOWN
+        contentText:
+          type: string
+          example: "# Generated result"
+        promptTokens:
+          type: integer
+          nullable: true
+          description: Actual input tokens reported by worker.
+        completionTokens:
+          type: integer
+          nullable: true
+          description: Actual output tokens reported by worker.
+        billableUnits:
+          type: integer
+          nullable: true
+          description: Billable generated items for per-call/image/video pricing.
+
+    TaskFailedRequest:
+      type: object
+      required: [errorCode, errorMessage]
+      properties:
+        errorCode:
+          type: string
+          example: MODEL_CALL_FAILED
+        errorMessage:
+          type: string
+          example: Model call failed

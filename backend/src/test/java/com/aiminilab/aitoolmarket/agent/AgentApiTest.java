@@ -143,8 +143,56 @@ class AgentApiTest {
         ensureOnlineTool("xiaohongshu_copywriting");
         Long sessionId = createSession(token, "Confirm Resume");
         Long runId = sendMessage(token, sessionId, "Please wait for tool confirmation.").runId();
+        String confirmationEventBody = """
+                {
+                  "eventType": "tool.confirmation_required",
+                  "eventText": "xiaohongshu_copywriting",
+                  "eventJson": {
+                    "toolCode": "xiaohongshu_copywriting"
+                  }
+                }
+                """;
+        mockMvc.perform(signed(post("/api/internal/v1/agent/runs/{runId}/events", runId), "POST",
+                        "/api/internal/v1/agent/runs/%d/events".formatted(runId), confirmationEventBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(confirmationEventBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.eventType").value("tool.confirmation_required"));
+        assertThat(agentRunMapper.findById(runId).orElseThrow().getStatus()).isEqualTo("WAITING_USER_CONFIRMATION");
 
-        agentRunMapper.updateById(waitingRun(runId));
+        mockMvc.perform(post("/api/v1/agent/runs/{runId}/tool-confirmations", runId)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "toolCode": "xiaohongshu_copywriting",
+                                  "approved": true,
+                                  "autoCallEnabled": false
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("RUNNING"));
+
+        mockMvc.perform(post("/api/v1/agent/runs/{runId}/tool-confirmations", runId)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "toolCode": "xiaohongshu_copywriting",
+                                  "approved": true,
+                                  "autoCallEnabled": false
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("RUNNING"));
+
+        Mockito.verify(agentServiceClient).confirmTool(runId, "xiaohongshu_copywriting");
+        Mockito.verify(agentServiceClient, Mockito.times(1)).confirmTool(runId, "xiaohongshu_copywriting");
+        assertThat(agentRunMapper.findById(runId).orElseThrow().getStatus()).isEqualTo("RUNNING");
+        assertThat(agentToolPreferenceMapper.findByUserIdAndToolCode(login.userId(), "xiaohongshu_copywriting"))
+                .isNotNull()
+                .extracting("autoCallEnabled")
+                .isEqualTo(false);
 
         String startedResponse = mockMvc.perform(signed(post("/api/internal/v1/agent/runs/{runId}/tool-calls", runId), "POST",
                         "/api/internal/v1/agent/runs/%d/tool-calls".formatted(runId), """
@@ -171,26 +219,27 @@ class AgentApiTest {
                 .getResponse()
                 .getContentAsString();
         long toolCallId = objectMapper.readTree(startedResponse).path("data").path("id").asLong();
-
-        mockMvc.perform(post("/api/v1/agent/runs/{runId}/tool-confirmations", runId)
-                        .header("Authorization", "Bearer " + token)
+        mockMvc.perform(signed(post("/api/internal/v1/agent/runs/{runId}/tool-calls", runId), "POST",
+                        "/api/internal/v1/agent/runs/%d/tool-calls".formatted(runId), """
+                                {
+                                  "toolCode": "xiaohongshu_copywriting",
+                                  "argumentsJson": {
+                                    "topic": "launch"
+                                  }
+                                }
+                                """)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
                                   "toolCode": "xiaohongshu_copywriting",
-                                  "approved": true,
-                                  "autoCallEnabled": false
+                                  "argumentsJson": {
+                                    "topic": "launch"
+                                  }
                                 }
                                 """))
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.id").value((int) toolCallId))
                 .andExpect(jsonPath("$.data.status").value("RUNNING"));
-
-        Mockito.verify(agentServiceClient).confirmTool(runId, "xiaohongshu_copywriting");
-        assertThat(agentRunMapper.findById(runId).orElseThrow().getStatus()).isEqualTo("RUNNING");
-        assertThat(agentToolPreferenceMapper.findByUserIdAndToolCode(login.userId(), "xiaohongshu_copywriting"))
-                .isNotNull()
-                .extracting("autoCallEnabled")
-                .isEqualTo(false);
 
         String completeToolBody = """
                 {
@@ -236,21 +285,23 @@ class AgentApiTest {
                 .getResponse()
                 .getContentAsString();
         JsonNode events = objectMapper.readTree(eventsResponse).path("data").path("list");
-        assertThat(events.size()).isEqualTo(4);
+        assertThat(events.size()).isEqualTo(5);
         long firstEventId = events.get(0).path("id").asLong();
         assertThat(events.get(0).path("eventType").asText()).isEqualTo("run.started");
-        assertThat(events.get(1).path("eventType").asText()).isEqualTo("tool.started");
+        assertThat(events.get(1).path("eventType").asText()).isEqualTo("tool.confirmation_required");
         assertThat(events.get(2).path("eventType").asText()).isEqualTo("tool.confirmed");
-        assertThat(events.get(3).path("eventType").asText()).isEqualTo("tool.finished");
+        assertThat(events.get(3).path("eventType").asText()).isEqualTo("tool.started");
+        assertThat(events.get(4).path("eventType").asText()).isEqualTo("tool.finished");
 
         mockMvc.perform(get("/api/v1/agent/runs/{runId}/events", runId)
                         .header("Authorization", "Bearer " + token)
                         .param("afterEventId", String.valueOf(firstEventId)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.list.length()").value(3))
-                .andExpect(jsonPath("$.data.list[0].eventType").value("tool.started"))
+                .andExpect(jsonPath("$.data.list.length()").value(4))
+                .andExpect(jsonPath("$.data.list[0].eventType").value("tool.confirmation_required"))
                 .andExpect(jsonPath("$.data.list[1].eventType").value("tool.confirmed"))
-                .andExpect(jsonPath("$.data.list[2].eventType").value("tool.finished"));
+                .andExpect(jsonPath("$.data.list[2].eventType").value("tool.started"))
+                .andExpect(jsonPath("$.data.list[3].eventType").value("tool.finished"));
 
         mockMvc.perform(get("/api/v1/agent/runs/{runId}/events/stream", runId)
                         .header("Authorization", "Bearer " + token)
@@ -839,6 +890,12 @@ class AgentApiTest {
         org.assertj.core.api.Assertions.assertThat(settled.balance()).isEqualTo(93);
         org.assertj.core.api.Assertions.assertThat(settled.frozen()).isEqualTo(0);
         org.assertj.core.api.Assertions.assertThat(settled.available()).isEqualTo(93);
+        Integer billingCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM billing_usage_logs WHERE source_type = 'AGENT_RUN' AND source_id = ? AND charged_credits = 7 AND prompt_tokens = 0 AND completion_tokens = 0",
+                Integer.class,
+                runId
+        );
+        org.assertj.core.api.Assertions.assertThat(billingCount).isEqualTo(1);
 
         mockMvc.perform(get("/api/v1/agent/sessions/{sessionId}/messages", sessionId)
                         .header("Authorization", "Bearer " + login.token()))
@@ -986,12 +1043,6 @@ class AgentApiTest {
     }
 
     private record SendMessageResult(Long sessionId, Long messageId, Long runId, String runStatus) {
-    }
-
-    private com.aiminilab.aitoolmarket.agent.entity.AgentRun waitingRun(Long runId) {
-        var run = agentRunMapper.findById(runId).orElseThrow();
-        run.setStatus("WAITING_USER_CONFIRMATION");
-        return run;
     }
 
     private void ensureOnlineTool(String toolCode) {

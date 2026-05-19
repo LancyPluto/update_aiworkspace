@@ -1,6 +1,6 @@
 /**
  * 与《openapi.yml》V1 契约对齐的类型与常量。
- * 响应壳：{ code, message, data, requestId? }
+ * 响应壳：{ code, message, data, traceId? }
  */
 
 /** §3 V1 保留错误码 */
@@ -34,8 +34,8 @@ export interface ApiResponse<T> {
   code: ApiErrorCode
   message: string
   data: T | null
-  requestId?: string
   traceId?: string
+  requestId?: string
 }
 
 /** §4 统一任务状态 */
@@ -136,6 +136,10 @@ export interface ToolSummary {
   categoryName: string
   description?: string | null
   coverUrl?: string | null
+  toolType?: string | null
+  inputModality?: string | null
+  outputModality?: string | null
+  configNote?: string | null
   status: ToolBizStatus
   estimatedCreditCost: number
 }
@@ -150,9 +154,9 @@ export interface ToolFieldOption {
 export interface ToolField {
   fieldKey: string
   fieldName: string
-  fieldType: "text" | "textarea" | "select" | "number"
+  fieldType: "text" | "textarea" | "select" | "number" | "radio" | "checkbox" | "slider" | "image" | "file"
   placeholder?: string | null
-  options?: ToolFieldOption[] | null
+  options?: Array<ToolFieldOption | string> | null
   required: boolean
   sortOrder: number
 }
@@ -166,6 +170,10 @@ export interface ToolDetail {
   categoryName: string
   description?: string | null
   coverUrl?: string | null
+  toolType?: string | null
+  inputModality?: string | null
+  outputModality?: string | null
+  configNote?: string | null
   status: ToolBizStatus
   estimatedCreditCost: number
   /** 动态字段列表 */
@@ -191,6 +199,7 @@ export interface CreateTaskResponse {
 export interface TaskStatusPayload {
   taskId: number
   taskNo: string
+  toolCode?: string
   status: TaskStatus
   progress?: number
   progressMessage?: string
@@ -212,6 +221,9 @@ export interface TaskDetail {
   userId: number
   toolCode: string
   toolName: string
+  toolType?: string
+  inputModality?: string
+  outputModality?: string
   params?: Record<string, unknown>
   result?: TaskResult | null
   createdAt: string
@@ -269,6 +281,8 @@ export type AgentRunEventType =
   | "tool.selected"
   | "tool.confirmation_required"
   | "tool.started"
+  | "tool.task_dispatched"
+  | "tool.task_progress"
   | "tool.finished"
   | "subagent.started"
   | "subagent.completed"
@@ -277,7 +291,9 @@ export type AgentRunEventType =
   | "workspace_file.updated"
   | "workspace_file.read"
   | "memory.context_injected"
+  | "memory.context_frozen"
   | "memory.candidate_created"
+  | "memory.saved"
   | "message.delta"
   | "message.completed"
   | "run.completed"

@@ -7,12 +7,14 @@ public record InternalAgentRunContextResponse(
         Long sessionId,
         Long workspaceId,
         Long userId,
+        String status,
         String message,
         List<InternalAgentMessageResponse> history,
         List<InternalAgentFileContextResponse> agentFiles,
         List<InternalAgentFileChunkContextResponse> agentFileChunks,
         List<AgentToolDescriptorResponse> availableTools,
         List<AgentToolPreferenceResponse> toolPreferences,
-        Integer creditBudget
+        Integer creditBudget,
+        InternalPendingToolContextResponse pendingToolContext
 ) {
 }

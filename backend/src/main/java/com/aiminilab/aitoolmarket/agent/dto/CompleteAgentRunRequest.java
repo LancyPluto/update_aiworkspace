@@ -8,6 +8,8 @@ public record CompleteAgentRunRequest(
         String intent,
         String modelProviderCode,
         String modelName,
-        Integer consumedCredits
+        Integer consumedCredits,
+        Integer promptTokens,
+        Integer completionTokens
 ) {
 }

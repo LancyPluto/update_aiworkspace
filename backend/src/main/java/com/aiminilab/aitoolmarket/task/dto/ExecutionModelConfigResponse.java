@@ -2,6 +2,8 @@ package com.aiminilab.aitoolmarket.task.dto;
 
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
 
+import java.util.List;
+
 public record ExecutionModelConfigResponse(
         Long id,
         String displayName,
@@ -11,9 +13,10 @@ public record ExecutionModelConfigResponse(
         String baseUrl,
         String apiKey,
         String minimaxGroupId,
-        Integer timeoutSeconds
+        Integer timeoutSeconds,
+        List<String> capabilities
 ) {
-    public static ExecutionModelConfigResponse from(AgentModelConfig config) {
+    public static ExecutionModelConfigResponse from(AgentModelConfig config, List<String> capabilities) {
         if (config == null) {
             return null;
         }
@@ -26,7 +29,8 @@ public record ExecutionModelConfigResponse(
                 config.getBaseUrl(),
                 config.getApiKey(),
                 config.getMinimaxGroupId(),
-                config.getTimeoutSeconds()
+                config.getTimeoutSeconds(),
+                capabilities == null ? List.of() : capabilities
         );
     }
 }

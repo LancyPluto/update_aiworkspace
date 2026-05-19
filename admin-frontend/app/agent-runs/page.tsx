@@ -60,7 +60,7 @@ function parseJson(value?: string | null) {
   }
 }
 
-export default function AgentRunsPage() {
+export function AgentRunsContent() {
   const [runs, setRuns] = useState<AdminAgentRunListItem[]>([])
   const [stats, setStats] = useState<AdminAgentRunStats | null>(null)
   const [detail, setDetail] = useState<AdminAgentRunDetail | null>(null)
@@ -139,13 +139,14 @@ export default function AgentRunsPage() {
   }
 
   return (
-    <AdminLayout>
-      <AdminHeader
-        title="Agent 运行"
-        description={error || "查看 Agent 会话运行状态、工具调用、事件流和失败原因。"}
-      />
+    <>
+      <div className="space-y-6">
+        {error ? (
+          <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
+            {error}
+          </div>
+        ) : null}
 
-      <div className="space-y-6 p-6">
         <div className="grid gap-4 md:grid-cols-4">
           {[
             ["总运行", stats?.totalRuns ?? 0],
@@ -294,6 +295,20 @@ export default function AgentRunsPage() {
           ) : null}
         </DialogContent>
       </Dialog>
+    </>
+  )
+}
+
+export default function AgentRunsPage() {
+  return (
+    <AdminLayout>
+      <AdminHeader
+        title="Agent 运行"
+        description="查看 Agent 会话运行状态、工具调用、事件流和失败原因。"
+      />
+      <div className="p-6">
+        <AgentRunsContent />
+      </div>
     </AdminLayout>
   )
 }

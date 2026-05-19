@@ -14,6 +14,7 @@ public class AppProperties {
     private String aiTaskQueue;
     private String taskQueueBackend = "rabbitmq";
     private Rabbitmq rabbitmq = new Rabbitmq();
+    private String generatedMediaDir = "../data/generated-media";
     private Agent agent = new Agent();
     private Auth auth = new Auth();
     private Cors cors = new Cors();
@@ -64,6 +65,16 @@ public class AppProperties {
 
     public void setRabbitmq(Rabbitmq rabbitmq) {
         this.rabbitmq = rabbitmq == null ? new Rabbitmq() : rabbitmq;
+    }
+
+    public String getGeneratedMediaDir() {
+        return generatedMediaDir;
+    }
+
+    public void setGeneratedMediaDir(String generatedMediaDir) {
+        this.generatedMediaDir = generatedMediaDir == null || generatedMediaDir.isBlank()
+                ? "../data/generated-media"
+                : generatedMediaDir;
     }
 
     public Agent getAgent() {
@@ -161,7 +172,6 @@ public class AppProperties {
                     ? new ArrayList<>(List.of(5000, 30000, 120000))
                     : retryDelaysMs;
         }
-
     }
 
     public static class Auth {
@@ -196,11 +206,11 @@ public class AppProperties {
 
     public static class Sms {
         private String provider = "local";
-        private String bmobApplicationId;
+        private String bmobApplicationId = "";
         private String bmobRestApiKey;
         private String bmobBaseUrl = "https://api.bmob.cn";
         private String bmobTemplate;
-        private String ihuyiApiId;
+        private String ihuyiApiId = "";
         private String ihuyiApiKey;
         private String ihuyiBaseUrl = "https://api.ihuyi.com/sms/Submit.json";
         private String ihuyiTemplateId = "1";

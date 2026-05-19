@@ -15,6 +15,8 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 
+import org.springframework.transaction.annotation.Transactional;
+
 @Service
 public class AgentSessionServiceImpl implements AgentSessionService {
 
@@ -74,6 +76,14 @@ public class AgentSessionServiceImpl implements AgentSessionService {
                 .toList();
         long total = agentMessageMapper.countBySession(userId, sessionId);
         return PageResponse.of(messages, total, pageNo, pageSize);
+    }
+
+    @Override
+    @Transactional
+    public void delete(Long userId, Long sessionId) {
+        findSession(userId, sessionId);
+        LocalDateTime now = LocalDateTime.now();
+        agentSessionMapper.deleteByIdAndUserId(sessionId, userId, now);
     }
 
     private AgentSession findSession(Long userId, Long sessionId) {

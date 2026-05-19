@@ -133,8 +133,14 @@ public interface ToolMapper extends BaseMapper<AiTool> {
             UPDATE ai_tools
             SET tool_name = #{tool.toolName}, category_id = #{tool.categoryId},
                 description = #{tool.description}, cover_url = #{tool.coverUrl},
+                tool_type = #{tool.toolType},
+                input_modality = #{tool.inputModality},
+                output_modality = #{tool.outputModality},
+                config_note = #{tool.configNote},
                 estimated_credit_cost = #{tool.estimatedCreditCost},
                 model_config_id = #{tool.modelConfigId},
+                template_id = #{tool.templateId},
+                execution_handler = #{tool.executionHandler},
                 updated_by = #{operatorId}, updated_at = CURRENT_TIMESTAMP
             WHERE id = #{toolId} AND is_deleted = 0
             """)
@@ -154,4 +160,15 @@ public interface ToolMapper extends BaseMapper<AiTool> {
     default void updateToolStatus(Long toolId, ToolStatus status, Long operatorId) {
         updateToolStatusValue(toolId, status.name(), operatorId);
     }
+
+    @Update("""
+            UPDATE ai_tools
+            SET is_deleted = 1,
+                status = 'OFFLINE',
+                updated_by = #{operatorId},
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{toolId} AND is_deleted = 0
+            """)
+    int softDeleteTool(@Param("toolId") Long toolId,
+                       @Param("operatorId") Long operatorId);
 }

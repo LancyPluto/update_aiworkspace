@@ -27,6 +27,8 @@ def parse_file_content(filename: str, content_type: str | None, content_base64: 
         return _parse_csv(content)
     if lowered_name.endswith(".json") or "json" in lowered_type:
         return _parse_json(content)
+    if lowered_name.endswith(".pdf") or lowered_type == "application/pdf":
+        return _parse_pdf(content)
     raise FileParseError("unsupported file type")
 
 
@@ -98,6 +100,24 @@ def _parse_docx(content: bytes) -> str:
         if line:
             paragraphs.append(line)
     return "\n".join(paragraphs).strip()
+
+
+def _parse_pdf(content: bytes) -> str:
+    try:
+        import pymupdf
+    except ImportError:
+        raise FileParseError("pymupdf is required to parse PDF files")
+    try:
+        doc = pymupdf.open(stream=content, filetype="pdf")
+    except Exception as exception:
+        raise FileParseError(f"could not read pdf document: {exception}") from exception
+    parts: list[str] = []
+    for page in doc:
+        text = page.get_text().strip()
+        if text:
+            parts.append(text)
+    doc.close()
+    return "\n\n".join(parts).strip()
 
 
 def _fallback_chunks(filename: str, text: str, chunk_size: int, chunk_overlap: int) -> list[dict]:

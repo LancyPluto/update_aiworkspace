@@ -37,14 +37,57 @@ CREATE TABLE ai_tools (
   category_id BIGINT NOT NULL,
   description TEXT,
   cover_url VARCHAR(512),
+  tool_type VARCHAR(32) NOT NULL DEFAULT 'TEXT_GENERATION',
+  input_modality VARCHAR(32) NOT NULL DEFAULT 'TEXT',
+  output_modality VARCHAR(32) NOT NULL DEFAULT 'TEXT',
+  config_note TEXT,
   status VARCHAR(32) NOT NULL DEFAULT 'DRAFT',
   estimated_credit_cost INT NOT NULL DEFAULT 0,
   model_config_id BIGINT,
+  template_id BIGINT,
+  execution_handler VARCHAR(32),
   created_by BIGINT,
   updated_by BIGINT,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   is_deleted TINYINT NOT NULL DEFAULT 0
+);
+
+CREATE TABLE tool_templates (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  template_code VARCHAR(128) NOT NULL UNIQUE,
+  template_name VARCHAR(128) NOT NULL,
+  tool_type VARCHAR(32) NOT NULL DEFAULT 'TEXT_GENERATION',
+  execution_handler VARCHAR(32) NOT NULL DEFAULT 'TEXT_GENERATION',
+  input_modality VARCHAR(32) NOT NULL DEFAULT 'TEXT',
+  output_modality VARCHAR(32) NOT NULL DEFAULT 'TEXT',
+  config_note TEXT,
+  default_system_prompt TEXT,
+  default_user_prompt_template TEXT,
+  default_output_format VARCHAR(32) NOT NULL DEFAULT 'MARKDOWN',
+  handler_config_json TEXT,
+  suggested_model_config_id BIGINT,
+  status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
+  sort_order INT NOT NULL DEFAULT 0,
+  is_system TINYINT NOT NULL DEFAULT 0,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE tool_template_fields (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  template_id BIGINT NOT NULL,
+  field_key VARCHAR(128) NOT NULL,
+  field_name VARCHAR(128) NOT NULL,
+  field_type VARCHAR(32) NOT NULL,
+  placeholder VARCHAR(255),
+  options_json TEXT,
+  validation_json TEXT,
+  required TINYINT NOT NULL DEFAULT 0,
+  sort_order INT NOT NULL DEFAULT 0,
+  status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE tool_field_schemas (
@@ -304,6 +347,42 @@ CREATE TABLE agent_tool_preferences (
   UNIQUE(user_id, tool_code)
 );
 
+CREATE TABLE agent_pending_tool_context (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  run_id BIGINT NOT NULL,
+  session_id BIGINT NOT NULL,
+  user_id BIGINT NOT NULL,
+  selected_tool_code VARCHAR(64),
+  candidate_tool_codes_json CLOB,
+  collected_arguments_json CLOB,
+  missing_arguments_json CLOB,
+  clarifying_question VARCHAR(2000),
+  confirmation_required TINYINT DEFAULT 0,
+  source VARCHAR(32) DEFAULT 'intent_router',
+  status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE agent_tool_descriptor_extension (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  tool_id BIGINT NOT NULL,
+  tool_code VARCHAR(64) NOT NULL UNIQUE,
+  agent_enabled TINYINT NOT NULL DEFAULT 1,
+  agent_recommendable TINYINT NOT NULL DEFAULT 1,
+  agent_auto_callable TINYINT NOT NULL DEFAULT 0,
+  confirmation_policy VARCHAR(32) DEFAULT 'auto',
+  risk_level VARCHAR(16) DEFAULT 'low',
+  keywords_json CLOB,
+  example_prompts_json CLOB,
+  applicable_scenarios_json CLOB,
+  not_applicable_scenarios_json CLOB,
+  result_schema_json CLOB,
+  output_type VARCHAR(32) DEFAULT 'text',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE agent_files (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   session_id BIGINT NOT NULL,
@@ -339,11 +418,72 @@ CREATE TABLE agent_model_configs (
   base_url VARCHAR(512),
   api_key VARCHAR(512),
   minimax_group_id VARCHAR(128),
+  console_url VARCHAR(512),
+  balance_url VARCHAR(512),
+  docs_url VARCHAR(512),
   timeout_seconds INT NOT NULL DEFAULT 60,
+  input_token_price_per_1k DECIMAL(18,8) NOT NULL DEFAULT 0,
+  output_token_price_per_1k DECIMAL(18,8) NOT NULL DEFAULT 0,
+  input_token_price_per_1m DECIMAL(18,8) NOT NULL DEFAULT 0,
+  output_token_price_per_1m DECIMAL(18,8) NOT NULL DEFAULT 0,
+  billing_unit VARCHAR(32) NOT NULL DEFAULT 'TOKEN_PER_M',
+  unit_price DECIMAL(18,8) NOT NULL DEFAULT 0,
+  capabilities TEXT,
   enabled TINYINT NOT NULL DEFAULT 1,
   is_default TINYINT NOT NULL DEFAULT 0,
   is_deleted TINYINT NOT NULL DEFAULT 0,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  CONSTRAINT uk_agent_model_configs_code UNIQUE (config_code)
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE billing_usage_logs (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  source_type VARCHAR(32) NOT NULL,
+  source_id BIGINT NOT NULL,
+  user_id BIGINT NOT NULL,
+  model_config_id BIGINT,
+  provider VARCHAR(64),
+  model_name VARCHAR(128),
+  prompt_tokens INT NOT NULL DEFAULT 0,
+  completion_tokens INT NOT NULL DEFAULT 0,
+  total_tokens INT NOT NULL DEFAULT 0,
+  input_token_price_per_1k DECIMAL(18,8) NOT NULL DEFAULT 0,
+  output_token_price_per_1k DECIMAL(18,8) NOT NULL DEFAULT 0,
+  input_token_price_per_1m DECIMAL(18,8) NOT NULL DEFAULT 0,
+  output_token_price_per_1m DECIMAL(18,8) NOT NULL DEFAULT 0,
+  billing_unit VARCHAR(32) NOT NULL DEFAULT 'TOKEN_PER_M',
+  billable_units INT NOT NULL DEFAULT 0,
+  unit_price DECIMAL(18,8) NOT NULL DEFAULT 0,
+  cost_amount DECIMAL(18,6) NOT NULL DEFAULT 0,
+  charged_credits INT NOT NULL DEFAULT 0,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Default model config for TEXT_GENERATION tools (tests create tools without model_config_id)
+INSERT INTO agent_model_configs (
+  display_name,
+  config_code,
+  provider,
+  model_name,
+  base_url,
+  timeout_seconds,
+  billing_unit,
+  unit_price,
+  capabilities,
+  enabled,
+  is_default,
+  is_deleted
+) VALUES (
+  'Test text generation',
+  'default_text_generation',
+  'minimax',
+  'MiniMax-M2.7',
+  'https://api.minimaxi.com/v1',
+  120,
+  'TOKEN_PER_M',
+  0,
+  '["TEXT_GENERATION"]',
+  1,
+  1,
+  0
 );

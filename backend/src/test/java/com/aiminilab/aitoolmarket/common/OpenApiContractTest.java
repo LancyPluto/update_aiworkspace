@@ -13,7 +13,7 @@ class OpenApiContractTest {
 
     @Test
     void openApiDocumentsCurrentImplementedApiSurface() throws Exception {
-        String openApi = Files.readString(Path.of("..", "docs", "api", "openapi.yml"), StandardCharsets.UTF_8);
+        String openApi = Files.readString(openApiPath(), StandardCharsets.UTF_8);
 
         assertThat(openApi).contains("openapi: 3.0.3");
         assertThat(openApi).doesNotContain("�", "宸", "绠", "鐢", "浠", "閫", "鍙", "鏌", "璐");
@@ -38,6 +38,11 @@ class OpenApiContractTest {
                 "/api/admin/v1/tools:",
                 "/api/admin/v1/tools/{toolId}:",
                 "/api/admin/v1/tools/{toolId}/fields:",
+                "/api/admin/v1/tools/{toolId}/field-schemas:",
+                "/api/admin/v1/tools/{toolId}/apply-template:",
+                "/api/admin/v1/tool-templates:",
+                "/api/admin/v1/tool-templates/{templateCode}:",
+                "/api/admin/v1/field-schemas/{schemaId}/publish:",
                 "/api/admin/v1/tasks:",
                 "/api/admin/v1/tasks/{taskId}:",
                 "/api/admin/v1/tasks/{taskId}/retry:",
@@ -49,6 +54,8 @@ class OpenApiContractTest {
                 "/api/admin/v1/users/{userId}/credits/logs:",
                 "/api/admin/v1/users/{userId}/credits/manual-add:",
                 "/api/admin/v1/users/{userId}/credits/manual-deduct:",
+                "/api/admin/v1/model-providers:",
+                "/api/admin/v1/model-providers/{code}:",
                 "/api/internal/v1/tasks/{taskId}/execution-context:",
                 "/api/internal/v1/tasks/{taskId}/processing:",
                 "/api/internal/v1/tasks/{taskId}/success:",
@@ -62,7 +69,20 @@ class OpenApiContractTest {
                 "ManualCreditRequest:",
                 "AdminUser:",
                 "RegenerateTaskRequest:",
-                "internalApiToken:"
+                "internalApiToken:",
+                "ModelProviderDescriptor:"
         );
+    }
+
+    private static Path openApiPath() {
+        List<Path> candidates = List.of(
+                Path.of("..", "docs", "api", "openapi.yml"),
+                Path.of("docs", "api", "openapi.yml"),
+                Path.of("/docs", "api", "openapi.yml")
+        );
+        return candidates.stream()
+                .filter(Files::isRegularFile)
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException("docs/api/openapi.yml not found"));
     }
 }
