@@ -1,4 +1,6 @@
-@import "tailwindcss";
+/* 扫描整个 src，避免登录后懒加载路由的 Tailwind 类在首屏未生成（需刷新才生效） */
+@import "tailwindcss" source("..");
+@source "../**/*.{vue,ts}";
 
 :root {
   --background: oklch(0.985 0.003 247);

@@ -1,33 +1,41 @@
 import { createRouter, createWebHistory } from "vue-router"
 import { useAuthStore } from "@/store/authStore"
 
+import LoginPage from "@/pages/Login/Page.vue"
+import DashboardPage from "@/pages/Dashboard/Page.vue"
+import AgentHomePage from "@/pages/AgentHome/Page.vue"
+import ToolListPage from "@/pages/ToolList/Page.vue"
+import MyTasksPage from "@/pages/MyTasks/Page.vue"
+import MaterialLibraryPage from "@/pages/MaterialLibrary/Page.vue"
+import BillingPage from "@/pages/Billing/Page.vue"
+
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
-    { path: "/", redirect: "/agent" },
+    { path: "/", redirect: "/login" },
     {
       path: "/login",
       name: "Login",
       meta: { requiresAuth: false },
-      component: () => import("@/pages/Login/Page.vue"),
+      component: LoginPage,
     },
     {
       path: "/dashboard",
       name: "Dashboard",
       meta: { requiresAuth: true },
-      component: () => import("@/pages/Dashboard/Page.vue"),
+      component: DashboardPage,
     },
     {
       path: "/agent",
       name: "AgentHome",
       meta: { requiresAuth: true },
-      component: () => import("@/pages/AgentHome/Page.vue"),
+      component: AgentHomePage,
     },
     {
       path: "/marketplace",
       name: "ToolList",
       meta: { requiresAuth: false },
-      component: () => import("@/pages/ToolList/Page.vue"),
+      component: ToolListPage,
     },
     {
       path: "/tools/:id",
@@ -47,19 +55,19 @@ const router = createRouter({
       path: "/tasks",
       name: "MyTasks",
       meta: { requiresAuth: true },
-      component: () => import("@/pages/MyTasks/Page.vue"),
+      component: MyTasksPage,
     },
     {
       path: "/library",
       name: "MaterialLibrary",
       meta: { requiresAuth: true },
-      component: () => import("@/pages/MaterialLibrary/Page.vue"),
+      component: MaterialLibraryPage,
     },
     {
       path: "/billing",
       name: "Billing",
       meta: { requiresAuth: true },
-      component: () => import("@/pages/Billing/Page.vue"),
+      component: BillingPage,
     },
     {
       path: "/tasks/:taskId/status",
@@ -78,9 +86,19 @@ const router = createRouter({
   ],
 })
 
-// 路由守卫：需要登录的页面跳转到登录页
+function resolvePostLoginRedirect(raw: unknown): string {
+  if (typeof raw !== "string" || !raw.startsWith("/") || raw === "/login" || raw.startsWith("/login?")) {
+    return "/agent"
+  }
+  return raw
+}
+
 router.beforeEach((to, _from, next) => {
   const auth = useAuthStore()
+  if (to.name === "Login" && auth.isLoggedIn) {
+    next(resolvePostLoginRedirect(to.query.redirect))
+    return
+  }
   if (to.meta.requiresAuth !== false && !auth.isLoggedIn) {
     next({ name: "Login", query: { redirect: to.fullPath } })
   } else {
@@ -89,3 +107,4 @@ router.beforeEach((to, _from, next) => {
 })
 
 export default router
+export { resolvePostLoginRedirect }
