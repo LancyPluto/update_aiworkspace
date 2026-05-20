@@ -51,6 +51,13 @@ function buildTaskParams(fields: ToolField[], raw: Record<string, unknown>): Rec
       if (!Number.isNaN(n)) out[f.fieldKey] = n
     } else if (f.fieldType === "checkbox") {
       out[f.fieldKey] = Boolean(v)
+    } else if ((f.fieldType === "select" || f.fieldType === "radio") && v === "__none__") {
+      continue
+    } else if ((f.fieldType === "select" || f.fieldType === "radio") && v === "__custom__") {
+      const custom = raw[`${f.fieldKey}Custom`]
+      if (custom !== undefined && custom !== null && String(custom).trim() !== "") {
+        out[f.fieldKey] = String(custom).trim()
+      }
     } else if (v !== undefined && v !== null && v !== "") {
       out[f.fieldKey] = typeof v === "string" ? v.trim() : v
     }
