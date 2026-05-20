@@ -15,6 +15,7 @@ import com.aiminilab.aitoolmarket.agent.dto.CreateAgentToolCallRequest;
 import com.aiminilab.aitoolmarket.agent.dto.FailAgentRunRequest;
 import com.aiminilab.aitoolmarket.agent.dto.FailAgentToolCallRequest;
 import com.aiminilab.aitoolmarket.agent.dto.InternalAgentRunContextResponse;
+import com.aiminilab.aitoolmarket.agent.dto.UpsertStreamingAgentAnswerRequest;
 import com.aiminilab.aitoolmarket.common.dto.PageResponse;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -47,6 +48,8 @@ public interface AgentRunService {
     AgentToolCallResponse failToolCall(Long toolCallId, FailAgentToolCallRequest request);
 
     AgentRunResponse completeRun(Long runId, CompleteAgentRunRequest request);
+
+    AgentRunResponse upsertStreamingAnswer(Long runId, UpsertStreamingAgentAnswerRequest request);
 
     AgentRunResponse failRun(Long runId, FailAgentRunRequest request);
 }

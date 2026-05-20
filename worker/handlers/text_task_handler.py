@@ -1,7 +1,9 @@
 import logging
+import time
 from typing import Any
 
 from client.backend_client import BackendClient, BackendClientError
+from config import settings
 from client.model_client import (
     ModelClient,
     ModelClientError,
@@ -49,10 +51,13 @@ from tools.store_campaign_planner import (
 from tools.wechat_longform_generator import (
     build_prompt_payload as build_wechat_longform_prompt_payload,
 )
+from tools.stream_preview import build_stream_progress_message
 from tools.xiaohongshu_copywriting import build_prompt_payload as build_xiaohongshu_prompt_payload
 
 
 LOGGER = logging.getLogger(__name__)
+STREAM_REPORT_INTERVAL_SECONDS = 0.45
+STREAM_REPORT_MIN_CHARS = 64
 
 LONG_OUTPUT_MODEL_TOKENS = {
     "wechat_longform_generator": 4096,
@@ -133,6 +138,9 @@ class TextTaskHandler:
                 api_key=context.get("modelApiKey"),
                 timeout_seconds=context.get("modelTimeoutSeconds"),
                 max_tokens=context.get("modelMaxTokens"),
+                task_id=task_id,
+                context=context,
+                trace_id=trace_id,
             )
 
             self._report_progress(context, task_id, 86, trace_id=trace_id)
@@ -276,9 +284,30 @@ class TextTaskHandler:
         return normalized
 
     def _generate_model_result(self, prompt: str, **kwargs: Any) -> ModelGenerationResult:
+        stream_kwargs = dict(kwargs)
+        task_id = stream_kwargs.pop("task_id", None)
+        context = stream_kwargs.pop("context", None)
+        trace_id = stream_kwargs.pop("trace_id", None)
+
+        stream_fn = getattr(self.model_client, "generate_stream_with_usage", None)
+        if (
+            settings.text_tool_streaming_enabled
+            and callable(stream_fn)
+            and task_id is not None
+            and isinstance(context, dict)
+        ):
+            return self._generate_model_result_streaming(
+                prompt,
+                task_id=int(task_id),
+                context=context,
+                trace_id=trace_id,
+                stream_fn=stream_fn,
+                **stream_kwargs,
+            )
+
         generate_with_usage = getattr(self.model_client, "generate_with_usage", None)
         if callable(generate_with_usage):
-            result = generate_with_usage(prompt, **kwargs)
+            result = generate_with_usage(prompt, **stream_kwargs)
             if isinstance(result, ModelGenerationResult):
                 return result
             if isinstance(result, dict):
@@ -291,8 +320,58 @@ class TextTaskHandler:
                 )
             return ModelGenerationResult(content=str(result or ""))
 
-        content = self.model_client.generate(prompt, **kwargs)
+        content = self.model_client.generate(prompt, **stream_kwargs)
         return ModelGenerationResult(content=content)
+
+    def _generate_model_result_streaming(
+        self,
+        prompt: str,
+        *,
+        task_id: int,
+        context: dict[str, Any],
+        trace_id: str | None,
+        stream_fn,
+        **kwargs: Any,
+    ) -> ModelGenerationResult:
+        parts: list[str] = []
+        last_report_at = 0.0
+        last_reported_len = 0
+        for piece in stream_fn(prompt, **kwargs):
+            if not piece:
+                continue
+            parts.append(piece)
+            text = "".join(parts)
+            now = time.monotonic()
+            if now - last_report_at < STREAM_REPORT_INTERVAL_SECONDS and len(text) - last_reported_len < STREAM_REPORT_MIN_CHARS:
+                continue
+            progress = min(89, 55 + len(text) // 120)
+            preview_message = build_stream_progress_message(text)
+            if preview_message:
+                self._report_progress(
+                    context,
+                    task_id,
+                    progress,
+                    trace_id=trace_id,
+                    progress_message=preview_message,
+                )
+            last_report_at = now
+            last_reported_len = len(text)
+
+        content = "".join(parts).strip()
+        if not content:
+            raise ModelOutputEmptyError("model stream returned empty content")
+        return ModelGenerationResult(
+            content=content,
+            prompt_tokens=self._estimate_tokens(kwargs.get("system_prompt", ""), prompt),
+            completion_tokens=self._estimate_tokens(content),
+        )
+
+    @staticmethod
+    def _estimate_tokens(*parts: str) -> int:
+        text = "\n".join(part for part in parts if part)
+        if not text:
+            return 0
+        return max(1, len(text) // 4)
 
     def _attach_token_usage(self, payload: dict[str, Any], result: ModelGenerationResult) -> None:
         if result.prompt_tokens > 0:
@@ -318,7 +397,16 @@ class TextTaskHandler:
         task_id: int,
         progress: int,
         trace_id: str | None = None,
+        progress_message: str | None = None,
     ) -> None:
+        if progress_message:
+            self.backend_client.mark_processing(
+                task_id,
+                progress=progress,
+                progress_message=progress_message,
+                trace_id=trace_id,
+            )
+            return
         progress_messages = PROGRESS_MESSAGES.get(str(context.get("toolCode") or ""))
         if progress_messages is not None:
             self.backend_client.mark_processing(

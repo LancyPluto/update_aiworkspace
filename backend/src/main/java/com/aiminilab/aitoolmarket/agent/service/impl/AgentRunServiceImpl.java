@@ -8,6 +8,7 @@ import com.aiminilab.aitoolmarket.agent.dto.AgentRunResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AgentToolCallResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AgentToolDescriptorResponse;
 import com.aiminilab.aitoolmarket.agent.dto.CompleteAgentRunRequest;
+import com.aiminilab.aitoolmarket.agent.dto.UpsertStreamingAgentAnswerRequest;
 import com.aiminilab.aitoolmarket.agent.dto.CompleteAgentToolCallRequest;
 import com.aiminilab.aitoolmarket.agent.dto.ConfirmAgentToolRequest;
 import com.aiminilab.aitoolmarket.agent.dto.CreateAgentMessageRequest;
@@ -47,6 +48,7 @@ import com.aiminilab.aitoolmarket.agent.metrics.AgentMetrics;
 import com.aiminilab.aitoolmarket.admin.service.BillingService;
 import com.aiminilab.aitoolmarket.agent.service.AgentModelConfigService;
 import com.aiminilab.aitoolmarket.agent.service.AgentRateLimitService;
+import com.aiminilab.aitoolmarket.agent.service.AgentFileService;
 import com.aiminilab.aitoolmarket.agent.service.AgentRunService;
 import com.aiminilab.aitoolmarket.agent.service.AgentToolDescriptorService;
 import com.aiminilab.aitoolmarket.agent.service.AgentToolPreferenceService;
@@ -96,6 +98,7 @@ public class AgentRunServiceImpl implements AgentRunService {
     private final AgentSessionMapper agentSessionMapper;
     private final AgentMessageMapper agentMessageMapper;
     private final AgentFileMapper agentFileMapper;
+    private final AgentFileService agentFileService;
     private final AgentFileChunkMapper agentFileChunkMapper;
     private final AgentRunMapper agentRunMapper;
     private final AgentRunEventMapper agentRunEventMapper;
@@ -118,6 +121,7 @@ public class AgentRunServiceImpl implements AgentRunService {
             AgentSessionMapper agentSessionMapper,
             AgentMessageMapper agentMessageMapper,
             AgentFileMapper agentFileMapper,
+            AgentFileService agentFileService,
             AgentFileChunkMapper agentFileChunkMapper,
             AgentRunMapper agentRunMapper,
             AgentRunEventMapper agentRunEventMapper,
@@ -139,6 +143,7 @@ public class AgentRunServiceImpl implements AgentRunService {
         this.agentSessionMapper = agentSessionMapper;
         this.agentMessageMapper = agentMessageMapper;
         this.agentFileMapper = agentFileMapper;
+        this.agentFileService = agentFileService;
         this.agentFileChunkMapper = agentFileChunkMapper;
         this.agentRunMapper = agentRunMapper;
         this.agentRunEventMapper = agentRunEventMapper;
@@ -191,7 +196,7 @@ public class AgentRunServiceImpl implements AgentRunService {
         message.setCreatedAt(now);
         agentMessageMapper.insertMessage(message);
 
-        return executeStartRun(userId, session, message, null, clientKey, trimmed, now);
+        return executeStartRun(userId, session, message, null, clientKey, trimmed, now, request.fileIds());
     }
 
     @Override
@@ -230,7 +235,7 @@ public class AgentRunServiceImpl implements AgentRunService {
         LocalDateTime now = LocalDateTime.now();
         agentMessageMapper.supersedeMessagesAfter(sourceRun.getSessionId(), userMessage.getId(), now);
 
-        return executeStartRun(userId, session, userMessage, runId, clientKey, null, now);
+        return executeStartRun(userId, session, userMessage, runId, clientKey, null, now, null);
     }
 
     @Override
@@ -276,7 +281,7 @@ public class AgentRunServiceImpl implements AgentRunService {
         agentMessageMapper.updateById(userMessage);
         agentMessageMapper.supersedeMessagesAfter(sessionId, messageId, now);
 
-        return executeStartRun(userId, session, userMessage, null, clientKey, trimmed, now);
+        return executeStartRun(userId, session, userMessage, null, clientKey, trimmed, now, null);
     }
 
     @Override
@@ -395,9 +400,10 @@ public class AgentRunServiceImpl implements AgentRunService {
                     .map(message -> new InternalAgentMessageResponse(message.getRole(), message.getContentText()))
                     .toList();
         }
-        List<AgentFile> readyFiles = agentFileMapper.findReadyBySession(
+        List<AgentFile> readyFiles = agentFileMapper.findReadyByRun(
                 run.getUserId(),
                 run.getSessionId(),
+                run.getId(),
                 FILE_CONTEXT_LIMIT
         );
         Map<Long, String> filenames = readyFiles.stream()
@@ -456,9 +462,10 @@ public class AgentRunServiceImpl implements AgentRunService {
             String query,
             Map<Long, String> filenames
     ) {
-        List<AgentFileChunk> chunks = agentFileChunkMapper.findReadyBySession(
+        List<AgentFileChunk> chunks = agentFileChunkMapper.findReadyByRun(
                         run.getUserId(),
                         run.getSessionId(),
+                        run.getId(),
                         FILE_CHUNK_SCAN_LIMIT
                 );
         if (chunks.isEmpty()) {
@@ -603,6 +610,37 @@ public class AgentRunServiceImpl implements AgentRunService {
 
     @Override
     @Transactional
+    public AgentRunResponse upsertStreamingAnswer(Long runId, UpsertStreamingAgentAnswerRequest request) {
+        AgentRun run = findRun(runId);
+        if (TERMINAL_STATUSES.contains(run.getStatus())) {
+            return AgentRunResponse.from(run);
+        }
+        String contentText = request.contentText() == null ? "" : request.contentText().trim();
+        if (contentText.isEmpty()) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "流式正文不能为空");
+        }
+        LocalDateTime now = LocalDateTime.now();
+        AgentMessage assistant = agentMessageMapper.findActiveAssistantByRunId(runId);
+        if (assistant == null) {
+            assistant = new AgentMessage();
+            assistant.setSessionId(run.getSessionId());
+            assistant.setUserId(run.getUserId());
+            assistant.setRole("ASSISTANT");
+            assistant.setContentText(contentText);
+            assistant.setRunId(runId);
+            assistant.setStatus("ACTIVE");
+            assistant.setSupersededAt(null);
+            assistant.setCreatedAt(now);
+            agentMessageMapper.insertMessage(assistant);
+        } else {
+            agentMessageMapper.updateContentText(assistant.getId(), contentText);
+        }
+        agentSessionMapper.touch(run.getSessionId(), now);
+        return AgentRunResponse.from(findRun(runId));
+    }
+
+    @Override
+    @Transactional
     public AgentRunResponse completeRun(Long runId, CompleteAgentRunRequest request) {
         AgentRun run = findRun(runId);
         if (TERMINAL_STATUSES.contains(run.getStatus())) {
@@ -676,7 +714,8 @@ public class AgentRunServiceImpl implements AgentRunService {
                                                        Long parentRunId,
                                                        String clientRequestId,
                                                        String sessionTitleContentHint,
-                                                       LocalDateTime now) {
+                                                       LocalDateTime now,
+                                                       List<Long> fileIds) {
         Long sessionId = session.getId();
         int creditBudget = Math.max(0, appProperties.getAgent().getDefaultCreditBudget());
 
@@ -695,6 +734,12 @@ public class AgentRunServiceImpl implements AgentRunService {
 
         userMessage.setRunId(run.getId());
         agentMessageMapper.updateById(userMessage);
+
+        if (parentRunId != null) {
+            agentFileMapper.reattachFilesFromRun(userId, sessionId, parentRunId, run.getId(), now);
+        } else {
+            agentFileService.attachPendingFilesToRun(userId, sessionId, run.getId(), fileIds);
+        }
 
         ModelConnectivityCheck connectivity = checkModelConnectivity();
         run.setModelProviderCode(connectivity.config().provider());

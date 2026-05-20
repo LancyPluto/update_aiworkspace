@@ -103,4 +103,22 @@ public interface AgentMessageMapper extends BaseMapper<AgentMessage> {
               AND status = 'ACTIVE'
             """)
     int supersedeActiveAssistantsByRunId(@Param("runId") Long runId, @Param("now") LocalDateTime now);
+
+    @Select("""
+            SELECT *
+            FROM agent_messages
+            WHERE run_id = #{runId}
+              AND role = 'ASSISTANT'
+              AND status = 'ACTIVE'
+            ORDER BY id DESC
+            LIMIT 1
+            """)
+    AgentMessage findActiveAssistantByRunId(@Param("runId") Long runId);
+
+    @Update("""
+            UPDATE agent_messages
+            SET content_text = #{contentText}
+            WHERE id = #{messageId}
+            """)
+    int updateContentText(@Param("messageId") Long messageId, @Param("contentText") String contentText);
 }

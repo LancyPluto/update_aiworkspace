@@ -1,4 +1,6 @@
+import json
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
 
@@ -151,6 +153,90 @@ class ModelClient:
         prompt_tokens, completion_tokens = self._extract_openai_usage(payload)
         return ModelGenerationResult(content, prompt_tokens, completion_tokens)
 
+    def generate_stream_with_usage(
+        self,
+        prompt: str,
+        *,
+        system_prompt: str = "",
+        provider: str | None = None,
+        model_name: str | None = None,
+        base_url: str | None = None,
+        api_key: str | None = None,
+        timeout_seconds: int | None = None,
+        max_tokens: int | None = None,
+    ) -> Iterator[str]:
+        """OpenAI-compatible SSE 流式生成，逐段 yield 文本增量。"""
+        effective_provider = provider or settings.model_provider
+        if effective_provider in {"mock", "anthropic_compatible"}:
+            content = self.generate(
+                prompt,
+                system_prompt=system_prompt,
+                provider=provider,
+                model_name=model_name,
+                base_url=base_url,
+                api_key=api_key,
+                timeout_seconds=timeout_seconds,
+                max_tokens=max_tokens,
+            )
+            for chunk in self._chunk_text(content, 24):
+                yield chunk
+            return
+
+        effective_base_url = (base_url or self.base_url).rstrip("/")
+        effective_api_key = api_key or self.api_key
+        effective_model_name = model_name or self.default_model_name
+        timeout = (5, timeout_seconds or self.timeout[1])
+        effective_max_tokens = max_tokens or self.default_max_tokens
+
+        if not effective_api_key or effective_api_key == "replace-with-model-key":
+            raise ModelClientError("MODEL_API_KEY is not configured")
+
+        messages: list[dict[str, str]] = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+
+        response = self._post_with_timeout_retry(
+            f"{effective_base_url}/chat/completions",
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {effective_api_key}",
+                "Accept": "text/event-stream",
+            },
+            payload={
+                "model": effective_model_name,
+                "messages": messages,
+                "stream": True,
+                "max_tokens": effective_max_tokens,
+            },
+            timeout=timeout,
+            stream=True,
+        )
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as exc:
+            raise ModelClientError(
+                f"model request failed: status={response.status_code}, body={response.text}"
+            ) from exc
+
+        for raw_line in response.iter_lines(decode_unicode=True):
+            if not raw_line or not raw_line.startswith("data:"):
+                continue
+            data = raw_line[5:].strip()
+            if not data or data == "[DONE]":
+                continue
+            try:
+                payload = json.loads(data)
+            except json.JSONDecodeError:
+                continue
+            choices = payload.get("choices") or []
+            if not choices:
+                continue
+            delta = choices[0].get("delta") or {}
+            piece = delta.get("content")
+            if isinstance(piece, str) and piece:
+                yield piece
+
     def _generate_anthropic_compatible(
         self,
         prompt: str,
@@ -196,6 +282,10 @@ class ModelClient:
         prompt_tokens, completion_tokens = self._extract_anthropic_usage(payload)
         return ModelGenerationResult(content, prompt_tokens, completion_tokens)
 
+    @staticmethod
+    def _chunk_text(value: str, size: int) -> list[str]:
+        return [value[index : index + size] for index in range(0, len(value), size)] or [""]
+
     def _post_with_timeout_retry(
         self,
         url: str,
@@ -203,6 +293,7 @@ class ModelClient:
         headers: dict[str, str],
         payload: dict[str, Any],
         timeout: tuple[int, int],
+        stream: bool = False,
     ) -> requests.Response:
         request_headers = {**headers, "Connection": "close"}
         last_timeout: requests.Timeout | None = None
@@ -215,6 +306,7 @@ class ModelClient:
                     headers=request_headers,
                     json=payload,
                     timeout=timeout,
+                    stream=stream,
                 )
             except requests.Timeout as exc:
                 last_timeout = exc

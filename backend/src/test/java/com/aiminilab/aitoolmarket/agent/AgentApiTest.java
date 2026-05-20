@@ -34,6 +34,7 @@ import static org.hamcrest.Matchers.notNullValue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -408,6 +409,49 @@ class AgentApiTest {
     }
 
     @Test
+    void userCanDeleteUploadedFile() throws Exception {
+        mockExternalAuthDependencies();
+        register("agent_file_delete_user");
+        String token = login("agent_file_delete_user");
+        Long sessionId = createSession(token, "File Delete");
+        Mockito.when(agentServiceClient.parseFile(anyString(), anyString(), any(byte[].class)))
+                .thenReturn(AgentFileParseResult.fromText("notes.txt", "temporary notes"));
+
+        MockMultipartFile file = new MockMultipartFile(
+                "file",
+                "notes.txt",
+                "text/plain",
+                "temporary notes".getBytes(java.nio.charset.StandardCharsets.UTF_8)
+        );
+
+        String uploadBody = mockMvc.perform(multipart("/api/v1/agent/sessions/{sessionId}/files", sessionId)
+                        .file(file)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.originalFilename").value("notes.txt"))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        Long fileId = objectMapper.readTree(uploadBody).path("data").path("id").asLong();
+
+        mockMvc.perform(delete("/api/v1/agent/sessions/{sessionId}/files/{fileId}", sessionId, fileId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/v1/agent/sessions/{sessionId}/files", sessionId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list").isEmpty());
+
+        Integer chunkCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM agent_file_chunks WHERE file_id = ?",
+                Integer.class,
+                fileId
+        );
+        assertThat(chunkCount).isZero();
+    }
+
+    @Test
     void agentContextRetrievesRelevantChunksForUserQuestion() throws Exception {
         mockExternalAuthDependencies();
         register("agent_chunk_user");
@@ -479,7 +523,7 @@ class AgentApiTest {
                 .andExpect(jsonPath("$.data.agentFiles[0].originalFilename").value("report.md"))
                 .andExpect(jsonPath("$.data.agentFileChunks[0].contentText").value("Long task result"));
 
-        var chunks = agentFileChunkMapper.findReadyBySession(login.userId(), sessionId, 10);
+        var chunks = agentFileChunkMapper.findReadyByRun(login.userId(), sessionId, runId, 10);
         org.assertj.core.api.Assertions.assertThat(chunks)
                 .extracting("contentText")
                 .containsExactly("Long task result", "Includes detailed recommendations.");
