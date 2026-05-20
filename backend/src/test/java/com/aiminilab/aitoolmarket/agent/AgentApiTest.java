@@ -49,6 +49,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "spring.datasource.driver-class-name=org.h2.Driver",
         "spring.datasource.username=sa",
         "spring.datasource.password=",
+        "spring.datasource.hikari.connection-init-sql=",
         "spring.sql.init.mode=always",
         "spring.sql.init.schema-locations=classpath:schema-test.sql",
         "app.agent.max-active-runs-per-user=100",
@@ -905,6 +906,201 @@ class AgentApiTest {
     }
 
     @Test
+    void userCanRegenerateAfterRunCompletesAndAssistantListShowsLatestOnly() throws Exception {
+        mockExternalAuthDependencies();
+        register("agent_regenerate_user");
+        String token = login("agent_regenerate_user");
+        Long sessionId = createSession(token, "Regenerate");
+        Long runId1 = sendMessage(token, sessionId, "First question.").runId();
+        String complete1 = """
+                {
+                  "finalAnswer": "First answer.",
+                  "intent": "general_chat",
+                  "modelProviderCode": "mock",
+                  "modelName": "mock-chat",
+                  "consumedCredits": 1
+                }
+                """;
+        completeRun(runId1, complete1).andExpect(status().isOk());
+
+        String regenResponse = mockMvc.perform(post("/api/v1/agent/runs/{runId}/regenerate", runId1)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        JsonNode regenData = objectMapper.readTree(regenResponse).path("data");
+        Long runId2 = regenData.path("runId").asLong();
+        assertThat(runId2).isNotEqualTo(runId1);
+        Mockito.verify(agentServiceClient).executeRun(runId1);
+        Mockito.verify(agentServiceClient).executeRun(runId2);
+
+        String complete2 = """
+                {
+                  "finalAnswer": "Second answer.",
+                  "intent": "general_chat",
+                  "modelProviderCode": "mock",
+                  "modelName": "mock-chat",
+                  "consumedCredits": 1
+                }
+                """;
+        completeRun(runId2, complete2).andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/v1/agent/sessions/{sessionId}/messages", sessionId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list.length()").value(2))
+                .andExpect(jsonPath("$.data.list[1].contentText").value("Second answer."));
+    }
+
+    @Test
+    void regenerateRunContextExcludesSupersededAssistant() throws Exception {
+        mockExternalAuthDependencies();
+        register("agent_regen_context_user");
+        String token = login("agent_regen_context_user");
+        Long sessionId = createSession(token, "Regen Context");
+        Long runId1 = sendMessage(token, sessionId, "Q1").runId();
+        completeRun(runId1, """
+                {
+                  "finalAnswer": "OLD_ASSISTANT_TEXT",
+                  "intent": "general_chat",
+                  "modelProviderCode": "mock",
+                  "modelName": "mock-chat",
+                  "consumedCredits": 0
+                }
+                """).andExpect(status().isOk());
+
+        String regenResponse = mockMvc.perform(post("/api/v1/agent/runs/{runId}/regenerate", runId1)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        Long runId2 = objectMapper.readTree(regenResponse).path("data").path("runId").asLong();
+
+        String ctx = mockMvc.perform(signed(get("/api/internal/v1/agent/runs/{runId}/context", runId2), "GET",
+                        "/api/internal/v1/agent/runs/%d/context".formatted(runId2), ""))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        assertThat(ctx).doesNotContain("OLD_ASSISTANT_TEXT");
+        assertThat(objectMapper.readTree(ctx).path("data").path("history").size()).isEqualTo(0);
+    }
+
+    @Test
+    void editRegenerateTruncatesLaterTurns() throws Exception {
+        mockExternalAuthDependencies();
+        register("agent_edit_truncate_user");
+        String token = login("agent_edit_truncate_user");
+        Long sessionId = createSession(token, "Edit Truncate");
+        SendMessageResult first = sendMessage(token, sessionId, "Round one");
+        completeRun(first.runId(), """
+                {
+                  "finalAnswer": "Answer one.",
+                  "intent": "general_chat",
+                  "modelProviderCode": "mock",
+                  "modelName": "mock-chat",
+                  "consumedCredits": 0
+                }
+                """).andExpect(status().isOk());
+        SendMessageResult second = sendMessage(token, sessionId, "Round two");
+        completeRun(second.runId(), """
+                {
+                  "finalAnswer": "Answer two.",
+                  "intent": "general_chat",
+                  "modelProviderCode": "mock",
+                  "modelName": "mock-chat",
+                  "consumedCredits": 0
+                }
+                """).andExpect(status().isOk());
+
+        String editBody = """
+                {
+                  "content": "Round one edited",
+                  "clientRequestId": null
+                }
+                """;
+        String editResp = mockMvc.perform(post(
+                        "/api/v1/agent/sessions/{sessionId}/messages/{messageId}/edit-regenerate",
+                        sessionId, first.messageId())
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(editBody))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        Long runId3 = objectMapper.readTree(editResp).path("data").path("runId").asLong();
+        completeRun(runId3, """
+                {
+                  "finalAnswer": "Answer one revised.",
+                  "intent": "general_chat",
+                  "modelProviderCode": "mock",
+                  "modelName": "mock-chat",
+                  "consumedCredits": 0
+                }
+                """).andExpect(status().isOk());
+
+        String listJson = mockMvc.perform(get("/api/v1/agent/sessions/{sessionId}/messages", sessionId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        assertThat(listJson).contains("Round one edited");
+        assertThat(listJson).contains("Answer one revised.");
+        assertThat(listJson).doesNotContain("Round two");
+        assertThat(listJson).doesNotContain("Answer two.");
+    }
+
+    @Test
+    void cannotRegenerateWhileRunIsNonTerminal() throws Exception {
+        mockExternalAuthDependencies();
+        register("agent_regen_running_user");
+        String token = login("agent_regen_running_user");
+        Long sessionId = createSession(token, "Running");
+        Long runId = sendMessage(token, sessionId, "Still running.").runId();
+
+        mockMvc.perform(post("/api/v1/agent/runs/{runId}/regenerate", runId)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("AGENT_RUN_NOT_REGENERATABLE"));
+    }
+
+    @Test
+    void regenerateIsIdempotentWhenClientRequestIdRepeats() throws Exception {
+        mockExternalAuthDependencies();
+        register("agent_regen_idem_user");
+        String token = login("agent_regen_idem_user");
+        Long sessionId = createSession(token, "Idem");
+        Long runId1 = sendMessage(token, sessionId, "Q").runId();
+        completeRun(runId1, """
+                {
+                  "finalAnswer": "A",
+                  "intent": "general_chat",
+                  "modelProviderCode": "mock",
+                  "modelName": "mock-chat",
+                  "consumedCredits": 0
+                }
+                """).andExpect(status().isOk());
+
+        String body = """
+                { "clientRequestId": "regen-idem-key-1" }
+                """;
+        String r1 = mockMvc.perform(post("/api/v1/agent/runs/{runId}/regenerate", runId1)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        String r2 = mockMvc.perform(post("/api/v1/agent/runs/{runId}/regenerate", runId1)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        assertThat(objectMapper.readTree(r1).path("data").path("runId").asLong())
+                .isEqualTo(objectMapper.readTree(r2).path("data").path("runId").asLong());
+    }
+
+    @Test
     void failCallbackAfterCancelKeepsRunCancelledAndDoesNotChangeCredits() throws Exception {
         mockExternalAuthDependencies();
         String username = "agent_cancel_fail_idempotent_user";
@@ -975,6 +1171,10 @@ class AgentApiTest {
     }
 
     private SendMessageResult sendMessage(String token, Long sessionId, String content) throws Exception {
+        return sendMessage(token, sessionId, content, java.util.UUID.randomUUID().toString());
+    }
+
+    private SendMessageResult sendMessage(String token, Long sessionId, String content, String clientRequestId) throws Exception {
         String response = mockMvc.perform(post("/api/v1/agent/sessions/{sessionId}/messages", sessionId)
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -983,7 +1183,7 @@ class AgentApiTest {
                                   "content": "%s",
                                   "clientRequestId": "%s"
                                 }
-                                """.formatted(content, java.util.UUID.randomUUID())))
+                                """.formatted(content, clientRequestId)))
                 .andExpect(status().isOk())
                 .andReturn()
                 .getResponse()

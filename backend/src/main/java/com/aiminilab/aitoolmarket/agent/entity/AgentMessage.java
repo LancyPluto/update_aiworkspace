@@ -15,6 +15,11 @@ public class AgentMessage {
     private String contentText;
     private String contentJson;
     private Long runId;
+    /**
+     * ACTIVE: visible in chat and context; SUPERSEDED: replaced by edit/regenerate branch.
+     */
+    private String status;
+    private LocalDateTime supersededAt;
     private LocalDateTime createdAt;
 
     public Long getId() { return id; }
@@ -31,6 +36,10 @@ public class AgentMessage {
     public void setContentJson(String contentJson) { this.contentJson = contentJson; }
     public Long getRunId() { return runId; }
     public void setRunId(Long runId) { this.runId = runId; }
+    public String getStatus() { return status; }
+    public void setStatus(String status) { this.status = status; }
+    public LocalDateTime getSupersededAt() { return supersededAt; }
+    public void setSupersededAt(LocalDateTime supersededAt) { this.supersededAt = supersededAt; }
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
 }

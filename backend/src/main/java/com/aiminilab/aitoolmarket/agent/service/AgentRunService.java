@@ -8,6 +8,8 @@ import com.aiminilab.aitoolmarket.agent.dto.CompleteAgentToolCallRequest;
 import com.aiminilab.aitoolmarket.agent.dto.ConfirmAgentToolRequest;
 import com.aiminilab.aitoolmarket.agent.dto.CreateAgentMessageRequest;
 import com.aiminilab.aitoolmarket.agent.dto.CreateAgentMessageResponse;
+import com.aiminilab.aitoolmarket.agent.dto.EditRegenerateAgentMessageRequest;
+import com.aiminilab.aitoolmarket.agent.dto.RegenerateAgentRunRequest;
 import com.aiminilab.aitoolmarket.agent.dto.CreateAgentRunEventRequest;
 import com.aiminilab.aitoolmarket.agent.dto.CreateAgentToolCallRequest;
 import com.aiminilab.aitoolmarket.agent.dto.FailAgentRunRequest;
@@ -18,6 +20,11 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 public interface AgentRunService {
     CreateAgentMessageResponse sendMessage(Long userId, Long sessionId, CreateAgentMessageRequest request);
+
+    CreateAgentMessageResponse regenerateRun(Long userId, Long runId, RegenerateAgentRunRequest request);
+
+    CreateAgentMessageResponse editRegenerateMessage(Long userId, Long sessionId, Long messageId,
+                                                     EditRegenerateAgentMessageRequest request);
 
     AgentRunResponse detail(Long userId, Long runId);
 

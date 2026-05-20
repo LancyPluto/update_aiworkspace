@@ -291,6 +291,8 @@ CREATE TABLE agent_messages (
   content_text CLOB NOT NULL,
   content_json JSON,
   run_id BIGINT,
+  status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
+  superseded_at DATETIME,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -308,9 +310,15 @@ CREATE TABLE agent_runs (
   error_message VARCHAR(512),
   started_at DATETIME,
   finished_at DATETIME,
+  parent_run_id BIGINT,
+  source_user_message_id BIGINT,
+  client_request_id VARCHAR(64),
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE INDEX idx_agent_runs_user_client ON agent_runs (user_id, client_request_id);
+CREATE INDEX idx_agent_messages_session_active ON agent_messages (session_id, status, id);
 
 CREATE TABLE agent_run_events (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,

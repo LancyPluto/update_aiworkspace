@@ -23,6 +23,9 @@ public class AgentRun {
     private LocalDateTime finishedAt;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
+    private Long parentRunId;
+    private Long sourceUserMessageId;
+    private String clientRequestId;
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
@@ -54,4 +57,10 @@ public class AgentRun {
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
+    public Long getParentRunId() { return parentRunId; }
+    public void setParentRunId(Long parentRunId) { this.parentRunId = parentRunId; }
+    public Long getSourceUserMessageId() { return sourceUserMessageId; }
+    public void setSourceUserMessageId(Long sourceUserMessageId) { this.sourceUserMessageId = sourceUserMessageId; }
+    public String getClientRequestId() { return clientRequestId; }
+    public void setClientRequestId(String clientRequestId) { this.clientRequestId = clientRequestId; }
 }
