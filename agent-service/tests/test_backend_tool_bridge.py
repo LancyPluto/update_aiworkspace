@@ -120,3 +120,26 @@ def test_build_arguments_merges_recent_user_followups_with_chinese_labels():
     assert arguments["scene"] == "活动宣传"
     assert arguments["sellingPoints"] == "限时体验价、到店即用、适合上班族放松"
     assert arguments["lengthLevel"] == "短"
+
+
+def test_extract_strips_example_prefix_from_chinese_labels():
+    bridge = BackendToolBridge(backend_client=None)  # type: ignore[arg-type]
+    tool = ToolDescriptor(
+        toolCode="xiaohongshu_copywriting",
+        toolName="AI 小红书文案生成器",
+        description="种草",
+        autoCallable=True,
+        inputSchema=_xiaohongshu_like_schema(),
+    )
+    msg = (
+        "产品/服务名称：例如：五一肩颈护理套餐\n"
+        "• 目标用户：例如：年轻女性、宝妈\n"
+        "• 文案风格：例如：种草\n"
+        "• 核心卖点：例如：价格划算、效果明显"
+    )
+    ctx = RunContext(runId=1, sessionId=1, userId=1, message=msg)
+    args = bridge.build_arguments(ctx, tool, apply_placeholder_defaults=False)
+    assert args["productName"] == "五一肩颈护理套餐"
+    assert args["targetCustomer"] == "年轻女性、宝妈"
+    assert args["style"] == "种草"
+    assert args["sellingPoints"] == "价格划算、效果明显"

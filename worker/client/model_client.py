@@ -1,7 +1,10 @@
+import time
 from dataclasses import dataclass
 from typing import Any
 
 import requests
+from requests.exceptions import ConnectionError as RequestsConnectionError
+from requests.exceptions import SSLError
 
 from config import settings
 
@@ -201,14 +204,29 @@ class ModelClient:
         payload: dict[str, Any],
         timeout: tuple[int, int],
     ) -> requests.Response:
+        request_headers = {**headers, "Connection": "close"}
         last_timeout: requests.Timeout | None = None
-        for _ in range(2):
+        last_transient: Exception | None = None
+        max_attempts = 4
+        for attempt in range(max_attempts):
             try:
-                return requests.post(url, headers=headers, json=payload, timeout=timeout)
+                return requests.post(
+                    url,
+                    headers=request_headers,
+                    json=payload,
+                    timeout=timeout,
+                )
             except requests.Timeout as exc:
                 last_timeout = exc
+            except (SSLError, RequestsConnectionError) as exc:
+                last_transient = exc
+                if attempt < max_attempts - 1:
+                    time.sleep(0.5 * (attempt + 1))
+                    continue
             except requests.RequestException as exc:
                 raise ModelClientError(f"model request failed: {exc}") from exc
+        if last_transient is not None:
+            raise ModelClientError(f"model request failed: {last_transient}") from last_transient
         raise ModelTimeoutError("model request timed out") from last_timeout
 
     @staticmethod

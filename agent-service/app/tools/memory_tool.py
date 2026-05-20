@@ -240,6 +240,9 @@ def _contains_memory_promise(text: str) -> bool:
 
 MEMORY_TOOL_SYSTEM_PROMPT = (
     "你有一个记忆系统，可以通过 memory_add / memory_replace / memory_remove 工具管理长期记忆。\n"
+    "注意：没有 memory_search 工具；工作区记忆（若有）已在上方 system 快照中给出。\n"
+    "用户问「你刚才/之前帮我做了什么」时，必须直接根据对话历史与记忆快照列出已完成事项，"
+    "禁止只说「让我查一下记忆/记录」却不给出具体结果。\n"
     "当你发现以下情况时，必须立即使用对应的记忆工具，**不要只是口头答应**：\n"
     "- 用户告诉你关于自己的偏好或习惯 → 立即调 memory_add，type=user_profile\n"
     "- 用户告诉你项目事实、业务规则、配置信息 → 立即调 memory_add，type=project_knowledge\n"

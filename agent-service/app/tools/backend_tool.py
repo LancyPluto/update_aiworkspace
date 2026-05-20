@@ -249,7 +249,24 @@ def _extract_labeled_argument(message: str, name: str) -> str:
     )
     if match is None:
         return ""
-    return match.group(1).strip().strip("\"'")
+    return _normalize_extracted_value(match.group(1))
+
+
+def _normalize_extracted_value(value: str) -> str:
+    text = value.strip().strip("\"'")
+    text = re.sub(r"^例如[：:]\s*", "", text)
+    text = re.sub(r"^如[：:]\s*", "", text)
+    return text.strip()
+
+
+_EXTRA_FIELD_LABEL_ALIASES: dict[str, tuple[str, ...]] = {
+    "style": ("文案风格",),
+    "sellingPoints": ("核心卖点",),
+    "targetCustomer": ("目标用户",),
+    "targetAudience": ("目标人群",),
+    "productName": ("产品/服务名称",),
+    "topic": ("文案主题",),
+}
 
 
 def _field_aliases(field_key: str, prop: Any) -> list[str]:
@@ -258,6 +275,9 @@ def _field_aliases(field_key: str, prop: Any) -> list[str]:
         title = prop.get("title")
         if isinstance(title, str) and title.strip() and title.strip() not in aliases:
             aliases.append(title.strip())
+    for extra in _EXTRA_FIELD_LABEL_ALIASES.get(field_key, ()):
+        if extra not in aliases:
+            aliases.append(extra)
     return aliases
 
 
@@ -287,7 +307,11 @@ def _recent_user_messages(context: RunContext) -> list[str]:
 
 
 def _is_tool_guidance_message(content: str) -> bool:
-    return "如果想使用「" in content and "请在同一条或下一条消息里按下面补充" in content
+    has_tool_hint = "如果想使用「" in content or "看起来你想使用「" in content
+    return has_tool_hint and (
+        "请在同一条或下一条消息里按下面补充" in content
+        or "这个工具需要补充以下信息" in content
+    )
 
 
 def _with_xiaohongshu_defaults(message: str, arguments: dict[str, Any]) -> dict[str, Any]:
