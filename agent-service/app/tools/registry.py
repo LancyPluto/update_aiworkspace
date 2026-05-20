@@ -38,6 +38,8 @@ class ToolRegistry:
         message_terms = _terms(message)
         matches: list[ToolMatch] = []
         for tool in self._tools.values():
+            if not tool.autoCallable:
+                continue
             score, matched_terms = _score_tool(text, message_terms, tool)
             if score > 0:
                 matches.append(ToolMatch(tool=tool, score=score, matched_terms=tuple(sorted(matched_terms))))

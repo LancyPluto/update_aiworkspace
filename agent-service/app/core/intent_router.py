@@ -124,9 +124,9 @@ class IntentRouter:
                     reason="weak_tool_signal",
                 )
 
-        # Short vague messages should suggest tools rather than asking for clarification
+        # Short vague task requests need one more concrete goal before routing.
         if len(message) <= 5 or message in self.vague_messages:
-            return IntentResult(intent=Intent.GENERAL_CHAT, confidence=0.6, reason="short_vague_message")
+            return IntentResult(intent=Intent.NEEDS_CLARIFICATION, confidence=0.6, reason="short_vague_message")
         return IntentResult(intent=Intent.GENERAL_CHAT, confidence=0.6, reason="default_general_chat")
 
     def _is_short_chat(self, message_lower: str) -> bool:
