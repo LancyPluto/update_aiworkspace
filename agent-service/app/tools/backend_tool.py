@@ -167,13 +167,14 @@ class BackendToolBridge:
             await self.backend.fail_tool_call(call.id, ToolCallFail(errorCode=error_code, errorMessage=error_message))
             raise ToolExecutionError(error_message)
         content_text = task_detail.result.contentText if task_detail.result is not None else ""
+        agent_content_text = _agent_visible_content(tool.toolCode, content_text)
         result = _tool_result(
             tool.toolCode,
             call.id,
             arguments,
             task_detail.taskId,
             task_detail.status,
-            content_text,
+            agent_content_text,
             task_detail.result.resourceType if task_detail.result else None,
         )
         await self.backend.complete_tool_call(call.id, ToolCallComplete(resultJson=result))
@@ -323,6 +324,26 @@ def _tool_result(
         },
         "summary": content_text or "",
     }
+
+
+def _agent_visible_content(tool_code: str, content_text: str | None) -> str:
+    text = content_text or ""
+    if tool_code != "digital_human_agent" or not text.strip():
+        return text
+
+    final_video = _first_match(text, r"(?:最终成片|成片)[:：]\s*(\S+?\.mp4(?:\?\S*)?)")
+    if final_video:
+        return f"视频已生成，可直接播放或下载：{_sanitize_link(final_video)}"
+    return "视频已生成，可直接播放或下载。"
+
+
+def _first_match(text: str, pattern: str) -> str:
+    match = re.search(pattern, text, flags=re.IGNORECASE)
+    return match.group(1).strip() if match else ""
+
+
+def _sanitize_link(value: str) -> str:
+    return value.strip().replace(")", "").replace("]", "").rstrip("，。,.、；;")
 
 
 def _compact(value: str, max_length: int) -> str:

@@ -40,6 +40,9 @@ from tools.short_video_script_generator import (
 from tools.short_video_topic_generator import (
     build_prompt_payload as build_short_video_topic_prompt_payload,
 )
+from tools.social_media_comment_insights_agent import (
+    build_prompt_payload as build_social_media_comment_insights_prompt_payload,
+)
 from tools.store_campaign_planner import (
     build_prompt_payload as build_store_campaign_prompt_payload,
 )
@@ -64,6 +67,7 @@ LONG_OUTPUT_MODEL_TOKENS = {
     "xiaohongshu_copywriting": 2048,
     "moments_copywriting_generator": 2048,
     "product_title_optimizer": 2048,
+    "social_media_comment_insights_agent": 4096,
 }
 
 LONG_OUTPUT_TIMEOUT_SECONDS = {
@@ -72,6 +76,24 @@ LONG_OUTPUT_TIMEOUT_SECONDS = {
     "ecommerce_campaign_planner": 120,
     "store_campaign_planner": 120,
     "live_stream_script_generator": 120,
+    "social_media_comment_insights_agent": 180,
+}
+
+PROGRESS_MESSAGES = {
+    "enterprise_diagnosis_agent": {
+        12: "任务已开始，正在整理输入参数",
+        28: "已生成企业诊断提示词，正在准备调用管理端大模型",
+        55: "正在调用管理端配置的大模型联网检索企业公开信息并分析经营情况",
+        86: "企业诊断报告已生成，正在整理报告结构",
+        94: "正在保存企业诊断报告，准备生成结果页",
+    },
+    "social_media_comment_insights_agent": {
+        12: "任务已开始，正在整理产品、目标人群和平台线索",
+        28: "已生成社交评论洞察提示词，正在准备调用管理端大模型",
+        55: "正在检索公开社交内容与评论线索，并提炼用户期望和痛点",
+        86: "社交媒体评论洞察报告已生成，正在整理建议结构",
+        94: "正在保存洞察报告，准备生成结果页",
+    },
 }
 
 
@@ -95,13 +117,13 @@ class TextTaskHandler:
             )
             trace_id = trace_id or context.get("traceId")
             context["traceId"] = trace_id
-            self._report_progress(context, task_id, 12, "任务已开始，正在整理输入参数", trace_id=trace_id)
+            self._report_progress(context, task_id, 12, trace_id=trace_id)
 
             system_prompt, user_prompt = self._build_model_prompts(context)
-            self._report_progress(context, task_id, 28, "已生成企业诊断提示词，正在准备调用管理端大模型", trace_id=trace_id)
+            self._report_progress(context, task_id, 28, trace_id=trace_id)
             system_prompt = apply_output_discipline(system_prompt)
 
-            self._report_progress(context, task_id, 55, "正在调用管理端配置的大模型联网检索企业公开信息并分析经营情况", trace_id=trace_id)
+            self._report_progress(context, task_id, 55, trace_id=trace_id)
             model_result = self._generate_model_result(
                 user_prompt,
                 system_prompt=system_prompt,
@@ -113,10 +135,10 @@ class TextTaskHandler:
                 max_tokens=context.get("modelMaxTokens"),
             )
 
-            self._report_progress(context, task_id, 86, "企业诊断报告已生成，正在整理报告结构", trace_id=trace_id)
+            self._report_progress(context, task_id, 86, trace_id=trace_id)
             success_payload = build_success_payload(context, model_result.content)
             self._attach_token_usage(success_payload, model_result)
-            self._report_progress(context, task_id, 94, "正在保存企业诊断报告，准备生成结果页", trace_id=trace_id)
+            self._report_progress(context, task_id, 94, trace_id=trace_id)
             self.backend_client.mark_success(task_id, success_payload, trace_id=trace_id)
             LOGGER.info("task %s completed successfully traceId=%s", task_id, trace_id or "-")
             return {"status": "SUCCESS", "taskId": task_id, "traceId": trace_id}
@@ -218,6 +240,10 @@ class TextTaskHandler:
             prompt_payload = build_store_campaign_prompt_payload(context)
             return prompt_payload["system_prompt"], prompt_payload["user_prompt"]
 
+        if tool_code == "social_media_comment_insights_agent":
+            prompt_payload = build_social_media_comment_insights_prompt_payload(context)
+            return prompt_payload["system_prompt"], prompt_payload["user_prompt"]
+
         params = context.get("params") or {}
         user_prompt_template = context.get("userPromptTemplate")
         if user_prompt_template:
@@ -291,14 +317,14 @@ class TextTaskHandler:
         context: dict[str, Any],
         task_id: int,
         progress: int,
-        message: str,
         trace_id: str | None = None,
     ) -> None:
-        if context.get("toolCode") == "enterprise_diagnosis_agent":
+        progress_messages = PROGRESS_MESSAGES.get(str(context.get("toolCode") or ""))
+        if progress_messages is not None:
             self.backend_client.mark_processing(
                 task_id,
                 progress=progress,
-                progress_message=message,
+                progress_message=progress_messages.get(progress, "AI is processing"),
                 trace_id=trace_id,
             )
             return

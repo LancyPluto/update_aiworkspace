@@ -71,7 +71,7 @@ class FakeModel:
     def __init__(self, response: str = ""):
         self.response = response
 
-    async def chat(self, messages):
+    async def chat(self, messages, tools=None):
         return self.response
 
     @property
@@ -109,6 +109,34 @@ async def test_graph_fails_when_selected_tool_exceeds_credit_budget():
     assert backend.tool_calls == []
     assert backend.completed == []
     assert backend.failed == [(7, "AGENT_RUN_BUDGET_EXCEEDED")]
+
+
+@pytest.mark.asyncio
+async def test_confirmed_tool_uses_tool_output_when_summary_model_returns_empty():
+    backend = FakeBackend()
+    engine = DeepAgentsRuntimeEngine(backend, FakeModel(response=""))
+    context = RunContext(
+        runId=9,
+        sessionId=1,
+        userId=1,
+        message="use video_tool",
+        creditBudget=20,
+        availableTools=[
+            ToolDescriptor(
+                toolCode="video_tool",
+                toolName="Video Tool",
+                description="video generation",
+                estimatedCreditCost=3,
+                autoCallable=True,
+            )
+        ],
+    )
+
+    await engine.run_confirmed_tool(context, "video_tool")
+
+    assert backend.completed == [(9, "# Generated copy", "tool_use")]
+    completed_events = [event for event in backend.events if event[1] == "message.completed"]
+    assert completed_events[-1][2] == "# Generated copy"
 
 
 @pytest.mark.asyncio

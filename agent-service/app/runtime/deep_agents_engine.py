@@ -535,7 +535,13 @@ class DeepAgentsRuntimeEngine:
             )
         else:
             messages_list.append(ChatMessage(role="user", content=f"User request: {context.message}\nTool result: {result}"))
-        return await self._stream_model_answer(context.runId, messages_list, budget, memory_tool=memory_tool)
+        return await self._stream_model_answer(
+            context.runId,
+            messages_list,
+            budget,
+            memory_tool=memory_tool,
+            fallback_answer=content_text,
+        )
 
     # --- Common helpers ---
 
@@ -543,6 +549,7 @@ class DeepAgentsRuntimeEngine:
         self, run_id: int, messages_list: list[ChatMessage],
         budget: BudgetState | None = None,
         memory_tool: MemoryTool | None = None,
+        fallback_answer: str | None = None,
     ) -> str:
         if budget is not None:
             self.budget_guard.reserve_model_call(budget)
@@ -553,6 +560,8 @@ class DeepAgentsRuntimeEngine:
             extra_kwargs["tools"] = _format_memory_tool_definitions()
         if stream is None:
             answer = await self.model.chat(messages_list, tools=extra_kwargs.get("tools"))
+            if not answer.strip() and fallback_answer:
+                answer = fallback_answer
             await self._emit_answer_events(run_id, answer)
             return answer
         async for chunk in self.model.chat_stream(messages_list, tools=extra_kwargs.get("tools")):
@@ -562,6 +571,13 @@ class DeepAgentsRuntimeEngine:
                 RunEventCreate(eventType=MESSAGE_DELTA, eventText=chunk, eventJson={"delta": chunk}),
             )
         answer = "".join(parts)
+        if not answer.strip() and fallback_answer:
+            answer = fallback_answer
+            for chunk in _chunks(answer, 32):
+                await self.backend.append_event(
+                    run_id,
+                    RunEventCreate(eventType=MESSAGE_DELTA, eventText=chunk, eventJson={"delta": chunk}),
+                )
         await self.backend.append_event(
             run_id,
             RunEventCreate(eventType=MESSAGE_COMPLETED, eventText=answer, eventJson={"content": answer}),
