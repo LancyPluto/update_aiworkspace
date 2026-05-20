@@ -41,6 +41,18 @@ class FakeBackendClient:
                 "baseUrl": "https://api.siliconflow.cn",
                 "apiKey": "fake-key",
             },
+            "fields": [
+                {
+                    "fieldKey": "style",
+                    "options": [
+                        {
+                            "label": "电商",
+                            "value": "电商",
+                            "promptPrefix": "commercial product photography, clean background",
+                        }
+                    ],
+                }
+            ],
         }
 
     def mark_processing(
@@ -131,7 +143,7 @@ def main() -> None:
     ]
     assert image_persister.calls[0]["taskId"] == 99120
     assert image_client.calls[0]["model"] == "Tongyi-MAI/Z-Image-Turbo"
-    assert image_client.calls[0]["prompt"].endswith("Style: 电商")
+    assert image_client.calls[0]["prompt"].startswith("commercial product photography, clean background, ")
     assert image_client.calls[0]["image_size"] == "1024x1024"
     assert image_client.calls[0]["batch_size"] == 2
     assert image_client.calls[0]["negative_prompt"] == "模糊, 低清晰度"
@@ -150,7 +162,7 @@ def test_failure_is_marked_processing_before_failed() -> None:
 
     assert result["status"] == "FAILED", result
     assert backend.processing, "task should be moved to PROCESSING before failed callback"
-    assert backend.failed_payload["errorCode"] == "MODEL_CALL_FAILED", backend.failed_payload
+    assert backend.failed_payload["errorCode"] == "WORKER_INTERNAL_ERROR", backend.failed_payload
 
 
 def test_data_url_image_is_persisted() -> None:

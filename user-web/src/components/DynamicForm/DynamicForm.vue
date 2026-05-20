@@ -8,7 +8,7 @@ const props = defineProps<{
 
 const model = defineModel<Record<string, unknown>>({ required: true })
 
-type FieldOption = string | { label: string; value: string }
+type FieldOption = string | { label: string; value: string; promptPrefix?: string }
 
 function optionLabel(option: FieldOption): string {
   return typeof option === "string" ? option : option.label
@@ -58,6 +58,12 @@ function setField(key: string, val: unknown) {
   model.value = { ...model.value, [key]: val }
 }
 
+function setOptionField(key: string, val: string) {
+  const next = { ...model.value, [key]: val }
+  if (val !== "__custom__") delete next[`${key}Custom`]
+  model.value = next
+}
+
 function onNumberInput(key: string, ev: Event) {
   const el = ev.target as HTMLInputElement
   const t = el.value
@@ -81,6 +87,12 @@ function validate(): { valid: boolean; message?: string } {
     }
     if ((f.fieldType === "number" || f.fieldType === "slider") && v === "") {
       return { valid: false, message: `请填写：${f.fieldName}` }
+    }
+    if ((f.fieldType === "select" || f.fieldType === "radio") && v === "__custom__") {
+      const custom = model.value[`${f.fieldKey}Custom`]
+      if (custom === undefined || custom === null || String(custom).trim() === "") {
+        return { valid: false, message: `请填写：${f.fieldName}` }
+      }
     }
   }
   return { valid: true }
@@ -129,10 +141,17 @@ defineExpose({ validate })
                 ? 'border-primary bg-primary/10 text-primary'
                 : 'border-border bg-background text-foreground/70 hover:border-primary/40'
             "
-            @click="setField(f.fieldKey, optionValue(opt))"
+            @click="setOptionField(f.fieldKey, optionValue(opt))"
           >
             {{ optionLabel(opt) }}
           </button>
+          <input
+            v-if="strVal(f.fieldKey) === '__custom__'"
+            :value="strVal(`${f.fieldKey}Custom`)"
+            :placeholder="f.placeholder || '请输入自定义' + f.fieldName"
+            class="mt-1 flex h-10 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+            @input="setField(`${f.fieldKey}Custom`, ($event.target as HTMLInputElement).value)"
+          />
         </div>
 
         <input
