@@ -128,7 +128,9 @@ onMounted(async () => {
                 >
                   HOT
                 </span>
-                <span class="rounded bg-secondary px-1.5 py-0.5 text-[10px] text-muted-foreground">{{ tool.categoryName }}</span>
+                <span class="rounded bg-secondary px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                  {{ labelOf(modalityLabels, tool.outputModality || 'TEXT') }}
+                </span>
                 <span class="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">
                   {{ labelOf(toolTypeLabels, tool.toolType || 'TEXT_GENERATION') }}
                 </span>

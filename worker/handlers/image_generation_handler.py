@@ -47,7 +47,7 @@ class ImageGenerationHandler:
             if provider not in {"siliconflow_images", "siliconflow"}:
                 raise SiliconFlowVideoError(f"unsupported image provider: {provider or 'empty'}")
 
-            prompt = _build_prompt(params)
+            prompt = _build_prompt(params, context.get("fields") or [])
             if not prompt:
                 raise SiliconFlowVideoError("prompt is required")
 
@@ -150,12 +150,51 @@ def _first_text(params: dict[str, Any], *keys: str) -> str:
     return ""
 
 
-def _build_prompt(params: dict[str, Any]) -> str:
+def _build_prompt(params: dict[str, Any], fields: list[dict[str, Any]] | None = None) -> str:
     prompt = _first_text(params, "prompt", "text", "description")
     style = _first_text(params, "style")
+    style_prefix = _option_prompt_prefix(fields or [], "style", style)
+    if prompt and style_prefix:
+        return f"{style_prefix}, {prompt}"
     if prompt and style:
         return f"{prompt}\nStyle: {style}"
     return prompt
+
+
+def _option_prompt_prefix(fields: list[dict[str, Any]], field_key: str, selected_value: str) -> str:
+    if not selected_value or selected_value == "__none__":
+        return ""
+    for field in fields:
+        if str(field.get("fieldKey") or "") != field_key:
+            continue
+        for option in _field_options(field):
+            value = str(option.get("value") or option.get("label") or "").strip()
+            if value == selected_value:
+                return str(option.get("promptPrefix") or "").strip()
+    return ""
+
+
+def _field_options(field: dict[str, Any]) -> list[dict[str, Any]]:
+    options = field.get("options")
+    if isinstance(options, list):
+        return [_normalize_option(option) for option in options]
+    options_json = field.get("optionsJson")
+    if isinstance(options_json, str) and options_json.strip():
+        try:
+            parsed = json.loads(options_json)
+            if isinstance(parsed, list):
+                return [_normalize_option(option) for option in parsed]
+        except ValueError:
+            return []
+    return []
+
+
+def _normalize_option(option: Any) -> dict[str, Any]:
+    if isinstance(option, str):
+        return {"label": option, "value": option}
+    if isinstance(option, dict):
+        return option
+    return {}
 
 
 def _resolve_image_size(params: dict[str, Any]) -> str:
