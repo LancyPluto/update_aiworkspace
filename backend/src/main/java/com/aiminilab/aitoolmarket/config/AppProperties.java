@@ -12,6 +12,8 @@ public class AppProperties {
     private String jwtSecret;
     private String internalApiToken;
     private String aiTaskQueue;
+    private String taskQueueBackend = "rabbitmq";
+    private Rabbitmq rabbitmq = new Rabbitmq();
     private String generatedMediaDir = "../data/generated-media";
     private Agent agent = new Agent();
     private Auth auth = new Auth();
@@ -47,6 +49,22 @@ public class AppProperties {
 
     public void setAiTaskQueue(String aiTaskQueue) {
         this.aiTaskQueue = aiTaskQueue;
+    }
+
+    public String getTaskQueueBackend() {
+        return taskQueueBackend;
+    }
+
+    public void setTaskQueueBackend(String taskQueueBackend) {
+        this.taskQueueBackend = taskQueueBackend == null || taskQueueBackend.isBlank() ? "rabbitmq" : taskQueueBackend;
+    }
+
+    public Rabbitmq getRabbitmq() {
+        return rabbitmq;
+    }
+
+    public void setRabbitmq(Rabbitmq rabbitmq) {
+        this.rabbitmq = rabbitmq == null ? new Rabbitmq() : rabbitmq;
     }
 
     public String getGeneratedMediaDir() {
@@ -92,6 +110,67 @@ public class AppProperties {
 
         public void setAllowedOrigins(List<String> allowedOrigins) {
             this.allowedOrigins = allowedOrigins == null ? new ArrayList<>() : allowedOrigins;
+        }
+    }
+
+    public static class Rabbitmq {
+        private String taskExchange = "ai.task.exchange";
+        private String taskRoutingKey = "tool.normal";
+        private String taskQueue = "ai.tool.normal";
+        private String deadQueue = "ai.tool.normal.dead";
+        private String retryQueuePrefix = "ai.tool.normal.retry";
+        private List<Integer> retryDelaysMs = new ArrayList<>(List.of(5000, 30000, 120000));
+
+        public String getTaskExchange() {
+            return taskExchange;
+        }
+
+        public void setTaskExchange(String taskExchange) {
+            this.taskExchange = taskExchange == null || taskExchange.isBlank() ? "ai.task.exchange" : taskExchange;
+        }
+
+        public String getTaskRoutingKey() {
+            return taskRoutingKey;
+        }
+
+        public void setTaskRoutingKey(String taskRoutingKey) {
+            this.taskRoutingKey = taskRoutingKey == null || taskRoutingKey.isBlank() ? "tool.normal" : taskRoutingKey;
+        }
+
+        public String getTaskQueue() {
+            return taskQueue;
+        }
+
+        public void setTaskQueue(String taskQueue) {
+            this.taskQueue = taskQueue == null || taskQueue.isBlank() ? "ai.tool.normal" : taskQueue;
+        }
+
+        public String getDeadQueue() {
+            return deadQueue;
+        }
+
+        public void setDeadQueue(String deadQueue) {
+            this.deadQueue = deadQueue == null || deadQueue.isBlank() ? this.taskQueue + ".dead" : deadQueue;
+        }
+
+        public String getRetryQueuePrefix() {
+            return retryQueuePrefix;
+        }
+
+        public void setRetryQueuePrefix(String retryQueuePrefix) {
+            this.retryQueuePrefix = retryQueuePrefix == null || retryQueuePrefix.isBlank()
+                    ? this.taskQueue + ".retry"
+                    : retryQueuePrefix;
+        }
+
+        public List<Integer> getRetryDelaysMs() {
+            return retryDelaysMs;
+        }
+
+        public void setRetryDelaysMs(List<Integer> retryDelaysMs) {
+            this.retryDelaysMs = retryDelaysMs == null || retryDelaysMs.isEmpty()
+                    ? new ArrayList<>(List.of(5000, 30000, 120000))
+                    : retryDelaysMs;
         }
     }
 

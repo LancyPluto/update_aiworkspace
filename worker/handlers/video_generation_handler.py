@@ -3,6 +3,7 @@ from typing import Any
 
 from client.backend_client import BackendClient, BackendClientError
 from providers import registry as provider_registry
+from providers.registry import ProviderRegistryError
 
 
 LOGGER = logging.getLogger(__name__)
@@ -37,3 +38,11 @@ class VideoGenerationHandler:
     except BackendClientError:
       LOGGER.exception("video generation handler backend error taskId=%s", task_id)
       raise
+    except ProviderRegistryError as exc:
+      self.backend_client.mark_failed(
+        task_id,
+        error_code="MODEL_CALL_FAILED",
+        error_message=str(exc),
+        trace_id=trace_id,
+      )
+      return {"status": "FAILED", "taskId": task_id, "traceId": trace_id, "errorCode": "MODEL_CALL_FAILED"}

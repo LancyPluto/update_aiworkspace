@@ -407,8 +407,8 @@ function mapTool(tool: ToolSummary): ToolRow {
     rawId: tool.id,
     toolCode: tool.toolCode,
     name: tool.toolName,
-    description: tool.description || "No description",
-    category: tool.categoryName || "Uncategorized",
+    description: tool.description || "暂无描述",
+    category: tool.categoryName || "未分类",
     categoryId: tool.categoryId ?? null,
     toolType: tool.toolType || "TEXT_GENERATION",
     inputModality: tool.inputModality || "TEXT",
@@ -477,7 +477,7 @@ export default function ToolsPage() {
       const templates = await fetchToolTemplates().catch(() => [] as ToolTemplateSummary[])
       setToolTemplates(templates)
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed to load tools")
+      setError(err instanceof ApiError ? err.message : "加载工具失败")
     } finally {
       setLoading(false)
     }
@@ -553,7 +553,7 @@ export default function ToolsPage() {
         : await publishTool(target.rawId)
       setToolList((prev) => prev.map((tool) => (tool.id === id ? mapTool(updated) : tool)))
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : "Failed to update tool status"
+      const message = err instanceof ApiError ? err.message : "更新工具状态失败"
       if (typeof window !== "undefined") window.alert(message)
     } finally {
       setTogglingId(null)
@@ -635,7 +635,7 @@ export default function ToolsPage() {
     setForm({
       toolCode: tool.toolCode,
       toolName: tool.name,
-      description: tool.description === "No description" ? "" : tool.description,
+      description: tool.description === "暂无描述" ? "" : tool.description,
       categoryId: tool.categoryId ? String(tool.categoryId) : "",
       toolType: tool.toolType,
       inputModality: tool.inputModality,
@@ -743,7 +743,7 @@ export default function ToolsPage() {
       const fields = await fetchToolFields(tool.rawId)
       applyLoadedFields(fields)
     } catch (err) {
-      setFieldError(err instanceof ApiError ? err.message : "Failed to load fields")
+      setFieldError(err instanceof ApiError ? err.message : "加载字段配置失败")
       setEditableFields([])
       setFieldJson("[]")
     } finally {
@@ -806,7 +806,7 @@ export default function ToolsPage() {
       applyLoadedFields(saved)
       setFieldDialogOpen(false)
     } catch (err) {
-      setFieldError(err instanceof ApiError ? err.message : "Failed to save fields")
+      setFieldError(err instanceof ApiError ? err.message : "保存字段配置失败")
     } finally {
       setFieldSaving(false)
     }
@@ -827,7 +827,7 @@ export default function ToolsPage() {
           <div className="relative max-w-md flex-1">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
-              placeholder="Search tools..."
+              placeholder="搜索工具名称、分类、描述..."
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
               className="pl-9 bg-secondary border-0"
@@ -1109,7 +1109,7 @@ export default function ToolsPage() {
               <h2 className="text-base font-semibold text-card-foreground">已配置模型能力</h2>
               <p className="text-sm text-muted-foreground">确认当前后台可绑定到不同模态工具的模型配置。</p>
             </div>
-            <Badge variant="secondary">{configuredModelRows.length} models</Badge>
+            <Badge variant="secondary">{configuredModelRows.length} 个模型</Badge>
           </div>
           {configuredModelRows.length === 0 ? (
             <p className="text-sm text-muted-foreground">暂无可用模型配置。</p>
@@ -1122,7 +1122,7 @@ export default function ToolsPage() {
                       <p className="truncate font-medium text-card-foreground">{config.displayName || config.modelName}</p>
                       <p className="truncate text-xs text-muted-foreground">{config.provider} · {config.modelName}</p>
                     </div>
-                    {config.isDefault ? <Badge variant="outline">Default</Badge> : null}
+                    {config.isDefault ? <Badge variant="outline">默认</Badge> : null}
                   </div>
                   <div className="mt-3 flex flex-wrap gap-2">
                     {capabilities.length > 0 ? capabilities.map((capability) => (
@@ -1207,7 +1207,7 @@ export default function ToolsPage() {
                 <div className="flex items-center gap-4 text-sm">
                   <div className="flex items-center gap-1 text-muted-foreground">
                     <Sparkles className="h-4 w-4" />
-                    <span>{tool.credits} credits</span>
+                    <span>{tool.credits} 算力</span>
                   </div>
                   <div className="text-muted-foreground">{tool.rawStatus}</div>
                 </div>
@@ -1220,7 +1220,7 @@ export default function ToolsPage() {
                 </Badge>
               </div>
               <div className="mt-3 rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
-                Model: {tool.modelConfigName || tool.modelName || "Default model config"}
+                模型：{tool.modelConfigName || tool.modelName || "默认模型配置"}
               </div>
             </div>
           ))}

@@ -4,7 +4,7 @@ import { useEffect, useState } from "react"
 import { usePathname, useRouter } from "next/navigation"
 import { AdminSidebar } from "./sidebar"
 import { fetchAdminMe } from "@/lib/api/auth"
-import { clearSession, getToken } from "@/lib/api/http"
+import { clearSession } from "@/lib/api/http"
 
 interface AdminLayoutProps {
   children: React.ReactNode
@@ -28,12 +28,6 @@ export function AdminLayout({ children }: AdminLayoutProps) {
     }
 
     async function verifySession() {
-      const token = getToken()
-      if (!token) {
-        redirectToLogin()
-        return
-      }
-
       try {
         await fetchAdminMe()
         if (!cancelled) setChecking(false)

@@ -79,8 +79,11 @@ const router = createRouter({
 })
 
 // 路由守卫：需要登录的页面跳转到登录页
-router.beforeEach((to, _from, next) => {
+router.beforeEach(async (to, _from, next) => {
   const auth = useAuthStore()
+  if (!auth.bootstrapComplete) {
+    await auth.init()
+  }
   if (to.meta.requiresAuth !== false && !auth.isLoggedIn) {
     next({ name: "Login", query: { redirect: to.fullPath } })
   } else {

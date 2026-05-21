@@ -11,6 +11,7 @@ from client.text_to_speech_client import (
 )
 from handlers.generated_audio_persister import GeneratedAudioPersistError, GeneratedAudioPersister
 from providers import registry as provider_registry
+from providers.registry import ProviderRegistryError
 
 
 LOGGER = logging.getLogger(__name__)
@@ -90,6 +91,8 @@ class TextToSpeechHandler:
             return {"status": "SUCCESS", "taskId": task_id, "traceId": trace_id}
         except TextToSpeechTimeoutError as exc:
             return self._mark_failed(task_id, "MODEL_TIMEOUT", str(exc), trace_id)
+        except ProviderRegistryError as exc:
+            return self._mark_failed(task_id, "MODEL_CALL_FAILED", str(exc), trace_id)
         except TextToSpeechError as exc:
             return self._mark_failed(task_id, "MODEL_CALL_FAILED", str(exc), trace_id)
         except GeneratedAudioPersistError as exc:
