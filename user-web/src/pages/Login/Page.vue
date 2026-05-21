@@ -14,20 +14,7 @@
     <div class="brand animate-item" :class="{ show: brandVisible }">
       <div class="logo">
         <div class="wave-logo">
-          <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M8 24C8 18 12 14 18 14C24 14 28 18 28 24C28 30 32 34 38 34C44 34 48 30 48 24" stroke="url(#grad)" stroke-width="3.5" stroke-linecap="round" fill="none"/>
-            <path d="M40 24C40 18 36 14 30 14C24 14 20 18 20 24C20 30 16 34 10 34C4 34 0 30 0 24" stroke="url(#grad2)" stroke-width="3.5" stroke-linecap="round" fill="none"/>
-            <defs>
-              <linearGradient id="grad" x1="8" y1="14" x2="48" y2="34" gradientUnits="userSpaceOnUse">
-                <stop stop-color="#3a7bb5"/>
-                <stop offset="1" stop-color="#6bb5a0"/>
-              </linearGradient>
-              <linearGradient id="grad2" x1="0" y1="14" x2="40" y2="34" gradientUnits="userSpaceOnUse">
-                <stop stop-color="#6bb5a0"/>
-                <stop offset="1" stop-color="#8ac4d8"/>
-              </linearGradient>
-            </defs>
-          </svg>
+          <img src="/logo.svg" alt="logo" "/>
         </div>
         <span class="brand-text">AI Tool Market</span>
       </div>
@@ -144,355 +131,355 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
-import { LayoutGrid, Rocket, Shield, Zap } from 'lucide-vue-next';
-import { sendSmsCode } from '@/api';
-import { useAuthStore } from '@/store/authStore';
+  import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue';
+  import { useRoute, useRouter } from 'vue-router';
+  import { LayoutGrid, Rocket, Shield, Zap } from 'lucide-vue-next';
+  import { sendSmsCode } from '@/api';
+  import { useAuthStore } from '@/store/authStore';
 
-// ================= 鼠标跟随效果 =================
-const mouseGlow = ref(null);
-function handleMouseMove(e) {
-  if (mouseGlow.value) {
-    mouseGlow.value.style.left = e.clientX + 'px';
-    mouseGlow.value.style.top = e.clientY + 'px';
-  }
-}
-
-const router = useRouter();
-const route = useRoute();
-const auth = useAuthStore();
-
-// ================= 开屏动画控制 =================
-const brandVisible = ref(false);
-const subVisible = ref(false);
-const buttonsVisible = ref(false);
-const titleVisible = ref(false);
-const line1El = ref(null);
-const line2El = ref(null);
-const heroTitleRef = ref(null);
-
-const fullLine1 = '企业级 AI 工具市场';
-const fullLine2 = '让每位成员都有专属 AI 助手';
-
-// 打字机效果
-function typeWriter(element, text, speed, callback) {
-  let i = 0;
-  element.innerHTML = '';
-  function addChar() {
-    if (i < text.length) {
-      const char = text[i];
-      const span = document.createElement('span');
-      span.textContent = char;
-      span.style.display = 'inline-block';
-      element.appendChild(span);
-      i++;
-      setTimeout(addChar, speed);
-    } else {
-      callback && callback();
+  // ================= 鼠标跟随效果 =================
+  const mouseGlow = ref(null);
+  function handleMouseMove(e) {
+    if (mouseGlow.value) {
+      mouseGlow.value.style.left = e.clientX + 'px';
+      mouseGlow.value.style.top = e.clientY + 'px';
     }
   }
-  addChar();
-}
 
-// 拆分标题为独立字符（用于跳动效果）
-function splitTitleToChars() {
-  const lines = [line1El.value, line2El.value];
-  lines.forEach(line => {
-    if (!line) return;
-    const text = line.innerText;
-    if (!text) return;
-    const chars = text.split('');
-    line.innerHTML = '';
-    chars.forEach(ch => {
-      const span = document.createElement('span');
-      span.className = 'char';
-      if (ch === ' ') {
-        span.innerHTML = '&nbsp;';
-        span.style.opacity = '0.4';
+  const router = useRouter();
+  const route = useRoute();
+  const auth = useAuthStore();
+
+  // ================= 开屏动画控制 =================
+  const brandVisible = ref(false);
+  const subVisible = ref(false);
+  const buttonsVisible = ref(false);
+  const titleVisible = ref(false);
+  const line1El = ref(null);
+  const line2El = ref(null);
+  const heroTitleRef = ref(null);
+
+  const fullLine1 = '企业级 AI 工具市场';
+  const fullLine2 = '让每位成员都有专属 AI 助手';
+
+  // 打字机效果
+  function typeWriter(element, text, speed, callback) {
+    let i = 0;
+    element.innerHTML = '';
+    function addChar() {
+      if (i < text.length) {
+        const char = text[i];
+        const span = document.createElement('span');
+        span.textContent = char;
+        span.style.display = 'inline-block';
+        element.appendChild(span);
+        i++;
+        setTimeout(addChar, speed);
       } else {
-        span.textContent = ch;
+        callback && callback();
       }
-      line.appendChild(span);
-    });
-  });
-  bindCharEvents();
-}
-
-// 字符跳动事件（防抖）
-let debounceMap = new Map();
-const DELAY = 50;
-function bounceChar(span) {
-  span.classList.remove('char-bounce');
-  void span.offsetWidth;
-  span.classList.add('char-bounce');
-  span.addEventListener('animationend', () => {
-    span.classList.remove('char-bounce');
-  }, { once: true });
-}
-function onEnter(span) {
-  if (debounceMap.has(span)) clearTimeout(debounceMap.get(span));
-  const timer = setTimeout(() => {
-    bounceChar(span);
-    debounceMap.delete(span);
-  }, DELAY);
-  debounceMap.set(span, timer);
-}
-function onLeave(span) {
-  if (debounceMap.has(span)) {
-    clearTimeout(debounceMap.get(span));
-    debounceMap.delete(span);
+    }
+    addChar();
   }
-}
-function bindCharEvents() {
-  document.querySelectorAll('.char').forEach(c => {
-    c.removeEventListener('mouseenter', () => onEnter(c));
-    c.removeEventListener('mouseleave', () => onLeave(c));
-    c.addEventListener('mouseenter', () => onEnter(c));
-    c.addEventListener('mouseleave', () => onLeave(c));
-  });
-}
 
-function startEntranceAnimation() {
-  setTimeout(() => { brandVisible.value = true; }, 100);
-  setTimeout(() => { subVisible.value = true; }, 300);
-  setTimeout(() => { buttonsVisible.value = true; }, 500);
-  setTimeout(async () => {
-    titleVisible.value = true;
-    await nextTick();
-    typeWriter(line1El.value, fullLine1, 50, () => {
-      typeWriter(line2El.value, fullLine2, 50, () => {
-        splitTitleToChars();
+  // 拆分标题为独立字符（用于跳动效果）
+  function splitTitleToChars() {
+    const lines = [line1El.value, line2El.value];
+    lines.forEach(line => {
+      if (!line) return;
+      const text = line.innerText;
+      if (!text) return;
+      const chars = text.split('');
+      line.innerHTML = '';
+      chars.forEach(ch => {
+        const span = document.createElement('span');
+        span.className = 'char';
+        if (ch === ' ') {
+          span.innerHTML = '&nbsp;';
+          span.style.opacity = '0.4';
+        } else {
+          span.textContent = ch;
+        }
+        line.appendChild(span);
       });
     });
-  }, 800);
-}
+    bindCharEvents();
+  }
 
-// ================= 光标跟随残影效果 =================
-let trailCanvas = null;
-let ctx = null;
-let trailWidth = 0, trailHeight = 0;
-let particles = [];
-let trailAnimationId = null;
-function resizeTrailCanvas() {
-  if (!trailCanvas) return;
-  trailWidth = window.innerWidth;
-  trailHeight = window.innerHeight;
-  trailCanvas.width = trailWidth;
-  trailCanvas.height = trailHeight;
-}
-function addTrailPoint(x, y) {
-  particles.push({ x, y, life: 1.0, size: 12 });
-  if (particles.length > 35) particles.shift();
-}
-function updateTrail() {
-  for (let i = 0; i < particles.length; i++) {
-    particles[i].life -= 0.035;
-    if (particles[i].life <= 0) {
-      particles.splice(i, 1);
-      i--;
+  // 字符跳动事件（防抖）
+  let debounceMap = new Map();
+  const DELAY = 50;
+  function bounceChar(span) {
+    span.classList.remove('char-bounce');
+    void span.offsetWidth;
+    span.classList.add('char-bounce');
+    span.addEventListener('animationend', () => {
+      span.classList.remove('char-bounce');
+    }, { once: true });
+  }
+  function onEnter(span) {
+    if (debounceMap.has(span)) clearTimeout(debounceMap.get(span));
+    const timer = setTimeout(() => {
+      bounceChar(span);
+      debounceMap.delete(span);
+    }, DELAY);
+    debounceMap.set(span, timer);
+  }
+  function onLeave(span) {
+    if (debounceMap.has(span)) {
+      clearTimeout(debounceMap.get(span));
+      debounceMap.delete(span);
     }
   }
-}
-function drawTrail() {
-  if (!ctx) return;
-  ctx.clearRect(0, 0, trailWidth, trailHeight);
-  for (let p of particles) {
-    const alpha = p.life * 0.5;
-    const size = p.size * p.life;
-    ctx.beginPath();
-    ctx.fillStyle = `rgba(150, 190, 225, ${alpha * 0.6})`;
-    ctx.arc(p.x, p.y, size * 0.6, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.fillStyle = `rgba(120, 170, 215, ${alpha * 0.3})`;
-    ctx.arc(p.x, p.y, size * 0.9, 0, Math.PI * 2);
-    ctx.fill();
+  function bindCharEvents() {
+    document.querySelectorAll('.char').forEach(c => {
+      c.removeEventListener('mouseenter', () => onEnter(c));
+      c.removeEventListener('mouseleave', () => onLeave(c));
+      c.addEventListener('mouseenter', () => onEnter(c));
+      c.addEventListener('mouseleave', () => onLeave(c));
+    });
   }
-}
-function animateTrail() {
-  updateTrail();
-  drawTrail();
-  trailAnimationId = requestAnimationFrame(animateTrail);
-}
-function initTrail() {
-  trailCanvas = document.getElementById('cursor-trail');
-  if (!trailCanvas) return;
-  ctx = trailCanvas.getContext('2d');
-  resizeTrailCanvas();
-  animateTrail();
-  window.addEventListener('mousemove', (e) => addTrailPoint(e.clientX, e.clientY));
-  window.addEventListener('resize', () => resizeTrailCanvas());
-}
 
-// ================= 光圈扩大 + 登录弹窗 =================
-const orbExpand = ref(false);
-const loginModalVisible = ref(false);
-let expandTimeout = null;
-
-function resetOrbs() {
-  const orbTop = document.querySelector('.orb-top-left');
-  const orbBottom = document.querySelector('.orb-bottom-right');
-  if (orbTop) orbTop.classList.remove('expand');
-  if (orbBottom) orbBottom.classList.remove('expand');
-}
-function startExpand() {
-  if (expandTimeout) return;
-  orbExpand.value = true;
-  expandTimeout = setTimeout(() => {
-    loginModalVisible.value = true;
-    setTimeout(() => {
-      orbExpand.value = false;
-      expandTimeout = null;
-    }, 300);
-  }, 600);
-}
-
-// ================= 登录弹窗逻辑 =================
-const currentMode = ref('passwordLogin');
-const loginTitles = {
-  smsLogin: { title: '手机号登录', subtitle: '输入短信验证码，安全进入工作台' },
-  passwordLogin: { title: '账号密码登录', subtitle: '使用账号或手机号和密码登录' },
-  register: { title: '手机号注册', subtitle: '验证手机号后自动创建账号并登录' }
-};
-const account = ref('');
-const password = ref('');
-const phone = ref('');
-const nickname = ref('');
-const smsCode = ref('');
-const tipMsg = ref('');
-const errorMsg = ref('');
-const submitting = ref(false);
-const codeSending = ref(false);
-const codeCountdown = ref(0);
-let countdownTimer = null;
-
-const codeBtnText = computed(() =>
-  codeCountdown.value > 0 ? `${codeCountdown.value}s 后重发` : '获取验证码'
-);
-
-function clearMessages() {
-  tipMsg.value = '';
-  errorMsg.value = '';
-}
-function switchMode(mode) {
-  currentMode.value = mode;
-  clearMessages();
-}
-function showTip(msg) {
-  tipMsg.value = msg;
-  errorMsg.value = '';
-}
-function showError(msg) {
-  errorMsg.value = msg;
-  tipMsg.value = '';
-}
-async function handleSendCode() {
-  const phoneNum = phone.value.trim();
-  if (!/^1\d{10}$/.test(phoneNum)) {
-    showError('请输入正确的 11 位手机号');
-    return;
+  function startEntranceAnimation() {
+    setTimeout(() => { brandVisible.value = true; }, 100);
+    setTimeout(() => { subVisible.value = true; }, 300);
+    setTimeout(() => { buttonsVisible.value = true; }, 500);
+    setTimeout(async () => {
+      titleVisible.value = true;
+      await nextTick();
+      typeWriter(line1El.value, fullLine1, 50, () => {
+        typeWriter(line2El.value, fullLine2, 50, () => {
+          splitTitleToChars();
+        });
+      });
+    }, 800);
   }
-  clearMessages();
-  codeSending.value = true;
-  try {
-    const scene = currentMode.value === 'register' ? 'REGISTER' : 'LOGIN';
-    const res = await sendSmsCode({ phone: phoneNum, scene });
-    const hint = res.debugCode ? `验证码已发送（调试码：${res.debugCode}）` : '验证码已发送';
-    showTip(hint);
-    codeCountdown.value = res.cooldownSeconds || 60;
+
+  // ================= 光标跟随残影效果 =================
+  let trailCanvas = null;
+  let ctx = null;
+  let trailWidth = 0, trailHeight = 0;
+  let particles = [];
+  let trailAnimationId = null;
+  function resizeTrailCanvas() {
+    if (!trailCanvas) return;
+    trailWidth = window.innerWidth;
+    trailHeight = window.innerHeight;
+    trailCanvas.width = trailWidth;
+    trailCanvas.height = trailHeight;
+  }
+  function addTrailPoint(x, y) {
+    particles.push({ x, y, life: 1.0, size: 12 });
+    if (particles.length > 35) particles.shift();
+  }
+  function updateTrail() {
+    for (let i = 0; i < particles.length; i++) {
+      particles[i].life -= 0.035;
+      if (particles[i].life <= 0) {
+        particles.splice(i, 1);
+        i--;
+      }
+    }
+  }
+  function drawTrail() {
+    if (!ctx) return;
+    ctx.clearRect(0, 0, trailWidth, trailHeight);
+    for (let p of particles) {
+      const alpha = p.life * 0.5;
+      const size = p.size * p.life;
+      ctx.beginPath();
+      ctx.fillStyle = `rgba(150, 190, 225, ${alpha * 0.6})`;
+      ctx.arc(p.x, p.y, size * 0.6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.fillStyle = `rgba(120, 170, 215, ${alpha * 0.3})`;
+      ctx.arc(p.x, p.y, size * 0.9, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  function animateTrail() {
+    updateTrail();
+    drawTrail();
+    trailAnimationId = requestAnimationFrame(animateTrail);
+  }
+  function initTrail() {
+    trailCanvas = document.getElementById('cursor-trail');
+    if (!trailCanvas) return;
+    ctx = trailCanvas.getContext('2d');
+    resizeTrailCanvas();
+    animateTrail();
+    window.addEventListener('mousemove', (e) => addTrailPoint(e.clientX, e.clientY));
+    window.addEventListener('resize', () => resizeTrailCanvas());
+  }
+
+  // ================= 光圈扩大 + 登录弹窗 =================
+  const orbExpand = ref(false);
+  const loginModalVisible = ref(false);
+  let expandTimeout = null;
+
+  function resetOrbs() {
+    const orbTop = document.querySelector('.orb-top-left');
+    const orbBottom = document.querySelector('.orb-bottom-right');
+    if (orbTop) orbTop.classList.remove('expand');
+    if (orbBottom) orbBottom.classList.remove('expand');
+  }
+  function startExpand() {
+    if (expandTimeout) return;
+    orbExpand.value = true;
+    expandTimeout = setTimeout(() => {
+      loginModalVisible.value = true;
+      setTimeout(() => {
+        orbExpand.value = false;
+        expandTimeout = null;
+      }, 300);
+    }, 600);
+  }
+
+  // ================= 登录弹窗逻辑 =================
+  const currentMode = ref('passwordLogin');
+  const loginTitles = {
+    smsLogin: { title: '手机号登录', subtitle: '输入短信验证码，安全进入工作台' },
+    passwordLogin: { title: '账号密码登录', subtitle: '使用账号或手机号和密码登录' },
+    register: { title: '手机号注册', subtitle: '验证手机号后自动创建账号并登录' }
+  };
+  const account = ref('');
+  const password = ref('');
+  const phone = ref('');
+  const nickname = ref('');
+  const smsCode = ref('');
+  const tipMsg = ref('');
+  const errorMsg = ref('');
+  const submitting = ref(false);
+  const codeSending = ref(false);
+  const codeCountdown = ref(0);
+  let countdownTimer = null;
+
+  const codeBtnText = computed(() =>
+    codeCountdown.value > 0 ? `${codeCountdown.value}s 后重发` : '获取验证码'
+  );
+
+  function clearMessages() {
+    tipMsg.value = '';
+    errorMsg.value = '';
+  }
+  function switchMode(mode) {
+    currentMode.value = mode;
+    clearMessages();
+  }
+  function showTip(msg) {
+    tipMsg.value = msg;
+    errorMsg.value = '';
+  }
+  function showError(msg) {
+    errorMsg.value = msg;
+    tipMsg.value = '';
+  }
+  async function handleSendCode() {
+    const phoneNum = phone.value.trim();
+    if (!/^1\d{10}$/.test(phoneNum)) {
+      showError('请输入正确的 11 位手机号');
+      return;
+    }
+    clearMessages();
+    codeSending.value = true;
+    try {
+      const scene = currentMode.value === 'register' ? 'REGISTER' : 'LOGIN';
+      const res = await sendSmsCode({ phone: phoneNum, scene });
+      const hint = res.debugCode ? `验证码已发送（调试码：${res.debugCode}）` : '验证码已发送';
+      showTip(hint);
+      codeCountdown.value = res.cooldownSeconds || 60;
+      if (countdownTimer) clearInterval(countdownTimer);
+      countdownTimer = setInterval(() => {
+        if (codeCountdown.value <= 0) {
+          clearInterval(countdownTimer);
+          countdownTimer = null;
+          codeSending.value = false;
+        } else {
+          codeCountdown.value--;
+        }
+      }, 1000);
+    } catch (e) {
+      showError(e instanceof Error ? e.message : '验证码发送失败');
+      codeSending.value = false;
+    }
+  }
+
+  function resetLoginForm() {
+    account.value = '';
+    password.value = '';
+    phone.value = '';
+    smsCode.value = '';
+    nickname.value = '';
+  }
+
+  function resolvePostLoginRedirect() {
+    const raw = route.query.redirect;
+    if (typeof raw !== 'string' || !raw.startsWith('/') || raw === '/login' || raw.startsWith('/login?')) {
+      return '/agent';
+    }
+    return raw;
+  }
+
+  async function enterAfterLogin() {
+    if (!auth.isLoggedIn) {
+      showError('登录未生效，请检查账号密码或后端服务');
+      return;
+    }
+    loginModalVisible.value = false;
+    resetLoginForm();
+    await router.replace(resolvePostLoginRedirect());
+  }
+
+  async function handleSubmit() {
+    if (submitting.value) return;
+    clearMessages();
+    submitting.value = true;
+    try {
+      if (currentMode.value === 'passwordLogin') {
+        if (!account.value.trim() || !password.value) throw new Error('请输入账号和密码');
+        await auth.login({ account: account.value.trim(), password: password.value });
+      } else {
+        const phoneNum = phone.value.trim();
+        if (!/^1\d{10}$/.test(phoneNum)) throw new Error('请输入正确的 11 位手机号');
+        if (!/^\d{6}$/.test(smsCode.value)) throw new Error('请输入 6 位短信验证码');
+        const body = { phone: phoneNum, code: smsCode.value.trim() };
+        if (currentMode.value === 'register') {
+          const nick = nickname.value.trim();
+          if (nick) body.nickname = nick;
+          await auth.smsRegister(body);
+        } else {
+          await auth.smsLogin(body);
+        }
+      }
+      await enterAfterLogin();
+    } catch (err) {
+      showError(err instanceof Error ? err.message : '登录失败');
+    } finally {
+      submitting.value = false;
+    }
+  }
+
+  function toolstoreLink() {
+    loginModalVisible.value = false;
+    router.push('/marketplace');
+  }
+
+  // ================= 生命周期 =================
+  onMounted(() => {
+    if (auth.isLoggedIn) {
+      router.replace(resolvePostLoginRedirect());
+      return;
+    }
+    startEntranceAnimation();
+    initTrail();
+    window.addEventListener('mousemove', handleMouseMove);
+  });
+  onBeforeUnmount(() => {
+    if (trailAnimationId) cancelAnimationFrame(trailAnimationId);
     if (countdownTimer) clearInterval(countdownTimer);
-    countdownTimer = setInterval(() => {
-      if (codeCountdown.value <= 0) {
-        clearInterval(countdownTimer);
-        countdownTimer = null;
-        codeSending.value = false;
-      } else {
-        codeCountdown.value--;
-      }
-    }, 1000);
-  } catch (e) {
-    showError(e instanceof Error ? e.message : '验证码发送失败');
-    codeSending.value = false;
-  }
-}
-
-function resetLoginForm() {
-  account.value = '';
-  password.value = '';
-  phone.value = '';
-  smsCode.value = '';
-  nickname.value = '';
-}
-
-function resolvePostLoginRedirect() {
-  const raw = route.query.redirect;
-  if (typeof raw !== 'string' || !raw.startsWith('/') || raw === '/login' || raw.startsWith('/login?')) {
-    return '/agent';
-  }
-  return raw;
-}
-
-async function enterAfterLogin() {
-  if (!auth.isLoggedIn) {
-    showError('登录未生效，请检查账号密码或后端服务');
-    return;
-  }
-  loginModalVisible.value = false;
-  resetLoginForm();
-  await router.replace(resolvePostLoginRedirect());
-}
-
-async function handleSubmit() {
-  if (submitting.value) return;
-  clearMessages();
-  submitting.value = true;
-  try {
-    if (currentMode.value === 'passwordLogin') {
-      if (!account.value.trim() || !password.value) throw new Error('请输入账号和密码');
-      await auth.login({ account: account.value.trim(), password: password.value });
-    } else {
-      const phoneNum = phone.value.trim();
-      if (!/^1\d{10}$/.test(phoneNum)) throw new Error('请输入正确的 11 位手机号');
-      if (!/^\d{6}$/.test(smsCode.value)) throw new Error('请输入 6 位短信验证码');
-      const body = { phone: phoneNum, code: smsCode.value.trim() };
-      if (currentMode.value === 'register') {
-        const nick = nickname.value.trim();
-        if (nick) body.nickname = nick;
-        await auth.smsRegister(body);
-      } else {
-        await auth.smsLogin(body);
-      }
-    }
-    await enterAfterLogin();
-  } catch (err) {
-    showError(err instanceof Error ? err.message : '登录失败');
-  } finally {
-    submitting.value = false;
-  }
-}
-
-function toolstoreLink() {
-  loginModalVisible.value = false;
-  router.push('/marketplace');
-}
-
-// ================= 生命周期 =================
-onMounted(() => {
-  if (auth.isLoggedIn) {
-    router.replace(resolvePostLoginRedirect());
-    return;
-  }
-  startEntranceAnimation();
-  initTrail();
-  window.addEventListener('mousemove', handleMouseMove);
-});
-onBeforeUnmount(() => {
-  if (trailAnimationId) cancelAnimationFrame(trailAnimationId);
-  if (countdownTimer) clearInterval(countdownTimer);
-  if (expandTimeout) clearTimeout(expandTimeout);
-  window.removeEventListener('mousemove', handleMouseMove);
-});
+    if (expandTimeout) clearTimeout(expandTimeout);
+    window.removeEventListener('mousemove', handleMouseMove);
+  });
 </script>
 
 <style>
@@ -504,6 +491,13 @@ onBeforeUnmount(() => {
   box-sizing: border-box;
   user-select: none;
 }
+
+.wave-logo {
+  width: 44px;
+  height: 44px;
+  object-fit: contain;
+}
+
 
 .page-root {
   min-height: 100vh;
