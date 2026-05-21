@@ -31,10 +31,12 @@ public interface AgentFileChunkMapper extends BaseMapper<AgentFileChunk> {
             WHERE c.session_id = #{sessionId}
               AND c.user_id = #{userId}
               AND f.status = 'READY'
+              AND f.attached_run_id = #{runId}
             ORDER BY c.file_id DESC, c.chunk_index ASC
             LIMIT #{limit}
             """)
-    List<AgentFileChunk> findReadyBySession(@Param("userId") Long userId,
-                                            @Param("sessionId") Long sessionId,
-                                            @Param("limit") int limit);
+    List<AgentFileChunk> findReadyByRun(@Param("userId") Long userId,
+                                        @Param("sessionId") Long sessionId,
+                                        @Param("runId") Long runId,
+                                        @Param("limit") int limit);
 }

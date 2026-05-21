@@ -42,7 +42,8 @@ class Settings:
     agent_model_call_cost: int = int(os.getenv("AGENT_MODEL_CALL_COST", "1"))
     agent_tool_execution_timeout_seconds: int = int(os.getenv("AGENT_TOOL_EXECUTION_TIMEOUT_SECONDS", "120"))
     agent_tool_poll_interval_seconds: float = float(os.getenv("AGENT_TOOL_POLL_INTERVAL_SECONDS", "1"))
-    agent_memory_retrieval_limit: int = int(os.getenv("AGENT_MEMORY_RETRIEVAL_LIMIT", "5"))
+    agent_tool_stream_relay_enabled: bool = _bool("AGENT_TOOL_STREAM_RELAY_ENABLED", True)
+    agent_memory_retrieval_limit: int = int(os.getenv("AGENT_MEMORY_RETRIEVAL_LIMIT", "10"))
     agent_memory_auto_save_enabled: bool = _bool("AGENT_MEMORY_AUTO_SAVE", True)
 
 

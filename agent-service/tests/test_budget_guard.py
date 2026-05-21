@@ -112,6 +112,37 @@ async def test_graph_fails_when_selected_tool_exceeds_credit_budget():
 
 
 @pytest.mark.asyncio
+async def test_confirmed_tool_passthrough_tool_output_even_when_summary_model_hallucinates():
+    backend = FakeBackend()
+    engine = DeepAgentsRuntimeEngine(
+        backend,
+        FakeModel(response="好的！已根据你提供的信息生成了一份种草风格的文案。"),
+    )
+    context = RunContext(
+        runId=10,
+        sessionId=1,
+        userId=1,
+        message="产品/服务名称：五一肩颈护理套餐",
+        creditBudget=20,
+        availableTools=[
+            ToolDescriptor(
+                toolCode="video_tool",
+                toolName="Video Tool",
+                description="video generation",
+                estimatedCreditCost=3,
+                autoCallable=True,
+            )
+        ],
+    )
+
+    await engine.run_confirmed_tool(context, "video_tool")
+
+    assert backend.completed == [(10, "# Generated copy", "tool_use")]
+    completed_events = [event for event in backend.events if event[1] == "message.completed"]
+    assert completed_events[-1][2] == "# Generated copy"
+
+
+@pytest.mark.asyncio
 async def test_confirmed_tool_uses_tool_output_when_summary_model_returns_empty():
     backend = FakeBackend()
     engine = DeepAgentsRuntimeEngine(backend, FakeModel(response=""))
@@ -137,6 +168,25 @@ async def test_confirmed_tool_uses_tool_output_when_summary_model_returns_empty(
     assert backend.completed == [(9, "# Generated copy", "tool_use")]
     completed_events = [event for event in backend.events if event[1] == "message.completed"]
     assert completed_events[-1][2] == "# Generated copy"
+
+
+@pytest.mark.asyncio
+async def test_general_chat_empty_answer_still_completes_run():
+    backend = FakeBackend()
+    engine = DeepAgentsRuntimeEngine(backend, FakeModel(response=""))
+    context = RunContext(
+        runId=11,
+        sessionId=1,
+        userId=1,
+        message="你好",
+        creditBudget=5,
+        availableTools=[],
+    )
+
+    await engine.run(context)
+
+    assert backend.failed == []
+    assert backend.completed == [(11, "抱歉，本次未能生成有效回复，请换个说法或补充更多信息后再试。", "general_chat")]
 
 
 @pytest.mark.asyncio

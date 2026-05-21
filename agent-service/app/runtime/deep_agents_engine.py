@@ -31,7 +31,12 @@ from app.runtime.subagent_profiles import default_subagent_profiles, profiles_to
 from app.runtime.workspace_files import WorkspaceFileContext, build_workspace_file_context
 from app.security.prompt_guard import PromptGuard
 from app.tools.backend_tool import BackendToolBridge
-from app.tools.memory_tool import MEMORY_TOOL_SYSTEM_PROMPT, MemoryTool, _format_memory_tool_definitions
+from app.tools.memory_tool import (
+    MEMORY_TOOL_SYSTEM_PROMPT,
+    MemoryTool,
+    _contains_memory_promise,
+    _format_memory_tool_definitions,
+)
 from app.tools.missing_argument_hints import format_missing_tool_arguments_message
 from app.tools.registry import ToolRegistry
 from langchain_core.callbacks import AsyncCallbackHandler
@@ -115,6 +120,7 @@ class DeepAgentsRuntimeEngine:
             except BudgetExceeded as exception:
                 await self._fail_run(context.runId, exception.error_code, exception.message)
                 return
+            await self._maybe_save_memory(context, answer)
             await self._complete_run(context, answer, intent=intent_enum.value)
             return
 
@@ -149,6 +155,7 @@ class DeepAgentsRuntimeEngine:
             except BudgetExceeded as exception:
                 await self._fail_run(context.runId, exception.error_code, exception.message)
                 return
+            await self._maybe_save_memory(context, answer)
             await self._complete_run(context, answer, intent=intent_enum.value)
             return
 
@@ -435,7 +442,23 @@ class DeepAgentsRuntimeEngine:
             messages.append(ChatMessage(role="system", content=file_context))
 
         memory_tool = None
-        if context.workspaceId and settings.agent_memory_auto_save_enabled:
+        recap_question = _looks_like_session_recap_question(context.message)
+        if recap_question:
+            summary = _format_recent_session_summary(context)
+            if summary:
+                messages.append(ChatMessage(role="system", content=summary))
+            messages.append(
+                ChatMessage(
+                    role="system",
+                    content=(
+                        "用户正在询问本会话里你已经帮他做过什么。"
+                        "请直接根据上方「本轮会话近期记录」、记忆快照与对话历史作答，列出已完成的事项。"
+                        "禁止只说「让我查一下记忆/记录」却不给出具体结果。"
+                        "本回合不要调用 memory_add / memory_replace / memory_remove。"
+                    ),
+                )
+            )
+        elif context.workspaceId and settings.agent_memory_auto_save_enabled:
             memory_tool = MemoryTool(self.backend, context.workspaceId, context.userId, run_id=context.runId)
             messages.append(ChatMessage(role="system", content=MEMORY_TOOL_SYSTEM_PROMPT))
 
@@ -531,8 +554,12 @@ class DeepAgentsRuntimeEngine:
         tool_arguments = result.get("arguments") if isinstance(result, dict) else {}
         tool_data = result.get("data") if isinstance(result, dict) else {}
         content_text = tool_data.get("contentText", "") if isinstance(tool_data, dict) else ""
+        # 工具已成功产出正文时直接回显，避免二次 LLM 总结/记忆提示把正文换成「已生成」等空话。
+        if isinstance(content_text, str) and content_text.strip():
+            await self._emit_answer_events(context.runId, content_text)
+            return content_text
         messages_list = [
-            ChatMessage(role="system", content="Summarize the tool result for the user."),
+            ChatMessage(role="system", content="请直接展示工具返回的结果，不要添加额外的总结说明。"),
         ]
         workspace_memory_context = await self._fetch_workspace_memory_context(context)
         if workspace_memory_context:
@@ -623,12 +650,15 @@ class DeepAgentsRuntimeEngine:
         )
 
     async def _complete_run(self, context: RunContext, final_answer: str, intent: str = Intent.GENERAL_CHAT.value) -> None:
+        normalized_answer = (final_answer or "").strip()
+        if not normalized_answer:
+            normalized_answer = "抱歉，本次未能生成有效回复，请换个说法或补充更多信息后再试。"
         consumed_credits = self.budget_guard.default_consumed_credits
         model_name = getattr(self.model, "model_name", settings.model_name)
         await self.backend.complete_run(
             context.runId,
             RunComplete(
-                finalAnswer=final_answer,
+                finalAnswer=normalized_answer,
                 intent=intent,
                 modelProviderCode="agent-service",
                 modelName=model_name,
@@ -711,6 +741,25 @@ class DeepAgentsRuntimeEngine:
                 eventText=title,
                 eventJson={"title": title, "content": content, "sourceRunId": run_id},
             ),
+        )
+
+    async def _maybe_save_memory(self, context: RunContext, answer: str) -> None:
+        """兜底：当 LLM 口头承诺'记住了'但未调用 memory_add 时，自动提取并写入。"""
+        if not context.workspaceId or not settings.agent_memory_auto_save_enabled:
+            return
+        if not _contains_memory_promise(answer):
+            return
+        text = context.message.strip()
+        if not text or len(text) < 4:
+            return
+        # 提取用户消息中的有效信息作为记忆内容
+        from app.tools.memory_tool import MemoryTool as MT
+        tool = MT(self.backend, context.workspaceId, context.userId, run_id=context.runId)
+        await tool.add_memory(
+            memory_type="project_knowledge",
+            title=text[:60],
+            content=text,
+            source_run_id=context.runId,
         )
 
 
@@ -948,6 +997,35 @@ def _raw_message_content(message) -> str:
 
 def _chunks(value: str, size: int) -> list[str]:
     return [value[index : index + size] for index in range(0, len(value), size)] or [""]
+
+
+def _looks_like_session_recap_question(message: str) -> bool:
+    return IntentRouter._looks_like_session_recap_question(message)
+
+
+def _format_recent_session_summary(context: RunContext) -> str:
+    lines: list[str] = []
+    for item in context.history[-24:]:
+        role = (item.role or "").strip().lower()
+        content = (item.content or "").strip()
+        if not content:
+            continue
+        if role in {"user", "human"}:
+            preview = re.sub(r"\s+", " ", content)[:140]
+            lines.append(f"- 用户：{preview}")
+            continue
+        if role not in {"assistant", "ai"}:
+            continue
+        if "如果想使用「" in content and len(content) < 500:
+            tool_match = re.search(r"如果想使用「([^」]+)」", content)
+            tool_name = tool_match.group(1) if tool_match else "某工具"
+            lines.append(f"- 助手：引导你补充「{tool_name}」所需参数")
+        elif len(content) >= 80:
+            preview = re.sub(r"\s+", " ", content)[:180]
+            lines.append(f"- 助手：已产出内容（节选）{preview}…")
+    if not lines:
+        return ""
+    return "本轮会话近期记录（供直接回答「做过什么」）：\n" + "\n".join(lines[-14:])
 
 
 def _format_file_context(context: RunContext) -> str:

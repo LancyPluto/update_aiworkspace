@@ -1,7 +1,6 @@
 package com.aiminilab.aitoolmarket.agent.service.impl;
 
 import com.aiminilab.aitoolmarket.agent.client.AgentServiceClient;
-import com.aiminilab.aitoolmarket.agent.dto.AgentMessageResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AgentModelConfigRequest;
 import com.aiminilab.aitoolmarket.agent.dto.AgentModelConfigTestResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AgentRunEventResponse;
@@ -9,10 +8,13 @@ import com.aiminilab.aitoolmarket.agent.dto.AgentRunResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AgentToolCallResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AgentToolDescriptorResponse;
 import com.aiminilab.aitoolmarket.agent.dto.CompleteAgentRunRequest;
+import com.aiminilab.aitoolmarket.agent.dto.UpsertStreamingAgentAnswerRequest;
 import com.aiminilab.aitoolmarket.agent.dto.CompleteAgentToolCallRequest;
 import com.aiminilab.aitoolmarket.agent.dto.ConfirmAgentToolRequest;
 import com.aiminilab.aitoolmarket.agent.dto.CreateAgentMessageRequest;
 import com.aiminilab.aitoolmarket.agent.dto.CreateAgentMessageResponse;
+import com.aiminilab.aitoolmarket.agent.dto.EditRegenerateAgentMessageRequest;
+import com.aiminilab.aitoolmarket.agent.dto.RegenerateAgentRunRequest;
 import com.aiminilab.aitoolmarket.agent.dto.CreateAgentRunEventRequest;
 import com.aiminilab.aitoolmarket.agent.dto.CreateAgentToolCallRequest;
 import com.aiminilab.aitoolmarket.agent.dto.FailAgentRunRequest;
@@ -46,6 +48,7 @@ import com.aiminilab.aitoolmarket.agent.metrics.AgentMetrics;
 import com.aiminilab.aitoolmarket.admin.service.BillingService;
 import com.aiminilab.aitoolmarket.agent.service.AgentModelConfigService;
 import com.aiminilab.aitoolmarket.agent.service.AgentRateLimitService;
+import com.aiminilab.aitoolmarket.agent.service.AgentFileService;
 import com.aiminilab.aitoolmarket.agent.service.AgentRunService;
 import com.aiminilab.aitoolmarket.agent.service.AgentToolDescriptorService;
 import com.aiminilab.aitoolmarket.agent.service.AgentToolPreferenceService;
@@ -71,6 +74,7 @@ import java.util.Comparator;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -94,6 +98,7 @@ public class AgentRunServiceImpl implements AgentRunService {
     private final AgentSessionMapper agentSessionMapper;
     private final AgentMessageMapper agentMessageMapper;
     private final AgentFileMapper agentFileMapper;
+    private final AgentFileService agentFileService;
     private final AgentFileChunkMapper agentFileChunkMapper;
     private final AgentRunMapper agentRunMapper;
     private final AgentRunEventMapper agentRunEventMapper;
@@ -116,6 +121,7 @@ public class AgentRunServiceImpl implements AgentRunService {
             AgentSessionMapper agentSessionMapper,
             AgentMessageMapper agentMessageMapper,
             AgentFileMapper agentFileMapper,
+            AgentFileService agentFileService,
             AgentFileChunkMapper agentFileChunkMapper,
             AgentRunMapper agentRunMapper,
             AgentRunEventMapper agentRunEventMapper,
@@ -137,6 +143,7 @@ public class AgentRunServiceImpl implements AgentRunService {
         this.agentSessionMapper = agentSessionMapper;
         this.agentMessageMapper = agentMessageMapper;
         this.agentFileMapper = agentFileMapper;
+        this.agentFileService = agentFileService;
         this.agentFileChunkMapper = agentFileChunkMapper;
         this.agentRunMapper = agentRunMapper;
         this.agentRunEventMapper = agentRunEventMapper;
@@ -163,6 +170,13 @@ public class AgentRunServiceImpl implements AgentRunService {
         if (!"ACTIVE".equals(session.getStatus())) {
             throw new BusinessException(ErrorCode.AGENT_SESSION_NOT_FOUND, "会话不可用");
         }
+        String clientKey = normalizeClientRequestId(request.clientRequestId());
+        if (clientKey != null) {
+            CreateAgentMessageResponse idempotent = tryIdempotentAgentRun(userId, clientKey);
+            if (idempotent != null) {
+                return idempotent;
+            }
+        }
         agentRateLimitService.checkMessageRate(userId);
         agentRateLimitService.checkRunRate(userId);
         agentRateLimitService.checkActiveRunLimit(userId);
@@ -172,66 +186,102 @@ public class AgentRunServiceImpl implements AgentRunService {
         }
 
         LocalDateTime now = LocalDateTime.now();
+        String trimmed = request.content().trim();
         AgentMessage message = new AgentMessage();
         message.setSessionId(sessionId);
         message.setUserId(userId);
         message.setRole("USER");
-        message.setContentText(request.content().trim());
+        message.setContentText(trimmed);
+        message.setStatus("ACTIVE");
         message.setCreatedAt(now);
         agentMessageMapper.insertMessage(message);
 
-        AgentRun run = new AgentRun();
-        run.setSessionId(sessionId);
-        run.setUserId(userId);
-        run.setStatus("CREATED");
-        run.setEstimatedCredits(creditBudget);
-        run.setConsumedCredits(0);
-        run.setCreatedAt(now);
-        run.setUpdatedAt(now);
-        agentRunMapper.insertRun(run);
+        return executeStartRun(userId, session, message, null, clientKey, trimmed, now, request.fileIds());
+    }
 
-        message.setRunId(run.getId());
-        // Use BaseMapper update here so the generated message id can be linked after run creation.
-        agentMessageMapper.updateById(message);
-
-        ModelConnectivityCheck connectivity = checkModelConnectivity();
-        run.setModelProviderCode(connectivity.config().provider());
-        run.setModelName(connectivity.config().modelName());
-        agentRunMapper.updateModel(
-                run.getId(),
-                connectivity.config().provider(),
-                connectivity.config().modelName(),
-                now
-        );
-        if (!connectivity.success()) {
-            String errorMessage = messageOrDefault(connectivity.message(), "Agent model connectivity check failed");
-            agentRunMapper.markFailed(run.getId(), "MODEL_CALL_FAILED", errorMessage, now);
-            appendEventInternal(
-                    run.getId(),
-                    userId,
-                    "model.preflight_failed",
-                    errorMessage,
-                    toJson(Map.of(
-                            "provider", connectivity.config().provider(),
-                            "modelName", connectivity.config().modelName(),
-                            "message", errorMessage
-                    )),
-                    now
-            );
-            agentSessionMapper.touch(sessionId, now);
-            throw new BusinessException(ErrorCode.MODEL_CALL_FAILED, errorMessage);
+    @Override
+    @Transactional(noRollbackFor = BusinessException.class)
+    public CreateAgentMessageResponse regenerateRun(Long userId, Long runId, RegenerateAgentRunRequest request) {
+        RegenerateAgentRunRequest body = request == null ? new RegenerateAgentRunRequest(null) : request;
+        String clientKey = normalizeClientRequestId(body.clientRequestId());
+        if (clientKey != null) {
+            CreateAgentMessageResponse idempotent = tryIdempotentAgentRun(userId, clientKey);
+            if (idempotent != null) {
+                return idempotent;
+            }
+        }
+        AgentRun sourceRun = findRun(runId, userId);
+        if (!TERMINAL_STATUSES.contains(sourceRun.getStatus())) {
+            throw new BusinessException(ErrorCode.AGENT_RUN_NOT_REGENERATABLE, "当前运行不可重新生成");
+        }
+        AgentMessage userMessage = resolveUserMessageForRun(sourceRun);
+        if (userMessage == null) {
+            throw new BusinessException(ErrorCode.AGENT_RUN_NOT_FOUND, "无法解析该运行的用户消息");
+        }
+        if (!"ACTIVE".equals(userMessage.getStatus())) {
+            throw new BusinessException(ErrorCode.AGENT_MESSAGE_NOT_FOUND, "消息不存在或已失效");
+        }
+        AgentSession session = findSession(userId, sourceRun.getSessionId());
+        if (!"ACTIVE".equals(session.getStatus())) {
+            throw new BusinessException(ErrorCode.AGENT_SESSION_NOT_FOUND, "会话不可用");
+        }
+        agentRateLimitService.checkRunRate(userId);
+        agentRateLimitService.checkActiveRunLimit(userId);
+        int creditBudget = Math.max(0, appProperties.getAgent().getDefaultCreditBudget());
+        if (creditService.account(userId).available() < creditBudget) {
+            throw new BusinessException(ErrorCode.AGENT_CREDIT_NOT_ENOUGH, "Agent 可用算力不足");
         }
 
-        creditService.freeze(userId, CreditSourceType.AGENT_RUN, run.getId(), creditBudget);
-        agentRunMapper.markRunning(run.getId(), now);
-        agentRateLimitService.incrementActiveRun(userId, run.getId());
-        appendEventInternal(run.getId(), userId, "run.started", "Agent 已开始处理", null, now);
-        agentSessionMapper.touch(sessionId, now);
-        // 自动更新会话标题：如果还是默认值，用第一条消息内容截取前 20 字
-        autoUpdateSessionTitle(session, request.content().trim(), now);
+        LocalDateTime now = LocalDateTime.now();
+        agentMessageMapper.supersedeMessagesAfter(sourceRun.getSessionId(), userMessage.getId(), now);
 
-        runAfterCommit(() -> notifyAgentService(run.getId(), () -> agentServiceClient.executeRun(run.getId())));
-        return new CreateAgentMessageResponse(sessionId, message.getId(), run.getId(), "RUNNING");
+        return executeStartRun(userId, session, userMessage, runId, clientKey, null, now, null);
+    }
+
+    @Override
+    @Transactional(noRollbackFor = BusinessException.class)
+    public CreateAgentMessageResponse editRegenerateMessage(Long userId, Long sessionId, Long messageId,
+                                                           EditRegenerateAgentMessageRequest request) {
+        String clientKey = normalizeClientRequestId(request.clientRequestId());
+        if (clientKey != null) {
+            CreateAgentMessageResponse idempotent = tryIdempotentAgentRun(userId, clientKey);
+            if (idempotent != null) {
+                return idempotent;
+            }
+        }
+        AgentSession session = findSession(userId, sessionId);
+        if (!"ACTIVE".equals(session.getStatus())) {
+            throw new BusinessException(ErrorCode.AGENT_SESSION_NOT_FOUND, "会话不可用");
+        }
+        AgentMessage userMessage = agentMessageMapper.findByIdSessionAndUser(messageId, sessionId, userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.AGENT_MESSAGE_NOT_FOUND, "消息不存在"));
+        if (!"USER".equals(userMessage.getRole())) {
+            throw new BusinessException(ErrorCode.AGENT_MESSAGE_NOT_EDITABLE, "仅支持编辑用户消息");
+        }
+        if (!"ACTIVE".equals(userMessage.getStatus())) {
+            throw new BusinessException(ErrorCode.AGENT_MESSAGE_NOT_FOUND, "消息不存在或已失效");
+        }
+        String trimmed = request.content().trim();
+        if (trimmed.equals(userMessage.getContentText())) {
+            throw new BusinessException(ErrorCode.AGENT_USE_REGENERATE_PATH, "内容未变化，请使用「重新生成」接口");
+        }
+        if (agentRunMapper.countActiveRunsBySession(sessionId) > 0) {
+            throw new BusinessException(ErrorCode.AGENT_ACTIVE_RUN_EXISTS, "会话中有进行中的运行，请先等待完成或取消");
+        }
+        agentRateLimitService.checkMessageRate(userId);
+        agentRateLimitService.checkRunRate(userId);
+        agentRateLimitService.checkActiveRunLimit(userId);
+        int creditBudget = Math.max(0, appProperties.getAgent().getDefaultCreditBudget());
+        if (creditService.account(userId).available() < creditBudget) {
+            throw new BusinessException(ErrorCode.AGENT_CREDIT_NOT_ENOUGH, "Agent 可用算力不足");
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        userMessage.setContentText(trimmed);
+        agentMessageMapper.updateById(userMessage);
+        agentMessageMapper.supersedeMessagesAfter(sessionId, messageId, now);
+
+        return executeStartRun(userId, session, userMessage, null, clientKey, trimmed, now, null);
     }
 
     @Override
@@ -333,14 +383,27 @@ public class AgentRunServiceImpl implements AgentRunService {
     public InternalAgentRunContextResponse context(Long runId) {
         AgentRun run = findRun(runId);
         AgentMessage userMessage = agentMessageMapper.findUserMessageByRunId(runId);
-        List<InternalAgentMessageResponse> history = agentMessageMapper.findLatestBySession(run.getSessionId(), HISTORY_LIMIT)
-                .stream()
-                .sorted((left, right) -> Long.compare(left.getId(), right.getId()))
-                .map(message -> new InternalAgentMessageResponse(message.getRole(), message.getContentText()))
-                .toList();
-        List<AgentFile> readyFiles = agentFileMapper.findReadyBySession(
+        if (userMessage == null && run.getSourceUserMessageId() != null) {
+            userMessage = agentMessageMapper.selectById(run.getSourceUserMessageId());
+        }
+        Long anchorId = run.getSourceUserMessageId();
+        if (anchorId == null && userMessage != null) {
+            anchorId = userMessage.getId();
+        }
+        List<InternalAgentMessageResponse> history;
+        if (anchorId == null) {
+            history = List.of();
+        } else {
+            history = agentMessageMapper.findActiveHistoryBefore(run.getSessionId(), anchorId, HISTORY_LIMIT)
+                    .stream()
+                    .sorted(Comparator.comparingLong(AgentMessage::getId))
+                    .map(message -> new InternalAgentMessageResponse(message.getRole(), message.getContentText()))
+                    .toList();
+        }
+        List<AgentFile> readyFiles = agentFileMapper.findReadyByRun(
                 run.getUserId(),
                 run.getSessionId(),
+                run.getId(),
                 FILE_CONTEXT_LIMIT
         );
         Map<Long, String> filenames = readyFiles.stream()
@@ -399,9 +462,10 @@ public class AgentRunServiceImpl implements AgentRunService {
             String query,
             Map<Long, String> filenames
     ) {
-        List<AgentFileChunk> chunks = agentFileChunkMapper.findReadyBySession(
+        List<AgentFileChunk> chunks = agentFileChunkMapper.findReadyByRun(
                         run.getUserId(),
                         run.getSessionId(),
+                        run.getId(),
                         FILE_CHUNK_SCAN_LIMIT
                 );
         if (chunks.isEmpty()) {
@@ -546,18 +610,52 @@ public class AgentRunServiceImpl implements AgentRunService {
 
     @Override
     @Transactional
+    public AgentRunResponse upsertStreamingAnswer(Long runId, UpsertStreamingAgentAnswerRequest request) {
+        AgentRun run = findRun(runId);
+        if (TERMINAL_STATUSES.contains(run.getStatus())) {
+            return AgentRunResponse.from(run);
+        }
+        String contentText = request.contentText() == null ? "" : request.contentText().trim();
+        if (contentText.isEmpty()) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "流式正文不能为空");
+        }
+        LocalDateTime now = LocalDateTime.now();
+        AgentMessage assistant = agentMessageMapper.findActiveAssistantByRunId(runId);
+        if (assistant == null) {
+            assistant = new AgentMessage();
+            assistant.setSessionId(run.getSessionId());
+            assistant.setUserId(run.getUserId());
+            assistant.setRole("ASSISTANT");
+            assistant.setContentText(contentText);
+            assistant.setRunId(runId);
+            assistant.setStatus("ACTIVE");
+            assistant.setSupersededAt(null);
+            assistant.setCreatedAt(now);
+            agentMessageMapper.insertMessage(assistant);
+        } else {
+            agentMessageMapper.updateContentText(assistant.getId(), contentText);
+        }
+        agentSessionMapper.touch(run.getSessionId(), now);
+        return AgentRunResponse.from(findRun(runId));
+    }
+
+    @Override
+    @Transactional
     public AgentRunResponse completeRun(Long runId, CompleteAgentRunRequest request) {
         AgentRun run = findRun(runId);
         if (TERMINAL_STATUSES.contains(run.getStatus())) {
             return AgentRunResponse.from(run);
         }
         LocalDateTime now = LocalDateTime.now();
+        agentMessageMapper.supersedeActiveAssistantsByRunId(runId, now);
         AgentMessage assistant = new AgentMessage();
         assistant.setSessionId(run.getSessionId());
         assistant.setUserId(run.getUserId());
         assistant.setRole("ASSISTANT");
         assistant.setContentText(request.finalAnswer());
         assistant.setRunId(runId);
+        assistant.setStatus("ACTIVE");
+        assistant.setSupersededAt(null);
         assistant.setCreatedAt(now);
         int estimatedCredits = run.getEstimatedCredits() == null ? 0 : Math.max(0, run.getEstimatedCredits());
         int consumedCredits = request.consumedCredits() == null ? 0 : Math.max(0, Math.min(request.consumedCredits(), estimatedCredits));
@@ -608,6 +706,124 @@ public class AgentRunServiceImpl implements AgentRunService {
         agentMetrics.recordRunOutcome("FAILED", run.getIntent(), firstNonNull(run.getStartedAt(), run.getCreatedAt()), now);
         cleanupEventStreams(runId);
         return AgentRunResponse.from(findRun(runId));
+    }
+
+    private CreateAgentMessageResponse executeStartRun(Long userId,
+                                                       AgentSession session,
+                                                       AgentMessage userMessage,
+                                                       Long parentRunId,
+                                                       String clientRequestId,
+                                                       String sessionTitleContentHint,
+                                                       LocalDateTime now,
+                                                       List<Long> fileIds) {
+        Long sessionId = session.getId();
+        int creditBudget = Math.max(0, appProperties.getAgent().getDefaultCreditBudget());
+
+        AgentRun run = new AgentRun();
+        run.setSessionId(sessionId);
+        run.setUserId(userId);
+        run.setStatus("CREATED");
+        run.setEstimatedCredits(creditBudget);
+        run.setConsumedCredits(0);
+        run.setCreatedAt(now);
+        run.setUpdatedAt(now);
+        run.setParentRunId(parentRunId);
+        run.setSourceUserMessageId(userMessage.getId());
+        run.setClientRequestId(clientRequestId);
+        agentRunMapper.insertRun(run);
+
+        userMessage.setRunId(run.getId());
+        agentMessageMapper.updateById(userMessage);
+
+        if (parentRunId != null) {
+            agentFileMapper.reattachFilesFromRun(userId, sessionId, parentRunId, run.getId(), now);
+        } else {
+            agentFileService.attachPendingFilesToRun(userId, sessionId, run.getId(), fileIds);
+        }
+
+        ModelConnectivityCheck connectivity = checkModelConnectivity();
+        run.setModelProviderCode(connectivity.config().provider());
+        run.setModelName(connectivity.config().modelName());
+        agentRunMapper.updateModel(
+                run.getId(),
+                connectivity.config().provider(),
+                connectivity.config().modelName(),
+                now
+        );
+        if (!connectivity.success()) {
+            String errorMessage = messageOrDefault(connectivity.message(), "Agent model connectivity check failed");
+            agentRunMapper.markFailed(run.getId(), "MODEL_CALL_FAILED", errorMessage, now);
+            appendEventInternal(
+                    run.getId(),
+                    userId,
+                    "model.preflight_failed",
+                    errorMessage,
+                    toJson(Map.of(
+                            "provider", connectivity.config().provider(),
+                            "modelName", connectivity.config().modelName(),
+                            "message", errorMessage
+                    )),
+                    now
+            );
+            agentSessionMapper.touch(sessionId, now);
+            throw new BusinessException(ErrorCode.MODEL_CALL_FAILED, errorMessage);
+        }
+
+        creditService.freeze(userId, CreditSourceType.AGENT_RUN, run.getId(), creditBudget);
+        agentRunMapper.markRunning(run.getId(), now);
+        agentRateLimitService.incrementActiveRun(userId, run.getId());
+        appendEventInternal(run.getId(), userId, "run.started", "Agent 已开始处理", null, now);
+        agentSessionMapper.touch(sessionId, now);
+        if (sessionTitleContentHint != null && !sessionTitleContentHint.isBlank()) {
+            autoUpdateSessionTitle(session, sessionTitleContentHint, now);
+        }
+
+        Long executeRunId = run.getId();
+        runAfterCommit(() -> notifyAgentService(executeRunId, () -> agentServiceClient.executeRun(executeRunId)));
+        return new CreateAgentMessageResponse(sessionId, userMessage.getId(), run.getId(), "RUNNING");
+    }
+
+    private String normalizeClientRequestId(String clientRequestId) {
+        if (clientRequestId == null) {
+            return null;
+        }
+        String trimmed = clientRequestId.trim();
+        return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private CreateAgentMessageResponse tryIdempotentAgentRun(Long userId, String clientRequestId) {
+        Optional<AgentRun> existing = agentRunMapper.findByUserIdAndClientRequestId(userId, clientRequestId);
+        if (existing.isEmpty()) {
+            return null;
+        }
+        AgentRun run = existing.get();
+        Long messageId = run.getSourceUserMessageId();
+        if (messageId == null) {
+            AgentMessage linked = agentMessageMapper.findUserMessageByRunId(run.getId());
+            messageId = linked == null ? null : linked.getId();
+        }
+        if (messageId == null) {
+            return null;
+        }
+        return new CreateAgentMessageResponse(run.getSessionId(), messageId, run.getId(), mapRunStatusForClient(run.getStatus()));
+    }
+
+    private String mapRunStatusForClient(String status) {
+        if ("CREATED".equals(status)) {
+            return "RUNNING";
+        }
+        return status;
+    }
+
+    private AgentMessage resolveUserMessageForRun(AgentRun run) {
+        AgentMessage byRun = agentMessageMapper.findUserMessageByRunId(run.getId());
+        if (byRun != null) {
+            return byRun;
+        }
+        if (run.getSourceUserMessageId() != null) {
+            return agentMessageMapper.selectById(run.getSourceUserMessageId());
+        }
+        return null;
     }
 
     private AgentSession findSession(Long userId, Long sessionId) {

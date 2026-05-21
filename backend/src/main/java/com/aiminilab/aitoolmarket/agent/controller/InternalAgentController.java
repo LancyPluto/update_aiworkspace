@@ -12,6 +12,7 @@ import com.aiminilab.aitoolmarket.agent.dto.CreateAgentRunEventRequest;
 import com.aiminilab.aitoolmarket.agent.dto.CreateAgentToolCallRequest;
 import com.aiminilab.aitoolmarket.agent.dto.FailAgentRunRequest;
 import com.aiminilab.aitoolmarket.agent.dto.FailAgentToolCallRequest;
+import com.aiminilab.aitoolmarket.agent.dto.UpsertStreamingAgentAnswerRequest;
 import com.aiminilab.aitoolmarket.agent.dto.InternalAgentRunContextResponse;
 import com.aiminilab.aitoolmarket.agent.dto.InternalAgentModelConfigResponse;
 import com.aiminilab.aitoolmarket.agent.dto.InternalCreateWorkspaceMemoryRequest;
@@ -154,6 +155,14 @@ public class InternalAgentController {
     public ApiResponse<AgentToolCallResponse> failToolCall(@PathVariable Long toolCallId,
                                                            @Valid @RequestBody FailAgentToolCallRequest request) {
         return ApiResponse.success(agentRunService.failToolCall(toolCallId, request));
+    }
+
+    @PutMapping("/runs/{runId}/streaming-answer")
+    public ApiResponse<AgentRunResponse> upsertStreamingAnswer(
+            @PathVariable Long runId,
+            @Valid @RequestBody UpsertStreamingAgentAnswerRequest request
+    ) {
+        return ApiResponse.success(agentRunService.upsertStreamingAnswer(runId, request));
     }
 
     @PostMapping("/runs/{runId}/complete")

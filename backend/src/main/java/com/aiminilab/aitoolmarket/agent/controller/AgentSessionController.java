@@ -4,6 +4,7 @@ import com.aiminilab.aitoolmarket.agent.dto.AgentMessageResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AgentSessionResponse;
 import com.aiminilab.aitoolmarket.agent.dto.CreateAgentMessageRequest;
 import com.aiminilab.aitoolmarket.agent.dto.CreateAgentMessageResponse;
+import com.aiminilab.aitoolmarket.agent.dto.EditRegenerateAgentMessageRequest;
 import com.aiminilab.aitoolmarket.agent.dto.CreateAgentSessionRequest;
 import com.aiminilab.aitoolmarket.agent.service.AgentRunService;
 import com.aiminilab.aitoolmarket.agent.service.AgentSessionService;
@@ -65,5 +66,13 @@ public class AgentSessionController {
     public ApiResponse<CreateAgentMessageResponse> sendMessage(@PathVariable Long sessionId,
                                                                @Valid @RequestBody CreateAgentMessageRequest request) {
         return ApiResponse.success(agentRunService.sendMessage(AuthContext.get().userId(), sessionId, request));
+    }
+
+    @PostMapping("/{sessionId}/messages/{messageId}/edit-regenerate")
+    public ApiResponse<CreateAgentMessageResponse> editRegenerate(@PathVariable Long sessionId,
+                                                                  @PathVariable Long messageId,
+                                                                  @Valid @RequestBody EditRegenerateAgentMessageRequest request) {
+        return ApiResponse.success(agentRunService.editRegenerateMessage(
+                AuthContext.get().userId(), sessionId, messageId, request));
     }
 }

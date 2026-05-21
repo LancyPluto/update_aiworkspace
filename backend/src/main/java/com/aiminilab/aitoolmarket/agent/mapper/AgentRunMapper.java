@@ -19,10 +19,12 @@ public interface AgentRunMapper extends BaseMapper<AgentRun> {
     @Insert("""
             INSERT INTO agent_runs(session_id, user_id, status, intent, model_provider_code, model_name,
                                    estimated_credits, consumed_credits, error_code, error_message,
-                                   started_at, finished_at, created_at, updated_at)
+                                   started_at, finished_at, parent_run_id, source_user_message_id, client_request_id,
+                                   created_at, updated_at)
             VALUES(#{run.sessionId}, #{run.userId}, #{run.status}, #{run.intent}, #{run.modelProviderCode}, #{run.modelName},
                    #{run.estimatedCredits}, #{run.consumedCredits}, #{run.errorCode}, #{run.errorMessage},
-                   #{run.startedAt}, #{run.finishedAt}, #{run.createdAt}, #{run.updatedAt})
+                   #{run.startedAt}, #{run.finishedAt}, #{run.parentRunId}, #{run.sourceUserMessageId}, #{run.clientRequestId},
+                   #{run.createdAt}, #{run.updatedAt})
             """)
     @Options(useGeneratedKeys = true, keyProperty = "run.id")
     void insertRun(@Param("run") AgentRun run);
@@ -122,6 +124,27 @@ public interface AgentRunMapper extends BaseMapper<AgentRun> {
               AND status IN ('CREATED', 'RUNNING', 'WAITING_USER_CONFIRMATION')
             """)
     long countActiveRuns(@Param("userId") Long userId);
+
+    @Select("""
+            SELECT COUNT(*)
+            FROM agent_runs
+            WHERE session_id = #{sessionId}
+              AND status IN ('CREATED', 'RUNNING', 'WAITING_USER_CONFIRMATION')
+            """)
+    long countActiveRunsBySession(@Param("sessionId") Long sessionId);
+
+    @Select("""
+            SELECT *
+            FROM agent_runs
+            WHERE user_id = #{userId} AND client_request_id = #{clientRequestId}
+            LIMIT 1
+            """)
+    AgentRun selectByUserIdAndClientRequestId(@Param("userId") Long userId,
+                                              @Param("clientRequestId") String clientRequestId);
+
+    default Optional<AgentRun> findByUserIdAndClientRequestId(Long userId, String clientRequestId) {
+        return Optional.ofNullable(selectByUserIdAndClientRequestId(userId, clientRequestId));
+    }
 
     @Update("""
             UPDATE agent_runs

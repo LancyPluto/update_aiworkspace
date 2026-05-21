@@ -63,6 +63,9 @@ class Settings:
     ffprobe_binary: str = os.getenv('FFPROBE_BINARY', 'ffprobe')
     subtitle_font_name: str = os.getenv('SUBTITLE_FONT_NAME', 'Noto Sans CJK SC')
     subtitle_fonts_dir: str = os.getenv('SUBTITLE_FONTS_DIR', '/usr/share/fonts/opentype/noto')
+    text_tool_streaming_enabled: bool = os.getenv('TEXT_TOOL_STREAMING_ENABLED', 'true').strip().lower() in {
+        '1', 'true', 'yes', 'on',
+    }
 
 
 settings = Settings()

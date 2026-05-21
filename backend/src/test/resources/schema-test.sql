@@ -125,7 +125,7 @@ CREATE TABLE ai_tasks (
   prompt_version_id BIGINT,
   status VARCHAR(32) NOT NULL DEFAULT 'CREATED',
   progress TINYINT NOT NULL DEFAULT 0,
-  progress_message VARCHAR(255),
+  progress_message TEXT,
   params_json JSON NOT NULL,
   params_hash VARCHAR(128),
   idempotency_key VARCHAR(128),
@@ -291,6 +291,8 @@ CREATE TABLE agent_messages (
   content_text CLOB NOT NULL,
   content_json JSON,
   run_id BIGINT,
+  status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
+  superseded_at DATETIME,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -308,9 +310,15 @@ CREATE TABLE agent_runs (
   error_message VARCHAR(512),
   started_at DATETIME,
   finished_at DATETIME,
+  parent_run_id BIGINT,
+  source_user_message_id BIGINT,
+  client_request_id VARCHAR(64),
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE INDEX idx_agent_runs_user_client ON agent_runs (user_id, client_request_id);
+CREATE INDEX idx_agent_messages_session_active ON agent_messages (session_id, status, id);
 
 CREATE TABLE agent_run_events (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
@@ -392,6 +400,7 @@ CREATE TABLE agent_files (
   file_size BIGINT NOT NULL DEFAULT 0,
   storage_path VARCHAR(1024) NOT NULL,
   status VARCHAR(32) NOT NULL,
+  attached_run_id BIGINT,
   extracted_text CLOB,
   error_message VARCHAR(512),
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
