@@ -88,6 +88,8 @@ interface ToolRow {
   outputModality: string
   configNote: string | null
   coverUrl: string | null
+  primaryColor: string
+  welcomeMessage: string
   icon: LucideIcon
   credits: number
   status: boolean
@@ -108,6 +110,8 @@ interface ToolForm {
   outputModality: string
   configNote: string
   coverUrl: string
+  primaryColor: string
+  welcomeMessage: string
   estimatedCreditCost: string
   modelConfigId: string
   templateCode: string
@@ -123,6 +127,8 @@ const initialForm: ToolForm = {
   outputModality: "TEXT",
   configNote: "",
   coverUrl: "",
+  primaryColor: "#3b82f6",
+  welcomeMessage: "",
   estimatedCreditCost: "5",
   modelConfigId: "",
   templateCode: "text_generation_default",
@@ -242,6 +248,43 @@ const templateCodeByToolType: Record<string, string> = {
   TEXT_TO_SPEECH: "text_to_speech_default",
   VIDEO_GENERATION: "video_generation_default",
   AGENT: "digital_human_default",
+}
+
+const FRONTEND_STYLE_MARKER = "<!-- ai-tool-ui:"
+const FRONTEND_STYLE_PATTERN = /<!-- ai-tool-ui:(.*?) -->/s
+
+interface FrontendStyleConfig {
+  primaryColor: string
+  welcomeMessage: string
+}
+
+function extractFrontendStyle(configNote?: string | null): { note: string; style: FrontendStyleConfig } {
+  const raw = configNote || ""
+  const match = raw.match(FRONTEND_STYLE_PATTERN)
+  const fallback = { primaryColor: "#3b82f6", welcomeMessage: "" }
+  if (!match) return { note: raw.trim(), style: fallback }
+
+  try {
+    const parsed = JSON.parse(match[1]) as Partial<FrontendStyleConfig>
+    return {
+      note: raw.replace(FRONTEND_STYLE_PATTERN, "").trim(),
+      style: {
+        primaryColor: typeof parsed.primaryColor === "string" && parsed.primaryColor ? parsed.primaryColor : fallback.primaryColor,
+        welcomeMessage: typeof parsed.welcomeMessage === "string" ? parsed.welcomeMessage : fallback.welcomeMessage,
+      },
+    }
+  } catch {
+    return { note: raw.replace(FRONTEND_STYLE_PATTERN, "").trim(), style: fallback }
+  }
+}
+
+function serializeConfigNote(note: string, style: FrontendStyleConfig): string {
+  const cleanNote = note.trim()
+  const styleJson = JSON.stringify({
+    primaryColor: style.primaryColor || "#3b82f6",
+    welcomeMessage: style.welcomeMessage || "",
+  })
+  return [cleanNote, `${FRONTEND_STYLE_MARKER}${styleJson} -->`].filter(Boolean).join("\n\n")
 }
 
 const CATEGORY_ICON_MAP: Record<string, LucideIcon> = {
@@ -402,6 +445,7 @@ function FieldSchemaSidePanel({
 }
 
 function mapTool(tool: ToolSummary): ToolRow {
+  const { note, style } = extractFrontendStyle(tool.configNote)
   return {
     id: String(tool.id),
     rawId: tool.id,
@@ -413,8 +457,10 @@ function mapTool(tool: ToolSummary): ToolRow {
     toolType: tool.toolType || "TEXT_GENERATION",
     inputModality: tool.inputModality || "TEXT",
     outputModality: tool.outputModality || "TEXT",
-    configNote: tool.configNote || null,
+    configNote: note || null,
     coverUrl: tool.coverUrl || null,
+    primaryColor: style.primaryColor,
+    welcomeMessage: style.welcomeMessage,
     icon: pickIcon(tool.categoryName),
     credits: tool.estimatedCreditCost ?? 0,
     status: (tool.status || "").toUpperCase() === "ONLINE",
@@ -642,6 +688,8 @@ export default function ToolsPage() {
       outputModality: tool.outputModality,
       configNote: tool.configNote || "",
       coverUrl: tool.coverUrl || "",
+      primaryColor: tool.primaryColor || "#3b82f6",
+      welcomeMessage: tool.welcomeMessage || "",
       estimatedCreditCost: String(tool.credits),
       modelConfigId: tool.modelConfigId ? String(tool.modelConfigId) : "",
       templateCode: "",
@@ -681,7 +729,10 @@ export default function ToolsPage() {
         toolType: form.toolType,
         inputModality: form.inputModality,
         outputModality: form.outputModality,
-        configNote: form.configNote.trim() || undefined,
+        configNote: serializeConfigNote(form.configNote, {
+          primaryColor: form.primaryColor,
+          welcomeMessage: form.welcomeMessage,
+        }),
         coverUrl: form.coverUrl.trim() || undefined,
         estimatedCreditCost: Math.floor(credits),
         modelConfigId: form.modelConfigId ? Number(form.modelConfigId) : null,
@@ -700,7 +751,12 @@ export default function ToolsPage() {
       setIsAddDialogOpen(false)
     } catch (err) {
       const message = err instanceof ApiError ? err.message : "保存工具失败，请稍后重试。"
-      console.error("[AI Tool Management] 保存工具失败", err)
+      console.error("[AI Tool Management] 保存工具失败", {
+        error: err,
+        api: err instanceof ApiError
+          ? { code: err.code, status: err.status, traceId: err.traceId, responseBody: err.responseBody }
+          : null,
+      })
       setFormError(message)
     } finally {
       setSubmitting(false)
@@ -795,6 +851,10 @@ export default function ToolsPage() {
     let fields: ToolFieldPayload[]
     try {
       const editable = fieldEditorMode === "visual" ? editableFields : parseFieldsJson(fieldJson)
+      const coreFields = editable.filter((field) => field.isCore)
+      if (coreFields.length > 1) {
+        throw new Error(`核心字段只能选择一个：${coreFields.map((field) => field.fieldName || field.fieldKey).join("、")}`)
+      }
       fields = editable.map((field, index) => toFieldPayload(field, index))
     } catch (err) {
       setFieldError(err instanceof Error ? err.message : "字段配置无效")
@@ -942,6 +1002,59 @@ export default function ToolsPage() {
                       建议使用 16:9 横图；GIF 可直接作为图片使用，视频建议 MP4/WebM。
                     </p>
                   )}
+                </div>
+                <div className="space-y-3 rounded-lg border border-border bg-secondary/20 p-3">
+                  <div>
+                    <Label>前端展示样式</Label>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      C 端工具卡片和聊天欢迎页会复用这些视觉配置。
+                    </p>
+                  </div>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label>主题色</Label>
+                      <div className="flex items-center gap-2">
+                        <Input
+                          type="color"
+                          className="h-10 w-14 cursor-pointer p-1"
+                          value={form.primaryColor || "#3b82f6"}
+                          onChange={(event) => updateForm("primaryColor", event.target.value)}
+                        />
+                        <Input
+                          value={form.primaryColor || "#3b82f6"}
+                          onChange={(event) => updateForm("primaryColor", event.target.value)}
+                          placeholder="#3b82f6"
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>欢迎语</Label>
+                      <Textarea
+                        rows={2}
+                        value={form.welcomeMessage}
+                        onChange={(event) => updateForm("welcomeMessage", event.target.value)}
+                        placeholder="首次进入聊天页时展示"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3 rounded-lg border border-border bg-card p-3">
+                    <div
+                      className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full ring-1 ring-border"
+                      style={{ backgroundColor: `${form.primaryColor || "#3b82f6"}18` }}
+                    >
+                      {form.coverUrl.trim() && !isVideoPreviewUrl(form.coverUrl) ? (
+                        <img src={normalizeToolMediaUrl(form.coverUrl)} alt="前端图标预览" className="h-full w-full object-cover" />
+                      ) : (
+                        <Sparkles className="h-5 w-5 text-primary" />
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium">{form.toolName || "工具名称"}</p>
+                      <p className="line-clamp-1 text-xs text-muted-foreground">
+                        {form.welcomeMessage || "欢迎语会展示在聊天欢迎页"}
+                      </p>
+                    </div>
+                  </div>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
@@ -1166,8 +1279,11 @@ export default function ToolsPage() {
               ) : null}
               <div className="flex items-start justify-between">
                 <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10">
-                    <tool.icon className="h-5 w-5 text-primary" />
+                  <div
+                    className="flex h-10 w-10 items-center justify-center rounded-xl"
+                    style={{ backgroundColor: `${tool.primaryColor || "#3b82f6"}18` }}
+                  >
+                    <tool.icon className="h-5 w-5" style={{ color: tool.primaryColor || "hsl(var(--primary))" }} />
                   </div>
                   <div>
                     <h3 className="font-semibold text-card-foreground">{tool.name}</h3>
@@ -1222,6 +1338,11 @@ export default function ToolsPage() {
               <div className="mt-3 rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
                 Model: {tool.modelConfigName || tool.modelName || "Default model config"}
               </div>
+              {tool.welcomeMessage ? (
+                <div className="mt-2 rounded-lg bg-secondary/40 px-3 py-2 text-xs text-muted-foreground">
+                  欢迎语：{tool.welcomeMessage}
+                </div>
+              ) : null}
             </div>
           ))}
         </div>
@@ -1230,11 +1351,11 @@ export default function ToolsPage() {
       <Dialog open={fieldDialogOpen} onOpenChange={setFieldDialogOpen}>
         <DialogContent className="!w-[1180px] !max-w-[calc(100vw-2rem)] max-h-[90vh] overflow-y-auto bg-card border-border">
           <DialogHeader>
-            <DialogTitle>用户端表单字段</DialogTitle>
+            <DialogTitle>聊天输入控件</DialogTitle>
             <DialogDescription>
               {fieldTool
-                ? `配置「${fieldTool.name}」参数。画面比例等请用「单选/下拉」并配置选项，用户只能点选。`
-                : "配置工具字段。"}
+                ? `配置「${fieldTool.name}」在聊天输入区展示的参数控件，例如数量、比例、参考图。`
+                : "配置聊天输入区参数控件。"}
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-2 lg:grid-cols-[minmax(0,1fr)_380px]">
@@ -1242,9 +1363,9 @@ export default function ToolsPage() {
               {fieldTool ? (
                 <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-secondary/30 p-3">
                   <div>
-                    <p className="text-sm font-medium">从工具模板填充</p>
+                    <p className="text-sm font-medium">从工具模板填充控件</p>
                     <p className="text-xs text-muted-foreground">
-                      当前类型：{optionLabel(toolTypeOptions, fieldTool.toolType)}。应用后可再在下方微调各字段选项。
+                      当前类型：{optionLabel(toolTypeOptions, fieldTool.toolType)}。应用后可再微调数量、比例、参考图等控件。
                     </p>
                   </div>
                   <Button type="button" variant="outline" size="sm" onClick={applyFieldTemplate} disabled={fieldLoading || fieldSaving}>
@@ -1260,7 +1381,7 @@ export default function ToolsPage() {
               <Tabs value={fieldEditorMode} onValueChange={(value) => switchFieldEditorMode(value as "visual" | "json")}>
                 <TabsList className="grid w-full grid-cols-2">
                   <TabsTrigger value="visual" disabled={fieldLoading || fieldSaving}>
-                    可视化配置
+                    可视化控件配置
                   </TabsTrigger>
                   <TabsTrigger value="json" disabled={fieldLoading || fieldSaving}>
                     高级 JSON

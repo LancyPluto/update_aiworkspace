@@ -39,7 +39,7 @@ export function FieldSchemaEditor({ fields, onChange, disabled }: FieldSchemaEdi
         merged.options = []
       }
       return merged
-    })
+    }).map((field, i) => (patch.isCore === true && i !== index ? { ...field, isCore: false } : field))
     onChange(next)
   }
 
@@ -159,8 +159,21 @@ export function FieldSchemaEditor({ fields, onChange, disabled }: FieldSchemaEdi
                     />
                     <Label className="text-sm">必填</Label>
                   </div>
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      checked={field.isCore}
+                      disabled={disabled}
+                      onCheckedChange={(checked) => updateField(index, { isCore: checked })}
+                    />
+                    <Label className="text-sm">核心字段</Label>
+                  </div>
                 </div>
               </div>
+              {field.isCore ? (
+                <p className="rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-primary">
+                  核心字段会替代用户端底部主输入框；同一个工具只能选择一个，适合 prompt / 视频描述 / 生成需求。
+                </p>
+              ) : null}
 
               <div className="space-y-1.5">
                 <Label>占位提示 placeholder</Label>

@@ -12,6 +12,7 @@ public record ExecutionModelConfigResponse(
         String modelName,
         String baseUrl,
         String apiKey,
+        String extraAuthJson,
         String minimaxGroupId,
         Integer timeoutSeconds,
         List<String> capabilities
@@ -28,6 +29,7 @@ public record ExecutionModelConfigResponse(
                 config.getModelName(),
                 config.getBaseUrl(),
                 config.getApiKey(),
+                config.getExtraAuthJson(),
                 config.getMinimaxGroupId(),
                 config.getTimeoutSeconds(),
                 capabilities == null ? List.of() : capabilities

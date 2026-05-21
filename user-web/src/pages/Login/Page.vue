@@ -1,621 +1,1104 @@
-<script setup lang="ts">
-import { computed, onBeforeUnmount, reactive, ref } from "vue"
-import { RouterLink, useRoute, useRouter } from "vue-router"
-import { Boxes, KeyRound, Loader2, MessageSquareText, ShieldCheck, UserPlus, Zap } from "lucide-vue-next"
-import { ApiBusinessError, sendSmsCode } from "@/api"
-import type { SmsCodeScene } from "@/api/types"
-import { useAuthStore } from "@/store/authStore"
-
-const router = useRouter()
-const route = useRoute()
-const auth = useAuthStore()
-
-type Mode = "smsLogin" | "passwordLogin" | "register"
-
-const mode = ref<Mode>("smsLogin")
-const smsForm = reactive({
-  phone: "",
-  code: "",
-  nickname: "",
-})
-const passwordForm = reactive({
-  account: "user1",
-  password: "123456",
-})
-
-const errorMsg = ref<string | null>(null)
-const tipMsg = ref<string | null>(null)
-const submitting = ref(false)
-const sendingCode = ref(false)
-const countdown = ref(0)
-let countdownTimer: number | null = null
-
-const title = computed(() => {
-  if (mode.value === "passwordLogin") return "账号密码登录"
-  return mode.value === "register" ? "手机号注册" : "手机号登录"
-})
-
-const subtitle = computed(() => {
-  if (mode.value === "passwordLogin") return "使用账号或手机号和密码登录"
-  return mode.value === "register" ? "验证手机号后自动创建账号并登录" : "输入短信验证码，安全进入工作台"
-})
-
-const scene = computed<SmsCodeScene>(() => (mode.value === "register" ? "REGISTER" : "LOGIN"))
-
-function switchMode(nextMode: Mode) {
-  mode.value = nextMode
-  errorMsg.value = null
-  tipMsg.value = null
-  smsForm.code = ""
-}
-
-function safeInternalRedirect(redirect: string | null): string | { name: "ToolList" } {
-  if (!redirect || !redirect.startsWith("/") || redirect.startsWith("//")) {
-    return { name: "ToolList" }
-  }
-  return redirect
-}
-
-async function handleSendCode() {
-  const phone = normalizePhone()
-  if (!phone) return
-  errorMsg.value = null
-  tipMsg.value = null
-  sendingCode.value = true
-  try {
-    const res = await sendSmsCode({ phone, scene: scene.value })
-    tipMsg.value = res.debugCode ? `开发验证码：${res.debugCode}` : "验证码已发送，请查看手机短信"
-    startCountdown(res.cooldownSeconds || 60)
-  } catch (e) {
-    errorMsg.value = resolveError(e, "验证码发送失败，请稍后重试")
-  } finally {
-    sendingCode.value = false
-  }
-}
-
-async function handleSubmit() {
-  if (mode.value === "passwordLogin") {
-    await handlePasswordLogin()
-  } else {
-    await handleSmsAuth()
-  }
-}
-
-async function handlePasswordLogin() {
-  const account = passwordForm.account.trim()
-  if (!account || !passwordForm.password) {
-    errorMsg.value = "请输入账号和密码"
-    return
-  }
-  await runAuthAction(async () => {
-    await auth.login({ account, password: passwordForm.password })
-  }, "登录失败，请稍后重试")
-}
-
-async function handleSmsAuth() {
-  const phone = normalizePhone()
-  if (!phone) return
-  const code = smsForm.code.trim()
-  if (!/^\d{6}$/.test(code)) {
-    errorMsg.value = "请输入 6 位短信验证码"
-    return
-  }
-
-  await runAuthAction(async () => {
-    if (mode.value === "register") {
-      await auth.smsRegister({
-        phone,
-        code,
-        nickname: smsForm.nickname.trim() || undefined,
-      })
-    } else {
-      await auth.smsLogin({ phone, code })
-    }
-  }, mode.value === "register" ? "注册失败，请稍后重试" : "登录失败，请稍后重试")
-}
-
-async function runAuthAction(action: () => Promise<void>, fallback: string) {
-  errorMsg.value = null
-  submitting.value = true
-  try {
-    await action()
-    const redirect = typeof route.query.redirect === "string" ? route.query.redirect : null
-    router.push(safeInternalRedirect(redirect))
-  } catch (e) {
-    errorMsg.value = resolveError(e, fallback)
-  } finally {
-    submitting.value = false
-  }
-}
-
-function normalizePhone() {
-  const phone = smsForm.phone.trim()
-  if (!/^1\d{10}$/.test(phone)) {
-    errorMsg.value = "请输入正确的 11 位手机号"
-    return null
-  }
-  return phone
-}
-
-function resolveError(error: unknown, fallback: string) {
-  if (error instanceof ApiBusinessError) return error.message
-  return (error as Error).message || fallback
-}
-
-function startCountdown(seconds: number) {
-  countdown.value = seconds
-  if (countdownTimer !== null) {
-    window.clearInterval(countdownTimer)
-  }
-  countdownTimer = window.setInterval(() => {
-    countdown.value -= 1
-    if (countdown.value <= 0 && countdownTimer !== null) {
-      window.clearInterval(countdownTimer)
-      countdownTimer = null
-    }
-  }, 1000)
-}
-
-onBeforeUnmount(() => {
-  if (countdownTimer !== null) {
-    window.clearInterval(countdownTimer)
-  }
-})
-</script>
-
 <template>
-  <div class="login-layout">
-    <aside class="hero-side">
-      <div class="brand">
-        <img src="/logo.svg" alt="AI Tool Market" class="brand-logo" />
-        <span class="brand-name">AI Tool Market</span>
+  <div class="page-root">
+  <!-- 动态光圈 -->
+  <div class="orb orb-top-left" :class="{ expand: orbExpand }"></div>
+  <div class="orb orb-bottom-right" :class="{ expand: orbExpand }"></div>
+  
+  <!-- 鼠标跟随光晕 -->
+  <div class="mouse-glow" ref="mouseGlow"></div>
+  
+  <canvas id="cursor-trail"></canvas>
+
+  <div class="container">
+    <!-- 品牌区（开屏动画） -->
+    <div class="brand animate-item" :class="{ show: brandVisible }">
+      <div class="logo">
+        <div class="wave-logo">
+          <img src="/logo.svg" alt="logo" "/>
+        </div>
+        <span class="brand-text">AI Tool Market</span>
+      </div>
+    </div>
+
+    <!-- 主标题容器（打字机效果） -->
+    <div class="hero-title" ref="heroTitleRef" :style="{ visibility: titleVisible ? 'visible' : 'hidden', opacity: titleVisible ? 1 : 0 }">
+      <div class="hero-title-line" ref="line1El"></div>
+      <div class="hero-title-line" ref="line2El"></div>
+    </div>
+
+    <!-- 副标题（开屏动画） -->
+    <div class="hero-sub animate-item" :class="{ show: subVisible }">
+      统一管理工具、任务、算力与素材，让团队更快完成内容生产和知识沉淀。
+    </div>
+
+    <!-- 三个基础按钮（开屏动画） -->
+    <div class="button-group animate-item" :class="{ show: buttonsVisible }">
+      <button class="btn"><LayoutGrid class="btn-icon" /> 工具市场</button>
+      <button class="btn"><Shield class="btn-icon" /> 安全会话</button>
+      <button class="btn"><Zap class="btn-icon" /> 即时创作</button>
+    </div>
+
+    <!-- 立即使用按钮单独一行居中 -->
+    <div class="cta-wrapper">
+      <div class="button-glow-ring"></div>
+      <div class="button-glow-ring second"></div>
+      <div class="button-glow-ring third"></div>
+      <button class="btn cta-btn" @click="startExpand"><Rocket class="btn-icon" /> 立即使用</button>
+    </div>
+  </div>
+
+
+
+  <!-- 登录弹窗 -->
+  <div v-if="loginModalVisible" class="login-modal" @click.self="loginModalVisible = false">
+    <div class="login-container">
+      <div class="login-header">
+        <h2 class="login-title">{{ loginTitles[currentMode].title }}</h2>
+        <p class="login-subtitle">{{ loginTitles[currentMode].subtitle }}</p>
       </div>
 
-      <div class="hero-content">
-        <h1 class="hero-title">
-          企业级 AI 工具中台
-          <br />
-          让每位成员都有专属 AI 助手
-        </h1>
-        <p class="hero-desc">
-          统一管理工具、任务、算力与素材，让团队更快完成内容生产和知识沉淀。
-        </p>
-        <div class="stats-grid">
-          <div class="stat-item">
-            <Boxes class="stat-icon" />工具市场
-          </div>
-          <div class="stat-item">
-            <ShieldCheck class="stat-icon" />安全会话
-          </div>
-          <div class="stat-item">
-            <Zap class="stat-icon" />即时创作
-          </div>
-        </div>
+      <div class="mode-tabs">
+        <button type="button" :class="{ active: currentMode === 'smsLogin' }" @click="switchMode('smsLogin')">
+          <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+          </svg>
+          短信登录
+        </button>
+        <button type="button" :class="{ active: currentMode === 'passwordLogin' }" @click="switchMode('passwordLogin')">
+          <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+          </svg>
+          密码登录
+        </button>
+        <button type="button" :class="{ active: currentMode === 'register' }" @click="switchMode('register')">
+          <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path>
+            <circle cx="9" cy="7" r="4"></circle>
+            <path d="M22 21v-2a4 4 0 0 0-3-3.87"></path>
+            <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+          </svg>
+          注册
+        </button>
       </div>
 
-      <div class="footer-copyright">© 2026 智效科技</div>
-    </aside>
-
-    <main class="login-main">
-      <div class="login-container">
-        <div class="mobile-brand">
-          <img src="/logo.svg" alt="AI Tool Market" class="brand-logo" />
-          <span class="brand-name">AI Tool Market</span>
+      <form class="login-card" @submit.prevent="handleSubmit">
+        <!-- 密码登录表单 -->
+        <div v-if="currentMode === 'passwordLogin'">
+          <div class="input-group">
+            <label class="input-label">账号或手机号</label>
+            <input type="text" class="input-field" v-model="account" placeholder="请输入账号或手机号" autocomplete="username" />
+          </div>
+          <div class="input-group">
+            <label class="input-label">登录密码</label>
+            <input type="password" class="input-field" v-model="password" placeholder="请输入密码" autocomplete="current-password" />
+          </div>
         </div>
 
-        <div class="login-header">
-          <h2 class="login-title">{{ title }}</h2>
-          <p class="login-subtitle">{{ subtitle }}</p>
+        <!-- 短信登录/注册表单 -->
+        <div v-else>
+          <div class="input-group">
+            <label class="input-label">手机号</label>
+            <input type="tel" class="input-field" v-model="phone" placeholder="请输入 11 位手机号" autocomplete="tel" />
+          </div>
+          <div class="input-group" v-if="currentMode === 'register'">
+            <label class="input-label">昵称</label>
+            <input type="text" class="input-field" v-model="nickname" placeholder="可选" autocomplete="nickname" />
+          </div>
+          <div class="input-group">
+            <label class="input-label">短信验证码</label>
+            <div class="code-row">
+              <input type="text" class="input-field" v-model="smsCode" placeholder="6 位验证码" maxlength="6" />
+              <button type="button" class="code-btn" :disabled="codeSending" @click="handleSendCode">{{ codeBtnText }}</button>
+            </div>
+          </div>
         </div>
 
-        <div class="mode-tabs" role="tablist" aria-label="认证方式">
-          <button type="button" :class="{ active: mode === 'smsLogin' }" @click="switchMode('smsLogin')">
-            <MessageSquareText class="tab-icon" />
-            短信登录
-          </button>
-          <button type="button" :class="{ active: mode === 'passwordLogin' }" @click="switchMode('passwordLogin')">
-            <KeyRound class="tab-icon" />
-            密码登录
-          </button>
-          <button type="button" :class="{ active: mode === 'register' }" @click="switchMode('register')">
-            <UserPlus class="tab-icon" />
-            注册
-          </button>
-        </div>
+        <p v-if="tipMsg" class="tip-message">{{ tipMsg }}</p>
+        <p v-if="errorMsg" class="error-message">{{ errorMsg }}</p>
 
-        <form class="login-card" @submit.prevent="handleSubmit">
-          <template v-if="mode === 'passwordLogin'">
-            <label class="input-group">
-              <span class="input-label">账号或手机号</span>
-              <input
-                v-model="passwordForm.account"
-                type="text"
-                class="input-field"
-                placeholder="请输入账号或手机号"
-                autocomplete="username"
-              />
-            </label>
+        <button type="submit" class="login-btn" :disabled="submitting">
+          {{ currentMode === 'register' ? '注册并登录' : '登录工作台' }}
+        </button>
+      </form>
 
-            <label class="input-group">
-              <span class="input-label">登录密码</span>
-              <input
-                v-model="passwordForm.password"
-                type="password"
-                class="input-field"
-                placeholder="请输入密码"
-                autocomplete="current-password"
-              />
-            </label>
-          </template>
-
-          <template v-else>
-            <label class="input-group">
-              <span class="input-label">手机号</span>
-              <input
-                v-model="smsForm.phone"
-                type="tel"
-                class="input-field"
-                placeholder="请输入 11 位手机号"
-                autocomplete="tel"
-                inputmode="numeric"
-              />
-            </label>
-
-            <label v-if="mode === 'register'" class="input-group">
-              <span class="input-label">昵称</span>
-              <input
-                v-model="smsForm.nickname"
-                type="text"
-                class="input-field"
-                placeholder="可选"
-                autocomplete="nickname"
-              />
-            </label>
-
-            <label class="input-group">
-              <span class="input-label">短信验证码</span>
-              <div class="code-row">
-                <input
-                  v-model="smsForm.code"
-                  type="text"
-                  class="input-field"
-                  placeholder="6 位验证码"
-                  autocomplete="one-time-code"
-                  inputmode="numeric"
-                  maxlength="6"
-                />
-                <button type="button" class="code-btn" :disabled="sendingCode || countdown > 0" @click="handleSendCode">
-                  <Loader2 v-if="sendingCode" class="spin-icon" />
-                  <span v-else>{{ countdown > 0 ? `${countdown}s` : "获取验证码" }}</span>
-                </button>
-              </div>
-            </label>
-          </template>
-
-          <p v-if="tipMsg" class="tip-message">{{ tipMsg }}</p>
-          <p v-if="errorMsg" class="error-message">{{ errorMsg }}</p>
-
-          <button type="submit" class="login-btn" :disabled="submitting">
-            <Loader2 v-if="submitting" class="spin-icon" />
-            {{ submitting ? "处理中..." : mode === "register" ? "注册并登录" : "登录工作台" }}
-          </button>
-        </form>
-
-        <p class="footer-link">
-          <RouterLink :to="{ name: 'ToolList' }" class="toolstore-link">
-            进入 AI 工具市场
-          </RouterLink>
-        </p>
-      </div>
-    </main>
+      <p class="footer-link">
+        <a href="#" @click.prevent="toolstoreLink">进入 AI 工具市场</a>
+      </p>
+    </div>
+  </div>
   </div>
 </template>
 
-<style scoped>
-.login-layout {
-  min-height: 100vh;
-  display: grid;
-  background: var(--background);
-}
+<script setup>
+  import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue';
+  import { useRoute, useRouter } from 'vue-router';
+  import { LayoutGrid, Rocket, Shield, Zap } from 'lucide-vue-next';
+  import { sendSmsCode } from '@/api';
+  import { useAuthStore } from '@/store/authStore';
 
-@media (min-width: 1024px) {
-  .login-layout {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  // ================= 鼠标跟随效果 =================
+  const mouseGlow = ref(null);
+  function handleMouseMove(e) {
+    if (mouseGlow.value) {
+      mouseGlow.value.style.left = e.clientX + 'px';
+      mouseGlow.value.style.top = e.clientY + 'px';
+    }
   }
-}
 
-.hero-side {
-  display: none;
-  flex-direction: column;
-  justify-content: space-between;
-  padding: 3rem;
-  border-right: 1px solid var(--border);
-  background: color-mix(in srgb, var(--card) 92%, var(--primary) 8%);
-}
+  const router = useRouter();
+  const route = useRoute();
+  const auth = useAuthStore();
 
-@media (min-width: 1024px) {
-  .hero-side {
-    display: flex;
+  // ================= 开屏动画控制 =================
+  const brandVisible = ref(false);
+  const subVisible = ref(false);
+  const buttonsVisible = ref(false);
+  const titleVisible = ref(false);
+  const line1El = ref(null);
+  const line2El = ref(null);
+  const heroTitleRef = ref(null);
+
+  const fullLine1 = '企业级 AI 工具市场';
+  const fullLine2 = '让每位成员都有专属 AI 助手';
+
+  // 打字机效果
+  function typeWriter(element, text, speed, callback) {
+    let i = 0;
+    element.innerHTML = '';
+    function addChar() {
+      if (i < text.length) {
+        const char = text[i];
+        const span = document.createElement('span');
+        span.textContent = char;
+        span.style.display = 'inline-block';
+        element.appendChild(span);
+        i++;
+        setTimeout(addChar, speed);
+      } else {
+        callback && callback();
+      }
+    }
+    addChar();
   }
+
+  // 拆分标题为独立字符（用于跳动效果）
+  function splitTitleToChars() {
+    const lines = [line1El.value, line2El.value];
+    lines.forEach(line => {
+      if (!line) return;
+      const text = line.innerText;
+      if (!text) return;
+      const chars = text.split('');
+      line.innerHTML = '';
+      chars.forEach(ch => {
+        const span = document.createElement('span');
+        span.className = 'char';
+        if (ch === ' ') {
+          span.innerHTML = '&nbsp;';
+          span.style.opacity = '0.4';
+        } else {
+          span.textContent = ch;
+        }
+        line.appendChild(span);
+      });
+    });
+    bindCharEvents();
+  }
+
+  // 字符跳动事件（防抖）
+  let debounceMap = new Map();
+  const DELAY = 50;
+  function bounceChar(span) {
+    span.classList.remove('char-bounce');
+    void span.offsetWidth;
+    span.classList.add('char-bounce');
+    span.addEventListener('animationend', () => {
+      span.classList.remove('char-bounce');
+    }, { once: true });
+  }
+  function onEnter(span) {
+    if (debounceMap.has(span)) clearTimeout(debounceMap.get(span));
+    const timer = setTimeout(() => {
+      bounceChar(span);
+      debounceMap.delete(span);
+    }, DELAY);
+    debounceMap.set(span, timer);
+  }
+  function onLeave(span) {
+    if (debounceMap.has(span)) {
+      clearTimeout(debounceMap.get(span));
+      debounceMap.delete(span);
+    }
+  }
+  function bindCharEvents() {
+    document.querySelectorAll('.char').forEach(c => {
+      c.removeEventListener('mouseenter', () => onEnter(c));
+      c.removeEventListener('mouseleave', () => onLeave(c));
+      c.addEventListener('mouseenter', () => onEnter(c));
+      c.addEventListener('mouseleave', () => onLeave(c));
+    });
+  }
+
+  function startEntranceAnimation() {
+    setTimeout(() => { brandVisible.value = true; }, 100);
+    setTimeout(() => { subVisible.value = true; }, 300);
+    setTimeout(() => { buttonsVisible.value = true; }, 500);
+    setTimeout(async () => {
+      titleVisible.value = true;
+      await nextTick();
+      typeWriter(line1El.value, fullLine1, 50, () => {
+        typeWriter(line2El.value, fullLine2, 50, () => {
+          splitTitleToChars();
+        });
+      });
+    }, 800);
+  }
+
+  // ================= 光标跟随残影效果 =================
+  let trailCanvas = null;
+  let ctx = null;
+  let trailWidth = 0, trailHeight = 0;
+  let particles = [];
+  let trailAnimationId = null;
+  function resizeTrailCanvas() {
+    if (!trailCanvas) return;
+    trailWidth = window.innerWidth;
+    trailHeight = window.innerHeight;
+    trailCanvas.width = trailWidth;
+    trailCanvas.height = trailHeight;
+  }
+  function addTrailPoint(x, y) {
+    particles.push({ x, y, life: 1.0, size: 12 });
+    if (particles.length > 35) particles.shift();
+  }
+  function updateTrail() {
+    for (let i = 0; i < particles.length; i++) {
+      particles[i].life -= 0.035;
+      if (particles[i].life <= 0) {
+        particles.splice(i, 1);
+        i--;
+      }
+    }
+  }
+  function drawTrail() {
+    if (!ctx) return;
+    ctx.clearRect(0, 0, trailWidth, trailHeight);
+    for (let p of particles) {
+      const alpha = p.life * 0.5;
+      const size = p.size * p.life;
+      ctx.beginPath();
+      ctx.fillStyle = `rgba(150, 190, 225, ${alpha * 0.6})`;
+      ctx.arc(p.x, p.y, size * 0.6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.fillStyle = `rgba(120, 170, 215, ${alpha * 0.3})`;
+      ctx.arc(p.x, p.y, size * 0.9, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  function animateTrail() {
+    updateTrail();
+    drawTrail();
+    trailAnimationId = requestAnimationFrame(animateTrail);
+  }
+  function initTrail() {
+    trailCanvas = document.getElementById('cursor-trail');
+    if (!trailCanvas) return;
+    ctx = trailCanvas.getContext('2d');
+    resizeTrailCanvas();
+    animateTrail();
+    window.addEventListener('mousemove', (e) => addTrailPoint(e.clientX, e.clientY));
+    window.addEventListener('resize', () => resizeTrailCanvas());
+  }
+
+  // ================= 光圈扩大 + 登录弹窗 =================
+  const orbExpand = ref(false);
+  const loginModalVisible = ref(false);
+  let expandTimeout = null;
+
+  function resetOrbs() {
+    const orbTop = document.querySelector('.orb-top-left');
+    const orbBottom = document.querySelector('.orb-bottom-right');
+    if (orbTop) orbTop.classList.remove('expand');
+    if (orbBottom) orbBottom.classList.remove('expand');
+  }
+  function startExpand() {
+    if (expandTimeout) return;
+    orbExpand.value = true;
+    expandTimeout = setTimeout(() => {
+      loginModalVisible.value = true;
+      setTimeout(() => {
+        orbExpand.value = false;
+        expandTimeout = null;
+      }, 300);
+    }, 600);
+  }
+
+  // ================= 登录弹窗逻辑 =================
+  const currentMode = ref('passwordLogin');
+  const loginTitles = {
+    smsLogin: { title: '手机号登录', subtitle: '输入短信验证码，安全进入工作台' },
+    passwordLogin: { title: '账号密码登录', subtitle: '使用账号或手机号和密码登录' },
+    register: { title: '手机号注册', subtitle: '验证手机号后自动创建账号并登录' }
+  };
+  const account = ref('');
+  const password = ref('');
+  const phone = ref('');
+  const nickname = ref('');
+  const smsCode = ref('');
+  const tipMsg = ref('');
+  const errorMsg = ref('');
+  const submitting = ref(false);
+  const codeSending = ref(false);
+  const codeCountdown = ref(0);
+  let countdownTimer = null;
+
+  const codeBtnText = computed(() =>
+    codeCountdown.value > 0 ? `${codeCountdown.value}s 后重发` : '获取验证码'
+  );
+
+  function clearMessages() {
+    tipMsg.value = '';
+    errorMsg.value = '';
+  }
+  function switchMode(mode) {
+    currentMode.value = mode;
+    clearMessages();
+  }
+  function showTip(msg) {
+    tipMsg.value = msg;
+    errorMsg.value = '';
+  }
+  function showError(msg) {
+    errorMsg.value = msg;
+    tipMsg.value = '';
+  }
+  async function handleSendCode() {
+    const phoneNum = phone.value.trim();
+    if (!/^1\d{10}$/.test(phoneNum)) {
+      showError('请输入正确的 11 位手机号');
+      return;
+    }
+    clearMessages();
+    codeSending.value = true;
+    try {
+      const scene = currentMode.value === 'register' ? 'REGISTER' : 'LOGIN';
+      const res = await sendSmsCode({ phone: phoneNum, scene });
+      const hint = res.debugCode ? `验证码已发送（调试码：${res.debugCode}）` : '验证码已发送';
+      showTip(hint);
+      codeCountdown.value = res.cooldownSeconds || 60;
+      if (countdownTimer) clearInterval(countdownTimer);
+      countdownTimer = setInterval(() => {
+        if (codeCountdown.value <= 0) {
+          clearInterval(countdownTimer);
+          countdownTimer = null;
+          codeSending.value = false;
+        } else {
+          codeCountdown.value--;
+        }
+      }, 1000);
+    } catch (e) {
+      showError(e instanceof Error ? e.message : '验证码发送失败');
+      codeSending.value = false;
+    }
+  }
+
+  function resetLoginForm() {
+    account.value = '';
+    password.value = '';
+    phone.value = '';
+    smsCode.value = '';
+    nickname.value = '';
+  }
+
+  function resolvePostLoginRedirect() {
+    const raw = route.query.redirect;
+    if (typeof raw !== 'string' || !raw.startsWith('/') || raw === '/login' || raw.startsWith('/login?')) {
+      return '/agent';
+    }
+    return raw;
+  }
+
+  async function enterAfterLogin() {
+    if (!auth.isLoggedIn) {
+      showError('登录未生效，请检查账号密码或后端服务');
+      return;
+    }
+    loginModalVisible.value = false;
+    resetLoginForm();
+    await router.replace(resolvePostLoginRedirect());
+  }
+
+  async function handleSubmit() {
+    if (submitting.value) return;
+    clearMessages();
+    submitting.value = true;
+    try {
+      if (currentMode.value === 'passwordLogin') {
+        if (!account.value.trim() || !password.value) throw new Error('请输入账号和密码');
+        await auth.login({ account: account.value.trim(), password: password.value });
+      } else {
+        const phoneNum = phone.value.trim();
+        if (!/^1\d{10}$/.test(phoneNum)) throw new Error('请输入正确的 11 位手机号');
+        if (!/^\d{6}$/.test(smsCode.value)) throw new Error('请输入 6 位短信验证码');
+        const body = { phone: phoneNum, code: smsCode.value.trim() };
+        if (currentMode.value === 'register') {
+          const nick = nickname.value.trim();
+          if (nick) body.nickname = nick;
+          await auth.smsRegister(body);
+        } else {
+          await auth.smsLogin(body);
+        }
+      }
+      await enterAfterLogin();
+    } catch (err) {
+      showError(err instanceof Error ? err.message : '登录失败');
+    } finally {
+      submitting.value = false;
+    }
+  }
+
+  function toolstoreLink() {
+    loginModalVisible.value = false;
+    router.push('/marketplace');
+  }
+
+  // ================= 生命周期 =================
+  onMounted(() => {
+    if (auth.isLoggedIn) {
+      router.replace(resolvePostLoginRedirect());
+      return;
+    }
+    startEntranceAnimation();
+    initTrail();
+    window.addEventListener('mousemove', handleMouseMove);
+  });
+  onBeforeUnmount(() => {
+    if (trailAnimationId) cancelAnimationFrame(trailAnimationId);
+    if (countdownTimer) clearInterval(countdownTimer);
+    if (expandTimeout) clearTimeout(expandTimeout);
+    window.removeEventListener('mousemove', handleMouseMove);
+  });
+</script>
+
+<style>
+/* 登录页样式限定在 .page-root，避免跳转后卸载全局 body/* 规则 */
+.page-root,
+.page-root * {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  user-select: none;
 }
 
-.brand,
-.mobile-brand {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.brand-logo {
-  height: 2.25rem;
-  width: 2.25rem;
-  border-radius: 0.5rem;
+.wave-logo {
+  width: 44px;
+  height: 44px;
   object-fit: contain;
 }
 
-.brand-name {
-  font-size: 1.125rem;
-  font-weight: 600;
-}
 
-.hero-content {
+.page-root {
+  min-height: 100vh;
+  width: 100%;
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
-  margin: 2rem 0;
-}
-
-.hero-title {
-  font-size: 2.25rem;
-  font-weight: 600;
-  line-height: 1.2;
-}
-
-.hero-desc {
-  max-width: 28rem;
-  font-size: 0.875rem;
-  color: var(--muted-foreground);
-  line-height: 1.625;
-}
-
-.stats-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 1rem;
-  max-width: 28rem;
-  padding-top: 1rem;
-}
-
-.stat-item {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  border: 1px solid var(--border);
-  border-radius: 0.5rem;
-  background: var(--card);
-  padding: 0.75rem;
-  font-size: 0.75rem;
-}
-
-.stat-icon,
-.tab-icon,
-.spin-icon {
-  height: 1rem;
-  width: 1rem;
-}
-
-.stat-icon {
-  color: var(--primary);
-}
-
-.footer-copyright {
-  font-size: 0.75rem;
-  color: var(--muted-foreground);
-}
-
-.login-main {
-  display: flex;
   align-items: center;
   justify-content: center;
-  padding: 1.5rem;
+  position: relative;
+  font-family: "Inter", "Microsoft YaHei", "PingFang SC", "Segoe UI", system-ui, sans-serif;
+  background: radial-gradient(circle at 20% 30%, #e9f0fc, #f4f8ff);
+  overflow: hidden;
 }
 
-@media (min-width: 640px) {
-  .login-main {
-    padding: 3rem;
+/* ========= 动态光圈 (左上 + 右下) ========= */
+.orb {
+  position: fixed;
+  border-radius: 50%;
+  filter: blur(80px);
+  opacity: 0.5;
+  pointer-events: none;
+  z-index: 0;
+  transition: all 0.6s cubic-bezier(0.2, 1.2, 0.4, 1);
+  will-change: transform, width, height, top, left, bottom, right;
+  animation: breathe 6s ease-in-out infinite alternate;
+}
+.orb-top-left {
+  top: -350px;
+  left: -350px;
+  width: 900px;
+  height: 900px;
+  background: radial-gradient(circle, rgba(100, 160, 230, 0.55), rgba(150, 200, 255, 0.3), rgba(200, 220, 255, 0));
+  animation-delay: 0s;
+}
+.orb-bottom-right {
+  bottom: -320px;
+  right: -320px;
+  width: 950px;
+  height: 950px;
+  background: radial-gradient(circle, rgba(80, 140, 220, 0.5), rgba(120, 180, 240, 0.25), rgba(180, 210, 255, 0));
+  animation-delay: -3s;
+}
+@keyframes breathe {
+  0% { transform: scale(0.9); opacity: 0.5; }
+  50% { transform: scale(1.15); opacity: 0.85; }
+  100% { transform: scale(0.9); opacity: 0.5; }
+}
+
+/* ========= 鼠标跟随光晕效果 ========= */
+.mouse-glow {
+  position: fixed;
+  width: 200px;
+  height: 200px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(42, 110, 255, 0.15) 0%, rgba(42, 110, 255, 0) 70%);
+  pointer-events: none;
+  z-index: 0;
+  transform: translate(-50%, -50%);
+  transition: opacity 0.3s ease;
+}
+
+/* ========= fade-up 入场（原生 @keyframes，保留 .animate-item / .show class） ========= */
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 
+/* ========= 按钮波纹效果 ========= */
+.btn {
+  position: relative;
+  overflow: hidden;
+}
+.btn::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  transition: width 0.6s ease, height 0.6s ease;
+}
+.btn:active::after {
+  width: 300%;
+  height: 300%;
+}
+
+/* ========= 按钮悬浮增强效果 ========= */
+.btn {
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+.btn:hover {
+  transform: translateY(-3px) scale(1.02);
+  box-shadow: 0 12px 24px rgba(42, 110, 255, 0.15);
+}
+
+/* ========= 登录弹窗入场动画 ========= */
+.login-modal {
+  animation: fadeIn 0.3s ease-out;
+}
+.login-container {
+  animation: slideUp 0.4s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(30px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* ========= 输入框聚焦动画 ========= */
+.input-field {
+  transition: all 0.3s ease;
+}
+.input-field:focus {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(42, 110, 255, 0.2);
+}
+
+/* ========= 标签页切换动画 ========= */
+.mode-tabs button {
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+.mode-tabs button.active {
+  transform: scale(1.05);
+}
+
+/* ========= 波浪logo动画 ========= */
+.wave-logo {
+  animation: waveFloat 4s ease-in-out infinite;
+}
+@keyframes waveFloat {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-5px); }
+}
+
+.orb-top-left.expand {
+  top: 50% !important;
+  left: 50% !important;
+  transform: translate(-50%, -50%) scale(1) !important;
+  width: 80vw;
+  height: 80vw;
+  max-width: 600px;
+  max-height: 600px;
+  animation: none !important;
+}
+.orb-bottom-right.expand {
+  bottom: auto !important;
+  right: auto !important;
+  top: 50% !important;
+  left: 50% !important;
+  transform: translate(-50%, -50%) scale(1) !important;
+  width: 80vw;
+  height: 80vw;
+  max-width: 600px;
+  max-height: 600px;
+  animation: none !important;
+}
+
+/* 残影画布层 */
+#cursor-trail {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 9999;
+}
+
+.container {
+  width: 100%;
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 2rem 1rem;
+  text-align: center;
+  position: relative;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.animate-item {
+  opacity: 0;
+  transform: translateY(20px);
+}
+.animate-item.show {
+  animation: fade-up 0.6s ease forwards;
+}
+
+/* 品牌区 */
+.brand {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 2rem;
+  flex-wrap: wrap;
+}
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.wave-logo svg {
+  width: 44px;
+  height: 44px;
+  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.02));
+}
+.brand-text {
+  font-size: 1.6rem;
+  font-weight: 700;
+  background: linear-gradient(135deg, #1a2a4a, #2c4a6a);
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* 主标题容器 - 打字机效果时显示，初始透明 */
+.hero-title {
+  font-size: clamp(2.2rem, 6vw, 3.8rem);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  margin-bottom: 1rem;
+  width: 100%;
+  text-align: center;
+  transition: opacity 0.35s ease;
+  background: linear-gradient(135deg, #1e3a5f 0%, #4a90a4 50%, #7ab8c9 100%);
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  text-shadow: 
+    0 1px 0 #163050,
+    0 2px 0 #123048,
+    0 3px 0 #0e2840,
+    0 4px 0 #0a2038,
+    0 5px 0 #061830,
+    0 6px 10px rgba(30, 58, 95, 0.3),
+    0 10px 20px rgba(74, 144, 164, 0.2),
+    0 15px 30px rgba(122, 184, 201, 0.15);
+}
+.hero-title-line {
+  display: block;
+  white-space: pre-wrap;
+}
+/* 打字机光标 */
+.typewriter-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1.2em;
+  background-color: #13334b;
+  margin-left: 2px;
+  animation: blink 0.8s step-end infinite;
+  vertical-align: middle;
+}
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+/* 副标题、按钮区 */
+.hero-sub {
+  font-size: 1.1rem;
+  color: #4a627a;
+  max-width: 600px;
+  margin: 1rem auto 0;
+  line-height: 1.6;
+}
+.button-group {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 1.5rem;
+  margin-top: 2rem;
+}
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.9rem 2rem;
+  font-size: 1rem;
+  font-weight: 500;
+  color: #1f2e3a;
+  background: #ffffff;
+  border: 1px solid #dce5ef;
+  border-radius: 48px;
+  cursor: pointer;
+  transition: all 0.25s ease;
+}
+.btn-icon {
+  width: 1.2rem;
+  height: 1.2rem;
+  color: #3a7bb5;
+  flex-shrink: 0;
+}
+.btn:hover {
+  border-color: #8bb4d6;
+  background: #fbfeff;
+  transform: translateY(-2px);
+}
+
+/* 立即使用按钮容器 - 单独一行居中 */
+.cta-wrapper {
+  display: flex;
+  justify-content: center;
+  margin-top: 1.5rem;
+  position: relative;
+}
+/* 1. 基础样式：改成横向椭圆/线条 */
+.button-glow-ring {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  border: 1px solid rgba(42, 110, 255, 0.3); /* 降低透明度，更柔和 */
+  animation: ringPulse 2s ease-out infinite;
+  pointer-events: none;
+
+  /* 关键修改：从正圆改成横向拉长的椭圆 */
+  width: 200px;    /* 横向宽度加大 */
+  height: 60px;    /* 纵向高度缩小，变成椭圆/线条感 */
+}
+
+.button-glow-ring.second {
+  animation-delay: 0.6s;
+  width: 300px;    /* 第二层更宽 */
+  height: 80px;
+}
+.button-glow-ring.third {
+  animation-delay: 1.2s;
+  width: 400px;    /* 第三层最宽 */
+  height: 100px;
+}
+
+/* 2. 修改动画，适配椭圆扩散 */
+@keyframes ringPulse {
+  0% {
+    opacity: 0.8;
+    transform: translate(-50%, -50%) scale(0.5);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1.8); /* 扩大倍数，适配椭圆效果 */
+  }
+}
+@keyframes ringPulse {
+  0% { width: 100%; height: 100%; opacity: 0.8; border-width: 2px; }
+  100% { width: 200%; height: 200%; opacity: 0; border-width: 1px; }
+}
+.cta-btn {
+  background: #2a6eff;
+  border: none;
+  color: white;
+  box-shadow: 0 4px 12px rgba(42, 110, 255, 0.3);
+}
+.cta-btn .btn-icon {
+  color: white;
+}
+.cta-btn:hover {
+  background: #1a5ae8;
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(42, 110, 255, 0.4);
+}
+
+/* 登录弹窗 */
+.login-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(8px);
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
 .login-container {
   width: 100%;
   max-width: 28rem;
-  display: flex;
-  flex-direction: column;
-  gap: 1.5rem;
+  margin: 1.5rem;
+  background: white;
+  border-radius: 0.75rem;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  overflow: hidden;
 }
-
-@media (min-width: 1024px) {
-  .mobile-brand {
-    display: none;
-  }
-}
-
 .login-header {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
+  padding: 1.5rem;
+  text-align: center;
 }
-
 .login-title {
   font-size: 1.5rem;
   font-weight: 600;
+  color: #1f2e3a;
+  margin: 0 0 0.5rem 0;
 }
-
 .login-subtitle {
   font-size: 0.875rem;
-  color: var(--muted-foreground);
+  color: #6b7a8c;
+  margin: 0;
 }
-
 .mode-tabs {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(3, 1fr);
   gap: 0.25rem;
-  border: 1px solid var(--border);
-  border-radius: 0.5rem;
   padding: 0.25rem;
-  background: var(--muted);
+  background: #f5f7fa;
+  border-bottom: 1px solid #e8ecef;
 }
-
 .mode-tabs button {
-  display: inline-flex;
-  min-height: 2.5rem;
+  display: flex;
   align-items: center;
   justify-content: center;
   gap: 0.375rem;
+  height: 2.5rem;
   border: none;
   border-radius: 0.375rem;
   background: transparent;
-  color: var(--muted-foreground);
+  color: #6b7a8c;
   font-size: 0.8125rem;
   cursor: pointer;
+  transition: all 0.2s ease;
 }
-
 .mode-tabs button.active {
-  background: var(--background);
-  color: var(--foreground);
+  background: white;
+  color: #1f2e3a;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
 }
-
 .login-card {
-  border-radius: 0.75rem;
-  border: 1px solid var(--border);
-  background: var(--card);
   padding: 1.5rem;
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 }
-
 .input-group {
-  display: block;
+  margin-bottom: 1rem;
 }
-
 .input-label {
   display: block;
   margin-bottom: 0.5rem;
   font-size: 0.875rem;
   font-weight: 500;
+  color: #3a5a7a;
 }
-
 .input-field {
-  height: 2.5rem;
-  min-width: 0;
   width: 100%;
-  border-radius: 0.375rem;
-  border: 1px solid var(--border);
-  background: var(--background);
+  height: 2.5rem;
   padding: 0.5rem 0.75rem;
+  border: 1px solid #dce5ef;
+  border-radius: 0.375rem;
   font-size: 0.875rem;
+  box-sizing: border-box;
+  transition: border-color 0.2s ease;
 }
-
 .input-field:focus {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
+  outline: none;
+  border-color: #4a8cdf;
 }
-
 .code-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 7rem;
+  grid-template-columns: 1fr 7rem;
   gap: 0.5rem;
 }
-
 .code-btn {
-  display: inline-flex;
   height: 2.5rem;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--border);
+  padding: 0 1rem;
+  border: 1px solid #dce5ef;
   border-radius: 0.375rem;
-  background: var(--background);
-  color: var(--foreground);
+  background: white;
+  color: #3a5a7a;
   font-size: 0.875rem;
   cursor: pointer;
+  transition: all 0.2s ease;
 }
-
+.code-btn:hover:not(:disabled) {
+  background: #f5f7fa;
+}
 .code-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }
-
 .tip-message,
 .error-message {
   font-size: 0.8rem;
   padding: 0.5rem;
   border-radius: 0.375rem;
-  overflow-wrap: anywhere;
+  margin: 0.5rem 0;
 }
-
 .tip-message {
-  color: var(--primary);
-  background: color-mix(in srgb, var(--primary) 10%, transparent);
-  border: 1px solid color-mix(in srgb, var(--primary) 30%, transparent);
+  color: #4a8cdf;
+  background: rgba(74, 140, 223, 0.1);
+  border: 1px solid rgba(74, 140, 223, 0.3);
 }
-
 .error-message {
-  color: var(--destructive);
-  background: color-mix(in srgb, var(--destructive) 10%, transparent);
-  border: 1px solid color-mix(in srgb, var(--destructive) 35%, transparent);
+  color: #e54d42;
+  background: rgba(229, 77, 66, 0.1);
+  border: 1px solid rgba(229, 77, 66, 0.35);
 }
-
 .login-btn {
-  display: inline-flex;
-  height: 2.75rem;
   width: 100%;
+  height: 2.75rem;
+  display: flex;
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
+  border: none;
   border-radius: 0.375rem;
-  background: var(--primary);
-  padding: 0 1rem;
+  background: #2a6eff;
+  color: white;
   font-size: 0.875rem;
   font-weight: 500;
-  color: var(--primary-foreground);
-  border: none;
   cursor: pointer;
+  transition: opacity 0.2s ease;
 }
-
-.login-btn:hover {
+.login-btn:hover:not(:disabled) {
   opacity: 0.9;
 }
-
 .login-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }
-
-.spin-icon {
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 .footer-link {
   text-align: center;
+  padding: 1rem 1.5rem 1.5rem;
   font-size: 0.75rem;
-  color: var(--muted-foreground);
+  color: #6b7a8c;
 }
-
-.toolstore-link {
-  color: var(--primary);
+.footer-link a {
+  color: #4a8cdf;
   text-decoration: none;
 }
-
-.toolstore-link:hover {
+.footer-link a:hover {
   text-decoration: underline;
+}
+.spin-icon {
+  animation: spin 1s linear infinite;
+  width: 1rem;
+  height: 1rem;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.tab-icon {
+  width: 1rem;
+  height: 1rem;
+}
+
+/* 字符跳动动画 */
+.char {
+  display: inline-block;
+  cursor: default;
+}
+.char-bounce {
+  animation: bounce 0.7s cubic-bezier(0.2, 1.1, 0.4, 1) forwards;
+}
+@keyframes bounce {
+  0% { transform: translateY(0); filter: drop-shadow(0 2px 3px rgba(0,0,0,0.1)); }
+  30% { transform: translateY(-38px); filter: drop-shadow(0 20px 22px rgba(0,0,0,0.5)) drop-shadow(0 0 12px rgba(0,0,0,0.4)); }
+  70% { transform: translateY(-4px); filter: drop-shadow(0 8px 10px rgba(0,0,0,0.3)); }
+  100% { transform: translateY(0); filter: drop-shadow(0 2px 3px rgba(0,0,0,0.1)); }
+}
+
+.scroll-hint {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(220,235,250,0.85);
+  backdrop-filter: blur(8px);
+  padding: 6px 16px;
+  border-radius: 40px;
+  color: #3a5a7a;
+  font-size: 12px;
+  font-family: monospace;
+  z-index: 100;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+@media (max-width: 700px) {
+  .hero-title { font-size: 1.8rem; }
+  .brand-text { font-size: 1.3rem; }
+  .orb-top-left, .orb-bottom-right { width: 250px; height: 250px; filter: blur(40px); }
 }
 </style>
