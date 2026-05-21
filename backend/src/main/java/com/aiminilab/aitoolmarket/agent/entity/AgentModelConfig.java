@@ -16,6 +16,7 @@ public class AgentModelConfig {
     private String modelName;
     private String baseUrl;
     private String apiKey;
+    private String extraAuthJson;
     private String minimaxGroupId;
     private String consoleUrl;
     private String balanceUrl;
@@ -47,6 +48,8 @@ public class AgentModelConfig {
     public void setBaseUrl(String baseUrl) { this.baseUrl = baseUrl; }
     public String getApiKey() { return apiKey; }
     public void setApiKey(String apiKey) { this.apiKey = apiKey; }
+    public String getExtraAuthJson() { return extraAuthJson; }
+    public void setExtraAuthJson(String extraAuthJson) { this.extraAuthJson = extraAuthJson; }
     public String getMinimaxGroupId() { return minimaxGroupId; }
     public void setMinimaxGroupId(String minimaxGroupId) { this.minimaxGroupId = minimaxGroupId; }
     public String getConsoleUrl() { return consoleUrl; }

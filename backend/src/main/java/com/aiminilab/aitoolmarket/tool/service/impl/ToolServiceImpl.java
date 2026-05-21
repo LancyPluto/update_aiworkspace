@@ -44,6 +44,7 @@ import com.aiminilab.aitoolmarket.tool.dto.ApplyToolTemplateRequest;
 import com.aiminilab.aitoolmarket.tool.service.ToolService;
 import com.aiminilab.aitoolmarket.tool.service.ToolTemplateService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -181,6 +182,7 @@ public class ToolServiceImpl implements ToolService {
     }
 
     @Override
+    @Transactional
     public ToolSummaryResponse createTool(UpsertToolRequest request, Long operatorId) {
         String toolCode = normalizeToolCode(request.toolCode(), request.toolName());
         if (toolMapper.existsByCode(toolCode)) {
@@ -203,6 +205,8 @@ public class ToolServiceImpl implements ToolService {
         AiTool persisted = toolMapper.findById(toolId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在"));
         modelCapabilityService.validateToolModelBinding(persisted);
+        log.info("Admin created AI tool: toolId={}, toolCode={}, toolType={}, modelConfigId={}, operatorId={}",
+                toolId, toolCode, persisted.getToolType(), persisted.getModelConfigId(), operatorId);
         return findToolSummary(toolId);
     }
 
@@ -304,6 +308,7 @@ public class ToolServiceImpl implements ToolService {
     @Override
     public List<ToolFieldResponse> updateFields(Long toolId, UpdateToolFieldsRequest request) {
         ensureToolExists(toolId);
+        validateSingleCoreField(request.fields());
         Long schemaId = toolFieldSchemaMapper.findActiveSchemaId(toolId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具字段配置不存在"));
         toolFieldItemMapper.replaceActiveFields(schemaId, request.fields().stream()
@@ -330,6 +335,7 @@ public class ToolServiceImpl implements ToolService {
         if (schemaId == null) {
             response = createFieldSchema(toolId, createRequest, operatorId);
         } else {
+            validateSingleCoreField(createRequest.fields());
             ToolFieldSchema schema = toolFieldSchemaMapper.selectById(schemaId);
             schema.setSchemaVersion(request.schemaVersion());
             toolFieldSchemaMapper.updateById(schema);
@@ -355,6 +361,7 @@ public class ToolServiceImpl implements ToolService {
     @Override
     public FieldSchemaResponse createFieldSchema(Long toolId, CreateFieldSchemaRequest request, Long operatorId) {
         ensureToolExists(toolId);
+        validateSingleCoreField(request.fields());
         ToolFieldSchema schema = new ToolFieldSchema();
         schema.setToolId(toolId);
         schema.setSchemaVersion(request.schemaVersion());
@@ -687,5 +694,35 @@ public class ToolServiceImpl implements ToolService {
         item.setRequired(request.required() == null || request.required());
         item.setSortOrder(request.sortOrder() == null ? 0 : request.sortOrder());
         return item;
+    }
+
+    private void validateSingleCoreField(List<ToolFieldRequest> fields) {
+        if (fields == null || fields.isEmpty()) {
+            return;
+        }
+        List<String> coreFields = fields.stream()
+                .filter(this::isCoreField)
+                .map(field -> field.fieldName() == null || field.fieldName().isBlank() ? field.fieldKey() : field.fieldName())
+                .toList();
+        if (coreFields.size() > 1) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "核心字段只能选择一个：" + String.join("、", coreFields));
+        }
+    }
+
+    private boolean isCoreField(ToolFieldRequest field) {
+        String raw = field == null ? null : field.optionsJson();
+        if (raw == null || raw.isBlank()) {
+            return false;
+        }
+        try {
+            JsonNode node = objectMapper.readTree(raw);
+            if (node.isTextual()) {
+                node = objectMapper.readTree(node.asText());
+            }
+            return node != null && node.isObject()
+                    && (node.path("core").asBoolean(false) || node.path("isCore").asBoolean(false));
+        } catch (Exception ignored) {
+            return false;
+        }
     }
 }

@@ -28,6 +28,15 @@ export function AdminLayout({ children }: AdminLayoutProps) {
     }
 
     async function verifySession() {
+      const mockDev =
+        process.env.NODE_ENV === "development" &&
+        process.env.NEXT_PUBLIC_AI_TOOL_MOCK !== "0"
+
+      if (mockDev) {
+        if (!cancelled) setChecking(false)
+        return
+      }
+
       const token = getToken()
       if (!token) {
         redirectToLogin()

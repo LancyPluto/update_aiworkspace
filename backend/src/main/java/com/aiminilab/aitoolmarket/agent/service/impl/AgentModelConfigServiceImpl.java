@@ -142,6 +142,13 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         } else {
             config.setApiKey("");
         }
+        if (request.extraAuthJson() != null && !request.extraAuthJson().isBlank()) {
+            config.setExtraAuthJson(request.extraAuthJson().trim());
+        } else if (existing != null) {
+            config.setExtraAuthJson(existing.getExtraAuthJson());
+        } else {
+            config.setExtraAuthJson(null);
+        }
         config.setMinimaxGroupId(blankToNull(request.minimaxGroupId()));
         config.setConsoleUrl(blankToNull(request.consoleUrl()));
         config.setBalanceUrl(blankToNull(request.balanceUrl()));
@@ -234,6 +241,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         fallback.setModelName("mock");
         fallback.setBaseUrl(null);
         fallback.setApiKey("");
+        fallback.setExtraAuthJson(null);
         fallback.setMinimaxGroupId(null);
         fallback.setConsoleUrl(null);
         fallback.setBalanceUrl(null);
@@ -274,6 +282,13 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         if (!Set.of(BILLING_UNIT_TOKEN_PER_M, BILLING_UNIT_PER_CALL).contains(billingUnit)) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "unsupported billing unit");
         }
+        if (request.extraAuthJson() != null && !request.extraAuthJson().isBlank()) {
+            try {
+                new com.fasterxml.jackson.databind.ObjectMapper().readTree(request.extraAuthJson());
+            } catch (com.fasterxml.jackson.core.JsonProcessingException exception) {
+                throw new BusinessException(ErrorCode.PARAM_ERROR, "extraAuthJson must be valid JSON");
+            }
+        }
     }
 
     private String blankToNull(String value) {
@@ -289,7 +304,9 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
     }
 
     private AgentModelConfigRequest mergeSecretFields(AgentModelConfigRequest request, AgentModelConfig existing) {
-        if (existing == null || request.apiKey() != null && !request.apiKey().isBlank()) {
+        boolean hasApiKey = request.apiKey() != null && !request.apiKey().isBlank();
+        boolean hasExtraAuth = request.extraAuthJson() != null && !request.extraAuthJson().isBlank();
+        if (existing == null || hasApiKey && hasExtraAuth) {
             return request;
         }
         return new AgentModelConfigRequest(
@@ -298,7 +315,8 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                 request.provider(),
                 request.modelName(),
                 request.baseUrl(),
-                existing.getApiKey(),
+                hasApiKey ? request.apiKey() : existing.getApiKey(),
+                hasExtraAuth ? request.extraAuthJson() : existing.getExtraAuthJson(),
                 request.minimaxGroupId(),
                 request.consoleUrl(),
                 request.balanceUrl(),

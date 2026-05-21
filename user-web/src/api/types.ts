@@ -158,6 +158,7 @@ export interface ToolField {
   fieldType: "text" | "textarea" | "select" | "number" | "radio" | "checkbox" | "slider" | "image" | "file"
   placeholder?: string | null
   options?: Array<ToolFieldOption | string> | null
+  optionsJson?: string | null
   required: boolean
   sortOrder: number
 }

@@ -48,6 +48,7 @@ export async function testSavedAgentModelConfig() {
     provider: config.provider,
     modelName: config.modelName,
     baseUrl: config.baseUrl || undefined,
+    extraAuthJson: undefined,
     minimaxGroupId: config.minimaxGroupId || undefined,
     timeoutSeconds: config.timeoutSeconds,
     inputTokenPricePer1m: config.inputTokenPricePer1m ?? ((config.inputTokenPricePer1k || 0) * 1000),
