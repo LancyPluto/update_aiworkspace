@@ -43,6 +43,7 @@ import {
   Sparkles,
   Store,
   Trash2,
+  UploadCloud,
   Video,
   type LucideIcon,
 } from "lucide-react"
@@ -57,9 +58,10 @@ import {
   publishTool,
   updateTool,
   updateToolFields,
+  uploadToolCover,
 } from "@/lib/api/tools"
 import { applyToolTemplate, fetchToolTemplates, type ToolTemplateSummary } from "@/lib/api/tool-templates"
-import { FieldSchemaEditor } from "@/components/admin/field-schema-editor"
+import { FieldSchemaEditor, FieldSchemaPreview } from "@/components/admin/field-schema-editor"
 import {
   editableFromToolField,
   parseFieldsJson,
@@ -70,7 +72,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { fetchAgentModelConfigs } from "@/lib/api/agent-model"
 import { fetchModelProviders } from "@/lib/api/model-providers"
-import { ApiError } from "@/lib/api/http"
+import { ApiError, getBaseUrl } from "@/lib/api/http"
 import type { AgentModelConfig, ModelProviderDescriptor, ToolCategory, ToolField, ToolFieldPayload, ToolSummary } from "@/lib/api/types"
 
 interface ToolRow {
@@ -85,6 +87,7 @@ interface ToolRow {
   inputModality: string
   outputModality: string
   configNote: string | null
+  coverUrl: string | null
   icon: LucideIcon
   credits: number
   status: boolean
@@ -104,6 +107,7 @@ interface ToolForm {
   inputModality: string
   outputModality: string
   configNote: string
+  coverUrl: string
   estimatedCreditCost: string
   modelConfigId: string
   templateCode: string
@@ -118,6 +122,7 @@ const initialForm: ToolForm = {
   inputModality: "TEXT",
   outputModality: "TEXT",
   configNote: "",
+  coverUrl: "",
   estimatedCreditCost: "5",
   modelConfigId: "",
   templateCode: "text_generation_default",
@@ -190,6 +195,7 @@ const fallbackProviderCapabilities: Record<string, string[]> = {
   minimax: ["TEXT_GENERATION"],
   siliconflow: ["IMAGE_GENERATION", "DIGITAL_HUMAN"],
   siliconflow_images: ["IMAGE_GENERATION", "DIGITAL_HUMAN"],
+  volcengine_images: ["IMAGE_GENERATION"],
   minimax_speech: ["TEXT_TO_SPEECH"],
   siliconflow_speech: ["TEXT_TO_SPEECH"],
   worker_video: ["VIDEO_GENERATION"],
@@ -252,6 +258,149 @@ function pickIcon(categoryName?: string | null): LucideIcon {
   return CATEGORY_ICON_MAP[categoryName] || Sparkles
 }
 
+function isVideoPreviewUrl(url?: string | null): boolean {
+  if (!url) return false
+  const normalized = url.split(/[?#]/)[0]?.toLowerCase() || ""
+  return [".mp4", ".webm", ".mov", ".m4v"].some((ext) => normalized.endsWith(ext))
+}
+
+function normalizeToolMediaUrl(url?: string | null): string {
+  const raw = url?.trim()
+  if (!raw) return ""
+  if (raw.startsWith("http://") || raw.startsWith("https://") || raw.startsWith("data:")) return raw
+  const path = raw.startsWith("/") ? raw : `/${raw}`
+  const baseUrl = getBaseUrl().replace(/\/$/, "")
+  return baseUrl ? `${baseUrl}${path}` : path
+}
+
+function safePreviewFields(json: string): EditableField[] {
+  try {
+    return parseFieldsJson(json)
+  } catch {
+    return []
+  }
+}
+
+function apiReferenceForTool(tool: ToolRow | null, modelConfig?: AgentModelConfig | null) {
+  const handler = tool
+    ? executionCapabilityForTool(tool.toolType, tool.toolCode, tool.executionHandler, tool.inputModality, tool.outputModality)
+    : "TEXT_GENERATION"
+  const provider = modelConfig?.provider || "未绑定"
+  const model = modelConfig?.modelName || tool?.modelName || "默认模型"
+  const baseUrl = modelConfig?.baseUrl || "使用后台模型配置"
+
+  if (handler === "IMAGE_GENERATION") {
+    return {
+      title: "文生图 API 映射",
+      endpoint: "POST /v1/images/generations",
+      model,
+      provider,
+      baseUrl,
+      fields: [
+        "prompt / text / description -> prompt",
+        "style -> 不直接发给 API；优先按选项 promptPrefix 拼到 prompt 前面",
+        "aspectRatio -> image_size（1:1 等比例会转换为分辨率）",
+        "imageSize -> image_size（显式分辨率优先）",
+        "count / batchSize -> batch_size（限制 1-4）",
+        "negativePrompt -> negative_prompt",
+        "seed -> seed",
+        "guidanceScale -> guidance_scale",
+        "numInferenceSteps -> num_inference_steps",
+      ],
+      note: "未命中的字段不会透传给官网 API；但若字段参与 prompt 拼接，仍会影响生成效果。",
+    }
+  }
+
+  if (handler === "TEXT_TO_SPEECH") {
+    return {
+      title: "文字转语音 API 映射",
+      endpoint: provider === "minimax_speech" ? "POST /v1/t2a_v2 或 /v1/t2a_async_v2" : "SiliconFlow speech endpoint",
+      model,
+      provider,
+      baseUrl,
+      fields: [
+        "text / script / content -> text",
+        "voice / voiceId -> voice_setting.voice_id 或 SiliconFlow voice",
+        "speed -> voice_setting.speed",
+        "volume / vol -> voice_setting.vol",
+        "pitch -> voice_setting.pitch",
+        "format / audioFormat -> audio_setting.format",
+        "sampleRate -> audio_setting.sample_rate",
+        "bitrate -> audio_setting.bitrate",
+        "channel -> audio_setting.channel",
+        "languageBoost -> language_boost",
+      ],
+      note: "其他字段不会整包透传给语音 API。",
+    }
+  }
+
+  return {
+    title: "文本生成 API 映射",
+    endpoint: provider === "anthropic_compatible" ? "POST /v1/messages" : "POST /chat/completions",
+    model,
+    provider,
+    baseUrl,
+    fields: [
+      "systemPrompt -> system message",
+      "userPromptTemplate + params -> user message",
+      "无模板时：params 会按 key/value 生成默认 user prompt",
+    ],
+    note: "文本工具的多余字段可能进入提示词，建议只保留模板实际引用的字段。",
+  }
+}
+
+function FieldSchemaSidePanel({
+  fields,
+  tool,
+  modelConfig,
+}: {
+  fields: EditableField[]
+  tool: ToolRow | null
+  modelConfig?: AgentModelConfig | null
+}) {
+  const reference = apiReferenceForTool(tool, modelConfig)
+  return (
+    <div className="space-y-4 lg:sticky lg:top-0 lg:self-start">
+      <FieldSchemaPreview fields={fields} />
+      <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
+        <div className="mb-4">
+          <h3 className="text-base font-semibold">{reference.title}</h3>
+          <p className="mt-1 text-xs text-muted-foreground">用于核对字段是否会进入真实模型调用。</p>
+        </div>
+        <div className="space-y-2 rounded-lg bg-secondary/40 p-3 text-xs">
+          <div className="flex justify-between gap-3">
+            <span className="text-muted-foreground">Provider</span>
+            <span className="text-right font-medium">{reference.provider}</span>
+          </div>
+          <div className="flex justify-between gap-3">
+            <span className="text-muted-foreground">Model</span>
+            <span className="text-right font-medium">{reference.model}</span>
+          </div>
+          <div className="flex justify-between gap-3">
+            <span className="text-muted-foreground">Endpoint</span>
+            <span className="text-right font-mono">{reference.endpoint}</span>
+          </div>
+          <div className="flex justify-between gap-3">
+            <span className="text-muted-foreground">Base URL</span>
+            <span className="max-w-[210px] truncate text-right font-mono">{reference.baseUrl}</span>
+          </div>
+        </div>
+        <div className="mt-4 space-y-2">
+          <p className="text-xs font-medium">当前系统支持字段</p>
+          <div className="space-y-1.5">
+            {reference.fields.map((field) => (
+              <div key={field} className="rounded-md border border-border/70 bg-background px-2.5 py-1.5 font-mono text-[11px] text-muted-foreground">
+                {field}
+              </div>
+            ))}
+          </div>
+        </div>
+        <p className="mt-3 text-xs text-muted-foreground">{reference.note}</p>
+      </div>
+    </div>
+  )
+}
+
 function mapTool(tool: ToolSummary): ToolRow {
   return {
     id: String(tool.id),
@@ -265,6 +414,7 @@ function mapTool(tool: ToolSummary): ToolRow {
     inputModality: tool.inputModality || "TEXT",
     outputModality: tool.outputModality || "TEXT",
     configNote: tool.configNote || null,
+    coverUrl: tool.coverUrl || null,
     icon: pickIcon(tool.categoryName),
     credits: tool.estimatedCreditCost ?? 0,
     status: (tool.status || "").toUpperCase() === "ONLINE",
@@ -289,6 +439,8 @@ export default function ToolsPage() {
   const [togglingId, setTogglingId] = useState<number | null>(null)
   const [deletingId, setDeletingId] = useState<number | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [coverUploading, setCoverUploading] = useState(false)
+  const [coverDragging, setCoverDragging] = useState(false)
   const [form, setForm] = useState<ToolForm>(initialForm)
   const [formError, setFormError] = useState<string | null>(null)
   const [fieldDialogOpen, setFieldDialogOpen] = useState(false)
@@ -412,6 +564,35 @@ export default function ToolsPage() {
     setForm((prev) => ({ ...prev, [key]: value }))
   }
 
+  function selectedModelName(): string {
+    const selected = form.modelConfigId
+      ? modelConfigs.find((config) => String(config.id) === form.modelConfigId)
+      : defaultModelConfig
+    return selected?.displayName || selected?.modelName || ""
+  }
+
+  async function handleCoverUpload(file?: File | null) {
+    if (!file) return
+    setFormError(null)
+    setCoverUploading(true)
+    try {
+      const uploaded = await uploadToolCover({
+        file,
+        toolName: form.toolName.trim(),
+        toolCode: form.toolCode.trim(),
+        modelName: selectedModelName(),
+      })
+      updateForm("coverUrl", uploaded.url)
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : "工具展示素材上传失败，请查看后端日志。"
+      console.error("[AI Tool Management] 工具展示素材上传失败", err)
+      setFormError(message)
+    } finally {
+      setCoverUploading(false)
+      setCoverDragging(false)
+    }
+  }
+
   function openCreateDialog() {
     setEditingTool(null)
     setForm({
@@ -420,6 +601,8 @@ export default function ToolsPage() {
       templateCode: templateCodeByToolType[initialForm.toolType] || "",
     })
     setFormError(null)
+    setCoverUploading(false)
+    setCoverDragging(false)
     setIsAddDialogOpen(true)
   }
 
@@ -458,11 +641,14 @@ export default function ToolsPage() {
       inputModality: tool.inputModality,
       outputModality: tool.outputModality,
       configNote: tool.configNote || "",
+      coverUrl: tool.coverUrl || "",
       estimatedCreditCost: String(tool.credits),
       modelConfigId: tool.modelConfigId ? String(tool.modelConfigId) : "",
       templateCode: "",
     })
     setFormError(null)
+    setCoverUploading(false)
+    setCoverDragging(false)
     setIsAddDialogOpen(true)
   }
 
@@ -496,6 +682,7 @@ export default function ToolsPage() {
         inputModality: form.inputModality,
         outputModality: form.outputModality,
         configNote: form.configNote.trim() || undefined,
+        coverUrl: form.coverUrl.trim() || undefined,
         estimatedCreditCost: Math.floor(credits),
         modelConfigId: form.modelConfigId ? Number(form.modelConfigId) : null,
         templateCode: !editingTool && form.templateCode ? form.templateCode : undefined,
@@ -654,6 +841,8 @@ export default function ToolsPage() {
                 setForm(initialForm)
                 setEditingTool(null)
                 setFormError(null)
+                setCoverUploading(false)
+                setCoverDragging(false)
               }
             }}
           >
@@ -663,7 +852,7 @@ export default function ToolsPage() {
                 新建工具
               </Button>
             </DialogTrigger>
-            <DialogContent className="bg-card border-border max-w-lg">
+            <DialogContent className="max-h-[92vh] overflow-y-auto bg-card border-border max-w-lg">
               <DialogHeader>
                 <DialogTitle>{editingTool ? "编辑 AI 工具" : "新建 AI 工具"}</DialogTitle>
                 <DialogDescription className={formError ? "text-destructive" : undefined}>
@@ -678,6 +867,81 @@ export default function ToolsPage() {
                 <div className="space-y-2">
                   <Label>工具描述</Label>
                   <Textarea value={form.description} onChange={(event) => updateForm("description", event.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label>工具展示素材 URL</Label>
+                  <Input
+                    value={form.coverUrl}
+                    onChange={(event) => updateForm("coverUrl", event.target.value)}
+                    placeholder="可填图片、GIF、MP4/WebM/MOV 地址；不填则使用默认图标"
+                  />
+                  <label
+                    className={cn(
+                      "flex cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-border bg-secondary/30 px-4 py-5 text-center transition",
+                      coverDragging && "border-primary bg-primary/5",
+                      coverUploading && "pointer-events-none opacity-70",
+                    )}
+                    onDragEnter={(event) => {
+                      event.preventDefault()
+                      setCoverDragging(true)
+                    }}
+                    onDragOver={(event) => {
+                      event.preventDefault()
+                      setCoverDragging(true)
+                    }}
+                    onDragLeave={(event) => {
+                      event.preventDefault()
+                      setCoverDragging(false)
+                    }}
+                    onDrop={(event) => {
+                      event.preventDefault()
+                      const file = event.dataTransfer.files?.[0]
+                      void handleCoverUpload(file)
+                    }}
+                  >
+                    <UploadCloud className="mb-2 h-5 w-5 text-primary" />
+                    <span className="text-sm font-medium">
+                      {coverUploading ? "上传中..." : "拖拽图片、GIF 或视频到这里"}
+                    </span>
+                    <span className="mt-1 text-xs text-muted-foreground">
+                      也可以点击选择文件；系统会按工具名和模型自动命名。
+                    </span>
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime,video/x-m4v"
+                      className="hidden"
+                      onChange={(event) => {
+                        const file = event.target.files?.[0]
+                        void handleCoverUpload(file)
+                        event.currentTarget.value = ""
+                      }}
+                    />
+                  </label>
+                  {form.coverUrl.trim() ? (
+                    <div className="overflow-hidden rounded-lg border border-border bg-muted/40">
+                      {isVideoPreviewUrl(form.coverUrl) ? (
+                        <video
+                          src={normalizeToolMediaUrl(form.coverUrl)}
+                          className="aspect-video w-full object-cover"
+                          muted
+                          loop
+                          playsInline
+                          controls
+                          preload="metadata"
+                        />
+                      ) : (
+                        <img
+                          src={normalizeToolMediaUrl(form.coverUrl)}
+                          alt="工具展示素材预览"
+                          className="aspect-video w-full object-cover"
+                        />
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      建议使用 16:9 横图；GIF 可直接作为图片使用，视频建议 MP4/WebM。
+                    </p>
+                  )}
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
@@ -884,6 +1148,22 @@ export default function ToolsPage() {
                 !tool.status && "opacity-60",
               )}
             >
+              {tool.coverUrl ? (
+                <div className="-mx-6 -mt-6 mb-5 overflow-hidden border-b border-border bg-muted">
+                  {isVideoPreviewUrl(tool.coverUrl) ? (
+                    <video
+                      src={normalizeToolMediaUrl(tool.coverUrl)}
+                      className="aspect-video w-full object-cover"
+                      muted
+                      loop
+                      playsInline
+                      preload="metadata"
+                    />
+                  ) : (
+                    <img src={normalizeToolMediaUrl(tool.coverUrl)} alt={tool.name} className="aspect-video w-full object-cover" />
+                  )}
+                </div>
+              ) : null}
               <div className="flex items-start justify-between">
                 <div className="flex items-center gap-3">
                   <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10">
@@ -948,7 +1228,7 @@ export default function ToolsPage() {
       </div>
 
       <Dialog open={fieldDialogOpen} onOpenChange={setFieldDialogOpen}>
-        <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto bg-card border-border">
+        <DialogContent className="!w-[1180px] !max-w-[calc(100vw-2rem)] max-h-[90vh] overflow-y-auto bg-card border-border">
           <DialogHeader>
             <DialogTitle>用户端表单字段</DialogTitle>
             <DialogDescription>
@@ -957,57 +1237,64 @@ export default function ToolsPage() {
                 : "配置工具字段。"}
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-3 py-2">
-            {fieldTool ? (
-              <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-secondary/30 p-3">
-                <div>
-                  <p className="text-sm font-medium">从工具模板填充</p>
-                  <p className="text-xs text-muted-foreground">
-                    当前类型：{optionLabel(toolTypeOptions, fieldTool.toolType)}。应用后可再在下方微调各字段选项。
-                  </p>
+          <div className="grid gap-4 py-2 lg:grid-cols-[minmax(0,1fr)_380px]">
+            <div className="min-w-0 space-y-3">
+              {fieldTool ? (
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-secondary/30 p-3">
+                  <div>
+                    <p className="text-sm font-medium">从工具模板填充</p>
+                    <p className="text-xs text-muted-foreground">
+                      当前类型：{optionLabel(toolTypeOptions, fieldTool.toolType)}。应用后可再在下方微调各字段选项。
+                    </p>
+                  </div>
+                  <Button type="button" variant="outline" size="sm" onClick={applyFieldTemplate} disabled={fieldLoading || fieldSaving}>
+                    应用模板
+                  </Button>
                 </div>
-                <Button type="button" variant="outline" size="sm" onClick={applyFieldTemplate} disabled={fieldLoading || fieldSaving}>
-                  应用模板
-                </Button>
-              </div>
-            ) : null}
-            {fieldError ? (
-              <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-                {fieldError}
-              </div>
-            ) : null}
-            <Tabs value={fieldEditorMode} onValueChange={(value) => switchFieldEditorMode(value as "visual" | "json")}>
-              <TabsList className="grid w-full grid-cols-2">
-                <TabsTrigger value="visual" disabled={fieldLoading || fieldSaving}>
-                  可视化配置
-                </TabsTrigger>
-                <TabsTrigger value="json" disabled={fieldLoading || fieldSaving}>
-                  高级 JSON
-                </TabsTrigger>
-              </TabsList>
-              <TabsContent value="visual" className="mt-3 max-h-[55vh] overflow-y-auto pr-1">
-                <FieldSchemaEditor
-                  fields={editableFields}
-                  disabled={fieldLoading || fieldSaving}
-                  onChange={(next) => {
-                    setEditableFields(next)
-                    setFieldJson(serializeFields(next))
-                  }}
-                />
-              </TabsContent>
-              <TabsContent value="json" className="mt-3">
-                <Textarea
-                  value={fieldJson}
-                  onChange={(event) => setFieldJson(event.target.value)}
-                  className="min-h-[420px] font-mono text-xs"
-                  disabled={fieldLoading || fieldSaving}
-                  placeholder='[{"fieldKey":"aspectRatio","fieldName":"画面比例","fieldType":"radio"}]'
-                />
-                <p className="mt-2 text-xs text-muted-foreground">
-                  radio / select 需带 optionsJson。日常请优先使用「可视化配置」。
-                </p>
-              </TabsContent>
-            </Tabs>
+              ) : null}
+              {fieldError ? (
+                <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+                  {fieldError}
+                </div>
+              ) : null}
+              <Tabs value={fieldEditorMode} onValueChange={(value) => switchFieldEditorMode(value as "visual" | "json")}>
+                <TabsList className="grid w-full grid-cols-2">
+                  <TabsTrigger value="visual" disabled={fieldLoading || fieldSaving}>
+                    可视化配置
+                  </TabsTrigger>
+                  <TabsTrigger value="json" disabled={fieldLoading || fieldSaving}>
+                    高级 JSON
+                  </TabsTrigger>
+                </TabsList>
+                <TabsContent value="visual" className="mt-3 max-h-[55vh] overflow-y-auto pr-1">
+                  <FieldSchemaEditor
+                    fields={editableFields}
+                    disabled={fieldLoading || fieldSaving}
+                    onChange={(next) => {
+                      setEditableFields(next)
+                      setFieldJson(serializeFields(next))
+                    }}
+                  />
+                </TabsContent>
+                <TabsContent value="json" className="mt-3">
+                  <Textarea
+                    value={fieldJson}
+                    onChange={(event) => setFieldJson(event.target.value)}
+                    className="min-h-[420px] font-mono text-xs"
+                    disabled={fieldLoading || fieldSaving}
+                    placeholder='[{"fieldKey":"aspectRatio","fieldName":"画面比例","fieldType":"radio"}]'
+                  />
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    radio / select 需带 optionsJson。日常请优先使用「可视化配置」。
+                  </p>
+                </TabsContent>
+              </Tabs>
+            </div>
+            <FieldSchemaSidePanel
+              fields={fieldEditorMode === "visual" ? editableFields : safePreviewFields(fieldJson)}
+              tool={fieldTool}
+              modelConfig={modelConfigs.find((config) => config.id === fieldTool?.modelConfigId) || null}
+            />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setFieldDialogOpen(false)} disabled={fieldSaving}>

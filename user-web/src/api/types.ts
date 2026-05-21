@@ -148,6 +148,7 @@ export interface ToolSummary {
 export interface ToolFieldOption {
   label: string
   value: string
+  promptPrefix?: string
 }
 
 /** 动态字段定义 */

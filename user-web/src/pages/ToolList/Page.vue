@@ -11,38 +11,100 @@ import {
   Megaphone,
   Image as ImageIcon,
   Video,
+  FileText,
+  Music,
+  Braces,
+  Files,
+  Sparkles,
 } from "lucide-vue-next"
 import AppShell from "@/components/AppShell.vue"
-import { fetchToolCategories, fetchTools, searchTools } from "@/api/toolApi"
-import type { ToolCategory, ToolSummary } from "@/api/types"
+import { getApiOrigin } from "@/api/client"
+import { fetchTools, searchTools } from "@/api/toolApi"
+import type { ToolSummary } from "@/api/types"
 import { useAuthStore } from "@/store/authStore"
 
 const auth = useAuthStore()
 const token = computed(() => auth.token)
 
-const categories = ref<ToolCategory[]>([])
 const tools = ref<ToolSummary[]>([])
 const total = ref(0)
 const loading = ref(false)
 const keyword = ref("")
-const selectedCategoryId = ref<number | undefined>(undefined)
+const selectedModality = ref<string | undefined>(undefined)
 const currentPage = ref(1)
-const pageSize = 20
+const pageSize = 100
+
+const modalityLabels: Record<string, string> = {
+  TEXT: "文本生成",
+  IMAGE: "图片生成",
+  AUDIO: "音频生成",
+  VIDEO: "视频生成",
+  JSON: "结构化数据",
+  FILE: "文件生成",
+  MULTIMODAL: "多模态生成",
+}
+
+const modalityIconMap = {
+  TEXT: FileText,
+  IMAGE: ImageIcon,
+  AUDIO: Music,
+  VIDEO: Video,
+  JSON: Braces,
+  FILE: Files,
+  MULTIMODAL: Sparkles,
+}
 
 // 图标映射
-function getIcon(_name: string) {
-  // 简单轮转图标
-  const icons = [Pencil, Megaphone, ImageIcon, Video]
-  return icons[Math.floor(Math.random() * icons.length)]
+function getIcon(tool: ToolSummary) {
+  const key = normalizeModality(tool.outputModality)
+  return modalityIconMap[key as keyof typeof modalityIconMap] || Pencil
 }
 
-async function loadCategories() {
-  try {
-    categories.value = await fetchToolCategories({ token: token.value })
-  } catch {
-    // 静默处理
-  }
+function normalizeModality(value?: string | null): string {
+  return (value || "TEXT").trim().toUpperCase()
 }
+
+function modalityLabel(value?: string | null): string {
+  const key = normalizeModality(value)
+  return modalityLabels[key] || key
+}
+
+function normalizeToolMediaUrl(value?: string | null): string {
+  const raw = value?.trim()
+  if (!raw) return ""
+  if (raw.startsWith("http://") || raw.startsWith("https://") || raw.startsWith("data:")) return raw
+  const path = raw.startsWith("/") ? raw : `/${raw}`
+  const apiOrigin = getApiOrigin()
+  return apiOrigin ? `${apiOrigin}${path}` : path
+}
+
+function isVideoPreviewUrl(value?: string | null): boolean {
+  const raw = value?.split(/[?#]/)[0]?.toLowerCase() || ""
+  return [".mp4", ".webm", ".mov", ".m4v"].some((ext) => raw.endsWith(ext))
+}
+
+const modalityFilters = computed(() => {
+  const counts = new Map<string, number>()
+  for (const tool of tools.value) {
+    const key = normalizeModality(tool.outputModality)
+    counts.set(key, (counts.get(key) || 0) + 1)
+  }
+  const order = ["TEXT", "IMAGE", "AUDIO", "VIDEO", "JSON", "FILE", "MULTIMODAL"]
+  return [...counts.entries()]
+    .sort(([a], [b]) => {
+      const ia = order.indexOf(a)
+      const ib = order.indexOf(b)
+      return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib)
+    })
+    .map(([key, count]) => ({ key, label: modalityLabel(key), count }))
+})
+
+const filteredTools = computed(() => {
+  if (!selectedModality.value) return tools.value
+  return tools.value.filter((tool) => normalizeModality(tool.outputModality) === selectedModality.value)
+})
+
+const displayTotal = computed(() => filteredTools.value.length)
 
 async function loadTools() {
   loading.value = true
@@ -51,9 +113,6 @@ async function loadTools() {
       pageNo: currentPage.value,
       pageSize,
     }
-    if (selectedCategoryId.value) {
-      query.categoryId = selectedCategoryId.value
-    }
     if (keyword.value) {
       // 有搜索关键词时使用搜索接口
       const res = await searchTools({
@@ -61,11 +120,11 @@ async function loadTools() {
         query: { keyword: keyword.value, pageNo: currentPage.value, pageSize },
       })
       tools.value = res.list
-      total.value = res.total
+      total.value = res.list.length
     } else {
       const res = await fetchTools({ token: token.value, query })
       tools.value = res.list
-      total.value = res.total
+      total.value = res.list.length
     }
   } catch {
     tools.value = []
@@ -75,10 +134,9 @@ async function loadTools() {
   }
 }
 
-function selectCategory(categoryId?: number) {
-  selectedCategoryId.value = categoryId
+function selectModality(modality?: string) {
+  selectedModality.value = modality
   currentPage.value = 1
-  loadTools()
 }
 
 function doSearch() {
@@ -87,7 +145,6 @@ function doSearch() {
 }
 
 onMounted(() => {
-  loadCategories()
   loadTools()
 })
 </script>
@@ -99,7 +156,7 @@ onMounted(() => {
       <div class="hidden xl:block w-56 shrink-0 border-r border-border bg-card/40 p-5 space-y-6">
         <div>
           <p class="mb-3 flex items-center gap-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">
-            <Filter class="h-3 w-3" /> 分类
+            <Filter class="h-3 w-3" /> 生成类型
           </p>
           <ul class="space-y-1">
             <li>
@@ -107,24 +164,25 @@ onMounted(() => {
                 type="button"
                 class="flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-sm transition-colors"
                 :class="
-                  selectedCategoryId === undefined ? 'bg-accent text-accent-foreground font-medium' : 'text-foreground/80 hover:bg-secondary'
+                  selectedModality === undefined ? 'bg-accent text-accent-foreground font-medium' : 'text-foreground/80 hover:bg-secondary'
                 "
-                @click="selectCategory(undefined)"
+                @click="selectModality(undefined)"
               >
                 <span>全部工具</span>
-                <span class="text-[11px] text-muted-foreground">{{ total }}</span>
+                <span class="text-[11px] text-muted-foreground">{{ tools.length }}</span>
               </button>
             </li>
-            <li v-for="c in categories" :key="c.id">
+            <li v-for="item in modalityFilters" :key="item.key">
               <button
                 type="button"
                 class="flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-sm transition-colors"
                 :class="
-                  selectedCategoryId === c.id ? 'bg-accent text-accent-foreground font-medium' : 'text-foreground/80 hover:bg-secondary'
+                  selectedModality === item.key ? 'bg-accent text-accent-foreground font-medium' : 'text-foreground/80 hover:bg-secondary'
                 "
-                @click="selectCategory(c.id)"
+                @click="selectModality(item.key)"
               >
-                <span>{{ c.categoryName }}</span>
+                <span>{{ item.label }}</span>
+                <span class="text-[11px] text-muted-foreground">{{ item.count }}</span>
               </button>
             </li>
           </ul>
@@ -173,9 +231,9 @@ onMounted(() => {
 
         <div class="flex items-center justify-between border-b border-border pb-3">
           <div class="flex items-center gap-2">
-            <h3 class="text-sm font-semibold">全部工具</h3>
+            <h3 class="text-sm font-semibold">{{ selectedModality ? modalityLabel(selectedModality) : '全部工具' }}</h3>
             <span class="rounded-md bg-secondary px-2 py-0.5 text-[11px] text-secondary-foreground">
-              共 {{ total }} 个
+              共 {{ displayTotal }} 个
             </span>
           </div>
         </div>
@@ -186,29 +244,44 @@ onMounted(() => {
         </div>
 
         <!-- 空状态 -->
-        <div v-else-if="tools.length === 0" class="flex items-center justify-center py-12">
+        <div v-else-if="filteredTools.length === 0" class="flex items-center justify-center py-12">
           <span class="text-sm text-muted-foreground">暂无可用工具</span>
         </div>
 
         <!-- 工具列表 -->
         <div v-else class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           <div
-            v-for="tool in tools"
+            v-for="tool in filteredTools"
             :key="tool.id"
-            class="group rounded-xl border border-border bg-card p-5 transition hover:border-primary/40 hover:shadow-md"
+            class="group overflow-hidden rounded-xl border border-border bg-card transition hover:border-primary/40 hover:shadow-md"
           >
-            <div class="flex items-start gap-3">
-              <img
-                v-if="tool.coverUrl"
-                :src="tool.coverUrl"
-                :alt="tool.toolName"
-                class="h-11 w-11 shrink-0 rounded-lg object-cover ring-1 ring-border"
+            <div v-if="tool.coverUrl" class="bg-muted">
+              <video
+                v-if="isVideoPreviewUrl(tool.coverUrl)"
+                :src="normalizeToolMediaUrl(tool.coverUrl)"
+                class="aspect-video w-full object-cover"
+                muted
+                loop
+                playsinline
+                autoplay
+                preload="metadata"
               />
-              <div
+              <img
                 v-else
-                class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-accent to-primary/10 text-primary"
+                :src="normalizeToolMediaUrl(tool.coverUrl)"
+                :alt="tool.toolName"
+                class="aspect-video w-full object-cover"
+              />
+            </div>
+            <div v-else class="flex aspect-video items-center justify-center bg-gradient-to-br from-accent to-primary/10 text-primary">
+                <component :is="getIcon(tool)" class="h-10 w-10" />
+            </div>
+            <div class="p-5">
+            <div class="flex items-start gap-3">
+              <div
+                class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-secondary text-primary ring-1 ring-border"
               >
-                <component :is="getIcon(tool.toolName)" class="h-5 w-5" />
+                <component :is="getIcon(tool)" class="h-5 w-5" />
               </div>
               <div class="flex-1 min-w-0">
                 <div class="flex items-center gap-2">
@@ -221,7 +294,7 @@ onMounted(() => {
                   </span>
                 </div>
                 <p class="mt-0.5 inline-block rounded bg-secondary px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                  {{ tool.categoryName }}
+                  {{ modalityLabel(tool.outputModality) }}
                 </p>
               </div>
             </div>
@@ -242,6 +315,7 @@ onMounted(() => {
               >
                 立即使用
               </RouterLink>
+            </div>
             </div>
           </div>
         </div>

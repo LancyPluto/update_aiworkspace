@@ -6,11 +6,13 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -24,7 +26,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "spring.datasource.username=sa",
         "spring.datasource.password=",
         "spring.sql.init.mode=always",
-        "spring.sql.init.schema-locations=classpath:schema-test.sql"
+        "spring.sql.init.schema-locations=classpath:schema-test.sql",
+        "app.generated-media-dir=target/test-generated-media"
 })
 class ToolApiTest {
 
@@ -49,13 +52,14 @@ class ToolApiTest {
                                   "toolName": "小红书文案生成",
                                   "categoryId": 1,
                                   "description": "根据产品信息生成小红书文案",
-                                  "coverUrl": "",
+                                  "coverUrl": "https://cdn.example.com/tools/xiaohongshu-cover.webp",
                                   "estimatedCreditCost": 10
                                 }
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.data.status").value("DRAFT"))
+                .andExpect(jsonPath("$.data.coverUrl").value("https://cdn.example.com/tools/xiaohongshu-cover.webp"))
                 .andReturn()
                 .getResponse()
                 .getContentAsString();
@@ -70,12 +74,13 @@ class ToolApiTest {
                                   "toolName": "小红书文案助手",
                                   "categoryId": 1,
                                   "description": "更新后的说明",
-                                  "coverUrl": "",
+                                  "coverUrl": "https://cdn.example.com/tools/xiaohongshu-preview.mp4",
                                   "estimatedCreditCost": 12
                                 }
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.toolName").value("小红书文案助手"))
+                .andExpect(jsonPath("$.data.coverUrl").value("https://cdn.example.com/tools/xiaohongshu-preview.mp4"))
                 .andExpect(jsonPath("$.data.estimatedCreditCost").value(12));
 
         mockMvc.perform(post("/api/admin/v1/tools/" + toolId + "/publish")
@@ -86,6 +91,7 @@ class ToolApiTest {
         mockMvc.perform(get("/api/v1/tools"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.list[0].toolCode").value("xiaohongshu_copywriting"))
+                .andExpect(jsonPath("$.data.list[0].coverUrl").value("https://cdn.example.com/tools/xiaohongshu-preview.mp4"))
                 .andExpect(jsonPath("$.data.list[0].toolName").value("小红书文案助手"));
 
         mockMvc.perform(get("/api/v1/tools/xiaohongshu_copywriting"))
@@ -197,6 +203,30 @@ class ToolApiTest {
         mockMvc.perform(delete("/api/admin/v1/tools/{toolId}", toolId)
                         .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().is4xxClientError());
+    }
+
+    @Test
+    void adminCanUploadToolCoverPreviewAsset() throws Exception {
+        String adminToken = loginAdmin();
+        MockMultipartFile file = new MockMultipartFile(
+                "file",
+                "preview.mp4",
+                "video/mp4",
+                "fake-video-content".getBytes()
+        );
+
+        mockMvc.perform(multipart("/api/admin/v1/tools/cover-upload")
+                        .file(file)
+                        .param("toolName", "视频换脸器")
+                        .param("toolCode", "video_face_swap")
+                        .param("modelName", "seedance-2.0")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.data.url").value(org.hamcrest.Matchers.startsWith("/generated/tool-covers/")))
+                .andExpect(jsonPath("$.data.filename").value(org.hamcrest.Matchers.containsString("视频换脸器")))
+                .andExpect(jsonPath("$.data.filename").value(org.hamcrest.Matchers.containsString("seedance-2.0")))
+                .andExpect(jsonPath("$.data.contentType").value("video/mp4"));
     }
 
     @Test
