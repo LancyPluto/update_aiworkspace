@@ -67,14 +67,15 @@ export const useAuthStore = defineStore("auth", () => {
     }
   }
 
-  async function fetchCurrentUser() {
+  async function fetchCurrentUser(options?: { clearOnFailure?: boolean }) {
     if (!token.value) return null
+    const clearOnFailure = options?.clearOnFailure !== false
     try {
       const u = await getCurrentUser({ token: token.value })
       user.value = u
       return u
     } catch {
-      clearAuth()
+      if (clearOnFailure) clearAuth()
       return null
     }
   }
@@ -103,7 +104,12 @@ export const useAuthStore = defineStore("auth", () => {
     token.value = t
     localStorage.setItem(TOKEN_KEY, t)
     setSessionBearerJwt(t)
-    await fetchCurrentUser()
+    if (res.user) user.value = res.user
+    const profile = await fetchCurrentUser({ clearOnFailure: false })
+    if (!profile && !user.value) {
+      clearAuth()
+      throw new Error("登录成功但无法获取用户信息，请确认后端已启动")
+    }
     return res
   }
 

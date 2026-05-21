@@ -137,11 +137,13 @@ services:
     container_name: ai-supermarket-user-web
     working_dir: /app
     restart: unless-stopped
-    depends_on:
-      - backend
+    env_file:
+      - ../.env
     environment:
-      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
-      VITE_DEV_PROXY_TARGET: ${VITE_DEV_PROXY_TARGET:-http://backend:8080}
+      # 浏览器直连本机后端；未设置时走 Vite 代理（见 VITE_DEV_PROXY_TARGET）
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8080}
+      # 本机 mvn 启动后端时，容器内代理需用 host.docker.internal，不能用已停掉的 backend 服务名
+      VITE_DEV_PROXY_TARGET: ${VITE_DEV_PROXY_TARGET:-http://host.docker.internal:8080}
       CHOKIDAR_USEPOLLING: "true"
     ports:
       - "${USER_WEB_PORT:-5173}:5173"
