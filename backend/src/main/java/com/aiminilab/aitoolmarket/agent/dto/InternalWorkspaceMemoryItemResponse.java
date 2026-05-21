@@ -13,4 +13,10 @@ public record InternalWorkspaceMemoryItemResponse(
         int score,
         LocalDateTime updatedAt
 ) {
+
+    public InternalWorkspaceMemoryItemResponse(Long id, Long workspaceId, Long sourceRunId,
+                                                String title, String content, String memoryType,
+                                                String status, LocalDateTime updatedAt) {
+        this(id, workspaceId, sourceRunId, title, content, memoryType, status, 0, updatedAt);
+    }
 }

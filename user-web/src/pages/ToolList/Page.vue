@@ -13,6 +13,7 @@ import {
   Video,
 } from "lucide-vue-next"
 import AppShell from "@/components/AppShell.vue"
+import { getApiOrigin } from "@/api/client"
 import { fetchToolCategories, fetchTools, searchTools } from "@/api/toolApi"
 import type { ToolCategory, ToolSummary } from "@/api/types"
 import { useAuthStore } from "@/store/authStore"
@@ -34,6 +35,20 @@ function getIcon(_name: string) {
   // 简单轮转图标
   const icons = [Pencil, Megaphone, ImageIcon, Video]
   return icons[Math.floor(Math.random() * icons.length)]
+}
+
+function normalizeToolMediaUrl(value?: string | null): string {
+  const raw = value?.trim()
+  if (!raw) return ""
+  if (raw.startsWith("http://") || raw.startsWith("https://") || raw.startsWith("data:")) return raw
+  const path = raw.startsWith("/") ? raw : `/${raw}`
+  const apiOrigin = getApiOrigin()
+  return apiOrigin ? `${apiOrigin}${path}` : path
+}
+
+function isVideoPreviewUrl(value?: string | null): boolean {
+  const raw = value?.split(/[?#]/)[0]?.toLowerCase() || ""
+  return [".mp4", ".webm", ".mov", ".m4v"].some((ext) => raw.endsWith(ext))
 }
 
 async function loadCategories() {
@@ -195,18 +210,33 @@ onMounted(() => {
           <div
             v-for="tool in tools"
             :key="tool.id"
-            class="group rounded-xl border border-border bg-card p-5 transition hover:border-primary/40 hover:shadow-md"
+            class="group overflow-hidden rounded-xl border border-border bg-card transition hover:border-primary/40 hover:shadow-md"
           >
-            <div class="flex items-start gap-3">
-              <img
-                v-if="tool.coverUrl"
-                :src="tool.coverUrl"
-                :alt="tool.toolName"
-                class="h-11 w-11 shrink-0 rounded-lg object-cover ring-1 ring-border"
+            <div v-if="tool.coverUrl" class="bg-muted">
+              <video
+                v-if="isVideoPreviewUrl(tool.coverUrl)"
+                :src="normalizeToolMediaUrl(tool.coverUrl)"
+                class="aspect-video w-full object-cover"
+                muted
+                loop
+                playsinline
+                autoplay
+                preload="metadata"
               />
-              <div
+              <img
                 v-else
-                class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-accent to-primary/10 text-primary"
+                :src="normalizeToolMediaUrl(tool.coverUrl)"
+                :alt="tool.toolName"
+                class="aspect-video w-full object-cover"
+              />
+            </div>
+            <div v-else class="flex aspect-video items-center justify-center bg-gradient-to-br from-accent to-primary/10 text-primary">
+              <component :is="getIcon(tool.toolName)" class="h-10 w-10" />
+            </div>
+            <div class="p-5">
+            <div class="flex items-start gap-3">
+              <div
+                class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-secondary text-primary ring-1 ring-border"
               >
                 <component :is="getIcon(tool.toolName)" class="h-5 w-5" />
               </div>
@@ -242,6 +272,7 @@ onMounted(() => {
               >
                 立即使用
               </RouterLink>
+            </div>
             </div>
           </div>
         </div>

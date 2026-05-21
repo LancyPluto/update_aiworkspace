@@ -1,5 +1,6 @@
 package com.aiminilab.aitoolmarket.tool.service.impl;
 
+import com.aiminilab.aitoolmarket.config.AppProperties;
 import com.aiminilab.aitoolmarket.common.dto.PageResponse;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.enums.ToolModality;
@@ -17,6 +18,7 @@ import com.aiminilab.aitoolmarket.tool.dto.PromptVersionResponse;
 import com.aiminilab.aitoolmarket.tool.dto.TestGenerateRequest;
 import com.aiminilab.aitoolmarket.tool.dto.TestGenerateResponse;
 import com.aiminilab.aitoolmarket.tool.dto.ToolCategoryResponse;
+import com.aiminilab.aitoolmarket.tool.dto.ToolCoverUploadResponse;
 import com.aiminilab.aitoolmarket.tool.dto.ToolDetailResponse;
 import com.aiminilab.aitoolmarket.tool.dto.ToolFieldRequest;
 import com.aiminilab.aitoolmarket.tool.dto.ToolFieldResponse;
@@ -47,14 +49,27 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.text.Normalizer;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 @Service
 public class ToolServiceImpl implements ToolService {
 
     private static final Logger log = LoggerFactory.getLogger(ToolServiceImpl.class);
+    private static final long MAX_TOOL_COVER_BYTES = 20L * 1024L * 1024L;
+    private static final DateTimeFormatter COVER_FILENAME_TIME = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
+    private static final Set<String> TOOL_COVER_EXTENSIONS = Set.of(
+            "jpg", "jpeg", "png", "webp", "gif", "mp4", "webm", "mov", "m4v"
+    );
 
     private final ToolMapper toolMapper;
     private final ToolCategoryMapper toolCategoryMapper;
@@ -65,12 +80,13 @@ public class ToolServiceImpl implements ToolService {
     private final ObjectMapper objectMapper;
     private final ToolTemplateService toolTemplateService;
     private final ModelCapabilityService modelCapabilityService;
+    private final AppProperties appProperties;
 
     public ToolServiceImpl(ToolMapper toolMapper, ToolCategoryMapper toolCategoryMapper,
                            ToolFieldSchemaMapper toolFieldSchemaMapper, ToolFieldItemMapper toolFieldItemMapper,
                            ToolPromptMapper toolPromptMapper, ToolPromptVersionMapper toolPromptVersionMapper,
                            ObjectMapper objectMapper, ToolTemplateService toolTemplateService,
-                           ModelCapabilityService modelCapabilityService) {
+                           ModelCapabilityService modelCapabilityService, AppProperties appProperties) {
         this.toolMapper = toolMapper;
         this.toolCategoryMapper = toolCategoryMapper;
         this.toolFieldSchemaMapper = toolFieldSchemaMapper;
@@ -80,6 +96,7 @@ public class ToolServiceImpl implements ToolService {
         this.objectMapper = objectMapper;
         this.toolTemplateService = toolTemplateService;
         this.modelCapabilityService = modelCapabilityService;
+        this.appProperties = appProperties;
     }
 
     @Override
@@ -187,6 +204,44 @@ public class ToolServiceImpl implements ToolService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在"));
         modelCapabilityService.validateToolModelBinding(persisted);
         return findToolSummary(toolId);
+    }
+
+    @Override
+    public ToolCoverUploadResponse uploadToolCover(MultipartFile file, String toolName, String toolCode, String modelName) {
+        if (file == null || file.isEmpty()) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "请选择要上传的工具展示素材");
+        }
+        if (file.getSize() > MAX_TOOL_COVER_BYTES) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "工具展示素材不能超过 20MB");
+        }
+
+        String originalFilename = file.getOriginalFilename();
+        String extension = resolveToolCoverExtension(originalFilename, file.getContentType());
+        if (!TOOL_COVER_EXTENSIONS.contains(extension)) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "仅支持 JPG、PNG、WebP、GIF、MP4、WebM、MOV 展示素材");
+        }
+
+        String baseName = String.join("-",
+                safeFilenamePart(toolName, "tool"),
+                safeFilenamePart(toolCode, "code"),
+                safeFilenamePart(modelName, "model")
+        ).replaceAll("-{2,}", "-");
+        String filename = baseName + "-" + LocalDateTime.now().format(COVER_FILENAME_TIME) + "." + extension;
+        Path dir = Path.of(appProperties.getGeneratedMediaDir()).resolve("tool-covers").normalize().toAbsolutePath();
+        Path target = dir.resolve(filename).normalize();
+        try {
+            Files.createDirectories(dir);
+            file.transferTo(target);
+        } catch (IOException ex) {
+            log.warn("Failed to store tool cover upload: filename={}, contentType={}, size={}",
+                    originalFilename, file.getContentType(), file.getSize(), ex);
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "工具展示素材保存失败，请查看后端日志");
+        }
+
+        String url = "/generated/tool-covers/" + filename;
+        log.info("Admin uploaded tool cover: url={}, originalFilename={}, contentType={}, size={}",
+                url, originalFilename, file.getContentType(), file.getSize());
+        return new ToolCoverUploadResponse(url, filename, defaultString(file.getContentType()), file.getSize());
     }
 
     @Override
@@ -427,6 +482,49 @@ public class ToolServiceImpl implements ToolService {
             suffix++;
         }
         return candidate;
+    }
+
+    private String resolveToolCoverExtension(String originalFilename, String contentType) {
+        String filename = originalFilename == null ? "" : originalFilename;
+        int dot = filename.lastIndexOf('.');
+        if (dot >= 0 && dot < filename.length() - 1) {
+            String ext = filename.substring(dot + 1).trim().toLowerCase();
+            if ("jpeg".equals(ext)) {
+                return "jpg";
+            }
+            if (!ext.isBlank()) {
+                return ext;
+            }
+        }
+        String type = contentType == null ? "" : contentType.toLowerCase();
+        return switch (type) {
+            case "image/jpeg" -> "jpg";
+            case "image/png" -> "png";
+            case "image/webp" -> "webp";
+            case "image/gif" -> "gif";
+            case "video/mp4" -> "mp4";
+            case "video/webm" -> "webm";
+            case "video/quicktime" -> "mov";
+            case "video/x-m4v" -> "m4v";
+            default -> "";
+        };
+    }
+
+    private String safeFilenamePart(String value, String fallback) {
+        String normalized = Normalizer.normalize(defaultString(value), Normalizer.Form.NFKC)
+                .trim()
+                .replaceAll("[\\\\/:*?\"<>|]+", "-")
+                .replaceAll("\\s+", "-")
+                .replaceAll("-{2,}", "-")
+                .replaceAll("^-+|-+$", "");
+        if (normalized.isBlank()) {
+            return fallback;
+        }
+        return normalized.length() > 48 ? normalized.substring(0, 48).replaceAll("-+$", "") : normalized;
+    }
+
+    private String defaultString(String value) {
+        return value == null ? "" : value;
     }
 
     private ToolModality normalizeInputModality(ToolType toolType, String value) {

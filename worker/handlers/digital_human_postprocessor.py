@@ -21,6 +21,7 @@ class DigitalHumanPostprocessResult:
     video_path: Path
     video_url: str
     subtitle_path: Path
+    subtitle_url: str
     audio_path: Path
 
 
@@ -30,6 +31,8 @@ class DigitalHumanPostprocessor:
         self.public_base_url = settings.generated_media_public_base_url.rstrip("/")
         self.ffmpeg_binary = settings.ffmpeg_binary
         self.ffprobe_binary = settings.ffprobe_binary
+        self.subtitle_font_name = settings.subtitle_font_name
+        self.subtitle_fonts_dir = settings.subtitle_fonts_dir
         self.timeout = (10, 120)
 
     def process(
@@ -51,14 +54,15 @@ class DigitalHumanPostprocessor:
 
         self._download(video_url, source_video)
         self._write_data_url(audio_data_url, audio_path)
-        duration = self._probe_duration(audio_path) or self._probe_duration(source_video) or 5.0
+        duration = self._probe_duration(source_video) or self._probe_duration(audio_path) or 5.0
         subtitle_path.write_text(self._build_srt(subtitle_text, duration), encoding="utf-8")
-        self._run_ffmpeg(ffmpeg_binary, source_video, audio_path, subtitle_path, final_video)
+        self._run_ffmpeg(ffmpeg_binary, source_video, audio_path, subtitle_path, final_video, duration)
 
         return DigitalHumanPostprocessResult(
             video_path=final_video,
             video_url=self._public_url(final_video),
             subtitle_path=subtitle_path,
+            subtitle_url=self._public_url(subtitle_path),
             audio_path=audio_path,
         )
 
@@ -69,8 +73,20 @@ class DigitalHumanPostprocessor:
         audio_path: Path,
         subtitle_path: Path,
         final_video: Path,
+        duration_seconds: float,
     ) -> None:
-        subtitle_filter = f"subtitles='{self._escape_filter_path(subtitle_path)}'"
+        subtitle_filter = (
+            f"subtitles='{self._escape_filter_path(subtitle_path)}':"
+            f"fontsdir='{self._escape_filter_path(Path(self.subtitle_fonts_dir))}':"
+            f"force_style='FontName={self.subtitle_font_name},FontSize=20,"
+            "PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,"
+            "BorderStyle=1,Outline=2,Shadow=1,Alignment=2,MarginV=32'"
+        )
+        audio_filter = (
+            "apad=pad_dur="
+            f"{max(duration_seconds, 1.0):.3f},"
+            f"atrim=0:{max(duration_seconds, 1.0):.3f}"
+        )
         command = [
             ffmpeg_binary,
             "-y",
@@ -82,11 +98,14 @@ class DigitalHumanPostprocessor:
             str(audio_path),
             "-vf",
             subtitle_filter,
+            "-af",
+            audio_filter,
+            "-t",
+            f"{max(duration_seconds, 1.0):.3f}",
             "-map",
             "0:v:0",
             "-map",
             "1:a:0",
-            "-shortest",
             "-c:v",
             "libx264",
             "-pix_fmt",

@@ -458,3 +458,32 @@ CREATE TABLE billing_usage_logs (
   charged_credits INT NOT NULL DEFAULT 0,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Default model config for TEXT_GENERATION tools (tests create tools without model_config_id)
+INSERT INTO agent_model_configs (
+  display_name,
+  config_code,
+  provider,
+  model_name,
+  base_url,
+  timeout_seconds,
+  billing_unit,
+  unit_price,
+  capabilities,
+  enabled,
+  is_default,
+  is_deleted
+) VALUES (
+  'Test text generation',
+  'default_text_generation',
+  'minimax',
+  'MiniMax-M2.7',
+  'https://api.minimaxi.com/v1',
+  120,
+  'TOKEN_PER_M',
+  0,
+  '["TEXT_GENERATION"]',
+  1,
+  1,
+  0
+);

@@ -2,7 +2,6 @@ from app.clients.backend_client import BackendClient, BackendClientError
 from app.clients.model_client import ModelClient, ModelClientError
 from app.config import Settings
 from app.core.schemas import RunFail
-from app.runtime.deep_agents_engine import DeepAgentsRuntimeEngine
 from app.runtime.router import RuntimeRouter
 from app.tools.backend_tool import ToolExecutionError
 
@@ -31,7 +30,11 @@ class AgentRuntime:
             if context.status in TERMINAL_RUN_STATUSES:
                 return
             model_client = await self._model_client()
-            engine = self.runtime_router_factory(self.backend, model_client).select_engine(message=context.message)
+            engine = self.runtime_router_factory(
+                self.backend,
+                model_client,
+                deep_agents_enabled=self.default_settings.agent_deep_agents_enabled,
+            ).select_engine(message=context.message)
             await engine.run(context)
         except BackendClientError as exc:
             await self._fail(run_id, "BACKEND_CALL_FAILED", str(exc))
@@ -47,7 +50,13 @@ class AgentRuntime:
             context = await self.backend.get_run_context(run_id)
             if context.status in TERMINAL_RUN_STATUSES:
                 return
-            await DeepAgentsRuntimeEngine(self.backend, await self._model_client()).run_confirmed_tool(context, tool_code)
+            model_client = await self._model_client()
+            engine = self.runtime_router_factory(
+                self.backend,
+                model_client,
+                deep_agents_enabled=self.default_settings.agent_deep_agents_enabled,
+            ).select_engine(message=context.message)
+            await engine.run_confirmed_tool(context, tool_code)
         except BackendClientError as exc:
             await self._fail(run_id, "BACKEND_CALL_FAILED", str(exc))
         except ModelClientError as exc:

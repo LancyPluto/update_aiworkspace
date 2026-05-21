@@ -116,6 +116,8 @@ class TaskHandlerRouter:
             return self.video_generation_handler.handle(routed_message)
         if context.get("toolCode") == "digital_human_agent":
             return self.digital_human_handler.handle(routed_message)
+        if context.get("toolCode") == "ai_comic_drama_agent":
+            return self.digital_human_handler.handle(routed_message)
         if str(context.get("toolType") or "").upper() == "IMAGE_GENERATION":
             return self.image_generation_handler.handle(routed_message)
         if str(context.get("toolType") or "").upper() == "TEXT_TO_SPEECH":

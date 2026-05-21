@@ -28,6 +28,7 @@ class Settings:
     internal_api_token: str = os.getenv("INTERNAL_API_TOKEN", "local-internal-token")
     agent_verify_internal_signature: bool = _bool("AGENT_VERIFY_INTERNAL_SIGNATURE", False)
     agent_execution_mode: str = os.getenv("AGENT_EXECUTION_MODE", "background")
+    agent_deep_agents_enabled: bool = _bool("AGENT_DEEP_AGENTS_ENABLED", False)
     model_provider: str = os.getenv("MODEL_PROVIDER", "mock")
     model_api_base_url: str = os.getenv("MODEL_API_BASE_URL", "https://api.deepseek.com")
     model_api_key: str = os.getenv("MODEL_API_KEY", "replace-with-model-key")
@@ -41,6 +42,8 @@ class Settings:
     agent_model_call_cost: int = int(os.getenv("AGENT_MODEL_CALL_COST", "1"))
     agent_tool_execution_timeout_seconds: int = int(os.getenv("AGENT_TOOL_EXECUTION_TIMEOUT_SECONDS", "120"))
     agent_tool_poll_interval_seconds: float = float(os.getenv("AGENT_TOOL_POLL_INTERVAL_SECONDS", "1"))
+    agent_memory_retrieval_limit: int = int(os.getenv("AGENT_MEMORY_RETRIEVAL_LIMIT", "10"))
+    agent_memory_auto_save_enabled: bool = _bool("AGENT_MEMORY_AUTO_SAVE", True)
 
 
 settings = Settings()

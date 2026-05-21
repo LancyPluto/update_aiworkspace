@@ -77,6 +77,13 @@ export interface UpsertToolPayload {
   templateCode?: string
 }
 
+export interface ToolCoverUploadResult {
+  url: string
+  filename: string
+  contentType: string
+  fileSize: number
+}
+
 export interface PromptRecord {
   id: number
   toolId: number

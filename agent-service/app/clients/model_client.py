@@ -2,6 +2,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.utils.function_calling import convert_to_openai_tool
 
 from app.clients.chat_model_factory import ChatModelFactory, ChatModelProviderError
 from app.config import Settings, settings as default_settings
@@ -28,24 +29,39 @@ class ModelClient:
     def chat_model(self):
         return self._chat_model
 
-    async def chat(self, messages: list[ChatMessage]) -> str:
+    async def chat(self, messages: list[ChatMessage], tools: list[dict[str, Any]] | None = None) -> str:
+        kwargs = {}
+        if tools:
+            kwargs["tools"] = tools
         try:
-            result = await self._chat_model.ainvoke(_to_langchain_messages(messages))
+            result = await self._chat_model.ainvoke(_to_langchain_messages(messages), **kwargs)
         except Exception as exception:
             raise ModelClientError(f"model request failed: {exception}") from exception
         return _message_content(result)
 
-    async def chat_stream(self, messages: list[ChatMessage]) -> AsyncIterator[str]:
-        if not hasattr(self._chat_model, "astream"):
-            yield await self.chat(messages)
+    async def chat_stream(self, messages: list[ChatMessage], tools: list[dict[str, Any]] | None = None) -> AsyncIterator[str]:
+        if self._should_stream_locally():
+            for chunk in _chunk_text(await self.chat(messages, tools=tools)):
+                yield chunk
             return
+        if not hasattr(self._chat_model, "astream"):
+            yield await self.chat(messages, tools=tools)
+            return
+        kwargs = {}
+        if tools:
+            kwargs["tools"] = tools
         try:
-            async for chunk in self._chat_model.astream(_to_langchain_messages(messages)):
+            async for chunk in self._chat_model.astream(_to_langchain_messages(messages), **kwargs):
                 text = _message_content(chunk, allow_empty=True)
                 if text:
                     yield text
         except Exception as exception:
-            raise ModelClientError(f"model stream failed: {exception}") from exception
+            raise ModelClientError(f"model stream failed: {_format_exception(exception)}") from exception
+
+    def _should_stream_locally(self) -> bool:
+        provider = self.settings.model_provider.strip().lower()
+        base_url = self.settings.model_api_base_url.strip().lower()
+        return provider == "openai_compatible" and "siliconflow.cn" in base_url
 
 
 def _to_langchain_message(message: ChatMessage):
@@ -109,3 +125,10 @@ def _extract_content(content: Any) -> str:
 
 def _chunk_text(value: str, size: int = 80) -> list[str]:
     return [value[index : index + size] for index in range(0, len(value), size)] or [""]
+
+
+def _format_exception(exception: Exception) -> str:
+    message = str(exception).strip()
+    if message:
+        return message
+    return exception.__class__.__name__
