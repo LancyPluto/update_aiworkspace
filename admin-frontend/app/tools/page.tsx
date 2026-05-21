@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { AdminLayout } from "@/components/admin/admin-layout"
 import { AdminHeader } from "@/components/admin/header"
+import { CapabilityEditor } from "@/components/admin/capability-editor"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -12,259 +13,37 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
+import { GripVertical, Pencil, Plus, Search, Trash2, UploadCloud } from "lucide-react"
 import {
-  Copy,
-  FileText,
-  MessageSquare,
-  MoreHorizontal,
-  Pencil,
-  Plus,
-  Search,
-  ShoppingBag,
-  Sparkles,
-  Store,
-  Trash2,
-  UploadCloud,
-  Video,
-  type LucideIcon,
-} from "lucide-react"
-import { cn } from "@/lib/utils"
+  createEmptyTool,
+  capabilityTypeLabel,
+  type AITool,
+  type UpsertAIToolPayload,
+} from "@/lib/ai-tool-types"
 import {
-  createTool,
-  deleteTool,
-  fetchAdminToolCategories,
-  fetchAdminTools,
-  fetchToolFields,
-  offlineTool,
-  publishTool,
-  updateTool,
-  updateToolFields,
-  uploadToolCover,
-} from "@/lib/api/tools"
-import { applyToolTemplate, fetchToolTemplates, type ToolTemplateSummary } from "@/lib/api/tool-templates"
-import { FieldSchemaEditor, FieldSchemaPreview } from "@/components/admin/field-schema-editor"
-import {
-  editableFromToolField,
-  parseFieldsJson,
-  serializeFields,
-  toFieldPayload,
-  type EditableField,
-} from "@/lib/tool-fields"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { fetchAgentModelConfigs } from "@/lib/api/agent-model"
-import { fetchModelProviders } from "@/lib/api/model-providers"
+  createAITool,
+  deleteAITool,
+  fetchAdminAITools,
+  updateAITool,
+  uploadAIToolIcon,
+} from "@/lib/api/ai-tools"
 import { ApiError, getBaseUrl } from "@/lib/api/http"
-import type { AgentModelConfig, ModelProviderDescriptor, ToolCategory, ToolField, ToolFieldPayload, ToolSummary } from "@/lib/api/types"
+import { cn } from "@/lib/utils"
 
-interface ToolRow {
-  id: string
-  rawId: number
-  toolCode: string
-  name: string
-  description: string
-  category: string
-  categoryId: number | null
-  toolType: string
-  inputModality: string
-  outputModality: string
-  configNote: string | null
-  coverUrl: string | null
-  icon: LucideIcon
-  credits: number
-  status: boolean
-  rawStatus: string
-  modelConfigId: number | null
-  modelConfigName: string | null
-  modelName: string | null
-  executionHandler?: string | null
-}
-
-interface ToolForm {
-  toolCode: string
-  toolName: string
-  description: string
-  categoryId: string
-  toolType: string
-  inputModality: string
-  outputModality: string
-  configNote: string
-  coverUrl: string
-  estimatedCreditCost: string
-  modelConfigId: string
-  templateCode: string
-}
-
-const initialForm: ToolForm = {
-  toolCode: "",
-  toolName: "",
-  description: "",
-  categoryId: "",
-  toolType: "TEXT_GENERATION",
-  inputModality: "TEXT",
-  outputModality: "TEXT",
-  configNote: "",
-  coverUrl: "",
-  estimatedCreditCost: "5",
-  modelConfigId: "",
-  templateCode: "text_generation_default",
-}
-
-const toolTypeOptions = [
-  { value: "TEXT_GENERATION", label: "文本生成", hint: "文案、摘要、客服回复等文本类工具" },
-  { value: "IMAGE_GENERATION", label: "文生图", hint: "输入提示词，输出图片" },
-  { value: "IMAGE_TO_IMAGE", label: "图生图", hint: "输入参考图或原图，输出图片" },
-  { value: "IMAGE_UNDERSTANDING", label: "图片理解", hint: "输入图片，输出识别/分析文本" },
-  { value: "SPEECH_TO_TEXT", label: "语音转文字", hint: "输入音频，输出文本" },
-  { value: "TEXT_TO_SPEECH", label: "文字转语音", hint: "输入文本，输出音频" },
-  { value: "VIDEO_GENERATION", label: "视频生成", hint: "输入文本/素材，输出视频" },
-  { value: "EMBEDDING", label: "Embedding", hint: "向量化，输出结构化 JSON" },
-  { value: "RERANK", label: "Rerank", hint: "重排序，输出结构化 JSON" },
-  { value: "AGENT", label: "Agent 编排", hint: "多步骤规划和工具调用" },
-]
-
-const modalityOptions = [
-  { value: "TEXT", label: "文本" },
-  { value: "IMAGE", label: "图片" },
-  { value: "AUDIO", label: "音频" },
-  { value: "VIDEO", label: "视频" },
-  { value: "JSON", label: "JSON" },
-  { value: "FILE", label: "文件" },
-  { value: "MULTIMODAL", label: "多模态" },
-]
-
-const defaultModalitiesByType: Record<string, { input: string; output: string }> = {
-  TEXT_GENERATION: { input: "TEXT", output: "TEXT" },
-  IMAGE_GENERATION: { input: "TEXT", output: "IMAGE" },
-  IMAGE_TO_IMAGE: { input: "IMAGE", output: "IMAGE" },
-  IMAGE_UNDERSTANDING: { input: "IMAGE", output: "TEXT" },
-  SPEECH_TO_TEXT: { input: "AUDIO", output: "TEXT" },
-  TEXT_TO_SPEECH: { input: "TEXT", output: "AUDIO" },
-  VIDEO_GENERATION: { input: "TEXT", output: "VIDEO" },
-  EMBEDDING: { input: "TEXT", output: "JSON" },
-  RERANK: { input: "TEXT", output: "JSON" },
-  AGENT: { input: "MULTIMODAL", output: "TEXT" },
-}
-
-function executionCapabilityForTool(
-  toolType: string,
-  toolCode: string,
-  executionHandler?: string | null,
-  inputModality?: string | null,
-  outputModality?: string | null,
-): string {
-  const eh = executionHandler?.trim()
-  if (eh) return eh.toUpperCase()
-  const code = (toolCode || "").trim()
-  if (code === "digital_human_agent") return "DIGITAL_HUMAN"
-  const input = (inputModality || "").trim().toUpperCase()
-  const output = (outputModality || "").trim().toUpperCase()
-  if (input === "TEXT" && output === "AUDIO") return "TEXT_TO_SPEECH"
-  if (input === "AUDIO" && output === "TEXT") return "SPEECH_TO_TEXT"
-  if (input === "TEXT" && output === "IMAGE") return "IMAGE_GENERATION"
-  if (input === "IMAGE" && output === "IMAGE") return "IMAGE_TO_IMAGE"
-  if (input === "IMAGE" && output === "TEXT") return "IMAGE_UNDERSTANDING"
-  if (output === "VIDEO") return "VIDEO_GENERATION"
-  if (output === "JSON" && (toolType || "").trim().toUpperCase() === "EMBEDDING") return "EMBEDDING"
-  if (output === "JSON" && (toolType || "").trim().toUpperCase() === "RERANK") return "RERANK"
-  return (toolType || "TEXT_GENERATION").toUpperCase()
-}
-
-const fallbackProviderCapabilities: Record<string, string[]> = {
-  mock: ["TEXT_GENERATION"],
-  openai_compatible: ["TEXT_GENERATION"],
-  anthropic_compatible: ["TEXT_GENERATION"],
-  minimax: ["TEXT_GENERATION"],
-  siliconflow: ["IMAGE_GENERATION", "DIGITAL_HUMAN"],
-  siliconflow_images: ["IMAGE_GENERATION", "DIGITAL_HUMAN"],
-  volcengine_images: ["IMAGE_GENERATION"],
-  minimax_speech: ["TEXT_TO_SPEECH"],
-  siliconflow_speech: ["TEXT_TO_SPEECH"],
-  worker_video: ["VIDEO_GENERATION"],
-}
-
-function modelConfigSupportsCapability(
-  config: AgentModelConfig,
-  capability: string,
-  providerCapabilities: Record<string, string[]> = fallbackProviderCapabilities,
-): boolean {
-  const caps = resolvedModelCapabilities(config, providerCapabilities)
-  if (caps.length === 0) return false
-  const want = capability.toUpperCase()
-  return caps.some((c) => (c || "").toUpperCase() === want)
-}
-
-function resolvedModelCapabilities(
-  config: AgentModelConfig,
-  providerCapabilities: Record<string, string[]> = fallbackProviderCapabilities,
-): string[] {
-  if (config.capabilities && config.capabilities.length > 0) {
-    return config.capabilities
-      .filter((capability) => capability && capability.trim())
-      .map((capability) => capability.trim().toUpperCase())
-  }
-  const provider = (config.provider || "").trim().toLowerCase()
-  return (providerCapabilities[provider] || fallbackProviderCapabilities[provider] || [])
-    .filter((capability) => capability && capability.trim())
-    .map((capability) => capability.trim().toUpperCase())
-}
-
-function capabilityLabel(capability: string): string {
-  const value = capability.toUpperCase()
-  return toolTypeOptions.find((item) => item.value === value)?.label || value
-}
-
-function optionLabel(options: Array<{ value: string; label: string }>, value?: string | null) {
-  return options.find((item) => item.value === value)?.label || value || "-"
-}
-
-const templateCodeByToolType: Record<string, string> = {
-  TEXT_GENERATION: "text_generation_default",
-  IMAGE_GENERATION: "image_generation_default",
-  TEXT_TO_SPEECH: "text_to_speech_default",
-  VIDEO_GENERATION: "video_generation_default",
-  AGENT: "digital_human_default",
-}
-
-const CATEGORY_ICON_MAP: Record<string, LucideIcon> = {
-  Copywriting: FileText,
-  Content: FileText,
-  Video,
-  Ecommerce: ShoppingBag,
-  Sales: MessageSquare,
-  Store,
-}
-
-function pickIcon(categoryName?: string | null): LucideIcon {
-  if (!categoryName) return Sparkles
-  return CATEGORY_ICON_MAP[categoryName] || Sparkles
-}
-
-function isVideoPreviewUrl(url?: string | null): boolean {
-  if (!url) return false
-  const normalized = url.split(/[?#]/)[0]?.toLowerCase() || ""
-  return [".mp4", ".webm", ".mov", ".m4v"].some((ext) => normalized.endsWith(ext))
-}
-
-function normalizeToolMediaUrl(url?: string | null): string {
+function normalizeMediaUrl(url?: string | null): string {
   const raw = url?.trim()
   if (!raw) return ""
   if (raw.startsWith("http://") || raw.startsWith("https://") || raw.startsWith("data:")) return raw
@@ -273,1035 +52,509 @@ function normalizeToolMediaUrl(url?: string | null): string {
   return baseUrl ? `${baseUrl}${path}` : path
 }
 
-function safePreviewFields(json: string): EditableField[] {
-  try {
-    return parseFieldsJson(json)
-  } catch {
-    return []
-  }
-}
-
-function apiReferenceForTool(tool: ToolRow | null, modelConfig?: AgentModelConfig | null) {
-  const handler = tool
-    ? executionCapabilityForTool(tool.toolType, tool.toolCode, tool.executionHandler, tool.inputModality, tool.outputModality)
-    : "TEXT_GENERATION"
-  const provider = modelConfig?.provider || "未绑定"
-  const model = modelConfig?.modelName || tool?.modelName || "默认模型"
-  const baseUrl = modelConfig?.baseUrl || "使用后台模型配置"
-
-  if (handler === "IMAGE_GENERATION") {
-    return {
-      title: "文生图 API 映射",
-      endpoint: "POST /v1/images/generations",
-      model,
-      provider,
-      baseUrl,
-      fields: [
-        "prompt / text / description -> prompt",
-        "style -> 不直接发给 API；优先按选项 promptPrefix 拼到 prompt 前面",
-        "aspectRatio -> image_size（1:1 等比例会转换为分辨率）",
-        "imageSize -> image_size（显式分辨率优先）",
-        "count / batchSize -> batch_size（限制 1-4）",
-        "negativePrompt -> negative_prompt",
-        "seed -> seed",
-        "guidanceScale -> guidance_scale",
-        "numInferenceSteps -> num_inference_steps",
-      ],
-      note: "未命中的字段不会透传给官网 API；但若字段参与 prompt 拼接，仍会影响生成效果。",
-    }
-  }
-
-  if (handler === "TEXT_TO_SPEECH") {
-    return {
-      title: "文字转语音 API 映射",
-      endpoint: provider === "minimax_speech" ? "POST /v1/t2a_v2 或 /v1/t2a_async_v2" : "SiliconFlow speech endpoint",
-      model,
-      provider,
-      baseUrl,
-      fields: [
-        "text / script / content -> text",
-        "voice / voiceId -> voice_setting.voice_id 或 SiliconFlow voice",
-        "speed -> voice_setting.speed",
-        "volume / vol -> voice_setting.vol",
-        "pitch -> voice_setting.pitch",
-        "format / audioFormat -> audio_setting.format",
-        "sampleRate -> audio_setting.sample_rate",
-        "bitrate -> audio_setting.bitrate",
-        "channel -> audio_setting.channel",
-        "languageBoost -> language_boost",
-      ],
-      note: "其他字段不会整包透传给语音 API。",
-    }
-  }
-
-  return {
-    title: "文本生成 API 映射",
-    endpoint: provider === "anthropic_compatible" ? "POST /v1/messages" : "POST /chat/completions",
-    model,
-    provider,
-    baseUrl,
-    fields: [
-      "systemPrompt -> system message",
-      "userPromptTemplate + params -> user message",
-      "无模板时：params 会按 key/value 生成默认 user prompt",
-    ],
-    note: "文本工具的多余字段可能进入提示词，建议只保留模板实际引用的字段。",
-  }
-}
-
-function FieldSchemaSidePanel({
-  fields,
-  tool,
-  modelConfig,
-}: {
-  fields: EditableField[]
-  tool: ToolRow | null
-  modelConfig?: AgentModelConfig | null
-}) {
-  const reference = apiReferenceForTool(tool, modelConfig)
-  return (
-    <div className="space-y-4 lg:sticky lg:top-0 lg:self-start">
-      <FieldSchemaPreview fields={fields} />
-      <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
-        <div className="mb-4">
-          <h3 className="text-base font-semibold">{reference.title}</h3>
-          <p className="mt-1 text-xs text-muted-foreground">用于核对字段是否会进入真实模型调用。</p>
-        </div>
-        <div className="space-y-2 rounded-lg bg-secondary/40 p-3 text-xs">
-          <div className="flex justify-between gap-3">
-            <span className="text-muted-foreground">Provider</span>
-            <span className="text-right font-medium">{reference.provider}</span>
-          </div>
-          <div className="flex justify-between gap-3">
-            <span className="text-muted-foreground">Model</span>
-            <span className="text-right font-medium">{reference.model}</span>
-          </div>
-          <div className="flex justify-between gap-3">
-            <span className="text-muted-foreground">Endpoint</span>
-            <span className="text-right font-mono">{reference.endpoint}</span>
-          </div>
-          <div className="flex justify-between gap-3">
-            <span className="text-muted-foreground">Base URL</span>
-            <span className="max-w-[210px] truncate text-right font-mono">{reference.baseUrl}</span>
-          </div>
-        </div>
-        <div className="mt-4 space-y-2">
-          <p className="text-xs font-medium">当前系统支持字段</p>
-          <div className="space-y-1.5">
-            {reference.fields.map((field) => (
-              <div key={field} className="rounded-md border border-border/70 bg-background px-2.5 py-1.5 font-mono text-[11px] text-muted-foreground">
-                {field}
-              </div>
-            ))}
-          </div>
-        </div>
-        <p className="mt-3 text-xs text-muted-foreground">{reference.note}</p>
-      </div>
-    </div>
-  )
-}
-
-function mapTool(tool: ToolSummary): ToolRow {
-  return {
-    id: String(tool.id),
-    rawId: tool.id,
-    toolCode: tool.toolCode,
-    name: tool.toolName,
-    description: tool.description || "No description",
-    category: tool.categoryName || "Uncategorized",
-    categoryId: tool.categoryId ?? null,
-    toolType: tool.toolType || "TEXT_GENERATION",
-    inputModality: tool.inputModality || "TEXT",
-    outputModality: tool.outputModality || "TEXT",
-    configNote: tool.configNote || null,
-    coverUrl: tool.coverUrl || null,
-    icon: pickIcon(tool.categoryName),
-    credits: tool.estimatedCreditCost ?? 0,
-    status: (tool.status || "").toUpperCase() === "ONLINE",
-    rawStatus: tool.status,
-    modelConfigId: tool.modelConfigId ?? null,
-    modelConfigName: tool.modelConfigName || null,
-    modelName: tool.modelName || null,
-    executionHandler: tool.executionHandler ?? null,
-  }
+function slugifyId(name: string): string {
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9\u4e00-\u9fff-]/g, "")
+    .slice(0, 32)
 }
 
 export default function ToolsPage() {
-  const [searchQuery, setSearchQuery] = useState("")
-  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
-  const [editingTool, setEditingTool] = useState<ToolRow | null>(null)
-  const [toolList, setToolList] = useState<ToolRow[]>([])
-  const [categories, setCategories] = useState<ToolCategory[]>([])
-  const [modelConfigs, setModelConfigs] = useState<AgentModelConfig[]>([])
-  const [providerCapabilities, setProviderCapabilities] = useState<Record<string, string[]>>(fallbackProviderCapabilities)
+  const [tools, setTools] = useState<AITool[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [togglingId, setTogglingId] = useState<number | null>(null)
-  const [deletingId, setDeletingId] = useState<number | null>(null)
-  const [submitting, setSubmitting] = useState(false)
-  const [coverUploading, setCoverUploading] = useState(false)
-  const [coverDragging, setCoverDragging] = useState(false)
-  const [form, setForm] = useState<ToolForm>(initialForm)
+  const [searchQuery, setSearchQuery] = useState("")
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const [editingTool, setEditingTool] = useState<AITool | null>(null)
+  const [form, setForm] = useState<UpsertAIToolPayload>(createEmptyTool())
   const [formError, setFormError] = useState<string | null>(null)
-  const [fieldDialogOpen, setFieldDialogOpen] = useState(false)
-  const [fieldTool, setFieldTool] = useState<ToolRow | null>(null)
-  const [fieldJson, setFieldJson] = useState("[]")
-  const [fieldError, setFieldError] = useState<string | null>(null)
-  const [fieldLoading, setFieldLoading] = useState(false)
-  const [fieldSaving, setFieldSaving] = useState(false)
-  const [fieldEditorMode, setFieldEditorMode] = useState<"visual" | "json">("visual")
-  const [editableFields, setEditableFields] = useState<EditableField[]>([])
-  const [toolTemplates, setToolTemplates] = useState<ToolTemplateSummary[]>([])
+  const [submitting, setSubmitting] = useState(false)
+  const [iconUploading, setIconUploading] = useState(false)
+  const [togglingId, setTogglingId] = useState<string | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<AITool | null>(null)
 
-  async function loadAll() {
+  async function loadTools() {
     setLoading(true)
     setError(null)
     try {
-      const [toolsResp, cats, providers] = await Promise.all([
-        fetchAdminTools(),
-        fetchAdminToolCategories().catch(() => [] as ToolCategory[]),
-        fetchModelProviders().catch(() => [] as ModelProviderDescriptor[]),
-      ])
-      setToolList(toolsResp.list.map(mapTool))
-      setCategories(cats)
-      if (providers.length > 0) {
-        setProviderCapabilities(
-          providers.reduce<Record<string, string[]>>((acc, provider) => {
-            acc[provider.code.trim().toLowerCase()] = provider.capabilities || []
-            return acc
-          }, { ...fallbackProviderCapabilities }),
-        )
-      }
-      const configs = await fetchAgentModelConfigs().catch(() => [] as AgentModelConfig[])
-      setModelConfigs(configs.filter((config) => config.enabled !== false))
-      const templates = await fetchToolTemplates().catch(() => [] as ToolTemplateSummary[])
-      setToolTemplates(templates)
+      const list = await fetchAdminAITools()
+      setTools([...list].sort((a, b) => a.order - b.order))
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed to load tools")
+      setError(err instanceof ApiError ? err.message : "加载 AI 工具失败")
     } finally {
       setLoading(false)
     }
   }
 
   useEffect(() => {
-    loadAll()
+    loadTools()
   }, [])
 
   const filteredTools = useMemo(() => {
     const keyword = searchQuery.trim().toLowerCase()
-    if (!keyword) return toolList
-    return toolList.filter((tool) =>
-      [tool.name, tool.description, tool.category].some((value) =>
-        value.toLowerCase().includes(keyword),
-      ),
+    if (!keyword) return tools
+    return tools.filter((tool) =>
+      [tool.name, tool.description || "", tool.id].some((value) => value.toLowerCase().includes(keyword)),
     )
-  }, [toolList, searchQuery])
-
-  const requiredModelCapability = useMemo(() => {
-    const code = editingTool?.toolCode ?? form.toolCode ?? ""
-    const type = editingTool?.toolType ?? form.toolType
-    const eh = editingTool?.executionHandler ?? null
-    const input = form.inputModality || editingTool?.inputModality
-    const output = form.outputModality || editingTool?.outputModality
-    return executionCapabilityForTool(type, code, eh, input, output)
-  }, [editingTool, form.toolType, form.toolCode, form.inputModality, form.outputModality])
-
-  const filteredModelConfigs = useMemo(
-    () => modelConfigs.filter((c) => modelConfigSupportsCapability(c, requiredModelCapability, providerCapabilities)),
-    [modelConfigs, providerCapabilities, requiredModelCapability],
-  )
-
-  const defaultModelConfig = useMemo(
-    () => modelConfigs.find((config) => config.isDefault) || modelConfigs[0] || null,
-    [modelConfigs],
-  )
-
-  const defaultModelSupportsRequiredCapability = useMemo(
-    () => !defaultModelConfig || modelConfigSupportsCapability(defaultModelConfig, requiredModelCapability, providerCapabilities),
-    [defaultModelConfig, providerCapabilities, requiredModelCapability],
-  )
-
-  const modelSelectValue = form.modelConfigId
-    ? form.modelConfigId
-    : defaultModelSupportsRequiredCapability
-      ? "default"
-      : "__select_matching_model"
-
-  const configuredModelRows = useMemo(
-    () => modelConfigs.map((config) => ({
-      config,
-      capabilities: resolvedModelCapabilities(config, providerCapabilities),
-    })),
-    [modelConfigs, providerCapabilities],
-  )
-
-  useEffect(() => {
-    if (!form.modelConfigId) return
-    const selected = modelConfigs.find((config) => String(config.id) === form.modelConfigId)
-    if (selected && !modelConfigSupportsCapability(selected, requiredModelCapability, providerCapabilities)) {
-      updateForm("modelConfigId", "")
-    }
-  }, [form.modelConfigId, modelConfigs, providerCapabilities, requiredModelCapability])
-
-  async function toggleToolStatus(id: string) {
-    const target = toolList.find((tool) => tool.id === id)
-    if (!target) return
-    setTogglingId(target.rawId)
-    try {
-      const updated = target.status
-        ? await offlineTool(target.rawId)
-        : await publishTool(target.rawId)
-      setToolList((prev) => prev.map((tool) => (tool.id === id ? mapTool(updated) : tool)))
-    } catch (err) {
-      const message = err instanceof ApiError ? err.message : "Failed to update tool status"
-      if (typeof window !== "undefined") window.alert(message)
-    } finally {
-      setTogglingId(null)
-    }
-  }
-
-  function updateForm<K extends keyof ToolForm>(key: K, value: ToolForm[K]) {
-    setForm((prev) => ({ ...prev, [key]: value }))
-  }
-
-  function selectedModelName(): string {
-    const selected = form.modelConfigId
-      ? modelConfigs.find((config) => String(config.id) === form.modelConfigId)
-      : defaultModelConfig
-    return selected?.displayName || selected?.modelName || ""
-  }
-
-  async function handleCoverUpload(file?: File | null) {
-    if (!file) return
-    setFormError(null)
-    setCoverUploading(true)
-    try {
-      const uploaded = await uploadToolCover({
-        file,
-        toolName: form.toolName.trim(),
-        toolCode: form.toolCode.trim(),
-        modelName: selectedModelName(),
-      })
-      updateForm("coverUrl", uploaded.url)
-    } catch (err) {
-      const message = err instanceof ApiError ? err.message : "工具展示素材上传失败，请查看后端日志。"
-      console.error("[AI Tool Management] 工具展示素材上传失败", err)
-      setFormError(message)
-    } finally {
-      setCoverUploading(false)
-      setCoverDragging(false)
-    }
-  }
+  }, [tools, searchQuery])
 
   function openCreateDialog() {
     setEditingTool(null)
-    setForm({
-      ...initialForm,
-      categoryId: categories[0] ? String(categories[0].id) : "",
-      templateCode: templateCodeByToolType[initialForm.toolType] || "",
-    })
+    const nextOrder = tools.length > 0 ? Math.max(...tools.map((tool) => tool.order)) + 10 : 10
+    setForm(createEmptyTool(nextOrder))
     setFormError(null)
-    setCoverUploading(false)
-    setCoverDragging(false)
-    setIsAddDialogOpen(true)
+    setDialogOpen(true)
   }
 
-  function updateToolType(value: string) {
-    const defaults = defaultModalitiesByType[value] || defaultModalitiesByType.TEXT_GENERATION
-    setForm((prev) => ({
-      ...prev,
-      toolType: value,
-      inputModality: defaults.input,
-      outputModality: defaults.output,
-      templateCode: templateCodeByToolType[value] || prev.templateCode,
-    }))
-  }
-
-  function applyTemplateToForm(templateCode: string) {
-    const template = toolTemplates.find((item) => item.templateCode === templateCode)
-    if (!template) return
-    setForm((prev) => ({
-      ...prev,
-      templateCode,
-      toolType: template.toolType,
-      inputModality: template.inputModality,
-      outputModality: template.outputModality,
-      configNote: template.configNote || "",
-    }))
-  }
-
-  function openEditDialog(tool: ToolRow) {
+  function openEditDialog(tool: AITool) {
     setEditingTool(tool)
     setForm({
-      toolCode: tool.toolCode,
-      toolName: tool.name,
-      description: tool.description === "No description" ? "" : tool.description,
-      categoryId: tool.categoryId ? String(tool.categoryId) : "",
-      toolType: tool.toolType,
-      inputModality: tool.inputModality,
-      outputModality: tool.outputModality,
-      configNote: tool.configNote || "",
-      coverUrl: tool.coverUrl || "",
-      estimatedCreditCost: String(tool.credits),
-      modelConfigId: tool.modelConfigId ? String(tool.modelConfigId) : "",
-      templateCode: "",
+      name: tool.name,
+      iconUrl: tool.iconUrl,
+      description: tool.description || "",
+      enabled: tool.enabled,
+      order: tool.order,
+      primaryColor: tool.primaryColor || "#3b82f6",
+      welcomeMessage: tool.welcomeMessage || "",
+      capabilities: tool.capabilities || [],
     })
     setFormError(null)
-    setCoverUploading(false)
-    setCoverDragging(false)
-    setIsAddDialogOpen(true)
+    setDialogOpen(true)
   }
 
-  async function handleSaveTool() {
+  function updateForm<K extends keyof UpsertAIToolPayload>(key: K, value: UpsertAIToolPayload[K]) {
+    setForm((prev) => ({ ...prev, [key]: value }))
+  }
+
+  async function handleIconUpload(file: File) {
+    setIconUploading(true)
     setFormError(null)
-    if (!form.toolName.trim()) {
-      setFormError("请填写工具名称。")
+    try {
+      const result = await uploadAIToolIcon(file)
+      updateForm("iconUrl", result.url)
+    } catch (err) {
+      setFormError(err instanceof ApiError ? err.message : "图标上传失败")
+    } finally {
+      setIconUploading(false)
+    }
+  }
+
+  async function handleSubmit() {
+    setFormError(null)
+    if (!form.name.trim()) {
+      setFormError("请填写名称")
       return
     }
-    if (!form.categoryId) {
-      setFormError(categories.length === 0 ? "请先在「分类管理」中创建一个工具分类。" : "请选择工具分类。")
+    if (form.name.trim().length > 20) {
+      setFormError("名称最多 20 个字符")
       return
     }
-    const credits = Number(form.estimatedCreditCost)
-    if (!Number.isFinite(credits) || credits < 0) {
-      setFormError("消耗算力必须是大于等于 0 的数字。")
+    if (!form.iconUrl.trim()) {
+      setFormError("请上传图标")
       return
     }
-    if (!form.modelConfigId && !defaultModelSupportsRequiredCapability) {
-      setFormError(`默认模型不支持「${capabilityLabel(requiredModelCapability)}」，请选择一个匹配的模型配置。`)
+    if (!form.order || form.order < 1) {
+      setFormError("排序必须为正整数")
       return
     }
+    if ((form.description || "").length > 100) {
+      setFormError("描述最多 100 个字符")
+      return
+    }
+
     setSubmitting(true)
     try {
-      const payload = {
-        toolCode: form.toolCode.trim() || undefined,
-        toolName: form.toolName.trim(),
-        categoryId: Number(form.categoryId),
-        description: form.description.trim() || undefined,
-        toolType: form.toolType,
-        inputModality: form.inputModality,
-        outputModality: form.outputModality,
-        configNote: form.configNote.trim() || undefined,
-        coverUrl: form.coverUrl.trim() || undefined,
-        estimatedCreditCost: Math.floor(credits),
-        modelConfigId: form.modelConfigId ? Number(form.modelConfigId) : null,
-        templateCode: !editingTool && form.templateCode ? form.templateCode : undefined,
-      }
       if (editingTool) {
-        const updated = await updateTool(editingTool.rawId, payload)
-        setToolList((prev) => prev.map((tool) => (tool.rawId === editingTool.rawId ? mapTool(updated) : tool)))
+        await updateAITool(editingTool.id, form)
       } else {
-        const created = await createTool(payload)
-        const published = await publishTool(created.id)
-        setToolList((prev) => [mapTool(published), ...prev])
+        const id = slugifyId(form.name) || `tool-${Date.now()}`
+        await createAITool({ ...form, id })
       }
-      setForm(initialForm)
-      setEditingTool(null)
-      setIsAddDialogOpen(false)
+      setDialogOpen(false)
+      await loadTools()
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : "保存工具失败，请稍后重试。"
-      console.error("[AI Tool Management] 保存工具失败", err)
-      setFormError(message)
+      setFormError(err instanceof ApiError ? err.message : "保存失败")
     } finally {
       setSubmitting(false)
     }
   }
 
-  async function handleDeleteTool(tool: ToolRow) {
-    if (typeof window !== "undefined") {
-      const confirmed = window.confirm(`确定删除「${tool.name}」吗？删除后该工具会从管理列表和用户端下线。`)
-      if (!confirmed) return
-    }
-    setDeletingId(tool.rawId)
-    setError(null)
+  async function toggleEnabled(tool: AITool) {
+    setTogglingId(tool.id)
     try {
-      await deleteTool(tool.rawId)
-      setToolList((prev) => prev.filter((item) => item.rawId !== tool.rawId))
+      await updateAITool(tool.id, {
+        name: tool.name,
+        iconUrl: tool.iconUrl,
+        description: tool.description,
+        enabled: !tool.enabled,
+        order: tool.order,
+        primaryColor: tool.primaryColor,
+        welcomeMessage: tool.welcomeMessage,
+        capabilities: tool.capabilities,
+      })
+      await loadTools()
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : "删除工具失败，请查看后端日志。"
-      console.error("[AI Tool Management] 删除工具失败", { toolId: tool.rawId, toolCode: tool.toolCode, error: err })
-      setError(message)
-      if (typeof window !== "undefined") window.alert(message)
+      setError(err instanceof ApiError ? err.message : "更新上架状态失败")
+    } finally {
+      setTogglingId(null)
+    }
+  }
+
+  async function confirmDelete() {
+    if (!deleteTarget) return
+    setDeletingId(deleteTarget.id)
+    try {
+      await deleteAITool(deleteTarget.id)
+      setDeleteTarget(null)
+      await loadTools()
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "删除失败")
     } finally {
       setDeletingId(null)
     }
   }
 
-  function applyLoadedFields(fields: ToolField[]) {
-    const editable = fields.map((field, index) => editableFromToolField(field, index))
-    setEditableFields(editable)
-    setFieldJson(serializeFields(editable))
-  }
+  async function moveTool(toolId: string, direction: -1 | 1) {
+    const sorted = [...tools].sort((a, b) => a.order - b.order)
+    const index = sorted.findIndex((tool) => tool.id === toolId)
+    const swapIndex = index + direction
+    if (index < 0 || swapIndex < 0 || swapIndex >= sorted.length) return
 
-  async function openFieldDialog(tool: ToolRow) {
-    setFieldTool(tool)
-    setFieldDialogOpen(true)
-    setFieldEditorMode("visual")
-    setFieldError(null)
-    setFieldLoading(true)
+    const current = sorted[index]
+    const target = sorted[swapIndex]
     try {
-      const fields = await fetchToolFields(tool.rawId)
-      applyLoadedFields(fields)
+      await Promise.all([
+        updateAITool(current.id, {
+          name: current.name,
+          iconUrl: current.iconUrl,
+          description: current.description,
+          enabled: current.enabled,
+          order: target.order,
+          primaryColor: current.primaryColor,
+          welcomeMessage: current.welcomeMessage,
+          capabilities: current.capabilities,
+        }),
+        updateAITool(target.id, {
+          name: target.name,
+          iconUrl: target.iconUrl,
+          description: target.description,
+          enabled: target.enabled,
+          order: current.order,
+          primaryColor: target.primaryColor,
+          welcomeMessage: target.welcomeMessage,
+          capabilities: target.capabilities,
+        }),
+      ])
+      await loadTools()
     } catch (err) {
-      setFieldError(err instanceof ApiError ? err.message : "Failed to load fields")
-      setEditableFields([])
-      setFieldJson("[]")
-    } finally {
-      setFieldLoading(false)
+      setError(err instanceof ApiError ? err.message : "调整排序失败")
     }
   }
-
-  function switchFieldEditorMode(mode: "visual" | "json") {
-    if (mode === fieldEditorMode) return
-    try {
-      if (mode === "json") {
-        setFieldJson(serializeFields(editableFields))
-      } else {
-        setEditableFields(parseFieldsJson(fieldJson))
-      }
-      setFieldEditorMode(mode)
-      setFieldError(null)
-    } catch (err) {
-      setFieldError(err instanceof Error ? err.message : "字段配置格式错误")
-    }
-  }
-
-  async function applyFieldTemplate() {
-    if (!fieldTool) return
-    const templateCode =
-      toolTemplates.find((item) => item.toolType === fieldTool.toolType)?.templateCode
-      || templateCodeByToolType[fieldTool.toolType]
-      || "text_generation_default"
-    setFieldSaving(true)
-    setFieldError(null)
-    try {
-      await applyToolTemplate(fieldTool.rawId, {
-        templateCode,
-        applyMetadata: false,
-        overwritePrompt: true,
-      })
-      const fields = await fetchToolFields(fieldTool.rawId)
-      applyLoadedFields(fields)
-    } catch (err) {
-      setFieldError(err instanceof ApiError ? err.message : "应用模板失败")
-    } finally {
-      setFieldSaving(false)
-    }
-  }
-
-  async function saveFields() {
-    if (!fieldTool) return
-    setFieldError(null)
-    let fields: ToolFieldPayload[]
-    try {
-      const editable = fieldEditorMode === "visual" ? editableFields : parseFieldsJson(fieldJson)
-      fields = editable.map((field, index) => toFieldPayload(field, index))
-    } catch (err) {
-      setFieldError(err instanceof Error ? err.message : "字段配置无效")
-      return
-    }
-    setFieldSaving(true)
-    try {
-      const saved = await updateToolFields(fieldTool.rawId, fields)
-      applyLoadedFields(saved)
-      setFieldDialogOpen(false)
-    } catch (err) {
-      setFieldError(err instanceof ApiError ? err.message : "Failed to save fields")
-    } finally {
-      setFieldSaving(false)
-    }
-  }
-
-  const headerDescription = error
-    ? `操作失败：${error}`
-    : loading
-      ? "正在加载工具列表..."
-      : "管理 AI 工具、字段配置和发布状态。"
 
   return (
     <AdminLayout>
-      <AdminHeader title="AI Tool Management" description={headerDescription} />
+      <AdminHeader
+        title="AI 工具管理"
+        description="配置 AI 模型图标、能力与上架状态，C 端聊天页将自动适配"
+      />
 
-      <div className="space-y-6 p-6">
-        <div className="flex items-center justify-between gap-4">
+      <div className="space-y-4 p-6">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="relative max-w-md flex-1">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
-              placeholder="Search tools..."
+              className="pl-9"
+              placeholder="搜索名称、描述、ID…"
               value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              className="pl-9 bg-secondary border-0"
+              onChange={(e) => setSearchQuery(e.target.value)}
             />
           </div>
-          <Dialog
-            open={isAddDialogOpen}
-            onOpenChange={(open) => {
-              setIsAddDialogOpen(open)
-              if (!open) {
-                setForm(initialForm)
-                setEditingTool(null)
-                setFormError(null)
-                setCoverUploading(false)
-                setCoverDragging(false)
-              }
-            }}
-          >
-            <DialogTrigger asChild>
-              <Button className="gap-2" onClick={openCreateDialog}>
-                <Plus className="h-4 w-4" />
-                新建工具
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="max-h-[92vh] overflow-y-auto bg-card border-border max-w-lg">
-              <DialogHeader>
-                <DialogTitle>{editingTool ? "编辑 AI 工具" : "新建 AI 工具"}</DialogTitle>
-                <DialogDescription className={formError ? "text-destructive" : undefined}>
-                  {formError || "配置工具信息、能力类型和模型绑定。"}
-                </DialogDescription>
-              </DialogHeader>
-              <div className="space-y-4 py-4">
-                <div className="space-y-2">
-                  <Label>工具名称</Label>
-                  <Input value={form.toolName} onChange={(event) => updateForm("toolName", event.target.value)} placeholder="例如：文字转语音" />
-                </div>
-                <div className="space-y-2">
-                  <Label>工具描述</Label>
-                  <Textarea value={form.description} onChange={(event) => updateForm("description", event.target.value)} />
-                </div>
-                <div className="space-y-2">
-                  <Label>工具展示素材 URL</Label>
-                  <Input
-                    value={form.coverUrl}
-                    onChange={(event) => updateForm("coverUrl", event.target.value)}
-                    placeholder="可填图片、GIF、MP4/WebM/MOV 地址；不填则使用默认图标"
-                  />
-                  <label
-                    className={cn(
-                      "flex cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-border bg-secondary/30 px-4 py-5 text-center transition",
-                      coverDragging && "border-primary bg-primary/5",
-                      coverUploading && "pointer-events-none opacity-70",
-                    )}
-                    onDragEnter={(event) => {
-                      event.preventDefault()
-                      setCoverDragging(true)
-                    }}
-                    onDragOver={(event) => {
-                      event.preventDefault()
-                      setCoverDragging(true)
-                    }}
-                    onDragLeave={(event) => {
-                      event.preventDefault()
-                      setCoverDragging(false)
-                    }}
-                    onDrop={(event) => {
-                      event.preventDefault()
-                      const file = event.dataTransfer.files?.[0]
-                      void handleCoverUpload(file)
-                    }}
-                  >
-                    <UploadCloud className="mb-2 h-5 w-5 text-primary" />
-                    <span className="text-sm font-medium">
-                      {coverUploading ? "上传中..." : "拖拽图片、GIF 或视频到这里"}
-                    </span>
-                    <span className="mt-1 text-xs text-muted-foreground">
-                      也可以点击选择文件；系统会按工具名和模型自动命名。
-                    </span>
-                    <input
-                      type="file"
-                      accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime,video/x-m4v"
-                      className="hidden"
-                      onChange={(event) => {
-                        const file = event.target.files?.[0]
-                        void handleCoverUpload(file)
-                        event.currentTarget.value = ""
-                      }}
-                    />
-                  </label>
-                  {form.coverUrl.trim() ? (
-                    <div className="overflow-hidden rounded-lg border border-border bg-muted/40">
-                      {isVideoPreviewUrl(form.coverUrl) ? (
-                        <video
-                          src={normalizeToolMediaUrl(form.coverUrl)}
-                          className="aspect-video w-full object-cover"
-                          muted
-                          loop
-                          playsInline
-                          controls
-                          preload="metadata"
+          <Button onClick={openCreateDialog}>
+            <Plus className="mr-1.5 h-4 w-4" />
+            新增 AI 工具
+          </Button>
+        </div>
+
+        {error ? (
+          <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+            {error}
+            <Button variant="link" className="ml-2 h-auto p-0 text-destructive" onClick={loadTools}>
+              重试
+            </Button>
+          </div>
+        ) : null}
+
+        <div className="rounded-xl border border-border bg-card shadow-sm">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-10" />
+                <TableHead>图标</TableHead>
+                <TableHead>名称</TableHead>
+                <TableHead>描述</TableHead>
+                <TableHead>能力</TableHead>
+                <TableHead>排序</TableHead>
+                <TableHead>上架</TableHead>
+                <TableHead className="text-right">操作</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {loading ? (
+                <TableRow>
+                  <TableCell colSpan={8} className="py-10 text-center text-muted-foreground">
+                    加载中…
+                  </TableCell>
+                </TableRow>
+              ) : filteredTools.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={8} className="py-10 text-center text-muted-foreground">
+                    暂无 AI 工具，点击右上角新增
+                  </TableCell>
+                </TableRow>
+              ) : (
+                filteredTools.map((tool, index) => (
+                  <TableRow key={tool.id}>
+                    <TableCell>
+                      <div className="flex flex-col gap-1">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6"
+                          disabled={index === 0}
+                          onClick={() => moveTool(tool.id, -1)}
+                        >
+                          <GripVertical className="h-3.5 w-3.5 rotate-180" />
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6"
+                          disabled={index === filteredTools.length - 1}
+                          onClick={() => moveTool(tool.id, 1)}
+                        >
+                          <GripVertical className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      {tool.iconUrl ? (
+                        <img
+                          src={normalizeMediaUrl(tool.iconUrl)}
+                          alt={tool.name}
+                          className="h-10 w-10 rounded-lg border border-border object-cover"
                         />
                       ) : (
-                        <img
-                          src={normalizeToolMediaUrl(form.coverUrl)}
-                          alt="工具展示素材预览"
-                          className="aspect-video w-full object-cover"
-                        />
+                        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-secondary text-xs text-muted-foreground">
+                          无
+                        </div>
                       )}
-                    </div>
-                  ) : (
-                    <p className="text-xs text-muted-foreground">
-                      建议使用 16:9 横图；GIF 可直接作为图片使用，视频建议 MP4/WebM。
-                    </p>
-                  )}
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label>分类</Label>
-                    <Select value={form.categoryId} onValueChange={(value) => updateForm("categoryId", value)}>
-                      <SelectTrigger>
-                        <SelectValue placeholder={categories.length === 0 ? "暂无分类，请先创建分类" : "选择分类"} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {categories.map((cat) => (
-                          <SelectItem key={cat.id} value={String(cat.id)}>
-                            {cat.categoryName}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>消耗算力</Label>
-                    <Input
-                      type="number"
-                      value={form.estimatedCreditCost}
-                      onChange={(event) => updateForm("estimatedCreditCost", event.target.value)}
-                    />
-                  </div>
-                </div>
-                {!editingTool ? (
-                  <div className="space-y-2">
-                    <Label>工具模板</Label>
-                    <Select
-                      value={form.templateCode}
-                      onValueChange={(value) => {
-                        updateForm("templateCode", value)
-                        applyTemplateToForm(value)
-                      }}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="选择蓝图模板" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {toolTemplates.map((item) => (
-                          <SelectItem key={item.templateCode} value={item.templateCode}>
-                            {item.templateName} ({item.executionHandler})
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                ) : null}
-                <div className="space-y-2 rounded-lg border border-border bg-secondary/30 p-3">
-                  <Label>模型能力类型</Label>
-                  <Select value={form.toolType} onValueChange={updateToolType}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="选择工具能力" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {toolTypeOptions.map((item) => (
-                        <SelectItem key={item.value} value={item.value}>
-                          {item.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">
-                    {toolTypeOptions.find((item) => item.value === form.toolType)?.hint}
-                  </p>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label>输入模态</Label>
-                    <Select value={form.inputModality} onValueChange={(value) => updateForm("inputModality", value)}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="选择输入类型" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {modalityOptions.map((item) => (
-                          <SelectItem key={item.value} value={item.value}>
-                            {item.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>输出模态</Label>
-                    <Select value={form.outputModality} onValueChange={(value) => updateForm("outputModality", value)}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="选择输出类型" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {modalityOptions.map((item) => (
-                          <SelectItem key={item.value} value={item.value}>
-                            {item.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <Label>配置说明</Label>
-                  <Textarea
-                    value={form.configNote}
-                    onChange={(event) => updateForm("configNote", event.target.value)}
-                    placeholder="给管理员看的补充说明，例如文生图需要尺寸、数量、风格、反向提示词等字段。"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>工具编码</Label>
-                  <Input
-                    value={form.toolCode}
-                    onChange={(event) => updateForm("toolCode", event.target.value)}
-                    placeholder="不填则自动生成"
-                    disabled={Boolean(editingTool)}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>模型配置</Label>
-                  <Select
-                    value={modelSelectValue}
-                    onValueChange={(value) => updateForm("modelConfigId", value === "default" || value === "__select_matching_model" ? "" : value)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="选择匹配的模型配置" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {!defaultModelSupportsRequiredCapability ? (
-                        <SelectItem value="__select_matching_model" disabled>
-                          请选择支持「{capabilityLabel(requiredModelCapability)}」的模型
-                        </SelectItem>
-                      ) : null}
-                      <SelectItem value="default" disabled={!defaultModelSupportsRequiredCapability}>
-                        使用默认模型配置
-                      </SelectItem>
-                      {filteredModelConfigs.map((config) => (
-                        <SelectItem key={config.id} value={String(config.id)}>
-                          {config.displayName || config.modelName} · {config.provider}
-                        </SelectItem>
-                      ))}
-                      {filteredModelConfigs.length === 0 ? (
-                        <SelectItem value="__no_matching_models" disabled>
-                          暂无匹配模型配置
-                        </SelectItem>
-                      ) : null}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">需要模型能力：{capabilityLabel(requiredModelCapability)}</p>
-                </div>
-              </div>
-              <DialogFooter>
-                <Button variant="outline" onClick={() => setIsAddDialogOpen(false)} disabled={submitting}>
-                  取消
-                </Button>
-                <Button onClick={handleSaveTool} disabled={submitting}>
-                  {submitting ? "保存中..." : editingTool ? "保存工具" : "创建工具"}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-        </div>
-
-        <div className="rounded-2xl border border-border bg-card p-5">
-          <div className="mb-4 flex items-center justify-between gap-4">
-            <div>
-              <h2 className="text-base font-semibold text-card-foreground">已配置模型能力</h2>
-              <p className="text-sm text-muted-foreground">确认当前后台可绑定到不同模态工具的模型配置。</p>
-            </div>
-            <Badge variant="secondary">{configuredModelRows.length} models</Badge>
-          </div>
-          {configuredModelRows.length === 0 ? (
-            <p className="text-sm text-muted-foreground">暂无可用模型配置。</p>
-          ) : (
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-              {configuredModelRows.map(({ config, capabilities }) => (
-                <div key={config.id} className="rounded-xl border border-border/70 bg-secondary/40 p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="truncate font-medium text-card-foreground">{config.displayName || config.modelName}</p>
-                      <p className="truncate text-xs text-muted-foreground">{config.provider} · {config.modelName}</p>
-                    </div>
-                    {config.isDefault ? <Badge variant="outline">Default</Badge> : null}
-                  </div>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {capabilities.length > 0 ? capabilities.map((capability) => (
-                      <Badge key={capability} variant="secondary" className="text-xs">
-                        {capabilityLabel(capability)}
-                      </Badge>
-                    )) : (
-                      <Badge variant="destructive" className="text-xs">未识别能力</Badge>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {filteredTools.map((tool) => (
-            <div
-              key={tool.id}
-              className={cn(
-                "group relative overflow-hidden rounded-2xl border border-border bg-card p-6 transition-all duration-300 hover:border-primary/30 hover:shadow-lg hover:shadow-primary/5",
-                !tool.status && "opacity-60",
+                    </TableCell>
+                    <TableCell>
+                      <div>
+                        <p className="font-medium">{tool.name}</p>
+                        <p className="text-xs text-muted-foreground">{tool.id}</p>
+                      </div>
+                    </TableCell>
+                    <TableCell className="max-w-[220px] truncate text-muted-foreground">
+                      {tool.description || "—"}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex flex-wrap gap-1">
+                        {(tool.capabilities || []).length === 0 ? (
+                          <span className="text-xs text-muted-foreground">无</span>
+                        ) : (
+                          tool.capabilities.map((capability, capIndex) => (
+                            <Badge key={`${capability.type}-${capIndex}`} variant="secondary" className="text-[10px]">
+                              {capabilityTypeLabel(capability.type)}
+                            </Badge>
+                          ))
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell>{tool.order}</TableCell>
+                    <TableCell>
+                      <Switch
+                        checked={tool.enabled}
+                        disabled={togglingId === tool.id}
+                        onCheckedChange={() => toggleEnabled(tool)}
+                      />
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-1">
+                        <Button type="button" variant="ghost" size="icon" onClick={() => openEditDialog(tool)}>
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="text-destructive hover:text-destructive"
+                          onClick={() => setDeleteTarget(tool)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))
               )}
-            >
-              {tool.coverUrl ? (
-                <div className="-mx-6 -mt-6 mb-5 overflow-hidden border-b border-border bg-muted">
-                  {isVideoPreviewUrl(tool.coverUrl) ? (
-                    <video
-                      src={normalizeToolMediaUrl(tool.coverUrl)}
-                      className="aspect-video w-full object-cover"
-                      muted
-                      loop
-                      playsInline
-                      preload="metadata"
-                    />
-                  ) : (
-                    <img src={normalizeToolMediaUrl(tool.coverUrl)} alt={tool.name} className="aspect-video w-full object-cover" />
-                  )}
-                </div>
-              ) : null}
-              <div className="flex items-start justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10">
-                    <tool.icon className="h-5 w-5 text-primary" />
-                  </div>
-                  <div>
-                    <h3 className="font-semibold text-card-foreground">{tool.name}</h3>
-                    <Badge variant="secondary" className="mt-1 text-xs font-normal">{tool.category}</Badge>
-                  </div>
-                </div>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="icon" className="h-8 w-8 opacity-0 transition-opacity group-hover:opacity-100">
-                      <MoreHorizontal className="h-4 w-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="bg-card border-border">
-                    <DropdownMenuItem className="gap-2" onClick={() => openEditDialog(tool)}>
-                      <Pencil className="h-4 w-4" /> 编辑
-                    </DropdownMenuItem>
-                    <DropdownMenuItem className="gap-2" onClick={() => openFieldDialog(tool)}>
-                      <FileText className="h-4 w-4" /> 字段配置
-                    </DropdownMenuItem>
-                    <DropdownMenuItem className="gap-2" disabled>
-                      <Copy className="h-4 w-4" /> 复制
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      className="gap-2 text-destructive"
-                      disabled={deletingId === tool.rawId}
-                      onClick={() => handleDeleteTool(tool)}
-                    >
-                      <Trash2 className="h-4 w-4" /> {deletingId === tool.rawId ? "删除中..." : "删除"}
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-
-              <p className="mt-3 line-clamp-2 text-sm text-muted-foreground">{tool.description}</p>
-
-              <div className="mt-4 flex items-center justify-between border-t border-border pt-4">
-                <div className="flex items-center gap-4 text-sm">
-                  <div className="flex items-center gap-1 text-muted-foreground">
-                    <Sparkles className="h-4 w-4" />
-                    <span>{tool.credits} credits</span>
-                  </div>
-                  <div className="text-muted-foreground">{tool.rawStatus}</div>
-                </div>
-                <Switch checked={tool.status} disabled={togglingId === tool.rawId} onCheckedChange={() => toggleToolStatus(tool.id)} />
-              </div>
-              <div className="mt-3 flex flex-wrap gap-2 text-xs">
-                <Badge variant="outline">{optionLabel(toolTypeOptions, tool.toolType)}</Badge>
-                <Badge variant="secondary">
-                  {optionLabel(modalityOptions, tool.inputModality)} → {optionLabel(modalityOptions, tool.outputModality)}
-                </Badge>
-              </div>
-              <div className="mt-3 rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
-                Model: {tool.modelConfigName || tool.modelName || "Default model config"}
-              </div>
-            </div>
-          ))}
+            </TableBody>
+          </Table>
         </div>
       </div>
 
-      <Dialog open={fieldDialogOpen} onOpenChange={setFieldDialogOpen}>
-        <DialogContent className="!w-[1180px] !max-w-[calc(100vw-2rem)] max-h-[90vh] overflow-y-auto bg-card border-border">
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>用户端表单字段</DialogTitle>
-            <DialogDescription>
-              {fieldTool
-                ? `配置「${fieldTool.name}」参数。画面比例等请用「单选/下拉」并配置选项，用户只能点选。`
-                : "配置工具字段。"}
-            </DialogDescription>
+            <DialogTitle>{editingTool ? "编辑 AI 工具" : "新增 AI 工具"}</DialogTitle>
+            <DialogDescription>配置基础信息与能力，保存后 C 端将自动渲染对应控件</DialogDescription>
           </DialogHeader>
-          <div className="grid gap-4 py-2 lg:grid-cols-[minmax(0,1fr)_380px]">
-            <div className="min-w-0 space-y-3">
-              {fieldTool ? (
-                <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-secondary/30 p-3">
-                  <div>
-                    <p className="text-sm font-medium">从工具模板填充</p>
-                    <p className="text-xs text-muted-foreground">
-                      当前类型：{optionLabel(toolTypeOptions, fieldTool.toolType)}。应用后可再在下方微调各字段选项。
-                    </p>
+
+          <div className="space-y-4 py-2">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <Label>名称 *</Label>
+                <Input
+                  className="mt-1.5"
+                  maxLength={20}
+                  placeholder="如：豆包"
+                  value={form.name}
+                  onChange={(e) => updateForm("name", e.target.value)}
+                />
+              </div>
+              <div>
+                <Label>排序 *</Label>
+                <Input
+                  className="mt-1.5"
+                  type="number"
+                  min={1}
+                  value={form.order}
+                  onChange={(e) => updateForm("order", Number(e.target.value) || 1)}
+                />
+              </div>
+            </div>
+
+            <div>
+              <Label>图标 *</Label>
+              <div className="mt-1.5 flex items-center gap-3">
+                {form.iconUrl ? (
+                  <img
+                    src={normalizeMediaUrl(form.iconUrl)}
+                    alt="icon preview"
+                    className="h-16 w-16 rounded-xl border border-border object-cover"
+                  />
+                ) : (
+                  <div className="flex h-16 w-16 items-center justify-center rounded-xl border border-dashed border-border bg-secondary/40 text-xs text-muted-foreground">
+                    1:1
                   </div>
-                  <Button type="button" variant="outline" size="sm" onClick={applyFieldTemplate} disabled={fieldLoading || fieldSaving}>
-                    应用模板
-                  </Button>
-                </div>
-              ) : null}
-              {fieldError ? (
-                <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-                  {fieldError}
-                </div>
-              ) : null}
-              <Tabs value={fieldEditorMode} onValueChange={(value) => switchFieldEditorMode(value as "visual" | "json")}>
-                <TabsList className="grid w-full grid-cols-2">
-                  <TabsTrigger value="visual" disabled={fieldLoading || fieldSaving}>
-                    可视化配置
-                  </TabsTrigger>
-                  <TabsTrigger value="json" disabled={fieldLoading || fieldSaving}>
-                    高级 JSON
-                  </TabsTrigger>
-                </TabsList>
-                <TabsContent value="visual" className="mt-3 max-h-[55vh] overflow-y-auto pr-1">
-                  <FieldSchemaEditor
-                    fields={editableFields}
-                    disabled={fieldLoading || fieldSaving}
-                    onChange={(next) => {
-                      setEditableFields(next)
-                      setFieldJson(serializeFields(next))
+                )}
+                <label className={cn("inline-flex cursor-pointer items-center gap-2 rounded-md border border-border px-3 py-2 text-sm hover:bg-secondary", iconUploading && "pointer-events-none opacity-60")}>
+                  <UploadCloud className="h-4 w-4" />
+                  {iconUploading ? "上传中…" : "上传图标"}
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/svg+xml,image/webp"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0]
+                      if (file) void handleIconUpload(file)
+                      e.target.value = ""
                     }}
                   />
-                </TabsContent>
-                <TabsContent value="json" className="mt-3">
-                  <Textarea
-                    value={fieldJson}
-                    onChange={(event) => setFieldJson(event.target.value)}
-                    className="min-h-[420px] font-mono text-xs"
-                    disabled={fieldLoading || fieldSaving}
-                    placeholder='[{"fieldKey":"aspectRatio","fieldName":"画面比例","fieldType":"radio"}]'
-                  />
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    radio / select 需带 optionsJson。日常请优先使用「可视化配置」。
-                  </p>
-                </TabsContent>
-              </Tabs>
+                </label>
+              </div>
             </div>
-            <FieldSchemaSidePanel
-              fields={fieldEditorMode === "visual" ? editableFields : safePreviewFields(fieldJson)}
-              tool={fieldTool}
-              modelConfig={modelConfigs.find((config) => config.id === fieldTool?.modelConfigId) || null}
+
+            <div>
+              <Label>描述</Label>
+              <Textarea
+                className="mt-1.5"
+                maxLength={100}
+                rows={2}
+                placeholder="简短描述，最多 100 字"
+                value={form.description || ""}
+                onChange={(e) => updateForm("description", e.target.value)}
+              />
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <Label>主题色</Label>
+                <div className="mt-1.5 flex items-center gap-2">
+                  <Input
+                    type="color"
+                    className="h-10 w-14 cursor-pointer p-1"
+                    value={form.primaryColor || "#3b82f6"}
+                    onChange={(e) => updateForm("primaryColor", e.target.value)}
+                  />
+                  <Input
+                    value={form.primaryColor || "#3b82f6"}
+                    onChange={(e) => updateForm("primaryColor", e.target.value)}
+                  />
+                </div>
+              </div>
+              <div className="flex items-end">
+                <div className="flex w-full items-center justify-between rounded-md border border-border px-3 py-2.5">
+                  <Label>上架</Label>
+                  <Switch checked={form.enabled} onCheckedChange={(checked) => updateForm("enabled", checked)} />
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <Label>欢迎语</Label>
+              <Textarea
+                className="mt-1.5"
+                rows={2}
+                placeholder="首次进入聊天页时展示"
+                value={form.welcomeMessage || ""}
+                onChange={(e) => updateForm("welcomeMessage", e.target.value)}
+              />
+            </div>
+
+            <CapabilityEditor
+              capabilities={form.capabilities}
+              onChange={(capabilities) => updateForm("capabilities", capabilities)}
             />
+
+            {formError ? <p className="text-sm text-destructive">{formError}</p> : null}
           </div>
+
           <DialogFooter>
-            <Button variant="outline" onClick={() => setFieldDialogOpen(false)} disabled={fieldSaving}>
+            <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>
               取消
             </Button>
-            <Button onClick={saveFields} disabled={fieldLoading || fieldSaving}>
-              {fieldSaving ? "保存中..." : "保存字段"}
+            <Button type="button" disabled={submitting} onClick={handleSubmit}>
+              {submitting ? "保存中…" : "保存"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>确认删除</DialogTitle>
+            <DialogDescription>
+              确定删除「{deleteTarget?.name}」吗？此操作不可撤销。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setDeleteTarget(null)}>
+              取消
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={deletingId === deleteTarget?.id}
+              onClick={confirmDelete}
+            >
+              {deletingId === deleteTarget?.id ? "删除中…" : "删除"}
             </Button>
           </DialogFooter>
         </DialogContent>
