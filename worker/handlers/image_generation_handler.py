@@ -8,7 +8,8 @@ from client.siliconflow_video_client import (
     SiliconFlowVideoError,
     SiliconFlowVideoTimeoutError,
 )
-from config import resolve_siliconflow_api_key
+from client.kling_video_client import KlingVideoClient, KlingVideoError, KlingVideoTimeoutError
+from config import resolve_kling_api_key, resolve_kling_credentials, resolve_siliconflow_api_key
 from handlers.generated_image_persister import GeneratedImagePersistError, GeneratedImagePersister
 from providers import registry as provider_registry
 from providers.registry import ProviderRegistryError
@@ -45,7 +46,7 @@ class ImageGenerationHandler:
             provider = str(model_config.get("provider") or context.get("modelProviderCode") or "").lower()
             provider_registry.require_capability(provider, "IMAGE_GENERATION")
             provider_registry.require_worker_ready(provider)
-            if provider not in {"siliconflow_images", "siliconflow"}:
+            if provider not in {"siliconflow_images", "siliconflow", "kling_video"}:
                 raise SiliconFlowVideoError(f"unsupported image provider: {provider or 'empty'}")
 
             prompt = _build_prompt(params, context.get("fields") or [])
@@ -59,10 +60,7 @@ class ImageGenerationHandler:
                 trace_id=trace_id,
             )
 
-            client = self.image_client or SiliconFlowVideoClient(
-                base_url=model_config.get("baseUrl"),
-                api_key=resolve_siliconflow_api_key(model_config),
-            )
+            client = self.image_client or self._image_client(provider, model_config)
             urls = client.generate_images(
                 prompt=prompt,
                 model=model_config.get("modelName"),
@@ -100,11 +98,9 @@ class ImageGenerationHandler:
             )
             LOGGER.info("image generation task %s completed traceId=%s images=%s", task_id, trace_id or "-", len(urls))
             return {"status": "SUCCESS", "taskId": task_id, "traceId": trace_id, "imageCount": len(urls)}
-        except SiliconFlowVideoTimeoutError as exc:
+        except (SiliconFlowVideoTimeoutError, KlingVideoTimeoutError) as exc:
             return self._mark_failed(task_id, "MODEL_TIMEOUT", str(exc), trace_id)
-        except ProviderRegistryError as exc:
-            return self._mark_failed(task_id, "MODEL_CALL_FAILED", str(exc), trace_id)
-        except SiliconFlowVideoError as exc:
+        except (ProviderRegistryError, SiliconFlowVideoError, KlingVideoError) as exc:
             return self._mark_failed(task_id, "MODEL_CALL_FAILED", str(exc), trace_id)
         except GeneratedImagePersistError as exc:
             return self._mark_failed(task_id, "MEDIA_PERSIST_FAILED", str(exc), trace_id)
@@ -112,6 +108,20 @@ class ImageGenerationHandler:
             raise
         except Exception as exc:
             return self._mark_failed(task_id, "WORKER_INTERNAL_ERROR", str(exc), trace_id)
+
+    def _image_client(self, provider: str, model_config: dict[str, Any]) -> Any:
+        if provider == "kling_video":
+            access_key, secret_key = resolve_kling_credentials(model_config)
+            return KlingVideoClient(
+                base_url=model_config.get("baseUrl"),
+                api_key=resolve_kling_api_key(model_config),
+                access_key=access_key,
+                secret_key=secret_key,
+            )
+        return SiliconFlowVideoClient(
+            base_url=model_config.get("baseUrl"),
+            api_key=resolve_siliconflow_api_key(model_config),
+        )
 
     def _mark_failed(self, task_id: int, error_code: str, error_message: str, trace_id: str | None) -> dict[str, Any]:
         LOGGER.exception("image generation task %s failed traceId=%s errorCode=%s: %s", task_id, trace_id or "-", error_code, error_message)

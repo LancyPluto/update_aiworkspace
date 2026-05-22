@@ -46,14 +46,16 @@ watch(sidebarOpen, (open) => {
 const userNav = [
   { href: "/agent" as const, label: "Agent", icon: Bot },
   { href: "/dashboard" as const, label: "工作台", icon: LayoutGrid },
-  { href: "/marketplace" as const, label: "AI 工具超市", icon: Store },
+  { href: "/marketplace" as const, label: "AI 超市", icon: Store },
   { href: "/tasks" as const, label: "我的任务", icon: ListChecks },
   { href: "/library" as const, label: "素材库", icon: FolderHeart },
   { href: "/billing" as const, label: "会员与算力", icon: Wallet },
 ]
 
 function isActive(path: string) {
-  if (path === "/marketplace") return route.path === path
+  if (path === "/marketplace") {
+    return route.path === path || route.path.startsWith("/chat/")
+  }
   return route.path === path || route.path.startsWith(path + "/")
 }
 

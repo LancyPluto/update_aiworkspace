@@ -5,6 +5,7 @@ import LoginPage from "@/pages/Login/Page.vue"
 import DashboardPage from "@/pages/Dashboard/Page.vue"
 import AgentHomePage from "@/pages/AgentHome/Page.vue"
 import ToolListPage from "@/pages/ToolList/Page.vue"
+import ChatPage from "@/pages/Chat/Page.vue"
 import MyTasksPage from "@/pages/MyTasks/Page.vue"
 import MaterialLibraryPage from "@/pages/MaterialLibrary/Page.vue"
 import BillingPage from "@/pages/Billing/Page.vue"
@@ -36,6 +37,13 @@ const router = createRouter({
       name: "ToolList",
       meta: { requiresAuth: false },
       component: ToolListPage,
+    },
+    {
+      path: "/chat/:toolId",
+      name: "Chat",
+      meta: { requiresAuth: false },
+      component: ChatPage,
+      props: true,
     },
     {
       path: "/tools/:id",

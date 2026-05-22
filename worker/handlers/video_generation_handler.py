@@ -1,9 +1,13 @@
+import json
 import logging
 from typing import Any
 
 from client.backend_client import BackendClient, BackendClientError
+from client.kling_video_client import KlingVideoClient, KlingVideoError, KlingVideoTimeoutError
+from client.seedance_video_client import SeedanceVideoClient, SeedanceVideoError, SeedanceVideoTimeoutError
+from config import resolve_kling_api_key, resolve_kling_credentials
+from handlers.generated_video_persister import GeneratedVideoPersistError, GeneratedVideoPersister
 from providers import registry as provider_registry
-from providers.registry import ProviderRegistryError
 
 
 LOGGER = logging.getLogger(__name__)
@@ -11,38 +15,187 @@ TERMINAL_TASK_STATUSES = {"SUCCESS", "FAILED", "CANCELLED"}
 
 
 class VideoGenerationHandler:
-  def __init__(self, backend_client: BackendClient | None = None) -> None:
-    self.backend_client = backend_client or BackendClient()
+    def __init__(
+        self,
+        backend_client: BackendClient | None = None,
+        seedance_client: SeedanceVideoClient | None = None,
+        kling_client: KlingVideoClient | None = None,
+        video_persister: GeneratedVideoPersister | None = None,
+    ) -> None:
+        self.backend_client = backend_client or BackendClient()
+        self.seedance_client = seedance_client
+        self.kling_client = kling_client
+        self.video_persister = video_persister or GeneratedVideoPersister()
 
-  def handle(self, message: dict[str, Any]) -> dict[str, Any]:
-    task_id = int(message["taskId"])
-    trace_id = message.get("traceId")
+    def handle(self, message: dict[str, Any]) -> dict[str, Any]:
+        task_id = int(message["taskId"])
+        trace_id = message.get("traceId")
+        try:
+            context = message.get("__executionContext") or self.backend_client.get_execution_context(task_id, trace_id=trace_id)
+            trace_id = trace_id or context.get("traceId")
+            status = str(context.get("status") or "").upper()
+            if status in TERMINAL_TASK_STATUSES:
+                LOGGER.info("skip terminal video task taskId=%s status=%s", task_id, status)
+                return {"status": "SKIPPED", "taskId": task_id, "taskStatus": status, "traceId": trace_id}
+
+            params = context.get("params") or {}
+            model_config = context.get("modelConfig") or {}
+            provider = str(model_config.get("provider") or context.get("modelProviderCode") or "").lower()
+            provider_registry.require_capability(provider, "VIDEO_GENERATION")
+            provider_registry.require_worker_ready(provider)
+
+            prompt = _build_prompt(params)
+            if not prompt:
+                raise KlingVideoError("prompt is required")
+
+            self._mark_processing_safe(task_id, progress=12, progress_message="Video generation task started", trace_id=trace_id)
+            client = self._client(provider, model_config)
+            video_request = {
+                "prompt": prompt,
+                "image_size": _resolve_image_size(params),
+                "negative_prompt": str(params.get("negativePrompt") or params.get("negative_prompt") or ""),
+                "model": model_config.get("modelName"),
+                "image": _first_text(params, "image", "imageUrl", "image_url", "referenceImage", "referenceImageUrl", "firstFrameUrl"),
+                "image_tail": _first_text(params, "imageTail", "image_tail", "tailImage", "tailImageUrl", "lastFrameUrl"),
+                "seed": _optional_int(params.get("seed")),
+                "duration": str(params.get("duration") or ""),
+                "aspect_ratio": str(params.get("aspectRatio") or params.get("aspect_ratio") or ""),
+                "resolution": str(params.get("resolution") or ""),
+            }
+            if provider == "kling_video":
+                video_request["mode"] = str(params.get("mode") or params.get("qualityMode") or "")
+                video_request["sound"] = str(params.get("sound") or "off")
+                video_request["callback_url"] = str(params.get("callbackUrl") or params.get("callback_url") or "")
+                video_request["external_task_id"] = str(params.get("externalTaskId") or params.get("external_task_id") or "")
+            result = client.generate_video(**video_request)
+
+            self.backend_client.mark_processing(
+                task_id,
+                progress=90,
+                progress_message="Video generated, saving result",
+                trace_id=trace_id,
+            )
+            persisted_video = self.video_persister.persist_video_url(task_id=task_id, source_url=result["videoUrl"])
+            content = json.dumps(
+                {
+                    "provider": result.get("provider") or provider,
+                    "model": result.get("model") or model_config.get("modelName"),
+                    "requestId": result.get("requestId"),
+                    "status": result.get("status"),
+                    "videos": [persisted_video],
+                    "sourceVideoUrl": result.get("videoUrl"),
+                    "resolution": result.get("resolution"),
+                },
+                ensure_ascii=False,
+            )
+            self.backend_client.mark_success(
+                task_id,
+                {
+                    "resourceType": "VIDEO",
+                    "contentText": content,
+                    "billableUnits": 1,
+                },
+                trace_id=trace_id,
+            )
+            LOGGER.info("video generation task %s completed traceId=%s provider=%s", task_id, trace_id or "-", provider)
+            return {"status": "SUCCESS", "taskId": task_id, "traceId": trace_id, "provider": provider}
+        except (KlingVideoTimeoutError, SeedanceVideoTimeoutError) as exc:
+            return self._mark_failed(task_id, "MODEL_TIMEOUT", str(exc), trace_id)
+        except (KlingVideoError, SeedanceVideoError, provider_registry.ProviderRegistryError) as exc:
+            return self._mark_failed(task_id, "MODEL_CALL_FAILED", str(exc), trace_id)
+        except GeneratedVideoPersistError as exc:
+            return self._mark_failed(task_id, "MEDIA_PERSIST_FAILED", str(exc), trace_id)
+        except BackendClientError:
+            LOGGER.exception("video generation handler backend error taskId=%s", task_id)
+            raise
+        except Exception as exc:
+            return self._mark_failed(task_id, "WORKER_INTERNAL_ERROR", str(exc), trace_id)
+
+    def _client(self, provider: str, model_config: dict[str, Any]) -> Any:
+        if provider == "kling_video":
+            if self.kling_client is not None:
+                return self.kling_client
+            access_key, secret_key = resolve_kling_credentials(model_config)
+            return KlingVideoClient(
+                base_url=model_config.get("baseUrl"),
+                api_key=resolve_kling_api_key(model_config),
+                access_key=access_key,
+                secret_key=secret_key,
+                text_path=model_config.get("textPath"),
+                image_path=model_config.get("imagePath"),
+                text_result_path=model_config.get("textResultPath"),
+                image_result_path=model_config.get("imageResultPath"),
+                timeout_seconds=model_config.get("timeoutSeconds"),
+            )
+        if provider == "seedance":
+            return self.seedance_client or SeedanceVideoClient()
+        raise KlingVideoError(f"unsupported video provider: {provider or 'empty'}")
+
+    def _mark_failed(self, task_id: int, error_code: str, error_message: str, trace_id: str | None) -> dict[str, Any]:
+        LOGGER.exception("video generation task %s failed traceId=%s errorCode=%s: %s", task_id, trace_id or "-", error_code, error_message)
+        self._mark_processing_safe(task_id, progress=99, progress_message="Video generation failed", trace_id=trace_id)
+        self.backend_client.mark_failed(
+            task_id,
+            {
+                "errorCode": error_code,
+                "errorMessage": error_message,
+            },
+            trace_id=trace_id,
+        )
+        return {"status": "FAILED", "taskId": task_id, "errorCode": error_code, "traceId": trace_id}
+
+    def _mark_processing_safe(
+        self,
+        task_id: int,
+        *,
+        progress: int,
+        progress_message: str,
+        trace_id: str | None,
+    ) -> None:
+        try:
+            self.backend_client.mark_processing(
+                task_id,
+                progress=progress,
+                progress_message=progress_message,
+                trace_id=trace_id,
+            )
+        except BackendClientError:
+            LOGGER.warning("failed to mark video task processing taskId=%s", task_id, exc_info=True)
+
+
+def _build_prompt(params: dict[str, Any]) -> str:
+    prompt = _first_text(params, "prompt", "text", "description", "script", "videoTopic")
+    if prompt:
+        return prompt
+    return ""
+
+
+def _first_text(params: dict[str, Any], *keys: str) -> str:
+    for key in keys:
+        value = params.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _resolve_image_size(params: dict[str, Any]) -> str:
+    explicit = params.get("imageSize") or params.get("image_size") or params.get("size")
+    if isinstance(explicit, str) and explicit.strip():
+        return explicit.strip()
+    aspect_ratio = str(params.get("aspectRatio") or params.get("aspect_ratio") or "16:9").strip()
+    return {
+        "1:1": "960x960",
+        "16:9": "1280x720",
+        "9:16": "720x1280",
+        "4:3": "1024x768",
+        "3:4": "768x1024",
+    }.get(aspect_ratio, "1280x720")
+
+
+def _optional_int(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
     try:
-      context = message.get("__executionContext") or self.backend_client.get_execution_context(task_id, trace_id=trace_id)
-      trace_id = trace_id or context.get("traceId")
-      status = str(context.get("status") or "").upper()
-      if status in TERMINAL_TASK_STATUSES:
-        LOGGER.info("skip terminal video task taskId=%s status=%s", task_id, status)
-        return {"status": "SKIPPED", "taskId": task_id, "taskStatus": status, "traceId": trace_id}
-      model_config = context.get("modelConfig") or {}
-      provider = str(model_config.get("provider") or context.get("modelProviderCode") or "").lower()
-      provider_registry.require_capability(provider, "VIDEO_GENERATION")
-      provider_registry.require_worker_ready(provider)
-      self.backend_client.mark_failed(
-        task_id,
-        error_code="VIDEO_GENERATION_NOT_CONFIGURED",
-        error_message="视频生成 Handler 已接入路由，但供应商调用尚未在本环境完成配置。请在管理端绑定视频模型后重试。",
-        trace_id=trace_id,
-      )
-      return {"status": "FAILED", "taskId": task_id, "traceId": trace_id}
-    except BackendClientError:
-      LOGGER.exception("video generation handler backend error taskId=%s", task_id)
-      raise
-    except ProviderRegistryError as exc:
-      self.backend_client.mark_failed(
-        task_id,
-        error_code="MODEL_CALL_FAILED",
-        error_message=str(exc),
-        trace_id=trace_id,
-      )
-      return {"status": "FAILED", "taskId": task_id, "traceId": trace_id, "errorCode": "MODEL_CALL_FAILED"}
+        return int(value)
+    except (TypeError, ValueError):
+        return None

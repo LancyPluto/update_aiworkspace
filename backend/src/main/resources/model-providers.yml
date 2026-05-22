@@ -111,6 +111,18 @@ providers:
     workerReady: true
     description: Seedance image-to-video generation used by digital-human and comic-drama pipelines.
 
+  - code: kling_video
+    label: Kling video/images
+    capabilities:
+      - VIDEO_GENERATION
+      - IMAGE_GENERATION
+    defaultBaseUrl: https://api-beijing.klingai.com
+    defaultModel: kling-v2-6
+    billingDefault: PER_CALL
+    testStrategy: accept_only
+    workerReady: true
+    description: Kling official text/image-to-video and image generation API. Configure AK/SK in extra auth JSON.
+
   - code: worker_video
     label: Video generation (stub)
     capabilities:

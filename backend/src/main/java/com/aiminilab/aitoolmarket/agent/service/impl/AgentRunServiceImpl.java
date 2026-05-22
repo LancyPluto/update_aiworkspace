@@ -891,6 +891,7 @@ public class AgentRunServiceImpl implements AgentRunService {
                 config.modelName(),
                 config.baseUrl(),
                 config.apiKey(),
+                config.extraAuthJson(),
                 config.minimaxGroupId(),
                 null,
                 null,

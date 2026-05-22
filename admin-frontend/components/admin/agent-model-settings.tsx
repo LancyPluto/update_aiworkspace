@@ -47,6 +47,8 @@ interface ModelForm {
   baseUrl: string
   apiKey: string
   apiKeyMasked: string
+  extraAuthJson: string
+  extraAuthJsonMasked: string
   consoleUrl: string
   balanceUrl: string
   docsUrl: string
@@ -122,6 +124,8 @@ const emptyForm: ModelForm = {
   baseUrl: "https://api.openai.com/v1",
   apiKey: "",
   apiKeyMasked: "",
+  extraAuthJson: "",
+  extraAuthJsonMasked: "",
   consoleUrl: "",
   balanceUrl: "",
   docsUrl: "",
@@ -148,6 +152,8 @@ function toForm(config: AgentModelConfig, catalog: ModelProviderDescriptor[]): M
     baseUrl: config.baseUrl || meta.defaultBaseUrl,
     apiKey: "",
     apiKeyMasked: config.apiKeyMasked || "",
+    extraAuthJson: "",
+    extraAuthJsonMasked: config.extraAuthJsonMasked || "",
     consoleUrl: config.consoleUrl || "",
     balanceUrl: config.balanceUrl || "",
     docsUrl: config.docsUrl || "",
@@ -170,6 +176,7 @@ function toPayload(form: ModelForm): AgentModelConfigPayload {
     modelName: form.modelName.trim(),
     baseUrl: form.baseUrl.trim(),
     apiKey: form.apiKey.trim(),
+    extraAuthJson: form.extraAuthJson.trim(),
     consoleUrl: form.consoleUrl.trim(),
     balanceUrl: form.balanceUrl.trim(),
     docsUrl: form.docsUrl.trim(),
@@ -398,7 +405,15 @@ export function AgentModelSettings() {
     if (!Number.isFinite(inputPrice) || inputPrice < 0) return "输入 Token 单价必须大于等于 0。"
     if (!Number.isFinite(outputPrice) || outputPrice < 0) return "输出 Token 单价必须大于等于 0。"
     if (!Number.isFinite(unitPrice) || unitPrice < 0) return "单次计费价格必须大于等于 0。"
-    if (!form.apiKey.trim() && !form.apiKeyMasked) return "请填写 API Key。"
+    if (form.extraAuthJson.trim()) {
+      try {
+        JSON.parse(form.extraAuthJson)
+      } catch {
+        return "额外鉴权 JSON 必须是合法 JSON。"
+      }
+    }
+    const hasSecret = Boolean(form.apiKey.trim() || form.apiKeyMasked || form.extraAuthJson.trim() || form.extraAuthJsonMasked)
+    if (form.provider !== "mock" && !hasSecret) return "请填写 API Key 或额外鉴权 JSON。"
     return null
   }
 
@@ -463,7 +478,7 @@ export function AgentModelSettings() {
     setError(null)
     setTestResult(null)
     try {
-      setTestResult(form.id && !form.apiKey.trim()
+      setTestResult(form.id && !form.apiKey.trim() && !form.extraAuthJson.trim()
         ? await testSavedAgentModelConfig()
         : await testAgentModelConfig(toPayload(form)))
     } catch (err) {
@@ -764,6 +779,23 @@ export function AgentModelSettings() {
               </div>
             </div>
 
+            <div className="space-y-2">
+              <Label>额外鉴权 JSON</Label>
+              <Textarea
+                className="min-h-24 font-mono text-xs"
+                value={form.extraAuthJson}
+                placeholder={
+                  form.extraAuthJsonMasked
+                    ? `Saved: ${form.extraAuthJsonMasked}`
+                    : '{"accessKey":"...","secretKey":"..."}'
+                }
+                onChange={(event) => updateForm("extraAuthJson", event.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                适合可灵这类 AK/SK 供应商。留空保存时会保留已保存的密钥；API Key 可继续用于固定 Bearer Token。
+              </p>
+            </div>
+
             <div className="flex flex-wrap items-center justify-between gap-4 rounded-md bg-secondary p-4">
               <div>
                 <p className="font-medium">启用</p>
@@ -775,7 +807,7 @@ export function AgentModelSettings() {
             <Textarea
               readOnly
               className="min-h-24 font-mono text-xs"
-              value={`provider=${form.provider}\nmodel=${form.modelName}\nbase_url=${form.baseUrl}\ntimeout=${form.timeoutSeconds}s\nbilling_unit=${form.billingUnit}\ninput_price_per_1m=${form.inputTokenPricePer1m}\noutput_price_per_1m=${form.outputTokenPricePer1m}\nunit_price=${form.unitPrice}`}
+              value={`provider=${form.provider}\nmodel=${form.modelName}\nbase_url=${form.baseUrl}\ntimeout=${form.timeoutSeconds}s\nbilling_unit=${form.billingUnit}\ninput_price_per_1m=${form.inputTokenPricePer1m}\noutput_price_per_1m=${form.outputTokenPricePer1m}\nunit_price=${form.unitPrice}\nextra_auth=${form.extraAuthJson || form.extraAuthJsonMasked ? "configured" : "empty"}`}
             />
 
             {testResult ? (

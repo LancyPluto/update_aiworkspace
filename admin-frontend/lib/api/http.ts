@@ -9,10 +9,14 @@ const LOCAL_BACKEND_URL = 'http://127.0.0.1:8080'
 export class ApiError extends Error {
   code: string
   status?: number
-  constructor(message: string, code: string, status?: number) {
+  traceId?: string | null
+  responseBody?: unknown
+  constructor(message: string, code: string, status?: number, traceId?: string | null, responseBody?: unknown) {
     super(message)
     this.code = code
     this.status = status
+    this.traceId = traceId
+    this.responseBody = responseBody
   }
 }
 
@@ -149,11 +153,11 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   if (!response.ok || !payload) {
     const message = payload?.message || `请求失败 (${response.status})`
     const code = payload?.code || 'HTTP_ERROR'
-    throw new ApiError(message, code, response.status)
+    throw new ApiError(message, code, response.status, payload?.traceId || payload?.requestId || null, payload)
   }
 
   if (payload.code && payload.code !== 'SUCCESS') {
-    throw new ApiError(payload.message || payload.code, payload.code)
+    throw new ApiError(payload.message || payload.code, payload.code, response.status, payload.traceId || payload.requestId || null, payload)
   }
 
   return payload.data
@@ -200,11 +204,11 @@ export const http = {
     if (!response.ok || !payload) {
       const message = payload?.message || `请求失败 (${response.status})`
       const code = payload?.code || 'HTTP_ERROR'
-      throw new ApiError(message, code, response.status)
+      throw new ApiError(message, code, response.status, payload?.traceId || payload?.requestId || null, payload)
     }
 
     if (payload.code && payload.code !== 'SUCCESS') {
-      throw new ApiError(payload.message || payload.code, payload.code)
+      throw new ApiError(payload.message || payload.code, payload.code, response.status, payload.traceId || payload.requestId || null, payload)
     }
 
     return payload.data

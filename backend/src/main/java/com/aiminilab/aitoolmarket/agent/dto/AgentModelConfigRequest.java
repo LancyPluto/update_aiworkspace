@@ -14,6 +14,7 @@ public record AgentModelConfigRequest(
         @NotBlank String modelName,
         String baseUrl,
         String apiKey,
+        String extraAuthJson,
         String minimaxGroupId,
         String consoleUrl,
         String balanceUrl,

@@ -1,350 +1,495 @@
 # AI 模型与模态配置指南
 
-本文说明当前项目中“模型配置、工具模态、后台绑定、Worker 执行路径”之间的关系，目标是让后续接入新模型时先判断是否能做到“配置即可用”，再决定是否需要补后端或 Worker 代码。
+本文给后续接入模型时的开发者和 AI 助手阅读。目标不是复述后台怎么点，而是让接入前先判断：
 
-## 一、核心结论
+1. 只需要后台配置，还是必须写代码。
+2. 如果要写代码，应该写后端、Worker、用户端还是管理端。
+3. 哪些概念必须保持一致，避免“模型能保存但任务跑不通”。
 
-当前架构已经把“模型供应商配置”和“工具配置”解耦到较清晰的层次：
+> 经验规则：后台配置决定“系统知道这个模型能干什么”，Worker 决定“任务真的怎么调用供应商”。如果供应商协议已经被 Worker 支持，通常不用写后端业务代码。
 
-1. 已有执行路径的同类模型，通常只需要后台配置即可使用。
-2. 新增同一模态、同一协议兼容的模型，优先走 `AI 模型配置` + `AI 工具管理` 页面绑定。
-3. 新增供应商但接口协议与现有 Worker client 兼容时，只需要补供应商注册和模型配置，不需要新增一套工具后端。
-4. 新增完全不同的模态或返回结构，例如音乐、视频、文件解析、语音识别，通常需要补 Worker handler、client、结果持久化和前端渲染。
+## 1. 一句话结论
 
-例如：
+新增模型先按下面顺序判断：
 
-- MiniMax TTS、生音频、SiliconFlow TTS：都属于 `TEXT_TO_SPEECH` 能力，输入文本、输出音频，可以共用通用 TTS 执行路径。
-- MiniMax 生音乐：属于 `MUSIC_GENERATION`，虽然输出也是音频，但输入参数、调用链、结果语义和工具模板不同，建议单独补音乐生成 Worker 路径。
+```mermaid
+flowchart TD
+  A["拿到一个新模型/API"] --> B{"属于已有能力吗？"}
+  B -->|"是，例如 VIDEO_GENERATION"| C{"已有 provider/client 支持该协议吗？"}
+  B -->|"否，新能力/新模态"| H["新增 ToolType/ExecutionHandler/模板/渲染链路"]
+  C -->|"是"| D["后台新增模型配置 + 工具绑定"]
+  C -->|"否"| E{"只差供应商协议吗？"}
+  E -->|"是"| F["新增/扩展 Worker client，必要时注册 provider"]
+  E -->|"否，结果结构或业务语义不同"| G["新增 handler / persister / 前端结果渲染"]
+  D --> I["用户端提交任务，Worker 跑通"]
+  F --> I
+  G --> I
+  H --> I
+```
 
-## 二、关键概念
+最常见情况：
 
-### 1. ToolType：工具能力类型
-
-后端枚举位置：
-
-`backend/src/main/java/com/aiminilab/aitoolmarket/common/enums/ToolType.java`
-
-常见值：
-
-| ToolType | 说明 | 典型输入 | 典型输出 |
+| 场景 | 是否写后端 | 是否写 Worker | 说明 |
 | --- | --- | --- | --- |
-| `TEXT_GENERATION` | 文本生成 | 文本 / JSON | 文本 |
-| `IMAGE_GENERATION` | 文生图 | 文本 | 图片 |
-| `TEXT_TO_SPEECH` | 文字转语音 / 生音频 | 文本 | 音频 |
-| `VIDEO_GENERATION` | 视频生成 | 文本 / 图片 | 视频 |
-| `AGENT` | Agent 工具 | 多轮上下文 | 文本 / 工具调用 |
+| 同供应商、同协议、换模型名 | 否 | 否 | 后台新增模型配置即可 |
+| 同能力、同供应商协议、不同模型参数 | 否 | 可能否 | 先通过工具字段和 modelConfig 参数覆盖 |
+| 新供应商，但接口协议类似现有 client | 通常否 | 是，扩展 client 分支或 provider 注册 |
+| 新供应商，有签名、异步轮询、文件转换 | 通常否 | 是，新增 client 适配 |
+| 新业务能力，例如生音乐、视频理解、文件解析 | 是 | 是 | 通常要新增 ToolType、模板、handler、渲染 |
+| 新输出模态，前端不会展示 | 可能是 | 是 | 后端枚举、用户端结果渲染都要补 |
 
-后台“AI 工具管理”里的“模型能力类型”本质上就是工具要绑定的 `ToolType`。
+## 2. 四个必须对齐的核心概念
 
-### 2. ToolModality：输入 / 输出模态
+### 2.1 Provider：供应商协议
 
-后端枚举位置：
-
-`backend/src/main/java/com/aiminilab/aitoolmarket/common/enums/ToolModality.java`
-
-常见值：
-
-| ToolModality | 说明 |
-| --- | --- |
-| `TEXT` | 文本 |
-| `IMAGE` | 图片 |
-| `AUDIO` | 音频 |
-| `VIDEO` | 视频 |
-| `JSON` | 结构化 JSON |
-| `FILE` | 文件 |
-| `MULTIMODAL` | 多模态 |
-
-后台工具配置中会同时记录：
-
-- `toolType`：工具能力类型，例如 `TEXT_TO_SPEECH`
-- `inputModality`：输入模态，例如 `TEXT`
-- `outputModality`：输出模态，例如 `AUDIO`
-
-模型下拉列表会按工具能力匹配模型配置。也就是说，文字转语音工具只应该看到具备 `TEXT_TO_SPEECH` 能力的模型配置。
-
-### 3. ExecutionHandler：Worker 执行处理器
-
-后端枚举位置：
-
-`backend/src/main/java/com/aiminilab/aitoolmarket/common/enums/ExecutionHandler.java`
-
-它决定任务发到 Worker 后走哪条处理路径：
-
-| ExecutionHandler | Worker 路径 | 用途 |
-| --- | --- | --- |
-| `TEXT_GENERATION` | 文本处理器 | 普通文案、文本生成 |
-| `IMAGE_GENERATION` | 图片处理器 | 文生图 |
-| `TEXT_TO_SPEECH` | TTS 处理器 | 文字转语音 / 生音频 |
-| `VIDEO_GENERATION` | 视频处理器 | 视频生成 |
-| `DIGITAL_HUMAN` | 数字人处理器 | 数字人视频 |
-
-工具模板会决定默认的 `ExecutionHandler`。后台创建工具时选择模板，等于选择了默认执行路径。
-
-## 三、模型供应商配置
-
-供应商能力注册文件：
+位置：
 
 `backend/src/main/resources/model-providers.yml`
 
-这里定义“系统知道哪些供应商具备哪些能力”，例如：
+它告诉后台“有哪些供应商、供应商支持哪些能力”。例如可灵：
 
 ```yaml
 providers:
-  - code: minimax_speech
-    label: MiniMax speech
+  - code: kling_video
+    label: Kling video/images
     capabilities:
-      - TEXT_TO_SPEECH
-    defaultBaseUrl: https://api.minimaxi.com
-    defaultModel: speech-2.8-hd
+      - VIDEO_GENERATION
+      - IMAGE_GENERATION
+    defaultBaseUrl: https://api-beijing.klingai.com
+    defaultModel: kling-v2-6
     billingDefault: PER_CALL
     testStrategy: accept_only
     workerReady: true
-    description: MiniMax /v1/t2a_async_v2 asynchronous text-to-speech.
 ```
 
-字段说明：
+规则：
 
-| 字段 | 说明 |
-| --- | --- |
-| `code` | 供应商唯一编码，会被模型配置和 Worker 使用 |
-| `label` | 后台展示名称 |
-| `capabilities` | 供应商支持的能力列表，决定模型能否被对应工具选择 |
-| `defaultBaseUrl` | 默认 API 地址 |
-| `defaultModel` | 默认模型名 |
-| `billingDefault` | 默认计费方式 |
-| `testStrategy` | 后台测试策略 |
-| `workerReady` | Worker 是否已经支持实际调用 |
-| `description` | 后台说明 |
+1. `code` 是供应商协议编码，后台模型配置和 Worker 都依赖它。
+2. `capabilities` 决定模型能不能被某类工具选择。
+3. `workerReady=true` 只能在 Worker 已支持真实调用后设置。
+4. 新增 provider 后，Worker 侧也要同步 `worker/providers/registry.py`。
 
-如果只是新增一个已有能力的供应商，例如新增另一个兼容 OpenAI chat completions 的文本模型，一般只需要在这里注册供应商能力，然后在后台添加模型配置。
-
-## 四、后台新增模型配置
+### 2.2 Model Config：某个可用模型实例
 
 后台路径：
 
 `系统配置 / AI 模型配置`
 
-新增模型配置时重点填写：
+它保存“供应商 + 模型名 + Base URL + 密钥 + 价格 + 能力”。一个 provider 可以配置多条模型，例如：
 
-1. 供应商：选择 `model-providers.yml` 中已经注册的 provider。
-2. 模型名称：供应商真实模型名，例如 `speech-2.8-hd`。
-3. Base URL：供应商接口地址。
-4. API Key：供应商密钥。
-5. 能力：必须包含对应工具需要的能力，例如 `TEXT_TO_SPEECH`。
-6. 状态：启用。
+| provider | modelName | capabilities | 用途 |
+| --- | --- | --- | --- |
+| `kling_video` | `kling-v2-6` | `VIDEO_GENERATION` | 可灵图生视频 |
+| `kling_video` | `kling-v3` | `IMAGE_GENERATION` | 可灵生图 |
+| `seedance` | `doubao-seedance-1-5-pro-251215` | `VIDEO_GENERATION` | Seedance 视频 |
 
-配置完成后，`AI 工具管理` 页顶部的“已配置模型能力”列表会显示当前可绑定的模型能力，方便确认是否配置成功。
+模型名必须和官方 API 文档一致。不要把后台展示名当成 `modelName`。
 
-## 五、后台新增或绑定 AI 工具
+### 2.3 ToolType / Capability：工具能力类型
 
-后台路径：
+后端枚举：
 
-`AI 工具管理`
+`backend/src/main/java/com/aiminilab/aitoolmarket/common/enums/ToolType.java`
 
-新增工具建议流程：
+常用值：
 
-1. 点击 `Add Tool`。
-2. 选择工具模板，例如 `Text to speech (TEXT_TO_SPEECH)`。
-3. 确认工具能力类型、输入模态、输出模态。
-4. 选择模型配置。
-5. 填写工具名称、分类、算力消耗、配置说明。
-6. 保存工具。
+| ToolType | 业务含义 | 典型输入 | 典型输出 |
+| --- | --- | --- | --- |
+| `TEXT_GENERATION` | 文本生成 | 文本/JSON | 文本 |
+| `IMAGE_GENERATION` | 图片生成 | 文本/图片 | 图片 |
+| `TEXT_TO_SPEECH` | 文本转语音 | 文本 | 音频 |
+| `VIDEO_GENERATION` | 视频生成 | 文本/图片 | 视频 |
+| `DIGITAL_HUMAN` | 数字人视频 | 文本/音频/形象 | 视频 |
+| `AGENT` | Agent 对话 | 多轮上下文 | 文本/工具调用 |
 
-模型下拉列表的匹配逻辑：
+后台工具里的“模型能力类型”必须和模型配置的 `capabilities` 匹配，否则模型下拉会看不到。
 
-1. 先根据工具的 `toolType` 过滤模型能力。
-2. `TEXT_TO_SPEECH` 工具只展示包含 `TEXT_TO_SPEECH` 能力的模型。
-3. `IMAGE_GENERATION` 工具只展示包含 `IMAGE_GENERATION` 能力的模型。
-4. 如果没有匹配模型，会提示需要配置对应能力模型。
+### 2.4 ExecutionHandler：Worker 路由
 
-因此，如果 MiniMax TTS 模型没有显示，优先检查：
+后端枚举：
 
-1. `model-providers.yml` 是否注册了 `TEXT_TO_SPEECH` 能力。
-2. 后台模型配置是否选择了正确 provider。
-3. 模型配置是否启用。
-4. 模型配置能力字段是否包含 `TEXT_TO_SPEECH`。
-5. 前端页面是否刷新了最新模型配置。
+`backend/src/main/java/com/aiminilab/aitoolmarket/common/enums/ExecutionHandler.java`
 
-## 六、TTS / 生音频接入说明
+Worker 路由：
 
-当前通用 TTS 路径已经支持：
+`worker/task_queue/redis_consumer.py`
 
-- `TEXT_TO_SPEECH` 工具类型
-- 输入文本，输出音频
-- MiniMax speech provider
-- SiliconFlow speech provider
-- 音频保存到项目目录 `data/generated-media/audio/{taskId}/`
-- 前端任务结果页音频播放器渲染
+| ExecutionHandler | Worker handler | 说明 |
+| --- | --- | --- |
+| `TEXT_GENERATION` | `worker/handlers/text_task_handler.py` | 文本生成 |
+| `IMAGE_GENERATION` | `worker/handlers/image_generation_handler.py` | 图片生成 |
+| `TEXT_TO_SPEECH` | `worker/handlers/text_to_speech_handler.py` | 音频生成 |
+| `VIDEO_GENERATION` | `worker/handlers/video_generation_handler.py` | 视频生成 |
+| `DIGITAL_HUMAN` | `worker/handlers/digital_human_video_handler.py` | 数字人 |
 
-Worker 相关文件：
+工具能保存不代表能跑通。真正执行时看的是 `executionHandler`。
 
-| 文件 | 作用 |
+## 3. 输入/输出模态怎么选
+
+后端枚举：
+
+`backend/src/main/java/com/aiminilab/aitoolmarket/common/enums/ToolModality.java`
+
+| 模态 | 说明 | 示例 |
+| --- | --- | --- |
+| `TEXT` | 文本 | prompt、文案、脚本 |
+| `IMAGE` | 图片 | 首帧图、参考图 |
+| `AUDIO` | 音频 | TTS 结果、参考音色 |
+| `VIDEO` | 视频 | 图生视频结果 |
+| `FILE` | 文件 | PDF、素材包 |
+| `JSON` | 结构化参数 | 表单参数、结构化结果 |
+| `MULTIMODAL` | 多模态 | 文本 + 图片 + 文件 |
+
+选择建议：
+
+| 工具 | ToolType | inputModality | outputModality |
+| --- | --- | --- | --- |
+| 文生图 | `IMAGE_GENERATION` | `TEXT` | `IMAGE` |
+| 图生图 | `IMAGE_GENERATION` | `IMAGE` 或 `MULTIMODAL` | `IMAGE` |
+| 文生视频 | `VIDEO_GENERATION` | `TEXT` | `VIDEO` |
+| 图生视频 | `VIDEO_GENERATION` | `IMAGE` 或 `MULTIMODAL` | `VIDEO` |
+| TTS | `TEXT_TO_SPEECH` | `TEXT` | `AUDIO` |
+| 数字人 | `DIGITAL_HUMAN` | `MULTIMODAL` | `VIDEO` |
+
+注意：
+
+1. 模态是产品和前端展示语义，不等于供应商原始 API 字段。
+2. 图生视频虽然需要 `prompt`，但核心输入可以是图片 + 文本，所以常用 `MULTIMODAL`。
+3. 如果用户端结果页无法展示某种输出，需要补前端渲染。
+
+## 4. 哪些情况只配置后台即可
+
+满足全部条件时，一般不用写代码：
+
+1. provider 已在 `model-providers.yml` 注册。
+2. Worker `providers/registry.py` 也注册了该 provider 能力。
+3. 对应 `ExecutionHandler` 已经存在。
+4. Worker client 已经支持该 provider 的协议。
+5. 新模型只改变 `modelName`、价格、Base URL 或密钥。
+6. 供应商返回结果能被现有 persister 和用户端结果页处理。
+
+例子：
+
+| 新增内容 | 操作 |
 | --- | --- |
-| `worker/client/text_to_speech_client.py` | 调用不同 TTS 供应商 |
-| `worker/handlers/text_to_speech_handler.py` | 处理 `TEXT_TO_SPEECH` 任务 |
-| `worker/handlers/generated_audio_persister.py` | 保存音频文件并生成 `/generated/...` URL |
-| `worker/task_queue/redis_consumer.py` | 将任务路由到 TTS handler |
-| `worker/providers/registry.py` | Worker 侧 provider 能力注册 |
+| 可灵同协议另一个图生视频模型 | 后台新增模型配置，provider 仍选 `kling_video` |
+| Seedance 同协议新视频模型 | 后台新增模型配置，provider 仍选 `seedance` |
+| MiniMax speech 换模型版本 | 后台新增模型配置，provider 仍选 `minimax_speech` |
 
-新增 TTS 模型时，如果满足以下条件，通常配置即可用：
+## 5. 什么时候要写后端代码
 
-1. 输入是文本。
-2. 输出是常规音频文件或可下载音频。
-3. provider 已经在 `text_to_speech_client.py` 中支持。
-4. 后台模型配置能力包含 `TEXT_TO_SPEECH`。
-5. 工具选择 `TEXT_TO_SPEECH` 模板。
+后端是业务事实源。只有平台自己的“能力、字段、状态、计费、展示契约”发生变化时，才优先写后端。
 
-需要补 Worker 代码的情况：
+### 5.1 必须写后端的情况
 
-1. 供应商 API 协议与现有 MiniMax / SiliconFlow 都不兼容。
-2. 返回结果不是直接音频、URL、base64 或当前已支持格式。
-3. 需要异步任务轮询、签名、分片上传、回调通知等特殊逻辑。
-4. 输出不是普通音频，而是歌词、工程文件、多轨音频等复杂结果。
+| 触发条件 | 常改文件 |
+| --- | --- |
+| 新增 ToolType | `common/enums/ToolType.java`、模板、测试 schema |
+| 新增 ExecutionHandler | `common/enums/ExecutionHandler.java`、任务路由契约 |
+| 新增 ToolModality | `common/enums/ToolModality.java`、前后端类型 |
+| 数据库字段变化 | `DataInitializer.java`、实体、Mapper、`schema-test.sql` |
+| 后台要新增配置字段 | DTO、Service、Mapper、管理端表单 |
+| 模型能力过滤规则变化 | `ModelCapabilityService.java` |
+| 任务状态/计费规则变化 | task service、credit service、测试 |
+| 新结果类型要落库或展示 | task result DTO、用户端结果页 |
 
-## 七、MiniMax TTS 配置参考
+### 5.2 不建议写后端的情况
 
-供应商注册建议：
+| 需求 | 推荐做法 |
+| --- | --- |
+| 只是换模型名 | 后台配置 |
+| 只是增加供应商文档链接 | `model-providers.yml` 或后台模型配置 |
+| 只是 AK/SK 鉴权 | 用 `extraAuthJson` |
+| 只是不同 API path | 优先放到 Worker client 默认值或 modelConfig 覆盖 |
+| 只是字段表单变化 | 后台“聊天输入控件”配置 |
 
-```yaml
-code: minimax_speech
-capabilities:
-  - TEXT_TO_SPEECH
-defaultBaseUrl: https://api.minimaxi.com
-defaultModel: speech-2.8-hd
-workerReady: true
+## 6. 什么时候要写 Worker 代码
+
+Worker 负责“把平台统一任务转换成供应商 API 调用”。只要供应商协议不同，通常要写 Worker。
+
+### 6.1 常改文件
+
+| 层 | 文件 | 作用 |
+| --- | --- | --- |
+| Provider 注册 | `worker/providers/registry.py` | Worker 侧能力校验 |
+| Client | `worker/client/*_client.py` | 供应商鉴权、请求、轮询、解析 |
+| Handler | `worker/handlers/*_handler.py` | 从 executionContext 取参数，调用 client |
+| Persister | `worker/handlers/generated_*_persister.py` | 下载/保存结果，生成 `/generated/...` |
+| Router | `worker/task_queue/redis_consumer.py` | 新 handler 路由 |
+| Config | `worker/config.py` | 默认 URL、path、timeout、env |
+| Test | `worker/scripts/run_fake_*_test.py` 或 `worker/tests` | 假链路验证 |
+
+### 6.2 Worker client 要处理什么
+
+新增 client 时要明确：
+
+1. 鉴权方式：API Key、Bearer Token、AK/SK、JWT、签名、OAuth。
+2. 请求方式：同步、异步任务、回调、分片上传。
+3. 输入转换：URL、base64、本地文件、multipart。
+4. 路径：创建路径、查询路径、取消路径。
+5. 状态映射：供应商状态到平台 `SUCCESS/FAILED/TIMEOUT`。
+6. 结果提取：图片 URL、视频 URL、音频 URL、base64、文件列表。
+7. 错误信息：保留 status、body、request_id，方便排查。
+
+可灵这次的两个关键点：
+
+1. `image2video` 的 `image` / `image_tail` 不能直接传平台 URL，Worker 要转成纯 base64。
+2. 图生视频创建后查询路径是 `/v1/videos/image2video/{task_id}`，不是 `/v1/videos/{task_id}`。
+
+## 7. 什么时候要写管理端代码
+
+管理端只负责让配置更容易填，不负责模型真实调用。
+
+需要改管理端的情况：
+
+| 场景 | 文件/区域 |
+| --- | --- |
+| 模型配置新增字段 | `admin-frontend/components/admin/agent-model-settings.tsx` |
+| 工具新增字段 | `admin-frontend/app/tools/page.tsx` |
+| 动态字段支持新控件 | `admin-frontend/components/admin/field-schema-editor.tsx`、`lib/tool-fields.ts` |
+| 新 ToolType 中文展示 | `admin-frontend/app/tools/page.tsx` |
+| 新 provider 下拉展示 | 后端 `model-providers.yml` + 管理端拉取接口 |
+
+当前已支持的关键后台能力：
+
+1. `extraAuthJson`：给 AK/SK 供应商使用，例如可灵。
+2. `核心字段`：同一工具只能选一个，用来替代用户端底部主输入框。
+3. 图片/文件字段：用户端支持拖拽上传，上传后自动回填 `/generated/uploads/...`。
+4. 供应商入口：可配置控制台、余额、文档链接，方便运营查看。
+
+## 8. 什么时候要写用户端代码
+
+用户端负责提交参数和展示结果。
+
+需要改用户端的情况：
+
+| 场景 | 文件/区域 |
+| --- | --- |
+| 新输入控件 | `user-web/src/pages/Chat/CapabilityControls.vue` |
+| 主输入框逻辑变化 | `user-web/src/pages/Chat/Page.vue` |
+| 文件上传参数 | `user-web/src/api/aiToolApi.ts` |
+| 新结果展示 | 任务详情/结果渲染相关组件 |
+| 新路由或页面 | `user-web/src/router`、页面目录 |
+
+现在图片/文件字段的设计：
+
+1. 用户端上传文件到 `/api/v1/upload`。
+2. 后端保存到 `data/generated-media/uploads/{yyyyMMdd}/`。
+3. 前端字段值变成 `/generated/uploads/{yyyyMMdd}/{file}`。
+4. Worker 如果供应商需要 base64，会自己读取或下载后转换。
+
+不要让前端直接做供应商签名或保存密钥。
+
+## 9. 字段 schema 与供应商 API 的关系
+
+后台“聊天输入控件”配置的是产品字段，不要求一比一等于供应商字段。
+
+建议字段命名：
+
+| 语义 | 推荐 fieldKey | 兼容别名 |
+| --- | --- | --- |
+| 核心提示词 | `prompt` | `text`、`description` |
+| 首帧图片 | `imageUrl` | `image`、`image_url`、`referenceImage`、`firstFrameUrl` |
+| 尾帧图片 | `imageTail` | `image_tail`、`tailImage`、`lastFrameUrl` |
+| 负向提示词 | `negativePrompt` | `negative_prompt` |
+| 比例 | `aspectRatio` | `aspect_ratio` |
+| 时长 | `duration` | - |
+| 模式/质量 | `mode` | `qualityMode` |
+| 声音 | `sound` | - |
+
+核心字段规则：
+
+1. 一个工具最多一个核心字段。
+2. 核心字段会替代用户端底部主输入框。
+3. 适合 `prompt`、视频描述、生成需求。
+4. 核心字段依然会写入任务 params，例如 `{ "prompt": "..." }`。
+
+`optionsJson` 示例：
+
+```json
+{"core":true}
 ```
 
-后台模型配置建议：
-
-| 字段 | 建议值 |
-| --- | --- |
-| Provider | `minimax_speech` |
-| Model | `speech-2.8-hd` |
-| Base URL | `https://api.minimaxi.com` |
-| Capability | `TEXT_TO_SPEECH` |
-| API Key | MiniMax API Key |
-| Status | Enabled |
-
-工具配置建议：
-
-| 字段 | 建议值 |
-| --- | --- |
-| 模板 | `Text to speech (TEXT_TO_SPEECH)` |
-| ToolType | `TEXT_TO_SPEECH` |
-| InputModality | `TEXT` |
-| OutputModality | `AUDIO` |
-| Model config | 选择 MiniMax speech 模型配置 |
-
-常见错误：
-
-| 现象 | 原因 | 处理 |
-| --- | --- | --- |
-| `invalid api key` | API Key 错误或不是对应 MiniMax 平台 Key | 重新生成并更新后台模型配置 |
-| SSL EOF | 网络或域名不稳定，也可能是旧域名 / endpoint | 优先使用 `https://api.minimaxi.com` |
-| 播放器显示 0 秒 | 文件 URL 没有正确映射到音频文件，或后端未重启读取新目录 | 检查 `/generated/audio/...` 是否返回 200，并重启 backend / worker |
-| 模型下拉不显示 | 模型能力没有包含 `TEXT_TO_SPEECH` | 检查 provider 和模型配置能力 |
-
-## 八、生音乐与 TTS 是否共用路径
-
-不建议把生音乐强行塞进通用 TTS 路径。
-
-虽然 TTS 和生音乐最终都可能输出音频，但它们的业务语义不同：
-
-| 项目 | TTS / 生音频 | 生音乐 |
-| --- | --- | --- |
-| ToolType | `TEXT_TO_SPEECH` | 建议新增或使用 `MUSIC_GENERATION` |
-| 输入 | 文本、声音、语速、格式 | 歌词、风格、曲风、时长、参考音频等 |
-| 输出 | 语音音频 | 音乐音频，可能含歌词、封面、任务 metadata |
-| Worker client | `text_to_speech_client.py` | 建议新增 `music_generation_client.py` |
-| Handler | `text_to_speech_handler.py` | 建议新增 `music_generation_handler.py` |
-| 前端渲染 | 音频播放器 | 音频播放器 + 音乐元信息 |
-
-建议做法：
-
-1. TTS 和普通生音频继续走 `TEXT_TO_SPEECH`。
-2. 生音乐新增 `MUSIC_GENERATION` 工具能力和模板。
-3. 生音乐可以复用 `generated_audio_persister.py` 保存音频文件。
-4. 生音乐应单独实现 Worker client 和 handler，避免 TTS handler 参数越来越混乱。
-
-## 九、新增模型判断清单
-
-新增前先回答以下问题：
-
-1. 这个模型属于已有 ToolType 吗？
-2. 输入 / 输出模态是否和已有路径一致？
-3. provider API 是否和已有 client 兼容？
-4. 结果是否能被现有前端 ResultRenderer 渲染？
-5. 是否需要异步轮询或特殊下载？
-6. 是否需要新增工具字段模板？
-
-判断结果：
-
-| 判断 | 操作 |
-| --- | --- |
-| 同能力、同协议、同结果格式 | 后台配置模型即可 |
-| 同能力、不同供应商协议 | 补 Worker client 分支 |
-| 同输出模态、不同业务语义 | 建议新增 ToolType / handler |
-| 新模态 | 补后端枚举、模板、Worker handler、前端渲染 |
-
-## 十、新增模态的开发步骤
-
-如果确认是新模态，建议按下面顺序补齐：
-
-1. 后端新增 `ToolType`。
-2. 必要时新增 `ExecutionHandler`。
-3. 更新 `model-providers.yml`，注册 provider capability。
-4. 更新工具模板 Bootstrap，提供默认工具模板。
-5. 更新后台 `AI 工具管理` 的模板映射和中文展示。
-6. 更新 Worker provider registry。
-7. 新增 Worker client 和 handler。
-8. 更新 Redis consumer 路由。
-9. 更新结果持久化，例如图片、音频、视频、文件。
-10. 更新用户端 `ResultRenderer`。
-11. 补 backend / worker / frontend 测试。
-
-## 十一、静态文件与生成结果目录
-
-生成媒体文件统一放在项目根目录：
-
-`data/generated-media/`
-
-后端通过 `/generated/**` 暴露静态资源，Worker 返回结果中保存类似：
+如果字段有选项并且也是核心字段：
 
 ```json
 {
-  "audios": [
-    {
-      "url": "/generated/audio/21/audio-1.mp3",
-      "contentType": "audio/mpeg"
-    }
+  "core": true,
+  "options": [
+    {"label":"5 秒","value":"5"},
+    {"label":"10 秒","value":"10"}
   ]
 }
 ```
 
-注意：
+## 10. 可灵接入范例
 
-1. `data/generated-media/` 是运行产物，不应该提交到 Git。
-2. 修改 `GENERATED_MEDIA_DIR` 后需要重启 backend 和 worker。
-3. 播放器显示 0 秒时，先在浏览器 Network 中检查 `/generated/...` 是否返回 200 和正确文件大小。
+### 10.1 Provider
 
-## 十二、上线前检查
-
-每次新增模型或模态后建议检查：
-
-1. 后台模型能力列表能看到对应模型。
-2. AI 工具管理中对应工具只展示匹配能力的模型。
-3. 创建工具、编辑工具、删除工具正常。
-4. 用户端能提交任务。
-5. Worker 日志能看到正确 provider / model。
-6. 任务成功后结果能渲染。
-7. `/generated/...` 资源能直接访问。
-8. 失败时有清晰错误信息和 traceId。
-
-推荐验证命令：
-
-```powershell
-mvn test -Dtest=ModelProviderRegistryTest,ToolApiTest
-npm.cmd run build
-python -m unittest discover -s worker\tests
+```yaml
+code: kling_video
+capabilities:
+  - VIDEO_GENERATION
+  - IMAGE_GENERATION
+defaultBaseUrl: https://api-beijing.klingai.com
+defaultModel: kling-v2-6
+workerReady: true
 ```
 
+### 10.2 后台模型配置
+
+| 字段 | 值 |
+| --- | --- |
+| Provider | `kling_video` |
+| Model name | `kling-v2-6` |
+| Base URL | `https://api-beijing.klingai.com` |
+| Capabilities | `VIDEO_GENERATION` |
+| Billing unit | `PER_CALL` |
+| Unit price | 按实际成本填写 |
+| API Key | 留空 |
+| 额外鉴权 JSON | `{"accessKey":"...","secretKey":"..."}` |
+
+### 10.3 Worker 关键逻辑
+
+| 事项 | 当前处理 |
+| --- | --- |
+| AK/SK | Worker 生成 JWT，放入 `Authorization: Bearer <token>` |
+| 创建接口 | `/v1/videos/image2video` |
+| 查询接口 | `/v1/videos/image2video/{task_id}` |
+| 图片输入 | URL、本地文件、data URL 均转成纯 base64 |
+| 结果 | 提取视频 URL，下载到 `/generated/video/{taskId}/` |
+
+### 10.4 可复用范围
+
+| 接入目标 | 是否复用 `kling_video` |
+| --- | --- |
+| 可灵另一个图生视频模型 | 是，换 modelName |
+| 可灵文生视频 | 是，走 text2video path |
+| 可灵生图 | 是，但走 image handler |
+| 其他供应商图生视频 | 不一定，要看鉴权、路径、payload、轮询 |
+
+## 11. 新模型接入请求包
+
+让 AI 或开发同学接入新模型时，最好一次性给齐：
+
+```text
+目标：
+- 接入供应商：
+- 模型名：
+- 能力：TEXT_GENERATION / IMAGE_GENERATION / VIDEO_GENERATION / TEXT_TO_SPEECH / ...
+- 输入模态：
+- 输出模态：
+- 是否已有后台模型配置：
+
+官方资料：
+- API 文档地址：
+- 创建任务 curl：
+- 查询任务 curl：
+- 成功响应示例：
+- 失败响应示例：
+- 鉴权方式：
+- 价格：
+
+业务要求：
+- 用户端要展示哪些字段：
+- 哪个字段是核心字段：
+- 结果页要展示什么：
+- 是否需要保存媒体文件：
+- 失败时是否退还冻结算力：
+```
+
+如果没有创建和查询 curl，AI 很容易误猜 path 或字段名。可灵 404 就是典型例子：创建路径对了，但查询路径一开始猜错了。
+
+## 12. 开发落地顺序
+
+### 12.1 只配置后台
+
+1. 确认 provider 已存在且 `workerReady=true`。
+2. 后台新增模型配置。
+3. 选择正确 capability。
+4. 后台创建工具并绑定模型。
+5. 配置聊天输入控件。
+6. 用户端提交一次测试任务。
+7. 看 Worker 日志和任务结果。
+
+### 12.2 要补 Worker
+
+1. 在 `model-providers.yml` 注册 provider。
+2. 在 `worker/providers/registry.py` 注册 provider 能力。
+3. 新增或扩展 `worker/client/*_client.py`。
+4. 在对应 handler 中识别 provider 并构造请求。
+5. 必要时新增 persister。
+6. 增加 fake integration test。
+7. 跑通假链路。
+8. 后台配置真实密钥做冒烟测试。
+
+### 12.3 要补新模态
+
+1. 后端新增 `ToolType` / `ToolModality` / `ExecutionHandler`。
+2. 更新数据库初始化和测试 schema。
+3. 更新工具模板 Bootstrap。
+4. 更新管理端展示和字段模板。
+5. 更新用户端表单和结果渲染。
+6. 新增 Worker handler/client/persister。
+7. 更新 Redis consumer 路由。
+8. 补 backend、worker、frontend 测试。
+9. 写专项接入文档。
+
+## 13. 常见错误与排查
+
+| 现象 | 优先检查 |
+| --- | --- |
+| 后台模型下拉看不到模型 | provider capability 是否包含工具 ToolType，模型是否启用 |
+| 保存工具报系统异常 | 看后端返回 traceId 和后台 console 的 responseBody |
+| Worker 报 credentials not configured | 模型配置是否传了 apiKey 或 extraAuthJson，服务是否重启 |
+| 401/403 | 密钥、AK/SK 是否填反，Base URL 是否正确，服务器时间是否准确 |
+| 400 参数错误 | 对比官方 curl，确认字段名、类型、base64/URL 要求 |
+| 404 | 创建 path 和查询 path 是否属于同一个任务类型 |
+| 任务成功但结果打不开 | `/generated/...` 是否 200，`GENERATED_MEDIA_DIR` 是否一致 |
+| 算力冻结未释放 | 任务是否走到 `markFailed`，是否需要超时扫描/对账修复 |
+
+## 14. 推荐验证命令
+
+后端：
+
+```powershell
+cd D:\0011\5.20\backend
+mvn test "-Dtest=ToolApiTest,AdminToolFieldApiTest,ModelProviderRegistryTest"
+```
+
+管理端：
+
+```powershell
+cd D:\0011\5.20\admin-frontend
+npm run build
+```
+
+用户端：
+
+```powershell
+cd D:\0011\5.20\user-web
+npm run build
+```
+
+Worker：
+
+```powershell
+cd D:\0011\5.20
+python worker\scripts\run_fake_kling_integration_test.py
+python -m py_compile worker\client\kling_video_client.py worker\handlers\video_generation_handler.py
+```
+
+## 15. 最后检查清单
+
+给 AI 或开发同学验收时，逐项确认：
+
+1. provider code 唯一且后端/Worker 一致。
+2. modelName 与官方文档一致。
+3. capabilities 与工具 ToolType 一致。
+4. executionHandler 与 Worker handler 一致。
+5. input/output modality 与用户端体验一致。
+6. 密钥只在后台或服务端环境变量中。
+7. 图片、音频、视频结果能落到 `/generated/...`。
+8. 失败时能看到清晰错误和 traceId。
+9. 算力冻结能在失败/成功后正确释放或扣减。
+10. 文档已同步后台操作教程或专项供应商教程。

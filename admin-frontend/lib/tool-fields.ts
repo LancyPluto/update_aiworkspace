@@ -85,6 +85,7 @@ export interface EditableField {
   required: boolean
   sortOrder: number
   options: FieldOptionRow[]
+  isCore: boolean
 }
 
 export function supportsOptions(fieldType: string): boolean {
@@ -95,8 +96,12 @@ export function parseOptionsJson(raw?: string | null): FieldOptionRow[] {
   if (!raw || !raw.trim()) return []
   try {
     const parsed = JSON.parse(raw) as unknown
-    if (!Array.isArray(parsed)) return []
-    return parsed.map((item) => {
+    const rows = Array.isArray(parsed)
+      ? parsed
+      : parsed && typeof parsed === "object" && Array.isArray((parsed as { options?: unknown }).options)
+        ? (parsed as { options: unknown[] }).options
+        : []
+    return rows.map((item) => {
       if (typeof item === "string") return { label: item, value: item }
       if (item && typeof item === "object") {
         const row = item as { label?: string; value?: string; promptPrefix?: string }
@@ -115,6 +120,21 @@ export function parseOptionsJson(raw?: string | null): FieldOptionRow[] {
   }
 }
 
+export function isCoreOptionsJson(raw?: string | null): boolean {
+  if (!raw || !raw.trim()) return false
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    return Boolean(
+      parsed &&
+      typeof parsed === "object" &&
+      !Array.isArray(parsed) &&
+      ((parsed as { core?: unknown }).core === true || (parsed as { isCore?: unknown }).isCore === true),
+    )
+  } catch {
+    return false
+  }
+}
+
 export function optionsFromToolField(field: ToolField): FieldOptionRow[] {
   if (Array.isArray(field.options) && field.options.length > 0) {
     return field.options.map((item) => {
@@ -128,6 +148,9 @@ export function optionsFromToolField(field: ToolField): FieldOptionRow[] {
         promptPrefix: row.promptPrefix ? String(row.promptPrefix).trim() : undefined,
       }
     })
+  }
+  if (field.options && typeof field.options === "object" && Array.isArray((field.options as { options?: unknown }).options)) {
+    return parseOptionsJson(JSON.stringify(field.options))
   }
   return parseOptionsJson(field.optionsJson)
 }
@@ -144,6 +167,13 @@ export function buildOptionsJson(options: FieldOptionRow[]): string | undefined 
   return JSON.stringify(cleaned)
 }
 
+function buildFieldOptionsJson(field: EditableField): string | undefined {
+  const optionsJson = supportsOptions(field.fieldType) ? buildOptionsJson(field.options) : undefined
+  if (!field.isCore) return optionsJson
+  const options = optionsJson ? JSON.parse(optionsJson) as unknown[] : undefined
+  return JSON.stringify(options ? { core: true, options } : { core: true })
+}
+
 export function editableFromToolField(field: ToolField, index: number): EditableField {
   const fieldType = (field.fieldType || "text").toLowerCase() as FieldTypeValue
   return {
@@ -154,6 +184,12 @@ export function editableFromToolField(field: ToolField, index: number): Editable
     required: field.required !== false,
     sortOrder: field.sortOrder ?? index + 1,
     options: supportsOptions(fieldType) ? optionsFromToolField(field) : [],
+    isCore: isCoreOptionsJson(field.optionsJson) || Boolean(
+      field.options &&
+      typeof field.options === "object" &&
+      !Array.isArray(field.options) &&
+      ((field.options as { core?: unknown }).core === true || (field.options as { isCore?: unknown }).isCore === true),
+    ),
   }
 }
 
@@ -167,6 +203,7 @@ export function editableFromPayload(field: Partial<ToolFieldPayload>, index: num
     required: field.required !== false,
     sortOrder: Number(field.sortOrder ?? index + 1),
     options: supportsOptions(fieldType) ? parseOptionsJson(field.optionsJson) : [],
+    isCore: isCoreOptionsJson(field.optionsJson),
   }
 }
 
@@ -174,7 +211,7 @@ export function toFieldPayload(field: EditableField, index: number): ToolFieldPa
   if (!field.fieldKey.trim() || !field.fieldName.trim()) {
     throw new Error(`第 ${index + 1} 个字段需填写字段键与显示名`)
   }
-  const optionsJson = supportsOptions(field.fieldType) ? buildOptionsJson(field.options) : undefined
+  const optionsJson = buildFieldOptionsJson(field)
   return {
     fieldKey: field.fieldKey.trim(),
     fieldName: field.fieldName.trim(),
@@ -205,6 +242,7 @@ export function createEmptyField(sortOrder: number): EditableField {
     required: false,
     sortOrder,
     options: [],
+    isCore: false,
   }
 }
 
