@@ -569,3 +569,26 @@ VALUES (
   '你好，我是豆包~',
   '[{"type":"imageGeneration","config":{"aspectRatios":["1:1","16:9"],"defaultRatio":"1:1"}},{"type":"fileReading","config":{"supportedFileTypes":["pdf","txt","png"],"maxSizeMB":20}}]'
 );
+
+CREATE TABLE ppt_project_bindings (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  user_id BIGINT NOT NULL,
+  tool_id BIGINT NOT NULL,
+  banana_project_id VARCHAR(64) NOT NULL,
+  creation_type VARCHAR(32) NOT NULL,
+  title VARCHAR(255),
+  status VARCHAR(64) NOT NULL DEFAULT 'DRAFT',
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE ppt_step_billing_logs (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  user_id BIGINT NOT NULL,
+  binding_id BIGINT NOT NULL,
+  step_code VARCHAR(64) NOT NULL,
+  credits_charged INT NOT NULL,
+  credit_log_id BIGINT,
+  client_request_id VARCHAR(64),
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);

@@ -213,7 +213,10 @@ public class CreditServiceImpl implements CreditService {
     }
 
     private ErrorCode notEnoughErrorCode(CreditSourceType sourceType) {
-        return sourceType == CreditSourceType.AGENT_RUN ? ErrorCode.AGENT_CREDIT_NOT_ENOUGH : ErrorCode.CREDIT_NOT_ENOUGH;
+        if (sourceType == CreditSourceType.AGENT_RUN) {
+            return ErrorCode.AGENT_CREDIT_NOT_ENOUGH;
+        }
+        return ErrorCode.CREDIT_NOT_ENOUGH;
     }
 
     private Long taskId(CreditSourceType sourceType, Long sourceId) {
@@ -225,6 +228,10 @@ public class CreditServiceImpl implements CreditService {
     }
 
     private String sourceLabel(CreditSourceType sourceType) {
-        return sourceType == CreditSourceType.AGENT_RUN ? "Agent 运行" : "任务";
+        return switch (sourceType) {
+            case AGENT_RUN -> "Agent 运行";
+            case PPT_STEP -> "PPT 生成";
+            default -> "任务";
+        };
     }
 }

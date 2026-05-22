@@ -1,5 +1,7 @@
 package com.aiminilab.aitoolmarket.tool.dto;
 
+import com.aiminilab.aitoolmarket.ppt.workflow.PptWorkflow;
+
 import java.util.List;
 
 public record ToolDetailResponse(
@@ -20,9 +22,14 @@ public record ToolDetailResponse(
         String modelConfigName,
         String modelName,
         String executionHandler,
-        List<ToolFieldResponse> fields
+        List<ToolFieldResponse> fields,
+        PptWorkflow workflow
 ) {
     public static ToolDetailResponse of(ToolSummaryResponse summary, List<ToolFieldResponse> fields) {
+        return of(summary, fields, null);
+    }
+
+    public static ToolDetailResponse of(ToolSummaryResponse summary, List<ToolFieldResponse> fields, PptWorkflow workflow) {
         return new ToolDetailResponse(
                 summary.id(),
                 summary.toolCode(),
@@ -41,7 +48,8 @@ public record ToolDetailResponse(
                 summary.modelConfigName(),
                 summary.modelName(),
                 summary.executionHandler(),
-                fields
+                fields,
+                workflow
         );
     }
 }

@@ -22,6 +22,10 @@
 | [AI模型与模态配置指南.md](AI模型与模态配置指南.md) | 给 AI/开发者看的模型接入判断手册 |
 | [后台模型接入操作教程.md](后台模型接入操作教程.md) | 给后台同学看的模型和工具配置步骤 |
 | [kling_model_integration_guide.md](kling_model_integration_guide.md) | 可灵 API 接入专项说明 |
+| [PPT生成工具接入-后端开发文档.md](PPT生成工具接入-后端开发文档.md) | PPT 工具接入（后端 BFF，增量不影响原主链路） |
+| [PPT生成工具接入-前端开发文档.md](PPT生成工具接入-前端开发文档.md) | PPT 工具接入（user-web + admin-frontend） |
+| [PPT生成工具接入实施文档-基于现有架构.md](PPT生成工具接入实施文档-基于现有架构.md) | PPT 接入方案综述（分册优先） |
+| [PPT生成工具接入开发文档.md](PPT生成工具接入开发文档.md) | PPT 接入早期 BFF 方案稿 |
 
 ## 文档维护规则
 

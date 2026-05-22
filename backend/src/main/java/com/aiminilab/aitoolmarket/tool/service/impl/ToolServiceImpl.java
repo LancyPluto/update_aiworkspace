@@ -41,6 +41,8 @@ import com.aiminilab.aitoolmarket.tool.mapper.ToolPromptMapper;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolPromptVersionMapper;
 import com.aiminilab.aitoolmarket.agent.service.ModelCapabilityService;
 import com.aiminilab.aitoolmarket.tool.dto.ApplyToolTemplateRequest;
+import com.aiminilab.aitoolmarket.ppt.PptConstants;
+import com.aiminilab.aitoolmarket.ppt.service.PptWorkflowService;
 import com.aiminilab.aitoolmarket.tool.service.ToolService;
 import com.aiminilab.aitoolmarket.tool.service.ToolTemplateService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -82,12 +84,14 @@ public class ToolServiceImpl implements ToolService {
     private final ToolTemplateService toolTemplateService;
     private final ModelCapabilityService modelCapabilityService;
     private final AppProperties appProperties;
+    private final PptWorkflowService pptWorkflowService;
 
     public ToolServiceImpl(ToolMapper toolMapper, ToolCategoryMapper toolCategoryMapper,
                            ToolFieldSchemaMapper toolFieldSchemaMapper, ToolFieldItemMapper toolFieldItemMapper,
                            ToolPromptMapper toolPromptMapper, ToolPromptVersionMapper toolPromptVersionMapper,
                            ObjectMapper objectMapper, ToolTemplateService toolTemplateService,
-                           ModelCapabilityService modelCapabilityService, AppProperties appProperties) {
+                           ModelCapabilityService modelCapabilityService, AppProperties appProperties,
+                           PptWorkflowService pptWorkflowService) {
         this.toolMapper = toolMapper;
         this.toolCategoryMapper = toolCategoryMapper;
         this.toolFieldSchemaMapper = toolFieldSchemaMapper;
@@ -98,6 +102,7 @@ public class ToolServiceImpl implements ToolService {
         this.toolTemplateService = toolTemplateService;
         this.modelCapabilityService = modelCapabilityService;
         this.appProperties = appProperties;
+        this.pptWorkflowService = pptWorkflowService;
     }
 
     @Override
@@ -158,7 +163,10 @@ public class ToolServiceImpl implements ToolService {
         AiTool tool = toolMapper.findOnlineByCode(toolCode)
                 .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在或未上线"));
         ToolSummaryResponse summary = ToolSummaryResponse.from(tool);
-        return ToolDetailResponse.of(summary, fields(tool.getId()));
+        var workflow = PptConstants.TOOL_CODE.equals(tool.getToolCode())
+                ? pptWorkflowService.parseWorkflow(tool.getConfigNote()).orElse(null)
+                : null;
+        return ToolDetailResponse.of(summary, fields(tool.getId()), workflow);
     }
 
     @Override

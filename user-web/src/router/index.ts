@@ -91,6 +91,19 @@ const router = createRouter({
       component: () => import("@/pages/TaskResult/Page.vue"),
       props: true,
     },
+    {
+      path: "/tools/banana_ppt_generator/workspace",
+      name: "PptWorkspace",
+      meta: { requiresAuth: true },
+      component: () => import("@/pages/PptWorkspace/Page.vue"),
+    },
+    {
+      path: "/tools/banana_ppt_generator/workspace/:bindingId",
+      name: "PptProjectEditor",
+      meta: { requiresAuth: true },
+      component: () => import("@/pages/PptWorkspace/Editor.vue"),
+      props: true,
+    },
   ],
 })
 
