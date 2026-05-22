@@ -2,6 +2,7 @@ package com.aiminilab.aitoolmarket.tool.controller;
 
 import com.aiminilab.aitoolmarket.auth.security.AuthContext;
 import com.aiminilab.aitoolmarket.common.dto.ApiResponse;
+import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.tool.dto.UpsertWorkflowRequest;
 import com.aiminilab.aitoolmarket.tool.dto.WorkflowResponse;
 import com.aiminilab.aitoolmarket.tool.dto.WorkflowVersionItemResponse;
@@ -53,7 +54,7 @@ public class AdminWorkflowController {
             @PathVariable int version) {
         WorkflowResponse workflow = workflowService.getWorkflow(toolId);
         if (workflow == null) {
-            return ApiResponse.error("Workflow not found");
+            return ApiResponse.fail(ErrorCode.PARAM_ERROR, "Workflow not found");
         }
         Long operatorId = AuthContext.get().userId();
         WorkflowResponse restored = workflowService.restoreVersion(workflow.id(), version, operatorId);

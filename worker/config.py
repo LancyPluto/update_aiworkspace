@@ -46,6 +46,12 @@ class Settings:
     siliconflow_asr_model: str = os.getenv('SILICONFLOW_ASR_MODEL', 'TeleAI/TeleSpeechASR')
     siliconflow_image_model: str = os.getenv('SILICONFLOW_IMAGE_MODEL', 'Tongyi-MAI/Z-Image-Turbo')
     digital_human_video_provider: str = os.getenv('DIGITAL_HUMAN_VIDEO_PROVIDER', 'seedance')
+    infinitetalk_base_url: str = os.getenv('INFINITETALK_BASE_URL', 'http://host.docker.internal:7860')
+    infinitetalk_api_key: str = os.getenv('INFINITETALK_API_KEY', '')
+    infinitetalk_create_path: str = os.getenv('INFINITETALK_CREATE_PATH', '/api/v1/generate')
+    infinitetalk_result_path: str = os.getenv('INFINITETALK_RESULT_PATH', '/api/v1/tasks/{task_id}')
+    infinitetalk_poll_interval_seconds: float = float(os.getenv('INFINITETALK_POLL_INTERVAL_SECONDS', '5'))
+    infinitetalk_timeout_seconds: int = int(os.getenv('INFINITETALK_TIMEOUT_SECONDS', '1800'))
     seedance_base_url: str = os.getenv('SEEDANCE_BASE_URL', 'https://ark.cn-beijing.volces.com')
     seedance_api_key: str = os.getenv('SEEDANCE_API_KEY', '')
     seedance_video_model: str = os.getenv('SEEDANCE_VIDEO_MODEL', 'doubao-seedance-1-5-pro-251215')
@@ -144,3 +150,13 @@ def resolve_kling_credentials(model_config: dict[str, Any] | None = None) -> tup
     if not secret_key or secret_key.startswith("replace-with-"):
         secret_key = (settings.kling_secret_key or "").strip()
     return access_key, secret_key
+
+
+def resolve_infinitetalk_api_key(model_config: dict[str, Any] | None = None) -> str:
+    if model_config:
+        configured = model_config.get("apiKey")
+        if configured is not None:
+            configured_text = str(configured).strip()
+            if configured_text and not configured_text.startswith("replace-with-"):
+                return configured_text
+    return (settings.infinitetalk_api_key or "").strip()

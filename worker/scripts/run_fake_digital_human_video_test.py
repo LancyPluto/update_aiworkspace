@@ -9,7 +9,7 @@ from config import settings
 from client.seedance_video_client import SeedanceVideoError
 from handlers.digital_human_postprocessor import DigitalHumanPostprocessor
 from handlers.digital_human_video_handler import DigitalHumanVideoHandler
-from task_queue.redis_consumer import TaskHandlerRouter
+from task_queue.task_handler_router import TaskHandlerRouter
 
 
 class FakeBackendClient:
@@ -91,6 +91,19 @@ class FailingSeedanceClient:
         raise SeedanceVideoError("seedance unauthorized")
 
 
+class FakeInfiniteTalkClient:
+    def __init__(self) -> None:
+        self.request_payload: dict | None = None
+
+    def generate_video(self, **kwargs) -> dict:
+        self.request_payload = kwargs
+        return fake_video_result(
+            "infinitetalk_fake_001",
+            provider="infinitetalk",
+            resolution=kwargs.get("resolution", "480p"),
+        )
+
+
 def fake_video_result(request_id: str, *, provider: str, resolution: str = "480p") -> dict:
     return {
         "requestId": request_id,
@@ -132,6 +145,21 @@ class SpyDigitalHumanHandler:
 class UnexpectedTextHandler:
     def handle(self, message: dict) -> dict:
         raise AssertionError(f"text handler should not handle this task: {message}")
+
+
+class FakeInfiniteTalkBackendClient(FakeBackendClient):
+    def get_execution_context(self, task_id: int) -> dict:
+        context = super().get_execution_context(task_id)
+        context["modelProviderCode"] = "infinitetalk"
+        context["executionHandler"] = "DIGITAL_HUMAN"
+        context["modelConfig"] = {
+            "code": "infinitetalk_video_avatar",
+            "provider": "infinitetalk",
+            "modelName": "MeiGen-AI/InfiniteTalk",
+            "baseUrl": "http://127.0.0.1:7860",
+            "timeoutSeconds": 1800,
+        }
+        return context
 
 
 def main() -> None:
@@ -207,6 +235,29 @@ def main() -> None:
     assert failing_backend.failed_payload["errorCode"] == "MODEL_CALL_FAILED"
     assert failing_siliconflow.speech_calls == 1, failing_siliconflow.speech_calls
     assert failing_siliconflow.image_prompts == [], failing_siliconflow.image_prompts
+
+    infinitetalk_backend = FakeInfiniteTalkBackendClient()
+    infinitetalk_siliconflow = FakeSiliconFlowClient()
+    infinitetalk_client = FakeInfiniteTalkClient()
+    infinitetalk_postprocessor = FakePostprocessor()
+    infinitetalk_handler = DigitalHumanVideoHandler(
+        backend_client=infinitetalk_backend,
+        video_client=infinitetalk_siliconflow,
+        infinitetalk_video_client=infinitetalk_client,
+        postprocessor=infinitetalk_postprocessor,
+    )
+    infinitetalk_result = infinitetalk_handler.handle({"taskId": 99004, "toolCode": "digital_human_agent"})
+    assert infinitetalk_result["status"] == "SUCCESS", infinitetalk_result
+    assert infinitetalk_result["provider"] == "infinitetalk", infinitetalk_result
+    assert infinitetalk_client.request_payload is not None
+    assert infinitetalk_client.request_payload["model"] == "MeiGen-AI/InfiniteTalk", infinitetalk_client.request_payload
+    assert infinitetalk_client.request_payload["image"] == "https://example.com/avatar.png", infinitetalk_client.request_payload
+    assert infinitetalk_client.request_payload["audio_data_url"].startswith("data:audio/mpeg;base64,"), infinitetalk_client.request_payload
+    assert infinitetalk_postprocessor.payload is None, infinitetalk_postprocessor.payload
+    assert infinitetalk_backend.success_payload is not None
+    assert infinitetalk_backend.success_payload["billableUnits"] == 1
+    assert "infinitetalk_fake_001" in infinitetalk_backend.success_payload["contentText"]
+    assert "跳过 FFmpeg" in infinitetalk_backend.success_payload["contentText"]
 
     srt = DigitalHumanPostprocessor._build_srt("First sentence!Second sentence!Third sentence!", 9.0)
     assert "00:00:00,000 -->" in srt

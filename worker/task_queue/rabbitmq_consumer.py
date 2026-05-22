@@ -6,20 +6,20 @@ import pika
 from pika.exceptions import AMQPError, UnroutableError
 
 from config import settings
-from handlers.text_task_handler import TextTaskHandler
+from task_queue.task_handler_router import TaskHandlerRouter
 
 
 LOGGER = logging.getLogger(__name__)
 
 
 class RabbitMqConsumer:
-    def __init__(self, handler: TextTaskHandler | None = None) -> None:
+    def __init__(self, handler: TaskHandlerRouter | None = None) -> None:
         self.queue_name = settings.rabbitmq_task_queue
         self.dead_queue_name = settings.rabbitmq_dead_queue
         self.retry_queue_prefix = settings.rabbitmq_retry_queue_prefix
         retry_queue_count = len([value for value in settings.rabbitmq_retry_delays_ms.split(",") if value.strip()])
         self.max_retries = min(settings.rabbitmq_max_retries, retry_queue_count)
-        self.handler = handler or TextTaskHandler()
+        self.handler = handler or TaskHandlerRouter()
 
     def start(self) -> None:
         credentials = pika.PlainCredentials(settings.rabbitmq_username, settings.rabbitmq_password)

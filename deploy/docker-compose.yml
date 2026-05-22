@@ -188,7 +188,7 @@ services:
     volumes:
       - ../worker:/app
       - generated_media:/data/generated-media
-    command: sh -c "for i in 1 2 3; do apt-get update && apt-get install -y --no-install-recommends --fix-missing fontconfig fonts-noto-cjk && break; echo font install retry $$i; sleep 5; done && fc-match 'Noto Sans CJK SC' && rm -rf /var/lib/apt/lists/* && pip install --no-cache-dir -r requirements.txt && python main.py"
+    command: sh -c "if command -v fc-match >/dev/null 2>&1 && fc-match 'Noto Sans CJK SC' >/dev/null 2>&1; then echo 'fonts ready'; else for i in 1 2 3; do apt-get update && apt-get install -y --no-install-recommends --fix-missing fontconfig fonts-noto-cjk && break; echo font install retry $$i; sleep 5; done; fi; if command -v fc-match >/dev/null 2>&1; then fc-match 'Noto Sans CJK SC' || true; else echo 'fontconfig unavailable, continuing without system font probe'; fi; rm -rf /var/lib/apt/lists/*; if python -c 'import requests, redis, dotenv, imageio_ffmpeg, pika' >/dev/null 2>&1; then echo 'python deps ready'; else pip install --no-cache-dir -r requirements.txt; fi; python main.py"
 
   agent-service:
     image: python:3.12-slim

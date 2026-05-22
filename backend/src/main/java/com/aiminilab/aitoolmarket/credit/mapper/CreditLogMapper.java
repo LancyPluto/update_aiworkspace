@@ -27,4 +27,14 @@ public interface CreditLogMapper extends BaseMapper<CreditLog> {
         }
         return selectCount(wrapper);
     }
+
+    default boolean existsByIdempotencyKey(String idempotencyKey) {
+        if (idempotencyKey == null || idempotencyKey.isBlank()) {
+            return false;
+        }
+        Long count = selectCount(new LambdaQueryWrapper<CreditLog>()
+                .eq(CreditLog::getIdempotencyKey, idempotencyKey)
+                .last("LIMIT 1"));
+        return count != null && count > 0;
+    }
 }

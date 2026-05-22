@@ -42,5 +42,7 @@ public interface CreditService {
 
     CreditAccountResponse manualDeduct(Long userId, int amount, String reason, Long operatorId);
 
+    CreditAccountResponse rechargeAdd(Long userId, Long rechargeOrderId, int amount, String reason);
+
     PageResponse<CreditLogResponse> logs(Long userId, String logType, Integer pageNo, Integer pageSize);
 }

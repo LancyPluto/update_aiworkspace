@@ -1,4 +1,4 @@
-SET NAMES utf8mb4;
+﻿SET NAMES utf8mb4;
 
 INSERT INTO agent_model_configs (
   display_name,
@@ -20,7 +20,7 @@ VALUES (
   'siliconflow_images',
   'Tongyi-MAI/Z-Image-Turbo',
   'https://api.siliconflow.cn',
-  'sk-qzxseslflrfnxtgzxaeapgzyabzlwlvvzwapjihaejjahquj',
+  'replace-with-siliconflow-api-key',
   600,
   'PER_CALL',
   0.00000000,
@@ -59,7 +59,7 @@ VALUES
   'siliconflow_speech',
   'FunAudioLLM/CosyVoice2-0.5B',
   'https://api.siliconflow.cn',
-  'sk-qzxseslflrfnxtgzxaeapgzyabzlwlvvzwapjihaejjahquj',
+  'replace-with-siliconflow-api-key',
   300,
   'PER_CALL',
   0.00000000,
@@ -73,7 +73,7 @@ VALUES
   'siliconflow_asr',
   'TeleAI/TeleSpeechASR',
   'https://api.siliconflow.cn',
-  'sk-qzxseslflrfnxtgzxaeapgzyabzlwlvvzwapjihaejjahquj',
+  'replace-with-siliconflow-api-key',
   300,
   'PER_CALL',
   0.00000000,
@@ -87,7 +87,7 @@ VALUES
   'siliconflow_images',
   'Tongyi-MAI/Z-Image-Turbo',
   'https://api.siliconflow.cn',
-  'sk-qzxseslflrfnxtgzxaeapgzyabzlwlvvzwapjihaejjahquj',
+  'replace-with-siliconflow-api-key',
   600,
   'PER_CALL',
   0.00000000,

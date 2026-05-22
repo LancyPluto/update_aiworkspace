@@ -91,6 +91,19 @@ public interface CreditMapper extends BaseMapper<CreditAccount> {
 
     @Update("""
             UPDATE credit_accounts
+            SET balance = balance + #{amount},
+                total_granted = total_granted + #{amount},
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{accountId} AND status = 'ACTIVE'
+            """)
+    int rechargeAddRows(@Param("accountId") Long accountId, @Param("amount") int amount);
+
+    default boolean rechargeAdd(Long accountId, int amount) {
+        return rechargeAddRows(accountId, amount) == 1;
+    }
+
+    @Update("""
+            UPDATE credit_accounts
             SET balance = balance - #{amount}, updated_at = CURRENT_TIMESTAMP
             WHERE id = #{accountId} AND balance - frozen >= #{amount} AND status = 'ACTIVE'
             """)

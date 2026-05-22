@@ -260,7 +260,7 @@ export interface CreditLog {
   userId: number
   taskId?: number | null
   agentRunId?: number | null
-  logType: "FREEZE" | "DEDUCT" | "RELEASE" | "MANUAL_ADD" | "MANUAL_DEDUCT"
+  logType: "FREEZE" | "DEDUCT" | "RELEASE" | "RECHARGE" | "MANUAL_ADD" | "MANUAL_DEDUCT"
   amount: number
   frozenAmount: number
   balanceBefore: number
@@ -270,6 +270,39 @@ export interface CreditLog {
   operatorType: string
   operatorId?: number | null
   reason: string
+  createdAt: string
+}
+
+export interface RechargePackage {
+  id: number
+  packageCode: string
+  packageName: string
+  credits: number
+  priceAmount: number
+  currency: string
+  validityDays: number
+  benefits: string[]
+  recommended: boolean
+}
+
+export type RechargeOrderStatus = "WAITING_PAYMENT" | "PAID" | "CREDITED" | "CLOSED" | "FAILED"
+
+export interface RechargeOrder {
+  id: number
+  orderNo: string
+  packageId: number
+  credits: number
+  priceAmount: number
+  currency: string
+  paymentChannel: string
+  status: RechargeOrderStatus
+  statusReason?: string | null
+  payUrl?: string | null
+  qrCodeUrl?: string | null
+  paidAt?: string | null
+  creditedAt?: string | null
+  closedAt?: string | null
+  expiresAt: string
   createdAt: string
 }
 
