@@ -67,7 +67,7 @@ function buildUrl(path: string, query?: RequestOptions["query"]): string {
 function redirectToLoginPage(): void {
   if (typeof window === "undefined") return
   const path = window.location.pathname
-  if (path === "/login" || path.endsWith("/login")) return
+  if (path === "/" || path === "/login" || path.endsWith("/login")) return
   try {
     localStorage.removeItem(SESSION_TOKEN_STORAGE_KEY)
   } catch {
@@ -77,7 +77,7 @@ function redirectToLoginPage(): void {
   const full = `${window.location.pathname}${window.location.search}`
   const base = import.meta.env.BASE_URL || "/"
   const normalizedBase = base.endsWith("/") ? base.slice(0, -1) : base
-  const loginPath = (normalizedBase ? `${normalizedBase}/login` : "/login").replace(/\/+/g, "/")
+  const loginPath = (normalizedBase || "").replace(/\/+/g, "/") || "/"
   window.location.assign(`${window.location.origin}${loginPath}?redirect=${encodeURIComponent(full)}`)
 }
 

@@ -45,6 +45,12 @@ export function isMockMode(): boolean {
   return import.meta.env.VITE_AI_TOOL_MOCK === "1"
 }
 
+/** 大模型页局部 Mock 使用的工具 id（仅 enabled 项） */
+export function isMarketplaceMockToolId(toolId: string): boolean {
+  const id = toolId.trim()
+  return MOCK_TOOLS.some((tool) => tool.id === id && tool.enabled)
+}
+
 function ensureSession(toolId: string): ChatSession[] {
   if (!sessions.has(toolId)) {
     const now = Date.now()

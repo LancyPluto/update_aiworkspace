@@ -884,7 +884,7 @@ export default function ToolsPage() {
 
   return (
     <AdminLayout>
-      <AdminHeader title="AI Tool Management" description={headerDescription} />
+      <AdminHeader title="大模型管理" description={headerDescription} />
 
       <div className="space-y-6 p-6">
         <div className="flex items-center justify-between gap-4">

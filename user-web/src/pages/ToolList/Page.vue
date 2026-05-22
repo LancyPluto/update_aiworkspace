@@ -45,13 +45,13 @@ onMounted(() => {
 </script>
 
 <template>
-  <AppShell title="AI 超市" description="选择 AI 模型，在统一聊天界面中体验不同能力">
+  <AppShell title="大模型" description="选择 AI 工具，在统一界面中使用不同能力">
     <div class="px-6 py-8">
       <div
         v-if="offlineNotice"
         class="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-800 dark:text-amber-200"
       >
-        该模型已不可用，请选择其他模型
+        该工具已不可用，请选择其他工具
       </div>
       <div v-if="loading" class="flex items-center justify-center py-20">
         <span class="text-sm text-muted-foreground">加载中…</span>
@@ -70,7 +70,7 @@ onMounted(() => {
 
       <div v-else-if="sortedTools.length === 0" class="flex flex-col items-center justify-center py-20 text-center">
         <Sparkles class="mb-4 h-12 w-12 text-muted-foreground/50" />
-        <p class="text-sm text-muted-foreground">暂无可用模型，请联系管理员</p>
+        <p class="text-sm text-muted-foreground">暂无可用工具，请联系管理员</p>
       </div>
 
       <div v-else class="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">

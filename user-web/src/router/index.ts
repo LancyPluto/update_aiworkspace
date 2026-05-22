@@ -9,16 +9,20 @@ import ChatPage from "@/pages/Chat/Page.vue"
 import MyTasksPage from "@/pages/MyTasks/Page.vue"
 import MaterialLibraryPage from "@/pages/MaterialLibrary/Page.vue"
 import BillingPage from "@/pages/Billing/Page.vue"
+import AgentPlaceholderPage from "@/pages/AgentPlaceholder/Page.vue"
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
-    { path: "/", redirect: "/login" },
     {
-      path: "/login",
+      path: "/",
       name: "Login",
       meta: { requiresAuth: false },
       component: LoginPage,
+    },
+    {
+      path: "/login",
+      redirect: (to) => ({ path: "/", query: to.query }),
     },
     {
       path: "/dashboard",
@@ -37,6 +41,12 @@ const router = createRouter({
       name: "ToolList",
       meta: { requiresAuth: false },
       component: ToolListPage,
+    },
+    {
+      path: "/agents",
+      name: "AgentPlaceholder",
+      meta: { requiresAuth: false },
+      component: AgentPlaceholderPage,
     },
     {
       path: "/chat/:toolId",
@@ -95,8 +105,14 @@ const router = createRouter({
 })
 
 function resolvePostLoginRedirect(raw: unknown): string {
-  if (typeof raw !== "string" || !raw.startsWith("/") || raw === "/login" || raw.startsWith("/login?")) {
-    return "/agent"
+  if (
+    typeof raw !== "string" ||
+    !raw.startsWith("/") ||
+    raw === "/" ||
+    raw === "/login" ||
+    raw.startsWith("/login?")
+  ) {
+    return "/marketplace"
   }
   return raw
 }
