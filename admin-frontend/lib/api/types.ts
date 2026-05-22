@@ -352,6 +352,30 @@ export interface AgentModelConfigTestResult {
   sample: string
 }
 
+export interface ConfigBundle {
+  format: "ai-tool-market-config-bundle" | string
+  version: number
+  exportedAt?: string
+  exportedBy?: string | null
+  secretsRedacted?: boolean
+  settings?: Record<string, string>
+  modelConfigs?: Array<Record<string, unknown>>
+  categories?: Array<Record<string, unknown>>
+  tools?: Array<Record<string, unknown>>
+}
+
+export interface ConfigBundleImportResult {
+  settings: number
+  modelConfigs: number
+  categories: number
+  tools: number
+  fields: number
+  prompts: number
+  promptVersions: number
+  workflows: number
+  warnings: string[]
+}
+
 export interface AdminAgentRunListItem {
   id: number
   sessionId: number

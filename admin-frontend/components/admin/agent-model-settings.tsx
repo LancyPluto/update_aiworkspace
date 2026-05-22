@@ -259,7 +259,11 @@ function testStatusBadge(config: ModelConfigWithTest) {
   return null
 }
 
-export function AgentModelSettings() {
+interface AgentModelSettingsProps {
+  refreshKey?: number
+}
+
+export function AgentModelSettings({ refreshKey = 0 }: AgentModelSettingsProps) {
   const [configs, setConfigs] = useState<ModelConfigWithTest[]>([])
   const [providerCatalog, setProviderCatalog] = useState<ModelProviderDescriptor[]>([])
   const [form, setForm] = useState<ModelForm>(emptyForm)
@@ -314,7 +318,7 @@ export function AgentModelSettings() {
   useEffect(() => {
     loadConfigs()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [refreshKey])
 
   function updateForm<K extends keyof ModelForm>(key: K, value: ModelForm[K]) {
     setForm((current) => ({ ...current, [key]: value }))

@@ -30,6 +30,15 @@ public interface AgentModelConfigMapper extends BaseMapper<AgentModelConfig> {
     AgentModelConfig findActiveById(@Param("id") Long id);
 
     @Select("""
+            SELECT *
+            FROM agent_model_configs
+            WHERE config_code = #{configCode}
+              AND COALESCE(is_deleted, 0) = 0
+            LIMIT 1
+            """)
+    AgentModelConfig findActiveByConfigCode(@Param("configCode") String configCode);
+
+    @Select("""
             SELECT COUNT(1)
             FROM agent_model_configs
             WHERE config_code = #{configCode}
