@@ -9,6 +9,7 @@ import ChatPage from "@/pages/Chat/Page.vue"
 import MyTasksPage from "@/pages/MyTasks/Page.vue"
 import MaterialLibraryPage from "@/pages/MaterialLibrary/Page.vue"
 import BillingPage from "@/pages/Billing/Page.vue"
+import AgentPlaceholderPage from "@/pages/AgentPlaceholder/Page.vue"
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -37,6 +38,12 @@ const router = createRouter({
       name: "ToolList",
       meta: { requiresAuth: false },
       component: ToolListPage,
+    },
+    {
+      path: "/agents",
+      name: "AgentPlaceholder",
+      meta: { requiresAuth: false },
+      component: AgentPlaceholderPage,
     },
     {
       path: "/chat/:toolId",

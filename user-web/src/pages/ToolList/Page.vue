@@ -45,7 +45,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <AppShell title="AI 超市" description="选择 AI 模型，在统一聊天界面中体验不同能力">
+  <AppShell title="大模型" description="选择 AI 模型，在统一聊天界面中体验不同能力">
     <div class="px-6 py-8">
       <div
         v-if="offlineNotice"

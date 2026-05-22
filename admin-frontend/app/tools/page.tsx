@@ -257,7 +257,7 @@ export default function ToolsPage() {
   return (
     <AdminLayout>
       <AdminHeader
-        title="AI 工具管理"
+        title="大模型管理"
         description="配置 AI 模型图标、能力与上架状态，C 端聊天页将自动适配"
       />
 
