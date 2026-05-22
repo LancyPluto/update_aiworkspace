@@ -1,3 +1,5 @@
+import type { ToolField } from "./types"
+
 export type CapabilityType =
   | "imageGeneration"
   | "fileReading"
@@ -20,6 +22,8 @@ export interface AITool {
   primaryColor?: string
   welcomeMessage?: string
   capabilities: Capability[]
+  fields?: ToolField[]
+  estimatedCreditCost?: number
 }
 
 export interface ChatSession {

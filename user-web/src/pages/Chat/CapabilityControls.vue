@@ -1,7 +1,11 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue"
 import type { Capability } from "@/api/aiToolTypes"
-import { Paperclip, Mic, X, Loader2 } from "lucide-vue-next"
+import type { ToolField } from "@/api/types"
+import { uploadChatFile } from "@/api/aiToolApi"
+import { getApiOrigin } from "@/api/client"
+import { useAuthStore } from "@/store/authStore"
+import { ImageUp, Loader2, Mic, Paperclip, UploadCloud, X } from "lucide-vue-next"
 
 export interface PendingAttachment {
   localId: string
@@ -19,56 +23,25 @@ export interface CapabilityState {
   webSearch?: boolean
   language?: string
   attachments: PendingAttachment[]
+  fields: Record<string, unknown>
 }
+
+type FieldOption = string | { label: string; value: string; promptPrefix?: string }
 
 const props = defineProps<{
   capabilities: Capability[]
-}>()
-
-const emit = defineEmits<{
-  upload: [file: File, localId: string]
+  fields?: ToolField[]
+  coreFieldKey?: string | null
 }>()
 
 const state = ref<CapabilityState>({
   attachments: [],
+  fields: {},
 })
+const auth = useAuthStore()
+const fieldUploads = ref<Record<string, { uploading?: boolean; error?: string; fileName?: string }>>({})
 
-function resetState() {
-  state.value = buildDefaultState(props.capabilities)
-}
-
-function buildDefaultState(capabilities: Capability[]): CapabilityState {
-  const next: CapabilityState = { attachments: [] }
-  for (const cap of capabilities) {
-    switch (cap.type) {
-      case "imageGeneration":
-        next.imageRatio =
-          typeof cap.config.defaultRatio === "string"
-            ? cap.config.defaultRatio
-            : Array.isArray(cap.config.aspectRatios) && cap.config.aspectRatios.length > 0
-              ? String(cap.config.aspectRatios[0])
-              : "1:1"
-        break
-      case "webSearch":
-        next.webSearch = cap.config.defaultEnabled === true
-        break
-      case "codeExecution":
-        next.language =
-          Array.isArray(cap.config.supportedLanguages) && cap.config.supportedLanguages.length > 0
-            ? String(cap.config.supportedLanguages[0])
-            : "python"
-        break
-    }
-  }
-  return next
-}
-
-watch(
-  () => props.capabilities,
-  () => resetState(),
-  { immediate: true, deep: true },
-)
-
+const configuredFields = computed(() => (props.fields || []).filter((field) => field.fieldKey !== props.coreFieldKey))
 const imageCapability = computed(() => props.capabilities.find((c) => c.type === "imageGeneration"))
 const fileCapability = computed(() => props.capabilities.find((c) => c.type === "fileReading"))
 const webSearchCapability = computed(() => props.capabilities.find((c) => c.type === "webSearch"))
@@ -83,19 +56,6 @@ const aspectRatios = computed(() => {
   return ["1:1", "16:9", "9:16"]
 })
 
-const supportedFileTypes = computed(() => {
-  const config = fileCapability.value?.config
-  if (Array.isArray(config?.supportedFileTypes)) {
-    return config.supportedFileTypes.map(String)
-  }
-  return ["pdf", "txt", "png"]
-})
-
-const maxSizeMB = computed(() => {
-  const value = fileCapability.value?.config?.maxSizeMB
-  return typeof value === "number" ? value : 20
-})
-
 const codeLanguages = computed(() => {
   const config = codeCapability.value?.config
   if (Array.isArray(config?.supportedLanguages) && config.supportedLanguages.length > 0) {
@@ -106,36 +66,167 @@ const codeLanguages = computed(() => {
 
 const showWebSearch = computed(() => webSearchCapability.value?.config?.enabled !== false)
 
-function acceptFileTypes(): string {
-  return supportedFileTypes.value.map((ext) => `.${ext}`).join(",")
+function optionLabel(option: FieldOption): string {
+  return typeof option === "string" ? option : option.label
 }
 
-function handleFileSelect(event: Event) {
-  const input = event.target as HTMLInputElement
-  const file = input.files?.[0]
-  input.value = ""
+function optionValue(option: FieldOption): string {
+  return typeof option === "string" ? option : option.value
+}
+
+function fieldOptions(field: ToolField): FieldOption[] {
+  if (Array.isArray(field.options)) return field.options
+  if (!field.optionsJson) return []
+  try {
+    const parsed = JSON.parse(field.optionsJson) as unknown
+    const rows = Array.isArray(parsed)
+      ? parsed
+      : parsed && typeof parsed === "object" && Array.isArray((parsed as { options?: unknown }).options)
+        ? (parsed as { options: unknown[] }).options
+        : []
+    return rows.filter((item): item is FieldOption => typeof item === "string" || Boolean(item && typeof item === "object"))
+  } catch {
+    return []
+  }
+}
+
+function defaultFieldValue(field: ToolField): unknown {
+  const options = fieldOptions(field)
+  if ((field.fieldType === "select" || field.fieldType === "radio") && options.length) return optionValue(options[0])
+  if (field.fieldType === "checkbox") return false
+  if (field.fieldType === "slider") return 50
+  return ""
+}
+
+function buildDefaultState(): CapabilityState {
+  const next: CapabilityState = { attachments: [], fields: {} }
+  if (imageCapability.value) {
+    next.imageRatio =
+      typeof imageCapability.value.config.defaultRatio === "string"
+        ? imageCapability.value.config.defaultRatio
+        : aspectRatios.value[0]
+  }
+  if (webSearchCapability.value) next.webSearch = webSearchCapability.value.config.defaultEnabled === true
+  if (codeCapability.value) next.language = codeLanguages.value[0] || "python"
+  for (const field of configuredFields.value) {
+    next.fields[field.fieldKey] = defaultFieldValue(field)
+  }
+  return next
+}
+
+function resetState() {
+  state.value = buildDefaultState()
+  fieldUploads.value = {}
+}
+
+watch(
+  () => [props.capabilities, props.fields, props.coreFieldKey],
+  () => resetState(),
+  { immediate: true, deep: true },
+)
+
+function strField(key: string): string {
+  const value = state.value.fields[key]
+  return value === undefined || value === null ? "" : String(value)
+}
+
+function setField(key: string, value: unknown) {
+  state.value.fields = { ...state.value.fields, [key]: value }
+}
+
+function uploadState(key: string) {
+  return fieldUploads.value[key] || {}
+}
+
+function normalizeResourceUrl(value: string): string {
+  const raw = value.trim()
+  if (!raw || raw.startsWith("http://") || raw.startsWith("https://") || raw.startsWith("data:")) return raw
+  const path = raw.startsWith("/") ? raw : `/${raw}`
+  const apiOrigin = getApiOrigin()
+  return apiOrigin ? `${apiOrigin}${path}` : path
+}
+
+function imagePreviewUrl(field: ToolField): string {
+  if (field.fieldType !== "image") return ""
+  return normalizeResourceUrl(strField(field.fieldKey))
+}
+
+async function handleFieldUpload(field: ToolField, files: FileList | File[] | null) {
+  const file = files?.[0]
   if (!file) return
-
-  const ext = file.name.split(".").pop()?.toLowerCase() || ""
-  if (!supportedFileTypes.value.includes(ext)) {
-    alert(`不支持 .${ext} 文件`)
-    return
+  fieldUploads.value = {
+    ...fieldUploads.value,
+    [field.fieldKey]: { uploading: true, fileName: file.name },
   }
-  if (file.size > maxSizeMB.value * 1024 * 1024) {
-    alert(`文件不能超过 ${maxSizeMB.value}MB`)
-    return
+  try {
+    const result = await uploadChatFile(file, { token: auth.token })
+    setField(field.fieldKey, result.url)
+    fieldUploads.value = {
+      ...fieldUploads.value,
+      [field.fieldKey]: { uploading: false, fileName: file.name },
+    }
+  } catch (err) {
+    fieldUploads.value = {
+      ...fieldUploads.value,
+      [field.fieldKey]: {
+        uploading: false,
+        fileName: file.name,
+        error: (err as Error).message || "上传失败",
+      },
+    }
   }
+}
 
-  const localId = `local-${Date.now()}-${Math.random().toString(36).slice(2)}`
-  state.value.attachments.push({
-    localId,
-    file,
-    name: file.name,
-    size: file.size,
-    type: file.type,
-    uploading: true,
-  })
-  emit("upload", file, localId)
+function clearUploadedField(field: ToolField) {
+  setField(field.fieldKey, "")
+  const next = { ...fieldUploads.value }
+  delete next[field.fieldKey]
+  fieldUploads.value = next
+}
+
+function onNumberInput(key: string, event: Event) {
+  const value = (event.target as HTMLInputElement).value
+  setField(key, value === "" ? "" : Number(value))
+}
+
+function validate(): { valid: boolean; message?: string } {
+  for (const field of configuredFields.value) {
+    if (!field.required) continue
+    const value = state.value.fields[field.fieldKey]
+    if (value === undefined || value === null || String(value).trim() === "") {
+      return { valid: false, message: `请填写：${field.fieldName}` }
+    }
+  }
+  return { valid: true }
+}
+
+function getRequestParams(): Record<string, unknown> {
+  const params: Record<string, unknown> = {}
+  if (imageCapability.value && state.value.imageRatio) params.imageRatio = state.value.imageRatio
+  if (webSearchCapability.value && showWebSearch.value) params.webSearch = state.value.webSearch === true
+  if (codeCapability.value && state.value.language) params.language = state.value.language
+
+  for (const field of configuredFields.value) {
+    const value = state.value.fields[field.fieldKey]
+    if (field.fieldType === "checkbox") {
+      params[field.fieldKey] = Boolean(value)
+    } else if (field.fieldType === "number" || field.fieldType === "slider") {
+      if (value !== "" && value !== undefined && value !== null && !Number.isNaN(Number(value))) {
+        params[field.fieldKey] = Number(value)
+      }
+    } else if (value !== "" && value !== undefined && value !== null) {
+      params[field.fieldKey] = typeof value === "string" ? value.trim() : value
+    }
+  }
+  return params
+}
+
+function getAttachmentIds(): string[] {
+  return state.value.attachments.filter((a) => a.fileId && !a.error).map((a) => a.fileId as string)
+}
+
+function hasPendingUploads(): boolean {
+  return state.value.attachments.some((a) => a.uploading) || Object.values(fieldUploads.value).some((item) => item.uploading)
 }
 
 function markUploadSuccess(localId: string, fileId: string) {
@@ -155,36 +246,9 @@ function markUploadError(localId: string, message: string) {
   }
 }
 
-function removeAttachment(localId: string) {
-  state.value.attachments = state.value.attachments.filter((a) => a.localId !== localId)
-}
-
-function getRequestParams(): Record<string, unknown> {
-  const params: Record<string, unknown> = {}
-  if (imageCapability.value && state.value.imageRatio) {
-    params.imageRatio = state.value.imageRatio
-  }
-  if (webSearchCapability.value && showWebSearch.value) {
-    params.webSearch = state.value.webSearch === true
-  }
-  if (codeCapability.value && state.value.language) {
-    params.language = state.value.language
-  }
-  return params
-}
-
-function getAttachmentIds(): string[] {
-  return state.value.attachments
-    .filter((a) => a.fileId && !a.error)
-    .map((a) => a.fileId as string)
-}
-
-function hasPendingUploads(): boolean {
-  return state.value.attachments.some((a) => a.uploading)
-}
-
 defineExpose({
   resetState,
+  validate,
   getRequestParams,
   getAttachmentIds,
   markUploadSuccess,
@@ -194,66 +258,154 @@ defineExpose({
 </script>
 
 <template>
-  <div v-if="capabilities.length > 0" class="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2">
-    <div v-if="imageCapability" class="flex items-center gap-2 text-xs">
-      <span class="text-muted-foreground">图片比例：</span>
+  <div v-if="configuredFields.length > 0 || capabilities.length > 0" class="space-y-3 border-t border-border/70 px-4 py-3">
+    <div v-if="configuredFields.length > 0" class="flex flex-wrap items-end gap-2">
+      <div v-for="field in configuredFields" :key="field.fieldKey" class="min-w-[116px] max-w-[220px]">
+        <label class="mb-1 block text-[11px] font-medium text-muted-foreground">
+          {{ field.fieldName }}<span v-if="field.required" class="text-destructive"> *</span>
+        </label>
+
+        <select
+          v-if="(field.fieldType === 'select' || field.fieldType === 'radio') && fieldOptions(field).length"
+          :value="strField(field.fieldKey)"
+          class="h-8 w-full rounded-md border border-border bg-background px-2 text-xs"
+          @change="setField(field.fieldKey, ($event.target as HTMLSelectElement).value)"
+        >
+          <option v-for="option in fieldOptions(field)" :key="optionValue(option)" :value="optionValue(option)">
+            {{ optionLabel(option) }}
+          </option>
+        </select>
+
+        <input
+          v-else-if="field.fieldType === 'number' || field.fieldType === 'slider'"
+          type="number"
+          :value="strField(field.fieldKey)"
+          :placeholder="field.placeholder || ''"
+          class="h-8 w-full rounded-md border border-border bg-background px-2 text-xs"
+          @input="onNumberInput(field.fieldKey, $event)"
+        />
+
+        <label
+          v-else-if="field.fieldType === 'checkbox'"
+          class="inline-flex h-8 items-center gap-2 rounded-md border border-border bg-background px-2 text-xs"
+        >
+          <input
+            type="checkbox"
+            :checked="Boolean(state.fields[field.fieldKey])"
+            class="accent-primary"
+            @change="setField(field.fieldKey, ($event.target as HTMLInputElement).checked)"
+          />
+          {{ field.placeholder || "启用" }}
+        </label>
+
+        <div v-else-if="field.fieldType === 'image' || field.fieldType === 'file'" class="space-y-1">
+          <label
+            class="flex h-8 cursor-pointer items-center gap-2 rounded-md border border-dashed border-border bg-background px-2 text-xs text-muted-foreground hover:border-primary/60 hover:text-foreground"
+            @dragover.prevent
+            @drop.prevent="handleFieldUpload(field, ($event as DragEvent).dataTransfer?.files || null)"
+          >
+            <input
+              type="file"
+              class="hidden"
+              :accept="field.fieldType === 'image' ? 'image/*' : undefined"
+              @change="handleFieldUpload(field, ($event.target as HTMLInputElement).files)"
+            />
+            <Loader2 v-if="uploadState(field.fieldKey).uploading" class="h-3.5 w-3.5 animate-spin" />
+            <ImageUp v-else-if="field.fieldType === 'image'" class="h-3.5 w-3.5" />
+            <UploadCloud v-else class="h-3.5 w-3.5" />
+            <span class="truncate">
+              {{ uploadState(field.fieldKey).uploading ? "上传中..." : (uploadState(field.fieldKey).fileName || field.placeholder || "拖拽/选择文件") }}
+            </span>
+          </label>
+          <div v-if="strField(field.fieldKey)" class="flex items-center gap-1">
+            <img
+              v-if="imagePreviewUrl(field)"
+              :src="imagePreviewUrl(field)"
+              alt=""
+              class="h-8 w-8 shrink-0 rounded border border-border object-cover"
+            />
+            <input
+              :value="strField(field.fieldKey)"
+              class="h-7 min-w-0 flex-1 rounded-md border border-border bg-muted/40 px-2 text-[11px]"
+              readonly
+            />
+            <button type="button" class="text-muted-foreground hover:text-foreground" @click="clearUploadedField(field)">
+              <X class="h-3.5 w-3.5" />
+            </button>
+          </div>
+          <p v-if="uploadState(field.fieldKey).error" class="text-[11px] text-destructive">
+            {{ uploadState(field.fieldKey).error }}
+          </p>
+        </div>
+
+        <input
+          v-else
+          type="text"
+          :value="strField(field.fieldKey)"
+          :placeholder="field.placeholder || ''"
+          class="h-8 w-full rounded-md border border-border bg-background px-2 text-xs"
+          @input="setField(field.fieldKey, ($event.target as HTMLInputElement).value)"
+        />
+      </div>
+    </div>
+
+    <div class="flex flex-wrap items-center gap-2">
       <select
+        v-if="imageCapability && configuredFields.length === 0"
         v-model="state.imageRatio"
         class="h-8 rounded-md border border-border bg-background px-2 text-xs"
+        title="图片比例"
       >
         <option v-for="ratio in aspectRatios" :key="ratio" :value="ratio">{{ ratio }}</option>
       </select>
-    </div>
 
-    <div v-if="fileCapability" class="flex items-center gap-2">
-      <label class="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs hover:bg-secondary">
+      <label
+        v-if="fileCapability"
+        class="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs text-muted-foreground"
+        title="图片/文件字段支持拖拽上传，上传后自动填入 URL"
+      >
         <Paperclip class="h-3.5 w-3.5" />
-        上传文件
-        <input type="file" class="hidden" :accept="acceptFileTypes()" @change="handleFileSelect" />
+        字段上传
       </label>
-    </div>
 
-    <div v-if="webSearchCapability && showWebSearch" class="flex items-center gap-2 text-xs">
-      <label class="inline-flex cursor-pointer items-center gap-2">
+      <label v-if="webSearchCapability && showWebSearch" class="inline-flex cursor-pointer items-center gap-2 text-xs">
         <input v-model="state.webSearch" type="checkbox" class="rounded border-border" />
         联网搜索
       </label>
-    </div>
 
-    <div v-if="codeCapability && codeLanguages.length > 1" class="flex items-center gap-2 text-xs">
-      <span class="text-muted-foreground">语言：</span>
       <select
+        v-if="codeCapability && codeLanguages.length > 1"
         v-model="state.language"
         class="h-8 rounded-md border border-border bg-background px-2 text-xs"
+        title="代码语言"
       >
         <option v-for="lang in codeLanguages" :key="lang" :value="lang">{{ lang }}</option>
       </select>
+
+      <button
+        v-if="voiceCapability"
+        type="button"
+        class="inline-flex cursor-not-allowed items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs text-muted-foreground"
+        title="语音输入待接入"
+        disabled
+      >
+        <Mic class="h-3.5 w-3.5" />
+        语音
+      </button>
     </div>
 
-    <button
-      v-if="voiceCapability"
-      type="button"
-      class="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs text-muted-foreground"
-      title="语音输入（需浏览器支持）"
-      disabled
-    >
-      <Mic class="h-3.5 w-3.5" />
-      语音
-    </button>
-  </div>
-
-  <div v-if="state.attachments.length > 0" class="flex flex-wrap gap-2 border-b border-border px-4 py-2">
-    <div
-      v-for="item in state.attachments"
-      :key="item.localId"
-      class="inline-flex items-center gap-1.5 rounded-md border border-border bg-secondary/40 px-2 py-1 text-xs"
-      :class="item.error ? 'border-destructive/50 text-destructive' : ''"
-    >
-      <Loader2 v-if="item.uploading" class="h-3 w-3 animate-spin" />
-      <span class="max-w-[160px] truncate">{{ item.name }}</span>
-      <button type="button" class="text-muted-foreground hover:text-foreground" @click="removeAttachment(item.localId)">
-        <X class="h-3 w-3" />
-      </button>
+    <div v-if="state.attachments.length > 0" class="flex flex-wrap gap-2">
+      <div
+        v-for="item in state.attachments"
+        :key="item.localId"
+        class="inline-flex items-center gap-1.5 rounded-md border border-border bg-secondary/40 px-2 py-1 text-xs"
+        :class="item.error ? 'border-destructive/50 text-destructive' : ''"
+      >
+        <span class="max-w-[160px] truncate">{{ item.name }}</span>
+        <button type="button" class="text-muted-foreground hover:text-foreground">
+          <X class="h-3 w-3" />
+        </button>
+      </div>
     </div>
   </div>
 </template>

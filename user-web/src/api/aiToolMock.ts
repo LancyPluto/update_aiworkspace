@@ -42,7 +42,7 @@ function delay(ms = 200) {
 }
 
 export function isMockMode(): boolean {
-  return import.meta.env.VITE_AI_TOOL_MOCK !== "0"
+  return import.meta.env.VITE_AI_TOOL_MOCK === "1"
 }
 
 function ensureSession(toolId: string): ChatSession[] {

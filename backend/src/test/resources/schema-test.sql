@@ -417,6 +417,7 @@ CREATE TABLE agent_model_configs (
   model_name VARCHAR(128) NOT NULL,
   base_url VARCHAR(512),
   api_key VARCHAR(512),
+  extra_auth_json TEXT,
   minimax_group_id VARCHAR(128),
   console_url VARCHAR(512),
   balance_url VARCHAR(512),
