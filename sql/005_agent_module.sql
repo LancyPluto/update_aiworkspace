@@ -21,10 +21,13 @@ CREATE TABLE IF NOT EXISTS agent_messages (
   content_text MEDIUMTEXT NOT NULL,
   content_json JSON NULL,
   run_id BIGINT NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE' COMMENT 'ACTIVE|SUPERSEDED',
+  superseded_at DATETIME NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   KEY idx_agent_messages_session_id (session_id, id),
   KEY idx_agent_messages_user_id (user_id, id),
-  KEY idx_agent_messages_run_id (run_id)
+  KEY idx_agent_messages_run_id (run_id),
+  KEY idx_agent_messages_session_active (session_id, status, id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS agent_runs (
@@ -41,11 +44,15 @@ CREATE TABLE IF NOT EXISTS agent_runs (
   error_message VARCHAR(512) NULL,
   started_at DATETIME NULL,
   finished_at DATETIME NULL,
+  parent_run_id BIGINT NULL,
+  source_user_message_id BIGINT NULL,
+  client_request_id VARCHAR(64) NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   KEY idx_agent_runs_user_created (user_id, created_at),
   KEY idx_agent_runs_session_created (session_id, created_at),
-  KEY idx_agent_runs_status (status)
+  KEY idx_agent_runs_status (status),
+  UNIQUE KEY uk_agent_runs_user_client (user_id, client_request_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS agent_run_events (

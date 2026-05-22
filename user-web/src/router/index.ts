@@ -117,8 +117,11 @@ function resolvePostLoginRedirect(raw: unknown): string {
   return raw
 }
 
-router.beforeEach((to, _from, next) => {
+router.beforeEach(async (to, _from, next) => {
   const auth = useAuthStore()
+  if (!auth.bootstrapComplete) {
+    await auth.init()
+  }
   if (to.name === "Login" && auth.isLoggedIn) {
     next(resolvePostLoginRedirect(to.query.redirect))
     return

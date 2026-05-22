@@ -1,69 +1,40 @@
 <script setup lang="ts">
-import { ref, computed, onUnmounted } from "vue"
-import type { CreditAccount } from "@/api/types"
-import { Crown, Sparkles, Check, Loader2, X } from "lucide-vue-next"
+import { computed, onMounted, onUnmounted, ref } from "vue"
+import { Check, Crown, Loader2, QrCode, Sparkles, X } from "lucide-vue-next"
+import type { CreditAccount, RechargeOrder, RechargePackage } from "@/api/types"
+import { createRechargeOrder, fetchRechargeOrder, fetchRechargePackages, mockPayRechargeOrder } from "@/api/creditApi"
+import { useAuthStore } from "@/store/authStore"
 
 const props = defineProps<{
   account: CreditAccount | null
 }>()
 
 const emit = defineEmits<{
-  /** 支付成功或需要刷新算力账户时由父级重新拉取 */
   creditsUpdated: []
 }>()
 
-/** 本地套餐展示（与预览页一致）；上线后改为接口数据 */
-interface CreditPackageItem {
-  id: number
-  credits: number
-  price: number
-  validityDays: number
-  benefits: string[]
-  recommended?: boolean
-}
+const auth = useAuthStore()
+const packages = ref<RechargePackage[]>([])
+const selectedId = ref<number | null>(null)
+const loadingPackages = ref(false)
+const ordering = ref(false)
+const error = ref("")
+const showPayModal = ref(false)
+const activeOrder = ref<RechargeOrder | null>(null)
+const paymentResult = ref<"success" | "fail" | null>(null)
+let pollingTimer: ReturnType<typeof setInterval> | null = null
 
-// TODO[API]: GET /api/v1/credits/recharge-packages（或 openapi 中实际路径）
-// 期望字段示例：{ id, credits, priceCny, validityDays, benefits[], recommended? }
-const packages = ref<CreditPackageItem[]>([
-  {
-    id: 1,
-    credits: 1000,
-    price: 10,
-    validityDays: 30,
-    benefits: ["专属客服", "优先排队"],
-  },
-  {
-    id: 2,
-    credits: 5000,
-    price: 45,
-    validityDays: 90,
-    benefits: ["专属客服", "优先排队", "API 加速"],
-    recommended: true,
-  },
-  {
-    id: 3,
-    credits: 12000,
-    price: 99,
-    validityDays: 180,
-    benefits: ["专属客服", "优先排队", "API 加速", "模型定制咨询"],
-  },
-])
-
-// TODO[API]: GET /api/v1/membership/me（或 user/plan 等）— 当前会员等级、到期时间
 const membership = ref<{ planName: string; expiryDate: string | null }>({
   planName: "免费版",
   expiryDate: null,
 })
 
-const selectedId = ref<number | null>(null)
+const selectedPackage = computed(() => packages.value.find((item) => item.id === selectedId.value) ?? null)
+const availableDisplay = computed(() => (props.account ? props.account.available.toLocaleString() : "--"))
+
 function selectPackage(id: number) {
   selectedId.value = id
 }
-
-const showPayModal = ref(false)
-const payingPackage = ref<CreditPackageItem | null>(null)
-const paymentResult = ref<"success" | "fail" | null>(null)
-let pollingTimer: ReturnType<typeof setInterval> | null = null
 
 function clearPolling() {
   if (pollingTimer) {
@@ -75,56 +46,99 @@ function clearPolling() {
 function closeModal() {
   clearPolling()
   showPayModal.value = false
-  payingPackage.value = null
+  activeOrder.value = null
   paymentResult.value = null
 }
 
-/** 模拟轮询；接支付后改为请求订单状态 */
-function startPolling() {
-  clearPolling()
-  let attempts = 0
-  pollingTimer = setInterval(() => {
-    attempts++
-    // TODO[API]: GET /api/v1/credits/orders/{orderId}/status — 直到 PAID / FAILED / CLOSED
-    if (attempts >= 3) {
+async function loadPackages() {
+  loadingPackages.value = true
+  error.value = ""
+  try {
+    const list = await fetchRechargePackages({ token: auth.token })
+    packages.value = list
+    selectedId.value = list.find((item) => item.recommended)?.id ?? list[0]?.id ?? null
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : "加载充值套餐失败"
+  } finally {
+    loadingPackages.value = false
+  }
+}
+
+async function pollOrder(orderId: number) {
+  try {
+    const order = await fetchRechargeOrder(orderId, { token: auth.token })
+    activeOrder.value = order
+    if (order.status === "CREDITED") {
+      paymentResult.value = "success"
       clearPolling()
-      const isSuccess = Math.random() > 0.3
-      paymentResult.value = isSuccess ? "success" : "fail"
-      if (isSuccess) emit("creditsUpdated")
+      emit("creditsUpdated")
+    } else if (order.status === "FAILED" || order.status === "CLOSED") {
+      paymentResult.value = "fail"
+      clearPolling()
     }
-  }, 1000)
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : "查询充值订单失败"
+    clearPolling()
+  }
 }
 
-function handleBuy(pkgId: number) {
-  const pkg = packages.value.find((p) => p.id === pkgId)
-  if (!pkg) return
-  // TODO[API]: POST /api/v1/credits/recharge-orders — body: { packageId }，返回 { orderId, payUrl?, qrCodeDataUrl? }
-  payingPackage.value = pkg
-  paymentResult.value = null
-  showPayModal.value = true
-  startPolling()
-}
-
-const availableDisplay = computed(() => {
-  if (!props.account) return "—"
-  return props.account.available.toLocaleString()
-})
-
-onUnmounted(() => {
+function startPolling(orderId: number) {
   clearPolling()
-})
+  pollingTimer = setInterval(() => {
+    void pollOrder(orderId)
+  }, 1500)
+}
+
+async function handleBuy(pkgId: number) {
+  ordering.value = true
+  error.value = ""
+  try {
+    const order = await createRechargeOrder(
+      {
+        packageId: pkgId,
+        paymentChannel: "MOCK",
+        clientRequestId: `recharge-${pkgId}-${Date.now()}`,
+      },
+      { token: auth.token },
+    )
+    activeOrder.value = order
+    paymentResult.value = null
+    showPayModal.value = true
+    startPolling(order.id)
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : "创建充值订单失败"
+  } finally {
+    ordering.value = false
+  }
+}
+
+async function confirmMockPayment() {
+  if (!activeOrder.value) return
+  ordering.value = true
+  error.value = ""
+  try {
+    const order = await mockPayRechargeOrder(activeOrder.value.id, { token: auth.token })
+    activeOrder.value = order
+    if (order.status === "CREDITED") {
+      paymentResult.value = "success"
+      clearPolling()
+      emit("creditsUpdated")
+    }
+  } catch (err) {
+    paymentResult.value = "fail"
+    error.value = err instanceof Error ? err.message : "确认支付失败"
+  } finally {
+    ordering.value = false
+  }
+}
+
+onMounted(loadPackages)
+onUnmounted(clearPolling)
 </script>
 
 <template>
   <section class="space-y-6">
-    <!-- 概览：与侧栏「智擎 AI」风格统一的算力 + 会员 -->
-    <div
-      class="relative overflow-hidden rounded-xl border border-border bg-card p-6 shadow-sm md:p-8"
-    >
-      <div
-        class="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-primary/5 blur-2xl"
-        aria-hidden="true"
-      />
+    <div class="relative overflow-hidden rounded-xl border border-border bg-card p-6 shadow-sm md:p-8">
       <div class="relative flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
         <div class="flex flex-col gap-6 sm:flex-row sm:gap-12">
           <div class="flex flex-col gap-1">
@@ -147,39 +161,40 @@ onUnmounted(() => {
             </p>
           </div>
         </div>
-        <div class="flex shrink-0 flex-col gap-2 sm:flex-row">
-          <!-- TODO[API]: 跳转会员订购页或 POST 升级意向；此处仅占位 -->
-          <button
-            type="button"
-            class="inline-flex items-center justify-center rounded-md border border-primary bg-transparent px-4 py-2 text-sm font-medium text-primary transition-colors hover:bg-primary/10"
-          >
-            升级会员
-          </button>
-        </div>
+        <button
+          type="button"
+          class="inline-flex items-center justify-center rounded-md border border-primary bg-transparent px-4 py-2 text-sm font-medium text-primary transition-colors hover:bg-primary/10"
+        >
+          升级会员
+        </button>
       </div>
     </div>
 
-    <!-- 套餐 -->
+    <div v-if="error" class="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
+      {{ error }}
+    </div>
+
     <div>
       <div class="mb-6 flex items-start gap-3">
-        <div
-          class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"
-        >
+        <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
           <Sparkles class="h-5 w-5" aria-hidden="true" />
         </div>
         <div>
           <h2 class="text-lg font-semibold tracking-tight">选择算力套餐</h2>
-          <p class="mt-1 text-sm text-muted-foreground">多买多惠 · 支付成功后算力将尽快到账</p>
+          <p class="mt-1 text-sm text-muted-foreground">下单、支付确认、到账都由充值订单状态机驱动</p>
         </div>
       </div>
 
-      <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+      <div v-if="loadingPackages" class="rounded-lg border border-border bg-card px-5 py-8 text-center text-sm text-muted-foreground">
+        正在加载套餐...
+      </div>
+      <div v-else class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         <div
           v-for="pkg in packages"
           :key="pkg.id"
           role="button"
           tabindex="0"
-          class="group relative flex flex-col rounded-xl border bg-card p-6 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-primary/30"
+          class="group relative flex min-h-[286px] flex-col rounded-xl border bg-card p-6 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-primary/30"
           :class="selectedId === pkg.id ? 'border-primary ring-1 ring-primary/20' : 'border-border'"
           @click="selectPackage(pkg.id)"
           @keydown.enter="selectPackage(pkg.id)"
@@ -196,27 +211,24 @@ onUnmounted(() => {
             <span class="text-sm font-normal text-muted-foreground">算力</span>
           </p>
           <p class="mt-2 text-2xl font-bold text-primary tabular-nums">
-            <span class="text-lg font-semibold">¥</span>{{ pkg.price }}
+            <span class="text-lg font-semibold">¥</span>{{ pkg.priceAmount }}
           </p>
           <p class="mt-2 border-b border-border pb-4 text-xs text-muted-foreground">
             套餐权益周期 {{ pkg.validityDays }} 天
           </p>
           <ul class="mt-4 flex flex-1 flex-col gap-2">
-            <li
-              v-for="b in pkg.benefits"
-              :key="b"
-              class="flex items-center gap-2 text-sm text-muted-foreground"
-            >
+            <li v-for="benefit in pkg.benefits" :key="benefit" class="flex items-center gap-2 text-sm text-muted-foreground">
               <Check class="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
-              {{ b }}
+              {{ benefit }}
             </li>
           </ul>
           <button
             type="button"
-            class="mt-6 w-full rounded-md bg-primary py-2.5 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
+            class="mt-6 w-full rounded-md bg-primary py-2.5 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+            :disabled="ordering"
             @click.stop="handleBuy(pkg.id)"
           >
-            立即购买
+            {{ ordering && selectedPackage?.id === pkg.id ? "下单中..." : "立即购买" }}
           </button>
         </div>
       </div>
@@ -231,66 +243,54 @@ onUnmounted(() => {
         aria-labelledby="pay-modal-title"
         @click.self="closeModal"
       >
-        <div
-          class="w-full max-w-md rounded-2xl border border-border bg-card p-8 shadow-xl"
-          @click.stop
-        >
+        <div class="w-full max-w-md rounded-2xl border border-border bg-card p-8 shadow-xl" @click.stop>
           <template v-if="!paymentResult">
-            <h3 id="pay-modal-title" class="sr-only">扫码支付</h3>
-            <p class="text-center text-sm text-muted-foreground">请使用微信 / 支付宝扫码支付</p>
-            <!-- TODO[API]: 使用下单接口返回的二维码 URL 或 base64：<img :src="order.qrCodeUrl" alt="支付码" /> -->
-            <div
-              class="mx-auto mt-5 flex h-44 w-44 items-center justify-center rounded-xl border border-dashed border-border bg-muted/30 text-xs text-muted-foreground"
-            >
-              二维码占位
+            <h3 id="pay-modal-title" class="text-center text-base font-semibold">扫码支付</h3>
+            <p class="mt-2 text-center text-sm text-muted-foreground">订单 {{ activeOrder?.orderNo }}</p>
+            <div class="mx-auto mt-5 flex h-44 w-44 items-center justify-center rounded-xl border border-dashed border-border bg-muted/30 text-muted-foreground">
+              <QrCode class="h-16 w-16" aria-hidden="true" />
             </div>
             <p class="mt-4 text-center text-sm font-medium">
               支付金额：
-              <span class="text-primary tabular-nums">¥{{ payingPackage?.price }}</span>
+              <span class="text-primary tabular-nums">¥{{ activeOrder?.priceAmount }}</span>
             </p>
-            <div
-              class="mt-4 flex items-center justify-center gap-2 rounded-full border border-border bg-secondary/50 px-4 py-2.5 text-xs text-muted-foreground"
-            >
+            <div class="mt-4 flex items-center justify-center gap-2 rounded-full border border-border bg-secondary/50 px-4 py-2.5 text-xs text-muted-foreground">
               <Loader2 class="h-4 w-4 animate-spin text-primary" aria-hidden="true" />
-              <span>正在确认支付结果，请稍候…</span>
+              <span>正在确认订单状态</span>
             </div>
             <button
               type="button"
-              class="mt-6 w-full rounded-full border border-border py-2 text-sm text-muted-foreground transition-colors hover:bg-secondary"
+              class="mt-5 w-full rounded-full bg-primary py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+              :disabled="ordering"
+              @click="confirmMockPayment"
+            >
+              {{ ordering ? "确认中..." : "模拟支付成功" }}
+            </button>
+            <button
+              type="button"
+              class="mt-3 w-full rounded-full border border-border py-2 text-sm text-muted-foreground transition-colors hover:bg-secondary"
               @click="closeModal"
             >
-              取消支付
+              稍后支付
             </button>
           </template>
 
           <div v-else-if="paymentResult === 'success'" class="text-center">
-            <div
-              class="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-emerald-500/15 text-3xl text-emerald-600 dark:text-emerald-400"
-            >
-              ✓
+            <div class="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
+              <Check class="h-8 w-8" stroke-width="2.5" aria-hidden="true" />
             </div>
-            <p class="mt-5 text-sm font-medium text-foreground">支付成功，订单处理中</p>
-            <button
-              type="button"
-              class="mt-6 rounded-full bg-primary px-6 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-              @click="closeModal"
-            >
+            <p class="mt-5 text-sm font-medium text-foreground">支付成功，算力已到账</p>
+            <button type="button" class="mt-6 rounded-full bg-primary px-6 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90" @click="closeModal">
               关闭
             </button>
           </div>
 
           <div v-else class="text-center">
-            <div
-              class="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-destructive/15 text-destructive"
-            >
+            <div class="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-destructive/15 text-destructive">
               <X class="h-8 w-8" stroke-width="2.5" aria-hidden="true" />
             </div>
-            <p class="mt-5 text-sm font-medium text-foreground">支付失败，请稍后重试</p>
-            <button
-              type="button"
-              class="mt-6 rounded-full bg-primary px-6 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-              @click="closeModal"
-            >
+            <p class="mt-5 text-sm font-medium text-foreground">支付未完成，请稍后重试</p>
+            <button type="button" class="mt-6 rounded-full bg-primary px-6 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90" @click="closeModal">
               关闭
             </button>
           </div>

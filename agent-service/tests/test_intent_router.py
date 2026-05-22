@@ -91,6 +91,21 @@ def test_routes_normal_question_to_general_chat():
     assert result.intent == Intent.GENERAL_CHAT
 
 
+def test_routes_session_recap_to_general_chat_not_tool():
+    result = IntentRouter().classify(context("你之前帮我做了什么"))
+
+    assert result.intent == Intent.GENERAL_CHAT
+    assert result.reason == "session_recap_question"
+    assert result.selectedToolCode is None
+
+
+def test_session_recap_does_not_trigger_tool_action_keywords():
+    result = IntentRouter().classify(context("你刚刚帮我完成了那些任务"))
+
+    assert result.intent == Intent.GENERAL_CHAT
+    assert result.reason == "session_recap_question"
+
+
 def test_continues_tool_use_after_field_guidance_without_xiaohongshu_keywords():
     history = [
         ChatMessage(role="USER", content="帮我写一篇小红书种草笔记"),
@@ -118,3 +133,65 @@ def test_continues_tool_use_after_field_guidance_without_xiaohongshu_keywords():
     assert result.intent == Intent.TOOL_USE
     assert result.selectedToolCode == "xiaohongshu_copywriting"
     assert result.reason == "continuing_pending_tool_prompt"
+
+
+def test_routes_repeat_xiaohongshu_request_to_tool_use():
+    result = IntentRouter().classify(context("再给我一个小红书文案"))
+
+    assert result.intent == Intent.TOOL_USE
+    assert result.selectedToolCode == "xiaohongshu_copywriting"
+
+
+def test_routes_structured_params_without_action_keywords():
+    message = (
+        "产品/服务名称：五一肩颈护理套餐\n"
+        "• 目标用户：年轻女性、宝妈\n"
+        "• 文案风格：种草\n"
+        "• 核心卖点：价格划算、效果明显"
+    )
+    ctx = RunContext(
+        runId=3,
+        sessionId=1,
+        userId=1,
+        message=message,
+        availableTools=[
+            ToolDescriptor(
+                toolCode="xiaohongshu_copywriting",
+                toolName="AI 小红书文案生成器",
+                description="小红书 种草 笔记",
+                autoCallable=True,
+            ),
+        ],
+    )
+    result = IntentRouter().classify(ctx)
+    assert result.intent == Intent.TOOL_USE
+    assert result.selectedToolCode == "xiaohongshu_copywriting"
+    assert result.reason == "structured_tool_arguments"
+
+
+def test_continues_after_weak_tool_clarification():
+    history = [
+        ChatMessage(role="USER", content="小红书"),
+        ChatMessage(
+            role="ASSISTANT",
+            content="看起来你想使用「AI 小红书文案生成器」工具。\n这个工具需要补充以下信息：「产品/服务名称」。",
+        ),
+    ]
+    ctx = RunContext(
+        runId=4,
+        sessionId=1,
+        userId=1,
+        message="产品/服务名称：五一肩颈护理套餐\n目标用户：年轻女性\n文案风格：种草\n核心卖点：价格划算",
+        history=history,
+        availableTools=[
+            ToolDescriptor(
+                toolCode="xiaohongshu_copywriting",
+                toolName="AI 小红书文案生成器",
+                description="小红书 种草",
+                autoCallable=True,
+            ),
+        ],
+    )
+    result = IntentRouter().classify(ctx)
+    assert result.intent == Intent.TOOL_USE
+    assert result.selectedToolCode == "xiaohongshu_copywriting"

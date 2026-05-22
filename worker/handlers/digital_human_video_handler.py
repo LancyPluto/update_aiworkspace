@@ -2,9 +2,10 @@ import logging
 from typing import Any
 
 from client.backend_client import BackendClient, BackendClientError
+from client.infinitetalk_video_client import InfiniteTalkVideoClient, InfiniteTalkVideoError, InfiniteTalkVideoTimeoutError
 from client.seedance_video_client import SeedanceVideoClient, SeedanceVideoError, SeedanceVideoTimeoutError
 from client.siliconflow_video_client import SiliconFlowVideoClient, SiliconFlowVideoError, SiliconFlowVideoTimeoutError
-from config import resolve_siliconflow_api_key, settings
+from config import resolve_infinitetalk_api_key, resolve_siliconflow_api_key, settings
 from handlers.digital_human_postprocessor import DigitalHumanPostprocessError, DigitalHumanPostprocessor
 from providers import registry as provider_registry
 
@@ -18,11 +19,13 @@ class DigitalHumanVideoHandler:
         backend_client: BackendClient | None = None,
         video_client: SiliconFlowVideoClient | None = None,
         seedance_video_client: SeedanceVideoClient | None = None,
+        infinitetalk_video_client: InfiniteTalkVideoClient | None = None,
         postprocessor: DigitalHumanPostprocessor | None = None,
     ) -> None:
         self.backend_client = backend_client or BackendClient()
         self.video_client = video_client
         self.seedance_video_client = seedance_video_client or SeedanceVideoClient()
+        self.infinitetalk_video_client = infinitetalk_video_client
         self.postprocessor = postprocessor or DigitalHumanPostprocessor()
 
     def handle(self, message: dict[str, Any]) -> dict[str, Any]:
@@ -34,7 +37,7 @@ class DigitalHumanVideoHandler:
             self._report(task_id, 8, "任务已启动，正在整理脚本与参数")
             model_config = context.get("modelConfig") or {}
             provider = str(model_config.get("provider") or context.get("modelProviderCode") or "siliconflow_images").lower()
-            if provider not in {"siliconflow", "siliconflow_images", "seedance"}:
+            if provider not in {"siliconflow", "siliconflow_images", "seedance", "infinitetalk"}:
                 provider = "siliconflow_images"
             provider_registry.require_capability(provider, "DIGITAL_HUMAN")
             provider_registry.require_worker_ready(provider)
@@ -63,18 +66,33 @@ class DigitalHumanVideoHandler:
             )
             background_image_url = ""
 
-            self._report(task_id, 68, "正在通过 Seedance 合成图生视频，通常需要 30 秒到 3 分钟")
-            result = self._video_generation_client().generate_video(
-                prompt=prompt,
-                image_size=self._resolve_image_size(params),
-                negative_prompt=str(params.get("negativePrompt") or ""),
-                model=self._resolve_model(params),
-                image=avatar_image_url,
-                seed=self._optional_int(params.get("seed")),
-                duration=str(params.get("duration") or ""),
-                aspect_ratio=str(params.get("aspectRatio") or ""),
-                resolution=self._resolve_resolution(params),
-            )
+            if provider == "infinitetalk":
+                self._report(task_id, 68, "正在通过 InfiniteTalk 生成音频驱动数字人成片")
+            else:
+                self._report(task_id, 68, "正在通过 Seedance 合成图生视频，通常需要 30 秒到 3 分钟")
+            result = self._generate_video(provider, model_config, params, prompt, avatar_image_url, audio_data_url)
+
+            if provider == "infinitetalk":
+                self._report(task_id, 92, "InfiniteTalk 已返回音频驱动成片，正在整理输出")
+                success_payload = {
+                    "resourceType": "MARKDOWN",
+                    "contentText": self._build_result_markdown(
+                        params,
+                        prompt,
+                        result,
+                        audio_data_url=audio_data_url,
+                        avatar_image_url=avatar_image_url,
+                        background_image_url=background_image_url,
+                        final_video_url=result["videoUrl"],
+                        subtitle_url="",
+                        presenter_gender=presenter_gender,
+                        voice=voice,
+                    ),
+                    "billableUnits": 1,
+                }
+                self.backend_client.mark_success(task_id, success_payload)
+                LOGGER.info("digital human InfiniteTalk task %s completed successfully", task_id)
+                return {"status": "SUCCESS", "taskId": task_id, "provider": provider}
 
             self._report(task_id, 88, "正在通过 FFmpeg 合并音频并烧录字幕")
             final_video = self.postprocessor.process(
@@ -111,6 +129,10 @@ class DigitalHumanVideoHandler:
             return self._mark_failed(task_id, error_code="MODEL_TIMEOUT", error_message=str(exc))
         except SeedanceVideoError as exc:
             return self._mark_failed(task_id, error_code="MODEL_CALL_FAILED", error_message=str(exc))
+        except InfiniteTalkVideoTimeoutError as exc:
+            return self._mark_failed(task_id, error_code="MODEL_TIMEOUT", error_message=str(exc))
+        except InfiniteTalkVideoError as exc:
+            return self._mark_failed(task_id, error_code="MODEL_CALL_FAILED", error_message=str(exc))
         except DigitalHumanPostprocessError as exc:
             return self._mark_failed(task_id, error_code="POSTPROCESS_FAILED", error_message=str(exc))
         except BackendClientError:
@@ -139,13 +161,54 @@ class DigitalHumanVideoHandler:
     def _siliconflow_client(self, model_config: dict[str, Any]) -> SiliconFlowVideoClient:
         if self.video_client is not None:
             return self.video_client
+        provider = str(model_config.get("provider") or "").lower()
         return SiliconFlowVideoClient(
-            base_url=self._optional_string(model_config.get("baseUrl")),
-            api_key=resolve_siliconflow_api_key(model_config),
+            base_url=self._optional_string(model_config.get("baseUrl")) if provider.startswith("siliconflow") else None,
+            api_key=resolve_siliconflow_api_key(model_config if provider.startswith("siliconflow") else None),
         )
 
     def _video_generation_client(self) -> SeedanceVideoClient:
         return self.seedance_video_client
+
+    def _infinitetalk_client(self, model_config: dict[str, Any]) -> InfiniteTalkVideoClient:
+        if self.infinitetalk_video_client is not None:
+            return self.infinitetalk_video_client
+        return InfiniteTalkVideoClient(
+            base_url=self._optional_string(model_config.get("baseUrl")) or None,
+            api_key=resolve_infinitetalk_api_key(model_config),
+            timeout_seconds=model_config.get("timeoutSeconds"),
+        )
+
+    def _generate_video(
+        self,
+        provider: str,
+        model_config: dict[str, Any],
+        params: dict[str, Any],
+        prompt: str,
+        avatar_image_url: str,
+        audio_data_url: str,
+    ) -> dict[str, Any]:
+        common = {
+            "prompt": prompt,
+            "negative_prompt": str(params.get("negativePrompt") or ""),
+            "model": self._resolve_model(params, model_config, provider),
+            "image": avatar_image_url,
+            "audio_data_url": audio_data_url,
+            "seed": self._optional_int(params.get("seed")),
+            "duration": str(params.get("duration") or ""),
+            "aspect_ratio": str(params.get("aspectRatio") or ""),
+            "resolution": self._resolve_resolution(params),
+        }
+        if provider == "infinitetalk":
+            return self._infinitetalk_client(model_config).generate_video(
+                **common,
+                source_video=self._optional_string(params.get("sourceVideoUrl") or params.get("referenceVideoUrl")),
+                mode=str(params.get("mode") or "streaming"),
+            )
+        return self._video_generation_client().generate_video(
+            **common,
+            image_size=self._resolve_image_size(params),
+        )
 
     @staticmethod
     def _build_video_prompt(params: dict[str, Any]) -> str:
@@ -161,6 +224,7 @@ class DigitalHumanVideoHandler:
             f"Requested duration: {params.get('duration') or '5 seconds'}",
             f"Target resolution: {DigitalHumanVideoHandler._resolve_resolution(params)}",
             "The presenter should face the camera, speak naturally, keep stable facial details, and use clean lighting.",
+            "Use the supplied driving audio to align mouth shapes, speech rhythm, facial motion, and subtitle timing.",
         ]
         brand_name = str(params.get("brandName") or "").strip()
         if brand_name:
@@ -296,10 +360,17 @@ class DigitalHumanVideoHandler:
         return "480p"
 
     @staticmethod
-    def _resolve_model(params: dict[str, Any]) -> str:
+    def _resolve_model(
+        params: dict[str, Any],
+        model_config: dict[str, Any] | None = None,
+        provider: str = "",
+    ) -> str:
         requested_model = str(params.get("model") or "").strip()
         if requested_model:
             return requested_model
+        configured_model = str((model_config or {}).get("modelName") or "").strip()
+        if configured_model and provider in {"seedance", "infinitetalk"}:
+            return configured_model
         return settings.seedance_video_model
 
     @staticmethod
@@ -325,6 +396,11 @@ class DigitalHumanVideoHandler:
         provider_line = f"\n- 视频供应商：{result.get('provider')}" if result.get("provider") else ""
         model_line = f"\n- 视频模型：{result.get('model')}" if result.get("model") else ""
         resolution_line = f"\n- 视频清晰度：{result.get('resolution')}" if result.get("resolution") else ""
+        hint_line = (
+            "提示：InfiniteTalk 已直接返回音频驱动成片；为避免再次合成导致口型漂移，已跳过 FFmpeg 合并与烧录字幕。"
+            if result.get("provider") == "infinitetalk"
+            else "提示：最终成片已通过 FFmpeg 合并口播音频并烧录字幕；原始视频链接保留用于排查。"
+        )
 
         return (
             "## 数字人视频生成结果\n\n"
@@ -355,7 +431,7 @@ class DigitalHumanVideoHandler:
             f"- 视频时长要求：{params.get('duration') or '5 秒'}\n\n"
             "## 实际提交给视频模型的 Prompt\n\n"
             f"```text\n{prompt}\n```\n\n"
-            "提示：最终成片已通过 FFmpeg 合并口播音频并烧录字幕；原始视频链接保留用于排查。"
+            f"{hint_line}"
         )
 
     @staticmethod

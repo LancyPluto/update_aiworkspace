@@ -13,6 +13,7 @@ PROVIDERS: dict[str, dict[str, Any]] = {
     "siliconflow": {"capabilities": {"IMAGE_GENERATION", "DIGITAL_HUMAN"}, "worker_ready": True},
     "siliconflow_images": {"capabilities": {"IMAGE_GENERATION", "DIGITAL_HUMAN"}, "worker_ready": True},
     "seedance": {"capabilities": {"VIDEO_GENERATION", "DIGITAL_HUMAN"}, "worker_ready": True},
+    "infinitetalk": {"capabilities": {"VIDEO_GENERATION", "DIGITAL_HUMAN"}, "worker_ready": True},
     "kling_video": {"capabilities": {"VIDEO_GENERATION", "IMAGE_GENERATION"}, "worker_ready": True},
     "worker_video": {"capabilities": {"VIDEO_GENERATION"}, "worker_ready": True},
     "minimax_speech": {"capabilities": {"TEXT_TO_SPEECH"}, "worker_ready": True},

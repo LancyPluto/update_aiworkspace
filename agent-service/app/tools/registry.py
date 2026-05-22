@@ -9,6 +9,7 @@ TOOL_KEYWORDS: dict[str, tuple[str, ...]] = {
     "moments_copywriting_generator": ("朋友圈", "微信朋友圈", "私域文案"),
     "product_title_optimizer": ("商品标题", "标题优化", "电商标题"),
     "wechat_longform_generator": ("公众号", "微信长文", "长文"),
+    "social_media_comment_insights_agent": ("社交媒体评论", "小红书评论", "抖音评论", "评论分析", "用户洞察", "产品建议"),
 }
 
 
@@ -38,6 +39,8 @@ class ToolRegistry:
         message_terms = _terms(message)
         matches: list[ToolMatch] = []
         for tool in self._tools.values():
+            if not tool.autoCallable:
+                continue
             score, matched_terms = _score_tool(text, message_terms, tool)
             if score > 0:
                 matches.append(ToolMatch(tool=tool, score=score, matched_terms=tuple(sorted(matched_terms))))

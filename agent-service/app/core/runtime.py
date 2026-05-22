@@ -27,7 +27,7 @@ class AgentRuntime:
     async def execute_run(self, run_id: int) -> None:
         try:
             context = await self.backend.get_run_context(run_id)
-            if context.status in TERMINAL_RUN_STATUSES:
+            if getattr(context, "status", None) in TERMINAL_RUN_STATUSES:
                 return
             model_client = await self._model_client()
             engine = self.runtime_router_factory(
@@ -48,7 +48,7 @@ class AgentRuntime:
     async def execute_confirmed_tool(self, run_id: int, tool_code: str) -> None:
         try:
             context = await self.backend.get_run_context(run_id)
-            if context.status in TERMINAL_RUN_STATUSES:
+            if getattr(context, "status", None) in TERMINAL_RUN_STATUSES:
                 return
             model_client = await self._model_client()
             engine = self.runtime_router_factory(

@@ -24,9 +24,7 @@ const visibleEvents = computed(() =>
         "subagent.completed",
         "subagent.failed",
         "memory.context_injected",
-        "memory.context_frozen",
         "memory.candidate_created",
-        "memory.saved",
         "workspace_file.created",
         "workspace_file.updated",
         "workspace_file.read",
@@ -68,9 +66,7 @@ function titleFor(event: AgentRunEvent) {
   if (event.eventType === "subagent.completed") return `子 Agent 已完成：${String(payload.subagentName || event.eventText || "agent")}`
   if (event.eventType === "subagent.failed") return `子 Agent 执行失败：${String(payload.subagentName || event.eventText || "agent")}`
   if (event.eventType === "memory.context_injected") return "已注入工作区记忆"
-  if (event.eventType === "memory.context_frozen") return "已冻结工作区记忆快照"
   if (event.eventType === "memory.candidate_created") return "已生成记忆候选"
-  if (event.eventType === "memory.saved") return "已保存工作区记忆"
   if (event.eventType === "workspace_file.created") return `已创建产物：${String(payload.filename || event.eventText || "文件")}`
   if (event.eventType === "workspace_file.updated") return `已更新产物：${String(payload.filename || event.eventText || "文件")}`
   if (event.eventType === "workspace_file.read") return "已读取工作区文件"
@@ -123,7 +119,6 @@ function toneFor(event: AgentRunEvent): TimelineTone {
   if (event.eventType === "run.failed" && payload.status === "CANCELLED") return "warning"
   if (event.eventType.endsWith(".failed") || event.eventType === "run.failed") return "error"
   if (event.eventType.endsWith(".completed") || event.eventType === "run.completed") return "success"
-  if (event.eventType === "memory.saved") return "success"
   if (event.eventType === "tool.finished") return payload.errorCode ? "error" : "success"
   if (
     [
@@ -135,7 +130,6 @@ function toneFor(event: AgentRunEvent): TimelineTone {
       "tool.task_progress",
       "workspace_file.read",
       "memory.context_injected",
-      "memory.context_frozen",
       "message.completed",
     ].includes(event.eventType)
   ) {

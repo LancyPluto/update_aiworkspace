@@ -123,6 +123,7 @@ public class AgentFileServiceImpl implements AgentFileService {
         file.setFileSize((long) bytes.length);
         file.setStoragePath(storeFile(run.getSessionId(), filename, bytes));
         file.setStatus("READY");
+        file.setAttachedRunId(runId);
         file.setExtractedText(content);
         file.setErrorMessage(null);
         file.setCreatedAt(now);
@@ -135,11 +136,42 @@ public class AgentFileServiceImpl implements AgentFileService {
     @Override
     public PageResponse<AgentFileResponse> list(Long userId, Long sessionId) {
         findActiveSession(userId, sessionId);
-        List<AgentFileResponse> files = agentFileMapper.findBySession(userId, sessionId, DEFAULT_FILE_LIST_SIZE)
+        List<AgentFileResponse> files = agentFileMapper.findPendingBySession(userId, sessionId, DEFAULT_FILE_LIST_SIZE)
                 .stream()
                 .map(AgentFileResponse::from)
                 .toList();
         return new PageResponse<>(files, files.size(), 1, DEFAULT_FILE_LIST_SIZE, files.size() == DEFAULT_FILE_LIST_SIZE);
+    }
+
+    @Override
+    @Transactional
+    public void delete(Long userId, Long sessionId, Long fileId) {
+        findActiveSession(userId, sessionId);
+        AgentFile file = agentFileMapper.findByIdSessionAndUser(fileId, sessionId, userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.PARAM_ERROR, "Agent file not found"));
+        agentFileChunkMapper.deleteByFileId(file.getId());
+        int affected = agentFileMapper.deleteByIdSessionAndUser(fileId, sessionId, userId);
+        if (affected == 0) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "Agent file not found");
+        }
+        deleteStoredFile(file.getStoragePath());
+    }
+
+    @Override
+    @Transactional
+    public void attachPendingFilesToRun(Long userId, Long sessionId, Long runId, List<Long> fileIds) {
+        findActiveSession(userId, sessionId);
+        LocalDateTime now = LocalDateTime.now();
+        if (fileIds == null) {
+            agentFileMapper.attachAllPendingFilesToRun(userId, sessionId, runId, now);
+            return;
+        }
+        for (Long fileId : fileIds) {
+            if (fileId == null) {
+                continue;
+            }
+            agentFileMapper.attachPendingFileToRun(userId, sessionId, runId, fileId, now);
+        }
     }
 
     private AgentSession findActiveSession(Long userId, Long sessionId) {
@@ -161,18 +193,39 @@ public class AgentFileServiceImpl implements AgentFileService {
 
     private String storeFile(Long sessionId, String filename, byte[] bytes) {
         try {
-            Path root = Path.of(appProperties.getAgent().getFileStorageDir()).toAbsolutePath().normalize();
-            Path sessionDir = root.resolve(String.valueOf(sessionId)).normalize();
-            Files.createDirectories(sessionDir);
-            Path stored = sessionDir.resolve(UUID.randomUUID() + "-" + filename).normalize();
-            if (!stored.startsWith(root)) {
-                throw new BusinessException(ErrorCode.PARAM_ERROR, "invalid filename");
-            }
+            Path stored = resolveStoredPath(sessionId, filename);
             Files.write(stored, bytes);
             return stored.toString();
         } catch (IOException exception) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "could not store uploaded file");
         }
+    }
+
+    private void deleteStoredFile(String storagePath) {
+        if (storagePath == null || storagePath.isBlank()) {
+            return;
+        }
+        try {
+            Path stored = Path.of(storagePath).toAbsolutePath().normalize();
+            Path root = Path.of(appProperties.getAgent().getFileStorageDir()).toAbsolutePath().normalize();
+            if (!stored.startsWith(root)) {
+                return;
+            }
+            Files.deleteIfExists(stored);
+        } catch (IOException ignored) {
+            // Best effort: DB rows are already removed.
+        }
+    }
+
+    private Path resolveStoredPath(Long sessionId, String filename) throws IOException {
+        Path root = Path.of(appProperties.getAgent().getFileStorageDir()).toAbsolutePath().normalize();
+        Path sessionDir = root.resolve(String.valueOf(sessionId)).normalize();
+        Files.createDirectories(sessionDir);
+        Path stored = sessionDir.resolve(UUID.randomUUID() + "-" + filename).normalize();
+        if (!stored.startsWith(root)) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "invalid filename");
+        }
+        return stored;
     }
 
     private String safeFilename(String filename) {

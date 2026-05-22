@@ -12,6 +12,7 @@ from client.kling_video_client import KlingVideoClient, KlingVideoError, KlingVi
 from config import resolve_kling_api_key, resolve_kling_credentials, resolve_siliconflow_api_key
 from handlers.generated_image_persister import GeneratedImagePersistError, GeneratedImagePersister
 from providers import registry as provider_registry
+from providers.registry import ProviderRegistryError
 
 
 LOGGER = logging.getLogger(__name__)
@@ -99,7 +100,7 @@ class ImageGenerationHandler:
             return {"status": "SUCCESS", "taskId": task_id, "traceId": trace_id, "imageCount": len(urls)}
         except (SiliconFlowVideoTimeoutError, KlingVideoTimeoutError) as exc:
             return self._mark_failed(task_id, "MODEL_TIMEOUT", str(exc), trace_id)
-        except (SiliconFlowVideoError, KlingVideoError) as exc:
+        except (ProviderRegistryError, SiliconFlowVideoError, KlingVideoError) as exc:
             return self._mark_failed(task_id, "MODEL_CALL_FAILED", str(exc), trace_id)
         except GeneratedImagePersistError as exc:
             return self._mark_failed(task_id, "MEDIA_PERSIST_FAILED", str(exc), trace_id)

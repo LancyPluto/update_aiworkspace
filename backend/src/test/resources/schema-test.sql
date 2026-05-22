@@ -125,7 +125,7 @@ CREATE TABLE ai_tasks (
   prompt_version_id BIGINT,
   status VARCHAR(32) NOT NULL DEFAULT 'CREATED',
   progress TINYINT NOT NULL DEFAULT 0,
-  progress_message VARCHAR(255),
+  progress_message TEXT,
   params_json JSON NOT NULL,
   params_hash VARCHAR(128),
   idempotency_key VARCHAR(128),
@@ -198,6 +198,47 @@ CREATE TABLE credit_logs (
   reason VARCHAR(512),
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE UNIQUE INDEX uk_credit_idem ON credit_logs(idempotency_key);
+
+CREATE TABLE credit_recharge_packages (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  package_code VARCHAR(64) NOT NULL UNIQUE,
+  package_name VARCHAR(128) NOT NULL,
+  credits INT NOT NULL,
+  price_amount DECIMAL(18,2) NOT NULL,
+  currency VARCHAR(16) NOT NULL DEFAULT 'CNY',
+  validity_days INT NOT NULL DEFAULT 0,
+  benefits_json TEXT,
+  recommended TINYINT NOT NULL DEFAULT 0,
+  sort_order INT NOT NULL DEFAULT 0,
+  status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE credit_recharge_orders (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  order_no VARCHAR(64) NOT NULL UNIQUE,
+  user_id BIGINT NOT NULL,
+  package_id BIGINT NOT NULL,
+  credits INT NOT NULL,
+  price_amount DECIMAL(18,2) NOT NULL,
+  currency VARCHAR(16) NOT NULL DEFAULT 'CNY',
+  payment_channel VARCHAR(32) NOT NULL DEFAULT 'MOCK',
+  status VARCHAR(32) NOT NULL DEFAULT 'WAITING_PAYMENT',
+  status_reason VARCHAR(255),
+  pay_url VARCHAR(512),
+  qr_code_url VARCHAR(512),
+  external_trade_no VARCHAR(128),
+  idempotency_key VARCHAR(128),
+  paid_at DATETIME,
+  credited_at DATETIME,
+  closed_at DATETIME,
+  expires_at DATETIME NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX uk_recharge_user_idem ON credit_recharge_orders(user_id, idempotency_key);
 
 CREATE TABLE tool_prompts (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
@@ -291,6 +332,8 @@ CREATE TABLE agent_messages (
   content_text CLOB NOT NULL,
   content_json JSON,
   run_id BIGINT,
+  status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
+  superseded_at DATETIME,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -308,9 +351,15 @@ CREATE TABLE agent_runs (
   error_message VARCHAR(512),
   started_at DATETIME,
   finished_at DATETIME,
+  parent_run_id BIGINT,
+  source_user_message_id BIGINT,
+  client_request_id VARCHAR(64),
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE INDEX idx_agent_runs_user_client ON agent_runs (user_id, client_request_id);
+CREATE INDEX idx_agent_messages_session_active ON agent_messages (session_id, status, id);
 
 CREATE TABLE agent_run_events (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
@@ -392,6 +441,7 @@ CREATE TABLE agent_files (
   file_size BIGINT NOT NULL DEFAULT 0,
   storage_path VARCHAR(1024) NOT NULL,
   status VARCHAR(32) NOT NULL,
+  attached_run_id BIGINT,
   extracted_text CLOB,
   error_message VARCHAR(512),
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -487,4 +537,28 @@ INSERT INTO agent_model_configs (
   1,
   1,
   0
+);
+
+INSERT INTO credit_recharge_packages (
+  package_code,
+  package_name,
+  credits,
+  price_amount,
+  currency,
+  validity_days,
+  benefits_json,
+  recommended,
+  sort_order,
+  status
+) VALUES (
+  'test_1000',
+  'Test credits',
+  1000,
+  10.00,
+  'CNY',
+  30,
+  '["Priority queue"]',
+  1,
+  10,
+  'ACTIVE'
 );

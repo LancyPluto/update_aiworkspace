@@ -16,6 +16,7 @@ public class AgentFile {
     private Long fileSize;
     private String storagePath;
     private String status;
+    private Long attachedRunId;
     private String extractedText;
     private String errorMessage;
     private LocalDateTime createdAt;
@@ -37,6 +38,8 @@ public class AgentFile {
     public void setStoragePath(String storagePath) { this.storagePath = storagePath; }
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
+    public Long getAttachedRunId() { return attachedRunId; }
+    public void setAttachedRunId(Long attachedRunId) { this.attachedRunId = attachedRunId; }
     public String getExtractedText() { return extractedText; }
     public void setExtractedText(String extractedText) { this.extractedText = extractedText; }
     public String getErrorMessage() { return errorMessage; }

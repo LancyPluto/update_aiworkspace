@@ -254,8 +254,8 @@ function VendorIcon({ vendor, size = "md" }: { vendor: VendorMeta; size?: "md" |
 }
 
 function testStatusBadge(config: ModelConfigWithTest) {
-  if (config.lastTestSuccess === true) return <Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-emerald-700">娴嬭瘯姝ｅ父</Badge>
-  if (config.lastTestSuccess === false) return <Badge variant="outline" className="border-red-200 bg-red-50 text-red-700">娴嬭瘯澶辫触</Badge>
+  if (config.lastTestSuccess === true) return <Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-emerald-700">测试正常</Badge>
+  if (config.lastTestSuccess === false) return <Badge variant="outline" className="border-red-200 bg-red-50 text-red-700">测试失败</Badge>
   return null
 }
 
@@ -389,31 +389,31 @@ export function AgentModelSettings() {
   }
 
   function validateForm(): string | null {
-    if (!form.displayName.trim()) return "Config name is required."
-    if (!form.modelName.trim()) return "Model name is required."
-    if (form.provider !== "mock" && !form.baseUrl.trim()) return "Base URL is required."
-    if (!form.capabilities.length) return "Select at least one capability."
+  if (!form.displayName.trim()) return "请填写配置名称。"
+  if (!form.modelName.trim()) return "请填写模型名称。"
+  if (form.provider !== "mock" && !form.baseUrl.trim()) return "请填写 Base URL。"
+  if (!form.capabilities.length) return "请至少选择一种模型能力。"
     const allowed = new Set(meta.capabilities.map((c) => c.toUpperCase()))
     for (const cap of form.capabilities) {
-      if (!allowed.has(cap.toUpperCase())) return `Capability ${cap} is not valid for provider ${form.provider}.`
+      if (!allowed.has(cap.toUpperCase())) return `能力 ${cap} 不适用于当前供应商 ${form.provider}。`
     }
     const timeout = Number(form.timeoutSeconds)
-    if (!Number.isFinite(timeout) || timeout < 1 || timeout > 300) return "Timeout must be between 1 and 300 seconds."
+    if (!Number.isFinite(timeout) || timeout < 1 || timeout > 300) return "超时时间必须在 1 到 300 秒之间。"
     const inputPrice = Number(form.inputTokenPricePer1m)
     const outputPrice = Number(form.outputTokenPricePer1m)
     const unitPrice = Number(form.unitPrice)
-    if (!Number.isFinite(inputPrice) || inputPrice < 0) return "Input token price must be zero or greater."
-    if (!Number.isFinite(outputPrice) || outputPrice < 0) return "Output token price must be zero or greater."
-    if (!Number.isFinite(unitPrice) || unitPrice < 0) return "Unit price must be zero or greater."
+    if (!Number.isFinite(inputPrice) || inputPrice < 0) return "输入 Token 单价必须大于等于 0。"
+    if (!Number.isFinite(outputPrice) || outputPrice < 0) return "输出 Token 单价必须大于等于 0。"
+    if (!Number.isFinite(unitPrice) || unitPrice < 0) return "单次计费价格必须大于等于 0。"
     if (form.extraAuthJson.trim()) {
       try {
         JSON.parse(form.extraAuthJson)
       } catch {
-        return "Extra auth JSON must be valid JSON."
+        return "额外鉴权 JSON 必须是合法 JSON。"
       }
     }
     const hasSecret = Boolean(form.apiKey.trim() || form.apiKeyMasked || form.extraAuthJson.trim() || form.extraAuthJsonMasked)
-    if (form.provider !== "mock" && !hasSecret) return "API Key or extra auth JSON is required."
+    if (form.provider !== "mock" && !hasSecret) return "请填写 API Key 或额外鉴权 JSON。"
     return null
   }
 
@@ -452,7 +452,7 @@ export function AgentModelSettings() {
   async function deleteConfig() {
     if (!form.id) return
     if (typeof window !== "undefined") {
-      const ok = window.confirm(`Delete model config ${form.displayName || form.modelName}?`)
+      const ok = window.confirm(`确认删除模型配置「${form.displayName || form.modelName}」吗？`)
       if (!ok) return
     }
     setSaving(true)
@@ -492,16 +492,16 @@ export function AgentModelSettings() {
     <div className="space-y-6">
       <Alert>
         <ServerCog className="h-4 w-4" />
-        <AlertTitle>Model API</AlertTitle>
+        <AlertTitle>大模型接入</AlertTitle>
         <AlertDescription>
-          Maintain the global model API used by AI tools and agent runs.
+          维护 AI 工具和 Agent 运行使用的全局模型 API。
         </AlertDescription>
       </Alert>
 
       {error && !dialogOpen ? (
         <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />
-          <AlertTitle>Operation failed</AlertTitle>
+          <AlertTitle>操作失败</AlertTitle>
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       ) : null}
@@ -509,22 +509,22 @@ export function AgentModelSettings() {
       <Card className="min-h-[420px]">
         <CardHeader className="flex flex-row items-start justify-between gap-3">
           <div>
-            <CardTitle>Configured Model</CardTitle>
-            <CardDescription>{configs.length} model API config. Click the card to edit it.</CardDescription>
+            <CardTitle>已配置模型</CardTitle>
+            <CardDescription>共 {configs.length} 个模型 API，点击卡片可编辑。</CardDescription>
           </div>
           <Button className="gap-2" onClick={createConfig}>
             <Plus className="h-4 w-4" />
-            Add model
+            新增模型
           </Button>
         </CardHeader>
         <CardContent>
           {loading ? (
-            <p className="text-sm text-muted-foreground">Loading...</p>
+            <p className="text-sm text-muted-foreground">加载中...</p>
           ) : configs.length === 0 ? (
             <div className="flex min-h-64 flex-col items-center justify-center rounded-xl border border-dashed bg-muted/20 p-8 text-center">
               <ServerCog className="mb-3 h-10 w-10 text-muted-foreground" />
-              <p className="font-medium">No model config</p>
-              <p className="mt-1 text-sm text-muted-foreground">The backend will use the built-in mock config until one is saved.</p>
+              <p className="font-medium">暂无模型配置</p>
+              <p className="mt-1 text-sm text-muted-foreground">保存真实配置前，后端会使用内置 Mock 配置。</p>
             </div>
           ) : (
             <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
@@ -552,12 +552,12 @@ export function AgentModelSettings() {
                             <p className="truncate text-base font-semibold">{config.displayName || config.modelName}</p>
                             <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{config.modelName}</p>
                           </div>
-                          {config.isDefault ? <Badge>Default</Badge> : null}
+                          {config.isDefault ? <Badge>默认</Badge> : null}
                         </div>
                         <div className="mt-3 flex flex-wrap items-center gap-2">
                           <Badge variant="outline">{vendor.shortName}</Badge>
                           <Badge variant="secondary">{pickMeta(catalogResolved, config.provider).label}</Badge>
-                          <Badge variant={config.enabled ? "default" : "secondary"}>{config.enabled ? "Enabled" : "Disabled"}</Badge>
+                          <Badge variant={config.enabled ? "default" : "secondary"}>{config.enabled ? "启用" : "停用"}</Badge>
                           {testStatusBadge(config)}
                         </div>
                         {!config.isDefault ? (
@@ -572,7 +572,7 @@ export function AgentModelSettings() {
                             }}
                           >
                             <Star className="h-3.5 w-3.5" />
-                            Set default
+                            设为默认
                           </Button>
                         ) : null}
                         <div className="mt-3 flex flex-wrap gap-2">
@@ -592,7 +592,7 @@ export function AgentModelSettings() {
                             </Button>
                           ) : null}
                         </div>
-                        <p className="mt-3 truncate text-xs text-muted-foreground">{config.baseUrl || "Base URL not configured"}</p>
+                        <p className="mt-3 truncate text-xs text-muted-foreground">{config.baseUrl || "未配置 Base URL"}</p>
                       </div>
                     </div>
                   </div>
@@ -606,14 +606,14 @@ export function AgentModelSettings() {
       <Dialog open={dialogOpen} onOpenChange={handleDialogOpenChange}>
         <DialogContent className="max-h-[min(92vh,calc(100vh-2rem))] w-full overflow-y-auto sm:max-w-3xl">
           <DialogHeader>
-            <DialogTitle>{form.id ? "Edit Model API" : "Add Model API"}</DialogTitle>
+            <DialogTitle>{form.id ? "编辑模型 API" : "新增模型 API"}</DialogTitle>
             <DialogDescription>{meta.description}</DialogDescription>
           </DialogHeader>
 
           {error ? (
             <Alert variant="destructive">
               <AlertCircle className="h-4 w-4" />
-              <AlertTitle>Operation failed</AlertTitle>
+              <AlertTitle>操作失败</AlertTitle>
               <AlertDescription>{error}</AlertDescription>
             </Alert>
           ) : null}
@@ -621,18 +621,18 @@ export function AgentModelSettings() {
           <div className="space-y-5">
             <div className="grid gap-5 md:grid-cols-2">
               <div className="space-y-2">
-                <Label>Config name</Label>
+                <Label>配置名称</Label>
                 <Input value={form.displayName} placeholder="MiniMax M2.7 primary model" onChange={(event) => updateForm("displayName", event.target.value)} />
               </div>
               <div className="space-y-2">
-                <Label>Config code</Label>
+                <Label>配置编码</Label>
                 <Input value={form.configCode} placeholder="Optional, e.g. minimax_m27" onChange={(event) => updateForm("configCode", normalizeConfigCode(event.target.value))} />
               </div>
             </div>
 
             <div className="grid gap-5 md:grid-cols-2">
               <div className="space-y-2">
-                <Label>Provider protocol</Label>
+                <Label>供应商协议</Label>
                 <Select value={form.provider} onValueChange={(value) => applyProvider(value)}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
@@ -645,7 +645,7 @@ export function AgentModelSettings() {
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label>Model name</Label>
+                <Label>模型名称</Label>
                 <div className="flex items-center gap-3">
                   <VendorIcon vendor={liveVendor} size="sm" />
                   <Input
@@ -655,7 +655,7 @@ export function AgentModelSettings() {
                     onChange={(event) => updateForm("modelName", event.target.value)}
                   />
                 </div>
-                <p className="text-xs text-muted-foreground">Detected vendor: {liveVendor.label}</p>
+                <p className="text-xs text-muted-foreground">识别供应商：{liveVendor.label}</p>
               </div>
             </div>
 
@@ -680,14 +680,14 @@ export function AgentModelSettings() {
                 <Input value={form.baseUrl} placeholder={meta.defaultBaseUrl} onChange={(event) => updateForm("baseUrl", event.target.value)} />
               </div>
               <div className="space-y-2">
-                <Label>Timeout seconds</Label>
+                <Label>超时时间（秒）</Label>
                 <Input type="number" min={1} max={300} value={form.timeoutSeconds} onChange={(event) => updateForm("timeoutSeconds", event.target.value)} />
               </div>
             </div>
 
             <div className="grid gap-5 md:grid-cols-2">
               <div className="space-y-2">
-                <Label>Input token price / 1M</Label>
+                <Label>输入 Token 单价 / 1M</Label>
                 <Input
                   type="number"
                   min={0}
@@ -697,7 +697,7 @@ export function AgentModelSettings() {
                 />
               </div>
               <div className="space-y-2">
-                <Label>Output token price / 1M</Label>
+                <Label>输出 Token 单价 / 1M</Label>
                 <Input
                   type="number"
                   min={0}
@@ -710,24 +710,24 @@ export function AgentModelSettings() {
 
             <div className="grid gap-5 md:grid-cols-2">
               <div className="space-y-2">
-                <Label>Billing unit</Label>
+                <Label>计费单位</Label>
                 <Select value={form.billingUnit} onValueChange={(value) => updateForm("billingUnit", value as ModelForm["billingUnit"])}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="TOKEN_PER_M">Token / 1M</SelectItem>
-                    <SelectItem value="PER_CALL">Per generated item</SelectItem>
+                    <SelectItem value="PER_CALL">按生成次数</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label>Unit price</Label>
+                <Label>单次价格</Label>
                 <Input
                   type="number"
                   min={0}
                   step="0.000001"
                   value={form.unitPrice}
                   onChange={(event) => updateForm("unitPrice", event.target.value)}
-                  placeholder={form.billingUnit === "PER_CALL" ? "Cost per image/video call" : "Usually 0 for token billing"}
+                  placeholder={form.billingUnit === "PER_CALL" ? "图片/视频等单次调用成本" : "Token 计费通常填 0"}
                 />
               </div>
             </div>
@@ -764,13 +764,13 @@ export function AgentModelSettings() {
                     type="password"
                     className="pl-9"
                     value={form.apiKey}
-                    placeholder={form.apiKeyMasked ? `Saved: ${form.apiKeyMasked}` : "Enter API Key"}
+                    placeholder={form.apiKeyMasked ? `已保存：${form.apiKeyMasked}` : "请输入 API Key"}
                     onChange={(event) => updateForm("apiKey", event.target.value)}
                   />
                 </div>
               </div>
               <div className="space-y-2">
-                <Label>Runtime</Label>
+                <Label>运行信息</Label>
                 <Input
                   value={`test=${meta.testStrategy} · workerReady=${meta.workerReady}`}
                   readOnly
@@ -798,8 +798,8 @@ export function AgentModelSettings() {
 
             <div className="flex flex-wrap items-center justify-between gap-4 rounded-md bg-secondary p-4">
               <div>
-                <p className="font-medium">Enabled</p>
-                <p className="text-sm text-muted-foreground">Disabled configs are not used by default model calls.</p>
+                <p className="font-medium">启用</p>
+                <p className="text-sm text-muted-foreground">停用后不会被默认模型调用使用。</p>
               </div>
               <Switch checked={form.enabled} onCheckedChange={(value) => updateForm("enabled", value)} />
             </div>
@@ -813,7 +813,7 @@ export function AgentModelSettings() {
             {testResult ? (
               <Alert variant={testResult.success ? "default" : "destructive"}>
                 {testResult.success ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
-                <AlertTitle>{testResult.success ? "Connection OK" : "Connection failed"}</AlertTitle>
+                <AlertTitle>{testResult.success ? "连接正常" : "连接失败"}</AlertTitle>
                 <AlertDescription>
                   {testResult.message}, latency {testResult.latencyMs} ms
                   {testResult.sample ? `, sample: ${testResult.sample}` : ""}
@@ -826,21 +826,21 @@ export function AgentModelSettings() {
             {form.id ? (
               <Button variant="destructive" className="gap-2" onClick={deleteConfig} disabled={saving || testing}>
                 <Trash2 className="h-4 w-4" />
-                Delete
+                删除
               </Button>
             ) : null}
             <div className="flex flex-wrap gap-2">
               <Button variant="outline" className="gap-2" onClick={() => loadConfigs(form.id)} disabled={loading || saving || testing}>
                 <RefreshCw className={loading ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
-                Refresh
+                刷新
               </Button>
               <Button variant="outline" className="gap-2" onClick={testConfig} disabled={saving || testing}>
                 <Zap className={testing ? "h-4 w-4 animate-pulse" : "h-4 w-4"} />
-                {testing ? "Testing..." : "Test connection"}
+                {testing ? "测试中..." : "测试连接"}
               </Button>
               <Button className="min-w-32 gap-2" onClick={saveConfig} disabled={saving || testing}>
                 {saved ? <CheckCircle2 className="h-4 w-4" /> : <Save className={saving ? "h-4 w-4 animate-spin" : "h-4 w-4"} />}
-                {saved ? "Saved" : saving ? "Saving..." : form.id ? "Save config" : "Create config"}
+                {saved ? "已保存" : saving ? "保存中..." : form.id ? "保存配置" : "创建配置"}
               </Button>
             </div>
           </DialogFooter>

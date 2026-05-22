@@ -41,6 +41,8 @@ tags:
     description: Admin model API configuration
   - name: InternalWorker
     description: Worker 内部接口
+  - name: AgentChat
+    description: 用户端 Agent 会话与运行（重新生成、编辑后生成）
 
 x-test-data:
   users:
@@ -820,6 +822,72 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/TaskStatusApiResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /api/v1/agent/runs/{runId}/regenerate:
+    post:
+      tags: [AgentChat]
+      summary: 对已完成运行重新生成（复用原 USER 消息）
+      operationId: regenerateAgentRun
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegenerateAgentRunRequest"
+      responses:
+        "200":
+          description: 新运行已创建，返回 messageId（USER）与 runId
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateAgentMessageApiResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /api/v1/agent/sessions/{sessionId}/messages/{messageId}/edit-regenerate:
+    post:
+      tags: [AgentChat]
+      summary: 编辑用户消息后重新生成（截断该消息之后的分支）
+      operationId: editRegenerateAgentMessage
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - name: messageId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EditRegenerateAgentMessageRequest"
+      responses:
+        "200":
+          description: 新运行已创建
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateAgentMessageApiResponse"
         "400":
           $ref: "#/components/responses/BadRequest"
 
@@ -2268,6 +2336,48 @@ components:
           type: string
           nullable: true
           description: 前端幂等请求 ID，对应规划里?clientRequestId?
+
+    RegenerateAgentRunRequest:
+      type: object
+      properties:
+        clientRequestId:
+          type: string
+          maxLength: 64
+          description: 可选幂等键；重复请求返回同一 run
+
+    EditRegenerateAgentMessageRequest:
+      type: object
+      required: [content]
+      properties:
+        content:
+          type: string
+          maxLength: 8000
+        clientRequestId:
+          type: string
+          maxLength: 64
+
+    CreateAgentMessageResult:
+      type: object
+      properties:
+        sessionId:
+          type: integer
+          format: int64
+        messageId:
+          type: integer
+          format: int64
+        runId:
+          type: integer
+          format: int64
+        runStatus:
+          type: string
+
+    CreateAgentMessageApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponse"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/CreateAgentMessageResult"
 
     RegenerateTaskRequest:
       type: object

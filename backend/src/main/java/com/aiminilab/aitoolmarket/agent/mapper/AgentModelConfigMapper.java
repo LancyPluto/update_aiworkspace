@@ -30,6 +30,24 @@ public interface AgentModelConfigMapper extends BaseMapper<AgentModelConfig> {
     AgentModelConfig findActiveById(@Param("id") Long id);
 
     @Select("""
+            SELECT COUNT(1)
+            FROM agent_model_configs
+            WHERE config_code = #{configCode}
+              AND COALESCE(is_deleted, 0) = 0
+              AND (#{excludeId} IS NULL OR id <> #{excludeId})
+            """)
+    int countActiveByConfigCode(@Param("configCode") String configCode, @Param("excludeId") Long excludeId);
+
+    @Update("""
+            UPDATE agent_model_configs
+            SET config_code = CONCAT(SUBSTRING(config_code, 1, 40), '__deleted_', id),
+                updated_at = NOW()
+            WHERE config_code = #{configCode}
+              AND COALESCE(is_deleted, 0) = 1
+            """)
+    void archiveDeletedConfigCode(@Param("configCode") String configCode);
+
+    @Select("""
             SELECT *
             FROM agent_model_configs
             WHERE COALESCE(is_deleted, 0) = 0
@@ -121,7 +139,11 @@ public interface AgentModelConfigMapper extends BaseMapper<AgentModelConfig> {
 
     @Update("""
             UPDATE agent_model_configs
-            SET is_deleted = 1,
+            SET config_code = CASE
+                    WHEN config_code IS NULL THEN NULL
+                    ELSE CONCAT(SUBSTRING(config_code, 1, 40), '__deleted_', id)
+                END,
+                is_deleted = 1,
                 is_default = 0,
                 updated_at = NOW()
             WHERE id = #{id}

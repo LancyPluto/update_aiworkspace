@@ -3,6 +3,8 @@ package com.aiminilab.aitoolmarket.agent.controller;
 import com.aiminilab.aitoolmarket.agent.dto.AgentRunEventResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AgentRunResponse;
 import com.aiminilab.aitoolmarket.agent.dto.ConfirmAgentToolRequest;
+import com.aiminilab.aitoolmarket.agent.dto.CreateAgentMessageResponse;
+import com.aiminilab.aitoolmarket.agent.dto.RegenerateAgentRunRequest;
 import com.aiminilab.aitoolmarket.agent.service.AgentRunService;
 import com.aiminilab.aitoolmarket.auth.security.AuthContext;
 import com.aiminilab.aitoolmarket.common.dto.ApiResponse;
@@ -34,6 +36,13 @@ public class AgentRunController {
     @PostMapping("/{runId}/cancel")
     public ApiResponse<AgentRunResponse> cancel(@PathVariable Long runId) {
         return ApiResponse.success(agentRunService.cancel(AuthContext.get().userId(), runId));
+    }
+
+    @PostMapping("/{runId}/regenerate")
+    public ApiResponse<CreateAgentMessageResponse> regenerate(@PathVariable Long runId,
+                                                                @RequestBody(required = false) RegenerateAgentRunRequest request) {
+        RegenerateAgentRunRequest body = request == null ? new RegenerateAgentRunRequest(null) : request;
+        return ApiResponse.success(agentRunService.regenerateRun(AuthContext.get().userId(), runId, body));
     }
 
     @PostMapping("/{runId}/tool-confirmations")

@@ -5,8 +5,9 @@ import time
 from typing import Any
 
 from app.config import settings
-from app.core.event_types import TOOL_TASK_DISPATCHED, TOOL_TASK_PROGRESS
+from app.core.event_types import MESSAGE_DELTA, TOOL_TASK_DISPATCHED, TOOL_TASK_PROGRESS
 from app.core.schemas import ChatMessage, RunContext, RunEventCreate, TaskCreate, ToolCallComplete, ToolCallCreate, ToolCallFail, ToolDescriptor
+from app.tools.stream_preview import extract_stream_preview
 
 
 class ToolExecutionError(RuntimeError):
@@ -167,13 +168,14 @@ class BackendToolBridge:
             await self.backend.fail_tool_call(call.id, ToolCallFail(errorCode=error_code, errorMessage=error_message))
             raise ToolExecutionError(error_message)
         content_text = task_detail.result.contentText if task_detail.result is not None else ""
+        agent_content_text = _agent_visible_content(tool.toolCode, content_text)
         result = _tool_result(
             tool.toolCode,
             call.id,
             arguments,
             task_detail.taskId,
             task_detail.status,
-            content_text,
+            agent_content_text,
             task_detail.result.resourceType if task_detail.result else None,
         )
         await self.backend.complete_tool_call(call.id, ToolCallComplete(resultJson=result))
@@ -186,6 +188,7 @@ class BackendToolBridge:
     async def _wait_for_task(self, context: RunContext, tool_code: str, task_id: int):
         deadline = time.monotonic() + self.timeout_seconds
         last_status = ""
+        stream_state: dict[str, int] = {"emitted_len": 0}
         while time.monotonic() <= deadline:
             run_context = await self.backend.get_run_context(context.runId)
             if run_context.status in self.TERMINAL_RUN_STATUSES:
@@ -208,6 +211,10 @@ class BackendToolBridge:
                             },
                         ),
                     )
+            if settings.agent_tool_stream_relay_enabled:
+                preview = extract_stream_preview(detail.progressMessage)
+                if preview:
+                    await self._relay_task_stream_preview(context, preview, stream_state)
             if detail.status in self.TERMINAL_TASK_STATUSES:
                 return detail
             await asyncio.sleep(self.poll_interval_seconds)
@@ -216,6 +223,29 @@ class BackendToolBridge:
     async def _cancel_task(self, user_id: int, task_id: int) -> None:
         try:
             await self.backend.cancel_task(user_id, task_id)
+        except Exception:
+            pass
+
+    async def _relay_task_stream_preview(
+        self,
+        context: RunContext,
+        preview: str,
+        stream_state: dict[str, int],
+    ) -> None:
+        emitted_len = stream_state.get("emitted_len", 0)
+        if len(preview) <= emitted_len:
+            return
+        delta = preview[emitted_len:]
+        stream_state["emitted_len"] = len(preview)
+        for chunk in _chunk_text(delta, 48):
+            await self.backend.append_event(
+                context.runId,
+                RunEventCreate(eventType=MESSAGE_DELTA, eventText=chunk, eventJson={"delta": chunk}),
+            )
+        try:
+            upsert = getattr(self.backend, "upsert_streaming_answer", None)
+            if callable(upsert):
+                await upsert(context.runId, preview)
         except Exception:
             pass
 
@@ -248,7 +278,24 @@ def _extract_labeled_argument(message: str, name: str) -> str:
     )
     if match is None:
         return ""
-    return match.group(1).strip().strip("\"'")
+    return _normalize_extracted_value(match.group(1))
+
+
+def _normalize_extracted_value(value: str) -> str:
+    text = value.strip().strip("\"'")
+    text = re.sub(r"^例如[：:]\s*", "", text)
+    text = re.sub(r"^如[：:]\s*", "", text)
+    return text.strip()
+
+
+_EXTRA_FIELD_LABEL_ALIASES: dict[str, tuple[str, ...]] = {
+    "style": ("文案风格",),
+    "sellingPoints": ("核心卖点",),
+    "targetCustomer": ("目标用户",),
+    "targetAudience": ("目标人群",),
+    "productName": ("产品/服务名称",),
+    "topic": ("文案主题",),
+}
 
 
 def _field_aliases(field_key: str, prop: Any) -> list[str]:
@@ -257,6 +304,9 @@ def _field_aliases(field_key: str, prop: Any) -> list[str]:
         title = prop.get("title")
         if isinstance(title, str) and title.strip() and title.strip() not in aliases:
             aliases.append(title.strip())
+    for extra in _EXTRA_FIELD_LABEL_ALIASES.get(field_key, ()):
+        if extra not in aliases:
+            aliases.append(extra)
     return aliases
 
 
@@ -286,7 +336,11 @@ def _recent_user_messages(context: RunContext) -> list[str]:
 
 
 def _is_tool_guidance_message(content: str) -> bool:
-    return "如果想使用「" in content and "请在同一条或下一条消息里按下面补充" in content
+    has_tool_hint = "如果想使用「" in content or "看起来你想使用「" in content
+    return has_tool_hint and (
+        "请在同一条或下一条消息里按下面补充" in content
+        or "这个工具需要补充以下信息" in content
+    )
 
 
 def _with_xiaohongshu_defaults(message: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -325,6 +379,30 @@ def _tool_result(
     }
 
 
+def _agent_visible_content(tool_code: str, content_text: str | None) -> str:
+    text = content_text or ""
+    if tool_code != "digital_human_agent" or not text.strip():
+        return text
+
+    final_video = _first_match(text, r"(?:最终成片|成片)[:：]\s*(\S+?\.mp4(?:\?\S*)?)")
+    if final_video:
+        return f"视频已生成，可直接播放或下载：{_sanitize_link(final_video)}"
+    return "视频已生成，可直接播放或下载。"
+
+
+def _first_match(text: str, pattern: str) -> str:
+    match = re.search(pattern, text, flags=re.IGNORECASE)
+    return match.group(1).strip() if match else ""
+
+
+def _sanitize_link(value: str) -> str:
+    return value.strip().replace(")", "").replace("]", "").rstrip("，。,.、；;")
+
+
 def _compact(value: str, max_length: int) -> str:
     normalized = re.sub(r"\s+", " ", value).strip()
     return normalized[:max_length]
+
+
+def _chunk_text(value: str, size: int = 32) -> list[str]:
+    return [value[index : index + size] for index in range(0, len(value), size)] or [""]

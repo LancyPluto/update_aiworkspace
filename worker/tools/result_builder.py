@@ -13,6 +13,7 @@ from tools.product_title_optimizer.parser import format_publishable_text as fmt_
 from tools.short_video_script_generator.parser import parse_result_markdown as parse_short_video_script
 from tools.short_video_script_generator.parser import format_publishable_text as fmt_short_video_script
 from tools.short_video_topic_generator.parser import format_publishable_text as fmt_short_video_topic
+from tools.social_media_comment_insights_agent.parser import format_publishable_text as fmt_social_media_comment_insights
 from tools.store_campaign_planner.parser import format_publishable_text as fmt_store_campaign
 from tools.wechat_longform_generator.parser import format_publishable_text as fmt_wechat_longform
 from tools.xiaohongshu_copywriting.parser import format_publishable_text as fmt_xiaohongshu
@@ -33,6 +34,7 @@ _TOOL_PUBLISHABLE_FORMATTERS: dict[str, Any] = {
     "objection_handling_script_generator": fmt_objection_handling,
     "store_campaign_planner": fmt_store_campaign,
     "ecommerce_campaign_planner": fmt_ecommerce_campaign,
+    "social_media_comment_insights_agent": fmt_social_media_comment_insights,
 }
 
 

@@ -22,23 +22,13 @@ const loading = ref(true)
 const error = ref<string | null>(null)
 const streamConnected = ref(false)
 
-const taskStages = computed(() => {
-  const toolCode = statusData.value?.toolCode || taskDetailFail.value?.toolCode || ""
-  if (toolCode === "digital_human_agent" || toolCode === "ai_comic_drama_agent") {
-    return [
+const digitalHumanStages = computed(() => [
   { label: "脚本与语音准备", progress: 18 },
   { label: "数字人形象生成", progress: 36 },
   { label: "背景画面生成", progress: 52 },
   { label: "形象驱动视频生成", progress: 78 },
   { label: "字幕整理与结果输出", progress: 96 },
-    ]
-  }
-  return [
-    { label: "任务排队", progress: 10 },
-    { label: "AI 生成内容", progress: 60 },
-    { label: "结果整理输出", progress: 96 },
-  ]
-})
+])
 
 function stageState(stageProgress: number): "done" | "current" | "pending" {
   const progress = statusData.value?.progress ?? 0
@@ -286,13 +276,9 @@ onUnmounted(() => {
             {{ failureHint }}
           </div>
 
-          <div
-            v-if="!isTerminal(statusData.status)"
-            class="mt-5 grid gap-2"
-            :class="taskStages.length >= 5 ? 'sm:grid-cols-5' : 'sm:grid-cols-3'"
-          >
+          <div v-if="!isTerminal(statusData.status)" class="mt-5 grid gap-2 sm:grid-cols-5">
             <div
-              v-for="stage in taskStages"
+              v-for="stage in digitalHumanStages"
               :key="stage.label"
               class="rounded-lg border px-3 py-2 text-xs"
               :class="

@@ -77,7 +77,7 @@
     deleteSessionError.value = null
   }
 
-  async function startSession(title = "新对话") {
+  async function startSession(title = "新的Agent对话") {
     if (!auth.token) return
     const session = await createAgentSession({ title }, { token: auth.token })
     sessions.value = [session, ...sessions.value.filter((item) => item.id !== session.id)]

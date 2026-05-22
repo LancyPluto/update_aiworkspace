@@ -11,6 +11,7 @@ import com.aiminilab.aitoolmarket.auth.security.AuthCookieSupport;
 import com.aiminilab.aitoolmarket.auth.security.JwtTokenProvider;
 import com.aiminilab.aitoolmarket.auth.service.AuthService;
 import com.aiminilab.aitoolmarket.common.dto.ApiResponse;
+import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpHeaders;
@@ -70,9 +71,19 @@ public class AuthController {
     }
 
     @PostMapping("/logout")
-    public ApiResponse<Void> logout(HttpServletRequest request) {
-        extractBearerToken(request).ifPresent(jwtTokenProvider::revokeToken);
-        return ApiResponse.success(null);
+    public ResponseEntity<ApiResponse<Void>> logout(HttpServletRequest request) {
+        extractToken(request).ifPresent(jwtTokenProvider::revokeToken);
+        return ResponseEntity.ok()
+                .header(HttpHeaders.SET_COOKIE, authCookieSupport.deleteUserCookie().toString())
+                .body(ApiResponse.success(null));
+    }
+
+    private java.util.Optional<String> extractToken(HttpServletRequest request) {
+        java.util.Optional<String> bearerToken = extractBearerToken(request);
+        if (bearerToken.isPresent()) {
+            return bearerToken;
+        }
+        return extractCookieToken(request, AuthCookieSupport.USER_SESSION_COOKIE);
     }
 
     private java.util.Optional<String> extractBearerToken(HttpServletRequest request) {
@@ -81,5 +92,18 @@ public class AuthController {
             return java.util.Optional.empty();
         }
         return java.util.Optional.of(authorization.substring("Bearer ".length()));
+    }
+
+    private java.util.Optional<String> extractCookieToken(HttpServletRequest request, String cookieName) {
+        Cookie[] cookies = request.getCookies();
+        if (cookies == null) {
+            return java.util.Optional.empty();
+        }
+        for (Cookie cookie : cookies) {
+            if (cookieName.equals(cookie.getName()) && cookie.getValue() != null && !cookie.getValue().isBlank()) {
+                return java.util.Optional.of(cookie.getValue());
+            }
+        }
+        return java.util.Optional.empty();
     }
 }
