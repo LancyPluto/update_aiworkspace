@@ -1,7 +1,9 @@
 import logging
+import time
 from typing import Any
 
 from client.backend_client import BackendClient, BackendClientError
+from config import settings
 from client.model_client import (
     ModelClient,
     ModelClientError,
@@ -40,16 +42,22 @@ from tools.short_video_script_generator import (
 from tools.short_video_topic_generator import (
     build_prompt_payload as build_short_video_topic_prompt_payload,
 )
+from tools.social_media_comment_insights_agent import (
+    build_prompt_payload as build_social_media_comment_insights_prompt_payload,
+)
 from tools.store_campaign_planner import (
     build_prompt_payload as build_store_campaign_prompt_payload,
 )
 from tools.wechat_longform_generator import (
     build_prompt_payload as build_wechat_longform_prompt_payload,
 )
+from tools.stream_preview import build_stream_progress_message
 from tools.xiaohongshu_copywriting import build_prompt_payload as build_xiaohongshu_prompt_payload
 
 
 LOGGER = logging.getLogger(__name__)
+STREAM_REPORT_INTERVAL_SECONDS = 0.45
+STREAM_REPORT_MIN_CHARS = 64
 
 LONG_OUTPUT_MODEL_TOKENS = {
     "wechat_longform_generator": 4096,
@@ -64,6 +72,7 @@ LONG_OUTPUT_MODEL_TOKENS = {
     "xiaohongshu_copywriting": 2048,
     "moments_copywriting_generator": 2048,
     "product_title_optimizer": 2048,
+    "social_media_comment_insights_agent": 4096,
 }
 
 LONG_OUTPUT_TIMEOUT_SECONDS = {
@@ -72,6 +81,24 @@ LONG_OUTPUT_TIMEOUT_SECONDS = {
     "ecommerce_campaign_planner": 120,
     "store_campaign_planner": 120,
     "live_stream_script_generator": 120,
+    "social_media_comment_insights_agent": 180,
+}
+
+PROGRESS_MESSAGES = {
+    "enterprise_diagnosis_agent": {
+        12: "任务已开始，正在整理输入参数",
+        28: "已生成企业诊断提示词，正在准备调用管理端大模型",
+        55: "正在调用管理端配置的大模型联网检索企业公开信息并分析经营情况",
+        86: "企业诊断报告已生成，正在整理报告结构",
+        94: "正在保存企业诊断报告，准备生成结果页",
+    },
+    "social_media_comment_insights_agent": {
+        12: "任务已开始，正在整理产品、目标人群和平台线索",
+        28: "已生成社交评论洞察提示词，正在准备调用管理端大模型",
+        55: "正在检索公开社交内容与评论线索，并提炼用户期望和痛点",
+        86: "社交媒体评论洞察报告已生成，正在整理建议结构",
+        94: "正在保存洞察报告，准备生成结果页",
+    },
 }
 
 
@@ -95,13 +122,13 @@ class TextTaskHandler:
             )
             trace_id = trace_id or context.get("traceId")
             context["traceId"] = trace_id
-            self._report_progress(context, task_id, 12, "任务已开始，正在整理输入参数", trace_id=trace_id)
+            self._report_progress(context, task_id, 12, trace_id=trace_id)
 
             system_prompt, user_prompt = self._build_model_prompts(context)
-            self._report_progress(context, task_id, 28, "已生成企业诊断提示词，正在准备调用管理端大模型", trace_id=trace_id)
+            self._report_progress(context, task_id, 28, trace_id=trace_id)
             system_prompt = apply_output_discipline(system_prompt)
 
-            self._report_progress(context, task_id, 55, "正在调用管理端配置的大模型联网检索企业公开信息并分析经营情况", trace_id=trace_id)
+            self._report_progress(context, task_id, 55, trace_id=trace_id)
             model_result = self._generate_model_result(
                 user_prompt,
                 system_prompt=system_prompt,
@@ -111,12 +138,15 @@ class TextTaskHandler:
                 api_key=context.get("modelApiKey"),
                 timeout_seconds=context.get("modelTimeoutSeconds"),
                 max_tokens=context.get("modelMaxTokens"),
+                task_id=task_id,
+                context=context,
+                trace_id=trace_id,
             )
 
-            self._report_progress(context, task_id, 86, "企业诊断报告已生成，正在整理报告结构", trace_id=trace_id)
+            self._report_progress(context, task_id, 86, trace_id=trace_id)
             success_payload = build_success_payload(context, model_result.content)
             self._attach_token_usage(success_payload, model_result)
-            self._report_progress(context, task_id, 94, "正在保存企业诊断报告，准备生成结果页", trace_id=trace_id)
+            self._report_progress(context, task_id, 94, trace_id=trace_id)
             self.backend_client.mark_success(task_id, success_payload, trace_id=trace_id)
             LOGGER.info("task %s completed successfully traceId=%s", task_id, trace_id or "-")
             return {"status": "SUCCESS", "taskId": task_id, "traceId": trace_id}
@@ -218,6 +248,10 @@ class TextTaskHandler:
             prompt_payload = build_store_campaign_prompt_payload(context)
             return prompt_payload["system_prompt"], prompt_payload["user_prompt"]
 
+        if tool_code == "social_media_comment_insights_agent":
+            prompt_payload = build_social_media_comment_insights_prompt_payload(context)
+            return prompt_payload["system_prompt"], prompt_payload["user_prompt"]
+
         params = context.get("params") or {}
         user_prompt_template = context.get("userPromptTemplate")
         if user_prompt_template:
@@ -250,9 +284,30 @@ class TextTaskHandler:
         return normalized
 
     def _generate_model_result(self, prompt: str, **kwargs: Any) -> ModelGenerationResult:
+        stream_kwargs = dict(kwargs)
+        task_id = stream_kwargs.pop("task_id", None)
+        context = stream_kwargs.pop("context", None)
+        trace_id = stream_kwargs.pop("trace_id", None)
+
+        stream_fn = getattr(self.model_client, "generate_stream_with_usage", None)
+        if (
+            settings.text_tool_streaming_enabled
+            and callable(stream_fn)
+            and task_id is not None
+            and isinstance(context, dict)
+        ):
+            return self._generate_model_result_streaming(
+                prompt,
+                task_id=int(task_id),
+                context=context,
+                trace_id=trace_id,
+                stream_fn=stream_fn,
+                **stream_kwargs,
+            )
+
         generate_with_usage = getattr(self.model_client, "generate_with_usage", None)
         if callable(generate_with_usage):
-            result = generate_with_usage(prompt, **kwargs)
+            result = generate_with_usage(prompt, **stream_kwargs)
             if isinstance(result, ModelGenerationResult):
                 return result
             if isinstance(result, dict):
@@ -265,8 +320,58 @@ class TextTaskHandler:
                 )
             return ModelGenerationResult(content=str(result or ""))
 
-        content = self.model_client.generate(prompt, **kwargs)
+        content = self.model_client.generate(prompt, **stream_kwargs)
         return ModelGenerationResult(content=content)
+
+    def _generate_model_result_streaming(
+        self,
+        prompt: str,
+        *,
+        task_id: int,
+        context: dict[str, Any],
+        trace_id: str | None,
+        stream_fn,
+        **kwargs: Any,
+    ) -> ModelGenerationResult:
+        parts: list[str] = []
+        last_report_at = 0.0
+        last_reported_len = 0
+        for piece in stream_fn(prompt, **kwargs):
+            if not piece:
+                continue
+            parts.append(piece)
+            text = "".join(parts)
+            now = time.monotonic()
+            if now - last_report_at < STREAM_REPORT_INTERVAL_SECONDS and len(text) - last_reported_len < STREAM_REPORT_MIN_CHARS:
+                continue
+            progress = min(89, 55 + len(text) // 120)
+            preview_message = build_stream_progress_message(text)
+            if preview_message:
+                self._report_progress(
+                    context,
+                    task_id,
+                    progress,
+                    trace_id=trace_id,
+                    progress_message=preview_message,
+                )
+            last_report_at = now
+            last_reported_len = len(text)
+
+        content = "".join(parts).strip()
+        if not content:
+            raise ModelOutputEmptyError("model stream returned empty content")
+        return ModelGenerationResult(
+            content=content,
+            prompt_tokens=self._estimate_tokens(kwargs.get("system_prompt", ""), prompt),
+            completion_tokens=self._estimate_tokens(content),
+        )
+
+    @staticmethod
+    def _estimate_tokens(*parts: str) -> int:
+        text = "\n".join(part for part in parts if part)
+        if not text:
+            return 0
+        return max(1, len(text) // 4)
 
     def _attach_token_usage(self, payload: dict[str, Any], result: ModelGenerationResult) -> None:
         if result.prompt_tokens > 0:
@@ -291,14 +396,23 @@ class TextTaskHandler:
         context: dict[str, Any],
         task_id: int,
         progress: int,
-        message: str,
         trace_id: str | None = None,
+        progress_message: str | None = None,
     ) -> None:
-        if context.get("toolCode") == "enterprise_diagnosis_agent":
+        if progress_message:
             self.backend_client.mark_processing(
                 task_id,
                 progress=progress,
-                progress_message=message,
+                progress_message=progress_message,
+                trace_id=trace_id,
+            )
+            return
+        progress_messages = PROGRESS_MESSAGES.get(str(context.get("toolCode") or ""))
+        if progress_messages is not None:
+            self.backend_client.mark_processing(
+                task_id,
+                progress=progress,
+                progress_message=progress_messages.get(progress, "AI is processing"),
                 trace_id=trace_id,
             )
             return

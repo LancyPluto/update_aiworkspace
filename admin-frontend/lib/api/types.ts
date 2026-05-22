@@ -475,3 +475,79 @@ export interface BillingUsageLog {
   chargedCredits: number
   createdAt: string
 }
+
+// ---- Workflow types ----
+
+export interface WorkflowNodeData extends Record<string, unknown> {
+  title: string
+  subtitle: string
+  detail: string
+  kind: string
+  iconName: string
+  color?: string
+  config?: AgentModelConfig | null
+  parameters?: Record<string, unknown>
+}
+
+export interface WorkflowNode {
+  id: string
+  type: string
+  position: { x: number; y: number }
+  data: WorkflowNodeData
+  width?: number
+  height?: number
+  selected?: boolean
+}
+
+export interface WorkflowEdge {
+  id: string
+  source: string
+  target: string
+  sourceHandle?: string
+  targetHandle?: string
+  type?: string
+  markerEnd?: { type: string; color?: string }
+  style?: Record<string, unknown>
+}
+
+export interface WorkflowGroup {
+  id: string
+  title: string
+  bounding: { x: number; y: number; width: number; height: number }
+  color?: string
+  fontSize?: number
+  locked?: boolean
+}
+
+export interface WorkflowResponse {
+  id: number
+  toolId: number
+  workflowName: string
+  nodesJson: string
+  edgesJson: string
+  groupsJson: string | null
+  configJson: string | null
+  version: number
+  status: string
+  createdBy?: number
+  updatedBy?: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface WorkflowVersionItem {
+  id: number
+  version: number
+  snapshotLabel: string | null
+  createdBy: number
+  createdAt: string
+}
+
+export interface UpsertWorkflowPayload {
+  workflowName: string
+  nodesJson: string
+  edgesJson: string
+  groupsJson?: string
+  configJson?: string
+  status?: string
+}

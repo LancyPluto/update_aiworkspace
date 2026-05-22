@@ -32,7 +32,10 @@ class IntentRouter:
     unsupported_keywords = ("上传", "文件", "知识库", "RAG", "向量", "多智能体", "工作流")
     vague_messages = {"帮我做一下", "帮我弄一下", "处理一下", "做一下"}
     short_chat_patterns = {"你是谁", "你能做什么", "你能帮我做什么", "你有什么工具", "有什么工具", "你好", "hi", "hello", "在吗"}
-    tool_action_keywords = ("写", "生成", "优化", "改写", "润色", "做", "帮我", "输出", "文案", "标题", "笔记", "朋友圈", "公众号")
+    tool_action_keywords = (
+        "写", "生成", "优化", "改写", "润色", "做", "帮我", "输出", "文案", "标题", "笔记", "朋友圈", "公众号",
+        "再给我", "再来", "再写", "再生成", "再来一篇", "再写一篇",
+    )
 
     def classify(self, context: RunContext) -> IntentResult:
         message = context.message.strip()
@@ -46,6 +49,9 @@ class IntentRouter:
         if not message:
             return IntentResult(intent=Intent.NEEDS_CLARIFICATION, confidence=0.8, reason="empty_request")
 
+        if self._looks_like_session_recap_question(message):
+            return IntentResult(intent=Intent.GENERAL_CHAT, confidence=0.92, reason="session_recap_question")
+
         # Substring match for short/greeting chats (broader than exact match)
         if self._is_short_chat(message_lower):
             return IntentResult(intent=Intent.GENERAL_CHAT, confidence=0.95, reason="short_general_chat")
@@ -55,6 +61,10 @@ class IntentRouter:
             return continued
 
         continued = self._tool_use_from_pending_tool_prompt(context)
+        if continued is not None:
+            return continued
+
+        continued = self._tool_use_from_structured_params(context)
         if continued is not None:
             return continued
 
@@ -124,8 +134,9 @@ class IntentRouter:
                     reason="weak_tool_signal",
                 )
 
-        # Short vague messages should suggest tools rather than asking for clarification
-        if len(message) <= 5 or message in self.vague_messages:
+        if message in self.vague_messages:
+            return IntentResult(intent=Intent.NEEDS_CLARIFICATION, confidence=0.6, reason="vague_request")
+        if len(message) <= 5:
             return IntentResult(intent=Intent.GENERAL_CHAT, confidence=0.6, reason="short_vague_message")
         return IntentResult(intent=Intent.GENERAL_CHAT, confidence=0.6, reason="default_general_chat")
 
@@ -141,8 +152,32 @@ class IntentRouter:
         return False
 
     def _looks_like_tool_request(self, message: str) -> bool:
+        if self._looks_like_session_recap_question(message):
+            return False
         lowered = message.lower()
         return any(keyword in lowered for keyword in self.tool_action_keywords)
+
+    @staticmethod
+    def _looks_like_session_recap_question(message: str) -> bool:
+        """用户追问「你刚才帮我做了什么」等元问题，应走对话回顾而非调工具。"""
+        needles = (
+            "你之前帮我",
+            "你刚刚帮我",
+            "你刚才帮我",
+            "你帮我做了什么",
+            "你帮我完成了",
+            "完成了什么",
+            "完成了那些",
+            "完成了哪些",
+            "做了什么",
+            "干了什么",
+            "刚才做了什么",
+            "上一轮",
+            "之前做了什么",
+            "帮我完成了什么",
+            "帮我做了哪些",
+        )
+        return any(needle in message for needle in needles)
 
     def _tool_use_from_pending_tool_context(self, context: RunContext) -> IntentResult | None:
         """检查是否存在持久的待补参上下文（agent_pending_tool_context），用于多轮补参恢复。"""
@@ -188,6 +223,24 @@ class IntentRouter:
                 )
         return None
 
+    def _tool_use_from_structured_params(self, context: RunContext) -> IntentResult | None:
+        """用户只回复「产品/服务名称：…」等结构化字段时，按字段内容匹配工具，不依赖「帮我写」等动作词。"""
+        message = context.message.strip()
+        if len(message) < 4 or not self._looks_like_tool_slot_followup(message):
+            return None
+        registry = ToolRegistry(context)
+        candidates = registry.rank_by_intent(message)
+        if not candidates or candidates[0].score < 4:
+            return None
+        top = candidates[0]
+        return IntentResult(
+            intent=Intent.TOOL_USE,
+            confidence=0.85,
+            selectedToolCode=top.tool.toolCode,
+            candidateToolCodes=[candidate.tool.toolCode for candidate in candidates[:3]],
+            reason="structured_tool_arguments",
+        )
+
     @staticmethod
     def _latest_tool_guidance_assistant_text(context: RunContext) -> str:
         for item in reversed(context.history[-8:]):
@@ -195,13 +248,13 @@ class IntentRouter:
             if role not in {"assistant", "ai"}:
                 continue
             body = (item.content or "").strip()
-            if "如果想使用「" in body:
+            if "如果想使用「" in body or "看起来你想使用「" in body:
                 return body
         return ""
 
     @staticmethod
     def _parse_tool_display_name_from_guidance(assistant_text: str) -> str:
-        match = re.search(r"如果想使用「([^」]+)」", assistant_text)
+        match = re.search(r"(?:如果想使用|看起来你想使用)「([^」]+)」", assistant_text)
         if not match:
             return ""
         return match.group(1).strip()

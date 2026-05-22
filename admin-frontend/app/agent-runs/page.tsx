@@ -247,7 +247,7 @@ export function AgentRunsContent() {
               Agent 运行详情
             </DialogTitle>
             <DialogDescription>
-              {detailLoading ? "加载中..." : detail ? `Run #${detail.run.id}` : "暂无详情"}
+              {detailLoading ? "加载中..." : detail ? `运行 #${detail.run.id}` : "暂无详情"}
             </DialogDescription>
           </DialogHeader>
           {detail ? (

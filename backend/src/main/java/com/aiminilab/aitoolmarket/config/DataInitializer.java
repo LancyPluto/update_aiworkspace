@@ -111,6 +111,46 @@ public class DataInitializer implements CommandLineRunner {
         ensureColumn("billing_usage_logs", "billing_unit", "ALTER TABLE billing_usage_logs ADD COLUMN billing_unit VARCHAR(32) NOT NULL DEFAULT 'TOKEN_PER_M'");
         ensureColumn("billing_usage_logs", "billable_units", "ALTER TABLE billing_usage_logs ADD COLUMN billable_units INT NOT NULL DEFAULT 0");
         ensureColumn("billing_usage_logs", "unit_price", "ALTER TABLE billing_usage_logs ADD COLUMN unit_price DECIMAL(18,8) NOT NULL DEFAULT 0");
+        ensureColumn("agent_messages", "status", "ALTER TABLE agent_messages ADD COLUMN status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE'");
+        ensureColumn("agent_messages", "superseded_at", "ALTER TABLE agent_messages ADD COLUMN superseded_at DATETIME NULL");
+        ensureColumn("agent_runs", "parent_run_id", "ALTER TABLE agent_runs ADD COLUMN parent_run_id BIGINT NULL");
+        ensureColumn("agent_runs", "source_user_message_id", "ALTER TABLE agent_runs ADD COLUMN source_user_message_id BIGINT NULL");
+        ensureColumn("agent_runs", "client_request_id", "ALTER TABLE agent_runs ADD COLUMN client_request_id VARCHAR(64) NULL");
+        ensureTable("tool_workflows", """
+                CREATE TABLE tool_workflows (
+                  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                  tool_id BIGINT NOT NULL,
+                  workflow_name VARCHAR(128) NOT NULL DEFAULT 'default',
+                  nodes_json MEDIUMTEXT NOT NULL,
+                  edges_json MEDIUMTEXT NOT NULL,
+                  groups_json MEDIUMTEXT,
+                  config_json MEDIUMTEXT,
+                  version INT NOT NULL DEFAULT 1,
+                  status VARCHAR(32) NOT NULL DEFAULT 'DRAFT',
+                  created_by BIGINT,
+                  updated_by BIGINT,
+                  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                  UNIQUE KEY uk_tool_workflow (tool_id, workflow_name),
+                  KEY idx_workflow_tool_status (tool_id, status)
+                )
+                """);
+        ensureTable("tool_workflow_versions", """
+                CREATE TABLE tool_workflow_versions (
+                  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                  workflow_id BIGINT NOT NULL,
+                  version INT NOT NULL,
+                  nodes_json MEDIUMTEXT NOT NULL,
+                  edges_json MEDIUMTEXT NOT NULL,
+                  groups_json MEDIUMTEXT,
+                  config_json MEDIUMTEXT,
+                  snapshot_label VARCHAR(255),
+                  created_by BIGINT,
+                  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  UNIQUE KEY uk_workflow_version (workflow_id, version),
+                  KEY idx_workflow_ver_created (workflow_id, created_at)
+                )
+                """);
     }
 
     private void ensureTable(String tableName, String ddl) {

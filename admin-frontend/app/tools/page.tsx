@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
+import Link from "next/link"
 import { AdminLayout } from "@/components/admin/admin-layout"
 import { AdminHeader } from "@/components/admin/header"
 import { Badge } from "@/components/ui/badge"
@@ -45,6 +46,7 @@ import {
   Trash2,
   UploadCloud,
   Video,
+  Workflow,
   type LucideIcon,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -204,6 +206,8 @@ const fallbackProviderCapabilities: Record<string, string[]> = {
   volcengine_images: ["IMAGE_GENERATION"],
   minimax_speech: ["TEXT_TO_SPEECH"],
   siliconflow_speech: ["TEXT_TO_SPEECH"],
+  siliconflow_asr: ["SPEECH_TO_TEXT"],
+  seedance: ["VIDEO_GENERATION", "DIGITAL_HUMAN"],
   worker_video: ["VIDEO_GENERATION"],
 }
 
@@ -451,8 +455,8 @@ function mapTool(tool: ToolSummary): ToolRow {
     rawId: tool.id,
     toolCode: tool.toolCode,
     name: tool.toolName,
-    description: tool.description || "No description",
-    category: tool.categoryName || "Uncategorized",
+    description: tool.description || "暂无描述",
+    category: tool.categoryName || "未分类",
     categoryId: tool.categoryId ?? null,
     toolType: tool.toolType || "TEXT_GENERATION",
     inputModality: tool.inputModality || "TEXT",
@@ -523,7 +527,7 @@ export default function ToolsPage() {
       const templates = await fetchToolTemplates().catch(() => [] as ToolTemplateSummary[])
       setToolTemplates(templates)
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed to load tools")
+      setError(err instanceof ApiError ? err.message : "加载工具失败")
     } finally {
       setLoading(false)
     }
@@ -599,7 +603,7 @@ export default function ToolsPage() {
         : await publishTool(target.rawId)
       setToolList((prev) => prev.map((tool) => (tool.id === id ? mapTool(updated) : tool)))
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : "Failed to update tool status"
+      const message = err instanceof ApiError ? err.message : "更新工具状态失败"
       if (typeof window !== "undefined") window.alert(message)
     } finally {
       setTogglingId(null)
@@ -681,7 +685,7 @@ export default function ToolsPage() {
     setForm({
       toolCode: tool.toolCode,
       toolName: tool.name,
-      description: tool.description === "No description" ? "" : tool.description,
+      description: tool.description === "暂无描述" ? "" : tool.description,
       categoryId: tool.categoryId ? String(tool.categoryId) : "",
       toolType: tool.toolType,
       inputModality: tool.inputModality,
@@ -799,7 +803,7 @@ export default function ToolsPage() {
       const fields = await fetchToolFields(tool.rawId)
       applyLoadedFields(fields)
     } catch (err) {
-      setFieldError(err instanceof ApiError ? err.message : "Failed to load fields")
+      setFieldError(err instanceof ApiError ? err.message : "加载字段配置失败")
       setEditableFields([])
       setFieldJson("[]")
     } finally {
@@ -866,7 +870,7 @@ export default function ToolsPage() {
       applyLoadedFields(saved)
       setFieldDialogOpen(false)
     } catch (err) {
-      setFieldError(err instanceof ApiError ? err.message : "Failed to save fields")
+      setFieldError(err instanceof ApiError ? err.message : "保存字段配置失败")
     } finally {
       setFieldSaving(false)
     }
@@ -876,7 +880,7 @@ export default function ToolsPage() {
     ? `操作失败：${error}`
     : loading
       ? "正在加载工具列表..."
-      : "管理 AI 工具、字段配置和发布状态。"
+      : "管理 AI 工具工作流入口和画布配置。"
 
   return (
     <AdminLayout>
@@ -887,12 +891,16 @@ export default function ToolsPage() {
           <div className="relative max-w-md flex-1">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
-              placeholder="Search tools..."
+              placeholder="搜索工具名称、分类、描述..."
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
               className="pl-9 bg-secondary border-0"
             />
           </div>
+          <Button className="gap-2" onClick={openCreateDialog}>
+            <Plus className="h-4 w-4" />
+            新建工具
+          </Button>
           <Dialog
             open={isAddDialogOpen}
             onOpenChange={(open) => {
@@ -906,12 +914,6 @@ export default function ToolsPage() {
               }
             }}
           >
-            <DialogTrigger asChild>
-              <Button className="gap-2" onClick={openCreateDialog}>
-                <Plus className="h-4 w-4" />
-                新建工具
-              </Button>
-            </DialogTrigger>
             <DialogContent className="max-h-[92vh] overflow-y-auto bg-card border-border max-w-lg">
               <DialogHeader>
                 <DialogTitle>{editingTool ? "编辑 AI 工具" : "新建 AI 工具"}</DialogTitle>
@@ -1216,13 +1218,14 @@ export default function ToolsPage() {
           </Dialog>
         </div>
 
+        {false ? (
         <div className="rounded-2xl border border-border bg-card p-5">
           <div className="mb-4 flex items-center justify-between gap-4">
             <div>
               <h2 className="text-base font-semibold text-card-foreground">已配置模型能力</h2>
               <p className="text-sm text-muted-foreground">确认当前后台可绑定到不同模态工具的模型配置。</p>
             </div>
-            <Badge variant="secondary">{configuredModelRows.length} models</Badge>
+            <Badge variant="secondary">{configuredModelRows.length} 个模型</Badge>
           </div>
           {configuredModelRows.length === 0 ? (
             <p className="text-sm text-muted-foreground">暂无可用模型配置。</p>
@@ -1235,7 +1238,7 @@ export default function ToolsPage() {
                       <p className="truncate font-medium text-card-foreground">{config.displayName || config.modelName}</p>
                       <p className="truncate text-xs text-muted-foreground">{config.provider} · {config.modelName}</p>
                     </div>
-                    {config.isDefault ? <Badge variant="outline">Default</Badge> : null}
+                    {config.isDefault ? <Badge variant="outline">默认</Badge> : null}
                   </div>
                   <div className="mt-3 flex flex-wrap gap-2">
                     {capabilities.length > 0 ? capabilities.map((capability) => (
@@ -1251,6 +1254,7 @@ export default function ToolsPage() {
             </div>
           )}
         </div>
+        ) : null}
 
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {filteredTools.map((tool) => (
@@ -1277,17 +1281,22 @@ export default function ToolsPage() {
                   )}
                 </div>
               ) : null}
-              <div className="flex items-start justify-between">
-                <div className="flex items-center gap-3">
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex min-w-0 items-center gap-3">
                   <div
                     className="flex h-10 w-10 items-center justify-center rounded-xl"
                     style={{ backgroundColor: `${tool.primaryColor || "#3b82f6"}18` }}
                   >
                     <tool.icon className="h-5 w-5" style={{ color: tool.primaryColor || "hsl(var(--primary))" }} />
                   </div>
-                  <div>
-                    <h3 className="font-semibold text-card-foreground">{tool.name}</h3>
-                    <Badge variant="secondary" className="mt-1 text-xs font-normal">{tool.category}</Badge>
+                  <div className="min-w-0">
+                    <h3 className="truncate font-semibold text-card-foreground">{tool.name}</h3>
+                    <div className="mt-1 flex flex-wrap gap-1.5">
+                      <Badge variant="secondary" className="text-xs font-normal">{tool.category}</Badge>
+                      <Badge variant={tool.status ? "outline" : "destructive"} className="text-xs font-normal">
+                        {tool.status ? "已上线" : "已下线"}
+                      </Badge>
+                    </div>
                   </div>
                 </div>
                 <DropdownMenu>
@@ -1299,6 +1308,11 @@ export default function ToolsPage() {
                   <DropdownMenuContent align="end" className="bg-card border-border">
                     <DropdownMenuItem className="gap-2" onClick={() => openEditDialog(tool)}>
                       <Pencil className="h-4 w-4" /> 编辑
+                    </DropdownMenuItem>
+                    <DropdownMenuItem asChild className="gap-2">
+                      <Link href={`/tools/${tool.rawId}/workflow`}>
+                        <Workflow className="h-4 w-4" /> 工作流画布
+                      </Link>
                     </DropdownMenuItem>
                     <DropdownMenuItem className="gap-2" onClick={() => openFieldDialog(tool)}>
                       <FileText className="h-4 w-4" /> 字段配置
@@ -1319,15 +1333,68 @@ export default function ToolsPage() {
 
               <p className="mt-3 line-clamp-2 text-sm text-muted-foreground">{tool.description}</p>
 
+              <div className="mt-4 grid gap-2 border-t border-border pt-4 text-xs">
+                <div className="flex items-center justify-between gap-3 rounded-lg bg-muted/40 px-3 py-2">
+                  <span className="text-muted-foreground">工作流类型</span>
+                  <span className="truncate font-medium text-card-foreground">{optionLabel(toolTypeOptions, tool.toolType)}</span>
+                </div>
+                <div className="flex items-center justify-between gap-3 rounded-lg bg-muted/40 px-3 py-2">
+                  <span className="text-muted-foreground">输入 / 输出</span>
+                  <span className="truncate font-medium text-card-foreground">
+                    {optionLabel(modalityOptions, tool.inputModality)} {"->"} {optionLabel(modalityOptions, tool.outputModality)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-3 rounded-lg bg-muted/40 px-3 py-2">
+                  <span className="text-muted-foreground">执行器</span>
+                  <span className="truncate font-mono text-card-foreground">{tool.executionHandler || "MODEL"}</span>
+                </div>
+                <div className="flex items-center justify-between gap-3 rounded-lg bg-muted/40 px-3 py-2">
+                  <span className="text-muted-foreground">绑定模型</span>
+                  <span className="max-w-[180px] truncate text-right font-medium text-card-foreground">
+                    {tool.modelConfigName || tool.modelName || "默认模型配置"}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-3 rounded-lg bg-muted/40 px-3 py-2">
+                  <span className="text-muted-foreground">消耗算力</span>
+                  <span className="flex items-center gap-1 font-medium text-card-foreground">
+                    <Sparkles className="h-3.5 w-3.5 text-primary" />
+                    {tool.credits}
+                  </span>
+                </div>
+              </div>
+              <Button asChild variant="outline" size="sm" className="mt-4 w-full gap-2">
+                <Link href={`/tools/${tool.rawId}/workflow`}>
+                  <Workflow className="h-4 w-4" />
+                  编辑工作流
+                </Link>
+              </Button>
+
+              <div className="mt-4 flex items-center justify-between border-t border-border pt-4">
+                <div className="text-sm">
+                  <p className="font-medium text-card-foreground">
+                    {tool.status ? "已上线" : "已下线"}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {tool.status ? "用户端可见并可使用" : "用户端暂不可见"}
+                  </p>
+                </div>
+                <Switch
+                  checked={tool.status}
+                  disabled={togglingId === tool.rawId}
+                  onCheckedChange={() => toggleToolStatus(tool.id)}
+                />
+              </div>
+
+              {false ? (<>
               <div className="mt-4 flex items-center justify-between border-t border-border pt-4">
                 <div className="flex items-center gap-4 text-sm">
                   <div className="flex items-center gap-1 text-muted-foreground">
                     <Sparkles className="h-4 w-4" />
-                    <span>{tool.credits} credits</span>
+                    <span>{tool.credits} 算力</span>
                   </div>
                   <div className="text-muted-foreground">{tool.rawStatus}</div>
                 </div>
-                <Switch checked={tool.status} disabled={togglingId === tool.rawId} onCheckedChange={() => toggleToolStatus(tool.id)} />
+                {false ? <Switch checked={tool.status} disabled={togglingId === tool.rawId} onCheckedChange={() => toggleToolStatus(tool.id)} /> : null}
               </div>
               <div className="mt-3 flex flex-wrap gap-2 text-xs">
                 <Badge variant="outline">{optionLabel(toolTypeOptions, tool.toolType)}</Badge>
@@ -1336,8 +1403,15 @@ export default function ToolsPage() {
                 </Badge>
               </div>
               <div className="mt-3 rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
-                Model: {tool.modelConfigName || tool.modelName || "Default model config"}
+                模型：{tool.modelConfigName || tool.modelName || "默认模型配置"}
               </div>
+              <Button asChild variant="outline" size="sm" className="mt-4 w-full gap-2">
+                <Link href={`/tools/${tool.rawId}/workflow`}>
+                  <Workflow className="h-4 w-4" />
+                  打开工作流画布
+                </Link>
+              </Button>
+              </>) : null}
               {tool.welcomeMessage ? (
                 <div className="mt-2 rounded-lg bg-secondary/40 px-3 py-2 text-xs text-muted-foreground">
                   欢迎语：{tool.welcomeMessage}

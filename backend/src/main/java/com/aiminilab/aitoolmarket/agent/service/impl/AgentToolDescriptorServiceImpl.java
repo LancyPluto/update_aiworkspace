@@ -117,6 +117,7 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
             case "moments_copywriting_generator" -> Map.of("keywords", List.of("朋友圈", "微信朋友圈", "私域文案"));
             case "product_title_optimizer" -> Map.of("keywords", List.of("商品标题", "标题优化", "电商标题"));
             case "wechat_longform_generator" -> Map.of("keywords", List.of("公众号", "微信长文", "长文"));
+            case "social_media_comment_insights_agent" -> Map.of("keywords", List.of("社交媒体评论", "小红书评论", "抖音评论", "评论分析", "用户洞察", "产品建议"));
             default -> Map.of("keywords", List.of());
         };
     }

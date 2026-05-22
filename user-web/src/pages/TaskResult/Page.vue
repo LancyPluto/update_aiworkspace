@@ -56,7 +56,7 @@ function buildResultBlocks(content: string, detail?: TaskDetail): ResultBlock[] 
         {
           type: "video",
           title: "最终成片",
-          url: normalizeMediaUrl(videoUrl, detail?.finishedAt ?? detail?.taskId),
+          url: normalizeMediaUrl(videoUrl),
           downloadName: `${detail?.taskNo ?? "video"}-final.mp4`,
         },
       ]
@@ -154,20 +154,13 @@ function sanitizeUrl(value: string): string {
   return value.trim().replace(/[)\]，。,.]+$/g, "")
 }
 
-function normalizeMediaUrl(value: string, cacheKey?: string | number | null): string {
-  const withCacheKey = (url: string) => {
-    if (!cacheKey || url.startsWith("data:")) {
-      return url
-    }
-    const separator = url.includes("?") ? "&" : "?"
-    return `${url}${separator}v=${encodeURIComponent(String(cacheKey))}`
-  }
+function normalizeMediaUrl(value: string): string {
   if (value.startsWith("http://") || value.startsWith("https://") || value.startsWith("data:")) {
-    return withCacheKey(value)
+    return value
   }
   const path = value.startsWith("/") ? value : `/${value}`
   const base = getRequestBaseUrl()
-  return withCacheKey(new URL(path, base.endsWith("/") ? base : `${base}/`).toString())
+  return new URL(path, base.endsWith("/") ? base : `${base}/`).toString()
 }
 </script>
 

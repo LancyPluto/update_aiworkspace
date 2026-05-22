@@ -19,6 +19,7 @@ import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.blankOrNullString;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.cookie;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -87,5 +88,44 @@ class AuthLogoutApiTest {
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"));
+    }
+
+    @Test
+    void logoutWithSessionCookieRevokesTokenAndClearsCookie() throws Exception {
+        Set<String> deniedTokenIds = new HashSet<>();
+        Mockito.doAnswer(invocation -> {
+                    deniedTokenIds.add(invocation.getArgument(0));
+                    return null;
+                })
+                .when(tokenDenylistService)
+                .deny(anyString(), any(Duration.class));
+        Mockito.when(tokenDenylistService.isDenied(anyString()))
+                .thenAnswer(invocation -> deniedTokenIds.contains(invocation.getArgument(0)));
+
+        var loginResult = mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "account": "user1",
+                                  "password": "123456"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andReturn();
+        var sessionCookie = loginResult.getResponse().getCookie("ATM_USER_SESSION");
+
+        mockMvc.perform(get("/api/v1/users/me")
+                        .cookie(sessionCookie))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/v1/auth/logout")
+                        .cookie(sessionCookie))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(cookie().maxAge("ATM_USER_SESSION", 0));
+
+        mockMvc.perform(get("/api/v1/users/me")
+                        .cookie(sessionCookie))
+                .andExpect(status().isUnauthorized());
     }
 }

@@ -38,6 +38,24 @@ services:
       timeout: 5s
       retries: 10
 
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: ai-supermarket-rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USERNAME:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}
+    ports:
+      - "${RABBITMQ_PORT:-5672}:5672"
+      - "${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
   backend:
     image: maven:3.9-eclipse-temurin-17
     container_name: ai-supermarket-backend
@@ -50,6 +68,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
     environment:
       SERVER_PORT: 8080
       MYSQL_HOST: mysql
@@ -61,6 +81,21 @@ services:
       REDIS_PORT: 6379
       REDIS_PASSWORD: ""
       REDIS_DATABASE: 0
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:-guest}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_RABBITMQ_PORT: 5672
+      SPRING_RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:-guest}
+      SPRING_RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
+      TASK_QUEUE_BACKEND: ${TASK_QUEUE_BACKEND:-rabbitmq}
+      RABBITMQ_TASK_EXCHANGE: ${RABBITMQ_TASK_EXCHANGE:-ai.task.exchange}
+      RABBITMQ_TASK_ROUTING_KEY: ${RABBITMQ_TASK_ROUTING_KEY:-tool.normal}
+      RABBITMQ_TASK_QUEUE: ${RABBITMQ_TASK_QUEUE:-ai.tool.normal}
+      RABBITMQ_DEAD_QUEUE: ${RABBITMQ_DEAD_QUEUE:-ai.tool.normal.dead}
+      RABBITMQ_RETRY_QUEUE_PREFIX: ${RABBITMQ_RETRY_QUEUE_PREFIX:-ai.tool.normal.retry}
+      RABBITMQ_RETRY_DELAYS_MS: ${RABBITMQ_RETRY_DELAYS_MS:-5000,30000,120000}
       APP_PRODUCTION_MODE: ${APP_PRODUCTION_MODE:-false}
       JWT_SECRET: ${JWT_SECRET:-local-dev-secret}
       INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-local-internal-token}
@@ -124,13 +159,27 @@ services:
     env_file:
       - ../.env
     depends_on:
-      - backend
-      - redis
+      backend:
+        condition: service_started
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
     environment:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_PASSWORD: ""
       REDIS_DATABASE: 0
+      TASK_QUEUE_BACKEND: ${TASK_QUEUE_BACKEND:-rabbitmq}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:-guest}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
+      RABBITMQ_TASK_QUEUE: ${RABBITMQ_TASK_QUEUE:-ai.tool.normal}
+      RABBITMQ_DEAD_QUEUE: ${RABBITMQ_DEAD_QUEUE:-ai.tool.normal.dead}
+      RABBITMQ_RETRY_QUEUE_PREFIX: ${RABBITMQ_RETRY_QUEUE_PREFIX:-ai.tool.normal.retry}
+      RABBITMQ_RETRY_DELAYS_MS: ${RABBITMQ_RETRY_DELAYS_MS:-5000,30000,120000}
+      RABBITMQ_MAX_RETRIES: ${RABBITMQ_MAX_RETRIES:-3}
       AI_TASK_QUEUE: ${AI_TASK_QUEUE:-ai:task:queue}
       BACKEND_INTERNAL_BASE_URL: http://backend:8080
       INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-local-internal-token}
@@ -139,7 +188,7 @@ services:
     volumes:
       - ../worker:/app
       - generated_media:/data/generated-media
-    command: sh -c "for i in 1 2 3; do apt-get update && apt-get install -y --no-install-recommends --fix-missing fontconfig fonts-noto-cjk && break; echo font install retry $$i; sleep 5; done && fc-match 'Noto Sans CJK SC' && rm -rf /var/lib/apt/lists/* && pip install --no-cache-dir -r requirements.txt && python main.py"
+    command: sh -c "if command -v fc-match >/dev/null 2>&1 && fc-match 'Noto Sans CJK SC' >/dev/null 2>&1; then echo 'fonts ready'; else for i in 1 2 3; do apt-get update && apt-get install -y --no-install-recommends --fix-missing fontconfig fonts-noto-cjk && break; echo font install retry $$i; sleep 5; done; fi; if command -v fc-match >/dev/null 2>&1; then fc-match 'Noto Sans CJK SC' || true; else echo 'fontconfig unavailable, continuing without system font probe'; fi; rm -rf /var/lib/apt/lists/*; if python -c 'import requests, redis, dotenv, imageio_ffmpeg, pika' >/dev/null 2>&1; then echo 'python deps ready'; else pip install --no-cache-dir -r requirements.txt; fi; python main.py"
 
   agent-service:
     image: python:3.12-slim
@@ -171,6 +220,7 @@ services:
 volumes:
   mysql_data:
   redis_data:
+  rabbitmq_data:
   maven_cache:
   generated_media:
   admin_frontend_next:

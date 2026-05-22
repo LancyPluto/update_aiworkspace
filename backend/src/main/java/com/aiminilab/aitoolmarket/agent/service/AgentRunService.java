@@ -8,16 +8,24 @@ import com.aiminilab.aitoolmarket.agent.dto.CompleteAgentToolCallRequest;
 import com.aiminilab.aitoolmarket.agent.dto.ConfirmAgentToolRequest;
 import com.aiminilab.aitoolmarket.agent.dto.CreateAgentMessageRequest;
 import com.aiminilab.aitoolmarket.agent.dto.CreateAgentMessageResponse;
+import com.aiminilab.aitoolmarket.agent.dto.EditRegenerateAgentMessageRequest;
+import com.aiminilab.aitoolmarket.agent.dto.RegenerateAgentRunRequest;
 import com.aiminilab.aitoolmarket.agent.dto.CreateAgentRunEventRequest;
 import com.aiminilab.aitoolmarket.agent.dto.CreateAgentToolCallRequest;
 import com.aiminilab.aitoolmarket.agent.dto.FailAgentRunRequest;
 import com.aiminilab.aitoolmarket.agent.dto.FailAgentToolCallRequest;
 import com.aiminilab.aitoolmarket.agent.dto.InternalAgentRunContextResponse;
+import com.aiminilab.aitoolmarket.agent.dto.UpsertStreamingAgentAnswerRequest;
 import com.aiminilab.aitoolmarket.common.dto.PageResponse;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 public interface AgentRunService {
     CreateAgentMessageResponse sendMessage(Long userId, Long sessionId, CreateAgentMessageRequest request);
+
+    CreateAgentMessageResponse regenerateRun(Long userId, Long runId, RegenerateAgentRunRequest request);
+
+    CreateAgentMessageResponse editRegenerateMessage(Long userId, Long sessionId, Long messageId,
+                                                     EditRegenerateAgentMessageRequest request);
 
     AgentRunResponse detail(Long userId, Long runId);
 
@@ -40,6 +48,8 @@ public interface AgentRunService {
     AgentToolCallResponse failToolCall(Long toolCallId, FailAgentToolCallRequest request);
 
     AgentRunResponse completeRun(Long runId, CompleteAgentRunRequest request);
+
+    AgentRunResponse upsertStreamingAnswer(Long runId, UpsertStreamingAgentAnswerRequest request);
 
     AgentRunResponse failRun(Long runId, FailAgentRunRequest request);
 }

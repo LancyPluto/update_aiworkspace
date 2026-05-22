@@ -31,7 +31,12 @@ from app.runtime.subagent_profiles import default_subagent_profiles, profiles_to
 from app.runtime.workspace_files import WorkspaceFileContext, build_workspace_file_context
 from app.security.prompt_guard import PromptGuard
 from app.tools.backend_tool import BackendToolBridge
-from app.tools.memory_tool import MEMORY_TOOL_SYSTEM_PROMPT, MemoryTool, _format_memory_tool_definitions
+from app.tools.memory_tool import (
+    MEMORY_TOOL_SYSTEM_PROMPT,
+    MemoryTool,
+    _contains_memory_promise,
+    _format_memory_tool_definitions,
+)
 from app.tools.missing_argument_hints import format_missing_tool_arguments_message
 from app.tools.registry import ToolRegistry
 from langchain_core.callbacks import AsyncCallbackHandler
@@ -54,13 +59,14 @@ class DeepAgentsRuntimeEngine:
         budget_guard: BudgetGuard | None = None,
         prompt_guard: PromptGuard | None = None,
         dependency_loader: Callable[[], ModuleType | None] | None = None,
-        deep_agents_enabled: bool = False,
+        deep_agents_enabled: bool | None = None,
     ) -> None:
         self.backend_client = backend_client
         self.backend = backend_client
         self.model_client = model_client
         self.model = model_client
-        self.deep_agents_enabled = deep_agents_enabled
+        self._explicit_deep_agents_flag = deep_agents_enabled is not None
+        self.deep_agents_enabled = bool(deep_agents_enabled)
         self.intent_router = intent_router or IntentRouter()
         self.budget_guard = budget_guard or BudgetGuard(
             max_model_calls=settings.agent_max_model_calls,
@@ -73,20 +79,29 @@ class DeepAgentsRuntimeEngine:
         self.tool_bridge = BackendToolBridge(backend_client, model_client=model_client)
 
     async def run(self, context: RunContext) -> None:
+        if self._explicit_deep_agents_flag and not self.deep_agents_enabled:
+            await self._fail_run(context.runId, "DEEP_AGENTS_DISABLED", "Deep Agents runtime is disabled")
+            return
+
         state = {
             "run_id": context.runId,
             "context": context,
             "budget": BudgetState(credit_budget=context.creditBudget),
         }
-        await self.backend.append_event(
-            context.runId,
-            RunEventCreate(eventType=RUN_STARTED, eventText="Agent 已开始处理", eventJson={"runId": context.runId}),
-        )
+        if not self.deep_agents_enabled:
+            await self.backend.append_event(
+                context.runId,
+                RunEventCreate(eventType=RUN_STARTED, eventText="Agent 已开始处理", eventJson={"runId": context.runId}),
+            )
 
         guard_result = self.prompt_guard.inspect(context.message)
         if guard_result.rejected:
             await self._emit_answer_events(context.runId, guard_result.message or "")
             await self._complete_run(context, guard_result.message or "", intent=Intent.SECURITY_REJECTED.value)
+            return
+
+        if self.deep_agents_enabled:
+            await self._run_deep_agents_or_chat(context, None)
             return
 
         # 1. Classify intent
@@ -97,11 +112,15 @@ class DeepAgentsRuntimeEngine:
         intent_enum = intent.intent
 
         if intent_enum == Intent.FILE_ANALYSIS:
+            if self.deep_agents_enabled:
+                await self._run_deep_agents_or_chat(context, intent)
+                return
             try:
                 answer = await self._run_chat(context, intent)
             except BudgetExceeded as exception:
                 await self._fail_run(context.runId, exception.error_code, exception.message)
                 return
+            await self._maybe_save_memory(context, answer)
             await self._complete_run(context, answer, intent=intent_enum.value)
             return
 
@@ -128,11 +147,15 @@ class DeepAgentsRuntimeEngine:
             return
 
         if intent_enum == Intent.GENERAL_CHAT:
+            if self.deep_agents_enabled:
+                await self._run_deep_agents_or_chat(context, intent)
+                return
             try:
                 answer = await self._run_chat(context, intent)
             except BudgetExceeded as exception:
                 await self._fail_run(context.runId, exception.error_code, exception.message)
                 return
+            await self._maybe_save_memory(context, answer)
             await self._complete_run(context, answer, intent=intent_enum.value)
             return
 
@@ -179,6 +202,9 @@ class DeepAgentsRuntimeEngine:
         if module is None:
             raise RuntimeError("deepagents package is not installed; enable the preview runtime only after installing it")
         return module
+
+    def ensure_available(self) -> None:
+        self._get_available_module()
 
     @staticmethod
     def _load_deepagents() -> ModuleType | None:
@@ -416,7 +442,23 @@ class DeepAgentsRuntimeEngine:
             messages.append(ChatMessage(role="system", content=file_context))
 
         memory_tool = None
-        if context.workspaceId and settings.agent_memory_auto_save_enabled:
+        recap_question = _looks_like_session_recap_question(context.message)
+        if recap_question:
+            summary = _format_recent_session_summary(context)
+            if summary:
+                messages.append(ChatMessage(role="system", content=summary))
+            messages.append(
+                ChatMessage(
+                    role="system",
+                    content=(
+                        "用户正在询问本会话里你已经帮他做过什么。"
+                        "请直接根据上方「本轮会话近期记录」、记忆快照与对话历史作答，列出已完成的事项。"
+                        "禁止只说「让我查一下记忆/记录」却不给出具体结果。"
+                        "本回合不要调用 memory_add / memory_replace / memory_remove。"
+                    ),
+                )
+            )
+        elif context.workspaceId and settings.agent_memory_auto_save_enabled:
             memory_tool = MemoryTool(self.backend, context.workspaceId, context.userId, run_id=context.runId)
             messages.append(ChatMessage(role="system", content=MEMORY_TOOL_SYSTEM_PROMPT))
 
@@ -473,28 +515,36 @@ class DeepAgentsRuntimeEngine:
 
         workspace_memory_context = _format_workspace_memory_context(workspace_memory_items)
 
-        # Emit frozen event for deep agents path
-        await self.backend.append_event(
-            context.runId,
-            RunEventCreate(
-                eventType=MEMORY_CONTEXT_FROZEN,
-                eventJson={
-                    "frozen": bool(workspace_memory_context),
-                    "count": len(workspace_memory_items),
-                },
-            ),
-        )
+        # Emit frozen event only when there is memory to expose in the trace.
+        if workspace_memory_context:
+            await self.backend.append_event(
+                context.runId,
+                RunEventCreate(
+                    eventType=MEMORY_CONTEXT_FROZEN,
+                    eventJson={
+                        "frozen": True,
+                        "count": len(workspace_memory_items),
+                    },
+                ),
+            )
 
-        result = await _invoke_agent(
+        answer, streamed = await _invoke_agent(
             agent,
             {"messages": _messages(context, workspace_memory_context, workspace_file_context.prompt_context)},
             config={"callbacks": [SubagentTraceCallbackHandler(context.runId, self.backend)]},
+            run_id=context.runId,
+            backend_client=self.backend,
         )
-        answer = _extract_final_answer(result)
         artifact = _parse_artifact_directive(answer)
         if artifact is not None:
             await self._create_artifact(context.runId, artifact)
-        await self._emit_answer_events(context.runId, answer)
+        if streamed:
+            await self.backend.append_event(
+                context.runId,
+                RunEventCreate(eventType=MESSAGE_COMPLETED, eventText=answer, eventJson={"content": answer}),
+            )
+        else:
+            await self._emit_answer_events(context.runId, answer)
         await self._complete_run(context, answer, intent=DEEP_AGENTS_INTENT)
         await self._emit_memory_candidate(context.runId, answer, artifact)
 
@@ -504,8 +554,12 @@ class DeepAgentsRuntimeEngine:
         tool_arguments = result.get("arguments") if isinstance(result, dict) else {}
         tool_data = result.get("data") if isinstance(result, dict) else {}
         content_text = tool_data.get("contentText", "") if isinstance(tool_data, dict) else ""
+        # 工具已成功产出正文时直接回显，避免二次 LLM 总结/记忆提示把正文换成「已生成」等空话。
+        if isinstance(content_text, str) and content_text.strip():
+            await self._emit_answer_events(context.runId, content_text)
+            return content_text
         messages_list = [
-            ChatMessage(role="system", content="Summarize the tool result for the user."),
+            ChatMessage(role="system", content="请直接展示工具返回的结果，不要添加额外的总结说明。"),
         ]
         workspace_memory_context = await self._fetch_workspace_memory_context(context)
         if workspace_memory_context:
@@ -528,7 +582,13 @@ class DeepAgentsRuntimeEngine:
             )
         else:
             messages_list.append(ChatMessage(role="user", content=f"User request: {context.message}\nTool result: {result}"))
-        return await self._stream_model_answer(context.runId, messages_list, budget, memory_tool=memory_tool)
+        return await self._stream_model_answer(
+            context.runId,
+            messages_list,
+            budget,
+            memory_tool=memory_tool,
+            fallback_answer=content_text,
+        )
 
     # --- Common helpers ---
 
@@ -536,6 +596,7 @@ class DeepAgentsRuntimeEngine:
         self, run_id: int, messages_list: list[ChatMessage],
         budget: BudgetState | None = None,
         memory_tool: MemoryTool | None = None,
+        fallback_answer: str | None = None,
     ) -> str:
         if budget is not None:
             self.budget_guard.reserve_model_call(budget)
@@ -545,16 +606,32 @@ class DeepAgentsRuntimeEngine:
         if memory_tool is not None and settings.agent_memory_auto_save_enabled:
             extra_kwargs["tools"] = _format_memory_tool_definitions()
         if stream is None:
-            answer = await self.model.chat(messages_list, tools=extra_kwargs.get("tools"))
+            try:
+                answer = await self.model.chat(messages_list, tools=extra_kwargs.get("tools"))
+            except TypeError:
+                answer = await self.model.chat(messages_list)
+            if not answer.strip() and fallback_answer:
+                answer = fallback_answer
             await self._emit_answer_events(run_id, answer)
             return answer
-        async for chunk in self.model.chat_stream(messages_list, tools=extra_kwargs.get("tools")):
+        try:
+            stream_iter = self.model.chat_stream(messages_list, tools=extra_kwargs.get("tools"))
+        except TypeError:
+            stream_iter = self.model.chat_stream(messages_list)
+        async for chunk in stream_iter:
             parts.append(chunk)
             await self.backend.append_event(
                 run_id,
                 RunEventCreate(eventType=MESSAGE_DELTA, eventText=chunk, eventJson={"delta": chunk}),
             )
         answer = "".join(parts)
+        if not answer.strip() and fallback_answer:
+            answer = fallback_answer
+            for chunk in _chunks(answer, 32):
+                await self.backend.append_event(
+                    run_id,
+                    RunEventCreate(eventType=MESSAGE_DELTA, eventText=chunk, eventJson={"delta": chunk}),
+                )
         await self.backend.append_event(
             run_id,
             RunEventCreate(eventType=MESSAGE_COMPLETED, eventText=answer, eventJson={"content": answer}),
@@ -573,12 +650,15 @@ class DeepAgentsRuntimeEngine:
         )
 
     async def _complete_run(self, context: RunContext, final_answer: str, intent: str = Intent.GENERAL_CHAT.value) -> None:
+        normalized_answer = (final_answer or "").strip()
+        if not normalized_answer:
+            normalized_answer = "抱歉，本次未能生成有效回复，请换个说法或补充更多信息后再试。"
         consumed_credits = self.budget_guard.default_consumed_credits
         model_name = getattr(self.model, "model_name", settings.model_name)
         await self.backend.complete_run(
             context.runId,
             RunComplete(
-                finalAnswer=final_answer,
+                finalAnswer=normalized_answer,
                 intent=intent,
                 modelProviderCode="agent-service",
                 modelName=model_name,
@@ -663,8 +743,51 @@ class DeepAgentsRuntimeEngine:
             ),
         )
 
+    async def _maybe_save_memory(self, context: RunContext, answer: str) -> None:
+        """兜底：当 LLM 口头承诺'记住了'但未调用 memory_add 时，自动提取并写入。"""
+        if not context.workspaceId or not settings.agent_memory_auto_save_enabled:
+            return
+        if not _contains_memory_promise(answer):
+            return
+        text = context.message.strip()
+        if not text or len(text) < 4:
+            return
+        # 提取用户消息中的有效信息作为记忆内容
+        from app.tools.memory_tool import MemoryTool as MT
+        tool = MT(self.backend, context.workspaceId, context.userId, run_id=context.runId)
+        await tool.add_memory(
+            memory_type="project_knowledge",
+            title=text[:60],
+            content=text,
+            source_run_id=context.runId,
+        )
 
-async def _invoke_agent(agent, payload: dict, config: dict | None = None):
+
+async def _invoke_agent(
+    agent,
+    payload: dict,
+    config: dict | None = None,
+    *,
+    run_id: int | None = None,
+    backend_client=None,
+) -> tuple[str, bool]:
+    if hasattr(agent, "astream_events"):
+        final_result = None
+        async for event in agent.astream_events(payload, config=config, version="v2"):
+            if not isinstance(event, dict):
+                continue
+            if event.get("event") == "on_chat_model_stream":
+                chunk = event.get("data", {}).get("chunk")
+                content = _raw_message_content(chunk) or _message_content(chunk)
+                if content and run_id is not None and backend_client is not None:
+                    await backend_client.append_event(
+                        run_id,
+                        RunEventCreate(eventType=MESSAGE_DELTA, eventText=content, eventJson={"delta": content}),
+                    )
+            elif event.get("event") == "on_chain_end":
+                final_result = event.get("data", {}).get("output")
+        return _extract_final_answer(final_result), True
+
     if hasattr(agent, "ainvoke"):
         result = agent.ainvoke(payload, config=config)
     elif hasattr(agent, "invoke"):
@@ -672,8 +795,8 @@ async def _invoke_agent(agent, payload: dict, config: dict | None = None):
     else:
         raise RuntimeError("deepagents agent does not expose invoke or ainvoke")
     if inspect.isawaitable(result):
-        return await result
-    return result
+        result = await result
+    return _extract_final_answer(result), False
 
 
 class SubagentTraceCallbackHandler(AsyncCallbackHandler):
@@ -864,8 +987,45 @@ def _message_content(message) -> str:
     return ""
 
 
+def _raw_message_content(message) -> str:
+    if isinstance(message, dict):
+        content = message.get("content")
+    else:
+        content = getattr(message, "content", None)
+    return content if isinstance(content, str) else ""
+
+
 def _chunks(value: str, size: int) -> list[str]:
     return [value[index : index + size] for index in range(0, len(value), size)] or [""]
+
+
+def _looks_like_session_recap_question(message: str) -> bool:
+    return IntentRouter._looks_like_session_recap_question(message)
+
+
+def _format_recent_session_summary(context: RunContext) -> str:
+    lines: list[str] = []
+    for item in context.history[-24:]:
+        role = (item.role or "").strip().lower()
+        content = (item.content or "").strip()
+        if not content:
+            continue
+        if role in {"user", "human"}:
+            preview = re.sub(r"\s+", " ", content)[:140]
+            lines.append(f"- 用户：{preview}")
+            continue
+        if role not in {"assistant", "ai"}:
+            continue
+        if "如果想使用「" in content and len(content) < 500:
+            tool_match = re.search(r"如果想使用「([^」]+)」", content)
+            tool_name = tool_match.group(1) if tool_match else "某工具"
+            lines.append(f"- 助手：引导你补充「{tool_name}」所需参数")
+        elif len(content) >= 80:
+            preview = re.sub(r"\s+", " ", content)[:180]
+            lines.append(f"- 助手：已产出内容（节选）{preview}…")
+    if not lines:
+        return ""
+    return "本轮会话近期记录（供直接回答「做过什么」）：\n" + "\n".join(lines[-14:])
 
 
 def _format_file_context(context: RunContext) -> str:
@@ -893,7 +1053,7 @@ def _format_workspace_memory_context(items: list[WorkspaceMemoryItem]) -> str:
     if not active_items:
         return ""
 
-    sections = []
+    sections = ["Workspace memory"]
     profiles = [it for it in active_items if it.memoryType == "user_profile"]
     knowledge = [it for it in active_items if it.memoryType == "project_knowledge"]
     others = [it for it in active_items if it.memoryType not in ("user_profile", "project_knowledge")]

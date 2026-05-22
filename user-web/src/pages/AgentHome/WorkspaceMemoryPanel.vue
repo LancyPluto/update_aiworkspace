@@ -25,10 +25,10 @@ const draft = ref<UpdateAgentWorkspaceMemoryRequest>({
   content: "",
 })
 
-const canLoad = computed(() => Boolean(props.workspaceId && props.token))
+const canLoad = computed(() => Boolean(props.workspaceId))
 
 watch(
-  () => [props.workspaceId, props.token] as const,
+  () => props.workspaceId,
   () => {
     void loadMemory()
   },
@@ -85,7 +85,7 @@ async function saveMemory(item: AgentWorkspaceMemoryItem) {
 
 async function deleteMemory(item: AgentWorkspaceMemoryItem) {
   if (!props.workspaceId || deletingId.value) return
-  if (!window.confirm(`Delete "${item.title}"?`)) return
+  if (!window.confirm(`确认删除「${item.title}」吗？`)) return
 
   deletingId.value = item.id
   errorMessage.value = null
@@ -101,7 +101,7 @@ async function deleteMemory(item: AgentWorkspaceMemoryItem) {
 }
 
 function formatError(error: unknown) {
-  return error instanceof Error ? error.message : "Workspace memory request failed"
+  return error instanceof Error ? error.message : "工作区记忆请求失败"
 }
 </script>
 
@@ -109,14 +109,14 @@ function formatError(error: unknown) {
   <aside class="workspace-memory-panel">
     <header class="panel-header">
       <div>
-        <p class="eyebrow">Workspace</p>
-        <h2>Memory</h2>
+        <p class="eyebrow">工作区</p>
+        <h2>记忆</h2>
       </div>
       <button 
       type="button" 
       class="icon-btn" 
       :disabled="loading || !canLoad" 
-      title="Refresh" 
+      title="刷新"
       @click="loadMemory">
         <Loader2 v-if="loading" class="h-4 w-4 animate-spin" />
         <RefreshCcw v-else class="h-4 w-4" />
@@ -130,21 +130,21 @@ function formatError(error: unknown) {
     </div>
 
     <div v-else-if="items.length === 0" class="panel-state">
-      No workspace memory yet
+      暂无工作区记忆
     </div>
 
     <div v-else class="memory-list">
       <article v-for="item in items" :key="item.id" class="memory-item">
         <template v-if="editingId === item.id">
-          <input v-model.trim="draft.memoryType" class="field compact" maxlength="32" aria-label="Memory type" />
-          <input v-model.trim="draft.title" class="field" maxlength="160" aria-label="Memory title" />
-          <textarea v-model.trim="draft.content" class="field content-field" rows="4" aria-label="Memory content" />
+          <input v-model.trim="draft.memoryType" class="field compact" maxlength="32" aria-label="记忆类型" />
+          <input v-model.trim="draft.title" class="field" maxlength="160" aria-label="记忆标题" />
+          <textarea v-model.trim="draft.content" class="field content-field" rows="4" aria-label="记忆内容" />
           <div class="item-actions">
-            <button type="button" class="icon-btn" :disabled="savingId === item.id" title="Save" @click="saveMemory(item)">
+            <button type="button" class="icon-btn" :disabled="savingId === item.id" title="保存" @click="saveMemory(item)">
               <Loader2 v-if="savingId === item.id" class="h-4 w-4 animate-spin" />
               <Save v-else class="h-4 w-4" />
             </button>
-            <button type="button" class="icon-btn" title="Cancel" @click="cancelEdit">
+            <button type="button" class="icon-btn" title="取消" @click="cancelEdit">
               <X class="h-4 w-4" />
             </button>
           </div>
@@ -158,14 +158,14 @@ function formatError(error: unknown) {
           <h3>{{ item.title }}</h3>
           <p>{{ item.content }}</p>
           <div class="item-actions">
-            <button type="button" class="icon-btn" title="Edit" @click="startEdit(item)">
+            <button type="button" class="icon-btn" title="编辑" @click="startEdit(item)">
               <Edit3 class="h-4 w-4" />
             </button>
             <button
               type="button"
               class="icon-btn danger"
               :disabled="deletingId === item.id"
-              title="Delete"
+              title="删除"
               @click="deleteMemory(item)"
             >
               <Loader2 v-if="deletingId === item.id" class="h-4 w-4 animate-spin" />

@@ -88,6 +88,17 @@ providers:
     workerReady: true
     description: SiliconFlow /v1/audio/speech for standalone TTS tools.
 
+  - code: siliconflow_asr
+    label: SiliconFlow ASR
+    capabilities:
+      - SPEECH_TO_TEXT
+    defaultBaseUrl: https://api.siliconflow.cn
+    defaultModel: TeleAI/TeleSpeechASR
+    billingDefault: PER_CALL
+    testStrategy: accept_only
+    workerReady: true
+    description: SiliconFlow speech recognition model reserved for subtitle alignment and speech-to-text workflows.
+
   - code: seedance
     label: Seedance video
     capabilities:
@@ -99,6 +110,18 @@ providers:
     testStrategy: accept_only
     workerReady: true
     description: Seedance image-to-video generation used by digital-human and comic-drama pipelines.
+
+  - code: infinitetalk
+    label: InfiniteTalk digital human
+    capabilities:
+      - VIDEO_GENERATION
+      - DIGITAL_HUMAN
+    defaultBaseUrl: http://host.docker.internal:7860
+    defaultModel: MeiGen-AI/InfiniteTalk
+    billingDefault: PER_CALL
+    testStrategy: accept_only
+    workerReady: true
+    description: MeiGen-AI InfiniteTalk audio-driven avatar/video dubbing service. Configure a deployed HTTP endpoint as base URL.
 
   - code: kling_video
     label: Kling video/images

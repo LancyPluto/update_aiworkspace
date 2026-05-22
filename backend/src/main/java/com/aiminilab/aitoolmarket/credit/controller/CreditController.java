@@ -5,20 +5,32 @@ import com.aiminilab.aitoolmarket.common.dto.ApiResponse;
 import com.aiminilab.aitoolmarket.common.dto.PageResponse;
 import com.aiminilab.aitoolmarket.credit.dto.CreditAccountResponse;
 import com.aiminilab.aitoolmarket.credit.dto.CreditLogResponse;
+import com.aiminilab.aitoolmarket.credit.dto.CreateRechargeOrderRequest;
+import com.aiminilab.aitoolmarket.credit.dto.RechargeOrderResponse;
+import com.aiminilab.aitoolmarket.credit.dto.RechargePackageResponse;
+import com.aiminilab.aitoolmarket.credit.service.CreditRechargeService;
 import com.aiminilab.aitoolmarket.credit.service.CreditService;
+import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/v1/credits")
 public class CreditController {
 
     private final CreditService creditService;
+    private final CreditRechargeService creditRechargeService;
 
-    public CreditController(CreditService creditService) {
+    public CreditController(CreditService creditService, CreditRechargeService creditRechargeService) {
         this.creditService = creditService;
+        this.creditRechargeService = creditRechargeService;
     }
 
     @GetMapping("/account")
@@ -31,5 +43,25 @@ public class CreditController {
                                                              @RequestParam(required = false) Integer pageNo,
                                                              @RequestParam(required = false) Integer pageSize) {
         return ApiResponse.success(creditService.logs(AuthContext.get().userId(), logType, pageNo, pageSize));
+    }
+
+    @GetMapping("/recharge-packages")
+    public ApiResponse<List<RechargePackageResponse>> rechargePackages() {
+        return ApiResponse.success(creditRechargeService.packages());
+    }
+
+    @PostMapping("/recharge-orders")
+    public ApiResponse<RechargeOrderResponse> createRechargeOrder(@Valid @RequestBody CreateRechargeOrderRequest request) {
+        return ApiResponse.success(creditRechargeService.createOrder(AuthContext.get().userId(), request));
+    }
+
+    @GetMapping("/recharge-orders/{orderId}")
+    public ApiResponse<RechargeOrderResponse> rechargeOrder(@PathVariable Long orderId) {
+        return ApiResponse.success(creditRechargeService.getOrder(AuthContext.get().userId(), orderId));
+    }
+
+    @PostMapping("/recharge-orders/{orderId}/mock-pay-success")
+    public ApiResponse<RechargeOrderResponse> mockPaySuccess(@PathVariable Long orderId) {
+        return ApiResponse.success(creditRechargeService.mockPaySuccess(AuthContext.get().userId(), orderId));
     }
 }
