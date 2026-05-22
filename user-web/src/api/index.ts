@@ -3,6 +3,16 @@ export { login, logout, register, sendSmsCode, smsLogin, smsRegister } from "./a
 export { getCurrentUser } from "./userApi"
 export { fetchToolCategories, fetchTools, searchTools, fetchToolByCode } from "./toolApi"
 export {
+  fetchEnabledAITools,
+  fetchAIToolById,
+  fetchChatSessions,
+  createChatSession,
+  deleteChatSession,
+  fetchChatMessages,
+  sendChatMessage,
+  uploadChatFile,
+} from "./aiToolApi"
+export {
   cancelAgentRun,
   confirmAgentTool,
   createAgentSession,

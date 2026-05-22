@@ -3,6 +3,7 @@ package com.aiminilab.aitoolmarket.tool.service;
 import com.aiminilab.aitoolmarket.common.dto.PageResponse;
 import com.aiminilab.aitoolmarket.tool.dto.FieldSchemaAdminResponse;
 import com.aiminilab.aitoolmarket.tool.dto.ToolCategoryResponse;
+import com.aiminilab.aitoolmarket.tool.dto.ToolCoverUploadResponse;
 import com.aiminilab.aitoolmarket.tool.dto.ToolDetailResponse;
 import com.aiminilab.aitoolmarket.tool.dto.ToolFieldResponse;
 import com.aiminilab.aitoolmarket.tool.dto.ToolSummaryResponse;
@@ -19,6 +20,7 @@ import com.aiminilab.aitoolmarket.tool.dto.UpsertFieldSchemaRequest;
 import com.aiminilab.aitoolmarket.tool.dto.UpsertToolCategoryRequest;
 import com.aiminilab.aitoolmarket.tool.dto.ApplyToolTemplateRequest;
 import com.aiminilab.aitoolmarket.tool.dto.UpsertToolRequest;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 
@@ -43,6 +45,8 @@ public interface ToolService {
     ToolDetailResponse adminToolDetail(Long toolId);
 
     ToolSummaryResponse createTool(UpsertToolRequest request, Long operatorId);
+
+    ToolCoverUploadResponse uploadToolCover(MultipartFile file, String toolName, String toolCode, String modelName);
 
     void applyTemplate(Long toolId, ApplyToolTemplateRequest request, Long operatorId);
 

@@ -9,10 +9,14 @@ const LOCAL_BACKEND_URL = 'http://127.0.0.1:8080'
 export class ApiError extends Error {
   code: string
   status?: number
-  constructor(message: string, code: string, status?: number) {
+  traceId?: string | null
+  responseBody?: unknown
+  constructor(message: string, code: string, status?: number, traceId?: string | null, responseBody?: unknown) {
     super(message)
     this.code = code
     this.status = status
+    this.traceId = traceId
+    this.responseBody = responseBody
   }
 }
 
@@ -89,7 +93,7 @@ function buildUrl(path: string, query?: RequestOptions['query']): string {
   return qs ? `${url}?${qs}` : url
 }
 
-function getBaseUrl(): string {
+export function getBaseUrl(): string {
   if (BASE_URL) return BASE_URL
   if (typeof window === 'undefined') return ''
   const { hostname, port } = window.location
@@ -144,11 +148,11 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   if (!response.ok || !payload) {
     const message = payload?.message || `请求失败 (${response.status})`
     const code = payload?.code || 'HTTP_ERROR'
-    throw new ApiError(message, code, response.status)
+    throw new ApiError(message, code, response.status, payload?.traceId || payload?.requestId || null, payload)
   }
 
   if (payload.code && payload.code !== 'SUCCESS') {
-    throw new ApiError(payload.message || payload.code, payload.code)
+    throw new ApiError(payload.message || payload.code, payload.code, response.status, payload.traceId || payload.requestId || null, payload)
   }
 
   return payload.data
@@ -169,5 +173,39 @@ export const http = {
   },
   delete<T>(path: string) {
     return request<T>(path, { method: 'DELETE' })
+  },
+  async postForm<T>(path: string, formData: FormData): Promise<T> {
+    const headers: Record<string, string> = {
+      Accept: 'application/json',
+    }
+    const token = getToken()
+    if (token) {
+      headers.Authorization = `Bearer ${token}`
+    }
+
+    const response = await fetch(buildUrl(path), {
+      method: 'POST',
+      headers,
+      body: formData,
+    })
+
+    let payload: ApiResponse<T> | null = null
+    try {
+      payload = (await response.json()) as ApiResponse<T>
+    } catch {
+      // ignore JSON parse error
+    }
+
+    if (!response.ok || !payload) {
+      const message = payload?.message || `请求失败 (${response.status})`
+      const code = payload?.code || 'HTTP_ERROR'
+      throw new ApiError(message, code, response.status, payload?.traceId || payload?.requestId || null, payload)
+    }
+
+    if (payload.code && payload.code !== 'SUCCESS') {
+      throw new ApiError(payload.message || payload.code, payload.code, response.status, payload.traceId || payload.requestId || null, payload)
+    }
+
+    return payload.data
   },
 }

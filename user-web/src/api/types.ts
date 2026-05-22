@@ -148,6 +148,7 @@ export interface ToolSummary {
 export interface ToolFieldOption {
   label: string
   value: string
+  promptPrefix?: string
 }
 
 /** 动态字段定义 */
@@ -157,6 +158,7 @@ export interface ToolField {
   fieldType: "text" | "textarea" | "select" | "number" | "radio" | "checkbox" | "slider" | "image" | "file"
   placeholder?: string | null
   options?: Array<ToolFieldOption | string> | null
+  optionsJson?: string | null
   required: boolean
   sortOrder: number
 }

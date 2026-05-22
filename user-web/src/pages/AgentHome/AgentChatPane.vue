@@ -1021,7 +1021,6 @@ defineExpose({
   background: var(--card);
   padding: 12px 14px;
   line-height: 1.7;
-  white-space: pre-wrap;
 }
 
 .agent-message.run-progress .bubble {

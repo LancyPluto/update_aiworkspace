@@ -2,6 +2,7 @@ export interface ApiResponse<T> {
   code: string
   message: string
   data: T
+  traceId?: string | null
   requestId: string | null
 }
 
@@ -75,6 +76,13 @@ export interface UpsertToolPayload {
   estimatedCreditCost: number
   modelConfigId?: number | null
   templateCode?: string
+}
+
+export interface ToolCoverUploadResult {
+  url: string
+  filename: string
+  contentType: string
+  fileSize: number
 }
 
 export interface PromptRecord {
@@ -257,6 +265,7 @@ export interface AgentModelConfig {
   modelName: string
   baseUrl?: string | null
   apiKeyMasked?: string | null
+  extraAuthJsonMasked?: string | null
   minimaxGroupId?: string | null
   consoleUrl?: string | null
   balanceUrl?: string | null
@@ -317,6 +326,7 @@ export interface AgentModelConfigPayload {
   modelName: string
   baseUrl?: string
   apiKey?: string
+  extraAuthJson?: string
   minimaxGroupId?: string
   consoleUrl?: string
   balanceUrl?: string

@@ -3,6 +3,7 @@ import type {
   PageResponse,
   FieldSchemaAdmin,
   ToolCategory,
+  ToolCoverUploadResult,
   ToolField,
   ToolFieldPayload,
   ToolSummary,
@@ -41,6 +42,20 @@ export function createTool(payload: UpsertToolPayload) {
 
 export function updateTool(toolId: number, payload: UpsertToolPayload) {
   return http.put<ToolSummary>(`/api/admin/v1/tools/${toolId}`, payload)
+}
+
+export function uploadToolCover(payload: {
+  file: File
+  toolName?: string
+  toolCode?: string
+  modelName?: string
+}) {
+  const formData = new FormData()
+  formData.append('file', payload.file)
+  if (payload.toolName) formData.append('toolName', payload.toolName)
+  if (payload.toolCode) formData.append('toolCode', payload.toolCode)
+  if (payload.modelName) formData.append('modelName', payload.modelName)
+  return http.postForm<ToolCoverUploadResult>('/api/admin/v1/tools/cover-upload', formData)
 }
 
 export function deleteTool(toolId: number) {

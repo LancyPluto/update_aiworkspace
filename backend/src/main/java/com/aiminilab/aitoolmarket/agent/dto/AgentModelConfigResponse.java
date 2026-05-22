@@ -16,6 +16,7 @@ public record AgentModelConfigResponse(
         String modelName,
         String baseUrl,
         String apiKeyMasked,
+        String extraAuthJsonMasked,
         String minimaxGroupId,
         String consoleUrl,
         String balanceUrl,
@@ -46,6 +47,7 @@ public record AgentModelConfigResponse(
                 config.getModelName(),
                 config.getBaseUrl(),
                 mask(config.getApiKey()),
+                maskJsonSecret(config.getExtraAuthJson()),
                 config.getMinimaxGroupId(),
                 config.getConsoleUrl(),
                 config.getBalanceUrl(),
@@ -73,5 +75,12 @@ public record AgentModelConfigResponse(
             return "****";
         }
         return value.substring(0, 2) + "***" + value.substring(value.length() - 2);
+    }
+
+    private static String maskJsonSecret(String value) {
+        if (value == null || value.isBlank()) {
+            return "";
+        }
+        return "********";
     }
 }
