@@ -11,8 +11,9 @@ import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { ApiError } from "@/lib/api/http"
+import { downloadConfigBundle, exportConfigBundle, importConfigBundle, readConfigBundleFile } from "@/lib/api/config-bundles"
 import { fetchSettings, updateSettings } from "@/lib/api/settings"
-import { CheckCircle, Database, RefreshCw, Save, Server, Settings2, Shield } from "lucide-react"
+import { CheckCircle, Database, Download, RefreshCw, Save, Server, Settings2, Shield, Upload } from "lucide-react"
 
 interface SettingsForm {
   platformName: string
@@ -51,8 +52,11 @@ export default function SettingsPage() {
   const [form, setForm] = useState<SettingsForm>(defaults)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [importing, setImporting] = useState(false)
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+  const [modelRefreshKey, setModelRefreshKey] = useState(0)
 
   async function loadSettings() {
     setLoading(true)
@@ -89,6 +93,7 @@ export default function SettingsPage() {
     setSaving(true)
     setSaved(false)
     setError(null)
+    setNotice(null)
     try {
       await updateSettings({
         "platform.name": form.platformName,
@@ -110,8 +115,42 @@ export default function SettingsPage() {
     }
   }
 
+  async function handleExportBundle() {
+    setError(null)
+    setNotice(null)
+    try {
+      const bundle = await exportConfigBundle()
+      downloadConfigBundle(bundle)
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "导出配置包失败")
+    }
+  }
+
+  async function handleImportBundle(file: File | undefined) {
+    if (!file) return
+    setImporting(true)
+    setError(null)
+    setNotice(null)
+    try {
+      const bundle = await readConfigBundleFile(file)
+      const result = await importConfigBundle(bundle)
+      await loadSettings()
+      setModelRefreshKey((key) => key + 1)
+      setSaved(true)
+      const warningText = result.warnings?.length ? `，提示：${result.warnings.join("；")}` : ""
+      setNotice(`导入完成：模型 ${result.modelConfigs}、分类 ${result.categories}、工具 ${result.tools}、字段 ${result.fields}${warningText}`)
+      setTimeout(() => setSaved(false), 1800)
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "导入配置包失败，请确认 JSON 格式正确")
+    } finally {
+      setImporting(false)
+    }
+  }
+
   const description = error
     ? `配置加载异常：${error}`
+    : notice
+      ? notice
     : loading
       ? "正在从数据库加载系统配置"
       : "系统配置会保存到后端 system_settings 表"
@@ -142,7 +181,7 @@ export default function SettingsPage() {
           </TabsList>
 
           <TabsContent value="model">
-            <AgentModelSettings />
+            <AgentModelSettings refreshKey={modelRefreshKey} />
           </TabsContent>
 
           <TabsContent value="system" className="space-y-5">
@@ -207,11 +246,29 @@ export default function SettingsPage() {
         </Tabs>
 
         <div className="mt-6 flex items-center justify-end gap-3">
-          <Button variant="outline" className="gap-2" onClick={loadSettings} disabled={loading || saving}>
+          <Button variant="outline" className="gap-2" onClick={handleExportBundle} disabled={loading || saving || importing}>
+            <Download className="h-4 w-4" />
+            导出配置包
+          </Button>
+          <Button variant="outline" className="relative gap-2" disabled={loading || saving || importing}>
+            <Upload className={importing ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
+            {importing ? "导入中..." : "导入配置包"}
+            <input
+              type="file"
+              accept="application/json,.json"
+              className="absolute inset-0 cursor-pointer opacity-0"
+              disabled={loading || saving || importing}
+              onChange={(event) => {
+                handleImportBundle(event.target.files?.[0])
+                event.currentTarget.value = ""
+              }}
+            />
+          </Button>
+          <Button variant="outline" className="gap-2" onClick={loadSettings} disabled={loading || saving || importing}>
             <RefreshCw className={loading ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
             刷新
           </Button>
-          <Button className="min-w-32 gap-2" onClick={saveSettings} disabled={saving}>
+          <Button className="min-w-32 gap-2" onClick={saveSettings} disabled={saving || importing}>
             {saved ? <CheckCircle className="h-4 w-4" /> : <Save className={saving ? "h-4 w-4 animate-spin" : "h-4 w-4"} />}
             {saved ? "已保存" : saving ? "保存中..." : "保存配置"}
           </Button>

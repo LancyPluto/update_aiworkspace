@@ -34,6 +34,7 @@ import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import {
   Copy,
+  Download,
   FileText,
   MessageSquare,
   MoreHorizontal,
@@ -44,6 +45,7 @@ import {
   Sparkles,
   Store,
   Trash2,
+  Upload,
   UploadCloud,
   Video,
   Workflow,
@@ -75,6 +77,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { fetchAgentModelConfigs } from "@/lib/api/agent-model"
 import { fetchModelProviders } from "@/lib/api/model-providers"
 import { ApiError, getBaseUrl } from "@/lib/api/http"
+import { downloadConfigBundle, exportConfigBundle, importConfigBundle, readConfigBundleFile } from "@/lib/api/config-bundles"
 import type { AgentModelConfig, ModelProviderDescriptor, ToolCategory, ToolField, ToolFieldPayload, ToolSummary } from "@/lib/api/types"
 
 interface ToolRow {
@@ -486,6 +489,8 @@ export default function ToolsPage() {
   const [providerCapabilities, setProviderCapabilities] = useState<Record<string, string[]>>(fallbackProviderCapabilities)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+  const [bundleBusy, setBundleBusy] = useState(false)
   const [togglingId, setTogglingId] = useState<number | null>(null)
   const [deletingId, setDeletingId] = useState<number | null>(null)
   const [submitting, setSubmitting] = useState(false)
@@ -530,6 +535,38 @@ export default function ToolsPage() {
       setError(err instanceof ApiError ? err.message : "加载工具失败")
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function handleExportBundle() {
+    setBundleBusy(true)
+    setError(null)
+    setNotice(null)
+    try {
+      const bundle = await exportConfigBundle()
+      downloadConfigBundle(bundle)
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "导出配置包失败")
+    } finally {
+      setBundleBusy(false)
+    }
+  }
+
+  async function handleImportBundle(file: File | undefined) {
+    if (!file) return
+    setBundleBusy(true)
+    setError(null)
+    setNotice(null)
+    try {
+      const bundle = await readConfigBundleFile(file)
+      const result = await importConfigBundle(bundle)
+      await loadAll()
+      const warningText = result.warnings?.length ? `；提示：${result.warnings.join("；")}` : ""
+      setNotice(`导入完成：工具 ${result.tools}、字段 ${result.fields}、提示词版本 ${result.promptVersions}、工作流 ${result.workflows}${warningText}`)
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "导入配置包失败，请确认 JSON 格式正确")
+    } finally {
+      setBundleBusy(false)
     }
   }
 
@@ -878,6 +915,8 @@ export default function ToolsPage() {
 
   const headerDescription = error
     ? `操作失败：${error}`
+    : notice
+      ? notice
     : loading
       ? "正在加载工具列表..."
       : "管理 AI 工具工作流入口和画布配置。"
@@ -897,10 +936,30 @@ export default function ToolsPage() {
               className="pl-9 bg-secondary border-0"
             />
           </div>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" className="gap-2" onClick={handleExportBundle} disabled={bundleBusy || loading}>
+              <Download className="h-4 w-4" />
+              导出
+            </Button>
+            <Button variant="outline" className="relative gap-2" disabled={bundleBusy || loading}>
+              <Upload className={bundleBusy ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
+              导入
+              <input
+                type="file"
+                accept="application/json,.json"
+                className="absolute inset-0 cursor-pointer opacity-0"
+                disabled={bundleBusy || loading}
+                onChange={(event) => {
+                  handleImportBundle(event.target.files?.[0])
+                  event.currentTarget.value = ""
+                }}
+              />
+            </Button>
           <Button className="gap-2" onClick={openCreateDialog}>
             <Plus className="h-4 w-4" />
             新建工具
           </Button>
+          </div>
           <Dialog
             open={isAddDialogOpen}
             onOpenChange={(open) => {

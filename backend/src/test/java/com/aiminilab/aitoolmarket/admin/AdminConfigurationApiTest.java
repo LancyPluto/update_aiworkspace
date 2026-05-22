@@ -106,6 +106,167 @@ class AdminConfigurationApiTest {
                 .andExpect(jsonPath("$.data['platform.name']").value("AI Tool Market"));
     }
 
+    @Test
+    void configBundleExportRedactsSecretsAndImportPreservesExistingSecrets() throws Exception {
+        String adminToken = loginAdmin();
+
+        mockMvc.perform(post("/api/admin/v1/agent/model-config")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "displayName": "Secret Model",
+                                  "configCode": "secret_model",
+                                  "provider": "mock",
+                                  "modelName": "mock",
+                                  "apiKey": "sk-secret-value",
+                                  "extraAuthJson": "{\\"secretKey\\":\\"real-secret\\"}",
+                                  "timeoutSeconds": 60,
+                                  "enabled": true,
+                                  "isDefault": true
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.apiKeyMasked").value("sk***ue"))
+                .andExpect(jsonPath("$.data.extraAuthJsonMasked").value("********"));
+
+        mockMvc.perform(get("/api/admin/v1/config-bundles/export")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.format").value("ai-tool-market-config-bundle"))
+                .andExpect(jsonPath("$.data.secretsRedacted").value(true))
+                .andExpect(jsonPath("$.data.modelConfigs[?(@.configCode=='secret_model')].apiKey").value(""))
+                .andExpect(jsonPath("$.data.modelConfigs[?(@.configCode=='secret_model')].extraAuthJson").value(""));
+
+        mockMvc.perform(post("/api/admin/v1/config-bundles/import")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "format": "ai-tool-market-config-bundle",
+                                  "version": 1,
+                                  "secretsRedacted": true,
+                                  "settings": {},
+                                  "categories": [],
+                                  "tools": [],
+                                  "modelConfigs": [
+                                    {
+                                      "displayName": "Imported Name",
+                                      "configCode": "secret_model",
+                                      "provider": "mock",
+                                      "modelName": "mock",
+                                      "apiKey": "",
+                                      "extraAuthJson": "",
+                                      "timeoutSeconds": 60,
+                                      "enabled": true,
+                                      "isDefault": true
+                                    }
+                                  ]
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.modelConfigs").value(1));
+
+        mockMvc.perform(get("/api/admin/v1/agent/model-config/list")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[?(@.configCode=='secret_model')].displayName").value("Imported Name"))
+                .andExpect(jsonPath("$.data[?(@.configCode=='secret_model')].apiKeyMasked").value("sk***ue"))
+                .andExpect(jsonPath("$.data[?(@.configCode=='secret_model')].extraAuthJsonMasked").value("********"));
+    }
+
+    @Test
+    void configBundleImportReusesEquivalentModelAndKeepsToolBinding() throws Exception {
+        String adminToken = loginAdmin();
+
+        String modelResponse = mockMvc.perform(post("/api/admin/v1/agent/model-config")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "displayName": "Existing Z Image",
+                                  "configCode": "siliconflow_image_turbo",
+                                  "provider": "siliconflow_images",
+                                  "modelName": "Tongyi-MAI/Z-Image-Turbo",
+                                  "baseUrl": "https://api.siliconflow.cn",
+                                  "timeoutSeconds": 60,
+                                  "enabled": true,
+                                  "isDefault": false,
+                                  "capabilities": ["IMAGE_GENERATION"]
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        Long existingModelId = Long.parseLong(modelResponse.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
+
+        mockMvc.perform(post("/api/admin/v1/config-bundles/import")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "format": "ai-tool-market-config-bundle",
+                                  "version": 1,
+                                  "secretsRedacted": true,
+                                  "settings": {},
+                                  "modelConfigs": [
+                                    {
+                                      "displayName": "Imported Z Image",
+                                      "configCode": "model_99",
+                                      "provider": "siliconflow_images",
+                                      "modelName": "Tongyi-MAI/Z-Image-Turbo",
+                                      "baseUrl": "https://api.siliconflow.cn",
+                                      "apiKey": "",
+                                      "extraAuthJson": "",
+                                      "timeoutSeconds": 60,
+                                      "enabled": true,
+                                      "isDefault": false,
+                                      "capabilities": ["IMAGE_GENERATION"]
+                                    }
+                                  ],
+                                  "categories": [
+                                    {
+                                      "categoryCode": "import_test",
+                                      "categoryName": "Import Test",
+                                      "sortOrder": 1,
+                                      "status": "ACTIVE"
+                                    }
+                                  ],
+                                  "tools": [
+                                    {
+                                      "toolCode": "dup_tool",
+                                      "toolName": "Duplicate Tool",
+                                      "categoryCode": "import_test",
+                                      "toolType": "IMAGE_GENERATION",
+                                      "inputModality": "TEXT",
+                                      "outputModality": "IMAGE",
+                                      "status": "ONLINE",
+                                      "estimatedCreditCost": 1,
+                                      "modelConfigCode": "model_99",
+                                      "fields": [],
+                                      "prompts": []
+                                    }
+                                  ]
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.modelConfigs").value(0))
+                .andExpect(jsonPath("$.data.tools").value(1))
+                .andExpect(jsonPath("$.data.warnings[0]").value("Reused existing model config siliconflow_image_turbo for imported model config model_99"));
+
+        mockMvc.perform(get("/api/admin/v1/agent/model-config/list")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[?(@.provider=='siliconflow_images' && @.modelName=='Tongyi-MAI/Z-Image-Turbo')]").isArray())
+                .andExpect(jsonPath("$.data[?(@.configCode=='model_99')]").isEmpty());
+
+        mockMvc.perform(get("/api/admin/v1/tools?page=1&pageSize=50")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[?(@.toolCode=='dup_tool')].modelConfigId").value(existingModelId.intValue()));
+    }
+
     private String loginAdmin() throws Exception {
         String response = mockMvc.perform(post("/api/admin/v1/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)

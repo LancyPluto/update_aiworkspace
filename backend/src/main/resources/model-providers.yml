@@ -55,6 +55,17 @@ providers:
     workerReady: true
     description: SiliconFlow /v1/images/generations and digital-human worker pipeline.
 
+  - code: volcengine_images
+    label: Volcengine images
+    capabilities:
+      - IMAGE_GENERATION
+    defaultBaseUrl: https://ark.cn-beijing.volces.com
+    defaultModel: doubao-seedream-4-5-251128
+    billingDefault: PER_CALL
+    testStrategy: accept_only
+    workerReady: true
+    description: Volcengine Ark image generation models such as Doubao Seedream.
+
   - code: minimax_music
     label: MiniMax music
     capabilities:
