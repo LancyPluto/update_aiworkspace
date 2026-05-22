@@ -18,7 +18,6 @@ export {
   createAgentSession,
   deleteAgentSession,
   createAgentWorkspaceMemory,
-  deleteAgentFile,
   deleteAgentWorkspaceMemory,
   fetchAgentFiles,
   fetchAgentMessages,

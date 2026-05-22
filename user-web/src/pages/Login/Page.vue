@@ -14,7 +14,7 @@
     <div class="brand animate-item" :class="{ show: brandVisible }">
       <div class="logo">
         <div class="wave-logo">
-          <img src="/logo.svg" alt="logo" "/>
+          <img src="/logo.svg" alt="logo" />
         </div>
         <span class="brand-text">AI Tool Market</span>
       </div>

@@ -50,7 +50,7 @@ export function fetchAgentMessages(sessionId: number, options?: { token?: string
 
 export function sendAgentMessage(
   sessionId: number,
-  body: { content: string; clientRequestId?: string; fileIds?: number[] },
+  body: { content: string; clientRequestId?: string },
   options?: { token?: string | null },
 ) {
   return apiRequest<CreateAgentMessageResponse>("POST", `/api/v1/agent/sessions/${sessionId}/messages`, {
@@ -71,16 +71,6 @@ export function uploadAgentFile(sessionId: number, file: File, options?: { token
   return apiRequest<AgentFile>("POST", `/api/v1/agent/sessions/${sessionId}/files`, {
     token: options?.token,
     body,
-  })
-}
-
-export function deleteAgentFile(
-  sessionId: number,
-  fileId: number,
-  options?: { token?: string | null },
-) {
-  return apiRequest<void>("DELETE", `/api/v1/agent/sessions/${sessionId}/files/${fileId}`, {
-    token: options?.token,
   })
 }
 

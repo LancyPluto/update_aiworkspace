@@ -3,6 +3,8 @@ package com.aiminilab.aitoolmarket.agent.client;
 import com.aiminilab.aitoolmarket.agent.dto.AgentFileParseResult;
 import com.aiminilab.aitoolmarket.agent.dto.AgentModelConfigRequest;
 import com.aiminilab.aitoolmarket.agent.dto.AgentModelConfigTestResponse;
+import com.aiminilab.aitoolmarket.agent.dto.MarketChatCompletionRequest;
+import com.aiminilab.aitoolmarket.agent.dto.MarketChatCompletionResponse;
 import com.aiminilab.aitoolmarket.config.AppProperties;
 import com.aiminilab.aitoolmarket.config.TraceIdFilter;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -65,6 +67,20 @@ public class HttpAgentServiceClient implements AgentServiceClient {
             return result == null ? AgentFileParseResult.fromText(filename, "") : result;
         } catch (JsonProcessingException exception) {
             throw new IllegalStateException("Could not parse agent-service file parse response", exception);
+        }
+    }
+
+    @Override
+    public MarketChatCompletionResponse marketChatCompletion(MarketChatCompletionRequest request) {
+        if (!appProperties.getAgent().isEnabled()) {
+            return new MarketChatCompletionResponse("");
+        }
+        String response = postInternal("/internal/v1/market/chat/completions", toJson(request));
+        try {
+            MarketChatCompletionResponse result = objectMapper.readValue(response, MarketChatCompletionResponse.class);
+            return result == null ? new MarketChatCompletionResponse("") : result;
+        } catch (JsonProcessingException exception) {
+            throw new IllegalStateException("Could not parse agent-service market chat response", exception);
         }
     }
 

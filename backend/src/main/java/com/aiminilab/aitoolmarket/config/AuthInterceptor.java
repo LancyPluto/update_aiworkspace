@@ -96,7 +96,7 @@ public class AuthInterceptor implements HandlerInterceptor, Filter {
             return false;
         }
 
-        if (path.startsWith("/api/admin/v1/")
+        if (requiresAdmin(path)
                 && !UserType.ADMIN.name().equals(authUser.get().userType())) {
             writeError(response, HttpStatus.FORBIDDEN, ErrorCode.ADMIN_FORBIDDEN, "管理员无权限");
             return false;
@@ -123,7 +123,15 @@ public class AuthInterceptor implements HandlerInterceptor, Filter {
                 || path.equals("/api/v1/tool-categories")
                 || path.equals("/api/v1/tools")
                 || path.startsWith("/api/v1/tools/")
+                || path.equals("/api/v1/ai-tools")
+                || path.startsWith("/api/v1/ai-tools/")
                 || path.equals("/api/admin/v1/auth/login");
+    }
+
+    private boolean requiresAdmin(String path) {
+        return path.startsWith("/api/admin/v1/")
+                || path.startsWith("/api/admin/ai-tools")
+                || path.equals("/api/admin/upload-icon");
     }
 
     private boolean verifyInternalSignature(HttpServletRequest request, byte[] body) {

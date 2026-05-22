@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi import Request
 
-from app.api import health, internal_files, internal_runs
+from app.api import health, internal_files, internal_market, internal_runs
 from app.clients.backend_client import BackendClient
 from app.clients.model_config_tester import ModelConfigTester
 from app.config import Settings, settings as default_settings
@@ -40,6 +40,7 @@ def create_app(
     app.include_router(health.router)
     app.include_router(internal_runs.router)
     app.include_router(internal_files.router)
+    app.include_router(internal_market.router)
     return app
 
 
