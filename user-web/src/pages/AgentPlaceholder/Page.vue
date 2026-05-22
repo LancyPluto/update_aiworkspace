@@ -4,7 +4,7 @@ import AppShell from "@/components/AppShell.vue"
 </script>
 
 <template>
-  <AppShell title="智能体" description="智能体能力即将上线，敬请期待">
+  <AppShell title="智能体" description="智能体能力开发中，敬请期待">
     <div class="flex flex-col items-center justify-center px-6 py-24 text-center">
       <div class="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10">
         <Bot class="h-8 w-8 text-primary" />

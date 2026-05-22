@@ -32,6 +32,7 @@ const props = defineProps<{
   capabilities: Capability[]
   fields?: ToolField[]
   coreFieldKey?: string | null
+  toolId?: string | null
 }>()
 
 const state = ref<CapabilityState>({
@@ -159,7 +160,7 @@ async function handleFieldUpload(field: ToolField, files: FileList | File[] | nu
     [field.fieldKey]: { uploading: true, fileName: file.name },
   }
   try {
-    const result = await uploadChatFile(file, { token: auth.token })
+    const result = await uploadChatFile(file, { token: auth.token, toolId: props.toolId })
     setField(field.fieldKey, result.url)
     fieldUploads.value = {
       ...fieldUploads.value,
@@ -258,9 +259,9 @@ defineExpose({
 </script>
 
 <template>
-  <div v-if="configuredFields.length > 0 || capabilities.length > 0" class="space-y-3 border-t border-border/70 px-4 py-3">
-    <div v-if="configuredFields.length > 0" class="flex flex-wrap items-end gap-2">
-      <div v-for="field in configuredFields" :key="field.fieldKey" class="min-w-[116px] max-w-[220px]">
+  <div v-if="configuredFields.length > 0 || capabilities.length > 0" class="mt-2 space-y-2">
+    <div class="flex flex-wrap items-center gap-1.5">
+      <div v-for="field in configuredFields" :key="field.fieldKey" class="min-w-[100px] max-w-[180px]">
         <label class="mb-1 block text-[11px] font-medium text-muted-foreground">
           {{ field.fieldName }}<span v-if="field.required" class="text-destructive"> *</span>
         </label>
@@ -268,7 +269,7 @@ defineExpose({
         <select
           v-if="(field.fieldType === 'select' || field.fieldType === 'radio') && fieldOptions(field).length"
           :value="strField(field.fieldKey)"
-          class="h-8 w-full rounded-md border border-border bg-background px-2 text-xs"
+          class="h-7 w-full rounded-lg border border-border/60 bg-background px-2 text-xs"
           @change="setField(field.fieldKey, ($event.target as HTMLSelectElement).value)"
         >
           <option v-for="option in fieldOptions(field)" :key="optionValue(option)" :value="optionValue(option)">
@@ -281,18 +282,18 @@ defineExpose({
           type="number"
           :value="strField(field.fieldKey)"
           :placeholder="field.placeholder || ''"
-          class="h-8 w-full rounded-md border border-border bg-background px-2 text-xs"
+          class="h-7 w-full rounded-lg border border-border/60 bg-background px-2 text-xs"
           @input="onNumberInput(field.fieldKey, $event)"
         />
 
         <label
           v-else-if="field.fieldType === 'checkbox'"
-          class="inline-flex h-8 items-center gap-2 rounded-md border border-border bg-background px-2 text-xs"
+          class="inline-flex h-7 items-center gap-2 rounded-lg border border-border/60 bg-background px-2 text-xs"
         >
           <input
             type="checkbox"
             :checked="Boolean(state.fields[field.fieldKey])"
-            class="accent-primary"
+            class="rounded border-border"
             @change="setField(field.fieldKey, ($event.target as HTMLInputElement).checked)"
           />
           {{ field.placeholder || "启用" }}
@@ -300,7 +301,7 @@ defineExpose({
 
         <div v-else-if="field.fieldType === 'image' || field.fieldType === 'file'" class="space-y-1">
           <label
-            class="flex h-8 cursor-pointer items-center gap-2 rounded-md border border-dashed border-border bg-background px-2 text-xs text-muted-foreground hover:border-primary/60 hover:text-foreground"
+            class="flex h-7 cursor-pointer items-center gap-2 rounded-lg border border-dashed border-border/60 bg-background px-2 text-xs text-muted-foreground hover:border-primary/60"
             @dragover.prevent
             @drop.prevent="handleFieldUpload(field, ($event as DragEvent).dataTransfer?.files || null)"
           >
@@ -313,8 +314,8 @@ defineExpose({
             <Loader2 v-if="uploadState(field.fieldKey).uploading" class="h-3.5 w-3.5 animate-spin" />
             <ImageUp v-else-if="field.fieldType === 'image'" class="h-3.5 w-3.5" />
             <UploadCloud v-else class="h-3.5 w-3.5" />
-            <span class="truncate">
-              {{ uploadState(field.fieldKey).uploading ? "上传中..." : (uploadState(field.fieldKey).fileName || field.placeholder || "拖拽/选择文件") }}
+            <span class="truncate text-xs">
+              {{ uploadState(field.fieldKey).uploading ? "上传中..." : (uploadState(field.fieldKey).fileName || "上传文件") }}
             </span>
           </label>
           <div v-if="strField(field.fieldKey)" class="flex items-center gap-1">
@@ -322,11 +323,11 @@ defineExpose({
               v-if="imagePreviewUrl(field)"
               :src="imagePreviewUrl(field)"
               alt=""
-              class="h-8 w-8 shrink-0 rounded border border-border object-cover"
+              class="h-7 w-7 shrink-0 rounded-md border border-border object-cover"
             />
             <input
               :value="strField(field.fieldKey)"
-              class="h-7 min-w-0 flex-1 rounded-md border border-border bg-muted/40 px-2 text-[11px]"
+              class="h-6 flex-1 rounded-md border border-border/60 bg-muted/30 px-2 text-[11px]"
               readonly
             />
             <button type="button" class="text-muted-foreground hover:text-foreground" @click="clearUploadedField(field)">
@@ -343,17 +344,17 @@ defineExpose({
           type="text"
           :value="strField(field.fieldKey)"
           :placeholder="field.placeholder || ''"
-          class="h-8 w-full rounded-md border border-border bg-background px-2 text-xs"
+          class="h-7 w-full rounded-lg border border-border/60 bg-background px-2 text-xs"
           @input="setField(field.fieldKey, ($event.target as HTMLInputElement).value)"
         />
       </div>
     </div>
 
-    <div class="flex flex-wrap items-center gap-2">
+    <div class="flex flex-wrap items-center gap-1.5">
       <select
         v-if="imageCapability && configuredFields.length === 0"
         v-model="state.imageRatio"
-        class="h-8 rounded-md border border-border bg-background px-2 text-xs"
+        class="h-7 rounded-lg border border-border/60 bg-background px-2 text-xs"
         title="图片比例"
       >
         <option v-for="ratio in aspectRatios" :key="ratio" :value="ratio">{{ ratio }}</option>
@@ -361,14 +362,13 @@ defineExpose({
 
       <label
         v-if="fileCapability"
-        class="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs text-muted-foreground"
-        title="图片/文件字段支持拖拽上传，上传后自动填入 URL"
+        class="inline-flex h-7 items-center gap-1.5 rounded-lg border border-border/60 bg-background px-2 text-xs text-muted-foreground"
       >
         <Paperclip class="h-3.5 w-3.5" />
-        字段上传
+        上传
       </label>
 
-      <label v-if="webSearchCapability && showWebSearch" class="inline-flex cursor-pointer items-center gap-2 text-xs">
+      <label v-if="webSearchCapability && showWebSearch" class="inline-flex h-7 cursor-pointer items-center gap-2 rounded-lg border border-border/60 bg-background px-2 text-xs">
         <input v-model="state.webSearch" type="checkbox" class="rounded border-border" />
         联网搜索
       </label>
@@ -376,7 +376,7 @@ defineExpose({
       <select
         v-if="codeCapability && codeLanguages.length > 1"
         v-model="state.language"
-        class="h-8 rounded-md border border-border bg-background px-2 text-xs"
+        class="h-7 rounded-lg border border-border/60 bg-background px-2 text-xs"
         title="代码语言"
       >
         <option v-for="lang in codeLanguages" :key="lang" :value="lang">{{ lang }}</option>
@@ -385,27 +385,12 @@ defineExpose({
       <button
         v-if="voiceCapability"
         type="button"
-        class="inline-flex cursor-not-allowed items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs text-muted-foreground"
-        title="语音输入待接入"
+        class="inline-flex h-7 items-center gap-1.5 rounded-lg border border-border/60 bg-background px-2 text-xs text-muted-foreground"
         disabled
       >
         <Mic class="h-3.5 w-3.5" />
         语音
       </button>
-    </div>
-
-    <div v-if="state.attachments.length > 0" class="flex flex-wrap gap-2">
-      <div
-        v-for="item in state.attachments"
-        :key="item.localId"
-        class="inline-flex items-center gap-1.5 rounded-md border border-border bg-secondary/40 px-2 py-1 text-xs"
-        :class="item.error ? 'border-destructive/50 text-destructive' : ''"
-      >
-        <span class="max-w-[160px] truncate">{{ item.name }}</span>
-        <button type="button" class="text-muted-foreground hover:text-foreground">
-          <X class="h-3 w-3" />
-        </button>
-      </div>
     </div>
   </div>
 </template>

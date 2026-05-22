@@ -297,7 +297,7 @@ onMounted(async () => {
           </template>
           <template v-else>
             <RouterLink
-              :to="'/login'"
+              :to="'/'"
               class="text-xs text-primary hover:underline"
             >
               登录

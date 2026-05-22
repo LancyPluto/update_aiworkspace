@@ -4,10 +4,10 @@ import { Bot } from "lucide-react"
 import { AdminLayout } from "@/components/admin/admin-layout"
 import { AdminHeader } from "@/components/admin/header"
 
-export default function AgentsPage() {
+export default function AgentToolsPlaceholderPage() {
   return (
     <AdminLayout>
-      <AdminHeader title="智能体管理" description="智能体管理能力即将上线，敬请期待" />
+      <AdminHeader title="智能体管理" description="智能体管理能力开发中，敬请期待" />
 
       <div className="flex flex-col items-center justify-center px-6 py-24 text-center">
         <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10">

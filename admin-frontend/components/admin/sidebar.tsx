@@ -49,7 +49,7 @@ const navigation: (NavLink | NavGroup)[] = [
     icon: Wrench,
     children: [
       { name: "大模型管理", href: "/tools" },
-      { name: "智能体管理", href: "/agents" },
+      { name: "智能体管理", href: "/task-tools" },
     ],
   },
   { type: "link", name: "工具模板", href: "/tool-templates", icon: Sparkles },

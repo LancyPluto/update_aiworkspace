@@ -10,6 +10,7 @@ import type {
 } from "./aiToolTypes"
 import type { PageResult, ToolDetail, ToolSummary } from "./types"
 import {
+  isMarketplaceMockToolId,
   isMockMode,
   mockCreateChatSession,
   mockDeleteChatSession,
@@ -21,8 +22,34 @@ import {
   mockUploadChatFile,
 } from "./aiToolMock"
 
+export { isMarketplaceMockToolId }
+
 async function withMockFallback<T>(request: () => Promise<T>, mock: () => Promise<T>): Promise<T> {
   if (isMockMode()) return mock()
+  return request()
+}
+
+async function withToolMockFallback<T>(
+  toolId: string | undefined,
+  request: () => Promise<T>,
+  mock: () => Promise<T>,
+): Promise<T> {
+  if (isMockMode() || (toolId && isMarketplaceMockToolId(toolId))) return mock()
+  return request()
+}
+
+function marketplaceToolIdFromSessionId(sessionId: string): string | undefined {
+  const match = sessionId.match(/^sess-(.+?)-/)
+  return match?.[1]
+}
+
+async function withSessionMockFallback<T>(
+  sessionId: string,
+  request: () => Promise<T>,
+  mock: () => Promise<T>,
+): Promise<T> {
+  const toolId = marketplaceToolIdFromSessionId(sessionId)
+  if (isMockMode() || (toolId && isMarketplaceMockToolId(toolId))) return mock()
   return request()
 }
 
@@ -82,6 +109,11 @@ function mapToolSummaryToAITool(tool: ToolSummary | ToolDetail): AITool {
   }
 }
 
+/** 大模型页专用：始终读取 aiToolMock 中的已上架大模型（不依赖 VITE_AI_TOOL_MOCK） */
+export async function fetchMarketplaceAITools(): Promise<AITool[]> {
+  return mockFetchEnabledAITools()
+}
+
 /** GET /api/v1/ai-tools — 已上架列表，按 order 排序 */
 export async function fetchEnabledAITools(options?: { token?: string | null }): Promise<AITool[]> {
   return withMockFallback(
@@ -104,7 +136,8 @@ export async function fetchAIToolById(
   toolId: string,
   options?: { token?: string | null },
 ): Promise<AITool> {
-  return withMockFallback(
+  return withToolMockFallback(
+    toolId,
     async () => {
       const tool = await apiRequest<ToolDetail>("GET", `/api/v1/tools/${encodeURIComponent(toolId)}`, {
         token: options?.token,
@@ -120,7 +153,8 @@ export async function fetchChatSessions(
   toolId: string,
   options?: { token?: string | null },
 ): Promise<ChatSession[]> {
-  return withMockFallback(
+  return withToolMockFallback(
+    toolId,
     () =>
       apiRequest<ChatSession[]>("GET", "/api/v1/sessions", {
         token: options?.token,
@@ -135,7 +169,8 @@ export async function createChatSession(
   toolId: string,
   options?: { token?: string | null },
 ): Promise<ChatSession> {
-  return withMockFallback(
+  return withToolMockFallback(
+    toolId,
     () =>
       apiRequest<ChatSession>("POST", "/api/v1/sessions", {
         token: options?.token,
@@ -150,7 +185,8 @@ export async function deleteChatSession(
   sessionId: string,
   options?: { token?: string | null },
 ): Promise<void> {
-  return withMockFallback(
+  return withSessionMockFallback(
+    sessionId,
     () =>
       apiRequest<void>("DELETE", `/api/v1/sessions/${encodeURIComponent(sessionId)}`, {
         token: options?.token,
@@ -164,7 +200,8 @@ export async function fetchChatMessages(
   sessionId: string,
   options?: { token?: string | null },
 ): Promise<ChatMessage[]> {
-  return withMockFallback(
+  return withSessionMockFallback(
+    sessionId,
     () =>
       apiRequest<ChatMessage[]>("GET", "/api/v1/messages", {
         token: options?.token,
@@ -179,7 +216,8 @@ export async function sendChatMessage(
   payload: ChatRequest,
   options?: { token?: string | null; signal?: AbortSignal },
 ): Promise<ChatResponse> {
-  return withMockFallback(
+  return withToolMockFallback(
+    payload.toolId,
     () =>
       apiRequest<ChatResponse>("POST", "/api/v1/chat/messages", {
         token: options?.token,
@@ -193,9 +231,10 @@ export async function sendChatMessage(
 /** POST /api/v1/upload */
 export async function uploadChatFile(
   file: File,
-  options?: { token?: string | null },
+  options?: { token?: string | null; toolId?: string | null },
 ): Promise<FileUploadResult> {
-  return withMockFallback(
+  return withToolMockFallback(
+    options?.toolId || undefined,
     () => {
       const formData = new FormData()
       formData.append("file", file)
