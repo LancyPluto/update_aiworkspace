@@ -88,6 +88,17 @@ providers:
     workerReady: true
     description: SiliconFlow /v1/audio/speech for standalone TTS tools.
 
+  - code: siliconflow_asr
+    label: SiliconFlow ASR
+    capabilities:
+      - SPEECH_TO_TEXT
+    defaultBaseUrl: https://api.siliconflow.cn
+    defaultModel: TeleAI/TeleSpeechASR
+    billingDefault: PER_CALL
+    testStrategy: accept_only
+    workerReady: true
+    description: SiliconFlow speech recognition model reserved for subtitle alignment and speech-to-text workflows.
+
   - code: seedance
     label: Seedance video
     capabilities:

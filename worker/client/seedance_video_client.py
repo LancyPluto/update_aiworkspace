@@ -34,6 +34,7 @@ class SeedanceVideoClient:
         negative_prompt: str = "",
         model: str | None = None,
         image: str = "",
+        audio_data_url: str = "",
         seed: int | None = None,
         duration: str = "",
         aspect_ratio: str = "",
@@ -48,6 +49,7 @@ class SeedanceVideoClient:
             negative_prompt=negative_prompt,
             model=model or self.default_model,
             image=image,
+            audio_data_url=audio_data_url,
             seed=seed,
             duration=duration,
             aspect_ratio=aspect_ratio,
@@ -94,6 +96,7 @@ class SeedanceVideoClient:
         negative_prompt: str,
         model: str,
         image: str,
+        audio_data_url: str,
         seed: int | None,
         duration: str,
         aspect_ratio: str,
@@ -105,6 +108,9 @@ class SeedanceVideoClient:
         content: list[dict[str, Any]] = [{"type": "text", "text": text}]
         if image.strip():
             content.append({"type": "image_url", "image_url": {"url": image.strip()}})
+        audio_payload = self._audio_payload(audio_data_url)
+        if audio_payload:
+            content.append(audio_payload)
 
         payload: dict[str, Any] = {
             "model": model,
@@ -124,6 +130,26 @@ class SeedanceVideoClient:
         if seed is not None:
             payload["seed"] = seed
         return payload
+
+    @staticmethod
+    def _audio_payload(audio_data_url: str) -> dict[str, Any] | None:
+        raw = (audio_data_url or "").strip()
+        if not raw:
+            return None
+        marker = "base64,"
+        if marker in raw:
+            media_type = raw.split(";", 1)[0].replace("data:", "") or "audio/mpeg"
+            audio_format = "mp3"
+            if "/" in media_type:
+                audio_format = media_type.rsplit("/", 1)[-1].replace("mpeg", "mp3")
+            return {
+                "type": "input_audio",
+                "input_audio": {
+                    "data": raw.split(marker, 1)[1],
+                    "format": audio_format,
+                },
+            }
+        return {"type": "audio_url", "audio_url": {"url": raw}}
 
     def _request(self, method: str, path: str, payload: dict[str, Any] | None) -> dict[str, Any]:
         body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")) if payload is not None else ""

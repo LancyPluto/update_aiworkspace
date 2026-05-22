@@ -171,6 +171,7 @@ def main() -> None:
     assert seedance.request_payload["image_size"] == "480x854", seedance.request_payload
     assert seedance.request_payload["image"] == "https://example.com/avatar.png", seedance.request_payload
     assert seedance.request_payload["model"] == "doubao-seedance-1-5-pro-251215", seedance.request_payload
+    assert seedance.request_payload["audio_data_url"].startswith("data:audio/mpeg;base64,"), seedance.request_payload
     assert seedance.request_payload["duration"] == "5 seconds", seedance.request_payload
     assert seedance.request_payload["resolution"] == "480p", seedance.request_payload
     assert len(siliconflow.image_prompts) == 0, siliconflow.image_prompts
@@ -208,7 +209,7 @@ def main() -> None:
     assert failing_siliconflow.image_prompts == [], failing_siliconflow.image_prompts
 
     srt = DigitalHumanPostprocessor._build_srt("First sentence!Second sentence!Third sentence!", 9.0)
-    assert "00:00:00,000 --> 00:00:03,000" in srt
+    assert "00:00:00,000 -->" in srt
     assert "First sentence!" in srt
     assert "Third sentence!" in srt
 

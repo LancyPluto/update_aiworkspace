@@ -54,7 +54,9 @@ class DigitalHumanPostprocessor:
 
         self._download(video_url, source_video)
         self._write_data_url(audio_data_url, audio_path)
-        duration = self._probe_duration(source_video) or self._probe_duration(audio_path) or 5.0
+        audio_duration = self._probe_duration(audio_path)
+        source_duration = self._probe_duration(source_video)
+        duration = audio_duration or source_duration or 5.0
         subtitle_path.write_text(self._build_srt(subtitle_text, duration), encoding="utf-8")
         self._run_ffmpeg(ffmpeg_binary, source_video, audio_path, subtitle_path, final_video, duration)
 
@@ -82,11 +84,7 @@ class DigitalHumanPostprocessor:
             "PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,"
             "BorderStyle=1,Outline=2,Shadow=1,Alignment=2,MarginV=32'"
         )
-        audio_filter = (
-            "apad=pad_dur="
-            f"{max(duration_seconds, 1.0):.3f},"
-            f"atrim=0:{max(duration_seconds, 1.0):.3f}"
-        )
+        audio_filter = f"atrim=0:{max(duration_seconds, 1.0):.3f},asetpts=PTS-STARTPTS"
         command = [
             ffmpeg_binary,
             "-y",
@@ -102,6 +100,7 @@ class DigitalHumanPostprocessor:
             audio_filter,
             "-t",
             f"{max(duration_seconds, 1.0):.3f}",
+            "-shortest",
             "-map",
             "0:v:0",
             "-map",
@@ -201,13 +200,17 @@ class DigitalHumanPostprocessor:
     def _build_srt(text: str, duration_seconds: float) -> str:
         clean_text = re.sub(r"\s+", " ", text).strip() or " "
         chunks = DigitalHumanPostprocessor._chunk_text(clean_text)
-        per_chunk = max(duration_seconds / max(len(chunks), 1), 1.0)
+        weights = [max(len(re.sub(r"\s+", "", chunk)), 1) for chunk in chunks]
+        total_weight = max(sum(weights), 1)
         lines: list[str] = []
+        cursor = 0.0
         for index, chunk in enumerate(chunks, start=1):
-            start = (index - 1) * per_chunk
-            end = min(index * per_chunk, duration_seconds)
+            start = cursor
+            chunk_duration = duration_seconds * weights[index - 1] / total_weight
+            end = min(duration_seconds, start + max(chunk_duration, 0.35))
+            cursor = end
             if end <= start:
-                end = start + 1
+                end = min(duration_seconds, start + 0.35)
             lines.extend(
                 [
                     str(index),

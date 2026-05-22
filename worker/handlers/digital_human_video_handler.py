@@ -70,6 +70,7 @@ class DigitalHumanVideoHandler:
                 negative_prompt=str(params.get("negativePrompt") or ""),
                 model=self._resolve_model(params),
                 image=avatar_image_url,
+                audio_data_url=audio_data_url,
                 seed=self._optional_int(params.get("seed")),
                 duration=str(params.get("duration") or ""),
                 aspect_ratio=str(params.get("aspectRatio") or ""),
@@ -161,6 +162,7 @@ class DigitalHumanVideoHandler:
             f"Requested duration: {params.get('duration') or '5 seconds'}",
             f"Target resolution: {DigitalHumanVideoHandler._resolve_resolution(params)}",
             "The presenter should face the camera, speak naturally, keep stable facial details, and use clean lighting.",
+            "Use the supplied driving audio to align mouth shapes, speech rhythm, facial motion, and subtitle timing.",
         ]
         brand_name = str(params.get("brandName") or "").strip()
         if brand_name:
