@@ -146,6 +146,34 @@ providers:
     workerReady: true
     description: Kling official text/image-to-video and image generation API. Configure AK/SK in extra auth JSON.
 
+  - code: ofox_openai_images
+    label: oFox OpenAI images gateway
+    capabilities:
+      - IMAGE_GENERATION
+    defaultBaseUrl: https://api.ofox.ai/v1
+    defaultModel: openai/gpt-image-2
+    billingDefault: IMAGE_TOKEN
+    providerProtocol: openai_images
+    vendorKind: gateway
+    upstreamVendor: openai
+    testStrategy: accept_only
+    workerReady: true
+    description: oFox gateway for OpenAI-compatible image generation models. Change Base URL/API Key to switch compatible gateways.
+
+  - code: openai_images_gateway
+    label: OpenAI images compatible gateway
+    capabilities:
+      - IMAGE_GENERATION
+    defaultBaseUrl: https://api.ofox.ai/v1
+    defaultModel: openai/gpt-image-2
+    billingDefault: IMAGE_TOKEN
+    providerProtocol: openai_images
+    vendorKind: gateway
+    upstreamVendor: openai
+    testStrategy: accept_only
+    workerReady: true
+    description: Generic gateway slot for OpenAI-compatible image generation APIs. Use this when only Base URL/API Key changes.
+
   - code: worker_video
     label: Video generation (stub)
     capabilities:

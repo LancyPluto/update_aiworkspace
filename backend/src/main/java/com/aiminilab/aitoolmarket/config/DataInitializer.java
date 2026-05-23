@@ -79,6 +79,63 @@ public class DataInitializer implements CommandLineRunner {
                 """);
         ensureColumn("agent_model_configs", "is_default", "ALTER TABLE agent_model_configs ADD COLUMN is_default TINYINT NOT NULL DEFAULT 0");
         ensureColumn("agent_model_configs", "is_deleted", "ALTER TABLE agent_model_configs ADD COLUMN is_deleted TINYINT NOT NULL DEFAULT 0");
+        ensureTable("credit_recharge_packages", """
+                CREATE TABLE credit_recharge_packages (
+                  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                  package_code VARCHAR(64) NOT NULL UNIQUE,
+                  package_name VARCHAR(128) NOT NULL,
+                  credits INT NOT NULL,
+                  price_amount DECIMAL(18,2) NOT NULL,
+                  currency VARCHAR(16) NOT NULL DEFAULT 'CNY',
+                  validity_days INT NOT NULL DEFAULT 0,
+                  benefits_json TEXT,
+                  recommended TINYINT NOT NULL DEFAULT 0,
+                  sort_order INT NOT NULL DEFAULT 0,
+                  status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
+                  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """);
+        ensureTable("credit_recharge_orders", """
+                CREATE TABLE credit_recharge_orders (
+                  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                  order_no VARCHAR(64) NOT NULL UNIQUE,
+                  user_id BIGINT NOT NULL,
+                  package_id BIGINT NOT NULL,
+                  credits INT NOT NULL,
+                  price_amount DECIMAL(18,2) NOT NULL,
+                  currency VARCHAR(16) NOT NULL DEFAULT 'CNY',
+                  payment_channel VARCHAR(32) NOT NULL DEFAULT 'MOCK',
+                  status VARCHAR(32) NOT NULL DEFAULT 'WAITING_PAYMENT',
+                  status_reason VARCHAR(255),
+                  pay_url VARCHAR(512),
+                  qr_code_url VARCHAR(512),
+                  external_trade_no VARCHAR(128),
+                  idempotency_key VARCHAR(128),
+                  paid_at DATETIME,
+                  credited_at DATETIME,
+                  closed_at DATETIME,
+                  expires_at DATETIME NOT NULL,
+                  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """);
+        ensureIndex(
+                "credit_recharge_orders",
+                "uk_recharge_user_idem",
+                "CREATE UNIQUE INDEX uk_recharge_user_idem ON credit_recharge_orders(user_id, idempotency_key)"
+        );
+        executeSql("""
+                INSERT INTO credit_recharge_packages (
+                  package_code, package_name, credits, price_amount, currency,
+                  validity_days, benefits_json, recommended, sort_order, status
+                )
+                SELECT 'test_1000', 'Test credits', 1000, 10.00, 'CNY',
+                       30, '["Priority queue"]', 1, 10, 'ACTIVE'
+                WHERE NOT EXISTS (
+                  SELECT 1 FROM credit_recharge_packages WHERE package_code = 'test_1000'
+                )
+                """);
         ensureTable("billing_usage_logs", """
                 CREATE TABLE billing_usage_logs (
                   id BIGINT PRIMARY KEY AUTO_INCREMENT,
@@ -173,6 +230,16 @@ public class DataInitializer implements CommandLineRunner {
         }
     }
 
+    private void ensureIndex(String tableName, String indexName, String ddl) {
+        try (Connection connection = dataSource.getConnection()) {
+            if (!indexExists(connection, tableName, indexName)) {
+                connection.createStatement().execute(ddl);
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to ensure database index " + tableName + "." + indexName, exception);
+        }
+    }
+
     private void executeSql(String sql) {
         try (Connection connection = dataSource.getConnection()) {
             connection.createStatement().executeUpdate(sql);
@@ -189,6 +256,27 @@ public class DataInitializer implements CommandLineRunner {
                 try (ResultSet columns = connection.getMetaData().getColumns(null, null, table, column)) {
                     if (columns.next()) {
                         return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    private boolean indexExists(Connection connection, String tableName, String indexName) throws SQLException {
+        String[] tableCandidates = {tableName, tableName.toUpperCase()};
+        String[] indexCandidates = {indexName, indexName.toUpperCase()};
+        for (String table : tableCandidates) {
+            try (ResultSet indexes = connection.getMetaData().getIndexInfo(null, null, table, false, false)) {
+                while (indexes.next()) {
+                    String existingIndex = indexes.getString("INDEX_NAME");
+                    if (existingIndex == null) {
+                        continue;
+                    }
+                    for (String index : indexCandidates) {
+                        if (existingIndex.equals(index)) {
+                            return true;
+                        }
                     }
                 }
             }

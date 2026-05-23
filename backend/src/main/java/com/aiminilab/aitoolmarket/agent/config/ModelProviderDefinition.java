@@ -9,6 +9,9 @@ public record ModelProviderDefinition(
         String defaultBaseUrl,
         String defaultModel,
         String billingDefault,
+        String providerProtocol,
+        String vendorKind,
+        String upstreamVendor,
         String testStrategy,
         boolean workerReady,
         String description

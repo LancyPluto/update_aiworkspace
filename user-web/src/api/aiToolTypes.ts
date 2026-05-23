@@ -22,6 +22,8 @@ export interface AITool {
   primaryColor?: string
   welcomeMessage?: string
   capabilities: Capability[]
+  inputModality?: string | null
+  outputModality?: string | null
   fields?: ToolField[]
   estimatedCreditCost?: number
 }

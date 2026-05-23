@@ -104,6 +104,8 @@ function mapToolSummaryToAITool(tool: ToolSummary | ToolDetail): AITool {
     primaryColor: style.primaryColor,
     welcomeMessage: style.welcomeMessage,
     capabilities: capabilitiesFromTool(tool),
+    inputModality: tool.inputModality,
+    outputModality: tool.outputModality,
     fields: "fields" in tool ? tool.fields : undefined,
     estimatedCreditCost: tool.estimatedCreditCost,
   }

@@ -88,6 +88,50 @@ public class CreditServiceImpl implements CreditService {
 
     @Override
     @Transactional
+    public int settleCompleted(Long userId, CreditSourceType sourceType, Long sourceId, int amount) {
+        if (amount <= 0) {
+            return 0;
+        }
+        CreditAccount before = creditMapper.getOrCreateAccount(userId);
+        if (creditMapper.settle(before.getId(), amount)) {
+            insertLog(
+                    before,
+                    taskId(sourceType, sourceId),
+                    agentRunId(sourceType, sourceId),
+                    CreditLogType.DEDUCT.name(),
+                    amount,
+                    -amount,
+                    before.getBalance() - amount,
+                    before.getFrozen() - amount,
+                    "SYSTEM",
+                    null,
+                    sourceLabel(sourceType) + " success credit deduction"
+            );
+            return amount;
+        }
+
+        CreditAccount current = creditMapper.getOrCreateAccount(userId);
+        if (creditMapper.deductAvailable(current.getId(), amount)) {
+            insertLog(
+                    current,
+                    taskId(sourceType, sourceId),
+                    agentRunId(sourceType, sourceId),
+                    CreditLogType.DEDUCT.name(),
+                    amount,
+                    0,
+                    current.getBalance() - amount,
+                    current.getFrozen(),
+                    "SYSTEM",
+                    null,
+                    sourceLabel(sourceType) + " success credit deduction without frozen balance"
+            );
+            return amount;
+        }
+        return 0;
+    }
+
+    @Override
+    @Transactional
     public void release(Long userId, CreditSourceType sourceType, Long sourceId, int amount) {
         if (amount <= 0) {
             return;

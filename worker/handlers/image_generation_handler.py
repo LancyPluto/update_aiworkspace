@@ -9,6 +9,7 @@ from client.siliconflow_video_client import (
     SiliconFlowVideoTimeoutError,
 )
 from client.kling_video_client import KlingVideoClient, KlingVideoError, KlingVideoTimeoutError
+from client.openai_images_client import OpenAIImagesClient, OpenAIImagesError, OpenAIImagesTimeoutError
 from config import resolve_kling_api_key, resolve_kling_credentials, resolve_siliconflow_api_key
 from handlers.generated_image_persister import GeneratedImagePersistError, GeneratedImagePersister
 from providers import registry as provider_registry
@@ -46,10 +47,15 @@ class ImageGenerationHandler:
             provider = str(model_config.get("provider") or context.get("modelProviderCode") or "").lower()
             provider_registry.require_capability(provider, "IMAGE_GENERATION")
             provider_registry.require_worker_ready(provider)
-            if provider not in {"siliconflow_images", "siliconflow", "kling_video"}:
+            provider_protocol = provider_registry.provider_protocol(provider)
+            if provider_protocol not in {"siliconflow_images", "siliconflow", "kling_video", "openai_images"}:
                 raise SiliconFlowVideoError(f"unsupported image provider: {provider or 'empty'}")
 
-            prompt = _build_prompt(params, context.get("fields") or [])
+            prompt = _build_prompt(
+                params,
+                context.get("fields") or [],
+                include_style=provider_protocol != "openai_images",
+            )
             if not prompt:
                 raise SiliconFlowVideoError("prompt is required")
 
@@ -61,16 +67,44 @@ class ImageGenerationHandler:
             )
 
             client = self.image_client or self._image_client(provider, model_config)
-            urls = client.generate_images(
-                prompt=prompt,
-                model=model_config.get("modelName"),
-                image_size=_resolve_image_size(params),
-                batch_size=max(1, min(4, _as_int(params.get("count") or params.get("batchSize"), 1))),
-                negative_prompt=str(params.get("negativePrompt") or params.get("negative_prompt") or ""),
-                seed=_optional_int(params.get("seed")),
-                guidance_scale=_optional_float(params.get("guidanceScale") or params.get("guidance_scale")),
-                num_inference_steps=_optional_int(params.get("numInferenceSteps") or params.get("num_inference_steps")),
-            )
+            image_request: dict[str, Any] = {
+                "prompt": prompt,
+                "model": model_config.get("modelName"),
+                "image_size": _resolve_image_size(params),
+                "batch_size": max(1, min(4, _as_int(params.get("count") or params.get("batchSize"), 1))),
+                "negative_prompt": str(params.get("negativePrompt") or params.get("negative_prompt") or ""),
+                "seed": _optional_int(params.get("seed")),
+                "guidance_scale": _optional_float(params.get("guidanceScale") or params.get("guidance_scale")),
+                "num_inference_steps": _optional_int(params.get("numInferenceSteps") or params.get("num_inference_steps")),
+            }
+            if provider_protocol == "kling_video":
+                image_request.update(
+                    {
+                        "image": _first_text(
+                            params,
+                            "image",
+                            "imageUrl",
+                            "image_url",
+                            "referenceImage",
+                            "referenceImageUrl",
+                            "reference_image_url",
+                            "baseImage",
+                            "baseImageUrl",
+                        ),
+                        "aspect_ratio": str(params.get("aspectRatio") or params.get("aspect_ratio") or ""),
+                        "image_reference": _resolve_kling_image_reference(params),
+                        "image_fidelity": _optional_float(params.get("imageFidelity") or params.get("image_fidelity")),
+                        "human_fidelity": _optional_float(params.get("humanFidelity") or params.get("human_fidelity")),
+                    }
+                )
+            if provider_protocol == "openai_images":
+                image_request["quality"] = _first_text(params, "quality", "imageQuality", "image_quality")
+                image_request["style"] = _first_text(params, "style", "imageStyle", "image_style")
+                image_request["output_format"] = _first_text(params, "outputFormat", "output_format")
+                image_request["response_format"] = _first_text(params, "responseFormat", "response_format")
+                image_request["image_size"] = _resolve_openai_image_size(params)
+            urls = client.generate_images(**image_request)
+            usage = getattr(client, "last_usage", {}) or {}
 
             self.backend_client.mark_processing(
                 task_id,
@@ -81,7 +115,7 @@ class ImageGenerationHandler:
             images = self.image_persister.persist_images(task_id=task_id, urls=urls)
             content = json.dumps(
                 {
-                    "provider": "siliconflow",
+                    "provider": provider,
                     "model": model_config.get("modelName"),
                     "images": images,
                 },
@@ -93,14 +127,16 @@ class ImageGenerationHandler:
                     "resourceType": "IMAGE",
                     "contentText": content,
                     "billableUnits": len(urls),
+                    "promptTokens": _optional_int(usage.get("promptTokens")),
+                    "completionTokens": _optional_int(usage.get("completionTokens")),
                 },
                 trace_id=trace_id,
             )
             LOGGER.info("image generation task %s completed traceId=%s images=%s", task_id, trace_id or "-", len(urls))
             return {"status": "SUCCESS", "taskId": task_id, "traceId": trace_id, "imageCount": len(urls)}
-        except (SiliconFlowVideoTimeoutError, KlingVideoTimeoutError) as exc:
+        except (SiliconFlowVideoTimeoutError, KlingVideoTimeoutError, OpenAIImagesTimeoutError) as exc:
             return self._mark_failed(task_id, "MODEL_TIMEOUT", str(exc), trace_id)
-        except (ProviderRegistryError, SiliconFlowVideoError, KlingVideoError) as exc:
+        except (ProviderRegistryError, SiliconFlowVideoError, KlingVideoError, OpenAIImagesError) as exc:
             return self._mark_failed(task_id, "MODEL_CALL_FAILED", str(exc), trace_id)
         except GeneratedImagePersistError as exc:
             return self._mark_failed(task_id, "MEDIA_PERSIST_FAILED", str(exc), trace_id)
@@ -110,13 +146,25 @@ class ImageGenerationHandler:
             return self._mark_failed(task_id, "WORKER_INTERNAL_ERROR", str(exc), trace_id)
 
     def _image_client(self, provider: str, model_config: dict[str, Any]) -> Any:
-        if provider == "kling_video":
+        provider_protocol = provider_registry.provider_protocol(provider)
+        if provider_protocol == "kling_video":
             access_key, secret_key = resolve_kling_credentials(model_config)
             return KlingVideoClient(
                 base_url=model_config.get("baseUrl"),
                 api_key=resolve_kling_api_key(model_config),
                 access_key=access_key,
                 secret_key=secret_key,
+                image_generation_path=model_config.get("imagePath") or model_config.get("endpointPath"),
+                image_generation_result_path=model_config.get("imageResultPath"),
+                timeout_seconds=model_config.get("timeoutSeconds"),
+            )
+        if provider_protocol == "openai_images":
+            return OpenAIImagesClient(
+                base_url=model_config.get("baseUrl"),
+                api_key=model_config.get("apiKey"),
+                endpoint_path=model_config.get("imagePath") or model_config.get("endpointPath"),
+                timeout_seconds=model_config.get("timeoutSeconds"),
+                extra_auth_json=model_config.get("extraAuthJson"),
             )
         return SiliconFlowVideoClient(
             base_url=model_config.get("baseUrl"),
@@ -130,7 +178,7 @@ class ImageGenerationHandler:
             task_id,
             {
                 "errorCode": error_code,
-                "errorMessage": error_message,
+                "errorMessage": _limit_text(error_message, 4000),
             },
             trace_id=trace_id,
         )
@@ -163,8 +211,15 @@ def _first_text(params: dict[str, Any], *keys: str) -> str:
     return ""
 
 
-def _build_prompt(params: dict[str, Any], fields: list[dict[str, Any]] | None = None) -> str:
+def _build_prompt(
+    params: dict[str, Any],
+    fields: list[dict[str, Any]] | None = None,
+    *,
+    include_style: bool = True,
+) -> str:
     prompt = _first_text(params, "prompt", "text", "description")
+    if not include_style:
+        return prompt
     style = _first_text(params, "style")
     style_prefix = _option_prompt_prefix(fields or [], "style", style)
     if prompt and style_prefix:
@@ -221,7 +276,56 @@ def _resolve_image_size(params: dict[str, Any]) -> str:
         "9:16": "720x1280",
         "4:3": "1024x768",
         "3:4": "768x1024",
+        "3:2": "1152x768",
+        "2:3": "768x1152",
+        "21:9": "2560x1080",
     }.get(aspect_ratio, "1024x1024")
+
+
+def _resolve_openai_image_size(params: dict[str, Any]) -> str:
+    explicit = params.get("imageSize") or params.get("image_size") or params.get("size")
+    if isinstance(explicit, str) and explicit.strip():
+        return explicit.strip()
+    aspect_ratio = str(params.get("aspectRatio") or params.get("aspect_ratio") or "1:1").strip()
+    return {
+        "1:1": "1024x1024",
+        "16:9": "1536x1024",
+        "4:3": "1536x1024",
+        "3:2": "1536x1024",
+        "9:16": "1024x1536",
+        "3:4": "1024x1536",
+        "2:3": "1024x1536",
+    }.get(aspect_ratio, "1024x1024")
+
+
+def _resolve_kling_image_reference(params: dict[str, Any]) -> str:
+    raw = _first_text(
+        params,
+        "imageReference",
+        "image_reference",
+        "referenceMode",
+        "reference_mode",
+        "referenceType",
+        "reference_type",
+    )
+    if not raw:
+        return ""
+    normalized = raw.strip().lower()
+    aliases = {
+        "角色特征": "subject",
+        "角色": "subject",
+        "主体": "subject",
+        "subject": "subject",
+        "人物长相": "face",
+        "人脸": "face",
+        "face": "face",
+        "通用垫图": "",
+        "垫图": "",
+        "general": "",
+        "none": "",
+        "__none__": "",
+    }
+    return aliases.get(normalized, normalized)
 
 
 def _as_int(value: Any, fallback: int) -> int:
@@ -244,3 +348,9 @@ def _optional_float(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _limit_text(value: str, max_length: int) -> str:
+    if len(value) <= max_length:
+        return value
+    return value[: max(0, max_length - 16)] + "...[truncated]"

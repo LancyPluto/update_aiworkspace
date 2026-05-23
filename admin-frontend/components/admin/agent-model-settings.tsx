@@ -55,7 +55,7 @@ interface ModelForm {
   timeoutSeconds: string
   inputTokenPricePer1m: string
   outputTokenPricePer1m: string
-  billingUnit: "TOKEN_PER_M" | "PER_CALL"
+  billingUnit: "TOKEN_PER_M" | "PER_CALL" | "IMAGE_TOKEN"
   unitPrice: string
   enabled: boolean
   isDefault: boolean
@@ -82,6 +82,9 @@ const FALLBACK_PROVIDER: ModelProviderDescriptor = {
   defaultBaseUrl: "https://api.openai.com/v1",
   defaultModel: "gpt-4o-mini",
   billingDefault: "TOKEN_PER_M",
+  providerProtocol: "",
+  vendorKind: "",
+  upstreamVendor: "",
   testStrategy: "agent_service",
   workerReady: true,
   description: "OpenAI-compatible chat completion endpoint.",
@@ -160,7 +163,12 @@ function toForm(config: AgentModelConfig, catalog: ModelProviderDescriptor[]): M
     timeoutSeconds: String(config.timeoutSeconds || 60),
     inputTokenPricePer1m: String(config.inputTokenPricePer1m ?? ((config.inputTokenPricePer1k ?? 0) * 1000)),
     outputTokenPricePer1m: String(config.outputTokenPricePer1m ?? ((config.outputTokenPricePer1k ?? 0) * 1000)),
-    billingUnit: config.billingUnit === "PER_CALL" ? "PER_CALL" : "TOKEN_PER_M",
+    billingUnit:
+      config.billingUnit === "PER_CALL"
+        ? "PER_CALL"
+        : config.billingUnit === "IMAGE_TOKEN"
+          ? "IMAGE_TOKEN"
+          : "TOKEN_PER_M",
     unitPrice: String(config.unitPrice ?? 0),
     enabled: config.enabled !== false,
     isDefault: Boolean(config.isDefault),
@@ -193,6 +201,12 @@ function toPayload(form: ModelForm): AgentModelConfigPayload {
 
 function normalizeConfigCode(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "")
+}
+
+function normalizeBillingUnit(value?: string | null): ModelForm["billingUnit"] {
+  if (value === "PER_CALL") return "PER_CALL"
+  if (value === "IMAGE_TOKEN") return "IMAGE_TOKEN"
+  return "TOKEN_PER_M"
 }
 
 function resolveVendorMeta(parts: {
@@ -344,7 +358,7 @@ export function AgentModelSettings({ refreshKey = 0 }: AgentModelSettingsProps) 
       capabilities: [...m.capabilities],
       baseUrl: m.defaultBaseUrl,
       modelName: m.defaultModel,
-      billingUnit: m.billingDefault === "PER_CALL" ? "PER_CALL" : "TOKEN_PER_M",
+      billingUnit: normalizeBillingUnit(m.billingDefault),
     })
     setSaved(false)
     setTestResult(null)
@@ -371,7 +385,7 @@ export function AgentModelSettings({ refreshKey = 0 }: AgentModelSettingsProps) 
           ? current.modelName
           : next.defaultModel,
       baseUrl: next.defaultBaseUrl,
-      billingUnit: next.billingDefault === "PER_CALL" ? "PER_CALL" : "TOKEN_PER_M",
+      billingUnit: normalizeBillingUnit(next.billingDefault),
       capabilities: [...next.capabilities],
     }))
     setSaved(false)
@@ -720,6 +734,7 @@ export function AgentModelSettings({ refreshKey = 0 }: AgentModelSettingsProps) 
                   <SelectContent>
                     <SelectItem value="TOKEN_PER_M">Token / 1M</SelectItem>
                     <SelectItem value="PER_CALL">按生成次数</SelectItem>
+                    <SelectItem value="IMAGE_TOKEN">图片 Token</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -740,7 +755,7 @@ export function AgentModelSettings({ refreshKey = 0 }: AgentModelSettingsProps) 
               <div className="mb-3">
                 <p className="text-sm font-medium">供应商入口</p>
                 <p className="text-xs text-muted-foreground">
-                  用于管理员快速跳转查看控制台、账号余额和接口文档；余额自动监控后续按供应商适配。
+                  用于管理员快速跳转查看控制台、账号余额和接口文档；中转站供应会在这里保留网关标识。
                 </p>
               </div>
               <div className="grid gap-4 md:grid-cols-3">
@@ -776,7 +791,7 @@ export function AgentModelSettings({ refreshKey = 0 }: AgentModelSettingsProps) 
               <div className="space-y-2">
                 <Label>运行信息</Label>
                 <Input
-                  value={`test=${meta.testStrategy} · workerReady=${meta.workerReady}`}
+                  value={`test=${meta.testStrategy} · workerReady=${meta.workerReady}${meta.vendorKind === "gateway" ? " · gateway" : ""}`}
                   readOnly
                   className="text-muted-foreground"
                 />
@@ -811,7 +826,7 @@ export function AgentModelSettings({ refreshKey = 0 }: AgentModelSettingsProps) 
             <Textarea
               readOnly
               className="min-h-24 font-mono text-xs"
-              value={`provider=${form.provider}\nmodel=${form.modelName}\nbase_url=${form.baseUrl}\ntimeout=${form.timeoutSeconds}s\nbilling_unit=${form.billingUnit}\ninput_price_per_1m=${form.inputTokenPricePer1m}\noutput_price_per_1m=${form.outputTokenPricePer1m}\nunit_price=${form.unitPrice}\nextra_auth=${form.extraAuthJson || form.extraAuthJsonMasked ? "configured" : "empty"}`}
+              value={`provider=${form.provider}\nprovider_protocol=${meta.providerProtocol || form.provider}\nvendor_kind=${meta.vendorKind || "direct"}\nupstream_vendor=${meta.upstreamVendor || ""}\nmodel=${form.modelName}\nbase_url=${form.baseUrl}\ntimeout=${form.timeoutSeconds}s\nbilling_unit=${form.billingUnit}\ninput_price_per_1m=${form.inputTokenPricePer1m}\noutput_price_per_1m=${form.outputTokenPricePer1m}\nunit_price=${form.unitPrice}\nextra_auth=${form.extraAuthJson || form.extraAuthJsonMasked ? "configured" : "empty"}`}
             />
 
             {testResult ? (

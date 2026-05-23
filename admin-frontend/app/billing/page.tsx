@@ -30,6 +30,9 @@ function billingUnit(log: BillingUsageLog) {
   if (log.billingUnit === "PER_CALL") {
     return `${number(log.billableUnits)} 次 x ${money(log.unitPrice)}`
   }
+  if (log.billingUnit === "IMAGE_TOKEN") {
+    return "图片 Token / 1M"
+  }
   return "Token / 1M"
 }
 

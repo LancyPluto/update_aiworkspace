@@ -368,6 +368,135 @@ workerReady: true
 | 可灵生图 | 是，但走 image handler |
 | 其他供应商图生视频 | 不一定，要看鉴权、路径、payload、轮询 |
 
+## 10A. oFox / OpenAI Images 中转站接入范例
+
+### 10A.1 为什么要区分中转站
+
+`oFox` 这类供应商本质上是“网关/中转站”：后台配置里看到的是 `oFox` 账号、`oFox` Base URL、`oFox` API Key，但真实模型协议仍然是 OpenAI 图片协议。
+
+因此要分清三层：
+
+| 概念 | 示例 | 作用 |
+| --- | --- | --- |
+| `provider` | `ofox_openai_images` | 后台下拉和凭证归属，表示这条配置来自哪个供应入口 |
+| `providerProtocol` | `openai_images` | Worker 路由用，决定按哪种 API 协议组装请求 |
+| `modelName` | `openai/gpt-image-2` | 真实模型名，必须和中转站文档一致 |
+
+规则：
+
+1. 如果以后只是换一个和 oFox 类似的 OpenAI 图片中转站，优先复用 `openai_images_gateway`，后台只改 `Base URL`、`API Key`、`modelName`。
+2. 如果要运营上明确区分品牌，可以新增一个 provider code，例如 `xxx_openai_images`，但它的 `providerProtocol` 仍然填 `openai_images`，Worker 不需要再写一套。
+3. 不要把图片模型塞进 `openai_compatible`。当前 `openai_compatible` 表示文本/聊天兼容协议，不表示图片生成协议。
+
+### 10A.2 Provider 配置
+
+```yaml
+code: ofox_openai_images
+label: oFox OpenAI images gateway
+capabilities:
+  - IMAGE_GENERATION
+defaultBaseUrl: https://api.ofox.ai/v1
+defaultModel: openai/gpt-image-2
+billingDefault: IMAGE_TOKEN
+providerProtocol: openai_images
+vendorKind: gateway
+upstreamVendor: openai
+testStrategy: accept_only
+workerReady: true
+```
+
+通用中转站槽位：
+
+```yaml
+code: openai_images_gateway
+providerProtocol: openai_images
+vendorKind: gateway
+upstreamVendor: openai
+```
+
+### 10A.3 后台模型配置
+
+| 字段 | 建议值 |
+| --- | --- |
+| Provider | `ofox_openai_images` 或 `openai_images_gateway` |
+| Base URL | `https://api.ofox.ai/v1` |
+| Model name | `openai/gpt-image-2` |
+| API Key | 中转站给的 Key |
+| Capabilities | `IMAGE_GENERATION` |
+| Billing unit | `IMAGE_TOKEN` |
+| 输入 Token 单价 / 1M | 按中转站价格表填写 |
+| 输出 Token 单价 / 1M | 按中转站价格表填写 |
+| 额外鉴权 JSON | 可选，用来覆盖特殊参数 |
+
+`extraAuthJson` 可选项：
+
+```json
+{
+  "endpointPath": "/images/generations",
+  "quality": "medium",
+  "responseFormat": "url",
+  "connectTimeoutSeconds": 10,
+  "readTimeoutSeconds": 300,
+  "sslEofRetries": 0,
+  "trustEnv": false,
+  "imageTokenEstimate": {
+    "1024x1024": {
+      "medium": 1056,
+      "high": 4224
+    },
+    "defaultOutputTokens": 1056
+  }
+}
+```
+
+### 10A.4 Worker 关键逻辑
+
+当前 `openai_images` client 会：
+
+1. 调用 `{baseUrl}/images/generations`。
+2. 使用 `Authorization: Bearer <apiKey>`。
+3. 发送 `model`、`prompt`、`n`、`size`、`quality`。
+4. 支持解析 `data[].url`。
+5. 支持解析 `data[].b64_json`，并保存为本地 `/generated/images/{taskId}/...`。
+6. 如果响应有 `usage`，优先使用 `input_tokens/output_tokens/total_tokens`。
+7. 如果响应没有 `usage`，按尺寸、质量、张数做图片 token 估算，并把 `promptTokens`、`completionTokens` 回传后端计费日志。
+
+OpenAI 图片生成通常是同步接口，Worker 会在 `POST /images/generations` 上等待供应商返回结果，不是轮询。`readTimeoutSeconds` 建议配置为 `300` 或更高；不要对生成 POST 自动重试，避免供应商实际已扣费但本地又发起第二次生成。
+
+如果遇到 `SSLEOFError: EOF occurred in violation of protocol`，这属于 HTTPS/TLS 连接在拿到 HTTP 响应前被中断。优先检查 Python `requests/urllib3/chardet/charset_normalizer` 版本、代理/VPN、公司网关 TLS 拦截、Base URL 是否正确。确认为偶发 TLS 断连后，可在后台临时设置：
+
+```json
+{
+  "sslEofRetries": 1
+}
+```
+
+这个重试默认关闭，因为生成接口重发存在重复扣费风险。
+
+如果日志出现 `ProxyError: Unable to connect to proxy`，说明 worker 的 Python requests 正在读取系统或环境变量代理，例如 `HTTP_PROXY` / `HTTPS_PROXY`。某些中转站域名可能被代理断开，而其他模型域名不受影响。可在后台额外鉴权 JSON 中禁用环境代理：
+
+```json
+{
+  "trustEnv": false
+}
+```
+
+如果必须走固定代理，则显式配置：
+
+```json
+{
+  "proxyUrl": "http://127.0.0.1:7890"
+}
+```
+
+### 10A.5 计费注意
+
+`IMAGE_TOKEN` 和普通 `PER_CALL` 不同：
+
+1. `PER_CALL` 适合可灵、部分视频模型这种“一次生成固定成本”的模型。
+2. `IMAGE_TOKEN` 适合 OpenAI 图片模型这种按输入/输出 token 计费的模型。
+3. 第一版任务冻结仍然使用工具的 `estimatedCreditCost`，Worker 成功后会把图片 token 写入 billing 日志；后续如果要按 token 精确扣算力，需要让后端按 `promptTokens/completionTokens + 模型单价` 反算实际 `chargedCredits`。
+
 ## 11. 新模型接入请求包
 
 让 AI 或开发同学接入新模型时，最好一次性给齐：

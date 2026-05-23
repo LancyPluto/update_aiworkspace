@@ -12,6 +12,8 @@ public interface CreditService {
 
     void settle(Long userId, CreditSourceType sourceType, Long sourceId, int amount);
 
+    int settleCompleted(Long userId, CreditSourceType sourceType, Long sourceId, int amount);
+
     void release(Long userId, CreditSourceType sourceType, Long sourceId, int amount);
 
     default void freezeForTask(Long userId, Long taskId, int amount) {

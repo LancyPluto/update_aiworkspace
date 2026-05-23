@@ -15,6 +15,20 @@ PROVIDERS: dict[str, dict[str, Any]] = {
     "seedance": {"capabilities": {"VIDEO_GENERATION", "DIGITAL_HUMAN"}, "worker_ready": True},
     "infinitetalk": {"capabilities": {"VIDEO_GENERATION", "DIGITAL_HUMAN"}, "worker_ready": True},
     "kling_video": {"capabilities": {"VIDEO_GENERATION", "IMAGE_GENERATION"}, "worker_ready": True},
+    "ofox_openai_images": {
+        "capabilities": {"IMAGE_GENERATION"},
+        "worker_ready": True,
+        "provider_protocol": "openai_images",
+        "vendor_kind": "gateway",
+        "upstream_vendor": "openai",
+    },
+    "openai_images_gateway": {
+        "capabilities": {"IMAGE_GENERATION"},
+        "worker_ready": True,
+        "provider_protocol": "openai_images",
+        "vendor_kind": "gateway",
+        "upstream_vendor": "openai",
+    },
     "worker_video": {"capabilities": {"VIDEO_GENERATION"}, "worker_ready": True},
     "minimax_speech": {"capabilities": {"TEXT_TO_SPEECH"}, "worker_ready": True},
     "minimax_music": {"capabilities": {"MUSIC_GENERATION"}, "worker_ready": False},
@@ -36,6 +50,14 @@ def provider_capabilities(provider: str | None) -> set[str]:
     if not meta:
         return set()
     return {str(c).upper() for c in meta.get("capabilities", set())}
+
+
+def provider_protocol(provider: str | None) -> str:
+    key = normalize_provider(provider)
+    meta = PROVIDERS.get(key)
+    if not meta:
+        return key
+    return str(meta.get("provider_protocol") or key).strip().lower()
 
 
 def require_capability(provider: str | None, capability: str) -> None:

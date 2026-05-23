@@ -2,12 +2,14 @@ import json
 import sys
 import tempfile
 from pathlib import Path
+from requests.exceptions import SSLError
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from handlers.image_generation_handler import ImageGenerationHandler
 from handlers.generated_image_persister import GeneratedImagePersister
+from client.openai_images_client import OpenAIImagesClient
 from task_queue.redis_consumer import TaskHandlerRouter
 
 
@@ -132,7 +134,7 @@ def main() -> None:
     assert backend.success_payload["resourceType"] == "IMAGE", backend.success_payload
     assert backend.success_payload["billableUnits"] == 2, backend.success_payload
     content = json.loads(backend.success_payload["contentText"])
-    assert content["provider"] == "siliconflow", content
+    assert content["provider"] == "siliconflow_images", content
     assert [item["url"] for item in content["images"]] == [
         "/generated/images/99120/image-1.png",
         "/generated/images/99120/image-2.png",
@@ -162,7 +164,7 @@ def test_failure_is_marked_processing_before_failed() -> None:
 
     assert result["status"] == "FAILED", result
     assert backend.processing, "task should be moved to PROCESSING before failed callback"
-    assert backend.failed_payload["errorCode"] == "WORKER_INTERNAL_ERROR", backend.failed_payload
+    assert backend.failed_payload["errorCode"] == "MODEL_CALL_FAILED", backend.failed_payload
 
 
 def test_data_url_image_is_persisted() -> None:
@@ -212,8 +214,159 @@ def test_terminal_task_is_skipped_before_handler() -> None:
     assert backend.failed_payload is None, backend.failed_payload
 
 
+def test_openai_images_gateway_handler_reports_image_tokens() -> None:
+    class FakeOpenAIImagesClient:
+        def __init__(self) -> None:
+            self.last_usage = {"promptTokens": 8, "completionTokens": 2112, "totalTokens": 2120}
+            self.calls = []
+
+        def generate_images(self, **kwargs):
+            self.calls.append(kwargs)
+            return ["data:image/png;base64,ZmFrZQ=="]
+
+    backend = FakeBackendClient()
+    context = backend.get_execution_context(99124)
+    context["modelConfig"] = {
+        "provider": "ofox_openai_images",
+        "modelName": "openai/gpt-image-2",
+        "baseUrl": "https://api.ofox.ai/v1",
+        "apiKey": "fake-ofox-key",
+    }
+    context["params"]["count"] = 1
+    context["params"]["quality"] = "low"
+    context["params"]["style"] = "natural"
+    context["params"]["outputFormat"] = "url"
+    client = FakeOpenAIImagesClient()
+    image_handler = ImageGenerationHandler(
+        backend_client=backend,
+        image_client=client,
+        image_persister=FakeImagePersister(),
+    )
+
+    result = image_handler.handle({"taskId": 99124, "traceId": "fake-openai-images-test", "__executionContext": context})
+
+    assert result["status"] == "SUCCESS", result
+    assert backend.success_payload["promptTokens"] == 8, backend.success_payload
+    assert backend.success_payload["completionTokens"] == 2112, backend.success_payload
+    assert backend.success_payload["billableUnits"] == 1, backend.success_payload
+    assert client.calls[0]["model"] == "openai/gpt-image-2"
+    assert client.calls[0]["quality"] == "low", client.calls
+    assert client.calls[0]["style"] == "natural", client.calls
+    assert client.calls[0]["output_format"] == "url", client.calls
+    assert "Style:" not in client.calls[0]["prompt"], client.calls
+
+
+def test_openai_images_client_parses_url_and_usage() -> None:
+    class FakeResponse:
+        status_code = 200
+        text = "{}"
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {
+                "data": [{"url": "https://example.com/openai-image.png"}],
+                "usage": {"input_tokens": 12, "output_tokens": 2048, "total_tokens": 2060},
+            }
+
+    client = OpenAIImagesClient(base_url="https://api.ofox.ai/v1", api_key="fake-key")
+    posted = {}
+
+    def fake_post(url, json, timeout):
+        posted["url"] = url
+        posted["json"] = json
+        posted["timeout"] = timeout
+        return FakeResponse()
+
+    client.session.post = fake_post
+    urls = client.generate_images(
+        prompt="draw a cat",
+        model="openai/gpt-image-2",
+        image_size="1024x1024",
+        batch_size=1,
+        quality="medium",
+        style="natural",
+        output_format="url",
+    )
+
+    assert urls == ["https://example.com/openai-image.png"], urls
+    assert posted["url"] == "https://api.ofox.ai/v1/images/generations", posted
+    assert posted["json"]["model"] == "openai/gpt-image-2", posted
+    assert posted["json"]["quality"] == "medium", posted
+    assert posted["json"]["style"] == "natural", posted
+    assert posted["json"]["output_format"] == "url", posted
+    assert posted["timeout"] == (10, 300), posted
+    assert client.last_usage == {"promptTokens": 12, "completionTokens": 2048, "totalTokens": 2060}
+
+
+def test_openai_images_client_timeout_can_be_configured() -> None:
+    client = OpenAIImagesClient(
+        base_url="https://api.ofox.ai/v1",
+        api_key="fake-key",
+        timeout_seconds=5,
+        extra_auth_json='{"connectTimeoutSeconds":3,"readTimeoutSeconds":180}',
+    )
+    assert client.timeout == (3, 180), client.timeout
+
+
+def test_openai_images_client_proxy_can_be_disabled() -> None:
+    client = OpenAIImagesClient(
+        base_url="https://shiyunapi.com/v1",
+        api_key="fake-key",
+        extra_auth_json='{"trustEnv":false}',
+    )
+    assert client.session.trust_env is False
+
+
+def test_openai_images_client_proxy_can_be_configured() -> None:
+    client = OpenAIImagesClient(
+        base_url="https://shiyunapi.com/v1",
+        api_key="fake-key",
+        extra_auth_json='{"proxyUrl":"http://127.0.0.1:7890"}',
+    )
+    assert client.session.proxies["https"] == "http://127.0.0.1:7890"
+
+
+def test_openai_images_client_can_retry_ssl_eof_when_enabled() -> None:
+    class FakeResponse:
+        status_code = 200
+        text = "{}"
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {"data": [{"url": "https://example.com/recovered.png"}]}
+
+    client = OpenAIImagesClient(
+        base_url="https://api.ofox.ai/v1",
+        api_key="fake-key",
+        extra_auth_json='{"sslEofRetries":1}',
+    )
+    calls = {"count": 0}
+
+    def fake_post(url, json, timeout):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise SSLError("EOF occurred in violation of protocol")
+        return FakeResponse()
+
+    client.session.post = fake_post
+    urls = client.generate_images(prompt="draw", model="openai/gpt-image-2")
+
+    assert urls == ["https://example.com/recovered.png"], urls
+    assert calls["count"] == 2, calls
+
+
 if __name__ == "__main__":
     test_terminal_task_is_skipped_before_handler()
     test_failure_is_marked_processing_before_failed()
     test_data_url_image_is_persisted()
+    test_openai_images_gateway_handler_reports_image_tokens()
+    test_openai_images_client_parses_url_and_usage()
+    test_openai_images_client_timeout_can_be_configured()
+    test_openai_images_client_proxy_can_be_disabled()
+    test_openai_images_client_proxy_can_be_configured()
+    test_openai_images_client_can_retry_ssl_eof_when_enabled()
     main()
