@@ -1,6 +1,7 @@
 package com.aiminilab.aitoolmarket.task;
 
 import com.aiminilab.aitoolmarket.auth.security.AuthTestTokens;
+import com.aiminilab.aitoolmarket.credit.service.CreditService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -31,6 +32,9 @@ class WorkerInternalApiTest {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private CreditService creditService;
 
     @Test
     void workerCanReadContextMarkProcessingAndWriteSuccessResult() throws Exception {
@@ -133,13 +137,108 @@ class WorkerInternalApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("FAILED"))
                 .andExpect(jsonPath("$.data.progress").value(100))
-                .andExpect(jsonPath("$.data.progressMessage").value("model timeout"));
+                .andExpect(jsonPath("$.data.progressMessage").value("任务失败：MODEL_CALL_FAILED"));
 
         mockMvc.perform(get("/api/v1/tasks/{taskId}", taskId)
                         .header("Authorization", "Bearer " + userToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("FAILED"))
                 .andExpect(jsonPath("$.data.result").doesNotExist());
+    }
+
+    @Test
+    void workerFailedStatusAcceptsLongProviderErrorMessage() throws Exception {
+        String adminToken = login("/api/admin/v1/auth/login", "admin");
+        Long toolId = createTool(adminToken, "worker_long_failed_tool", 1);
+        publishTool(adminToken, toolId);
+        String userToken = login("/api/v1/auth/login", "user1");
+        Long taskId = createTask(userToken, "worker_long_failed_tool");
+
+        String processingBody = """
+                                {
+                                  "progress": 35,
+                                  "progressMessage": "AI is generating"
+                                }
+                                """;
+        mockMvc.perform(signed(post("/api/internal/v1/tasks/{taskId}/processing", taskId), "POST",
+                        "/api/internal/v1/tasks/%d/processing".formatted(taskId), processingBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(processingBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("PROCESSING"));
+
+        String longMessage = "SSL EOF ".repeat(800);
+        String failedBody = """
+                                {
+                                  "errorCode": "MODEL_CALL_FAILED",
+                                  "errorMessage": "%s"
+                                }
+                                """.formatted(longMessage);
+        mockMvc.perform(signed(post("/api/internal/v1/tasks/{taskId}/failed", taskId), "POST",
+                        "/api/internal/v1/tasks/%d/failed".formatted(taskId), failedBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(failedBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("FAILED"))
+                .andExpect(jsonPath("$.data.progressMessage").value("任务失败：MODEL_CALL_FAILED"));
+
+        mockMvc.perform(get("/api/v1/tasks/{taskId}", taskId)
+                        .header("Authorization", "Bearer " + userToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("FAILED"));
+    }
+
+    @Test
+    void workerSuccessStillSavesResultWhenFrozenCreditWasReleased() throws Exception {
+        String adminToken = login("/api/admin/v1/auth/login", "admin");
+        Long toolId = createTool(adminToken, "worker_success_after_release_tool", 10);
+        publishTool(adminToken, toolId);
+        String userToken = login("/api/v1/auth/login", "user1");
+        Long taskId = createTask(userToken, "worker_success_after_release_tool");
+
+        creditService.releaseForTask(2L, taskId, 10);
+
+        String processingBody = """
+                                {
+                                  "progress": 35,
+                                  "progressMessage": "AI is generating"
+                                }
+                                """;
+        mockMvc.perform(signed(post("/api/internal/v1/tasks/{taskId}/processing", taskId), "POST",
+                        "/api/internal/v1/tasks/%d/processing".formatted(taskId), processingBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(processingBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("PROCESSING"));
+
+        String successBody = """
+                                {
+                                  "resourceType": "VIDEO",
+                                  "contentText": "{\\"videos\\":[{\\"url\\":\\"/generated/video.mp4\\"}]}",
+                                  "billableUnits": 1
+                                }
+                                """;
+        mockMvc.perform(signed(post("/api/internal/v1/tasks/{taskId}/success", taskId), "POST",
+                        "/api/internal/v1/tasks/%d/success".formatted(taskId), successBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(successBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("SUCCESS"));
+
+        mockMvc.perform(get("/api/v1/tasks/{taskId}", taskId)
+                        .header("Authorization", "Bearer " + userToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("SUCCESS"))
+                .andExpect(jsonPath("$.data.result.resourceType").value("VIDEO"))
+                .andExpect(jsonPath("$.data.result.contentText").value("{\"videos\":[{\"url\":\"/generated/video.mp4\"}]}"));
+
+        mockMvc.perform(get("/api/admin/v1/billing/usage-logs")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .param("pageNo", "1")
+                        .param("pageSize", "10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].sourceId").value(taskId.intValue()))
+                .andExpect(jsonPath("$.data.list[0].chargedCredits").value(10));
     }
 
     @Test

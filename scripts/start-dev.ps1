@@ -126,37 +126,50 @@ function Start-InfraIfNeeded {
         return
     }
 
-    Write-Section "Starting infra: MySQL + Redis"
+    $UseRabbitMq = $env:TASK_QUEUE_BACKEND -and $env:TASK_QUEUE_BACKEND.Trim().ToLowerInvariant() -eq "rabbitmq"
+    $InfraServices = @("mysql", "redis")
+    if ($UseRabbitMq) {
+        $InfraServices += "rabbitmq"
+    }
+
+    Write-Section ("Starting infra: " + ($InfraServices -join " + "))
     $DeployPath = Join-Path $Root "deploy"
     Push-Location $DeployPath
     try {
         & docker compose version *> $null
         if ($LASTEXITCODE -eq 0) {
-            & docker compose up -d mysql redis
+            $ComposeArgs = @("compose", "up", "-d") + $InfraServices
+            & docker @ComposeArgs
         } else {
-            & docker-compose up -d mysql redis
+            $ComposeArgs = @("up", "-d") + $InfraServices
+            & docker-compose @ComposeArgs
         }
         if ($LASTEXITCODE -ne 0) {
-            throw "Failed to start MySQL/Redis."
+            throw "Failed to start infra services: $($InfraServices -join ', ')."
         }
     } finally {
         Pop-Location
     }
 
-    Write-Host "[..] Waiting for MySQL + Redis containers..."
+    Write-Host "[..] Waiting for containers: $($InfraServices -join ', ')..."
     $Deadline = (Get-Date).AddSeconds(90)
     while ((Get-Date) -lt $Deadline) {
         cmd /c "docker exec ai-supermarket-mysql mysqladmin ping -uroot -proot123456 --silent >nul 2>nul"
         $MysqlReady = $LASTEXITCODE -eq 0
         cmd /c "docker exec ai-supermarket-redis redis-cli ping >nul 2>nul"
         $RedisReady = $LASTEXITCODE -eq 0
-        if ($MysqlReady -and $RedisReady) {
-            Write-Host "[OK] MySQL + Redis are ready"
+        $RabbitReady = -not $UseRabbitMq
+        if ($UseRabbitMq) {
+            cmd /c "docker exec ai-supermarket-rabbitmq rabbitmq-diagnostics -q ping >nul 2>nul"
+            $RabbitReady = $LASTEXITCODE -eq 0
+        }
+        if ($MysqlReady -and $RedisReady -and $RabbitReady) {
+            Write-Host "[OK] Infra services are ready: $($InfraServices -join ', ')"
             return
         }
         Start-Sleep -Seconds 2
     }
-    throw "Timed out waiting for MySQL/Redis containers."
+    throw "Timed out waiting for infra services: $($InfraServices -join ', ')."
 }
 
 Import-DotEnv (Join-Path $Root ".env")
@@ -169,6 +182,12 @@ Set-DefaultEnv "SERVER_PORT" "8080"
 Set-DefaultEnv "REDIS_HOST" "127.0.0.1"
 Set-DefaultEnv "REDIS_PORT" "6379"
 Set-DefaultEnv "AI_TASK_QUEUE" "ai:task:queue"
+Set-DefaultEnv "TASK_QUEUE_BACKEND" "rabbitmq"
+Set-DefaultEnv "RABBITMQ_HOST" "127.0.0.1"
+Set-DefaultEnv "RABBITMQ_PORT" "5672"
+Set-DefaultEnv "RABBITMQ_USERNAME" "guest"
+Set-DefaultEnv "RABBITMQ_PASSWORD" "guest"
+Set-DefaultEnv "RABBITMQ_TASK_QUEUE" "ai.tool.normal"
 Set-DefaultEnv "GENERATED_MEDIA_DIR" (Join-Path $Root "data\generated-media")
 Set-DefaultEnv "GENERATED_MEDIA_PUBLIC_BASE_URL" "/generated"
 
@@ -179,7 +198,8 @@ Write-Host "Backend:       http://localhost:8080"
 Write-Host "Agent Service: http://localhost:8090"
 Write-Host "User Web:      http://localhost:5173"
 Write-Host "Admin Web:     http://localhost:5174"
-Write-Host "Worker:        Redis queue consumer"
+Write-Host "Queue backend: $env:TASK_QUEUE_BACKEND"
+Write-Host "Worker:        $env:TASK_QUEUE_BACKEND queue consumer"
 
 Require-Command "java" "JDK 17+"
 Require-Command "mvn" "Maven 3.8+"

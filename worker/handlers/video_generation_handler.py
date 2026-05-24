@@ -38,6 +38,28 @@ class VideoGenerationHandler:
                 LOGGER.info("skip terminal video task taskId=%s status=%s", task_id, status)
                 return {"status": "SKIPPED", "taskId": task_id, "taskStatus": status, "traceId": trace_id}
 
+            cached_video = self.video_persister.find_existing_task_video(task_id=task_id)
+            if cached_video:
+                content = json.dumps(
+                    {
+                        "provider": "cached",
+                        "status": "SUCCESS",
+                        "videos": [cached_video],
+                    },
+                    ensure_ascii=False,
+                )
+                self.backend_client.mark_success(
+                    task_id,
+                    {
+                        "resourceType": "VIDEO",
+                        "contentText": content,
+                        "billableUnits": 1,
+                    },
+                    trace_id=trace_id,
+                )
+                LOGGER.info("video generation task %s finalized from cached media traceId=%s", task_id, trace_id or "-")
+                return {"status": "SUCCESS", "taskId": task_id, "traceId": trace_id, "cached": True}
+
             params = context.get("params") or {}
             model_config = context.get("modelConfig") or {}
             provider = str(model_config.get("provider") or context.get("modelProviderCode") or "").lower()

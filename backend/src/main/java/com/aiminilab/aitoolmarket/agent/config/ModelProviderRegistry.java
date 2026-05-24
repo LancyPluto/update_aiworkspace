@@ -128,6 +128,9 @@ public class ModelProviderRegistry {
                 stringValue(raw.get("defaultBaseUrl")),
                 stringValue(raw.get("defaultModel")),
                 stringValue(raw.get("billingDefault")),
+                stringValue(raw.get("providerProtocol")),
+                stringValue(raw.get("vendorKind")),
+                stringValue(raw.get("upstreamVendor")),
                 stringValue(raw.get("testStrategy")),
                 booleanValue(raw.get("workerReady"), true),
                 stringValue(raw.get("description"))

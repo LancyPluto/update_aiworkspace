@@ -61,6 +61,23 @@ class GeneratedVideoPersister:
             content_type=content_type,
         ).to_result_item()
 
+    def find_existing_task_video(self, *, task_id: int) -> dict[str, str] | None:
+        task_dir = self.output_dir / "video" / str(task_id)
+        if not task_dir.exists():
+            return None
+        for path in sorted(task_dir.glob("video-1.*")):
+            if not path.is_file():
+                continue
+            content_type = mimetypes.guess_type(path.name)[0]
+            public_url = self._public_url(path)
+            return PersistedVideo(
+                url=public_url,
+                source_url=public_url,
+                path=path,
+                content_type=content_type,
+            ).to_result_item()
+        return None
+
     def _download(self, source_url: str) -> tuple[bytes, str | None]:
         try:
             with requests.get(source_url, stream=True, timeout=self.timeout) as response:

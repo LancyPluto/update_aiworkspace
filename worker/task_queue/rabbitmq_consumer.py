@@ -3,7 +3,7 @@ import logging
 import time
 
 import pika
-from pika.exceptions import AMQPError, UnroutableError
+from pika.exceptions import AMQPError, ConnectionWrongStateError, UnroutableError
 
 from config import settings
 from task_queue.task_handler_router import TaskHandlerRouter
@@ -27,8 +27,8 @@ class RabbitMqConsumer:
             host=settings.rabbitmq_host,
             port=settings.rabbitmq_port,
             credentials=credentials,
-            heartbeat=30,
-            blocked_connection_timeout=60,
+            heartbeat=settings.rabbitmq_heartbeat_seconds,
+            blocked_connection_timeout=settings.rabbitmq_blocked_connection_timeout_seconds,
         )
         backoff_seconds = 1
         while True:
@@ -54,37 +54,23 @@ class RabbitMqConsumer:
                     raise ValueError(f"message missing taskId: {message}")
                 result = self.handler.handle(message)
                 LOGGER.info("task handled result=%s", result)
-                ch.basic_ack(delivery_tag=method.delivery_tag)
             except Exception as exc:
-                retry_count = self._retry_count(properties.headers or {})
-                headers = dict(properties.headers or {})
-                headers["x-last-error"] = str(exc)[:500]
-                try:
-                    if retry_count < self.max_retries:
-                        next_retry = retry_count + 1
-                        headers["x-retry-count"] = next_retry
-                        retry_queue = f"{self.retry_queue_prefix}.{next_retry}"
-                        LOGGER.exception("rabbitmq task handling failed, retry=%s/%s queue=%s", next_retry, self.max_retries, retry_queue)
-                        self._publish(ch, retry_queue, body, headers)
-                    else:
-                        headers["x-dead-reason"] = "max-retries-exceeded"
-                        LOGGER.exception("rabbitmq task handling failed, moved to dead queue")
-                        self._publish(ch, self.dead_queue_name, body, headers)
-                    ch.basic_ack(delivery_tag=method.delivery_tag)
-                except UnroutableError:
-                    LOGGER.exception("rabbitmq retry/dead queue is missing, original message will be requeued")
-                    ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
+                self._handle_task_exception(ch, method, properties, body, exc)
+                return
+            self._ack(ch, method.delivery_tag)
 
         channel.basic_consume(queue=self.queue_name, on_message_callback=callback)
         try:
             channel.start_consuming()
         except KeyboardInterrupt:
             LOGGER.info("worker stopped by keyboard interrupt")
-            channel.stop_consuming()
+            if channel.is_open:
+                channel.stop_consuming()
         finally:
-            connection.close()
+            self._safe_close(connection)
 
     def _publish(self, channel, routing_key: str, body: bytes, headers: dict) -> None:
+        self._ensure_channel_open(channel)
         channel.basic_publish(
             exchange="",
             routing_key=routing_key,
@@ -96,6 +82,54 @@ class RabbitMqConsumer:
                 headers=headers,
             ),
         )
+
+    def _handle_task_exception(self, channel, method, properties, body: bytes, exc: Exception) -> None:
+        self._ensure_channel_open(channel)
+        retry_count = self._retry_count(properties.headers or {})
+        headers = dict(properties.headers or {})
+        headers["x-last-error"] = str(exc)[:500]
+        try:
+            if retry_count < self.max_retries:
+                next_retry = retry_count + 1
+                headers["x-retry-count"] = next_retry
+                retry_queue = f"{self.retry_queue_prefix}.{next_retry}"
+                LOGGER.exception(
+                    "rabbitmq task handling failed, retry=%s/%s queue=%s",
+                    next_retry,
+                    self.max_retries,
+                    retry_queue,
+                )
+                self._publish(channel, retry_queue, body, headers)
+            else:
+                headers["x-dead-reason"] = "max-retries-exceeded"
+                LOGGER.exception("rabbitmq task handling failed, moved to dead queue")
+                self._publish(channel, self.dead_queue_name, body, headers)
+            self._ack(channel, method.delivery_tag)
+        except UnroutableError:
+            LOGGER.exception("rabbitmq retry/dead queue is missing, original message will be requeued")
+            self._nack_requeue(channel, method.delivery_tag)
+
+    def _ack(self, channel, delivery_tag) -> None:
+        self._ensure_channel_open(channel)
+        channel.basic_ack(delivery_tag=delivery_tag)
+
+    def _nack_requeue(self, channel, delivery_tag) -> None:
+        self._ensure_channel_open(channel)
+        channel.basic_nack(delivery_tag=delivery_tag, requeue=True)
+
+    @staticmethod
+    def _ensure_channel_open(channel) -> None:
+        if not channel.is_open:
+            raise ConnectionWrongStateError("rabbitmq channel is closed")
+
+    @staticmethod
+    def _safe_close(connection: pika.BlockingConnection) -> None:
+        if not connection.is_open:
+            return
+        try:
+            connection.close()
+        except ConnectionWrongStateError:
+            LOGGER.debug("rabbitmq connection already closed before close()")
 
     @staticmethod
     def _retry_count(headers: dict) -> int:

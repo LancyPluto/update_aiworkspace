@@ -213,7 +213,7 @@ public interface TaskMapper extends BaseMapper<AiTask> {
     @Update("""
             <script>
             UPDATE ai_tasks
-            SET status = 'FAILED', progress = 100, progress_message = #{errorMessage},
+            SET status = 'FAILED', progress = 100, progress_message = #{progressMessage},
                 error_code = #{errorCode}, error_message = #{errorMessage},
                 finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
             WHERE id = #{taskId}
@@ -225,6 +225,7 @@ public interface TaskMapper extends BaseMapper<AiTask> {
             """)
     int markFailed(@Param("taskId") Long taskId,
                    @Param("errorCode") String errorCode,
+                   @Param("progressMessage") String progressMessage,
                    @Param("errorMessage") String errorMessage,
                    @Param("expectedStatuses") List<String> expectedStatuses);
 

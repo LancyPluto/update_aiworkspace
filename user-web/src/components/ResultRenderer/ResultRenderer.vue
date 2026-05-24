@@ -228,7 +228,14 @@ function escapeXml(value: string): string {
             :key="image.url"
             class="overflow-hidden rounded-lg border border-border bg-background"
           >
-            <img :src="image.url" :alt="image.label ?? b.title" class="w-full object-contain" loading="lazy" />
+            <div class="flex aspect-square items-center justify-center bg-secondary/30">
+              <img
+                :src="image.url"
+                :alt="image.label ?? b.title"
+                class="h-full w-full object-contain"
+                loading="lazy"
+              />
+            </div>
             <figcaption class="flex items-center justify-between gap-3 border-t border-border px-3 py-2 text-xs text-muted-foreground">
               <span>{{ image.label ?? "图片" }}</span>
               <a :href="image.url" download class="inline-flex items-center gap-1 text-foreground hover:text-primary">

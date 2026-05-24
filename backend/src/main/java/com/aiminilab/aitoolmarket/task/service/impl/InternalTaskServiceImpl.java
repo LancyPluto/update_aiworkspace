@@ -26,6 +26,8 @@ import com.aiminilab.aitoolmarket.tool.dto.ToolFieldResponse;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolFieldItemMapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -33,6 +35,7 @@ import java.util.List;
 
 @Service
 public class InternalTaskServiceImpl implements InternalTaskService {
+    private static final Logger LOGGER = LoggerFactory.getLogger(InternalTaskServiceImpl.class);
 
     private final TaskMapper taskMapper;
     private final ToolMapper toolMapper;
@@ -81,7 +84,7 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         int progress = request.progress() == null ? 10 : Math.max(0, Math.min(99, request.progress()));
         String message = request.progressMessage() == null || request.progressMessage().isBlank()
                 ? "AI is processing"
-                : request.progressMessage();
+                : limitText(request.progressMessage(), 240);
         AiTask task = findTask(taskId);
         if (!TaskStatus.PROCESSING.name().equals(task.getStatus())) {
             TaskStateMachine.ensureTransition(task.getStatus(), TaskStatus.PROCESSING.name());
@@ -111,11 +114,17 @@ public class InternalTaskServiceImpl implements InternalTaskService {
             }
             TaskStateMachine.ensureTransition(current.getStatus(), TaskStatus.SUCCESS.name());
         }
-        creditService.settle(task.getUserId(), CreditSourceType.TASK, taskId, task.getEstimatedCreditCost());
+        int chargedCredits = creditService.settleCompleted(task.getUserId(), CreditSourceType.TASK, taskId, task.getEstimatedCreditCost());
+        if (chargedCredits < task.getEstimatedCreditCost()) {
+            LOGGER.warn(
+                    "task success saved with incomplete credit settlement taskId={} userId={} expectedCredits={} chargedCredits={}",
+                    taskId, task.getUserId(), task.getEstimatedCreditCost(), chargedCredits
+            );
+        }
         AiTool billingTool = toolMapper.findById(task.getToolId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在"));
         billingService.recordUsage("TASK", taskId, task.getUserId(), modelCapabilityService.resolveModelConfigForTool(billingTool),
-                request.promptTokens(), request.completionTokens(), request.billableUnits(), task.getEstimatedCreditCost());
+                request.promptTokens(), request.completionTokens(), request.billableUnits(), chargedCredits);
         taskMapper.insertResult(taskId, task.getUserId(), request.resourceType(), request.contentText());
         taskMetrics.recordTaskOutcome(task.getToolCode(), "SUCCESS", task.getCreatedAt(), findTask(taskId).getFinishedAt());
         return TaskStatusResponse.from(findTask(taskId));
@@ -129,14 +138,15 @@ public class InternalTaskServiceImpl implements InternalTaskService {
                 : request.errorCode();
         String errorMessage = request.errorMessage() == null || request.errorMessage().isBlank()
                 ? "Worker execution failed"
-                : request.errorMessage();
+                : limitText(request.errorMessage(), 4000);
+        String progressMessage = limitText("任务失败：" + errorCode, 240);
         AiTask task = findTask(taskId);
         if (TaskStatus.FAILED.name().equals(task.getStatus()) || TaskStatus.SUCCESS.name().equals(task.getStatus())
                 || TaskStatus.CANCELLED.name().equals(task.getStatus())) {
             return TaskStatusResponse.from(task);
         }
         TaskStateMachine.ensureTransition(task.getStatus(), TaskStatus.FAILED.name());
-        int updated = taskMapper.markFailed(taskId, errorCode, errorMessage, List.of(TaskStatus.PROCESSING.name()));
+        int updated = taskMapper.markFailed(taskId, errorCode, progressMessage, errorMessage, List.of(TaskStatus.PROCESSING.name()));
         if (updated == 0) {
             AiTask current = findTask(taskId);
             if (TaskStatus.FAILED.name().equals(current.getStatus()) || TaskStatus.SUCCESS.name().equals(current.getStatus())
@@ -153,6 +163,17 @@ public class InternalTaskServiceImpl implements InternalTaskService {
     private AiTask findTask(Long taskId) {
         return taskMapper.findById(taskId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.TASK_NOT_FOUND, "任务不存在"));
+    }
+
+    private String limitText(String value, int maxLength) {
+        if (value == null) {
+            return "";
+        }
+        String normalized = value.trim();
+        if (normalized.length() <= maxLength) {
+            return normalized;
+        }
+        return normalized.substring(0, Math.max(0, maxLength - 16)) + "...[truncated]";
     }
 
     private JsonNode parseParams(String paramsJson) {

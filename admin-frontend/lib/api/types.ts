@@ -252,6 +252,9 @@ export interface ModelProviderDescriptor {
   defaultBaseUrl: string
   defaultModel: string
   billingDefault: string
+  providerProtocol?: string | null
+  vendorKind?: string | null
+  upstreamVendor?: string | null
   testStrategy: string
   workerReady: boolean
   description: string
@@ -275,7 +278,7 @@ export interface AgentModelConfig {
   outputTokenPricePer1k?: number | null
   inputTokenPricePer1m?: number | null
   outputTokenPricePer1m?: number | null
-  billingUnit?: 'TOKEN_PER_M' | 'PER_CALL' | string | null
+  billingUnit?: 'TOKEN_PER_M' | 'PER_CALL' | 'IMAGE_TOKEN' | string | null
   unitPrice?: number | null
   enabled: boolean
   isDefault?: boolean | null
@@ -336,7 +339,7 @@ export interface AgentModelConfigPayload {
   outputTokenPricePer1k?: number
   inputTokenPricePer1m?: number
   outputTokenPricePer1m?: number
-  billingUnit?: 'TOKEN_PER_M' | 'PER_CALL' | string
+  billingUnit?: 'TOKEN_PER_M' | 'PER_CALL' | 'IMAGE_TOKEN' | string
   unitPrice?: number
   enabled?: boolean
   isDefault?: boolean

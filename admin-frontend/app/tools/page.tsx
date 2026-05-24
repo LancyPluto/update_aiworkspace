@@ -481,6 +481,7 @@ function mapTool(tool: ToolSummary): ToolRow {
 
 export default function ToolsPage() {
   const [searchQuery, setSearchQuery] = useState("")
+  const [selectedOutputModality, setSelectedOutputModality] = useState<string | null>(null)
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [editingTool, setEditingTool] = useState<ToolRow | null>(null)
   const [toolList, setToolList] = useState<ToolRow[]>([])
@@ -576,13 +577,34 @@ export default function ToolsPage() {
 
   const filteredTools = useMemo(() => {
     const keyword = searchQuery.trim().toLowerCase()
-    if (!keyword) return toolList
-    return toolList.filter((tool) =>
-      [tool.name, tool.description, tool.category].some((value) =>
-        value.toLowerCase().includes(keyword),
-      ),
-    )
-  }, [toolList, searchQuery])
+    return toolList.filter((tool) => {
+      const matchesKeyword =
+        !keyword ||
+        [tool.name, tool.description, tool.category, tool.toolCode].some((value) =>
+          value.toLowerCase().includes(keyword),
+        )
+      const matchesOutput =
+        !selectedOutputModality ||
+        (tool.outputModality || "").trim().toUpperCase() === selectedOutputModality
+      return matchesKeyword && matchesOutput
+    })
+  }, [toolList, searchQuery, selectedOutputModality])
+
+  const outputModalityFilters = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const tool of toolList) {
+      const key = (tool.outputModality || "TEXT").trim().toUpperCase()
+      counts.set(key, (counts.get(key) || 0) + 1)
+    }
+    const order = ["TEXT", "IMAGE", "AUDIO", "VIDEO", "JSON", "FILE", "MULTIMODAL"]
+    return [...counts.entries()]
+      .sort(([a], [b]) => {
+        const ia = order.indexOf(a)
+        const ib = order.indexOf(b)
+        return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib)
+      })
+      .map(([key, count]) => ({ key, label: optionLabel(modalityOptions, key), count }))
+  }, [toolList])
 
   const requiredModelCapability = useMemo(() => {
     const code = editingTool?.toolCode ?? form.toolCode ?? ""
@@ -960,6 +982,32 @@ export default function ToolsPage() {
             新建工具
           </Button>
           </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant={selectedOutputModality === null ? "default" : "outline"}
+            onClick={() => setSelectedOutputModality(null)}
+          >
+            全部
+            <span className="ml-1 opacity-70">{toolList.length}</span>
+          </Button>
+          {outputModalityFilters.map((item) => (
+            <Button
+              key={item.key}
+              type="button"
+              size="sm"
+              variant={selectedOutputModality === item.key ? "default" : "outline"}
+              onClick={() => setSelectedOutputModality(item.key)}
+            >
+              {item.label}
+              <span className="ml-1 opacity-70">{item.count}</span>
+            </Button>
+          ))}
+        </div>
+
           <Dialog
             open={isAddDialogOpen}
             onOpenChange={(open) => {
@@ -1275,7 +1323,6 @@ export default function ToolsPage() {
               </DialogFooter>
             </DialogContent>
           </Dialog>
-        </div>
 
         {false ? (
         <div className="rounded-2xl border border-border bg-card p-5">

@@ -27,6 +27,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
 
     private static final String BILLING_UNIT_TOKEN_PER_M = "TOKEN_PER_M";
     private static final String BILLING_UNIT_PER_CALL = "PER_CALL";
+    private static final String BILLING_UNIT_IMAGE_TOKEN = "IMAGE_TOKEN";
     private static final BigDecimal TOKEN_UNIT_SCALE = BigDecimal.valueOf(1000);
     private static final String TEST_STRATEGY_ACCEPT_ONLY = "accept_only";
 
@@ -281,7 +282,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "token price must be non-negative");
         }
         String billingUnit = resolveBillingUnit(request.billingUnit(), provider);
-        if (!Set.of(BILLING_UNIT_TOKEN_PER_M, BILLING_UNIT_PER_CALL).contains(billingUnit)) {
+        if (!Set.of(BILLING_UNIT_TOKEN_PER_M, BILLING_UNIT_PER_CALL, BILLING_UNIT_IMAGE_TOKEN).contains(billingUnit)) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "unsupported billing unit");
         }
         if (request.extraAuthJson() != null && !request.extraAuthJson().isBlank()) {
@@ -361,6 +362,9 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         String defaultUnit = providerRegistry.defaultBillingUnit(provider);
         if (BILLING_UNIT_PER_CALL.equalsIgnoreCase(defaultUnit)) {
             return BILLING_UNIT_PER_CALL;
+        }
+        if (BILLING_UNIT_IMAGE_TOKEN.equalsIgnoreCase(defaultUnit)) {
+            return BILLING_UNIT_IMAGE_TOKEN;
         }
         return BILLING_UNIT_TOKEN_PER_M;
     }

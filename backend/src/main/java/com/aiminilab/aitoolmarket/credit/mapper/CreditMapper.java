@@ -67,6 +67,19 @@ public interface CreditMapper extends BaseMapper<CreditAccount> {
 
     @Update("""
             UPDATE credit_accounts
+            SET balance = balance - #{amount},
+                total_consumed = total_consumed + #{amount},
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{accountId} AND balance - frozen >= #{amount} AND status = 'ACTIVE'
+            """)
+    int deductAvailableRows(@Param("accountId") Long accountId, @Param("amount") int amount);
+
+    default boolean deductAvailable(Long accountId, int amount) {
+        return deductAvailableRows(accountId, amount) == 1;
+    }
+
+    @Update("""
+            UPDATE credit_accounts
             SET frozen = frozen - #{amount}, updated_at = CURRENT_TIMESTAMP
             WHERE id = #{accountId} AND frozen >= #{amount} AND status = 'ACTIVE'
             """)
