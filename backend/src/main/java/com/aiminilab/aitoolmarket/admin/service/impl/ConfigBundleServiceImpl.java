@@ -88,14 +88,14 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
     }
 
     @Override
-    public ConfigBundleDto exportBundle(Long operatorId) {
+    public ConfigBundleDto exportBundle(Long operatorId, boolean includeSecrets) {
         Map<Long, String> categoryCodesById = toolService.adminCategories().stream()
                 .collect(Collectors.toMap(ToolCategoryResponse::id, ToolCategoryResponse::categoryCode, (a, b) -> a));
         Map<Long, String> modelCodesById = agentModelConfigService.adminList().stream()
                 .collect(Collectors.toMap(AgentModelConfigResponse::id, this::stableModelConfigCode, (a, b) -> a));
 
-        PageResponse<ToolSummaryResponse> tools = toolService.adminTools(null, null, null, 1, 500);
-        List<ConfigBundleDto.Tool> exportedTools = tools.list().stream()
+        List<ToolSummaryResponse> tools = exportAllTools();
+        List<ConfigBundleDto.Tool> exportedTools = tools.stream()
                 .map(tool -> exportTool(tool, categoryCodesById, modelCodesById))
                 .toList();
 
@@ -104,9 +104,11 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                 VERSION,
                 OffsetDateTime.now().toString(),
                 operatorId == null ? null : String.valueOf(operatorId),
-                true,
+                !includeSecrets,
                 redactSettings(systemSettingService.settings()),
-                agentModelConfigService.adminList().stream().map(this::exportModelConfig).toList(),
+                agentModelConfigService.adminList().stream()
+                        .map(config -> exportModelConfig(config, includeSecrets))
+                        .toList(),
                 toolService.adminCategories().stream().map(this::exportCategory).toList(),
                 exportedTools
         );
@@ -121,7 +123,7 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
 
         List<String> warnings = new ArrayList<>();
         int settings = importSettings(bundle.settings());
-        ImportModelResult modelResult = importModelConfigs(safeList(bundle.modelConfigs()), warnings);
+        ImportModelResult modelResult = importModelConfigs(safeList(bundle.modelConfigs()), warnings, bundle.secretsRedacted());
         int categories = importCategories(safeList(bundle.categories()));
 
         Map<String, Long> modelIdsByCode = agentModelConfigService.adminList().stream()
@@ -178,16 +180,33 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
         );
     }
 
-    private ConfigBundleDto.ModelConfig exportModelConfig(AgentModelConfigResponse config) {
+    private List<ToolSummaryResponse> exportAllTools() {
+        int page = 1;
+        int pageSize = 200;
+        List<ToolSummaryResponse> result = new ArrayList<>();
+        while (true) {
+            PageResponse<ToolSummaryResponse> tools = toolService.adminTools(null, null, null, page, pageSize);
+            result.addAll(tools.list());
+            if (tools.list().size() < pageSize || result.size() >= tools.total()) {
+                return result;
+            }
+            page++;
+        }
+    }
+
+    private ConfigBundleDto.ModelConfig exportModelConfig(AgentModelConfigResponse config, boolean includeSecrets) {
+        AgentModelConfig secretSource = includeSecrets && config.id() != null
+                ? agentModelConfigMapper.findActiveById(config.id())
+                : null;
         return new ConfigBundleDto.ModelConfig(
                 config.displayName(),
                 stableModelConfigCode(config),
                 config.provider(),
                 config.modelName(),
                 config.baseUrl(),
-                "",
-                "",
-                true,
+                secretSource == null ? "" : nullToEmpty(secretSource.getApiKey()),
+                secretSource == null ? "" : nullToEmpty(secretSource.getExtraAuthJson()),
+                !includeSecrets,
                 config.minimaxGroupId(),
                 config.consoleUrl(),
                 config.balanceUrl(),
@@ -282,7 +301,9 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
         return clean.size();
     }
 
-    private ImportModelResult importModelConfigs(List<ConfigBundleDto.ModelConfig> configs, List<String> warnings) {
+    private ImportModelResult importModelConfigs(List<ConfigBundleDto.ModelConfig> configs,
+                                                 List<String> warnings,
+                                                 Boolean bundleSecretsRedacted) {
         int count = 0;
         Map<String, Long> modelIdsByImportedCode = new LinkedHashMap<>();
         for (ConfigBundleDto.ModelConfig config : configs) {
@@ -295,14 +316,17 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                         + ": unsupported provider " + config.provider());
                 continue;
             }
+            boolean secretsRedacted = config.secretsRedacted() != null
+                    ? config.secretsRedacted()
+                    : bundleSecretsRedacted == null || bundleSecretsRedacted;
             AgentModelConfigRequest request = new AgentModelConfigRequest(
                     config.displayName(),
                     config.configCode(),
                     config.provider(),
                     config.modelName(),
                     config.baseUrl(),
-                    "",
-                    "",
+                    secretsRedacted ? "" : nullToEmpty(config.apiKey()),
+                    secretsRedacted ? "" : nullToEmpty(config.extraAuthJson()),
                     config.minimaxGroupId(),
                     config.consoleUrl(),
                     config.balanceUrl(),
@@ -545,6 +569,10 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
 
     private boolean isBlank(String value) {
         return value == null || value.isBlank();
+    }
+
+    private String nullToEmpty(String value) {
+        return value == null ? "" : value;
     }
 
     private <T> List<T> safeList(List<T> list) {

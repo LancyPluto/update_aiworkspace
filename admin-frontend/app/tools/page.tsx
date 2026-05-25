@@ -36,11 +36,13 @@ import {
   Copy,
   Download,
   FileText,
+  KeyRound,
   MessageSquare,
   MoreHorizontal,
   Pencil,
   Plus,
   Search,
+  Shield,
   ShoppingBag,
   Sparkles,
   Store,
@@ -95,6 +97,8 @@ interface ToolRow {
   coverUrl: string | null
   primaryColor: string
   welcomeMessage: string
+  mediaDisplayMode: "icon" | "effect"
+  modelIconUrl: string
   icon: LucideIcon
   credits: number
   status: boolean
@@ -117,6 +121,8 @@ interface ToolForm {
   coverUrl: string
   primaryColor: string
   welcomeMessage: string
+  mediaDisplayMode: "icon" | "effect"
+  modelIconUrl: string
   estimatedCreditCost: string
   modelConfigId: string
   templateCode: string
@@ -134,6 +140,8 @@ const initialForm: ToolForm = {
   coverUrl: "",
   primaryColor: "#3b82f6",
   welcomeMessage: "",
+  mediaDisplayMode: "icon",
+  modelIconUrl: "",
   estimatedCreditCost: "5",
   modelConfigId: "",
   templateCode: "text_generation_default",
@@ -263,21 +271,26 @@ const FRONTEND_STYLE_PATTERN = /<!-- ai-tool-ui:(.*?) -->/s
 interface FrontendStyleConfig {
   primaryColor: string
   welcomeMessage: string
+  mediaDisplayMode: "icon" | "effect"
+  modelIconUrl: string
 }
 
 function extractFrontendStyle(configNote?: string | null): { note: string; style: FrontendStyleConfig } {
   const raw = configNote || ""
   const match = raw.match(FRONTEND_STYLE_PATTERN)
-  const fallback = { primaryColor: "#3b82f6", welcomeMessage: "" }
+  const fallback: FrontendStyleConfig = { primaryColor: "#3b82f6", welcomeMessage: "", mediaDisplayMode: "icon", modelIconUrl: "" }
   if (!match) return { note: raw.trim(), style: fallback }
 
   try {
     const parsed = JSON.parse(match[1]) as Partial<FrontendStyleConfig>
+    const mediaDisplayMode = parsed.mediaDisplayMode === "effect" ? "effect" : "icon"
     return {
       note: raw.replace(FRONTEND_STYLE_PATTERN, "").trim(),
       style: {
         primaryColor: typeof parsed.primaryColor === "string" && parsed.primaryColor ? parsed.primaryColor : fallback.primaryColor,
         welcomeMessage: typeof parsed.welcomeMessage === "string" ? parsed.welcomeMessage : fallback.welcomeMessage,
+        mediaDisplayMode,
+        modelIconUrl: typeof parsed.modelIconUrl === "string" ? parsed.modelIconUrl : fallback.modelIconUrl,
       },
     }
   } catch {
@@ -290,6 +303,8 @@ function serializeConfigNote(note: string, style: FrontendStyleConfig): string {
   const styleJson = JSON.stringify({
     primaryColor: style.primaryColor || "#3b82f6",
     welcomeMessage: style.welcomeMessage || "",
+    mediaDisplayMode: style.mediaDisplayMode === "effect" ? "effect" : "icon",
+    modelIconUrl: style.modelIconUrl || "",
   })
   return [cleanNote, `${FRONTEND_STYLE_MARKER}${styleJson} -->`].filter(Boolean).join("\n\n")
 }
@@ -468,6 +483,8 @@ function mapTool(tool: ToolSummary): ToolRow {
     coverUrl: tool.coverUrl || null,
     primaryColor: style.primaryColor,
     welcomeMessage: style.welcomeMessage,
+    mediaDisplayMode: style.mediaDisplayMode,
+    modelIconUrl: style.modelIconUrl,
     icon: pickIcon(tool.categoryName),
     credits: tool.estimatedCreditCost ?? 0,
     status: (tool.status || "").toUpperCase() === "ONLINE",
@@ -492,6 +509,7 @@ export default function ToolsPage() {
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [bundleBusy, setBundleBusy] = useState(false)
+  const [exportDialogOpen, setExportDialogOpen] = useState(false)
   const [togglingId, setTogglingId] = useState<number | null>(null)
   const [deletingId, setDeletingId] = useState<number | null>(null)
   const [submitting, setSubmitting] = useState(false)
@@ -539,13 +557,14 @@ export default function ToolsPage() {
     }
   }
 
-  async function handleExportBundle() {
+  async function handleExportBundle(includeSecrets: boolean) {
     setBundleBusy(true)
     setError(null)
     setNotice(null)
     try {
-      const bundle = await exportConfigBundle()
+      const bundle = await exportConfigBundle(includeSecrets)
       downloadConfigBundle(bundle)
+      setExportDialogOpen(false)
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "导出配置包失败")
     } finally {
@@ -753,6 +772,8 @@ export default function ToolsPage() {
       coverUrl: tool.coverUrl || "",
       primaryColor: tool.primaryColor || "#3b82f6",
       welcomeMessage: tool.welcomeMessage || "",
+      mediaDisplayMode: tool.mediaDisplayMode || "icon",
+      modelIconUrl: tool.modelIconUrl || "",
       estimatedCreditCost: String(tool.credits),
       modelConfigId: tool.modelConfigId ? String(tool.modelConfigId) : "",
       templateCode: "",
@@ -795,6 +816,8 @@ export default function ToolsPage() {
         configNote: serializeConfigNote(form.configNote, {
           primaryColor: form.primaryColor,
           welcomeMessage: form.welcomeMessage,
+          mediaDisplayMode: form.mediaDisplayMode,
+          modelIconUrl: form.modelIconUrl,
         }),
         coverUrl: form.coverUrl.trim() || undefined,
         estimatedCreditCost: Math.floor(credits),
@@ -959,7 +982,7 @@ export default function ToolsPage() {
             />
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="outline" className="gap-2" onClick={handleExportBundle} disabled={bundleBusy || loading}>
+            <Button variant="outline" className="gap-2" onClick={() => setExportDialogOpen(true)} disabled={bundleBusy || loading}>
               <Download className="h-4 w-4" />
               导出
             </Button>
@@ -1120,6 +1143,21 @@ export default function ToolsPage() {
                     </p>
                   </div>
                   <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="space-y-2 sm:col-span-2">
+                      <Label>模型卡片展示</Label>
+                      <Select value={form.mediaDisplayMode} onValueChange={(value) => updateForm("mediaDisplayMode", value as "icon" | "effect")}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="选择模型卡片展示方式" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="icon">模型图标</SelectItem>
+                          <SelectItem value="effect">模型效果</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground">
+                        模型图标会在 C 端展示圆形图标；模型效果会使用展示素材作为宽幅图片或视频预览。
+                      </p>
+                    </div>
                     <div className="space-y-2">
                       <Label>主题色</Label>
                       <div className="flex items-center gap-2">
@@ -1145,8 +1183,32 @@ export default function ToolsPage() {
                         placeholder="首次进入聊天页时展示"
                       />
                     </div>
+                    <div className="space-y-2 sm:col-span-2">
+                      <Label>模型图标 URL</Label>
+                      <Input
+                        value={form.modelIconUrl}
+                        onChange={(event) => updateForm("modelIconUrl", event.target.value)}
+                        placeholder="用于聊天页左上角和欢迎态；不填则按绑定模型自动生成默认图标"
+                      />
+                    </div>
                   </div>
                   <div className="flex items-center gap-3 rounded-lg border border-border bg-card p-3">
+                    {form.modelIconUrl.trim() ? (
+                      <div
+                        className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full ring-1 ring-border"
+                        style={{ backgroundColor: `${form.primaryColor || "#3b82f6"}18` }}
+                      >
+                        <img src={normalizeToolMediaUrl(form.modelIconUrl)} alt="model icon preview" className="h-full w-full object-cover" />
+                      </div>
+                    ) : form.mediaDisplayMode === "effect" && form.coverUrl.trim() ? (
+                      <div className="h-14 w-24 shrink-0 overflow-hidden rounded-lg bg-muted ring-1 ring-border">
+                        {isVideoPreviewUrl(form.coverUrl) ? (
+                          <video src={normalizeToolMediaUrl(form.coverUrl)} className="h-full w-full object-cover" muted loop playsInline preload="metadata" />
+                        ) : (
+                          <img src={normalizeToolMediaUrl(form.coverUrl)} alt="effect preview" className="h-full w-full object-cover" />
+                        )}
+                      </div>
+                    ) : (
                     <div
                       className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full ring-1 ring-border"
                       style={{ backgroundColor: `${form.primaryColor || "#3b82f6"}18` }}
@@ -1157,6 +1219,7 @@ export default function ToolsPage() {
                         <Sparkles className="h-5 w-5 text-primary" />
                       )}
                     </div>
+                    )}
                     <div className="min-w-0">
                       <p className="truncate text-sm font-medium">{form.toolName || "工具名称"}</p>
                       <p className="line-clamp-1 text-xs text-muted-foreground">
@@ -1527,6 +1590,51 @@ export default function ToolsPage() {
           ))}
         </div>
       </div>
+
+      <Dialog open={exportDialogOpen} onOpenChange={setExportDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>导出配置包</DialogTitle>
+            <DialogDescription>
+              请选择是否把模型 API Key 和额外鉴权信息一起写入 JSON。含密钥文件只适合可信成员之间临时流转。
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <button
+              type="button"
+              className="rounded-lg border border-border bg-card p-4 text-left transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={bundleBusy}
+              onClick={() => handleExportBundle(false)}
+            >
+              <div className="flex items-center gap-2 font-medium">
+                <Shield className="h-4 w-4 text-primary" />
+                不含密钥
+              </div>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">适合提交到分支、分享给成员或作为默认配置模板。</p>
+            </button>
+
+            <button
+              type="button"
+              className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 text-left transition-colors hover:bg-amber-500/15 disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={bundleBusy}
+              onClick={() => handleExportBundle(true)}
+            >
+              <div className="flex items-center gap-2 font-medium">
+                <KeyRound className="h-4 w-4 text-amber-500" />
+                包含密钥
+              </div>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">仅用于可信开发环境快速同步，导出后请不要提交仓库。</p>
+            </button>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setExportDialogOpen(false)} disabled={bundleBusy}>
+              取消
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={fieldDialogOpen} onOpenChange={setFieldDialogOpen}>
         <DialogContent className="!w-[1180px] !max-w-[calc(100vw-2rem)] max-h-[90vh] overflow-y-auto bg-card border-border">

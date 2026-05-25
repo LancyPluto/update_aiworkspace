@@ -21,6 +21,10 @@ export interface AITool {
   order: number
   primaryColor?: string
   welcomeMessage?: string
+  mediaDisplayMode?: "icon" | "effect"
+  modelIconUrl?: string
+  modelConfigName?: string | null
+  modelName?: string | null
   capabilities: Capability[]
   inputModality?: string | null
   outputModality?: string | null

@@ -1,8 +1,8 @@
 import { http } from './http'
 import type { ConfigBundle, ConfigBundleImportResult } from './types'
 
-export function exportConfigBundle() {
-  return http.get<ConfigBundle>('/api/admin/v1/config-bundles/export')
+export function exportConfigBundle(includeSecrets = false) {
+  return http.get<ConfigBundle>(`/api/admin/v1/config-bundles/export?includeSecrets=${includeSecrets ? 'true' : 'false'}`)
 }
 
 export function importConfigBundle(bundle: ConfigBundle) {
