@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue"
 import { RouterLink, useRoute, useRouter } from "vue-router"
-import { AlertCircle, ArrowLeft, ChevronRight, Loader2, PanelLeft, Send, Sparkles } from "lucide-vue-next"
+import { AlertCircle, ArrowLeft, ChevronRight, Loader2, PanelLeft, Send } from "lucide-vue-next"
 import CapabilityControls from "./CapabilityControls.vue"
 import ChatSessionSidebar from "./ChatSessionSidebar.vue"
 import ResultRenderer from "@/components/ResultRenderer/ResultRenderer.vue"
@@ -82,6 +82,22 @@ const inputPlaceholder = computed(() => {
   return coreField.value.placeholder || `请输入${coreField.value.fieldName}`
 })
 
+const chatIconUrl = computed(() => {
+  if (!tool.value) return ""
+  if (tool.value.modelIconUrl) return tool.value.modelIconUrl
+  if (tool.value.mediaDisplayMode !== "effect" && tool.value.iconUrl && !isVideoPreviewUrl(tool.value.iconUrl)) {
+    return tool.value.iconUrl
+  }
+  return ""
+})
+const chatAvatarText = computed(() => {
+  const source = tool.value?.modelConfigName || tool.value?.modelName || tool.value?.name || "AI"
+  const latin = source.match(/[A-Za-z0-9]+/g)?.join("") || ""
+  if (latin) return latin.slice(0, 2).toUpperCase()
+  return source.trim().slice(0, 2) || "AI"
+})
+const chatAvatarTitle = computed(() => tool.value?.modelConfigName || tool.value?.modelName || tool.value?.name || "AI")
+
 function lastSessionStorageKey(id: string) {
   return `ai_tool_market_marketplace_last_session_${id}`
 }
@@ -112,6 +128,11 @@ function normalizeMediaUrl(value?: string | null): string {
   const path = raw.startsWith("/") ? raw : `/${raw}`
   const apiOrigin = getApiOrigin()
   return apiOrigin ? `${apiOrigin}${path}` : path
+}
+
+function isVideoPreviewUrl(value?: string | null): boolean {
+  const raw = value?.split(/[?#]/)[0]?.toLowerCase() || ""
+  return [".mp4", ".webm", ".mov", ".m4v"].some((ext) => raw.endsWith(ext))
 }
 
 function isMediaParamKey(key: string): boolean {
@@ -593,11 +614,18 @@ onUnmounted(() => {
         </button>
         <div v-if="tool" class="flex min-w-0 items-center gap-2">
           <img
-            v-if="tool.iconUrl"
-            :src="normalizeMediaUrl(tool.iconUrl)"
-            :alt="tool.name"
+            v-if="chatIconUrl"
+            :src="normalizeMediaUrl(chatIconUrl)"
+            :alt="chatAvatarTitle"
             class="h-8 w-8 rounded-full object-cover"
           />
+          <span
+            v-else
+            class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border bg-secondary text-[11px] font-semibold text-primary"
+            :title="chatAvatarTitle"
+          >
+            {{ chatAvatarText }}
+          </span>
           <span class="truncate text-sm font-semibold">{{ tool.name }}</span>
         </div>
       </div>
@@ -683,12 +711,12 @@ onUnmounted(() => {
                 :style="{ backgroundColor: tool.primaryColor ? `${tool.primaryColor}18` : undefined }"
               >
                 <img
-                  v-if="tool.iconUrl"
-                  :src="normalizeMediaUrl(tool.iconUrl)"
-                  :alt="tool.name"
+                  v-if="chatIconUrl"
+                  :src="normalizeMediaUrl(chatIconUrl)"
+                  :alt="chatAvatarTitle"
                   class="h-full w-full object-cover"
                 />
-                <Sparkles v-else class="h-10 w-10 text-primary" />
+                <span v-else class="text-3xl font-semibold text-primary">{{ chatAvatarText }}</span>
               </div>
               <p v-if="tool.welcomeMessage" class="max-w-xl text-sm text-muted-foreground">
                 {{ tool.welcomeMessage }}

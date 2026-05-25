@@ -138,6 +138,14 @@ class AdminConfigurationApiTest {
                 .andExpect(jsonPath("$.data.modelConfigs[?(@.configCode=='secret_model')].apiKey").value(""))
                 .andExpect(jsonPath("$.data.modelConfigs[?(@.configCode=='secret_model')].extraAuthJson").value(""));
 
+        mockMvc.perform(get("/api/admin/v1/config-bundles/export?includeSecrets=true")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.secretsRedacted").value(false))
+                .andExpect(jsonPath("$.data.modelConfigs[?(@.configCode=='secret_model')].secretsRedacted").value(false))
+                .andExpect(jsonPath("$.data.modelConfigs[?(@.configCode=='secret_model')].apiKey").value("sk-secret-value"))
+                .andExpect(jsonPath("$.data.modelConfigs[?(@.configCode=='secret_model')].extraAuthJson").value("{\"secretKey\":\"real-secret\"}"));
+
         mockMvc.perform(post("/api/admin/v1/config-bundles/import")
                         .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)

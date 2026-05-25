@@ -55,15 +55,22 @@ async function withSessionMockFallback<T>(
 
 const FRONTEND_STYLE_PATTERN = /<!-- ai-tool-ui:(.*?) -->/s
 
-function parseFrontendStyle(configNote?: string | null): Pick<AITool, "primaryColor" | "welcomeMessage"> {
+function parseFrontendStyle(configNote?: string | null): Pick<AITool, "primaryColor" | "welcomeMessage" | "mediaDisplayMode" | "modelIconUrl"> {
   const match = (configNote || "").match(FRONTEND_STYLE_PATTERN)
   if (!match) return {}
 
   try {
-    const parsed = JSON.parse(match[1]) as { primaryColor?: unknown; welcomeMessage?: unknown }
+    const parsed = JSON.parse(match[1]) as {
+      primaryColor?: unknown
+      welcomeMessage?: unknown
+      mediaDisplayMode?: unknown
+      modelIconUrl?: unknown
+    }
     return {
       primaryColor: typeof parsed.primaryColor === "string" ? parsed.primaryColor : undefined,
       welcomeMessage: typeof parsed.welcomeMessage === "string" ? parsed.welcomeMessage : undefined,
+      mediaDisplayMode: parsed.mediaDisplayMode === "effect" ? "effect" : "icon",
+      modelIconUrl: typeof parsed.modelIconUrl === "string" ? parsed.modelIconUrl : undefined,
     }
   } catch {
     return {}
@@ -103,11 +110,15 @@ function mapToolSummaryToAITool(tool: ToolSummary | ToolDetail): AITool {
     order: tool.id,
     primaryColor: style.primaryColor,
     welcomeMessage: style.welcomeMessage,
+    mediaDisplayMode: style.mediaDisplayMode,
+    modelIconUrl: style.modelIconUrl,
     capabilities: capabilitiesFromTool(tool),
     inputModality: tool.inputModality,
     outputModality: tool.outputModality,
     fields: "fields" in tool ? tool.fields : undefined,
     estimatedCreditCost: tool.estimatedCreditCost,
+    modelConfigName: tool.modelConfigName,
+    modelName: tool.modelName,
   }
 }
 

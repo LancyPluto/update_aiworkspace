@@ -142,6 +142,10 @@ export interface ToolSummary {
   configNote?: string | null
   status: ToolBizStatus
   estimatedCreditCost: number
+  modelConfigId?: number | null
+  modelConfigName?: string | null
+  modelName?: string | null
+  executionHandler?: string | null
 }
 
 /** 动态字段选项 */
@@ -178,6 +182,10 @@ export interface ToolDetail {
   configNote?: string | null
   status: ToolBizStatus
   estimatedCreditCost: number
+  modelConfigId?: number | null
+  modelConfigName?: string | null
+  modelName?: string | null
+  executionHandler?: string | null
   /** 动态字段列表 */
   fields: ToolField[]
 }

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue"
 import { RouterLink, useRoute } from "vue-router"
-import { Sparkles } from "lucide-vue-next"
+import { Film, Sparkles } from "lucide-vue-next"
 import AppShell from "@/components/AppShell.vue"
 import { getApiOrigin } from "@/api/client"
 import { fetchEnabledAITools } from "@/api/aiToolApi"
@@ -44,6 +44,15 @@ function normalizeMediaUrl(value?: string | null): string {
   const path = raw.startsWith("/") ? raw : `/${raw}`
   const apiOrigin = getApiOrigin()
   return apiOrigin ? `${apiOrigin}${path}` : path
+}
+
+function isVideoPreviewUrl(value?: string | null): boolean {
+  const raw = value?.split(/[?#]/)[0]?.toLowerCase() || ""
+  return [".mp4", ".webm", ".mov", ".m4v"].some((ext) => raw.endsWith(ext))
+}
+
+function usesEffectMedia(tool: AITool): boolean {
+  return tool.mediaDisplayMode === "effect" && Boolean(tool.iconUrl)
 }
 
 const sortedTools = computed(() => [...tools.value].sort((a, b) => a.order - b.order))
@@ -154,7 +163,57 @@ onMounted(() => {
           :to="`/chat/${tool.id}`"
           class="group overflow-hidden rounded-2xl border border-border bg-card transition hover:border-primary/40 hover:shadow-lg"
         >
-          <div class="flex flex-col items-center px-6 pb-6 pt-8">
+          <div v-if="usesEffectMedia(tool)" class="flex h-full flex-col">
+            <div class="relative aspect-[16/10] overflow-hidden bg-muted">
+              <video
+                v-if="isVideoPreviewUrl(tool.iconUrl)"
+                :src="normalizeMediaUrl(tool.iconUrl)"
+                class="h-full w-full object-cover transition duration-500 group-hover:scale-[1.03]"
+                muted
+                loop
+                autoplay
+                playsinline
+                preload="metadata"
+              />
+              <img
+                v-else
+                :src="normalizeMediaUrl(tool.iconUrl)"
+                :alt="tool.name"
+                class="h-full w-full object-cover transition duration-500 group-hover:scale-[1.03]"
+              />
+              <div class="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
+              <div class="absolute bottom-3 left-3 right-3 flex items-end justify-between gap-3">
+                <div class="min-w-0">
+                  <h3 class="truncate text-base font-semibold text-white drop-shadow">{{ tool.name }}</h3>
+                  <p class="mt-1 line-clamp-1 text-xs text-white/75">
+                    {{ tool.description || "点击进入对话" }}
+                  </p>
+                </div>
+                <span class="shrink-0 rounded-full bg-white/18 px-2.5 py-1 text-[11px] font-medium text-white ring-1 ring-white/25 backdrop-blur">
+                  {{ modalityLabel(tool.outputModality) }}
+                </span>
+              </div>
+              <div
+                class="absolute left-3 top-3 flex h-8 w-8 items-center justify-center rounded-full bg-black/35 text-white ring-1 ring-white/20 backdrop-blur"
+              >
+                <Film class="h-4 w-4" />
+              </div>
+            </div>
+            <div class="flex flex-1 flex-col px-5 py-4">
+              <p class="line-clamp-2 min-h-[40px] text-sm text-muted-foreground">
+                {{ tool.description || "点击进入对话" }}
+              </p>
+              <div class="mt-4 flex items-center justify-between">
+                <span
+                  class="h-1.5 w-16 rounded-full"
+                  :style="{ backgroundColor: tool.primaryColor || 'hsl(var(--primary))' }"
+                />
+                <span class="text-xs font-medium text-primary">开始使用</span>
+              </div>
+            </div>
+          </div>
+
+          <div v-else class="flex flex-col items-center px-6 pb-6 pt-8">
             <div
               class="mb-4 flex h-[72px] w-[72px] items-center justify-center overflow-hidden rounded-full ring-2 ring-border transition group-hover:ring-primary/30"
               :style="{ backgroundColor: tool.primaryColor ? `${tool.primaryColor}18` : undefined }"
