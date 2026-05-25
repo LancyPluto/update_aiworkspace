@@ -10,6 +10,7 @@ import com.aiminilab.aitoolmarket.task.dto.TaskStatusResponse;
 import com.aiminilab.aitoolmarket.task.service.TaskService;
 import jakarta.validation.Valid;
 import org.springframework.http.MediaType;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -72,6 +73,12 @@ public class TaskController {
     @PostMapping("/{taskId}/cancel")
     public ApiResponse<TaskStatusResponse> cancel(@PathVariable Long taskId) {
         return ApiResponse.success(taskService.cancel(AuthContext.get().userId(), taskId));
+    }
+
+    @DeleteMapping("/{taskId}")
+    public ApiResponse<Void> delete(@PathVariable Long taskId) {
+        taskService.delete(AuthContext.get().userId(), taskId);
+        return ApiResponse.success(null);
     }
 
     @PostMapping("/{taskId}/regenerate")

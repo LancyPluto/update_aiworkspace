@@ -123,6 +123,16 @@ public class TaskServiceImpl implements TaskService {
 
     @Override
     @Transactional
+    public void delete(Long userId, Long taskId) {
+        findTask(taskId, userId);
+        int updated = taskMapper.softDeleteForUser(taskId, userId);
+        if (updated == 0) {
+            throw new BusinessException(ErrorCode.TASK_NOT_FOUND, "任务不存在");
+        }
+    }
+
+    @Override
+    @Transactional
     public TaskStatusResponse regenerate(Long userId, Long taskId, RegenerateTaskRequest request) {
         AiTask originalTask = findTask(taskId, userId);
         return taskMapper.findByUserIdAndIdempotencyKey(userId, request.clientRequestId())
