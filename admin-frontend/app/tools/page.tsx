@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { AdminLayout } from "@/components/admin/admin-layout"
 import { AdminHeader } from "@/components/admin/header"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -33,6 +34,8 @@ import {
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import {
+  AlertCircle,
+  CheckCircle2,
   Copy,
   Download,
   FileText,
@@ -51,8 +54,10 @@ import {
   UploadCloud,
   Video,
   Workflow,
+  X,
   type LucideIcon,
 } from "lucide-react"
+import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import {
   createTool,
@@ -508,6 +513,7 @@ export default function ToolsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const [saveFeedback, setSaveFeedback] = useState<{ type: "success" | "error"; title: string; detail: string } | null>(null)
   const [bundleBusy, setBundleBusy] = useState(false)
   const [exportDialogOpen, setExportDialogOpen] = useState(false)
   const [togglingId, setTogglingId] = useState<number | null>(null)
@@ -593,6 +599,12 @@ export default function ToolsPage() {
   useEffect(() => {
     loadAll()
   }, [])
+
+  useEffect(() => {
+    if (!saveFeedback) return
+    const timer = window.setTimeout(() => setSaveFeedback(null), 12000)
+    return () => window.clearTimeout(timer)
+  }, [saveFeedback])
 
   const filteredTools = useMemo(() => {
     const keyword = searchQuery.trim().toLowerCase()
@@ -784,26 +796,33 @@ export default function ToolsPage() {
     setIsAddDialogOpen(true)
   }
 
+  function reportSaveValidationError(message: string) {
+    setFormError(message)
+    toast.error("无法保存", { description: message })
+  }
+
   async function handleSaveTool() {
     setFormError(null)
+    setSaveFeedback(null)
     if (!form.toolName.trim()) {
-      setFormError("请填写工具名称。")
+      reportSaveValidationError("请填写工具名称。")
       return
     }
     if (!form.categoryId) {
-      setFormError(categories.length === 0 ? "请先在「分类管理」中创建一个工具分类。" : "请选择工具分类。")
+      reportSaveValidationError(categories.length === 0 ? "请先在「分类管理」中创建一个工具分类。" : "请选择工具分类。")
       return
     }
     const credits = Number(form.estimatedCreditCost)
     if (!Number.isFinite(credits) || credits < 0) {
-      setFormError("消耗算力必须是大于等于 0 的数字。")
+      reportSaveValidationError("消耗算力必须是大于等于 0 的数字。")
       return
     }
     if (!form.modelConfigId && !defaultModelSupportsRequiredCapability) {
-      setFormError(`默认模型不支持「${capabilityLabel(requiredModelCapability)}」，请选择一个匹配的模型配置。`)
+      reportSaveValidationError(`默认模型不支持「${capabilityLabel(requiredModelCapability)}」，请选择一个匹配的模型配置。`)
       return
     }
     setSubmitting(true)
+    const toastId = toast.loading(editingTool ? "正在保存工具..." : "正在创建工具...")
     try {
       const payload = {
         toolCode: form.toolCode.trim() || undefined,
@@ -824,14 +843,22 @@ export default function ToolsPage() {
         modelConfigId: form.modelConfigId ? Number(form.modelConfigId) : null,
         templateCode: !editingTool && form.templateCode ? form.templateCode : undefined,
       }
+      let published: ToolSummary
       if (editingTool) {
-        const updated = await updateTool(editingTool.rawId, payload)
-        setToolList((prev) => prev.map((tool) => (tool.rawId === editingTool.rawId ? mapTool(updated) : tool)))
+        await updateTool(editingTool.rawId, payload)
+        published = await publishTool(editingTool.rawId)
+        setToolList((prev) => prev.map((tool) => (tool.rawId === editingTool.rawId ? mapTool(published) : tool)))
       } else {
         const created = await createTool(payload)
-        const published = await publishTool(created.id)
+        published = await publishTool(created.id)
         setToolList((prev) => [mapTool(published), ...prev])
       }
+      const successTitle = editingTool ? "工具已保存并上线" : "工具已创建并上线"
+      const successDetail = `「${published.toolName}」已对用户端可见，请刷新用户端大模型页查看。`
+      setNotice(successDetail)
+      setSaveFeedback({ type: "success", title: successTitle, detail: successDetail })
+      toast.success(successTitle, { id: toastId, description: successDetail })
+      setError(null)
       setForm(initialForm)
       setEditingTool(null)
       setIsAddDialogOpen(false)
@@ -844,6 +871,12 @@ export default function ToolsPage() {
           : null,
       })
       setFormError(message)
+      setSaveFeedback({
+        type: "error",
+        title: "保存工具失败",
+        detail: err instanceof ApiError && err.traceId ? `${message}（traceId: ${err.traceId}）` : message,
+      })
+      toast.error("保存工具失败", { id: toastId, description: message })
     } finally {
       setSubmitting(false)
     }
@@ -971,6 +1004,27 @@ export default function ToolsPage() {
       <AdminHeader title="大模型管理" description={headerDescription} />
 
       <div className="space-y-6 p-6">
+        {saveFeedback ? (
+          <Alert
+            variant={saveFeedback.type === "error" ? "destructive" : "default"}
+            className={cn(
+              "relative pr-10",
+              saveFeedback.type === "success" && "border-emerald-500/40 bg-emerald-500/10",
+            )}
+          >
+            {saveFeedback.type === "success" ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
+            <AlertTitle>{saveFeedback.title}</AlertTitle>
+            <AlertDescription>{saveFeedback.detail}</AlertDescription>
+            <button
+              type="button"
+              className="absolute right-3 top-3 rounded-md p-1 text-muted-foreground hover:bg-secondary hover:text-foreground"
+              aria-label="关闭提示"
+              onClick={() => setSaveFeedback(null)}
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </Alert>
+        ) : null}
         <div className="flex items-center justify-between gap-4">
           <div className="relative max-w-md flex-1">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />

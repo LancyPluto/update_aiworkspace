@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue"
 import { RouterLink, useRoute, useRouter } from "vue-router"
-import { AlertCircle, ArrowLeft, ChevronRight, Loader2, PanelLeft, Send } from "lucide-vue-next"
+import { AlertCircle, ArrowLeft, Loader2, PanelLeft, Send, RefreshCw, Download, Maximize2, Minimize2 } from "lucide-vue-next"
 import CapabilityControls from "./CapabilityControls.vue"
 import ChatSessionSidebar from "./ChatSessionSidebar.vue"
 import ResultRenderer from "@/components/ResultRenderer/ResultRenderer.vue"
@@ -28,6 +28,7 @@ const router = useRouter()
 const auth = useAuthStore()
 
 const SESSION_SIDEBAR_KEY = "ai_tool_market_marketplace_session_sidebar_open"
+const TASK_SIDEBAR_KEY = "ai_tool_task_sidebar_open"
 
 type LocalChatMessage = ChatMessage & {
   taskId?: number
@@ -65,11 +66,40 @@ const sessionSidebarOpen = ref(true)
 const deletingSessionId = ref<string | null>(null)
 const deleteSessionError = ref<string | null>(null)
 const switchingSession = ref(false)
+
+const taskSidebarOpen = ref(true)
 const taskHistory = ref<TaskDetail[]>([])
 const taskHistoryLoading = ref(false)
 const activeHistoryTaskId = ref<number | null>(null)
 
 const runningTaskTimers = new Map<number, ReturnType<typeof setTimeout>>()
+
+// ----- 输入框放大与自动扩高相关 -----
+const textareaRef = ref<HTMLTextAreaElement | null>(null)
+const isExpanded = ref(false) // 手动放大模式
+
+function autoResizeTextarea() {
+  const el = textareaRef.value
+  if (!el) return
+  if (isExpanded.value) {
+    // 手动放大模式：固定高度 120px，超出滚动
+    el.style.height = '120px'
+    el.style.overflowY = 'auto'
+  } else {
+    // 自动模式：根据内容高度调整，最大 200px
+    el.style.height = 'auto'
+    const scrollH = el.scrollHeight
+    const newHeight = Math.min(scrollH, 200)
+    el.style.height = `${newHeight}px`
+    el.style.overflowY = scrollH > 200 ? 'auto' : 'hidden'
+  }
+}
+
+function toggleExpand() {
+  isExpanded.value = !isExpanded.value
+  nextTick(() => autoResizeTextarea())
+}
+// ---------------------------------
 
 const isMarketplaceChat = computed(() => isMarketplaceMockToolId(toolId.value))
 const chatBackPath = computed(() => "/marketplace")
@@ -297,6 +327,11 @@ async function removeSession(session: ChatSession, event: MouseEvent) {
 function toggleSessionSidebar() {
   sessionSidebarOpen.value = !sessionSidebarOpen.value
   localStorage.setItem(SESSION_SIDEBAR_KEY, sessionSidebarOpen.value ? "1" : "0")
+}
+
+function toggleTaskSidebar() {
+  taskSidebarOpen.value = !taskSidebarOpen.value
+  localStorage.setItem(TASK_SIDEBAR_KEY, taskSidebarOpen.value ? "1" : "0")
 }
 
 async function loadTool() {
@@ -530,12 +565,8 @@ async function handleSend() {
       )
       messages.value = [
         ...messages.value,
-        buildAssistantMessage(`任务已创建：${response.taskNo}\n正在生成，结果会直接返回到这里。`, {
+        buildAssistantMessage(`正在生成…`, {
           taskId: response.taskId,
-          taskNo: response.taskNo,
-          taskStatus: response.status,
-          progress: 0,
-          progressMessage: "任务已排队",
           pending: true,
         }),
       ]
@@ -565,6 +596,73 @@ async function handleSend() {
   }
 }
 
+function exportMessageContent(content: string) {
+  const blob = new Blob([content], { type: "text/plain;charset=utf-8" })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement("a")
+  a.href = url
+  a.download = `文案_${Date.now()}.txt`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
+
+function findPrecedingUserMessage(assistantMsg: LocalChatMessage): LocalChatMessage | null {
+  const index = messages.value.findIndex((item) => item.id === assistantMsg.id)
+  if (index <= 0) return null
+  for (let i = index - 1; i >= 0; i--) {
+    const candidate = messages.value[i]
+    if (candidate.role === "user") return candidate
+  }
+  return null
+}
+
+async function regenerateFromAssistant(assistantMsg: LocalChatMessage) {
+  const userMsg = findPrecedingUserMessage(assistantMsg)
+  if (!userMsg) return
+  await regenerateMessage(userMsg)
+}
+
+async function regenerateMessage(msg: LocalChatMessage) {
+  if (sending.value || msg.role !== "user") return
+  sending.value = true
+  await scrollToBottom()
+  try {
+    const params = msg.params || {}
+    const attachments = capabilityRef.value?.getAttachmentIds() || []
+    const response = await createTask(
+      {
+        toolCode: tool.value!.id,
+        params: {
+          ...params,
+          prompt: msg.content,
+          text: msg.content,
+          attachments,
+        },
+        clientRequestId: crypto.randomUUID(),
+      },
+      { token: auth.token },
+    )
+    messages.value = [
+      ...messages.value,
+      buildAssistantMessage(`正在重新生成…`, {
+        taskId: response.taskId,
+        pending: true,
+      }),
+    ]
+    activeHistoryTaskId.value = response.taskId
+    await loadTaskHistory()
+    pollTaskUntilDone(response.taskId)
+  } catch (e) {
+    sendError.value = (e as Error).message || "重新生成失败"
+    messages.value = [...messages.value, buildAssistantMessage(sendError.value)]
+  } finally {
+    sending.value = false
+    await scrollToBottom()
+  }
+}
+
 function handleKeydown(event: KeyboardEvent) {
   if (event.key === "Enter" && !event.shiftKey) {
     event.preventDefault()
@@ -579,11 +677,22 @@ watch(
   },
 )
 
+// 监听输入内容变化，自动调整高度
+watch(inputText, () => {
+  nextTick(() => autoResizeTextarea())
+})
+
 onMounted(() => {
-  const saved = localStorage.getItem(SESSION_SIDEBAR_KEY)
-  if (saved === "0") sessionSidebarOpen.value = false
-  if (saved === "1") sessionSidebarOpen.value = true
+  const savedSidebar = localStorage.getItem(SESSION_SIDEBAR_KEY)
+  if (savedSidebar === "0") sessionSidebarOpen.value = false
+  if (savedSidebar === "1") sessionSidebarOpen.value = true
+
+  const savedTask = localStorage.getItem(TASK_SIDEBAR_KEY)
+  if (savedTask === "0") taskSidebarOpen.value = false
+  if (savedTask === "1") taskSidebarOpen.value = true
+
   void loadTool()
+  nextTick(() => autoResizeTextarea())
 })
 
 onUnmounted(() => {
@@ -602,16 +711,25 @@ onUnmounted(() => {
           <ArrowLeft class="h-4 w-4" />
           返回超市
         </RouterLink>
+
         <button
           v-if="isMarketplaceChat && tool"
           type="button"
           class="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-secondary hover:text-foreground"
-          :aria-label="sessionSidebarOpen ? '收起历史记录' : '展开历史记录'"
           @click="toggleSessionSidebar"
         >
-          <PanelLeft v-if="sessionSidebarOpen" class="h-4 w-4" />
-          <ChevronRight v-else class="h-4 w-4" />
+          <PanelLeft class="h-4 w-4" />
         </button>
+
+        <button
+          v-else-if="usesTaskChat && tool"
+          type="button"
+          class="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-secondary hover:text-foreground"
+          @click="toggleTaskSidebar"
+        >
+          <PanelLeft class="h-4 w-4" />
+        </button>
+
         <div v-if="tool" class="flex min-w-0 items-center gap-2">
           <img
             v-if="chatIconUrl"
@@ -629,14 +747,6 @@ onUnmounted(() => {
           <span class="truncate text-sm font-semibold">{{ tool.name }}</span>
         </div>
       </div>
-      <button
-        v-if="usesTaskChat"
-        type="button"
-        class="rounded-md border border-border px-3 py-1.5 text-xs hover:bg-secondary"
-        @click="loadTaskHistory"
-      >
-        刷新历史
-      </button>
     </header>
 
     <div v-if="loading" class="flex flex-1 items-center justify-center">
@@ -646,9 +756,7 @@ onUnmounted(() => {
     <div v-else-if="loadError" class="flex flex-1 flex-col items-center justify-center gap-4 p-6">
       <AlertCircle class="h-10 w-10 text-destructive" />
       <p class="text-sm text-destructive">{{ loadError }}</p>
-      <button type="button" class="rounded-md border border-border px-4 py-2 text-sm" @click="loadTool">
-        重试
-      </button>
+      <button type="button" class="rounded-md border border-border px-4 py-2 text-sm" @click="loadTool">重试</button>
     </div>
 
     <template v-else-if="tool">
@@ -666,34 +774,42 @@ onUnmounted(() => {
           @delete="removeSession"
         />
 
-        <aside v-else class="hidden w-72 shrink-0 border-r border-border bg-card p-3 md:flex md:flex-col">
-          <div class="mb-3 flex items-center justify-between gap-2">
-            <p class="text-xs font-medium uppercase tracking-wide text-muted-foreground">当前工具历史</p>
-            <button type="button" class="rounded-md border border-border px-2 py-1 text-[11px] hover:bg-secondary" @click="loadTaskHistory">
-              刷新
-            </button>
-          </div>
-          <div v-if="taskHistoryLoading" class="flex justify-center py-6 text-muted-foreground">
-            <Loader2 class="h-4 w-4 animate-spin" />
-          </div>
-          <div v-else-if="taskHistory.length === 0" class="rounded-lg border border-dashed border-border px-3 py-6 text-center text-xs text-muted-foreground">
-            暂无使用记录
-          </div>
-          <div v-else class="min-h-0 flex-1 overflow-y-auto space-y-1">
-            <button
-              v-for="task in taskHistory"
-              :key="task.taskId"
-              type="button"
-              class="w-full rounded-lg px-3 py-2 text-left hover:bg-secondary"
-              :class="task.taskId === activeHistoryTaskId ? 'bg-primary/10' : ''"
-              @click="selectTaskHistory(task.taskId)"
-            >
-              <div class="flex items-center justify-between gap-2">
-                <span class="truncate text-sm font-medium">{{ taskPrompt(task) }}</span>
-                <span class="shrink-0 rounded-full bg-secondary px-2 py-0.5 text-[10px] text-muted-foreground">{{ task.status }}</span>
-              </div>
-              <p class="mt-1 truncate font-mono text-[11px] text-muted-foreground">{{ task.taskNo }}</p>
-            </button>
+        <aside
+          v-else
+          :class="taskSidebarOpen ? 'w-72' : 'w-0 opacity-0'"
+          class="relative border-r border-border bg-card transition-all duration-300 overflow-hidden"
+        >
+          <div v-if="taskSidebarOpen" class="p-3 h-full flex flex-col">
+            <div class="mb-3 flex items-center justify-between">
+              <p class="text-xs font-medium text-muted-foreground">历史任务</p>
+              <button type="button" class="rounded-md border border-border px-2 py-1 text-xs" @click="loadTaskHistory">
+                刷新
+              </button>
+            </div>
+
+            <div v-if="taskHistoryLoading" class="flex justify-center py-6 text-muted-foreground">
+              <Loader2 class="h-4 w-4 animate-spin" />
+            </div>
+            <div v-else-if="taskHistory.length === 0" class="rounded-lg border border-dashed border-border p-4 text-center text-xs text-muted-foreground">
+              暂无记录
+            </div>
+            <div v-else class="flex-1 overflow-y-auto space-y-1">
+              <button
+                v-for="task in taskHistory"
+                :key="task.taskId"
+                class="w-full rounded-lg px-3 py-2 text-left hover:bg-secondary transition-colors"
+                :class="task.taskId === activeHistoryTaskId ? 'bg-primary/10' : ''"
+                @click="selectTaskHistory(task.taskId)"
+              >
+                <div class="flex items-center justify-between">
+                  <span class="truncate text-sm">{{ taskPrompt(task) }}</span>
+                  <span class="shrink-0 rounded-full bg-secondary px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                    {{ task.status }}
+                  </span>
+                </div>
+                <p class="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">{{ task.taskNo }}</p>
+              </button>
+            </div>
           </div>
         </aside>
 
@@ -702,12 +818,13 @@ onUnmounted(() => {
             <div v-if="switchingSession" class="flex h-full items-center justify-center">
               <Loader2 class="h-5 w-5 animate-spin text-muted-foreground" />
             </div>
+
             <div
               v-else-if="showWelcome"
-              class="flex h-full flex-col items-center justify-center px-6 py-12 text-center"
+              class="flex h-full flex-col items-center justify-center px-6 text-center"
             >
               <div
-                class="mb-6 flex h-[120px] w-[120px] items-center justify-center overflow-hidden rounded-full ring-2 ring-border"
+                class="mb-6 flex h-[120px] w-[120px] items-center justify-center rounded-full ring-2 ring-border"
                 :style="{ backgroundColor: tool.primaryColor ? `${tool.primaryColor}18` : undefined }"
               >
                 <img
@@ -726,90 +843,86 @@ onUnmounted(() => {
               </p>
             </div>
 
-            <div v-else class="mx-auto max-w-3xl space-y-4 px-4 py-6">
+            <div v-else class="mx-auto max-w-5xl w-full space-y-6 px-6 py-8">
               <div
                 v-for="msg in messages"
                 :key="msg.id"
-                class="flex"
-                :class="msg.role === 'user' ? 'justify-end' : 'justify-start'"
+                class="flex flex-col"
+                :class="msg.role === 'user' ? 'items-end' : 'items-start'"
               >
+                <div class="max-w-full text-base leading-relaxed whitespace-pre-wrap">
+                  {{ msg.content }}
+                </div>
+
                 <div
-                  class="max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed"
-                  :class="msg.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-secondary text-foreground'"
+                  v-if="msg.role === 'user' && collectMediaInputs(msg.params).length"
+                  class="mt-3 grid gap-2 sm:grid-cols-2"
                 >
-                  <p class="whitespace-pre-wrap">{{ msg.content }}</p>
                   <div
-                    v-if="msg.role === 'user' && collectMediaInputs(msg.params).length"
-                    class="mt-3 grid gap-2 sm:grid-cols-2"
+                    v-for="media in collectMediaInputs(msg.params)"
+                    :key="`${msg.id}-${media.key}-${media.url}`"
+                    class="overflow-hidden rounded-lg border border-white/10 bg-black/10"
                   >
-                    <div
-                      v-for="media in collectMediaInputs(msg.params)"
-                      :key="`${msg.id}-${media.key}-${media.url}`"
-                      class="overflow-hidden rounded-lg border border-white/20 bg-black/10"
-                    >
-                      <img
-                        v-if="media.type === 'image'"
-                        :src="media.url"
-                        :alt="media.label"
-                        class="max-h-40 w-full object-contain"
-                        loading="lazy"
-                      />
-                      <video
-                        v-else-if="media.type === 'video'"
-                        :src="media.url"
-                        controls
-                        playsinline
-                        preload="metadata"
-                        class="max-h-40 w-full bg-black"
-                      />
-                      <audio
-                        v-else-if="media.type === 'audio'"
-                        :src="media.url"
-                        controls
-                        preload="metadata"
-                        class="w-full p-2"
-                      />
-                      <a
-                        v-else
-                        :href="media.url"
-                        target="_blank"
-                        rel="noreferrer"
-                        class="block px-3 py-2 text-xs underline"
-                      >
-                        {{ media.url }}
-                      </a>
-                      <div class="border-t border-white/20 px-2 py-1 text-[11px] opacity-80">
-                        {{ media.label }}
-                      </div>
-                    </div>
+                    <img
+                      v-if="media.type === 'image'"
+                      :src="media.url"
+                      :alt="media.label"
+                      class="max-h-40 w-full object-contain"
+                    />
+                    <video
+                      v-else-if="media.type === 'video'"
+                      :src="media.url"
+                      controls
+                      class="max-h-40 w-full bg-black"
+                    />
+                    <audio
+                      v-else-if="media.type === 'audio'"
+                      :src="media.url"
+                      controls
+                      class="w-full p-2"
+                    />
                   </div>
-                  <div v-if="msg.taskId" class="mt-2 rounded-lg border border-border/60 bg-background/70 p-2 text-xs text-muted-foreground">
-                    <div class="flex items-center justify-between gap-3">
-                      <span class="font-mono">{{ msg.taskNo }}</span>
-                      <span>{{ msg.taskStatus }}</span>
-                    </div>
-                    <div v-if="msg.pending" class="mt-2 h-1.5 overflow-hidden rounded-full bg-secondary">
-                      <div class="h-full rounded-full bg-primary transition-all" :style="{ width: `${msg.progress ?? 8}%` }" />
-                    </div>
-                    <p v-if="msg.progressMessage" class="mt-1">{{ msg.progressMessage }}</p>
-                  </div>
-                  <div v-if="msg.resultBlocks?.length" class="mt-3 min-w-[280px] max-w-full">
-                    <ResultRenderer :blocks="msg.resultBlocks" />
-                  </div>
+                </div>
+
+                <div v-if="msg.resultBlocks?.length" class="mt-3">
+                  <ResultRenderer :blocks="msg.resultBlocks" />
+                </div>
+
+                <div
+                  v-if="msg.role === 'assistant' && !msg.pending && (msg.resultBlocks?.length || msg.failed)"
+                  class="mt-3 flex items-center gap-3"
+                >
+                  <button
+                    type="button"
+                    class="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                    @click="regenerateFromAssistant(msg)"
+                    :disabled="sending"
+                  >
+                    <RefreshCw class="h-3.5 w-3.5" />
+                    重新生成
+                  </button>
+                  <button
+                    v-if="msg.resultBlocks?.length"
+                    type="button"
+                    class="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                    @click="exportMessageContent(msg.content)"
+                  >
+                    <Download class="h-3.5 w-3.5" />
+                    导出
+                  </button>
                 </div>
               </div>
-              <div v-if="sending" class="flex justify-start">
-                <div class="rounded-2xl bg-secondary px-4 py-2.5 text-sm text-muted-foreground">
-                  <Loader2 class="mr-2 inline h-4 w-4 animate-spin" />
-                  {{ isMarketplaceChat ? "正在生成回复…" : "正在创建生成任务…" }}
-                </div>
+
+              <div v-if="sending" class="flex items-center text-sm text-muted-foreground">
+                <Loader2 class="mr-2 inline h-4 w-4 animate-spin" />
+                正在生成回复…
               </div>
               <div ref="messagesEndRef" />
             </div>
           </div>
 
-          <div class="shrink-0 border-t border-border bg-card px-4 py-3">
-            <div class="rounded-xl border border-border/60 bg-background p-3 shadow-sm">
+          <div class="shrink-0 px-6 py-4 mt-6">
+            <div class="mx-auto max-w-5xl rounded-xl border border-gray-200/60 p-4">
               <CapabilityControls
                 ref="capabilityRef"
                 :capabilities="tool.capabilities || []"
@@ -818,18 +931,28 @@ onUnmounted(() => {
                 :tool-id="tool.id"
                 class="mb-2"
               />
-
-              <div class="flex items-center gap-2">
-                <textarea
-                  v-model="inputText"
-                  rows="1"
-                  class="max-h-24 min-h-[36px] w-full resize-none border-none bg-transparent text-sm outline-none placeholder:text-muted-foreground/70"
-                  :placeholder="inputPlaceholder"
-                  @keydown="handleKeydown"
-                />
+              <div class="flex items-center gap-3">
+                <div class="flex-1">
+                  <textarea
+                    ref="textareaRef"
+                    v-model="inputText"
+                    rows="1"
+                    class="max-h-28 min-h-[40px] w-full resize-none border-none bg-transparent text-base outline-none placeholder:text-muted-foreground/70"
+                    :placeholder="inputPlaceholder"
+                    @keydown="handleKeydown"
+                  ></textarea>
+                </div>
                 <button
                   type="button"
-                  class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground disabled:opacity-50"
+                  class="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-border text-muted-foreground hover:text-foreground transition-colors"
+                  @click="toggleExpand"
+                >
+                  <Maximize2 v-if="!isExpanded" class="h-4 w-4" />
+                  <Minimize2 v-else class="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  class="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary text-white disabled:opacity-50"
                   :disabled="!inputText.trim() || sending"
                   @click="handleSend"
                 >
@@ -837,10 +960,7 @@ onUnmounted(() => {
                   <Send v-else class="h-4 w-4" />
                 </button>
               </div>
-
-              <div v-if="sendError" class="mt-1 text-[11px] text-destructive">
-                {{ sendError }}
-              </div>
+              <div v-if="sendError" class="mt-1 text-xs text-destructive">{{ sendError }}</div>
             </div>
           </div>
         </div>
@@ -848,3 +968,9 @@ onUnmounted(() => {
     </template>
   </div>
 </template>
+
+<style scoped>
+textarea {
+  transition: height 0.1s ease;
+}
+</style>
