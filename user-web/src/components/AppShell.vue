@@ -186,12 +186,12 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="flex min-h-screen bg-background text-foreground">
+  <div class="flex h-screen overflow-hidden bg-background text-foreground">
     <aside
-      class="hidden w-60 shrink-0 flex-col border-r border-border bg-card"
+      class="hidden h-full w-60 shrink-0 flex-col border-r border-border bg-card"
       :class="sidebarOpen ? 'lg:flex' : 'lg:hidden'"
     >
-      <div class="flex h-16 items-center gap-2.5 px-5 border-b border-border">
+      <div class="flex h-16 shrink-0 items-center gap-2.5 border-b border-border px-5">
         <img src="/logo.svg" alt="AI Tool Market" class="h-9 w-9 rounded-lg object-contain" />
         <div class="flex flex-col leading-tight">
           <span class="text-sm font-semibold">智擎 AI</span>
@@ -199,7 +199,7 @@ onMounted(async () => {
         </div>
       </div>
 
-      <nav class="flex-1 overflow-y-auto px-3 py-4">
+      <nav class="min-h-0 flex-1 px-3 py-4">
         <p class="px-3 pb-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">工作区</p>
         <ul class="flex flex-col gap-1">
           <template v-for="item in userNav" :key="item.type === 'link' ? item.href : item.id">
@@ -266,7 +266,7 @@ onMounted(async () => {
         </ul>
       </nav>
 
-      <div class="border-t border-border p-4">
+      <div class="shrink-0 border-t border-border p-4">
         <div class="rounded-lg border border-border bg-accent/40 p-3">
           <p class="text-xs font-medium">本月已用算力</p>
           <p class="mt-1 text-lg font-semibold text-primary">
@@ -291,8 +291,8 @@ onMounted(async () => {
       </div>
     </aside>
 
-    <div class="flex flex-1 flex-col min-w-0">
-      <header class="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-border bg-card/80 px-6 backdrop-blur">
+    <div class="flex h-full min-h-0 min-w-0 flex-1 flex-col">
+      <header class="z-30 flex h-16 shrink-0 items-center gap-3 border-b border-border bg-card/80 px-6 backdrop-blur">
         <button
           type="button"
           class="hidden lg:inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border bg-background text-muted-foreground hover:bg-secondary hover:text-foreground"
@@ -331,7 +331,7 @@ onMounted(async () => {
           </template>
         </div>
       </header>
-      <main class="flex-1 overflow-x-hidden">
+      <main class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
         <slot />
       </main>
     </div>
