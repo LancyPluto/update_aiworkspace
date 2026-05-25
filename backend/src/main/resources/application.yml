@@ -69,7 +69,8 @@ app:
 
 ppt:
   engine:
-    base-url: ${PPT_ENGINE_BASE_URL:http://127.0.0.1:5000}
+    # macOS 上 5000 常被 AirPlay Receiver 占用并返回 403；本机 Docker 引擎映射为 5001
+    base-url: ${PPT_ENGINE_BASE_URL:http://127.0.0.1:5001}
     connect-timeout-ms: ${PPT_ENGINE_CONNECT_TIMEOUT_MS:5000}
     read-timeout-ms: ${PPT_ENGINE_READ_TIMEOUT_MS:300000}
   billing:
@@ -79,6 +80,7 @@ ppt:
     generate-images-credits: ${PPT_BILLING_IMAGES:50}
     export-pptx-credits: ${PPT_BILLING_EXPORT_PPTX:5}
     export-pdf-credits: ${PPT_BILLING_EXPORT_PDF:5}
+    export-editable-pptx-credits: ${PPT_BILLING_EXPORT_EDITABLE_PPTX:15}
 
 mybatis-plus:
   configuration:

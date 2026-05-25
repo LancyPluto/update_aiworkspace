@@ -11,6 +11,12 @@ logs/
 backend/data/agent-files/
 data/generated-media/
 
+# PPT engine (banana-slides) runtime — code lives under engines/banana-slides/
+engines/banana-slides/.env
+engines/banana-slides/uploads/
+engines/banana-slides/backend/instance/
+engines/banana-slides/backend/.temp/
+
 # local planning docs
 项目规划/
 

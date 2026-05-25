@@ -22,6 +22,8 @@ import type { ResultBlock } from "@/types/result"
 import { ApiBusinessError } from "@/api/client"
 import { useAuthStore } from "@/store/authStore"
 import { buildTaskResultBlocks } from "@/utils/taskResultBlocks"
+import { isPptWorkspaceTool } from "@/api/pptApi"
+import { userRoutes } from "@/router/userRoutes"
 
 const route = useRoute()
 const router = useRouter()
@@ -300,6 +302,10 @@ function toggleSessionSidebar() {
 }
 
 async function loadTool() {
+  if (isPptWorkspaceTool(toolId.value)) {
+    await router.replace(userRoutes.pptWorkspace())
+    return
+  }
   loading.value = true
   loadError.value = null
   sendError.value = null

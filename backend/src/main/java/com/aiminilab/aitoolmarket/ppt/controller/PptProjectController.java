@@ -61,8 +61,14 @@ public class PptProjectController {
 
     @PostMapping("/renovation")
     public ApiResponse<PptProjectCreatedResponse> renovation(@RequestParam("file") MultipartFile file,
+                                                             @RequestParam(required = false) String toolCode,
                                                              @RequestParam(required = false) String clientRequestId) {
-        return ApiResponse.success(pptProjectService.createRenovation(AuthContext.get().userId(), file, clientRequestId));
+        return ApiResponse.success(pptProjectService.createRenovation(
+                AuthContext.get().userId(),
+                toolCode,
+                file,
+                clientRequestId
+        ));
     }
 
     @PostMapping("/{bindingId}/generate/outline")
@@ -104,6 +110,11 @@ public class PptProjectController {
         return ApiResponse.success(pptProjectService.getTask(AuthContext.get().userId(), bindingId, taskId));
     }
 
+    @GetMapping("/{bindingId}/exports")
+    public ApiResponse<Object> listExports(@PathVariable Long bindingId) {
+        return ApiResponse.success(pptProjectService.listExports(AuthContext.get().userId(), bindingId));
+    }
+
     @GetMapping("/{bindingId}/export/pptx")
     public ApiResponse<PptExportResponse> exportPptx(@PathVariable Long bindingId,
                                                    @RequestParam(required = false) String filename,
@@ -128,6 +139,18 @@ public class PptProjectController {
         ));
     }
 
+    @PostMapping("/{bindingId}/export/editable-pptx")
+    public ApiResponse<PptTaskResponse> exportEditablePptx(@PathVariable Long bindingId,
+                                                           @RequestBody(required = false) Map<String, Object> body,
+                                                           @RequestParam(required = false) String clientRequestId) {
+        return ApiResponse.success(pptProjectService.exportEditablePptx(
+                AuthContext.get().userId(),
+                bindingId,
+                body,
+                new PptStepRequest(clientRequestId)
+        ));
+    }
+
     @GetMapping("/{bindingId}/export/images")
     public ApiResponse<PptExportResponse> exportImages(@PathVariable Long bindingId,
                                                        @RequestParam(required = false) String pageIds) {
@@ -138,6 +161,24 @@ public class PptProjectController {
         ));
     }
 
+    @PostMapping("/{bindingId}/pages")
+    public ApiResponse<Object> addPage(@PathVariable Long bindingId,
+                                       @RequestBody(required = false) Map<String, Object> body) {
+        return ApiResponse.success(pptProjectService.addPage(AuthContext.get().userId(), bindingId, body));
+    }
+
+    @DeleteMapping("/{bindingId}/pages/{pageId}")
+    public ApiResponse<Void> deletePage(@PathVariable Long bindingId, @PathVariable String pageId) {
+        pptProjectService.deletePage(AuthContext.get().userId(), bindingId, pageId);
+        return ApiResponse.success(null);
+    }
+
+    @PutMapping("/{bindingId}")
+    public ApiResponse<ObjectNode> updateProject(@PathVariable Long bindingId,
+                                                 @RequestBody Map<String, Object> body) {
+        return ApiResponse.success(pptProjectService.updateProjectMeta(AuthContext.get().userId(), bindingId, body));
+    }
+
     @PostMapping("/{bindingId}/template")
     public ApiResponse<Object> uploadTemplate(@PathVariable Long bindingId,
                                               @RequestParam("template_image") MultipartFile templateImage) {
@@ -145,6 +186,14 @@ public class PptProjectController {
                 AuthContext.get().userId(),
                 bindingId,
                 templateImage
+        ));
+    }
+
+    @DeleteMapping("/{bindingId}/template")
+    public ApiResponse<ObjectNode> deleteTemplate(@PathVariable Long bindingId) {
+        return ApiResponse.success(pptProjectService.deleteTemplate(
+                AuthContext.get().userId(),
+                bindingId
         ));
     }
 

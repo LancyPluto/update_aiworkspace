@@ -17,6 +17,8 @@ class PptAdminWorkflowServiceTest {
     private final PptAdminWorkflowService service = new PptAdminWorkflowService(
             null,
             new PptWorkflowService(null, new PptEngineProperties(), new ObjectMapper()),
+            null,
+            null,
             new ObjectMapper()
     );
 

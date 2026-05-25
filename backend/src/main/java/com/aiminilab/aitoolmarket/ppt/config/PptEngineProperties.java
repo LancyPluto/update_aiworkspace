@@ -61,6 +61,7 @@ public class PptEngineProperties {
         private int generateImagesCredits = 50;
         private int exportPptxCredits = 5;
         private int exportPdfCredits = 5;
+        private int exportEditablePptxCredits = 15;
 
         public int getCreateProjectCredits() {
             return createProjectCredits;
@@ -108,6 +109,14 @@ public class PptEngineProperties {
 
         public void setExportPdfCredits(int exportPdfCredits) {
             this.exportPdfCredits = exportPdfCredits;
+        }
+
+        public int getExportEditablePptxCredits() {
+            return exportEditablePptxCredits;
+        }
+
+        public void setExportEditablePptxCredits(int exportEditablePptxCredits) {
+            this.exportEditablePptxCredits = exportEditablePptxCredits;
         }
     }
 }

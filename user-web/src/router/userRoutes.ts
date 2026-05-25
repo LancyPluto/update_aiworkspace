@@ -38,4 +38,10 @@ export const userRoutes = {
   taskResult(taskId: string) {
     return { name: "TaskResult", params: { taskId } }
   },
+  pptWorkspace() {
+    return { name: "PptWorkspace" }
+  },
+  pptProjectEditor(bindingId: string | number) {
+    return { name: "PptProjectEditor", params: { bindingId: String(bindingId) } }
+  },
 } as const

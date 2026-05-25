@@ -1,8 +1,12 @@
 package com.aiminilab.aitoolmarket.ppt.service;
 
+import com.aiminilab.aitoolmarket.agent.dto.AgentModelConfigResponse;
+import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
+import com.aiminilab.aitoolmarket.agent.mapper.AgentModelConfigMapper;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.ppt.PptConstants;
+import com.aiminilab.aitoolmarket.ppt.dto.PptAdminWorkflowDetailResponse;
 import com.aiminilab.aitoolmarket.ppt.workflow.PptWorkflow;
 import com.aiminilab.aitoolmarket.ppt.workflow.PptWorkflowStep;
 import com.aiminilab.aitoolmarket.tool.entity.AiTool;
@@ -19,35 +23,84 @@ public class PptAdminWorkflowService {
 
     private final ToolMapper toolMapper;
     private final PptWorkflowService pptWorkflowService;
+    private final PptEngineSettingsSyncService pptEngineSettingsSyncService;
+    private final AgentModelConfigMapper agentModelConfigMapper;
     private final ObjectMapper objectMapper;
 
     public PptAdminWorkflowService(ToolMapper toolMapper,
                                    PptWorkflowService pptWorkflowService,
+                                   PptEngineSettingsSyncService pptEngineSettingsSyncService,
+                                   AgentModelConfigMapper agentModelConfigMapper,
                                    ObjectMapper objectMapper) {
         this.toolMapper = toolMapper;
         this.pptWorkflowService = pptWorkflowService;
+        this.pptEngineSettingsSyncService = pptEngineSettingsSyncService;
+        this.agentModelConfigMapper = agentModelConfigMapper;
         this.objectMapper = objectMapper;
     }
 
-    public PptWorkflow getWorkflow(Long toolId) {
+    public PptAdminWorkflowDetailResponse getWorkflowDetail(Long toolId) {
         AiTool tool = requirePptTool(toolId);
-        return pptWorkflowService.requireWorkflow(tool);
+        PptWorkflow workflow = pptWorkflowService.requireWorkflow(tool);
+        return toDetailResponse(workflow, false, null);
     }
 
     @Transactional
-    public PptWorkflow updateWorkflow(Long toolId, PptWorkflow workflow, Long operatorId) {
+    public PptAdminWorkflowDetailResponse updateWorkflow(Long toolId, PptWorkflow workflow, Long operatorId) {
         AiTool tool = requirePptTool(toolId);
         validateWorkflow(workflow);
         tool.setConfigNote(mergeWorkflowIntoConfigNote(tool.getConfigNote(), workflow));
         toolMapper.updateTool(toolId, tool, operatorId);
-        return workflow;
+        return syncAndDetail(workflow);
+    }
+
+    public PptAdminWorkflowDetailResponse syncEngineSettings(Long toolId) {
+        AiTool tool = requirePptTool(toolId);
+        PptWorkflow workflow = pptWorkflowService.requireWorkflow(tool);
+        return syncAndDetail(workflow);
+    }
+
+    private PptAdminWorkflowDetailResponse syncAndDetail(PptWorkflow workflow) {
+        try {
+            pptEngineSettingsSyncService.syncFromWorkflow(workflow);
+            return toDetailResponse(workflow, true, "已同步到 PPT 引擎");
+        } catch (BusinessException exception) {
+            return toDetailResponse(workflow, false, exception.getMessage());
+        } catch (RuntimeException exception) {
+            return toDetailResponse(workflow, false, "引擎同步失败: " + exception.getMessage());
+        }
+    }
+
+    private PptAdminWorkflowDetailResponse toDetailResponse(PptWorkflow workflow,
+                                                            boolean engineSynced,
+                                                            String engineSyncMessage) {
+        return new PptAdminWorkflowDetailResponse(
+                workflow,
+                resolveModelSummary(workflow.getTextModelConfigId()),
+                resolveModelSummary(workflow.getImageModelConfigId()),
+                engineSynced,
+                engineSyncMessage
+        );
+    }
+
+    private AgentModelConfigResponse resolveModelSummary(Long configId) {
+        if (configId == null) {
+            return null;
+        }
+        AgentModelConfig config = agentModelConfigMapper.findActiveById(configId);
+        return config == null ? null : AgentModelConfigResponse.from(config);
     }
 
     private AiTool requirePptTool(Long toolId) {
         AiTool tool = toolMapper.findById(toolId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在"));
-        if (!PptConstants.TOOL_CODE.equals(tool.getToolCode())) {
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "仅 PPT 工具支持工作流配置");
+        // 允许首次保存时 config_note 还没有 ppt-workflow 块（前端会在 updateWorkflow 里写入），
+        // 仅当工具已有内容但不是 PPT 工作台模式时拒绝（防止误把标准任务工具改成 PPT）。
+        if (tool.getConfigNote() != null
+                && !tool.getConfigNote().isBlank()
+                && pptWorkflowService.parseWorkflow(tool.getConfigNote()).isPresent()
+                && !pptWorkflowService.isPptWorkspace(tool)) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "该工具的集成模式不是 PPT 工作台");
         }
         return tool;
     }
@@ -73,6 +126,9 @@ public class PptAdminWorkflowService {
         }
         if (workflow.getIntegrationMode() == null || workflow.getIntegrationMode().isBlank()) {
             workflow.setIntegrationMode(PptConstants.INTEGRATION_MODE);
+        }
+        if (workflow.getTextModelConfigId() == null && workflow.getImageModelConfigId() == null) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "请配置 textModelConfigId 或 imageModelConfigId");
         }
     }
 

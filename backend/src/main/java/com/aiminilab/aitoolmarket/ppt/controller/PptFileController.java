@@ -4,6 +4,7 @@ import com.aiminilab.aitoolmarket.auth.security.AuthContext;
 import com.aiminilab.aitoolmarket.ppt.service.PptEngineClient;
 import com.aiminilab.aitoolmarket.ppt.service.PptProjectService;
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -11,6 +12,9 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 
 @RestController
 @RequestMapping("/api/v1/ppt/files")
@@ -29,10 +33,15 @@ public class PptFileController {
         String prefix = "/api/v1/ppt/files/" + bindingId + "/";
         String uri = request.getRequestURI();
         String relative = uri.startsWith(prefix) ? uri.substring(prefix.length()) : "";
+        relative = URLDecoder.decode(relative, StandardCharsets.UTF_8);
         String enginePath = pptProjectService.resolveEngineFilePath(AuthContext.get().userId(), bindingId, relative);
         byte[] content = pptEngineClient.downloadFile(enginePath);
+        String filename = relative.contains("/") ? relative.substring(relative.lastIndexOf('/') + 1) : relative;
+        ContentDisposition disposition = ContentDisposition.attachment()
+                .filename(filename, StandardCharsets.UTF_8)
+                .build();
         return ResponseEntity.ok()
-                .header(HttpHeaders.CONTENT_DISPOSITION, "inline")
+                .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
                 .contentType(guessMediaType(relative))
                 .body(content);
     }

@@ -19,6 +19,8 @@ import com.aiminilab.aitoolmarket.tool.entity.AiTool;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.LinkedMultiValueMap;
@@ -33,12 +35,15 @@ import java.util.Map;
 @Service
 public class PptProjectService {
 
+    private static final Logger LOG = LoggerFactory.getLogger(PptProjectService.class);
+
     private static final String STEP_CREATE = "CREATE";
     private static final String STEP_OUTLINE = "OUTLINE";
     private static final String STEP_DESCRIPTIONS = "DESCRIPTIONS";
     private static final String STEP_IMAGES = "IMAGES";
     private static final String STEP_EXPORT_PPTX = "EXPORT_PPTX";
     private static final String STEP_EXPORT_PDF = "EXPORT_PDF";
+    private static final String STEP_EXPORT_EDITABLE_PPTX = "EXPORT_EDITABLE_PPTX";
 
     private final PptProjectBindingMapper bindingMapper;
     private final PptStepBillingLogMapper billingLogMapper;
@@ -66,7 +71,7 @@ public class PptProjectService {
 
     @Transactional
     public PptProjectCreatedResponse createProject(Long userId, CreatePptProjectRequest request) {
-        AiTool tool = pptWorkflowService.requireOnlinePptTool();
+        AiTool tool = resolveTool(request.toolCode());
         PptWorkflow workflow = pptWorkflowService.requireWorkflow(tool);
         pptWorkflowService.validateCreationType(workflow, request.creationType());
 
@@ -225,6 +230,11 @@ public class PptProjectService {
         return new PptExportResponse(rewriteDownloadUrl(bindingId, textOrNull(data, "download_url")));
     }
 
+    public JsonNode listExports(Long userId, Long bindingId) {
+        Context ctx = loadContext(userId, bindingId);
+        return pptEngineClient.getProjectAction(ctx.binding().getBananaProjectId(), "/exports");
+    }
+
     public PptExportResponse exportImages(Long userId, Long bindingId, String pageIds) {
         Context ctx = loadContext(userId, bindingId);
         String query = pageIds == null || pageIds.isBlank() ? "" : "?page_ids=" + pageIds;
@@ -244,6 +254,14 @@ public class PptProjectService {
         return result;
     }
 
+    public ObjectNode deleteTemplate(Long userId, Long bindingId) {
+        Context ctx = loadContext(userId, bindingId);
+        pptEngineClient.deleteProjectAction(ctx.binding().getBananaProjectId(), "/template");
+        JsonNode engineProject = pptEngineClient.getProject(ctx.binding().getBananaProjectId());
+        syncBinding(ctx.binding(), engineProject);
+        return mergeDetail(ctx.binding(), engineProject);
+    }
+
     public PptExportResponse exportPdf(Long userId, Long bindingId, String filename, PptStepRequest stepRequest) {
         Context ctx = loadContext(userId, bindingId);
         JsonNode data = pptBillingService.chargeStep(
@@ -261,6 +279,30 @@ public class PptProjectService {
         return new PptExportResponse(rewriteDownloadUrl(bindingId, textOrNull(data, "download_url")));
     }
 
+    public PptTaskResponse exportEditablePptx(Long userId,
+                                              Long bindingId,
+                                              Map<String, Object> body,
+                                              PptStepRequest stepRequest) {
+        Context ctx = loadContext(userId, bindingId);
+        JsonNode data = pptBillingService.chargeStep(
+                userId,
+                bindingId,
+                ctx.tool(),
+                ctx.workflow(),
+                STEP_EXPORT_EDITABLE_PPTX,
+                clientRequestId(stepRequest),
+                () -> {
+                    Map<String, Object> payload = body == null ? new LinkedHashMap<>() : new LinkedHashMap<>(body);
+                    return pptEngineClient.postProjectAction(
+                            ctx.binding().getBananaProjectId(),
+                            "/export/editable-pptx",
+                            payload
+                    );
+                }
+        );
+        return toTaskResponse(data);
+    }
+
     public JsonNode proxyMutation(Long userId,
                                   Long bindingId,
                                   String subPath,
@@ -268,16 +310,45 @@ public class PptProjectService {
                                   Map<String, Object> body) {
         Context ctx = loadContext(userId, bindingId);
         String projectId = ctx.binding().getBananaProjectId();
-        return switch (method.toUpperCase()) {
+        JsonNode result = switch (method.toUpperCase()) {
             case "PUT" -> pptEngineClient.putProjectAction(projectId, subPath, body);
             case "POST" -> pptEngineClient.postProjectAction(projectId, subPath, body == null ? Map.of() : body);
             default -> throw new BusinessException(ErrorCode.PARAM_ERROR, "不支持的代理方法: " + method);
         };
+        syncBinding(ctx.binding(), pptEngineClient.getProject(projectId));
+        return result;
+    }
+
+    public JsonNode addPage(Long userId, Long bindingId, Map<String, Object> body) {
+        Context ctx = loadContext(userId, bindingId);
+        JsonNode result = pptEngineClient.postProjectAction(
+                ctx.binding().getBananaProjectId(),
+                "/pages",
+                body == null ? Map.of() : body
+        );
+        syncBinding(ctx.binding(), pptEngineClient.getProject(ctx.binding().getBananaProjectId()));
+        return result;
+    }
+
+    public void deletePage(Long userId, Long bindingId, String pageId) {
+        Context ctx = loadContext(userId, bindingId);
+        pptEngineClient.deleteProjectAction(ctx.binding().getBananaProjectId(), "/pages/" + pageId);
+        syncBinding(ctx.binding(), pptEngineClient.getProject(ctx.binding().getBananaProjectId()));
+    }
+
+    public ObjectNode updateProjectMeta(Long userId, Long bindingId, Map<String, Object> body) {
+        Context ctx = loadContext(userId, bindingId);
+        pptEngineClient.updateProject(ctx.binding().getBananaProjectId(), body == null ? Map.of() : body);
+        syncBinding(ctx.binding(), pptEngineClient.getProject(ctx.binding().getBananaProjectId()));
+        return mergeDetail(ctx.binding(), pptEngineClient.getProject(ctx.binding().getBananaProjectId()));
     }
 
     @Transactional
-    public PptProjectCreatedResponse createRenovation(Long userId, MultipartFile file, String clientRequestId) {
-        AiTool tool = pptWorkflowService.requireOnlinePptTool();
+    public PptProjectCreatedResponse createRenovation(Long userId,
+                                                      String toolCode,
+                                                      MultipartFile file,
+                                                      String clientRequestId) {
+        AiTool tool = resolveTool(toolCode);
         PptWorkflow workflow = pptWorkflowService.requireWorkflow(tool);
         pptWorkflowService.validateCreationType(workflow, "ppt_renovation");
 
@@ -343,10 +414,22 @@ public class PptProjectService {
     }
 
     private Context loadContext(Long userId, Long bindingId) {
-        AiTool tool = pptWorkflowService.requireOnlinePptTool();
-        PptWorkflow workflow = pptWorkflowService.requireWorkflow(tool);
         PptProjectBinding binding = requireBinding(bindingId, userId);
+        AiTool tool = pptWorkflowService.requirePptWorkspaceToolById(binding.getToolId());
+        PptWorkflow workflow = pptWorkflowService.requireWorkflow(tool);
         return new Context(tool, workflow, binding);
+    }
+
+    /**
+     * 解析创建项目用的工具：优先按 toolCode；缺省时退化为「在线唯一 PPT 工具」并打 WARN。
+     */
+    @SuppressWarnings("deprecation")
+    private AiTool resolveTool(String toolCode) {
+        if (toolCode != null && !toolCode.isBlank()) {
+            return pptWorkflowService.requirePptWorkspaceTool(toolCode);
+        }
+        LOG.warn("createProject/Renovation 未传 toolCode，回退到默认 PPT 工具（迁移期兼容）");
+        return pptWorkflowService.requireOnlinePptTool();
     }
 
     private PptProjectBinding requireBinding(Long bindingId, Long userId) {

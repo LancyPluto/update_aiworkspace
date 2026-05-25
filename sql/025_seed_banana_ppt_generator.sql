@@ -24,9 +24,11 @@ SELECT
     '{"code":"OUTLINE","name":"生成大纲","credits":10,"enabled":true},',
     '{"code":"DESCRIPTIONS","name":"生成描述","credits":20,"enabled":true},',
     '{"code":"IMAGES","name":"生成图片","credits":50,"enabled":true},',
-    '{"code":"EXPORT_PPTX","name":"导出PPTX","credits":5,"enabled":true}',
+    '{"code":"EXPORT_PPTX","name":"导出图片幻灯片","credits":5,"enabled":true},',
+    '{"code":"EXPORT_EDITABLE_PPTX","name":"导出可编辑PPTX","credits":15,"enabled":true},',
+    '{"code":"EXPORT_PDF","name":"导出PDF","credits":5,"enabled":true}',
     '],',
-    '"features":{"renovation":false,"singlePageRegenerate":true,"refineOutline":true,"refineDescriptions":true}}',
+    '"features":{"renovation":false,"singlePageRegenerate":true,"refineOutline":true,"refineDescriptions":true,"exportEditablePptx":true}}',
     ' -->'
   ),
   'ONLINE',

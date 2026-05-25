@@ -15,8 +15,12 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.util.UriComponentsBuilder;
 
 import java.io.IOException;
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.Map;
 
 @Component
@@ -58,6 +62,15 @@ public class PptEngineClient {
         return exchange("PUT", "/api/projects/" + projectId + actionPath, body, false);
     }
 
+    public JsonNode updateProject(String projectId, Map<String, Object> body) {
+        return exchange("PUT", "/api/projects/" + projectId, body == null ? Map.of() : body, false);
+    }
+
+    public void deleteProjectAction(String projectId, String actionPath) {
+        String path = "/api/projects/" + projectId + (actionPath.startsWith("/") ? actionPath : "/" + actionPath);
+        delete(path);
+    }
+
     public JsonNode postRenovation(MultiValueMap<String, Object> formData) {
         return exchangeMultipart("/api/projects/renovation", formData);
     }
@@ -69,16 +82,36 @@ public class PptEngineClient {
 
     public byte[] downloadFile(String enginePath) {
         try {
+            URI uri = buildEngineFileUri(enginePath);
             return restClient.get()
-                    .uri(enginePath.startsWith("/") ? enginePath : "/" + enginePath)
+                    .uri(uri)
                     .retrieve()
                     .onStatus(HttpStatusCode::isError, (request, response) -> {
-                        throw new BusinessException(ErrorCode.PPT_ENGINE_ERROR, "引擎文件下载失败");
+                        throw engineStatusError(response);
                     })
                     .body(byte[].class);
+        } catch (BusinessException exception) {
+            throw exception;
         } catch (RestClientException exception) {
             throw engineError(exception);
         }
+    }
+
+    /** 按路径段编码，避免中文等非 ASCII 文件名导致引擎 404/400 */
+    private URI buildEngineFileUri(String enginePath) {
+        String normalized = enginePath == null ? "" : enginePath.trim();
+        if (!normalized.startsWith("/")) {
+            normalized = "/" + normalized;
+        }
+        UriComponentsBuilder builder = UriComponentsBuilder.fromHttpUrl(normalizeBaseUrl(properties.getEngine().getBaseUrl()));
+        Arrays.stream(normalized.split("/"))
+                .filter(segment -> !segment.isBlank())
+                .forEach(builder::pathSegment);
+        return builder.build().encode(StandardCharsets.UTF_8).toUri();
+    }
+
+    public void updateSettings(Map<String, Object> body) {
+        put("/api/settings", body == null ? Map.of() : body);
     }
 
     public boolean healthCheck() {
@@ -91,6 +124,10 @@ public class PptEngineClient {
         } catch (Exception exception) {
             return false;
         }
+    }
+
+    private JsonNode put(String path, Map<String, Object> body) {
+        return exchange("PUT", path, body, false);
     }
 
     private JsonNode post(String path, Map<String, Object> body, boolean allow201) {
@@ -185,10 +222,9 @@ public class PptEngineClient {
 
     private BusinessException engineStatusError(org.springframework.http.client.ClientHttpResponse response) {
         try {
-            return new BusinessException(
-                    ErrorCode.PPT_ENGINE_ERROR,
-                    "引擎请求失败: HTTP " + response.getStatusCode().value()
-            );
+            byte[] bytes = response.getBody().readAllBytes();
+            String body = bytes.length > 0 ? new String(bytes, StandardCharsets.UTF_8) : null;
+            return engineErrorFromBody(body, response.getStatusCode().value());
         } catch (IOException exception) {
             return new BusinessException(ErrorCode.PPT_ENGINE_ERROR, "引擎请求失败");
         }
