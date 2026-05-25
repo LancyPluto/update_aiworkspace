@@ -14,17 +14,20 @@ class FakeLangChainModel:
     def __init__(self, response):
         self.response = response
         self.messages = []
+        self.kwargs = []
         self.stream_calls = 0
 
-    async def ainvoke(self, messages):
+    async def ainvoke(self, messages, **kwargs):
         self.messages.append(messages)
+        self.kwargs.append(kwargs)
         if isinstance(self.response, Exception):
             raise self.response
         return FakeLangChainMessage(self.response)
 
-    async def astream(self, messages):
+    async def astream(self, messages, **kwargs):
         self.stream_calls += 1
         self.messages.append(messages)
+        self.kwargs.append(kwargs)
         for chunk in self.response:
             yield FakeLangChainMessage(chunk)
 
@@ -117,6 +120,62 @@ async def test_model_client_streams_langchain_chat_chunks():
 
     assert chunks == ["hello ", "world"]
     assert langchain_model.messages[0][0].type == "human"
+
+
+@pytest.mark.asyncio
+async def test_model_client_converts_tools_for_anthropic_compatible_stream():
+    langchain_model = FakeLangChainModel(["ok"])
+    client = ModelClient(
+        Settings(model_provider="anthropic_compatible", model_api_base_url="https://api.minimaxi.com/anthropic", model_api_key="key"),
+        chat_model=langchain_model,
+    )
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "memory_add",
+                "description": "save memory",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"content": {"type": "string"}},
+                    "required": ["content"],
+                },
+            },
+        }
+    ]
+
+    chunks = [chunk async for chunk in client.chat_stream([ChatMessage(role="user", content="hello")], tools=tools)]
+
+    assert chunks == ["ok"]
+    assert langchain_model.kwargs[0]["tools"] == [
+        {
+            "name": "memory_add",
+            "description": "save memory",
+            "input_schema": {
+                "type": "object",
+                "properties": {"content": {"type": "string"}},
+                "required": ["content"],
+            },
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_model_client_drops_invalid_tools_before_request():
+    langchain_model = FakeLangChainModel(["ok"])
+    client = ModelClient(
+        Settings(model_provider="openai_compatible", model_api_base_url="http://model", model_api_key="key"),
+        chat_model=langchain_model,
+    )
+    tools = [
+        {"type": "function", "function": {"name": "", "parameters": {"type": "object", "properties": {"x": {"type": "string"}}}}},
+        {"type": "function", "function": {"name": "empty_params", "parameters": {"type": "object", "properties": {}}}},
+    ]
+
+    chunks = [chunk async for chunk in client.chat_stream([ChatMessage(role="user", content="hello")], tools=tools)]
+
+    assert chunks == ["ok"]
+    assert "tools" not in langchain_model.kwargs[0]
 
 
 @pytest.mark.asyncio

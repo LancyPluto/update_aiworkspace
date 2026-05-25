@@ -17,6 +17,8 @@ class ModelClientError(RuntimeError):
 class ModelClient:
     def __init__(self, settings: Settings = default_settings, chat_model=None) -> None:
         self.settings = settings
+        self.prompt_tokens = 0
+        self.completion_tokens = 0
         try:
             self._chat_model = chat_model or ChatModelFactory(settings).create()
         except ChatModelProviderError as exception:
@@ -34,8 +36,15 @@ class ModelClient:
     def chat_model(self):
         return self._chat_model
 
+    @property
+    def usage(self) -> dict[str, int]:
+        return {
+            "promptTokens": max(0, self.prompt_tokens),
+            "completionTokens": max(0, self.completion_tokens),
+        }
+
     async def chat(self, messages: list[ChatMessage], tools: list[dict[str, Any]] | None = None) -> str:
-        safe_tools = _sanitize_tools(tools)
+        safe_tools = _prepare_tools_for_provider(tools, self.settings.model_provider)
         if self._should_use_direct_openai_compatible():
             return await self._chat_openai_compatible_direct(messages, tools=safe_tools)
         kwargs = {}
@@ -45,6 +54,7 @@ class ModelClient:
             result = await self._chat_model.ainvoke(_to_langchain_messages(messages), **kwargs)
         except Exception as exception:
             raise ModelClientError(f"model request failed: {exception}") from exception
+        self._record_usage(result)
         return _message_content(result)
 
     async def chat_stream(self, messages: list[ChatMessage], tools: list[dict[str, Any]] | None = None) -> AsyncIterator[str]:
@@ -56,11 +66,12 @@ class ModelClient:
             yield await self.chat(messages, tools=tools)
             return
         kwargs = {}
-        safe_tools = _sanitize_tools(tools)
+        safe_tools = _prepare_tools_for_provider(tools, self.settings.model_provider)
         if safe_tools:
             kwargs["tools"] = safe_tools
         try:
             async for chunk in self._chat_model.astream(_to_langchain_messages(messages), **kwargs):
+                self._record_usage(chunk)
                 text = _message_content(chunk, allow_empty=True)
                 if text:
                     yield text
@@ -102,7 +113,30 @@ class ModelClient:
             raise ModelClientError(f"model request failed: {_format_http_error(exception.response)}") from exception
         except Exception as exception:
             raise ModelClientError(f"model request failed: {exception}") from exception
+        self._record_openai_usage(data)
         return _openai_compatible_content(data)
+
+    def _record_usage(self, result: Any) -> None:
+        usage = getattr(result, "usage_metadata", None)
+        if isinstance(usage, dict):
+            self.prompt_tokens += _int_usage(usage.get("input_tokens") or usage.get("prompt_tokens"))
+            self.completion_tokens += _int_usage(usage.get("output_tokens") or usage.get("completion_tokens"))
+            return
+        metadata = getattr(result, "response_metadata", None)
+        if isinstance(metadata, dict):
+            token_usage = metadata.get("token_usage") or metadata.get("usage")
+            if isinstance(token_usage, dict):
+                self.prompt_tokens += _int_usage(token_usage.get("prompt_tokens") or token_usage.get("input_tokens"))
+                self.completion_tokens += _int_usage(token_usage.get("completion_tokens") or token_usage.get("output_tokens"))
+
+    def _record_openai_usage(self, data: Any) -> None:
+        if not isinstance(data, dict):
+            return
+        usage = data.get("usage")
+        if not isinstance(usage, dict):
+            return
+        self.prompt_tokens += _int_usage(usage.get("prompt_tokens") or usage.get("input_tokens"))
+        self.completion_tokens += _int_usage(usage.get("completion_tokens") or usage.get("output_tokens"))
 
 
 def _to_langchain_message(message: ChatMessage):
@@ -140,10 +174,33 @@ def _sanitize_tools(tools: list[dict[str, Any]] | None) -> list[dict[str, Any]] 
         if not name:
             continue
         params = func.get("parameters")
-        if params is None or (isinstance(params, dict) and not params.get("properties")):
+        if not isinstance(params, dict):
+            continue
+        if params.get("type") != "object" or not params.get("properties"):
             continue
         valid.append(tool)
     return valid if valid else None
+
+
+def _prepare_tools_for_provider(tools: list[dict[str, Any]] | None, provider: str) -> list[dict[str, Any]] | None:
+    safe_tools = _sanitize_tools(tools)
+    if not safe_tools:
+        return None
+    if provider.strip().lower() != "anthropic_compatible":
+        return safe_tools
+    return [_to_anthropic_tool(tool) for tool in safe_tools]
+
+
+def _to_anthropic_tool(tool: dict[str, Any]) -> dict[str, Any]:
+    func = tool["function"]
+    anthropic_tool = {
+        "name": func["name"].strip(),
+        "input_schema": func["parameters"],
+    }
+    description = func.get("description")
+    if isinstance(description, str) and description.strip():
+        anthropic_tool["description"] = description
+    return anthropic_tool
 
 
 def _to_openai_message(message: ChatMessage) -> dict[str, str]:
@@ -178,6 +235,13 @@ def _openai_compatible_content(data: Any) -> str:
     if isinstance(text, str):
         return text
     raise ModelClientError("model returned invalid chat completion message")
+
+
+def _int_usage(value: Any) -> int:
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
 
 
 def _message_content(message, *, allow_empty: bool = False) -> str:

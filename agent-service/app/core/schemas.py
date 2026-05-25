@@ -121,11 +121,16 @@ class RunComplete(BaseModel):
     modelProviderCode: str | None = None
     modelName: str | None = None
     consumedCredits: int
+    promptTokens: int | None = None
+    completionTokens: int | None = None
 
 
 class RunFail(BaseModel):
     errorCode: str
     errorMessage: str
+    consumedCredits: int | None = None
+    promptTokens: int | None = None
+    completionTokens: int | None = None
 
 
 class ToolCallCreate(BaseModel):

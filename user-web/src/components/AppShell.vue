@@ -165,7 +165,7 @@ onMounted(async () => {
 <template>
   <div class="flex min-h-screen bg-background text-foreground">
     <aside
-      class="hidden w-60 shrink-0 flex-col border-r border-border bg-card"
+      class="fixed inset-y-0 left-0 z-40 hidden w-60 shrink-0 flex-col border-r border-border bg-card"
       :class="sidebarOpen ? 'lg:flex' : 'lg:hidden'"
     >
       <div class="flex h-16 items-center gap-2.5 px-5 border-b border-border">
@@ -176,7 +176,7 @@ onMounted(async () => {
         </div>
       </div>
 
-      <nav class="flex-1 overflow-y-auto px-3 py-4">
+      <nav class="flex-1 overflow-y-auto px-3 py-4 pb-36">
         <p class="px-3 pb-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">工作区</p>
         <ul class="flex flex-col gap-1">
           <template v-for="item in userNav" :key="item.type === 'link' ? item.href : item.id">
@@ -243,7 +243,7 @@ onMounted(async () => {
         </ul>
       </nav>
 
-      <div class="border-t border-border p-4">
+      <div class="fixed bottom-0 left-0 z-50 w-60 border-t border-border bg-card p-4">
         <div class="rounded-lg border border-border bg-accent/40 p-3">
           <p class="text-xs font-medium">本月已用算力</p>
           <p class="mt-1 text-lg font-semibold text-primary">
@@ -268,7 +268,7 @@ onMounted(async () => {
       </div>
     </aside>
 
-    <div class="flex flex-1 flex-col min-w-0">
+    <div class="flex flex-1 flex-col min-w-0" :class="sidebarOpen ? 'lg:pl-60' : ''">
       <header class="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-border bg-card/80 px-6 backdrop-blur">
         <button
           type="button"

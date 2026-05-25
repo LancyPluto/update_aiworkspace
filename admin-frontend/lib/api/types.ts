@@ -511,6 +511,9 @@ export interface BillingUsageLog {
   id: number
   sourceType: string
   sourceId: number
+  taskNo?: string | null
+  inputModality?: string | null
+  outputModality?: string | null
   userId: number
   modelConfigId?: number | null
   provider?: string | null

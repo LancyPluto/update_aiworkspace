@@ -81,10 +81,27 @@ class AgentRuntime:
                 minimax_group_id=config.minimaxGroupId or "",
                 model_timeout_seconds=config.timeoutSeconds,
             )
-        return self.model_client_factory(settings)
+        self.model_client = self.model_client_factory(settings)
+        return self.model_client
 
     async def _fail(self, run_id: int, error_code: str, error_message: str) -> None:
         try:
-            await self.backend.fail_run(run_id, RunFail(errorCode=error_code, errorMessage=error_message))
+            usage = getattr(self.model_client, "usage", None)
+            prompt_tokens = 0
+            completion_tokens = 0
+            if isinstance(usage, dict):
+                prompt_tokens = max(0, int(usage.get("promptTokens") or 0))
+                completion_tokens = max(0, int(usage.get("completionTokens") or 0))
+            consumed_credits = self.default_settings.agent_default_consumed_credits if prompt_tokens or completion_tokens else None
+            await self.backend.fail_run(
+                run_id,
+                RunFail(
+                    errorCode=error_code,
+                    errorMessage=error_message,
+                    consumedCredits=consumed_credits,
+                    promptTokens=prompt_tokens,
+                    completionTokens=completion_tokens,
+                ),
+            )
         except Exception:
             pass

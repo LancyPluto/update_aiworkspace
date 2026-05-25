@@ -100,6 +100,7 @@ class WorkerInternalApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.list[0].sourceType").value("TASK"))
                 .andExpect(jsonPath("$.data.list[0].sourceId").value(taskId.intValue()))
+                .andExpect(jsonPath("$.data.list[0].taskNo", not(blankOrNullString())))
                 .andExpect(jsonPath("$.data.list[0].promptTokens").value(120))
                 .andExpect(jsonPath("$.data.list[0].completionTokens").value(35))
                 .andExpect(jsonPath("$.data.list[0].totalTokens").value(155))
@@ -255,6 +256,7 @@ class WorkerInternalApiTest {
                         .param("pageSize", "10"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.list[0].sourceId").value(taskId.intValue()))
+                .andExpect(jsonPath("$.data.list[0].taskNo", not(blankOrNullString())))
                 .andExpect(jsonPath("$.data.list[0].chargedCredits").value(10));
     }
 
@@ -317,6 +319,7 @@ class WorkerInternalApiTest {
                         .param("pageSize", "10"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.list[0].sourceId").value(taskId.intValue()))
+                .andExpect(jsonPath("$.data.list[0].taskNo", not(blankOrNullString())))
                 .andExpect(jsonPath("$.data.list[0].billingUnit").value("PER_CALL"))
                 .andExpect(jsonPath("$.data.list[0].billableUnits").value(2))
                 .andExpect(jsonPath("$.data.list[0].unitPrice").value(0.03))

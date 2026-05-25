@@ -227,14 +227,17 @@ public interface BillingUsageLogMapper extends BaseMapper<BillingUsageLog> {
 
     @Select("""
             <script>
-            SELECT id, source_type, source_id, user_id, model_config_id, provider, model_name,
-                   prompt_tokens, completion_tokens, total_tokens, input_token_price_per_1k,
-                   output_token_price_per_1k, input_token_price_per_1m, output_token_price_per_1m,
-                   billing_unit, billable_units, unit_price, cost_amount, charged_credits, created_at
-            FROM billing_usage_logs
+            SELECT l.id, l.source_type, l.source_id, task.task_no, tool.input_modality, tool.output_modality,
+                   l.user_id, l.model_config_id, l.provider, l.model_name,
+                   l.prompt_tokens, l.completion_tokens, l.total_tokens, l.input_token_price_per_1k,
+                   l.output_token_price_per_1k, l.input_token_price_per_1m, l.output_token_price_per_1m,
+                   l.billing_unit, l.billable_units, l.unit_price, l.cost_amount, l.charged_credits, l.created_at
+            FROM billing_usage_logs l
+            LEFT JOIN ai_tasks task ON l.source_type = 'TASK' AND l.source_id = task.id
+            LEFT JOIN ai_tools tool ON task.tool_id = tool.id
             WHERE 1 = 1
-            """ + FILTER + """
-            ORDER BY id DESC
+            """ + ALIASED_FILTER + """
+            ORDER BY l.id DESC
             LIMIT #{limit} OFFSET #{offset}
             </script>
             """)
@@ -242,6 +245,9 @@ public interface BillingUsageLogMapper extends BaseMapper<BillingUsageLog> {
             @Arg(column = "id", javaType = Long.class),
             @Arg(column = "source_type", javaType = String.class),
             @Arg(column = "source_id", javaType = Long.class),
+            @Arg(column = "task_no", javaType = String.class),
+            @Arg(column = "input_modality", javaType = String.class),
+            @Arg(column = "output_modality", javaType = String.class),
             @Arg(column = "user_id", javaType = Long.class),
             @Arg(column = "model_config_id", javaType = Long.class),
             @Arg(column = "provider", javaType = String.class),
