@@ -54,6 +54,8 @@ public class DataInitializer implements CommandLineRunner {
         ensureColumn("ai_tools", "input_modality", "ALTER TABLE ai_tools ADD COLUMN input_modality VARCHAR(32) NOT NULL DEFAULT 'TEXT'");
         ensureColumn("ai_tools", "output_modality", "ALTER TABLE ai_tools ADD COLUMN output_modality VARCHAR(32) NOT NULL DEFAULT 'TEXT'");
         ensureColumn("ai_tools", "config_note", "ALTER TABLE ai_tools ADD COLUMN config_note TEXT NULL");
+        ensureColumn("ai_tasks", "user_deleted", "ALTER TABLE ai_tasks ADD COLUMN user_deleted TINYINT NOT NULL DEFAULT 0");
+        ensureColumn("ai_tasks", "user_deleted_at", "ALTER TABLE ai_tasks ADD COLUMN user_deleted_at DATETIME NULL");
         ensureColumn("agent_model_configs", "display_name", "ALTER TABLE agent_model_configs ADD COLUMN display_name VARCHAR(128) NULL");
         ensureColumn("agent_model_configs", "config_code", "ALTER TABLE agent_model_configs ADD COLUMN config_code VARCHAR(64) NULL");
         ensureColumn("agent_model_configs", "console_url", "ALTER TABLE agent_model_configs ADD COLUMN console_url VARCHAR(512) NULL");
