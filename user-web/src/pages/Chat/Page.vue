@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue"
 import { RouterLink, useRoute, useRouter } from "vue-router"
-import { AlertCircle, ArrowLeft, Loader2, PanelLeft, Send, RefreshCw, Download } from "lucide-vue-next"
+import { AlertCircle, ArrowLeft, Loader2, PanelLeft, Send, RefreshCw, Download, Maximize2, Minimize2 } from "lucide-vue-next"
 import CapabilityControls from "./CapabilityControls.vue"
 import ChatSessionSidebar from "./ChatSessionSidebar.vue"
 import ResultRenderer from "@/components/ResultRenderer/ResultRenderer.vue"
@@ -73,6 +73,33 @@ const taskHistoryLoading = ref(false)
 const activeHistoryTaskId = ref<number | null>(null)
 
 const runningTaskTimers = new Map<number, ReturnType<typeof setTimeout>>()
+
+// ----- 输入框放大与自动扩高相关 -----
+const textareaRef = ref<HTMLTextAreaElement | null>(null)
+const isExpanded = ref(false) // 手动放大模式
+
+function autoResizeTextarea() {
+  const el = textareaRef.value
+  if (!el) return
+  if (isExpanded.value) {
+    // 手动放大模式：固定高度 120px，超出滚动
+    el.style.height = '120px'
+    el.style.overflowY = 'auto'
+  } else {
+    // 自动模式：根据内容高度调整，最大 200px
+    el.style.height = 'auto'
+    const scrollH = el.scrollHeight
+    const newHeight = Math.min(scrollH, 200)
+    el.style.height = `${newHeight}px`
+    el.style.overflowY = scrollH > 200 ? 'auto' : 'hidden'
+  }
+}
+
+function toggleExpand() {
+  isExpanded.value = !isExpanded.value
+  nextTick(() => autoResizeTextarea())
+}
+// ---------------------------------
 
 const isMarketplaceChat = computed(() => isMarketplaceMockToolId(toolId.value))
 const chatBackPath = computed(() => "/marketplace")
@@ -581,6 +608,22 @@ function exportMessageContent(content: string) {
   URL.revokeObjectURL(url)
 }
 
+function findPrecedingUserMessage(assistantMsg: LocalChatMessage): LocalChatMessage | null {
+  const index = messages.value.findIndex((item) => item.id === assistantMsg.id)
+  if (index <= 0) return null
+  for (let i = index - 1; i >= 0; i--) {
+    const candidate = messages.value[i]
+    if (candidate.role === "user") return candidate
+  }
+  return null
+}
+
+async function regenerateFromAssistant(assistantMsg: LocalChatMessage) {
+  const userMsg = findPrecedingUserMessage(assistantMsg)
+  if (!userMsg) return
+  await regenerateMessage(userMsg)
+}
+
 async function regenerateMessage(msg: LocalChatMessage) {
   if (sending.value || msg.role !== "user") return
   sending.value = true
@@ -634,6 +677,11 @@ watch(
   },
 )
 
+// 监听输入内容变化，自动调整高度
+watch(inputText, () => {
+  nextTick(() => autoResizeTextarea())
+})
+
 onMounted(() => {
   const savedSidebar = localStorage.getItem(SESSION_SIDEBAR_KEY)
   if (savedSidebar === "0") sessionSidebarOpen.value = false
@@ -644,6 +692,7 @@ onMounted(() => {
   if (savedTask === "1") taskSidebarOpen.value = true
 
   void loadTool()
+  nextTick(() => autoResizeTextarea())
 })
 
 onUnmounted(() => {
@@ -840,19 +889,20 @@ onUnmounted(() => {
                 </div>
 
                 <div
-                  v-if="msg.role === 'assistant' && !msg.pending && msg.resultBlocks?.length"
+                  v-if="msg.role === 'assistant' && !msg.pending && (msg.resultBlocks?.length || msg.failed)"
                   class="mt-3 flex items-center gap-3"
                 >
                   <button
                     type="button"
                     class="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-                    @click="regenerateMessage(messages.find((m, idx, arr) => arr.findIndex(item => item.id === msg.id) > idx))"
+                    @click="regenerateFromAssistant(msg)"
                     :disabled="sending"
                   >
                     <RefreshCw class="h-3.5 w-3.5" />
                     重新生成
                   </button>
                   <button
+                    v-if="msg.resultBlocks?.length"
                     type="button"
                     class="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
                     @click="exportMessageContent(msg.content)"
@@ -882,13 +932,24 @@ onUnmounted(() => {
                 class="mb-2"
               />
               <div class="flex items-center gap-3">
-                <textarea
-                  v-model="inputText"
-                  rows="1"
-                  class="max-h-28 min-h-[40px] w-full resize-none border-none bg-transparent text-base outline-none placeholder:text-muted-foreground/70"
-                  placeholder="输入消息..."
-                  @keydown="handleKeydown"
-                />
+                <div class="flex-1">
+                  <textarea
+                    ref="textareaRef"
+                    v-model="inputText"
+                    rows="1"
+                    class="max-h-28 min-h-[40px] w-full resize-none border-none bg-transparent text-base outline-none placeholder:text-muted-foreground/70"
+                    :placeholder="inputPlaceholder"
+                    @keydown="handleKeydown"
+                  ></textarea>
+                </div>
+                <button
+                  type="button"
+                  class="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-border text-muted-foreground hover:text-foreground transition-colors"
+                  @click="toggleExpand"
+                >
+                  <Maximize2 v-if="!isExpanded" class="h-4 w-4" />
+                  <Minimize2 v-else class="h-4 w-4" />
+                </button>
                 <button
                   type="button"
                   class="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary text-white disabled:opacity-50"
@@ -907,3 +968,9 @@ onUnmounted(() => {
     </template>
   </div>
 </template>
+
+<style scoped>
+textarea {
+  transition: height 0.1s ease;
+}
+</style>
