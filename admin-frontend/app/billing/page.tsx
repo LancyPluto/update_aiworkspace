@@ -6,11 +6,12 @@ import { AdminHeader } from "@/components/admin/header"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { ApiError } from "@/lib/api/http"
 import { fetchBillingOverview, fetchBillingUsageLogs } from "@/lib/api/billing"
 import type { BillingOverview, BillingUsageLog } from "@/lib/api/types"
-import { Coins, DollarSign, Gauge, RefreshCw, Sigma, WalletCards } from "lucide-react"
+import { Coins, DollarSign, Filter, Gauge, RefreshCw, Sigma, WalletCards } from "lucide-react"
 
 function number(value: number | null | undefined) {
   return Number(value || 0).toLocaleString()
@@ -39,16 +40,38 @@ function billingUnit(log: BillingUsageLog) {
 export default function BillingPage() {
   const [overview, setOverview] = useState<BillingOverview | null>(null)
   const [logs, setLogs] = useState<BillingUsageLog[]>([])
+  const [filters, setFilters] = useState({
+    userId: "",
+    modelName: "",
+    provider: "",
+    sourceType: "",
+    sourceId: "",
+    startDate: "",
+    endDate: "",
+  })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  function query() {
+    return {
+      userId: filters.userId ? Number(filters.userId) : undefined,
+      modelName: filters.modelName || undefined,
+      provider: filters.provider || undefined,
+      sourceType: filters.sourceType || undefined,
+      sourceId: filters.sourceId ? Number(filters.sourceId) : undefined,
+      startDate: filters.startDate || undefined,
+      endDate: filters.endDate || undefined,
+    }
+  }
 
   async function loadBilling() {
     setLoading(true)
     setError(null)
     try {
+      const baseQuery = query()
       const [overviewData, logData] = await Promise.all([
-        fetchBillingOverview(),
-        fetchBillingUsageLogs({ pageNo: 1, pageSize: 30 }),
+        fetchBillingOverview(baseQuery),
+        fetchBillingUsageLogs({ ...baseQuery, pageNo: 1, pageSize: 30 }),
       ])
       setOverview(overviewData)
       setLogs(logData.list)
@@ -81,12 +104,68 @@ export default function BillingPage() {
       />
 
       <div className="space-y-6 p-6">
-        <div className="flex justify-end">
-          <Button variant="outline" className="gap-2" onClick={loadBilling} disabled={loading}>
-            <RefreshCw className={loading ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
-            刷新
-          </Button>
-        </div>
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Filter className="h-5 w-5" />
+              过滤与统计维度
+            </CardTitle>
+            <CardDescription>按用户、模型、供应商、来源和日期范围查看成本与算力消耗。</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-3 md:grid-cols-7">
+              <Input
+                placeholder="用户 ID"
+                inputMode="numeric"
+                value={filters.userId}
+                onChange={(event) => setFilters((current) => ({ ...current, userId: event.target.value }))}
+              />
+              <Input
+                placeholder="模型名称"
+                value={filters.modelName}
+                onChange={(event) => setFilters((current) => ({ ...current, modelName: event.target.value }))}
+              />
+              <Input
+                placeholder="Provider"
+                value={filters.provider}
+                onChange={(event) => setFilters((current) => ({ ...current, provider: event.target.value }))}
+              />
+              <Input
+                placeholder="来源 TASK/AGENT_RUN"
+                value={filters.sourceType}
+                onChange={(event) => setFilters((current) => ({ ...current, sourceType: event.target.value }))}
+              />
+              <Input
+                placeholder="来源 ID"
+                inputMode="numeric"
+                value={filters.sourceId}
+                onChange={(event) => setFilters((current) => ({ ...current, sourceId: event.target.value }))}
+              />
+              <Input
+                type="date"
+                value={filters.startDate}
+                onChange={(event) => setFilters((current) => ({ ...current, startDate: event.target.value }))}
+              />
+              <Input
+                type="date"
+                value={filters.endDate}
+                onChange={(event) => setFilters((current) => ({ ...current, endDate: event.target.value }))}
+              />
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <Button
+                variant="ghost"
+                onClick={() => setFilters({ userId: "", modelName: "", provider: "", sourceType: "", sourceId: "", startDate: "", endDate: "" })}
+              >
+                清空
+              </Button>
+              <Button variant="outline" className="gap-2" onClick={loadBilling} disabled={loading}>
+                <RefreshCw className={loading ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
+                刷新
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
 
         <div className="grid gap-4 md:grid-cols-4">
           {stats.map((stat) => (
@@ -141,6 +220,89 @@ export default function BillingPage() {
             </Table>
           </CardContent>
         </Card>
+
+        <div className="grid gap-4 lg:grid-cols-3">
+          <Card>
+            <CardHeader>
+              <CardTitle>用户消耗 Top 10</CardTitle>
+              <CardDescription>用于识别重点客户和异常消耗。</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>用户</TableHead>
+                    <TableHead>积分</TableHead>
+                    <TableHead>次数</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(overview?.userCosts || []).map((item) => (
+                    <TableRow key={item.userId}>
+                      <TableCell>U{item.userId}</TableCell>
+                      <TableCell>{number(item.chargedCredits)}</TableCell>
+                      <TableCell>{number(item.usageCount)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>模态消耗</CardTitle>
+              <CardDescription>一级按文本、图片、视频、音频等生成模态聚合。</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>模态</TableHead>
+                    <TableHead>积分</TableHead>
+                    <TableHead>次数</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(overview?.modalityCosts || []).map((item) => (
+                    <TableRow key={item.modality}>
+                      <TableCell>{item.modality || "-"}</TableCell>
+                      <TableCell>{number(item.chargedCredits)}</TableCell>
+                      <TableCell>{number(item.usageCount)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>日期趋势</CardTitle>
+              <CardDescription>最近 14 个有记录的日期聚合。</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>日期</TableHead>
+                    <TableHead>成本</TableHead>
+                    <TableHead>积分</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(overview?.dailyCosts || []).map((item) => (
+                    <TableRow key={item.usageDate}>
+                      <TableCell>{item.usageDate}</TableCell>
+                      <TableCell>{money(item.costAmount)}</TableCell>
+                      <TableCell>{number(item.chargedCredits)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </div>
 
         <Card>
           <CardHeader>

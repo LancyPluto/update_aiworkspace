@@ -18,6 +18,7 @@ public class AppProperties {
     private Agent agent = new Agent();
     private Auth auth = new Auth();
     private Cors cors = new Cors();
+    private Payment payment = new Payment();
 
     public boolean isProductionMode() {
         return productionMode;
@@ -99,6 +100,14 @@ public class AppProperties {
 
     public void setCors(Cors cors) {
         this.cors = cors;
+    }
+
+    public Payment getPayment() {
+        return payment;
+    }
+
+    public void setPayment(Payment payment) {
+        this.payment = payment == null ? new Payment() : payment;
     }
 
     public static class Cors {
@@ -353,6 +362,113 @@ public class AppProperties {
 
         public void setFileStorageDir(String fileStorageDir) {
             this.fileStorageDir = fileStorageDir == null || fileStorageDir.isBlank() ? "data/agent-files" : fileStorageDir;
+        }
+    }
+
+    public static class Payment {
+        private WechatNative wechatNative = new WechatNative();
+
+        public WechatNative getWechatNative() {
+            return wechatNative;
+        }
+
+        public void setWechatNative(WechatNative wechatNative) {
+            this.wechatNative = wechatNative == null ? new WechatNative() : wechatNative;
+        }
+    }
+
+    public static class WechatNative {
+        private boolean enabled;
+        private String appid = "";
+        private String mchid = "";
+        private String merchantSerialNo = "";
+        private String merchantPrivateKeyPath = "";
+        private String apiV3Key = "";
+        private String wechatPayPublicKeyId = "";
+        private String wechatPayPublicKeyPath = "";
+        private String notifyUrl = "";
+        private String apiBaseUrl = "https://api.mch.weixin.qq.com";
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public String getAppid() {
+            return appid;
+        }
+
+        public void setAppid(String appid) {
+            this.appid = appid == null ? "" : appid;
+        }
+
+        public String getMchid() {
+            return mchid;
+        }
+
+        public void setMchid(String mchid) {
+            this.mchid = mchid == null ? "" : mchid;
+        }
+
+        public String getMerchantSerialNo() {
+            return merchantSerialNo;
+        }
+
+        public void setMerchantSerialNo(String merchantSerialNo) {
+            this.merchantSerialNo = merchantSerialNo == null ? "" : merchantSerialNo;
+        }
+
+        public String getMerchantPrivateKeyPath() {
+            return merchantPrivateKeyPath;
+        }
+
+        public void setMerchantPrivateKeyPath(String merchantPrivateKeyPath) {
+            this.merchantPrivateKeyPath = merchantPrivateKeyPath == null ? "" : merchantPrivateKeyPath;
+        }
+
+        public String getApiV3Key() {
+            return apiV3Key;
+        }
+
+        public void setApiV3Key(String apiV3Key) {
+            this.apiV3Key = apiV3Key == null ? "" : apiV3Key;
+        }
+
+        public String getWechatPayPublicKeyId() {
+            return wechatPayPublicKeyId;
+        }
+
+        public void setWechatPayPublicKeyId(String wechatPayPublicKeyId) {
+            this.wechatPayPublicKeyId = wechatPayPublicKeyId == null ? "" : wechatPayPublicKeyId;
+        }
+
+        public String getWechatPayPublicKeyPath() {
+            return wechatPayPublicKeyPath;
+        }
+
+        public void setWechatPayPublicKeyPath(String wechatPayPublicKeyPath) {
+            this.wechatPayPublicKeyPath = wechatPayPublicKeyPath == null ? "" : wechatPayPublicKeyPath;
+        }
+
+        public String getNotifyUrl() {
+            return notifyUrl;
+        }
+
+        public void setNotifyUrl(String notifyUrl) {
+            this.notifyUrl = notifyUrl == null ? "" : notifyUrl;
+        }
+
+        public String getApiBaseUrl() {
+            return apiBaseUrl;
+        }
+
+        public void setApiBaseUrl(String apiBaseUrl) {
+            this.apiBaseUrl = apiBaseUrl == null || apiBaseUrl.isBlank()
+                    ? "https://api.mch.weixin.qq.com"
+                    : apiBaseUrl;
         }
     }
 }

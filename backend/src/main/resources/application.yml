@@ -64,6 +64,18 @@ app:
     max-runs-per-hour: ${AGENT_MAX_RUNS_PER_HOUR:30}
     default-credit-budget: ${AGENT_DEFAULT_CREDIT_BUDGET:20}
     file-storage-dir: ${AGENT_FILE_STORAGE_DIR:data/agent-files}
+  payment:
+    wechat-native:
+      enabled: ${WECHAT_NATIVE_PAY_ENABLED:false}
+      appid: ${WECHAT_PAY_APPID:}
+      mchid: ${WECHAT_PAY_MCHID:}
+      merchant-serial-no: ${WECHAT_PAY_MERCHANT_SERIAL_NO:}
+      merchant-private-key-path: ${WECHAT_PAY_MERCHANT_PRIVATE_KEY_PATH:}
+      api-v3-key: ${WECHAT_PAY_API_V3_KEY:}
+      wechat-pay-public-key-id: ${WECHAT_PAY_PUBLIC_KEY_ID:}
+      wechat-pay-public-key-path: ${WECHAT_PAY_PUBLIC_KEY_PATH:}
+      notify-url: ${WECHAT_PAY_NOTIFY_URL:}
+      api-base-url: ${WECHAT_PAY_API_BASE_URL:https://api.mch.weixin.qq.com}
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174}
 

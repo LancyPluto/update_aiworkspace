@@ -470,6 +470,30 @@ export interface BillingModelCostPoint {
   chargedCredits: number
 }
 
+export interface BillingUserCostPoint {
+  userId: number
+  totalTokens: number
+  costAmount: number
+  chargedCredits: number
+  usageCount: number
+}
+
+export interface BillingModalityCostPoint {
+  modality: string
+  totalTokens: number
+  costAmount: number
+  chargedCredits: number
+  usageCount: number
+}
+
+export interface BillingDailyCostPoint {
+  usageDate: string
+  totalTokens: number
+  costAmount: number
+  chargedCredits: number
+  usageCount: number
+}
+
 export interface BillingOverview {
   todayPromptTokens: number
   todayCompletionTokens: number
@@ -478,6 +502,9 @@ export interface BillingOverview {
   todayChargedCredits: number
   todayUsageCount: number
   modelCosts: BillingModelCostPoint[]
+  userCosts: BillingUserCostPoint[]
+  modalityCosts: BillingModalityCostPoint[]
+  dailyCosts: BillingDailyCostPoint[]
 }
 
 export interface BillingUsageLog {

@@ -93,7 +93,10 @@ class WorkerInternalApiTest {
         mockMvc.perform(get("/api/admin/v1/billing/usage-logs")
                         .header("Authorization", "Bearer " + adminToken)
                         .param("pageNo", "1")
-                        .param("pageSize", "10"))
+                        .param("pageSize", "10")
+                        .param("userId", "2")
+                        .param("sourceType", "TASK")
+                        .param("sourceId", taskId.toString()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.list[0].sourceType").value("TASK"))
                 .andExpect(jsonPath("$.data.list[0].sourceId").value(taskId.intValue()))
@@ -101,6 +104,20 @@ class WorkerInternalApiTest {
                 .andExpect(jsonPath("$.data.list[0].completionTokens").value(35))
                 .andExpect(jsonPath("$.data.list[0].totalTokens").value(155))
                 .andExpect(jsonPath("$.data.list[0].chargedCredits").value(10));
+
+        mockMvc.perform(get("/api/admin/v1/billing/overview")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .param("userId", "2")
+                        .param("sourceType", "TASK")
+                        .param("sourceId", taskId.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.todayTotalTokens").value(155))
+                .andExpect(jsonPath("$.data.todayChargedCredits").value(10))
+                .andExpect(jsonPath("$.data.modelCosts[0].modelName").isNotEmpty())
+                .andExpect(jsonPath("$.data.userCosts[0].userId").value(2))
+                .andExpect(jsonPath("$.data.userCosts[0].usageCount").value(1))
+                .andExpect(jsonPath("$.data.modalityCosts[0].modality").value("TEXT"))
+                .andExpect(jsonPath("$.data.dailyCosts[0].usageCount").value(1));
     }
 
     @Test

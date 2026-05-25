@@ -30,6 +30,14 @@ public interface CreditRechargeOrderMapper extends BaseMapper<CreditRechargeOrde
             """)
     CreditRechargeOrder findByIdAndUserId(@Param("orderId") Long orderId, @Param("userId") Long userId);
 
+    @Select("""
+            SELECT *
+            FROM credit_recharge_orders
+            WHERE order_no = #{orderNo}
+            LIMIT 1
+            """)
+    CreditRechargeOrder findByOrderNo(@Param("orderNo") String orderNo);
+
     @Update("""
             UPDATE credit_recharge_orders
             SET status = #{toStatus},
@@ -46,4 +54,15 @@ public interface CreditRechargeOrderMapper extends BaseMapper<CreditRechargeOrde
                 @Param("toStatus") String toStatus,
                 @Param("reason") String reason,
                 @Param("eventAt") LocalDateTime eventAt);
+
+    @Update("""
+            UPDATE credit_recharge_orders
+            SET external_trade_no = #{externalTradeNo},
+                updated_at = #{eventAt}
+            WHERE id = #{orderId}
+              AND (external_trade_no IS NULL OR external_trade_no = #{externalTradeNo})
+            """)
+    int bindExternalTradeNo(@Param("orderId") Long orderId,
+                            @Param("externalTradeNo") String externalTradeNo,
+                            @Param("eventAt") LocalDateTime eventAt);
 }
