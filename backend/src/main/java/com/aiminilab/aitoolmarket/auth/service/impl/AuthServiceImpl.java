@@ -9,6 +9,7 @@ import com.aiminilab.aitoolmarket.auth.dto.SmsCodeResponse;
 import com.aiminilab.aitoolmarket.auth.security.AuthUser;
 import com.aiminilab.aitoolmarket.auth.security.JwtTokenProvider;
 import com.aiminilab.aitoolmarket.auth.service.AuthService;
+import com.aiminilab.aitoolmarket.auth.service.HumanCaptchaService;
 import com.aiminilab.aitoolmarket.auth.service.SmsCodeService;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.enums.UserStatus;
@@ -28,15 +29,18 @@ public class AuthServiceImpl implements AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenProvider jwtTokenProvider;
     private final SmsCodeService smsCodeService;
+    private final HumanCaptchaService humanCaptchaService;
 
     public AuthServiceImpl(UserMapper userMapper,
                            PasswordEncoder passwordEncoder,
                            JwtTokenProvider jwtTokenProvider,
-                           SmsCodeService smsCodeService) {
+                           SmsCodeService smsCodeService,
+                           HumanCaptchaService humanCaptchaService) {
         this.userMapper = userMapper;
         this.passwordEncoder = passwordEncoder;
         this.jwtTokenProvider = jwtTokenProvider;
         this.smsCodeService = smsCodeService;
+        this.humanCaptchaService = humanCaptchaService;
     }
 
     @Override
@@ -89,9 +93,10 @@ public class AuthServiceImpl implements AuthService {
     }
 
     @Override
-    public SmsCodeResponse sendSmsCode(String phone, String scene) {
+    public SmsCodeResponse sendSmsCode(String phone, String scene, String captchaVerifyParam) {
         String normalizedPhone = normalizePhone(phone);
         String normalizedScene = normalizeBlank(scene);
+        humanCaptchaService.verify(captchaVerifyParam);
         if ("REGISTER".equalsIgnoreCase(normalizedScene)) {
             userMapper.findByPhone(normalizedPhone).ifPresent(user -> {
                 throw new BusinessException(ErrorCode.PARAM_ERROR, "手机号已注册");

@@ -187,6 +187,7 @@ public class AppProperties {
         private String cookieSameSite = "Lax";
         private Boolean cookieSecure;
         private Sms sms = new Sms();
+        private Captcha captcha = new Captcha();
 
         public String getCookieSameSite() {
             return cookieSameSite;
@@ -210,6 +211,85 @@ public class AppProperties {
 
         public void setSms(Sms sms) {
             this.sms = sms == null ? new Sms() : sms;
+        }
+
+        public Captcha getCaptcha() {
+            return captcha;
+        }
+
+        public void setCaptcha(Captcha captcha) {
+            this.captcha = captcha == null ? new Captcha() : captcha;
+        }
+    }
+
+    public static class Captcha {
+        private boolean enabled = false;
+        private String provider = "local";
+        private String region = "cn";
+        private String sceneId = "";
+        private String endpoint = "";
+        private String accessKeyId = "";
+        private String accessKeySecret = "";
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public String getProvider() {
+            return provider;
+        }
+
+        public void setProvider(String provider) {
+            this.provider = provider == null || provider.isBlank() ? "local" : provider;
+        }
+
+        public String getRegion() {
+            return region;
+        }
+
+        public void setRegion(String region) {
+            this.region = region == null || region.isBlank() ? "cn" : region;
+        }
+
+        public String getSceneId() {
+            return sceneId;
+        }
+
+        public void setSceneId(String sceneId) {
+            this.sceneId = sceneId == null ? "" : sceneId;
+        }
+
+        public String getEndpoint() {
+            if (endpoint != null && !endpoint.isBlank()) {
+                return endpoint;
+            }
+            return "sgp".equalsIgnoreCase(region)
+                    ? "captcha.ap-southeast-1.aliyuncs.com"
+                    : "captcha.cn-shanghai.aliyuncs.com";
+        }
+
+        public void setEndpoint(String endpoint) {
+            this.endpoint = endpoint == null ? "" : endpoint;
+        }
+
+        public String getAccessKeyId() {
+            return accessKeyId;
+        }
+
+        public void setAccessKeyId(String accessKeyId) {
+            this.accessKeyId = accessKeyId == null ? "" : accessKeyId;
+        }
+
+        public String getAccessKeySecret() {
+            return accessKeySecret;
+        }
+
+        public void setAccessKeySecret(String accessKeySecret) {
+            this.accessKeySecret = accessKeySecret == null ? "" : accessKeySecret;
         }
     }
 

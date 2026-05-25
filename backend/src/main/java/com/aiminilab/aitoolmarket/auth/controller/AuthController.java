@@ -49,7 +49,7 @@ public class AuthController {
 
     @PostMapping("/sms-code")
     public ApiResponse<SmsCodeResponse> sendSmsCode(@Valid @RequestBody SmsCodeRequest request) {
-        return ApiResponse.success(authService.sendSmsCode(request.phone(), request.scene()));
+        return ApiResponse.success(authService.sendSmsCode(request.phone(), request.scene(), request.captchaVerifyParam()));
     }
 
     @PostMapping("/sms-register")

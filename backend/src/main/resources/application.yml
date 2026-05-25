@@ -46,6 +46,14 @@ app:
     retry-queue-prefix: ${RABBITMQ_TASK_RETRY_QUEUE_PREFIX:ai.tool.normal.retry}
     retry-delays-ms: ${RABBITMQ_TASK_RETRY_DELAYS_MS:5000,30000,120000}
   auth:
+    captcha:
+      enabled: ${ALIYUN_CAPTCHA_ENABLED:false}
+      provider: ${CAPTCHA_PROVIDER:aliyun}
+      region: ${ALIYUN_CAPTCHA_REGION:cn}
+      scene-id: ${ALIYUN_CAPTCHA_SCENE_ID:}
+      endpoint: ${ALIYUN_CAPTCHA_ENDPOINT:}
+      access-key-id: ${ALIYUN_CAPTCHA_ACCESS_KEY_ID:}
+      access-key-secret: ${ALIYUN_CAPTCHA_ACCESS_KEY_SECRET:}
     sms:
       provider: ${SMS_PROVIDER:local}
       bmob-application-id: ${BMOB_APPLICATION_ID:}

@@ -82,6 +82,9 @@
         </button>
       </div>
 
+      <div id="aliyun-captcha-element" class="aliyun-captcha-element"></div>
+      <button id="aliyun-captcha-trigger" class="aliyun-captcha-trigger" type="button" aria-hidden="true" tabindex="-1"></button>
+
       <form class="login-card" @submit.prevent="handleSubmit">
         <!-- 密码登录表单 -->
         <div v-if="currentMode === 'passwordLogin'">
@@ -149,6 +152,16 @@
   const router = useRouter();
   const route = useRoute();
   const auth = useAuthStore();
+  const aliyunCaptchaConfig = {
+    enabled: import.meta.env.VITE_ALIYUN_CAPTCHA_ENABLED === 'true',
+    region: import.meta.env.VITE_ALIYUN_CAPTCHA_REGION || 'cn',
+    prefix: import.meta.env.VITE_ALIYUN_CAPTCHA_PREFIX || '',
+    sceneId: import.meta.env.VITE_ALIYUN_CAPTCHA_SCENE_ID || '',
+  };
+  let aliyunCaptchaInstance = null;
+  let aliyunCaptchaLoading = null;
+  let pendingCaptchaResolve = null;
+  let pendingCaptchaReject = null;
 
   // ================= 开屏动画控制 =================
   const brandVisible = ref(false);
@@ -374,6 +387,83 @@
     errorMsg.value = msg;
     tipMsg.value = '';
   }
+  function loadAliyunCaptchaScript() {
+    if (!aliyunCaptchaConfig.enabled) return Promise.resolve(false);
+    if (!aliyunCaptchaConfig.prefix || !aliyunCaptchaConfig.sceneId) {
+      return Promise.reject(new Error('阿里云验证码前端配置不完整'));
+    }
+    if (window.initAliyunCaptcha) return Promise.resolve(true);
+    if (aliyunCaptchaLoading) return aliyunCaptchaLoading;
+    window.AliyunCaptchaConfig = {
+      region: aliyunCaptchaConfig.region,
+      prefix: aliyunCaptchaConfig.prefix,
+    };
+    aliyunCaptchaLoading = new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = 'https://o.alicdn.com/captcha-frontend/aliyunCaptcha/AliyunCaptcha.js';
+      script.async = true;
+      script.onload = () => resolve(true);
+      script.onerror = () => reject(new Error('阿里云验证码脚本加载失败'));
+      document.head.appendChild(script);
+    });
+    return aliyunCaptchaLoading;
+  }
+  async function ensureAliyunCaptcha() {
+    const loaded = await loadAliyunCaptchaScript();
+    if (!loaded || aliyunCaptchaInstance) return loaded;
+    if (!window.initAliyunCaptcha) {
+      throw new Error('阿里云验证码初始化方法不可用');
+    }
+    window.initAliyunCaptcha({
+      SceneId: aliyunCaptchaConfig.sceneId,
+      mode: 'popup',
+      element: '#aliyun-captcha-element',
+      button: '#aliyun-captcha-trigger',
+      language: 'cn',
+      delayBeforeSuccess: false,
+      slideStyle: {
+        width: 360,
+        height: 40,
+      },
+      success(captchaVerifyParam) {
+        const resolve = pendingCaptchaResolve;
+        pendingCaptchaResolve = null;
+        pendingCaptchaReject = null;
+        if (resolve) resolve(captchaVerifyParam);
+      },
+      fail(result) {
+        console.error(result);
+      },
+      onError(errorInfo) {
+        const reject = pendingCaptchaReject;
+        pendingCaptchaResolve = null;
+        pendingCaptchaReject = null;
+        if (reject) reject(new Error(errorInfo?.msg || '阿里云验证码初始化失败'));
+      },
+      getInstance(instance) {
+        aliyunCaptchaInstance = instance;
+      },
+    });
+    return true;
+  }
+  async function verifyAliyunCaptcha() {
+    const enabled = await ensureAliyunCaptcha();
+    if (!enabled) return null;
+    return new Promise((resolve, reject) => {
+      pendingCaptchaResolve = resolve;
+      pendingCaptchaReject = reject;
+      const trigger = document.getElementById('aliyun-captcha-trigger');
+      if (trigger) {
+        trigger.click();
+      } else if (aliyunCaptchaInstance?.show) {
+        aliyunCaptchaInstance.show();
+      } else {
+        pendingCaptchaResolve = null;
+        pendingCaptchaReject = null;
+        reject(new Error('阿里云验证码触发失败'));
+      }
+    });
+  }
   async function handleSendCode() {
     const phoneNum = phone.value.trim();
     if (!/^1\d{10}$/.test(phoneNum)) {
@@ -384,7 +474,8 @@
     codeSending.value = true;
     try {
       const scene = currentMode.value === 'register' ? 'REGISTER' : 'LOGIN';
-      const res = await sendSmsCode({ phone: phoneNum, scene });
+      const captchaVerifyParam = await verifyAliyunCaptcha();
+      const res = await sendSmsCode({ phone: phoneNum, scene, captchaVerifyParam });
       const hint = res.debugCode ? `验证码已发送（调试码：${res.debugCode}）` : '验证码已发送';
       showTip(hint);
       codeCountdown.value = res.cooldownSeconds || 60;
@@ -563,6 +654,16 @@
   z-index: 0;
   transform: translate(-50%, -50%);
   transition: opacity 0.3s ease;
+}
+
+.aliyun-captcha-element,
+.aliyun-captcha-trigger {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
 }
 
 /* ========= fade-up 入场（原生 @keyframes，保留 .animate-item / .show class） ========= */

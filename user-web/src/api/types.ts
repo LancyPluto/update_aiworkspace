@@ -84,6 +84,7 @@ export type SmsCodeScene = "REGISTER" | "LOGIN"
 export interface SmsCodeRequest {
   phone: string
   scene: SmsCodeScene
+  captchaVerifyParam?: string | null
 }
 
 export interface SmsCodeResponse {

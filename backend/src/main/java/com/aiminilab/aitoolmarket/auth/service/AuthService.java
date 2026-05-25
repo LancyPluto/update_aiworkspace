@@ -13,7 +13,7 @@ public interface AuthService {
 
     AuthenticatedSession login(LoginRequest request, boolean adminLogin);
 
-    SmsCodeResponse sendSmsCode(String phone, String scene);
+    SmsCodeResponse sendSmsCode(String phone, String scene, String captchaVerifyParam);
 
     AuthenticatedSession registerWithSmsCode(SmsAuthRequest request);
 
