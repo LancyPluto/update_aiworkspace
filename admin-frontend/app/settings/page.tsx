@@ -5,14 +5,16 @@ import { AdminLayout } from "@/components/admin/admin-layout"
 import { AgentModelSettings } from "@/components/admin/agent-model-settings"
 import { AdminHeader } from "@/components/admin/header"
 import { Button } from "@/components/ui/button"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { ApiError } from "@/lib/api/http"
+import { downloadConfigBundle, exportConfigBundle, importConfigBundle, readConfigBundleFile } from "@/lib/api/config-bundles"
 import { fetchSettings, updateSettings } from "@/lib/api/settings"
-import { CheckCircle, Database, RefreshCw, Save, Server, Settings2, Shield } from "lucide-react"
+import { CheckCircle, Database, Download, KeyRound, RefreshCw, Save, Server, Settings2, Shield, Upload } from "lucide-react"
 
 interface SettingsForm {
   platformName: string
@@ -51,8 +53,13 @@ export default function SettingsPage() {
   const [form, setForm] = useState<SettingsForm>(defaults)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [importing, setImporting] = useState(false)
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+  const [modelRefreshKey, setModelRefreshKey] = useState(0)
+  const [exportDialogOpen, setExportDialogOpen] = useState(false)
+  const [exporting, setExporting] = useState(false)
 
   async function loadSettings() {
     setLoading(true)
@@ -89,6 +96,7 @@ export default function SettingsPage() {
     setSaving(true)
     setSaved(false)
     setError(null)
+    setNotice(null)
     try {
       await updateSettings({
         "platform.name": form.platformName,
@@ -110,8 +118,46 @@ export default function SettingsPage() {
     }
   }
 
+  async function handleExportBundle(includeSecrets: boolean) {
+    setExporting(true)
+    setError(null)
+    setNotice(null)
+    try {
+      const bundle = await exportConfigBundle(includeSecrets)
+      downloadConfigBundle(bundle)
+      setExportDialogOpen(false)
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "导出配置包失败")
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  async function handleImportBundle(file: File | undefined) {
+    if (!file) return
+    setImporting(true)
+    setError(null)
+    setNotice(null)
+    try {
+      const bundle = await readConfigBundleFile(file)
+      const result = await importConfigBundle(bundle)
+      await loadSettings()
+      setModelRefreshKey((key) => key + 1)
+      setSaved(true)
+      const warningText = result.warnings?.length ? `，提示：${result.warnings.join("；")}` : ""
+      setNotice(`导入完成：模型 ${result.modelConfigs}、分类 ${result.categories}、工具 ${result.tools}、字段 ${result.fields}${warningText}`)
+      setTimeout(() => setSaved(false), 1800)
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "导入配置包失败，请确认 JSON 格式正确")
+    } finally {
+      setImporting(false)
+    }
+  }
+
   const description = error
     ? `配置加载异常：${error}`
+    : notice
+      ? notice
     : loading
       ? "正在从数据库加载系统配置"
       : "系统配置会保存到后端 system_settings 表"
@@ -142,7 +188,7 @@ export default function SettingsPage() {
           </TabsList>
 
           <TabsContent value="model">
-            <AgentModelSettings />
+            <AgentModelSettings refreshKey={modelRefreshKey} />
           </TabsContent>
 
           <TabsContent value="system" className="space-y-5">
@@ -207,15 +253,78 @@ export default function SettingsPage() {
         </Tabs>
 
         <div className="mt-6 flex items-center justify-end gap-3">
-          <Button variant="outline" className="gap-2" onClick={loadSettings} disabled={loading || saving}>
+          <Button variant="outline" className="gap-2" onClick={() => setExportDialogOpen(true)} disabled={loading || saving || importing || exporting}>
+            <Download className="h-4 w-4" />
+            导出配置包
+          </Button>
+          <Button variant="outline" className="relative gap-2" disabled={loading || saving || importing}>
+            <Upload className={importing ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
+            {importing ? "导入中..." : "导入配置包"}
+            <input
+              type="file"
+              accept="application/json,.json"
+              className="absolute inset-0 cursor-pointer opacity-0"
+              disabled={loading || saving || importing}
+              onChange={(event) => {
+                handleImportBundle(event.target.files?.[0])
+                event.currentTarget.value = ""
+              }}
+            />
+          </Button>
+          <Button variant="outline" className="gap-2" onClick={loadSettings} disabled={loading || saving || importing}>
             <RefreshCw className={loading ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
             刷新
           </Button>
-          <Button className="min-w-32 gap-2" onClick={saveSettings} disabled={saving}>
+          <Button className="min-w-32 gap-2" onClick={saveSettings} disabled={saving || importing}>
             {saved ? <CheckCircle className="h-4 w-4" /> : <Save className={saving ? "h-4 w-4 animate-spin" : "h-4 w-4"} />}
             {saved ? "已保存" : saving ? "保存中..." : "保存配置"}
           </Button>
         </div>
+
+        <Dialog open={exportDialogOpen} onOpenChange={setExportDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>导出配置包</DialogTitle>
+              <DialogDescription>
+                请选择是否把模型 API Key 和额外鉴权信息一起写入 JSON。含密钥文件只适合可信成员之间临时流转。
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <button
+                type="button"
+                className="rounded-lg border border-border bg-card p-4 text-left transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={exporting}
+                onClick={() => handleExportBundle(false)}
+              >
+                <div className="flex items-center gap-2 font-medium">
+                  <Shield className="h-4 w-4 text-primary" />
+                  不含密钥
+                </div>
+                <p className="mt-2 text-sm leading-6 text-muted-foreground">适合提交到分支、分享给成员或作为默认配置模板。</p>
+              </button>
+
+              <button
+                type="button"
+                className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 text-left transition-colors hover:bg-amber-500/15 disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={exporting}
+                onClick={() => handleExportBundle(true)}
+              >
+                <div className="flex items-center gap-2 font-medium">
+                  <KeyRound className="h-4 w-4 text-amber-500" />
+                  包含密钥
+                </div>
+                <p className="mt-2 text-sm leading-6 text-muted-foreground">仅用于可信开发环境快速同步，导出后请不要提交仓库。</p>
+              </button>
+            </div>
+
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setExportDialogOpen(false)} disabled={exporting}>
+                取消
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </AdminLayout>
   )

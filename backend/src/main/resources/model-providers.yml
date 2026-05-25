@@ -55,6 +55,17 @@ providers:
     workerReady: true
     description: SiliconFlow /v1/images/generations and digital-human worker pipeline.
 
+  - code: volcengine_images
+    label: Volcengine images
+    capabilities:
+      - IMAGE_GENERATION
+    defaultBaseUrl: https://ark.cn-beijing.volces.com
+    defaultModel: doubao-seedream-4-5-251128
+    billingDefault: PER_CALL
+    testStrategy: accept_only
+    workerReady: true
+    description: Volcengine Ark image generation models such as Doubao Seedream.
+
   - code: minimax_music
     label: MiniMax music
     capabilities:
@@ -88,6 +99,17 @@ providers:
     workerReady: true
     description: SiliconFlow /v1/audio/speech for standalone TTS tools.
 
+  - code: siliconflow_asr
+    label: SiliconFlow ASR
+    capabilities:
+      - SPEECH_TO_TEXT
+    defaultBaseUrl: https://api.siliconflow.cn
+    defaultModel: TeleAI/TeleSpeechASR
+    billingDefault: PER_CALL
+    testStrategy: accept_only
+    workerReady: true
+    description: SiliconFlow speech recognition model reserved for subtitle alignment and speech-to-text workflows.
+
   - code: seedance
     label: Seedance video
     capabilities:
@@ -100,6 +122,18 @@ providers:
     workerReady: true
     description: Seedance image-to-video generation used by digital-human and comic-drama pipelines.
 
+  - code: infinitetalk
+    label: InfiniteTalk digital human
+    capabilities:
+      - VIDEO_GENERATION
+      - DIGITAL_HUMAN
+    defaultBaseUrl: http://host.docker.internal:7860
+    defaultModel: MeiGen-AI/InfiniteTalk
+    billingDefault: PER_CALL
+    testStrategy: accept_only
+    workerReady: true
+    description: MeiGen-AI InfiniteTalk audio-driven avatar/video dubbing service. Configure a deployed HTTP endpoint as base URL.
+
   - code: kling_video
     label: Kling video/images
     capabilities:
@@ -111,6 +145,34 @@ providers:
     testStrategy: accept_only
     workerReady: true
     description: Kling official text/image-to-video and image generation API. Configure AK/SK in extra auth JSON.
+
+  - code: ofox_openai_images
+    label: oFox OpenAI images gateway
+    capabilities:
+      - IMAGE_GENERATION
+    defaultBaseUrl: https://api.ofox.ai/v1
+    defaultModel: openai/gpt-image-2
+    billingDefault: IMAGE_TOKEN
+    providerProtocol: openai_images
+    vendorKind: gateway
+    upstreamVendor: openai
+    testStrategy: accept_only
+    workerReady: true
+    description: oFox gateway for OpenAI-compatible image generation models. Change Base URL/API Key to switch compatible gateways.
+
+  - code: openai_images_gateway
+    label: OpenAI images compatible gateway
+    capabilities:
+      - IMAGE_GENERATION
+    defaultBaseUrl: https://api.ofox.ai/v1
+    defaultModel: openai/gpt-image-2
+    billingDefault: IMAGE_TOKEN
+    providerProtocol: openai_images
+    vendorKind: gateway
+    upstreamVendor: openai
+    testStrategy: accept_only
+    workerReady: true
+    description: Generic gateway slot for OpenAI-compatible image generation APIs. Use this when only Base URL/API Key changes.
 
   - code: worker_video
     label: Video generation (stub)

@@ -414,8 +414,14 @@
 
   function resolvePostLoginRedirect() {
     const raw = route.query.redirect;
-    if (typeof raw !== 'string' || !raw.startsWith('/') || raw === '/login' || raw.startsWith('/login?')) {
-      return '/agent';
+    if (
+      typeof raw !== 'string' ||
+      !raw.startsWith('/') ||
+      raw === '/' ||
+      raw === '/login' ||
+      raw.startsWith('/login?')
+    ) {
+      return '/marketplace';
     }
     return raw;
   }

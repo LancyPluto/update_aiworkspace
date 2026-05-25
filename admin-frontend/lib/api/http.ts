@@ -23,7 +23,7 @@ export class ApiError extends Error {
 export function getToken(): string | null {
   if (typeof window === 'undefined') return null
   try {
-    return window.localStorage.getItem(TOKEN_STORAGE_KEY)
+    return window.sessionStorage.getItem(TOKEN_STORAGE_KEY)
   } catch {
     return null
   }
@@ -33,8 +33,10 @@ export function setToken(token: string | null) {
   if (typeof window === 'undefined') return
   try {
     if (token) {
-      window.localStorage.setItem(TOKEN_STORAGE_KEY, token)
+      window.sessionStorage.setItem(TOKEN_STORAGE_KEY, token)
+      window.localStorage.removeItem(TOKEN_STORAGE_KEY)
     } else {
+      window.sessionStorage.removeItem(TOKEN_STORAGE_KEY)
       window.localStorage.removeItem(TOKEN_STORAGE_KEY)
     }
   } catch {
@@ -45,7 +47,7 @@ export function setToken(token: string | null) {
 export function getStoredUser<T = unknown>(): T | null {
   if (typeof window === 'undefined') return null
   try {
-    const raw = window.localStorage.getItem(USER_STORAGE_KEY)
+    const raw = window.sessionStorage.getItem(USER_STORAGE_KEY)
     return raw ? (JSON.parse(raw) as T) : null
   } catch {
     return null
@@ -56,8 +58,10 @@ export function setStoredUser(profile: unknown | null) {
   if (typeof window === 'undefined') return
   try {
     if (profile) {
-      window.localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(profile))
+      window.sessionStorage.setItem(USER_STORAGE_KEY, JSON.stringify(profile))
+      window.localStorage.removeItem(USER_STORAGE_KEY)
     } else {
+      window.sessionStorage.removeItem(USER_STORAGE_KEY)
       window.localStorage.removeItem(USER_STORAGE_KEY)
     }
   } catch {
@@ -122,6 +126,7 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
       headers,
       body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
       signal: options.signal,
+      credentials: 'include',
     })
   } catch (err) {
     if ((err as Error).name === 'AbortError') {

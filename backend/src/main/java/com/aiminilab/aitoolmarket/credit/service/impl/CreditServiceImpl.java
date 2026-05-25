@@ -88,6 +88,50 @@ public class CreditServiceImpl implements CreditService {
 
     @Override
     @Transactional
+    public int settleCompleted(Long userId, CreditSourceType sourceType, Long sourceId, int amount) {
+        if (amount <= 0) {
+            return 0;
+        }
+        CreditAccount before = creditMapper.getOrCreateAccount(userId);
+        if (creditMapper.settle(before.getId(), amount)) {
+            insertLog(
+                    before,
+                    taskId(sourceType, sourceId),
+                    agentRunId(sourceType, sourceId),
+                    CreditLogType.DEDUCT.name(),
+                    amount,
+                    -amount,
+                    before.getBalance() - amount,
+                    before.getFrozen() - amount,
+                    "SYSTEM",
+                    null,
+                    sourceLabel(sourceType) + " success credit deduction"
+            );
+            return amount;
+        }
+
+        CreditAccount current = creditMapper.getOrCreateAccount(userId);
+        if (creditMapper.deductAvailable(current.getId(), amount)) {
+            insertLog(
+                    current,
+                    taskId(sourceType, sourceId),
+                    agentRunId(sourceType, sourceId),
+                    CreditLogType.DEDUCT.name(),
+                    amount,
+                    0,
+                    current.getBalance() - amount,
+                    current.getFrozen(),
+                    "SYSTEM",
+                    null,
+                    sourceLabel(sourceType) + " success credit deduction without frozen balance"
+            );
+            return amount;
+        }
+        return 0;
+    }
+
+    @Override
+    @Transactional
     public void release(Long userId, CreditSourceType sourceType, Long sourceId, int amount) {
         if (amount <= 0) {
             return;
@@ -158,6 +202,37 @@ public class CreditServiceImpl implements CreditService {
     }
 
     @Override
+    @Transactional
+    public CreditAccountResponse rechargeAdd(Long userId, Long rechargeOrderId, int amount, String reason) {
+        if (amount <= 0) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "recharge amount must be positive");
+        }
+        String idempotencyKey = "RECHARGE_ORDER:" + rechargeOrderId;
+        if (creditLogMapper.existsByIdempotencyKey(idempotencyKey)) {
+            return account(userId);
+        }
+        CreditAccount before = creditMapper.getOrCreateAccount(userId);
+        if (!creditMapper.rechargeAdd(before.getId(), amount)) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "credit account is unavailable");
+        }
+        insertLog(
+                before,
+                null,
+                null,
+                CreditLogType.RECHARGE.name(),
+                amount,
+                0,
+                before.getBalance() + amount,
+                before.getFrozen(),
+                "PAYMENT",
+                null,
+                normalizeReason(reason, "Recharge credits"),
+                idempotencyKey
+        );
+        return account(userId);
+    }
+
+    @Override
     public PageResponse<CreditLogResponse> logs(Long userId, String logType, Integer pageNo, Integer pageSize) {
         int normalizedPageSize = PageResponse.normalizePageSize(pageSize);
         int offset = PageResponse.offset(pageNo, pageSize);
@@ -170,6 +245,13 @@ public class CreditServiceImpl implements CreditService {
 
     private void insertLog(CreditAccount before, Long taskId, Long agentRunId, String logType, int amount, int frozenAmount,
                            int balanceAfter, int frozenAfter, String operatorType, Long operatorId, String reason) {
+        insertLog(before, taskId, agentRunId, logType, amount, frozenAmount, balanceAfter, frozenAfter, operatorType,
+                operatorId, reason, null);
+    }
+
+    private void insertLog(CreditAccount before, Long taskId, Long agentRunId, String logType, int amount, int frozenAmount,
+                           int balanceAfter, int frozenAfter, String operatorType, Long operatorId, String reason,
+                           String idempotencyKey) {
         CreditLog log = new CreditLog();
         log.setUserId(before.getUserId());
         log.setAccountId(before.getId());
@@ -182,6 +264,7 @@ public class CreditServiceImpl implements CreditService {
         log.setBalanceAfter(balanceAfter);
         log.setFrozenBefore(before.getFrozen());
         log.setFrozenAfter(frozenAfter);
+        log.setIdempotencyKey(idempotencyKey);
         log.setOperatorType(operatorType);
         log.setOperatorId(operatorId);
         log.setReason(reason);

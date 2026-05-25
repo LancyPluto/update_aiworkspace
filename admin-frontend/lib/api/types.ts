@@ -252,6 +252,9 @@ export interface ModelProviderDescriptor {
   defaultBaseUrl: string
   defaultModel: string
   billingDefault: string
+  providerProtocol?: string | null
+  vendorKind?: string | null
+  upstreamVendor?: string | null
   testStrategy: string
   workerReady: boolean
   description: string
@@ -275,7 +278,7 @@ export interface AgentModelConfig {
   outputTokenPricePer1k?: number | null
   inputTokenPricePer1m?: number | null
   outputTokenPricePer1m?: number | null
-  billingUnit?: 'TOKEN_PER_M' | 'PER_CALL' | string | null
+  billingUnit?: 'TOKEN_PER_M' | 'PER_CALL' | 'IMAGE_TOKEN' | string | null
   unitPrice?: number | null
   enabled: boolean
   isDefault?: boolean | null
@@ -336,7 +339,7 @@ export interface AgentModelConfigPayload {
   outputTokenPricePer1k?: number
   inputTokenPricePer1m?: number
   outputTokenPricePer1m?: number
-  billingUnit?: 'TOKEN_PER_M' | 'PER_CALL' | string
+  billingUnit?: 'TOKEN_PER_M' | 'PER_CALL' | 'IMAGE_TOKEN' | string
   unitPrice?: number
   enabled?: boolean
   isDefault?: boolean
@@ -350,6 +353,30 @@ export interface AgentModelConfigTestResult {
   latencyMs: number
   message: string
   sample: string
+}
+
+export interface ConfigBundle {
+  format: "ai-tool-market-config-bundle" | string
+  version: number
+  exportedAt?: string
+  exportedBy?: string | null
+  secretsRedacted?: boolean
+  settings?: Record<string, string>
+  modelConfigs?: Array<Record<string, unknown>>
+  categories?: Array<Record<string, unknown>>
+  tools?: Array<Record<string, unknown>>
+}
+
+export interface ConfigBundleImportResult {
+  settings: number
+  modelConfigs: number
+  categories: number
+  tools: number
+  fields: number
+  prompts: number
+  promptVersions: number
+  workflows: number
+  warnings: string[]
 }
 
 export interface AdminAgentRunListItem {
@@ -474,4 +501,80 @@ export interface BillingUsageLog {
   costAmount: number
   chargedCredits: number
   createdAt: string
+}
+
+// ---- Workflow types ----
+
+export interface WorkflowNodeData extends Record<string, unknown> {
+  title: string
+  subtitle: string
+  detail: string
+  kind: string
+  iconName: string
+  color?: string
+  config?: AgentModelConfig | null
+  parameters?: Record<string, unknown>
+}
+
+export interface WorkflowNode {
+  id: string
+  type: string
+  position: { x: number; y: number }
+  data: WorkflowNodeData
+  width?: number
+  height?: number
+  selected?: boolean
+}
+
+export interface WorkflowEdge {
+  id: string
+  source: string
+  target: string
+  sourceHandle?: string
+  targetHandle?: string
+  type?: string
+  markerEnd?: { type: string; color?: string }
+  style?: Record<string, unknown>
+}
+
+export interface WorkflowGroup {
+  id: string
+  title: string
+  bounding: { x: number; y: number; width: number; height: number }
+  color?: string
+  fontSize?: number
+  locked?: boolean
+}
+
+export interface WorkflowResponse {
+  id: number
+  toolId: number
+  workflowName: string
+  nodesJson: string
+  edgesJson: string
+  groupsJson: string | null
+  configJson: string | null
+  version: number
+  status: string
+  createdBy?: number
+  updatedBy?: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface WorkflowVersionItem {
+  id: number
+  version: number
+  snapshotLabel: string | null
+  createdBy: number
+  createdAt: string
+}
+
+export interface UpsertWorkflowPayload {
+  workflowName: string
+  nodesJson: string
+  edgesJson: string
+  groupsJson?: string
+  configJson?: string
+  status?: string
 }

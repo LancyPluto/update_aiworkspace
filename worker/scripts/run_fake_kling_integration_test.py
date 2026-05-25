@@ -96,6 +96,9 @@ class FakeVideoPersister:
     def __init__(self) -> None:
         self.calls: list[dict] = []
 
+    def find_existing_task_video(self, *, task_id: int) -> dict[str, str] | None:
+        return None
+
     def persist_video_url(self, *, task_id: int, source_url: str) -> dict[str, str]:
         self.calls.append({"taskId": task_id, "sourceUrl": source_url})
         return {
@@ -167,6 +170,7 @@ def test_kling_image_handler() -> None:
     assert client.image_request is not None
     assert client.image_request["model"] == "kling-v2-6"
     assert client.image_request["batch_size"] == 2
+    assert client.image_request["image"] == "https://example.com/start.png"
     assert persister.calls[0]["urls"] == [
         "https://example.com/kling-image-1.png",
         "https://example.com/kling-image-2.png",
@@ -226,9 +230,70 @@ def test_kling_client_uses_image2video_result_path() -> None:
     ]
 
 
+def test_kling_client_polls_async_image_generation() -> None:
+    class RecordingKlingClient(KlingVideoClient):
+        def __init__(self) -> None:
+            super().__init__(access_key="fake-ak", secret_key="fake-sk", poll_interval_seconds=0.01, timeout_seconds=1)
+            self.requests: list[tuple[str, str, dict | None]] = []
+
+        def _request(self, method: str, path: str, payload: dict | None) -> dict:
+            self.requests.append((method, path, payload))
+            if method == "POST":
+                return {"code": 0, "data": {"task_id": "image-task-123", "task_status": "submitted"}}
+            return {
+                "code": 0,
+                "data": {
+                    "task_id": "image-task-123",
+                    "task_status": "succeed",
+                    "task_result": {
+                        "images": [
+                            {"url": "https://example.com/kling-result-1.png"},
+                            {"url": "https://example.com/kling-result-2.webp"},
+                        ]
+                    },
+                },
+            }
+
+    client = RecordingKlingClient()
+    expected_image = base64.b64encode(b"reference-image").decode("ascii")
+    with tempfile.TemporaryDirectory() as tmp:
+        reference = Path(tmp) / "reference.png"
+        reference.write_bytes(b"reference-image")
+        result = client.generate_images(
+            prompt="画一只猫",
+            model="kling-v3",
+            image_size="1280x720",
+            batch_size=2,
+            image=str(reference),
+            image_reference="subject",
+            image_fidelity=0.75,
+            human_fidelity=1,
+        )
+    assert result == [
+        "https://example.com/kling-result-1.png",
+        "https://example.com/kling-result-2.webp",
+    ]
+    assert client.requests[0] == (
+        "POST",
+        "/v1/images/generations",
+        {
+            "model_name": "kling-v3",
+            "prompt": "画一只猫",
+            "n": 2,
+            "aspect_ratio": "16:9",
+            "image": expected_image,
+            "image_reference": "subject",
+            "image_fidelity": 0.75,
+            "human_fidelity": 1,
+        },
+    )
+    assert client.requests[1] == ("GET", "/v1/images/generations/image-task-123", None)
+
+
 if __name__ == "__main__":
     test_kling_video_handler()
     test_kling_image_handler()
     test_kling_client_encodes_input_images()
     test_kling_client_uses_image2video_result_path()
+    test_kling_client_polls_async_image_generation()
     print("FAKE_KLING_INTEGRATION_TEST_PASSED")

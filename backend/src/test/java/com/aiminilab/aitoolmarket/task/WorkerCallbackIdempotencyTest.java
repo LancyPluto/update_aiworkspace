@@ -70,12 +70,12 @@ class WorkerCallbackIdempotencyTest {
         markFailed(taskId, "first timeout")
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("FAILED"))
-                .andExpect(jsonPath("$.data.progressMessage").value("first timeout"));
+                .andExpect(jsonPath("$.data.progressMessage").value("任务失败：MODEL_CALL_FAILED"));
 
         markFailed(taskId, "duplicate timeout")
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("FAILED"))
-                .andExpect(jsonPath("$.data.progressMessage").value("first timeout"));
+                .andExpect(jsonPath("$.data.progressMessage").value("任务失败：MODEL_CALL_FAILED"));
 
         org.assertj.core.api.Assertions.assertThat(countCreditLogs(taskId, "RELEASE")).isEqualTo(1);
         org.assertj.core.api.Assertions.assertThat(countCreditLogs(taskId, "DEDUCT")).isZero();

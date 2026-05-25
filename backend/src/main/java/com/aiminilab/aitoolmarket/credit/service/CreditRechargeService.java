@@ -1,0 +1,17 @@
+package com.aiminilab.aitoolmarket.credit.service;
+
+import com.aiminilab.aitoolmarket.credit.dto.CreateRechargeOrderRequest;
+import com.aiminilab.aitoolmarket.credit.dto.RechargeOrderResponse;
+import com.aiminilab.aitoolmarket.credit.dto.RechargePackageResponse;
+
+import java.util.List;
+
+public interface CreditRechargeService {
+    List<RechargePackageResponse> packages();
+
+    RechargeOrderResponse createOrder(Long userId, CreateRechargeOrderRequest request);
+
+    RechargeOrderResponse getOrder(Long userId, Long orderId);
+
+    RechargeOrderResponse mockPaySuccess(Long userId, Long orderId);
+}

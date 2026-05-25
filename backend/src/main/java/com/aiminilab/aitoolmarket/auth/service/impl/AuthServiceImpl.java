@@ -17,6 +17,7 @@ import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.user.dto.UserProfileResponse;
 import com.aiminilab.aitoolmarket.user.entity.User;
 import com.aiminilab.aitoolmarket.user.mapper.UserMapper;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
@@ -66,7 +67,7 @@ public class AuthServiceImpl implements AuthService {
         user.setNickname(resolveNickname(request.nickname(), loginName));
         user.setUserType(UserType.USER.name());
         user.setStatus(UserStatus.ACTIVE.name());
-        Long userId = userMapper.insertAndReturnId(user);
+        Long userId = insertUser(user);
         user.setId(userId);
         return buildLoginResponse(user);
     }
@@ -120,7 +121,7 @@ public class AuthServiceImpl implements AuthService {
         user.setNickname(resolveNickname(request.nickname(), phone));
         user.setUserType(UserType.USER.name());
         user.setStatus(UserStatus.ACTIVE.name());
-        Long userId = userMapper.insertAndReturnId(user);
+        Long userId = insertUser(user);
         user.setId(userId);
         return buildLoginResponse(user);
     }
@@ -147,6 +148,14 @@ public class AuthServiceImpl implements AuthService {
     private AuthenticatedSession buildLoginResponse(User user) {
         String token = jwtTokenProvider.createToken(new AuthUser(user.getId(), user.getUsername(), user.getUserType()));
         return new AuthenticatedSession(token, new LoginResponse(token, UserProfileResponse.from(user)));
+    }
+
+    private Long insertUser(User user) {
+        try {
+            return userMapper.insertAndReturnId(user);
+        } catch (DuplicateKeyException exception) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "Account already exists");
+        }
     }
 
     private String resolveNickname(String nickname, String fallback) {

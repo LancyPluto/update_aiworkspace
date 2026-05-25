@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
+import Link from "next/link"
 import { AdminLayout } from "@/components/admin/admin-layout"
 import { AdminHeader } from "@/components/admin/header"
 import { Badge } from "@/components/ui/badge"
@@ -33,18 +34,23 @@ import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import {
   Copy,
+  Download,
   FileText,
+  KeyRound,
   MessageSquare,
   MoreHorizontal,
   Pencil,
   Plus,
   Search,
+  Shield,
   ShoppingBag,
   Sparkles,
   Store,
   Trash2,
+  Upload,
   UploadCloud,
   Video,
+  Workflow,
   type LucideIcon,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -73,6 +79,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { fetchAgentModelConfigs } from "@/lib/api/agent-model"
 import { fetchModelProviders } from "@/lib/api/model-providers"
 import { ApiError, getBaseUrl } from "@/lib/api/http"
+import { downloadConfigBundle, exportConfigBundle, importConfigBundle, readConfigBundleFile } from "@/lib/api/config-bundles"
 import type { AgentModelConfig, ModelProviderDescriptor, ToolCategory, ToolField, ToolFieldPayload, ToolSummary } from "@/lib/api/types"
 
 interface ToolRow {
@@ -90,6 +97,8 @@ interface ToolRow {
   coverUrl: string | null
   primaryColor: string
   welcomeMessage: string
+  mediaDisplayMode: "icon" | "effect"
+  modelIconUrl: string
   icon: LucideIcon
   credits: number
   status: boolean
@@ -112,6 +121,8 @@ interface ToolForm {
   coverUrl: string
   primaryColor: string
   welcomeMessage: string
+  mediaDisplayMode: "icon" | "effect"
+  modelIconUrl: string
   estimatedCreditCost: string
   modelConfigId: string
   templateCode: string
@@ -129,6 +140,8 @@ const initialForm: ToolForm = {
   coverUrl: "",
   primaryColor: "#3b82f6",
   welcomeMessage: "",
+  mediaDisplayMode: "icon",
+  modelIconUrl: "",
   estimatedCreditCost: "5",
   modelConfigId: "",
   templateCode: "text_generation_default",
@@ -204,6 +217,8 @@ const fallbackProviderCapabilities: Record<string, string[]> = {
   volcengine_images: ["IMAGE_GENERATION"],
   minimax_speech: ["TEXT_TO_SPEECH"],
   siliconflow_speech: ["TEXT_TO_SPEECH"],
+  siliconflow_asr: ["SPEECH_TO_TEXT"],
+  seedance: ["VIDEO_GENERATION", "DIGITAL_HUMAN"],
   worker_video: ["VIDEO_GENERATION"],
 }
 
@@ -256,21 +271,26 @@ const FRONTEND_STYLE_PATTERN = /<!-- ai-tool-ui:(.*?) -->/s
 interface FrontendStyleConfig {
   primaryColor: string
   welcomeMessage: string
+  mediaDisplayMode: "icon" | "effect"
+  modelIconUrl: string
 }
 
 function extractFrontendStyle(configNote?: string | null): { note: string; style: FrontendStyleConfig } {
   const raw = configNote || ""
   const match = raw.match(FRONTEND_STYLE_PATTERN)
-  const fallback = { primaryColor: "#3b82f6", welcomeMessage: "" }
+  const fallback: FrontendStyleConfig = { primaryColor: "#3b82f6", welcomeMessage: "", mediaDisplayMode: "icon", modelIconUrl: "" }
   if (!match) return { note: raw.trim(), style: fallback }
 
   try {
     const parsed = JSON.parse(match[1]) as Partial<FrontendStyleConfig>
+    const mediaDisplayMode = parsed.mediaDisplayMode === "effect" ? "effect" : "icon"
     return {
       note: raw.replace(FRONTEND_STYLE_PATTERN, "").trim(),
       style: {
         primaryColor: typeof parsed.primaryColor === "string" && parsed.primaryColor ? parsed.primaryColor : fallback.primaryColor,
         welcomeMessage: typeof parsed.welcomeMessage === "string" ? parsed.welcomeMessage : fallback.welcomeMessage,
+        mediaDisplayMode,
+        modelIconUrl: typeof parsed.modelIconUrl === "string" ? parsed.modelIconUrl : fallback.modelIconUrl,
       },
     }
   } catch {
@@ -283,6 +303,8 @@ function serializeConfigNote(note: string, style: FrontendStyleConfig): string {
   const styleJson = JSON.stringify({
     primaryColor: style.primaryColor || "#3b82f6",
     welcomeMessage: style.welcomeMessage || "",
+    mediaDisplayMode: style.mediaDisplayMode === "effect" ? "effect" : "icon",
+    modelIconUrl: style.modelIconUrl || "",
   })
   return [cleanNote, `${FRONTEND_STYLE_MARKER}${styleJson} -->`].filter(Boolean).join("\n\n")
 }
@@ -451,8 +473,8 @@ function mapTool(tool: ToolSummary): ToolRow {
     rawId: tool.id,
     toolCode: tool.toolCode,
     name: tool.toolName,
-    description: tool.description || "No description",
-    category: tool.categoryName || "Uncategorized",
+    description: tool.description || "暂无描述",
+    category: tool.categoryName || "未分类",
     categoryId: tool.categoryId ?? null,
     toolType: tool.toolType || "TEXT_GENERATION",
     inputModality: tool.inputModality || "TEXT",
@@ -461,6 +483,8 @@ function mapTool(tool: ToolSummary): ToolRow {
     coverUrl: tool.coverUrl || null,
     primaryColor: style.primaryColor,
     welcomeMessage: style.welcomeMessage,
+    mediaDisplayMode: style.mediaDisplayMode,
+    modelIconUrl: style.modelIconUrl,
     icon: pickIcon(tool.categoryName),
     credits: tool.estimatedCreditCost ?? 0,
     status: (tool.status || "").toUpperCase() === "ONLINE",
@@ -474,6 +498,7 @@ function mapTool(tool: ToolSummary): ToolRow {
 
 export default function ToolsPage() {
   const [searchQuery, setSearchQuery] = useState("")
+  const [selectedOutputModality, setSelectedOutputModality] = useState<string | null>(null)
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [editingTool, setEditingTool] = useState<ToolRow | null>(null)
   const [toolList, setToolList] = useState<ToolRow[]>([])
@@ -482,6 +507,9 @@ export default function ToolsPage() {
   const [providerCapabilities, setProviderCapabilities] = useState<Record<string, string[]>>(fallbackProviderCapabilities)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+  const [bundleBusy, setBundleBusy] = useState(false)
+  const [exportDialogOpen, setExportDialogOpen] = useState(false)
   const [togglingId, setTogglingId] = useState<number | null>(null)
   const [deletingId, setDeletingId] = useState<number | null>(null)
   const [submitting, setSubmitting] = useState(false)
@@ -523,9 +551,42 @@ export default function ToolsPage() {
       const templates = await fetchToolTemplates().catch(() => [] as ToolTemplateSummary[])
       setToolTemplates(templates)
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed to load tools")
+      setError(err instanceof ApiError ? err.message : "加载工具失败")
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function handleExportBundle(includeSecrets: boolean) {
+    setBundleBusy(true)
+    setError(null)
+    setNotice(null)
+    try {
+      const bundle = await exportConfigBundle(includeSecrets)
+      downloadConfigBundle(bundle)
+      setExportDialogOpen(false)
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "导出配置包失败")
+    } finally {
+      setBundleBusy(false)
+    }
+  }
+
+  async function handleImportBundle(file: File | undefined) {
+    if (!file) return
+    setBundleBusy(true)
+    setError(null)
+    setNotice(null)
+    try {
+      const bundle = await readConfigBundleFile(file)
+      const result = await importConfigBundle(bundle)
+      await loadAll()
+      const warningText = result.warnings?.length ? `；提示：${result.warnings.join("；")}` : ""
+      setNotice(`导入完成：工具 ${result.tools}、字段 ${result.fields}、提示词版本 ${result.promptVersions}、工作流 ${result.workflows}${warningText}`)
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "导入配置包失败，请确认 JSON 格式正确")
+    } finally {
+      setBundleBusy(false)
     }
   }
 
@@ -535,13 +596,34 @@ export default function ToolsPage() {
 
   const filteredTools = useMemo(() => {
     const keyword = searchQuery.trim().toLowerCase()
-    if (!keyword) return toolList
-    return toolList.filter((tool) =>
-      [tool.name, tool.description, tool.category].some((value) =>
-        value.toLowerCase().includes(keyword),
-      ),
-    )
-  }, [toolList, searchQuery])
+    return toolList.filter((tool) => {
+      const matchesKeyword =
+        !keyword ||
+        [tool.name, tool.description, tool.category, tool.toolCode].some((value) =>
+          value.toLowerCase().includes(keyword),
+        )
+      const matchesOutput =
+        !selectedOutputModality ||
+        (tool.outputModality || "").trim().toUpperCase() === selectedOutputModality
+      return matchesKeyword && matchesOutput
+    })
+  }, [toolList, searchQuery, selectedOutputModality])
+
+  const outputModalityFilters = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const tool of toolList) {
+      const key = (tool.outputModality || "TEXT").trim().toUpperCase()
+      counts.set(key, (counts.get(key) || 0) + 1)
+    }
+    const order = ["TEXT", "IMAGE", "AUDIO", "VIDEO", "JSON", "FILE", "MULTIMODAL"]
+    return [...counts.entries()]
+      .sort(([a], [b]) => {
+        const ia = order.indexOf(a)
+        const ib = order.indexOf(b)
+        return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib)
+      })
+      .map(([key, count]) => ({ key, label: optionLabel(modalityOptions, key), count }))
+  }, [toolList])
 
   const requiredModelCapability = useMemo(() => {
     const code = editingTool?.toolCode ?? form.toolCode ?? ""
@@ -599,7 +681,7 @@ export default function ToolsPage() {
         : await publishTool(target.rawId)
       setToolList((prev) => prev.map((tool) => (tool.id === id ? mapTool(updated) : tool)))
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : "Failed to update tool status"
+      const message = err instanceof ApiError ? err.message : "更新工具状态失败"
       if (typeof window !== "undefined") window.alert(message)
     } finally {
       setTogglingId(null)
@@ -681,7 +763,7 @@ export default function ToolsPage() {
     setForm({
       toolCode: tool.toolCode,
       toolName: tool.name,
-      description: tool.description === "No description" ? "" : tool.description,
+      description: tool.description === "暂无描述" ? "" : tool.description,
       categoryId: tool.categoryId ? String(tool.categoryId) : "",
       toolType: tool.toolType,
       inputModality: tool.inputModality,
@@ -690,6 +772,8 @@ export default function ToolsPage() {
       coverUrl: tool.coverUrl || "",
       primaryColor: tool.primaryColor || "#3b82f6",
       welcomeMessage: tool.welcomeMessage || "",
+      mediaDisplayMode: tool.mediaDisplayMode || "icon",
+      modelIconUrl: tool.modelIconUrl || "",
       estimatedCreditCost: String(tool.credits),
       modelConfigId: tool.modelConfigId ? String(tool.modelConfigId) : "",
       templateCode: "",
@@ -732,6 +816,8 @@ export default function ToolsPage() {
         configNote: serializeConfigNote(form.configNote, {
           primaryColor: form.primaryColor,
           welcomeMessage: form.welcomeMessage,
+          mediaDisplayMode: form.mediaDisplayMode,
+          modelIconUrl: form.modelIconUrl,
         }),
         coverUrl: form.coverUrl.trim() || undefined,
         estimatedCreditCost: Math.floor(credits),
@@ -799,7 +885,7 @@ export default function ToolsPage() {
       const fields = await fetchToolFields(tool.rawId)
       applyLoadedFields(fields)
     } catch (err) {
-      setFieldError(err instanceof ApiError ? err.message : "Failed to load fields")
+      setFieldError(err instanceof ApiError ? err.message : "加载字段配置失败")
       setEditableFields([])
       setFieldJson("[]")
     } finally {
@@ -866,7 +952,7 @@ export default function ToolsPage() {
       applyLoadedFields(saved)
       setFieldDialogOpen(false)
     } catch (err) {
-      setFieldError(err instanceof ApiError ? err.message : "Failed to save fields")
+      setFieldError(err instanceof ApiError ? err.message : "保存字段配置失败")
     } finally {
       setFieldSaving(false)
     }
@@ -874,25 +960,77 @@ export default function ToolsPage() {
 
   const headerDescription = error
     ? `操作失败：${error}`
+    : notice
+      ? notice
     : loading
       ? "正在加载工具列表..."
-      : "管理 AI 工具、字段配置和发布状态。"
+      : "管理 AI 工具工作流入口和画布配置。"
 
   return (
     <AdminLayout>
-      <AdminHeader title="AI Tool Management" description={headerDescription} />
+      <AdminHeader title="大模型管理" description={headerDescription} />
 
       <div className="space-y-6 p-6">
         <div className="flex items-center justify-between gap-4">
           <div className="relative max-w-md flex-1">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
-              placeholder="Search tools..."
+              placeholder="搜索工具名称、分类、描述..."
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
               className="pl-9 bg-secondary border-0"
             />
           </div>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" className="gap-2" onClick={() => setExportDialogOpen(true)} disabled={bundleBusy || loading}>
+              <Download className="h-4 w-4" />
+              导出
+            </Button>
+            <Button variant="outline" className="relative gap-2" disabled={bundleBusy || loading}>
+              <Upload className={bundleBusy ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
+              导入
+              <input
+                type="file"
+                accept="application/json,.json"
+                className="absolute inset-0 cursor-pointer opacity-0"
+                disabled={bundleBusy || loading}
+                onChange={(event) => {
+                  handleImportBundle(event.target.files?.[0])
+                  event.currentTarget.value = ""
+                }}
+              />
+            </Button>
+          <Button className="gap-2" onClick={openCreateDialog}>
+            <Plus className="h-4 w-4" />
+            新建工具
+          </Button>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant={selectedOutputModality === null ? "default" : "outline"}
+            onClick={() => setSelectedOutputModality(null)}
+          >
+            全部
+            <span className="ml-1 opacity-70">{toolList.length}</span>
+          </Button>
+          {outputModalityFilters.map((item) => (
+            <Button
+              key={item.key}
+              type="button"
+              size="sm"
+              variant={selectedOutputModality === item.key ? "default" : "outline"}
+              onClick={() => setSelectedOutputModality(item.key)}
+            >
+              {item.label}
+              <span className="ml-1 opacity-70">{item.count}</span>
+            </Button>
+          ))}
+        </div>
+
           <Dialog
             open={isAddDialogOpen}
             onOpenChange={(open) => {
@@ -906,12 +1044,6 @@ export default function ToolsPage() {
               }
             }}
           >
-            <DialogTrigger asChild>
-              <Button className="gap-2" onClick={openCreateDialog}>
-                <Plus className="h-4 w-4" />
-                新建工具
-              </Button>
-            </DialogTrigger>
             <DialogContent className="max-h-[92vh] overflow-y-auto bg-card border-border max-w-lg">
               <DialogHeader>
                 <DialogTitle>{editingTool ? "编辑 AI 工具" : "新建 AI 工具"}</DialogTitle>
@@ -1011,6 +1143,21 @@ export default function ToolsPage() {
                     </p>
                   </div>
                   <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="space-y-2 sm:col-span-2">
+                      <Label>模型卡片展示</Label>
+                      <Select value={form.mediaDisplayMode} onValueChange={(value) => updateForm("mediaDisplayMode", value as "icon" | "effect")}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="选择模型卡片展示方式" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="icon">模型图标</SelectItem>
+                          <SelectItem value="effect">模型效果</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground">
+                        模型图标会在 C 端展示圆形图标；模型效果会使用展示素材作为宽幅图片或视频预览。
+                      </p>
+                    </div>
                     <div className="space-y-2">
                       <Label>主题色</Label>
                       <div className="flex items-center gap-2">
@@ -1036,8 +1183,32 @@ export default function ToolsPage() {
                         placeholder="首次进入聊天页时展示"
                       />
                     </div>
+                    <div className="space-y-2 sm:col-span-2">
+                      <Label>模型图标 URL</Label>
+                      <Input
+                        value={form.modelIconUrl}
+                        onChange={(event) => updateForm("modelIconUrl", event.target.value)}
+                        placeholder="用于聊天页左上角和欢迎态；不填则按绑定模型自动生成默认图标"
+                      />
+                    </div>
                   </div>
                   <div className="flex items-center gap-3 rounded-lg border border-border bg-card p-3">
+                    {form.modelIconUrl.trim() ? (
+                      <div
+                        className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full ring-1 ring-border"
+                        style={{ backgroundColor: `${form.primaryColor || "#3b82f6"}18` }}
+                      >
+                        <img src={normalizeToolMediaUrl(form.modelIconUrl)} alt="model icon preview" className="h-full w-full object-cover" />
+                      </div>
+                    ) : form.mediaDisplayMode === "effect" && form.coverUrl.trim() ? (
+                      <div className="h-14 w-24 shrink-0 overflow-hidden rounded-lg bg-muted ring-1 ring-border">
+                        {isVideoPreviewUrl(form.coverUrl) ? (
+                          <video src={normalizeToolMediaUrl(form.coverUrl)} className="h-full w-full object-cover" muted loop playsInline preload="metadata" />
+                        ) : (
+                          <img src={normalizeToolMediaUrl(form.coverUrl)} alt="effect preview" className="h-full w-full object-cover" />
+                        )}
+                      </div>
+                    ) : (
                     <div
                       className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full ring-1 ring-border"
                       style={{ backgroundColor: `${form.primaryColor || "#3b82f6"}18` }}
@@ -1048,6 +1219,7 @@ export default function ToolsPage() {
                         <Sparkles className="h-5 w-5 text-primary" />
                       )}
                     </div>
+                    )}
                     <div className="min-w-0">
                       <p className="truncate text-sm font-medium">{form.toolName || "工具名称"}</p>
                       <p className="line-clamp-1 text-xs text-muted-foreground">
@@ -1214,15 +1386,15 @@ export default function ToolsPage() {
               </DialogFooter>
             </DialogContent>
           </Dialog>
-        </div>
 
+        {false ? (
         <div className="rounded-2xl border border-border bg-card p-5">
           <div className="mb-4 flex items-center justify-between gap-4">
             <div>
               <h2 className="text-base font-semibold text-card-foreground">已配置模型能力</h2>
               <p className="text-sm text-muted-foreground">确认当前后台可绑定到不同模态工具的模型配置。</p>
             </div>
-            <Badge variant="secondary">{configuredModelRows.length} models</Badge>
+            <Badge variant="secondary">{configuredModelRows.length} 个模型</Badge>
           </div>
           {configuredModelRows.length === 0 ? (
             <p className="text-sm text-muted-foreground">暂无可用模型配置。</p>
@@ -1235,7 +1407,7 @@ export default function ToolsPage() {
                       <p className="truncate font-medium text-card-foreground">{config.displayName || config.modelName}</p>
                       <p className="truncate text-xs text-muted-foreground">{config.provider} · {config.modelName}</p>
                     </div>
-                    {config.isDefault ? <Badge variant="outline">Default</Badge> : null}
+                    {config.isDefault ? <Badge variant="outline">默认</Badge> : null}
                   </div>
                   <div className="mt-3 flex flex-wrap gap-2">
                     {capabilities.length > 0 ? capabilities.map((capability) => (
@@ -1251,6 +1423,7 @@ export default function ToolsPage() {
             </div>
           )}
         </div>
+        ) : null}
 
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {filteredTools.map((tool) => (
@@ -1277,17 +1450,22 @@ export default function ToolsPage() {
                   )}
                 </div>
               ) : null}
-              <div className="flex items-start justify-between">
-                <div className="flex items-center gap-3">
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex min-w-0 items-center gap-3">
                   <div
                     className="flex h-10 w-10 items-center justify-center rounded-xl"
                     style={{ backgroundColor: `${tool.primaryColor || "#3b82f6"}18` }}
                   >
                     <tool.icon className="h-5 w-5" style={{ color: tool.primaryColor || "hsl(var(--primary))" }} />
                   </div>
-                  <div>
-                    <h3 className="font-semibold text-card-foreground">{tool.name}</h3>
-                    <Badge variant="secondary" className="mt-1 text-xs font-normal">{tool.category}</Badge>
+                  <div className="min-w-0">
+                    <h3 className="truncate font-semibold text-card-foreground">{tool.name}</h3>
+                    <div className="mt-1 flex flex-wrap gap-1.5">
+                      <Badge variant="secondary" className="text-xs font-normal">{tool.category}</Badge>
+                      <Badge variant={tool.status ? "outline" : "destructive"} className="text-xs font-normal">
+                        {tool.status ? "已上线" : "已下线"}
+                      </Badge>
+                    </div>
                   </div>
                 </div>
                 <DropdownMenu>
@@ -1299,6 +1477,11 @@ export default function ToolsPage() {
                   <DropdownMenuContent align="end" className="bg-card border-border">
                     <DropdownMenuItem className="gap-2" onClick={() => openEditDialog(tool)}>
                       <Pencil className="h-4 w-4" /> 编辑
+                    </DropdownMenuItem>
+                    <DropdownMenuItem asChild className="gap-2">
+                      <Link href={`/tools/${tool.rawId}/workflow`}>
+                        <Workflow className="h-4 w-4" /> 工作流画布
+                      </Link>
                     </DropdownMenuItem>
                     <DropdownMenuItem className="gap-2" onClick={() => openFieldDialog(tool)}>
                       <FileText className="h-4 w-4" /> 字段配置
@@ -1319,15 +1502,68 @@ export default function ToolsPage() {
 
               <p className="mt-3 line-clamp-2 text-sm text-muted-foreground">{tool.description}</p>
 
+              <div className="mt-4 grid gap-2 border-t border-border pt-4 text-xs">
+                <div className="flex items-center justify-between gap-3 rounded-lg bg-muted/40 px-3 py-2">
+                  <span className="text-muted-foreground">工作流类型</span>
+                  <span className="truncate font-medium text-card-foreground">{optionLabel(toolTypeOptions, tool.toolType)}</span>
+                </div>
+                <div className="flex items-center justify-between gap-3 rounded-lg bg-muted/40 px-3 py-2">
+                  <span className="text-muted-foreground">输入 / 输出</span>
+                  <span className="truncate font-medium text-card-foreground">
+                    {optionLabel(modalityOptions, tool.inputModality)} {"->"} {optionLabel(modalityOptions, tool.outputModality)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-3 rounded-lg bg-muted/40 px-3 py-2">
+                  <span className="text-muted-foreground">执行器</span>
+                  <span className="truncate font-mono text-card-foreground">{tool.executionHandler || "MODEL"}</span>
+                </div>
+                <div className="flex items-center justify-between gap-3 rounded-lg bg-muted/40 px-3 py-2">
+                  <span className="text-muted-foreground">绑定模型</span>
+                  <span className="max-w-[180px] truncate text-right font-medium text-card-foreground">
+                    {tool.modelConfigName || tool.modelName || "默认模型配置"}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-3 rounded-lg bg-muted/40 px-3 py-2">
+                  <span className="text-muted-foreground">消耗算力</span>
+                  <span className="flex items-center gap-1 font-medium text-card-foreground">
+                    <Sparkles className="h-3.5 w-3.5 text-primary" />
+                    {tool.credits}
+                  </span>
+                </div>
+              </div>
+              <Button asChild variant="outline" size="sm" className="mt-4 w-full gap-2">
+                <Link href={`/tools/${tool.rawId}/workflow`}>
+                  <Workflow className="h-4 w-4" />
+                  编辑工作流
+                </Link>
+              </Button>
+
+              <div className="mt-4 flex items-center justify-between border-t border-border pt-4">
+                <div className="text-sm">
+                  <p className="font-medium text-card-foreground">
+                    {tool.status ? "已上线" : "已下线"}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {tool.status ? "用户端可见并可使用" : "用户端暂不可见"}
+                  </p>
+                </div>
+                <Switch
+                  checked={tool.status}
+                  disabled={togglingId === tool.rawId}
+                  onCheckedChange={() => toggleToolStatus(tool.id)}
+                />
+              </div>
+
+              {false ? (<>
               <div className="mt-4 flex items-center justify-between border-t border-border pt-4">
                 <div className="flex items-center gap-4 text-sm">
                   <div className="flex items-center gap-1 text-muted-foreground">
                     <Sparkles className="h-4 w-4" />
-                    <span>{tool.credits} credits</span>
+                    <span>{tool.credits} 算力</span>
                   </div>
                   <div className="text-muted-foreground">{tool.rawStatus}</div>
                 </div>
-                <Switch checked={tool.status} disabled={togglingId === tool.rawId} onCheckedChange={() => toggleToolStatus(tool.id)} />
+                {false ? <Switch checked={tool.status} disabled={togglingId === tool.rawId} onCheckedChange={() => toggleToolStatus(tool.id)} /> : null}
               </div>
               <div className="mt-3 flex flex-wrap gap-2 text-xs">
                 <Badge variant="outline">{optionLabel(toolTypeOptions, tool.toolType)}</Badge>
@@ -1336,8 +1572,15 @@ export default function ToolsPage() {
                 </Badge>
               </div>
               <div className="mt-3 rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
-                Model: {tool.modelConfigName || tool.modelName || "Default model config"}
+                模型：{tool.modelConfigName || tool.modelName || "默认模型配置"}
               </div>
+              <Button asChild variant="outline" size="sm" className="mt-4 w-full gap-2">
+                <Link href={`/tools/${tool.rawId}/workflow`}>
+                  <Workflow className="h-4 w-4" />
+                  打开工作流画布
+                </Link>
+              </Button>
+              </>) : null}
               {tool.welcomeMessage ? (
                 <div className="mt-2 rounded-lg bg-secondary/40 px-3 py-2 text-xs text-muted-foreground">
                   欢迎语：{tool.welcomeMessage}
@@ -1347,6 +1590,51 @@ export default function ToolsPage() {
           ))}
         </div>
       </div>
+
+      <Dialog open={exportDialogOpen} onOpenChange={setExportDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>导出配置包</DialogTitle>
+            <DialogDescription>
+              请选择是否把模型 API Key 和额外鉴权信息一起写入 JSON。含密钥文件只适合可信成员之间临时流转。
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <button
+              type="button"
+              className="rounded-lg border border-border bg-card p-4 text-left transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={bundleBusy}
+              onClick={() => handleExportBundle(false)}
+            >
+              <div className="flex items-center gap-2 font-medium">
+                <Shield className="h-4 w-4 text-primary" />
+                不含密钥
+              </div>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">适合提交到分支、分享给成员或作为默认配置模板。</p>
+            </button>
+
+            <button
+              type="button"
+              className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 text-left transition-colors hover:bg-amber-500/15 disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={bundleBusy}
+              onClick={() => handleExportBundle(true)}
+            >
+              <div className="flex items-center gap-2 font-medium">
+                <KeyRound className="h-4 w-4 text-amber-500" />
+                包含密钥
+              </div>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">仅用于可信开发环境快速同步，导出后请不要提交仓库。</p>
+            </button>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setExportDialogOpen(false)} disabled={bundleBusy}>
+              取消
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={fieldDialogOpen} onOpenChange={setFieldDialogOpen}>
         <DialogContent className="!w-[1180px] !max-w-[calc(100vw-2rem)] max-h-[90vh] overflow-y-auto bg-card border-border">

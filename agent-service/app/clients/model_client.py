@@ -1,6 +1,7 @@
 from collections.abc import AsyncIterator
 from typing import Any
 
+import httpx
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.utils.function_calling import convert_to_openai_tool
 
@@ -34,8 +35,10 @@ class ModelClient:
         return self._chat_model
 
     async def chat(self, messages: list[ChatMessage], tools: list[dict[str, Any]] | None = None) -> str:
-        kwargs = {}
         safe_tools = _sanitize_tools(tools)
+        if self._should_use_direct_openai_compatible():
+            return await self._chat_openai_compatible_direct(messages, tools=safe_tools)
+        kwargs = {}
         if safe_tools:
             kwargs["tools"] = safe_tools
         try:
@@ -67,7 +70,39 @@ class ModelClient:
     def _should_stream_locally(self) -> bool:
         provider = self.settings.model_provider.strip().lower()
         base_url = self.settings.model_api_base_url.strip().lower()
-        return provider == "openai_compatible" and "siliconflow.cn" in base_url
+        return provider == "openai_compatible" and (
+            "siliconflow.cn" in base_url or self._should_use_direct_openai_compatible()
+        )
+
+    def _should_use_direct_openai_compatible(self) -> bool:
+        provider = self.settings.model_provider.strip().lower()
+        base_url = self.settings.model_api_base_url.strip().lower()
+        return provider == "openai_compatible" and "api-inference.modelscope.cn" in base_url
+
+    async def _chat_openai_compatible_direct(
+        self,
+        messages: list[ChatMessage],
+        tools: list[dict[str, Any]] | None = None,
+    ) -> str:
+        base_url = self.settings.model_api_base_url.rstrip("/")
+        payload: dict[str, Any] = {
+            "model": self.settings.model_name,
+            "messages": [_to_openai_message(message) for message in messages],
+            "stream": False,
+        }
+        if tools:
+            payload["tools"] = tools
+        headers = {"Authorization": f"Bearer {self.settings.model_api_key}"}
+        try:
+            async with httpx.AsyncClient(timeout=self.settings.model_timeout_seconds) as client:
+                response = await client.post(f"{base_url}/chat/completions", headers=headers, json=payload)
+                response.raise_for_status()
+                data = response.json()
+        except httpx.HTTPStatusError as exception:
+            raise ModelClientError(f"model request failed: {_format_http_error(exception.response)}") from exception
+        except Exception as exception:
+            raise ModelClientError(f"model request failed: {exception}") from exception
+        return _openai_compatible_content(data)
 
 
 def _to_langchain_message(message: ChatMessage):
@@ -109,6 +144,40 @@ def _sanitize_tools(tools: list[dict[str, Any]] | None) -> list[dict[str, Any]] 
             continue
         valid.append(tool)
     return valid if valid else None
+
+
+def _to_openai_message(message: ChatMessage) -> dict[str, str]:
+    role = message.role.lower()
+    if role == "ai":
+        role = "assistant"
+    if role not in {"system", "assistant", "user", "tool"}:
+        role = "user"
+    return {"role": role, "content": message.content}
+
+
+def _openai_compatible_content(data: Any) -> str:
+    if not isinstance(data, dict):
+        raise ModelClientError("model returned non-object chat completion response")
+    choices = data.get("choices")
+    if not isinstance(choices, list) or not choices:
+        error = data.get("error")
+        if isinstance(error, dict) and error.get("message"):
+            raise ModelClientError(f"model returned error: {error.get('message')}")
+        raise ModelClientError("model returned empty chat completion choices")
+    first = choices[0]
+    if not isinstance(first, dict):
+        raise ModelClientError("model returned invalid chat completion choice")
+    message = first.get("message")
+    if isinstance(message, dict):
+        content = message.get("content")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            return _flatten_content(content)
+    text = first.get("text")
+    if isinstance(text, str):
+        return text
+    raise ModelClientError("model returned invalid chat completion message")
 
 
 def _message_content(message, *, allow_empty: bool = False) -> str:
@@ -166,3 +235,16 @@ def _format_exception(exception: Exception) -> str:
     if message:
         return message
     return exception.__class__.__name__
+
+
+def _format_http_error(response: httpx.Response) -> str:
+    try:
+        data = response.json()
+    except ValueError:
+        text = response.text.strip()
+        return f"status={response.status_code}, body={text[:300]}"
+    if isinstance(data, dict):
+        error = data.get("error")
+        if isinstance(error, dict) and error.get("message"):
+            return f"status={response.status_code}, message={error.get('message')}"
+    return f"status={response.status_code}, body={str(data)[:300]}"

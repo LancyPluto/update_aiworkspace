@@ -36,7 +36,15 @@ app:
   jwt-secret: ${JWT_SECRET:local-dev-secret}
   internal-api-token: ${INTERNAL_API_TOKEN:local-internal-token}
   ai-task-queue: ${AI_TASK_QUEUE:ai:task:queue}
+  task-queue-backend: ${TASK_QUEUE_BACKEND:rabbitmq}
   generated-media-dir: ${GENERATED_MEDIA_DIR:../data/generated-media}
+  rabbitmq:
+    task-exchange: ${RABBITMQ_TASK_EXCHANGE:ai.task.exchange}
+    task-routing-key: ${RABBITMQ_TASK_ROUTING_KEY:tool.normal}
+    task-queue: ${RABBITMQ_TASK_QUEUE:ai.tool.normal}
+    dead-queue: ${RABBITMQ_TASK_DEAD_QUEUE:ai.tool.normal.dead}
+    retry-queue-prefix: ${RABBITMQ_TASK_RETRY_QUEUE_PREFIX:ai.tool.normal.retry}
+    retry-delays-ms: ${RABBITMQ_TASK_RETRY_DELAYS_MS:5000,30000,120000}
   auth:
     sms:
       provider: ${SMS_PROVIDER:local}

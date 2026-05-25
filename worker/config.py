@@ -24,6 +24,18 @@ class Settings:
     redis_database: int = int(os.getenv('REDIS_DATABASE', '0'))
     redis_retry_interval_seconds: float = float(os.getenv('REDIS_RETRY_INTERVAL_SECONDS', '5'))
     ai_task_queue: str = os.getenv('AI_TASK_QUEUE', 'ai:task:queue')
+    task_queue_backend: str = os.getenv('TASK_QUEUE_BACKEND', 'redis')
+    rabbitmq_host: str = os.getenv('RABBITMQ_HOST', '127.0.0.1')
+    rabbitmq_port: int = int(os.getenv('RABBITMQ_PORT', '5672'))
+    rabbitmq_username: str = os.getenv('RABBITMQ_USERNAME', 'guest')
+    rabbitmq_password: str = os.getenv('RABBITMQ_PASSWORD', 'guest')
+    rabbitmq_task_queue: str = os.getenv('RABBITMQ_TASK_QUEUE', 'ai.tool.normal')
+    rabbitmq_dead_queue: str = os.getenv('RABBITMQ_DEAD_QUEUE', 'ai.tool.normal.dead')
+    rabbitmq_retry_queue_prefix: str = os.getenv('RABBITMQ_RETRY_QUEUE_PREFIX', 'ai.tool.normal.retry')
+    rabbitmq_retry_delays_ms: str = os.getenv('RABBITMQ_RETRY_DELAYS_MS', '5000,30000,120000')
+    rabbitmq_max_retries: int = int(os.getenv('RABBITMQ_MAX_RETRIES', '3'))
+    rabbitmq_heartbeat_seconds: int = int(os.getenv('RABBITMQ_HEARTBEAT_SECONDS', '1800'))
+    rabbitmq_blocked_connection_timeout_seconds: int = int(os.getenv('RABBITMQ_BLOCKED_CONNECTION_TIMEOUT_SECONDS', '1800'))
     backend_internal_base_url: str = os.getenv('BACKEND_INTERNAL_BASE_URL', 'http://localhost:8080')
     internal_api_token: str = os.getenv('INTERNAL_API_TOKEN', 'replace-with-internal-token')
     model_provider: str = os.getenv('MODEL_PROVIDER', 'deepseek')
@@ -36,6 +48,12 @@ class Settings:
     siliconflow_asr_model: str = os.getenv('SILICONFLOW_ASR_MODEL', 'TeleAI/TeleSpeechASR')
     siliconflow_image_model: str = os.getenv('SILICONFLOW_IMAGE_MODEL', 'Tongyi-MAI/Z-Image-Turbo')
     digital_human_video_provider: str = os.getenv('DIGITAL_HUMAN_VIDEO_PROVIDER', 'seedance')
+    infinitetalk_base_url: str = os.getenv('INFINITETALK_BASE_URL', 'http://host.docker.internal:7860')
+    infinitetalk_api_key: str = os.getenv('INFINITETALK_API_KEY', '')
+    infinitetalk_create_path: str = os.getenv('INFINITETALK_CREATE_PATH', '/api/v1/generate')
+    infinitetalk_result_path: str = os.getenv('INFINITETALK_RESULT_PATH', '/api/v1/tasks/{task_id}')
+    infinitetalk_poll_interval_seconds: float = float(os.getenv('INFINITETALK_POLL_INTERVAL_SECONDS', '5'))
+    infinitetalk_timeout_seconds: int = int(os.getenv('INFINITETALK_TIMEOUT_SECONDS', '1800'))
     seedance_base_url: str = os.getenv('SEEDANCE_BASE_URL', 'https://ark.cn-beijing.volces.com')
     seedance_api_key: str = os.getenv('SEEDANCE_API_KEY', '')
     seedance_video_model: str = os.getenv('SEEDANCE_VIDEO_MODEL', 'doubao-seedance-1-5-pro-251215')
@@ -56,6 +74,7 @@ class Settings:
     kling_video_text_result_path: str = os.getenv('KLING_VIDEO_TEXT_RESULT_PATH', '/v1/videos/text2video/{task_id}')
     kling_video_image_result_path: str = os.getenv('KLING_VIDEO_IMAGE_RESULT_PATH', '/v1/videos/image2video/{task_id}')
     kling_image_generation_path: str = os.getenv('KLING_IMAGE_GENERATION_PATH', '/v1/images/generations')
+    kling_image_result_path: str = os.getenv('KLING_IMAGE_RESULT_PATH', '/v1/images/generations/{task_id}')
     kling_poll_interval_seconds: float = float(os.getenv('KLING_POLL_INTERVAL_SECONDS', '5'))
     kling_timeout_seconds: int = int(os.getenv('KLING_TIMEOUT_SECONDS', '900'))
     generated_media_dir: str = os.getenv('GENERATED_MEDIA_DIR', '../data/generated-media')
@@ -134,3 +153,13 @@ def resolve_kling_credentials(model_config: dict[str, Any] | None = None) -> tup
     if not secret_key or secret_key.startswith("replace-with-"):
         secret_key = (settings.kling_secret_key or "").strip()
     return access_key, secret_key
+
+
+def resolve_infinitetalk_api_key(model_config: dict[str, Any] | None = None) -> str:
+    if model_config:
+        configured = model_config.get("apiKey")
+        if configured is not None:
+            configured_text = str(configured).strip()
+            if configured_text and not configured_text.startswith("replace-with-"):
+                return configured_text
+    return (settings.infinitetalk_api_key or "").strip()

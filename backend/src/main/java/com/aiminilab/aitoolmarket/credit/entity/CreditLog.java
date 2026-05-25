@@ -21,6 +21,7 @@ public class CreditLog {
     private Integer balanceAfter;
     private Integer frozenBefore;
     private Integer frozenAfter;
+    private String idempotencyKey;
     private String operatorType;
     private Long operatorId;
     private String reason;
@@ -120,6 +121,14 @@ public class CreditLog {
 
     public void setFrozenAfter(Integer frozenAfter) {
         this.frozenAfter = frozenAfter;
+    }
+
+    public String getIdempotencyKey() {
+        return idempotencyKey;
+    }
+
+    public void setIdempotencyKey(String idempotencyKey) {
+        this.idempotencyKey = idempotencyKey;
     }
 
     public String getOperatorType() {

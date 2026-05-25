@@ -3,8 +3,10 @@ export { login, logout, register, sendSmsCode, smsLogin, smsRegister } from "./a
 export { getCurrentUser } from "./userApi"
 export { fetchToolCategories, fetchTools, searchTools, fetchToolByCode } from "./toolApi"
 export {
+  fetchMarketplaceAITools,
   fetchEnabledAITools,
   fetchAIToolById,
+  isMarketplaceMockToolId,
   fetchChatSessions,
   createChatSession,
   deleteChatSession,
@@ -33,5 +35,12 @@ export {
   updateAgentToolPreference,
 } from "./agentApi"
 export { createTask, fetchTasks, fetchTaskStatus, fetchTaskById, cancelTask } from "./taskApi"
-export { fetchCreditAccount, fetchCreditLogs } from "./creditApi"
+export {
+  createRechargeOrder,
+  fetchCreditAccount,
+  fetchCreditLogs,
+  fetchRechargeOrder,
+  fetchRechargePackages,
+  mockPayRechargeOrder,
+} from "./creditApi"
 export * from "./types"

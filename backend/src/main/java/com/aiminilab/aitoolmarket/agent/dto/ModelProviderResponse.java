@@ -11,6 +11,9 @@ public record ModelProviderResponse(
         String defaultBaseUrl,
         String defaultModel,
         String billingDefault,
+        String providerProtocol,
+        String vendorKind,
+        String upstreamVendor,
         String testStrategy,
         boolean workerReady,
         String description
@@ -23,6 +26,9 @@ public record ModelProviderResponse(
                 definition.defaultBaseUrl(),
                 definition.defaultModel(),
                 definition.billingDefault(),
+                definition.providerProtocol(),
+                definition.vendorKind(),
+                definition.upstreamVendor(),
                 definition.testStrategy(),
                 definition.workerReady(),
                 definition.description()

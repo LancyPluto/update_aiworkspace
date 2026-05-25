@@ -41,6 +41,7 @@ class KlingVideoClient:
         text_result_path: str | None = None,
         image_result_path: str | None = None,
         image_generation_path: str | None = None,
+        image_generation_result_path: str | None = None,
         poll_interval_seconds: float | None = None,
         timeout_seconds: int | None = None,
     ) -> None:
@@ -53,6 +54,7 @@ class KlingVideoClient:
         self.text_result_path = text_result_path or settings.kling_video_text_result_path
         self.image_result_path = image_result_path or settings.kling_video_image_result_path
         self.image_generation_path = image_generation_path or settings.kling_image_generation_path
+        self.image_generation_result_path = image_generation_result_path or settings.kling_image_result_path
         self.poll_interval_seconds = poll_interval_seconds or settings.kling_poll_interval_seconds
         self.timeout_seconds = timeout_seconds or settings.kling_timeout_seconds
         self.timeout = (10, 300)
@@ -124,19 +126,32 @@ class KlingVideoClient:
         seed: int | None = None,
         guidance_scale: float | None = None,
         num_inference_steps: int | None = None,
+        image: str = "",
+        aspect_ratio: str = "",
+        image_reference: str = "",
+        image_fidelity: float | None = None,
+        human_fidelity: float | None = None,
     ) -> list[str]:
         if not self._has_auth():
             raise KlingVideoError("Kling credentials are not configured")
 
+        resolved_aspect_ratio = self._aspect_ratio(aspect_ratio, image_size)
         payload: dict[str, Any] = {
-            "model": model or settings.kling_image_model,
+            "model_name": model or settings.kling_image_model,
             "prompt": prompt,
-            "image_size": image_size,
             "n": max(1, batch_size),
-            "batch_size": max(1, batch_size),
+            "aspect_ratio": resolved_aspect_ratio,
         }
+        if image.strip():
+            payload["image"] = self._image_to_base64(image.strip())
         if negative_prompt.strip():
             payload["negative_prompt"] = negative_prompt.strip()
+        if image_reference.strip():
+            payload["image_reference"] = image_reference.strip()
+        if image_fidelity is not None:
+            payload["image_fidelity"] = image_fidelity
+        if human_fidelity is not None:
+            payload["human_fidelity"] = human_fidelity
         if seed is not None:
             payload["seed"] = seed
         if guidance_scale is not None:
@@ -144,7 +159,12 @@ class KlingVideoClient:
         if num_inference_steps is not None:
             payload["num_inference_steps"] = num_inference_steps
         response = self._request("POST", self.image_generation_path, payload)
-        return self._extract_image_urls(response)
+        urls = self._extract_image_urls_or_empty(response)
+        if urls:
+            return urls
+        task_id = self._extract_task_id(response)
+        finished = self.wait_for_images(task_id)
+        return self._extract_image_urls(finished)
 
     def wait_for_video(self, task_id: str, *, result_path_template: str | None = None) -> dict[str, Any]:
         deadline = time.monotonic() + self.timeout_seconds
@@ -161,6 +181,23 @@ class KlingVideoClient:
             time.sleep(self.poll_interval_seconds)
         raise KlingVideoTimeoutError(
             f"kling video generation timed out, taskId={task_id}, lastStatus={self._extract_status(last_payload)}"
+        )
+
+    def wait_for_images(self, task_id: str) -> dict[str, Any]:
+        deadline = time.monotonic() + self.timeout_seconds
+        last_payload: dict[str, Any] = {}
+        path = self._task_result_path(task_id, self.image_generation_result_path)
+        while time.monotonic() < deadline:
+            last_payload = self._request("GET", path, None)
+            status = self._extract_status(last_payload).lower()
+            if status in {"succeeded", "succeed", "success", "completed", "done"}:
+                return last_payload
+            if status in {"failed", "fail", "error", "cancelled", "canceled"}:
+                reason = str(last_payload.get("message") or last_payload.get("reason") or "kling image generation failed")
+                raise KlingVideoError(reason)
+            time.sleep(self.poll_interval_seconds)
+        raise KlingVideoTimeoutError(
+            f"kling image generation timed out, taskId={task_id}, lastStatus={self._extract_status(last_payload)}"
         )
 
     def _task_result_path(self, task_id: str, template: str) -> str:
@@ -423,13 +460,20 @@ class KlingVideoClient:
 
     @classmethod
     def _extract_image_urls(cls, payload: dict[str, Any]) -> list[str]:
+        urls = cls._extract_image_urls_or_empty(payload)
+        if urls:
+            return urls
+        raise KlingVideoError("kling image response missing image url")
+
+    @classmethod
+    def _extract_image_urls_or_empty(cls, payload: dict[str, Any]) -> list[str]:
         urls: list[str] = []
         for value in cls._walk(payload):
             if isinstance(value, str) and cls._looks_like_image_url(value):
                 urls.append(value.strip())
         if urls:
             return list(dict.fromkeys(urls))
-        raise KlingVideoError("kling image response missing image url")
+        return []
 
     @classmethod
     def _walk(cls, value: Any) -> list[Any]:
@@ -462,8 +506,24 @@ class KlingVideoClient:
     @staticmethod
     def _aspect_ratio(aspect_ratio: str, image_size: str) -> str:
         raw = str(aspect_ratio or "")
-        if "9:16" in raw or image_size in {"480x854", "720x1280", "1080x1920"}:
+        for ratio in ("21:9", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "1:1"):
+            if ratio in raw:
+                return ratio
+        size = str(image_size or "")
+        if size in {"2560x1080", "1920x810"}:
+            return "21:9"
+        if size in {"1280x720", "1920x1080"}:
+            return "16:9"
+        if size in {"480x854", "720x1280", "1080x1920"}:
             return "9:16"
-        if "1:1" in raw or image_size in {"480x480", "960x960", "1024x1024"}:
+        if size in {"1024x768", "1280x960"}:
+            return "4:3"
+        if size in {"768x1024", "960x1280"}:
+            return "3:4"
+        if size in {"1152x768", "1536x1024"}:
+            return "3:2"
+        if size in {"768x1152", "1024x1536"}:
+            return "2:3"
+        if size in {"480x480", "960x960", "1024x1024"}:
             return "1:1"
         return "16:9"
