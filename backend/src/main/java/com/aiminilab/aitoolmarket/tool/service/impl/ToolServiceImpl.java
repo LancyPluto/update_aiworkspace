@@ -28,6 +28,7 @@ import com.aiminilab.aitoolmarket.tool.dto.UpsertFieldSchemaRequest;
 import com.aiminilab.aitoolmarket.tool.dto.UpsertToolCategoryRequest;
 import com.aiminilab.aitoolmarket.tool.dto.UpsertToolRequest;
 import com.aiminilab.aitoolmarket.tool.entity.AiTool;
+import com.aiminilab.aitoolmarket.tool.support.ConfigNoteMergeSupport;
 import com.aiminilab.aitoolmarket.tool.entity.ToolCategory;
 import com.aiminilab.aitoolmarket.tool.entity.ToolFieldItem;
 import com.aiminilab.aitoolmarket.tool.entity.ToolFieldSchema;
@@ -41,6 +42,11 @@ import com.aiminilab.aitoolmarket.tool.mapper.ToolPromptMapper;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolPromptVersionMapper;
 import com.aiminilab.aitoolmarket.agent.service.ModelCapabilityService;
 import com.aiminilab.aitoolmarket.tool.dto.ApplyToolTemplateRequest;
+import com.aiminilab.aitoolmarket.tool.dto.ToolIntegrationView;
+import com.aiminilab.aitoolmarket.tool.integration.ToolIntegrationConfig;
+import com.aiminilab.aitoolmarket.tool.integration.ToolIntegrationPlugin;
+import com.aiminilab.aitoolmarket.tool.integration.ToolIntegrationRegistry;
+import com.aiminilab.aitoolmarket.tool.integration.ToolIntegrationResolver;
 import com.aiminilab.aitoolmarket.tool.service.ToolService;
 import com.aiminilab.aitoolmarket.tool.service.ToolTemplateService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -82,12 +88,16 @@ public class ToolServiceImpl implements ToolService {
     private final ToolTemplateService toolTemplateService;
     private final ModelCapabilityService modelCapabilityService;
     private final AppProperties appProperties;
+    private final ToolIntegrationResolver toolIntegrationResolver;
+    private final ToolIntegrationRegistry toolIntegrationRegistry;
 
     public ToolServiceImpl(ToolMapper toolMapper, ToolCategoryMapper toolCategoryMapper,
                            ToolFieldSchemaMapper toolFieldSchemaMapper, ToolFieldItemMapper toolFieldItemMapper,
                            ToolPromptMapper toolPromptMapper, ToolPromptVersionMapper toolPromptVersionMapper,
                            ObjectMapper objectMapper, ToolTemplateService toolTemplateService,
-                           ModelCapabilityService modelCapabilityService, AppProperties appProperties) {
+                           ModelCapabilityService modelCapabilityService, AppProperties appProperties,
+                           ToolIntegrationResolver toolIntegrationResolver,
+                           ToolIntegrationRegistry toolIntegrationRegistry) {
         this.toolMapper = toolMapper;
         this.toolCategoryMapper = toolCategoryMapper;
         this.toolFieldSchemaMapper = toolFieldSchemaMapper;
@@ -98,6 +108,8 @@ public class ToolServiceImpl implements ToolService {
         this.toolTemplateService = toolTemplateService;
         this.modelCapabilityService = modelCapabilityService;
         this.appProperties = appProperties;
+        this.toolIntegrationResolver = toolIntegrationResolver;
+        this.toolIntegrationRegistry = toolIntegrationRegistry;
     }
 
     @Override
@@ -158,7 +170,18 @@ public class ToolServiceImpl implements ToolService {
         AiTool tool = toolMapper.findOnlineByCode(toolCode)
                 .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在或未上线"));
         ToolSummaryResponse summary = ToolSummaryResponse.from(tool);
-        return ToolDetailResponse.of(summary, fields(tool.getId()));
+        return ToolDetailResponse.of(summary, fields(tool.getId()), resolveIntegrationView(tool));
+    }
+
+    private ToolIntegrationView resolveIntegrationView(AiTool tool) {
+        ToolIntegrationConfig config = toolIntegrationResolver.resolve(tool);
+        if (config == null || config.isStandardTask()) {
+            return ToolIntegrationView.of(config, null);
+        }
+        Object extension = toolIntegrationRegistry.find(config.getIntegrationMode())
+                .map(plugin -> plugin.userDetailExtension(tool, config))
+                .orElse(null);
+        return ToolIntegrationView.of(config, extension);
     }
 
     @Override
@@ -268,6 +291,8 @@ public class ToolServiceImpl implements ToolService {
         if (tool.getExecutionHandler() == null || tool.getExecutionHandler().isBlank()) {
             tool.setExecutionHandler(existing.getExecutionHandler());
         }
+        tool.setConfigNote(ConfigNoteMergeSupport.mergePreservingIntegrationMarkers(
+                existing.getConfigNote(), tool.getConfigNote()));
         modelCapabilityService.validateToolModelBinding(tool);
         toolMapper.updateTool(toolId, tool, operatorId);
         return findToolSummary(toolId);

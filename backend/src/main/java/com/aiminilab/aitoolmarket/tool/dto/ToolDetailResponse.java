@@ -1,5 +1,7 @@
 package com.aiminilab.aitoolmarket.tool.dto;
 
+import com.aiminilab.aitoolmarket.ppt.workflow.PptWorkflow;
+
 import java.util.List;
 
 public record ToolDetailResponse(
@@ -20,9 +22,28 @@ public record ToolDetailResponse(
         String modelConfigName,
         String modelName,
         String executionHandler,
-        List<ToolFieldResponse> fields
+        List<ToolFieldResponse> fields,
+        // 平台级集成块；标准任务工具的 integrationMode 为 STANDARD_TASK。
+        // 前端入口判断、跳转、插件渲染均以本字段为准。
+        ToolIntegrationView integration,
+        // 过渡兼容字段；新代码请读取 integration().extension()（PPT 插件返回 PptWorkflow）。
+        PptWorkflow workflow
 ) {
     public static ToolDetailResponse of(ToolSummaryResponse summary, List<ToolFieldResponse> fields) {
+        return of(summary, fields, null, null);
+    }
+
+    public static ToolDetailResponse of(ToolSummaryResponse summary,
+                                        List<ToolFieldResponse> fields,
+                                        ToolIntegrationView integration) {
+        PptWorkflow legacy = integration != null && integration.extension() instanceof PptWorkflow w ? w : null;
+        return of(summary, fields, integration, legacy);
+    }
+
+    public static ToolDetailResponse of(ToolSummaryResponse summary,
+                                        List<ToolFieldResponse> fields,
+                                        ToolIntegrationView integration,
+                                        PptWorkflow legacyWorkflow) {
         return new ToolDetailResponse(
                 summary.id(),
                 summary.toolCode(),
@@ -41,7 +62,9 @@ public record ToolDetailResponse(
                 summary.modelConfigName(),
                 summary.modelName(),
                 summary.executionHandler(),
-                fields
+                fields,
+                integration,
+                legacyWorkflow
         );
     }
 }

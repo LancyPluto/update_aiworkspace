@@ -15,7 +15,9 @@ import {
 import { computed, ref, onMounted } from "vue"
 import AppShell from "@/components/AppShell.vue"
 import { fetchToolByCode } from "@/api/toolApi"
+import { isPptWorkspaceTool } from "@/api/pptApi"
 import type { ToolDetail } from "@/api/types"
+import { userRoutes } from "@/router/userRoutes"
 import { useAuthStore } from "@/store/authStore"
 
 const props = defineProps<{
@@ -32,6 +34,15 @@ const tab = ref<"intro" | "cases" | "input" | "output">("intro")
 
 const title = computed(() => tool.value?.toolName ?? `工具 · ${props.id}`)
 const isOffline = computed(() => tool.value?.status === "OFFLINE")
+
+const isPptTool = computed(() =>
+  isPptWorkspaceTool(tool.value?.toolCode, tool.value?.integration?.integrationMode),
+)
+
+const useLink = computed(() => {
+  if (isPptTool.value) return userRoutes.pptWorkspace()
+  return userRoutes.toolUse(props.id)
+})
 
 const toolTypeLabels: Record<string, string> = {
   TEXT_GENERATION: "文本生成",
@@ -157,10 +168,11 @@ onMounted(async () => {
               </div>
               <RouterLink
                 v-if="!isOffline"
-                :to="'/tools/' + id + '/use'"
+                :to="useLink"
                 class="inline-flex h-11 items-center justify-center rounded-md bg-primary px-8 text-sm font-medium text-primary-foreground hover:opacity-90"
               >
-                开始使用 <ArrowRight class="ml-1.5 h-4 w-4" />
+                {{ isPptTool ? "进入 PPT 工作台" : "开始使用" }}
+                <ArrowRight class="ml-1.5 h-4 w-4" />
               </RouterLink>
               <span
                 v-else

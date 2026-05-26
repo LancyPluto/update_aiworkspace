@@ -591,7 +591,11 @@ export function AgentModelSettings({ refreshKey = 0 }: AgentModelSettingsProps) 
         <ServerCog className="h-4 w-4" />
         <AlertTitle>大模型接入</AlertTitle>
         <AlertDescription>
-          维护 AI 工具和 Agent 运行使用的全局模型 API。
+          维护 AI 工具和 Agent 运行使用的全局模型 API。工作台类工具（如 PPT）在
+          <a href="/tools" className="mx-1 font-medium text-primary underline">
+            工具编辑
+          </a>
+          绑定文本/生图模型；MinerU、百度 OCR 等在「系统配置 → 引擎 API」统一维护。
         </AlertDescription>
       </Alert>
 

@@ -38,7 +38,7 @@ public class UserUploadController {
         this.appProperties = appProperties;
     }
 
-    @PostMapping("/upload")
+    @PostMapping("/tool-upload")
     public ApiResponse<FileUploadResponse> upload(@RequestParam("file") MultipartFile file) {
         if (file == null || file.isEmpty()) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "请选择要上传的文件");
