@@ -53,6 +53,9 @@ import {
   Workflow,
   type LucideIcon,
 } from "lucide-react"
+import { ApiReferenceCard, type ToolApiReference } from "@/components/admin/api-reference-card"
+import { PptEngineApiPanel } from "@/components/admin/ppt-engine-api-panel"
+import { isPptWorkspaceTool } from "@/lib/model-capabilities"
 import { cn } from "@/lib/utils"
 import {
   createTool,
@@ -346,7 +349,7 @@ function safePreviewFields(json: string): EditableField[] {
   }
 }
 
-function apiReferenceForTool(tool: ToolRow | null, modelConfig?: AgentModelConfig | null) {
+function apiReferenceForTool(tool: ToolRow | null, modelConfig?: AgentModelConfig | null): ToolApiReference {
   const handler = tool
     ? executionCapabilityForTool(tool.toolType, tool.toolCode, tool.executionHandler, tool.inputModality, tool.outputModality)
     : "TEXT_GENERATION"
@@ -427,41 +430,7 @@ function FieldSchemaSidePanel({
   return (
     <div className="space-y-4 lg:sticky lg:top-0 lg:self-start">
       <FieldSchemaPreview fields={fields} />
-      <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
-        <div className="mb-4">
-          <h3 className="text-base font-semibold">{reference.title}</h3>
-          <p className="mt-1 text-xs text-muted-foreground">用于核对字段是否会进入真实模型调用。</p>
-        </div>
-        <div className="space-y-2 rounded-lg bg-secondary/40 p-3 text-xs">
-          <div className="flex justify-between gap-3">
-            <span className="text-muted-foreground">Provider</span>
-            <span className="text-right font-medium">{reference.provider}</span>
-          </div>
-          <div className="flex justify-between gap-3">
-            <span className="text-muted-foreground">Model</span>
-            <span className="text-right font-medium">{reference.model}</span>
-          </div>
-          <div className="flex justify-between gap-3">
-            <span className="text-muted-foreground">Endpoint</span>
-            <span className="text-right font-mono">{reference.endpoint}</span>
-          </div>
-          <div className="flex justify-between gap-3">
-            <span className="text-muted-foreground">Base URL</span>
-            <span className="max-w-[210px] truncate text-right font-mono">{reference.baseUrl}</span>
-          </div>
-        </div>
-        <div className="mt-4 space-y-2">
-          <p className="text-xs font-medium">当前系统支持字段</p>
-          <div className="space-y-1.5">
-            {reference.fields.map((field) => (
-              <div key={field} className="rounded-md border border-border/70 bg-background px-2.5 py-1.5 font-mono text-[11px] text-muted-foreground">
-                {field}
-              </div>
-            ))}
-          </div>
-        </div>
-        <p className="mt-3 text-xs text-muted-foreground">{reference.note}</p>
-      </div>
+      <ApiReferenceCard reference={reference} />
     </div>
   )
 }
@@ -662,6 +631,13 @@ export default function ToolsPage() {
     })),
     [modelConfigs, providerCapabilities],
   )
+
+  const standardEditDialogApiReference = useMemo(() => {
+    if (!editingTool || isPptWorkspaceTool(editingTool)) return null
+    const id = form.modelConfigId.trim()
+    const bound = id === "" ? null : modelConfigs.find((c) => String(c.id) === id) ?? null
+    return apiReferenceForTool(editingTool, bound)
+  }, [editingTool, form.modelConfigId, modelConfigs])
 
   useEffect(() => {
     if (!form.modelConfigId) return
@@ -1044,7 +1020,12 @@ export default function ToolsPage() {
               }
             }}
           >
-            <DialogContent className="max-h-[92vh] overflow-y-auto bg-card border-border max-w-lg">
+            <DialogContent
+              className={cn(
+                "max-h-[92vh] overflow-y-auto border-border bg-card",
+                editingTool && isPptWorkspaceTool(editingTool) ? "max-w-2xl" : "max-w-lg",
+              )}
+            >
               <DialogHeader>
                 <DialogTitle>{editingTool ? "编辑 AI 工具" : "新建 AI 工具"}</DialogTitle>
                 <DialogDescription className={formError ? "text-destructive" : undefined}>
@@ -1373,8 +1354,38 @@ export default function ToolsPage() {
                       ) : null}
                     </SelectContent>
                   </Select>
-                  <p className="text-xs text-muted-foreground">需要模型能力：{capabilityLabel(requiredModelCapability)}</p>
+                  <p className="text-xs text-muted-foreground">
+                    需要模型能力：{capabilityLabel(requiredModelCapability)}
+                    {editingTool && isPptWorkspaceTool(editingTool) ? (
+                      <span className="block pt-1 text-amber-800 dark:text-amber-200">
+                        PPT 工作台的大纲/配图等由下方「用到的 API 与引擎同步」中的绑定决定，本项不参与 PPT 引擎调用。
+                      </span>
+                    ) : null}
+                  </p>
                 </div>
+                {editingTool && !isPptWorkspaceTool(editingTool) && standardEditDialogApiReference ? (
+                  <div className="space-y-2 border-t border-border pt-4">
+                    <h3 className="text-sm font-semibold text-card-foreground">用到的 API</h3>
+                    <ApiReferenceCard reference={standardEditDialogApiReference} />
+                  </div>
+                ) : null}
+                {editingTool && isPptWorkspaceTool(editingTool) ? (
+                  <div className="space-y-3 border-t border-border pt-4">
+                    <div>
+                      <h3 className="text-sm font-semibold text-card-foreground">用到的 API 与引擎同步</h3>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        含<strong>文本大模型</strong>、<strong>文生图</strong>、<strong>MinerU（PDF/Office 解析）</strong>、
+                        <strong>百度高精度文字识别</strong>及可选百度图像能力；后三类密钥在 banana-slides 引擎内配置，前两类的绑定由下方保存并同步至引擎。
+                      </p>
+                    </div>
+                    <PptEngineApiPanel
+                      toolId={editingTool.rawId}
+                      toolName={editingTool.name}
+                      embedded
+                      onSaved={() => void loadAll()}
+                    />
+                  </div>
+                ) : null}
               </div>
               <DialogFooter>
                 <Button variant="outline" onClick={() => setIsAddDialogOpen(false)} disabled={submitting}>

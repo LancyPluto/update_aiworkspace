@@ -15,6 +15,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Matcher;
 
@@ -41,7 +42,8 @@ public class PptAdminWorkflowService {
 
     public PptAdminWorkflowDetailResponse getWorkflowDetail(Long toolId) {
         AiTool tool = requirePptTool(toolId);
-        PptWorkflow workflow = pptWorkflowService.requireWorkflow(tool);
+        PptWorkflow workflow = pptWorkflowService.parseWorkflow(tool.getConfigNote())
+                .orElseGet(this::defaultWorkflowSkeleton);
         return toDetailResponse(workflow, false, null);
     }
 
@@ -103,6 +105,30 @@ public class PptAdminWorkflowService {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "该工具的集成模式不是 PPT 工作台");
         }
         return tool;
+    }
+
+    private PptWorkflow defaultWorkflowSkeleton() {
+        PptWorkflow workflow = new PptWorkflow();
+        workflow.setIntegrationMode(PptConstants.INTEGRATION_MODE);
+        workflow.setCustomUiRoute("/tools/" + PptConstants.TOOL_CODE + "/workspace");
+        workflow.setCreationTypes(List.of("idea", "outline", "descriptions"));
+        List<PptWorkflowStep> steps = new ArrayList<>();
+        steps.add(step("CREATE", "创建项目", 5));
+        steps.add(step("OUTLINE", "生成大纲", 10));
+        steps.add(step("DESCRIPTIONS", "生成描述", 20));
+        steps.add(step("IMAGES", "生成图片", 50));
+        steps.add(step("EXPORT_PPTX", "导出图片幻灯片", 5));
+        workflow.setSteps(steps);
+        return workflow;
+    }
+
+    private static PptWorkflowStep step(String code, String name, int credits) {
+        PptWorkflowStep step = new PptWorkflowStep();
+        step.setCode(code);
+        step.setName(name);
+        step.setCredits(credits);
+        step.setEnabled(true);
+        return step;
     }
 
     void validateWorkflow(PptWorkflow workflow) {
