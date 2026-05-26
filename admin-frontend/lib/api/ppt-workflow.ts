@@ -1,4 +1,5 @@
 import { http } from "./http"
+import type { ToolIntegrationApiCatalog } from "./tool-integration-api"
 import type { AgentModelConfig } from "./types"
 
 export interface PptWorkflowStep {
@@ -16,12 +17,21 @@ export interface PptWorkflow {
   features?: Record<string, boolean>
   textModelConfigId?: number | null
   imageModelConfigId?: number | null
+  engineSecrets?: Record<string, string>
+}
+
+export interface ToolEngineSecretFieldView {
+  key: string
+  displayValue: string
+  configured: boolean
 }
 
 export interface PptAdminWorkflowDetail {
   workflow: PptWorkflow
+  apiCatalog: ToolIntegrationApiCatalog
   textModel: AgentModelConfig | null
   imageModel: AgentModelConfig | null
+  engineSecretFields: ToolEngineSecretFieldView[]
   engineSynced: boolean
   engineSyncMessage: string | null
 }

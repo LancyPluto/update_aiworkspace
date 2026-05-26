@@ -11,9 +11,14 @@ public class PptWorkflow {
     private List<String> creationTypes;
     private List<PptWorkflowStep> steps;
     private Map<String, Boolean> features = new LinkedHashMap<>();
-    /** 方案 A：绑定超市 agent_model_configs，保存工作流时同步到 banana */
+    /** 绑定超市 agent_model_configs，保存工作流时同步到 banana */
     private Long textModelConfigId;
     private Long imageModelConfigId;
+    /**
+     * 引擎侧第三方 API 凭证（MinerU、百度 OCR 等），key 与 {@code ToolIntegrationApiCatalog} 中
+     * {@link com.aiminilab.aitoolmarket.tool.integration.api.ToolEngineApiFieldDefinition#key()} 一致。
+     */
+    private Map<String, String> engineSecrets = new LinkedHashMap<>();
 
     public Long getTextModelConfigId() {
         return textModelConfigId;
@@ -29,6 +34,14 @@ public class PptWorkflow {
 
     public void setImageModelConfigId(Long imageModelConfigId) {
         this.imageModelConfigId = imageModelConfigId;
+    }
+
+    public Map<String, String> getEngineSecrets() {
+        return engineSecrets;
+    }
+
+    public void setEngineSecrets(Map<String, String> engineSecrets) {
+        this.engineSecrets = engineSecrets == null ? new LinkedHashMap<>() : engineSecrets;
     }
 
     public String getIntegrationMode() {

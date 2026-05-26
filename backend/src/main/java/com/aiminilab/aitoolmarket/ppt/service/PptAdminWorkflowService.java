@@ -9,6 +9,7 @@ import com.aiminilab.aitoolmarket.ppt.PptConstants;
 import com.aiminilab.aitoolmarket.ppt.dto.PptAdminWorkflowDetailResponse;
 import com.aiminilab.aitoolmarket.ppt.workflow.PptWorkflow;
 import com.aiminilab.aitoolmarket.ppt.workflow.PptWorkflowStep;
+import com.aiminilab.aitoolmarket.tool.integration.api.ToolIntegrationApiCatalog;
 import com.aiminilab.aitoolmarket.tool.entity.AiTool;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolMapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -17,6 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.regex.Matcher;
 
 @Service
@@ -50,6 +52,9 @@ public class PptAdminWorkflowService {
     @Transactional
     public PptAdminWorkflowDetailResponse updateWorkflow(Long toolId, PptWorkflow workflow, Long operatorId) {
         AiTool tool = requirePptTool(toolId);
+        PptWorkflow previous = pptWorkflowService.parseWorkflow(tool.getConfigNote()).orElse(null);
+        Map<String, String> previousSecrets = previous == null ? Map.of() : previous.getEngineSecrets();
+        workflow.setEngineSecrets(PptEngineSecretSupport.mergeIncomingSecrets(workflow.getEngineSecrets(), previousSecrets));
         validateWorkflow(workflow);
         tool.setConfigNote(mergeWorkflowIntoConfigNote(tool.getConfigNote(), workflow));
         toolMapper.updateTool(toolId, tool, operatorId);
@@ -76,10 +81,13 @@ public class PptAdminWorkflowService {
     private PptAdminWorkflowDetailResponse toDetailResponse(PptWorkflow workflow,
                                                             boolean engineSynced,
                                                             String engineSyncMessage) {
+        workflow.setEngineSecrets(PptEngineSecretSupport.normalizeSecrets(workflow.getEngineSecrets()));
         return new PptAdminWorkflowDetailResponse(
                 workflow,
+                ToolIntegrationApiCatalog.require(ToolIntegrationApiCatalog.PPT_PLUGIN),
                 resolveModelSummary(workflow.getTextModelConfigId()),
                 resolveModelSummary(workflow.getImageModelConfigId()),
+                PptEngineSecretSupport.toViews(workflow.getEngineSecrets()),
                 engineSynced,
                 engineSyncMessage
         );
@@ -153,8 +161,12 @@ public class PptAdminWorkflowService {
         if (workflow.getIntegrationMode() == null || workflow.getIntegrationMode().isBlank()) {
             workflow.setIntegrationMode(PptConstants.INTEGRATION_MODE);
         }
-        if (workflow.getTextModelConfigId() == null && workflow.getImageModelConfigId() == null) {
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "请配置 textModelConfigId 或 imageModelConfigId");
+        workflow.setEngineSecrets(PptEngineSecretSupport.normalizeSecrets(workflow.getEngineSecrets()));
+        boolean hasModel = workflow.getTextModelConfigId() != null || workflow.getImageModelConfigId() != null;
+        boolean hasSecret = workflow.getEngineSecrets() != null
+                && workflow.getEngineSecrets().values().stream().anyMatch(v -> v != null && !v.isBlank());
+        if (!hasModel && !hasSecret) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "请至少配置一项大模型绑定或引擎 API");
         }
     }
 

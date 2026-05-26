@@ -54,8 +54,8 @@ import {
   type LucideIcon,
 } from "lucide-react"
 import { ApiReferenceCard, type ToolApiReference } from "@/components/admin/api-reference-card"
-import { PptEngineApiPanel } from "@/components/admin/ppt-engine-api-panel"
-import { isPptWorkspaceTool } from "@/lib/model-capabilities"
+import { ToolIntegrationApiSection } from "@/components/admin/tool-integration-api-section"
+import { resolveIntegrationPluginId } from "@/lib/model-capabilities"
 import { cn } from "@/lib/utils"
 import {
   createTool,
@@ -632,12 +632,17 @@ export default function ToolsPage() {
     [modelConfigs, providerCapabilities],
   )
 
+  const integrationPluginId = useMemo(
+    () => (editingTool ? resolveIntegrationPluginId(editingTool) : null),
+    [editingTool],
+  )
+
   const standardEditDialogApiReference = useMemo(() => {
-    if (!editingTool || isPptWorkspaceTool(editingTool)) return null
+    if (!editingTool || integrationPluginId) return null
     const id = form.modelConfigId.trim()
     const bound = id === "" ? null : modelConfigs.find((c) => String(c.id) === id) ?? null
     return apiReferenceForTool(editingTool, bound)
-  }, [editingTool, form.modelConfigId, modelConfigs])
+  }, [editingTool, integrationPluginId, form.modelConfigId, modelConfigs])
 
   useEffect(() => {
     if (!form.modelConfigId) return
@@ -1023,7 +1028,7 @@ export default function ToolsPage() {
             <DialogContent
               className={cn(
                 "max-h-[92vh] overflow-y-auto border-border bg-card",
-                editingTool && isPptWorkspaceTool(editingTool) ? "max-w-2xl" : "max-w-lg",
+                integrationPluginId ? "max-w-2xl" : "max-w-lg",
               )}
             >
               <DialogHeader>
@@ -1326,66 +1331,54 @@ export default function ToolsPage() {
                 </div>
                 <div className="space-y-2">
                   <Label>模型配置</Label>
-                  <Select
-                    value={modelSelectValue}
-                    onValueChange={(value) => updateForm("modelConfigId", value === "default" || value === "__select_matching_model" ? "" : value)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="选择匹配的模型配置" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {!defaultModelSupportsRequiredCapability ? (
-                        <SelectItem value="__select_matching_model" disabled>
-                          请选择支持「{capabilityLabel(requiredModelCapability)}」的模型
-                        </SelectItem>
-                      ) : null}
-                      <SelectItem value="default" disabled={!defaultModelSupportsRequiredCapability}>
-                        使用默认模型配置
-                      </SelectItem>
-                      {filteredModelConfigs.map((config) => (
-                        <SelectItem key={config.id} value={String(config.id)}>
-                          {config.displayName || config.modelName} · {config.provider}
-                        </SelectItem>
-                      ))}
-                      {filteredModelConfigs.length === 0 ? (
-                        <SelectItem value="__no_matching_models" disabled>
-                          暂无匹配模型配置
-                        </SelectItem>
-                      ) : null}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">
-                    需要模型能力：{capabilityLabel(requiredModelCapability)}
-                    {editingTool && isPptWorkspaceTool(editingTool) ? (
-                      <span className="block pt-1 text-amber-800 dark:text-amber-200">
-                        PPT 工作台的大纲/配图等由下方「用到的 API 与引擎同步」中的绑定决定，本项不参与 PPT 引擎调用。
-                      </span>
-                    ) : null}
-                  </p>
-                </div>
-                {editingTool && !isPptWorkspaceTool(editingTool) && standardEditDialogApiReference ? (
-                  <div className="space-y-2 border-t border-border pt-4">
-                    <h3 className="text-sm font-semibold text-card-foreground">用到的 API</h3>
-                    <ApiReferenceCard reference={standardEditDialogApiReference} />
-                  </div>
-                ) : null}
-                {editingTool && isPptWorkspaceTool(editingTool) ? (
-                  <div className="space-y-3 border-t border-border pt-4">
-                    <div>
-                      <h3 className="text-sm font-semibold text-card-foreground">用到的 API 与引擎同步</h3>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        含<strong>文本大模型</strong>、<strong>文生图</strong>、<strong>MinerU（PDF/Office 解析）</strong>、
-                        <strong>百度高精度文字识别</strong>及可选百度图像能力；后三类密钥在 banana-slides 引擎内配置，前两类的绑定由下方保存并同步至引擎。
-                      </p>
+                  {integrationPluginId ? (
+                    <div className="space-y-3 rounded-lg border border-border p-3">
+                      <ToolIntegrationApiSection
+                        pluginId={integrationPluginId}
+                        toolId={editingTool.rawId}
+                        onSaved={() => void loadAll()}
+                      />
                     </div>
-                    <PptEngineApiPanel
-                      toolId={editingTool.rawId}
-                      toolName={editingTool.name}
-                      embedded
-                      onSaved={() => void loadAll()}
-                    />
-                  </div>
-                ) : null}
+                  ) : (
+                    <div className="space-y-2">
+                      <Select
+                        value={modelSelectValue}
+                        onValueChange={(value) => updateForm("modelConfigId", value === "default" || value === "__select_matching_model" ? "" : value)}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="选择匹配的模型配置" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {!defaultModelSupportsRequiredCapability ? (
+                            <SelectItem value="__select_matching_model" disabled>
+                              请选择支持「{capabilityLabel(requiredModelCapability)}」的模型
+                            </SelectItem>
+                          ) : null}
+                          <SelectItem value="default" disabled={!defaultModelSupportsRequiredCapability}>
+                            使用默认模型配置
+                          </SelectItem>
+                          {filteredModelConfigs.map((config) => (
+                            <SelectItem key={config.id} value={String(config.id)}>
+                              {config.displayName || config.modelName} · {config.provider}
+                            </SelectItem>
+                          ))}
+                          {filteredModelConfigs.length === 0 ? (
+                            <SelectItem value="__no_matching_models" disabled>
+                              暂无匹配模型配置
+                            </SelectItem>
+                          ) : null}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground">需要模型能力：{capabilityLabel(requiredModelCapability)}</p>
+                      {editingTool && standardEditDialogApiReference ? (
+                        <div className="space-y-2 border-t border-border pt-3 mt-3">
+                          <p className="text-xs font-semibold text-card-foreground">用到的 API</p>
+                          <ApiReferenceCard reference={standardEditDialogApiReference} />
+                        </div>
+                      ) : null}
+                    </div>
+                  )}
+                </div>
               </div>
               <DialogFooter>
                 <Button variant="outline" onClick={() => setIsAddDialogOpen(false)} disabled={submitting}>

@@ -512,11 +512,11 @@ export function AgentModelSettings({ refreshKey = 0 }: AgentModelSettingsProps) 
         <ServerCog className="h-4 w-4" />
         <AlertTitle>大模型接入</AlertTitle>
         <AlertDescription>
-          维护 AI 工具和 Agent 运行使用的全局模型 API。PPT 生成工具需分别配置「文本生成」与「文生图」能力，并在
+          维护 AI 工具和 Agent 运行使用的全局模型 API。工作台类工具（如 PPT 生成器）在
           <a href="/tools" className="mx-1 font-medium text-primary underline">
-            大模型管理
+            工具编辑
           </a>
-          中为 AI PPT 生成器打开「PPT 引擎 API」完成绑定与同步。
+          「模型配置」中配置大模型绑定与 MinerU、百度 OCR 等引擎密钥。
         </AlertDescription>
       </Alert>
 

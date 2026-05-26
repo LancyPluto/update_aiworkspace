@@ -6,9 +6,9 @@
   "secretsRedacted": false,
   "settings": {
     "sourceDoc": "模型配置.md",
-    "scope": "国际§一 + 国内§二 + 多模态§三（与模型配置.md 对齐；保留 domestic 包已有 apiKey）",
+    "scope": "国际§一 + 国内§二 + 多模态§三（含已录入 apiKey）",
     "pricingVerifiedAt": "2026-05-25",
-    "pricingDisclaimer": "含明文密钥时勿提交 Git。secretsRedacted=false。国际模型单价为 USD/1M。"
+    "pricingDisclaimer": "含明文密钥，勿提交 Git。导入时 secretsRedacted=false。国际模型单价为 USD/1M。"
   },
   "modelConfigs": [
     {
@@ -382,7 +382,7 @@
       "modelName": "kling-v3-omni",
       "baseUrl": "https://api-beijing.klingai.com",
       "apiKey": "",
-      "extraAuthJson": "{\"pricingNote\": \"V3 std720p 0.6元/秒×5s\", \"pricingVerifiedAt\": \"2026-05-25\", \"costAffectingParams\": \"duration;mode;resolution;sound\", \"defaultBillingParams\": {\"duration\": \"5\", \"mode\": \"std\", \"resolution\": \"720p\"}, \"authHint\": \"extraAuthJson配置accessKey/secretKey\"}",
+      "extraAuthJson": "{\"pricingVerifiedAt\": \"2026-05-25\", \"pricingNote\": \"0.6元/秒×5s std720p\", \"costAffectingParams\": \"model_name;duration;mode;resolution;aspect_ratio;sound\", \"defaultBillingParams\": {\"duration\": \"5\", \"mode\": \"std\", \"resolution\": \"720p\"}, \"authHint\": \"extraAuthJson需配置accessKey与secretKey\"}",
       "secretsRedacted": false,
       "minimaxGroupId": null,
       "consoleUrl": "https://app.klingai.com/cn/dev/api-key",

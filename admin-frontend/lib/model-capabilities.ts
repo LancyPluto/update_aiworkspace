@@ -72,3 +72,12 @@ export function isPptWorkspaceTool(tool: { toolCode: string; configNote?: string
     note.includes('"integrationMode":"ppt_workspace"')
   )
 }
+
+/** 工作台类工具对应的 integration 插件 ID；标准任务工具返回 null */
+export function resolveIntegrationPluginId(tool: {
+  toolCode: string
+  configNote?: string | null
+}): string | null {
+  if (isPptWorkspaceTool(tool)) return "ppt"
+  return null
+}
