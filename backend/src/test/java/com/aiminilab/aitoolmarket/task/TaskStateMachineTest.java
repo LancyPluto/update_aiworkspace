@@ -33,7 +33,7 @@ class TaskStateMachineTest {
         assertThat(TaskStateMachine.isTerminal(TaskStatus.SUCCESS.name())).isTrue();
         assertThat(TaskStateMachine.isTerminal(TaskStatus.CANCELLED.name())).isTrue();
         assertThat(TaskStateMachine.isTerminal(TaskStatus.TIMEOUT.name())).isTrue();
-        assertThat(TaskStateMachine.isTerminal(TaskStatus.FAILED.name())).isFalse();
+        assertThat(TaskStateMachine.isTerminal(TaskStatus.FAILED.name())).isTrue();
         assertThat(TaskStateMachine.isTerminal(TaskStatus.PROCESSING.name())).isFalse();
     }
 

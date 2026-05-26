@@ -44,7 +44,7 @@ import { AgentRunsContent } from "@/app/agent-runs/page"
 import { ApiError } from "@/lib/api/http"
 import type { AdminTaskApiPayload } from "@/lib/api/types"
 
-type TaskStatus = "active" | "pending" | "error"
+type TaskStatus = "active" | "pending" | "error" | "timeout"
 
 interface Task {
   id: string
@@ -60,6 +60,9 @@ interface Task {
   output: string
   outputResourceType: string
   error: string
+  errorCode: string
+  errorMessage: string
+  progressMessage: string
   createdAt: string
   completedAt: string
   duration: string
@@ -75,6 +78,8 @@ function mapStatus(status: string): { status: TaskStatus; label: string } {
       return { status: "pending", label: "生成中" }
     case "FAILED":
       return { status: "error", label: "失败" }
+    case "TIMEOUT":
+      return { status: "timeout", label: "超时" }
     case "CANCELLED":
       return { status: "error", label: "已取消" }
     default:
@@ -114,8 +119,49 @@ function buildParamsText(params: unknown): string {
 /** 失败/取消时后端将原因写在 progressMessage */
 function taskFailureHint(row: AdminTaskApiPayload): string {
   const st = (row.status || "").toUpperCase()
-  if (st !== "FAILED" && st !== "CANCELLED") return ""
+  if (st !== "FAILED" && st !== "TIMEOUT" && st !== "CANCELLED") return ""
   return row.progressMessage?.trim() || ""
+}
+
+function isExceptionalTaskStatus(status: string): boolean {
+  return ["FAILED", "TIMEOUT", "CANCELLED"].includes((status || "").toUpperCase())
+}
+
+function currentDialogTask(item: Task, selectedTask: Task | null): Task {
+  return selectedTask?.rawId === item.rawId ? selectedTask : item
+}
+
+function taskDialogError(item: Task, selectedTask: Task | null): string {
+  const current = currentDialogTask(item, selectedTask)
+  if (!isExceptionalTaskStatus(current.rawStatus)) return ""
+  return current.errorMessage?.trim() || current.error?.trim() || current.progressMessage?.trim() || ""
+}
+
+function errorStatusLabel(status: string): string {
+  switch ((status || "").toUpperCase()) {
+    case "TIMEOUT":
+      return "任务超时"
+    case "CANCELLED":
+      return "任务已取消"
+    default:
+      return "任务失败"
+  }
+}
+
+function errorPanelTone(status: string) {
+  return (status || "").toUpperCase() === "TIMEOUT"
+    ? {
+        wrap: "rounded-lg border border-amber-500/20 bg-amber-500/10 p-4",
+        icon: "text-amber-600",
+        title: "text-amber-700",
+        code: "border-amber-500/20 bg-amber-500/10 text-amber-700",
+      }
+    : {
+        wrap: "rounded-lg border border-destructive/20 bg-destructive/10 p-4",
+        icon: "text-destructive",
+        title: "text-destructive",
+        code: "border-destructive/20 bg-destructive/10 text-destructive",
+      }
 }
 
 function rowToTask(row: AdminTaskApiPayload): Task {
@@ -133,6 +179,9 @@ function rowToTask(row: AdminTaskApiPayload): Task {
     output: row.result?.contentText || "",
     outputResourceType: row.result?.resourceType || "",
     error: taskFailureHint(row),
+    errorCode: row.errorCode?.trim() || "",
+    errorMessage: row.errorMessage?.trim() || "",
+    progressMessage: row.progressMessage?.trim() || "",
     createdAt: formatDateTime(row.createdAt),
     completedAt: formatDateTime(row.finishedAt),
     duration: computeDuration(row.createdAt, row.finishedAt),
@@ -298,7 +347,11 @@ export default function TasksPage() {
         task.user.includes(searchQuery) ||
         task.tool.includes(searchQuery)
       const matchesStatus =
-        statusFilter === "all" || task.status === statusFilter
+        statusFilter === "all" ||
+        (statusFilter === "active" && task.rawStatus === "SUCCESS") ||
+        (statusFilter === "pending" && ["QUEUED", "PROCESSING", "RETRYING"].includes(task.rawStatus)) ||
+        (statusFilter === "error" && ["FAILED", "CANCELLED"].includes(task.rawStatus)) ||
+        (statusFilter === "timeout" && task.rawStatus === "TIMEOUT")
       return matchesSearch && matchesStatus
     })
   }, [tasks, searchQuery, statusFilter])
@@ -309,14 +362,14 @@ export default function TasksPage() {
     const running = tasks.filter(
       (t) => t.rawStatus === "PROCESSING" || t.rawStatus === "QUEUED",
     ).length
-    const failed = tasks.filter(
-      (t) => t.rawStatus === "FAILED" || t.rawStatus === "CANCELLED",
-    ).length
+    const failed = tasks.filter((t) => t.rawStatus === "FAILED" || t.rawStatus === "CANCELLED").length
+    const timeout = tasks.filter((t) => t.rawStatus === "TIMEOUT").length
     return [
       { label: "全部任务", value: total, icon: Clock, color: "text-foreground" },
       { label: "已完成", value: done, icon: CheckCircle, color: "text-accent" },
       { label: "生成中", value: running, icon: RefreshCw, color: "text-chart-5" },
       { label: "失败", value: failed, icon: XCircle, color: "text-destructive" },
+      { label: "超时", value: timeout, icon: AlertCircle, color: "text-amber-600" },
     ]
   }, [tasks])
 
@@ -328,10 +381,16 @@ export default function TasksPage() {
       const row = rowToTask(detail)
       setSelectedTask({
         ...item,
+        rawStatus: row.rawStatus,
+        status: row.status,
+        statusLabel: row.statusLabel,
         input: buildParamsText(detail.params),
         output: detail.result?.contentText || "",
         outputResourceType: detail.result?.resourceType || "",
         error: taskFailureHint(detail) || item.error,
+        errorCode: row.errorCode,
+        errorMessage: row.errorMessage,
+        progressMessage: row.progressMessage,
         credits: row.credits,
         completedAt: row.completedAt,
         duration: row.duration,
@@ -410,7 +469,7 @@ export default function TasksPage() {
                 <TabsList className="bg-secondary">
                   <TabsTrigger value="input">输入参数</TabsTrigger>
                   <TabsTrigger value="output">生成结果</TabsTrigger>
-                  {(selectedTask?.error || item.error) && (
+                  {taskDialogError(item, selectedTask) && (
                     <TabsTrigger value="error">错误信息</TabsTrigger>
                   )}
                 </TabsList>
@@ -426,23 +485,53 @@ export default function TasksPage() {
                     {renderTaskOutput(selectedTask)}
                   </div>
                 </TabsContent>
-                {(selectedTask?.error || item.error) && (
+                {taskDialogError(item, selectedTask) && (() => {
+                  const current = currentDialogTask(item, selectedTask)
+                  const tone = errorPanelTone(current.rawStatus)
+                  const fullError = taskDialogError(item, selectedTask)
+                  const summary = current.progressMessage || current.error || "-"
+                  return (
                   <TabsContent value="error" className="mt-4">
-                    <div className="rounded-lg bg-destructive/10 border border-destructive/20 p-4">
+                    <div className={tone.wrap}>
                       <div className="flex items-start gap-3">
-                        <AlertCircle className="h-5 w-5 text-destructive mt-0.5" />
-                        <div>
-                          <p className="font-medium text-destructive">
-                            任务执行失败
-                          </p>
-                          <p className="mt-1 text-sm text-muted-foreground">
-                            {selectedTask?.error || item.error}
-                          </p>
+                        <AlertCircle className={`mt-0.5 h-5 w-5 ${tone.icon}`} />
+                        <div className="min-w-0 flex-1 space-y-3">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className={`font-medium ${tone.title}`}>
+                              {errorStatusLabel(current.rawStatus)}
+                            </p>
+                            {current.errorCode && (
+                              <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${tone.code}`}>
+                                {current.errorCode}
+                              </span>
+                            )}
+                          </div>
+                          <div className="grid gap-3 text-sm sm:grid-cols-2">
+                            <div>
+                              <p className="text-xs text-muted-foreground">当前状态</p>
+                              <p className="mt-1 font-medium">{current.statusLabel}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-muted-foreground">结束时间</p>
+                              <p className="mt-1 font-medium">{current.completedAt || "-"}</p>
+                            </div>
+                          </div>
+                          <div>
+                            <p className="text-xs text-muted-foreground">阶段摘要</p>
+                            <p className="mt-1 text-sm text-card-foreground">{summary}</p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-muted-foreground">完整错误信息</p>
+                            <pre className="mt-1 max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-md bg-background/80 p-3 text-xs text-card-foreground">
+                              {fullError}
+                            </pre>
+                          </div>
                         </div>
                       </div>
                     </div>
                   </TabsContent>
-                )}
+                  )
+                })()}
               </Tabs>
               <div className="mt-4 grid grid-cols-2 gap-4 text-sm">
                 <div>
@@ -474,7 +563,7 @@ export default function TasksPage() {
               </div>
             </DialogContent>
           </Dialog>
-          {item.status === "error" && item.rawStatus === "FAILED" && (
+          {(item.rawStatus === "FAILED" || item.rawStatus === "TIMEOUT") && (
             <Button
               variant="ghost"
               size="icon"
@@ -509,7 +598,7 @@ export default function TasksPage() {
 
           <TabsContent value="tasks" className="space-y-6">
             {/* Stats */}
-            <div className="grid gap-4 md:grid-cols-4">
+            <div className="grid gap-4 md:grid-cols-5">
               {stats.map((stat) => (
                 <div
                   key={stat.label}
@@ -551,6 +640,7 @@ export default function TasksPage() {
                   <SelectItem value="active">已完成</SelectItem>
                   <SelectItem value="pending">生成中</SelectItem>
                   <SelectItem value="error">失败</SelectItem>
+                  <SelectItem value="timeout">超时</SelectItem>
                 </SelectContent>
               </Select>
             </div>

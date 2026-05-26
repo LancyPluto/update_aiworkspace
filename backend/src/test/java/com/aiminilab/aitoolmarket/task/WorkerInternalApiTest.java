@@ -165,6 +165,43 @@ class WorkerInternalApiTest {
     }
 
     @Test
+    void workerModelTimeoutMarksTaskTimeout() throws Exception {
+        String adminToken = login("/api/admin/v1/auth/login", "admin");
+        Long toolId = createTool(adminToken, "worker_timeout_tool", 1);
+        publishTool(adminToken, toolId);
+        String userToken = login("/api/v1/auth/login", "user1");
+        Long taskId = createTask(userToken, "worker_timeout_tool");
+
+        String processingBody = """
+                                {
+                                  "progress": 35,
+                                  "progressMessage": "AI is generating"
+                                }
+                                """;
+        mockMvc.perform(signed(post("/api/internal/v1/tasks/{taskId}/processing", taskId), "POST",
+                        "/api/internal/v1/tasks/%d/processing".formatted(taskId), processingBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(processingBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("PROCESSING"));
+
+        String failedBody = """
+                                {
+                                  "errorCode": "MODEL_TIMEOUT",
+                                  "errorMessage": "model request timed out"
+                                }
+                                """;
+        mockMvc.perform(signed(post("/api/internal/v1/tasks/{taskId}/failed", taskId), "POST",
+                        "/api/internal/v1/tasks/%d/failed".formatted(taskId), failedBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(failedBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("TIMEOUT"))
+                .andExpect(jsonPath("$.data.progress").value(100))
+                .andExpect(jsonPath("$.data.progressMessage").value("任务超时：MODEL_TIMEOUT"));
+    }
+
+    @Test
     void workerFailedStatusAcceptsLongProviderErrorMessage() throws Exception {
         String adminToken = login("/api/admin/v1/auth/login", "admin");
         Long toolId = createTool(adminToken, "worker_long_failed_tool", 1);

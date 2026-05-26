@@ -74,7 +74,7 @@ export function DataTable<T extends Record<string, unknown>>({
 
 // 状态徽章组件
 interface StatusBadgeProps {
-  status: "active" | "inactive" | "pending" | "error"
+  status: "active" | "inactive" | "pending" | "error" | "timeout"
   label: string
 }
 
@@ -84,6 +84,7 @@ export function StatusBadge({ status, label }: StatusBadgeProps) {
     inactive: "bg-muted text-muted-foreground border-border",
     pending: "bg-chart-5/10 text-chart-5 border-chart-5/20",
     error: "bg-destructive/10 text-destructive border-destructive/20",
+    timeout: "bg-amber-500/10 text-amber-600 border-amber-500/20",
   }
 
   return (
@@ -97,7 +98,8 @@ export function StatusBadge({ status, label }: StatusBadgeProps) {
           status === "active" && "bg-accent",
           status === "inactive" && "bg-muted-foreground",
           status === "pending" && "bg-chart-5",
-          status === "error" && "bg-destructive"
+          status === "error" && "bg-destructive",
+          status === "timeout" && "bg-amber-500"
         )}
       />
       {label}

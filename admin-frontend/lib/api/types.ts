@@ -165,6 +165,8 @@ export interface AdminTaskApiPayload {
   status: string
   progress: number
   progressMessage?: string | null
+  errorCode?: string | null
+  errorMessage?: string | null
   params?: unknown
   result?: TaskResult | null
   createdAt: string

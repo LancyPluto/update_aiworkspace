@@ -19,6 +19,7 @@ public final class TaskStateMachine {
 
     private static final Set<String> TERMINAL_STATUSES = Set.of(
             TaskStatus.SUCCESS.name(),
+            TaskStatus.FAILED.name(),
             TaskStatus.TIMEOUT.name(),
             TaskStatus.CANCELLED.name()
     );
