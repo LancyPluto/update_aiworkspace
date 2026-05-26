@@ -18,6 +18,7 @@ import { ref, onMounted, computed, watch } from "vue"
 import { fetchCreditAccount } from "@/api/creditApi"
 import type { CreditAccount } from "@/api/types"
 import { useAuthStore } from "@/store/authStore"
+import MemberBadge from "@/components/MemberBadge/MemberBadge.vue"
 
 withDefaults(
   defineProps<{
@@ -131,7 +132,36 @@ const creditPercent = computed(() => {
   return Math.round((credit.value.available / (credit.value.totalGranted || 1)) * 100)
 })
 
+const availableCredits = computed(() => credit.value?.available ?? null)
+
+async function loadCreditAccount() {
+  if (!auth.isLoggedIn || !auth.token) {
+    credit.value = null
+    return
+  }
+  try {
+    credit.value = await fetchCreditAccount({ token: auth.token })
+  } catch {
+    // 静默处理
+  }
+}
+
 watch(() => route.path, ensureActiveGroupExpanded, { immediate: true })
+
+watch(
+  () => auth.isLoggedIn,
+  (loggedIn) => {
+    if (loggedIn) void loadCreditAccount()
+    else credit.value = null
+  },
+)
+
+watch(
+  () => route.path,
+  (path) => {
+    if (path === "/billing" && auth.isLoggedIn) void loadCreditAccount()
+  },
+)
 
 onMounted(async () => {
   const saved = localStorage.getItem(SIDEBAR_OPEN_KEY)
@@ -151,24 +181,17 @@ onMounted(async () => {
   }
 
   ensureActiveGroupExpanded()
-
-  if (auth.isLoggedIn && auth.token) {
-    try {
-      credit.value = await fetchCreditAccount({ token: auth.token })
-    } catch {
-      // 静默处理
-    }
-  }
+  await loadCreditAccount()
 })
 </script>
 
 <template>
-  <div class="flex min-h-screen bg-background text-foreground">
+  <div class="flex h-screen overflow-hidden bg-background text-foreground">
     <aside
       class="fixed inset-y-0 left-0 z-40 hidden w-60 shrink-0 flex-col border-r border-border bg-card"
       :class="sidebarOpen ? 'lg:flex' : 'lg:hidden'"
     >
-      <div class="flex h-16 items-center gap-2.5 px-5 border-b border-border">
+      <div class="flex h-16 shrink-0 items-center gap-2.5 border-b border-border px-5">
         <img src="/logo.svg" alt="AI Tool Market" class="h-9 w-9 rounded-lg object-contain" />
         <div class="flex flex-col leading-tight">
           <span class="text-sm font-semibold">智擎 AI</span>
@@ -286,7 +309,10 @@ onMounted(async () => {
         </div>
         <div class="ml-auto flex items-center gap-3">
           <template v-if="auth.isLoggedIn">
-            <span class="text-xs text-muted-foreground">{{ auth.user?.nickname || auth.user?.username }}</span>
+            <div class="flex items-center gap-2">
+              <MemberBadge :available="availableCredits" />
+              <span class="text-xs text-muted-foreground">{{ auth.user?.nickname || auth.user?.username }}</span>
+            </div>
             <button
               type="button"
               class="text-xs text-muted-foreground hover:text-foreground"
@@ -305,7 +331,7 @@ onMounted(async () => {
           </template>
         </div>
       </header>
-      <main class="flex-1 overflow-x-hidden">
+      <main class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
         <slot />
       </main>
     </div>

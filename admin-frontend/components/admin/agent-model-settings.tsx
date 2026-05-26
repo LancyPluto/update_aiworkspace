@@ -75,6 +75,18 @@ type ModelConfigWithTest = AgentModelConfig & {
   lastTestSuccess?: boolean | null
 }
 
+type ModalityFilter = "ALL" | "TEXT" | "IMAGE" | "VIDEO" | "AUDIO" | "MULTIMODAL" | "OTHER"
+
+const modalityFilters: Array<{ value: ModalityFilter; label: string }> = [
+  { value: "ALL", label: "全部" },
+  { value: "TEXT", label: "文本" },
+  { value: "IMAGE", label: "图片" },
+  { value: "VIDEO", label: "视频" },
+  { value: "AUDIO", label: "音频" },
+  { value: "MULTIMODAL", label: "多模态" },
+  { value: "OTHER", label: "其他" },
+]
+
 const FALLBACK_PROVIDER: ModelProviderDescriptor = {
   code: "openai_compatible",
   label: "OpenAI compatible",
@@ -248,6 +260,52 @@ function detectModelVendor(config: AgentModelConfig): VendorMeta {
   })
 }
 
+function resolvedCapabilities(config: AgentModelConfig, catalog: ModelProviderDescriptor[]) {
+  if (config.capabilities && config.capabilities.length > 0) {
+    return config.capabilities
+  }
+  return pickMeta(catalog, config.provider).capabilities
+}
+
+function capabilityModalities(capabilities: string[]): ModalityFilter[] {
+  const normalized = capabilities.map((capability) => capability.trim().toUpperCase()).filter(Boolean)
+  const result = new Set<ModalityFilter>()
+
+  normalized.forEach((capability) => {
+    if (capability.includes("TEXT") || capability.includes("CHAT") || capability.includes("LLM")) {
+      result.add("TEXT")
+    }
+    if (capability.includes("IMAGE")) {
+      result.add("IMAGE")
+    }
+    if (capability.includes("VIDEO") || capability.includes("DIGITAL_HUMAN")) {
+      result.add("VIDEO")
+    }
+    if (capability.includes("AUDIO") || capability.includes("SPEECH") || capability.includes("VOICE")) {
+      result.add("AUDIO")
+    }
+    if (capability.includes("MULTIMODAL")) {
+      result.add("MULTIMODAL")
+    }
+  })
+
+  if (result.size > 1) {
+    result.add("MULTIMODAL")
+  }
+  if (result.size === 0) {
+    result.add("OTHER")
+  }
+
+  return Array.from(result)
+}
+
+function capabilityModalityLabel(capabilities: string[]) {
+  const all = capabilityModalities(capabilities)
+  const modalities = all.length > 1 ? all.filter((item) => item !== "MULTIMODAL") : all
+  const labels = modalities.map((item) => modalityFilters.find((filter) => filter.value === item)?.label || item)
+  return labels.join(" / ")
+}
+
 function VendorIcon({ vendor, size = "md" }: { vendor: VendorMeta; size?: "md" | "sm" }) {
   const box = size === "sm" ? "h-11 w-11" : "h-14 w-14"
   const img = size === "sm" ? "h-8 w-8" : "h-10 w-10"
@@ -288,6 +346,7 @@ export function AgentModelSettings({ refreshKey = 0 }: AgentModelSettingsProps) 
   const [error, setError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
   const [testResult, setTestResult] = useState<AgentModelConfigTestResult | null>(null)
+  const [modalityFilter, setModalityFilter] = useState<ModalityFilter>("ALL")
 
   const catalogResolved = providerCatalog.length > 0 ? providerCatalog : [FALLBACK_PROVIDER]
 
@@ -304,6 +363,26 @@ export function AgentModelSettings({ refreshKey = 0 }: AgentModelSettingsProps) 
     [form.displayName, form.modelName, form.configCode, form.baseUrl, form.provider],
   )
   const selectedId = dialogOpen ? form.id : null
+  const modalityCounts = useMemo(() => {
+    const counts = modalityFilters.reduce<Record<ModalityFilter, number>>((acc, filter) => {
+      acc[filter.value] = 0
+      return acc
+    }, {} as Record<ModalityFilter, number>)
+    counts.ALL = configs.length
+    configs.forEach((config) => {
+      const modalities = capabilityModalities(resolvedCapabilities(config, catalogResolved))
+      modalities.forEach((modality) => {
+        counts[modality] = (counts[modality] ?? 0) + 1
+      })
+    })
+    return counts
+  }, [catalogResolved, configs])
+  const filteredConfigs = useMemo(() => {
+    if (modalityFilter === "ALL") return configs
+    return configs.filter((config) =>
+      capabilityModalities(resolvedCapabilities(config, catalogResolved)).includes(modalityFilter),
+    )
+  }, [catalogResolved, configs, modalityFilter])
 
   async function loadConfigs(nextSelectedId?: number | null) {
     setLoading(true)
@@ -528,14 +607,35 @@ export function AgentModelSettings({ refreshKey = 0 }: AgentModelSettingsProps) 
         <CardHeader className="flex flex-row items-start justify-between gap-3">
           <div>
             <CardTitle>已配置模型</CardTitle>
-            <CardDescription>共 {configs.length} 个模型 API，点击卡片可编辑。</CardDescription>
+            <CardDescription>
+              共 {configs.length} 个模型 API
+              {modalityFilter === "ALL" ? "" : `，当前筛选 ${filteredConfigs.length} 个`}，点击卡片可编辑。
+            </CardDescription>
           </div>
           <Button className="gap-2" onClick={createConfig}>
             <Plus className="h-4 w-4" />
             新增模型
           </Button>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
+          <div className="flex flex-wrap gap-2">
+            {modalityFilters.map((filter) => (
+              <Button
+                key={filter.value}
+                type="button"
+                variant={modalityFilter === filter.value ? "default" : "outline"}
+                size="sm"
+                className="gap-2"
+                onClick={() => setModalityFilter(filter.value)}
+              >
+                {filter.label}
+                <Badge variant={modalityFilter === filter.value ? "secondary" : "outline"}>
+                  {modalityCounts[filter.value] ?? 0}
+                </Badge>
+              </Button>
+            ))}
+          </div>
+
           {loading ? (
             <p className="text-sm text-muted-foreground">加载中...</p>
           ) : configs.length === 0 ? (
@@ -544,10 +644,17 @@ export function AgentModelSettings({ refreshKey = 0 }: AgentModelSettingsProps) 
               <p className="font-medium">暂无模型配置</p>
               <p className="mt-1 text-sm text-muted-foreground">保存真实配置前，后端会使用内置 Mock 配置。</p>
             </div>
+          ) : filteredConfigs.length === 0 ? (
+            <div className="flex min-h-48 flex-col items-center justify-center rounded-xl border border-dashed bg-muted/20 p-8 text-center">
+              <ServerCog className="mb-3 h-10 w-10 text-muted-foreground" />
+              <p className="font-medium">当前模态下暂无模型</p>
+              <p className="mt-1 text-sm text-muted-foreground">可以切换筛选条件，或新增支持该模态的模型配置。</p>
+            </div>
           ) : (
             <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
-              {configs.map((config) => {
+              {filteredConfigs.map((config) => {
                 const vendor = detectModelVendor(config)
+                const capabilities = resolvedCapabilities(config, catalogResolved)
                 return (
                   <div
                     key={config.id}
@@ -575,6 +682,7 @@ export function AgentModelSettings({ refreshKey = 0 }: AgentModelSettingsProps) 
                         <div className="mt-3 flex flex-wrap items-center gap-2">
                           <Badge variant="outline">{vendor.shortName}</Badge>
                           <Badge variant="secondary">{pickMeta(catalogResolved, config.provider).label}</Badge>
+                          <Badge variant="outline">{capabilityModalityLabel(capabilities)}</Badge>
                           <Badge variant={config.enabled ? "default" : "secondary"}>{config.enabled ? "启用" : "停用"}</Badge>
                           {testStatusBadge(config)}
                         </div>

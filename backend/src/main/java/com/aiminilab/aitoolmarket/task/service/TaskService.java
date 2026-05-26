@@ -19,6 +19,8 @@ public interface TaskService {
 
     TaskStatusResponse cancel(Long userId, Long taskId);
 
+    void delete(Long userId, Long taskId);
+
     TaskStatusResponse regenerate(Long userId, Long taskId, RegenerateTaskRequest request);
 
     PageResponse<TaskDetailResponse> adminList(String status, String toolCode, Long userId, Integer pageNo, Integer pageSize);

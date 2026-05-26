@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue"
 import type { Capability } from "@/api/aiToolTypes"
-import type { ToolField } from "@/api/types"
+import type { TaskDetail, ToolField } from "@/api/types"
 import { uploadChatFile } from "@/api/aiToolApi"
 import { getApiOrigin } from "@/api/client"
+import { fetchTasks } from "@/api/taskApi"
 import { useAuthStore } from "@/store/authStore"
-import { ImageUp, Loader2, Mic, Paperclip, UploadCloud, X } from "lucide-vue-next"
+import { buildTaskResultBlocks } from "@/utils/taskResultBlocks"
+import { FileAudio, FileVideo, ImageIcon, ImageUp, Library, Loader2, Mic, Paperclip, UploadCloud, X } from "lucide-vue-next"
 
 export interface PendingAttachment {
   localId: string
@@ -27,6 +29,16 @@ export interface CapabilityState {
 }
 
 type FieldOption = string | { label: string; value: string; promptPrefix?: string }
+type MaterialKind = "image" | "video" | "audio" | "file"
+
+interface MaterialAsset {
+  id: string
+  kind: MaterialKind
+  url: string
+  title: string
+  subtitle: string
+  previewUrl?: string
+}
 
 const props = defineProps<{
   capabilities: Capability[]
@@ -41,6 +53,11 @@ const state = ref<CapabilityState>({
 })
 const auth = useAuthStore()
 const fieldUploads = ref<Record<string, { uploading?: boolean; error?: string; fileName?: string }>>({})
+const materialPickerOpen = ref(false)
+const materialPickerField = ref<ToolField | null>(null)
+const materialLoading = ref(false)
+const materialError = ref("")
+const materialAssets = ref<MaterialAsset[]>([])
 
 const configuredFields = computed(() => (props.fields || []).filter((field) => field.fieldKey !== props.coreFieldKey))
 const imageCapability = computed(() => props.capabilities.find((c) => c.type === "imageGeneration"))
@@ -48,6 +65,7 @@ const fileCapability = computed(() => props.capabilities.find((c) => c.type === 
 const webSearchCapability = computed(() => props.capabilities.find((c) => c.type === "webSearch"))
 const codeCapability = computed(() => props.capabilities.find((c) => c.type === "codeExecution"))
 const voiceCapability = computed(() => props.capabilities.find((c) => c.type === "voiceInput"))
+const activeMaterialKind = computed(() => (materialPickerField.value ? materialKindForField(materialPickerField.value) : "file"))
 
 const aspectRatios = computed(() => {
   const config = imageCapability.value?.config
@@ -148,8 +166,124 @@ function normalizeResourceUrl(value: string): string {
 }
 
 function imagePreviewUrl(field: ToolField): string {
-  if (field.fieldType !== "image") return ""
+  if (materialKindForField(field) !== "image") return ""
   return normalizeResourceUrl(strField(field.fieldKey))
+}
+
+function materialKindForField(field: ToolField): MaterialKind {
+  if (field.fieldType === "image") return "image"
+  const text = `${field.fieldKey} ${field.fieldName} ${field.placeholder || ""}`.toLowerCase()
+  if (/image|img|picture|photo|frame|cover|avatar|poster|图片|图像|照片|帧|封面|首图/.test(text)) return "image"
+  if (/audio|voice|sound|speech|music|音频|语音|声音|音乐/.test(text)) return "audio"
+  if (/video|clip|movie|视频|短片|影片/.test(text)) return "video"
+  return "file"
+}
+
+function materialKindLabel(kind: MaterialKind): string {
+  if (kind === "image") return "图片"
+  if (kind === "video") return "视频"
+  if (kind === "audio") return "音频"
+  return "素材"
+}
+
+function uploadAccept(field: ToolField): string | undefined {
+  const kind = materialKindForField(field)
+  if (kind === "image") return "image/*"
+  if (kind === "video") return "video/*"
+  if (kind === "audio") return "audio/*"
+  return undefined
+}
+
+function formatTaskTime(value?: string | null): string {
+  if (!value) return ""
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
+}
+
+function createMaterialAssets(task: TaskDetail, targetKind: MaterialKind): MaterialAsset[] {
+  const content = task.result?.contentText || ""
+  if (!content.trim()) return []
+  const blocks = buildTaskResultBlocks(content, task)
+  const taskTitle = task.toolName || task.toolCode || "历史任务"
+  const subtitle = `${task.taskNo || `#${task.taskId}`} · ${formatTaskTime(task.finishedAt || task.createdAt)}`
+  const assets: MaterialAsset[] = []
+
+  for (const block of blocks) {
+    if (block.type === "image" && (targetKind === "image" || targetKind === "file")) {
+      block.images.forEach((image, index) => {
+        assets.push({
+          id: `${task.taskId}-image-${index}`,
+          kind: "image",
+          url: image.url,
+          previewUrl: image.url,
+          title: image.label || taskTitle,
+          subtitle,
+        })
+      })
+    } else if (block.type === "video" && (targetKind === "video" || targetKind === "file")) {
+      assets.push({
+        id: `${task.taskId}-video`,
+        kind: "video",
+        url: block.url,
+        title: block.title || taskTitle,
+        subtitle,
+      })
+    } else if (block.type === "audio" && (targetKind === "audio" || targetKind === "file")) {
+      assets.push({
+        id: `${task.taskId}-audio`,
+        kind: "audio",
+        url: block.url,
+        title: block.title || taskTitle,
+        subtitle,
+      })
+    }
+  }
+
+  return assets
+}
+
+async function openMaterialPicker(field: ToolField) {
+  materialPickerField.value = field
+  materialPickerOpen.value = true
+  materialLoading.value = true
+  materialError.value = ""
+  materialAssets.value = []
+  const targetKind = materialKindForField(field)
+  try {
+    const page = await fetchTasks({
+      token: auth.token,
+      query: { pageNo: 1, pageSize: 80, status: "SUCCESS" },
+    })
+    const seen = new Set<string>()
+    const assets = page.list.flatMap((task) => createMaterialAssets(task, targetKind)).filter((asset) => {
+      const key = `${asset.kind}:${asset.url}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+    materialAssets.value = assets
+  } catch (err) {
+    materialError.value = (err as Error).message || "素材加载失败"
+  } finally {
+    materialLoading.value = false
+  }
+}
+
+function closeMaterialPicker() {
+  materialPickerOpen.value = false
+  materialPickerField.value = null
+}
+
+function selectMaterialAsset(asset: MaterialAsset) {
+  const field = materialPickerField.value
+  if (!field) return
+  setField(field.fieldKey, asset.url)
+  fieldUploads.value = {
+    ...fieldUploads.value,
+    [field.fieldKey]: { uploading: false, fileName: asset.title },
+  }
+  closeMaterialPicker()
 }
 
 async function handleFieldUpload(field: ToolField, files: FileList | File[] | null) {
@@ -300,24 +434,36 @@ defineExpose({
         </label>
 
         <div v-else-if="field.fieldType === 'image' || field.fieldType === 'file'" class="space-y-1">
-          <label
-            class="flex h-7 cursor-pointer items-center gap-2 rounded-lg border border-dashed border-border/60 bg-background px-2 text-xs text-muted-foreground hover:border-primary/60"
+          <div
+            class="flex items-center gap-1"
             @dragover.prevent
             @drop.prevent="handleFieldUpload(field, ($event as DragEvent).dataTransfer?.files || null)"
           >
-            <input
-              type="file"
-              class="hidden"
-              :accept="field.fieldType === 'image' ? 'image/*' : undefined"
-              @change="handleFieldUpload(field, ($event.target as HTMLInputElement).files)"
-            />
-            <Loader2 v-if="uploadState(field.fieldKey).uploading" class="h-3.5 w-3.5 animate-spin" />
-            <ImageUp v-else-if="field.fieldType === 'image'" class="h-3.5 w-3.5" />
-            <UploadCloud v-else class="h-3.5 w-3.5" />
-            <span class="truncate text-xs">
-              {{ uploadState(field.fieldKey).uploading ? "上传中..." : (uploadState(field.fieldKey).fileName || "上传文件") }}
-            </span>
-          </label>
+            <label
+              class="flex h-7 min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg border border-dashed border-border/60 bg-background px-2 text-xs text-muted-foreground hover:border-primary/60"
+            >
+              <input
+                type="file"
+                class="hidden"
+                :accept="uploadAccept(field)"
+                @change="handleFieldUpload(field, ($event.target as HTMLInputElement).files)"
+              />
+              <Loader2 v-if="uploadState(field.fieldKey).uploading" class="h-3.5 w-3.5 animate-spin" />
+              <ImageUp v-else-if="materialKindForField(field) === 'image'" class="h-3.5 w-3.5" />
+              <UploadCloud v-else class="h-3.5 w-3.5" />
+              <span class="truncate text-xs">
+                {{ uploadState(field.fieldKey).uploading ? "上传中..." : (uploadState(field.fieldKey).fileName || "上传文件") }}
+              </span>
+            </label>
+            <button
+              type="button"
+              class="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-border/60 bg-background text-muted-foreground hover:border-primary/50 hover:text-primary"
+              :title="`从历史${materialKindLabel(materialKindForField(field))}素材中选择`"
+              @click="openMaterialPicker(field)"
+            >
+              <Library class="h-3.5 w-3.5" />
+            </button>
+          </div>
           <div v-if="strField(field.fieldKey)" class="flex items-center gap-1">
             <img
               v-if="imagePreviewUrl(field)"
@@ -391,6 +537,70 @@ defineExpose({
         <Mic class="h-3.5 w-3.5" />
         语音
       </button>
+    </div>
+
+    <div
+      v-if="materialPickerOpen"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/35 px-4 py-6"
+      @click.self="closeMaterialPicker"
+    >
+      <div class="flex max-h-[78vh] w-full max-w-3xl flex-col rounded-2xl border border-border bg-background shadow-2xl">
+        <div class="flex items-center justify-between border-b border-border px-5 py-4">
+          <div>
+            <h3 class="text-base font-semibold text-foreground">
+              选择{{ materialKindLabel(activeMaterialKind) }}素材
+            </h3>
+            <p class="mt-1 text-xs text-muted-foreground">
+              来自你已生成成功的历史任务，选择后会填入当前上传字段。
+            </p>
+          </div>
+          <button
+            type="button"
+            class="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+            @click="closeMaterialPicker"
+          >
+            <X class="h-4 w-4" />
+          </button>
+        </div>
+
+        <div class="min-h-[220px] overflow-y-auto p-5">
+          <div v-if="materialLoading" class="flex h-48 items-center justify-center gap-2 text-sm text-muted-foreground">
+            <Loader2 class="h-4 w-4 animate-spin" />
+            正在加载素材库...
+          </div>
+          <div v-else-if="materialError" class="flex h-48 items-center justify-center text-sm text-destructive">
+            {{ materialError }}
+          </div>
+          <div v-else-if="materialAssets.length === 0" class="flex h-48 items-center justify-center text-sm text-muted-foreground">
+            暂无可用{{ materialKindLabel(activeMaterialKind) }}素材
+          </div>
+          <div v-else class="grid grid-cols-2 gap-3 md:grid-cols-3">
+            <button
+              v-for="asset in materialAssets"
+              :key="asset.id"
+              type="button"
+              class="group overflow-hidden rounded-xl border border-border bg-card text-left transition hover:border-primary/60 hover:shadow-md"
+              @click="selectMaterialAsset(asset)"
+            >
+              <div class="flex aspect-[4/3] items-center justify-center bg-muted/40">
+                <img
+                  v-if="asset.kind === 'image' && asset.previewUrl"
+                  :src="asset.previewUrl"
+                  alt=""
+                  class="h-full w-full object-cover"
+                />
+                <FileVideo v-else-if="asset.kind === 'video'" class="h-9 w-9 text-muted-foreground group-hover:text-primary" />
+                <FileAudio v-else-if="asset.kind === 'audio'" class="h-9 w-9 text-muted-foreground group-hover:text-primary" />
+                <ImageIcon v-else class="h-9 w-9 text-muted-foreground group-hover:text-primary" />
+              </div>
+              <div class="space-y-1 p-3">
+                <p class="truncate text-sm font-medium text-foreground">{{ asset.title }}</p>
+                <p class="truncate text-xs text-muted-foreground">{{ asset.subtitle }}</p>
+              </div>
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </template>
