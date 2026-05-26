@@ -12,6 +12,7 @@ import {
   Trash2,
 } from "lucide-vue-next"
 import AppShell from "@/components/AppShell.vue"
+import { confirmDelete } from "@/composables/useConfirmDelete"
 import { deleteTask, fetchTasks } from "@/api/taskApi"
 import type { TaskDetail } from "@/api/types"
 import type { ResultBlock } from "@/types/result"
@@ -146,7 +147,11 @@ function textPreview(item: MaterialItem) {
 async function removeMaterial(item: MaterialItem) {
   if (deletingTaskId.value) return
   const name = item.task.toolName || item.task.taskNo
-  if (!confirm(`确定删除「${name}」这个素材吗？删除后素材库和任务历史中将不再显示。`)) return
+  const confirmed = await confirmDelete({
+    title: "删除素材",
+    description: `确定删除「${name}」这个素材吗？删除后素材库和任务历史中将不再显示。`,
+  })
+  if (!confirmed) return
   deletingTaskId.value = item.task.taskId
   error.value = ""
   try {
