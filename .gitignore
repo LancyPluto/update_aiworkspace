@@ -20,6 +20,18 @@ engines/banana-slides/backend/.temp/
 # local planning docs
 项目规划/
 
+# development / design docs (keep local only, do not commit)
+/docs/**/*.md
+/docs/**/*.docx
+/engines/banana-slides/docs/
+/模型配置.md
+/模型配置后端文档.md
+/agent开发.md
+/agent开发_改进版.md
+/mergeD1.md
+/PROJECT_REVIEW_README.md
+/task_progress.md
+
 # local tool bundles
 .tools/
 
