@@ -32,6 +32,7 @@ public interface TaskMapper extends BaseMapper<AiTask> {
             FROM ai_tasks t
             JOIN ai_tools tool ON tool.id = t.tool_id
             WHERE t.id = #{taskId} AND t.user_id = #{userId}
+              AND COALESCE(t.user_deleted, 0) = 0
             """)
     AiTask selectByIdAndUserId(@Param("taskId") Long taskId, @Param("userId") Long userId);
 
@@ -57,6 +58,7 @@ public interface TaskMapper extends BaseMapper<AiTask> {
             FROM ai_tasks t
             JOIN ai_tools tool ON tool.id = t.tool_id
             WHERE t.user_id = #{userId}
+              AND COALESCE(t.user_deleted, 0) = 0
             <if test="idempotencyKey != null and idempotencyKey.trim() != ''">
               AND t.idempotency_key = #{idempotencyKey}
             </if>
@@ -80,6 +82,7 @@ public interface TaskMapper extends BaseMapper<AiTask> {
             FROM ai_tasks t
             JOIN ai_tools tool ON tool.id = t.tool_id
             WHERE t.user_id = #{userId}
+              AND COALESCE(t.user_deleted, 0) = 0
             <if test="status != null and status.trim() != ''">
               AND t.status = #{status}
             </if>
@@ -102,6 +105,7 @@ public interface TaskMapper extends BaseMapper<AiTask> {
             FROM ai_tasks t
             JOIN ai_tools tool ON tool.id = t.tool_id
             WHERE t.user_id = #{userId}
+              AND COALESCE(t.user_deleted, 0) = 0
             <if test="status != null and status.trim() != ''">
               AND t.status = #{status}
             </if>
@@ -260,6 +264,17 @@ public interface TaskMapper extends BaseMapper<AiTask> {
             """)
     int cancel(@Param("taskId") Long taskId,
                @Param("expectedStatuses") List<String> expectedStatuses);
+
+    @Update("""
+            UPDATE ai_tasks
+            SET user_deleted = 1,
+                user_deleted_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{taskId}
+              AND user_id = #{userId}
+              AND COALESCE(user_deleted, 0) = 0
+            """)
+    int softDeleteForUser(@Param("taskId") Long taskId, @Param("userId") Long userId);
 
     @Insert("""
             INSERT INTO ai_result_resources

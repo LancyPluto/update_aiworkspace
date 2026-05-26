@@ -107,3 +107,14 @@ export async function cancelTask(
     token: options?.token,
   })
 }
+
+/** DELETE /api/v1/tasks/{taskId} - 从当前用户素材库/任务列表隐藏任务 */
+export async function deleteTask(
+  taskId: number | string,
+  options?: { token?: string | null },
+): Promise<void> {
+  const id = encodeURIComponent(String(taskId))
+  return apiRequest<void>("DELETE", `/api/v1/tasks/${id}`, {
+    token: options?.token,
+  })
+}

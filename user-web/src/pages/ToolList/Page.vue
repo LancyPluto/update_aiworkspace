@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from "vue"
 import { RouterLink, useRoute } from "vue-router"
 import { Film, Sparkles } from "lucide-vue-next"
 import AppShell from "@/components/AppShell.vue"
+import CreditCostBadge from "@/components/CreditCostBadge/CreditCostBadge.vue"
 import { getApiOrigin } from "@/api/client"
 import { fetchEnabledAITools } from "@/api/aiToolApi"
 import type { AITool } from "@/api/aiToolTypes"
@@ -205,11 +206,8 @@ onMounted(() => {
               <p class="line-clamp-2 min-h-[40px] text-sm text-muted-foreground">
                 {{ tool.description || (isPptWorkspaceTool(tool.id) ? "进入 PPT 工作台" : "点击进入对话") }}
               </p>
-              <div class="mt-4 flex items-center justify-between">
-                <span
-                  class="h-1.5 w-16 rounded-full"
-                  :style="{ backgroundColor: tool.primaryColor || 'hsl(var(--primary))' }"
-                />
+              <div class="mt-4 flex flex-col items-start gap-2">
+                <CreditCostBadge :cost="tool.estimatedCreditCost" />
                 <span class="text-xs font-medium text-primary">开始使用</span>
               </div>
             </div>
@@ -232,9 +230,12 @@ onMounted(() => {
             <p class="mt-2 line-clamp-2 min-h-[40px] text-center text-xs text-muted-foreground">
               {{ tool.description || (isPptWorkspaceTool(tool.id) ? "进入 PPT 工作台" : "点击进入对话") }}
             </p>
-            <span class="mt-4 rounded-full bg-secondary px-2.5 py-1 text-[11px] text-muted-foreground">
-              {{ modalityLabel(tool.outputModality) }}
-            </span>
+            <div class="mt-4 flex flex-wrap items-center justify-center gap-2">
+              <span class="rounded-full bg-secondary px-2.5 py-1 text-[11px] text-muted-foreground">
+                {{ modalityLabel(tool.outputModality) }}
+              </span>
+              <CreditCostBadge :cost="tool.estimatedCreditCost" />
+            </div>
           </div>
         </RouterLink>
       </div>
