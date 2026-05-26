@@ -18,6 +18,7 @@ import {
 import CapabilityControls from "./CapabilityControls.vue"
 import ChatSessionSidebar from "./ChatSessionSidebar.vue"
 import ResultRenderer from "@/components/ResultRenderer/ResultRenderer.vue"
+import { confirmDelete } from "@/composables/useConfirmDelete"
 import { getApiOrigin } from "@/api/client"
 import {
   createChatSession,
@@ -106,17 +107,15 @@ const runningTaskTimers = new Map<number, ReturnType<typeof setTimeout>>()
 
 // ----- 输入框放大与自动扩高相关 -----
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
-const isExpanded = ref(false) // 手动放大模式
+const isExpanded = ref(false)
 
 function autoResizeTextarea() {
   const el = textareaRef.value
   if (!el) return
   if (isExpanded.value) {
-    // 手动放大模式：固定高度 120px，超出滚动
     el.style.height = '120px'
     el.style.overflowY = 'auto'
   } else {
-    // 自动模式：根据内容高度调整，最大 200px
     el.style.height = 'auto'
     const scrollH = el.scrollHeight
     const newHeight = Math.min(scrollH, 200)
@@ -137,9 +136,9 @@ const usesTaskChat = computed(() => !isMarketplaceChat.value)
 
 const showWelcome = computed(() => messages.value.length === 0 && !sending.value && !switchingSession.value)
 const coreField = computed(() => (tool.value?.fields || []).find((field) => isCoreField(field)) || null)
+
 const inputPlaceholder = computed(() => {
-  if (!coreField.value) return "输入消息..."
-  return coreField.value.placeholder || `请输入${coreField.value.fieldName}`
+  return "请输入信息，Enter 发送，Shift+Enter 换行"
 })
 
 const chatIconUrl = computed(() => {
@@ -431,7 +430,6 @@ async function startNewSession() {
 async function removeSession(session: ChatSession, event: MouseEvent) {
   event.stopPropagation()
   if (deletingSessionId.value) return
-  if (!confirm(`确定删除「${session.title || "新对话"}」？`)) return
   deletingSessionId.value = session.id
   deleteSessionError.value = null
   try {
@@ -589,10 +587,15 @@ function startNewTaskWindow() {
   nextTick(() => autoResizeTextarea())
 }
 
-function removeTaskWindow(window: TaskWindow, event: MouseEvent) {
+async function removeTaskWindow(window: TaskWindow, event: MouseEvent) {
   event.stopPropagation()
   if (deletingTaskWindowId.value) return
-  if (!confirm(`确定删除「${window.title || "新窗口"}」？任务资产仍会保留在素材库。`)) return
+  const confirmed = await confirmDelete({
+    title: "删除窗口",
+    itemName: window.title || "新窗口",
+    warning: "任务资产仍会保留在素材库。",
+  })
+  if (!confirmed) return
   deletingTaskWindowId.value = window.id
   const wasActive = activeTaskWindowId.value === window.id
   const next = taskWindows.value.filter((item) => item.id !== window.id)
@@ -629,7 +632,7 @@ function appendTaskToActiveWindow(taskId: number, prompt: string, params: Record
     taskSnapshots: [...(window.taskSnapshots || []).filter((item) => item.taskId !== taskId), snapshot],
     updatedAt: Date.now(),
   }
-  setTaskWindows(taskWindows.value.map((item) => (item.id === nextWindow.id ? nextWindow : item)))
+  setTaskWindows(taskWindows.value.map((item) => item.id === nextWindow.id ? nextWindow : item))
 }
 
 function clearTaskPolling(taskId?: number) {
@@ -877,7 +880,6 @@ watch(
   },
 )
 
-// 监听输入内容变化，自动调整高度
 watch(inputText, () => {
   nextTick(() => autoResizeTextarea())
 })
@@ -1122,6 +1124,7 @@ onUnmounted(() => {
                   class="mt-3 flex items-center gap-3"
                 >
                   <button
+                    v-if="msg.failed"
                     type="button"
                     class="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
                     @click="regenerateFromAssistant(msg)"
@@ -1130,15 +1133,7 @@ onUnmounted(() => {
                     <RefreshCw class="h-3.5 w-3.5" />
                     重新生成
                   </button>
-                  <button
-                    v-if="msg.resultBlocks?.length"
-                    type="button"
-                    class="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-                    @click="exportMessageContent(msg.content)"
-                  >
-                    <Download class="h-3.5 w-3.5" />
-                    导出
-                  </button>
+                  
                 </div>
               </div>
 
@@ -1150,10 +1145,20 @@ onUnmounted(() => {
             </div>
           </div>
 
+          <!-- 输入框区域：已删除上传按钮 + 对齐完美 -->
           <div class="shrink-0 bg-gradient-to-t from-muted/70 via-muted/40 to-transparent px-6 pb-5 pt-3">
-            <div
-              class="mx-auto max-w-5xl rounded-2xl border border-border/80 bg-background/95 p-4 shadow-[0_18px_60px_rgba(15,23,42,0.12)] backdrop-blur"
-            >
+            <div class="mx-auto max-w-5xl rounded-2xl border border-border/80 bg-background/95 p-4 shadow-lg relative">
+             
+              <!-- 放大按钮 → 右上角 小尺寸 -->
+              <button
+                type="button"
+                class="absolute top-3 right-3 w-6 h-6 flex items-center justify-center text-muted-foreground hover:text-foreground"
+                @click="toggleExpand"
+              >
+                <Maximize2 v-if="!isExpanded" class="h-3 w-3" />
+                <Minimize2 v-else class="h-3 w-3" />
+              </button>
+
               <CapabilityControls
                 ref="capabilityRef"
                 :capabilities="tool.capabilities || []"
@@ -1162,29 +1167,24 @@ onUnmounted(() => {
                 :tool-id="tool.id"
                 class="mb-2"
               />
-              <div class="flex items-end gap-3">
+
+              <!-- 完美对齐：输入框 + 发送按钮 -->
+              <div class="flex items-center gap-3">
                 <div class="min-w-0 flex-1">
                   <textarea
                     ref="textareaRef"
                     v-model="inputText"
                     rows="1"
                     class="max-h-40 min-h-[56px] w-full resize-none rounded-xl border border-transparent bg-secondary/60 px-4 py-3 text-base leading-6 outline-none transition focus:border-primary/40 focus:bg-background placeholder:text-muted-foreground/70"
-                    :placeholder="inputPlaceholder"
+                    placeholder="请输入信息，Enter 发送，Shift+Enter 换行"
                     @keydown="handleKeydown"
                   ></textarea>
                 </div>
+
+                <!-- 发送按钮 -->
                 <button
                   type="button"
-                  class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-border bg-background text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
-                  @click="toggleExpand"
-                  title="展开输入框"
-                >
-                  <Maximize2 v-if="!isExpanded" class="h-4 w-4" />
-                  <Minimize2 v-else class="h-4 w-4" />
-                </button>
-                <button
-                  type="button"
-                  class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-primary text-white shadow-sm transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-45"
+                  class="h-11 w-11 inline-flex shrink-0 items-center justify-center rounded-full bg-primary text-white shadow-sm transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-45"
                   :disabled="!inputText.trim() || sending"
                   @click="handleSend"
                   title="发送"
@@ -1193,8 +1193,8 @@ onUnmounted(() => {
                   <Send v-else class="h-4 w-4" />
                 </button>
               </div>
-              <div class="mt-2 flex items-center justify-between gap-3 text-xs text-muted-foreground">
-                <span>Enter 发送，Shift + Enter 换行</span>
+
+              <div class="mt-2 flex items-center justify-end gap-3 text-xs text-muted-foreground">
                 <span v-if="sendError" class="text-destructive">{{ sendError }}</span>
               </div>
             </div>

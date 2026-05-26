@@ -12,6 +12,7 @@ import {
   Trash2,
 } from "lucide-vue-next"
 import AppShell from "@/components/AppShell.vue"
+import { confirmDelete } from "@/composables/useConfirmDelete"
 import { deleteTask, fetchTasks } from "@/api/taskApi"
 import type { TaskDetail } from "@/api/types"
 import type { ResultBlock } from "@/types/result"
@@ -135,6 +136,21 @@ function formatTime(value?: string | null) {
   })
 }
 
+const PROMPT_PREVIEW_MAX_LENGTH = 48
+
+function taskPromptText(task: TaskDetail) {
+  const params = task.params || {}
+  const value = params.prompt || params.text || params.description || params.videoTopic || params.productName
+  return typeof value === "string" && value.trim() ? value.trim() : ""
+}
+
+function taskPromptPreview(task: TaskDetail, maxLength = PROMPT_PREVIEW_MAX_LENGTH) {
+  const prompt = taskPromptText(task)
+  if (!prompt) return task.taskNo
+  if (prompt.length <= maxLength) return prompt
+  return `${prompt.slice(0, maxLength)}…`
+}
+
 function textPreview(item: MaterialItem) {
   const block = primaryBlock(item)
   if (!block) return ""
@@ -145,8 +161,12 @@ function textPreview(item: MaterialItem) {
 
 async function removeMaterial(item: MaterialItem) {
   if (deletingTaskId.value) return
-  const name = item.task.toolName || item.task.taskNo
-  if (!confirm(`确定删除「${name}」这个素材吗？删除后素材库和任务历史中将不再显示。`)) return
+  const name = taskPromptPreview(item.task) || item.task.toolName || item.task.taskNo
+  const confirmed = await confirmDelete({
+    title: "删除素材",
+    description: `确定删除「${name}」这个素材吗？删除后素材库和任务历史中将不再显示。`,
+  })
+  if (!confirmed) return
   deletingTaskId.value = item.task.taskId
   error.value = ""
   try {
@@ -309,7 +329,7 @@ onMounted(loadMaterials)
               type="button"
               class="absolute right-3 top-3 inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/90 text-gray-500 opacity-0 shadow-sm backdrop-blur transition hover:bg-red-50 hover:text-red-600 group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-70"
               :disabled="deletingTaskId === item.task.taskId"
-              :title="`删除素材：${item.task.taskNo}`"
+              :title="`删除素材：${taskPromptPreview(item.task)}`"
               @click="removeMaterial(item)"
             >
               <LoaderCircle v-if="deletingTaskId === item.task.taskId" class="h-4 w-4 animate-spin" />
@@ -321,7 +341,9 @@ onMounted(loadMaterials)
             <div class="flex items-start justify-between gap-3">
               <div class="min-w-0">
                 <h3 class="truncate text-sm font-semibold text-gray-900">{{ item.task.toolName }}</h3>
-                <p class="mt-1 truncate text-xs text-gray-500">{{ item.task.taskNo }}</p>
+                <p class="mt-1 truncate text-xs text-gray-500" :title="taskPromptText(item.task) || item.task.taskNo">
+                  {{ taskPromptPreview(item.task) }}
+                </p>
               </div>
               <div class="flex shrink-0 items-center gap-1 text-xs text-gray-400">
                 <Clock class="h-3 w-3" />

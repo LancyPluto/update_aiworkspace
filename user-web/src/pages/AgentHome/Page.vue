@@ -4,6 +4,7 @@
   import AppShell from "@/components/AppShell.vue"
   import WorkspaceMemoryPanel from "./WorkspaceMemoryPanel.vue"
   import AgentChatPane from "./AgentChatPane.vue"
+  import { confirmDelete } from "@/composables/useConfirmDelete"
   import { useAuthStore } from "@/store/authStore"
   import {
     createAgentSession,
@@ -95,7 +96,11 @@
       pane.showError("当前会话 Agent 仍在运行，请稍后再删除。")
       return
     }
-    if (!confirm(`确定删除「${session.title}」？`)) return
+    const confirmed = await confirmDelete({
+      title: "删除会话",
+      itemName: session.title,
+    })
+    if (!confirmed) return
     deletingSessionId.value = session.id
     deleteSessionError.value = null
     try {

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { watch } from "vue"
 import { RouterView, useRoute, useRouter } from "vue-router"
+import ConfirmDeleteDialog from "@/components/ConfirmDeleteDialog/ConfirmDeleteDialog.vue"
 import { useAuthStore } from "@/store/authStore"
 
 const auth = useAuthStore()
@@ -24,4 +25,5 @@ watch(
 
 <template>
   <RouterView />
+  <ConfirmDeleteDialog />
 </template>
