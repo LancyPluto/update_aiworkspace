@@ -324,7 +324,10 @@ public class SmsCodeServiceImpl implements SmsCodeService {
 
     private String normalizeScene(String scene) {
         String normalized = scene == null ? "" : scene.trim().toUpperCase(Locale.ROOT);
-        if (!"REGISTER".equals(normalized) && !"LOGIN".equals(normalized)) {
+        if (!"REGISTER".equals(normalized)
+                && !"LOGIN".equals(normalized)
+                && !"LOGIN_OR_REGISTER".equals(normalized)
+                && !"RESET_PASSWORD".equals(normalized)) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "验证码场景不正确");
         }
         return normalized;

@@ -196,6 +196,67 @@ class AuthApiTest {
     }
 
     @Test
+    void loginOrRegisterSmsCodeCreatesUserWhenPhoneIsNew() throws Exception {
+        String phone = "13600136000";
+        String code = sendSmsCode(phone, "LOGIN_OR_REGISTER");
+
+        mockMvc.perform(post("/api/v1/auth/sms-login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "phone": "%s",
+                                  "code": "%s"
+                                }
+                                """.formatted(phone, code)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.data.user.username").value(phone))
+                .andExpect(jsonPath("$.data.user.phone").value(phone));
+    }
+
+    @Test
+    void resetsPasswordBySmsCode() throws Exception {
+        String phone = "13500135000";
+        String registerCode = sendSmsCode(phone, "REGISTER");
+        mockMvc.perform(post("/api/v1/auth/sms-register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "phone": "%s",
+                                  "code": "%s",
+                                  "password": "oldpass123"
+                                }
+                                """.formatted(phone, registerCode)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"));
+
+        String resetCode = sendSmsCode(phone, "RESET_PASSWORD");
+        mockMvc.perform(post("/api/v1/auth/reset-password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "phone": "%s",
+                                  "code": "%s",
+                                  "password": "newpass123"
+                                }
+                                """.formatted(phone, resetCode)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"));
+
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "account": "%s",
+                                  "password": "newpass123"
+                                }
+                                """.formatted(phone)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.data.user.phone").value(phone));
+    }
+
+    @Test
     void rejectsInvalidSmsCode() throws Exception {
         String phone = "13700137000";
         sendSmsCode(phone, "REGISTER");

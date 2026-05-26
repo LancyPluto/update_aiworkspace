@@ -79,7 +79,7 @@ export interface LoginResponse {
   user?: UserProfile
 }
 
-export type SmsCodeScene = "REGISTER" | "LOGIN"
+export type SmsCodeScene = "REGISTER" | "LOGIN" | "LOGIN_OR_REGISTER" | "RESET_PASSWORD"
 
 export interface SmsCodeRequest {
   phone: string
@@ -97,6 +97,13 @@ export interface SmsAuthRequest {
   phone: string
   code: string
   nickname?: string
+  password?: string
+}
+
+export interface ResetPasswordRequest {
+  phone: string
+  code: string
+  password: string
 }
 
 export interface RegisterRequest {
