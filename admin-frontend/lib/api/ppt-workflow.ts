@@ -18,6 +18,8 @@ export interface PptWorkflow {
   textModelConfigId?: number | null
   imageModelConfigId?: number | null
   engineSecrets?: Record<string, string>
+  /** 值为 system 表示使用系统配置中的全局引擎 API */
+  engineSecretSources?: Record<string, string>
 }
 
 export interface ToolEngineSecretFieldView {
@@ -32,6 +34,7 @@ export interface PptAdminWorkflowDetail {
   textModel: AgentModelConfig | null
   imageModel: AgentModelConfig | null
   engineSecretFields: ToolEngineSecretFieldView[]
+  systemEngineSecretFields: ToolEngineSecretFieldView[]
   engineSynced: boolean
   engineSyncMessage: string | null
 }

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import { AdminLayout } from "@/components/admin/admin-layout"
 import { AgentModelSettings } from "@/components/admin/agent-model-settings"
+import { EngineApiSettings } from "@/components/admin/engine-api-settings"
 import { AdminHeader } from "@/components/admin/header"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -173,6 +174,10 @@ export default function SettingsPage() {
               <Settings2 className="h-4 w-4" />
               大模型接入
             </TabsTrigger>
+            <TabsTrigger value="engine-api" className="gap-2">
+              <KeyRound className="h-4 w-4" />
+              引擎 API
+            </TabsTrigger>
             <TabsTrigger value="system" className="gap-2">
               <Server className="h-4 w-4" />
               基础设置
@@ -189,6 +194,10 @@ export default function SettingsPage() {
 
           <TabsContent value="model">
             <AgentModelSettings refreshKey={modelRefreshKey} />
+          </TabsContent>
+
+          <TabsContent value="engine-api">
+            <EngineApiSettings refreshKey={modelRefreshKey} />
           </TabsContent>
 
           <TabsContent value="system" className="space-y-5">

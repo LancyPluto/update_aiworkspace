@@ -12,6 +12,7 @@ public record PptAdminWorkflowDetailResponse(
         AgentModelConfigResponse textModel,
         AgentModelConfigResponse imageModel,
         List<ToolEngineSecretFieldView> engineSecretFields,
+        List<ToolEngineSecretFieldView> systemEngineSecretFields,
         boolean engineSynced,
         String engineSyncMessage
 ) {

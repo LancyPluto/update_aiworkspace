@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { ApiReferenceCard, type ToolApiReference } from "@/components/admin/api-reference-card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -19,16 +18,47 @@ import {
   updatePptWorkflow,
   type PptAdminWorkflowDetail,
   type PptWorkflow,
+  type ToolEngineSecretFieldView,
 } from "@/lib/api/ppt-workflow"
 import { ApiError } from "@/lib/api/http"
-import { buildPptImageModelReference, buildPptTextModelReference } from "@/lib/ppt-model-api-reference"
 import type { AgentModelConfig, ModelProviderDescriptor } from "@/lib/api/types"
 import {
   capabilityLabel,
   modelConfigSupportsCapability,
   resolvedModelCapabilities,
 } from "@/lib/model-capabilities"
-import { AlertCircle, CheckCircle2, ExternalLink, KeyRound, RefreshCw, Save, ServerCog } from "lucide-react"
+import { AlertCircle, CheckCircle2, ExternalLink, KeyRound, Link2, RefreshCw, Save, ServerCog } from "lucide-react"
+
+type EngineSecretSourceMode = "system" | "custom"
+
+function resolveInitialSourceMode(
+  fieldKey: string,
+  enginePayloadKey: string,
+  workflow: PptWorkflow | null,
+  systemViews: ToolEngineSecretFieldView[],
+): EngineSecretSourceMode {
+  const sources = workflow?.engineSecretSources || {}
+  const explicit = sources[fieldKey]?.trim().toLowerCase()
+  if (explicit === "system") return "system"
+  if (explicit === "custom") return "custom"
+  const systemConfigured = systemViews.find((v) => v.key === fieldKey)?.configured
+  const secrets = workflow?.engineSecrets || {}
+  const toolValue = secrets[fieldKey] || secrets[enginePayloadKey]
+  if (toolValue?.trim()) return "custom"
+  return systemConfigured ? "system" : "custom"
+}
+
+function buildSourceModes(
+  workflow: PptWorkflow | null,
+  catalog: ToolIntegrationApiCatalog,
+  systemViews: ToolEngineSecretFieldView[],
+): Record<string, EngineSecretSourceMode> {
+  const modes: Record<string, EngineSecretSourceMode> = {}
+  for (const field of catalog.engineApiFields) {
+    modes[field.key] = resolveInitialSourceMode(field.key, field.enginePayloadKey, workflow, systemViews)
+  }
+  return modes
+}
 
 /** 当前仅 PPT 插件走 ppt-workflow API；后续新插件可扩展 fetch/save 策略 */
 const WORKFLOW_ADAPTERS: Record<
@@ -64,30 +94,6 @@ function modelSummaryLine(config: AgentModelConfig | null | undefined): string {
   return `${config.modelName} · ${config.provider} · ${key ? `Key: ${key}` : "未配置 API Key"}`
 }
 
-function apiReferenceFromField(
-  catalog: ToolIntegrationApiCatalog,
-  fieldKey: string,
-  secrets: Record<string, string>,
-  secretViews: PptAdminWorkflowDetail["engineSecretFields"],
-): ToolApiReference | null {
-  const def = catalog.engineApiFields.find((f) => f.key === fieldKey)
-  if (!def) return null
-  const view = secretViews?.find((v) => v.key === fieldKey)
-  const configured = view?.configured ?? Boolean(secrets[fieldKey] || secrets[def.enginePayloadKey])
-  return {
-    title: def.label,
-    provider: catalog.displayName,
-    model: configured ? "已配置" : "未配置",
-    endpoint: def.endpointHint || `引擎字段 ${def.enginePayloadKey}`,
-    baseUrl: secrets[def.key] || secrets[def.enginePayloadKey] || view?.displayValue || "—",
-    fields: [def.description, `同步字段：${def.enginePayloadKey}`],
-    note: def.fieldType === "SECRET"
-      ? "密钥保存在工具 workflow 配置中，保存并同步后写入 PPT 引擎。留空提交则保留原密钥。"
-      : "保存并同步后写入 PPT 引擎 PUT /api/settings。",
-    docUrl: def.docUrl || undefined,
-  }
-}
-
 export function ToolIntegrationApiSection({ pluginId, toolId, onSaved }: ToolIntegrationApiSectionProps) {
   const adapter = WORKFLOW_ADAPTERS[pluginId]
   const [loading, setLoading] = useState(true)
@@ -101,8 +107,10 @@ export function ToolIntegrationApiSection({ pluginId, toolId, onSaved }: ToolInt
   const [modelConfigs, setModelConfigs] = useState<AgentModelConfig[]>([])
   const [providerCatalog, setProviderCatalog] = useState<ModelProviderDescriptor[]>([])
   const [engineHealth, setEngineHealth] = useState<{ healthy: boolean; status: string } | null>(null)
+  const [secretSourceModes, setSecretSourceModes] = useState<Record<string, EngineSecretSourceMode>>({})
 
   const catalog = detail?.apiCatalog ?? null
+  const systemEngineViews = detail?.systemEngineSecretFields ?? []
 
   const providerCapabilities = useMemo(() => {
     const map: Record<string, string[]> = {}
@@ -137,6 +145,13 @@ export function ToolIntegrationApiSection({ pluginId, toolId, onSaved }: ToolInt
       ])
       setDetail(workflowDetail)
       setWorkflow(workflowDetail.workflow)
+      setSecretSourceModes(
+        buildSourceModes(
+          workflowDetail.workflow,
+          workflowDetail.apiCatalog,
+          workflowDetail.systemEngineSecretFields || [],
+        ),
+      )
       setSecretDraft({})
       setModelConfigs(configs)
       setProviderCatalog(providers)
@@ -161,14 +176,35 @@ export function ToolIntegrationApiSection({ pluginId, toolId, onSaved }: ToolInt
   }
 
   function buildWorkflowPayload(): PptWorkflow | null {
-    if (!workflow) return null
+    if (!workflow || !catalog) return null
     const mergedSecrets = { ...(workflow.engineSecrets || {}) }
-    for (const [key, value] of Object.entries(secretDraft)) {
-      if (value.trim()) {
-        mergedSecrets[key] = value.trim()
+    const sources: Record<string, string> = { ...(workflow.engineSecretSources || {}) }
+    for (const field of catalog.engineApiFields) {
+      const mode = secretSourceModes[field.key] || "custom"
+      if (mode === "system") {
+        sources[field.key] = "system"
+        delete mergedSecrets[field.key]
+        delete mergedSecrets[field.enginePayloadKey]
+        continue
+      }
+      sources[field.key] = "custom"
+      const draft = secretDraft[field.key]
+      if (draft?.trim()) {
+        mergedSecrets[field.key] = draft.trim()
       }
     }
-    return { ...workflow, engineSecrets: mergedSecrets }
+    return { ...workflow, engineSecrets: mergedSecrets, engineSecretSources: sources }
+  }
+
+  function applyAllSystemSources() {
+    if (!catalog) return
+    const next: Record<string, EngineSecretSourceMode> = {}
+    for (const field of catalog.engineApiFields) {
+      const systemOk = systemEngineViews.find((v) => v.key === field.key)?.configured
+      next[field.key] = systemOk ? "system" : secretSourceModes[field.key] || "custom"
+    }
+    setSecretSourceModes(next)
+    setSecretDraft({})
   }
 
   async function handleSyncOnly() {
@@ -180,6 +216,9 @@ export function ToolIntegrationApiSection({ pluginId, toolId, onSaved }: ToolInt
       const result = await adapter.sync(toolId)
       setDetail(result)
       setWorkflow(result.workflow)
+      setSecretSourceModes(
+        buildSourceModes(result.workflow, result.apiCatalog, result.systemEngineSecretFields || []),
+      )
       setSecretDraft({})
       setNotice(result.engineSyncMessage || (result.engineSynced ? "已同步到引擎" : "同步失败"))
     } catch (err) {
@@ -203,6 +242,9 @@ export function ToolIntegrationApiSection({ pluginId, toolId, onSaved }: ToolInt
       }
       setDetail(result)
       setWorkflow(result.workflow)
+      setSecretSourceModes(
+        buildSourceModes(result.workflow, result.apiCatalog, result.systemEngineSecretFields || []),
+      )
       setSecretDraft({})
       setNotice(
         result.engineSynced
@@ -238,20 +280,6 @@ export function ToolIntegrationApiSection({ pluginId, toolId, onSaved }: ToolInt
   }
 
   const secrets = workflow.engineSecrets || {}
-  const apiCards: ToolApiReference[] = []
-
-  if (detail?.textModel) {
-    const ref = buildPptTextModelReference(detail.textModel)
-    if (ref) apiCards.push(ref)
-  }
-  if (detail?.imageModel) {
-    const ref = buildPptImageModelReference(detail.imageModel)
-    if (ref) apiCards.push(ref)
-  }
-  for (const field of catalog.engineApiFields) {
-    const ref = apiReferenceFromField(catalog, field.key, secrets, detail.engineSecretFields)
-    if (ref) apiCards.push(ref)
-  }
 
   return (
     <div className="space-y-5">
@@ -359,12 +387,26 @@ export function ToolIntegrationApiSection({ pluginId, toolId, onSaved }: ToolInt
           )
         })}
 
+        <div className="flex flex-wrap items-center gap-2 border-t border-border/60 pt-3">
+          <Button type="button" variant="outline" size="sm" className="gap-1" onClick={applyAllSystemSources}>
+            <Link2 className="h-3.5 w-3.5" />
+            全部使用系统配置
+          </Button>
+          <Link href="/settings" className="text-xs text-primary underline">
+            去系统配置 → 引擎 API
+            <ExternalLink className="ml-0.5 inline h-3 w-3" />
+          </Link>
+        </div>
+
         {catalog.engineApiFields.map((field) => {
-          const view = detail.engineSecretFields?.find((v) => v.key === field.key)
+          const toolView = detail.engineSecretFields?.find((v) => v.key === field.key)
+          const systemView = systemEngineViews.find((v) => v.key === field.key)
+          const systemConfigured = Boolean(systemView?.configured)
+          const mode = secretSourceModes[field.key] || (systemConfigured ? "system" : "custom")
           const isSecret = field.fieldType === "SECRET"
           const placeholder = isSecret
-            ? view?.configured
-              ? `已配置（${view.displayValue || "****"}），留空不修改`
+            ? toolView?.configured
+              ? `本工具已配置（${toolView.displayValue || "****"}），留空不修改`
               : "填写 API Key / Token"
             : field.fieldType === "URL"
               ? "https://..."
@@ -374,13 +416,51 @@ export function ToolIntegrationApiSection({ pluginId, toolId, onSaved }: ToolInt
             <div key={field.key} className="space-y-2 border-t border-border/60 pt-3">
               <Label>{field.label}</Label>
               <p className="text-xs text-muted-foreground">{field.description}</p>
-              <Input
-                type={isSecret ? "password" : "text"}
-                value={secretDraft[field.key] ?? (isSecret ? "" : secrets[field.key] || secrets[field.enginePayloadKey] || "")}
-                placeholder={placeholder}
-                onChange={(event) => patchSecret(field.key, event.target.value)}
-                autoComplete="off"
-              />
+              <Select
+                value={mode}
+                onValueChange={(value) => {
+                  const next = value as EngineSecretSourceMode
+                  setSecretSourceModes((prev) => ({ ...prev, [field.key]: next }))
+                  if (next === "system") {
+                    setSecretDraft((prev) => {
+                      const copy = { ...prev }
+                      delete copy[field.key]
+                      return copy
+                    })
+                  }
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="system" disabled={!systemConfigured}>
+                    使用系统配置
+                    {systemConfigured && systemView?.displayValue
+                      ? `（${systemView.displayValue}）`
+                      : systemConfigured
+                        ? "（已配置）"
+                        : "（请先在系统配置填写）"}
+                  </SelectItem>
+                  <SelectItem value="custom">本工具自定义</SelectItem>
+                </SelectContent>
+              </Select>
+              {mode === "system" ? (
+                <p className="text-xs text-muted-foreground">
+                  保存并同步时从「系统配置 → 引擎 API」读取，无需在此重复填写。
+                </p>
+              ) : (
+                <Input
+                  type={isSecret ? "password" : "text"}
+                  value={
+                    secretDraft[field.key] ??
+                    (isSecret ? "" : secrets[field.key] || secrets[field.enginePayloadKey] || "")
+                  }
+                  placeholder={placeholder}
+                  onChange={(event) => patchSecret(field.key, event.target.value)}
+                  autoComplete="off"
+                />
+              )}
               {field.endpointHint ? (
                 <p className="font-mono text-[11px] text-muted-foreground">{field.endpointHint}</p>
               ) : null}
@@ -392,7 +472,7 @@ export function ToolIntegrationApiSection({ pluginId, toolId, onSaved }: ToolInt
       <div className="flex flex-wrap items-center gap-2 rounded-lg border border-dashed border-border bg-secondary/20 px-4 py-3 text-xs text-muted-foreground">
         <KeyRound className="h-3.5 w-3.5 shrink-0" />
         <span>
-          大模型 API Key 在「系统配置 → 大模型接入」维护；MinerU / 百度等在本栏填写后随「保存并同步」写入引擎。
+          大模型在「系统配置 → 大模型接入」维护；MinerU / 百度 OCR 建议在「系统配置 → 引擎 API」维护后，此处选择「使用系统配置」即可。
         </span>
       </div>
 
@@ -409,15 +489,6 @@ export function ToolIntegrationApiSection({ pluginId, toolId, onSaved }: ToolInt
           <ServerCog className="h-4 w-4" />
           仅同步引擎
         </Button>
-      </div>
-
-      <div className="border-t border-border pt-5">
-        <h4 className="mb-2 text-sm font-semibold text-card-foreground">本工具涉及的外部 API</h4>
-        <div className="grid gap-3 md:grid-cols-2">
-          {apiCards.map((ref) => (
-            <ApiReferenceCard key={ref.title} reference={ref} description="按目录动态生成。" />
-          ))}
-        </div>
       </div>
     </div>
   )

@@ -28,6 +28,7 @@ import com.aiminilab.aitoolmarket.tool.dto.UpsertFieldSchemaRequest;
 import com.aiminilab.aitoolmarket.tool.dto.UpsertToolCategoryRequest;
 import com.aiminilab.aitoolmarket.tool.dto.UpsertToolRequest;
 import com.aiminilab.aitoolmarket.tool.entity.AiTool;
+import com.aiminilab.aitoolmarket.tool.support.ConfigNoteMergeSupport;
 import com.aiminilab.aitoolmarket.tool.entity.ToolCategory;
 import com.aiminilab.aitoolmarket.tool.entity.ToolFieldItem;
 import com.aiminilab.aitoolmarket.tool.entity.ToolFieldSchema;
@@ -290,6 +291,8 @@ public class ToolServiceImpl implements ToolService {
         if (tool.getExecutionHandler() == null || tool.getExecutionHandler().isBlank()) {
             tool.setExecutionHandler(existing.getExecutionHandler());
         }
+        tool.setConfigNote(ConfigNoteMergeSupport.mergePreservingIntegrationMarkers(
+                existing.getConfigNote(), tool.getConfigNote()));
         modelCapabilityService.validateToolModelBinding(tool);
         toolMapper.updateTool(toolId, tool, operatorId);
         return findToolSummary(toolId);

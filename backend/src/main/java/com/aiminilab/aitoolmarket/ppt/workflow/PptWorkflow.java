@@ -19,6 +19,11 @@ public class PptWorkflow {
      * {@link com.aiminilab.aitoolmarket.tool.integration.api.ToolEngineApiFieldDefinition#key()} 一致。
      */
     private Map<String, String> engineSecrets = new LinkedHashMap<>();
+    /**
+     * 引擎字段来源：key 为目录字段名（如 {@code mineru_token}），值为 {@code system} 表示使用
+     * {@code system_settings} 中的全局配置。
+     */
+    private Map<String, String> engineSecretSources = new LinkedHashMap<>();
 
     public Long getTextModelConfigId() {
         return textModelConfigId;
@@ -42,6 +47,14 @@ public class PptWorkflow {
 
     public void setEngineSecrets(Map<String, String> engineSecrets) {
         this.engineSecrets = engineSecrets == null ? new LinkedHashMap<>() : engineSecrets;
+    }
+
+    public Map<String, String> getEngineSecretSources() {
+        return engineSecretSources;
+    }
+
+    public void setEngineSecretSources(Map<String, String> engineSecretSources) {
+        this.engineSecretSources = engineSecretSources == null ? new LinkedHashMap<>() : engineSecretSources;
     }
 
     public String getIntegrationMode() {

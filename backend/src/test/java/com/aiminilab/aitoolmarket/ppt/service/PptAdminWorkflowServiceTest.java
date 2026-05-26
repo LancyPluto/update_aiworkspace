@@ -1,5 +1,7 @@
 package com.aiminilab.aitoolmarket.ppt.service;
 
+import com.aiminilab.aitoolmarket.admin.engine.EngineApiSettingsService;
+import com.aiminilab.aitoolmarket.admin.service.SystemSettingService;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.ppt.config.PptEngineProperties;
 import com.aiminilab.aitoolmarket.ppt.workflow.PptWorkflow;
@@ -8,19 +10,37 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class PptAdminWorkflowServiceTest {
 
+    private final EngineApiSettingsService engineApiSettingsService = new EngineApiSettingsService(emptySettings());
+
     private final PptAdminWorkflowService service = new PptAdminWorkflowService(
             null,
             new PptWorkflowService(null, new PptEngineProperties(), new ObjectMapper()),
             null,
             null,
+            engineApiSettingsService,
             new ObjectMapper()
     );
+
+    private static SystemSettingService emptySettings() {
+        return new SystemSettingService() {
+            @Override
+            public Map<String, String> settings() {
+                return Map.of();
+            }
+
+            @Override
+            public Map<String, String> updateSettings(Map<String, String> settings) {
+                return Map.of();
+            }
+        };
+    }
 
     @Test
     void mergesWorkflowIntoExistingConfigNote() {

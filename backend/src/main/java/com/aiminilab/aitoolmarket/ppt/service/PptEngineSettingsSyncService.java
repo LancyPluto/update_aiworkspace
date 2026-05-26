@@ -1,5 +1,6 @@
 package com.aiminilab.aitoolmarket.ppt.service;
 
+import com.aiminilab.aitoolmarket.admin.engine.EngineApiSettingsService;
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentModelConfigMapper;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
@@ -13,11 +14,14 @@ import java.util.Map;
 public class PptEngineSettingsSyncService {
 
     private final AgentModelConfigMapper agentModelConfigMapper;
+    private final EngineApiSettingsService engineApiSettingsService;
     private final PptEngineClient pptEngineClient;
 
     public PptEngineSettingsSyncService(AgentModelConfigMapper agentModelConfigMapper,
+                                        EngineApiSettingsService engineApiSettingsService,
                                         PptEngineClient pptEngineClient) {
         this.agentModelConfigMapper = agentModelConfigMapper;
+        this.engineApiSettingsService = engineApiSettingsService;
         this.pptEngineClient = pptEngineClient;
     }
 
@@ -28,15 +32,16 @@ public class PptEngineSettingsSyncService {
         Long textId = workflow.getTextModelConfigId();
         Long imageId = workflow.getImageModelConfigId();
         boolean hasModel = textId != null || imageId != null;
-        boolean hasEngineSecret = workflow.getEngineSecrets() != null
-                && workflow.getEngineSecrets().values().stream().anyMatch(v -> v != null && !v.isBlank());
+        Map<String, String> resolvedSecrets = engineApiSettingsService.resolveForWorkflow(
+                workflow.getEngineSecrets(), workflow.getEngineSecretSources());
+        boolean hasEngineSecret = resolvedSecrets.values().stream().anyMatch(v -> v != null && !v.isBlank());
         if (!hasModel && !hasEngineSecret) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "请至少配置一项大模型绑定或引擎 API（如 MinerU、百度 OCR）");
         }
         AgentModelConfig text = textId == null ? null : requireEnabledConfig(textId, "文本");
         AgentModelConfig image = imageId == null ? null : requireEnabledConfig(imageId, "生图");
         Map<String, Object> payload = PptBananaSettingsMapper.toBananaSettings(text, image);
-        PptEngineSecretSupport.mergeEngineSecretsIntoPayload(payload, workflow.getEngineSecrets());
+        PptEngineSecretSupport.mergeEngineSecretsIntoPayload(payload, resolvedSecrets);
         pptEngineClient.updateSettings(payload);
     }
 
