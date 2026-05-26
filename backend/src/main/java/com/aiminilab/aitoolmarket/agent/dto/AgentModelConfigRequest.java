@@ -27,6 +27,7 @@ public record AgentModelConfigRequest(
         String billingUnit,
         BigDecimal unitPrice,
         Boolean enabled,
+        Boolean agentEnabled,
         Boolean isDefault,
         List<String> capabilities
 ) {

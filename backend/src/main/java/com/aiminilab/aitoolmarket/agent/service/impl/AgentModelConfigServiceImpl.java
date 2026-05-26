@@ -64,6 +64,19 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
     }
 
     @Override
+    public List<AgentModelConfigResponse> agentSelectableList() {
+        List<AgentModelConfig> configs = agentModelConfigMapper.findAgentEnabled();
+        if (!configs.isEmpty()) {
+            return configs.stream().map(this::toResponse).toList();
+        }
+        AgentModelConfig fallback = findOrDefault();
+        if (Boolean.FALSE.equals(fallback.getEnabled()) || Boolean.FALSE.equals(fallback.getAgentEnabled())) {
+            return List.of();
+        }
+        return List.of(toResponse(fallback));
+    }
+
+    @Override
     @Transactional
     public AgentModelConfigResponse adminCreate(AgentModelConfigRequest request) {
         validate(request);
@@ -180,6 +193,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         }
         config.setCapabilities(capabilitiesCodec.serialize(capabilities));
         config.setEnabled(request.enabled() == null || request.enabled());
+        config.setAgentEnabled(request.agentEnabled() == null ? Boolean.TRUE : request.agentEnabled());
         config.setDefault(request.isDefault() != null && request.isDefault());
         config.setUpdatedAt(now);
         return config;
@@ -187,7 +201,20 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
 
     @Override
     public InternalAgentModelConfigResponse internalGet() {
-        return InternalAgentModelConfigResponse.from(findOrDefault());
+        List<AgentModelConfig> agentConfigs = agentModelConfigMapper.findAgentEnabled();
+        return InternalAgentModelConfigResponse.from(agentConfigs.isEmpty() ? findOrDefault() : agentConfigs.get(0));
+    }
+
+    @Override
+    public InternalAgentModelConfigResponse internalGet(Long modelConfigId) {
+        if (modelConfigId == null) {
+            return internalGet();
+        }
+        AgentModelConfig config = agentModelConfigMapper.findAgentEnabledById(modelConfigId);
+        if (config == null) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "Agent model config not found or not enabled for Agent");
+        }
+        return InternalAgentModelConfigResponse.from(config);
     }
 
     @Override
@@ -258,6 +285,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         fallback.setUnitPrice(BigDecimal.ZERO);
         fallback.setCapabilities(capabilitiesCodec.serialize(providerRegistry.defaultCapabilities("mock")));
         fallback.setEnabled(true);
+        fallback.setAgentEnabled(true);
         fallback.setDefault(true);
         fallback.setCreatedAt(now);
         fallback.setUpdatedAt(now);
@@ -343,6 +371,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                 request.billingUnit(),
                 request.unitPrice(),
                 request.enabled(),
+                request.agentEnabled(),
                 request.isDefault(),
                 request.capabilities()
         );

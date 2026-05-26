@@ -24,6 +24,7 @@ export {
   deleteAgentWorkspaceMemory,
   fetchAgentFiles,
   fetchAgentMessages,
+  fetchAgentModelConfigs,
   fetchAgentRun,
   fetchAgentRunEvents,
   fetchAgentSessions,
@@ -35,7 +36,7 @@ export {
   updateAgentWorkspaceMemory,
   updateAgentToolPreference,
 } from "./agentApi"
-export { createTask, fetchTasks, fetchTaskStatus, fetchTaskById, cancelTask } from "./taskApi"
+export { createTask, fetchTasks, fetchTaskStatus, fetchTaskById, regenerateTask, cancelTask } from "./taskApi"
 export {
   createRechargeOrder,
   fetchCreditAccount,

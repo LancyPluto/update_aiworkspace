@@ -205,6 +205,11 @@ export interface CreateTaskResponse {
   status: TaskStatus
 }
 
+export interface RegenerateTaskRequest {
+  params: Record<string, unknown>
+  clientRequestId?: string
+}
+
 /** GET /api/v1/tasks/{taskId}/status —— 轮询用精简状态 */
 export interface TaskStatusPayload {
   taskId: number
@@ -364,6 +369,21 @@ export interface CreateAgentMessageResponse {
   messageId: number
   runId: number
   runStatus: AgentRunStatus
+}
+
+export interface AgentModelConfig {
+  id: number
+  displayName?: string | null
+  configCode?: string | null
+  provider: string
+  modelName: string
+  baseUrl?: string | null
+  apiKeyMasked?: string | null
+  extraAuthJsonMasked?: string | null
+  enabled: boolean
+  agentEnabled?: boolean | null
+  isDefault?: boolean | null
+  capabilities?: string[] | null
 }
 
 export interface AgentRun {

@@ -32,6 +32,7 @@ import {
 import type {
   AgentFile,
   AgentMessage,
+  AgentModelConfig,
   AgentRun,
   AgentRunEvent,
   AgentRunStatus,
@@ -44,10 +45,14 @@ const props = defineProps<{
   draft: string
   sessionSidebarOpen: boolean
   sessions: AgentSession[]
+  modelConfigId?: number | null
+  agentModels: AgentModelConfig[]
+  modelsLoading: boolean
 }>()
 
 const emit = defineEmits<{
   "update:draft": [value: string]
+  "change-model": [value: number | null]
   "toggle-session-sidebar": []
 }>()
 
@@ -114,6 +119,29 @@ const hasActiveRun = computed(() => {
 const showRunRecoveryBanner = computed(
   () => recoveryRunId.value != null && (showActiveRunLimitHint.value || hasActiveRun.value),
 )
+const selectedAgentModel = computed(() =>
+  props.agentModels.find((model) => model.id === props.modelConfigId) ?? props.agentModels[0] ?? null,
+)
+const showGenerationLoading = computed(() =>
+  sending.value || runConnectionStatus.value === "running" || runConnectionStatus.value === "awaiting_confirmation",
+)
+
+function modelLabel(model: AgentModelConfig) {
+  return model.displayName || model.modelName || model.configCode || `Model ${model.id}`
+}
+
+function modelMeta(model: AgentModelConfig) {
+  return `${model.provider} · ${model.modelName}`
+}
+
+function changeModel(rawId: string) {
+  if (!rawId) {
+    emit("change-model", null)
+    return
+  }
+  const id = Number(rawId)
+  emit("change-model", Number.isFinite(id) && id > 0 ? id : null)
+}
 
 function isResumableRunStatus(status: AgentRunStatus) {
   return status === "CREATED" || status === "RUNNING" || status === "WAITING_USER_CONFIRMATION"
@@ -210,6 +238,7 @@ async function cancelCurrentRun() {
   if (sending.value && !activeRunId.value) {
     sending.value = false
     agentError.value = null
+    runConnectionStatus.value = "idle"
     await scrollBottom()
     return
   }
@@ -277,10 +306,18 @@ async function submitMessage(content = input.value) {
   const text = content.trim()
   if (!text && files.value.length === 0) return
   if (!props.token || sending.value || hasActiveRun.value) return
+  if (props.modelsLoading) {
+    agentError.value = "模型列表仍在加载，请稍等一下再发送。"
+    return
+  }
+  if (!props.modelConfigId) {
+    agentError.value = "请先选择一个 Agent 模型。"
+    return
+  }
   sending.value = true
   agentError.value = null
   confirmationError.value = null
-  runConnectionStatus.value = "idle"
+  runConnectionStatus.value = "running"
   try {
     input.value = ""
     messages.value.push({
@@ -296,6 +333,7 @@ async function submitMessage(content = input.value) {
       {
         content: text,
         clientRequestId: crypto.randomUUID(),
+        modelConfigId: props.modelConfigId ?? null,
         fileIds: files.value.map((item) => item.id),
       },
       { token: props.token },
@@ -304,6 +342,8 @@ async function submitMessage(content = input.value) {
     await waitForRunComplete(res.runId)
     files.value = []
   } catch (error) {
+    runConnectionStatus.value = "failed"
+    activeRunId.value = null
     if (error instanceof ApiBusinessError && error.code === "AGENT_ACTIVE_RUN_LIMIT") {
       showActiveRunLimitHint.value = true
       const runId = await discoverActiveRunId(props.sessionId)
@@ -547,7 +587,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  window.removeEventListener("resize", adjustComposerTextareaHeight())
+  window.removeEventListener("resize", adjustComposerTextareaHeight)
 })
 
 defineExpose({
@@ -583,6 +623,27 @@ defineExpose({
           </div>
           <div class="bubble">
             <ChatMessage :message="message.contentText" :is-user="message.role === 'USER'" />
+          </div>
+        </article>
+
+        <article v-if="showGenerationLoading" class="agent-message assistant generating-message">
+          <div class="avatar">
+            <Bot class="h-4 w-4" />
+          </div>
+          <div class="bubble generating-bubble">
+            <div class="generating-orbit">
+              <Sparkles class="h-4 w-4" />
+            </div>
+            <div class="generating-copy">
+              <p>模型生成中</p>
+              <span v-if="selectedAgentModel">{{ modelLabel(selectedAgentModel) }} · {{ selectedAgentModel.modelName }}</span>
+              <span v-else>正在准备 Agent 模型</span>
+            </div>
+            <div class="typing-dots" aria-hidden="true">
+              <i></i>
+              <i></i>
+              <i></i>
+            </div>
           </div>
         </article>
 
@@ -684,6 +745,27 @@ defineExpose({
     <form class="composer" @submit.prevent="submitMessage()">
       <input ref="fileInputRef" type="file" class="sr-only" @change="handleFileSelected" />
 
+      <div class="composer-model-row">
+        <div class="composer-model-copy">
+          <span class="composer-model-kicker">Agent 模型</span>
+          <strong v-if="selectedAgentModel">{{ modelLabel(selectedAgentModel) }}</strong>
+          <strong v-else>{{ modelsLoading ? "模型加载中" : "未选择模型" }}</strong>
+          <small v-if="selectedAgentModel">{{ modelMeta(selectedAgentModel) }}</small>
+        </div>
+        <select
+          class="composer-model-select"
+          :value="modelConfigId ?? ''"
+          :disabled="modelsLoading || hasActiveRun || sending || agentModels.length === 0"
+          @change="changeModel(($event.target as HTMLSelectElement).value)"
+        >
+          <option v-if="modelsLoading" value="">加载中...</option>
+          <option v-else-if="agentModels.length === 0" value="">暂无可选模型</option>
+          <option v-for="model in agentModels" :key="model.id" :value="model.id">
+            {{ modelLabel(model) }}
+          </option>
+        </select>
+      </div>
+
       <!-- 上传的文件显示在输入框内部 -->
       <div v-if="files.length > 0" class="inner-file-list">
         <div v-for="file in files" :key="file.id" class="inner-file-item">
@@ -745,7 +827,7 @@ defineExpose({
         <button
           class="send-circle-btn"
           :class="{ stop: sending || hasActiveRun }"
-          :disabled="(!sending && !hasActiveRun && !input.trim() && !files.length) || cancellingRun"
+          :disabled="(!sending && !hasActiveRun && ((!input.trim() && !files.length) || modelsLoading || !modelConfigId)) || cancellingRun"
           @click="(sending || hasActiveRun) ? cancelCurrentRun() : submitMessage()"
         >
           <Loader2 v-if="cancellingRun" class="h-4 w-4 animate-spin" />
@@ -780,14 +862,64 @@ defineExpose({
 .composer {
   width: min(860px, calc(100% - 32px));
   margin: 0 auto 16px;
-  border: 1px solid var(--border);
+  border: 1px solid color-mix(in srgb, var(--foreground) 10%, var(--border));
   border-radius: 20px;
-  background: var(--card);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--card) 92%, #fff 2%), color-mix(in srgb, var(--card) 86%, #000));
   padding: 14px 18px;
   display: flex;
   flex-direction: column;
   gap: 12px;
   flex-shrink: 0;
+  box-shadow: 0 18px 42px rgb(0 0 0 / 0.28);
+}
+
+.composer-model-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid color-mix(in srgb, var(--foreground) 9%, var(--border));
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--secondary) 60%, transparent);
+  padding: 10px 12px;
+}
+
+.composer-model-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.composer-model-kicker,
+.composer-model-copy small {
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+
+.composer-model-copy strong {
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--foreground);
+  font-size: 13px;
+}
+
+.composer-model-select {
+  width: min(260px, 44vw);
+  min-height: 34px;
+  border: 1px solid color-mix(in srgb, var(--primary) 26%, var(--border));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--card) 88%, #000);
+  color: var(--foreground);
+  padding: 0 10px;
+  outline: none;
+}
+
+.composer-model-select:disabled {
+  opacity: 0.62;
+  cursor: not-allowed;
 }
 
 /* 输入框内部文件预览 */
@@ -893,14 +1025,16 @@ defineExpose({
   font-size: 13px;
   padding: 5px 12px;
   border-radius: 999px;
-  border: 1px solid var(--border);
-  background: transparent;
-  color: var(--foreground);
+  border: 1px solid color-mix(in srgb, var(--foreground) 14%, var(--border));
+  background: color-mix(in srgb, var(--muted) 70%, transparent);
+  color: color-mix(in srgb, var(--foreground) 90%, var(--muted-foreground));
   cursor: pointer;
   transition: all 0.2s;
 }
 .tool-btn:hover:not(:disabled) {
-  background: var(--secondary);
+  border-color: color-mix(in srgb, var(--primary) 42%, var(--border));
+  background: color-mix(in srgb, var(--primary) 14%, var(--secondary));
+  color: var(--foreground);
 }
 .tool-btn:disabled {
   opacity: 0.5;
@@ -912,8 +1046,10 @@ defineExpose({
   height: 36px;
   border-radius: 50%;
   border: none;
-  background: var(--foreground);
-  color: var(--primary-foreground);
+  border: 1px solid color-mix(in srgb, var(--primary) 40%, transparent);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--primary) 74%, #fff 8%), color-mix(in srgb, var(--primary) 66%, #000));
+  color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -921,13 +1057,14 @@ defineExpose({
   transition: background 0.2s;
 }
 .send-circle-btn.stop {
-  background: #f53f3f;
+  border-color: color-mix(in srgb, var(--destructive) 72%, transparent);
+  background: color-mix(in srgb, var(--destructive) 78%, #111);
 }
 .send-circle-btn.stop:hover {
-  background: #d92c2c;
+  background: color-mix(in srgb, var(--destructive) 90%, #111);
 }
 .send-circle-btn:disabled {
-  opacity: 0.5;
+  opacity: 0.42;
   cursor: not-allowed;
 }
 
@@ -948,8 +1085,11 @@ defineExpose({
   display: grid;
   place-items: center;
   border-radius: 12px;
-  background: var(--foreground);
-  color: var(--primary-foreground);
+  border: 1px solid color-mix(in srgb, var(--primary) 38%, var(--border));
+  background:
+    radial-gradient(circle at 65% 25%, color-mix(in srgb, var(--primary) 46%, transparent), transparent 45%),
+    color-mix(in srgb, var(--card) 86%, #000);
+  color: color-mix(in srgb, var(--primary) 68%, #fff);
 }
 
 .empty-state h2 {
@@ -968,10 +1108,20 @@ defineExpose({
 
 .suggestions button {
   min-height: 44px;
-  border: 1px solid var(--border);
+  border: 1px solid color-mix(in srgb, var(--foreground) 12%, var(--border));
   border-radius: 8px;
-  background: var(--card);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--card) 86%, #fff 3%), color-mix(in srgb, var(--card) 92%, #000));
+  color: color-mix(in srgb, var(--foreground) 86%, var(--muted-foreground));
+  cursor: pointer;
+  transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease, transform 0.18s ease;
+}
+
+.suggestions button:hover {
+  border-color: color-mix(in srgb, var(--primary) 46%, var(--border));
+  background: color-mix(in srgb, var(--primary) 12%, var(--card));
   color: var(--foreground);
+  transform: translateY(-1px);
 }
 
 .agent-message {
@@ -989,15 +1139,17 @@ defineExpose({
 .agent-message.user .avatar {
   grid-column: 2;
   grid-row: 1;
-  background: var(--primary);
-  color: var(--primary-foreground);
+  background: color-mix(in srgb, var(--primary) 36%, var(--card));
+  color: var(--foreground);
 }
 
 .agent-message.user .bubble {
   grid-column: 1;
   justify-self: end;
-  background: var(--foreground);
-  color: var(--primary-foreground);
+  border-color: color-mix(in srgb, var(--primary) 40%, var(--border));
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--primary) 30%, var(--card)), color-mix(in srgb, var(--primary) 18%, var(--card)));
+  color: var(--foreground);
 }
 
 .avatar,
@@ -1018,13 +1170,80 @@ defineExpose({
   max-width: 100%;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: var(--card);
+  background: color-mix(in srgb, var(--card) 92%, #000);
   padding: 12px 14px;
   line-height: 1.7;
 }
 
 .agent-message.run-progress .bubble {
   border-color: color-mix(in srgb, var(--foreground) 20%, var(--border));
+}
+
+.generating-message {
+  animation: generating-enter 0.18s ease-out;
+}
+
+.generating-bubble {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  border-color: color-mix(in srgb, var(--primary) 36%, var(--border));
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--primary) 13%, var(--card)), color-mix(in srgb, var(--card) 86%, #000));
+  box-shadow: 0 14px 32px rgb(0 0 0 / 0.22);
+}
+
+.generating-orbit {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--primary) 42%, var(--border));
+  color: color-mix(in srgb, var(--primary) 72%, #fff);
+  animation: pulse-ring 1.4s ease-in-out infinite;
+}
+
+.generating-copy {
+  min-width: 0;
+}
+
+.generating-copy p {
+  margin: 0;
+  color: var(--foreground);
+  font-weight: 700;
+}
+
+.generating-copy span {
+  display: block;
+  max-width: min(420px, 52vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
+.typing-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.typing-dots i {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--primary) 72%, #fff);
+  animation: typing-dot 1s ease-in-out infinite;
+}
+
+.typing-dots i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.typing-dots i:nth-child(3) {
+  animation-delay: 0.3s;
 }
 
 .confirmation-card,
@@ -1058,26 +1277,26 @@ defineExpose({
 }
 
 .run-status-card.awaiting_confirmation {
-  border-color: #fedf89;
-  background: #fffcf5;
-  color: #933708;
+  border-color: color-mix(in srgb, var(--warning) 48%, var(--border));
+  background: color-mix(in srgb, var(--warning) 13%, var(--card));
+  color: color-mix(in srgb, var(--warning) 72%, #fff);
 }
 
 .run-status-card.completed {
-  border-color: #abefc6;
-  background: #f6fef9;
-  color: #027a48;
+  border-color: color-mix(in srgb, var(--success) 48%, var(--border));
+  background: color-mix(in srgb, var(--success) 13%, var(--card));
+  color: color-mix(in srgb, var(--success) 72%, #fff);
 }
 
 .run-status-card.failed {
-  border-color: #fecdca;
-  background: #fffbfa;
-  color: #b42318;
+  border-color: color-mix(in srgb, var(--destructive) 50%, var(--border));
+  background: color-mix(in srgb, var(--destructive) 13%, var(--card));
+  color: color-mix(in srgb, var(--destructive) 70%, #fff);
 }
 
 .card-icon.error {
-  background: #fef3f2;
-  color: #b42318;
+  background: color-mix(in srgb, var(--destructive) 16%, var(--card));
+  color: color-mix(in srgb, var(--destructive) 75%, #fff);
 }
 
 .card-body {
@@ -1088,8 +1307,8 @@ defineExpose({
 }
 
 .card-body.error {
-  border-color: #fecdca;
-  background: #fffbfa;
+  border-color: color-mix(in srgb, var(--destructive) 42%, var(--border));
+  background: color-mix(in srgb, var(--destructive) 10%, var(--card));
 }
 
 .card-title {
@@ -1131,13 +1350,13 @@ defineExpose({
 }
 
 .primary-btn {
-  border-color: var(--foreground);
-  background: var(--foreground);
-  color: var(--primary-foreground);
+  border-color: color-mix(in srgb, var(--primary) 54%, var(--border));
+  background: color-mix(in srgb, var(--primary) 55%, var(--card));
+  color: var(--foreground);
 }
 
 .ghost-btn {
-  background: var(--card);
+  background: color-mix(in srgb, var(--muted) 58%, var(--card));
   color: var(--foreground);
 }
 
@@ -1154,6 +1373,13 @@ defineExpose({
   .suggestions {
     grid-template-columns: 1fr;
   }
+  .composer-model-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .composer-model-select {
+    width: 100%;
+  }
   .agent-message,
   .confirmation-card,
   .agent-error-card {
@@ -1161,6 +1387,40 @@ defineExpose({
   }
   .run-status-card {
     max-width: 100%;
+  }
+}
+
+@keyframes generating-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulse-ring {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--primary) 20%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 7px color-mix(in srgb, var(--primary) 0%, transparent);
+  }
+}
+
+@keyframes typing-dot {
+  0%,
+  80%,
+  100% {
+    opacity: 0.35;
+    transform: translateY(0);
+  }
+  40% {
+    opacity: 1;
+    transform: translateY(-3px);
   }
 }
 </style>

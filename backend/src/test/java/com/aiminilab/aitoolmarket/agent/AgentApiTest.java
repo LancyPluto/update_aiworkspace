@@ -804,7 +804,7 @@ class AgentApiTest {
     }
 
     @Test
-    void userCannotStartAgentRunWhenModelConnectivityFails() throws Exception {
+    void userCanStartAgentRunWithoutPerMessageModelPreflight() throws Exception {
         mockExternalAuthDependencies();
         Mockito.when(agentServiceClient.testModelConfig(any()))
                 .thenReturn(new AgentModelConfigTestResponse(
@@ -825,25 +825,21 @@ class AgentApiTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
-                                  "content": "Start with invalid model",
-                                  "clientRequestId": "model-preflight-failure"
+                                  "content": "Start without model preflight",
+                                  "clientRequestId": "model-preflight-skipped"
                                 }
                                 """))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("MODEL_CALL_FAILED"))
-                .andExpect(jsonPath("$.message").value("connection refused"));
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.data.runStatus").value("RUNNING"));
 
-        Mockito.verify(agentServiceClient, Mockito.never()).executeRun(anyLong());
-        org.assertj.core.api.Assertions.assertThat(creditService.account(login.userId()).frozen()).isZero();
+        Mockito.verify(agentServiceClient, Mockito.never()).testModelConfig(any());
+        Mockito.verify(agentServiceClient).executeRun(anyLong());
 
-        var failedRuns = agentRunMapper.findForAdmin("FAILED", login.userId(), 10, 0);
-        org.assertj.core.api.Assertions.assertThat(failedRuns).hasSize(1);
-        org.assertj.core.api.Assertions.assertThat(failedRuns.get(0).errorCode()).isEqualTo("MODEL_CALL_FAILED");
-        org.assertj.core.api.Assertions.assertThat(failedRuns.get(0).errorMessage()).isEqualTo("connection refused");
-        var events = agentRunEventMapper.findEventsForAdmin(failedRuns.get(0).id(), 10);
-        org.assertj.core.api.Assertions.assertThat(events).hasSize(1);
-        org.assertj.core.api.Assertions.assertThat(events.get(0).getEventType()).isEqualTo("model.preflight_failed");
-        org.assertj.core.api.Assertions.assertThat(events.get(0).getEventText()).isEqualTo("connection refused");
+        var runningRuns = agentRunMapper.findForAdmin("RUNNING", login.userId(), 10, 0);
+        org.assertj.core.api.Assertions.assertThat(runningRuns).hasSize(1);
+        var events = agentRunEventMapper.findEventsForAdmin(runningRuns.get(0).id(), 10);
+        org.assertj.core.api.Assertions.assertThat(events).extracting(event -> event.getEventType()).contains("run.started");
     }
 
     @Test

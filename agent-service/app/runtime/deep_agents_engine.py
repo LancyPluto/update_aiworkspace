@@ -42,6 +42,11 @@ from app.tools.registry import ToolRegistry
 from langchain_core.callbacks import AsyncCallbackHandler
 
 DEEP_AGENTS_INTENT = "deep_agents"
+DEFAULT_AGENT_SYSTEM_PROMPT = (
+    "You are a helpful cloud agent for an AI tool marketplace. "
+    "Your reasoning model is only used for conversation, planning, and orchestration. "
+    "Each AI tool runs with its own backend tool configuration and model binding."
+)
 DEEP_AGENTS_SYSTEM_PROMPT = (
     "You are a workspace agent for an AI tool marketplace. Plan and execute tasks carefully, "
     "use available context from the conversation, workspace memory, and files, "
@@ -403,19 +408,11 @@ class DeepAgentsRuntimeEngine:
     # --- Chat / Deep Agents flow ---
 
     async def _run_chat(self, context: RunContext, intent=None) -> str:
-        available_tools = context.availableTools or []
-        if available_tools:
-            tool_descriptions = []
-            for t in available_tools:
-                name = t.toolName or t.toolCode
-                desc = t.description or ""
-                tool_descriptions.append(f"- {name}: {desc}")
-            tool_list_text = "你可以使用的AI工具列表：\n" + "\n".join(tool_descriptions)
-        else:
-            tool_list_text = ""
-        system_prompt = "You are a helpful cloud agent for an AI tool marketplace."
-        if tool_list_text:
-            system_prompt += "\n\n" + tool_list_text
+        system_prompt = _compose_system_prompt(
+            context.agentSystemPrompt,
+            context,
+            DEFAULT_AGENT_SYSTEM_PROMPT,
+        )
 
         messages = [ChatMessage(role="system", content=system_prompt)]
         workspace_memory_context = await self._fetch_workspace_memory_context(context)
@@ -498,9 +495,14 @@ class DeepAgentsRuntimeEngine:
             chat_model = self._chat_model()
             workspace_memory_items = await self._fetch_workspace_memory_items(context)
             workspace_file_context = await self._build_workspace_file_context(context)
+            system_prompt = _compose_system_prompt(
+                context.deepAgentsSystemPrompt or context.agentSystemPrompt,
+                context,
+                DEEP_AGENTS_SYSTEM_PROMPT,
+            )
             agent = create_deep_agent(
                 tools=[],
-                system_prompt=DEEP_AGENTS_SYSTEM_PROMPT,
+                system_prompt=system_prompt,
                 model=chat_model,
                 subagents=profiles_to_deepagents_subagents(
                     default_subagent_profiles(),
@@ -1001,6 +1003,34 @@ def _chunks(value: str, size: int) -> list[str]:
 
 def _looks_like_session_recap_question(message: str) -> bool:
     return IntentRouter._looks_like_session_recap_question(message)
+
+
+def _compose_system_prompt(configured_prompt: str | None, context: RunContext, fallback: str) -> str:
+    base_prompt = (configured_prompt or "").strip() or fallback
+    tools_prompt = _format_available_tools_prompt(context)
+    if not tools_prompt:
+        return base_prompt
+    return f"{base_prompt}\n\n{tools_prompt}"
+
+
+def _format_available_tools_prompt(context: RunContext) -> str:
+    available_tools = context.availableTools or []
+    if not available_tools:
+        return ""
+    tool_descriptions = []
+    for tool in available_tools:
+        name = tool.toolName or tool.toolCode
+        desc = tool.description or ""
+        code = tool.toolCode or ""
+        if desc:
+            tool_descriptions.append(f"- {name} ({code}): {desc}")
+        else:
+            tool_descriptions.append(f"- {name} ({code})")
+    return (
+        "你可以读取并编排的平台 AI 工具如下。注意：这些工具会使用各自后台绑定的模型配置，"
+        "不要把当前 Agent 模型当作工具执行模型。\n"
+        + "\n".join(tool_descriptions)
+    )
 
 
 def _format_recent_session_summary(context: RunContext) -> str:

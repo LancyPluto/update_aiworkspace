@@ -219,6 +219,7 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                 config.billingUnit(),
                 config.unitPrice(),
                 config.enabled(),
+                config.agentEnabled(),
                 config.isDefault(),
                 config.capabilities()
         );
@@ -339,6 +340,7 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                     config.billingUnit(),
                     config.unitPrice(),
                     config.enabled(),
+                    config.agentEnabled(),
                     config.isDefault(),
                     config.capabilities()
             );

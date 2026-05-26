@@ -58,6 +58,7 @@ class WorkspaceMemoryItem(BaseModel):
 
 
 class AgentModelConfig(BaseModel):
+    id: int | None = None
     provider: str = "mock"
     modelName: str = "mock"
     baseUrl: str | None = None
@@ -65,6 +66,19 @@ class AgentModelConfig(BaseModel):
     minimaxGroupId: str | None = None
     timeoutSeconds: int = 60
     enabled: bool = True
+    agentEnabled: bool = True
+
+
+class ContextWindow(BaseModel):
+    snapshotId: int | None = None
+    strategy: str | None = None
+    maxHistoryMessages: int | None = None
+    historyMessageCount: int = 0
+    fileCount: int = 0
+    fileChunkCount: int = 0
+    memoryItemCount: int = 0
+    estimatedInputTokens: int = 0
+    snapshotJson: str | None = None
 
 
 class PendingToolContext(BaseModel):
@@ -98,6 +112,10 @@ class RunContext(BaseModel):
     availableTools: list[ToolDescriptor] = Field(default_factory=list, validation_alias=AliasChoices("availableTools", "tools"))
     toolPreferences: list[ToolPreference] = Field(default_factory=list)
     creditBudget: int = 0
+    contextWindow: ContextWindow | None = None
+    modelConfig: AgentModelConfig | None = None
+    agentSystemPrompt: str | None = None
+    deepAgentsSystemPrompt: str | None = None
     pendingToolContext: PendingToolContext | None = Field(default=None, validation_alias=AliasChoices("pendingToolContext", "pending_tool_context"))
 
 

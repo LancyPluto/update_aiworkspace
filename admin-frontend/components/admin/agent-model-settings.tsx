@@ -58,6 +58,7 @@ interface ModelForm {
   billingUnit: "TOKEN_PER_M" | "PER_CALL" | "IMAGE_TOKEN"
   unitPrice: string
   enabled: boolean
+  agentEnabled: boolean
   isDefault: boolean
   capabilities: string[]
 }
@@ -150,6 +151,7 @@ const emptyForm: ModelForm = {
   billingUnit: "TOKEN_PER_M",
   unitPrice: "0",
   enabled: true,
+  agentEnabled: true,
   isDefault: false,
   capabilities: ["TEXT_GENERATION"],
 }
@@ -183,6 +185,7 @@ function toForm(config: AgentModelConfig, catalog: ModelProviderDescriptor[]): M
           : "TOKEN_PER_M",
     unitPrice: String(config.unitPrice ?? 0),
     enabled: config.enabled !== false,
+    agentEnabled: config.agentEnabled !== false,
     isDefault: Boolean(config.isDefault),
     capabilities: caps,
   }
@@ -206,6 +209,7 @@ function toPayload(form: ModelForm): AgentModelConfigPayload {
     billingUnit: form.billingUnit,
     unitPrice: Number(form.unitPrice) || 0,
     enabled: form.enabled,
+    agentEnabled: form.agentEnabled,
     isDefault: form.isDefault,
     capabilities: form.capabilities,
   }
@@ -434,6 +438,7 @@ export function AgentModelSettings({ refreshKey = 0 }: AgentModelSettingsProps) 
       configCode: "",
       displayName: "",
       isDefault: configs.length === 0,
+      agentEnabled: true,
       capabilities: [...m.capabilities],
       baseUrl: m.defaultBaseUrl,
       modelName: m.defaultModel,
@@ -683,6 +688,7 @@ export function AgentModelSettings({ refreshKey = 0 }: AgentModelSettingsProps) 
                           <Badge variant="outline">{vendor.shortName}</Badge>
                           <Badge variant="secondary">{pickMeta(catalogResolved, config.provider).label}</Badge>
                           <Badge variant="outline">{capabilityModalityLabel(capabilities)}</Badge>
+                          {config.agentEnabled !== false ? <Badge variant="outline">Agent 可选</Badge> : null}
                           <Badge variant={config.enabled ? "default" : "secondary"}>{config.enabled ? "启用" : "停用"}</Badge>
                           {testStatusBadge(config)}
                         </div>
@@ -931,10 +937,22 @@ export function AgentModelSettings({ refreshKey = 0 }: AgentModelSettingsProps) 
               <Switch checked={form.enabled} onCheckedChange={(value) => updateForm("enabled", value)} />
             </div>
 
+            <div className="flex flex-wrap items-center justify-between gap-4 rounded-md bg-secondary p-4">
+              <div>
+                <p className="font-medium">作为 Agent 模型</p>
+                <p className="text-sm text-muted-foreground">勾选后会出现在用户端 Agent 页的模型选择中。</p>
+              </div>
+              <Switch
+                checked={form.agentEnabled}
+                disabled={!form.enabled}
+                onCheckedChange={(value) => updateForm("agentEnabled", value)}
+              />
+            </div>
+
             <Textarea
               readOnly
               className="min-h-24 font-mono text-xs"
-              value={`provider=${form.provider}\nprovider_protocol=${meta.providerProtocol || form.provider}\nvendor_kind=${meta.vendorKind || "direct"}\nupstream_vendor=${meta.upstreamVendor || ""}\nmodel=${form.modelName}\nbase_url=${form.baseUrl}\ntimeout=${form.timeoutSeconds}s\nbilling_unit=${form.billingUnit}\ninput_price_per_1m=${form.inputTokenPricePer1m}\noutput_price_per_1m=${form.outputTokenPricePer1m}\nunit_price=${form.unitPrice}\nextra_auth=${form.extraAuthJson || form.extraAuthJsonMasked ? "configured" : "empty"}`}
+              value={`provider=${form.provider}\nprovider_protocol=${meta.providerProtocol || form.provider}\nvendor_kind=${meta.vendorKind || "direct"}\nupstream_vendor=${meta.upstreamVendor || ""}\nmodel=${form.modelName}\nbase_url=${form.baseUrl}\ntimeout=${form.timeoutSeconds}s\nagent_enabled=${form.agentEnabled}\nbilling_unit=${form.billingUnit}\ninput_price_per_1m=${form.inputTokenPricePer1m}\noutput_price_per_1m=${form.outputTokenPricePer1m}\nunit_price=${form.unitPrice}\nextra_auth=${form.extraAuthJson || form.extraAuthJsonMasked ? "configured" : "empty"}`}
             />
 
             {testResult ? (

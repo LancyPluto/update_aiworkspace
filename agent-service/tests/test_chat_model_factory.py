@@ -85,6 +85,30 @@ def test_factory_creates_openai_compatible_chat_model_from_settings():
     }
 
 
+def test_factory_treats_deepseek_as_openai_compatible():
+    FakeChatOpenAI.calls = []
+    factory = ChatModelFactory(
+        Settings(
+            model_provider="deepseek",
+            model_api_base_url="https://api.deepseek.com",
+            model_api_key="key",
+            model_name="deepseek-chat",
+            model_timeout_seconds=45,
+        ),
+        chat_openai_cls=FakeChatOpenAI,
+    )
+
+    model = factory.create()
+
+    assert isinstance(model, FakeChatOpenAI)
+    assert FakeChatOpenAI.calls[0] == {
+        "model": "deepseek-chat",
+        "api_key": "key",
+        "base_url": "https://api.deepseek.com",
+        "timeout": 45,
+    }
+
+
 def test_factory_creates_minimax_chat_model_from_settings():
     FakeMiniMaxChat.calls = []
     factory = ChatModelFactory(

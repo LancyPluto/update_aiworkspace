@@ -17,13 +17,13 @@ import com.aiminilab.aitoolmarket.agent.dto.AdminAgentRunStatsResponse;
 public interface AgentRunMapper extends BaseMapper<AgentRun> {
 
     @Insert("""
-            INSERT INTO agent_runs(session_id, user_id, status, intent, model_provider_code, model_name,
+            INSERT INTO agent_runs(session_id, user_id, status, intent, model_config_id, model_provider_code, model_name,
                                    estimated_credits, consumed_credits, error_code, error_message,
-                                   started_at, finished_at, parent_run_id, source_user_message_id, client_request_id,
+                                   started_at, finished_at, parent_run_id, source_user_message_id, context_snapshot_id, client_request_id,
                                    created_at, updated_at)
-            VALUES(#{run.sessionId}, #{run.userId}, #{run.status}, #{run.intent}, #{run.modelProviderCode}, #{run.modelName},
+            VALUES(#{run.sessionId}, #{run.userId}, #{run.status}, #{run.intent}, #{run.modelConfigId}, #{run.modelProviderCode}, #{run.modelName},
                    #{run.estimatedCredits}, #{run.consumedCredits}, #{run.errorCode}, #{run.errorMessage},
-                   #{run.startedAt}, #{run.finishedAt}, #{run.parentRunId}, #{run.sourceUserMessageId}, #{run.clientRequestId},
+                   #{run.startedAt}, #{run.finishedAt}, #{run.parentRunId}, #{run.sourceUserMessageId}, #{run.contextSnapshotId}, #{run.clientRequestId},
                    #{run.createdAt}, #{run.updatedAt})
             """)
     @Options(useGeneratedKeys = true, keyProperty = "run.id")
@@ -175,13 +175,23 @@ public interface AgentRunMapper extends BaseMapper<AgentRun> {
 
     @Update("""
             UPDATE agent_runs
-            SET model_provider_code = #{modelProviderCode}, model_name = #{modelName}, updated_at = #{now}
+            SET model_config_id = #{modelConfigId}, model_provider_code = #{modelProviderCode}, model_name = #{modelName}, updated_at = #{now}
             WHERE id = #{runId}
             """)
     void updateModel(@Param("runId") Long runId,
+                     @Param("modelConfigId") Long modelConfigId,
                      @Param("modelProviderCode") String modelProviderCode,
                      @Param("modelName") String modelName,
                      @Param("now") LocalDateTime now);
+
+    @Update("""
+            UPDATE agent_runs
+            SET context_snapshot_id = #{contextSnapshotId}, updated_at = #{now}
+            WHERE id = #{runId}
+            """)
+    void updateContextSnapshot(@Param("runId") Long runId,
+                               @Param("contextSnapshotId") Long contextSnapshotId,
+                               @Param("now") LocalDateTime now);
 
     @Update("""
             UPDATE agent_runs

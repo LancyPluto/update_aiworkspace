@@ -343,6 +343,7 @@ CREATE TABLE agent_runs (
   user_id BIGINT NOT NULL,
   status VARCHAR(32) NOT NULL,
   intent VARCHAR(64),
+  model_config_id BIGINT,
   model_provider_code VARCHAR(64),
   model_name VARCHAR(128),
   estimated_credits INT NOT NULL DEFAULT 0,
@@ -353,13 +354,39 @@ CREATE TABLE agent_runs (
   finished_at DATETIME,
   parent_run_id BIGINT,
   source_user_message_id BIGINT,
+  context_snapshot_id BIGINT,
   client_request_id VARCHAR(64),
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_agent_runs_user_client ON agent_runs (user_id, client_request_id);
+CREATE UNIQUE INDEX uk_agent_runs_user_client ON agent_runs (user_id, client_request_id);
+CREATE INDEX idx_agent_runs_model_config ON agent_runs (model_config_id);
+CREATE INDEX idx_agent_runs_context_snapshot ON agent_runs (context_snapshot_id);
 CREATE INDEX idx_agent_messages_session_active ON agent_messages (session_id, status, id);
+
+CREATE TABLE agent_context_snapshots (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  run_id BIGINT NOT NULL,
+  session_id BIGINT NOT NULL,
+  user_id BIGINT NOT NULL,
+  workspace_id BIGINT,
+  model_config_id BIGINT,
+  model_provider_code VARCHAR(64),
+  model_name VARCHAR(128),
+  strategy VARCHAR(64) NOT NULL,
+  max_history_messages INT NOT NULL DEFAULT 20,
+  history_message_count INT NOT NULL DEFAULT 0,
+  file_count INT NOT NULL DEFAULT 0,
+  file_chunk_count INT NOT NULL DEFAULT 0,
+  memory_item_count INT NOT NULL DEFAULT 0,
+  estimated_input_tokens INT NOT NULL DEFAULT 0,
+  snapshot_json JSON,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_agent_context_snapshots_run ON agent_context_snapshots (run_id, id);
+CREATE INDEX idx_agent_context_snapshots_session ON agent_context_snapshots (session_id, id);
+CREATE INDEX idx_agent_context_snapshots_user ON agent_context_snapshots (user_id, id);
 
 CREATE TABLE agent_run_events (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
@@ -481,6 +508,7 @@ CREATE TABLE agent_model_configs (
   unit_price DECIMAL(18,8) NOT NULL DEFAULT 0,
   capabilities TEXT,
   enabled TINYINT NOT NULL DEFAULT 1,
+  agent_enabled TINYINT NOT NULL DEFAULT 1,
   is_default TINYINT NOT NULL DEFAULT 0,
   is_deleted TINYINT NOT NULL DEFAULT 0,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -522,6 +550,7 @@ INSERT INTO agent_model_configs (
   unit_price,
   capabilities,
   enabled,
+  agent_enabled,
   is_default,
   is_deleted
 ) VALUES (
@@ -534,6 +563,7 @@ INSERT INTO agent_model_configs (
   'TOKEN_PER_M',
   0,
   '["TEXT_GENERATION"]',
+  1,
   1,
   1,
   0

@@ -281,6 +281,7 @@ export interface AgentModelConfig {
   billingUnit?: 'TOKEN_PER_M' | 'PER_CALL' | 'IMAGE_TOKEN' | string | null
   unitPrice?: number | null
   enabled: boolean
+  agentEnabled?: boolean | null
   isDefault?: boolean | null
   /** 该凭证可用于的执行能力（与 executionHandler / toolType 对齐） */
   capabilities?: string[] | null
@@ -342,6 +343,7 @@ export interface AgentModelConfigPayload {
   billingUnit?: 'TOKEN_PER_M' | 'PER_CALL' | 'IMAGE_TOKEN' | string
   unitPrice?: number
   enabled?: boolean
+  agentEnabled?: boolean
   isDefault?: boolean
   capabilities?: string[]
 }

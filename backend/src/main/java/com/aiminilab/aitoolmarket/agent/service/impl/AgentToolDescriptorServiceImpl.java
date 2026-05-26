@@ -31,6 +31,7 @@ import java.util.stream.StreamSupport;
 public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(AgentToolDescriptorServiceImpl.class);
+    private static final int AGENT_AVAILABLE_TOOL_LIMIT = 1000;
 
     private final ToolMapper toolMapper;
     private final ToolFieldItemMapper toolFieldItemMapper;
@@ -49,7 +50,7 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
 
     @Override
     public List<AgentToolDescriptorResponse> listAvailableToolsForUser(Long userId) {
-        return toolMapper.findTools(true, null, null, null, 100, 0)
+        return toolMapper.findTools(true, null, null, null, AGENT_AVAILABLE_TOOL_LIMIT, 0)
                 .stream()
                 .filter(tool -> {
                     Optional<AgentToolDescriptorExtension> ext = extensionMapper.findByToolCode(tool.getToolCode());

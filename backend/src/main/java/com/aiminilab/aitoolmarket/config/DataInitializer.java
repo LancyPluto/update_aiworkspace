@@ -1,6 +1,7 @@
 package com.aiminilab.aitoolmarket.config;
 
 import com.aiminilab.aitoolmarket.admin.mapper.SystemSettingMapper;
+import com.aiminilab.aitoolmarket.agent.config.AgentPromptSettings;
 import com.aiminilab.aitoolmarket.common.enums.UserStatus;
 import com.aiminilab.aitoolmarket.common.enums.UserType;
 import com.aiminilab.aitoolmarket.user.entity.User;
@@ -46,6 +47,22 @@ public class DataInitializer implements CommandLineRunner {
         createUserIfAbsent("user1", "123456", "User One", UserType.USER);
         toolCategoryMapper.ensureDefaultCategory();
         systemSettingMapper.ensureTable();
+        seedAgentPromptSettings();
+    }
+
+    private void seedAgentPromptSettings() {
+        systemSettingMapper.insertIfAbsent(
+                AgentPromptSettings.SYSTEM_PROMPT_KEY,
+                AgentPromptSettings.DEFAULT_SYSTEM_PROMPT,
+                "agent",
+                "Agent normal chat system prompt"
+        );
+        systemSettingMapper.insertIfAbsent(
+                AgentPromptSettings.DEEP_AGENTS_SYSTEM_PROMPT_KEY,
+                AgentPromptSettings.DEFAULT_DEEP_AGENTS_SYSTEM_PROMPT,
+                "agent",
+                "Agent deep-agents runtime system prompt"
+        );
     }
 
     private void ensureSchemaCompatibility() {
@@ -69,6 +86,12 @@ public class DataInitializer implements CommandLineRunner {
         ensureColumn("agent_model_configs", "billing_unit", "ALTER TABLE agent_model_configs ADD COLUMN billing_unit VARCHAR(32) NOT NULL DEFAULT 'TOKEN_PER_M'");
         ensureColumn("agent_model_configs", "unit_price", "ALTER TABLE agent_model_configs ADD COLUMN unit_price DECIMAL(18,8) NOT NULL DEFAULT 0");
         ensureColumn("agent_model_configs", "capabilities", "ALTER TABLE agent_model_configs ADD COLUMN capabilities TEXT NULL");
+        ensureColumn("agent_model_configs", "agent_enabled", "ALTER TABLE agent_model_configs ADD COLUMN agent_enabled TINYINT NOT NULL DEFAULT 1");
+        ensureIndex(
+                "agent_model_configs",
+                "idx_agent_model_configs_agent_enabled",
+                "CREATE INDEX idx_agent_model_configs_agent_enabled ON agent_model_configs(agent_enabled, enabled, is_deleted, is_default, id)"
+        );
         executeSql("""
                 UPDATE agent_model_configs
                 SET input_token_price_per_1m = input_token_price_per_1k * 1000
@@ -170,11 +193,42 @@ public class DataInitializer implements CommandLineRunner {
         ensureColumn("billing_usage_logs", "billing_unit", "ALTER TABLE billing_usage_logs ADD COLUMN billing_unit VARCHAR(32) NOT NULL DEFAULT 'TOKEN_PER_M'");
         ensureColumn("billing_usage_logs", "billable_units", "ALTER TABLE billing_usage_logs ADD COLUMN billable_units INT NOT NULL DEFAULT 0");
         ensureColumn("billing_usage_logs", "unit_price", "ALTER TABLE billing_usage_logs ADD COLUMN unit_price DECIMAL(18,8) NOT NULL DEFAULT 0");
+        ensureColumn("agent_files", "attached_run_id", "ALTER TABLE agent_files ADD COLUMN attached_run_id BIGINT NULL");
+        ensureIndex("agent_files", "idx_agent_files_attached_run", "CREATE INDEX idx_agent_files_attached_run ON agent_files(session_id, attached_run_id, id)");
         ensureColumn("agent_messages", "status", "ALTER TABLE agent_messages ADD COLUMN status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE'");
         ensureColumn("agent_messages", "superseded_at", "ALTER TABLE agent_messages ADD COLUMN superseded_at DATETIME NULL");
+        ensureColumn("agent_runs", "model_config_id", "ALTER TABLE agent_runs ADD COLUMN model_config_id BIGINT NULL");
         ensureColumn("agent_runs", "parent_run_id", "ALTER TABLE agent_runs ADD COLUMN parent_run_id BIGINT NULL");
         ensureColumn("agent_runs", "source_user_message_id", "ALTER TABLE agent_runs ADD COLUMN source_user_message_id BIGINT NULL");
+        ensureColumn("agent_runs", "context_snapshot_id", "ALTER TABLE agent_runs ADD COLUMN context_snapshot_id BIGINT NULL");
         ensureColumn("agent_runs", "client_request_id", "ALTER TABLE agent_runs ADD COLUMN client_request_id VARCHAR(64) NULL");
+        ensureIndex("agent_runs", "uk_agent_runs_user_client", "CREATE UNIQUE INDEX uk_agent_runs_user_client ON agent_runs(user_id, client_request_id)");
+        ensureIndex("agent_runs", "idx_agent_runs_model_config", "CREATE INDEX idx_agent_runs_model_config ON agent_runs(model_config_id)");
+        ensureIndex("agent_runs", "idx_agent_runs_context_snapshot", "CREATE INDEX idx_agent_runs_context_snapshot ON agent_runs(context_snapshot_id)");
+        ensureTable("agent_context_snapshots", """
+                CREATE TABLE agent_context_snapshots (
+                  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                  run_id BIGINT NOT NULL,
+                  session_id BIGINT NOT NULL,
+                  user_id BIGINT NOT NULL,
+                  workspace_id BIGINT NULL,
+                  model_config_id BIGINT NULL,
+                  model_provider_code VARCHAR(64) NULL,
+                  model_name VARCHAR(128) NULL,
+                  strategy VARCHAR(64) NOT NULL,
+                  max_history_messages INT NOT NULL DEFAULT 20,
+                  history_message_count INT NOT NULL DEFAULT 0,
+                  file_count INT NOT NULL DEFAULT 0,
+                  file_chunk_count INT NOT NULL DEFAULT 0,
+                  memory_item_count INT NOT NULL DEFAULT 0,
+                  estimated_input_tokens INT NOT NULL DEFAULT 0,
+                  snapshot_json JSON NULL,
+                  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """);
+        ensureIndex("agent_context_snapshots", "idx_agent_context_snapshots_run", "CREATE INDEX idx_agent_context_snapshots_run ON agent_context_snapshots(run_id, id)");
+        ensureIndex("agent_context_snapshots", "idx_agent_context_snapshots_session", "CREATE INDEX idx_agent_context_snapshots_session ON agent_context_snapshots(session_id, id)");
+        ensureIndex("agent_context_snapshots", "idx_agent_context_snapshots_user", "CREATE INDEX idx_agent_context_snapshots_user ON agent_context_snapshots(user_id, id)");
         ensureTable("tool_workflows", """
                 CREATE TABLE tool_workflows (
                   id BIGINT PRIMARY KEY AUTO_INCREMENT,

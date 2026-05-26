@@ -1,5 +1,5 @@
 <script setup lang="ts">
-  import { onMounted, ref, watch } from "vue"
+  import { computed, onMounted, ref, watch } from "vue"
   import { Bot, ChevronLeft, ChevronRight, Loader2, Plus, Sparkles, Trash2 } from "lucide-vue-next"
   import AppShell from "@/components/AppShell.vue"
   import WorkspaceMemoryPanel from "./WorkspaceMemoryPanel.vue"
@@ -8,25 +8,33 @@
   import {
     createAgentSession,
     deleteAgentSession,
+    fetchAgentModelConfigs,
     fetchAgentSessions,
     fetchAgentWorkspaces,
   } from "@/api"
-  import type { AgentSession, AgentWorkspace } from "@/api/types"
+  import type { AgentModelConfig, AgentSession, AgentWorkspace } from "@/api/types"
 
   const auth = useAuthStore()
   const workspaces = ref<AgentWorkspace[]>([])
   const activeWorkspaceId = ref<number | null>(null)
   const sessions = ref<AgentSession[]>([])
+  const agentModels = ref<AgentModelConfig[]>([])
   const activeSessionId = ref<number | null>(null)
+  const selectedModelConfigId = ref<number | null>(null)
   const sessionDrafts = ref<Record<number, string>>({})
   const sessionsLoading = ref(false)
+  const modelsLoading = ref(false)
   const chatPaneRef = ref<InstanceType<typeof AgentChatPane> | null>(null)
 
   const AGENT_SESSION_SIDEBAR_KEY = "ai_tool_market_agent_session_sidebar_open"
   const AGENT_LAST_SESSION_KEY = "ai_tool_market_agent_last_session_id"
+  const AGENT_SELECTED_MODEL_KEY = "ai_tool_market_agent_selected_model_config_id"
   const sessionSidebarOpen = ref(true)
   const deletingSessionId = ref<number | null>(null)
   const deleteSessionError = ref<string | null>(null)
+  const selectedAgentModel = computed(() =>
+    agentModels.value.find((model) => model.id === selectedModelConfigId.value) ?? agentModels.value[0] ?? null,
+  )
 
   function toggleSessionSidebar() {
     sessionSidebarOpen.value = !sessionSidebarOpen.value
@@ -45,12 +53,59 @@
     localStorage.setItem(AGENT_LAST_SESSION_KEY, String(sessionId))
   }
 
+  function modelLabel(model: AgentModelConfig) {
+    return model.displayName || model.modelName || model.configCode || `Model ${model.id}`
+  }
+
+  function selectAgentModel(rawId: string) {
+    if (!rawId) {
+      selectedModelConfigId.value = null
+      localStorage.removeItem(AGENT_SELECTED_MODEL_KEY)
+      return
+    }
+    const id = Number(rawId)
+    selectedModelConfigId.value = Number.isFinite(id) && id > 0 ? id : null
+    if (selectedModelConfigId.value != null) {
+      localStorage.setItem(AGENT_SELECTED_MODEL_KEY, String(selectedModelConfigId.value))
+    }
+  }
+
+  function modelHasRuntimeAuth(model: AgentModelConfig) {
+    if (model.provider.toLowerCase() === "mock") return true
+    return Boolean(model.apiKeyMasked || model.extraAuthJsonMasked)
+  }
+
   async function loadWorkspaces() {
     if (!auth.token) return
     const res = await fetchAgentWorkspaces({ token: auth.token })
     workspaces.value = res.list
     if (!activeWorkspaceId.value && workspaces.value[0]) {
       activeWorkspaceId.value = workspaces.value[0].id
+    }
+  }
+
+  async function loadAgentModels() {
+    if (!auth.token) return
+    modelsLoading.value = true
+    try {
+      const list = (await fetchAgentModelConfigs({ token: auth.token }))
+        .filter((model) => model.enabled !== false && model.agentEnabled !== false && modelHasRuntimeAuth(model))
+      agentModels.value = list
+      if (!list.length) {
+        selectedModelConfigId.value = null
+        localStorage.removeItem(AGENT_SELECTED_MODEL_KEY)
+        return
+      }
+      const savedRaw = localStorage.getItem(AGENT_SELECTED_MODEL_KEY)
+      const savedId = savedRaw ? Number(savedRaw) : NaN
+      const target =
+        list.find((model) => model.id === savedId) ??
+        list.find((model) => model.isDefault) ??
+        list[0]
+      selectedModelConfigId.value = target.id
+      localStorage.setItem(AGENT_SELECTED_MODEL_KEY, String(target.id))
+    } finally {
+      modelsLoading.value = false
     }
   }
 
@@ -120,6 +175,7 @@
     if (saved === "0") sessionSidebarOpen.value = false
     if (saved === "1") sessionSidebarOpen.value = true
     void loadWorkspaces()
+    void loadAgentModels()
     void loadSessions()
   })
 </script>
@@ -138,6 +194,25 @@
           <Plus class="h-4 w-4" />
           新会话
         </button>
+        <div class="agent-model-picker">
+          <label class="agent-model-label" for="agent-model-select">Agent 模型</label>
+          <select
+            id="agent-model-select"
+            class="agent-model-select"
+            :value="selectedModelConfigId ?? ''"
+            :disabled="modelsLoading || agentModels.length === 0"
+            @change="selectAgentModel(($event.target as HTMLSelectElement).value)"
+          >
+            <option v-if="modelsLoading" value="">加载中...</option>
+            <option v-else-if="agentModels.length === 0" value="">暂无可选模型</option>
+            <option v-for="model in agentModels" :key="model.id" :value="model.id">
+              {{ modelLabel(model) }}
+            </option>
+          </select>
+          <p v-if="selectedAgentModel" class="agent-model-meta">
+            {{ selectedAgentModel.provider }} · {{ selectedAgentModel.modelName }}
+          </p>
+        </div>
         <p v-if="deleteSessionError" class="sidebar-error">{{ deleteSessionError }}</p>
         <div v-if="sessionsLoading" class="session-list-loading">
           <Loader2 class="h-4 w-4 animate-spin" />
@@ -177,7 +252,11 @@
           :draft="sessionDrafts[activeSessionId] ?? ''"
           :session-sidebar-open="sessionSidebarOpen"
           :sessions="sessions"
+          :model-config-id="selectedModelConfigId"
+          :agent-models="agentModels"
+          :models-loading="modelsLoading"
           @update:draft="onDraftUpdate"
+          @change-model="selectAgentModel(String($event ?? ''))"
           @toggle-session-sidebar="toggleSessionSidebar"
         />
         <div v-else class="chat-pane-empty">
@@ -266,12 +345,62 @@
   .new-chat {
     width: 100%;
     height: 40px;
-    border: 1px solid var(--border);
-    background: var(--foreground);
-    color: var(--primary-foreground);
+    border: 1px solid color-mix(in srgb, var(--primary) 45%, var(--border));
+    background:
+      linear-gradient(180deg, color-mix(in srgb, var(--primary) 28%, var(--card)), var(--card));
+    color: var(--foreground);
     font-size: 14px;
     cursor: pointer;
     margin-top: 30px;
+    box-shadow: 0 10px 24px rgb(0 0 0 / 0.2);
+    transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease;
+  }
+
+  .new-chat:hover {
+    border-color: color-mix(in srgb, var(--primary) 70%, var(--border));
+    transform: translateY(-1px);
+  }
+
+  .agent-model-picker {
+    margin-top: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    border: 1px solid color-mix(in srgb, var(--foreground) 10%, var(--border));
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--card) 90%, #000);
+    padding: 12px;
+  }
+
+  .agent-model-label {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--muted-foreground);
+  }
+
+  .agent-model-select {
+    width: 100%;
+    min-height: 36px;
+    border: 1px solid color-mix(in srgb, var(--foreground) 14%, var(--border));
+    border-radius: 8px;
+    background: var(--secondary);
+    color: var(--foreground);
+    padding: 0 10px;
+    outline: none;
+  }
+
+  .agent-model-select:disabled {
+    opacity: 0.65;
+    cursor: not-allowed;
+  }
+
+  .agent-model-meta {
+    margin: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+    color: var(--muted-foreground);
   }
 
   .sidebar-error {
@@ -373,8 +502,11 @@
     display: grid;
     place-items: center;
     border-radius: 12px;
-    background: var(--foreground);
-    color: var(--primary-foreground);
+    border: 1px solid color-mix(in srgb, var(--primary) 38%, var(--border));
+    background:
+      radial-gradient(circle at 65% 25%, color-mix(in srgb, var(--primary) 45%, transparent), transparent 45%),
+      color-mix(in srgb, var(--card) 86%, #000);
+    color: color-mix(in srgb, var(--primary) 70%, #fff);
   }
 
   .chat-pane-empty h2 {
@@ -387,9 +519,9 @@
     margin-top: 22px;
     height: 40px;
     padding: 0 16px;
-    border: 1px solid var(--border);
-    background: var(--foreground);
-    color: var(--primary-foreground);
+    border: 1px solid color-mix(in srgb, var(--primary) 45%, var(--border));
+    background: color-mix(in srgb, var(--primary) 22%, var(--card));
+    color: var(--foreground);
     font-size: 14px;
     cursor: pointer;
   }

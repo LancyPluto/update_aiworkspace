@@ -1,4 +1,5 @@
 import json
+import logging
 from typing import Any
 
 import httpx
@@ -32,11 +33,14 @@ class BackendBusinessError(BackendClientError):
     pass
 
 
+logger = logging.getLogger(__name__)
+
+
 class BackendClient:
     def __init__(self, settings: Settings = default_settings, http_client: httpx.AsyncClient | None = None) -> None:
         self.settings = settings
         self.base_url = settings.backend_internal_base_url.rstrip("/")
-        self._client = http_client or httpx.AsyncClient(timeout=10)
+        self._client = http_client or httpx.AsyncClient(timeout=10, trust_env=False)
 
     async def get_run_context(self, run_id: int) -> RunContext:
         data = await self._request("GET", f"/api/internal/v1/agent/runs/{run_id}/context")
@@ -155,11 +159,32 @@ class BackendClient:
 
     def _parse_response(self, response: httpx.Response) -> dict[str, Any]:
         if response.status_code < 200 or response.status_code >= 300:
-            raise BackendClientError(f"backend request failed: status={response.status_code}, body={response.text}")
+            message = (
+                f"backend request failed: method={response.request.method}, "
+                f"url={response.request.url}, status={response.status_code}, body={_truncate(response.text)}"
+            )
+            logger.error(message)
+            raise BackendClientError(message)
         try:
             payload = response.json()
         except ValueError as exc:
-            raise BackendClientError("backend returned non-json response") from exc
+            message = (
+                f"backend returned non-json response: method={response.request.method}, "
+                f"url={response.request.url}, status={response.status_code}, body={_truncate(response.text)}"
+            )
+            logger.error(message)
+            raise BackendClientError(message) from exc
         if payload.get("code") != "SUCCESS":
-            raise BackendBusinessError(f"backend business error: code={payload.get('code')}, message={payload.get('message', '')}")
+            message = (
+                f"backend business error: method={response.request.method}, url={response.request.url}, "
+                f"code={payload.get('code')}, message={payload.get('message', '')}, traceId={payload.get('traceId')}"
+            )
+            logger.error(message)
+            raise BackendBusinessError(message)
         return payload.get("data") or {}
+
+
+def _truncate(value: str, limit: int = 1200) -> str:
+    if len(value) <= limit:
+        return value
+    return value[:limit] + "...<truncated>"

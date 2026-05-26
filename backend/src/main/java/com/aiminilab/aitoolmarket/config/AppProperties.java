@@ -297,6 +297,7 @@ public class AppProperties {
         private int maxMessagesPerMinute = 10;
         private int maxRunsPerHour = 30;
         private int defaultCreditBudget = 20;
+        private int maxHistoryMessages = 20;
         private String fileStorageDir = "data/agent-files";
 
         public boolean isEnabled() {
@@ -345,6 +346,14 @@ public class AppProperties {
 
         public void setDefaultCreditBudget(int defaultCreditBudget) {
             this.defaultCreditBudget = defaultCreditBudget;
+        }
+
+        public int getMaxHistoryMessages() {
+            return maxHistoryMessages;
+        }
+
+        public void setMaxHistoryMessages(int maxHistoryMessages) {
+            this.maxHistoryMessages = maxHistoryMessages < 1 ? 20 : maxHistoryMessages;
         }
 
         public String getFileStorageDir() {

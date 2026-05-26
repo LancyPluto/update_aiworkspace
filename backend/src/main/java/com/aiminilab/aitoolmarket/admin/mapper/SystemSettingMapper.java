@@ -24,4 +24,13 @@ public interface SystemSettingMapper extends BaseMapper<SystemSetting> {
             ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = CURRENT_TIMESTAMP
             """)
     void upsert(@Param("settingKey") String settingKey, @Param("settingValue") String settingValue);
+
+    @Update("""
+            INSERT IGNORE INTO system_settings (setting_key, setting_value, setting_group, description)
+            VALUES (#{settingKey}, #{settingValue}, #{settingGroup}, #{description})
+            """)
+    void insertIfAbsent(@Param("settingKey") String settingKey,
+                        @Param("settingValue") String settingValue,
+                        @Param("settingGroup") String settingGroup,
+                        @Param("description") String description);
 }

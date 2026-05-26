@@ -14,7 +14,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { ApiError } from "@/lib/api/http"
 import { downloadConfigBundle, exportConfigBundle, importConfigBundle, readConfigBundleFile } from "@/lib/api/config-bundles"
 import { fetchSettings, updateSettings } from "@/lib/api/settings"
-import { CheckCircle, Database, Download, KeyRound, RefreshCw, Save, Server, Settings2, Shield, Upload } from "lucide-react"
+import { CheckCircle, Database, Download, Headphones, KeyRound, RefreshCw, Save, Server, Settings2, Shield, Upload } from "lucide-react"
 
 interface SettingsForm {
   platformName: string
@@ -24,6 +24,10 @@ interface SettingsForm {
   queueEnabled: boolean
   creditDeductEnabled: boolean
   maintenanceMode: boolean
+  customerServiceEnabled: boolean
+  customerServiceTitle: string
+  customerServiceDescription: string
+  customerServiceQrCodeUrl: string
   jwtHours: string
   allowedCors: string
 }
@@ -36,6 +40,10 @@ const defaults: SettingsForm = {
   queueEnabled: true,
   creditDeductEnabled: true,
   maintenanceMode: false,
+  customerServiceEnabled: true,
+  customerServiceTitle: "联系客服",
+  customerServiceDescription: "扫码添加客服，获取使用支持",
+  customerServiceQrCodeUrl: "",
   jwtHours: "24",
   allowedCors: "http://127.0.0.1:5173\nhttp://127.0.0.1:5174",
 }
@@ -74,6 +82,10 @@ export default function SettingsPage() {
         queueEnabled: stringToBool(data["tasks.queueEnabled"], defaults.queueEnabled),
         creditDeductEnabled: stringToBool(data["credits.deductEnabled"], defaults.creditDeductEnabled),
         maintenanceMode: stringToBool(data["system.maintenanceMode"], defaults.maintenanceMode),
+        customerServiceEnabled: stringToBool(data["customerService.enabled"], defaults.customerServiceEnabled),
+        customerServiceTitle: data["customerService.title"] ?? defaults.customerServiceTitle,
+        customerServiceDescription: data["customerService.description"] ?? defaults.customerServiceDescription,
+        customerServiceQrCodeUrl: data["customerService.qrCodeUrl"] ?? defaults.customerServiceQrCodeUrl,
         jwtHours: data["security.jwtHours"] ?? defaults.jwtHours,
         allowedCors: data["security.allowedCors"] ?? defaults.allowedCors,
       })
@@ -106,6 +118,10 @@ export default function SettingsPage() {
         "tasks.queueEnabled": boolToString(form.queueEnabled),
         "credits.deductEnabled": boolToString(form.creditDeductEnabled),
         "system.maintenanceMode": boolToString(form.maintenanceMode),
+        "customerService.enabled": boolToString(form.customerServiceEnabled),
+        "customerService.title": form.customerServiceTitle,
+        "customerService.description": form.customerServiceDescription,
+        "customerService.qrCodeUrl": form.customerServiceQrCodeUrl,
         "security.jwtHours": form.jwtHours,
         "security.allowedCors": form.allowedCors,
       })
@@ -181,6 +197,10 @@ export default function SettingsPage() {
               <Database className="h-4 w-4" />
               功能开关
             </TabsTrigger>
+            <TabsTrigger value="customer-service" className="gap-2">
+              <Headphones className="h-4 w-4" />
+              客服设置
+            </TabsTrigger>
             <TabsTrigger value="security" className="gap-2">
               <Shield className="h-4 w-4" />
               安全设置
@@ -232,6 +252,65 @@ export default function SettingsPage() {
                     <Switch checked={form[item.key]} onCheckedChange={(value) => updateForm(item.key, value)} />
                   </div>
                 ))}
+              </div>
+            </section>
+          </TabsContent>
+
+          <TabsContent value="customer-service" className="space-y-5">
+            <section className="rounded-lg border border-border bg-card p-5">
+              <div className="flex items-center justify-between rounded-md bg-secondary p-4">
+                <div>
+                  <p className="font-medium">启用用户端联系客服</p>
+                  <p className="text-sm text-muted-foreground">开启后，用户端右上角会展示“联系客服”入口。</p>
+                </div>
+                <Switch
+                  checked={form.customerServiceEnabled}
+                  onCheckedChange={(value) => updateForm("customerServiceEnabled", value)}
+                />
+              </div>
+
+              <div className="mt-5 grid gap-5 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>入口标题</Label>
+                  <Input
+                    value={form.customerServiceTitle}
+                    onChange={(event) => updateForm("customerServiceTitle", event.target.value)}
+                    placeholder="联系客服"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>客服二维码图片地址</Label>
+                  <Input
+                    value={form.customerServiceQrCodeUrl}
+                    onChange={(event) => updateForm("customerServiceQrCodeUrl", event.target.value)}
+                    placeholder="https://... 或 /uploads/customer-service.png"
+                  />
+                </div>
+              </div>
+
+              <div className="mt-5 grid gap-5 md:grid-cols-[minmax(0,1fr)_180px]">
+                <div className="space-y-2">
+                  <Label>弹窗说明</Label>
+                  <Textarea
+                    value={form.customerServiceDescription}
+                    onChange={(event) => updateForm("customerServiceDescription", event.target.value)}
+                    placeholder="扫码添加客服，获取使用支持"
+                  />
+                </div>
+                <div className="rounded-lg border border-border bg-secondary/50 p-3">
+                  <p className="mb-2 text-sm font-medium">二维码预览</p>
+                  {form.customerServiceQrCodeUrl ? (
+                    <img
+                      src={form.customerServiceQrCodeUrl}
+                      alt="客服二维码预览"
+                      className="aspect-square w-full rounded-md bg-white object-contain p-2"
+                    />
+                  ) : (
+                    <div className="flex aspect-square w-full items-center justify-center rounded-md border border-dashed border-border text-center text-xs text-muted-foreground">
+                      未配置图片地址
+                    </div>
+                  )}
+                </div>
               </div>
             </section>
           </TabsContent>

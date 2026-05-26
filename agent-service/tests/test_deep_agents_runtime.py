@@ -201,7 +201,7 @@ async def test_deep_agents_engine_injects_workspace_memory_into_messages():
 
     await engine.run(context)
 
-    assert backend.memory_requests == [(7, "plan pricing rollout", 5)]
+    assert backend.memory_requests == [(7, "plan pricing rollout", 10)]
     prompt_text = "\n".join(message["content"] for message in module.invocations[0]["messages"])
     assert "Workspace memory" in prompt_text
     assert "memory:11" in prompt_text

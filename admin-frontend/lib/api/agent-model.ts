@@ -56,6 +56,7 @@ export async function testSavedAgentModelConfig() {
     billingUnit: config.billingUnit || 'TOKEN_PER_M',
     unitPrice: config.unitPrice || 0,
     enabled: config.enabled,
+    agentEnabled: config.agentEnabled ?? true,
     isDefault: config.isDefault ?? true,
     capabilities: config.capabilities ?? undefined,
   })
@@ -66,6 +67,7 @@ function normalizeSingleConfig(config: AgentModelConfig): AgentModelConfig {
     ...config,
     displayName: config.displayName || config.modelName,
     configCode: config.configCode || String(config.id || 'default'),
+    agentEnabled: config.agentEnabled ?? true,
     isDefault: config.isDefault ?? true,
   }
 }
