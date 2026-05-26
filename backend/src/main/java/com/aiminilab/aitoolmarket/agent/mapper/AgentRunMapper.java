@@ -212,6 +212,19 @@ public interface AgentRunMapper extends BaseMapper<AgentRun> {
 
     @Update("""
             UPDATE agent_runs
+            SET status = 'FAILED', error_code = #{errorCode}, error_message = #{errorMessage},
+                consumed_credits = #{consumedCredits}, finished_at = #{now}, updated_at = #{now}
+            WHERE id = #{runId}
+              AND status NOT IN ('SUCCESS', 'FAILED', 'CANCELLED', 'TIMEOUT')
+            """)
+    int markFailedWithConsumedCredits(@Param("runId") Long runId,
+                                      @Param("errorCode") String errorCode,
+                                      @Param("errorMessage") String errorMessage,
+                                      @Param("consumedCredits") int consumedCredits,
+                                      @Param("now") LocalDateTime now);
+
+    @Update("""
+            UPDATE agent_runs
             SET status = 'CANCELLED', finished_at = #{now}, updated_at = #{now}
             WHERE id = #{runId}
               AND status IN ('CREATED', 'RUNNING', 'WAITING_USER_CONFIRMATION')

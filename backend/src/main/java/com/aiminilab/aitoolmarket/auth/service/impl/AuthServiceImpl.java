@@ -4,11 +4,13 @@ import com.aiminilab.aitoolmarket.auth.dto.AuthenticatedSession;
 import com.aiminilab.aitoolmarket.auth.dto.LoginRequest;
 import com.aiminilab.aitoolmarket.auth.dto.LoginResponse;
 import com.aiminilab.aitoolmarket.auth.dto.RegisterRequest;
+import com.aiminilab.aitoolmarket.auth.dto.ResetPasswordRequest;
 import com.aiminilab.aitoolmarket.auth.dto.SmsAuthRequest;
 import com.aiminilab.aitoolmarket.auth.dto.SmsCodeResponse;
 import com.aiminilab.aitoolmarket.auth.security.AuthUser;
 import com.aiminilab.aitoolmarket.auth.security.JwtTokenProvider;
 import com.aiminilab.aitoolmarket.auth.service.AuthService;
+import com.aiminilab.aitoolmarket.auth.service.HumanCaptchaService;
 import com.aiminilab.aitoolmarket.auth.service.SmsCodeService;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.enums.UserStatus;
@@ -28,15 +30,18 @@ public class AuthServiceImpl implements AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenProvider jwtTokenProvider;
     private final SmsCodeService smsCodeService;
+    private final HumanCaptchaService humanCaptchaService;
 
     public AuthServiceImpl(UserMapper userMapper,
                            PasswordEncoder passwordEncoder,
                            JwtTokenProvider jwtTokenProvider,
-                           SmsCodeService smsCodeService) {
+                           SmsCodeService smsCodeService,
+                           HumanCaptchaService humanCaptchaService) {
         this.userMapper = userMapper;
         this.passwordEncoder = passwordEncoder;
         this.jwtTokenProvider = jwtTokenProvider;
         this.smsCodeService = smsCodeService;
+        this.humanCaptchaService = humanCaptchaService;
     }
 
     @Override
@@ -89,14 +94,21 @@ public class AuthServiceImpl implements AuthService {
     }
 
     @Override
-    public SmsCodeResponse sendSmsCode(String phone, String scene) {
+    public SmsCodeResponse sendSmsCode(String phone, String scene, String captchaVerifyParam) {
         String normalizedPhone = normalizePhone(phone);
         String normalizedScene = normalizeBlank(scene);
+        humanCaptchaService.verify(captchaVerifyParam);
+        if ("LOGIN_OR_REGISTER".equalsIgnoreCase(normalizedScene)) {
+            return smsCodeService.sendCode(normalizedPhone, "LOGIN_OR_REGISTER");
+        }
         if ("REGISTER".equalsIgnoreCase(normalizedScene)) {
             userMapper.findByPhone(normalizedPhone).ifPresent(user -> {
                 throw new BusinessException(ErrorCode.PARAM_ERROR, "手机号已注册");
             });
         } else if ("LOGIN".equalsIgnoreCase(normalizedScene)) {
+            userMapper.findByPhone(normalizedPhone)
+                    .orElseThrow(() -> new BusinessException(ErrorCode.PARAM_ERROR, "手机号未注册"));
+        } else if ("RESET_PASSWORD".equalsIgnoreCase(normalizedScene)) {
             userMapper.findByPhone(normalizedPhone)
                     .orElseThrow(() -> new BusinessException(ErrorCode.PARAM_ERROR, "手机号未注册"));
         }
@@ -116,7 +128,8 @@ public class AuthServiceImpl implements AuthService {
 
         User user = new User();
         user.setUsername(phone);
-        user.setPasswordHash(passwordEncoder.encode("SMS_LOGIN_ONLY:" + phone + ":" + System.nanoTime()));
+        String password = normalizeBlank(request.password());
+        user.setPasswordHash(passwordEncoder.encode(password == null ? "SMS_LOGIN_ONLY:" + phone + ":" + System.nanoTime() : password));
         user.setPhone(phone);
         user.setNickname(resolveNickname(request.nickname(), phone));
         user.setUserType(UserType.USER.name());
@@ -129,13 +142,46 @@ public class AuthServiceImpl implements AuthService {
     @Override
     public AuthenticatedSession loginWithSmsCode(SmsAuthRequest request) {
         String phone = normalizePhone(request.phone());
-        smsCodeService.verifyCode(phone, "LOGIN", normalizeBlank(request.code()));
-        User user = userMapper.findByPhone(phone)
-                .orElseThrow(() -> new BusinessException(ErrorCode.UNAUTHORIZED, "手机号未注册"));
+        String code = normalizeBlank(request.code());
+        User user = userMapper.findByPhone(phone).orElse(null);
+        if (user == null) {
+            smsCodeService.verifyCode(phone, "LOGIN_OR_REGISTER", code);
+            userMapper.findByUsername(phone).ifPresent(existing -> {
+                throw new BusinessException(ErrorCode.PARAM_ERROR, "用户名已存在");
+            });
+            User created = new User();
+            created.setUsername(phone);
+            created.setPasswordHash(passwordEncoder.encode("SMS_LOGIN_ONLY:" + phone + ":" + System.nanoTime()));
+            created.setPhone(phone);
+            created.setNickname(resolveNickname(request.nickname(), phone));
+            created.setUserType(UserType.USER.name());
+            created.setStatus(UserStatus.ACTIVE.name());
+            Long userId = insertUser(created);
+            created.setId(userId);
+            return buildLoginResponse(created);
+        }
+        try {
+            smsCodeService.verifyCode(phone, "LOGIN", code);
+        } catch (BusinessException exception) {
+            smsCodeService.verifyCode(phone, "LOGIN_OR_REGISTER", code);
+        }
         if (!UserStatus.ACTIVE.name().equals(user.getStatus())) {
             throw new BusinessException(ErrorCode.UNAUTHORIZED, "账号已禁用");
         }
         return buildLoginResponse(user);
+    }
+
+    @Override
+    public void resetPasswordWithSmsCode(ResetPasswordRequest request) {
+        String phone = normalizePhone(request.phone());
+        String password = normalizeBlank(request.password());
+        if (password == null || password.length() < 6 || password.length() > 64) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "密码长度需为 6-64 位");
+        }
+        smsCodeService.verifyCode(phone, "RESET_PASSWORD", normalizeBlank(request.code()));
+        User user = userMapper.findByPhone(phone)
+                .orElseThrow(() -> new BusinessException(ErrorCode.PARAM_ERROR, "手机号未注册"));
+        userMapper.updatePasswordHash(user.getId(), passwordEncoder.encode(password));
     }
 
     @Override

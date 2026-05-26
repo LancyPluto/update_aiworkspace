@@ -72,6 +72,26 @@ class TaskOutboxServiceTest {
     }
 
     @Test
+    void repeatedPublishFailuresMoveEventToDeadAfterMaxRetries() throws Exception {
+        String userToken = prepareOnlineTool("outbox_dead_tool", 4);
+        Long taskId = createTask(userToken, "outbox_dead_tool", "outbox-dead-request");
+
+        Mockito.when(taskQueuePublisher.publish(eq(taskId), anyString())).thenReturn(false);
+
+        for (int i = 0; i < 5; i++) {
+            jdbcTemplate.update("UPDATE task_outbox_events SET next_retry_at = CURRENT_TIMESTAMP WHERE task_id = ?", taskId);
+            taskOutboxService.dispatchPending(10);
+        }
+
+        assertThat(outboxStatus(taskId)).isEqualTo("DEAD");
+        assertThat(outboxRetryCount(taskId)).isEqualTo(5);
+
+        jdbcTemplate.update("UPDATE task_outbox_events SET next_retry_at = CURRENT_TIMESTAMP WHERE task_id = ?", taskId);
+        taskOutboxService.dispatchPending(10);
+        Mockito.verify(taskQueuePublisher, Mockito.times(5)).publish(eq(taskId), anyString());
+    }
+
+    @Test
     void duplicateCreateWithSameIdempotencyKeyDoesNotCreateDuplicateOutboxEvent() throws Exception {
         String userToken = prepareOnlineTool("outbox_idempotent_tool", 3);
 

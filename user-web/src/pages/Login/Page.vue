@@ -51,66 +51,97 @@
 
   <!-- 登录弹窗 -->
   <div v-if="loginModalVisible" class="login-modal" @click.self="loginModalVisible = false">
-    <div class="login-container">
+    <div class="login-container" :class="{ 'compact-login': currentMode === 'passwordLogin' }">
       <div class="login-header">
-        <h2 class="login-title">{{ loginTitles[currentMode].title }}</h2>
-        <p class="login-subtitle">{{ loginTitles[currentMode].subtitle }}</p>
+        <h2 class="login-title">{{ loginTitle }}</h2>
+        <p class="login-subtitle">{{ loginSubtitle }}</p>
       </div>
 
-      <div class="mode-tabs">
-        <button type="button" :class="{ active: currentMode === 'smsLogin' }" @click="switchMode('smsLogin')">
-          <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
-          </svg>
-          短信登录
-        </button>
-        <button type="button" :class="{ active: currentMode === 'passwordLogin' }" @click="switchMode('passwordLogin')">
-          <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-          </svg>
-          密码登录
-        </button>
-        <button type="button" :class="{ active: currentMode === 'register' }" @click="switchMode('register')">
-          <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path>
-            <circle cx="9" cy="7" r="4"></circle>
-            <path d="M22 21v-2a4 4 0 0 0-3-3.87"></path>
-            <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
-          </svg>
-          注册
-        </button>
-      </div>
+      <div id="aliyun-captcha-element" class="aliyun-captcha-element"></div>
+      <button id="aliyun-captcha-trigger" class="aliyun-captcha-trigger" type="button" aria-hidden="true" tabindex="-1"></button>
 
       <form class="login-card" @submit.prevent="handleSubmit">
-        <!-- 密码登录表单 -->
-        <div v-if="currentMode === 'passwordLogin'">
-          <div class="input-group">
-            <label class="input-label">账号或手机号</label>
-            <input type="text" class="input-field" v-model="account" placeholder="请输入账号或手机号" autocomplete="username" />
+        <div v-if="currentMode === 'smsLogin'" class="sms-form">
+          <div class="phone-field input-group">
+            <span class="country-code">+86</span>
+            <input type="tel" class="input-field" v-model="phone" placeholder="请输入手机号" autocomplete="tel" />
           </div>
+          <div class="input-group code-field">
+            <div class="code-row pill-field">
+              <input type="text" class="input-field" v-model="smsCode" placeholder="请输入验证码" maxlength="6" inputmode="numeric" />
+              <button type="button" class="code-btn" :disabled="codeSending" @click="handleSendCode('login')">{{ codeBtnText }}</button>
+            </div>
+          </div>
+          <p class="agreement-text">
+            注册登录即代表已阅读并同意我们的
+            <a href="#" @click.prevent>隐私政策</a>
+            ，未注册的手机号将自动注册
+          </p>
+        </div>
+
+        <div v-else-if="currentMode === 'passwordLogin'" class="password-form">
           <div class="input-group">
-            <label class="input-label">登录密码</label>
-            <input type="password" class="input-field" v-model="password" placeholder="请输入密码" autocomplete="current-password" />
+            <input type="text" class="input-field pill-field" v-model="account" placeholder="请输入手机号/账号" autocomplete="username" />
+          </div>
+          <div class="input-group password-field pill-field">
+            <input :type="showPassword ? 'text' : 'password'" class="input-field" v-model="password" placeholder="请输入密码" autocomplete="current-password" />
+            <button type="button" class="eye-btn" @click="showPassword = !showPassword" aria-label="切换密码显示"><Eye class="eye-icon" /></button>
+          </div>
+          <p class="agreement-text password-agreement">
+            注册登录即代表已阅读并同意我们的
+            <a href="#" @click.prevent>隐私政策</a>
+          </p>
+          <div class="auth-row-links">
+            <a href="#" @click.prevent="switchMode('forgotVerify')">忘记密码</a>
+            <a href="#" @click.prevent="switchMode('register')">立即注册</a>
           </div>
         </div>
 
-        <!-- 短信登录/注册表单 -->
-        <div v-else>
-          <div class="input-group">
-            <label class="input-label">手机号</label>
-            <input type="tel" class="input-field" v-model="phone" placeholder="请输入 11 位手机号" autocomplete="tel" />
+        <div v-else-if="currentMode === 'register'" class="register-form">
+          <div class="phone-field input-group">
+            <span class="country-code">+86</span>
+            <input type="tel" class="input-field" v-model="registerPhone" placeholder="请输入手机号" autocomplete="tel" />
           </div>
-          <div class="input-group" v-if="currentMode === 'register'">
-            <label class="input-label">昵称</label>
-            <input type="text" class="input-field" v-model="nickname" placeholder="可选" autocomplete="nickname" />
+          <div class="input-group password-field pill-field">
+            <input :type="showRegisterPassword ? 'text' : 'password'" class="input-field" v-model="registerPassword" placeholder="请输入密码" autocomplete="new-password" />
+            <button type="button" class="eye-btn" @click="showRegisterPassword = !showRegisterPassword" aria-label="切换密码显示"><Eye class="eye-icon" /></button>
           </div>
-          <div class="input-group">
-            <label class="input-label">短信验证码</label>
-            <div class="code-row">
-              <input type="text" class="input-field" v-model="smsCode" placeholder="6 位验证码" maxlength="6" />
-              <button type="button" class="code-btn" :disabled="codeSending" @click="handleSendCode">{{ codeBtnText }}</button>
+          <div class="input-group password-field pill-field">
+            <input :type="showRegisterConfirmPassword ? 'text' : 'password'" class="input-field" v-model="registerConfirmPassword" placeholder="请再次输入密码" autocomplete="new-password" />
+            <button type="button" class="eye-btn" @click="showRegisterConfirmPassword = !showRegisterConfirmPassword" aria-label="切换密码显示"><Eye class="eye-icon" /></button>
+          </div>
+          <div class="input-group code-field">
+            <div class="code-row pill-field">
+              <input type="text" class="input-field" v-model="registerCode" placeholder="请输入验证码" maxlength="6" inputmode="numeric" />
+              <button type="button" class="code-btn" :disabled="codeSending" @click="handleSendCode('register')">{{ codeBtnText }}</button>
             </div>
+          </div>
+          <p class="agreement-text">
+            注册即代表已阅读并同意我们的
+            <a href="#" @click.prevent>隐私政策</a>
+          </p>
+        </div>
+
+        <div v-else-if="currentMode === 'forgotVerify'" class="forgot-form">
+          <div class="input-group">
+            <input type="text" class="input-field pill-field" v-model="resetAccount" placeholder="请输入 +86 手机号" autocomplete="username" />
+          </div>
+          <div class="input-group code-field">
+            <div class="code-row pill-field">
+              <input type="text" class="input-field" v-model="resetCode" placeholder="请输入验证码" maxlength="6" inputmode="numeric" />
+              <button type="button" class="code-btn" :disabled="codeSending" @click="handleSendCode('reset')">{{ codeBtnText }}</button>
+            </div>
+          </div>
+        </div>
+
+        <div v-else class="forgot-reset-form">
+          <div class="input-group password-field pill-field">
+            <input :type="showResetPassword ? 'text' : 'password'" class="input-field" v-model="resetPasswordValue" placeholder="请输入新密码" autocomplete="new-password" />
+            <button type="button" class="eye-btn" @click="showResetPassword = !showResetPassword" aria-label="切换密码显示"><Eye class="eye-icon" /></button>
+          </div>
+          <div class="input-group password-field pill-field">
+            <input :type="showResetConfirmPassword ? 'text' : 'password'" class="input-field" v-model="resetConfirmPassword" placeholder="请确认新密码" autocomplete="new-password" />
+            <button type="button" class="eye-btn" @click="showResetConfirmPassword = !showResetConfirmPassword" aria-label="切换密码显示"><Eye class="eye-icon" /></button>
           </div>
         </div>
 
@@ -118,12 +149,21 @@
         <p v-if="errorMsg" class="error-message">{{ errorMsg }}</p>
 
         <button type="submit" class="login-btn" :disabled="submitting">
-          {{ currentMode === 'register' ? '注册并登录' : '登录工作台' }}
+          {{ submitting ? submitPendingLabel : submitLabel }}
         </button>
       </form>
 
-      <p class="footer-link">
-        <a href="#" @click.prevent="toolstoreLink">进入 AI 工具市场</a>
+      <p v-if="currentMode === 'smsLogin'" class="auth-switch">
+        <a href="#" @click.prevent="switchMode('passwordLogin')">密码登录</a>
+      </p>
+      <p v-else-if="currentMode === 'passwordLogin'" class="auth-switch">
+        <a href="#" @click.prevent="switchMode('smsLogin')">验证码登录</a>
+      </p>
+      <p v-else-if="currentMode === 'register' || currentMode === 'forgotVerify'" class="auth-switch plain-link">
+        <a href="#" @click.prevent="switchMode('passwordLogin')">返回登录</a>
+      </p>
+      <p v-else class="auth-switch plain-link">
+        <a href="#" @click.prevent="switchMode('forgotVerify')">返回</a>
       </p>
     </div>
   </div>
@@ -133,8 +173,8 @@
 <script setup>
   import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue';
   import { useRoute, useRouter } from 'vue-router';
-  import { LayoutGrid, Rocket, Shield, Zap } from 'lucide-vue-next';
-  import { sendSmsCode } from '@/api';
+  import { Eye, LayoutGrid, Rocket, Shield, Zap } from 'lucide-vue-next';
+  import { resetPassword, sendSmsCode } from '@/api';
   import { useAuthStore } from '@/store/authStore';
 
   // ================= 鼠标跟随效果 =================
@@ -149,6 +189,16 @@
   const router = useRouter();
   const route = useRoute();
   const auth = useAuthStore();
+  const aliyunCaptchaConfig = {
+    enabled: import.meta.env.VITE_ALIYUN_CAPTCHA_ENABLED === 'true',
+    region: import.meta.env.VITE_ALIYUN_CAPTCHA_REGION || 'cn',
+    prefix: import.meta.env.VITE_ALIYUN_CAPTCHA_PREFIX || '',
+    sceneId: import.meta.env.VITE_ALIYUN_CAPTCHA_SCENE_ID || '',
+  };
+  let aliyunCaptchaInstance = null;
+  let aliyunCaptchaLoading = null;
+  let pendingCaptchaResolve = null;
+  let pendingCaptchaReject = null;
 
   // ================= 开屏动画控制 =================
   const brandVisible = ref(false);
@@ -336,17 +386,26 @@
   }
 
   // ================= 登录弹窗逻辑 =================
-  const currentMode = ref('passwordLogin');
-  const loginTitles = {
-    smsLogin: { title: '手机号登录', subtitle: '输入短信验证码，安全进入工作台' },
-    passwordLogin: { title: '账号密码登录', subtitle: '使用账号或手机号和密码登录' },
-    register: { title: '手机号注册', subtitle: '验证手机号后自动创建账号并登录' }
-  };
+  const currentMode = ref('smsLogin');
   const account = ref('');
   const password = ref('');
   const phone = ref('');
-  const nickname = ref('');
   const smsCode = ref('');
+  const registerPhone = ref('');
+  const registerPassword = ref('');
+  const registerConfirmPassword = ref('');
+  const registerCode = ref('');
+  const resetAccount = ref('');
+  const resetCode = ref('');
+  const verifiedResetPhone = ref('');
+  const resetPasswordValue = ref('');
+  const resetConfirmPassword = ref('');
+  const showPassword = ref(false);
+  const showRegisterPassword = ref(false);
+  const showRegisterConfirmPassword = ref(false);
+  const showResetPassword = ref(false);
+  const showResetConfirmPassword = ref(false);
+  const nickname = ref('');
   const tipMsg = ref('');
   const errorMsg = ref('');
   const submitting = ref(false);
@@ -354,8 +413,32 @@
   const codeCountdown = ref(0);
   let countdownTimer = null;
 
+  const loginTitle = computed(() => {
+    if (currentMode.value === 'register') return '';
+    if (currentMode.value === 'forgotVerify' || currentMode.value === 'forgotReset') return '重置统一登录密码';
+    return currentMode.value === 'passwordLogin' ? '密码登录' : '手机号登录';
+  });
+  const loginSubtitle = computed(() => {
+    if (currentMode.value === 'register') return '你所在地区仅支持手机号注册，只需一个未来云AI账号，即可访问未来云AI的所有服务。';
+    if (currentMode.value === 'forgotVerify') return '请输入你注册的手机号用于接收验证码，我们将为你重置密码。';
+    if (currentMode.value === 'forgotReset') return '你正在重置 ' + (verifiedResetPhone.value || resetTargetLabel.value) + ' 的密码，请输入新密码。';
+    return currentMode.value === 'passwordLogin' ? '' : '未注册手机号验证后将自动创建账号';
+  });
+  const resetTargetLabel = computed(() => resetAccount.value.trim() || verifiedResetPhone.value);
+  const submitLabel = computed(() => {
+    if (currentMode.value === 'register') return '注册';
+    if (currentMode.value === 'forgotVerify') return '下一步';
+    if (currentMode.value === 'forgotReset') return '重置密码';
+    return '登录';
+  });
+  const submitPendingLabel = computed(() => {
+    if (currentMode.value === 'register') return '注册中...';
+    if (currentMode.value === 'forgotVerify') return '处理中...';
+    if (currentMode.value === 'forgotReset') return '重置中...';
+    return '登录中...';
+  });
   const codeBtnText = computed(() =>
-    codeCountdown.value > 0 ? `${codeCountdown.value}s 后重发` : '获取验证码'
+    codeCountdown.value > 0 ? codeCountdown.value + ' 秒后可再次获取' : '发送验证码'
   );
 
   function clearMessages() {
@@ -374,19 +457,119 @@
     errorMsg.value = msg;
     tipMsg.value = '';
   }
-  async function handleSendCode() {
-    const phoneNum = phone.value.trim();
+  function normalizePhoneInput(value) {
+    return value.trim().replace(/[\s-]/g, '').replace(/^\+?86/, '');
+  }
+  function validatePhone(value) {
+    const phoneNum = normalizePhoneInput(value);
     if (!/^1\d{10}$/.test(phoneNum)) {
-      showError('请输入正确的 11 位手机号');
+      throw new Error('请输入正确的 11 位手机号');
+    }
+    return phoneNum;
+  }
+  function validatePasswordPair(first, second) {
+    if (!first || first.length < 6) throw new Error('密码至少需要 6 位');
+    if (first !== second) throw new Error('两次输入的密码不一致');
+  }
+  function resetCountdown() {
+    if (countdownTimer) clearInterval(countdownTimer);
+    countdownTimer = null;
+    codeCountdown.value = 0;
+    codeSending.value = false;
+  }
+  function loadAliyunCaptchaScript() {
+    if (!aliyunCaptchaConfig.enabled) return Promise.resolve(false);
+    if (!aliyunCaptchaConfig.prefix || !aliyunCaptchaConfig.sceneId) {
+      return Promise.reject(new Error('阿里云验证码前端配置不完整'));
+    }
+    if (window.initAliyunCaptcha) return Promise.resolve(true);
+    if (aliyunCaptchaLoading) return aliyunCaptchaLoading;
+    window.AliyunCaptchaConfig = {
+      region: aliyunCaptchaConfig.region,
+      prefix: aliyunCaptchaConfig.prefix,
+    };
+    aliyunCaptchaLoading = new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = 'https://o.alicdn.com/captcha-frontend/aliyunCaptcha/AliyunCaptcha.js';
+      script.async = true;
+      script.onload = () => resolve(true);
+      script.onerror = () => reject(new Error('阿里云验证码脚本加载失败'));
+      document.head.appendChild(script);
+    });
+    return aliyunCaptchaLoading;
+  }
+  async function ensureAliyunCaptcha() {
+    const loaded = await loadAliyunCaptchaScript();
+    if (!loaded || aliyunCaptchaInstance) return loaded;
+    if (!window.initAliyunCaptcha) {
+      throw new Error('阿里云验证码初始化方法不可用');
+    }
+    window.initAliyunCaptcha({
+      SceneId: aliyunCaptchaConfig.sceneId,
+      mode: 'popup',
+      element: '#aliyun-captcha-element',
+      button: '#aliyun-captcha-trigger',
+      language: 'cn',
+      delayBeforeSuccess: false,
+      slideStyle: {
+        width: 360,
+        height: 40,
+      },
+      success(captchaVerifyParam) {
+        const resolve = pendingCaptchaResolve;
+        pendingCaptchaResolve = null;
+        pendingCaptchaReject = null;
+        if (resolve) resolve(captchaVerifyParam);
+      },
+      fail(result) {
+        console.error(result);
+      },
+      onError(errorInfo) {
+        const reject = pendingCaptchaReject;
+        pendingCaptchaResolve = null;
+        pendingCaptchaReject = null;
+        if (reject) reject(new Error(errorInfo?.msg || '阿里云验证码初始化失败'));
+      },
+      getInstance(instance) {
+        aliyunCaptchaInstance = instance;
+      },
+    });
+    return true;
+  }
+  async function verifyAliyunCaptcha() {
+    const enabled = await ensureAliyunCaptcha();
+    if (!enabled) return null;
+    return new Promise((resolve, reject) => {
+      pendingCaptchaResolve = resolve;
+      pendingCaptchaReject = reject;
+      const trigger = document.getElementById('aliyun-captcha-trigger');
+      if (trigger) {
+        trigger.click();
+      } else if (aliyunCaptchaInstance?.show) {
+        aliyunCaptchaInstance.show();
+      } else {
+        pendingCaptchaResolve = null;
+        pendingCaptchaReject = null;
+        reject(new Error('阿里云验证码触发失败'));
+      }
+    });
+  }
+  async function handleSendCode(target = 'login') {
+    let phoneNum;
+    try {
+      if (target === 'register') phoneNum = validatePhone(registerPhone.value);
+      else if (target === 'reset') phoneNum = validatePhone(resetAccount.value);
+      else phoneNum = validatePhone(phone.value);
+    } catch (error) {
+      showError(error instanceof Error ? error.message : '请输入正确的手机号');
       return;
     }
     clearMessages();
     codeSending.value = true;
     try {
-      const scene = currentMode.value === 'register' ? 'REGISTER' : 'LOGIN';
-      const res = await sendSmsCode({ phone: phoneNum, scene });
-      const hint = res.debugCode ? `验证码已发送（调试码：${res.debugCode}）` : '验证码已发送';
-      showTip(hint);
+      const scene = target === 'register' ? 'REGISTER' : target === 'reset' ? 'RESET_PASSWORD' : 'LOGIN_OR_REGISTER';
+      const captchaVerifyParam = await verifyAliyunCaptcha();
+      const res = await sendSmsCode({ phone: phoneNum, scene, captchaVerifyParam });
       codeCountdown.value = res.cooldownSeconds || 60;
       if (countdownTimer) clearInterval(countdownTimer);
       countdownTimer = setInterval(() => {
@@ -409,7 +592,17 @@
     password.value = '';
     phone.value = '';
     smsCode.value = '';
+    registerPhone.value = '';
+    registerPassword.value = '';
+    registerConfirmPassword.value = '';
+    registerCode.value = '';
+    resetAccount.value = '';
+    resetCode.value = '';
+    verifiedResetPhone.value = '';
+    resetPasswordValue.value = '';
+    resetConfirmPassword.value = '';
     nickname.value = '';
+    resetCountdown();
   }
 
   function resolvePostLoginRedirect() {
@@ -444,30 +637,56 @@
       if (currentMode.value === 'passwordLogin') {
         if (!account.value.trim() || !password.value) throw new Error('请输入账号和密码');
         await auth.login({ account: account.value.trim(), password: password.value });
-      } else {
-        const phoneNum = phone.value.trim();
-        if (!/^1\d{10}$/.test(phoneNum)) throw new Error('请输入正确的 11 位手机号');
-        if (!/^\d{6}$/.test(smsCode.value)) throw new Error('请输入 6 位短信验证码');
-        const body = { phone: phoneNum, code: smsCode.value.trim() };
-        if (currentMode.value === 'register') {
-          const nick = nickname.value.trim();
-          if (nick) body.nickname = nick;
-          await auth.smsRegister(body);
-        } else {
-          await auth.smsLogin(body);
-        }
+        await enterAfterLogin();
+        return;
       }
-      await enterAfterLogin();
+
+      if (currentMode.value === 'smsLogin') {
+        const phoneNum = validatePhone(phone.value);
+        if (!/^\d{6}$/.test(smsCode.value)) throw new Error('请输入 6 位短信验证码');
+        await auth.smsLogin({ phone: phoneNum, code: smsCode.value.trim() });
+        await enterAfterLogin();
+        return;
+      }
+
+      if (currentMode.value === 'register') {
+        const phoneNum = validatePhone(registerPhone.value);
+        validatePasswordPair(registerPassword.value, registerConfirmPassword.value);
+        if (!/^\d{6}$/.test(registerCode.value)) throw new Error('请输入 6 位短信验证码');
+        await auth.smsRegister({
+          phone: phoneNum,
+          code: registerCode.value.trim(),
+          password: registerPassword.value,
+        });
+        await enterAfterLogin();
+        return;
+      }
+
+      if (currentMode.value === 'forgotVerify') {
+        const phoneNum = validatePhone(resetAccount.value);
+        if (!/^\d{6}$/.test(resetCode.value)) throw new Error('请输入 6 位短信验证码');
+        verifiedResetPhone.value = phoneNum;
+        currentMode.value = 'forgotReset';
+        clearMessages();
+        return;
+      }
+
+      validatePasswordPair(resetPasswordValue.value, resetConfirmPassword.value);
+      const phoneNum = verifiedResetPhone.value || validatePhone(resetAccount.value);
+      await resetPassword({
+        phone: phoneNum,
+        code: resetCode.value.trim(),
+        password: resetPasswordValue.value,
+      });
+      showTip('密码已重置，请使用新密码登录');
+      password.value = '';
+      account.value = phoneNum;
+      currentMode.value = 'passwordLogin';
     } catch (err) {
-      showError(err instanceof Error ? err.message : '登录失败');
+      showError(err instanceof Error ? err.message : '操作失败');
     } finally {
       submitting.value = false;
     }
-  }
-
-  function toolstoreLink() {
-    loginModalVisible.value = false;
-    router.push('/marketplace');
   }
 
   // ================= 生命周期 =================
@@ -563,6 +782,16 @@
   z-index: 0;
   transform: translate(-50%, -50%);
   transition: opacity 0.3s ease;
+}
+
+.aliyun-captcha-element,
+.aliyun-captcha-trigger {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
 }
 
 /* ========= fade-up 入场（原生 @keyframes，保留 .animate-item / .show class） ========= */
@@ -905,60 +1134,41 @@
 }
 .login-container {
   width: 100%;
-  max-width: 28rem;
-  margin: 1.5rem;
+  max-width: 380px;
+  margin: 1.25rem;
   background: white;
-  border-radius: 0.75rem;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  border: 1px solid #d8e7ff;
+  border-radius: 24px;
+  box-shadow: 0 24px 60px rgba(37, 99, 235, 0.18);
   overflow: hidden;
 }
+.login-container.compact-login .login-card {
+  padding-top: 0.875rem;
+}
 .login-header {
-  padding: 1.5rem;
+  padding: 1.75rem 1.375rem 0.875rem;
   text-align: center;
 }
 .login-title {
-  font-size: 1.5rem;
-  font-weight: 600;
-  color: #1f2e3a;
-  margin: 0 0 0.5rem 0;
+  font-size: 1.375rem;
+  font-weight: 700;
+  color: #1455d9;
+  margin: 0 0 0.45rem 0;
+  letter-spacing: 0;
+}
+.login-title:empty {
+  display: none;
 }
 .login-subtitle {
-  font-size: 0.875rem;
-  color: #6b7a8c;
+  font-size: 0.8125rem;
+  color: #5f7fb8;
   margin: 0;
 }
-.mode-tabs {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 0.25rem;
-  padding: 0.25rem;
-  background: #f5f7fa;
-  border-bottom: 1px solid #e8ecef;
-}
-.mode-tabs button {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.375rem;
-  height: 2.5rem;
-  border: none;
-  border-radius: 0.375rem;
-  background: transparent;
-  color: #6b7a8c;
-  font-size: 0.8125rem;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-.mode-tabs button.active {
-  background: white;
-  color: #1f2e3a;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
-}
 .login-card {
-  padding: 1.5rem;
+  padding: 0.5rem 1.375rem 0;
 }
 .input-group {
-  margin-bottom: 1rem;
+  margin-bottom: 1.125rem;
 }
 .input-label {
   display: block;
@@ -969,40 +1179,130 @@
 }
 .input-field {
   width: 100%;
-  height: 2.5rem;
-  padding: 0.5rem 0.75rem;
-  border: 1px solid #dce5ef;
-  border-radius: 0.375rem;
-  font-size: 0.875rem;
+  height: 100%;
+  padding: 0 1rem;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: #121826;
+  font-size: 0.9375rem;
   box-sizing: border-box;
-  transition: border-color 0.2s ease;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 .input-field:focus {
   outline: none;
-  border-color: #4a8cdf;
+  transform: none;
+  box-shadow: none;
+}
+.input-field::placeholder {
+  color: #b5bdc9;
+}
+.pill-field,
+.phone-field {
+  height: 48px;
+  display: flex;
+  align-items: center;
+  border: 1px solid #cfe0ff;
+  border-radius: 999px;
+  background: #fff;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.pill-field:focus-within,
+.phone-field:focus-within {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+.phone-field {
+  padding-left: 1rem;
+}
+.phone-field .input-field {
+  padding-left: 0.55rem;
+}
+.country-code {
+  color: #1455d9;
+  font-size: 0.9375rem;
+  white-space: nowrap;
+}
+.password-field .input-field {
+  min-width: 0;
+  padding-right: 0.5rem;
+}
+.eye-btn {
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  display: grid;
+  place-items: center;
+  border: none;
+  background: transparent;
+  color: #2563eb;
+  cursor: pointer;
+}
+.eye-icon {
+  width: 16px;
+  height: 16px;
+  stroke-width: 2;
 }
 .code-row {
-  display: grid;
-  grid-template-columns: 1fr 7rem;
-  gap: 0.5rem;
+  overflow: hidden;
+}
+.code-row .input-field {
+  min-width: 0;
 }
 .code-btn {
-  height: 2.5rem;
-  padding: 0 1rem;
-  border: 1px solid #dce5ef;
-  border-radius: 0.375rem;
-  background: white;
-  color: #3a5a7a;
-  font-size: 0.875rem;
+  align-self: stretch;
+  min-width: 118px;
+  padding: 0 0.85rem;
+  border: none;
+  border-left: 1px solid #d8e7ff;
+  background: transparent;
+  color: #1455d9;
+  font-size: 0.8125rem;
+  font-weight: 500;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: color 0.2s ease, background 0.2s ease;
 }
 .code-btn:hover:not(:disabled) {
-  background: #f5f7fa;
+  color: #2563eb;
+  background: #eff6ff;
 }
 .code-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+.agreement-text {
+  margin: 0.25rem 0 1.375rem;
+  color: #6b7280;
+  font-size: 0.75rem;
+  line-height: 1.7;
+}
+.agreement-text a {
+  color: #1455d9;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.password-agreement {
+  margin-top: -0.25rem;
+  margin-bottom: 1.25rem;
+}
+.auth-row-links {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: -0.25rem 0 1.125rem;
+  font-size: 0.8125rem;
+}
+.auth-row-links a {
+  color: #1455d9;
+  text-decoration: none;
+}
+.auth-row-links a:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.forgot-reset-form {
+  padding-top: 1.5rem;
 }
 .tip-message,
 .error-message {
@@ -1023,39 +1323,46 @@
 }
 .login-btn {
   width: 100%;
-  height: 2.75rem;
+  height: 46px;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
   border: none;
-  border-radius: 0.375rem;
-  background: #2a6eff;
+  border-radius: 999px;
+  background: #2563eb;
   color: white;
-  font-size: 0.875rem;
-  font-weight: 500;
+  font-size: 0.9375rem;
+  font-weight: 600;
   cursor: pointer;
-  transition: opacity 0.2s ease;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease;
 }
 .login-btn:hover:not(:disabled) {
-  opacity: 0.9;
+  transform: translateY(-1px);
+  box-shadow: 0 14px 24px rgba(37, 99, 235, 0.28);
 }
 .login-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }
-.footer-link {
+.auth-switch {
   text-align: center;
   padding: 1rem 1.5rem 1.5rem;
   font-size: 0.75rem;
-  color: #6b7a8c;
+  color: #6b7280;
 }
-.footer-link a {
-  color: #4a8cdf;
+.auth-switch a {
+  color: #6b7280;
   text-decoration: none;
+  border-bottom: 1px solid currentColor;
 }
-.footer-link a:hover {
-  text-decoration: underline;
+.auth-switch a:hover {
+  color: #1455d9;
+}
+.auth-switch.plain-link a {
+  color: #1455d9;
+  border-bottom: none;
+  font-size: 0.875rem;
 }
 .spin-icon {
   animation: spin 1s linear infinite;

@@ -25,27 +25,45 @@ public class BillingServiceImpl implements BillingService {
     }
 
     @Override
-    public BillingOverviewResponse overview() {
-        LocalDate today = LocalDate.now();
-        LocalDateTime startAt = today.atStartOfDay();
-        LocalDateTime endAt = today.plusDays(1).atStartOfDay();
+    public BillingOverviewResponse overview(Long userId, Long modelConfigId, String provider, String modelName,
+                                            String sourceType, Long sourceId, LocalDate startDate, LocalDate endDate) {
+        LocalDate normalizedStart = startDate == null ? LocalDate.now() : startDate;
+        LocalDate normalizedEnd = endDate == null ? normalizedStart : endDate;
+        if (normalizedEnd.isBefore(normalizedStart)) {
+            normalizedEnd = normalizedStart;
+        }
+        LocalDateTime startAt = normalizedStart.atStartOfDay();
+        LocalDateTime endAt = normalizedEnd.plusDays(1).atStartOfDay();
         return new BillingOverviewResponse(
-                billingUsageLogMapper.sumPromptTokens(startAt, endAt),
-                billingUsageLogMapper.sumCompletionTokens(startAt, endAt),
-                billingUsageLogMapper.sumTotalTokens(startAt, endAt),
-                zeroIfNull(billingUsageLogMapper.sumCostAmount(startAt, endAt)),
-                billingUsageLogMapper.sumChargedCredits(startAt, endAt),
-                billingUsageLogMapper.countUsage(startAt, endAt),
-                billingUsageLogMapper.modelCosts(startAt, endAt)
+                billingUsageLogMapper.sumPromptTokens(startAt, endAt, userId, modelConfigId, clean(provider), clean(modelName), clean(sourceType), sourceId),
+                billingUsageLogMapper.sumCompletionTokens(startAt, endAt, userId, modelConfigId, clean(provider), clean(modelName), clean(sourceType), sourceId),
+                billingUsageLogMapper.sumTotalTokens(startAt, endAt, userId, modelConfigId, clean(provider), clean(modelName), clean(sourceType), sourceId),
+                zeroIfNull(billingUsageLogMapper.sumCostAmount(startAt, endAt, userId, modelConfigId, clean(provider), clean(modelName), clean(sourceType), sourceId)),
+                billingUsageLogMapper.sumChargedCredits(startAt, endAt, userId, modelConfigId, clean(provider), clean(modelName), clean(sourceType), sourceId),
+                billingUsageLogMapper.countUsage(startAt, endAt, userId, modelConfigId, clean(provider), clean(modelName), clean(sourceType), sourceId),
+                billingUsageLogMapper.modelCosts(startAt, endAt, userId, modelConfigId, clean(provider), clean(modelName), clean(sourceType), sourceId),
+                billingUsageLogMapper.userCosts(startAt, endAt, userId, modelConfigId, clean(provider), clean(modelName), clean(sourceType), sourceId),
+                billingUsageLogMapper.modalityCosts(startAt, endAt, userId, modelConfigId, clean(provider), clean(modelName), clean(sourceType), sourceId),
+                billingUsageLogMapper.dailyCosts(startAt, endAt, userId, modelConfigId, clean(provider), clean(modelName), clean(sourceType), sourceId)
         );
     }
 
     @Override
-    public PageResponse<BillingUsageLogResponse> logs(Integer pageNo, Integer pageSize) {
+    public PageResponse<BillingUsageLogResponse> logs(Integer pageNo, Integer pageSize, Long userId, Long modelConfigId,
+                                                      String provider, String modelName, String sourceType,
+                                                      Long sourceId, LocalDate startDate, LocalDate endDate) {
         int normalizedPageSize = PageResponse.normalizePageSize(pageSize);
         int offset = PageResponse.offset(pageNo, pageSize);
-        long total = billingUsageLogMapper.countLogs();
-        return PageResponse.of(billingUsageLogMapper.findLogs(normalizedPageSize, offset), total, pageNo, pageSize);
+        LocalDateTime startAt = startDate == null ? null : startDate.atStartOfDay();
+        LocalDateTime endAt = endDate == null ? null : endDate.plusDays(1).atStartOfDay();
+        long total = billingUsageLogMapper.countLogs(startAt, endAt, userId, modelConfigId, clean(provider), clean(modelName), clean(sourceType), sourceId);
+        return PageResponse.of(
+                billingUsageLogMapper.findLogs(normalizedPageSize, offset, startAt, endAt, userId, modelConfigId,
+                        clean(provider), clean(modelName), clean(sourceType), sourceId),
+                total,
+                pageNo,
+                pageSize
+        );
     }
 
     @Override
@@ -113,5 +131,9 @@ public class BillingServiceImpl implements BillingService {
 
     private int nonNegative(Integer value) {
         return value == null ? 0 : Math.max(0, value);
+    }
+
+    private String clean(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
     }
 }

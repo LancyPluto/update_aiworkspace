@@ -18,6 +18,7 @@ public class AppProperties {
     private Agent agent = new Agent();
     private Auth auth = new Auth();
     private Cors cors = new Cors();
+    private Payment payment = new Payment();
 
     public boolean isProductionMode() {
         return productionMode;
@@ -101,6 +102,14 @@ public class AppProperties {
         this.cors = cors;
     }
 
+    public Payment getPayment() {
+        return payment;
+    }
+
+    public void setPayment(Payment payment) {
+        this.payment = payment == null ? new Payment() : payment;
+    }
+
     public static class Cors {
         private List<String> allowedOrigins = new ArrayList<>();
 
@@ -178,6 +187,7 @@ public class AppProperties {
         private String cookieSameSite = "Lax";
         private Boolean cookieSecure;
         private Sms sms = new Sms();
+        private Captcha captcha = new Captcha();
 
         public String getCookieSameSite() {
             return cookieSameSite;
@@ -202,6 +212,85 @@ public class AppProperties {
         public void setSms(Sms sms) {
             this.sms = sms == null ? new Sms() : sms;
         }
+
+        public Captcha getCaptcha() {
+            return captcha;
+        }
+
+        public void setCaptcha(Captcha captcha) {
+            this.captcha = captcha == null ? new Captcha() : captcha;
+        }
+    }
+
+    public static class Captcha {
+        private boolean enabled = false;
+        private String provider = "local";
+        private String region = "cn";
+        private String sceneId = "";
+        private String endpoint = "";
+        private String accessKeyId = "";
+        private String accessKeySecret = "";
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public String getProvider() {
+            return provider;
+        }
+
+        public void setProvider(String provider) {
+            this.provider = provider == null || provider.isBlank() ? "local" : provider;
+        }
+
+        public String getRegion() {
+            return region;
+        }
+
+        public void setRegion(String region) {
+            this.region = region == null || region.isBlank() ? "cn" : region;
+        }
+
+        public String getSceneId() {
+            return sceneId;
+        }
+
+        public void setSceneId(String sceneId) {
+            this.sceneId = sceneId == null ? "" : sceneId;
+        }
+
+        public String getEndpoint() {
+            if (endpoint != null && !endpoint.isBlank()) {
+                return endpoint;
+            }
+            return "sgp".equalsIgnoreCase(region)
+                    ? "captcha.ap-southeast-1.aliyuncs.com"
+                    : "captcha.cn-shanghai.aliyuncs.com";
+        }
+
+        public void setEndpoint(String endpoint) {
+            this.endpoint = endpoint == null ? "" : endpoint;
+        }
+
+        public String getAccessKeyId() {
+            return accessKeyId;
+        }
+
+        public void setAccessKeyId(String accessKeyId) {
+            this.accessKeyId = accessKeyId == null ? "" : accessKeyId;
+        }
+
+        public String getAccessKeySecret() {
+            return accessKeySecret;
+        }
+
+        public void setAccessKeySecret(String accessKeySecret) {
+            this.accessKeySecret = accessKeySecret == null ? "" : accessKeySecret;
+        }
     }
 
     public static class Sms {
@@ -214,6 +303,12 @@ public class AppProperties {
         private String ihuyiApiKey;
         private String ihuyiBaseUrl = "https://api.ihuyi.com/sms/Submit.json";
         private String ihuyiTemplateId = "1";
+        private String aliyunAccessKeyId = "";
+        private String aliyunAccessKeySecret = "";
+        private String aliyunEndpoint = "dysmsapi.aliyuncs.com";
+        private String aliyunSignName = "";
+        private String aliyunTemplateCode = "";
+        private String aliyunTemplateParamName = "code";
 
         public String getProvider() {
             return provider;
@@ -288,6 +383,56 @@ public class AppProperties {
         public void setIhuyiTemplateId(String ihuyiTemplateId) {
             this.ihuyiTemplateId = ihuyiTemplateId == null || ihuyiTemplateId.isBlank() ? "1" : ihuyiTemplateId;
         }
+
+        public String getAliyunAccessKeyId() {
+            return aliyunAccessKeyId;
+        }
+
+        public void setAliyunAccessKeyId(String aliyunAccessKeyId) {
+            this.aliyunAccessKeyId = aliyunAccessKeyId == null ? "" : aliyunAccessKeyId;
+        }
+
+        public String getAliyunAccessKeySecret() {
+            return aliyunAccessKeySecret;
+        }
+
+        public void setAliyunAccessKeySecret(String aliyunAccessKeySecret) {
+            this.aliyunAccessKeySecret = aliyunAccessKeySecret == null ? "" : aliyunAccessKeySecret;
+        }
+
+        public String getAliyunEndpoint() {
+            return aliyunEndpoint == null || aliyunEndpoint.isBlank() ? "dysmsapi.aliyuncs.com" : aliyunEndpoint;
+        }
+
+        public void setAliyunEndpoint(String aliyunEndpoint) {
+            this.aliyunEndpoint = aliyunEndpoint == null || aliyunEndpoint.isBlank() ? "dysmsapi.aliyuncs.com" : aliyunEndpoint;
+        }
+
+        public String getAliyunSignName() {
+            return aliyunSignName;
+        }
+
+        public void setAliyunSignName(String aliyunSignName) {
+            this.aliyunSignName = aliyunSignName == null ? "" : aliyunSignName;
+        }
+
+        public String getAliyunTemplateCode() {
+            return aliyunTemplateCode;
+        }
+
+        public void setAliyunTemplateCode(String aliyunTemplateCode) {
+            this.aliyunTemplateCode = aliyunTemplateCode == null ? "" : aliyunTemplateCode;
+        }
+
+        public String getAliyunTemplateParamName() {
+            return aliyunTemplateParamName == null || aliyunTemplateParamName.isBlank() ? "code" : aliyunTemplateParamName;
+        }
+
+        public void setAliyunTemplateParamName(String aliyunTemplateParamName) {
+            this.aliyunTemplateParamName = aliyunTemplateParamName == null || aliyunTemplateParamName.isBlank()
+                    ? "code"
+                    : aliyunTemplateParamName;
+        }
     }
 
     public static class Agent {
@@ -353,6 +498,113 @@ public class AppProperties {
 
         public void setFileStorageDir(String fileStorageDir) {
             this.fileStorageDir = fileStorageDir == null || fileStorageDir.isBlank() ? "data/agent-files" : fileStorageDir;
+        }
+    }
+
+    public static class Payment {
+        private WechatNative wechatNative = new WechatNative();
+
+        public WechatNative getWechatNative() {
+            return wechatNative;
+        }
+
+        public void setWechatNative(WechatNative wechatNative) {
+            this.wechatNative = wechatNative == null ? new WechatNative() : wechatNative;
+        }
+    }
+
+    public static class WechatNative {
+        private boolean enabled;
+        private String appid = "";
+        private String mchid = "";
+        private String merchantSerialNo = "";
+        private String merchantPrivateKeyPath = "";
+        private String apiV3Key = "";
+        private String wechatPayPublicKeyId = "";
+        private String wechatPayPublicKeyPath = "";
+        private String notifyUrl = "";
+        private String apiBaseUrl = "https://api.mch.weixin.qq.com";
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public String getAppid() {
+            return appid;
+        }
+
+        public void setAppid(String appid) {
+            this.appid = appid == null ? "" : appid;
+        }
+
+        public String getMchid() {
+            return mchid;
+        }
+
+        public void setMchid(String mchid) {
+            this.mchid = mchid == null ? "" : mchid;
+        }
+
+        public String getMerchantSerialNo() {
+            return merchantSerialNo;
+        }
+
+        public void setMerchantSerialNo(String merchantSerialNo) {
+            this.merchantSerialNo = merchantSerialNo == null ? "" : merchantSerialNo;
+        }
+
+        public String getMerchantPrivateKeyPath() {
+            return merchantPrivateKeyPath;
+        }
+
+        public void setMerchantPrivateKeyPath(String merchantPrivateKeyPath) {
+            this.merchantPrivateKeyPath = merchantPrivateKeyPath == null ? "" : merchantPrivateKeyPath;
+        }
+
+        public String getApiV3Key() {
+            return apiV3Key;
+        }
+
+        public void setApiV3Key(String apiV3Key) {
+            this.apiV3Key = apiV3Key == null ? "" : apiV3Key;
+        }
+
+        public String getWechatPayPublicKeyId() {
+            return wechatPayPublicKeyId;
+        }
+
+        public void setWechatPayPublicKeyId(String wechatPayPublicKeyId) {
+            this.wechatPayPublicKeyId = wechatPayPublicKeyId == null ? "" : wechatPayPublicKeyId;
+        }
+
+        public String getWechatPayPublicKeyPath() {
+            return wechatPayPublicKeyPath;
+        }
+
+        public void setWechatPayPublicKeyPath(String wechatPayPublicKeyPath) {
+            this.wechatPayPublicKeyPath = wechatPayPublicKeyPath == null ? "" : wechatPayPublicKeyPath;
+        }
+
+        public String getNotifyUrl() {
+            return notifyUrl;
+        }
+
+        public void setNotifyUrl(String notifyUrl) {
+            this.notifyUrl = notifyUrl == null ? "" : notifyUrl;
+        }
+
+        public String getApiBaseUrl() {
+            return apiBaseUrl;
+        }
+
+        public void setApiBaseUrl(String apiBaseUrl) {
+            this.apiBaseUrl = apiBaseUrl == null || apiBaseUrl.isBlank()
+                    ? "https://api.mch.weixin.qq.com"
+                    : apiBaseUrl;
         }
     }
 }

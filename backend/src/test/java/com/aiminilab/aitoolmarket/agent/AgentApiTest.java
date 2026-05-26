@@ -905,6 +905,46 @@ class AgentApiTest {
     }
 
     @Test
+    void failedAgentRunRecordsModelUsageAndSettlesConsumedCredits() throws Exception {
+        mockExternalAuthDependencies();
+        String username = "agent_failed_usage_user";
+        register(username);
+        LoginResult login = loginWithUser(username);
+        Long sessionId = createSession(login.token(), "Agent Failed Usage");
+
+        Long runId = sendMessage(login.token(), sessionId, "Fail after model usage.").runId();
+        org.assertj.core.api.Assertions.assertThat(creditService.account(login.userId()).frozen()).isEqualTo(20);
+
+        String failBody = """
+                {
+                  "errorCode": "TOOL_CALL_FAILED",
+                  "errorMessage": "Tool failed after model planning.",
+                  "consumedCredits": 3,
+                  "promptTokens": 111,
+                  "completionTokens": 22
+                }
+                """;
+        mockMvc.perform(signed(post("/api/internal/v1/agent/runs/{runId}/fail", runId), "POST",
+                        "/api/internal/v1/agent/runs/%d/fail".formatted(runId), failBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(failBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("FAILED"))
+                .andExpect(jsonPath("$.data.consumedCredits").value(3));
+
+        var settled = creditService.account(login.userId());
+        org.assertj.core.api.Assertions.assertThat(settled.balance()).isEqualTo(97);
+        org.assertj.core.api.Assertions.assertThat(settled.frozen()).isEqualTo(0);
+        org.assertj.core.api.Assertions.assertThat(settled.available()).isEqualTo(97);
+        Integer billingCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM billing_usage_logs WHERE source_type = 'AGENT_RUN' AND source_id = ? AND charged_credits = 3 AND prompt_tokens = 111 AND completion_tokens = 22 AND total_tokens = 133",
+                Integer.class,
+                runId
+        );
+        org.assertj.core.api.Assertions.assertThat(billingCount).isEqualTo(1);
+    }
+
+    @Test
     void repeatedCompleteCallbackDoesNotDoubleChargeOrDuplicateAnswer() throws Exception {
         mockExternalAuthDependencies();
         String username = "agent_complete_idempotent_user";

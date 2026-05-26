@@ -93,14 +93,32 @@ class WorkerInternalApiTest {
         mockMvc.perform(get("/api/admin/v1/billing/usage-logs")
                         .header("Authorization", "Bearer " + adminToken)
                         .param("pageNo", "1")
-                        .param("pageSize", "10"))
+                        .param("pageSize", "10")
+                        .param("userId", "2")
+                        .param("sourceType", "TASK")
+                        .param("sourceId", taskId.toString()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.list[0].sourceType").value("TASK"))
                 .andExpect(jsonPath("$.data.list[0].sourceId").value(taskId.intValue()))
+                .andExpect(jsonPath("$.data.list[0].taskNo", not(blankOrNullString())))
                 .andExpect(jsonPath("$.data.list[0].promptTokens").value(120))
                 .andExpect(jsonPath("$.data.list[0].completionTokens").value(35))
                 .andExpect(jsonPath("$.data.list[0].totalTokens").value(155))
                 .andExpect(jsonPath("$.data.list[0].chargedCredits").value(10));
+
+        mockMvc.perform(get("/api/admin/v1/billing/overview")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .param("userId", "2")
+                        .param("sourceType", "TASK")
+                        .param("sourceId", taskId.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.todayTotalTokens").value(155))
+                .andExpect(jsonPath("$.data.todayChargedCredits").value(10))
+                .andExpect(jsonPath("$.data.modelCosts[0].modelName").isNotEmpty())
+                .andExpect(jsonPath("$.data.userCosts[0].userId").value(2))
+                .andExpect(jsonPath("$.data.userCosts[0].usageCount").value(1))
+                .andExpect(jsonPath("$.data.modalityCosts[0].modality").value("TEXT"))
+                .andExpect(jsonPath("$.data.dailyCosts[0].usageCount").value(1));
     }
 
     @Test
@@ -144,6 +162,43 @@ class WorkerInternalApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("FAILED"))
                 .andExpect(jsonPath("$.data.result").doesNotExist());
+    }
+
+    @Test
+    void workerModelTimeoutMarksTaskTimeout() throws Exception {
+        String adminToken = login("/api/admin/v1/auth/login", "admin");
+        Long toolId = createTool(adminToken, "worker_timeout_tool", 1);
+        publishTool(adminToken, toolId);
+        String userToken = login("/api/v1/auth/login", "user1");
+        Long taskId = createTask(userToken, "worker_timeout_tool");
+
+        String processingBody = """
+                                {
+                                  "progress": 35,
+                                  "progressMessage": "AI is generating"
+                                }
+                                """;
+        mockMvc.perform(signed(post("/api/internal/v1/tasks/{taskId}/processing", taskId), "POST",
+                        "/api/internal/v1/tasks/%d/processing".formatted(taskId), processingBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(processingBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("PROCESSING"));
+
+        String failedBody = """
+                                {
+                                  "errorCode": "MODEL_TIMEOUT",
+                                  "errorMessage": "model request timed out"
+                                }
+                                """;
+        mockMvc.perform(signed(post("/api/internal/v1/tasks/{taskId}/failed", taskId), "POST",
+                        "/api/internal/v1/tasks/%d/failed".formatted(taskId), failedBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(failedBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("TIMEOUT"))
+                .andExpect(jsonPath("$.data.progress").value(100))
+                .andExpect(jsonPath("$.data.progressMessage").value("任务超时：MODEL_TIMEOUT"));
     }
 
     @Test
@@ -238,6 +293,7 @@ class WorkerInternalApiTest {
                         .param("pageSize", "10"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.list[0].sourceId").value(taskId.intValue()))
+                .andExpect(jsonPath("$.data.list[0].taskNo", not(blankOrNullString())))
                 .andExpect(jsonPath("$.data.list[0].chargedCredits").value(10));
     }
 
@@ -300,6 +356,7 @@ class WorkerInternalApiTest {
                         .param("pageSize", "10"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.list[0].sourceId").value(taskId.intValue()))
+                .andExpect(jsonPath("$.data.list[0].taskNo", not(blankOrNullString())))
                 .andExpect(jsonPath("$.data.list[0].billingUnit").value("PER_CALL"))
                 .andExpect(jsonPath("$.data.list[0].billableUnits").value(2))
                 .andExpect(jsonPath("$.data.list[0].unitPrice").value(0.03))

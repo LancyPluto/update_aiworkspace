@@ -4,6 +4,7 @@ import jakarta.validation.constraints.NotBlank;
 
 public record SmsCodeRequest(
         @NotBlank String phone,
-        @NotBlank String scene
+        @NotBlank String scene,
+        String captchaVerifyParam
 ) {
 }

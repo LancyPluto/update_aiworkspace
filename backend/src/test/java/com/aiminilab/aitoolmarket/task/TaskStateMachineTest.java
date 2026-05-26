@@ -16,8 +16,11 @@ class TaskStateMachineTest {
         assertThat(TaskStateMachine.canTransition(TaskStatus.QUEUED.name(), TaskStatus.CANCELLED.name())).isTrue();
         assertThat(TaskStateMachine.canTransition(TaskStatus.PROCESSING.name(), TaskStatus.SUCCESS.name())).isTrue();
         assertThat(TaskStateMachine.canTransition(TaskStatus.PROCESSING.name(), TaskStatus.FAILED.name())).isTrue();
+        assertThat(TaskStateMachine.canTransition(TaskStatus.PROCESSING.name(), TaskStatus.TIMEOUT.name())).isTrue();
         assertThat(TaskStateMachine.canTransition(TaskStatus.PROCESSING.name(), TaskStatus.CANCELLED.name())).isTrue();
-        assertThat(TaskStateMachine.canTransition(TaskStatus.FAILED.name(), TaskStatus.QUEUED.name())).isTrue();
+        assertThat(TaskStateMachine.canTransition(TaskStatus.FAILED.name(), TaskStatus.RETRYING.name())).isTrue();
+        assertThat(TaskStateMachine.canTransition(TaskStatus.TIMEOUT.name(), TaskStatus.RETRYING.name())).isTrue();
+        assertThat(TaskStateMachine.canTransition(TaskStatus.RETRYING.name(), TaskStatus.QUEUED.name())).isTrue();
 
         assertThat(TaskStateMachine.canTransition(TaskStatus.QUEUED.name(), TaskStatus.SUCCESS.name())).isFalse();
         assertThat(TaskStateMachine.canTransition(TaskStatus.FAILED.name(), TaskStatus.SUCCESS.name())).isFalse();
@@ -29,7 +32,8 @@ class TaskStateMachineTest {
     void treatsSuccessAndCancelledAsTerminal() {
         assertThat(TaskStateMachine.isTerminal(TaskStatus.SUCCESS.name())).isTrue();
         assertThat(TaskStateMachine.isTerminal(TaskStatus.CANCELLED.name())).isTrue();
-        assertThat(TaskStateMachine.isTerminal(TaskStatus.FAILED.name())).isFalse();
+        assertThat(TaskStateMachine.isTerminal(TaskStatus.TIMEOUT.name())).isTrue();
+        assertThat(TaskStateMachine.isTerminal(TaskStatus.FAILED.name())).isTrue();
         assertThat(TaskStateMachine.isTerminal(TaskStatus.PROCESSING.name())).isFalse();
     }
 

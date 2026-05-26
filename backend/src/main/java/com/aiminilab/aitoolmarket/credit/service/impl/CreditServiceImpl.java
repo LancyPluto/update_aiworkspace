@@ -12,6 +12,7 @@ import com.aiminilab.aitoolmarket.credit.entity.CreditLog;
 import com.aiminilab.aitoolmarket.credit.mapper.CreditLogMapper;
 import com.aiminilab.aitoolmarket.credit.mapper.CreditMapper;
 import com.aiminilab.aitoolmarket.credit.service.CreditService;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -208,27 +209,28 @@ public class CreditServiceImpl implements CreditService {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "recharge amount must be positive");
         }
         String idempotencyKey = "RECHARGE_ORDER:" + rechargeOrderId;
-        if (creditLogMapper.existsByIdempotencyKey(idempotencyKey)) {
+        CreditAccount before = creditMapper.getOrCreateAccount(userId);
+        try {
+            insertLog(
+                    before,
+                    null,
+                    null,
+                    CreditLogType.RECHARGE.name(),
+                    amount,
+                    0,
+                    before.getBalance() + amount,
+                    before.getFrozen(),
+                    "PAYMENT",
+                    null,
+                    normalizeReason(reason, "Recharge credits"),
+                    idempotencyKey
+            );
+        } catch (DuplicateKeyException ignored) {
             return account(userId);
         }
-        CreditAccount before = creditMapper.getOrCreateAccount(userId);
         if (!creditMapper.rechargeAdd(before.getId(), amount)) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "credit account is unavailable");
         }
-        insertLog(
-                before,
-                null,
-                null,
-                CreditLogType.RECHARGE.name(),
-                amount,
-                0,
-                before.getBalance() + amount,
-                before.getFrozen(),
-                "PAYMENT",
-                null,
-                normalizeReason(reason, "Recharge credits"),
-                idempotencyKey
-        );
         return account(userId);
     }
 

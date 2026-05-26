@@ -136,27 +136,32 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         String errorCode = request.errorCode() == null || request.errorCode().isBlank()
                 ? ErrorCode.MODEL_CALL_FAILED.name()
                 : request.errorCode();
+        String targetStatus = "MODEL_TIMEOUT".equals(errorCode)
+                ? TaskStatus.TIMEOUT.name()
+                : TaskStatus.FAILED.name();
         String errorMessage = request.errorMessage() == null || request.errorMessage().isBlank()
                 ? "Worker execution failed"
                 : limitText(request.errorMessage(), 4000);
-        String progressMessage = limitText("任务失败：" + errorCode, 240);
+        String progressMessage = limitText(("MODEL_TIMEOUT".equals(errorCode) ? "任务超时：" : "任务失败：") + errorCode, 240);
         AiTask task = findTask(taskId);
-        if (TaskStatus.FAILED.name().equals(task.getStatus()) || TaskStatus.SUCCESS.name().equals(task.getStatus())
+        if (TaskStatus.FAILED.name().equals(task.getStatus()) || TaskStatus.TIMEOUT.name().equals(task.getStatus())
+                || TaskStatus.SUCCESS.name().equals(task.getStatus())
                 || TaskStatus.CANCELLED.name().equals(task.getStatus())) {
             return TaskStatusResponse.from(task);
         }
-        TaskStateMachine.ensureTransition(task.getStatus(), TaskStatus.FAILED.name());
-        int updated = taskMapper.markFailed(taskId, errorCode, progressMessage, errorMessage, List.of(TaskStatus.PROCESSING.name()));
+        TaskStateMachine.ensureTransition(task.getStatus(), targetStatus);
+        int updated = taskMapper.markFailed(taskId, targetStatus, errorCode, progressMessage, errorMessage, List.of(TaskStatus.PROCESSING.name()));
         if (updated == 0) {
             AiTask current = findTask(taskId);
-            if (TaskStatus.FAILED.name().equals(current.getStatus()) || TaskStatus.SUCCESS.name().equals(current.getStatus())
+            if (TaskStatus.FAILED.name().equals(current.getStatus()) || TaskStatus.TIMEOUT.name().equals(current.getStatus())
+                    || TaskStatus.SUCCESS.name().equals(current.getStatus())
                     || TaskStatus.CANCELLED.name().equals(current.getStatus())) {
                 return TaskStatusResponse.from(current);
             }
-            TaskStateMachine.ensureTransition(current.getStatus(), TaskStatus.FAILED.name());
+            TaskStateMachine.ensureTransition(current.getStatus(), targetStatus);
         }
         creditService.release(task.getUserId(), CreditSourceType.TASK, taskId, task.getEstimatedCreditCost());
-        taskMetrics.recordTaskOutcome(task.getToolCode(), "FAILED", task.getCreatedAt(), findTask(taskId).getFinishedAt());
+        taskMetrics.recordTaskOutcome(task.getToolCode(), targetStatus, task.getCreatedAt(), findTask(taskId).getFinishedAt());
         return TaskStatusResponse.from(findTask(taskId));
     }
 

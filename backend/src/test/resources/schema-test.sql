@@ -239,6 +239,7 @@ CREATE TABLE credit_recharge_orders (
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE UNIQUE INDEX uk_recharge_user_idem ON credit_recharge_orders(user_id, idempotency_key);
+CREATE UNIQUE INDEX uk_recharge_external_trade_no ON credit_recharge_orders(external_trade_no);
 
 CREATE TABLE tool_prompts (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
