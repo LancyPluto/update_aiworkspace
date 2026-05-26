@@ -405,13 +405,14 @@ defineExpose({
 
 <template>
   <div v-if="configuredFields.length > 0 || capabilities.length > 0" class="mt-3 space-y-3">
+    <!-- 自定义字段区域 -->
     <div class="flex flex-wrap items-start gap-2">
       <div v-for="field in configuredFields" :key="field.fieldKey" class="min-w-[100px] max-w-[180px]">
-        <!-- 字段标题：改为「图片上传」 -->
         <label class="mb-1.5 block text-[11px] font-medium text-muted-foreground">
-          图片上传<span v-if="field.required" class="text-destructive"> *</span>
+          {{ field.fieldName }}<span v-if="field.required" class="text-destructive"> *</span>
         </label>
 
+        <!-- 下拉/单选框 -->
         <select
           v-if="(field.fieldType === 'select' || field.fieldType === 'radio') && fieldOptions(field).length"
           :value="strField(field.fieldKey)"
@@ -423,6 +424,7 @@ defineExpose({
           </option>
         </select>
 
+        <!-- 数字输入框 -->
         <input
           v-else-if="field.fieldType === 'number' || field.fieldType === 'slider'"
           type="number"
@@ -432,6 +434,7 @@ defineExpose({
           @input="onNumberInput(field.fieldKey, $event)"
         />
 
+        <!-- 复选框 -->
         <label
           v-else-if="field.fieldType === 'checkbox'"
           class="inline-flex h-8 items-center gap-2 rounded-lg border border-border/70 bg-background px-2 text-xs transition-all hover:border-primary/40 cursor-pointer"
@@ -445,42 +448,47 @@ defineExpose({
           {{ field.placeholder || "启用" }}
         </label>
 
-        <!-- 图片/文件上传区域（核心修改部分） -->
+        <!-- 图片/文件上传区域 -->
         <div v-else-if="field.fieldType === 'image' || field.fieldType === 'file'" class="space-y-1.5">
           <div
-            class="flex items-center justify-center gap-2 border border-dashed border-border/70 bg-background rounded-lg px-3 py-2 text-xs text-muted-foreground transition-all hover:border-primary/50 hover:bg-primary/5 cursor-pointer"
+            class="flex items-center gap-1.5"
             @dragover.prevent
             @drop.prevent="handleFieldUpload(field, ($event as DragEvent).dataTransfer?.files || null)"
           >
-            <!-- 本地上传按钮 -->
+
+          <div
+            class="flex h-8 min-w-0 items-center justify-center gap-2 rounded-lg border border-dashed border-border/70 bg-background px-3 text-xs text-muted-foreground transition-all hover:border-primary/50 hover:bg-primary/5"
+          >
+            <input
+              type="file"
+              :id="`file-${field.fieldKey}`"
+              class="hidden"
+              :accept="uploadAccept(field)"
+              @change="handleFieldUpload(field, ($event.target as HTMLInputElement).files)"
+            />
+
             <label
-              class="flex items-center gap-1 cursor-pointer"
+              :for="`file-${field.fieldKey}`"
+              class="flex cursor-pointer items-center gap-1.5 text-muted-foreground transition-colors hover:text-primary"
               title="从本地上传"
             >
-              <input
-                type="file"
-                class="hidden"
-                :accept="uploadAccept(field)"
-                @change="handleFieldUpload(field, ($event.target as HTMLInputElement).files)"
-              />
               <Loader2 v-if="uploadState(field.fieldKey).uploading" class="h-4 w-4 animate-spin" />
               <ImageUp v-else class="h-4 w-4" />
-              <span class="truncate hover:text-primary">本地</span>
+              <span>本地</span>
             </label>
 
-            <!-- 分隔符 -->
             <span class="text-muted-foreground">|</span>
 
-            <!-- 素材库按钮 -->
             <button
               type="button"
-              class="inline-flex items-center gap-1 text-muted-foreground transition-colors hover:text-primary cursor-pointer"
+              class="flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-primary"
               title="从素材库上传"
               @click="openMaterialPicker(field)"
             >
               <BookMarked class="h-4 w-4" />
               <span>素材库</span>
             </button>
+          </div>
           </div>
 
           <!-- 已上传预览 -->
@@ -491,11 +499,7 @@ defineExpose({
               alt=""
               class="h-8 w-8 shrink-0 rounded-md border border-border object-cover shadow-sm"
             />
-            <input
-              :value="strField(field.fieldKey)"
-              class="h-7 flex-1 rounded-md border border-border/70 bg-muted/40 px-2 text-[11px] outline-none"
-              readonly
-            />
+            
             <button type="button" class="p-1 rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive" @click="clearUploadedField(field)">
               <X class="h-4 w-4" />
             </button>
@@ -506,6 +510,7 @@ defineExpose({
           </p>
         </div>
 
+        <!-- 普通文本输入框 -->
         <input
           v-else
           type="text"
@@ -517,6 +522,7 @@ defineExpose({
       </div>
     </div>
 
+    <!-- 能力快捷选项区域 -->
     <div class="flex flex-wrap items-center gap-2">
       <select
         v-if="imageCapability && configuredFields.length === 0"
@@ -560,12 +566,14 @@ defineExpose({
       </button>
     </div>
 
+    <!-- 素材选择弹窗 -->
     <div
       v-if="materialPickerOpen"
       class="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm px-4 py-6 transition-opacity duration-200"
       @click.self="closeMaterialPicker"
     >
       <div class="flex max-h-[78vh] w-full max-w-3xl flex-col rounded-2xl border border-border bg-background shadow-xl transition-transform duration-200 scale-100">
+        <!-- 弹窗头部 -->
         <div class="flex items-center justify-between border-b border-border/60 px-5 py-4">
           <div>
             <h3 class="text-base font-semibold text-foreground">
@@ -584,6 +592,7 @@ defineExpose({
           </button>
         </div>
 
+        <!-- 弹窗内容区 -->
         <div class="min-h-[220px] overflow-y-auto p-5">
           <div v-if="materialLoading" class="flex h-48 items-center justify-center gap-2 text-sm text-muted-foreground">
             <Loader2 class="h-4 w-4 animate-spin" />
@@ -595,6 +604,7 @@ defineExpose({
           <div v-else-if="materialAssets.length === 0" class="flex h-48 items-center justify-center text-sm text-muted-foreground">
             暂无可用{{ materialKindLabel(activeMaterialKind) }}素材
           </div>
+          <!-- 素材卡片网格 -->
           <div v-else class="grid grid-cols-2 gap-3 md:grid-cols-3">
             <button
               v-for="asset in materialAssets"
@@ -615,7 +625,7 @@ defineExpose({
                 <ImageIcon v-else class="h-10 w-10 text-muted-foreground group-hover:text-primary transition-colors" />
               </div>
               <div class="space-y-1 p-3">
-                <p class="truncate text-sm font-medium text-foreground">{{ asset.title }}</p>
+                
                 <p class="truncate text-xs text-muted-foreground">{{ asset.subtitle }}</p>
               </div>
             </button>
