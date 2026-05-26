@@ -303,6 +303,12 @@ public class AppProperties {
         private String ihuyiApiKey;
         private String ihuyiBaseUrl = "https://api.ihuyi.com/sms/Submit.json";
         private String ihuyiTemplateId = "1";
+        private String aliyunAccessKeyId = "";
+        private String aliyunAccessKeySecret = "";
+        private String aliyunEndpoint = "dysmsapi.aliyuncs.com";
+        private String aliyunSignName = "";
+        private String aliyunTemplateCode = "";
+        private String aliyunTemplateParamName = "code";
 
         public String getProvider() {
             return provider;
@@ -376,6 +382,56 @@ public class AppProperties {
 
         public void setIhuyiTemplateId(String ihuyiTemplateId) {
             this.ihuyiTemplateId = ihuyiTemplateId == null || ihuyiTemplateId.isBlank() ? "1" : ihuyiTemplateId;
+        }
+
+        public String getAliyunAccessKeyId() {
+            return aliyunAccessKeyId;
+        }
+
+        public void setAliyunAccessKeyId(String aliyunAccessKeyId) {
+            this.aliyunAccessKeyId = aliyunAccessKeyId == null ? "" : aliyunAccessKeyId;
+        }
+
+        public String getAliyunAccessKeySecret() {
+            return aliyunAccessKeySecret;
+        }
+
+        public void setAliyunAccessKeySecret(String aliyunAccessKeySecret) {
+            this.aliyunAccessKeySecret = aliyunAccessKeySecret == null ? "" : aliyunAccessKeySecret;
+        }
+
+        public String getAliyunEndpoint() {
+            return aliyunEndpoint == null || aliyunEndpoint.isBlank() ? "dysmsapi.aliyuncs.com" : aliyunEndpoint;
+        }
+
+        public void setAliyunEndpoint(String aliyunEndpoint) {
+            this.aliyunEndpoint = aliyunEndpoint == null || aliyunEndpoint.isBlank() ? "dysmsapi.aliyuncs.com" : aliyunEndpoint;
+        }
+
+        public String getAliyunSignName() {
+            return aliyunSignName;
+        }
+
+        public void setAliyunSignName(String aliyunSignName) {
+            this.aliyunSignName = aliyunSignName == null ? "" : aliyunSignName;
+        }
+
+        public String getAliyunTemplateCode() {
+            return aliyunTemplateCode;
+        }
+
+        public void setAliyunTemplateCode(String aliyunTemplateCode) {
+            this.aliyunTemplateCode = aliyunTemplateCode == null ? "" : aliyunTemplateCode;
+        }
+
+        public String getAliyunTemplateParamName() {
+            return aliyunTemplateParamName == null || aliyunTemplateParamName.isBlank() ? "code" : aliyunTemplateParamName;
+        }
+
+        public void setAliyunTemplateParamName(String aliyunTemplateParamName) {
+            this.aliyunTemplateParamName = aliyunTemplateParamName == null || aliyunTemplateParamName.isBlank()
+                    ? "code"
+                    : aliyunTemplateParamName;
         }
     }
 

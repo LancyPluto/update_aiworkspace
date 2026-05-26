@@ -146,20 +146,14 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
         if (order.getCurrency() != null && !order.getCurrency().equals(notification.currency())) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "WeChat payment currency mismatch");
         }
-        orderMapper.bindExternalTradeNo(order.getId(), notification.transactionId(), LocalDateTime.now());
-        if (RechargeOrderStatus.WAITING_PAYMENT.name().equals(order.getStatus())) {
-            transitOrThrow(order, RechargeOrderStatus.PAID, "WeChat Native payment confirmed");
-            order = orderMapper.findByOrderNo(notification.outTradeNo());
+        if (orderMapper.bindExternalTradeNo(order.getId(), notification.transactionId(), LocalDateTime.now()) == 0) {
+            CreditRechargeOrder current = orderMapper.findByOrderNo(notification.outTradeNo());
+            if (current == null || !notification.transactionId().equals(current.getExternalTradeNo())) {
+                throw new BusinessException(ErrorCode.PARAM_ERROR, "WeChat transaction id conflicts with recharge order");
+            }
         }
-        if (RechargeOrderStatus.PAID.name().equals(order.getStatus())) {
-            creditService.rechargeAdd(order.getUserId(), order.getId(), order.getCredits(),
-                    "WeChat Native recharge order " + order.getOrderNo());
-            transitOrThrow(order, RechargeOrderStatus.CREDITED, "credits granted");
-            return;
-        }
-        if (!RechargeOrderStatus.valueOf(order.getStatus()).terminal()) {
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "recharge order cannot handle WeChat notification from status " + order.getStatus());
-        }
+        grantPaidOrderIfNeeded(orderMapper.findByOrderNo(notification.outTradeNo()), "WeChat Native payment confirmed",
+                "WeChat Native recharge order " + order.getOrderNo());
     }
 
     @Override
@@ -175,15 +169,35 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "recharge order expired");
         }
         if (RechargeOrderStatus.WAITING_PAYMENT.name().equals(order.getStatus())) {
-            transitOrThrow(order, RechargeOrderStatus.PAID, "mock payment confirmed");
+            transitOrCurrent(order, RechargeOrderStatus.PAID, "mock payment confirmed");
             order = orderOrThrow(userId, orderId);
         }
         if (!RechargeOrderStatus.PAID.name().equals(order.getStatus())) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "recharge order cannot be paid from status " + order.getStatus());
         }
-        creditService.rechargeAdd(order.getUserId(), order.getId(), order.getCredits(), "Recharge order " + order.getOrderNo());
-        transitOrThrow(order, RechargeOrderStatus.CREDITED, "credits granted");
+        grantPaidOrderIfNeeded(order, "mock payment confirmed", "Recharge order " + order.getOrderNo());
         return responseFrom(orderOrThrow(userId, orderId));
+    }
+
+    private void grantPaidOrderIfNeeded(CreditRechargeOrder order, String paidReason, String creditReason) {
+        if (order == null) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "recharge order not found");
+        }
+        if (RechargeOrderStatus.CREDITED.name().equals(order.getStatus())) {
+            return;
+        }
+        if (RechargeOrderStatus.WAITING_PAYMENT.name().equals(order.getStatus())) {
+            transitOrCurrent(order, RechargeOrderStatus.PAID, paidReason);
+            order = orderMapper.findByOrderNo(order.getOrderNo());
+        }
+        if (RechargeOrderStatus.PAID.name().equals(order.getStatus())) {
+            creditService.rechargeAdd(order.getUserId(), order.getId(), order.getCredits(), creditReason);
+            transitOrCurrent(order, RechargeOrderStatus.CREDITED, "credits granted");
+            return;
+        }
+        if (!RechargeOrderStatus.valueOf(order.getStatus()).terminal()) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "recharge order cannot grant credits from status " + order.getStatus());
+        }
     }
 
     private CreditRechargePackage activePackageOrThrow(Long packageId) {
@@ -212,6 +226,29 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
         }
         int updated = orderMapper.transit(order.getId(), fromStatus.name(), toStatus.name(), reason, LocalDateTime.now());
         if (updated != 1) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "recharge order status changed, please retry");
+        }
+    }
+
+    private void transitOrCurrent(CreditRechargeOrder order, RechargeOrderStatus toStatus, String reason) {
+        RechargeOrderStatus fromStatus = RechargeOrderStatus.valueOf(order.getStatus());
+        if (fromStatus == toStatus) {
+            return;
+        }
+        if (!fromStatus.canTransitTo(toStatus)) {
+            CreditRechargeOrder current = orderMapper.findByOrderNo(order.getOrderNo());
+            if (current != null && RechargeOrderStatus.valueOf(current.getStatus()).terminal()) {
+                return;
+            }
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "invalid recharge order transition");
+        }
+        int updated = orderMapper.transit(order.getId(), fromStatus.name(), toStatus.name(), reason, LocalDateTime.now());
+        if (updated != 1) {
+            CreditRechargeOrder current = orderMapper.findByOrderNo(order.getOrderNo());
+            if (current != null && (toStatus.name().equals(current.getStatus())
+                    || RechargeOrderStatus.CREDITED.name().equals(current.getStatus()))) {
+                return;
+            }
             throw new BusinessException(ErrorCode.PARAM_ERROR, "recharge order status changed, please retry");
         }
     }

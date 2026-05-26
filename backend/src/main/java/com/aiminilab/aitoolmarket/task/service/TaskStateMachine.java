@@ -11,12 +11,15 @@ public final class TaskStateMachine {
 
     private static final Map<String, Set<String>> ALLOWED_TRANSITIONS = Map.of(
             TaskStatus.QUEUED.name(), Set.of(TaskStatus.PROCESSING.name(), TaskStatus.CANCELLED.name()),
-            TaskStatus.PROCESSING.name(), Set.of(TaskStatus.SUCCESS.name(), TaskStatus.FAILED.name(), TaskStatus.CANCELLED.name()),
-            TaskStatus.FAILED.name(), Set.of(TaskStatus.QUEUED.name())
+            TaskStatus.PROCESSING.name(), Set.of(TaskStatus.SUCCESS.name(), TaskStatus.FAILED.name(), TaskStatus.TIMEOUT.name(), TaskStatus.CANCELLED.name()),
+            TaskStatus.FAILED.name(), Set.of(TaskStatus.RETRYING.name()),
+            TaskStatus.TIMEOUT.name(), Set.of(TaskStatus.RETRYING.name()),
+            TaskStatus.RETRYING.name(), Set.of(TaskStatus.QUEUED.name())
     );
 
     private static final Set<String> TERMINAL_STATUSES = Set.of(
             TaskStatus.SUCCESS.name(),
+            TaskStatus.TIMEOUT.name(),
             TaskStatus.CANCELLED.name()
     );
 

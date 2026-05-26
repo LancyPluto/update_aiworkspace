@@ -39,4 +39,15 @@ public interface TaskOutboxMapper extends BaseMapper<TaskOutboxEvent> {
     int markFailed(@Param("eventId") Long eventId,
                    @Param("nextRetryAt") LocalDateTime nextRetryAt,
                    @Param("lastError") String lastError);
+
+    @Update("""
+            UPDATE task_outbox_events
+            SET status = 'DEAD',
+                retry_count = retry_count + 1,
+                last_error = #{lastError},
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{eventId} AND status = 'PENDING'
+            """)
+    int markDead(@Param("eventId") Long eventId,
+                 @Param("lastError") String lastError);
 }

@@ -64,6 +64,12 @@ app:
       ihuyi-api-key: ${IHUYI_API_KEY:}
       ihuyi-base-url: ${IHUYI_BASE_URL:https://api.ihuyi.com/sms/Submit.json}
       ihuyi-template-id: ${IHUYI_TEMPLATE_ID:1}
+      aliyun-access-key-id: ${ALIYUN_SMS_ACCESS_KEY_ID:${ALIYUN_CAPTCHA_ACCESS_KEY_ID:${ALIYUN_ACCESS_KEY_ID:}}}
+      aliyun-access-key-secret: ${ALIYUN_SMS_ACCESS_KEY_SECRET:${ALIYUN_CAPTCHA_ACCESS_KEY_SECRET:${ALIYUN_ACCESS_KEY_SECRET:}}}
+      aliyun-endpoint: ${ALIYUN_SMS_ENDPOINT:dysmsapi.aliyuncs.com}
+      aliyun-sign-name: ${ALIYUN_SMS_SIGN_NAME:}
+      aliyun-template-code: ${ALIYUN_SMS_TEMPLATE_CODE:}
+      aliyun-template-param-name: ${ALIYUN_SMS_TEMPLATE_PARAM_NAME:code}
   agent:
     enabled: ${AGENT_ENABLED:true}
     service-base-url: ${AGENT_SERVICE_BASE_URL:http://127.0.0.1:8090}
