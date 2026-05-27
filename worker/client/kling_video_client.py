@@ -2,6 +2,7 @@ import json
 import base64
 import hashlib
 import hmac
+import logging
 import time
 from pathlib import Path
 from typing import Any
@@ -10,6 +11,9 @@ from urllib.parse import urlparse
 import requests
 
 from config import settings
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class KlingVideoError(RuntimeError):
@@ -158,6 +162,11 @@ class KlingVideoClient:
             payload["guidance_scale"] = guidance_scale
         if num_inference_steps is not None:
             payload["num_inference_steps"] = num_inference_steps
+        LOGGER.info(
+            "kling image generation request path=%s payload=%s",
+            self.image_generation_path,
+            _json_for_log(payload),
+        )
         response = self._request("POST", self.image_generation_path, payload)
         urls = self._extract_image_urls_or_empty(response)
         if urls:
@@ -467,6 +476,7 @@ class KlingVideoClient:
         urls = cls._extract_image_urls_or_empty(payload)
         if urls:
             return urls
+        LOGGER.warning("kling image response missing image url payload=%s", _json_for_log(payload))
         raise KlingVideoError("kling image response missing image url")
 
     @classmethod
@@ -569,3 +579,31 @@ class KlingVideoClient:
         if size in {"480x480", "960x960", "1024x1024"}:
             return "1:1"
         return "16:9"
+
+
+def _json_for_log(value: Any) -> str:
+    try:
+        return json.dumps(_sanitize_for_log(value), ensure_ascii=False, separators=(",", ":"))[:4000]
+    except Exception:
+        return "<unserializable>"
+
+
+def _sanitize_for_log(value: Any) -> Any:
+    if isinstance(value, dict):
+        sanitized: dict[str, Any] = {}
+        for key, nested in value.items():
+            key_text = str(key)
+            lowered = key_text.lower()
+            if any(secret in lowered for secret in ("key", "secret", "token", "authorization")):
+                sanitized[key_text] = "***"
+                continue
+            if key_text in {"image", "image_tail"} and isinstance(nested, str) and len(nested) > 120:
+                sanitized[key_text] = f"<image-bytes:{len(nested)} chars>"
+                continue
+            sanitized[key_text] = _sanitize_for_log(nested)
+        return sanitized
+    if isinstance(value, list):
+        return [_sanitize_for_log(item) for item in value]
+    if isinstance(value, str) and len(value) > 800:
+        return value[:800] + f"...<{len(value)} chars>"
+    return value

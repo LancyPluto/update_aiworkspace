@@ -103,6 +103,16 @@ class ImageGenerationHandler:
                 image_request["output_format"] = _first_text(params, "outputFormat", "output_format")
                 image_request["response_format"] = _first_text(params, "responseFormat", "response_format")
                 image_request["image_size"] = _resolve_openai_image_size(params)
+            LOGGER.info(
+                "image generation request built taskId=%s traceId=%s provider=%s protocol=%s model=%s params=%s request=%s",
+                task_id,
+                trace_id or "-",
+                provider or "-",
+                provider_protocol,
+                model_config.get("modelName") or "-",
+                _json_for_log(params),
+                _json_for_log(image_request),
+            )
             urls = client.generate_images(**image_request)
             usage = getattr(client, "last_usage", {}) or {}
 
@@ -354,3 +364,31 @@ def _limit_text(value: str, max_length: int) -> str:
     if len(value) <= max_length:
         return value
     return value[: max(0, max_length - 16)] + "...[truncated]"
+
+
+def _json_for_log(value: Any) -> str:
+    try:
+        return json.dumps(_sanitize_for_log(value), ensure_ascii=False, separators=(",", ":"))[:4000]
+    except Exception:
+        return "<unserializable>"
+
+
+def _sanitize_for_log(value: Any) -> Any:
+    if isinstance(value, dict):
+        sanitized: dict[str, Any] = {}
+        for key, nested in value.items():
+            key_text = str(key)
+            lowered = key_text.lower()
+            if any(secret in lowered for secret in ("key", "secret", "token", "authorization")):
+                sanitized[key_text] = "***"
+                continue
+            if key_text in {"image", "image_tail"} and isinstance(nested, str) and len(nested) > 120:
+                sanitized[key_text] = f"<image-bytes:{len(nested)} chars>"
+                continue
+            sanitized[key_text] = _sanitize_for_log(nested)
+        return sanitized
+    if isinstance(value, list):
+        return [_sanitize_for_log(item) for item in value]
+    if isinstance(value, str) and len(value) > 800:
+        return value[:800] + f"...<{len(value)} chars>"
+    return value
