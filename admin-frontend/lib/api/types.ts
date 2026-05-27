@@ -297,6 +297,11 @@ export interface ToolField {
   options?: unknown
   optionsJson?: string | null
   required?: boolean
+  executionRequired?: boolean
+  userRequired?: boolean
+  defaultValue?: string | null
+  agentFillStrategy?: 'infer_from_user' | 'default' | 'ask_user' | 'derive' | 'none' | string
+  riskLevel?: 'LOW' | 'MEDIUM' | 'HIGH' | string
   sortOrder?: number
 }
 
@@ -308,6 +313,11 @@ export interface ToolFieldPayload {
   optionsJson?: string
   validationJson?: string
   required?: boolean
+  executionRequired?: boolean
+  userRequired?: boolean
+  defaultValue?: string
+  agentFillStrategy?: 'infer_from_user' | 'default' | 'ask_user' | 'derive' | 'none' | string
+  riskLevel?: 'LOW' | 'MEDIUM' | 'HIGH' | string
   sortOrder?: number
 }
 

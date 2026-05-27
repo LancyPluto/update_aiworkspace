@@ -243,6 +243,11 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                 field.options(),
                 field.optionsJson(),
                 field.required(),
+                field.executionRequired(),
+                field.userRequired(),
+                field.defaultValue(),
+                field.agentFillStrategy(),
+                field.riskLevel(),
                 field.sortOrder()
         );
     }
@@ -437,6 +442,11 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                             field.options(),
                             field.optionsJson(),
                             field.required(),
+                            field.executionRequired(),
+                            field.userRequired(),
+                            field.defaultValue(),
+                            field.agentFillStrategy(),
+                            field.riskLevel(),
                             field.sortOrder()
                     ))
                     .toList()));

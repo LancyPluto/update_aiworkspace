@@ -1,11 +1,28 @@
 from typing import Any
 
+from typing import Any
+
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 
 class ChatMessage(BaseModel):
     role: str
     content: str
+
+
+class ToolFieldDescriptor(BaseModel):
+    fieldKey: str
+    fieldName: str = ""
+    fieldType: str = "text"
+    description: str | None = None
+    options: Any | None = None
+    required: bool = False
+    executionRequired: bool | None = None
+    userRequired: bool | None = None
+    defaultValue: str | None = None
+    agentFillStrategy: str | None = None
+    riskLevel: str | None = None
+    sortOrder: int | None = None
 
 
 class ToolDescriptor(BaseModel):
@@ -17,6 +34,7 @@ class ToolDescriptor(BaseModel):
     estimatedCreditCost: int = Field(default=0, validation_alias=AliasChoices("estimatedCreditCost", "creditCost"))
     inputSchema: dict[str, Any] = Field(default_factory=dict)
     autoCallable: bool = False
+    fields: list[ToolFieldDescriptor] = Field(default_factory=list)
     hints: dict[str, Any] = Field(default_factory=dict)
 
 

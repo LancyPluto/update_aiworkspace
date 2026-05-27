@@ -34,6 +34,11 @@ public interface ToolFieldItemMapper extends BaseMapper<ToolFieldItem> {
                 placeholder = #{field.placeholder},
                 options_json = #{field.optionsJson},
                 required = #{field.required},
+                execution_required = #{field.executionRequired},
+                user_required = #{field.userRequired},
+                default_value = #{field.defaultValue},
+                agent_fill_strategy = #{field.agentFillStrategy},
+                risk_level = #{field.riskLevel},
                 sort_order = #{field.sortOrder},
                 status = 'ACTIVE',
                 updated_at = CURRENT_TIMESTAMP
@@ -43,15 +48,19 @@ public interface ToolFieldItemMapper extends BaseMapper<ToolFieldItem> {
     int reactivateAndUpdateBySchemaAndKey(@Param("field") ToolFieldItem field);
 
     default void createDefaultFields(Long schemaId) {
-        insertField(schemaId, "productName", "产品名称", "text", "请输入产品名称", null, true, 1);
-        insertField(schemaId, "targetCustomer", "目标用户", "textarea", "请输入目标用户", null, true, 2);
-        insertField(schemaId, "style", "文案风格", "select", "请选择文案风格",
-                "[{\"label\":\"种草\",\"value\":\"种草\"},{\"label\":\"专业\",\"value\":\"专业\"}]", true, 3);
+        insertField(schemaId, "productName", "产品名称", "text", "请输入产品名称", null,
+                true, true, true, null, "ask_user", "MEDIUM", 1);
+        insertField(schemaId, "targetCustomer", "目标用户", "textarea", "请输入目标用户", null,
+                true, true, true, null, "ask_user", "MEDIUM", 2);
+        insertField(schemaId, "style", "风格", "select", "请选择风格",
+                "[{\"label\":\"种草\",\"value\":\"种草\"},{\"label\":\"专业\",\"value\":\"专业\"}]",
+                true, true, false, "种草", "default", "LOW", 3);
     }
 
     default void replaceActiveFields(Long schemaId, List<ToolFieldItem> fields) {
         inactiveBySchemaId(schemaId);
         for (ToolFieldItem field : fields) {
+            boolean required = field.getRequired() != null && field.getRequired();
             insertField(
                     schemaId,
                     field.getFieldKey(),
@@ -59,14 +68,21 @@ public interface ToolFieldItemMapper extends BaseMapper<ToolFieldItem> {
                     field.getFieldType(),
                     field.getPlaceholder(),
                     field.getOptionsJson(),
-                    field.getRequired() != null && field.getRequired(),
+                    required,
+                    field.getExecutionRequired() == null ? required : field.getExecutionRequired(),
+                    field.getUserRequired() == null ? required : field.getUserRequired(),
+                    field.getDefaultValue(),
+                    field.getAgentFillStrategy(),
+                    field.getRiskLevel(),
                     field.getSortOrder()
             );
         }
     }
 
     default void insertField(Long schemaId, String fieldKey, String fieldName, String fieldType,
-                             String placeholder, String optionsJson, boolean required, int sortOrder) {
+                             String placeholder, String optionsJson, boolean required,
+                             boolean executionRequired, boolean userRequired, String defaultValue,
+                             String agentFillStrategy, String riskLevel, int sortOrder) {
         ToolFieldItem item = new ToolFieldItem();
         item.setSchemaId(schemaId);
         item.setFieldKey(fieldKey);
@@ -75,6 +91,11 @@ public interface ToolFieldItemMapper extends BaseMapper<ToolFieldItem> {
         item.setPlaceholder(placeholder);
         item.setOptionsJson(optionsJson);
         item.setRequired(required);
+        item.setExecutionRequired(executionRequired);
+        item.setUserRequired(userRequired);
+        item.setDefaultValue(defaultValue);
+        item.setAgentFillStrategy(agentFillStrategy == null || agentFillStrategy.isBlank() ? "default" : agentFillStrategy);
+        item.setRiskLevel(riskLevel == null || riskLevel.isBlank() ? "LOW" : riskLevel);
         item.setSortOrder(sortOrder);
         item.setStatus("ACTIVE");
         if (reactivateAndUpdateBySchemaAndKey(item) == 0) {

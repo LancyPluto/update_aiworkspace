@@ -164,6 +164,11 @@ export interface ToolField {
   options?: Array<ToolFieldOption | string> | null
   optionsJson?: string | null
   required: boolean
+  executionRequired?: boolean
+  userRequired?: boolean
+  defaultValue?: string | null
+  agentFillStrategy?: string | null
+  riskLevel?: string | null
   sortOrder: number
 }
 

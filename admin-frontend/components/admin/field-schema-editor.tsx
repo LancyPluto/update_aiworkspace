@@ -30,6 +30,20 @@ type FieldSchemaEditorProps = {
   disabled?: boolean
 }
 
+const AGENT_FILL_STRATEGIES: Array<{ value: EditableField["agentFillStrategy"]; label: string; hint: string }> = [
+  { value: "infer_from_user", label: "从用户需求推断", hint: "适合主题、提示词、对象等可从自然语言抽取的字段" },
+  { value: "default", label: "使用默认值", hint: "适合比例、数量、画质等有产品默认值的字段" },
+  { value: "ask_user", label: "缺失时追问", hint: "适合预算、授权、账号等不能擅自决定的字段" },
+  { value: "derive", label: "由系统派生", hint: "适合 userId、sessionId、素材 ID 等上下文字段" },
+  { value: "none", label: "不参与 Agent 填充", hint: "保留给后台或工具执行层处理" },
+]
+
+const RISK_LEVELS: Array<{ value: EditableField["riskLevel"]; label: string }> = [
+  { value: "LOW", label: "低风险" },
+  { value: "MEDIUM", label: "中风险" },
+  { value: "HIGH", label: "高风险" },
+]
+
 export function FieldSchemaEditor({ fields, onChange, disabled }: FieldSchemaEditorProps) {
   function updateField(index: number, patch: Partial<EditableField>) {
     const next = fields.map((field, i) => {
@@ -155,9 +169,9 @@ export function FieldSchemaEditor({ fields, onChange, disabled }: FieldSchemaEdi
                     <Switch
                       checked={field.required}
                       disabled={disabled}
-                      onCheckedChange={(checked) => updateField(index, { required: checked })}
+                      onCheckedChange={(checked) => updateField(index, { required: checked, executionRequired: checked })}
                     />
-                    <Label className="text-sm">必填</Label>
+                    <Label className="text-sm">接口必填</Label>
                   </div>
                   <div className="flex items-center gap-2">
                     <Switch
@@ -183,6 +197,102 @@ export function FieldSchemaEditor({ fields, onChange, disabled }: FieldSchemaEdi
                   placeholder="用户未填写时看到的说明"
                   onChange={(e) => updateField(index, { placeholder: e.target.value })}
                 />
+              </div>
+
+              <div className="space-y-3 rounded-md border border-primary/15 bg-primary/5 p-3">
+                <div>
+                  <p className="text-sm font-medium">Agent 交互策略</p>
+                  <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
+                    区分“工具执行必须有”和“必须追问用户”。默认值、上下文派生和可推断字段不会打断对话。
+                  </p>
+                </div>
+                <div className="grid gap-3 lg:grid-cols-2">
+                  <div className="flex items-center justify-between rounded-md border border-border/80 bg-background/70 px-3 py-2">
+                    <div>
+                      <Label className="text-sm">执行必填</Label>
+                      <p className="text-[11px] text-muted-foreground">调用工具前必须有值，会进入 JSON schema required。</p>
+                    </div>
+                    <Switch
+                      checked={field.executionRequired}
+                      disabled={disabled}
+                      onCheckedChange={(checked) => updateField(index, { executionRequired: checked, required: checked ? field.required : false })}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between rounded-md border border-border/80 bg-background/70 px-3 py-2">
+                    <div>
+                      <Label className="text-sm">缺失时追问用户</Label>
+                      <p className="text-[11px] text-muted-foreground">只给真正需要用户决策的字段打开。</p>
+                    </div>
+                    <Switch
+                      checked={field.userRequired}
+                      disabled={disabled}
+                      onCheckedChange={(checked) => updateField(index, {
+                        userRequired: checked,
+                        agentFillStrategy: checked ? "ask_user" : field.agentFillStrategy === "ask_user" ? "default" : field.agentFillStrategy,
+                      })}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>填充策略</Label>
+                    <Select
+                      value={field.agentFillStrategy}
+                      disabled={disabled}
+                      onValueChange={(value) => {
+                        const strategy = value as EditableField["agentFillStrategy"]
+                        updateField(index, {
+                          agentFillStrategy: strategy,
+                          userRequired: strategy === "ask_user" ? true : field.userRequired && strategy !== "default" && strategy !== "derive" && strategy !== "none",
+                        })
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {AGENT_FILL_STRATEGIES.map((item) => (
+                          <SelectItem key={item.value} value={item.value}>
+                            {item.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-[11px] text-muted-foreground">
+                      {AGENT_FILL_STRATEGIES.find((item) => item.value === field.agentFillStrategy)?.hint}
+                    </p>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>风险等级</Label>
+                    <Select
+                      value={field.riskLevel}
+                      disabled={disabled}
+                      onValueChange={(value) => updateField(index, { riskLevel: value as EditableField["riskLevel"] })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {RISK_LEVELS.map((item) => (
+                          <SelectItem key={item.value} value={item.value}>
+                            {item.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-[11px] text-muted-foreground">高风险字段后续可接二次确认、审计和权限策略。</p>
+                  </div>
+                  <div className="space-y-1.5 lg:col-span-2">
+                    <Label>默认值</Label>
+                    <Input
+                      value={field.defaultValue}
+                      disabled={disabled}
+                      placeholder="如 3:4、1、standard；无默认值则留空"
+                      onChange={(e) => updateField(index, { defaultValue: e.target.value })}
+                    />
+                    <p className="text-[11px] text-muted-foreground">
+                      当填充策略为“使用默认值”时，Agent 会优先使用这里的值，不再追问用户。
+                    </p>
+                  </div>
+                </div>
               </div>
 
               {supportsOptions(field.fieldType) ? (
@@ -362,6 +472,27 @@ function PreviewField({ field, index }: { field: EditableField; index: number })
       )}
 
       {field.placeholder ? <p className="text-[11px] text-muted-foreground">{field.placeholder}</p> : null}
+      <div className="flex flex-wrap gap-1.5">
+        {field.executionRequired ? (
+          <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300">
+            执行必填
+          </span>
+        ) : null}
+        {field.userRequired ? (
+          <span className="rounded bg-destructive/10 px-1.5 py-0.5 text-[10px] font-medium text-destructive">
+            缺失追问
+          </span>
+        ) : (
+          <span className="rounded bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-300">
+            可自动填充
+          </span>
+        )}
+        {field.defaultValue ? (
+          <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">
+            默认 {field.defaultValue}
+          </span>
+        ) : null}
+      </div>
     </div>
   )
 }

@@ -76,11 +76,16 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
                         field.fieldKey(),
                         field.fieldName(),
                         field.fieldType(),
-                        field.placeholder(),
-                        field.options(),
-                        field.required(),
-                        field.sortOrder()
-                ))
+                      field.placeholder(),
+                      field.options(),
+                      field.required(),
+                      field.executionRequired(),
+                      field.userRequired(),
+                      field.defaultValue(),
+                      field.agentFillStrategy(),
+                      field.riskLevel(),
+                      field.sortOrder()
+              ))
                 .toList();
 
         AgentToolDescriptorExtension ext = extensionMapper.findByToolCode(tool.getToolCode()).orElse(null);
@@ -148,8 +153,16 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
                     property.set("enum", enumValues);
                 }
             }
+            if (field.defaultValue() != null && !field.defaultValue().isBlank()) {
+                property.put("default", field.defaultValue());
+            }
+            property.put("x-user-required", Boolean.TRUE.equals(field.userRequired() == null ? field.required() : field.userRequired()));
+            property.put("x-agent-fill-strategy", field.agentFillStrategy() == null || field.agentFillStrategy().isBlank()
+                    ? (Boolean.TRUE.equals(field.userRequired() == null ? field.required() : field.userRequired()) ? "ask_user" : "default")
+                    : field.agentFillStrategy());
+            property.put("x-risk-level", field.riskLevel() == null || field.riskLevel().isBlank() ? "LOW" : field.riskLevel());
             properties.set(field.fieldKey(), property);
-            if (Boolean.TRUE.equals(field.required())) {
+            if (Boolean.TRUE.equals(field.executionRequired() == null ? field.required() : field.executionRequired())) {
                 required.add(field.fieldKey());
             }
         }

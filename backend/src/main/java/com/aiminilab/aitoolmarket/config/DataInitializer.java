@@ -71,6 +71,19 @@ public class DataInitializer implements CommandLineRunner {
         ensureColumn("ai_tools", "input_modality", "ALTER TABLE ai_tools ADD COLUMN input_modality VARCHAR(32) NOT NULL DEFAULT 'TEXT'");
         ensureColumn("ai_tools", "output_modality", "ALTER TABLE ai_tools ADD COLUMN output_modality VARCHAR(32) NOT NULL DEFAULT 'TEXT'");
         ensureColumn("ai_tools", "config_note", "ALTER TABLE ai_tools ADD COLUMN config_note TEXT NULL");
+        ensureColumn("tool_field_schema_items", "execution_required", "ALTER TABLE tool_field_schema_items ADD COLUMN execution_required TINYINT NOT NULL DEFAULT 0");
+        ensureColumn("tool_field_schema_items", "user_required", "ALTER TABLE tool_field_schema_items ADD COLUMN user_required TINYINT NOT NULL DEFAULT 0");
+        ensureColumn("tool_field_schema_items", "default_value", "ALTER TABLE tool_field_schema_items ADD COLUMN default_value VARCHAR(512) NULL");
+        ensureColumn("tool_field_schema_items", "agent_fill_strategy", "ALTER TABLE tool_field_schema_items ADD COLUMN agent_fill_strategy VARCHAR(32) NOT NULL DEFAULT 'default'");
+        ensureColumn("tool_field_schema_items", "risk_level", "ALTER TABLE tool_field_schema_items ADD COLUMN risk_level VARCHAR(16) NOT NULL DEFAULT 'LOW'");
+        executeSql("""
+                UPDATE tool_field_schema_items
+                SET execution_required = required,
+                    user_required = required,
+                    agent_fill_strategy = CASE WHEN required = 1 THEN 'ask_user' ELSE 'default' END,
+                    risk_level = 'LOW'
+                WHERE agent_fill_strategy IS NULL OR agent_fill_strategy = ''
+                """);
         ensureColumn("ai_tasks", "user_deleted", "ALTER TABLE ai_tasks ADD COLUMN user_deleted TINYINT NOT NULL DEFAULT 0");
         ensureColumn("ai_tasks", "user_deleted_at", "ALTER TABLE ai_tasks ADD COLUMN user_deleted_at DATETIME NULL");
         ensureColumn("agent_model_configs", "display_name", "ALTER TABLE agent_model_configs ADD COLUMN display_name VARCHAR(128) NULL");

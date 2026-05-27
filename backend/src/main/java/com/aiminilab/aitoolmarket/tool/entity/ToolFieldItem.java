@@ -15,6 +15,11 @@ public class ToolFieldItem {
     private String placeholder;
     private String optionsJson;
     private Boolean required;
+    private Boolean executionRequired;
+    private Boolean userRequired;
+    private String defaultValue;
+    private String agentFillStrategy;
+    private String riskLevel;
     private Integer sortOrder;
     private String status;
 
@@ -80,6 +85,46 @@ public class ToolFieldItem {
 
     public void setRequired(Boolean required) {
         this.required = required;
+    }
+
+    public Boolean getExecutionRequired() {
+        return executionRequired;
+    }
+
+    public void setExecutionRequired(Boolean executionRequired) {
+        this.executionRequired = executionRequired;
+    }
+
+    public Boolean getUserRequired() {
+        return userRequired;
+    }
+
+    public void setUserRequired(Boolean userRequired) {
+        this.userRequired = userRequired;
+    }
+
+    public String getDefaultValue() {
+        return defaultValue;
+    }
+
+    public void setDefaultValue(String defaultValue) {
+        this.defaultValue = defaultValue;
+    }
+
+    public String getAgentFillStrategy() {
+        return agentFillStrategy;
+    }
+
+    public void setAgentFillStrategy(String agentFillStrategy) {
+        this.agentFillStrategy = agentFillStrategy;
+    }
+
+    public String getRiskLevel() {
+        return riskLevel;
+    }
+
+    public void setRiskLevel(String riskLevel) {
+        this.riskLevel = riskLevel;
     }
 
     public Integer getSortOrder() {

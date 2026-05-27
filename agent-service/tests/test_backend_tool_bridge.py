@@ -62,6 +62,74 @@ def test_execute_arguments_fill_xiaohongshu_placeholders():
         assert args.get(key), f"missing filled {key}"
 
 
+def test_defaultable_execution_required_field_does_not_trigger_clarification():
+    bridge = BackendToolBridge(backend_client=None)  # type: ignore[arg-type]
+    tool = ToolDescriptor(
+        toolCode="image_generation",
+        toolName="图片生成",
+        autoCallable=True,
+        inputSchema={
+            "type": "object",
+            "required": ["aspectRatio"],
+            "properties": {
+                "userRequest": {"type": "string"},
+                "aspectRatio": {
+                    "type": "string",
+                    "title": "画面比例",
+                    "default": "3:4",
+                    "x-user-required": False,
+                    "x-agent-fill-strategy": "default",
+                },
+            },
+        },
+        fields=[
+            {
+                "fieldKey": "aspectRatio",
+                "fieldName": "画面比例",
+                "fieldType": "radio",
+                "required": True,
+                "executionRequired": True,
+                "userRequired": False,
+                "defaultValue": "3:4",
+                "agentFillStrategy": "default",
+                "riskLevel": "LOW",
+            },
+        ],
+    )
+    ctx = RunContext(runId=1, sessionId=1, userId=1, message="我要生成一张石原里美的图片")
+
+    assert bridge.missing_required_arguments(ctx, tool) == []
+    assert bridge.build_arguments(ctx, tool)["aspectRatio"] == "3:4"
+
+
+def test_user_required_field_still_triggers_clarification():
+    bridge = BackendToolBridge(backend_client=None)  # type: ignore[arg-type]
+    tool = ToolDescriptor(
+        toolCode="account_binding",
+        toolName="账号绑定",
+        autoCallable=True,
+        inputSchema={
+            "type": "object",
+            "required": ["accountId"],
+            "properties": {"accountId": {"type": "string", "title": "账号 ID", "x-user-required": True}},
+        },
+        fields=[
+            {
+                "fieldKey": "accountId",
+                "fieldName": "账号 ID",
+                "required": True,
+                "executionRequired": True,
+                "userRequired": True,
+                "agentFillStrategy": "ask_user",
+                "riskLevel": "HIGH",
+            },
+        ],
+    )
+    ctx = RunContext(runId=1, sessionId=1, userId=1, message="帮我绑定账号")
+
+    assert bridge.missing_required_arguments(ctx, tool) == ["accountId"]
+
+
 def test_missing_skipped_when_user_accepts_builtin_examples():
     bridge = BackendToolBridge(backend_client=None)  # type: ignore[arg-type]
     tool = ToolDescriptor(
