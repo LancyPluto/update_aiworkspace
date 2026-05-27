@@ -16,7 +16,7 @@ class ToolExecutionError(RuntimeError):
 
 class BackendToolBridge:
     TERMINAL_TASK_STATUSES = {"SUCCESS", "FAILED", "CANCELLED"}
-    TERMINAL_RUN_STATUSES = {"SUCCESS", "FAILED", "CANCELLED", "TIMEOUT"}
+    ABORTING_RUN_STATUSES = {"FAILED", "CANCELLED", "TIMEOUT"}
 
     def __init__(
         self,
@@ -47,20 +47,15 @@ class BackendToolBridge:
                         break
         if apply_placeholder_defaults and tool.toolCode == "xiaohongshu_copywriting":
             arguments = _with_xiaohongshu_defaults(context.message, arguments)
+        if apply_placeholder_defaults:
+            arguments = _with_field_strategy_defaults(tool, arguments)
         return arguments
 
     def missing_required_arguments(self, context: RunContext, tool: ToolDescriptor) -> list[str]:
         if tool.toolCode == "xiaohongshu_copywriting" and _user_accepts_builtin_examples(context.message):
             return []
         arguments = self.build_arguments(context, tool, apply_placeholder_defaults=False)
-        required = tool.inputSchema.get("required", [])
-        if not isinstance(required, list):
-            return []
-        return [
-            name
-            for name in required
-            if isinstance(name, str) and (name not in arguments or arguments[name] in (None, ""))
-        ]
+        return _missing_user_required_fields(tool, arguments)
 
     async def enrich_arguments(self, message: str, tool: ToolDescriptor, existing_args: dict[str, Any] | None = None) -> dict[str, Any]:
         if self.model is None:
@@ -191,7 +186,7 @@ class BackendToolBridge:
         stream_state: dict[str, int] = {"emitted_len": 0}
         while time.monotonic() <= deadline:
             run_context = await self.backend.get_run_context(context.runId)
-            if run_context.status in self.TERMINAL_RUN_STATUSES:
+            if run_context.status in self.ABORTING_RUN_STATUSES:
                 raise ToolExecutionError(f"Agent run ended with status {run_context.status}")
             detail = await self.backend.get_task_detail(context.userId, task_id)
             if detail.status != last_status:
@@ -308,6 +303,65 @@ def _field_aliases(field_key: str, prop: Any) -> list[str]:
         if extra not in aliases:
             aliases.append(extra)
     return aliases
+
+
+def _missing_user_required_fields(tool: ToolDescriptor, arguments: dict[str, Any]) -> list[str]:
+    if tool.fields:
+        return [
+            field.fieldKey
+            for field in tool.fields
+            if _field_requires_user_input(field, tool)
+            and (field.fieldKey not in arguments or arguments[field.fieldKey] in (None, ""))
+        ]
+    required = tool.inputSchema.get("required", [])
+    if not isinstance(required, list):
+        return []
+    properties = tool.inputSchema.get("properties", {})
+    return [
+        name
+        for name in required
+        if isinstance(name, str)
+        and _schema_property_user_required(properties.get(name))
+        and (name not in arguments or arguments[name] in (None, ""))
+    ]
+
+
+def _field_requires_user_input(field, tool: ToolDescriptor) -> bool:
+    strategy = (field.agentFillStrategy or "").strip().lower()
+    if strategy in {"default", "derive", "none"}:
+        return False
+    if field.defaultValue not in (None, "") and strategy != "ask_user":
+        return False
+    if field.userRequired is not None:
+        return bool(field.userRequired)
+    properties = tool.inputSchema.get("properties", {})
+    return _schema_property_user_required(properties.get(field.fieldKey))
+
+
+def _schema_property_user_required(prop: Any) -> bool:
+    if not isinstance(prop, dict):
+        return True
+    if prop.get("x-user-required") is False:
+        return False
+    strategy = str(prop.get("x-agent-fill-strategy") or "").strip().lower()
+    if strategy in {"default", "derive", "none"}:
+        return False
+    if prop.get("default") not in (None, "") and strategy != "ask_user":
+        return False
+    return True
+
+
+def _with_field_strategy_defaults(tool: ToolDescriptor, arguments: dict[str, Any]) -> dict[str, Any]:
+    if not tool.fields:
+        return arguments
+    normalized = dict(arguments)
+    for field in tool.fields:
+        if field.fieldKey in normalized and normalized[field.fieldKey] not in (None, ""):
+            continue
+        strategy = (field.agentFillStrategy or "").strip().lower()
+        if strategy in {"default", "derive"} and field.defaultValue not in (None, ""):
+            normalized[field.fieldKey] = field.defaultValue
+    return normalized
 
 
 def _recent_user_messages(context: RunContext) -> list[str]:

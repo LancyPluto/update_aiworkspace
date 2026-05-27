@@ -8,6 +8,7 @@ public record EditRegenerateAgentMessageRequest(
         @Size(max = 8000, message = "消息内容过长")
         String content,
         @Size(max = 64, message = "clientRequestId 过长")
-        String clientRequestId
+        String clientRequestId,
+        Long modelConfigId
 ) {
 }

@@ -110,6 +110,66 @@ class AdminAgentApiTest {
     }
 
     @Test
+    void adminCanDisableAgentToolAccessAndRuntimeContextFiltersIt() throws Exception {
+        mockExternalAuthDependencies();
+        String adminToken = login("/api/admin/v1/auth/login", "admin");
+        String toolCode = "agent_access_toggle";
+        Long toolId = createTool(adminToken, toolCode);
+        publishTool(adminToken, toolId);
+
+        String listResponse = mockMvc.perform(get("/api/admin/v1/agent/tools")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        assertThat(listResponse).contains("\"toolCode\":\"agent_access_toggle\"");
+        assertThat(listResponse).contains("\"agentEnabled\":true");
+
+        String userToken = login("/api/v1/auth/login", "user1");
+        Long sessionId = createSession(userToken, "Agent Tool Access");
+        Long enabledRunId = sendMessage(userToken, sessionId, "Find a tool.");
+        String enabledContext = mockMvc.perform(signed(get("/api/internal/v1/agent/runs/{runId}/context", enabledRunId), "GET",
+                        "/api/internal/v1/agent/runs/%d/context".formatted(enabledRunId), ""))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        assertThat(enabledContext).contains("\"toolCode\":\"agent_access_toggle\"");
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put("/api/admin/v1/agent/tools/{toolCode}", toolCode)
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"agentEnabled\":false}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.toolCode").value(toolCode))
+                .andExpect(jsonPath("$.data.agentEnabled").value(false));
+
+        Mockito.clearInvocations(agentServiceClient);
+        Long disabledRunId = sendMessage(userToken, sessionId, "Find a tool again.");
+        String disabledContext = mockMvc.perform(signed(get("/api/internal/v1/agent/runs/{runId}/context", disabledRunId), "GET",
+                        "/api/internal/v1/agent/runs/%d/context".formatted(disabledRunId), ""))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        assertThat(disabledContext).doesNotContain("\"toolCode\":\"agent_access_toggle\"");
+
+        String body = """
+                {
+                  "toolCode": "agent_access_toggle",
+                  "argumentsJson": "{}"
+                }
+                """;
+        mockMvc.perform(signed(post("/api/internal/v1/agent/runs/{runId}/tool-calls", disabledRunId), "POST",
+                        "/api/internal/v1/agent/runs/%d/tool-calls".formatted(disabledRunId), body)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("AGENT_TOOL_NOT_AVAILABLE"));
+    }
+
+    @Test
     void adminCanSaveModelConfigAndInternalApiReturnsActiveConfig() throws Exception {
         mockExternalAuthDependencies();
         String adminToken = login("/api/admin/v1/auth/login", "admin");
@@ -191,6 +251,60 @@ class AdminAgentApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.apiKey").value("first-secret"))
                 .andExpect(jsonPath("$.data.modelName").value("second-model"));
+    }
+
+    @Test
+    void adminCanConfigureGatewayTimeoutsWithoutOverwritingExtraAuthSecrets() throws Exception {
+        mockExternalAuthDependencies();
+        String adminToken = login("/api/admin/v1/auth/login", "admin");
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put("/api/admin/v1/agent/model-config")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "provider": "ofox_openai_images",
+                                  "modelName": "openai/gpt-image-2",
+                                  "baseUrl": "https://api.ofox.ai/v1",
+                                  "apiKey": "image-secret",
+                                  "extraAuthJson": "{\\"proxyUrl\\":\\"http://127.0.0.1:7890\\"}",
+                                  "timeoutSeconds": 300,
+                                  "connectTimeoutSeconds": 30,
+                                  "readTimeoutSeconds": 600,
+                                  "enabled": true
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.connectTimeoutSeconds").value(30))
+                .andExpect(jsonPath("$.data.readTimeoutSeconds").value(600));
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put("/api/admin/v1/agent/model-config")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "provider": "ofox_openai_images",
+                                  "modelName": "openai/gpt-image-2",
+                                  "baseUrl": "https://api.ofox.ai/v1",
+                                  "apiKey": "",
+                                  "extraAuthJson": "",
+                                  "timeoutSeconds": 300,
+                                  "connectTimeoutSeconds": 45,
+                                  "readTimeoutSeconds": 900,
+                                  "enabled": true
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.connectTimeoutSeconds").value(45))
+                .andExpect(jsonPath("$.data.readTimeoutSeconds").value(900));
+
+        mockMvc.perform(signed(get("/api/internal/v1/agent/model-config"), "GET",
+                        "/api/internal/v1/agent/model-config", ""))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.apiKey").value("image-secret"))
+                .andExpect(jsonPath("$.data.extraAuthJson").value(org.hamcrest.Matchers.containsString("\"proxyUrl\":\"http://127.0.0.1:7890\"")))
+                .andExpect(jsonPath("$.data.extraAuthJson").value(org.hamcrest.Matchers.containsString("\"connectTimeoutSeconds\":45")))
+                .andExpect(jsonPath("$.data.extraAuthJson").value(org.hamcrest.Matchers.containsString("\"readTimeoutSeconds\":900")));
     }
 
     @Test

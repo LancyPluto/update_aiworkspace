@@ -122,6 +122,7 @@ public class AuthInterceptor implements HandlerInterceptor, Filter {
                 || path.equals("/actuator/prometheus")
                 || path.startsWith("/actuator/metrics")
                 || path.startsWith("/api/v1/auth/")
+                || path.equals("/api/v1/settings/customer-service")
                 || path.startsWith("/api/v1/pay/wechat/")
                 || path.equals("/api/v1/tool-categories")
                 || path.equals("/api/v1/tools")

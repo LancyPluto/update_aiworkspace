@@ -8,7 +8,9 @@ import com.aiminilab.aitoolmarket.agent.config.ModelProviderRegistry;
 import com.aiminilab.aitoolmarket.agent.dto.AgentModelConfigRequest;
 import com.aiminilab.aitoolmarket.agent.dto.AgentModelConfigResponse;
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
+import com.aiminilab.aitoolmarket.agent.entity.AgentToolDescriptorExtension;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentModelConfigMapper;
+import com.aiminilab.aitoolmarket.agent.mapper.AgentToolDescriptorExtensionMapper;
 import com.aiminilab.aitoolmarket.agent.service.AgentModelConfigService;
 import com.aiminilab.aitoolmarket.common.dto.PageResponse;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
@@ -38,6 +40,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -60,6 +63,7 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
     private final SystemSettingService systemSettingService;
     private final AgentModelConfigService agentModelConfigService;
     private final AgentModelConfigMapper agentModelConfigMapper;
+    private final AgentToolDescriptorExtensionMapper agentToolDescriptorExtensionMapper;
     private final ToolService toolService;
     private final WorkflowService workflowService;
     private final ToolMapper toolMapper;
@@ -70,6 +74,7 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
     public ConfigBundleServiceImpl(SystemSettingService systemSettingService,
                                    AgentModelConfigService agentModelConfigService,
                                    AgentModelConfigMapper agentModelConfigMapper,
+                                   AgentToolDescriptorExtensionMapper agentToolDescriptorExtensionMapper,
                                    ToolService toolService,
                                    WorkflowService workflowService,
                                    ToolMapper toolMapper,
@@ -79,6 +84,7 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
         this.systemSettingService = systemSettingService;
         this.agentModelConfigService = agentModelConfigService;
         this.agentModelConfigMapper = agentModelConfigMapper;
+        this.agentToolDescriptorExtensionMapper = agentToolDescriptorExtensionMapper;
         this.toolService = toolService;
         this.workflowService = workflowService;
         this.toolMapper = toolMapper;
@@ -154,6 +160,9 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
     private ConfigBundleDto.Tool exportTool(ToolSummaryResponse tool,
                                             Map<Long, String> categoryCodesById,
                                             Map<Long, String> modelCodesById) {
+        AgentToolDescriptorExtension extension = agentToolDescriptorExtensionMapper
+                .findByToolCode(tool.toolCode())
+                .orElse(null);
         List<ConfigBundleDto.Field> fields = toolService.adminFields(tool.id()).stream()
                 .map(this::exportField)
                 .toList();
@@ -174,6 +183,8 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                 tool.status(),
                 tool.estimatedCreditCost(),
                 modelCodesById.get(tool.modelConfigId()),
+                tool.executionHandler(),
+                extension == null ? true : Boolean.TRUE.equals(extension.getAgentEnabled()),
                 fields,
                 prompts,
                 exportWorkflow(workflow)
@@ -212,6 +223,8 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                 config.balanceUrl(),
                 config.docsUrl(),
                 config.timeoutSeconds(),
+                config.connectTimeoutSeconds(),
+                config.readTimeoutSeconds(),
                 config.inputTokenPricePer1k(),
                 config.outputTokenPricePer1k(),
                 config.inputTokenPricePer1m(),
@@ -219,6 +232,7 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                 config.billingUnit(),
                 config.unitPrice(),
                 config.enabled(),
+                config.agentEnabled(),
                 config.isDefault(),
                 config.capabilities()
         );
@@ -242,6 +256,11 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                 field.options(),
                 field.optionsJson(),
                 field.required(),
+                field.executionRequired(),
+                field.userRequired(),
+                field.defaultValue(),
+                field.agentFillStrategy(),
+                field.riskLevel(),
                 field.sortOrder()
         );
     }
@@ -332,6 +351,8 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                     config.balanceUrl(),
                     config.docsUrl(),
                     config.timeoutSeconds(),
+                    config.connectTimeoutSeconds(),
+                    config.readTimeoutSeconds(),
                     config.inputTokenPricePer1k(),
                     config.outputTokenPricePer1k(),
                     config.inputTokenPricePer1m(),
@@ -339,6 +360,7 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                     config.billingUnit(),
                     config.unitPrice(),
                     config.enabled(),
+                    config.agentEnabled(),
                     config.isDefault(),
                     config.capabilities()
             );
@@ -417,6 +439,7 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                 item.configNote(),
                 item.estimatedCreditCost() == null ? 0 : item.estimatedCreditCost(),
                 modelConfigId,
+                item.executionHandler(),
                 null
         );
         AiTool existing = findToolByCode(item.toolCode()).orElse(null);
@@ -424,6 +447,9 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                 ? toolService.createTool(request, operatorId)
                 : toolService.updateTool(existing.getId(), request, operatorId);
         counter.tools++;
+        if (item.agentEnabled() != null) {
+            upsertAgentToolAccess(saved, item.agentEnabled());
+        }
 
         if (!safeList(item.fields()).isEmpty()) {
             toolService.updateFields(saved.id(), new UpdateToolFieldsRequest(safeList(item.fields()).stream()
@@ -435,6 +461,11 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                             field.options(),
                             field.optionsJson(),
                             field.required(),
+                            field.executionRequired(),
+                            field.userRequired(),
+                            field.defaultValue(),
+                            field.agentFillStrategy(),
+                            field.riskLevel(),
                             field.sortOrder()
                     ))
                     .toList()));
@@ -449,6 +480,33 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
             toolService.publishTool(saved.id(), operatorId);
         } else if ("OFFLINE".equals(status)) {
             toolService.offlineTool(saved.id(), operatorId);
+        }
+    }
+
+    private void upsertAgentToolAccess(ToolSummaryResponse tool, Boolean agentEnabled) {
+        AgentToolDescriptorExtension extension = agentToolDescriptorExtensionMapper
+                .findByToolCode(tool.toolCode())
+                .orElse(null);
+        LocalDateTime now = LocalDateTime.now();
+        if (extension == null) {
+            extension = new AgentToolDescriptorExtension();
+            extension.setToolId(tool.id());
+            extension.setToolCode(tool.toolCode());
+            extension.setAgentRecommendable(true);
+            extension.setAgentAutoCallable(false);
+            extension.setConfirmationPolicy("auto");
+            extension.setRiskLevel("low");
+            extension.setOutputType(normalizeOutputType(tool.outputModality()));
+            extension.setCreatedAt(now);
+        } else {
+            extension.setToolId(tool.id());
+        }
+        extension.setAgentEnabled(Boolean.TRUE.equals(agentEnabled));
+        extension.setUpdatedAt(now);
+        if (extension.getId() == null) {
+            agentToolDescriptorExtensionMapper.insert(extension);
+        } else {
+            agentToolDescriptorExtensionMapper.updateById(extension);
         }
     }
 
@@ -565,6 +623,10 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
 
     private String normalizeText(String value) {
         return value == null ? "" : value.trim();
+    }
+
+    private String normalizeOutputType(String outputModality) {
+        return outputModality == null || outputModality.isBlank() ? "text" : outputModality.trim().toLowerCase(Locale.ROOT);
     }
 
     private boolean isBlank(String value) {

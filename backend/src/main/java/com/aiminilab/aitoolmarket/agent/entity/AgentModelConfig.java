@@ -30,6 +30,7 @@ public class AgentModelConfig {
     private BigDecimal unitPrice;
     private String capabilities;
     private Boolean enabled;
+    private Boolean agentEnabled;
     private Boolean isDefault;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
@@ -76,6 +77,8 @@ public class AgentModelConfig {
     public void setCapabilities(String capabilities) { this.capabilities = capabilities; }
     public Boolean getEnabled() { return enabled; }
     public void setEnabled(Boolean enabled) { this.enabled = enabled; }
+    public Boolean getAgentEnabled() { return agentEnabled; }
+    public void setAgentEnabled(Boolean agentEnabled) { this.agentEnabled = agentEnabled; }
     public Boolean getDefault() { return isDefault; }
     public void setDefault(Boolean isDefault) { this.isDefault = isDefault; }
     public LocalDateTime getCreatedAt() { return createdAt; }

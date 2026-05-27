@@ -5,6 +5,7 @@ import type {
   CreateTaskResponse,
   ListTasksQuery,
   PageResult,
+  RegenerateTaskRequest,
   TaskDetail,
   TaskStatusPayload,
 } from "./types"
@@ -94,6 +95,19 @@ export async function fetchTasks(
   return apiRequest<PageResult<TaskDetail>>("GET", "/api/v1/tasks", {
     token: options?.token,
     query: options?.query as Record<string, string | number | boolean | undefined> | undefined,
+  })
+}
+
+/** POST /api/v1/tasks/{taskId}/regenerate —— 使用历史参数再次生成 */
+export async function regenerateTask(
+  taskId: number | string,
+  body: RegenerateTaskRequest,
+  options?: { token?: string | null },
+): Promise<TaskStatusPayload> {
+  const id = encodeURIComponent(String(taskId))
+  return apiRequest<TaskStatusPayload>("POST", `/api/v1/tasks/${id}/regenerate`, {
+    body,
+    token: options?.token,
   })
 }
 

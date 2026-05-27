@@ -14,6 +14,9 @@ import com.aiminilab.aitoolmarket.agent.service.ModelCapabilityService;
 import com.aiminilab.aitoolmarket.agent.support.ModelCapabilitiesCodec;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -36,17 +39,20 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
     private final ModelProviderRegistry providerRegistry;
     private final ModelCapabilityService modelCapabilityService;
     private final ModelCapabilitiesCodec capabilitiesCodec;
+    private final ObjectMapper objectMapper;
 
     public AgentModelConfigServiceImpl(AgentModelConfigMapper agentModelConfigMapper,
                                        AgentServiceClient agentServiceClient,
                                        ModelProviderRegistry providerRegistry,
                                        ModelCapabilityService modelCapabilityService,
-                                       ModelCapabilitiesCodec capabilitiesCodec) {
+                                       ModelCapabilitiesCodec capabilitiesCodec,
+                                       ObjectMapper objectMapper) {
         this.agentModelConfigMapper = agentModelConfigMapper;
         this.agentServiceClient = agentServiceClient;
         this.providerRegistry = providerRegistry;
         this.modelCapabilityService = modelCapabilityService;
         this.capabilitiesCodec = capabilitiesCodec;
+        this.objectMapper = objectMapper;
     }
 
     @Override
@@ -61,6 +67,19 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
             return List.of(toResponse(findOrDefault()));
         }
         return configs.stream().map(this::toResponse).toList();
+    }
+
+    @Override
+    public List<AgentModelConfigResponse> agentSelectableList() {
+        List<AgentModelConfig> configs = agentModelConfigMapper.findAgentEnabled();
+        if (!configs.isEmpty()) {
+            return configs.stream().map(this::toResponse).toList();
+        }
+        AgentModelConfig fallback = findOrDefault();
+        if (Boolean.FALSE.equals(fallback.getEnabled()) || Boolean.FALSE.equals(fallback.getAgentEnabled())) {
+            return List.of();
+        }
+        return List.of(toResponse(fallback));
     }
 
     @Override
@@ -145,13 +164,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         } else {
             config.setApiKey("");
         }
-        if (request.extraAuthJson() != null && !request.extraAuthJson().isBlank()) {
-            config.setExtraAuthJson(request.extraAuthJson().trim());
-        } else if (existing != null) {
-            config.setExtraAuthJson(existing.getExtraAuthJson());
-        } else {
-            config.setExtraAuthJson(null);
-        }
+        config.setExtraAuthJson(mergeExtraAuthJson(request, existing));
         config.setMinimaxGroupId(blankToNull(request.minimaxGroupId()));
         config.setConsoleUrl(blankToNull(request.consoleUrl()));
         config.setBalanceUrl(blankToNull(request.balanceUrl()));
@@ -180,6 +193,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         }
         config.setCapabilities(capabilitiesCodec.serialize(capabilities));
         config.setEnabled(request.enabled() == null || request.enabled());
+        config.setAgentEnabled(request.agentEnabled() == null ? Boolean.TRUE : request.agentEnabled());
         config.setDefault(request.isDefault() != null && request.isDefault());
         config.setUpdatedAt(now);
         return config;
@@ -187,7 +201,20 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
 
     @Override
     public InternalAgentModelConfigResponse internalGet() {
-        return InternalAgentModelConfigResponse.from(findOrDefault());
+        List<AgentModelConfig> agentConfigs = agentModelConfigMapper.findAgentEnabled();
+        return InternalAgentModelConfigResponse.from(agentConfigs.isEmpty() ? findOrDefault() : agentConfigs.get(0));
+    }
+
+    @Override
+    public InternalAgentModelConfigResponse internalGet(Long modelConfigId) {
+        if (modelConfigId == null) {
+            return internalGet();
+        }
+        AgentModelConfig config = agentModelConfigMapper.findAgentEnabledById(modelConfigId);
+        if (config == null) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "Agent model config not found or not enabled for Agent");
+        }
+        return InternalAgentModelConfigResponse.from(config);
     }
 
     @Override
@@ -258,6 +285,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         fallback.setUnitPrice(BigDecimal.ZERO);
         fallback.setCapabilities(capabilitiesCodec.serialize(providerRegistry.defaultCapabilities("mock")));
         fallback.setEnabled(true);
+        fallback.setAgentEnabled(true);
         fallback.setDefault(true);
         fallback.setCreatedAt(now);
         fallback.setUpdatedAt(now);
@@ -287,7 +315,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         }
         if (request.extraAuthJson() != null && !request.extraAuthJson().isBlank()) {
             try {
-                new com.fasterxml.jackson.databind.ObjectMapper().readTree(request.extraAuthJson());
+                objectMapper.readTree(request.extraAuthJson());
             } catch (com.fasterxml.jackson.core.JsonProcessingException exception) {
                 throw new BusinessException(ErrorCode.PARAM_ERROR, "extraAuthJson must be valid JSON");
             }
@@ -336,6 +364,8 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                 request.balanceUrl(),
                 request.docsUrl(),
                 request.timeoutSeconds(),
+                request.connectTimeoutSeconds(),
+                request.readTimeoutSeconds(),
                 request.inputTokenPricePer1k(),
                 request.outputTokenPricePer1k(),
                 request.inputTokenPricePer1m(),
@@ -343,6 +373,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                 request.billingUnit(),
                 request.unitPrice(),
                 request.enabled(),
+                request.agentEnabled(),
                 request.isDefault(),
                 request.capabilities()
         );
@@ -367,6 +398,34 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
             return BILLING_UNIT_IMAGE_TOKEN;
         }
         return BILLING_UNIT_TOKEN_PER_M;
+    }
+
+    private String mergeExtraAuthJson(AgentModelConfigRequest request, AgentModelConfig existing) {
+        ObjectNode node = objectMapper.createObjectNode();
+        if (existing != null && existing.getExtraAuthJson() != null && !existing.getExtraAuthJson().isBlank()) {
+            mergeObject(node, existing.getExtraAuthJson());
+        }
+        if (request.extraAuthJson() != null && !request.extraAuthJson().isBlank()) {
+            mergeObject(node, request.extraAuthJson());
+        }
+        if (request.connectTimeoutSeconds() != null) {
+            node.put("connectTimeoutSeconds", request.connectTimeoutSeconds());
+        }
+        if (request.readTimeoutSeconds() != null) {
+            node.put("readTimeoutSeconds", request.readTimeoutSeconds());
+        }
+        return node.isEmpty() ? null : node.toString();
+    }
+
+    private void mergeObject(ObjectNode target, String json) {
+        try {
+            JsonNode parsed = objectMapper.readTree(json);
+            if (parsed != null && parsed.isObject()) {
+                target.setAll((ObjectNode) parsed);
+            }
+        } catch (com.fasterxml.jackson.core.JsonProcessingException exception) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "extraAuthJson must be valid JSON");
+        }
     }
 
     private AgentModelConfig findActiveOrThrow(Long id) {

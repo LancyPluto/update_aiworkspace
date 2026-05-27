@@ -9,6 +9,11 @@ public record AgentToolFieldDescriptorResponse(
         String description,
         JsonNode options,
         Boolean required,
+        Boolean executionRequired,
+        Boolean userRequired,
+        String defaultValue,
+        String agentFillStrategy,
+        String riskLevel,
         Integer sortOrder
 ) {
 }

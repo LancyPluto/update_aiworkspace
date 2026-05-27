@@ -21,6 +21,17 @@ providers:
     workerReady: true
     description: OpenAI-compatible chat completions endpoint.
 
+  - code: deepseek
+    label: DeepSeek
+    capabilities:
+      - TEXT_GENERATION
+    defaultBaseUrl: https://api.deepseek.com
+    defaultModel: deepseek-chat
+    billingDefault: TOKEN_PER_M
+    testStrategy: agent_service
+    workerReady: true
+    description: DeepSeek chat completions API using the OpenAI-compatible protocol.
+
   - code: anthropic_compatible
     label: Anthropic compatible
     capabilities:

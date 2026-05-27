@@ -1,6 +1,8 @@
 """BackendToolBridge: required-field detection must not be short-circuited by placeholder defaults."""
 
-from app.core.schemas import ChatMessage, RunContext, ToolDescriptor
+import pytest
+
+from app.core.schemas import ChatMessage, RunContext, TaskDetailResponse, ToolDescriptor
 from app.tools.backend_tool import BackendToolBridge
 
 
@@ -60,6 +62,74 @@ def test_execute_arguments_fill_xiaohongshu_placeholders():
     args = bridge.build_arguments(ctx, tool, apply_placeholder_defaults=True)
     for key in ("productName", "targetCustomer", "style", "sellingPoints"):
         assert args.get(key), f"missing filled {key}"
+
+
+def test_defaultable_execution_required_field_does_not_trigger_clarification():
+    bridge = BackendToolBridge(backend_client=None)  # type: ignore[arg-type]
+    tool = ToolDescriptor(
+        toolCode="image_generation",
+        toolName="图片生成",
+        autoCallable=True,
+        inputSchema={
+            "type": "object",
+            "required": ["aspectRatio"],
+            "properties": {
+                "userRequest": {"type": "string"},
+                "aspectRatio": {
+                    "type": "string",
+                    "title": "画面比例",
+                    "default": "3:4",
+                    "x-user-required": False,
+                    "x-agent-fill-strategy": "default",
+                },
+            },
+        },
+        fields=[
+            {
+                "fieldKey": "aspectRatio",
+                "fieldName": "画面比例",
+                "fieldType": "radio",
+                "required": True,
+                "executionRequired": True,
+                "userRequired": False,
+                "defaultValue": "3:4",
+                "agentFillStrategy": "default",
+                "riskLevel": "LOW",
+            },
+        ],
+    )
+    ctx = RunContext(runId=1, sessionId=1, userId=1, message="我要生成一张石原里美的图片")
+
+    assert bridge.missing_required_arguments(ctx, tool) == []
+    assert bridge.build_arguments(ctx, tool)["aspectRatio"] == "3:4"
+
+
+def test_user_required_field_still_triggers_clarification():
+    bridge = BackendToolBridge(backend_client=None)  # type: ignore[arg-type]
+    tool = ToolDescriptor(
+        toolCode="account_binding",
+        toolName="账号绑定",
+        autoCallable=True,
+        inputSchema={
+            "type": "object",
+            "required": ["accountId"],
+            "properties": {"accountId": {"type": "string", "title": "账号 ID", "x-user-required": True}},
+        },
+        fields=[
+            {
+                "fieldKey": "accountId",
+                "fieldName": "账号 ID",
+                "required": True,
+                "executionRequired": True,
+                "userRequired": True,
+                "agentFillStrategy": "ask_user",
+                "riskLevel": "HIGH",
+            },
+        ],
+    )
+    ctx = RunContext(runId=1, sessionId=1, userId=1, message="帮我绑定账号")
+
+    assert bridge.missing_required_arguments(ctx, tool) == ["accountId"]
 
 
 def test_missing_skipped_when_user_accepts_builtin_examples():
@@ -143,3 +213,31 @@ def test_extract_strips_example_prefix_from_chinese_labels():
     assert args["targetCustomer"] == "年轻女性、宝妈"
     assert args["style"] == "种草"
     assert args["sellingPoints"] == "价格划算、效果明显"
+
+
+@pytest.mark.asyncio
+async def test_wait_for_task_keeps_polling_if_run_is_already_success():
+    class Backend:
+        def __init__(self) -> None:
+            self.polls = 0
+
+        async def get_run_context(self, run_id: int) -> RunContext:
+            return RunContext(runId=run_id, sessionId=1, userId=1, message="generate image", status="SUCCESS")
+
+        async def get_task_detail(self, user_id: int, task_id: int) -> TaskDetailResponse:
+            self.polls += 1
+            return TaskDetailResponse(
+                taskId=task_id,
+                status="SUCCESS",
+                progress=100,
+                progressMessage="done",
+            )
+
+    backend = Backend()
+    bridge = BackendToolBridge(backend_client=backend, timeout_seconds=1, poll_interval_seconds=0.01)  # type: ignore[arg-type]
+    context = RunContext(runId=9, sessionId=1, userId=1, message="generate image", status="RUNNING")
+
+    detail = await bridge._wait_for_task(context, "image_generation", 71)
+
+    assert detail.status == "SUCCESS"
+    assert backend.polls == 1

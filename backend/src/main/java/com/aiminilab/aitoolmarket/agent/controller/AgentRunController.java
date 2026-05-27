@@ -41,7 +41,7 @@ public class AgentRunController {
     @PostMapping("/{runId}/regenerate")
     public ApiResponse<CreateAgentMessageResponse> regenerate(@PathVariable Long runId,
                                                                 @RequestBody(required = false) RegenerateAgentRunRequest request) {
-        RegenerateAgentRunRequest body = request == null ? new RegenerateAgentRunRequest(null) : request;
+        RegenerateAgentRunRequest body = request == null ? new RegenerateAgentRunRequest(null, null) : request;
         return ApiResponse.success(agentRunService.regenerateRun(AuthContext.get().userId(), runId, body));
     }
 

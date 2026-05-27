@@ -13,6 +13,7 @@ public class AgentRun {
     private Long userId;
     private String status;
     private String intent;
+    private Long modelConfigId;
     private String modelProviderCode;
     private String modelName;
     private Integer estimatedCredits;
@@ -25,6 +26,7 @@ public class AgentRun {
     private LocalDateTime updatedAt;
     private Long parentRunId;
     private Long sourceUserMessageId;
+    private Long contextSnapshotId;
     private String clientRequestId;
 
     public Long getId() { return id; }
@@ -37,6 +39,8 @@ public class AgentRun {
     public void setStatus(String status) { this.status = status; }
     public String getIntent() { return intent; }
     public void setIntent(String intent) { this.intent = intent; }
+    public Long getModelConfigId() { return modelConfigId; }
+    public void setModelConfigId(Long modelConfigId) { this.modelConfigId = modelConfigId; }
     public String getModelProviderCode() { return modelProviderCode; }
     public void setModelProviderCode(String modelProviderCode) { this.modelProviderCode = modelProviderCode; }
     public String getModelName() { return modelName; }
@@ -61,6 +65,8 @@ public class AgentRun {
     public void setParentRunId(Long parentRunId) { this.parentRunId = parentRunId; }
     public Long getSourceUserMessageId() { return sourceUserMessageId; }
     public void setSourceUserMessageId(Long sourceUserMessageId) { this.sourceUserMessageId = sourceUserMessageId; }
+    public Long getContextSnapshotId() { return contextSnapshotId; }
+    public void setContextSnapshotId(Long contextSnapshotId) { this.contextSnapshotId = contextSnapshotId; }
     public String getClientRequestId() { return clientRequestId; }
     public void setClientRequestId(String clientRequestId) { this.clientRequestId = clientRequestId; }
 }

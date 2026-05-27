@@ -7,18 +7,7 @@ import { getApiOrigin } from "@/api/client"
 import { fetchTasks } from "@/api/taskApi"
 import { useAuthStore } from "@/store/authStore"
 import { buildTaskResultBlocks } from "@/utils/taskResultBlocks"
-import {
-  FileAudio,
-  FileVideo,
-  ImageIcon,
-  ImageUp,
-  BookMarked,
-  Loader2,
-  Mic,
-  Paperclip,
-  UploadCloud,
-  X
-} from "lucide-vue-next"
+import { FileAudio, FileVideo, ImageIcon, ImageUp, Library, Loader2, Mic, Paperclip, UploadCloud, X } from "lucide-vue-next"
 
 export interface PendingAttachment {
   localId: string
@@ -56,6 +45,7 @@ const props = defineProps<{
   fields?: ToolField[]
   coreFieldKey?: string | null
   toolId?: string | null
+  initialParams?: Record<string, unknown> | null
 }>()
 
 const state = ref<CapabilityState>({
@@ -139,8 +129,12 @@ function buildDefaultState(): CapabilityState {
   if (webSearchCapability.value) next.webSearch = webSearchCapability.value.config.defaultEnabled === true
   if (codeCapability.value) next.language = codeLanguages.value[0] || "python"
   for (const field of configuredFields.value) {
-    next.fields[field.fieldKey] = defaultFieldValue(field)
+    const initial = props.initialParams?.[field.fieldKey]
+    next.fields[field.fieldKey] = initial !== undefined && initial !== null ? initial : defaultFieldValue(field)
   }
+  if (typeof props.initialParams?.imageRatio === "string") next.imageRatio = props.initialParams.imageRatio
+  if (typeof props.initialParams?.webSearch === "boolean") next.webSearch = props.initialParams.webSearch
+  if (typeof props.initialParams?.language === "string") next.language = props.initialParams.language
   return next
 }
 
@@ -150,7 +144,7 @@ function resetState() {
 }
 
 watch(
-  () => [props.capabilities, props.fields, props.coreFieldKey],
+  () => [props.capabilities, props.fields, props.coreFieldKey, props.initialParams],
   () => resetState(),
   { immediate: true, deep: true },
 )
@@ -404,19 +398,17 @@ defineExpose({
 </script>
 
 <template>
-  <div v-if="configuredFields.length > 0 || capabilities.length > 0" class="mt-3 space-y-3">
-    <!-- 自定义字段区域 -->
-    <div class="flex flex-wrap items-start gap-2">
+  <div v-if="configuredFields.length > 0 || capabilities.length > 0" class="mt-2 space-y-2">
+    <div class="flex flex-wrap items-center gap-1.5">
       <div v-for="field in configuredFields" :key="field.fieldKey" class="min-w-[100px] max-w-[180px]">
-        <label class="mb-1.5 block text-[11px] font-medium text-muted-foreground">
+        <label class="mb-1 block text-[11px] font-medium text-muted-foreground">
           {{ field.fieldName }}<span v-if="field.required" class="text-destructive"> *</span>
         </label>
 
-        <!-- 下拉/单选框 -->
         <select
           v-if="(field.fieldType === 'select' || field.fieldType === 'radio') && fieldOptions(field).length"
           :value="strField(field.fieldKey)"
-          class="h-8 w-full rounded-lg border border-border/70 bg-background px-2 text-xs transition-all hover:border-primary/40 focus:border-primary focus:ring-1 focus:ring-primary/20 outline-none"
+          class="h-7 w-full rounded-lg border border-border/60 bg-background px-2 text-xs"
           @change="setField(field.fieldKey, ($event.target as HTMLSelectElement).value)"
         >
           <option v-for="option in fieldOptions(field)" :key="optionValue(option)" :value="optionValue(option)">
@@ -424,110 +416,96 @@ defineExpose({
           </option>
         </select>
 
-        <!-- 数字输入框 -->
         <input
           v-else-if="field.fieldType === 'number' || field.fieldType === 'slider'"
           type="number"
           :value="strField(field.fieldKey)"
           :placeholder="field.placeholder || ''"
-          class="h-8 w-full rounded-lg border border-border/70 bg-background px-2 text-xs transition-all hover:border-primary/40 focus:border-primary focus:ring-1 focus:ring-primary/20 outline-none"
+          class="h-7 w-full rounded-lg border border-border/60 bg-background px-2 text-xs"
           @input="onNumberInput(field.fieldKey, $event)"
         />
 
-        <!-- 复选框 -->
         <label
           v-else-if="field.fieldType === 'checkbox'"
-          class="inline-flex h-8 items-center gap-2 rounded-lg border border-border/70 bg-background px-2 text-xs transition-all hover:border-primary/40 cursor-pointer"
+          class="inline-flex h-7 items-center gap-2 rounded-lg border border-border/60 bg-background px-2 text-xs"
         >
           <input
             type="checkbox"
             :checked="Boolean(state.fields[field.fieldKey])"
-            class="rounded border-border accent-primary"
+            class="rounded border-border"
             @change="setField(field.fieldKey, ($event.target as HTMLInputElement).checked)"
           />
           {{ field.placeholder || "启用" }}
         </label>
 
-        <!-- 图片/文件上传区域 -->
-        <div v-else-if="field.fieldType === 'image' || field.fieldType === 'file'" class="space-y-1.5">
+        <div v-else-if="field.fieldType === 'image' || field.fieldType === 'file'" class="space-y-1">
           <div
-            class="flex items-center gap-1.5"
+            class="flex items-center gap-1"
             @dragover.prevent
             @drop.prevent="handleFieldUpload(field, ($event as DragEvent).dataTransfer?.files || null)"
           >
-
-          <div
-            class="flex h-8 min-w-0 items-center justify-center gap-2 rounded-lg border border-dashed border-border/70 bg-background px-3 text-xs text-muted-foreground transition-all hover:border-primary/50 hover:bg-primary/5"
-          >
-            <input
-              type="file"
-              :id="`file-${field.fieldKey}`"
-              class="hidden"
-              :accept="uploadAccept(field)"
-              @change="handleFieldUpload(field, ($event.target as HTMLInputElement).files)"
-            />
-
             <label
-              :for="`file-${field.fieldKey}`"
-              class="flex cursor-pointer items-center gap-1.5 text-muted-foreground transition-colors hover:text-primary"
-              title="从本地上传"
+              class="flex h-7 min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg border border-dashed border-border/60 bg-background px-2 text-xs text-muted-foreground hover:border-primary/60"
             >
-              <Loader2 v-if="uploadState(field.fieldKey).uploading" class="h-4 w-4 animate-spin" />
-              <ImageUp v-else class="h-4 w-4" />
-              <span>本地</span>
+              <input
+                type="file"
+                class="hidden"
+                :accept="uploadAccept(field)"
+                @change="handleFieldUpload(field, ($event.target as HTMLInputElement).files)"
+              />
+              <Loader2 v-if="uploadState(field.fieldKey).uploading" class="h-3.5 w-3.5 animate-spin" />
+              <ImageUp v-else-if="materialKindForField(field) === 'image'" class="h-3.5 w-3.5" />
+              <UploadCloud v-else class="h-3.5 w-3.5" />
+              <span class="truncate text-xs">
+                {{ uploadState(field.fieldKey).uploading ? "上传中..." : (uploadState(field.fieldKey).fileName || "上传文件") }}
+              </span>
             </label>
-
-            <span class="text-muted-foreground">|</span>
-
             <button
               type="button"
-              class="flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-primary"
-              title="从素材库上传"
+              class="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-border/60 bg-background text-muted-foreground hover:border-primary/50 hover:text-primary"
+              :title="`从历史${materialKindLabel(materialKindForField(field))}素材中选择`"
               @click="openMaterialPicker(field)"
             >
-              <BookMarked class="h-4 w-4" />
-              <span>素材库</span>
+              <Library class="h-3.5 w-3.5" />
             </button>
           </div>
-          </div>
-
-          <!-- 已上传预览 -->
-          <div v-if="strField(field.fieldKey)" class="flex items-center gap-1.5">
+          <div v-if="strField(field.fieldKey)" class="flex items-center gap-1">
             <img
               v-if="imagePreviewUrl(field)"
               :src="imagePreviewUrl(field)"
               alt=""
-              class="h-8 w-8 shrink-0 rounded-md border border-border object-cover shadow-sm"
+              class="h-7 w-7 shrink-0 rounded-md border border-border object-cover"
             />
-            
-            <button type="button" class="p-1 rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive" @click="clearUploadedField(field)">
-              <X class="h-4 w-4" />
+            <input
+              :value="strField(field.fieldKey)"
+              class="h-6 flex-1 rounded-md border border-border/60 bg-muted/30 px-2 text-[11px]"
+              readonly
+            />
+            <button type="button" class="text-muted-foreground hover:text-foreground" @click="clearUploadedField(field)">
+              <X class="h-3.5 w-3.5" />
             </button>
           </div>
-
-          <p v-if="uploadState(field.fieldKey).error" class="text-[11px] text-destructive pl-0.5">
+          <p v-if="uploadState(field.fieldKey).error" class="text-[11px] text-destructive">
             {{ uploadState(field.fieldKey).error }}
           </p>
         </div>
 
-        <!-- 普通文本输入框 -->
         <input
           v-else
           type="text"
           :value="strField(field.fieldKey)"
           :placeholder="field.placeholder || ''"
-          class="h-8 w-full rounded-lg border border-border/70 bg-background px-2 text-xs transition-all hover:border-primary/40 focus:border-primary focus:ring-1 focus:ring-primary/20 outline-none"
+          class="h-7 w-full rounded-lg border border-border/60 bg-background px-2 text-xs"
           @input="setField(field.fieldKey, ($event.target as HTMLInputElement).value)"
         />
       </div>
     </div>
 
-    <!-- 能力快捷选项区域 -->
-    <div class="flex flex-wrap items-center gap-2">
+    <div class="flex flex-wrap items-center gap-1.5">
       <select
         v-if="imageCapability && configuredFields.length === 0"
         v-model="state.imageRatio"
-        class="h-8 rounded-lg border border-border/70 bg-background px-2 text-xs transition-all hover:border-primary/40 focus:border-primary focus:ring-1 focus:ring-primary/20 outline-none"
+        class="h-7 rounded-lg border border-border/60 bg-background px-2 text-xs"
         title="图片比例"
       >
         <option v-for="ratio in aspectRatios" :key="ratio" :value="ratio">{{ ratio }}</option>
@@ -535,21 +513,21 @@ defineExpose({
 
       <label
         v-if="fileCapability"
-        class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border/70 bg-background px-2 text-xs text-muted-foreground transition-all hover:border-primary/40"
+        class="inline-flex h-7 items-center gap-1.5 rounded-lg border border-border/60 bg-background px-2 text-xs text-muted-foreground"
       >
-        <Paperclip class="h-4 w-4" />
+        <Paperclip class="h-3.5 w-3.5" />
         上传
       </label>
 
-      <label v-if="webSearchCapability && showWebSearch" class="inline-flex h-8 cursor-pointer items-center gap-2 rounded-lg border border-border/70 bg-background px-2 text-xs transition-all hover:border-primary/40">
-        <input v-model="state.webSearch" type="checkbox" class="rounded border-border accent-primary" />
+      <label v-if="webSearchCapability && showWebSearch" class="inline-flex h-7 cursor-pointer items-center gap-2 rounded-lg border border-border/60 bg-background px-2 text-xs">
+        <input v-model="state.webSearch" type="checkbox" class="rounded border-border" />
         联网搜索
       </label>
 
       <select
         v-if="codeCapability && codeLanguages.length > 1"
         v-model="state.language"
-        class="h-8 rounded-lg border border-border/70 bg-background px-2 text-xs transition-all hover:border-primary/40 focus:border-primary focus:ring-1 focus:ring-primary/20 outline-none"
+        class="h-7 rounded-lg border border-border/60 bg-background px-2 text-xs"
         title="代码语言"
       >
         <option v-for="lang in codeLanguages" :key="lang" :value="lang">{{ lang }}</option>
@@ -558,80 +536,78 @@ defineExpose({
       <button
         v-if="voiceCapability"
         type="button"
-        class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border/70 bg-background px-2 text-xs text-muted-foreground transition-all hover:border-primary/40"
+        class="inline-flex h-7 items-center gap-1.5 rounded-lg border border-border/60 bg-background px-2 text-xs text-muted-foreground"
         disabled
       >
-        <Mic class="h-4 w-4" />
+        <Mic class="h-3.5 w-3.5" />
         语音
       </button>
     </div>
 
-    <!-- 素材选择弹窗 -->
-    <div
-      v-if="materialPickerOpen"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm px-4 py-6 transition-opacity duration-200"
-      @click.self="closeMaterialPicker"
-    >
-      <div class="flex max-h-[78vh] w-full max-w-3xl flex-col rounded-2xl border border-border bg-background shadow-xl transition-transform duration-200 scale-100">
-        <!-- 弹窗头部 -->
-        <div class="flex items-center justify-between border-b border-border/60 px-5 py-4">
-          <div>
-            <h3 class="text-base font-semibold text-foreground">
-              选择{{ materialKindLabel(activeMaterialKind) }}素材
-            </h3>
-            <p class="mt-1 text-xs text-muted-foreground">
-              来自你已生成成功的历史任务，选择后会填入当前上传字段。
-            </p>
-          </div>
-          <button
-            type="button"
-            class="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            @click="closeMaterialPicker"
-          >
-            <X class="h-4 w-4" />
-          </button>
-        </div>
-
-        <!-- 弹窗内容区 -->
-        <div class="min-h-[220px] overflow-y-auto p-5">
-          <div v-if="materialLoading" class="flex h-48 items-center justify-center gap-2 text-sm text-muted-foreground">
-            <Loader2 class="h-4 w-4 animate-spin" />
-            正在加载素材库...
-          </div>
-          <div v-else-if="materialError" class="flex h-48 items-center justify-center text-sm text-destructive">
-            {{ materialError }}
-          </div>
-          <div v-else-if="materialAssets.length === 0" class="flex h-48 items-center justify-center text-sm text-muted-foreground">
-            暂无可用{{ materialKindLabel(activeMaterialKind) }}素材
-          </div>
-          <!-- 素材卡片网格 -->
-          <div v-else class="grid grid-cols-2 gap-3 md:grid-cols-3">
+    <Teleport to="body">
+      <div
+        v-if="materialPickerOpen"
+        class="fixed inset-0 z-[120] flex items-start justify-center bg-black/65 px-4 pb-8 pt-[9vh] backdrop-blur-sm"
+        @click.self="closeMaterialPicker"
+      >
+        <div class="flex max-h-[82vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-white/10 bg-[#111217] text-white shadow-[0_28px_100px_rgb(0_0_0_/_0.72)]">
+          <div class="flex items-center justify-between border-b border-white/10 px-6 py-5">
+            <div>
+              <h3 class="text-lg font-semibold text-white">
+                选择{{ materialKindLabel(activeMaterialKind) }}素材
+              </h3>
+              <p class="mt-1 text-sm text-white/45">
+                来自你已生成成功的历史任务，选择后会填入当前上传字段。
+              </p>
+            </div>
             <button
-              v-for="asset in materialAssets"
-              :key="asset.id"
               type="button"
-              class="group overflow-hidden rounded-xl border border-border/70 bg-card text-left transition-all duration-200 hover:border-primary/50 hover:shadow-md hover:-translate-y-0.5 active:scale-[0.98]"
-              @click="selectMaterialAsset(asset)"
+              class="rounded-full p-2 text-white/45 transition hover:bg-white/10 hover:text-white"
+              @click="closeMaterialPicker"
             >
-              <div class="flex aspect-[4/3] items-center justify-center bg-muted/30">
-                <img
-                  v-if="asset.kind === 'image' && asset.previewUrl"
-                  :src="asset.previewUrl"
-                  alt=""
-                  class="h-full w-full object-cover"
-                />
-                <FileVideo v-else-if="asset.kind === 'video'" class="h-10 w-10 text-muted-foreground group-hover:text-primary transition-colors" />
-                <FileAudio v-else-if="asset.kind === 'audio'" class="h-10 w-10 text-muted-foreground group-hover:text-primary transition-colors" />
-                <ImageIcon v-else class="h-10 w-10 text-muted-foreground group-hover:text-primary transition-colors" />
-              </div>
-              <div class="space-y-1 p-3">
-                
-                <p class="truncate text-xs text-muted-foreground">{{ asset.subtitle }}</p>
-              </div>
+              <X class="h-5 w-5" />
             </button>
           </div>
+
+          <div class="min-h-[260px] overflow-y-auto p-6">
+            <div v-if="materialLoading" class="flex h-56 items-center justify-center gap-2 text-sm text-white/45">
+              <Loader2 class="h-4 w-4 animate-spin" />
+              正在加载素材库...
+            </div>
+            <div v-else-if="materialError" class="flex h-56 items-center justify-center text-sm text-red-300">
+              {{ materialError }}
+            </div>
+            <div v-else-if="materialAssets.length === 0" class="flex h-56 items-center justify-center text-sm text-white/45">
+              暂无可用{{ materialKindLabel(activeMaterialKind) }}素材
+            </div>
+            <div v-else class="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-4">
+              <button
+                v-for="asset in materialAssets"
+                :key="asset.id"
+                type="button"
+                class="group overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04] text-left transition hover:-translate-y-0.5 hover:border-primary/60 hover:bg-white/[0.07]"
+                @click="selectMaterialAsset(asset)"
+              >
+                <div class="flex aspect-[4/3] items-center justify-center bg-white/[0.04]">
+                  <img
+                    v-if="asset.kind === 'image' && asset.previewUrl"
+                    :src="asset.previewUrl"
+                    alt=""
+                    class="h-full w-full object-cover"
+                  />
+                  <FileVideo v-else-if="asset.kind === 'video'" class="h-9 w-9 text-white/35 group-hover:text-primary" />
+                  <FileAudio v-else-if="asset.kind === 'audio'" class="h-9 w-9 text-white/35 group-hover:text-primary" />
+                  <ImageIcon v-else class="h-9 w-9 text-white/35 group-hover:text-primary" />
+                </div>
+                <div class="space-y-1.5 p-4">
+                  <p class="truncate text-sm font-semibold text-white">{{ asset.title }}</p>
+                  <p class="truncate text-xs text-white/40">{{ asset.subtitle }}</p>
+                </div>
+              </button>
+            </div>
+          </div>
         </div>
-      </div>
-    </div>
+              </div>
+    </Teleport>
   </div>
 </template>

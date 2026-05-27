@@ -65,6 +65,27 @@ public interface AgentModelConfigMapper extends BaseMapper<AgentModelConfig> {
     List<AgentModelConfig> findAllActive();
 
     @Select("""
+            SELECT *
+            FROM agent_model_configs
+            WHERE COALESCE(is_deleted, 0) = 0
+              AND enabled = 1
+              AND COALESCE(agent_enabled, 0) = 1
+            ORDER BY COALESCE(is_default, 0) DESC, id DESC
+            """)
+    List<AgentModelConfig> findAgentEnabled();
+
+    @Select("""
+            SELECT *
+            FROM agent_model_configs
+            WHERE id = #{id}
+              AND COALESCE(is_deleted, 0) = 0
+              AND enabled = 1
+              AND COALESCE(agent_enabled, 0) = 1
+            LIMIT 1
+            """)
+    AgentModelConfig findAgentEnabledById(@Param("id") Long id);
+
+    @Select("""
             SELECT m.*
             FROM ai_tools t
             JOIN agent_model_configs m ON m.id = COALESCE(
@@ -90,14 +111,16 @@ public interface AgentModelConfigMapper extends BaseMapper<AgentModelConfig> {
                                             extra_auth_json, minimax_group_id, console_url, balance_url, docs_url,
                                             timeout_seconds, input_token_price_per_1k, output_token_price_per_1k,
                                             input_token_price_per_1m, output_token_price_per_1m,
-                                            billing_unit, unit_price, capabilities, enabled, is_default, created_at, updated_at)
+                                            billing_unit, unit_price, capabilities, enabled, agent_enabled,
+                                            is_default, created_at, updated_at)
             VALUES(#{config.displayName}, #{config.configCode}, #{config.provider}, #{config.modelName},
                    #{config.baseUrl}, #{config.apiKey}, #{config.extraAuthJson}, #{config.minimaxGroupId},
                    #{config.consoleUrl}, #{config.balanceUrl}, #{config.docsUrl}, #{config.timeoutSeconds},
                    #{config.inputTokenPricePer1k}, #{config.outputTokenPricePer1k},
                    #{config.inputTokenPricePer1m}, #{config.outputTokenPricePer1m},
                    #{config.billingUnit}, #{config.unitPrice}, #{config.capabilities},
-                   #{config.enabled}, #{config.default}, #{config.createdAt}, #{config.updatedAt})
+                   #{config.enabled}, #{config.agentEnabled}, #{config.default},
+                   #{config.createdAt}, #{config.updatedAt})
             """)
     @Options(useGeneratedKeys = true, keyProperty = "config.id")
     void insertConfig(@Param("config") AgentModelConfig config);
@@ -124,6 +147,7 @@ public interface AgentModelConfigMapper extends BaseMapper<AgentModelConfig> {
                 unit_price = #{config.unitPrice},
                 capabilities = #{config.capabilities},
                 enabled = #{config.enabled},
+                agent_enabled = #{config.agentEnabled},
                 is_default = #{config.default},
                 updated_at = #{config.updatedAt}
             WHERE id = #{config.id}
