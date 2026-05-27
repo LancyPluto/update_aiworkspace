@@ -1,5 +1,5 @@
 import { apiRequest } from "./client"
-import type { LoginRequest, LoginResponse, RegisterRequest, SmsAuthRequest, SmsCodeRequest, SmsCodeResponse } from "./types"
+import type { LoginRequest, LoginResponse, RegisterRequest, ResetPasswordRequest, SmsAuthRequest, SmsCodeRequest, SmsCodeResponse } from "./types"
 
 const P = {
   register: "/api/v1/auth/register",
@@ -7,6 +7,7 @@ const P = {
   smsCode: "/api/v1/auth/sms-code",
   smsRegister: "/api/v1/auth/sms-register",
   smsLogin: "/api/v1/auth/sms-login",
+  resetPassword: "/api/v1/auth/reset-password",
   logout: "/api/v1/auth/logout",
 } as const
 
@@ -51,6 +52,10 @@ export async function smsLogin(body: SmsAuthRequest): Promise<LoginResponse> {
     throw new Error("登录响应缺少 data")
   }
   return data
+}
+
+export async function resetPassword(body: ResetPasswordRequest): Promise<void> {
+  await apiRequest<unknown>("POST", P.resetPassword, { body })
 }
 
 export async function logout(options?: { token?: string | null }): Promise<void> {

@@ -23,6 +23,27 @@ services:
       timeout: 5s
       retries: 10
 
+  banana-slides:
+    build:
+      context: ../engines/banana-slides
+      dockerfile: backend/Dockerfile
+    container_name: ai-supermarket-banana-slides
+    restart: unless-stopped
+    env_file:
+      - ../engines/banana-slides/.env
+    ports:
+      - "${BANANA_SLIDES_PORT:-5001}:5000"
+      - "1455:1455"
+    volumes:
+      - ../engines/banana-slides/backend/instance:/app/backend/instance
+      - ../engines/banana-slides/uploads:/app/uploads
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
   redis:
     image: redis:7
     container_name: ai-supermarket-redis
@@ -70,6 +91,8 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      banana-slides:
+        condition: service_healthy
     environment:
       SERVER_PORT: 8080
       MYSQL_HOST: mysql
@@ -107,6 +130,7 @@ services:
       AGENT_MAX_RUNS_PER_HOUR: ${AGENT_MAX_RUNS_PER_HOUR:-30}
       AGENT_DEFAULT_CREDIT_BUDGET: ${AGENT_DEFAULT_CREDIT_BUDGET:-20}
       GENERATED_MEDIA_DIR: /data/generated-media
+      PPT_ENGINE_BASE_URL: ${PPT_ENGINE_BASE_URL:-http://banana-slides:5000}
     ports:
       - "${BACKEND_PORT:-8080}:8080"
     volumes:
@@ -143,6 +167,10 @@ services:
     environment:
       # 浏览器直连本机后端；未设置时走 Vite 代理（见 VITE_DEV_PROXY_TARGET）
       VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8080}
+      VITE_ALIYUN_CAPTCHA_ENABLED: ${VITE_ALIYUN_CAPTCHA_ENABLED:-false}
+      VITE_ALIYUN_CAPTCHA_REGION: ${VITE_ALIYUN_CAPTCHA_REGION:-cn}
+      VITE_ALIYUN_CAPTCHA_PREFIX: ${VITE_ALIYUN_CAPTCHA_PREFIX:-}
+      VITE_ALIYUN_CAPTCHA_SCENE_ID: ${VITE_ALIYUN_CAPTCHA_SCENE_ID:-}
       # 本机 mvn 启动后端时，容器内代理需用 host.docker.internal，不能用已停掉的 backend 服务名
       VITE_DEV_PROXY_TARGET: ${VITE_DEV_PROXY_TARGET:-http://host.docker.internal:8080}
       CHOKIDAR_USEPOLLING: "true"

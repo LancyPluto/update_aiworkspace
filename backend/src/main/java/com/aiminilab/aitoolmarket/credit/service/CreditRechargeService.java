@@ -14,4 +14,12 @@ public interface CreditRechargeService {
     RechargeOrderResponse getOrder(Long userId, Long orderId);
 
     RechargeOrderResponse mockPaySuccess(Long userId, Long orderId);
+
+    void handleWechatNativePaymentNotification(
+            String serial,
+            String signature,
+            String timestamp,
+            String nonce,
+            String body
+    );
 }

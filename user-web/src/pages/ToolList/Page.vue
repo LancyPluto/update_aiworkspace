@@ -11,6 +11,8 @@ import type { AITool } from "@/api/aiToolTypes"
 import type { TaskDetail } from "@/api/types"
 import { userRoutes } from "@/router/userRoutes"
 import { useAuthStore } from "@/store/authStore"
+import { isPptWorkspaceTool } from "@/api/pptApi"
+import { toolEntryRoute } from "@/utils/toolEntryRoute"
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -244,7 +246,7 @@ onMounted(() => {
             <RouterLink
               v-for="tool in recentUsedTools"
               :key="tool.id"
-              :to="{ path: '/dashboard', query: { modality: normalizeModality(tool.outputModality), tool: tool.id } }"
+              :to="toolEntryRoute(tool.id)"
               class="h-28 w-20 shrink-0 overflow-hidden rounded-2xl bg-secondary"
             >
               <video
@@ -328,7 +330,7 @@ onMounted(() => {
         <RouterLink
           v-for="tool in filteredTools"
           :key="tool.id"
-          :to="{ path: '/dashboard', query: { modality: normalizeModality(tool.outputModality), tool: tool.id } }"
+          :to="toolEntryRoute(tool.id)"
           class="group overflow-hidden rounded-3xl border border-white/8 bg-white/[0.04] transition hover:-translate-y-1 hover:border-primary/50 hover:shadow-[0_20px_45px_rgb(0_0_0_/_0.38)]"
         >
           <div v-if="usesEffectMedia(tool)" class="flex h-full flex-col">
@@ -354,7 +356,7 @@ onMounted(() => {
                 <div class="min-w-0">
                   <h3 class="truncate text-2xl font-semibold text-white drop-shadow">{{ tool.name }}</h3>
                   <p class="mt-1 line-clamp-1 text-xs text-white/75">
-                    {{ tool.description || "点击进入对话" }}
+                    {{ tool.description || (isPptWorkspaceTool(tool.id) ? "进入 PPT 工作台" : "点击进入对话") }}
                   </p>
                 </div>
                 <span class="shrink-0 rounded-full bg-white/18 px-2.5 py-1 text-[11px] font-medium text-white ring-1 ring-white/25 backdrop-blur">
@@ -369,7 +371,7 @@ onMounted(() => {
             </div>
             <div class="flex flex-1 flex-col px-4 py-4">
               <p class="line-clamp-2 min-h-[40px] text-sm text-muted-foreground">
-                {{ tool.description || "点击进入对话" }}
+                {{ tool.description || (isPptWorkspaceTool(tool.id) ? "进入 PPT 工作台" : "点击进入对话") }}
               </p>
               <div class="mt-4 flex items-center justify-between gap-2">
                 <CreditCostBadge :cost="tool.estimatedCreditCost" />
@@ -393,7 +395,7 @@ onMounted(() => {
             </div>
             <h3 class="text-xl font-semibold">{{ tool.name }}</h3>
             <p class="mt-2 line-clamp-3 min-h-[60px] text-sm text-muted-foreground">
-              {{ tool.description || "点击进入对话" }}
+              {{ tool.description || (isPptWorkspaceTool(tool.id) ? "进入 PPT 工作台" : "点击进入对话") }}
             </p>
             <div class="mt-auto flex flex-wrap items-center justify-between gap-2 pt-6">
               <span class="rounded-full bg-white/8 px-2.5 py-1 text-[11px] text-muted-foreground">

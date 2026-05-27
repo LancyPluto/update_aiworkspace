@@ -57,6 +57,13 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react"
+import { ToolIntegrationApiSection } from "@/components/admin/tool-integration-api-section"
+import { resolveIntegrationPluginId } from "@/lib/model-capabilities"
+import {
+  extractFrontendStyle,
+  extractIntegrationMarkers,
+  serializeConfigNote,
+} from "@/lib/tool-config-note"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import {
@@ -270,50 +277,6 @@ const templateCodeByToolType: Record<string, string> = {
   AGENT: "digital_human_default",
 }
 
-const FRONTEND_STYLE_MARKER = "<!-- ai-tool-ui:"
-const FRONTEND_STYLE_PATTERN = /<!-- ai-tool-ui:(.*?) -->/s
-
-interface FrontendStyleConfig {
-  primaryColor: string
-  welcomeMessage: string
-  mediaDisplayMode: "icon" | "effect"
-  modelIconUrl: string
-}
-
-function extractFrontendStyle(configNote?: string | null): { note: string; style: FrontendStyleConfig } {
-  const raw = configNote || ""
-  const match = raw.match(FRONTEND_STYLE_PATTERN)
-  const fallback: FrontendStyleConfig = { primaryColor: "#3b82f6", welcomeMessage: "", mediaDisplayMode: "icon", modelIconUrl: "" }
-  if (!match) return { note: raw.trim(), style: fallback }
-
-  try {
-    const parsed = JSON.parse(match[1]) as Partial<FrontendStyleConfig>
-    const mediaDisplayMode = parsed.mediaDisplayMode === "effect" ? "effect" : "icon"
-    return {
-      note: raw.replace(FRONTEND_STYLE_PATTERN, "").trim(),
-      style: {
-        primaryColor: typeof parsed.primaryColor === "string" && parsed.primaryColor ? parsed.primaryColor : fallback.primaryColor,
-        welcomeMessage: typeof parsed.welcomeMessage === "string" ? parsed.welcomeMessage : fallback.welcomeMessage,
-        mediaDisplayMode,
-        modelIconUrl: typeof parsed.modelIconUrl === "string" ? parsed.modelIconUrl : fallback.modelIconUrl,
-      },
-    }
-  } catch {
-    return { note: raw.replace(FRONTEND_STYLE_PATTERN, "").trim(), style: fallback }
-  }
-}
-
-function serializeConfigNote(note: string, style: FrontendStyleConfig): string {
-  const cleanNote = note.trim()
-  const styleJson = JSON.stringify({
-    primaryColor: style.primaryColor || "#3b82f6",
-    welcomeMessage: style.welcomeMessage || "",
-    mediaDisplayMode: style.mediaDisplayMode === "effect" ? "effect" : "icon",
-    modelIconUrl: style.modelIconUrl || "",
-  })
-  return [cleanNote, `${FRONTEND_STYLE_MARKER}${styleJson} -->`].filter(Boolean).join("\n\n")
-}
-
 const CATEGORY_ICON_MAP: Record<string, LucideIcon> = {
   Copywriting: FileText,
   Content: FileText,
@@ -349,126 +312,6 @@ function safePreviewFields(json: string): EditableField[] {
   } catch {
     return []
   }
-}
-
-function apiReferenceForTool(tool: ToolRow | null, modelConfig?: AgentModelConfig | null) {
-  const handler = tool
-    ? executionCapabilityForTool(tool.toolType, tool.toolCode, tool.executionHandler, tool.inputModality, tool.outputModality)
-    : "TEXT_GENERATION"
-  const provider = modelConfig?.provider || "未绑定"
-  const model = modelConfig?.modelName || tool?.modelName || "默认模型"
-  const baseUrl = modelConfig?.baseUrl || "使用后台模型配置"
-
-  if (handler === "IMAGE_GENERATION") {
-    return {
-      title: "文生图 API 映射",
-      endpoint: "POST /v1/images/generations",
-      model,
-      provider,
-      baseUrl,
-      fields: [
-        "prompt / text / description -> prompt",
-        "style -> 不直接发给 API；优先按选项 promptPrefix 拼到 prompt 前面",
-        "aspectRatio -> image_size（1:1 等比例会转换为分辨率）",
-        "imageSize -> image_size（显式分辨率优先）",
-        "count / batchSize -> batch_size（限制 1-4）",
-        "negativePrompt -> negative_prompt",
-        "seed -> seed",
-        "guidanceScale -> guidance_scale",
-        "numInferenceSteps -> num_inference_steps",
-      ],
-      note: "未命中的字段不会透传给官网 API；但若字段参与 prompt 拼接，仍会影响生成效果。",
-    }
-  }
-
-  if (handler === "TEXT_TO_SPEECH") {
-    return {
-      title: "文字转语音 API 映射",
-      endpoint: provider === "minimax_speech" ? "POST /v1/t2a_v2 或 /v1/t2a_async_v2" : "SiliconFlow speech endpoint",
-      model,
-      provider,
-      baseUrl,
-      fields: [
-        "text / script / content -> text",
-        "voice / voiceId -> voice_setting.voice_id 或 SiliconFlow voice",
-        "speed -> voice_setting.speed",
-        "volume / vol -> voice_setting.vol",
-        "pitch -> voice_setting.pitch",
-        "format / audioFormat -> audio_setting.format",
-        "sampleRate -> audio_setting.sample_rate",
-        "bitrate -> audio_setting.bitrate",
-        "channel -> audio_setting.channel",
-        "languageBoost -> language_boost",
-      ],
-      note: "其他字段不会整包透传给语音 API。",
-    }
-  }
-
-  return {
-    title: "文本生成 API 映射",
-    endpoint: provider === "anthropic_compatible" ? "POST /v1/messages" : "POST /chat/completions",
-    model,
-    provider,
-    baseUrl,
-    fields: [
-      "systemPrompt -> system message",
-      "userPromptTemplate + params -> user message",
-      "无模板时：params 会按 key/value 生成默认 user prompt",
-    ],
-    note: "文本工具的多余字段可能进入提示词，建议只保留模板实际引用的字段。",
-  }
-}
-
-function FieldSchemaSidePanel({
-  fields,
-  tool,
-  modelConfig,
-}: {
-  fields: EditableField[]
-  tool: ToolRow | null
-  modelConfig?: AgentModelConfig | null
-}) {
-  const reference = apiReferenceForTool(tool, modelConfig)
-  return (
-    <div className="space-y-4 lg:sticky lg:top-0 lg:self-start">
-      <FieldSchemaPreview fields={fields} />
-      <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
-        <div className="mb-4">
-          <h3 className="text-base font-semibold">{reference.title}</h3>
-          <p className="mt-1 text-xs text-muted-foreground">用于核对字段是否会进入真实模型调用。</p>
-        </div>
-        <div className="space-y-2 rounded-lg bg-secondary/40 p-3 text-xs">
-          <div className="flex justify-between gap-3">
-            <span className="text-muted-foreground">Provider</span>
-            <span className="text-right font-medium">{reference.provider}</span>
-          </div>
-          <div className="flex justify-between gap-3">
-            <span className="text-muted-foreground">Model</span>
-            <span className="text-right font-medium">{reference.model}</span>
-          </div>
-          <div className="flex justify-between gap-3">
-            <span className="text-muted-foreground">Endpoint</span>
-            <span className="text-right font-mono">{reference.endpoint}</span>
-          </div>
-          <div className="flex justify-between gap-3">
-            <span className="text-muted-foreground">Base URL</span>
-            <span className="max-w-[210px] truncate text-right font-mono">{reference.baseUrl}</span>
-          </div>
-        </div>
-        <div className="mt-4 space-y-2">
-          <p className="text-xs font-medium">当前系统支持字段</p>
-          <div className="space-y-1.5">
-            {reference.fields.map((field) => (
-              <div key={field} className="rounded-md border border-border/70 bg-background px-2.5 py-1.5 font-mono text-[11px] text-muted-foreground">
-                {field}
-              </div>
-            ))}
-          </div>
-        </div>
-        <p className="mt-3 text-xs text-muted-foreground">{reference.note}</p>
-      </div>
-    </div>
-  )
 }
 
 function mapTool(tool: ToolSummary): ToolRow {
@@ -675,6 +518,11 @@ export default function ToolsPage() {
     [modelConfigs, providerCapabilities],
   )
 
+  const integrationPluginId = useMemo(
+    () => (editingTool ? resolveIntegrationPluginId(editingTool) : null),
+    [editingTool],
+  )
+
   useEffect(() => {
     if (!form.modelConfigId) return
     const selected = modelConfigs.find((config) => String(config.id) === form.modelConfigId)
@@ -824,6 +672,18 @@ export default function ToolsPage() {
     setSubmitting(true)
     const toastId = toast.loading(editingTool ? "正在保存工具..." : "正在创建工具...")
     try {
+      const style = {
+        primaryColor: form.primaryColor,
+        welcomeMessage: form.welcomeMessage,
+        mediaDisplayMode: form.mediaDisplayMode,
+        modelIconUrl: form.modelIconUrl,
+      }
+      let preservedMarkers: string[] | undefined
+      if (integrationPluginId && editingTool) {
+        const toolsResp = await fetchAdminTools()
+        const fresh = toolsResp.list.find((tool) => tool.id === editingTool.rawId)
+        preservedMarkers = extractIntegrationMarkers(fresh?.configNote)
+      }
       const payload = {
         toolCode: form.toolCode.trim() || undefined,
         toolName: form.toolName.trim(),
@@ -832,12 +692,7 @@ export default function ToolsPage() {
         toolType: form.toolType,
         inputModality: form.inputModality,
         outputModality: form.outputModality,
-        configNote: serializeConfigNote(form.configNote, {
-          primaryColor: form.primaryColor,
-          welcomeMessage: form.welcomeMessage,
-          mediaDisplayMode: form.mediaDisplayMode,
-          modelIconUrl: form.modelIconUrl,
-        }),
+        configNote: serializeConfigNote(form.configNote, style, preservedMarkers),
         coverUrl: form.coverUrl.trim() || undefined,
         estimatedCreditCost: Math.floor(credits),
         modelConfigId: form.modelConfigId ? Number(form.modelConfigId) : null,
@@ -1098,7 +953,12 @@ export default function ToolsPage() {
               }
             }}
           >
-            <DialogContent className="max-h-[92vh] overflow-y-auto bg-card border-border max-w-lg">
+            <DialogContent
+              className={cn(
+                "max-h-[92vh] overflow-y-auto border-border bg-card",
+                integrationPluginId ? "max-w-2xl" : "max-w-lg",
+              )}
+            >
               <DialogHeader>
                 <DialogTitle>{editingTool ? "编辑 AI 工具" : "新建 AI 工具"}</DialogTitle>
                 <DialogDescription className={formError ? "text-destructive" : undefined}>
@@ -1399,35 +1259,59 @@ export default function ToolsPage() {
                 </div>
                 <div className="space-y-2">
                   <Label>模型配置</Label>
-                  <Select
-                    value={modelSelectValue}
-                    onValueChange={(value) => updateForm("modelConfigId", value === "default" || value === "__select_matching_model" ? "" : value)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="选择匹配的模型配置" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {!defaultModelSupportsRequiredCapability ? (
-                        <SelectItem value="__select_matching_model" disabled>
-                          请选择支持「{capabilityLabel(requiredModelCapability)}」的模型
-                        </SelectItem>
-                      ) : null}
-                      <SelectItem value="default" disabled={!defaultModelSupportsRequiredCapability}>
-                        使用默认模型配置
-                      </SelectItem>
-                      {filteredModelConfigs.map((config) => (
-                        <SelectItem key={config.id} value={String(config.id)}>
-                          {config.displayName || config.modelName} · {config.provider}
-                        </SelectItem>
-                      ))}
-                      {filteredModelConfigs.length === 0 ? (
-                        <SelectItem value="__no_matching_models" disabled>
-                          暂无匹配模型配置
-                        </SelectItem>
-                      ) : null}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">需要模型能力：{capabilityLabel(requiredModelCapability)}</p>
+                  {integrationPluginId ? (
+                    <div className="space-y-3 rounded-lg border border-border p-3">
+                      <p className="text-xs text-amber-700">
+                        工作台类工具的大模型绑定保存在下方「保存配置」中；仅点对话框底部「保存工具」不会写入文本/文生图模型。
+                      </p>
+                      <ToolIntegrationApiSection
+                        pluginId={integrationPluginId}
+                        toolId={editingTool.rawId}
+                        onSaved={async () => {
+                          const toolsResp = await fetchAdminTools()
+                          const fresh = toolsResp.list.find((tool) => tool.id === editingTool.rawId)
+                          if (fresh) {
+                            const mapped = mapTool(fresh)
+                            setEditingTool(mapped)
+                            setForm((prev) => ({ ...prev, configNote: mapped.configNote || "" }))
+                          }
+                          await loadAll()
+                        }}
+                      />
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <Select
+                        value={modelSelectValue}
+                        onValueChange={(value) => updateForm("modelConfigId", value === "default" || value === "__select_matching_model" ? "" : value)}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="选择匹配的模型配置" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {!defaultModelSupportsRequiredCapability ? (
+                            <SelectItem value="__select_matching_model" disabled>
+                              请选择支持「{capabilityLabel(requiredModelCapability)}」的模型
+                            </SelectItem>
+                          ) : null}
+                          <SelectItem value="default" disabled={!defaultModelSupportsRequiredCapability}>
+                            使用默认模型配置
+                          </SelectItem>
+                          {filteredModelConfigs.map((config) => (
+                            <SelectItem key={config.id} value={String(config.id)}>
+                              {config.displayName || config.modelName} · {config.provider}
+                            </SelectItem>
+                          ))}
+                          {filteredModelConfigs.length === 0 ? (
+                            <SelectItem value="__no_matching_models" disabled>
+                              暂无匹配模型配置
+                            </SelectItem>
+                          ) : null}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground">需要模型能力：{capabilityLabel(requiredModelCapability)}</p>
+                    </div>
+                  )}
                 </div>
               </div>
               <DialogFooter>
@@ -1753,11 +1637,11 @@ export default function ToolsPage() {
                 </TabsContent>
               </Tabs>
             </div>
-            <FieldSchemaSidePanel
-              fields={fieldEditorMode === "visual" ? editableFields : safePreviewFields(fieldJson)}
-              tool={fieldTool}
-              modelConfig={modelConfigs.find((config) => config.id === fieldTool?.modelConfigId) || null}
-            />
+            <div className="lg:sticky lg:top-0 lg:self-start">
+              <FieldSchemaPreview
+                fields={fieldEditorMode === "visual" ? editableFields : safePreviewFields(fieldJson)}
+              />
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setFieldDialogOpen(false)} disabled={fieldSaving}>

@@ -28,6 +28,11 @@ export type ApiErrorCode =
   | "AGENT_TOOL_CALL_LIMIT"
   | "AGENT_MODEL_CALL_LIMIT"
   | "AGENT_SECURITY_REJECTED"
+  | "PPT_PROJECT_NOT_FOUND"
+  | "PPT_STEP_DISABLED"
+  | "PPT_ENGINE_ERROR"
+  | "PPT_TASK_FAILED"
+  | "PPT_EXPORT_FAILED"
   | "SYSTEM_ERROR"
 
 export interface ApiResponse<T> {
@@ -79,11 +84,12 @@ export interface LoginResponse {
   user?: UserProfile
 }
 
-export type SmsCodeScene = "REGISTER" | "LOGIN"
+export type SmsCodeScene = "REGISTER" | "LOGIN" | "LOGIN_OR_REGISTER" | "RESET_PASSWORD"
 
 export interface SmsCodeRequest {
   phone: string
   scene: SmsCodeScene
+  captchaVerifyParam?: string | null
 }
 
 export interface SmsCodeResponse {
@@ -96,6 +102,13 @@ export interface SmsAuthRequest {
   phone: string
   code: string
   nickname?: string
+  password?: string
+}
+
+export interface ResetPasswordRequest {
+  phone: string
+  code: string
+  password: string
 }
 
 export interface RegisterRequest {
@@ -193,6 +206,10 @@ export interface ToolDetail {
   executionHandler?: string | null
   /** 动态字段列表 */
   fields: ToolField[]
+  /** 平台化集成（PPT 工作台等） */
+  integration?: import("./pptApi").ToolIntegrationView | null
+  /** 兼容字段，优先读 integration.extension */
+  workflow?: import("./pptApi").PptWorkflow | null
 }
 
 /* ========== 任务相关 ========== */
@@ -344,7 +361,9 @@ export type AgentRunEventType =
   | "workspace_file.updated"
   | "workspace_file.read"
   | "memory.context_injected"
+  | "memory.context_frozen"
   | "memory.candidate_created"
+  | "memory.saved"
   | "message.delta"
   | "message.completed"
   | "run.completed"

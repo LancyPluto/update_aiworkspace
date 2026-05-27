@@ -21,7 +21,6 @@ import {
   ApiBusinessError,
   cancelAgentRun,
   confirmAgentTool,
-  deleteAgentFile,
   fetchAgentMessages,
   fetchAgentFiles,
   fetchAgentRun,
@@ -62,7 +61,6 @@ const events = ref<AgentRunEvent[]>([])
 const paneLoading = ref(true)
 const sending = ref(false)
 const uploading = ref(false)
-const deletingFileId = ref<number | null>(null)
 const agentError = ref<string | null>(null)
 const rememberTool = ref(true)
 const activeRunId = ref<number | null>(null)
@@ -288,20 +286,6 @@ async function handleFileSelected(event: Event) {
   }
 }
 
-async function removeFile(file: AgentFile) {
-  if (!props.token || deletingFileId.value !== null) return
-  deletingFileId.value = file.id
-  agentError.value = null
-  try {
-    await deleteAgentFile(props.sessionId, file.id, { token: props.token })
-    files.value = files.value.filter((item) => item.id !== file.id)
-  } catch (error) {
-    agentError.value = formatAgentError(error)
-  } finally {
-    deletingFileId.value = null
-  }
-}
-
 async function submitMessage(content = input.value) {
   const text = content.trim()
   if (!text && files.value.length === 0) return
@@ -340,7 +324,6 @@ async function submitMessage(content = input.value) {
     )
     activeRunId.value = res.runId
     await waitForRunComplete(res.runId)
-    files.value = []
   } catch (error) {
     runConnectionStatus.value = "failed"
     activeRunId.value = null
@@ -774,14 +757,8 @@ defineExpose({
             <span class="inner-file-name">{{ file.originalFilename }}</span>
             <span class="inner-file-size">{{ formatFileSize(file.fileSize) }}</span>
           </div>
-          <button
-            type="button"
-            class="inner-file-close"
-            :disabled="deletingFileId === file.id || hasActiveRun"
-            @click="removeFile(file)"
-          >
-            <Loader2 v-if="deletingFileId === file.id" class="h-3 w-3 animate-spin" />
-            <X v-else class="h-3 w-3" />
+          <button class="inner-file-close" @click="files = files.filter(x => x.id !== file.id)">
+            <X class="h-3 w-3" />
           </button>
         </div>
       </div>

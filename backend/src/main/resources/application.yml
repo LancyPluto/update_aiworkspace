@@ -46,6 +46,14 @@ app:
     retry-queue-prefix: ${RABBITMQ_TASK_RETRY_QUEUE_PREFIX:ai.tool.normal.retry}
     retry-delays-ms: ${RABBITMQ_TASK_RETRY_DELAYS_MS:5000,30000,120000}
   auth:
+    captcha:
+      enabled: ${ALIYUN_CAPTCHA_ENABLED:false}
+      provider: ${CAPTCHA_PROVIDER:aliyun}
+      region: ${ALIYUN_CAPTCHA_REGION:cn}
+      scene-id: ${ALIYUN_CAPTCHA_SCENE_ID:}
+      endpoint: ${ALIYUN_CAPTCHA_ENDPOINT:}
+      access-key-id: ${ALIYUN_CAPTCHA_ACCESS_KEY_ID:}
+      access-key-secret: ${ALIYUN_CAPTCHA_ACCESS_KEY_SECRET:}
     sms:
       provider: ${SMS_PROVIDER:local}
       bmob-application-id: ${BMOB_APPLICATION_ID:}
@@ -56,6 +64,12 @@ app:
       ihuyi-api-key: ${IHUYI_API_KEY:}
       ihuyi-base-url: ${IHUYI_BASE_URL:https://api.ihuyi.com/sms/Submit.json}
       ihuyi-template-id: ${IHUYI_TEMPLATE_ID:1}
+      aliyun-access-key-id: ${ALIYUN_SMS_ACCESS_KEY_ID:${ALIYUN_CAPTCHA_ACCESS_KEY_ID:${ALIYUN_ACCESS_KEY_ID:}}}
+      aliyun-access-key-secret: ${ALIYUN_SMS_ACCESS_KEY_SECRET:${ALIYUN_CAPTCHA_ACCESS_KEY_SECRET:${ALIYUN_ACCESS_KEY_SECRET:}}}
+      aliyun-endpoint: ${ALIYUN_SMS_ENDPOINT:dysmsapi.aliyuncs.com}
+      aliyun-sign-name: ${ALIYUN_SMS_SIGN_NAME:}
+      aliyun-template-code: ${ALIYUN_SMS_TEMPLATE_CODE:}
+      aliyun-template-param-name: ${ALIYUN_SMS_TEMPLATE_PARAM_NAME:code}
   agent:
     enabled: ${AGENT_ENABLED:true}
     service-base-url: ${AGENT_SERVICE_BASE_URL:http://127.0.0.1:8090}
@@ -65,8 +79,35 @@ app:
     default-credit-budget: ${AGENT_DEFAULT_CREDIT_BUDGET:20}
     max-history-messages: ${AGENT_MAX_HISTORY_MESSAGES:20}
     file-storage-dir: ${AGENT_FILE_STORAGE_DIR:data/agent-files}
+  payment:
+    wechat-native:
+      enabled: ${WECHAT_NATIVE_PAY_ENABLED:false}
+      appid: ${WECHAT_PAY_APPID:}
+      mchid: ${WECHAT_PAY_MCHID:}
+      merchant-serial-no: ${WECHAT_PAY_MERCHANT_SERIAL_NO:}
+      merchant-private-key-path: ${WECHAT_PAY_MERCHANT_PRIVATE_KEY_PATH:}
+      api-v3-key: ${WECHAT_PAY_API_V3_KEY:}
+      wechat-pay-public-key-id: ${WECHAT_PAY_PUBLIC_KEY_ID:}
+      wechat-pay-public-key-path: ${WECHAT_PAY_PUBLIC_KEY_PATH:}
+      notify-url: ${WECHAT_PAY_NOTIFY_URL:}
+      api-base-url: ${WECHAT_PAY_API_BASE_URL:https://api.mch.weixin.qq.com}
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174}
+
+ppt:
+  engine:
+    # macOS 上 5000 常被 AirPlay Receiver 占用并返回 403；本机 Docker 引擎映射为 5001
+    base-url: ${PPT_ENGINE_BASE_URL:http://127.0.0.1:5001}
+    connect-timeout-ms: ${PPT_ENGINE_CONNECT_TIMEOUT_MS:5000}
+    read-timeout-ms: ${PPT_ENGINE_READ_TIMEOUT_MS:300000}
+  billing:
+    create-project-credits: ${PPT_BILLING_CREATE:5}
+    generate-outline-credits: ${PPT_BILLING_OUTLINE:10}
+    generate-descriptions-credits: ${PPT_BILLING_DESCRIPTIONS:20}
+    generate-images-credits: ${PPT_BILLING_IMAGES:50}
+    export-pptx-credits: ${PPT_BILLING_EXPORT_PPTX:5}
+    export-pdf-credits: ${PPT_BILLING_EXPORT_PDF:5}
+    export-editable-pptx-credits: ${PPT_BILLING_EXPORT_EDITABLE_PPTX:15}
 
 mybatis-plus:
   configuration:

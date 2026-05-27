@@ -244,6 +244,7 @@ CREATE TABLE credit_recharge_orders (
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE UNIQUE INDEX uk_recharge_user_idem ON credit_recharge_orders(user_id, idempotency_key);
+CREATE UNIQUE INDEX uk_recharge_external_trade_no ON credit_recharge_orders(external_trade_no);
 
 CREATE TABLE tool_prompts (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
@@ -575,6 +576,101 @@ INSERT INTO agent_model_configs (
   1,
   1,
   0
+);
+
+CREATE TABLE ai_market_tools (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  tool_id VARCHAR(64) NOT NULL UNIQUE,
+  name VARCHAR(64) NOT NULL,
+  icon_url VARCHAR(512) NOT NULL,
+  description VARCHAR(256),
+  enabled TINYINT NOT NULL DEFAULT 1,
+  sort_order INT NOT NULL DEFAULT 0,
+  primary_color VARCHAR(16),
+  welcome_message CLOB,
+  capabilities_json CLOB NOT NULL,
+  model_config_id BIGINT,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  is_deleted TINYINT NOT NULL DEFAULT 0
+);
+
+CREATE TABLE ai_market_sessions (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  session_id VARCHAR(64) NOT NULL UNIQUE,
+  user_id BIGINT NOT NULL,
+  tool_id VARCHAR(64) NOT NULL,
+  title VARCHAR(128) NOT NULL DEFAULT '新对话',
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  is_deleted TINYINT NOT NULL DEFAULT 0
+);
+
+CREATE TABLE ai_market_messages (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  message_id VARCHAR(64) NOT NULL UNIQUE,
+  session_id VARCHAR(64) NOT NULL,
+  role VARCHAR(16) NOT NULL,
+  content CLOB NOT NULL,
+  params_json CLOB,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE ai_market_message_attachments (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  message_id VARCHAR(64) NOT NULL,
+  file_id VARCHAR(64) NOT NULL,
+  file_name VARCHAR(256) NOT NULL,
+  file_size BIGINT NOT NULL,
+  content_type VARCHAR(128) NOT NULL
+);
+
+CREATE TABLE ai_market_files (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  file_id VARCHAR(64) NOT NULL UNIQUE,
+  user_id BIGINT NOT NULL,
+  tool_id VARCHAR(64),
+  original_name VARCHAR(256) NOT NULL,
+  storage_path VARCHAR(512) NOT NULL,
+  content_type VARCHAR(128) NOT NULL,
+  file_size BIGINT NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+INSERT INTO ai_market_tools (tool_id, name, icon_url, description, enabled, sort_order, primary_color, welcome_message, capabilities_json)
+VALUES (
+  'doubao',
+  '豆包',
+  '/generated/icons/doubao.png',
+  '生图 + 文件阅读',
+  1,
+  10,
+  '#f97316',
+  '你好，我是豆包~',
+  '[{"type":"imageGeneration","config":{"aspectRatios":["1:1","16:9"],"defaultRatio":"1:1"}},{"type":"fileReading","config":{"supportedFileTypes":["pdf","txt","png"],"maxSizeMB":20}}]'
+);
+
+CREATE TABLE ppt_project_bindings (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  user_id BIGINT NOT NULL,
+  tool_id BIGINT NOT NULL,
+  banana_project_id VARCHAR(64) NOT NULL,
+  creation_type VARCHAR(32) NOT NULL,
+  title VARCHAR(255),
+  status VARCHAR(64) NOT NULL DEFAULT 'DRAFT',
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE ppt_step_billing_logs (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  user_id BIGINT NOT NULL,
+  binding_id BIGINT NOT NULL,
+  step_code VARCHAR(64) NOT NULL,
+  credits_charged INT NOT NULL,
+  credit_log_id BIGINT,
+  client_request_id VARCHAR(64),
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 INSERT INTO credit_recharge_packages (

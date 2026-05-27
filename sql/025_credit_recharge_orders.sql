@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS credit_recharge_orders (
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY uk_recharge_user_idem(user_id, idempotency_key),
+  UNIQUE KEY uk_recharge_external_trade_no(external_trade_no),
   KEY idx_recharge_orders_user_created(user_id, created_at),
   KEY idx_recharge_orders_status_expires(status, expires_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

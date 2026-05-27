@@ -6,6 +6,7 @@ import {
   BrainCircuit,
   LayoutGrid,
   Store,
+  ListChecks,
   Wallet,
   FolderHeart,
   ChevronDown,
@@ -82,6 +83,7 @@ const userNav: (NavLink | NavGroup)[] = [
       { href: "/agents", label: "智能体", icon: BrainCircuit },
     ],
   },
+  { type: "link", href: "/tasks", label: "我的任务", icon: ListChecks },
   { type: "link", href: "/library", label: "素材库", icon: FolderHeart },
   { type: "link", href: "/billing", label: "会员与算力", icon: Wallet },
 ]

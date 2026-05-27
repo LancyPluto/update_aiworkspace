@@ -4,6 +4,7 @@ import com.aiminilab.aitoolmarket.auth.dto.AuthenticatedSession;
 import com.aiminilab.aitoolmarket.auth.dto.LoginRequest;
 import com.aiminilab.aitoolmarket.auth.dto.LoginResponse;
 import com.aiminilab.aitoolmarket.auth.dto.RegisterRequest;
+import com.aiminilab.aitoolmarket.auth.dto.ResetPasswordRequest;
 import com.aiminilab.aitoolmarket.auth.dto.SmsAuthRequest;
 import com.aiminilab.aitoolmarket.auth.dto.SmsCodeRequest;
 import com.aiminilab.aitoolmarket.auth.dto.SmsCodeResponse;
@@ -49,7 +50,7 @@ public class AuthController {
 
     @PostMapping("/sms-code")
     public ApiResponse<SmsCodeResponse> sendSmsCode(@Valid @RequestBody SmsCodeRequest request) {
-        return ApiResponse.success(authService.sendSmsCode(request.phone(), request.scene()));
+        return ApiResponse.success(authService.sendSmsCode(request.phone(), request.scene(), request.captchaVerifyParam()));
     }
 
     @PostMapping("/sms-register")
@@ -62,6 +63,12 @@ public class AuthController {
     public ResponseEntity<ApiResponse<LoginResponse>> smsLogin(@Valid @RequestBody SmsAuthRequest request) {
         AuthenticatedSession session = authService.loginWithSmsCode(request);
         return authenticated(session);
+    }
+
+    @PostMapping("/reset-password")
+    public ApiResponse<Void> resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
+        authService.resetPasswordWithSmsCode(request);
+        return ApiResponse.success(null);
     }
 
     private ResponseEntity<ApiResponse<LoginResponse>> authenticated(AuthenticatedSession session) {

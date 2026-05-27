@@ -724,11 +724,20 @@ public class AgentRunServiceImpl implements AgentRunService {
             return AgentRunResponse.from(run);
         }
         LocalDateTime now = LocalDateTime.now();
-        if (agentRunMapper.markFailed(runId, request.errorCode(), request.errorMessage(), now) == 0) {
+        int estimatedCredits = run.getEstimatedCredits() == null ? 0 : Math.max(0, run.getEstimatedCredits());
+        int consumedCredits = request.consumedCredits() == null
+                ? 0
+                : Math.max(0, Math.min(request.consumedCredits(), estimatedCredits));
+        if (agentRunMapper.markFailedWithConsumedCredits(runId, request.errorCode(), request.errorMessage(), consumedCredits, now) == 0) {
             return AgentRunResponse.from(findRun(runId));
         }
         failOpenToolCalls(runId, run.getUserId(), request.errorCode(), request.errorMessage(), now);
-        creditService.release(run.getUserId(), CreditSourceType.AGENT_RUN, runId, Math.max(0, run.getEstimatedCredits()));
+        if (consumedCredits > 0) {
+            creditService.settle(run.getUserId(), CreditSourceType.AGENT_RUN, runId, consumedCredits);
+        }
+        creditService.release(run.getUserId(), CreditSourceType.AGENT_RUN, runId, estimatedCredits - consumedCredits);
+        billingService.recordUsage("AGENT_RUN", runId, run.getUserId(), agentModelConfigMapper.findLatest(),
+                request.promptTokens(), request.completionTokens(), null, consumedCredits);
         appendEventInternal(runId, run.getUserId(), "run.failed", request.errorMessage(), toJson(request), now);
         agentRateLimitService.decrementActiveRun(run.getUserId(), runId);
         agentPendingToolContextMapper.expireByRunId(runId);

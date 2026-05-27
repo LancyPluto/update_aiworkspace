@@ -202,7 +202,7 @@ class DeepAgentsRuntimeEngine:
         try:
             result = await self._execute_tool_with_guard(context, tool, budget)
         except BudgetExceeded as exception:
-            await self._fail_run(context.runId, exception.error_code, exception.message)
+            await self._fail_run(context.runId, exception.error_code, exception.message, budget=budget)
             return
 
         if result.get("missing_tool_arguments"):
@@ -445,7 +445,7 @@ class DeepAgentsRuntimeEngine:
                 try:
                     result = await self._execute_tool_with_guard(context, tool, budget, arguments=enriched)
                 except BudgetExceeded as exception:
-                    await self._fail_run(context.runId, exception.error_code, exception.message)
+                    await self._fail_run(context.runId, exception.error_code, exception.message, budget=budget)
                     return
                 if result.get("missing_tool_arguments"):
                     answer = self._format_missing_arguments_message(tool, result["missing_tool_arguments"])
@@ -475,7 +475,7 @@ class DeepAgentsRuntimeEngine:
         try:
             result = await self._execute_tool_with_guard(context, tool, budget)
         except BudgetExceeded as exception:
-            await self._fail_run(context.runId, exception.error_code, exception.message)
+            await self._fail_run(context.runId, exception.error_code, exception.message, budget=budget)
             return
 
         if result.get("missing_tool_arguments"):
@@ -868,6 +868,7 @@ class DeepAgentsRuntimeEngine:
             normalized_answer = "抱歉，本次未能生成有效回复，请换个说法或补充更多信息后再试。"
         consumed_credits = self.budget_guard.default_consumed_credits
         model_name = getattr(self.model, "model_name", settings.model_name)
+        usage = self._model_usage()
         await self.backend.complete_run(
             context.runId,
             RunComplete(
@@ -876,11 +877,41 @@ class DeepAgentsRuntimeEngine:
                 modelProviderCode="agent-service",
                 modelName=model_name,
                 consumedCredits=consumed_credits,
+                promptTokens=usage["promptTokens"],
+                completionTokens=usage["completionTokens"],
             ),
         )
 
-    async def _fail_run(self, run_id: int, error_code: str, error_message: str) -> None:
-        await self.backend.fail_run(run_id, RunFail(errorCode=error_code, errorMessage=error_message))
+    async def _fail_run(
+        self,
+        run_id: int,
+        error_code: str,
+        error_message: str,
+        budget: BudgetState | None = None,
+    ) -> None:
+        usage = self._model_usage()
+        consumed_credits = budget.consumed_credits if budget and budget.consumed_credits > 0 else None
+        if consumed_credits is None and (usage["promptTokens"] > 0 or usage["completionTokens"] > 0):
+            consumed_credits = self.budget_guard.default_consumed_credits
+        await self.backend.fail_run(
+            run_id,
+            RunFail(
+                errorCode=error_code,
+                errorMessage=error_message,
+                consumedCredits=consumed_credits,
+                promptTokens=usage["promptTokens"],
+                completionTokens=usage["completionTokens"],
+            ),
+        )
+
+    def _model_usage(self) -> dict[str, int]:
+        usage = getattr(self.model, "usage", None)
+        if not isinstance(usage, dict):
+            return {"promptTokens": 0, "completionTokens": 0}
+        return {
+            "promptTokens": max(0, int(usage.get("promptTokens") or 0)),
+            "completionTokens": max(0, int(usage.get("completionTokens") or 0)),
+        }
 
     def _chat_model(self):
         return getattr(self.model, "chat_model", self.model)

@@ -96,7 +96,7 @@ async function handleBuy(pkgId: number) {
     const order = await createRechargeOrder(
       {
         packageId: pkgId,
-        paymentChannel: "MOCK",
+        paymentChannel: "WECHAT_NATIVE",
         clientRequestId: `recharge-${pkgId}-${Date.now()}`,
       },
       { token: auth.token },
@@ -247,8 +247,14 @@ onUnmounted(clearPolling)
           <template v-if="!paymentResult">
             <h3 id="pay-modal-title" class="text-center text-base font-semibold">扫码支付</h3>
             <p class="mt-2 text-center text-sm text-muted-foreground">订单 {{ activeOrder?.orderNo }}</p>
-            <div class="mx-auto mt-5 flex h-44 w-44 items-center justify-center rounded-xl border border-dashed border-border bg-muted/30 text-muted-foreground">
-              <QrCode class="h-16 w-16" aria-hidden="true" />
+            <div class="mx-auto mt-5 flex h-44 w-44 items-center justify-center rounded-xl border border-border bg-white p-3 text-muted-foreground">
+              <img
+                v-if="activeOrder?.qrCodeUrl"
+                :src="activeOrder.qrCodeUrl"
+                alt="微信支付二维码"
+                class="h-full w-full"
+              />
+              <QrCode v-else class="h-16 w-16" aria-hidden="true" />
             </div>
             <p class="mt-4 text-center text-sm font-medium">
               支付金额：
@@ -259,6 +265,7 @@ onUnmounted(clearPolling)
               <span>正在确认订单状态</span>
             </div>
             <button
+              v-if="activeOrder?.paymentChannel === 'MOCK'"
               type="button"
               class="mt-5 w-full rounded-full bg-primary py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
               :disabled="ordering"

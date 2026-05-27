@@ -1,7 +1,8 @@
 export { apiRequest, ApiBusinessError } from "./client"
-export { login, logout, register, sendSmsCode, smsLogin, smsRegister } from "./authApi"
+export { login, logout, register, resetPassword, sendSmsCode, smsLogin, smsRegister } from "./authApi"
 export { getCurrentUser } from "./userApi"
 export { fetchToolCategories, fetchTools, searchTools, fetchToolByCode } from "./toolApi"
+export * from "./pptApi"
 export {
   fetchMarketplaceAITools,
   fetchEnabledAITools,
@@ -20,7 +21,6 @@ export {
   createAgentSession,
   deleteAgentSession,
   createAgentWorkspaceMemory,
-  deleteAgentFile,
   deleteAgentWorkspaceMemory,
   fetchAgentFiles,
   fetchAgentMessages,

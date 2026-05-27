@@ -5,6 +5,12 @@ import com.aiminilab.aitoolmarket.auth.service.SmsCodeService;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.config.AppProperties;
+import com.aliyun.dysmsapi20170525.Client;
+import com.aliyun.dysmsapi20170525.models.SendSmsRequest;
+import com.aliyun.dysmsapi20170525.models.SendSmsResponse;
+import com.aliyun.dysmsapi20170525.models.SendSmsResponseBody;
+import com.aliyun.teaopenapi.models.Config;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -36,13 +42,16 @@ public class SmsCodeServiceImpl implements SmsCodeService {
     private final StringRedisTemplate redisTemplate;
     private final AppProperties appProperties;
     private final RestClient restClient;
+    private final ObjectMapper objectMapper;
     private final Map<String, LocalCode> localCodes = new ConcurrentHashMap<>();
     private final Map<String, Instant> localCooldowns = new ConcurrentHashMap<>();
+    private volatile Client aliyunClient;
 
     public SmsCodeServiceImpl(StringRedisTemplate redisTemplate, AppProperties appProperties) {
         this.redisTemplate = redisTemplate;
         this.appProperties = appProperties;
         this.restClient = RestClient.builder().build();
+        this.objectMapper = new ObjectMapper();
     }
 
     @Override
@@ -52,6 +61,12 @@ public class SmsCodeServiceImpl implements SmsCodeService {
         assertNotCoolingDown(cooldownKey);
 
         String code = String.format("%06d", RANDOM.nextInt(1_000_000));
+        if (providerIs("aliyun")) {
+            requestAliyunSmsCode(phone, code);
+            storeLocalCode(codeKey(phone, normalizedScene), cooldownKey, code);
+            return new SmsCodeResponse((int) CODE_TTL.toSeconds(), (int) SEND_COOLDOWN.toSeconds(), null);
+        }
+
         if (useIhuyi()) {
             requestIhuyiSmsCode(phone, code);
             storeLocalCode(codeKey(phone, normalizedScene), cooldownKey, code);
@@ -94,6 +109,65 @@ public class SmsCodeServiceImpl implements SmsCodeService {
     private boolean useBmob() {
         AppProperties.Sms sms = appProperties.getAuth().getSms();
         return "bmob".equalsIgnoreCase(sms.getProvider()) && hasText(sms.getBmobApplicationId()) && hasText(sms.getBmobRestApiKey());
+    }
+
+    private boolean providerIs(String provider) {
+        return provider.equalsIgnoreCase(appProperties.getAuth().getSms().getProvider());
+    }
+
+    private void requestAliyunSmsCode(String phone, String code) {
+        AppProperties.Sms sms = appProperties.getAuth().getSms();
+        assertAliyunConfigured(sms);
+        try {
+            String templateParam = objectMapper.writeValueAsString(Map.of(sms.getAliyunTemplateParamName(), code));
+            SendSmsRequest request = new SendSmsRequest()
+                    .setPhoneNumbers(phone)
+                    .setSignName(sms.getAliyunSignName())
+                    .setTemplateCode(sms.getAliyunTemplateCode())
+                    .setTemplateParam(templateParam);
+            SendSmsResponse response = aliyunClient(sms).sendSms(request);
+            SendSmsResponseBody body = response == null ? null : response.getBody();
+            if (body == null || !"OK".equalsIgnoreCase(body.getCode())) {
+                String message = body == null ? "empty response" : body.getMessage();
+                log.warn("Aliyun SMS request failed: requestId={}, code={}, message={}",
+                        body == null ? null : body.getRequestId(),
+                        body == null ? null : body.getCode(),
+                        message);
+                throw new BusinessException(ErrorCode.SYSTEM_ERROR, "短信验证码发送失败：" + message);
+            }
+            log.info("Aliyun SMS code requested: phone={}, bizId={}", phone, body.getBizId());
+        } catch (BusinessException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            log.warn("Aliyun SMS request failed", exception);
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "短信验证码发送失败");
+        }
+    }
+
+    private void assertAliyunConfigured(AppProperties.Sms sms) {
+        if (!hasText(sms.getAliyunAccessKeyId())
+                || !hasText(sms.getAliyunAccessKeySecret())
+                || !hasText(sms.getAliyunSignName())
+                || !hasText(sms.getAliyunTemplateCode())) {
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "阿里云短信配置不完整");
+        }
+    }
+
+    private Client aliyunClient(AppProperties.Sms sms) throws Exception {
+        Client existing = aliyunClient;
+        if (existing != null) {
+            return existing;
+        }
+        synchronized (this) {
+            if (aliyunClient == null) {
+                Config config = new Config()
+                        .setAccessKeyId(sms.getAliyunAccessKeyId())
+                        .setAccessKeySecret(sms.getAliyunAccessKeySecret())
+                        .setEndpoint(sms.getAliyunEndpoint());
+                aliyunClient = new Client(config);
+            }
+            return aliyunClient;
+        }
     }
 
     @SuppressWarnings("unchecked")
@@ -250,7 +324,10 @@ public class SmsCodeServiceImpl implements SmsCodeService {
 
     private String normalizeScene(String scene) {
         String normalized = scene == null ? "" : scene.trim().toUpperCase(Locale.ROOT);
-        if (!"REGISTER".equals(normalized) && !"LOGIN".equals(normalized)) {
+        if (!"REGISTER".equals(normalized)
+                && !"LOGIN".equals(normalized)
+                && !"LOGIN_OR_REGISTER".equals(normalized)
+                && !"RESET_PASSWORD".equals(normalized)) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "验证码场景不正确");
         }
         return normalized;

@@ -165,6 +165,8 @@ export interface AdminTaskApiPayload {
   status: string
   progress: number
   progressMessage?: string | null
+  errorCode?: string | null
+  errorMessage?: string | null
   params?: unknown
   result?: TaskResult | null
   createdAt: string
@@ -486,6 +488,30 @@ export interface BillingModelCostPoint {
   chargedCredits: number
 }
 
+export interface BillingUserCostPoint {
+  userId: number
+  totalTokens: number
+  costAmount: number
+  chargedCredits: number
+  usageCount: number
+}
+
+export interface BillingModalityCostPoint {
+  modality: string
+  totalTokens: number
+  costAmount: number
+  chargedCredits: number
+  usageCount: number
+}
+
+export interface BillingDailyCostPoint {
+  usageDate: string
+  totalTokens: number
+  costAmount: number
+  chargedCredits: number
+  usageCount: number
+}
+
 export interface BillingOverview {
   todayPromptTokens: number
   todayCompletionTokens: number
@@ -494,12 +520,18 @@ export interface BillingOverview {
   todayChargedCredits: number
   todayUsageCount: number
   modelCosts: BillingModelCostPoint[]
+  userCosts: BillingUserCostPoint[]
+  modalityCosts: BillingModalityCostPoint[]
+  dailyCosts: BillingDailyCostPoint[]
 }
 
 export interface BillingUsageLog {
   id: number
   sourceType: string
   sourceId: number
+  taskNo?: string | null
+  inputModality?: string | null
+  outputModality?: string | null
   userId: number
   modelConfigId?: number | null
   provider?: string | null

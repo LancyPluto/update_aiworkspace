@@ -13,6 +13,7 @@ import {
 } from "lucide-vue-next"
 import AppShell from "@/components/AppShell.vue"
 import AssetPreviewModal from "@/components/AssetPreviewModal.vue"
+import { confirmDelete } from "@/composables/useConfirmDelete"
 import { deleteTask, fetchTasks } from "@/api/taskApi"
 import { fetchTools } from "@/api/toolApi"
 import type { TaskDetail, ToolSummary } from "@/api/types"
@@ -228,8 +229,12 @@ function textPreview(item: MaterialItem) {
 
 async function removeMaterial(item: MaterialItem) {
   if (deletingTaskId.value) return
-  const name = item.task.toolName || item.task.taskNo
-  if (!confirm(`确定删除「${name}」这个素材吗？删除后素材库和任务历史中将不再显示。`)) return
+  const name = taskPromptPreview(item.task) || item.task.toolName || item.task.taskNo
+  const confirmed = await confirmDelete({
+    title: "删除素材",
+    description: `确定删除「${name}」这个素材吗？删除后素材库和任务历史中将不再显示。`,
+  })
+  if (!confirmed) return
   deletingTaskId.value = item.task.taskId
   error.value = ""
   try {
@@ -393,7 +398,7 @@ onMounted(loadMaterials)
               type="button"
               class="absolute right-3 top-3 inline-flex h-8 w-8 items-center justify-center rounded-full bg-black/55 text-white/55 opacity-0 shadow-sm backdrop-blur transition hover:bg-red-500/15 hover:text-red-300 group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-70"
               :disabled="deletingTaskId === item.task.taskId"
-              :title="`删除素材：${item.task.taskNo}`"
+              :title="`删除素材：${taskPromptPreview(item.task)}`"
               @click.stop="removeMaterial(item)"
             >
               <LoaderCircle v-if="deletingTaskId === item.task.taskId" class="h-4 w-4 animate-spin" />
@@ -405,7 +410,9 @@ onMounted(loadMaterials)
             <div class="flex items-start justify-between gap-3">
               <div class="min-w-0">
                 <h3 class="truncate text-base font-semibold text-white">{{ item.task.toolName }}</h3>
-                <p class="mt-1 truncate text-xs text-white/45">{{ item.task.taskNo }}</p>
+                <p class="mt-1 truncate text-xs text-white/45" :title="taskPromptText(item.task) || item.task.taskNo">
+                  {{ taskPromptPreview(item.task) }}
+                </p>
               </div>
               <div class="flex shrink-0 items-center gap-1 text-xs text-white/35">
                 <Clock class="h-3 w-3" />
