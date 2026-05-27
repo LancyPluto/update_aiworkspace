@@ -1,3 +1,4 @@
+import logging
 import re
 from enum import StrEnum
 
@@ -5,6 +6,9 @@ from pydantic import BaseModel, Field
 
 from app.core.schemas import RunContext
 from app.tools.registry import ToolRegistry, requested_output_modality, tool_supports_modality
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class Intent(StrEnum):
@@ -70,8 +74,24 @@ class IntentRouter:
 
         registry = ToolRegistry(context)
         candidates = registry.rank_by_intent(message)
+        requested_modality = requested_output_modality(message)
+        if candidates or requested_modality:
+            LOGGER.info(
+                "agent intent route candidates runId=%s requestedModality=%s message=%s candidates=%s",
+                context.runId,
+                requested_modality or "-",
+                _clip(message),
+                [
+                    {
+                        "toolCode": candidate.tool.toolCode,
+                        "toolName": candidate.tool.toolName,
+                        "score": candidate.score,
+                        "matchedTerms": list(candidate.matched_terms),
+                    }
+                    for candidate in candidates[:8]
+                ],
+            )
         if candidates:
-            requested_modality = requested_output_modality(message)
             if requested_modality and self._looks_like_tool_request(message):
                 modality_candidates = [
                     candidate for candidate in candidates
@@ -299,3 +319,9 @@ class IntentRouter:
         if "全部按照" in message and ("你给" in message or "你的" in message):
             return True
         return False
+
+
+def _clip(value: str, limit: int = 180) -> str:
+    if len(value) <= limit:
+        return value
+    return value[:limit] + "...<truncated>"

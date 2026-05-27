@@ -103,7 +103,10 @@ def _score_modality_intent(text: str, tool: ToolDescriptor) -> tuple[int, set[st
 
 def requested_output_modality(message: str) -> str | None:
     text = message.lower()
-    if _has_any(text, ("图片", "图像", "照片", "写真", "海报", "插画", "画面", "生成一张", "来一张")):
+    if _has_any(text, (
+        "图片", "图像", "照片", "写真", "写真照", "海报", "插画", "画面", "生成一张", "来一张",
+        "拍摄", "摄影", "远景", "近景", "全身", "半身", "cos", "cosplay", "角色照", "剧照",
+    )):
         return "image"
     if _has_any(text, ("视频", "短视频", "成片", "生成一段", "生成一个视频")):
         return "video"
@@ -115,7 +118,10 @@ def requested_output_modality(message: str) -> str | None:
 def tool_supports_modality(tool: ToolDescriptor, modality: str, combined_text: str | None = None) -> bool:
     combined = combined_text if combined_text is not None else " ".join(_phrases(tool)).lower()
     if modality == "image":
-        return _has_any(combined, ("image_generation", "image", "photo", "picture", "图片", "图像", "生图", "文生图", "写真", "海报", "插画"))
+        return _has_any(combined, (
+            "image_generation", "image", "photo", "picture", "图片", "图像", "生图", "文生图",
+            "写真", "海报", "插画", "照片", "摄影", "拍摄",
+        ))
     if modality == "video":
         return _has_any(combined, ("video_generation", "video", "视频", "短视频", "成片", "生视频", "文生视频"))
     if modality == "audio":

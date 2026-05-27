@@ -275,6 +275,42 @@ async def test_image_generation_request_executes_when_tool_is_auto_callable():
 
 
 @pytest.mark.asyncio
+async def test_visual_cosplay_shoot_request_prefers_image_tool_over_text_tool():
+    backend = FakeBackend()
+    engine = DeepAgentsRuntimeEngine(backend, FakeModel(response=""))
+    message = "生成科比布莱恩特穿着海贼王的大将披风cos黄猿的日常远景拍摄"
+    context = RunContext(
+        runId=15,
+        sessionId=1,
+        userId=1,
+        message=message,
+        creditBudget=20,
+        availableTools=[
+            ToolDescriptor(
+                toolCode="deepseek_text_generation",
+                toolName="文本生成-DeepSeek-V4-flash",
+                description="文本生成，适合文案、标题、脚本、通用问答",
+                estimatedCreditCost=1,
+                autoCallable=True,
+            ),
+            ToolDescriptor(
+                toolCode="kling_image_v21",
+                toolName="可灵生图 V2.1",
+                description="高质量图片生成，适合照片、写真、海报、文生图、摄影拍摄",
+                estimatedCreditCost=3,
+                autoCallable=True,
+            ),
+        ],
+    )
+
+    await engine.run(context)
+
+    assert ("task", "kling_image_v21", {"userRequest": message}, "agent-run-15-tool-call-99") in backend.tool_calls
+    assert not any(call[0] == "task" and call[1] == "deepseek_text_generation" for call in backend.tool_calls)
+    assert backend.completed == [(15, "# Generated copy", "tool_use")]
+
+
+@pytest.mark.asyncio
 async def test_graph_fails_when_model_call_limit_is_exceeded():
     backend = FakeBackend()
     engine = DeepAgentsRuntimeEngine(

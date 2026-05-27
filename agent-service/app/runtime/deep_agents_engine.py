@@ -1,5 +1,6 @@
 import importlib.util
 import inspect
+import logging
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -40,6 +41,8 @@ from app.tools.memory_tool import (
 from app.tools.missing_argument_hints import format_missing_tool_arguments_message
 from app.tools.registry import ToolRegistry, requested_output_modality, tool_supports_modality
 from langchain_core.callbacks import AsyncCallbackHandler
+
+LOGGER = logging.getLogger(__name__)
 
 DEEP_AGENTS_INTENT = "deep_agents"
 DEFAULT_AGENT_SYSTEM_PROMPT = (
@@ -111,6 +114,15 @@ class DeepAgentsRuntimeEngine:
 
         # 1. Classify intent
         intent = self.intent_router.classify(context)
+        LOGGER.info(
+            "agent route selected runId=%s intent=%s confidence=%.2f selectedTool=%s candidates=%s reason=%s",
+            context.runId,
+            intent.intent.value,
+            intent.confidence,
+            intent.selectedToolCode or "-",
+            intent.candidateToolCodes,
+            intent.reason,
+        )
         await self._emit_intent_event(context, intent)
 
         # 2. Route by intent
@@ -273,6 +285,14 @@ class DeepAgentsRuntimeEngine:
             await self._complete_run(context, answer, intent=Intent.NEEDS_CLARIFICATION.value)
             return
 
+        LOGGER.info(
+            "agent tool path runId=%s selectedTool=%s toolName=%s autoCallable=%s candidateTools=%s",
+            context.runId,
+            tool.toolCode,
+            tool.toolName,
+            tool.autoCallable,
+            intent.candidateToolCodes,
+        )
         await self.backend.append_event(
             context.runId,
             RunEventCreate(eventType=TOOL_SELECTED, eventText=tool.toolCode, eventJson={"toolCode": tool.toolCode}),
@@ -281,6 +301,12 @@ class DeepAgentsRuntimeEngine:
         budget = BudgetState(credit_budget=context.creditBudget)
         missing_args = self.tool_bridge.missing_required_arguments(context, tool)
         extracted_args = None
+        LOGGER.info(
+            "agent tool arguments check runId=%s tool=%s missing=%s",
+            context.runId,
+            tool.toolCode,
+            missing_args,
+        )
 
         if missing_args:
             base_args = self.tool_bridge.build_arguments(context, tool, apply_placeholder_defaults=False)
