@@ -338,6 +338,8 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                     config.balanceUrl(),
                     config.docsUrl(),
                     config.timeoutSeconds(),
+                    null,
+                    null,
                     config.inputTokenPricePer1k(),
                     config.outputTokenPricePer1k(),
                     config.inputTokenPricePer1m(),

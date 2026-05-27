@@ -14,8 +14,8 @@ from config import settings
 
 
 LOGGER = logging.getLogger(__name__)
-SUCCESS_STATUSES = {"succeeded", "succeed", "success", "completed", "done"}
-FAILED_STATUSES = {"failed", "fail", "error", "cancelled", "canceled"}
+SUCCESS_STATUSES = {"succeeded", "succeed", "success", "completed", "done", "finish", "finished"}
+FAILED_STATUSES = {"failed", "fail", "failure", "error", "cancelled", "canceled", "timeout", "timed_out"}
 
 
 class KlingVideoError(RuntimeError):
@@ -187,15 +187,28 @@ class KlingVideoClient:
                 return last_payload
             status = self._extract_status(last_payload).lower()
             if status in SUCCESS_STATUSES or self._has_success_indicator(last_payload):
-                return last_payload
+                raise KlingVideoError(
+                    self._describe_response_problem(
+                        "kling video response reached terminal success but no video url",
+                        last_payload,
+                    )
+                )
             if status in FAILED_STATUSES:
                 reason = str(last_payload.get("message") or last_payload.get("reason") or "kling video generation failed")
                 if reason.strip().lower() in SUCCESS_STATUSES or self._has_success_indicator(last_payload):
-                    return last_payload
-                raise KlingVideoError(reason)
+                    raise KlingVideoError(
+                        self._describe_response_problem(
+                            "kling video response reached terminal success but no video url",
+                            last_payload,
+                        )
+                    )
+                raise KlingVideoError(self._describe_response_problem("kling video generation failed", last_payload))
             time.sleep(self.poll_interval_seconds)
         raise KlingVideoTimeoutError(
-            f"kling video generation timed out, taskId={task_id}, lastStatus={self._extract_status(last_payload)}"
+            self._describe_response_problem(
+                f"kling video generation timed out, taskId={task_id}, lastStatus={self._extract_status(last_payload)}",
+                last_payload,
+            )
         )
 
     def wait_for_images(self, task_id: str) -> dict[str, Any]:
@@ -208,15 +221,28 @@ class KlingVideoClient:
                 return last_payload
             status = self._extract_status(last_payload).lower()
             if status in SUCCESS_STATUSES or self._has_success_indicator(last_payload):
-                return last_payload
+                raise KlingVideoError(
+                    self._describe_response_problem(
+                        "kling image response reached terminal success but no image url",
+                        last_payload,
+                    )
+                )
             if status in FAILED_STATUSES:
                 reason = str(last_payload.get("message") or last_payload.get("reason") or "kling image generation failed")
                 if reason.strip().lower() in SUCCESS_STATUSES or self._has_success_indicator(last_payload):
-                    return last_payload
-                raise KlingVideoError(reason)
+                    raise KlingVideoError(
+                        self._describe_response_problem(
+                            "kling image response reached terminal success but no image url",
+                            last_payload,
+                        )
+                    )
+                raise KlingVideoError(self._describe_response_problem("kling image generation failed", last_payload))
             time.sleep(self.poll_interval_seconds)
         raise KlingVideoTimeoutError(
-            f"kling image generation timed out, taskId={task_id}, lastStatus={self._extract_status(last_payload)}"
+            self._describe_response_problem(
+                f"kling image generation timed out, taskId={task_id}, lastStatus={self._extract_status(last_payload)}",
+                last_payload,
+            )
         )
 
     def _task_result_path(self, task_id: str, template: str) -> str:
@@ -468,6 +494,13 @@ class KlingVideoClient:
         data = payload.get("data")
         if isinstance(data, dict):
             return cls._extract_status(data)
+        for key in ("message", "reason", "status_msg", "statusMsg", "task_status_msg", "taskStatusMsg"):
+            value = payload.get(key)
+            if not isinstance(value, str) or not value.strip():
+                continue
+            normalized = value.strip().lower()
+            if normalized in SUCCESS_STATUSES or normalized in FAILED_STATUSES:
+                return value.strip()
         return "processing"
 
     @classmethod
@@ -486,7 +519,7 @@ class KlingVideoClient:
         url = cls._extract_video_url_or_empty(payload)
         if url:
             return url
-        raise KlingVideoError("kling response missing video url")
+        raise KlingVideoError(cls._describe_response_problem("kling response missing video url", payload))
 
     @classmethod
     def _extract_video_url_or_empty(cls, payload: dict[str, Any]) -> str:
@@ -519,8 +552,9 @@ class KlingVideoClient:
         urls = cls._extract_image_urls_or_empty(payload)
         if urls:
             return urls
-        LOGGER.warning("kling image response missing image url payload=%s", _json_for_log(payload))
-        raise KlingVideoError("kling image response missing image url")
+        message = cls._describe_response_problem("kling image response missing image url", payload)
+        LOGGER.warning(message)
+        raise KlingVideoError(message)
 
     @classmethod
     def _extract_image_urls_or_empty(cls, payload: dict[str, Any]) -> list[str]:
@@ -548,6 +582,72 @@ class KlingVideoClient:
         if cls._looks_like_image_url_field(parent_key, candidate):
             return [candidate]
         return urls
+
+    @classmethod
+    def _describe_response_problem(cls, prefix: str, payload: dict[str, Any]) -> str:
+        diagnostics = cls._response_diagnostics(payload)
+        diagnostic_text = "; ".join(diagnostics) if diagnostics else "none"
+        payload_text = _json_for_log(payload)
+        if len(payload_text) > 1600:
+            payload_text = payload_text[:1600] + "...<truncated>"
+        return f"{prefix}; diagnostics={diagnostic_text}; payload={payload_text}"
+
+    @classmethod
+    def _response_diagnostics(cls, value: Any) -> list[str]:
+        fields: list[str] = []
+        cls._collect_response_diagnostics(value, "", fields)
+        return fields
+
+    @classmethod
+    def _collect_response_diagnostics(cls, value: Any, path: str, fields: list[str]) -> None:
+        if len(fields) >= 16:
+            return
+        if isinstance(value, dict):
+            for key, nested in value.items():
+                nested_path = f"{path}.{key}" if path else str(key)
+                normalized = str(key).replace("-", "_").lower()
+                compact = normalized.replace("_", "")
+                if normalized in {
+                    "code",
+                    "error_code",
+                    "message",
+                    "msg",
+                    "reason",
+                    "status",
+                    "state",
+                    "status_msg",
+                    "task_status",
+                    "task_status_msg",
+                    "fail_reason",
+                } or compact in {
+                    "errorcode",
+                    "statusmsg",
+                    "taskstatus",
+                    "taskstatusmsg",
+                    "failreason",
+                }:
+                    fields.append(f"{nested_path}={cls._diagnostic_value(nested)}")
+                    if len(fields) >= 16:
+                        return
+                cls._collect_response_diagnostics(nested, nested_path, fields)
+            return
+        if isinstance(value, list):
+            for index, nested in enumerate(value[:8]):
+                cls._collect_response_diagnostics(nested, f"{path}[{index}]", fields)
+                if len(fields) >= 16:
+                    return
+
+    @staticmethod
+    def _diagnostic_value(value: Any) -> str:
+        sanitized = _sanitize_for_log(value)
+        if isinstance(sanitized, str):
+            text = sanitized
+        else:
+            try:
+                text = json.dumps(sanitized, ensure_ascii=False, separators=(",", ":"))
+            except Exception:
+                text = str(sanitized)
+        return text[:240] + ("...<truncated>" if len(text) > 240 else "")
 
     @classmethod
     def _walk(cls, value: Any) -> list[Any]:
@@ -584,7 +684,17 @@ class KlingVideoClient:
             "generatedvideourl",
             "result_url",
             "resulturl",
+            "download_url",
+            "downloadurl",
+            "resource_url",
+            "resourceurl",
+            "signed_url",
+            "signedurl",
         }
+        return (
+            ("video" in lowered_key or "url" in lowered_key)
+            and any(token in lowered_key for token in ("url", "download", "resource", "signed"))
+        )
 
     @staticmethod
     def _looks_like_image_url(value: str) -> bool:
@@ -610,7 +720,32 @@ class KlingVideoClient:
             "generatedimageurl",
             "result_url",
             "resulturl",
+            "urls",
+            "image_urls",
+            "imageurls",
+            "origin_image_urls",
+            "originimageurls",
+            "generated_image_urls",
+            "generatedimageurls",
+            "result_urls",
+            "resulturls",
+            "download_url",
+            "downloadurl",
+            "download_urls",
+            "downloadurls",
+            "resource_url",
+            "resourceurl",
+            "resource_urls",
+            "resourceurls",
+            "signed_url",
+            "signedurl",
+            "signed_urls",
+            "signedurls",
         }
+        return (
+            ("image" in lowered_key or "url" in lowered_key)
+            and any(token in lowered_key for token in ("url", "download", "resource", "signed"))
+        )
 
     @staticmethod
     def _duration_seconds(duration: str) -> int | None:

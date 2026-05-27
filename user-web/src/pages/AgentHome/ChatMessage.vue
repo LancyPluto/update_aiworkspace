@@ -128,7 +128,12 @@ watch(
         </video>
       </section>
     </div>
-    <ResultRenderer v-if="resultBlocks.length" class="agent-result-renderer" :blocks="resultBlocks" />
+    <ResultRenderer
+      v-if="resultBlocks.length"
+      class="agent-result-renderer"
+      :blocks="resultBlocks"
+      mode="compact"
+    />
     <span v-if="streaming && !renderedHtml && !resultBlocks.length" class="stream-placeholder" />
     <span v-if="streaming" class="stream-cursor" />
   </div>
@@ -268,11 +273,16 @@ watch(
   margin-top: 12px;
 }
 
+.agent-result-renderer {
+  margin-top: 2px;
+}
+
 .video-card {
   overflow: hidden;
-  border: 1px solid #dbe4ef;
-  border-radius: 8px;
-  background: #ffffff;
+  border: 0;
+  border-radius: 20px;
+  background: transparent;
+  box-shadow: none;
 }
 
 .video-card__bar {
@@ -280,10 +290,10 @@ watch(
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 10px 12px;
-  border-bottom: 1px solid #e5edf5;
-  color: #334155;
-  font-size: 13px;
+  padding: 0 2px 8px;
+  border-bottom: 0;
+  color: rgb(255 255 255 / 0.72);
+  font-size: 12px;
   font-weight: 600;
 }
 
@@ -291,13 +301,13 @@ watch(
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  color: #0f172a;
+  color: rgb(255 255 255 / 0.72);
   text-decoration: none;
   white-space: nowrap;
 }
 
 .video-download:hover {
-  color: #2563eb;
+  color: rgb(210 170 255);
 }
 
 .download-icon {
@@ -309,6 +319,8 @@ watch(
   display: block;
   width: 100%;
   aspect-ratio: 16 / 9;
+  border: 1px solid rgb(255 255 255 / 0.10);
+  border-radius: 20px;
   background: #000000;
 }
 

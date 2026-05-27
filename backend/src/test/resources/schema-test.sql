@@ -460,6 +460,9 @@ CREATE TABLE agent_tool_descriptor_extension (
   not_applicable_scenarios_json CLOB,
   result_schema_json CLOB,
   output_type VARCHAR(32) DEFAULT 'text',
+  health_status VARCHAR(32) NOT NULL DEFAULT 'UNKNOWN',
+  health_message VARCHAR(512),
+  health_checked_at DATETIME,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

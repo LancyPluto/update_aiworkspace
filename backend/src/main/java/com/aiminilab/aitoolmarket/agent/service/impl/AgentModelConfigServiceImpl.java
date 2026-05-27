@@ -14,6 +14,9 @@ import com.aiminilab.aitoolmarket.agent.service.ModelCapabilityService;
 import com.aiminilab.aitoolmarket.agent.support.ModelCapabilitiesCodec;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -36,17 +39,20 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
     private final ModelProviderRegistry providerRegistry;
     private final ModelCapabilityService modelCapabilityService;
     private final ModelCapabilitiesCodec capabilitiesCodec;
+    private final ObjectMapper objectMapper;
 
     public AgentModelConfigServiceImpl(AgentModelConfigMapper agentModelConfigMapper,
                                        AgentServiceClient agentServiceClient,
                                        ModelProviderRegistry providerRegistry,
                                        ModelCapabilityService modelCapabilityService,
-                                       ModelCapabilitiesCodec capabilitiesCodec) {
+                                       ModelCapabilitiesCodec capabilitiesCodec,
+                                       ObjectMapper objectMapper) {
         this.agentModelConfigMapper = agentModelConfigMapper;
         this.agentServiceClient = agentServiceClient;
         this.providerRegistry = providerRegistry;
         this.modelCapabilityService = modelCapabilityService;
         this.capabilitiesCodec = capabilitiesCodec;
+        this.objectMapper = objectMapper;
     }
 
     @Override
@@ -158,13 +164,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         } else {
             config.setApiKey("");
         }
-        if (request.extraAuthJson() != null && !request.extraAuthJson().isBlank()) {
-            config.setExtraAuthJson(request.extraAuthJson().trim());
-        } else if (existing != null) {
-            config.setExtraAuthJson(existing.getExtraAuthJson());
-        } else {
-            config.setExtraAuthJson(null);
-        }
+        config.setExtraAuthJson(mergeExtraAuthJson(request, existing));
         config.setMinimaxGroupId(blankToNull(request.minimaxGroupId()));
         config.setConsoleUrl(blankToNull(request.consoleUrl()));
         config.setBalanceUrl(blankToNull(request.balanceUrl()));
@@ -315,7 +315,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         }
         if (request.extraAuthJson() != null && !request.extraAuthJson().isBlank()) {
             try {
-                new com.fasterxml.jackson.databind.ObjectMapper().readTree(request.extraAuthJson());
+                objectMapper.readTree(request.extraAuthJson());
             } catch (com.fasterxml.jackson.core.JsonProcessingException exception) {
                 throw new BusinessException(ErrorCode.PARAM_ERROR, "extraAuthJson must be valid JSON");
             }
@@ -364,6 +364,8 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                 request.balanceUrl(),
                 request.docsUrl(),
                 request.timeoutSeconds(),
+                request.connectTimeoutSeconds(),
+                request.readTimeoutSeconds(),
                 request.inputTokenPricePer1k(),
                 request.outputTokenPricePer1k(),
                 request.inputTokenPricePer1m(),
@@ -396,6 +398,34 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
             return BILLING_UNIT_IMAGE_TOKEN;
         }
         return BILLING_UNIT_TOKEN_PER_M;
+    }
+
+    private String mergeExtraAuthJson(AgentModelConfigRequest request, AgentModelConfig existing) {
+        ObjectNode node = objectMapper.createObjectNode();
+        if (existing != null && existing.getExtraAuthJson() != null && !existing.getExtraAuthJson().isBlank()) {
+            mergeObject(node, existing.getExtraAuthJson());
+        }
+        if (request.extraAuthJson() != null && !request.extraAuthJson().isBlank()) {
+            mergeObject(node, request.extraAuthJson());
+        }
+        if (request.connectTimeoutSeconds() != null) {
+            node.put("connectTimeoutSeconds", request.connectTimeoutSeconds());
+        }
+        if (request.readTimeoutSeconds() != null) {
+            node.put("readTimeoutSeconds", request.readTimeoutSeconds());
+        }
+        return node.isEmpty() ? null : node.toString();
+    }
+
+    private void mergeObject(ObjectNode target, String json) {
+        try {
+            JsonNode parsed = objectMapper.readTree(json);
+            if (parsed != null && parsed.isObject()) {
+                target.setAll((ObjectNode) parsed);
+            }
+        } catch (com.fasterxml.jackson.core.JsonProcessingException exception) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "extraAuthJson must be valid JSON");
+        }
     }
 
     private AgentModelConfig findActiveOrThrow(Long id) {

@@ -3,6 +3,8 @@ package com.aiminilab.aitoolmarket.agent.dto;
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
 
 import com.aiminilab.aitoolmarket.agent.support.ModelCapabilitiesCodec;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -22,6 +24,8 @@ public record AgentModelConfigResponse(
         String balanceUrl,
         String docsUrl,
         Integer timeoutSeconds,
+        Integer connectTimeoutSeconds,
+        Integer readTimeoutSeconds,
         BigDecimal inputTokenPricePer1k,
         BigDecimal outputTokenPricePer1k,
         BigDecimal inputTokenPricePer1m,
@@ -54,6 +58,8 @@ public record AgentModelConfigResponse(
                 config.getBalanceUrl(),
                 config.getDocsUrl(),
                 config.getTimeoutSeconds(),
+                extraAuthInt(config.getExtraAuthJson(), "connectTimeoutSeconds"),
+                extraAuthInt(config.getExtraAuthJson(), "readTimeoutSeconds"),
                 config.getInputTokenPricePer1k(),
                 config.getOutputTokenPricePer1k(),
                 config.getInputTokenPricePer1m(),
@@ -84,5 +90,27 @@ public record AgentModelConfigResponse(
             return "";
         }
         return "********";
+    }
+
+    private static Integer extraAuthInt(String value, String key) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            JsonNode node = new ObjectMapper().readTree(value);
+            JsonNode field = node.get(key);
+            if (field == null || field.isNull()) {
+                return null;
+            }
+            if (field.isInt() || field.isLong()) {
+                return field.asInt();
+            }
+            if (field.isTextual() && !field.asText().isBlank()) {
+                return Integer.parseInt(field.asText().trim());
+            }
+        } catch (Exception ignored) {
+            return null;
+        }
+        return null;
     }
 }

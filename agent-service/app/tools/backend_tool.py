@@ -16,7 +16,7 @@ class ToolExecutionError(RuntimeError):
 
 class BackendToolBridge:
     TERMINAL_TASK_STATUSES = {"SUCCESS", "FAILED", "CANCELLED"}
-    TERMINAL_RUN_STATUSES = {"SUCCESS", "FAILED", "CANCELLED", "TIMEOUT"}
+    ABORTING_RUN_STATUSES = {"FAILED", "CANCELLED", "TIMEOUT"}
 
     def __init__(
         self,
@@ -186,7 +186,7 @@ class BackendToolBridge:
         stream_state: dict[str, int] = {"emitted_len": 0}
         while time.monotonic() <= deadline:
             run_context = await self.backend.get_run_context(context.runId)
-            if run_context.status in self.TERMINAL_RUN_STATUSES:
+            if run_context.status in self.ABORTING_RUN_STATUSES:
                 raise ToolExecutionError(f"Agent run ended with status {run_context.status}")
             detail = await self.backend.get_task_detail(context.userId, task_id)
             if detail.status != last_status:

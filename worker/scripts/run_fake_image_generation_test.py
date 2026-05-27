@@ -7,7 +7,7 @@ from requests.exceptions import SSLError
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from handlers.image_generation_handler import ImageGenerationHandler
+from handlers.image_generation_handler import ImageGenerationHandler, _model_call_error_code
 from handlers.generated_image_persister import GeneratedImagePersister
 from client.openai_images_client import OpenAIImagesClient
 from task_queue.redis_consumer import TaskHandlerRouter
@@ -164,7 +164,12 @@ def test_failure_is_marked_processing_before_failed() -> None:
 
     assert result["status"] == "FAILED", result
     assert backend.processing, "task should be moved to PROCESSING before failed callback"
-    assert backend.failed_payload["errorCode"] == "MODEL_CALL_FAILED", backend.failed_payload
+    assert backend.failed_payload["errorCode"] == "MODEL_PROVIDER_UNAVAILABLE", backend.failed_payload
+
+
+def test_model_auth_failure_error_code_is_specific() -> None:
+    assert _model_call_error_code('siliconflow request failed: status=401, body="Invalid token"') == "MODEL_AUTH_FAILED"
+    assert _model_call_error_code("API Key is required for model provider") == "MODEL_AUTH_FAILED"
 
 
 def test_data_url_image_is_persisted() -> None:
@@ -362,6 +367,7 @@ def test_openai_images_client_can_retry_ssl_eof_when_enabled() -> None:
 if __name__ == "__main__":
     test_terminal_task_is_skipped_before_handler()
     test_failure_is_marked_processing_before_failed()
+    test_model_auth_failure_error_code_is_specific()
     test_data_url_image_is_persisted()
     test_openai_images_gateway_handler_reports_image_tokens()
     test_openai_images_client_parses_url_and_usage()

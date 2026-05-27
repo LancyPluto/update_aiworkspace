@@ -274,6 +274,8 @@ export interface AgentModelConfig {
   balanceUrl?: string | null
   docsUrl?: string | null
   timeoutSeconds: number
+  connectTimeoutSeconds?: number | null
+  readTimeoutSeconds?: number | null
   inputTokenPricePer1k?: number | null
   outputTokenPricePer1k?: number | null
   inputTokenPricePer1m?: number | null
@@ -346,6 +348,8 @@ export interface AgentModelConfigPayload {
   balanceUrl?: string
   docsUrl?: string
   timeoutSeconds?: number
+  connectTimeoutSeconds?: number
+  readTimeoutSeconds?: number
   inputTokenPricePer1k?: number
   outputTokenPricePer1k?: number
   inputTokenPricePer1m?: number

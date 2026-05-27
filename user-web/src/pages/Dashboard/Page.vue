@@ -18,6 +18,7 @@ import {
   Send,
   Sparkles,
   Store,
+  Trash2,
   Video,
   WandSparkles,
   X,
@@ -28,7 +29,7 @@ import CapabilityControls from "@/pages/Chat/CapabilityControls.vue"
 import { fetchCreditAccount } from "@/api/creditApi"
 import { ApiBusinessError, getApiOrigin } from "@/api/client"
 import { fetchAIToolById } from "@/api/aiToolApi"
-import { createTask, fetchTaskById, fetchTasks, fetchTaskStatus, regenerateTask } from "@/api/taskApi"
+import { createTask, deleteTask, fetchTaskById, fetchTasks, fetchTaskStatus, regenerateTask } from "@/api/taskApi"
 import { fetchTools } from "@/api/toolApi"
 import type { AITool } from "@/api/aiToolTypes"
 import type { CreditAccount, TaskDetail, TaskStatus, ToolSummary } from "@/api/types"
@@ -66,6 +67,7 @@ const historySentinelRef = ref<HTMLElement | null>(null)
 let historyObserver: IntersectionObserver | null = null
 const taskPollTimers = new Map<number, number>()
 const retryingTaskIds = ref<Set<number>>(new Set())
+const deletingTaskIds = ref<Set<number>>(new Set())
 
 const modalityLabels: Record<string, string> = {
   IMAGE: "图像",
@@ -523,6 +525,10 @@ function canRetryTask(status?: TaskStatus): boolean {
   return status === "FAILED" || status === "TIMEOUT"
 }
 
+function canDeleteTask(status?: TaskStatus): boolean {
+  return status === "FAILED" || status === "TIMEOUT" || status === "CANCELLED"
+}
+
 function taskStatusLabel(status?: TaskStatus): string {
   const labels: Record<TaskStatus, string> = {
     CREATED: "已创建",
@@ -578,6 +584,23 @@ async function retryTask(task: TaskDetail) {
     const next = new Set(retryingTaskIds.value)
     next.delete(task.taskId)
     retryingTaskIds.value = next
+  }
+}
+
+async function removeTask(task: TaskDetail) {
+  if (!canDeleteTask(task.status) || deletingTaskIds.value.has(task.taskId)) return
+  deletingTaskIds.value = new Set([...deletingTaskIds.value, task.taskId])
+  submitError.value = ""
+  try {
+    stopTaskPolling(task.taskId)
+    await deleteTask(task.taskId, { token: auth.token })
+    tasks.value = tasks.value.filter((item) => item.taskId !== task.taskId)
+  } catch (e) {
+    submitError.value = (e as Error).message || "删除任务失败"
+  } finally {
+    const next = new Set(deletingTaskIds.value)
+    next.delete(task.taskId)
+    deletingTaskIds.value = next
   }
 }
 
@@ -994,23 +1017,36 @@ onUnmounted(() => {
                         </div>
                       </div>
                       <div class="flex items-center justify-between gap-3">
-                        <button
-                          v-if="canRetryTask(item.task.status)"
-                          type="button"
-                          class="rounded-full bg-red-500/15 px-3 py-1.5 text-xs font-medium text-red-100 transition hover:bg-red-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
-                          :disabled="retryingTaskIds.has(item.task.taskId)"
-                          @click="retryTask(item.task)"
-                        >
-                          {{ retryingTaskIds.has(item.task.taskId) ? "重试中" : "重试" }}
-                        </button>
-                        <button
-                          v-else
-                          type="button"
-                          class="rounded-full bg-primary/15 px-3 py-1.5 text-xs font-medium text-primary transition hover:bg-primary hover:text-white"
-                          @click="replayTask(item.task)"
-                        >
-                          再次生成
-                        </button>
+                        <div class="flex flex-wrap items-center gap-2">
+                          <button
+                            v-if="canRetryTask(item.task.status)"
+                            type="button"
+                            class="rounded-full bg-red-500/15 px-3 py-1.5 text-xs font-medium text-red-100 transition hover:bg-red-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+                            :disabled="retryingTaskIds.has(item.task.taskId) || deletingTaskIds.has(item.task.taskId)"
+                            @click="retryTask(item.task)"
+                          >
+                            {{ retryingTaskIds.has(item.task.taskId) ? "重试中" : "重试" }}
+                          </button>
+                          <button
+                            v-else
+                            type="button"
+                            class="rounded-full bg-primary/15 px-3 py-1.5 text-xs font-medium text-primary transition hover:bg-primary hover:text-white"
+                            @click="replayTask(item.task)"
+                          >
+                            再次生成
+                          </button>
+                          <button
+                            v-if="canDeleteTask(item.task.status)"
+                            type="button"
+                            class="inline-flex items-center gap-1 rounded-full bg-white/8 px-3 py-1.5 text-xs font-medium text-white/55 transition hover:bg-white/14 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+                            :disabled="deletingTaskIds.has(item.task.taskId) || retryingTaskIds.has(item.task.taskId)"
+                            @click="removeTask(item.task)"
+                          >
+                            <Loader2 v-if="deletingTaskIds.has(item.task.taskId)" class="h-3.5 w-3.5 animate-spin" />
+                            <Trash2 v-else class="h-3.5 w-3.5" />
+                            {{ deletingTaskIds.has(item.task.taskId) ? "删除中" : "删除" }}
+                          </button>
+                        </div>
                         <RouterLink
                           :to="item.task.status === 'SUCCESS' ? userRoutes.taskResult(String(item.task.taskId)) : userRoutes.taskStatus(String(item.task.taskId))"
                           class="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-white/45 transition hover:text-white"

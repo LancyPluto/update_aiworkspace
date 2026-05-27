@@ -23,6 +23,18 @@ public interface AgentToolDescriptorExtensionMapper extends BaseMapper<AgentTool
     }
 
     @Select("""
+            <script>
+            SELECT *
+            FROM agent_tool_descriptor_extension
+            WHERE tool_code IN
+            <foreach collection="toolCodes" item="toolCode" open="(" separator="," close=")">
+                #{toolCode}
+            </foreach>
+            </script>
+            """)
+    List<AgentToolDescriptorExtension> selectByToolCodes(@Param("toolCodes") List<String> toolCodes);
+
+    @Select("""
             SELECT *
             FROM agent_tool_descriptor_extension
             WHERE agent_enabled = 1 AND agent_recommendable = 1

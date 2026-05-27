@@ -53,6 +53,8 @@ interface ModelForm {
   balanceUrl: string
   docsUrl: string
   timeoutSeconds: string
+  connectTimeoutSeconds: string
+  readTimeoutSeconds: string
   inputTokenPricePer1m: string
   outputTokenPricePer1m: string
   billingUnit: "TOKEN_PER_M" | "PER_CALL" | "IMAGE_TOKEN"
@@ -146,6 +148,8 @@ const emptyForm: ModelForm = {
   balanceUrl: "",
   docsUrl: "",
   timeoutSeconds: "60",
+  connectTimeoutSeconds: "",
+  readTimeoutSeconds: "",
   inputTokenPricePer1m: "0",
   outputTokenPricePer1m: "0",
   billingUnit: "TOKEN_PER_M",
@@ -175,6 +179,8 @@ function toForm(config: AgentModelConfig, catalog: ModelProviderDescriptor[]): M
     balanceUrl: config.balanceUrl || "",
     docsUrl: config.docsUrl || "",
     timeoutSeconds: String(config.timeoutSeconds || 60),
+    connectTimeoutSeconds: config.connectTimeoutSeconds != null ? String(config.connectTimeoutSeconds) : "",
+    readTimeoutSeconds: config.readTimeoutSeconds != null ? String(config.readTimeoutSeconds) : "",
     inputTokenPricePer1m: String(config.inputTokenPricePer1m ?? ((config.inputTokenPricePer1k ?? 0) * 1000)),
     outputTokenPricePer1m: String(config.outputTokenPricePer1m ?? ((config.outputTokenPricePer1k ?? 0) * 1000)),
     billingUnit:
@@ -204,6 +210,8 @@ function toPayload(form: ModelForm): AgentModelConfigPayload {
     balanceUrl: form.balanceUrl.trim(),
     docsUrl: form.docsUrl.trim(),
     timeoutSeconds: Number(form.timeoutSeconds) || 60,
+    connectTimeoutSeconds: form.connectTimeoutSeconds.trim() ? Number(form.connectTimeoutSeconds) : undefined,
+    readTimeoutSeconds: form.readTimeoutSeconds.trim() ? Number(form.readTimeoutSeconds) : undefined,
     inputTokenPricePer1m: Number(form.inputTokenPricePer1m) || 0,
     outputTokenPricePer1m: Number(form.outputTokenPricePer1m) || 0,
     billingUnit: form.billingUnit,
@@ -501,6 +509,18 @@ export function AgentModelSettings({ refreshKey = 0 }: AgentModelSettingsProps) 
     }
     const timeout = Number(form.timeoutSeconds)
     if (!Number.isFinite(timeout) || timeout < 1 || timeout > 300) return "超时时间必须在 1 到 300 秒之间。"
+    if (form.connectTimeoutSeconds.trim()) {
+      const connectTimeout = Number(form.connectTimeoutSeconds)
+      if (!Number.isFinite(connectTimeout) || connectTimeout < 1 || connectTimeout > 120) {
+        return "连接超时必须在 1 到 120 秒之间。"
+      }
+    }
+    if (form.readTimeoutSeconds.trim()) {
+      const readTimeout = Number(form.readTimeoutSeconds)
+      if (!Number.isFinite(readTimeout) || readTimeout < 60 || readTimeout > 1800) {
+        return "读取超时必须在 60 到 1800 秒之间。"
+      }
+    }
     const inputPrice = Number(form.inputTokenPricePer1m)
     const outputPrice = Number(form.outputTokenPricePer1m)
     const unitPrice = Number(form.unitPrice)
@@ -812,8 +832,39 @@ export function AgentModelSettings({ refreshKey = 0 }: AgentModelSettingsProps) 
                 <Input value={form.baseUrl} placeholder={meta.defaultBaseUrl} onChange={(event) => updateForm("baseUrl", event.target.value)} />
               </div>
               <div className="space-y-2">
-                <Label>超时时间（秒）</Label>
+                <Label>默认读取超时（秒）</Label>
                 <Input type="number" min={1} max={300} value={form.timeoutSeconds} onChange={(event) => updateForm("timeoutSeconds", event.target.value)} />
+              </div>
+            </div>
+
+            <div className="grid gap-5 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label>连接超时（秒）</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  max={120}
+                  placeholder="默认 10"
+                  value={form.connectTimeoutSeconds}
+                  onChange={(event) => updateForm("connectTimeoutSeconds", event.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  连接到供应商网关的等待时间，适合 ofox/openai_images 等图片网关。
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label>读取超时（秒）</Label>
+                <Input
+                  type="number"
+                  min={60}
+                  max={1800}
+                  placeholder="默认使用上方读取超时"
+                  value={form.readTimeoutSeconds}
+                  onChange={(event) => updateForm("readTimeoutSeconds", event.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  供应商已连接后等待生成结果的时间，图片生成建议 300 秒以上。
+                </p>
               </div>
             </div>
 
@@ -925,7 +976,7 @@ export function AgentModelSettings({ refreshKey = 0 }: AgentModelSettingsProps) 
                 onChange={(event) => updateForm("extraAuthJson", event.target.value)}
               />
               <p className="text-xs text-muted-foreground">
-                适合可灵这类 AK/SK 供应商。留空保存时会保留已保存的密钥；API Key 可继续用于固定 Bearer Token。
+                适合可灵这类 AK/SK 供应商，也可填写 proxyUrl、trustEnv 等高级参数。留空保存时会保留已保存的密钥；上方超时字段会自动合并到该 JSON。
               </p>
             </div>
 
@@ -952,7 +1003,7 @@ export function AgentModelSettings({ refreshKey = 0 }: AgentModelSettingsProps) 
             <Textarea
               readOnly
               className="min-h-24 font-mono text-xs"
-              value={`provider=${form.provider}\nprovider_protocol=${meta.providerProtocol || form.provider}\nvendor_kind=${meta.vendorKind || "direct"}\nupstream_vendor=${meta.upstreamVendor || ""}\nmodel=${form.modelName}\nbase_url=${form.baseUrl}\ntimeout=${form.timeoutSeconds}s\nagent_enabled=${form.agentEnabled}\nbilling_unit=${form.billingUnit}\ninput_price_per_1m=${form.inputTokenPricePer1m}\noutput_price_per_1m=${form.outputTokenPricePer1m}\nunit_price=${form.unitPrice}\nextra_auth=${form.extraAuthJson || form.extraAuthJsonMasked ? "configured" : "empty"}`}
+              value={`provider=${form.provider}\nprovider_protocol=${meta.providerProtocol || form.provider}\nvendor_kind=${meta.vendorKind || "direct"}\nupstream_vendor=${meta.upstreamVendor || ""}\nmodel=${form.modelName}\nbase_url=${form.baseUrl}\ntimeout=${form.timeoutSeconds}s\nconnect_timeout=${form.connectTimeoutSeconds || "default"}s\nread_timeout=${form.readTimeoutSeconds || "default"}s\nagent_enabled=${form.agentEnabled}\nbilling_unit=${form.billingUnit}\ninput_price_per_1m=${form.inputTokenPricePer1m}\noutput_price_per_1m=${form.outputTokenPricePer1m}\nunit_price=${form.unitPrice}\nextra_auth=${form.extraAuthJson || form.extraAuthJsonMasked || form.connectTimeoutSeconds || form.readTimeoutSeconds ? "configured" : "empty"}`}
             />
 
             {testResult ? (

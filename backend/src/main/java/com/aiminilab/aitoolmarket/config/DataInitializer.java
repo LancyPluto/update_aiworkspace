@@ -218,6 +218,37 @@ public class DataInitializer implements CommandLineRunner {
         ensureIndex("agent_runs", "uk_agent_runs_user_client", "CREATE UNIQUE INDEX uk_agent_runs_user_client ON agent_runs(user_id, client_request_id)");
         ensureIndex("agent_runs", "idx_agent_runs_model_config", "CREATE INDEX idx_agent_runs_model_config ON agent_runs(model_config_id)");
         ensureIndex("agent_runs", "idx_agent_runs_context_snapshot", "CREATE INDEX idx_agent_runs_context_snapshot ON agent_runs(context_snapshot_id)");
+        ensureTable("agent_tool_descriptor_extension", """
+                CREATE TABLE agent_tool_descriptor_extension (
+                  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                  tool_id BIGINT NOT NULL,
+                  tool_code VARCHAR(64) NOT NULL,
+                  agent_enabled TINYINT NOT NULL DEFAULT 1,
+                  agent_recommendable TINYINT NOT NULL DEFAULT 1,
+                  agent_auto_callable TINYINT NOT NULL DEFAULT 0,
+                  confirmation_policy VARCHAR(32) DEFAULT 'auto',
+                  risk_level VARCHAR(16) DEFAULT 'low',
+                  keywords_json TEXT DEFAULT NULL,
+                  example_prompts_json TEXT DEFAULT NULL,
+                  applicable_scenarios_json TEXT DEFAULT NULL,
+                  not_applicable_scenarios_json TEXT DEFAULT NULL,
+                  result_schema_json TEXT DEFAULT NULL,
+                  output_type VARCHAR(32) DEFAULT 'text',
+                  health_status VARCHAR(32) NOT NULL DEFAULT 'UNKNOWN',
+                  health_message VARCHAR(512) NULL,
+                  health_checked_at DATETIME NULL,
+                  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  UNIQUE KEY uk_tool_code (tool_code),
+                  KEY idx_enabled_recommendable (agent_enabled, agent_recommendable),
+                  KEY idx_agent_tool_health (agent_enabled, health_status)
+                )
+                """);
+        ensureColumn("agent_tool_descriptor_extension", "health_status", "ALTER TABLE agent_tool_descriptor_extension ADD COLUMN health_status VARCHAR(32) NOT NULL DEFAULT 'UNKNOWN'");
+        ensureColumn("agent_tool_descriptor_extension", "health_message", "ALTER TABLE agent_tool_descriptor_extension ADD COLUMN health_message VARCHAR(512) NULL");
+        ensureColumn("agent_tool_descriptor_extension", "health_checked_at", "ALTER TABLE agent_tool_descriptor_extension ADD COLUMN health_checked_at DATETIME NULL");
+        ensureIndex("agent_tool_descriptor_extension", "idx_agent_tool_health", "CREATE INDEX idx_agent_tool_health ON agent_tool_descriptor_extension(agent_enabled, health_status)");
+        executeSqlIgnore("ALTER TABLE agent_run_events MODIFY COLUMN event_text MEDIUMTEXT NULL");
         ensureTable("agent_context_snapshots", """
                 CREATE TABLE agent_context_snapshots (
                   id BIGINT PRIMARY KEY AUTO_INCREMENT,
@@ -330,6 +361,14 @@ public class DataInitializer implements CommandLineRunner {
             }
         }
         return false;
+    }
+
+    private void executeSqlIgnore(String sql) {
+        try (Connection connection = dataSource.getConnection()) {
+            connection.createStatement().executeUpdate(sql);
+        } catch (SQLException ignored) {
+            // Compatibility DDL is best-effort across MySQL and H2 test schemas.
+        }
     }
 
     private boolean indexExists(Connection connection, String tableName, String indexName) throws SQLException {

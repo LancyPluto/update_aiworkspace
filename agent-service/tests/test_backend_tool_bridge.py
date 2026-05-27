@@ -1,6 +1,8 @@
 """BackendToolBridge: required-field detection must not be short-circuited by placeholder defaults."""
 
-from app.core.schemas import ChatMessage, RunContext, ToolDescriptor
+import pytest
+
+from app.core.schemas import ChatMessage, RunContext, TaskDetailResponse, ToolDescriptor
 from app.tools.backend_tool import BackendToolBridge
 
 
@@ -211,3 +213,31 @@ def test_extract_strips_example_prefix_from_chinese_labels():
     assert args["targetCustomer"] == "年轻女性、宝妈"
     assert args["style"] == "种草"
     assert args["sellingPoints"] == "价格划算、效果明显"
+
+
+@pytest.mark.asyncio
+async def test_wait_for_task_keeps_polling_if_run_is_already_success():
+    class Backend:
+        def __init__(self) -> None:
+            self.polls = 0
+
+        async def get_run_context(self, run_id: int) -> RunContext:
+            return RunContext(runId=run_id, sessionId=1, userId=1, message="generate image", status="SUCCESS")
+
+        async def get_task_detail(self, user_id: int, task_id: int) -> TaskDetailResponse:
+            self.polls += 1
+            return TaskDetailResponse(
+                taskId=task_id,
+                status="SUCCESS",
+                progress=100,
+                progressMessage="done",
+            )
+
+    backend = Backend()
+    bridge = BackendToolBridge(backend_client=backend, timeout_seconds=1, poll_interval_seconds=0.01)  # type: ignore[arg-type]
+    context = RunContext(runId=9, sessionId=1, userId=1, message="generate image", status="RUNNING")
+
+    detail = await bridge._wait_for_task(context, "image_generation", 71)
+
+    assert detail.status == "SUCCESS"
+    assert backend.polls == 1

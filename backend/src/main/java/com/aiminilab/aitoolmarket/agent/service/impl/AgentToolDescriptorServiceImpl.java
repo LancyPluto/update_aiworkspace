@@ -1,7 +1,9 @@
 package com.aiminilab.aitoolmarket.agent.service.impl;
 
+import com.aiminilab.aitoolmarket.agent.dto.AdminAgentToolAccessResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AgentToolDescriptorResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AgentToolFieldDescriptorResponse;
+import com.aiminilab.aitoolmarket.agent.dto.UpdateAgentToolAccessRequest;
 import com.aiminilab.aitoolmarket.agent.entity.AgentToolDescriptorExtension;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentToolDescriptorExtensionMapper;
 import com.aiminilab.aitoolmarket.agent.service.AgentToolDescriptorService;
@@ -19,11 +21,12 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
-import java.util.Collections;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
@@ -32,6 +35,8 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
 
     private static final Logger LOGGER = LoggerFactory.getLogger(AgentToolDescriptorServiceImpl.class);
     private static final int AGENT_AVAILABLE_TOOL_LIMIT = 1000;
+    private static final String HEALTH_FAILED = "FAILED";
+    private static final String HEALTH_UNKNOWN = "UNKNOWN";
 
     private final ToolMapper toolMapper;
     private final ToolFieldItemMapper toolFieldItemMapper;
@@ -50,13 +55,14 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
 
     @Override
     public List<AgentToolDescriptorResponse> listAvailableToolsForUser(Long userId) {
-        return toolMapper.findTools(true, null, null, null, AGENT_AVAILABLE_TOOL_LIMIT, 0)
-                .stream()
+        List<AiTool> tools = toolMapper.findTools(true, null, null, null, AGENT_AVAILABLE_TOOL_LIMIT, 0);
+        Map<String, AgentToolDescriptorExtension> extensions = findExtensionsByToolCode(tools);
+        return tools.stream()
                 .filter(tool -> {
-                    Optional<AgentToolDescriptorExtension> ext = extensionMapper.findByToolCode(tool.getToolCode());
-                    return ext.map(AgentToolDescriptorExtension::getAgentEnabled).orElse(true);
+                    AgentToolDescriptorExtension ext = extensions.get(tool.getToolCode());
+                    return ext == null || isAgentReadable(ext);
                 })
-                .map(this::toDescriptor)
+                .map(tool -> toDescriptor(tool, extensions.get(tool.getToolCode())))
                 .toList();
     }
 
@@ -64,10 +70,112 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
     public AgentToolDescriptorResponse getToolForAgent(Long userId, String toolCode) {
         AiTool tool = toolMapper.findOnlineByCode(toolCode)
                 .orElseThrow(() -> new BusinessException(ErrorCode.AGENT_TOOL_NOT_AVAILABLE, "工具不可用"));
-        return toDescriptor(tool);
+        AgentToolDescriptorExtension ext = extensionMapper.findByToolCode(tool.getToolCode()).orElse(null);
+        if (ext != null && !isAgentReadable(ext)) {
+            throw new BusinessException(ErrorCode.AGENT_TOOL_NOT_AVAILABLE, "Tool is disabled for Agent");
+        }
+        return toDescriptor(tool, ext);
+    }
+
+    @Override
+    public List<AdminAgentToolAccessResponse> listAdminToolAccess() {
+        List<AiTool> tools = toolMapper.findTools(true, null, null, null, AGENT_AVAILABLE_TOOL_LIMIT, 0);
+        Map<String, AgentToolDescriptorExtension> extensions = findExtensionsByToolCode(tools);
+        return tools.stream()
+                .map(tool -> {
+                    AgentToolDescriptorExtension ext = extensions.get(tool.getToolCode());
+                    return AdminAgentToolAccessResponse.from(tool, agentEnabled(ext), healthStatus(ext), healthMessage(ext), healthCheckedAt(ext));
+                })
+                .toList();
+    }
+
+    @Override
+    @Transactional
+    public AdminAgentToolAccessResponse updateAdminToolAccess(String toolCode, UpdateAgentToolAccessRequest request) {
+        AiTool tool = toolMapper.findOnlineByCode(toolCode)
+                .orElseThrow(() -> new BusinessException(ErrorCode.AGENT_TOOL_NOT_AVAILABLE, "Tool is not online"));
+        AgentToolDescriptorExtension ext = extensionMapper.findByToolCode(tool.getToolCode()).orElse(null);
+        LocalDateTime now = LocalDateTime.now();
+        if (ext == null) {
+            ext = new AgentToolDescriptorExtension();
+            ext.setToolId(tool.getId());
+            ext.setToolCode(tool.getToolCode());
+            ext.setAgentRecommendable(true);
+            ext.setAgentAutoCallable(false);
+            ext.setConfirmationPolicy("auto");
+            ext.setRiskLevel("low");
+            ext.setOutputType(normalizeOutputType(tool.getOutputModality()));
+            ext.setCreatedAt(now);
+        }
+        ext.setAgentEnabled(Boolean.TRUE.equals(request.agentEnabled()));
+        if (Boolean.TRUE.equals(request.agentEnabled()) && HEALTH_FAILED.equalsIgnoreCase(ext.getHealthStatus())) {
+            ext.setHealthStatus(HEALTH_UNKNOWN);
+            ext.setHealthMessage(null);
+            ext.setHealthCheckedAt(now);
+            ext.setAgentRecommendable(true);
+        }
+        ext.setUpdatedAt(now);
+        if (ext.getId() == null) {
+            extensionMapper.insert(ext);
+        } else {
+            extensionMapper.updateById(ext);
+        }
+        return AdminAgentToolAccessResponse.from(
+                tool,
+                Boolean.TRUE.equals(ext.getAgentEnabled()),
+                ext.getHealthStatus(),
+                ext.getHealthMessage(),
+                ext.getHealthCheckedAt()
+        );
+    }
+
+    @Override
+    @Transactional
+    public void markToolHealth(String toolCode, String healthStatus, String healthMessage) {
+        if (toolCode == null || toolCode.isBlank()) {
+            return;
+        }
+        AiTool tool = toolMapper.findOnlineByCode(toolCode).orElse(null);
+        if (tool == null) {
+            return;
+        }
+        AgentToolDescriptorExtension ext = extensionMapper.findByToolCode(tool.getToolCode()).orElse(null);
+        LocalDateTime now = LocalDateTime.now();
+        if (ext == null) {
+            ext = new AgentToolDescriptorExtension();
+            ext.setToolId(tool.getId());
+            ext.setToolCode(tool.getToolCode());
+            ext.setAgentEnabled(true);
+            ext.setAgentRecommendable(true);
+            ext.setAgentAutoCallable(false);
+            ext.setConfirmationPolicy("auto");
+            ext.setRiskLevel("low");
+            ext.setOutputType(normalizeOutputType(tool.getOutputModality()));
+            ext.setCreatedAt(now);
+        }
+        String normalizedStatus = normalizeHealthStatus(healthStatus);
+        ext.setHealthStatus(normalizedStatus);
+        ext.setHealthMessage(limitText(healthMessage, 512));
+        ext.setHealthCheckedAt(now);
+        ext.setUpdatedAt(now);
+        if (HEALTH_FAILED.equals(normalizedStatus)) {
+            ext.setAgentRecommendable(false);
+            ext.setAgentAutoCallable(false);
+        } else if (Boolean.TRUE.equals(ext.getAgentEnabled())) {
+            ext.setAgentRecommendable(true);
+        }
+        if (ext.getId() == null) {
+            extensionMapper.insert(ext);
+        } else {
+            extensionMapper.updateById(ext);
+        }
     }
 
     private AgentToolDescriptorResponse toDescriptor(AiTool tool) {
+        return toDescriptor(tool, extensionMapper.findByToolCode(tool.getToolCode()).orElse(null));
+    }
+
+    private AgentToolDescriptorResponse toDescriptor(AiTool tool, AgentToolDescriptorExtension ext) {
         List<ToolFieldResponse> fields = toolFieldItemMapper.findActiveFields(tool.getId()).stream()
                 .map(field -> ToolFieldResponse.from(field, objectMapper))
                 .toList();
@@ -88,7 +196,6 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
               ))
                 .toList();
 
-        AgentToolDescriptorExtension ext = extensionMapper.findByToolCode(tool.getToolCode()).orElse(null);
         boolean autoCallable = ext != null ? Boolean.TRUE.equals(ext.getAgentAutoCallable()) : false;
 
         return new AgentToolDescriptorResponse(
@@ -101,6 +208,73 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
                 fieldDescriptors,
                 loadHints(tool.getToolCode(), ext)
         );
+    }
+
+    private Map<String, AgentToolDescriptorExtension> findExtensionsByToolCode(List<AiTool> tools) {
+        List<String> toolCodes = tools.stream()
+                .map(AiTool::getToolCode)
+                .filter(code -> code != null && !code.isBlank())
+                .distinct()
+                .toList();
+        if (toolCodes.isEmpty()) {
+            return Map.of();
+        }
+        return extensionMapper.selectByToolCodes(toolCodes).stream()
+                .collect(Collectors.toMap(
+                        AgentToolDescriptorExtension::getToolCode,
+                        extension -> extension,
+                        (left, right) -> left
+                ));
+    }
+
+    private boolean agentEnabled(AgentToolDescriptorExtension ext) {
+        return ext == null || Boolean.TRUE.equals(ext.getAgentEnabled());
+    }
+
+    private String healthStatus(AgentToolDescriptorExtension ext) {
+        if (ext == null || ext.getHealthStatus() == null || ext.getHealthStatus().isBlank()) {
+            return HEALTH_UNKNOWN;
+        }
+        return ext.getHealthStatus();
+    }
+
+    private String healthMessage(AgentToolDescriptorExtension ext) {
+        return ext == null ? null : ext.getHealthMessage();
+    }
+
+    private LocalDateTime healthCheckedAt(AgentToolDescriptorExtension ext) {
+        return ext == null ? null : ext.getHealthCheckedAt();
+    }
+
+    private boolean isAgentReadable(AgentToolDescriptorExtension ext) {
+        return !Boolean.FALSE.equals(ext.getAgentEnabled())
+                && !HEALTH_FAILED.equalsIgnoreCase(ext.getHealthStatus());
+    }
+
+    private String normalizeHealthStatus(String healthStatus) {
+        if (healthStatus == null || healthStatus.isBlank()) {
+            return HEALTH_UNKNOWN;
+        }
+        String normalized = healthStatus.trim().toUpperCase();
+        if (!Set.of("HEALTHY", "UNKNOWN", HEALTH_FAILED).contains(normalized)) {
+            return HEALTH_UNKNOWN;
+        }
+        return normalized;
+    }
+
+    private String limitText(String value, int maxLength) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        String normalized = value.trim();
+        return normalized.length() <= maxLength ? normalized : normalized.substring(0, Math.max(0, maxLength - 16)) + "...[truncated]";
+    }
+
+    private String normalizeOutputType(String outputModality) {
+        if (outputModality == null || outputModality.isBlank()) {
+            return "text";
+        }
+        return outputModality.trim().toLowerCase();
     }
 
     private Map<String, Object> loadHints(String toolCode, AgentToolDescriptorExtension ext) {

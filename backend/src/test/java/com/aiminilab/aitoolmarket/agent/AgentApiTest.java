@@ -699,6 +699,33 @@ class AgentApiTest {
     }
 
     @Test
+    void internalAgentEventTextIsTruncatedBeforePersisting() throws Exception {
+        mockExternalAuthDependencies();
+        register("agent_long_event_user");
+        String token = login("agent_long_event_user");
+        Long sessionId = createSession(token, "Long Event");
+        Long runId = sendMessage(token, sessionId, "Create a verbose event.").runId();
+        String longEventText = "x".repeat(20_000);
+        String eventBody = objectMapper.writeValueAsString(java.util.Map.of(
+                "eventType", "tool.finished",
+                "eventText", longEventText
+        ));
+
+        mockMvc.perform(signed(post("/api/internal/v1/agent/runs/{runId}/events", runId), "POST",
+                        "/api/internal/v1/agent/runs/%d/events".formatted(runId), eventBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(eventBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.eventType").value("tool.finished"));
+
+        var events = agentRunEventMapper.findEventsForAdmin(runId, 10);
+        assertThat(events).hasSize(2);
+        assertThat(events.get(1).getEventText())
+                .hasSize(4000)
+                .endsWith("... [truncated]");
+    }
+
+    @Test
     void userCanManagePerToolAutoCallPreference() throws Exception {
         mockExternalAuthDependencies();
         register("agent_preference_user");

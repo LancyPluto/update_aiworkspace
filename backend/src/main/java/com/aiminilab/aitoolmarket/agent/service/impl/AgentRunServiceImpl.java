@@ -90,6 +90,8 @@ public class AgentRunServiceImpl implements AgentRunService {
     private static final int FILE_CHUNK_SCAN_LIMIT = 200;
     private static final int FILE_CHUNK_CONTEXT_LIMIT = 5;
     private static final int DEFAULT_EVENT_PAGE_SIZE = 100;
+    private static final int MAX_EVENT_TEXT_LENGTH = 4000;
+    private static final String EVENT_TEXT_TRUNCATED_SUFFIX = "... [truncated]";
     private static final long EVENT_STREAM_TIMEOUT_MILLIS = 30 * 60 * 1000L;
     private static final Set<String> CANCELLABLE_STATUSES = Set.of("CREATED", "RUNNING", "WAITING_USER_CONFIRMATION");
     private static final Set<String> CONFIRMABLE_STATUSES = Set.of("WAITING_USER_CONFIRMATION");
@@ -1071,7 +1073,7 @@ public class AgentRunServiceImpl implements AgentRunService {
         event.setRunId(runId);
         event.setUserId(userId);
         event.setEventType(eventType);
-        event.setEventText(eventText);
+        event.setEventText(eventTextPreview(eventText));
         event.setEventJson(eventJson);
         event.setCreatedAt(now);
         agentRunEventMapper.insertEvent(event);
@@ -1087,6 +1089,14 @@ public class AgentRunServiceImpl implements AgentRunService {
         for (SseEmitter emitter : emitters) {
             sendEvent(event.runId(), emitter, event);
         }
+    }
+
+    private String eventTextPreview(String eventText) {
+        if (eventText == null || eventText.length() <= MAX_EVENT_TEXT_LENGTH) {
+            return eventText;
+        }
+        int contentLength = Math.max(0, MAX_EVENT_TEXT_LENGTH - EVENT_TEXT_TRUNCATED_SUFFIX.length());
+        return eventText.substring(0, contentLength) + EVENT_TEXT_TRUNCATED_SUFFIX;
     }
 
     private void sendEvent(Long runId, SseEmitter emitter, AgentRunEventResponse event) {

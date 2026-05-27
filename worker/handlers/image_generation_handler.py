@@ -146,8 +146,10 @@ class ImageGenerationHandler:
             return {"status": "SUCCESS", "taskId": task_id, "traceId": trace_id, "imageCount": len(urls)}
         except (SiliconFlowVideoTimeoutError, KlingVideoTimeoutError, OpenAIImagesTimeoutError) as exc:
             return self._mark_failed(task_id, "MODEL_TIMEOUT", str(exc), trace_id)
-        except (ProviderRegistryError, SiliconFlowVideoError, KlingVideoError, OpenAIImagesError) as exc:
-            return self._mark_failed(task_id, "MODEL_CALL_FAILED", str(exc), trace_id)
+        except ProviderRegistryError as exc:
+            return self._mark_failed(task_id, "MODEL_PROVIDER_UNAVAILABLE", str(exc), trace_id)
+        except (SiliconFlowVideoError, KlingVideoError, OpenAIImagesError) as exc:
+            return self._mark_failed(task_id, _model_call_error_code(str(exc)), str(exc), trace_id)
         except GeneratedImagePersistError as exc:
             return self._mark_failed(task_id, "MEDIA_PERSIST_FAILED", str(exc), trace_id)
         except BackendClientError:
@@ -364,6 +366,19 @@ def _limit_text(value: str, max_length: int) -> str:
     if len(value) <= max_length:
         return value
     return value[: max(0, max_length - 16)] + "...[truncated]"
+
+
+def _model_call_error_code(message: str) -> str:
+    normalized = message.lower()
+    if "status=401" in normalized or "status=403" in normalized:
+        return "MODEL_AUTH_FAILED"
+    if "invalid token" in normalized or "unauthorized" in normalized or "api key" in normalized:
+        return "MODEL_AUTH_FAILED"
+    if "status=429" in normalized or "rate limit" in normalized or "too many requests" in normalized:
+        return "MODEL_RATE_LIMITED"
+    if "timed out" in normalized or "timeout" in normalized:
+        return "MODEL_TIMEOUT"
+    return "MODEL_CALL_FAILED"
 
 
 def _json_for_log(value: Any) -> str:

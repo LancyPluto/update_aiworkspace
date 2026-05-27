@@ -20,6 +20,8 @@ public record AgentModelConfigRequest(
         String balanceUrl,
         String docsUrl,
         @Min(1) @Max(300) Integer timeoutSeconds,
+        @Min(1) @Max(120) Integer connectTimeoutSeconds,
+        @Min(60) @Max(1800) Integer readTimeoutSeconds,
         BigDecimal inputTokenPricePer1k,
         BigDecimal outputTokenPricePer1k,
         BigDecimal inputTokenPricePer1m,

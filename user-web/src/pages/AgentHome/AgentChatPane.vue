@@ -840,81 +840,108 @@ defineExpose({
 </template>
 
 <style scoped>
-/* 组件最外层 */
 .agent-chat-pane {
   width: 100%;
   height: 100%;
   display: flex;
   flex-direction: column;
   overflow: hidden !important;
+  position: relative;
+  background: linear-gradient(180deg, #09090a 0%, #000 42%, #050507 100%);
+}
+
+.agent-chat-pane::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, rgb(176 92 255 / 0.065), transparent 22%),
+    linear-gradient(90deg, transparent, rgb(255 255 255 / 0.025), transparent);
 }
 
 .message-container {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 24px;
+  position: relative;
+  z-index: 1;
   height: 100%;
-  max-height: calc(100vh - 140px);
+  max-height: none;
+  padding: 56px 32px 34px;
+  scroll-behavior: smooth;
 }
 
-/* 输入框固定在底部，不参与滚动 */
+.message-container::-webkit-scrollbar {
+  width: 8px;
+}
+
+.message-container::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.12);
+}
+
 .composer {
-  width: min(860px, calc(100% - 32px));
-  margin: 0 auto 16px;
-  border: 1px solid color-mix(in srgb, var(--foreground) 10%, var(--border));
-  border-radius: 20px;
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--card) 92%, #fff 2%), color-mix(in srgb, var(--card) 86%, #000));
-  padding: 14px 18px;
+  width: min(980px, calc(100% - 40px));
+  margin: 0 auto 22px;
+  border: 1px solid rgb(255 255 255 / 0.10);
+  border-radius: 26px;
+  background: linear-gradient(180deg, rgb(35 36 43 / 0.96), rgb(24 25 31 / 0.96));
+  padding: 14px 16px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
   flex-shrink: 0;
-  box-shadow: 0 18px 42px rgb(0 0 0 / 0.28);
+  position: relative;
+  z-index: 2;
+  box-shadow: 0 24px 80px rgb(0 0 0 / 0.52), inset 0 1px 0 rgb(255 255 255 / 0.05);
+  backdrop-filter: blur(18px);
 }
 
 .composer-model-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  border: 1px solid color-mix(in srgb, var(--foreground) 9%, var(--border));
-  border-radius: 14px;
-  background: color-mix(in srgb, var(--secondary) 60%, transparent);
-  padding: 10px 12px;
+  align-self: flex-start;
+  justify-content: flex-start;
+  gap: 8px;
+  max-width: min(430px, 100%);
+  border: 1px solid rgb(255 255 255 / 0.07);
+  border-radius: 999px;
+  background: rgb(0 0 0 / 0.16);
+  padding: 5px 6px 5px 12px;
 }
 
 .composer-model-copy {
-  min-width: 0;
-  display: grid;
-  gap: 2px;
+  display: flex;
+  align-items: center;
+  min-width: auto;
 }
 
-.composer-model-kicker,
+.composer-model-kicker {
+  color: rgb(255 255 255 / 0.42);
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
 .composer-model-copy small {
-  color: var(--muted-foreground);
-  font-size: 11px;
+  display: none;
 }
 
 .composer-model-copy strong {
-  max-width: 360px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--foreground);
-  font-size: 13px;
+  display: none;
 }
 
 .composer-model-select {
-  width: min(260px, 44vw);
-  min-height: 34px;
-  border: 1px solid color-mix(in srgb, var(--primary) 26%, var(--border));
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--card) 88%, #000);
-  color: var(--foreground);
-  padding: 0 10px;
+  width: min(220px, 46vw);
+  min-height: 30px;
+  border: 1px solid rgb(176 92 255 / 0.20);
+  border-radius: 999px;
+  background: rgb(15 15 19 / 0.72);
+  color: rgb(255 255 255 / 0.76);
+  padding: 0 28px 0 10px;
   outline: none;
+  font-size: 12px;
 }
 
 .composer-model-select:disabled {
@@ -922,7 +949,6 @@ defineExpose({
   cursor: not-allowed;
 }
 
-/* 输入框内部文件预览 */
 .inner-file-list {
   display: flex;
   flex-direction: column;
@@ -931,61 +957,74 @@ defineExpose({
   overflow-y: auto;
   padding-right: 4px;
 }
+
 .inner-file-item {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 10px;
-  background: var(--secondary);
-  border-radius: 10px;
+  padding: 7px 10px;
+  background: rgb(255 255 255 / 0.06);
+  border: 1px solid rgb(255 255 255 / 0.07);
+  border-radius: 14px;
   font-size: 12px;
 }
+
 .inner-file-info {
   flex: 1;
   display: flex;
   align-items: center;
   gap: 8px;
 }
+
 .inner-file-name {
-  color: var(--foreground);
+  color: rgb(255 255 255 / 0.84);
   font-weight: 500;
 }
+
 .inner-file-size {
-  color: var(--muted-foreground);
+  color: rgb(255 255 255 / 0.42);
   font-size: 11px;
 }
+
 .inner-file-close {
   background: transparent;
   border: none;
-  color: var(--muted-foreground);
+  color: rgb(255 255 255 / 0.42);
   cursor: pointer;
   padding: 2px;
 }
+
 .inner-file-close:hover {
-  color: var(--foreground);
+  color: #fff;
 }
 
-/* 输入框 */
 .input-wrap {
   position: relative;
 }
+
 .chat-input {
   width: 100%;
   border: none;
   outline: none;
   background: transparent;
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1.6;
-  min-height: 28px;
+  min-height: 34px;
   max-height: 150px;
   resize: none;
-  padding: 4px 32px 4px 0;
-  color: var(--foreground);
+  padding: 6px 38px 6px 2px;
+  color: rgb(255 255 255 / 0.90);
 }
+
+.chat-input::placeholder {
+  color: rgb(255 255 255 / 0.34);
+}
+
 .chat-input.input-expand {
   min-height: 110px;
   max-height: 40vh;
 }
+
 .chat-input:disabled {
   opacity: 0.7;
   cursor: not-allowed;
@@ -994,16 +1033,18 @@ defineExpose({
 .expand-btn {
   position: absolute;
   right: 0;
-  bottom: 4px;
+  bottom: 8px;
   border: none;
   background: transparent;
-  color: var(--muted-foreground);
+  color: rgb(255 255 255 / 0.42);
   cursor: pointer;
   padding: 2px;
 }
+
 .expand-btn:hover {
-  color: var(--foreground);
+  color: #fff;
 }
+
 .expand-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
@@ -1014,61 +1055,73 @@ defineExpose({
   align-items: center;
   justify-content: space-between;
 }
+
 .left-tools {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
+
 .tool-btn {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 13px;
-  padding: 5px 12px;
+  font-size: 12px;
+  padding: 7px 13px;
   border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--foreground) 14%, var(--border));
-  background: color-mix(in srgb, var(--muted) 70%, transparent);
-  color: color-mix(in srgb, var(--foreground) 90%, var(--muted-foreground));
+  border: 1px solid rgb(255 255 255 / 0.08);
+  background: rgb(0 0 0 / 0.22);
+  color: rgb(255 255 255 / 0.64);
   cursor: pointer;
   transition: all 0.2s;
 }
+
 .tool-btn:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--primary) 42%, var(--border));
-  background: color-mix(in srgb, var(--primary) 14%, var(--secondary));
-  color: var(--foreground);
+  border-color: rgb(176 92 255 / 0.48);
+  background: rgb(176 92 255 / 0.14);
+  color: #fff;
 }
+
 .tool-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
 .send-circle-btn {
-  width: 36px;
-  height: 36px;
+  width: 42px;
+  height: 42px;
   border-radius: 50%;
-  border: none;
-  border: 1px solid color-mix(in srgb, var(--primary) 40%, transparent);
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--primary) 74%, #fff 8%), color-mix(in srgb, var(--primary) 66%, #000));
+  border: 1px solid rgb(176 92 255 / 0.55);
+  background: linear-gradient(180deg, rgb(191 115 255), rgb(144 70 228));
   color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: transform 0.18s ease, filter 0.18s ease, background 0.2s;
+  box-shadow: 0 10px 30px rgb(176 92 255 / 0.34);
 }
+
+.send-circle-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  filter: brightness(1.08);
+}
+
 .send-circle-btn.stop {
-  border-color: color-mix(in srgb, var(--destructive) 72%, transparent);
-  background: color-mix(in srgb, var(--destructive) 78%, #111);
+  border-color: rgb(248 113 113 / 0.72);
+  background: rgb(127 29 29);
+  box-shadow: 0 10px 30px rgb(248 113 113 / 0.22);
 }
+
 .send-circle-btn.stop:hover {
-  background: color-mix(in srgb, var(--destructive) 90%, #111);
+  background: rgb(153 27 27);
 }
+
 .send-circle-btn:disabled {
   opacity: 0.42;
   cursor: not-allowed;
 }
 
-/* 以下是原有样式，保持不变 */
 .empty-state {
   min-height: 60vh;
   display: flex;
@@ -1076,26 +1129,25 @@ defineExpose({
   align-items: center;
   justify-content: center;
   text-align: center;
-  color: var(--muted-foreground);
+  color: rgb(255 255 255 / 0.48);
 }
 
 .empty-mark {
-  width: 48px;
-  height: 48px;
+  width: 62px;
+  height: 62px;
   display: grid;
   place-items: center;
-  border-radius: 12px;
-  border: 1px solid color-mix(in srgb, var(--primary) 38%, var(--border));
-  background:
-    radial-gradient(circle at 65% 25%, color-mix(in srgb, var(--primary) 46%, transparent), transparent 45%),
-    color-mix(in srgb, var(--card) 86%, #000);
-  color: color-mix(in srgb, var(--primary) 68%, #fff);
+  border-radius: 24px;
+  border: 1px solid rgb(176 92 255 / 0.36);
+  background: linear-gradient(145deg, rgb(176 92 255 / 0.22), rgb(255 255 255 / 0.05));
+  color: rgb(210 170 255);
+  animation: breathe-soft 2.8s ease-in-out infinite;
 }
 
 .empty-state h2 {
   margin: 18px 0 8px;
-  font-size: 24px;
-  color: var(--foreground);
+  font-size: 28px;
+  color: #fff;
 }
 
 .suggestions {
@@ -1108,59 +1160,62 @@ defineExpose({
 
 .suggestions button {
   min-height: 44px;
-  border: 1px solid color-mix(in srgb, var(--foreground) 12%, var(--border));
-  border-radius: 8px;
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--card) 86%, #fff 3%), color-mix(in srgb, var(--card) 92%, #000));
-  color: color-mix(in srgb, var(--foreground) 86%, var(--muted-foreground));
+  border: 1px solid rgb(255 255 255 / 0.09);
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgb(255 255 255 / 0.07), rgb(255 255 255 / 0.035));
+  color: rgb(255 255 255 / 0.74);
   cursor: pointer;
   transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease, transform 0.18s ease;
 }
 
 .suggestions button:hover {
-  border-color: color-mix(in srgb, var(--primary) 46%, var(--border));
-  background: color-mix(in srgb, var(--primary) 12%, var(--card));
-  color: var(--foreground);
+  border-color: rgb(176 92 255 / 0.48);
+  background: rgb(176 92 255 / 0.13);
+  color: #fff;
   transform: translateY(-1px);
 }
 
 .agent-message {
   display: grid;
-  grid-template-columns: 34px minmax(0, 760px);
-  gap: 12px;
-  margin: 18px auto;
-  max-width: 900px;
+  grid-template-columns: 42px minmax(0, 820px);
+  gap: 14px;
+  margin: 28px auto;
+  max-width: 1040px;
+  animation: message-rise 0.24s ease-out;
 }
 
 .agent-message.user {
-  grid-template-columns: minmax(0, 760px) 34px;
+  grid-template-columns: minmax(0, 720px) 42px;
 }
 
 .agent-message.user .avatar {
   grid-column: 2;
   grid-row: 1;
-  background: color-mix(in srgb, var(--primary) 36%, var(--card));
-  color: var(--foreground);
+  background: rgb(176 92 255 / 0.20);
+  border-color: rgb(176 92 255 / 0.34);
+  color: #fff;
 }
 
 .agent-message.user .bubble {
   grid-column: 1;
   justify-self: end;
-  border-color: color-mix(in srgb, var(--primary) 40%, var(--border));
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--primary) 30%, var(--card)), color-mix(in srgb, var(--primary) 18%, var(--card)));
-  color: var(--foreground);
+  border-color: rgb(176 92 255 / 0.26);
+  background: linear-gradient(180deg, rgb(58 42 77 / 0.94), rgb(37 33 48 / 0.94));
+  color: #fff;
+  border-radius: 24px 10px 24px 24px;
+  box-shadow: 0 18px 48px rgb(0 0 0 / 0.24);
 }
 
 .avatar,
 .card-icon {
-  width: 34px;
-  height: 34px;
+  width: 42px;
+  height: 42px;
   display: grid;
   place-items: center;
-  border-radius: 8px;
-  background: var(--secondary);
-  color: var(--foreground);
+  border-radius: 15px;
+  border: 1px solid rgb(255 255 255 / 0.10);
+  background: rgb(255 255 255 / 0.06);
+  color: rgb(255 255 255 / 0.82);
   font-size: 12px;
   font-weight: 700;
 }
@@ -1168,29 +1223,41 @@ defineExpose({
 .bubble {
   width: fit-content;
   max-width: 100%;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--card) 92%, #000);
-  padding: 12px 14px;
-  line-height: 1.7;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 10px 24px 24px 24px;
+  background: linear-gradient(180deg, rgb(32 33 40 / 0.92), rgb(22 23 29 / 0.92));
+  padding: 16px 18px;
+  line-height: 1.75;
+  color: rgb(255 255 255 / 0.86);
+  box-shadow: 0 18px 44px rgb(0 0 0 / 0.22), inset 0 1px 0 rgb(255 255 255 / 0.04);
+}
+
+.agent-message.assistant .bubble:has(.agent-result-renderer) {
+  width: min(820px, 100%);
+  padding: 10px;
+  border-color: rgb(255 255 255 / 0.06);
+  background: rgb(255 255 255 / 0.035);
+  box-shadow: 0 16px 44px rgb(0 0 0 / 0.18);
 }
 
 .agent-message.run-progress .bubble {
-  border-color: color-mix(in srgb, var(--foreground) 20%, var(--border));
+  width: min(820px, 100%);
+  border-color: rgb(255 255 255 / 0.10);
+  background: rgb(255 255 255 / 0.045);
 }
 
 .generating-message {
-  animation: generating-enter 0.18s ease-out;
+  animation: message-rise 0.18s ease-out;
 }
 
 .generating-bubble {
   display: inline-flex;
   align-items: center;
   gap: 12px;
-  border-color: color-mix(in srgb, var(--primary) 36%, var(--border));
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--primary) 13%, var(--card)), color-mix(in srgb, var(--card) 86%, #000));
-  box-shadow: 0 14px 32px rgb(0 0 0 / 0.22);
+  border-color: rgb(176 92 255 / 0.34);
+  background: linear-gradient(180deg, rgb(176 92 255 / 0.14), rgb(255 255 255 / 0.045));
+  box-shadow: 0 18px 56px rgb(176 92 255 / 0.12), 0 16px 40px rgb(0 0 0 / 0.34);
+  animation: breathe-panel 2.2s ease-in-out infinite;
 }
 
 .generating-orbit {
@@ -1198,9 +1265,9 @@ defineExpose({
   height: 34px;
   display: grid;
   place-items: center;
-  border-radius: 10px;
-  border: 1px solid color-mix(in srgb, var(--primary) 42%, var(--border));
-  color: color-mix(in srgb, var(--primary) 72%, #fff);
+  border-radius: 12px;
+  border: 1px solid rgb(176 92 255 / 0.44);
+  color: rgb(210 170 255);
   animation: pulse-ring 1.4s ease-in-out infinite;
 }
 
@@ -1210,7 +1277,7 @@ defineExpose({
 
 .generating-copy p {
   margin: 0;
-  color: var(--foreground);
+  color: #fff;
   font-weight: 700;
 }
 
@@ -1220,7 +1287,7 @@ defineExpose({
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--muted-foreground);
+  color: rgb(255 255 255 / 0.48);
   font-size: 12px;
 }
 
@@ -1234,7 +1301,7 @@ defineExpose({
   width: 6px;
   height: 6px;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--primary) 72%, #fff);
+  background: rgb(210 170 255);
   animation: typing-dot 1s ease-in-out infinite;
 }
 
@@ -1249,66 +1316,68 @@ defineExpose({
 .confirmation-card,
 .agent-error-card {
   display: grid;
-  grid-template-columns: 34px minmax(0, 760px);
-  gap: 12px;
-  max-width: 900px;
-  margin: 18px auto;
+  grid-template-columns: 42px minmax(0, 820px);
+  gap: 14px;
+  max-width: 1040px;
+  margin: 24px auto;
 }
 
 .run-status-card {
   width: fit-content;
-  max-width: min(860px, calc(100% - 32px));
-  min-height: 34px;
+  max-width: min(920px, calc(100% - 32px));
+  min-height: 38px;
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--card);
-  color: var(--muted-foreground);
+  border: 1px solid rgb(255 255 255 / 0.10);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.055);
+  color: rgb(255 255 255 / 0.54);
   font-size: 13px;
   margin: 8px auto 18px;
-  padding: 8px 12px;
+  padding: 8px 14px;
 }
 
 .run-status-card.running,
 .run-status-card.awaiting_confirmation {
-  border-color: color-mix(in srgb, var(--foreground) 12%, var(--border));
+  border-color: rgb(176 92 255 / 0.26);
+  animation: breathe-panel 2.4s ease-in-out infinite;
 }
 
 .run-status-card.awaiting_confirmation {
-  border-color: color-mix(in srgb, var(--warning) 48%, var(--border));
-  background: color-mix(in srgb, var(--warning) 13%, var(--card));
-  color: color-mix(in srgb, var(--warning) 72%, #fff);
+  border-color: rgb(245 158 11 / 0.48);
+  background: rgb(245 158 11 / 0.10);
+  color: rgb(253 230 138);
 }
 
 .run-status-card.completed {
-  border-color: color-mix(in srgb, var(--success) 48%, var(--border));
-  background: color-mix(in srgb, var(--success) 13%, var(--card));
-  color: color-mix(in srgb, var(--success) 72%, #fff);
+  border-color: rgb(52 211 153 / 0.42);
+  background: rgb(52 211 153 / 0.10);
+  color: rgb(167 243 208);
 }
 
 .run-status-card.failed {
-  border-color: color-mix(in srgb, var(--destructive) 50%, var(--border));
-  background: color-mix(in srgb, var(--destructive) 13%, var(--card));
-  color: color-mix(in srgb, var(--destructive) 70%, #fff);
+  border-color: rgb(248 113 113 / 0.50);
+  background: rgb(248 113 113 / 0.10);
+  color: rgb(254 202 202);
 }
 
 .card-icon.error {
-  background: color-mix(in srgb, var(--destructive) 16%, var(--card));
-  color: color-mix(in srgb, var(--destructive) 75%, #fff);
+  background: rgb(248 113 113 / 0.14);
+  color: rgb(254 202 202);
 }
 
 .card-body {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--card);
-  padding: 14px;
+  border: 1px solid rgb(255 255 255 / 0.10);
+  border-radius: 22px;
+  background: rgb(255 255 255 / 0.055);
+  padding: 16px;
+  box-shadow: 0 18px 44px rgb(0 0 0 / 0.18);
 }
 
 .card-body.error {
-  border-color: color-mix(in srgb, var(--destructive) 42%, var(--border));
-  background: color-mix(in srgb, var(--destructive) 10%, var(--card));
+  border-color: rgb(248 113 113 / 0.34);
+  background: rgb(248 113 113 / 0.10);
 }
 
 .card-title {
@@ -1318,7 +1387,7 @@ defineExpose({
 
 .card-desc {
   margin: 6px 0 12px;
-  color: var(--muted-foreground);
+  color: rgb(255 255 255 / 0.52);
   font-size: 13px;
 }
 
@@ -1326,7 +1395,7 @@ defineExpose({
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  color: var(--foreground);
+  color: rgb(255 255 255 / 0.78);
   font-size: 13px;
 }
 
@@ -1339,7 +1408,8 @@ defineExpose({
 .primary-btn,
 .ghost-btn {
   height: 36px;
-  border: 1px solid var(--border);
+  border: 1px solid rgb(255 255 255 / 0.12);
+  border-radius: 999px;
   padding: 0 12px;
 }
 
@@ -1350,14 +1420,14 @@ defineExpose({
 }
 
 .primary-btn {
-  border-color: color-mix(in srgb, var(--primary) 54%, var(--border));
-  background: color-mix(in srgb, var(--primary) 55%, var(--card));
-  color: var(--foreground);
+  border-color: rgb(176 92 255 / 0.56);
+  background: rgb(176 92 255 / 0.52);
+  color: #fff;
 }
 
 .ghost-btn {
-  background: color-mix(in srgb, var(--muted) 58%, var(--card));
-  color: var(--foreground);
+  background: rgb(255 255 255 / 0.06);
+  color: rgb(255 255 255 / 0.76);
 }
 
 .sr-only {
@@ -1370,30 +1440,49 @@ defineExpose({
 }
 
 @media (max-width: 900px) {
+  .message-container {
+    padding: 36px 14px 24px;
+  }
+  .composer {
+    width: calc(100% - 24px);
+    border-radius: 22px;
+  }
   .suggestions {
     grid-template-columns: 1fr;
   }
   .composer-model-row {
-    align-items: stretch;
-    flex-direction: column;
+    align-items: center;
+    flex-direction: row;
+    max-width: 100%;
   }
   .composer-model-select {
-    width: 100%;
+    width: min(220px, 58vw);
   }
   .agent-message,
   .confirmation-card,
   .agent-error-card {
-    grid-template-columns: 30px minmax(0, 1fr);
+    grid-template-columns: 34px minmax(0, 1fr);
+    gap: 10px;
+    margin: 20px auto;
+  }
+  .agent-message.user {
+    grid-template-columns: minmax(0, 1fr) 34px;
+  }
+  .avatar,
+  .card-icon {
+    width: 34px;
+    height: 34px;
+    border-radius: 12px;
   }
   .run-status-card {
     max-width: 100%;
   }
 }
 
-@keyframes generating-enter {
+@keyframes message-rise {
   from {
     opacity: 0;
-    transform: translateY(4px);
+    transform: translateY(6px);
   }
   to {
     opacity: 1;
@@ -1401,13 +1490,35 @@ defineExpose({
   }
 }
 
+@keyframes breathe-soft {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgb(176 92 255 / 0.16);
+    transform: translateY(0);
+  }
+  50% {
+    box-shadow: 0 0 0 10px rgb(176 92 255 / 0);
+    transform: translateY(-1px);
+  }
+}
+
+@keyframes breathe-panel {
+  0%,
+  100% {
+    box-shadow: 0 18px 56px rgb(176 92 255 / 0.10), 0 16px 40px rgb(0 0 0 / 0.34);
+  }
+  50% {
+    box-shadow: 0 18px 68px rgb(176 92 255 / 0.22), 0 16px 40px rgb(0 0 0 / 0.34);
+  }
+}
+
 @keyframes pulse-ring {
   0%,
   100% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--primary) 20%, transparent);
+    box-shadow: 0 0 0 0 rgb(176 92 255 / 0.20);
   }
   50% {
-    box-shadow: 0 0 0 7px color-mix(in srgb, var(--primary) 0%, transparent);
+    box-shadow: 0 0 0 7px rgb(176 92 255 / 0);
   }
 }
 

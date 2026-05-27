@@ -22,6 +22,9 @@ public class AgentToolDescriptorExtension {
     private String notApplicableScenariosJson;
     private String resultSchemaJson;
     private String outputType;
+    private String healthStatus;
+    private String healthMessage;
+    private LocalDateTime healthCheckedAt;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 
@@ -53,6 +56,12 @@ public class AgentToolDescriptorExtension {
     public void setResultSchemaJson(String resultSchemaJson) { this.resultSchemaJson = resultSchemaJson; }
     public String getOutputType() { return outputType; }
     public void setOutputType(String outputType) { this.outputType = outputType; }
+    public String getHealthStatus() { return healthStatus; }
+    public void setHealthStatus(String healthStatus) { this.healthStatus = healthStatus; }
+    public String getHealthMessage() { return healthMessage; }
+    public void setHealthMessage(String healthMessage) { this.healthMessage = healthMessage; }
+    public LocalDateTime getHealthCheckedAt() { return healthCheckedAt; }
+    public void setHealthCheckedAt(LocalDateTime healthCheckedAt) { this.healthCheckedAt = healthCheckedAt; }
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }

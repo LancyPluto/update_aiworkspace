@@ -10,12 +10,12 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
+import { fetchAdminAgentTools, updateAdminAgentToolAccess, type AgentToolAccess } from "@/lib/api/agent-tools"
 import { ApiError } from "@/lib/api/http"
 import { fetchSettings, updateSettings } from "@/lib/api/settings"
-import { fetchAdminTools } from "@/lib/api/tools"
-import type { ToolSummary } from "@/lib/api/types"
-import { AlertTriangle, Bot, BrainCircuit, CheckCircle2, Database, RefreshCw, Save, Wrench } from "lucide-react"
+import { AlertTriangle, Bot, BrainCircuit, CheckCircle2, Database, RefreshCw, Save, SlidersHorizontal, Wrench } from "lucide-react"
 
 const AGENT_SYSTEM_PROMPT_KEY = "agent.system_prompt"
 const DEEP_AGENTS_SYSTEM_PROMPT_KEY = "agent.deep_agents_system_prompt"
@@ -29,32 +29,64 @@ const DEFAULT_AGENT_SYSTEM_PROMPT = `你是 AI 工具市场的云代理。你的
 4. 如果缺少工具必填参数，先用自然语言追问；不要编造参数。
 5. 回答要简洁、可执行，必要时说明你将使用哪个工具。`
 
-const DEFAULT_DEEP_AGENTS_SYSTEM_PROMPT = `你是 AI 工具市场的工作区 Agent。你可以结合会话历史、工作区记忆、文件上下文和可用工具来规划并完成任务。
-保持步骤清晰，优先使用平台工具完成用户明确要求的生成或分析任务，并在最终答案中给出清晰结果。`
+const DEFAULT_DEEP_AGENTS_SYSTEM_PROMPT = `你是 AI 工具市场的工作区 Agent。你可以结合会话历史、工作区记忆、文件上下文和可用工具来规划并完成任务。保持步骤清晰，优先使用平台工具完成用户明确要求的生成或分析任务，并在最终答案中给出清晰结果。`
+
+const MODALITY_LABELS: Record<string, string> = {
+  TEXT: "文本",
+  IMAGE: "图片",
+  AUDIO: "音频",
+  VIDEO: "视频",
+  JSON: "JSON",
+  FILE: "文件",
+  MULTIMODAL: "多模态",
+  UNKNOWN: "未分类",
+}
 
 function errorMessage(error: unknown, fallback: string) {
   return error instanceof ApiError ? error.message : fallback
 }
 
+function modalityKey(value?: string | null) {
+  const normalized = value?.trim().toUpperCase()
+  return normalized || "UNKNOWN"
+}
+
+function modalityLabel(value?: string | null) {
+  const key = modalityKey(value)
+  return MODALITY_LABELS[key] || key
+}
+
+function toolHealthBadge(tool: AgentToolAccess) {
+  const status = (tool.healthStatus || "UNKNOWN").toUpperCase()
+  if (status === "FAILED") {
+    return <Badge variant="destructive">Health failed</Badge>
+  }
+  if (status === "HEALTHY") {
+    return <Badge variant="default">Healthy</Badge>
+  }
+  return <Badge variant="outline">Unknown</Badge>
+}
+
 export default function PromptsPage() {
   const [agentPrompt, setAgentPrompt] = useState(DEFAULT_AGENT_SYSTEM_PROMPT)
   const [deepAgentsPrompt, setDeepAgentsPrompt] = useState(DEFAULT_DEEP_AGENTS_SYSTEM_PROMPT)
-  const [tools, setTools] = useState<ToolSummary[]>([])
+  const [tools, setTools] = useState<AgentToolAccess[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [updatingToolCode, setUpdatingToolCode] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   async function loadConfig() {
     setLoading(true)
     setError(null)
     try {
-      const [settings, toolPage] = await Promise.all([
+      const [settings, agentTools] = await Promise.all([
         fetchSettings(),
-        fetchAdminTools({ status: "ONLINE", pageNo: 1, pageSize: 1000 }),
+        fetchAdminAgentTools(),
       ])
       setAgentPrompt(settings[AGENT_SYSTEM_PROMPT_KEY] || DEFAULT_AGENT_SYSTEM_PROMPT)
       setDeepAgentsPrompt(settings[DEEP_AGENTS_SYSTEM_PROMPT_KEY] || DEFAULT_DEEP_AGENTS_SYSTEM_PROMPT)
-      setTools(toolPage.list || [])
+      setTools(agentTools || [])
     } catch (err) {
       setError(errorMessage(err, "加载 Agent 配置失败"))
     } finally {
@@ -85,17 +117,57 @@ export default function PromptsPage() {
     }
   }
 
+  async function toggleToolAccess(tool: AgentToolAccess, agentEnabled: boolean) {
+    setUpdatingToolCode(tool.toolCode)
+    setError(null)
+    const previousTools = tools
+    setTools((current) =>
+      current.map((item) => (item.toolCode === tool.toolCode ? { ...item, agentEnabled } : item)),
+    )
+    try {
+      const updated = await updateAdminAgentToolAccess(tool.toolCode, agentEnabled)
+      setTools((current) => current.map((item) => (item.toolCode === tool.toolCode ? updated : item)))
+      toast.success(agentEnabled ? "已启用 Agent 工具" : "已禁用 Agent 工具", {
+        description: tool.toolName,
+      })
+    } catch (err) {
+      const message = errorMessage(err, "更新 Agent 工具可见性失败")
+      setTools(previousTools)
+      setError(message)
+      toast.error("更新失败", { description: message })
+    } finally {
+      setUpdatingToolCode(null)
+    }
+  }
+
   const modelBoundToolCount = useMemo(
     () => tools.filter((tool) => tool.modelConfigId != null || tool.modelName).length,
     [tools],
   )
-  const previewTools = tools.slice(0, 12)
+  const agentEnabledToolCount = useMemo(
+    () => tools.filter((tool) => tool.agentEnabled).length,
+    [tools],
+  )
+  const groupedTools = useMemo(() => {
+    const groups = new Map<string, AgentToolAccess[]>()
+    for (const tool of tools) {
+      const key = modalityKey(tool.outputModality)
+      groups.set(key, [...(groups.get(key) || []), tool])
+    }
+    return Array.from(groups.entries())
+      .map(([key, items]) => ({
+        key,
+        label: modalityLabel(key),
+        tools: items.sort((left, right) => left.toolName.localeCompare(right.toolName, "zh-CN")),
+      }))
+      .sort((left, right) => left.label.localeCompare(right.label, "zh-CN"))
+  }, [tools])
 
   return (
     <AdminLayout>
       <AdminHeader
         title="Agent 配置"
-        description="配置 Agent 的系统提示词，并检查它能读取的在线 AI 工具"
+        description="配置 Agent 的系统提示词，并管理它能读取的在线 AI 工具"
       />
 
       <main className="space-y-6 p-6">
@@ -115,7 +187,7 @@ export default function PromptsPage() {
               </div>
               <div>
                 <CardTitle>Agent 模型</CardTitle>
-                <CardDescription>由后台模型表的“作为 Agent 模型”决定前台可选项</CardDescription>
+                <CardDescription>由后台模型表的 Agent 可用配置决定前台可选项</CardDescription>
               </div>
             </CardHeader>
           </Card>
@@ -127,7 +199,7 @@ export default function PromptsPage() {
               </div>
               <div>
                 <CardTitle>AI 工具</CardTitle>
-                <CardDescription>Agent 读取在线工具，工具执行使用各自绑定模型</CardDescription>
+                <CardDescription>Agent 只读取启用的在线工具，工具执行使用各自绑定模型</CardDescription>
               </div>
             </CardHeader>
           </Card>
@@ -139,13 +211,13 @@ export default function PromptsPage() {
               </div>
               <div>
                 <CardTitle>系统配置</CardTitle>
-                <CardDescription>提示词保存到 system_settings，无需新增业务表</CardDescription>
+                <CardDescription>提示词保存到 system_settings，工具开关保存到 Agent 扩展表</CardDescription>
               </div>
             </CardHeader>
           </Card>
         </section>
 
-        <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
+        <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
           <div className="space-y-6">
             <Card className="rounded-lg">
               <CardHeader>
@@ -156,7 +228,7 @@ export default function PromptsPage() {
                       普通 Agent 系统提示词
                     </CardTitle>
                     <CardDescription>
-                      用于常规对话、工具推荐和参数追问。平台会在运行时自动追加在线工具清单。
+                      用于常规对话、工具推荐和参数追问。平台会在运行时自动追加启用的工具清单。
                     </CardDescription>
                   </div>
                   <Badge variant="secondary">{AGENT_SYSTEM_PROMPT_KEY}</Badge>
@@ -211,9 +283,12 @@ export default function PromptsPage() {
           <aside className="space-y-6">
             <Card className="rounded-lg">
               <CardHeader>
-                <CardTitle>工具读取范围</CardTitle>
+                <CardTitle className="flex items-center gap-2">
+                  <SlidersHorizontal className="h-5 w-5" />
+                  工具读取范围
+                </CardTitle>
                 <CardDescription>
-                  当前 Agent 上下文会读取在线工具；单个工具的模型来自工具自身配置。
+                  按输出模态管理 Agent 可见工具；禁用后不会进入 Agent 运行时工具清单。
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -223,28 +298,66 @@ export default function PromptsPage() {
                     <div className="text-xs text-muted-foreground">在线工具</div>
                   </div>
                   <div className="rounded-lg border bg-muted/40 p-3">
+                    <div className="text-2xl font-semibold">{loading ? "-" : agentEnabledToolCount}</div>
+                    <div className="text-xs text-muted-foreground">Agent 可见</div>
+                  </div>
+                  <div className="rounded-lg border bg-muted/40 p-3">
+                    <div className="text-2xl font-semibold">{loading ? "-" : tools.length - agentEnabledToolCount}</div>
+                    <div className="text-xs text-muted-foreground">已禁用</div>
+                  </div>
+                  <div className="rounded-lg border bg-muted/40 p-3">
                     <div className="text-2xl font-semibold">{loading ? "-" : modelBoundToolCount}</div>
                     <div className="text-xs text-muted-foreground">已绑定模型</div>
                   </div>
                 </div>
 
-                <div className="space-y-2">
+                <div className="max-h-[560px] space-y-3 overflow-y-auto pr-1">
                   {loading ? (
                     Array.from({ length: 6 }).map((_, index) => (
-                      <Skeleton key={index} className="h-10 w-full" />
+                      <Skeleton key={index} className="h-16 w-full" />
                     ))
-                  ) : previewTools.length ? (
-                    previewTools.map((tool) => (
-                      <div key={tool.id} className="rounded-lg border px-3 py-2">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="truncate text-sm font-medium">{tool.toolName}</span>
-                          <Badge variant={tool.modelConfigId != null || tool.modelName ? "default" : "outline"}>
-                            {tool.modelConfigId != null || tool.modelName ? "有模型" : "未绑定"}
-                          </Badge>
+                  ) : groupedTools.length ? (
+                    groupedTools.map((group) => (
+                      <div key={group.key} className="space-y-2">
+                        <div className="flex items-center justify-between text-xs text-muted-foreground">
+                          <span className="font-medium text-foreground">{group.label}</span>
+                          <span>{group.tools.filter((tool) => tool.agentEnabled).length}/{group.tools.length}</span>
                         </div>
-                        <div className="mt-1 truncate text-xs text-muted-foreground">
-                          {tool.toolCode}
-                        </div>
+                        {group.tools.map((tool) => {
+                          const hasModel = tool.modelConfigId != null || Boolean(tool.modelName)
+                          const healthStatus = (tool.healthStatus || "UNKNOWN").toUpperCase()
+                          return (
+                            <div key={tool.id} className="rounded-lg border px-3 py-3">
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0 space-y-1">
+                                  <div className="truncate text-sm font-medium">{tool.toolName}</div>
+                                  <div className="truncate text-xs text-muted-foreground">{tool.toolCode}</div>
+                                  <div className="flex flex-wrap gap-1.5">
+                                    <Badge variant={hasModel ? "default" : "outline"}>
+                                      {hasModel ? "有模型" : "未绑定"}
+                                    </Badge>
+                                    <Badge variant="secondary">{modalityLabel(tool.outputModality)}</Badge>
+                                    {toolHealthBadge(tool)}
+                                  </div>
+                                  {healthStatus === "FAILED" && tool.healthMessage ? (
+                                    <div className="line-clamp-2 text-xs text-destructive">{tool.healthMessage}</div>
+                                  ) : null}
+                                </div>
+                                <div className="flex shrink-0 flex-col items-end gap-2">
+                                  <Switch
+                                    checked={tool.agentEnabled}
+                                    disabled={updatingToolCode === tool.toolCode}
+                                    aria-label={`${tool.agentEnabled ? "禁用" : "启用"} ${tool.toolName}`}
+                                    onCheckedChange={(checked) => toggleToolAccess(tool, checked)}
+                                  />
+                                  <span className="text-xs text-muted-foreground">
+                                    {tool.agentEnabled ? "启用" : "禁用"}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          )
+                        })}
                       </div>
                     ))
                   ) : (
@@ -260,7 +373,7 @@ export default function PromptsPage() {
               <CheckCircle2 />
               <AlertTitle>当前链路</AlertTitle>
               <AlertDescription>
-                前台选择的是 Agent 推理模型；Agent 读取在线 AI 工具列表；工具真正执行时继续使用后台工具绑定的模型和参数。
+                前台选择的是 Agent 推理模型；Agent 读取启用的在线 AI 工具列表；工具真正执行时继续使用后台工具绑定的模型和参数。
               </AlertDescription>
             </Alert>
           </aside>

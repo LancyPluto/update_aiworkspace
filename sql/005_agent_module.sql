@@ -60,7 +60,7 @@ CREATE TABLE IF NOT EXISTS agent_run_events (
   run_id BIGINT NOT NULL,
   user_id BIGINT NOT NULL,
   event_type VARCHAR(64) NOT NULL,
-  event_text TEXT NULL,
+  event_text MEDIUMTEXT NULL,
   event_json JSON NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   KEY idx_agent_run_events_run_id (run_id, id),
