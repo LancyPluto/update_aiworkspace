@@ -189,11 +189,15 @@ class KlingVideoClient:
         path = self._task_result_path(task_id, self.image_generation_result_path)
         while time.monotonic() < deadline:
             last_payload = self._request("GET", path, None)
+            if self._extract_image_urls_or_empty(last_payload):
+                return last_payload
             status = self._extract_status(last_payload).lower()
             if status in {"succeeded", "succeed", "success", "completed", "done"}:
                 return last_payload
             if status in {"failed", "fail", "error", "cancelled", "canceled"}:
                 reason = str(last_payload.get("message") or last_payload.get("reason") or "kling image generation failed")
+                if reason.strip().lower() in {"succeeded", "succeed", "success", "completed", "done"}:
+                    return last_payload
                 raise KlingVideoError(reason)
             time.sleep(self.poll_interval_seconds)
         raise KlingVideoTimeoutError(
@@ -467,13 +471,30 @@ class KlingVideoClient:
 
     @classmethod
     def _extract_image_urls_or_empty(cls, payload: dict[str, Any]) -> list[str]:
-        urls: list[str] = []
-        for value in cls._walk(payload):
-            if isinstance(value, str) and cls._looks_like_image_url(value):
-                urls.append(value.strip())
+        urls = cls._collect_image_urls(payload)
         if urls:
             return list(dict.fromkeys(urls))
         return []
+
+    @classmethod
+    def _collect_image_urls(cls, value: Any, parent_key: str = "") -> list[str]:
+        urls: list[str] = []
+        if isinstance(value, dict):
+            for key, nested in value.items():
+                urls.extend(cls._collect_image_urls(nested, str(key)))
+            return urls
+        if isinstance(value, list):
+            for item in value:
+                urls.extend(cls._collect_image_urls(item, parent_key))
+            return urls
+        if not isinstance(value, str):
+            return urls
+        candidate = value.strip()
+        if cls._looks_like_image_url(candidate):
+            return [candidate]
+        if cls._looks_like_image_url_field(parent_key, candidate):
+            return [candidate]
+        return urls
 
     @classmethod
     def _walk(cls, value: Any) -> list[Any]:
@@ -495,6 +516,27 @@ class KlingVideoClient:
     def _looks_like_image_url(value: str) -> bool:
         lowered = value.lower().split("?", 1)[0]
         return lowered.startswith(("http://", "https://")) and lowered.endswith((".jpg", ".jpeg", ".png", ".webp", ".gif"))
+
+    @staticmethod
+    def _looks_like_image_url_field(key: str, value: str) -> bool:
+        lowered_key = key.lower()
+        lowered_value = value.lower().split("?", 1)[0]
+        if not lowered_value.startswith(("http://", "https://")):
+            return False
+        if lowered_value.endswith((".mp4", ".mov", ".webm", ".m3u8")):
+            return False
+        return lowered_key in {
+            "url",
+            "image",
+            "image_url",
+            "imageurl",
+            "origin_image_url",
+            "originimageurl",
+            "generated_image_url",
+            "generatedimageurl",
+            "result_url",
+            "resulturl",
+        }
 
     @staticmethod
     def _duration_seconds(duration: str) -> int | None:

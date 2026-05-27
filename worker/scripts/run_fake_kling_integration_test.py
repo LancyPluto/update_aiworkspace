@@ -290,10 +290,61 @@ def test_kling_client_polls_async_image_generation() -> None:
     assert client.requests[1] == ("GET", "/v1/images/generations/image-task-123", None)
 
 
+def test_kling_image_generation_accepts_success_reason_with_failed_status() -> None:
+    class RecordingKlingClient(KlingVideoClient):
+        def __init__(self) -> None:
+            super().__init__(access_key="fake-ak", secret_key="fake-sk", poll_interval_seconds=0.01, timeout_seconds=1)
+
+        def _request(self, method: str, path: str, payload: dict | None) -> dict:
+            if method == "POST":
+                return {"code": 0, "data": {"task_id": "image-task-456", "task_status": "submitted"}}
+            return {
+                "code": 0,
+                "data": {
+                    "task_id": "image-task-456",
+                    "task_status": "failed",
+                    "task_status_msg": "SUCCEED",
+                    "task_result": {
+                        "images": [{"url": "https://example.com/kling-result.png"}],
+                    },
+                },
+            }
+
+    client = RecordingKlingClient()
+
+    assert client.generate_images(prompt="画一只猫", model="kling-v3") == ["https://example.com/kling-result.png"]
+
+
+def test_kling_image_generation_accepts_signed_image_url_without_extension() -> None:
+    class RecordingKlingClient(KlingVideoClient):
+        def __init__(self) -> None:
+            super().__init__(access_key="fake-ak", secret_key="fake-sk", poll_interval_seconds=0.01, timeout_seconds=1)
+
+        def _request(self, method: str, path: str, payload: dict | None) -> dict:
+            if method == "POST":
+                return {"code": 0, "data": {"task_id": "image-task-789", "task_status": "submitted"}}
+            return {
+                "code": 0,
+                "data": {
+                    "task_id": "image-task-789",
+                    "task_status": "succeed",
+                    "task_result": {
+                        "images": [{"url": "https://cdn.example.com/download?id=abc&token=signed"}],
+                    },
+                },
+            }
+
+    client = RecordingKlingClient()
+
+    assert client.generate_images(prompt="画一只猫", model="kling-v3") == ["https://cdn.example.com/download?id=abc&token=signed"]
+
+
 if __name__ == "__main__":
     test_kling_video_handler()
     test_kling_image_handler()
     test_kling_client_encodes_input_images()
     test_kling_client_uses_image2video_result_path()
     test_kling_client_polls_async_image_generation()
+    test_kling_image_generation_accepts_success_reason_with_failed_status()
+    test_kling_image_generation_accepts_signed_image_url_without_extension()
     print("FAKE_KLING_INTEGRATION_TEST_PASSED")
