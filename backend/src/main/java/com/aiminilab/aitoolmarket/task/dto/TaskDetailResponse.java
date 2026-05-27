@@ -22,6 +22,8 @@ public record TaskDetailResponse(
         JsonNode params,
         TaskResultResponse result,
         LocalDateTime createdAt,
+        LocalDateTime queuedAt,
+        LocalDateTime startedAt,
         LocalDateTime finishedAt
 ) {
     public static TaskDetailResponse of(AiTask task, JsonNode params, TaskResultResponse result) {
@@ -42,6 +44,8 @@ public record TaskDetailResponse(
                 params,
                 result,
                 task.getCreatedAt(),
+                task.getQueuedAt(),
+                task.getStartedAt(),
                 task.getFinishedAt()
         );
     }

@@ -10,15 +10,18 @@ import {
   Wallet,
   FolderHeart,
   ChevronDown,
+  Moon,
   PanelLeft,
   PanelLeftClose,
   Sparkles,
+  Sun,
 } from "lucide-vue-next"
 import { ref, onMounted, computed, watch } from "vue"
 import { fetchCreditAccount } from "@/api/creditApi"
 import type { CreditAccount } from "@/api/types"
 import { useAuthStore } from "@/store/authStore"
 import MemberBadge from "@/components/MemberBadge/MemberBadge.vue"
+import { applyAppTheme, getStoredTheme, storeAppTheme, type AppTheme } from "@/utils/theme"
 
 withDefaults(
   defineProps<{
@@ -50,6 +53,7 @@ const SIDEBAR_OPEN_KEY = "ai_tool_market_sidebar_open"
 const EXPANDED_GROUPS_KEY = "ai_tool_market_nav_expanded_groups"
 
 const credit = ref<CreditAccount | null>(null)
+const theme = ref<AppTheme>("light")
 const sidebarOpen = ref(true)
 const expandedGroups = ref<Set<string>>(new Set())
 
@@ -75,8 +79,17 @@ function toggleSidebar() {
   sidebarOpen.value = !sidebarOpen.value
 }
 
+function toggleTheme() {
+  theme.value = theme.value === "dark" ? "light" : "dark"
+}
+
 watch(sidebarOpen, (open) => {
   localStorage.setItem(SIDEBAR_OPEN_KEY, open ? "1" : "0")
+})
+
+watch(theme, (next) => {
+  applyAppTheme(next)
+  storeAppTheme(next)
 })
 
 function saveExpandedGroups() {
@@ -164,6 +177,9 @@ watch(
 )
 
 onMounted(async () => {
+  theme.value = getStoredTheme()
+  applyAppTheme(theme.value)
+
   const saved = localStorage.getItem(SIDEBAR_OPEN_KEY)
   if (saved === "0") sidebarOpen.value = false
   if (saved === "1") sidebarOpen.value = true
@@ -186,7 +202,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="flex h-screen overflow-hidden bg-background text-foreground">
+  <div class="app-shell-root flex h-screen overflow-hidden bg-background text-foreground">
     <aside
       class="fixed inset-y-0 left-0 z-40 hidden w-60 shrink-0 flex-col border-r border-border bg-card"
       :class="sidebarOpen ? 'lg:flex' : 'lg:hidden'"
@@ -308,6 +324,17 @@ onMounted(async () => {
           <p v-if="description" class="text-xs text-muted-foreground truncate">{{ description }}</p>
         </div>
         <div class="ml-auto flex items-center gap-3">
+          <button
+            type="button"
+            class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border bg-background/75 text-muted-foreground transition hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            :aria-label="theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'"
+            :title="theme === 'dark' ? 'Light mode' : 'Dark mode'"
+            :aria-pressed="theme === 'dark'"
+            @click="toggleTheme"
+          >
+            <Sun v-if="theme === 'dark'" class="h-4 w-4" aria-hidden="true" />
+            <Moon v-else class="h-4 w-4" aria-hidden="true" />
+          </button>
           <template v-if="auth.isLoggedIn">
             <div class="flex items-center gap-2">
               <MemberBadge :available="availableCredits" />

@@ -18,6 +18,7 @@ import com.aiminilab.aitoolmarket.credit.wechat.QrCodeDataUriGenerator;
 import com.aiminilab.aitoolmarket.credit.wechat.WechatNativePayClient;
 import com.aiminilab.aitoolmarket.credit.wechat.WechatPayCallbackHeaders;
 import com.aiminilab.aitoolmarket.credit.wechat.WechatPayNotification;
+import com.aiminilab.aitoolmarket.config.AppProperties;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
@@ -35,6 +36,7 @@ import java.util.UUID;
 public class CreditRechargeServiceImpl implements CreditRechargeService {
     private static final DateTimeFormatter ORDER_DATE = DateTimeFormatter.ofPattern("yyyyMMdd");
     private static final int ORDER_EXPIRE_MINUTES = 30;
+    private static final int WECHAT_QUERY_THROTTLE_SECONDS = 10;
 
     private final CreditRechargePackageMapper packageMapper;
     private final CreditRechargeOrderMapper orderMapper;
@@ -42,19 +44,22 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
     private final ObjectMapper objectMapper;
     private final WechatNativePayClient wechatNativePayClient;
     private final QrCodeDataUriGenerator qrCodeDataUriGenerator;
+    private final AppProperties.WechatNative wechatProperties;
 
     public CreditRechargeServiceImpl(CreditRechargePackageMapper packageMapper,
                                      CreditRechargeOrderMapper orderMapper,
                                      CreditService creditService,
                                      ObjectMapper objectMapper,
                                      WechatNativePayClient wechatNativePayClient,
-                                     QrCodeDataUriGenerator qrCodeDataUriGenerator) {
+                                     QrCodeDataUriGenerator qrCodeDataUriGenerator,
+                                     AppProperties appProperties) {
         this.packageMapper = packageMapper;
         this.orderMapper = orderMapper;
         this.creditService = creditService;
         this.objectMapper = objectMapper;
         this.wechatNativePayClient = wechatNativePayClient;
         this.qrCodeDataUriGenerator = qrCodeDataUriGenerator;
+        this.wechatProperties = appProperties.getPayment().getWechatNative();
     }
 
     @Override
@@ -65,7 +70,6 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
     }
 
     @Override
-    @Transactional
     public RechargeOrderResponse createOrder(Long userId, CreateRechargeOrderRequest request) {
         String idempotencyKey = normalizeIdempotencyKey(request.clientRequestId());
         if (idempotencyKey != null) {
@@ -94,25 +98,38 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
         order.setCreatedAt(now);
         order.setUpdatedAt(now);
         if ("WECHAT_NATIVE".equals(paymentChannel)) {
-            NativePrepayResponse prepay = wechatNativePayClient.createNativeOrder(new NativePrepayRequest(
-                    order.getOrderNo(),
-                    "AI工具市场算力充值-" + rechargePackage.getPackageName(),
-                    priceToFen(rechargePackage.getPriceAmount()),
-                    rechargePackage.getCurrency(),
-                    expiresAt
-            ));
-            order.setPayUrl(prepay.codeUrl());
             order.setQrCodeUrl(null);
         } else {
             order.setPayUrl("/mock-pay/recharge/" + order.getOrderNo());
             order.setQrCodeUrl(null);
         }
         orderMapper.insert(order);
-        return responseFrom(order);
+        if ("WECHAT_NATIVE".equals(paymentChannel)) {
+            try {
+                NativePrepayResponse prepay = wechatNativePayClient.createNativeOrder(new NativePrepayRequest(
+                        order.getOrderNo(),
+                        "AI Tool Market credits recharge - " + rechargePackage.getPackageName(),
+                        priceToFen(rechargePackage.getPriceAmount()),
+                        rechargePackage.getCurrency(),
+                        expiresAt
+                ));
+                if (orderMapper.bindPayUrl(order.getId(), prepay.codeUrl(), "WeChat Native prepay created", LocalDateTime.now()) != 1) {
+                    throw new BusinessException(ErrorCode.PARAM_ERROR, "recharge order status changed before WeChat prepay binding");
+                }
+            } catch (BusinessException exception) {
+                orderMapper.transit(order.getId(), RechargeOrderStatus.WAITING_PAYMENT.name(), RechargeOrderStatus.FAILED.name(),
+                        exception.getMessage(), LocalDateTime.now());
+                throw exception;
+            }
+        }
+        return responseFrom(orderMapper.findByOrderNo(order.getOrderNo()));
     }
 
     @Override
+    @Transactional
     public RechargeOrderResponse getOrder(Long userId, Long orderId) {
+        CreditRechargeOrder order = orderOrThrow(userId, orderId);
+        refreshWechatOrderIfNeeded(order);
         return responseFrom(orderOrThrow(userId, orderId));
     }
 
@@ -127,6 +144,7 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
                 new WechatPayCallbackHeaders(serial, signature, timestamp, nonce),
                 body
         );
+        validateWechatMerchant(notification);
         if (!"SUCCESS".equals(notification.tradeState())) {
             return;
         }
@@ -134,6 +152,71 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "unsupported WeChat trade type");
         }
         CreditRechargeOrder order = orderMapper.findByOrderNo(notification.outTradeNo());
+        if (order == null || !"WECHAT_NATIVE".equals(order.getPaymentChannel())) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "recharge order not found for WeChat notification");
+        }
+        if (RechargeOrderStatus.CREDITED.name().equals(order.getStatus())) {
+            return;
+        }
+        if (priceToFen(order.getPriceAmount()) != notification.totalAmountFen()) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "WeChat payment amount mismatch");
+        }
+        if (order.getCurrency() != null && !order.getCurrency().equals(notification.currency())) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "WeChat payment currency mismatch");
+        }
+        if (orderMapper.bindExternalTradeNo(order.getId(), notification.transactionId(), LocalDateTime.now()) == 0) {
+            CreditRechargeOrder current = orderMapper.findByOrderNo(notification.outTradeNo());
+            if (current == null || !notification.transactionId().equals(current.getExternalTradeNo())) {
+                throw new BusinessException(ErrorCode.PARAM_ERROR, "WeChat transaction id conflicts with recharge order");
+            }
+        }
+        grantPaidOrderIfNeeded(orderMapper.findByOrderNo(notification.outTradeNo()), "WeChat Native payment confirmed",
+                "WeChat Native recharge order " + order.getOrderNo());
+    }
+
+    private void refreshWechatOrderIfNeeded(CreditRechargeOrder order) {
+        if (!"WECHAT_NATIVE".equals(order.getPaymentChannel())) {
+            return;
+        }
+        RechargeOrderStatus status = RechargeOrderStatus.valueOf(order.getStatus());
+        if (status.terminal()) {
+            return;
+        }
+        LocalDateTime now = LocalDateTime.now();
+        if (RechargeOrderStatus.WAITING_PAYMENT.name().equals(order.getStatus())
+                && order.getExpiresAt() != null
+                && order.getExpiresAt().isBefore(now)) {
+            transitOrCurrent(order, RechargeOrderStatus.CLOSED, "order expired");
+            return;
+        }
+        if (order.getUpdatedAt() != null && order.getUpdatedAt().isAfter(now.minusSeconds(WECHAT_QUERY_THROTTLE_SECONDS))) {
+            return;
+        }
+        WechatPayNotification notification = wechatNativePayClient.queryNativeOrder(order.getOrderNo());
+        if (notification == null) {
+            orderMapper.touchStatusReason(order.getId(), order.getStatus(), "WeChat order not found yet", now);
+            return;
+        }
+        validateWechatMerchant(notification);
+        if (!"NATIVE".equals(notification.tradeType())) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "unsupported WeChat trade type");
+        }
+        if ("SUCCESS".equals(notification.tradeState())) {
+            applyPaidWechatNotification(order, notification);
+            return;
+        }
+        if ("CLOSED".equals(notification.tradeState()) || "REVOKED".equals(notification.tradeState())) {
+            transitOrCurrent(order, RechargeOrderStatus.CLOSED, "WeChat order " + notification.tradeState());
+            return;
+        }
+        if ("PAYERROR".equals(notification.tradeState())) {
+            transitOrCurrent(order, RechargeOrderStatus.FAILED, "WeChat payment failed");
+            return;
+        }
+        orderMapper.touchStatusReason(order.getId(), order.getStatus(), "WeChat order state " + notification.tradeState(), now);
+    }
+
+    private void applyPaidWechatNotification(CreditRechargeOrder order, WechatPayNotification notification) {
         if (order == null || !"WECHAT_NATIVE".equals(order.getPaymentChannel())) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "recharge order not found for WeChat notification");
         }
@@ -197,6 +280,14 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
         }
         if (!RechargeOrderStatus.valueOf(order.getStatus()).terminal()) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "recharge order cannot grant credits from status " + order.getStatus());
+        }
+    }
+
+    private void validateWechatMerchant(WechatPayNotification notification) {
+        if (notification == null
+                || !wechatProperties.getAppid().equals(notification.appid())
+                || !wechatProperties.getMchid().equals(notification.mchid())) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "WeChat payment merchant identity mismatch");
         }
     }
 

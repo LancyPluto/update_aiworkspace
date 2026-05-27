@@ -64,6 +64,8 @@ interface Task {
   errorMessage: string
   progressMessage: string
   createdAt: string
+  queuedAt: string
+  startedAt: string
   completedAt: string
   duration: string
 }
@@ -183,8 +185,10 @@ function rowToTask(row: AdminTaskApiPayload): Task {
     errorMessage: row.errorMessage?.trim() || "",
     progressMessage: row.progressMessage?.trim() || "",
     createdAt: formatDateTime(row.createdAt),
+    queuedAt: formatDateTime(row.queuedAt),
+    startedAt: formatDateTime(row.startedAt),
     completedAt: formatDateTime(row.finishedAt),
-    duration: computeDuration(row.createdAt, row.finishedAt),
+    duration: computeDuration(row.startedAt ?? row.queuedAt ?? row.createdAt, row.finishedAt),
   }
 }
 
@@ -306,7 +310,7 @@ function renderTaskOutput(task?: Task | null) {
   }
 
   return (
-    <pre className="whitespace-pre-wrap text-sm">
+    <pre className="min-w-0 whitespace-pre-wrap break-words text-sm">
       {content || "暂无输出"}
     </pre>
   )
@@ -392,6 +396,8 @@ export default function TasksPage() {
         errorMessage: row.errorMessage,
         progressMessage: row.progressMessage,
         credits: row.credits,
+        queuedAt: row.queuedAt,
+        startedAt: row.startedAt,
         completedAt: row.completedAt,
         duration: row.duration,
       })
@@ -456,8 +462,8 @@ export default function TasksPage() {
                 <Eye className="h-4 w-4" />
               </Button>
             </DialogTrigger>
-            <DialogContent className="bg-card border-border max-w-2xl">
-              <DialogHeader>
+            <DialogContent className="h-[min(760px,calc(100vh-2rem))] !max-w-[min(960px,calc(100vw-2rem))] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden border-border bg-card">
+              <DialogHeader className="shrink-0 pr-8">
                 <DialogTitle>任务详情</DialogTitle>
                 <DialogDescription>
                   {detailLoadingId === item.rawId
@@ -465,23 +471,23 @@ export default function TasksPage() {
                     : `任务 ID: ${selectedTask?.id || item.id}`}
                 </DialogDescription>
               </DialogHeader>
-              <Tabs defaultValue="input" className="mt-4">
-                <TabsList className="bg-secondary">
+              <Tabs defaultValue="input" className="mt-4 flex min-h-0 flex-col overflow-hidden">
+                <TabsList className="shrink-0 bg-secondary">
                   <TabsTrigger value="input">输入参数</TabsTrigger>
                   <TabsTrigger value="output">生成结果</TabsTrigger>
                   {taskDialogError(item, selectedTask) && (
                     <TabsTrigger value="error">错误信息</TabsTrigger>
                   )}
                 </TabsList>
-                <TabsContent value="input" className="mt-4">
-                  <div className="rounded-lg bg-secondary p-4">
-                    <pre className="whitespace-pre-wrap text-sm">
+                <TabsContent value="input" className="mt-4 min-h-0 flex-1 overflow-hidden data-[state=active]:flex">
+                  <div className="h-full min-h-0 w-full min-w-0 overflow-auto overscroll-contain rounded-lg bg-secondary p-4">
+                    <pre className="min-w-0 whitespace-pre-wrap break-words text-sm">
                       {selectedTask?.input || "—"}
                     </pre>
                   </div>
                 </TabsContent>
-                <TabsContent value="output" className="mt-4">
-                  <div className="rounded-lg bg-secondary p-4">
+                <TabsContent value="output" className="mt-4 min-h-0 flex-1 overflow-hidden data-[state=active]:flex">
+                  <div className="h-full min-h-0 w-full min-w-0 overflow-auto overscroll-contain rounded-lg bg-secondary p-4">
                     {renderTaskOutput(selectedTask)}
                   </div>
                 </TabsContent>
@@ -491,38 +497,38 @@ export default function TasksPage() {
                   const fullError = taskDialogError(item, selectedTask)
                   const summary = current.progressMessage || current.error || "-"
                   return (
-                  <TabsContent value="error" className="mt-4">
-                    <div className={tone.wrap}>
+                  <TabsContent value="error" className="mt-4 min-h-0 flex-1 overflow-hidden data-[state=active]:flex">
+                    <div className={`${tone.wrap} h-full min-h-0 w-full min-w-0 overflow-hidden`}>
                       <div className="flex items-start gap-3">
-                        <AlertCircle className={`mt-0.5 h-5 w-5 ${tone.icon}`} />
-                        <div className="min-w-0 flex-1 space-y-3">
+                        <AlertCircle className={`mt-0.5 h-5 w-5 shrink-0 ${tone.icon}`} />
+                        <div className="min-h-0 min-w-0 flex-1 space-y-3 overflow-auto overscroll-contain pr-1">
                           <div className="flex flex-wrap items-center gap-2">
                             <p className={`font-medium ${tone.title}`}>
                               {errorStatusLabel(current.rawStatus)}
                             </p>
                             {current.errorCode && (
-                              <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${tone.code}`}>
+                              <span className={`max-w-full break-all rounded-full border px-2 py-0.5 text-xs font-medium ${tone.code}`}>
                                 {current.errorCode}
                               </span>
                             )}
                           </div>
                           <div className="grid gap-3 text-sm sm:grid-cols-2">
-                            <div>
+                            <div className="min-w-0">
                               <p className="text-xs text-muted-foreground">当前状态</p>
-                              <p className="mt-1 font-medium">{current.statusLabel}</p>
+                              <p className="mt-1 break-words font-medium">{current.statusLabel}</p>
                             </div>
-                            <div>
+                            <div className="min-w-0">
                               <p className="text-xs text-muted-foreground">结束时间</p>
-                              <p className="mt-1 font-medium">{current.completedAt || "-"}</p>
+                              <p className="mt-1 break-words font-medium">{current.completedAt || "-"}</p>
                             </div>
                           </div>
                           <div>
                             <p className="text-xs text-muted-foreground">阶段摘要</p>
-                            <p className="mt-1 text-sm text-card-foreground">{summary}</p>
+                            <p className="mt-1 break-words text-sm text-card-foreground">{summary}</p>
                           </div>
                           <div>
                             <p className="text-xs text-muted-foreground">完整错误信息</p>
-                            <pre className="mt-1 max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-md bg-background/80 p-3 text-xs text-card-foreground">
+                            <pre className="mt-1 max-h-40 max-w-full overflow-auto whitespace-pre-wrap break-all rounded-md bg-background/80 p-3 text-xs text-card-foreground">
                               {fullError}
                             </pre>
                           </div>
@@ -533,7 +539,7 @@ export default function TasksPage() {
                   )
                 })()}
               </Tabs>
-              <div className="mt-4 grid grid-cols-2 gap-4 text-sm">
+              <div className="mt-4 grid shrink-0 grid-cols-2 gap-4 text-sm">
                 <div>
                   <p className="text-muted-foreground">创建时间</p>
                   <p className="font-medium">
@@ -541,6 +547,12 @@ export default function TasksPage() {
                   </p>
                 </div>
                 <div>
+                <div>
+                  <p className="text-muted-foreground">????</p>
+                  <p className="font-medium">
+                    {selectedTask?.startedAt || item.startedAt}
+                  </p>
+                </div>
                   <p className="text-muted-foreground">完成时间</p>
                   <p className="font-medium">
                     {selectedTask?.completedAt || item.completedAt}

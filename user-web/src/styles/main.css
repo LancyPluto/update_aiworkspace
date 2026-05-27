@@ -22,6 +22,27 @@
   --chart-2: oklch(0.65 0.18 220);
 }
 
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --background: oklch(0.145 0.022 250);
+  --foreground: oklch(0.965 0.008 248);
+  --card: oklch(0.19 0.025 252);
+  --muted: oklch(0.245 0.025 252);
+  --muted-foreground: oklch(0.73 0.028 252);
+  --primary: oklch(0.72 0.18 248);
+  --primary-foreground: oklch(0.12 0.02 252);
+  --secondary: oklch(0.25 0.028 252);
+  --secondary-foreground: oklch(0.95 0.01 248);
+  --accent: oklch(0.27 0.075 255);
+  --accent-foreground: oklch(0.88 0.09 245);
+  --destructive: oklch(0.68 0.21 25);
+  --destructive-foreground: oklch(0.99 0 0);
+  --success: oklch(0.72 0.16 155);
+  --warning: oklch(0.82 0.16 78);
+  --border: oklch(0.34 0.03 252);
+  --chart-2: oklch(0.72 0.15 218);
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -54,4 +75,19 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans);
+}
+
+html[data-theme="dark"] body {
+  background:
+    radial-gradient(circle at 16% 10%, rgb(54 95 255 / 0.28), transparent 30%),
+    radial-gradient(circle at 82% 4%, rgb(25 210 225 / 0.18), transparent 28%),
+    radial-gradient(circle at 50% 110%, rgb(110 78 255 / 0.18), transparent 36%),
+    linear-gradient(135deg, #020617 0%, #07111f 46%, #030712 100%);
+}
+
+html[data-theme="dark"] .app-shell-root {
+  background:
+    radial-gradient(circle at 18% 0%, rgb(64 98 255 / 0.24), transparent 30%),
+    radial-gradient(circle at 78% 6%, rgb(18 190 214 / 0.14), transparent 26%),
+    linear-gradient(135deg, rgb(2 6 23 / 0.98), rgb(8 15 28 / 0.95) 52%, rgb(3 7 18 / 0.98));
 }

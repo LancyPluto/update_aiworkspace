@@ -12,6 +12,7 @@ import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 import java.io.IOException;
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -34,7 +35,9 @@ import java.util.UUID;
 @Component
 public class DefaultWechatNativePayClient implements WechatNativePayClient {
     private static final String METHOD = "POST";
+    private static final String GET_METHOD = "GET";
     private static final String NATIVE_PREPAY_PATH = "/v3/pay/transactions/native";
+    private static final String ORDER_QUERY_PATH_PREFIX = "/v3/pay/transactions/out-trade-no/";
     private static final DateTimeFormatter RFC3339 = DateTimeFormatter.ISO_OFFSET_DATE_TIME;
 
     private final AppProperties.WechatNative properties;
@@ -55,7 +58,6 @@ public class DefaultWechatNativePayClient implements WechatNativePayClient {
                     .uri(URI.create(properties.getApiBaseUrl() + NATIVE_PREPAY_PATH))
                     .header("Accept", "application/json")
                     .header("Content-Type", "application/json")
-                    .header("Wechatpay-Serial", properties.getWechatPayPublicKeyId())
                     .header("Authorization", authorization(METHOD, NATIVE_PREPAY_PATH, body))
                     .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
                     .build();
@@ -63,6 +65,7 @@ public class DefaultWechatNativePayClient implements WechatNativePayClient {
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
                 throw new BusinessException(ErrorCode.PARAM_ERROR, "WeChat Native prepay failed: " + response.body());
             }
+            verifyHttpResponseSignature(response);
             JsonNode json = objectMapper.readTree(response.body());
             String codeUrl = json.path("code_url").asText("");
             if (codeUrl.isBlank()) {
@@ -74,6 +77,36 @@ public class DefaultWechatNativePayClient implements WechatNativePayClient {
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
             throw new BusinessException(ErrorCode.PARAM_ERROR, "WeChat Native prepay request interrupted");
+        }
+    }
+
+    @Override
+    public WechatPayNotification queryNativeOrder(String orderNo) {
+        ensureEnabled();
+        try {
+            String encodedOrderNo = URLEncoder.encode(orderNo, StandardCharsets.UTF_8);
+            String pathWithQuery = ORDER_QUERY_PATH_PREFIX + encodedOrderNo + "?mchid="
+                    + URLEncoder.encode(properties.getMchid(), StandardCharsets.UTF_8);
+            HttpRequest httpRequest = HttpRequest.newBuilder()
+                    .uri(URI.create(properties.getApiBaseUrl() + pathWithQuery))
+                    .header("Accept", "application/json")
+                    .header("Authorization", authorization(GET_METHOD, pathWithQuery, ""))
+                    .GET()
+                    .build();
+            HttpResponse<String> response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            if (response.statusCode() == 404) {
+                return null;
+            }
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                throw new BusinessException(ErrorCode.PARAM_ERROR, "WeChat Native order query failed: " + response.body());
+            }
+            verifyHttpResponseSignature(response);
+            return notificationFromTransaction(objectMapper.readTree(response.body()));
+        } catch (IOException exception) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "WeChat Native order query failed");
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "WeChat Native order query interrupted");
         }
     }
 
@@ -90,17 +123,7 @@ public class DefaultWechatNativePayClient implements WechatNativePayClient {
                     resource.path("ciphertext").asText()
             );
             JsonNode transaction = objectMapper.readTree(plain);
-            JsonNode amount = transaction.path("amount");
-            return new WechatPayNotification(
-                    transaction.path("appid").asText(),
-                    transaction.path("mchid").asText(),
-                    transaction.path("out_trade_no").asText(),
-                    transaction.path("transaction_id").asText(),
-                    transaction.path("trade_type").asText(),
-                    transaction.path("trade_state").asText(),
-                    amount.path("total").asInt(),
-                    amount.path("currency").asText("CNY")
-            );
+            return notificationFromTransaction(transaction);
         } catch (Exception exception) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "WeChat payment notification decrypt failed");
         }
@@ -119,6 +142,20 @@ public class DefaultWechatNativePayClient implements WechatNativePayClient {
         amount.put("currency", request.currency() == null || request.currency().isBlank() ? "CNY" : request.currency());
         payload.put("amount", amount);
         return payload;
+    }
+
+    private WechatPayNotification notificationFromTransaction(JsonNode transaction) {
+        JsonNode amount = transaction.path("amount");
+        return new WechatPayNotification(
+                transaction.path("appid").asText(),
+                transaction.path("mchid").asText(),
+                transaction.path("out_trade_no").asText(),
+                transaction.path("transaction_id").asText(),
+                transaction.path("trade_type").asText(),
+                transaction.path("trade_state").asText(),
+                amount.path("total").asInt(),
+                amount.path("currency").asText("CNY")
+        );
     }
 
     private String authorization(String method, String path, String body) {
@@ -156,6 +193,16 @@ public class DefaultWechatNativePayClient implements WechatNativePayClient {
         } catch (Exception exception) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "WeChat payment callback signature verify failed");
         }
+    }
+
+    private void verifyHttpResponseSignature(HttpResponse<String> response) {
+        WechatPayCallbackHeaders headers = new WechatPayCallbackHeaders(
+                response.headers().firstValue("Wechatpay-Serial").orElse(""),
+                response.headers().firstValue("Wechatpay-Signature").orElse(""),
+                response.headers().firstValue("Wechatpay-Timestamp").orElse(""),
+                response.headers().firstValue("Wechatpay-Nonce").orElse("")
+        );
+        verifyCallbackSignature(headers, response.body());
     }
 
     private String decryptResource(String nonce, String associatedData, String ciphertext) throws Exception {

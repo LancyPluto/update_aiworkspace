@@ -170,6 +170,8 @@ export interface AdminTaskApiPayload {
   params?: unknown
   result?: TaskResult | null
   createdAt: string
+  queuedAt?: string | null
+  startedAt?: string | null
   finishedAt?: string | null
 }
 
