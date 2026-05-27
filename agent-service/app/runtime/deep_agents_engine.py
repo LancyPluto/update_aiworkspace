@@ -613,7 +613,10 @@ class DeepAgentsRuntimeEngine:
         content_text = tool_data.get("contentText", "") if isinstance(tool_data, dict) else ""
         # 工具已成功产出正文时直接回显，避免二次 LLM 总结/记忆提示把正文换成「已生成」等空话。
         if isinstance(content_text, str) and content_text.strip():
-            await self._emit_answer_events(context.runId, content_text)
+            if _is_structured_media_result(content_text):
+                await self._emit_completed_answer_event(context.runId, content_text)
+            else:
+                await self._emit_answer_events(context.runId, content_text)
             return content_text
         messages_list = [
             ChatMessage(role="system", content="请直接展示工具返回的结果，不要添加额外的总结说明。"),
@@ -701,6 +704,12 @@ class DeepAgentsRuntimeEngine:
                 run_id,
                 RunEventCreate(eventType=MESSAGE_DELTA, eventText=chunk, eventJson={"delta": chunk}),
             )
+        await self.backend.append_event(
+            run_id,
+            RunEventCreate(eventType=MESSAGE_COMPLETED, eventText=answer, eventJson={"content": answer}),
+        )
+
+    async def _emit_completed_answer_event(self, run_id: int, answer: str) -> None:
         await self.backend.append_event(
             run_id,
             RunEventCreate(eventType=MESSAGE_COMPLETED, eventText=answer, eventJson={"content": answer}),
@@ -1054,6 +1063,42 @@ def _raw_message_content(message) -> str:
 
 def _chunks(value: str, size: int) -> list[str]:
     return [value[index : index + size] for index in range(0, len(value), size)] or [""]
+
+
+def _is_structured_media_result(value: str) -> bool:
+    text = value.strip()
+    if not text or not text.startswith(("{", "[")):
+        return False
+    try:
+        import json
+
+        parsed = json.loads(text)
+    except Exception:
+        return False
+    return _contains_media_result(parsed)
+
+
+def _contains_media_result(value: Any) -> bool:
+    if isinstance(value, dict):
+        for key, nested in value.items():
+            lowered = str(key).lower()
+            if lowered in {
+                "images",
+                "videos",
+                "audios",
+                "imageurl",
+                "image_url",
+                "videourl",
+                "video_url",
+                "audiourl",
+                "audio_url",
+            }:
+                return True
+            if _contains_media_result(nested):
+                return True
+    if isinstance(value, list):
+        return any(_contains_media_result(item) for item in value)
+    return False
 
 
 def _looks_like_session_recap_question(message: str) -> bool:

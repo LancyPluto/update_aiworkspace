@@ -6,13 +6,15 @@ from app.runtime.deep_agents_engine import DeepAgentsRuntimeEngine
 
 
 class FakeBackend:
-    def __init__(self):
+    def __init__(self, *, resource_type: str = "MARKDOWN", content_text: str = "# Generated copy"):
         self.events = []
         self.completed = []
         self.failed = []
         self.tool_calls = []
         self.memory_items = []
         self.memory_requests = []
+        self.resource_type = resource_type
+        self.content_text = content_text
 
     async def append_event(self, run_id, event):
         self.events.append((run_id, event.eventType, event.eventText, event.eventJson))
@@ -32,7 +34,7 @@ class FakeBackend:
         return type("TaskStatus", (), {"taskId": 123, "status": "QUEUED"})
 
     async def get_task_detail(self, user_id, task_id):
-        result = type("TaskResult", (), {"resourceType": "MARKDOWN", "contentText": "# Generated copy"})
+        result = type("TaskResult", (), {"resourceType": self.resource_type, "contentText": self.content_text})
         return type(
             "TaskDetail",
             (),
@@ -168,6 +170,35 @@ async def test_confirmed_tool_uses_tool_output_when_summary_model_returns_empty(
     assert backend.completed == [(9, "# Generated copy", "tool_use")]
     completed_events = [event for event in backend.events if event[1] == "message.completed"]
     assert completed_events[-1][2] == "# Generated copy"
+
+
+@pytest.mark.asyncio
+async def test_media_tool_output_emits_single_completed_event_without_delta_fanout():
+    media_result = '{"provider":"kling_video","model":"kling-v2-1","images":[{"url":"/generated/images/79/image-1.png"}]}'
+    backend = FakeBackend(resource_type="IMAGE", content_text=media_result)
+    engine = DeepAgentsRuntimeEngine(backend, FakeModel(response=""))
+    context = RunContext(
+        runId=14,
+        sessionId=1,
+        userId=1,
+        message="generate an image",
+        creditBudget=20,
+        availableTools=[
+            ToolDescriptor(
+                toolCode="kling_image_v21",
+                toolName="Kling Image",
+                description="image generation",
+                estimatedCreditCost=3,
+                autoCallable=True,
+            )
+        ],
+    )
+
+    await engine.run_confirmed_tool(context, "kling_image_v21")
+
+    message_events = [event for event in backend.events if event[1].startswith("message.")]
+    assert [(event[1], event[2]) for event in message_events] == [("message.completed", media_result)]
+    assert backend.completed == [(14, media_result, "tool_use")]
 
 
 @pytest.mark.asyncio
