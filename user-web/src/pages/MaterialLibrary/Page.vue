@@ -176,6 +176,19 @@ function taskPrompt(task: TaskDetail): string {
   return typeof value === "string" && value.trim() ? value.trim() : ""
 }
 
+const PROMPT_PREVIEW_MAX_LENGTH = 48
+
+function taskPromptText(task: TaskDetail): string {
+  return taskPrompt(task)
+}
+
+function taskPromptPreview(task: TaskDetail, maxLength = PROMPT_PREVIEW_MAX_LENGTH): string {
+  const prompt = taskPromptText(task)
+  if (!prompt) return task.taskNo
+  if (prompt.length <= maxLength) return prompt
+  return `${prompt.slice(0, maxLength)}...`
+}
+
 function recommendToolsForAsset(asset: AssetPreviewItem): AssetPreviewRecommendation[] {
   const target = asset.kind === "image" ? "IMAGE" : asset.kind === "video" ? "VIDEO" : asset.kind === "audio" ? "AUDIO" : ""
   const keyword = asset.kind === "image" ? /图|图片|影像|photo|image|img|改图|参考/i : asset.kind === "video" ? /视频|短片|video|clip|movie/i : /音频|音乐|audio|voice|tts/i
