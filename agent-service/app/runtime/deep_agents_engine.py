@@ -1,5 +1,6 @@
 import importlib.util
 import inspect
+import json
 import logging
 import re
 from collections.abc import Callable
@@ -26,7 +27,7 @@ from app.core.event_types import (
     WORKSPACE_FILE_CREATED,
     WORKSPACE_FILE_READ,
 )
-from app.core.intent_router import Intent, IntentRouter
+from app.core.intent_router import Intent, IntentResult, IntentRouter
 from app.core.schemas import ChatMessage, RunComplete, RunContext, RunEventCreate, RunFail, ToolDescriptor, WorkspaceMemoryItem
 from app.runtime.subagent_profiles import default_subagent_profiles, profiles_to_deepagents_subagents
 from app.runtime.workspace_files import WorkspaceFileContext, build_workspace_file_context
@@ -113,7 +114,7 @@ class DeepAgentsRuntimeEngine:
             return
 
         # 1. Classify intent
-        intent = self.intent_router.classify(context)
+        intent = await self._classify_intent(context)
         LOGGER.info(
             "agent route selected runId=%s intent=%s confidence=%.2f selectedTool=%s candidates=%s reason=%s",
             context.runId,
@@ -230,6 +231,126 @@ class DeepAgentsRuntimeEngine:
         return importlib.import_module("deepagents")
 
     # --- Intent helpers ---
+
+    async def _classify_intent(self, context: RunContext):
+        rule_intent = self.intent_router.classify(context)
+        if not self._should_use_llm_router(context, rule_intent):
+            return rule_intent
+        llm_intent = await self._classify_intent_with_llm(context, rule_intent)
+        return llm_intent or rule_intent
+
+    def _should_use_llm_router(self, context: RunContext, rule_intent) -> bool:
+        if not settings.agent_llm_router_enabled:
+            return False
+        if not context.availableTools:
+            return False
+        hard_rule_reasons = {
+            "ready_file_context_available",
+            "file_analysis_request",
+            "phase_unsupported_capability",
+            "empty_request",
+            "session_recap_question",
+            "short_general_chat",
+            "restored_from_pending_tool_context",
+            "continuing_pending_tool_prompt",
+            "structured_tool_arguments",
+        }
+        return rule_intent.reason not in hard_rule_reasons
+
+    async def _classify_intent_with_llm(self, context: RunContext, rule_intent):
+        tools = ToolRegistry(context).list_tools()
+        tool_lines = []
+        for tool in tools[:30]:
+            tool_lines.append(
+                {
+                    "toolCode": tool.toolCode,
+                    "toolName": tool.toolName,
+                    "description": tool.description or "",
+                    "autoCallable": tool.autoCallable,
+                    "fields": [
+                        {
+                            "fieldKey": field.fieldKey,
+                            "fieldName": field.fieldName,
+                            "description": field.description or "",
+                            "required": field.required,
+                            "userRequired": field.userRequired,
+                            "agentFillStrategy": field.agentFillStrategy,
+                        }
+                        for field in tool.fields[:12]
+                    ],
+                }
+            )
+        prompt = (
+            "你是 AI 工具市场的路由器。根据用户请求选择最合适的意图和工具。\n"
+            "必须只返回 JSON，不要解释。\n"
+            "JSON schema: {"
+            "\"intent\":\"tool_use|general_chat|needs_clarification|unsupported\","
+            "\"selectedToolCode\":string|null,"
+            "\"candidateToolCodes\":string[],"
+            "\"confidence\":0到1,"
+            "\"reason\":string,"
+            "\"clarifyingQuestion\":string|null"
+            "}\n"
+            "选择原则：用户要生成图片/照片/视觉/拍摄/cos/海报/画面时优先图片生成工具；"
+            "用户要生成视频/短视频/成片时优先视频工具；用户要文案/标题/文章时选择文本工具。"
+            "只有关键目标完全不清楚才 needs_clarification，不要因为比例、张数、画质等可默认字段追问。\n\n"
+            f"用户请求：{context.message}\n"
+            f"规则兜底判断：intent={rule_intent.intent.value}, selectedTool={rule_intent.selectedToolCode}, reason={rule_intent.reason}\n"
+            f"可用工具：{json.dumps(tool_lines, ensure_ascii=False)}"
+        )
+        try:
+            raw = await self.model.chat([ChatMessage(role="user", content=prompt)])
+            parsed = _parse_json_object(raw)
+            result = self._validate_llm_intent(context, parsed)
+            LOGGER.info(
+                "agent llm router runId=%s accepted=%s raw=%s parsed=%s fallbackReason=%s",
+                context.runId,
+                result is not None,
+                _clip(raw, 500),
+                parsed,
+                "none" if result is not None else "invalid_or_low_confidence",
+            )
+            return result
+        except Exception as exc:
+            LOGGER.warning("agent llm router fallback runId=%s error=%s", context.runId, exc)
+            return None
+
+    def _validate_llm_intent(self, context: RunContext, parsed: Any):
+        if not isinstance(parsed, dict):
+            return None
+        raw_intent = str(parsed.get("intent") or "").strip()
+        try:
+            intent = Intent(raw_intent)
+        except ValueError:
+            return None
+        confidence = _safe_float(parsed.get("confidence"), 0)
+        if confidence < 0.7:
+            return None
+        selected_tool = parsed.get("selectedToolCode")
+        selected_tool = selected_tool.strip() if isinstance(selected_tool, str) else None
+        available = {tool.toolCode for tool in context.availableTools}
+        if intent == Intent.TOOL_USE:
+            if not selected_tool or selected_tool not in available:
+                return None
+        elif selected_tool and selected_tool not in available:
+            selected_tool = None
+        candidates = parsed.get("candidateToolCodes")
+        candidate_codes = [
+            code for code in candidates
+            if isinstance(code, str) and code in available
+        ] if isinstance(candidates, list) else []
+        if selected_tool and selected_tool not in candidate_codes:
+            candidate_codes.insert(0, selected_tool)
+        clarifying = parsed.get("clarifyingQuestion")
+        return IntentResult(
+            intent=intent,
+            confidence=confidence,
+            selectedToolCode=selected_tool,
+            candidateToolCodes=candidate_codes[:3],
+            clarifyingQuestion=clarifying if isinstance(clarifying, str) else None,
+            decisionSource="llm_router",
+            reason=str(parsed.get("reason") or "llm_router"),
+        )
 
     async def _emit_intent_event(self, context: RunContext, intent) -> None:
         await self.backend.append_event(
@@ -1089,6 +1210,40 @@ def _raw_message_content(message) -> str:
 
 def _chunks(value: str, size: int) -> list[str]:
     return [value[index : index + size] for index in range(0, len(value), size)] or [""]
+
+
+def _parse_json_object(raw: str) -> Any:
+    text = raw.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines:
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        match = re.search(r"\{.*\}", text, re.DOTALL)
+        if not match:
+            return None
+        try:
+            return json.loads(match.group(0))
+        except json.JSONDecodeError:
+            return None
+
+
+def _safe_float(value: Any, fallback: float) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _clip(value: str, limit: int = 500) -> str:
+    if len(value) <= limit:
+        return value
+    return value[:limit] + "...<truncated>"
 
 
 def _is_structured_media_result(value: str) -> bool:

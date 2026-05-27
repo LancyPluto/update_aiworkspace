@@ -311,6 +311,48 @@ async def test_visual_cosplay_shoot_request_prefers_image_tool_over_text_tool():
 
 
 @pytest.mark.asyncio
+async def test_llm_router_can_select_tool_when_rule_match_is_weak():
+    backend = FakeBackend()
+    router_json = (
+        '{"intent":"tool_use","selectedToolCode":"kling_image_v21",'
+        '"candidateToolCodes":["kling_image_v21"],"confidence":0.92,'
+        '"reason":"用户要做主视觉画面","clarifyingQuestion":null}'
+    )
+    engine = DeepAgentsRuntimeEngine(backend, FakeModel(response=router_json))
+    message = "帮我做一个赛博风主视觉，人物站在霓虹街头"
+    context = RunContext(
+        runId=16,
+        sessionId=1,
+        userId=1,
+        message=message,
+        creditBudget=20,
+        availableTools=[
+            ToolDescriptor(
+                toolCode="deepseek_text_generation",
+                toolName="文本生成-DeepSeek-V4-flash",
+                description="文本生成，适合文案、标题、脚本、通用问答",
+                estimatedCreditCost=1,
+                autoCallable=True,
+            ),
+            ToolDescriptor(
+                toolCode="kling_image_v21",
+                toolName="可灵生图 V2.1",
+                description="高质量图片生成，适合照片、写真、海报、文生图、摄影拍摄",
+                estimatedCreditCost=3,
+                autoCallable=True,
+            ),
+        ],
+    )
+
+    await engine.run(context)
+
+    assert ("task", "kling_image_v21", {"userRequest": message}, "agent-run-16-tool-call-99") in backend.tool_calls
+    assert not any(call[0] == "task" and call[1] == "deepseek_text_generation" for call in backend.tool_calls)
+    intent_events = [event for event in backend.events if event[1] == "intent.detected"]
+    assert intent_events[-1][3]["decisionSource"] == "llm_router"
+
+
+@pytest.mark.asyncio
 async def test_graph_fails_when_model_call_limit_is_exceeded():
     backend = FakeBackend()
     engine = DeepAgentsRuntimeEngine(
