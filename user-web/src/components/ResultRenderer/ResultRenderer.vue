@@ -35,18 +35,18 @@ function mediaGridClass(count = 0) {
 
 function figureClass() {
   return props.mode === "compact"
-    ? "overflow-hidden rounded-2xl border border-white/10 bg-black/35"
+    ? "group relative overflow-hidden rounded-xl bg-transparent shadow-[0_20px_72px_rgb(0_0_0_/_0.34)]"
     : "overflow-hidden rounded-lg border border-border bg-background"
 }
 
 function imageFrameClass() {
   return props.mode === "compact"
-    ? "flex max-h-[560px] items-center justify-center bg-black/45"
+    ? "flex max-h-[560px] items-center justify-center bg-transparent"
     : "flex aspect-square items-center justify-center bg-secondary/30"
 }
 
 function imageClass() {
-  return props.mode === "compact" ? "max-h-[560px] w-full object-contain" : "h-full w-full object-contain"
+  return props.mode === "compact" ? "max-h-[560px] w-full rounded-xl object-contain" : "h-full w-full object-contain"
 }
 
 function captionClass() {
@@ -61,6 +61,10 @@ function downloadLinkClass() {
     : "inline-flex items-center gap-1 text-foreground hover:text-primary"
 }
 
+function floatingDownloadClass() {
+  return "absolute right-3 top-3 inline-flex h-9 items-center gap-1.5 rounded-full border border-white/12 bg-black/38 px-3 text-xs font-medium text-white/72 opacity-0 shadow-[0_10px_30px_rgb(0_0_0_/_0.28)] backdrop-blur-xl transition group-hover:opacity-100 hover:bg-white/14 hover:text-white"
+}
+
 function mediaActionClass() {
   return props.mode === "compact"
     ? "inline-flex h-8 items-center justify-center gap-2 rounded-full border border-white/10 bg-white/8 px-3 text-xs font-medium text-white/70 hover:bg-white/12 hover:text-white"
@@ -69,7 +73,7 @@ function mediaActionClass() {
 
 function videoClass() {
   return props.mode === "compact"
-    ? "aspect-video w-full rounded-2xl bg-black"
+    ? "aspect-video w-full rounded-xl bg-black shadow-[0_20px_72px_rgb(0_0_0_/_0.34)]"
     : "aspect-video w-full rounded-lg border border-border bg-black"
 }
 
@@ -307,13 +311,22 @@ function escapeXml(value: string): string {
                 loading="lazy"
               />
             </div>
-            <figcaption :class="captionClass()">
+            <figcaption v-if="props.mode !== 'compact'" :class="captionClass()">
               <span>{{ image.label ?? "图片" }}</span>
               <a :href="image.url" download :class="downloadLinkClass()">
                 <Download class="h-3.5 w-3.5" />
                 下载
               </a>
             </figcaption>
+            <a
+              v-if="props.mode === 'compact'"
+              :href="image.url"
+              download
+              :class="floatingDownloadClass()"
+            >
+              <Download class="h-3.5 w-3.5" />
+              下载
+            </a>
           </figure>
         </div>
       </template>

@@ -847,7 +847,7 @@ defineExpose({
   flex-direction: column;
   overflow: hidden !important;
   position: relative;
-  background: linear-gradient(180deg, #09090a 0%, #000 42%, #050507 100%);
+  background: #000;
 }
 
 .agent-chat-pane::before {
@@ -856,8 +856,9 @@ defineExpose({
   inset: 0;
   pointer-events: none;
   background:
-    linear-gradient(180deg, rgb(176 92 255 / 0.065), transparent 22%),
-    linear-gradient(90deg, transparent, rgb(255 255 255 / 0.025), transparent);
+    radial-gradient(circle at 50% 0%, rgb(176 92 255 / 0.095), transparent 34%),
+    radial-gradient(circle at 84% 18%, rgb(34 211 238 / 0.045), transparent 30%),
+    linear-gradient(180deg, rgb(255 255 255 / 0.018), transparent 22%);
 }
 
 .message-container {
@@ -868,7 +869,7 @@ defineExpose({
   z-index: 1;
   height: 100%;
   max-height: none;
-  padding: 56px 32px 34px;
+  padding: 60px 32px 42px;
   scroll-behavior: smooth;
 }
 
@@ -882,20 +883,22 @@ defineExpose({
 }
 
 .composer {
-  width: min(980px, calc(100% - 40px));
-  margin: 0 auto 22px;
+  width: min(880px, calc(100% - 96px));
+  margin: 0 auto 30px;
   border: 1px solid rgb(255 255 255 / 0.10);
-  border-radius: 26px;
-  background: linear-gradient(180deg, rgb(35 36 43 / 0.96), rgb(24 25 31 / 0.96));
-  padding: 14px 16px;
+  border-radius: 28px;
+  background:
+    linear-gradient(135deg, rgb(176 92 255 / 0.055), transparent 38%),
+    rgb(25 25 25 / 0.62);
+  padding: 13px 15px;
   display: flex;
   flex-direction: column;
   gap: 10px;
   flex-shrink: 0;
   position: relative;
   z-index: 2;
-  box-shadow: 0 24px 80px rgb(0 0 0 / 0.52), inset 0 1px 0 rgb(255 255 255 / 0.05);
-  backdrop-filter: blur(18px);
+  box-shadow: 0 -18px 58px rgb(176 92 255 / 0.08), 0 24px 80px rgb(0 0 0 / 0.48), inset 0 1px 0 rgb(255 255 255 / 0.055);
+  backdrop-filter: blur(20px) saturate(135%);
 }
 
 .composer-model-row {
@@ -907,7 +910,7 @@ defineExpose({
   max-width: min(430px, 100%);
   border: 1px solid rgb(255 255 255 / 0.07);
   border-radius: 999px;
-  background: rgb(0 0 0 / 0.16);
+  background: rgb(0 0 0 / 0.18);
   padding: 5px 6px 5px 12px;
 }
 
@@ -935,10 +938,10 @@ defineExpose({
 .composer-model-select {
   width: min(220px, 46vw);
   min-height: 30px;
-  border: 1px solid rgb(176 92 255 / 0.20);
+  border: 1px solid rgb(176 92 255 / 0.18);
   border-radius: 999px;
-  background: rgb(15 15 19 / 0.72);
-  color: rgb(255 255 255 / 0.76);
+  background: rgb(15 15 19 / 0.62);
+  color: rgb(255 255 255 / 0.68);
   padding: 0 28px 0 10px;
   outline: none;
   font-size: 12px;
@@ -963,8 +966,8 @@ defineExpose({
   align-items: center;
   gap: 8px;
   padding: 7px 10px;
-  background: rgb(255 255 255 / 0.06);
-  border: 1px solid rgb(255 255 255 / 0.07);
+  background: rgb(255 255 255 / 0.045);
+  border: 1px solid rgb(255 255 255 / 0.06);
   border-radius: 14px;
   font-size: 12px;
 }
@@ -1013,7 +1016,7 @@ defineExpose({
   max-height: 150px;
   resize: none;
   padding: 6px 38px 6px 2px;
-  color: rgb(255 255 255 / 0.90);
+  color: rgb(255 255 255 / 0.88);
 }
 
 .chat-input::placeholder {
@@ -1069,9 +1072,9 @@ defineExpose({
   font-size: 12px;
   padding: 7px 13px;
   border-radius: 999px;
-  border: 1px solid rgb(255 255 255 / 0.08);
-  background: rgb(0 0 0 / 0.22);
-  color: rgb(255 255 255 / 0.64);
+  border: 1px solid rgb(255 255 255 / 0.07);
+  background: rgb(0 0 0 / 0.18);
+  color: rgb(255 255 255 / 0.56);
   cursor: pointer;
   transition: all 0.2s;
 }
@@ -1091,15 +1094,17 @@ defineExpose({
   width: 42px;
   height: 42px;
   border-radius: 50%;
-  border: 1px solid rgb(176 92 255 / 0.55);
-  background: linear-gradient(180deg, rgb(191 115 255), rgb(144 70 228));
+  border: 1px solid rgb(255 255 255 / 0.14);
+  background:
+    radial-gradient(circle at 28% 20%, rgb(255 255 255 / 0.42), transparent 24%),
+    linear-gradient(135deg, rgb(205 132 255), rgb(176 92 255) 48%, rgb(115 72 255));
   color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   transition: transform 0.18s ease, filter 0.18s ease, background 0.2s;
-  box-shadow: 0 10px 30px rgb(176 92 255 / 0.34);
+  box-shadow: 0 0 0 1px rgb(176 92 255 / 0.08), 0 10px 32px rgb(176 92 255 / 0.42), 0 0 70px rgb(176 92 255 / 0.22);
 }
 
 .send-circle-btn:hover:not(:disabled) {
@@ -1179,7 +1184,7 @@ defineExpose({
   display: grid;
   grid-template-columns: 42px minmax(0, 820px);
   gap: 14px;
-  margin: 28px auto;
+  margin: 30px auto;
   max-width: 1040px;
   animation: message-rise 0.24s ease-out;
 }
@@ -1191,19 +1196,22 @@ defineExpose({
 .agent-message.user .avatar {
   grid-column: 2;
   grid-row: 1;
-  background: rgb(176 92 255 / 0.20);
-  border-color: rgb(176 92 255 / 0.34);
+  background: rgb(176 92 255 / 0.16);
+  border-color: rgb(176 92 255 / 0.24);
   color: #fff;
 }
 
 .agent-message.user .bubble {
   grid-column: 1;
   justify-self: end;
-  border-color: rgb(176 92 255 / 0.26);
-  background: linear-gradient(180deg, rgb(58 42 77 / 0.94), rgb(37 33 48 / 0.94));
-  color: #fff;
+  border-color: rgb(255 255 255 / 0.09);
+  background:
+    radial-gradient(circle at 18% 10%, rgb(176 92 255 / 0.16), transparent 42%),
+    rgb(255 255 255 / 0.055);
+  color: rgb(255 255 255 / 0.91);
   border-radius: 24px 10px 24px 24px;
-  box-shadow: 0 18px 48px rgb(0 0 0 / 0.24);
+  box-shadow: 0 18px 48px rgb(0 0 0 / 0.20), inset 0 1px 0 rgb(255 255 255 / 0.045);
+  backdrop-filter: blur(14px);
 }
 
 .avatar,
@@ -1213,8 +1221,8 @@ defineExpose({
   display: grid;
   place-items: center;
   border-radius: 15px;
-  border: 1px solid rgb(255 255 255 / 0.10);
-  background: rgb(255 255 255 / 0.06);
+  border: 1px solid rgb(255 255 255 / 0.075);
+  background: rgb(255 255 255 / 0.045);
   color: rgb(255 255 255 / 0.82);
   font-size: 12px;
   font-weight: 700;
@@ -1223,21 +1231,23 @@ defineExpose({
 .bubble {
   width: fit-content;
   max-width: 100%;
-  border: 1px solid rgb(255 255 255 / 0.08);
+  border: 1px solid rgb(255 255 255 / 0.065);
   border-radius: 10px 24px 24px 24px;
-  background: linear-gradient(180deg, rgb(32 33 40 / 0.92), rgb(22 23 29 / 0.92));
+  background: rgb(255 255 255 / 0.045);
   padding: 16px 18px;
   line-height: 1.75;
   color: rgb(255 255 255 / 0.86);
-  box-shadow: 0 18px 44px rgb(0 0 0 / 0.22), inset 0 1px 0 rgb(255 255 255 / 0.04);
+  box-shadow: 0 18px 44px rgb(0 0 0 / 0.16), inset 0 1px 0 rgb(255 255 255 / 0.035);
+  backdrop-filter: blur(10px);
 }
 
 .agent-message.assistant .bubble:has(.agent-result-renderer) {
   width: min(820px, 100%);
-  padding: 10px;
-  border-color: rgb(255 255 255 / 0.06);
-  background: rgb(255 255 255 / 0.035);
-  box-shadow: 0 16px 44px rgb(0 0 0 / 0.18);
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
 }
 
 .agent-message.run-progress .bubble {
@@ -1420,9 +1430,10 @@ defineExpose({
 }
 
 .primary-btn {
-  border-color: rgb(176 92 255 / 0.56);
-  background: rgb(176 92 255 / 0.52);
+  border-color: rgb(176 92 255 / 0.48);
+  background: linear-gradient(135deg, rgb(205 132 255), rgb(176 92 255));
   color: #fff;
+  box-shadow: 0 10px 26px rgb(176 92 255 / 0.18);
 }
 
 .ghost-btn {
@@ -1445,6 +1456,7 @@ defineExpose({
   }
   .composer {
     width: calc(100% - 24px);
+    margin-bottom: 16px;
     border-radius: 22px;
   }
   .suggestions {

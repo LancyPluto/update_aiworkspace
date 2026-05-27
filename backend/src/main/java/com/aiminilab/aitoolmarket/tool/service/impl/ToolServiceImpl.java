@@ -3,6 +3,7 @@ package com.aiminilab.aitoolmarket.tool.service.impl;
 import com.aiminilab.aitoolmarket.config.AppProperties;
 import com.aiminilab.aitoolmarket.common.dto.PageResponse;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
+import com.aiminilab.aitoolmarket.common.enums.ExecutionHandler;
 import com.aiminilab.aitoolmarket.common.enums.ToolModality;
 import com.aiminilab.aitoolmarket.common.enums.ToolStatus;
 import com.aiminilab.aitoolmarket.common.enums.ToolType;
@@ -191,6 +192,9 @@ public class ToolServiceImpl implements ToolService {
 
         AiTool tool = fromRequest(request);
         tool.setToolCode(toolCode);
+        if (tool.getExecutionHandler() == null || tool.getExecutionHandler().isBlank()) {
+            tool.setExecutionHandler(ExecutionHandler.fromNullable(tool.getToolType()).name());
+        }
         Long toolId = toolMapper.insertTool(tool, operatorId);
         toolFieldSchemaMapper.createActiveDefaultSchema(toolId, operatorId);
         if (request.templateCode() != null && !request.templateCode().isBlank()) {
@@ -467,6 +471,9 @@ public class ToolServiceImpl implements ToolService {
         tool.setConfigNote(blankToNull(request.configNote()));
         tool.setEstimatedCreditCost(request.estimatedCreditCost());
         tool.setModelConfigId(request.modelConfigId());
+        if (request.executionHandler() != null && !request.executionHandler().isBlank()) {
+            tool.setExecutionHandler(ExecutionHandler.fromNullable(request.executionHandler()).name());
+        }
         return tool;
     }
 

@@ -236,14 +236,18 @@ onMounted(async () => {
             <li v-if="item.type === 'link'">
               <RouterLink
                 :to="item.href"
-                class="flex items-center gap-3 rounded-2xl px-4 py-3 text-[15px] font-semibold transition-colors"
+                class="relative flex items-center gap-3 rounded-2xl px-4 py-3 text-[15px] font-semibold transition-colors before:absolute before:left-0 before:top-1/2 before:h-6 before:w-px before:-translate-y-1/2 before:rounded-full before:bg-transparent before:transition-colors"
                 :class="
                   isActive(item.href)
-                    ? 'bg-white/10 text-white'
+                    ? 'bg-white/[0.045] text-white before:bg-primary'
                     : 'text-white/70 hover:bg-white/6 hover:text-white'
                 "
               >
-                <component :is="item.icon" class="h-5 w-5" />
+                <component
+                  :is="item.icon"
+                  class="h-5 w-5 transition-colors"
+                  :class="isActive(item.href) ? 'text-primary' : 'text-white/68'"
+                />
                 <span>{{ item.label }}</span>
               </RouterLink>
             </li>
@@ -254,13 +258,17 @@ onMounted(async () => {
                 class="flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-[15px] font-semibold transition-colors"
                 :class="
                   isGroupActive(item)
-                    ? 'bg-white/10 text-white'
+                    ? 'text-white'
                     : 'text-white/70 hover:bg-white/6 hover:text-white'
                 "
                 :aria-expanded="isGroupExpanded(item.id)"
                 @click="toggleGroup(item.id)"
               >
-                <component :is="item.icon" class="h-5 w-5 shrink-0" />
+                <component
+                  :is="item.icon"
+                  class="h-5 w-5 shrink-0 transition-colors"
+                  :class="isGroupActive(item) ? 'text-white/85' : 'text-white/60'"
+                />
                 <span class="flex-1 text-left">{{ item.label }}</span>
                 <ChevronDown
                   class="h-4 w-4 shrink-0 text-white/40 transition-transform duration-200"
@@ -273,18 +281,22 @@ onMounted(async () => {
                 :class="isGroupExpanded(item.id) ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'"
               >
                 <div class="overflow-hidden">
-                  <ul class="ml-7 mt-1 flex flex-col gap-1 border-l border-white/10 pl-3">
+                  <ul class="ml-10 mt-1 flex flex-col gap-1 border-l border-white/10 pl-4">
                     <li v-for="child in item.children" :key="child.href">
                       <RouterLink
                         :to="child.href"
-                        class="flex items-center gap-2.5 rounded-xl py-2 pl-3 pr-2 text-sm font-medium transition-colors"
+                        class="relative flex items-center gap-2.5 rounded-xl py-2 pl-3 pr-2 text-sm font-medium transition-colors before:absolute before:-left-[17px] before:top-1/2 before:h-px before:w-3 before:bg-white/10"
                         :class="
                           isActive(child.href)
-                            ? 'bg-primary/20 text-white'
+                            ? 'bg-white/[0.035] text-white'
                             : 'text-white/55 hover:bg-white/6 hover:text-white'
                         "
                       >
-                        <component :is="child.icon" class="h-3.5 w-3.5 shrink-0" />
+                        <component
+                          :is="child.icon"
+                          class="h-3.5 w-3.5 shrink-0 transition-colors"
+                          :class="isActive(child.href) ? 'text-primary' : 'text-white/42'"
+                        />
                         <span>{{ child.label }}</span>
                       </RouterLink>
                     </li>
@@ -297,25 +309,25 @@ onMounted(async () => {
       </nav>
 
       <div class="shrink-0 p-5">
-        <div class="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
-          <p class="text-xs font-medium text-white/55">本月已用算力</p>
-          <p class="mt-1 text-2xl font-semibold text-white">
+        <div class="rounded-2xl border border-white/8 bg-white/[0.025] p-4 shadow-[inset_0_1px_0_rgb(255_255_255_/_0.035)]">
+          <p class="text-[11px] font-medium tracking-wide text-white/42">已用算力</p>
+          <p class="mt-1 font-mono text-[12px] tabular-nums text-white/76">
             {{ credit ? credit.totalConsumed.toLocaleString() : '---' }}
-            <span class="text-xs font-normal text-white/45">
+            <span class="font-normal text-white/32">
               / {{ credit ? credit.totalGranted.toLocaleString() : '---' }}
             </span>
           </p>
-          <div class="mt-3 h-2 overflow-hidden rounded-full bg-white/8">
+          <div class="mt-3 h-[3px] overflow-hidden rounded-full bg-white/8">
             <div
-              class="h-full rounded-full bg-gradient-to-r from-primary to-sky-400"
+              class="h-full rounded-full bg-gradient-to-r from-primary/75 to-sky-300/65"
               :style="{ width: Math.min(creditPercent, 100) + '%' }"
             />
           </div>
           <RouterLink
             :to="'/billing'"
-            class="mt-3 block text-center text-xs font-medium text-primary hover:text-white"
+            class="mt-3 block text-center text-[11px] font-medium text-primary/80 transition hover:text-primary hover:drop-shadow-[0_0_10px_rgb(176_92_255_/_0.35)]"
           >
-            充值 / 升级套餐 →
+            充值 / 升级套餐
           </RouterLink>
         </div>
       </div>

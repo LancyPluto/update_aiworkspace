@@ -396,6 +396,45 @@ def test_kling_video_generation_accepts_success_reason_with_failed_status() -> N
     assert result["videoUrl"] == "https://cdn.example.com/video-download?id=abc&token=signed"
 
 
+def test_kling_video_generation_ignores_transport_success_message_while_submitted() -> None:
+    class RecordingKlingClient(KlingVideoClient):
+        def __init__(self) -> None:
+            super().__init__(access_key="fake-ak", secret_key="fake-sk", poll_interval_seconds=0.01, timeout_seconds=1)
+            self.polls = 0
+
+        def _request(self, method: str, path: str, payload: dict | None) -> dict:
+            if method == "POST":
+                return {"code": 0, "data": {"task_id": "video-task-submitted", "task_status": "submitted"}}
+            self.polls += 1
+            if self.polls == 1:
+                return {
+                    "code": 0,
+                    "message": "SUCCEED",
+                    "data": {
+                        "task_id": "video-task-submitted",
+                        "task_status": "submitted",
+                        "task_result": {},
+                    },
+                }
+            return {
+                "code": 0,
+                "message": "SUCCEED",
+                "data": {
+                    "task_id": "video-task-submitted",
+                    "task_status": "succeed",
+                    "task_result": {
+                        "videos": [{"url": "https://cdn.example.com/video-ready.mp4"}],
+                    },
+                },
+            }
+
+    client = RecordingKlingClient()
+
+    result = client.generate_video(prompt="normal prompt", image_size="1280x720")
+    assert client.polls == 2
+    assert result["videoUrl"] == "https://cdn.example.com/video-ready.mp4"
+
+
 def test_kling_video_generation_reports_nested_failure_reason() -> None:
     class RecordingKlingClient(KlingVideoClient):
         def __init__(self) -> None:
@@ -474,6 +513,7 @@ if __name__ == "__main__":
     test_kling_image_generation_accepts_signed_image_url_without_extension()
     test_kling_image_generation_accepts_plural_result_urls_without_extension()
     test_kling_video_generation_accepts_success_reason_with_failed_status()
+    test_kling_video_generation_ignores_transport_success_message_while_submitted()
     test_kling_video_generation_reports_nested_failure_reason()
     test_kling_video_generation_reports_success_without_url_payload()
     print("FAKE_KLING_INTEGRATION_TEST_PASSED")

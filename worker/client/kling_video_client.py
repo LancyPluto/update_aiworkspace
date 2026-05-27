@@ -186,7 +186,7 @@ class KlingVideoClient:
             if self._extract_video_url_or_empty(last_payload):
                 return last_payload
             status = self._extract_status(last_payload).lower()
-            if status in SUCCESS_STATUSES or self._has_success_indicator(last_payload):
+            if status in SUCCESS_STATUSES:
                 raise KlingVideoError(
                     self._describe_response_problem(
                         "kling video response reached terminal success but no video url",
@@ -220,7 +220,7 @@ class KlingVideoClient:
             if self._extract_image_urls_or_empty(last_payload):
                 return last_payload
             status = self._extract_status(last_payload).lower()
-            if status in SUCCESS_STATUSES or self._has_success_indicator(last_payload):
+            if status in SUCCESS_STATUSES:
                 raise KlingVideoError(
                     self._describe_response_problem(
                         "kling image response reached terminal success but no image url",

@@ -284,6 +284,7 @@
     height: calc(100vh - 64px);
     overflow: hidden;
     position: relative;
+    background: #000;
   }
 
   .agent-page--session-collapsed {
@@ -296,22 +297,33 @@
     left: 10px;
     top: 12px;
     z-index: 10;
-    width: 28px;
-    height: 28px;
+    width: 32px;
+    height: 32px;
     border-radius: 50%;
-    border: 1px solid var(--border);
-    background: var(--card);
-    color: var(--foreground);
+    border: 1px solid rgb(255 255 255 / 0.08);
+    background: rgb(255 255 255 / 0.055);
+    color: rgb(255 255 255 / 0.72);
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
+    box-shadow: 0 16px 36px rgb(0 0 0 / 0.38);
+    backdrop-filter: blur(16px);
+    transition: transform 0.18s ease, background 0.18s ease, color 0.18s ease;
+  }
+
+  .sidebar-toggle-btn:hover {
+    transform: translateY(-1px);
+    background: rgb(255 255 255 / 0.09);
+    color: #fff;
   }
 
   .agent-sidebar {
-    border-right: 1px solid var(--border);
-    background: var(--card);
-    padding: 14px;
+    border-right: 0;
+    background:
+      radial-gradient(circle at 20% 8%, rgb(176 92 255 / 0.10), transparent 28%),
+      #121214;
+    padding: 16px 12px;
     min-width: 0;
     transition: opacity 0.15s ease, padding 0.15s ease;
     height: 100%;
@@ -319,6 +331,7 @@
     overflow-x: hidden;
     display: flex;
     flex-direction: column;
+    box-shadow: inset -1px 0 0 rgb(255 255 255 / 0.025);
   }
 
   .agent-sidebar--collapsed {
@@ -339,54 +352,57 @@
     align-items: center;
     justify-content: center;
     gap: 8px;
-    border-radius: 8px;
+    border-radius: 14px;
   }
 
   .new-chat {
     width: 100%;
-    height: 40px;
-    border: 1px solid color-mix(in srgb, var(--primary) 45%, var(--border));
-    background:
-      linear-gradient(180deg, color-mix(in srgb, var(--primary) 28%, var(--card)), var(--card));
-    color: var(--foreground);
+    height: 42px;
+    border: 1px solid rgb(176 92 255 / 0.28);
+    background: linear-gradient(135deg, rgb(176 92 255 / 0.30), rgb(255 255 255 / 0.055) 54%, rgb(34 211 238 / 0.08));
+    color: rgb(255 255 255 / 0.88);
     font-size: 14px;
+    font-weight: 700;
     cursor: pointer;
-    margin-top: 30px;
-    box-shadow: 0 10px 24px rgb(0 0 0 / 0.2);
-    transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease;
+    margin-top: 32px;
+    box-shadow: 0 14px 44px rgb(176 92 255 / 0.16), 0 10px 24px rgb(0 0 0 / 0.28);
+    transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
   }
 
   .new-chat:hover {
-    border-color: color-mix(in srgb, var(--primary) 70%, var(--border));
+    border-color: rgb(176 92 255 / 0.54);
     transform: translateY(-1px);
+    box-shadow: 0 18px 56px rgb(176 92 255 / 0.24), 0 10px 24px rgb(0 0 0 / 0.32);
   }
 
   .agent-model-picker {
-    margin-top: 14px;
+    margin-top: 12px;
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    border: 1px solid color-mix(in srgb, var(--foreground) 10%, var(--border));
-    border-radius: 10px;
-    background: color-mix(in srgb, var(--card) 90%, #000);
-    padding: 12px;
+    gap: 7px;
+    border: 0;
+    border-radius: 18px;
+    background: rgb(255 255 255 / 0.035);
+    padding: 10px;
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.035);
   }
 
   .agent-model-label {
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 700;
-    color: var(--muted-foreground);
+    color: rgb(255 255 255 / 0.34);
   }
 
   .agent-model-select {
     width: 100%;
-    min-height: 36px;
-    border: 1px solid color-mix(in srgb, var(--foreground) 14%, var(--border));
-    border-radius: 8px;
-    background: var(--secondary);
-    color: var(--foreground);
+    min-height: 32px;
+    border: 1px solid rgb(255 255 255 / 0.08);
+    border-radius: 999px;
+    background: rgb(0 0 0 / 0.24);
+    color: rgb(255 255 255 / 0.72);
     padding: 0 10px;
     outline: none;
+    font-size: 12px;
   }
 
   .agent-model-select:disabled {
@@ -399,8 +415,8 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 12px;
-    color: var(--muted-foreground);
+    font-size: 11px;
+    color: rgb(255 255 255 / 0.32);
   }
 
   .sidebar-error {
@@ -429,13 +445,18 @@
     display: flex;
     align-items: stretch;
     gap: 2px;
-    border-radius: 8px;
+    border-radius: 16px;
     min-width: 0;
+    transition: background 0.18s ease, color 0.18s ease;
   }
 
-  .session-row.active,
   .session-row:hover {
-    background: var(--secondary);
+    background: rgb(255 255 255 / 0.045);
+  }
+
+  .session-row.active {
+    background: rgb(176 92 255 / 0.14);
+    box-shadow: inset 0 0 0 1px rgb(176 92 255 / 0.12);
   }
 
   .session-item {
@@ -444,10 +465,16 @@
     border: 0;
     background: transparent;
     padding: 10px 6px 10px 10px;
-    color: var(--foreground);
+    color: rgb(255 255 255 / 0.42);
     font-size: 13px;
     text-align: left;
     cursor: pointer;
+    transition: color 0.18s ease;
+  }
+
+  .session-row:hover .session-item,
+  .session-row.active .session-item {
+    color: rgb(255 255 255 / 0.86);
   }
 
   .session-item span {
@@ -463,12 +490,22 @@
     border: 0;
     background: transparent;
     padding: 0;
-    color: var(--muted-foreground);
+    color: rgb(255 255 255 / 0.32);
     cursor: pointer;
+    opacity: 0;
+    transform: translateX(4px);
+    transition: opacity 0.18s ease, transform 0.18s ease, color 0.18s ease;
+  }
+
+  .session-row:hover .session-delete,
+  .session-delete:focus-visible,
+  .session-delete:disabled {
+    opacity: 1;
+    transform: translateX(0);
   }
 
   .session-delete:hover:not(:disabled) {
-    color: var(--destructive);
+    color: rgb(252 165 165);
   }
 
   .session-delete:disabled {
@@ -483,6 +520,7 @@
     min-height: 0;
     height: 100%;
     overflow: hidden;
+    background: #000;
   }
 
   .chat-pane-empty {
@@ -492,7 +530,7 @@
     align-items: center;
     justify-content: center;
     text-align: center;
-    color: var(--muted-foreground);
+    color: rgb(255 255 255 / 0.50);
     padding: 28px;
   }
 
@@ -501,27 +539,27 @@
     height: 48px;
     display: grid;
     place-items: center;
-    border-radius: 12px;
-    border: 1px solid color-mix(in srgb, var(--primary) 38%, var(--border));
+    border-radius: 22px;
+    border: 1px solid rgb(176 92 255 / 0.32);
     background:
-      radial-gradient(circle at 65% 25%, color-mix(in srgb, var(--primary) 45%, transparent), transparent 45%),
-      color-mix(in srgb, var(--card) 86%, #000);
-    color: color-mix(in srgb, var(--primary) 70%, #fff);
+      radial-gradient(circle at 65% 25%, rgb(176 92 255 / 0.34), transparent 45%),
+      rgb(255 255 255 / 0.045);
+    color: rgb(210 170 255);
   }
 
   .chat-pane-empty h2 {
     margin: 18px 0 8px;
     font-size: 24px;
-    color: var(--foreground);
+    color: #fff;
   }
 
   .chat-pane-empty-btn {
     margin-top: 22px;
     height: 40px;
     padding: 0 16px;
-    border: 1px solid color-mix(in srgb, var(--primary) 45%, var(--border));
-    background: color-mix(in srgb, var(--primary) 22%, var(--card));
-    color: var(--foreground);
+    border: 1px solid rgb(176 92 255 / 0.36);
+    background: rgb(176 92 255 / 0.24);
+    color: #fff;
     font-size: 14px;
     cursor: pointer;
   }
@@ -531,6 +569,13 @@
     min-height: 0;
     height: 100%;
     overflow: hidden;
+    background: #101012;
+    box-shadow: inset 1px 0 0 rgb(255 255 255 / 0.025);
+  }
+
+  :deep(.workspace-memory-panel) {
+    border-left: 0;
+    background: transparent;
   }
 
   @media (max-width: 900px) {

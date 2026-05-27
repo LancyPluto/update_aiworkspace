@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue"
-import { RouterLink, useRoute } from "vue-router"
+import { RouterLink, useRoute, useRouter } from "vue-router"
 import {
   ArrowRight,
   Bot,
@@ -25,6 +25,7 @@ import {
   Zap,
 } from "lucide-vue-next"
 import AppShell from "@/components/AppShell.vue"
+import AssetPreviewModal from "@/components/AssetPreviewModal.vue"
 import CapabilityControls from "@/pages/Chat/CapabilityControls.vue"
 import { fetchCreditAccount } from "@/api/creditApi"
 import { ApiBusinessError, getApiOrigin } from "@/api/client"
@@ -32,7 +33,8 @@ import { fetchAIToolById } from "@/api/aiToolApi"
 import { createTask, deleteTask, fetchTaskById, fetchTasks, fetchTaskStatus, regenerateTask } from "@/api/taskApi"
 import { fetchTools } from "@/api/toolApi"
 import type { AITool } from "@/api/aiToolTypes"
-import type { CreditAccount, TaskDetail, TaskStatus, ToolSummary } from "@/api/types"
+import type { CreditAccount, TaskDetail, TaskStatus, ToolField, ToolSummary } from "@/api/types"
+import type { AssetPreviewItem, AssetPreviewRecommendation } from "@/types/assetPreview"
 import type { ResultBlock } from "@/types/result"
 import { userRoutes } from "@/router/userRoutes"
 import { useAuthStore } from "@/store/authStore"
@@ -40,6 +42,7 @@ import { buildTaskResultBlocks } from "@/utils/taskResultBlocks"
 
 const auth = useAuthStore()
 const route = useRoute()
+const router = useRouter()
 
 const loading = ref(false)
 const credit = ref<CreditAccount | null>(null)
@@ -68,6 +71,9 @@ let historyObserver: IntersectionObserver | null = null
 const taskPollTimers = new Map<number, number>()
 const retryingTaskIds = ref<Set<number>>(new Set())
 const deletingTaskIds = ref<Set<number>>(new Set())
+const previewAsset = ref<AssetPreviewItem | null>(null)
+const pendingAssetReplay = ref<AssetPreviewItem | null>(null)
+const pendingAssetStorageKey = "dashboard_pending_asset"
 
 const modalityLabels: Record<string, string> = {
   IMAGE: "图像",
@@ -103,22 +109,22 @@ const gallerySeeds = [
   {
     title: "品牌新品主视觉",
     prompt: "高质感电商棚拍，柔和布光，细腻产品材质",
-    gradient: "from-rose-500/80 via-orange-400/55 to-yellow-300/70",
+    gradient: "bg-[radial-gradient(circle_at_18%_18%,rgb(244_114_182_/_0.70),transparent_32%),radial-gradient(circle_at_82%_22%,rgb(251_191_36_/_0.36),transparent_34%),radial-gradient(circle_at_45%_90%,rgb(127_29_29_/_0.66),transparent_42%),linear-gradient(135deg,rgb(42_22_28),rgb(21_18_24))]",
   },
   {
     title: "社媒种草封面",
     prompt: "年轻化生活方式，明亮构图，强记忆点标题空间",
-    gradient: "from-cyan-400/75 via-blue-500/55 to-violet-500/75",
+    gradient: "bg-[radial-gradient(circle_at_18%_20%,rgb(34_211_238_/_0.58),transparent_34%),radial-gradient(circle_at_82%_28%,rgb(129_140_248_/_0.48),transparent_38%),radial-gradient(circle_at_55%_92%,rgb(30_64_175_/_0.62),transparent_44%),linear-gradient(135deg,rgb(14_28_44),rgb(18_18_30))]",
   },
   {
     title: "短视频口播脚本",
     prompt: "三秒钩子，真实体验，轻转化结尾",
-    gradient: "from-emerald-400/75 via-teal-500/45 to-sky-500/70",
+    gradient: "bg-[radial-gradient(circle_at_20%_24%,rgb(16_185_129_/_0.56),transparent_35%),radial-gradient(circle_at_84%_30%,rgb(45_212_191_/_0.34),transparent_36%),radial-gradient(circle_at_56%_90%,rgb(14_116_144_/_0.58),transparent_45%),linear-gradient(135deg,rgb(13_36_32),rgb(13_20_25))]",
   },
   {
     title: "直播间氛围素材",
     prompt: "暖色灯光，大促氛围，层次丰富的空间布景",
-    gradient: "from-fuchsia-500/70 via-purple-500/55 to-slate-600/80",
+    gradient: "bg-[radial-gradient(circle_at_18%_22%,rgb(217_70_239_/_0.56),transparent_34%),radial-gradient(circle_at_82%_26%,rgb(168_85_247_/_0.42),transparent_36%),radial-gradient(circle_at_56%_92%,rgb(71_85_105_/_0.64),transparent_46%),linear-gradient(135deg,rgb(35_24_46),rgb(17_18_24))]",
   },
 ]
 
@@ -190,6 +196,9 @@ const taskMaterials = computed(() =>
       }
     }),
 )
+const previewRecommendations = computed<AssetPreviewRecommendation[]>(() =>
+  previewAsset.value ? recommendToolsForAsset(previewAsset.value) : [],
+)
 const runningCount = computed(() =>
   tasks.value.filter((task) => ["CREATED", "QUEUED", "PROCESSING", "RETRYING"].includes(task.status)).length,
 )
@@ -249,7 +258,13 @@ async function loadDashboard() {
     if (rawRouteModality) selectedModality.value = normalizeModality(rawRouteModality)
     ensureSelectedModality()
     const rawRouteTool = Array.isArray(route.query.tool) ? route.query.tool[0] : route.query.tool
+    const pendingAsset = consumePendingAssetFromStorage()
+    if (pendingAsset) {
+      pendingAssetReplay.value = pendingAsset
+      promptText.value = pendingAsset.prompt || promptText.value
+    }
     if (rawRouteTool) selectToolByCode(rawRouteTool, true)
+    else if (pendingAsset) composerOpen.value = true
     await reloadTasksForCurrentModality()
     startPollingVisibleTasks()
   } finally {
@@ -623,6 +638,111 @@ function primaryBlock(blocks: ResultBlock[]): ResultBlock | null {
   return blocks.find((block) => block.type === "image" || block.type === "video" || block.type === "audio") || blocks[0] || null
 }
 
+function assetFromTask(item: { task: TaskDetail; blocks: ResultBlock[]; modality: string }): AssetPreviewItem | null {
+  const block = primaryBlock(item.blocks)
+  if (!block) return null
+  const base = {
+    id: `task-${item.task.taskId}`,
+    title: item.task.toolName || block.title || item.task.taskNo,
+    subtitle: item.task.progressMessage || item.task.taskNo,
+    prompt: taskPrompt(item.task),
+    taskId: item.task.taskId,
+    taskNo: item.task.taskNo,
+    toolName: item.task.toolName,
+    toolCode: item.task.toolCode,
+    createdAt: item.task.createdAt,
+  }
+  if (block.type === "image") {
+    return {
+      ...base,
+      kind: "image",
+      url: block.images[0]?.url,
+      urls: block.images.map((image) => image.url),
+      title: block.title || base.title,
+    }
+  }
+  if (block.type === "video") return { ...base, kind: "video", url: block.url, title: block.title || base.title }
+  if (block.type === "audio") return { ...base, kind: "audio", url: block.url, title: block.title || base.title }
+  if (block.type === "text" || block.type === "json" || block.type === "report") {
+    return { ...base, kind: "text", rawText: block.content, title: block.title || base.title }
+  }
+  if (block.type === "list") return { ...base, kind: "text", rawText: block.items.join("\n"), title: block.title || base.title }
+  return { ...base, kind: "other", rawText: item.task.result?.contentText || "", title: base.title }
+}
+
+function openAssetPreview(item: { task: TaskDetail; blocks: ResultBlock[]; modality: string }) {
+  if (item.task.status !== "SUCCESS") return
+  previewAsset.value = assetFromTask(item)
+}
+
+function recommendToolsForAsset(asset: AssetPreviewItem): AssetPreviewRecommendation[] {
+  const target = asset.kind === "image" ? "IMAGE" : asset.kind === "video" ? "VIDEO" : asset.kind === "audio" ? "AUDIO" : ""
+  const keyword = asset.kind === "image" ? /图|图片|影像|photo|image|img|改图|参考/i : asset.kind === "video" ? /视频|短片|video|clip|movie/i : /音频|音乐|audio|voice|tts/i
+  const matches = tools.value.filter((tool) => {
+    const input = normalizeModality(tool.inputModality)
+    const text = `${tool.toolName} ${tool.description || ""} ${tool.configNote || ""} ${tool.toolCode}`
+    return (
+      (target && (input.includes(target) || input.includes("MULTIMODAL") || input.includes("FILE"))) ||
+      keyword.test(text)
+    )
+  })
+  return (matches.length ? matches : currentTools.value.length ? currentTools.value : tools.value).slice(0, 8)
+}
+
+function useAssetWithTool(tool: AssetPreviewRecommendation, asset: AssetPreviewItem) {
+  selectModality(normalizeModality(tool.outputModality))
+  selectedToolCode.value = tool.toolCode
+  promptText.value = asset.prompt || promptText.value
+  pendingAssetReplay.value = asset
+  replayParams.value = buildAssetReplayParams(selectedChatTool.value?.fields || [], asset)
+  previewAsset.value = null
+  composerOpen.value = true
+}
+
+function materialKindForField(field: ToolField): AssetPreviewItem["kind"] | "file" {
+  if (field.fieldType === "image") return "image"
+  const text = `${field.fieldKey} ${field.fieldName} ${field.placeholder || ""}`.toLowerCase()
+  if (/image|img|picture|photo|frame|cover|avatar|poster|图片|图像|照片|帧|封面|首图/.test(text)) return "image"
+  if (/video|clip|movie|视频|短片|影片/.test(text)) return "video"
+  if (/audio|voice|sound|speech|music|音频|语音|声音|音乐/.test(text)) return "audio"
+  return "file"
+}
+
+function buildAssetReplayParams(fields: ToolField[], asset: AssetPreviewItem): Record<string, unknown> {
+  const params: Record<string, unknown> = {
+    sourceAssetUrl: asset.url,
+    sourceTaskId: asset.taskId,
+    sourceTaskNo: asset.taskNo,
+  }
+  if (!asset.url) return params
+
+  const mediaFields = fields.filter((field) => field.fieldType === "image" || field.fieldType === "file")
+  const exact = mediaFields.find((field) => materialKindForField(field) === asset.kind)
+  const fallback =
+    exact ||
+    mediaFields.find((field) => materialKindForField(field) === "file") ||
+    mediaFields[0]
+  if (fallback) params[fallback.fieldKey] = asset.url
+  return params
+}
+
+function consumePendingAssetFromStorage(): AssetPreviewItem | null {
+  try {
+    const raw = window.sessionStorage.getItem(pendingAssetStorageKey)
+    if (!raw) return null
+    window.sessionStorage.removeItem(pendingAssetStorageKey)
+    const parsed = JSON.parse(raw) as AssetPreviewItem
+    return parsed?.url || parsed?.rawText ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+function openPreviewTask(asset: AssetPreviewItem) {
+  if (!asset.taskId) return
+  void router.push(userRoutes.taskResult(String(asset.taskId)))
+}
+
 function textPreview(blocks: ResultBlock[], task: TaskDetail): string {
   const block = primaryBlock(blocks)
   if (!block) return task.result?.contentText || ""
@@ -651,6 +771,10 @@ async function loadSelectedToolDetail(toolCode: string) {
   selectedToolDetailLoading.value = true
   try {
     selectedChatTool.value = await fetchAIToolById(toolCode, { token: auth.token })
+    if (pendingAssetReplay.value) {
+      replayParams.value = buildAssetReplayParams(selectedChatTool.value.fields || [], pendingAssetReplay.value)
+      if (pendingAssetReplay.value.prompt) promptText.value = pendingAssetReplay.value.prompt
+    }
   } finally {
     selectedToolDetailLoading.value = false
   }
@@ -768,7 +892,7 @@ onUnmounted(() => {
 
       <section class="relative flex min-w-0 flex-1 flex-col">
         <div
-          class="mx-auto mt-4 flex h-12 w-full max-w-5xl items-center justify-center border-x border-white/8 bg-[linear-gradient(90deg,transparent,rgb(255_213_177_/_0.22),transparent)] text-sm text-amber-100"
+          class="mx-auto mt-4 flex h-9 w-full max-w-5xl items-center justify-center rounded-full border border-[#d7b77a]/12 bg-[#d7b77a]/[0.055] px-5 text-xs font-medium text-[#ead7aa]/85 shadow-[inset_0_1px_0_rgb(255_255_255_/_0.04)] backdrop-blur-xl"
         >
           SVIP限时体验 · 选择模态后模型列表会自动切换
         </div>
@@ -809,9 +933,8 @@ onUnmounted(() => {
                     <span class="ml-1 text-xs opacity-70">{{ recentTasks.length }}</span>
                   </button>
                 </div>
-                <div class="hidden text-right text-sm text-white/45 sm:block">
-                  <p>{{ modalityLabel(selectedModality) }} · {{ currentTools.length }} 个可用模型</p>
-                  <p>可用算力 {{ credit?.available ?? "--" }} · 进行中 {{ runningCount }}</p>
+                <div class="hidden text-right font-mono text-[12px] leading-5 text-white/36 sm:block">
+                  <p>{{ modalityLabel(selectedModality) }} · {{ currentTools.length }} 个可用模型 · 可用算力 {{ credit?.available ?? "--" }} · 进行中 {{ runningCount }}</p>
                 </div>
               </div>
             </div>
@@ -825,33 +948,29 @@ onUnmounted(() => {
                   </div>
                 </div>
 
-                <section class="grid gap-1 overflow-hidden rounded-3xl bg-white/[0.03] p-1 lg:grid-cols-4">
+                <section class="grid gap-2 overflow-hidden rounded-[28px] bg-white/[0.025] p-2 ring-1 ring-white/6 lg:grid-cols-4">
                   <article
                     v-for="seed in gallerySeeds"
                     :key="seed.title"
-                    class="group relative min-h-[220px] overflow-hidden bg-secondary"
+                    class="group relative min-h-[220px] overflow-hidden rounded-[24px] bg-secondary"
                   >
-                    <div class="absolute inset-0 bg-gradient-to-br" :class="seed.gradient" />
-                    <div class="absolute inset-0 bg-gradient-to-t from-black/85 via-black/10 to-transparent" />
+                    <div class="absolute inset-0" :class="seed.gradient" />
+                    <div class="absolute inset-0 opacity-[0.07] bg-[url('data:image/svg+xml,%3Csvg_viewBox=%220_0_120_120%22_xmlns=%22http://www.w3.org/2000/svg%22%3E%3Cfilter_id=%22n%22%3E%3CfeTurbulence_type=%22fractalNoise%22_baseFrequency=%220.9%22_numOctaves=%222%22_stitchTiles=%22stitch%22/%3E%3C/filter%3E%3Crect_width=%22120%22_height=%22120%22_filter=%22url(%23n)%22_opacity=%220.65%22/%3E%3C/svg%3E')]" />
+                    <div class="absolute inset-0 bg-gradient-to-t from-black/78 via-black/8 to-white/5" />
+                    <WandSparkles class="absolute -bottom-3 -right-2 h-28 w-28 text-white/[0.075] transition duration-500 group-hover:scale-105 group-hover:text-white/[0.11]" />
                     <div class="absolute bottom-5 left-5 right-5">
-                      <p class="text-xl font-semibold">{{ seed.title }}</p>
-                      <p class="mt-2 line-clamp-2 text-sm text-white/65">{{ seed.prompt }}</p>
+                      <p class="text-xl font-semibold text-white/90">{{ seed.title }}</p>
+                      <p class="mt-2 line-clamp-2 text-sm font-light leading-6 text-white/62">{{ seed.prompt }}</p>
                     </div>
                     <button
                       type="button"
-                      class="absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-xl bg-black/35 text-white/80 opacity-0 backdrop-blur transition group-hover:opacity-100"
+                      class="absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-black/24 text-white/74 opacity-0 backdrop-blur transition group-hover:opacity-100 hover:bg-white/10 hover:text-white"
                       @click="promptText = seed.prompt; composerOpen = true"
                     >
                       <WandSparkles class="h-4 w-4" />
                     </button>
                   </article>
                 </section>
-
-                <div class="flex items-center justify-center gap-3 text-sm text-white/30">
-                  <span class="h-px w-24 bg-white/8" />
-                  模型推荐
-                  <span class="h-px w-24 bg-white/8" />
-                </div>
 
                 <div class="grid gap-5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
                 <article
@@ -916,6 +1035,8 @@ onUnmounted(() => {
                     v-for="item in taskMaterials"
                     :key="item.task.taskId"
                     class="group mb-5 inline-block w-full break-inside-avoid overflow-hidden rounded-3xl border border-white/8 bg-[#191919] shadow-[0_18px_42px_rgb(0_0_0_/_0.24)] transition hover:-translate-y-1 hover:border-primary/50"
+                    :class="item.task.status === 'SUCCESS' ? 'cursor-zoom-in' : ''"
+                    @click="openAssetPreview(item)"
                   >
                     <div class="relative bg-muted">
                       <template v-if="isTaskRunning(item.task.status) || canRetryTask(item.task.status) || (!item.task.result?.contentText && item.task.status !== 'SUCCESS')">
@@ -1023,7 +1144,7 @@ onUnmounted(() => {
                             type="button"
                             class="rounded-full bg-red-500/15 px-3 py-1.5 text-xs font-medium text-red-100 transition hover:bg-red-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
                             :disabled="retryingTaskIds.has(item.task.taskId) || deletingTaskIds.has(item.task.taskId)"
-                            @click="retryTask(item.task)"
+                            @click.stop="retryTask(item.task)"
                           >
                             {{ retryingTaskIds.has(item.task.taskId) ? "重试中" : "重试" }}
                           </button>
@@ -1031,7 +1152,7 @@ onUnmounted(() => {
                             v-else
                             type="button"
                             class="rounded-full bg-primary/15 px-3 py-1.5 text-xs font-medium text-primary transition hover:bg-primary hover:text-white"
-                            @click="replayTask(item.task)"
+                            @click.stop="replayTask(item.task)"
                           >
                             再次生成
                           </button>
@@ -1040,7 +1161,7 @@ onUnmounted(() => {
                             type="button"
                             class="inline-flex items-center gap-1 rounded-full bg-white/8 px-3 py-1.5 text-xs font-medium text-white/55 transition hover:bg-white/14 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
                             :disabled="deletingTaskIds.has(item.task.taskId) || retryingTaskIds.has(item.task.taskId)"
-                            @click="removeTask(item.task)"
+                            @click.stop="removeTask(item.task)"
                           >
                             <Loader2 v-if="deletingTaskIds.has(item.task.taskId)" class="h-3.5 w-3.5 animate-spin" />
                             <Trash2 v-else class="h-3.5 w-3.5" />
@@ -1050,6 +1171,7 @@ onUnmounted(() => {
                         <RouterLink
                           :to="item.task.status === 'SUCCESS' ? userRoutes.taskResult(String(item.task.taskId)) : userRoutes.taskStatus(String(item.task.taskId))"
                           class="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-white/45 transition hover:text-white"
+                          @click.stop
                         >
                           查看完整内容
                           <ArrowRight class="h-3 w-3" />
@@ -1079,7 +1201,7 @@ onUnmounted(() => {
           <button
             v-if="!composerOpen"
             type="button"
-            class="pointer-events-auto flex h-16 w-[min(720px,calc(100vw-2rem))] items-center gap-4 rounded-full border border-white/10 bg-[#202128] px-5 text-left text-white shadow-[0_24px_80px_rgb(0_0_0_/_0.55)] transition hover:border-primary/50 hover:bg-[#292a33]"
+            class="pointer-events-auto flex h-16 w-[min(720px,calc(100vw-2rem))] items-center gap-4 rounded-full border border-white/10 bg-[#1e1e24]/88 px-5 text-left text-white shadow-[0_24px_90px_rgb(0_0_0_/_0.58)] backdrop-blur-2xl transition hover:border-primary/45 hover:bg-[#252631]/92"
             @click="composerOpen = true"
           >
             <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-black/30 text-primary">
@@ -1091,7 +1213,7 @@ onUnmounted(() => {
                 {{ selectedTool?.toolName || `${modalityLabel(selectedModality)}模型` }} · 点击展开创作参数
               </span>
             </span>
-            <span class="hidden rounded-full bg-primary px-5 py-2 text-sm font-semibold sm:inline-flex">
+            <span class="hidden rounded-full bg-[linear-gradient(180deg,rgb(199_128_255),rgb(143_73_226))] px-5 py-2 text-sm font-semibold shadow-[0_10px_28px_rgb(176_92_255_/_0.35),inset_0_1px_0_rgb(255_255_255_/_0.16)] sm:inline-flex">
               创作
             </span>
           </button>
@@ -1105,7 +1227,7 @@ onUnmounted(() => {
               玩法
             </button>
 
-            <div class="relative rounded-3xl border border-white/10 bg-[#202128] p-4 shadow-[0_24px_80px_rgb(0_0_0_/_0.5)]">
+            <div class="relative rounded-3xl border border-white/10 bg-[#1e1e24]/92 p-4 shadow-[0_24px_90px_rgb(0_0_0_/_0.58)] backdrop-blur-2xl">
               <button
                 type="button"
                 class="absolute right-3 top-3 inline-flex h-8 w-8 items-center justify-center rounded-full text-white/45 transition hover:bg-white/8 hover:text-white"
@@ -1279,7 +1401,7 @@ onUnmounted(() => {
 
                 <button
                   type="button"
-                  class="ml-auto inline-flex h-11 min-w-32 items-center justify-center gap-2 rounded-xl bg-primary px-5 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:bg-white/12 disabled:text-white/35"
+                  class="ml-auto inline-flex h-11 min-w-32 items-center justify-center gap-2 rounded-xl bg-[linear-gradient(180deg,rgb(199_128_255),rgb(143_73_226))] px-5 text-sm font-semibold text-white shadow-[0_12px_32px_rgb(176_92_255_/_0.34),inset_0_1px_0_rgb(255_255_255_/_0.16)] transition hover:brightness-110 disabled:cursor-not-allowed disabled:bg-white/12 disabled:text-white/35"
                   :disabled="!selectedTool || submitting"
                   @click="createWithSelectedTool"
                 >
@@ -1292,6 +1414,13 @@ onUnmounted(() => {
           </div>
         </div>
       </section>
+      <AssetPreviewModal
+        :asset="previewAsset"
+        :recommendations="previewRecommendations"
+        @close="previewAsset = null"
+        @use-tool="useAssetWithTool"
+        @open-task="openPreviewTask"
+      />
     </div>
   </AppShell>
 </template>

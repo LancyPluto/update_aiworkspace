@@ -12,8 +12,11 @@ import {
   Trash2,
 } from "lucide-vue-next"
 import AppShell from "@/components/AppShell.vue"
+import AssetPreviewModal from "@/components/AssetPreviewModal.vue"
 import { deleteTask, fetchTasks } from "@/api/taskApi"
-import type { TaskDetail } from "@/api/types"
+import { fetchTools } from "@/api/toolApi"
+import type { TaskDetail, ToolSummary } from "@/api/types"
+import type { AssetPreviewItem, AssetPreviewRecommendation } from "@/types/assetPreview"
 import type { ResultBlock } from "@/types/result"
 import { userRoutes } from "@/router/userRoutes"
 import { useAuthStore } from "@/store/authStore"
@@ -31,10 +34,12 @@ const auth = useAuthStore()
 const loading = ref(false)
 const error = ref("")
 const tasks = ref<TaskDetail[]>([])
+const tools = ref<ToolSummary[]>([])
 const selectedModality = ref<MaterialModality>("all")
 const selectTool = ref("all")
 const sortType = ref("desc")
 const deletingTaskId = ref<number | null>(null)
+const previewAsset = ref<AssetPreviewItem | null>(null)
 
 const modalityOptions: Array<{ value: MaterialModality; label: string }> = [
   { value: "all", label: "全部作品" },
@@ -81,6 +86,9 @@ const toolOptions = computed(() => {
       : originMaterials.value.filter((item) => item.modality === selectedModality.value)
   return Array.from(new Set(source.map((item) => item.task.toolName).filter(Boolean)))
 })
+const previewRecommendations = computed<AssetPreviewRecommendation[]>(() =>
+  previewAsset.value ? recommendToolsForAsset(previewAsset.value) : [],
+)
 
 watch(selectedModality, () => {
   selectTool.value = "all"
@@ -95,6 +103,8 @@ async function loadMaterials() {
       query: { status: "SUCCESS", pageNo: 1, pageSize: 80 },
     })
     tasks.value = response.list
+    const toolResponse = await fetchTools({ token: auth.token, query: { pageNo: 1, pageSize: 120 } })
+    tools.value = toolResponse.list
   } catch (err) {
     error.value = err instanceof Error ? err.message : "加载素材库失败"
   } finally {
@@ -117,6 +127,79 @@ function primaryBlock(item: MaterialItem): ResultBlock | null {
     item.blocks[0] ||
     null
   )
+}
+
+function assetFromMaterial(item: MaterialItem): AssetPreviewItem | null {
+  const block = primaryBlock(item)
+  if (!block) return null
+  const base = {
+    id: `material-${item.task.taskId}`,
+    title: item.task.toolName || block.title || item.task.taskNo,
+    subtitle: item.task.taskNo,
+    prompt: taskPrompt(item.task),
+    taskId: item.task.taskId,
+    taskNo: item.task.taskNo,
+    toolName: item.task.toolName,
+    toolCode: item.task.toolCode,
+    createdAt: item.task.createdAt,
+  }
+  if (block.type === "image") {
+    return {
+      ...base,
+      kind: "image",
+      url: block.images[0]?.url,
+      urls: block.images.map((image) => image.url),
+      title: block.title || base.title,
+    }
+  }
+  if (block.type === "video") return { ...base, kind: "video", url: block.url, title: block.title || base.title }
+  if (block.type === "audio") return { ...base, kind: "audio", url: block.url, title: block.title || base.title }
+  if (block.type === "text" || block.type === "json" || block.type === "report") {
+    return { ...base, kind: "text", rawText: block.content, title: block.title || base.title }
+  }
+  if (block.type === "list") return { ...base, kind: "text", rawText: block.items.join("\n"), title: block.title || base.title }
+  return { ...base, kind: "other", rawText: item.task.result?.contentText || "", title: base.title }
+}
+
+function openAssetPreview(item: MaterialItem) {
+  previewAsset.value = assetFromMaterial(item)
+}
+
+function normalizeModality(value?: string | null) {
+  return (value || "TEXT").trim().toUpperCase()
+}
+
+function taskPrompt(task: TaskDetail): string {
+  const params = task.params || {}
+  const value = params.prompt || params.text || params.description || params.videoTopic || params.productName
+  return typeof value === "string" && value.trim() ? value.trim() : ""
+}
+
+function recommendToolsForAsset(asset: AssetPreviewItem): AssetPreviewRecommendation[] {
+  const target = asset.kind === "image" ? "IMAGE" : asset.kind === "video" ? "VIDEO" : asset.kind === "audio" ? "AUDIO" : ""
+  const keyword = asset.kind === "image" ? /图|图片|影像|photo|image|img|改图|参考/i : asset.kind === "video" ? /视频|短片|video|clip|movie/i : /音频|音乐|audio|voice|tts/i
+  const matches = tools.value.filter((tool) => {
+    const input = normalizeModality(tool.inputModality)
+    const text = `${tool.toolName} ${tool.description || ""} ${tool.configNote || ""} ${tool.toolCode}`
+    return (
+      (target && (input.includes(target) || input.includes("MULTIMODAL") || input.includes("FILE"))) ||
+      keyword.test(text)
+    )
+  })
+  return (matches.length ? matches : tools.value).slice(0, 8)
+}
+
+function useAssetWithTool(tool: AssetPreviewRecommendation) {
+  if (previewAsset.value) {
+    window.sessionStorage.setItem("dashboard_pending_asset", JSON.stringify(previewAsset.value))
+  }
+  previewAsset.value = null
+  window.location.href = `/dashboard?modality=${encodeURIComponent(tool.outputModality || "IMAGE")}&tool=${encodeURIComponent(tool.toolCode)}`
+}
+
+function openPreviewTask(asset: AssetPreviewItem) {
+  if (!asset.taskId) return
+  window.location.href = `/tasks/${asset.taskId}/result`
 }
 
 function modalityLabel(value: MaterialModality) {
@@ -243,7 +326,8 @@ onMounted(loadMaterials)
         <article
           v-for="item in materials"
           :key="item.task.taskId"
-          class="group mb-5 inline-block w-full break-inside-avoid overflow-hidden rounded-3xl border border-white/8 bg-white/[0.04] shadow-[0_18px_42px_rgb(0_0_0_/_0.24)] transition-all duration-200 hover:-translate-y-1 hover:border-primary/50"
+          class="group mb-5 inline-block w-full break-inside-avoid cursor-zoom-in overflow-hidden rounded-3xl border border-white/8 bg-white/[0.04] shadow-[0_18px_42px_rgb(0_0_0_/_0.24)] transition-all duration-200 hover:-translate-y-1 hover:border-primary/50"
+          @click="openAssetPreview(item)"
         >
           <div class="relative bg-muted">
             <template v-if="primaryBlock(item)?.type === 'image'">
@@ -310,7 +394,7 @@ onMounted(loadMaterials)
               class="absolute right-3 top-3 inline-flex h-8 w-8 items-center justify-center rounded-full bg-black/55 text-white/55 opacity-0 shadow-sm backdrop-blur transition hover:bg-red-500/15 hover:text-red-300 group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-70"
               :disabled="deletingTaskId === item.task.taskId"
               :title="`删除素材：${item.task.taskNo}`"
-              @click="removeMaterial(item)"
+              @click.stop="removeMaterial(item)"
             >
               <LoaderCircle v-if="deletingTaskId === item.task.taskId" class="h-4 w-4 animate-spin" />
               <Trash2 v-else class="h-4 w-4" />
@@ -334,6 +418,7 @@ onMounted(loadMaterials)
               <RouterLink
                 :to="userRoutes.taskResult(String(item.task.taskId))"
                 class="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-primary transition hover:text-white"
+                @click.stop
               >
                 查看完整内容
                 <ArrowRight class="h-3 w-3 transition-transform group-hover:translate-x-0.5" />
@@ -343,5 +428,12 @@ onMounted(loadMaterials)
         </article>
       </div>
     </div>
+    <AssetPreviewModal
+      :asset="previewAsset"
+      :recommendations="previewRecommendations"
+      @close="previewAsset = null"
+      @use-tool="useAssetWithTool"
+      @open-task="openPreviewTask"
+    />
   </AppShell>
 </template>

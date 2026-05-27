@@ -31,6 +31,8 @@ public record ConfigBundleDto(
             String balanceUrl,
             String docsUrl,
             Integer timeoutSeconds,
+            Integer connectTimeoutSeconds,
+            Integer readTimeoutSeconds,
             BigDecimal inputTokenPricePer1k,
             BigDecimal outputTokenPricePer1k,
             BigDecimal inputTokenPricePer1m,
@@ -65,6 +67,8 @@ public record ConfigBundleDto(
             String status,
             Integer estimatedCreditCost,
             String modelConfigCode,
+            String executionHandler,
+            Boolean agentEnabled,
             List<Field> fields,
             List<Prompt> prompts,
             Workflow workflow
