@@ -287,11 +287,9 @@ class DeepAgentsRuntimeEngine:
             enriched = await self.tool_bridge.enrich_arguments(
                 self.tool_bridge.conversation_argument_text(context), tool, existing_args=base_args,
             )
-            still_missing = self._missing_from_enriched(enriched, tool)
+            still_missing = self._missing_user_arguments(enriched, tool)
             extracted_args = enriched
-            auto_call = any(
-                p.toolCode == tool.toolCode and p.autoCallEnabled for p in context.toolPreferences
-            )
+            auto_call = self._should_auto_call(context, tool)
             if not still_missing:
                 await self._emit_arguments_preview(context, tool, extracted_args, [], not auto_call)
                 if not auto_call:
@@ -301,6 +299,11 @@ class DeepAgentsRuntimeEngine:
                     result = await self._execute_tool_with_guard(context, tool, budget, arguments=enriched)
                 except BudgetExceeded as exception:
                     await self._fail_run(context.runId, exception.error_code, exception.message)
+                    return
+                if result.get("missing_tool_arguments"):
+                    answer = self._format_missing_arguments_message(tool, result["missing_tool_arguments"])
+                    await self._emit_answer_events(context.runId, answer)
+                    await self._complete_run(context, answer, intent=Intent.NEEDS_CLARIFICATION.value)
                     return
                 answer = await self._synthesize_answer(context, tool, result, budget)
                 await self._complete_run(context, answer, intent=Intent.TOOL_USE.value)
@@ -313,9 +316,7 @@ class DeepAgentsRuntimeEngine:
                 await self._complete_run(context, answer, intent=Intent.NEEDS_CLARIFICATION.value)
                 return
 
-        auto_call = any(
-            p.toolCode == tool.toolCode and p.autoCallEnabled for p in context.toolPreferences
-        )
+        auto_call = self._should_auto_call(context, tool)
         if not extracted_args:
             extracted_args = self.tool_bridge.build_arguments(context, tool, apply_placeholder_defaults=False)
         await self._emit_arguments_preview(context, tool, extracted_args, [], not auto_call)
@@ -330,6 +331,12 @@ class DeepAgentsRuntimeEngine:
             await self._fail_run(context.runId, exception.error_code, exception.message)
             return
 
+        if result.get("missing_tool_arguments"):
+            answer = self._format_missing_arguments_message(tool, result["missing_tool_arguments"])
+            await self._emit_answer_events(context.runId, answer)
+            await self._complete_run(context, answer, intent=Intent.NEEDS_CLARIFICATION.value)
+            return
+
         answer = await self._synthesize_answer(context, tool, result, budget)
         await self._complete_run(context, answer, intent=Intent.TOOL_USE.value)
         await self._emit_memory_candidate(context.runId, answer, None)
@@ -338,7 +345,10 @@ class DeepAgentsRuntimeEngine:
         self, context: RunContext, tool: ToolDescriptor, budget: BudgetState, arguments: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         if arguments:
-            missing = self._missing_from_enriched(arguments, tool)
+            prepared = self.tool_bridge.build_arguments(context, tool, apply_placeholder_defaults=True)
+            prepared.update({key: value for key, value in arguments.items() if value not in (None, "")})
+            arguments = prepared
+            missing = self._missing_execution_arguments(arguments, tool)
             if missing:
                 return {"missing_tool_arguments": missing}
         else:
@@ -346,8 +356,10 @@ class DeepAgentsRuntimeEngine:
             enriched = await self.tool_bridge.enrich_arguments(
                 self.tool_bridge.conversation_argument_text(context), tool, existing_args=base_args,
             )
-            missing = self._missing_from_enriched(enriched, tool)
-            arguments = enriched
+            prepared = self.tool_bridge.build_arguments(context, tool, apply_placeholder_defaults=True)
+            prepared.update({key: value for key, value in enriched.items() if value not in (None, "")})
+            missing = self._missing_execution_arguments(prepared, tool)
+            arguments = prepared
             if missing:
                 return {"missing_tool_arguments": missing}
 
@@ -390,8 +402,41 @@ class DeepAgentsRuntimeEngine:
             ),
         )
 
+    def _should_auto_call(self, context: RunContext, tool: ToolDescriptor) -> bool:
+        if tool.autoCallable:
+            return True
+        return any(p.toolCode == tool.toolCode and p.autoCallEnabled for p in context.toolPreferences)
+
     @staticmethod
-    def _missing_from_enriched(arguments: dict[str, Any], tool: ToolDescriptor) -> list[str]:
+    def _missing_user_arguments(arguments: dict[str, Any], tool: ToolDescriptor) -> list[str]:
+        if tool.fields:
+            return [
+                field.fieldKey
+                for field in tool.fields
+                if _field_requires_user_input(field, tool)
+                and (field.fieldKey not in arguments or arguments[field.fieldKey] in (None, ""))
+            ]
+        required = tool.inputSchema.get("required", [])
+        if not isinstance(required, list):
+            return []
+        properties = tool.inputSchema.get("properties", {})
+        return [
+            name
+            for name in required
+            if isinstance(name, str)
+            and _schema_property_user_required(properties.get(name) if isinstance(properties, dict) else None)
+            and (name not in arguments or arguments[name] in (None, ""))
+        ]
+
+    @staticmethod
+    def _missing_execution_arguments(arguments: dict[str, Any], tool: ToolDescriptor) -> list[str]:
+        if tool.fields:
+            return [
+                field.fieldKey
+                for field in tool.fields
+                if bool(field.executionRequired if field.executionRequired is not None else field.required)
+                and (field.fieldKey not in arguments or arguments[field.fieldKey] in (None, ""))
+            ]
         required = tool.inputSchema.get("required", [])
         if not isinstance(required, list):
             return []
@@ -1003,6 +1048,31 @@ def _chunks(value: str, size: int) -> list[str]:
 
 def _looks_like_session_recap_question(message: str) -> bool:
     return IntentRouter._looks_like_session_recap_question(message)
+
+
+def _field_requires_user_input(field, tool: ToolDescriptor) -> bool:
+    strategy = (field.agentFillStrategy or "").strip().lower()
+    if strategy in {"default", "derive", "none"}:
+        return False
+    if field.defaultValue not in (None, "") and strategy != "ask_user":
+        return False
+    if field.userRequired is not None:
+        return bool(field.userRequired)
+    properties = tool.inputSchema.get("properties", {})
+    return _schema_property_user_required(properties.get(field.fieldKey) if isinstance(properties, dict) else None)
+
+
+def _schema_property_user_required(prop: Any) -> bool:
+    if not isinstance(prop, dict):
+        return True
+    if prop.get("x-user-required") is False:
+        return False
+    strategy = str(prop.get("x-agent-fill-strategy") or "").strip().lower()
+    if strategy in {"default", "derive", "none"}:
+        return False
+    if prop.get("default") not in (None, "") and strategy != "ask_user":
+        return False
+    return True
 
 
 def _compose_system_prompt(configured_prompt: str | None, context: RunContext, fallback: str) -> str:

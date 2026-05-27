@@ -39,8 +39,6 @@ class ToolRegistry:
         message_terms = _terms(message)
         matches: list[ToolMatch] = []
         for tool in self._tools.values():
-            if not tool.autoCallable:
-                continue
             score, matched_terms = _score_tool(text, message_terms, tool)
             if score > 0:
                 matches.append(ToolMatch(tool=tool, score=score, matched_terms=tuple(sorted(matched_terms))))
@@ -64,6 +62,10 @@ def _score_tool(text: str, message_terms: set[str], tool: ToolDescriptor) -> tup
     if tool.toolCode.lower() in text:
         matched_terms.add(tool.toolCode)
         score += 8
+    modality_score, modality_terms = _score_modality_intent(text, tool)
+    if modality_score:
+        score += modality_score
+        matched_terms.update(modality_terms)
     return score, matched_terms
 
 
@@ -80,6 +82,26 @@ def _phrases(tool: ToolDescriptor) -> list[str]:
         elif isinstance(value, (list, tuple, set)):
             phrases.extend(str(item) for item in value)
     return [phrase.strip() for phrase in phrases if isinstance(phrase, str) and phrase.strip()]
+
+
+def _score_modality_intent(text: str, tool: ToolDescriptor) -> tuple[int, set[str]]:
+    tool_text = " ".join(_phrases(tool)).lower()
+    hint_values = " ".join(str(value) for value in tool.hints.values()).lower()
+    combined = f"{tool_text} {hint_values}"
+    if _has_any(combined, ("image_generation", "image", "photo", "picture", "图片", "图像", "生图", "文生图", "写真", "海报", "插画")):
+        if _has_any(text, ("图片", "图像", "照片", "写真", "海报", "插画", "画面", "生成一张", "来一张")):
+            return 7, {"image_intent"}
+    if _has_any(combined, ("video_generation", "video", "视频", "短视频", "成片", "生视频", "文生视频")):
+        if _has_any(text, ("视频", "短视频", "成片", "生成一段", "生成一个视频")):
+            return 7, {"video_intent"}
+    if _has_any(combined, ("text_to_speech", "speech", "tts", "语音", "配音", "朗读", "音频")):
+        if _has_any(text, ("语音", "配音", "朗读", "音频", "声音")):
+            return 7, {"audio_intent"}
+    return 0, set()
+
+
+def _has_any(value: str, needles: tuple[str, ...]) -> bool:
+    return any(needle in value for needle in needles)
 
 
 def _terms(value: str) -> set[str]:

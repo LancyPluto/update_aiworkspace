@@ -195,3 +195,25 @@ def test_continues_after_weak_tool_clarification():
     result = IntentRouter().classify(ctx)
     assert result.intent == Intent.TOOL_USE
     assert result.selectedToolCode == "xiaohongshu_copywriting"
+
+
+def test_routes_image_generation_request_to_non_auto_callable_tool():
+    ctx = RunContext(
+        runId=5,
+        sessionId=1,
+        userId=1,
+        message="我想要生成石原里美在漫展穿着火影忍者的晓袍的写真",
+        availableTools=[
+            ToolDescriptor(
+                toolCode="kling_image_v21",
+                toolName="可灵生图 V2.1",
+                description="高质量图片生成，适合照片、写真、海报、文生图",
+                autoCallable=False,
+            ),
+        ],
+    )
+
+    result = IntentRouter().classify(ctx)
+
+    assert result.intent == Intent.TOOL_USE
+    assert result.selectedToolCode == "kling_image_v21"
