@@ -14,6 +14,8 @@ from config import settings
 
 
 LOGGER = logging.getLogger(__name__)
+SUCCESS_STATUSES = {"succeeded", "succeed", "success", "completed", "done"}
+FAILED_STATUSES = {"failed", "fail", "error", "cancelled", "canceled"}
 
 
 class KlingVideoError(RuntimeError):
@@ -181,11 +183,15 @@ class KlingVideoClient:
         path = self._task_result_path(task_id, result_path_template or self.image_result_path)
         while time.monotonic() < deadline:
             last_payload = self._request("GET", path, None)
-            status = self._extract_status(last_payload).lower()
-            if status in {"succeeded", "succeed", "success", "completed", "done"}:
+            if self._extract_video_url_or_empty(last_payload):
                 return last_payload
-            if status in {"failed", "fail", "error", "cancelled", "canceled"}:
+            status = self._extract_status(last_payload).lower()
+            if status in SUCCESS_STATUSES or self._has_success_indicator(last_payload):
+                return last_payload
+            if status in FAILED_STATUSES:
                 reason = str(last_payload.get("message") or last_payload.get("reason") or "kling video generation failed")
+                if reason.strip().lower() in SUCCESS_STATUSES or self._has_success_indicator(last_payload):
+                    return last_payload
                 raise KlingVideoError(reason)
             time.sleep(self.poll_interval_seconds)
         raise KlingVideoTimeoutError(
@@ -201,11 +207,11 @@ class KlingVideoClient:
             if self._extract_image_urls_or_empty(last_payload):
                 return last_payload
             status = self._extract_status(last_payload).lower()
-            if status in {"succeeded", "succeed", "success", "completed", "done"}:
+            if status in SUCCESS_STATUSES or self._has_success_indicator(last_payload):
                 return last_payload
-            if status in {"failed", "fail", "error", "cancelled", "canceled"}:
+            if status in FAILED_STATUSES:
                 reason = str(last_payload.get("message") or last_payload.get("reason") or "kling image generation failed")
-                if reason.strip().lower() in {"succeeded", "succeed", "success", "completed", "done"}:
+                if reason.strip().lower() in SUCCESS_STATUSES or self._has_success_indicator(last_payload):
                     return last_payload
                 raise KlingVideoError(reason)
             time.sleep(self.poll_interval_seconds)
@@ -465,11 +471,48 @@ class KlingVideoClient:
         return "processing"
 
     @classmethod
+    def _has_success_indicator(cls, payload: dict[str, Any]) -> bool:
+        for key in ("message", "reason", "status_msg", "statusMsg", "task_status_msg", "taskStatusMsg"):
+            value = payload.get(key)
+            if isinstance(value, str) and value.strip().lower() in SUCCESS_STATUSES:
+                return True
+        data = payload.get("data")
+        if isinstance(data, dict):
+            return cls._has_success_indicator(data)
+        return False
+
+    @classmethod
     def _extract_video_url(cls, payload: dict[str, Any]) -> str:
-        for value in cls._walk(payload):
-            if isinstance(value, str) and cls._looks_like_video_url(value):
-                return value.strip()
+        url = cls._extract_video_url_or_empty(payload)
+        if url:
+            return url
         raise KlingVideoError("kling response missing video url")
+
+    @classmethod
+    def _extract_video_url_or_empty(cls, payload: dict[str, Any]) -> str:
+        for value in cls._collect_video_urls(payload):
+            return value
+        return ""
+
+    @classmethod
+    def _collect_video_urls(cls, value: Any, parent_key: str = "") -> list[str]:
+        urls: list[str] = []
+        if isinstance(value, dict):
+            for key, nested in value.items():
+                urls.extend(cls._collect_video_urls(nested, str(key)))
+            return urls
+        if isinstance(value, list):
+            for item in value:
+                urls.extend(cls._collect_video_urls(item, parent_key))
+            return urls
+        if not isinstance(value, str):
+            return urls
+        candidate = value.strip()
+        if cls._looks_like_video_url(candidate):
+            return [candidate]
+        if cls._looks_like_video_url_field(parent_key, candidate):
+            return [candidate]
+        return urls
 
     @classmethod
     def _extract_image_urls(cls, payload: dict[str, Any]) -> list[str]:
@@ -521,6 +564,27 @@ class KlingVideoClient:
     def _looks_like_video_url(value: str) -> bool:
         lowered = value.lower().split("?", 1)[0]
         return lowered.startswith(("http://", "https://")) and lowered.endswith((".mp4", ".mov", ".webm"))
+
+    @staticmethod
+    def _looks_like_video_url_field(key: str, value: str) -> bool:
+        lowered_key = key.lower()
+        lowered_value = value.lower().split("?", 1)[0]
+        if not lowered_value.startswith(("http://", "https://")):
+            return False
+        if lowered_value.endswith((".jpg", ".jpeg", ".png", ".webp", ".gif")):
+            return False
+        return lowered_key in {
+            "url",
+            "video",
+            "video_url",
+            "videourl",
+            "origin_video_url",
+            "originvideourl",
+            "generated_video_url",
+            "generatedvideourl",
+            "result_url",
+            "resulturl",
+        }
 
     @staticmethod
     def _looks_like_image_url(value: str) -> bool:

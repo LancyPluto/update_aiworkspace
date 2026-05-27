@@ -2,7 +2,10 @@
 import { ref, computed, watch, onMounted, nextTick } from "vue"
 import { Download } from "lucide-vue-next"
 import { getRequestBaseUrl } from "@/api/client"
+import ResultRenderer from "@/components/ResultRenderer/ResultRenderer.vue"
+import { buildTaskResultBlocks } from "@/utils/taskResultBlocks"
 import { renderMarkdown } from "@/utils/markdownRender"
+import type { ResultBlock } from "@/types/result"
 
 const props = defineProps({
   message: { type: String, default: "" },
@@ -12,15 +15,19 @@ const props = defineProps({
 
 const displayed = ref("")
 const fullText = computed(() => props.message ?? "")
-const renderedHtml = computed(() => renderMarkdown(displayed.value))
+const resultBlocks = computed(() => buildStructuredResultBlocks(fullText.value))
+const renderedText = computed(() => (resultBlocks.value.length > 0 ? "" : displayed.value))
+const renderedHtml = computed(() => renderMarkdown(renderedText.value))
 const videoItems = computed(() =>
-  extractVideoUrls(fullText.value).map((url, index) => {
-    const normalizedUrl = normalizeMediaUrl(url)
-    return {
-      url: normalizedUrl,
-      downloadName: downloadNameFromUrl(normalizedUrl, index),
-    }
-  }),
+  resultBlocks.value.length > 0
+    ? []
+    : extractVideoUrls(fullText.value).map((url, index) => {
+        const normalizedUrl = normalizeMediaUrl(url)
+        return {
+          url: normalizedUrl,
+          downloadName: downloadNameFromUrl(normalizedUrl, index),
+        }
+      }),
 )
 
 // 流式打字动画
@@ -73,6 +80,14 @@ function downloadNameFromUrl(value: string, index: number) {
   }
 }
 
+function buildStructuredResultBlocks(value: string): ResultBlock[] {
+  const trimmed = value.trim()
+  if (!trimmed || (!trimmed.startsWith("{") && !trimmed.startsWith("["))) return []
+  const blocks = buildTaskResultBlocks(trimmed)
+  if (blocks.length === 1 && (blocks[0].type === "text" || blocks[0].type === "json")) return []
+  return blocks
+}
+
 onMounted(() => {
   if (props.streaming) void type()
   else displayed.value = fullText.value
@@ -113,7 +128,8 @@ watch(
         </video>
       </section>
     </div>
-    <span v-else-if="streaming && !renderedHtml" class="stream-placeholder" />
+    <ResultRenderer v-if="resultBlocks.length" class="agent-result-renderer" :blocks="resultBlocks" />
+    <span v-if="streaming && !renderedHtml && !resultBlocks.length" class="stream-placeholder" />
     <span v-if="streaming" class="stream-cursor" />
   </div>
 </template>
