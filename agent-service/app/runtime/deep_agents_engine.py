@@ -38,7 +38,7 @@ from app.tools.memory_tool import (
     _format_memory_tool_definitions,
 )
 from app.tools.missing_argument_hints import format_missing_tool_arguments_message
-from app.tools.registry import ToolRegistry
+from app.tools.registry import ToolRegistry, requested_output_modality, tool_supports_modality
 from langchain_core.callbacks import AsyncCallbackHandler
 
 DEEP_AGENTS_INTENT = "deep_agents"
@@ -405,7 +405,17 @@ class DeepAgentsRuntimeEngine:
     def _should_auto_call(self, context: RunContext, tool: ToolDescriptor) -> bool:
         if tool.autoCallable:
             return True
-        return any(p.toolCode == tool.toolCode and p.autoCallEnabled for p in context.toolPreferences)
+        if any(p.toolCode == tool.toolCode and p.autoCallEnabled for p in context.toolPreferences):
+            return True
+        return self._is_direct_generation_request(context, tool)
+
+    def _is_direct_generation_request(self, context: RunContext, tool: ToolDescriptor) -> bool:
+        modality = requested_output_modality(context.message)
+        if not modality:
+            return False
+        if not tool_supports_modality(tool, modality):
+            return False
+        return self.intent_router._looks_like_tool_request(context.message)
 
     @staticmethod
     def _missing_user_arguments(arguments: dict[str, Any], tool: ToolDescriptor) -> list[str]:

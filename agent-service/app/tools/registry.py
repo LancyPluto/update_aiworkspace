@@ -88,16 +88,39 @@ def _score_modality_intent(text: str, tool: ToolDescriptor) -> tuple[int, set[st
     tool_text = " ".join(_phrases(tool)).lower()
     hint_values = " ".join(str(value) for value in tool.hints.values()).lower()
     combined = f"{tool_text} {hint_values}"
-    if _has_any(combined, ("image_generation", "image", "photo", "picture", "图片", "图像", "生图", "文生图", "写真", "海报", "插画")):
-        if _has_any(text, ("图片", "图像", "照片", "写真", "海报", "插画", "画面", "生成一张", "来一张")):
-            return 7, {"image_intent"}
-    if _has_any(combined, ("video_generation", "video", "视频", "短视频", "成片", "生视频", "文生视频")):
-        if _has_any(text, ("视频", "短视频", "成片", "生成一段", "生成一个视频")):
-            return 7, {"video_intent"}
-    if _has_any(combined, ("text_to_speech", "speech", "tts", "语音", "配音", "朗读", "音频")):
-        if _has_any(text, ("语音", "配音", "朗读", "音频", "声音")):
-            return 7, {"audio_intent"}
+    requested_modality = requested_output_modality(text)
+    if requested_modality == "image" and tool_supports_modality(tool, "image", combined):
+        bonus = 2 if _has_any(combined, ("图片生成", "生图", "文生图", "image_generation")) else 0
+        return 7 + bonus, {"image_intent"}
+    if requested_modality == "video" and tool_supports_modality(tool, "video", combined):
+        bonus = 2 if _has_any(combined, ("视频生成", "文生视频", "video_generation")) else 0
+        return 7 + bonus, {"video_intent"}
+    if requested_modality == "audio" and tool_supports_modality(tool, "audio", combined):
+        bonus = 2 if _has_any(combined, ("语音合成", "配音", "text_to_speech")) else 0
+        return 7 + bonus, {"audio_intent"}
     return 0, set()
+
+
+def requested_output_modality(message: str) -> str | None:
+    text = message.lower()
+    if _has_any(text, ("图片", "图像", "照片", "写真", "海报", "插画", "画面", "生成一张", "来一张")):
+        return "image"
+    if _has_any(text, ("视频", "短视频", "成片", "生成一段", "生成一个视频")):
+        return "video"
+    if _has_any(text, ("语音", "配音", "朗读", "音频", "声音")):
+        return "audio"
+    return None
+
+
+def tool_supports_modality(tool: ToolDescriptor, modality: str, combined_text: str | None = None) -> bool:
+    combined = combined_text if combined_text is not None else " ".join(_phrases(tool)).lower()
+    if modality == "image":
+        return _has_any(combined, ("image_generation", "image", "photo", "picture", "图片", "图像", "生图", "文生图", "写真", "海报", "插画"))
+    if modality == "video":
+        return _has_any(combined, ("video_generation", "video", "视频", "短视频", "成片", "生视频", "文生视频"))
+    if modality == "audio":
+        return _has_any(combined, ("text_to_speech", "speech", "tts", "语音", "配音", "朗读", "音频"))
+    return False
 
 
 def _has_any(value: str, needles: tuple[str, ...]) -> bool:

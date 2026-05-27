@@ -1,5 +1,5 @@
 from app.core.schemas import RunContext, ToolDescriptor
-from app.tools.registry import ToolRegistry
+from app.tools.registry import ToolRegistry, requested_output_modality, tool_supports_modality
 
 
 def test_registry_matches_agent_enabled_tools_even_when_confirmation_is_required():
@@ -135,3 +135,20 @@ def test_registry_matches_image_generation_by_modality():
     tool = registry.match_by_intent("我要生成一张漫展写真照片")
     assert tool is not None
     assert tool.toolCode == "kling_image_v21"
+
+
+def test_modality_helpers_distinguish_image_from_video_tools():
+    image_tool = ToolDescriptor(
+        toolCode="z_image_turbo",
+        toolName="Z-image-Turbo",
+        description="图片生成，文生图，写真，海报",
+    )
+    video_tool = ToolDescriptor(
+        toolCode="kling_video_v26",
+        toolName="可灵生视频V2.6",
+        description="视频生成，文生视频，短视频",
+    )
+
+    assert requested_output_modality("我要生成一张写真照片") == "image"
+    assert tool_supports_modality(image_tool, "image") is True
+    assert tool_supports_modality(video_tool, "image") is False

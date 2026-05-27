@@ -190,7 +190,7 @@ async def test_general_chat_empty_answer_still_completes_run():
 
 
 @pytest.mark.asyncio
-async def test_image_generation_request_requires_confirmation_when_tool_not_auto_callable():
+async def test_direct_image_generation_request_executes_even_without_auto_callable_flag():
     backend = FakeBackend()
     engine = DeepAgentsRuntimeEngine(backend, FakeModel(response="不应该走普通问答"))
     context = RunContext(
@@ -212,12 +212,8 @@ async def test_image_generation_request_requires_confirmation_when_tool_not_auto
 
     await engine.run(context)
 
-    event_types = [event[1] for event in backend.events]
-    assert "intent.detected" in event_types
-    assert "tool.selected" in event_types
-    assert "tool.confirmation_required" in event_types
-    assert backend.tool_calls == []
-    assert backend.completed == []
+    assert ("task", "kling_image_v21", {"userRequest": "我要生成一张漫展写真照片"}, "agent-run-12-tool-call-99") in backend.tool_calls
+    assert backend.completed == [(12, "# Generated copy", "tool_use")]
 
 
 @pytest.mark.asyncio
