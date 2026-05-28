@@ -163,6 +163,15 @@ const creditPercent = computed(() => {
 })
 
 const availableCredits = computed(() => credit.value?.available ?? null)
+const safeUserName = computed(() => {
+  const nickname = auth.user?.nickname?.trim() || ""
+  const username = auth.user?.username?.trim() || ""
+  const badEncoding = /�|锟|阖€|鍍|\uFFFD/.test(nickname)
+  if (nickname && !badEncoding) return nickname
+  if (username) return username
+  const readablePrefix = nickname.match(/^[\w\s.-]{2,}/)?.[0]?.trim()
+  return readablePrefix || "User"
+})
 
 function handleCreditsUpdated(event: Event) {
   const detail = (event as CustomEvent<CreditAccount | undefined>).detail
@@ -258,7 +267,7 @@ onUnmounted(() => {
         <img src="/logo.svg" alt="AI Tool Market" class="h-10 w-10 rounded-xl object-contain" />
         <div class="flex flex-col leading-tight">
           <span class="text-lg font-semibold">未来云 AI</span>
-          <span class="text-[11px] text-white/45">缁忚惀鍔╂墜骞冲彴</span>
+          <span class="text-[11px] text-white/45">经营助手平台</span>
         </div>
       </div>
 
@@ -370,14 +379,14 @@ onUnmounted(() => {
         <button
           type="button"
           class="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] text-white/70 hover:bg-white/10 hover:text-white lg:hidden"
-          aria-label="鑿滃崟"
+          aria-label="菜单"
         >
           <Menu class="h-5 w-5" aria-hidden="true" />
         </button>
         <button
           type="button"
           class="hidden h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] text-white/60 hover:bg-white/10 hover:text-white lg:inline-flex"
-          :aria-label="sidebarOpen ? '闅愯棌渚ф爮' : '鏄剧ず渚ф爮'"
+          :aria-label="sidebarOpen ? '隐藏侧栏' : '显示侧栏'"
           :aria-expanded="sidebarOpen"
           @click="toggleSidebar"
         >
@@ -389,7 +398,7 @@ onUnmounted(() => {
           <p v-if="description" class="text-xs text-white/45 truncate">{{ description }}</p>
         </div>
         <div class="hidden h-12 min-w-0 flex-1 items-center rounded-full bg-white/[0.07] px-4 ring-1 ring-white/8 xl:flex">
-          <span class="pr-4 text-sm text-white/70">鍏ㄩ儴</span>
+          <span class="pr-4 text-sm text-white/70">全部</span>
           <span class="h-5 w-px bg-white/10" />
           <Search class="ml-4 h-5 w-5 text-white/35" />
           <input
@@ -397,17 +406,26 @@ onUnmounted(() => {
             placeholder="搜索模型、智能体和素材"
           />
         </div>
+        <div
+          v-if="credit"
+          class="hidden h-10 shrink-0 items-center gap-2 rounded-full border border-white/10 bg-white/[0.035] px-3 font-mono text-xs tabular-nums text-white/62 shadow-[inset_0_1px_0_rgb(255_255_255_/_0.035)] lg:inline-flex"
+          title="剩余可用算力"
+        >
+          <Sparkles class="h-3.5 w-3.5 text-primary/75" />
+          <span class="font-sans text-white/38">剩余算力</span>
+          <strong class="font-mono font-medium text-white/78">{{ credit.available.toLocaleString() }}</strong>
+        </div>
         <RouterLink
           :to="userRoutes.toolList"
-          class="ml-auto hidden h-11 items-center gap-2 rounded-full bg-primary px-5 text-sm font-semibold text-white shadow-[0_12px_28px_rgb(176_92_255_/_0.32)] hover:brightness-110 md:inline-flex"
+          class="hidden h-11 items-center gap-2 rounded-full bg-gradient-to-br from-primary/90 via-fuchsia-400/85 to-primary/80 px-5 text-sm font-semibold text-white shadow-[0_14px_34px_rgb(176_92_255_/_0.24),inset_0_1px_0_rgb(255_255_255_/_0.22)] transition hover:brightness-110 md:inline-flex"
         >
           <Plus class="h-4 w-4" />
-          鍒涘缓
+          创建
         </RouterLink>
         <button
           type="button"
           class="hidden h-10 w-10 shrink-0 items-center justify-center rounded-full text-white/55 hover:bg-white/8 hover:text-white md:inline-flex"
-          aria-label="閫氱煡"
+          aria-label="通知"
         >
           <Bell class="h-5 w-5" />
         </button>
@@ -435,14 +453,14 @@ onUnmounted(() => {
           <template v-if="auth.isLoggedIn">
             <div class="flex items-center gap-2">
               <MemberBadge :available="availableCredits" />
-              <span class="hidden text-xs text-white/60 sm:inline">{{ auth.user?.nickname || auth.user?.username }}</span>
+              <span class="hidden max-w-[140px] truncate text-xs text-white/60 sm:inline">{{ safeUserName }}</span>
             </div>
             <button
               type="button"
               class="text-xs text-white/45 hover:text-white"
               @click="auth.logout()"
             >
-              閫€鍑?
+              退出
             </button>
           </template>
           <template v-else>
@@ -450,7 +468,7 @@ onUnmounted(() => {
               :to="'/'"
               class="text-xs text-primary hover:text-white"
             >
-              鐧诲綍
+              登录
             </RouterLink>
           </template>
         </div>

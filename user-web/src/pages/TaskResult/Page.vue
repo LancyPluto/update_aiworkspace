@@ -10,6 +10,7 @@ import type { TaskDetail } from "@/api/types"
 import type { ResultBlock } from "@/types/result"
 import { userRoutes } from "@/router/userRoutes"
 import { useAuthStore } from "@/store/authStore"
+import { buildTaskResultBlocks } from "@/utils/taskResultBlocks"
 
 const props = defineProps<{ taskId: string }>()
 const auth = useAuthStore()
@@ -24,7 +25,7 @@ onMounted(async () => {
   try {
     task.value = await fetchTaskById(props.taskId, { token: auth.token })
     if (task.value.result?.contentText) {
-      blocks.value = buildResultBlocks(task.value.result.contentText, task.value)
+      blocks.value = buildTaskResultBlocks(task.value.result.contentText, task.value)
     }
   } catch (err) {
     error.value = err instanceof Error ? err.message : "获取任务结果失败"
