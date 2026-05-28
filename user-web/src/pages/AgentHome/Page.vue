@@ -2,7 +2,6 @@
   import { computed, onMounted, ref, watch } from "vue"
   import { Bot, ChevronLeft, ChevronRight, Loader2, Plus, Sparkles, Trash2 } from "lucide-vue-next"
   import AppShell from "@/components/AppShell.vue"
-  import WorkspaceMemoryPanel from "./WorkspaceMemoryPanel.vue"
   import AgentChatPane from "./AgentChatPane.vue"
   import { confirmDelete } from "@/composables/useConfirmDelete"
   import { useAuthStore } from "@/store/authStore"
@@ -11,13 +10,10 @@
     deleteAgentSession,
     fetchAgentModelConfigs,
     fetchAgentSessions,
-    fetchAgentWorkspaces,
   } from "@/api"
-  import type { AgentModelConfig, AgentSession, AgentWorkspace } from "@/api/types"
+  import type { AgentModelConfig, AgentSession } from "@/api/types"
 
   const auth = useAuthStore()
-  const workspaces = ref<AgentWorkspace[]>([])
-  const activeWorkspaceId = ref<number | null>(null)
   const sessions = ref<AgentSession[]>([])
   const agentModels = ref<AgentModelConfig[]>([])
   const activeSessionId = ref<number | null>(null)
@@ -36,6 +32,35 @@
   const selectedAgentModel = computed(() =>
     agentModels.value.find((model) => model.id === selectedModelConfigId.value) ?? agentModels.value[0] ?? null,
   )
+  const groupedSessions = computed(() => {
+    const groups: Array<{ label: string; sessions: AgentSession[] }> = []
+    const map = new Map<string, AgentSession[]>()
+    for (const session of sessions.value) {
+      const label = sessionTimeGroup(session.updatedAt || session.createdAt)
+      const list = map.get(label) ?? []
+      list.push(session)
+      map.set(label, list)
+    }
+    for (const label of ["今天", "昨天", "前 7 天", "更早"]) {
+      const list = map.get(label)
+      if (list?.length) groups.push({ label, sessions: list })
+    }
+    return groups
+  })
+
+  function sessionTimeGroup(value?: string | null) {
+    if (!value) return "更早"
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return "更早"
+    const now = new Date()
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+    const startOfTarget = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
+    const diffDays = Math.floor((startOfToday - startOfTarget) / 86400000)
+    if (diffDays <= 0) return "今天"
+    if (diffDays === 1) return "昨天"
+    if (diffDays <= 7) return "前 7 天"
+    return "更早"
+  }
 
   function toggleSessionSidebar() {
     sessionSidebarOpen.value = !sessionSidebarOpen.value
@@ -74,15 +99,6 @@
   function modelHasRuntimeAuth(model: AgentModelConfig) {
     if (model.provider.toLowerCase() === "mock") return true
     return Boolean(model.apiKeyMasked || model.extraAuthJsonMasked)
-  }
-
-  async function loadWorkspaces() {
-    if (!auth.token) return
-    const res = await fetchAgentWorkspaces({ token: auth.token })
-    workspaces.value = res.list
-    if (!activeWorkspaceId.value && workspaces.value[0]) {
-      activeWorkspaceId.value = workspaces.value[0].id
-    }
   }
 
   async function loadAgentModels() {
@@ -179,7 +195,6 @@
     const saved = localStorage.getItem(AGENT_SESSION_SIDEBAR_KEY)
     if (saved === "0") sessionSidebarOpen.value = false
     if (saved === "1") sessionSidebarOpen.value = true
-    void loadWorkspaces()
     void loadAgentModels()
     void loadSessions()
   })
@@ -222,13 +237,15 @@
         <div v-if="sessionsLoading" class="session-list-loading">
           <Loader2 class="h-4 w-4 animate-spin" />
         </div>
-        <div class="session-list">
-          <div
-            v-for="session in sessions"
-            :key="session.id"
-            class="session-row"
-            :class="{ active: session.id === activeSessionId }"
-          >
+        <div class="session-list session-list--flat">
+          <template v-for="group in groupedSessions" :key="group.label">
+            <p class="session-group-label">{{ group.label }}</p>
+            <div
+              v-for="session in group.sessions"
+              :key="session.id"
+              class="session-row"
+              :class="{ active: session.id === activeSessionId }"
+            >
             <button type="button" class="session-item" @click="selectSession(session.id)">
               <Bot class="h-4 w-4 shrink-0" />
               <span>{{ session.title }}</span>
@@ -243,7 +260,8 @@
               <Loader2 v-if="deletingSessionId === session.id" class="h-4 w-4 animate-spin" aria-hidden="true" />
               <Trash2 v-else class="h-4 w-4" aria-hidden="true" />
             </button>
-          </div>
+            </div>
+          </template>
         </div>
       </aside>
 
@@ -275,9 +293,6 @@
         </div>
       </section>
 
-      <div class="agent-memory-panel">
-        <WorkspaceMemoryPanel :workspace-id="activeWorkspaceId" :token="auth.token" />
-      </div>
     </div>
   </AppShell>
 </template>
@@ -285,7 +300,7 @@
 <style scoped>
   .agent-page {
     display: grid;
-    grid-template-columns: 280px minmax(0, 1fr) 320px;
+    grid-template-columns: 280px minmax(0, 1fr);
     height: calc(100vh - 64px);
     overflow: hidden;
     position: relative;
@@ -293,7 +308,7 @@
   }
 
   .agent-page--session-collapsed {
-    grid-template-columns: 0 minmax(0, 1fr) 320px;
+    grid-template-columns: 0 minmax(0, 1fr);
   }
 
   /* 侧边栏显隐按钮样式 */
@@ -441,9 +456,17 @@
     margin-top: 14px;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 12px;
     flex: 1;
     min-height: 0;
+  }
+
+  .session-group-label {
+    margin: 6px 8px 6px;
+    color: rgb(255 255 255 / 0.28);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0;
   }
 
   .session-row {
@@ -569,39 +592,15 @@
     cursor: pointer;
   }
 
-  .agent-memory-panel {
-    min-width: 0;
-    min-height: 0;
-    height: 100%;
-    overflow: hidden;
-    background: #101012;
-    box-shadow: inset 1px 0 0 rgb(255 255 255 / 0.025);
-  }
-
-  :deep(.workspace-memory-panel) {
-    border-left: 0;
-    background: transparent;
-  }
-
   @media (max-width: 900px) {
     .agent-page {
       grid-template-columns: minmax(140px, 36vw) minmax(0, 1fr);
-      grid-template-rows: minmax(0, 1fr) auto;
       height: calc(100vh - 64px);
       overflow: hidden;
     }
 
     .agent-page--session-collapsed {
       grid-template-columns: 0 minmax(0, 1fr);
-    }
-
-    .agent-memory-panel {
-      grid-column: 1 / -1;
-      border-top: 1px solid var(--border);
-    }
-
-    :deep(.workspace-memory-panel) {
-      border-left: 0;
     }
 
     .agent-sidebar::-webkit-scrollbar {

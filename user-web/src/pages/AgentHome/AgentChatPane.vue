@@ -4,10 +4,13 @@ import {
   AlertTriangle,
   Bot,
   Check,
+  Copy,
   FileText,
   Loader2,
   Maximize2,
   Minimize2,
+  Pencil,
+  RefreshCw,
   Send,
   Sparkles,
   Store,
@@ -17,14 +20,18 @@ import {
 } from "lucide-vue-next"
 import RunTimeline from "./RunTimeline.vue"
 import ChatMessage from "./ChatMessage.vue"
+import AssetPreviewModal from "@/components/AssetPreviewModal.vue"
 import {
   ApiBusinessError,
   cancelAgentRun,
   confirmAgentTool,
+  editRegenerateAgentMessage,
   fetchAgentMessages,
   fetchAgentFiles,
   fetchAgentRun,
   fetchAgentRunEvents,
+  fetchTools,
+  regenerateAgentRun,
   sendAgentMessage,
   uploadAgentFile,
 } from "@/api"
@@ -36,7 +43,9 @@ import type {
   AgentRunEvent,
   AgentRunStatus,
   AgentSession,
+  ToolSummary,
 } from "@/api/types"
+import type { AssetPreviewItem, AssetPreviewRecommendation } from "@/types/assetPreview"
 
 const props = defineProps<{
   sessionId: number
@@ -58,6 +67,8 @@ const emit = defineEmits<{
 const messages = ref<AgentMessage[]>([])
 const files = ref<AgentFile[]>([])
 const events = ref<AgentRunEvent[]>([])
+const previewTools = ref<ToolSummary[]>([])
+const previewAsset = ref<AssetPreviewItem | null>(null)
 const paneLoading = ref(true)
 const sending = ref(false)
 const uploading = ref(false)
@@ -71,8 +82,15 @@ const confirmingEventIds = ref<Set<number>>(new Set())
 const confirmationError = ref<string | null>(null)
 const dismissedConfirmationIds = ref<Set<number>>(new Set())
 const recoveryRunId = ref<number | null>(null)
+const lastFailedRunId = ref<number | null>(null)
 const showActiveRunLimitHint = ref(false)
 const cancellingRun = ref(false)
+const retryingRun = ref(false)
+const regeneratingMessageId = ref<number | null>(null)
+const editingMessageId = ref<number | null>(null)
+const editingMessageDraft = ref("")
+const editingRegenerating = ref(false)
+const copiedMessageId = ref<number | null>(null)
 const bottomRef = ref<HTMLElement | null>(null)
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const composerTextareaRef = ref<HTMLTextAreaElement | null>(null)
@@ -121,7 +139,14 @@ const selectedAgentModel = computed(() =>
   props.agentModels.find((model) => model.id === props.modelConfigId) ?? props.agentModels[0] ?? null,
 )
 const showGenerationLoading = computed(() =>
-  sending.value || runConnectionStatus.value === "running" || runConnectionStatus.value === "awaiting_confirmation",
+  sending.value ||
+  editingRegenerating.value ||
+  regeneratingMessageId.value != null ||
+  runConnectionStatus.value === "running" ||
+  runConnectionStatus.value === "awaiting_confirmation",
+)
+const previewRecommendations = computed<AssetPreviewRecommendation[]>(() =>
+  previewAsset.value ? recommendToolsForAsset(previewAsset.value) : [],
 )
 
 function modelLabel(model: AgentModelConfig) {
@@ -219,6 +244,7 @@ async function cancelRecoveryRun() {
     showActiveRunLimitHint.value = false
     recoveryRunId.value = null
     activeRunId.value = null
+    lastFailedRunId.value = null
     runConnectionStatus.value = "idle"
     events.value = []
     dismissedConfirmationIds.value = new Set()
@@ -246,6 +272,7 @@ async function cancelCurrentRun() {
     try {
       await cancelAgentRun(activeRunId.value, { token: props.token })
       activeRunId.value = null
+      lastFailedRunId.value = null
       runConnectionStatus.value = "idle"
       events.value = []
       dismissedConfirmationIds.value = new Set()
@@ -289,7 +316,7 @@ async function handleFileSelected(event: Event) {
 async function submitMessage(content = input.value) {
   const text = content.trim()
   if (!text && files.value.length === 0) return
-  if (!props.token || sending.value || hasActiveRun.value) return
+  if (!props.token || sending.value || editingRegenerating.value || hasActiveRun.value) return
   if (props.modelsLoading) {
     agentError.value = "模型列表仍在加载，请稍等一下再发送。"
     return
@@ -301,6 +328,7 @@ async function submitMessage(content = input.value) {
   sending.value = true
   agentError.value = null
   confirmationError.value = null
+  lastFailedRunId.value = null
   runConnectionStatus.value = "running"
   try {
     input.value = ""
@@ -309,6 +337,7 @@ async function submitMessage(content = input.value) {
       sessionId: props.sessionId,
       role: "USER",
       contentText: text,
+      editedAt: null,
       createdAt: new Date().toISOString(),
     })
     events.value = []
@@ -335,6 +364,190 @@ async function submitMessage(content = input.value) {
     agentError.value = formatAgentError(error)
   } finally {
     sending.value = false
+    await scrollBottom()
+  }
+}
+
+async function loadPreviewTools() {
+  if (!props.token) return
+  try {
+    const response = await fetchTools({ token: props.token, query: { pageNo: 1, pageSize: 120 } })
+    previewTools.value = response.list
+  } catch {
+    previewTools.value = []
+  }
+}
+
+async function retryFailedRun() {
+  if (!props.token || retryingRun.value || editingRegenerating.value || regeneratingMessageId.value != null || hasActiveRun.value || lastFailedRunId.value == null) return
+  if (props.modelsLoading) {
+    agentError.value = "模型列表仍在加载，请稍等一下再重试。"
+    return
+  }
+  if (!props.modelConfigId) {
+    agentError.value = "请先选择一个 Agent 模型再重试。"
+    return
+  }
+  const sourceRunId = lastFailedRunId.value
+  retryingRun.value = true
+  agentError.value = null
+  confirmationError.value = null
+  runConnectionStatus.value = "running"
+  events.value = []
+  try {
+    const res = await regenerateAgentRun(
+      sourceRunId,
+      {
+        clientRequestId: crypto.randomUUID(),
+        modelConfigId: props.modelConfigId ?? null,
+      },
+      { token: props.token },
+    )
+    activeRunId.value = res.runId
+    lastFailedRunId.value = null
+    await waitForRunComplete(res.runId)
+  } catch (error) {
+    runConnectionStatus.value = "failed"
+    agentError.value = formatAgentError(error)
+  } finally {
+    retryingRun.value = false
+    await scrollBottom()
+  }
+}
+
+async function regenerateAssistantMessage(message: AgentMessage) {
+  if (!props.token || message.role !== "ASSISTANT" || !message.runId) return
+  if (retryingRun.value || editingRegenerating.value || regeneratingMessageId.value != null || sending.value || hasActiveRun.value) return
+  if (props.modelsLoading) {
+    agentError.value = "模型列表仍在加载，请稍等一下再重新生成。"
+    return
+  }
+  if (!props.modelConfigId) {
+    agentError.value = "请先选择一个 Agent 模型再重新生成。"
+    return
+  }
+
+  regeneratingMessageId.value = message.id
+  agentError.value = null
+  confirmationError.value = null
+  lastFailedRunId.value = null
+  runConnectionStatus.value = "running"
+  events.value = []
+  try {
+    const res = await regenerateAgentRun(
+      message.runId,
+      {
+        clientRequestId: crypto.randomUUID(),
+        modelConfigId: props.modelConfigId ?? null,
+      },
+      { token: props.token },
+    )
+    activeRunId.value = res.runId
+    messages.value = messages.value.filter((item) => item.id < message.id)
+    await waitForRunComplete(res.runId)
+  } catch (error) {
+    runConnectionStatus.value = "failed"
+    agentError.value = formatAgentError(error)
+    await refreshMessages()
+  } finally {
+    regeneratingMessageId.value = null
+    await scrollBottom()
+  }
+}
+
+async function copyMessage(message: AgentMessage) {
+  const text = message.contentText?.trim()
+  if (!text) return
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text)
+    } else {
+      const textarea = document.createElement("textarea")
+      textarea.value = text
+      textarea.style.position = "fixed"
+      textarea.style.opacity = "0"
+      document.body.appendChild(textarea)
+      textarea.focus()
+      textarea.select()
+      document.execCommand("copy")
+      document.body.removeChild(textarea)
+    }
+    copiedMessageId.value = message.id
+    window.setTimeout(() => {
+      if (copiedMessageId.value === message.id) copiedMessageId.value = null
+    }, 1200)
+  } catch (error) {
+    agentError.value = "复制失败，请稍后重试。"
+  }
+}
+
+function startEditMessage(message: AgentMessage) {
+  if (message.role !== "USER" || hasActiveRun.value || sending.value || editingRegenerating.value || regeneratingMessageId.value != null) return
+  editingMessageId.value = message.id
+  editingMessageDraft.value = message.contentText
+  agentError.value = null
+}
+
+function cancelEditMessage() {
+  editingMessageId.value = null
+  editingMessageDraft.value = ""
+}
+
+async function submitEditedMessage(message: AgentMessage) {
+  if (!props.token || message.role !== "USER" || editingRegenerating.value || regeneratingMessageId.value != null || sending.value || hasActiveRun.value) return
+  if (props.modelsLoading) {
+    agentError.value = "模型列表仍在加载，请稍等一下再发送。"
+    return
+  }
+  if (!props.modelConfigId) {
+    agentError.value = "请先选择一个 Agent 模型。"
+    return
+  }
+  const text = editingMessageDraft.value.trim()
+  if (!text) {
+    agentError.value = "消息内容不能为空。"
+    return
+  }
+  if (text === message.contentText.trim()) {
+    cancelEditMessage()
+    return
+  }
+
+  const previousText = message.contentText
+  const previousEditedAt = message.editedAt ?? null
+  editingRegenerating.value = true
+  agentError.value = null
+  confirmationError.value = null
+  lastFailedRunId.value = null
+  runConnectionStatus.value = "running"
+  events.value = []
+  message.contentText = text
+  message.editedAt = new Date().toISOString()
+  editingMessageId.value = null
+  editingMessageDraft.value = ""
+  try {
+    const res = await editRegenerateAgentMessage(
+      props.sessionId,
+      message.id,
+      {
+        content: text,
+        clientRequestId: crypto.randomUUID(),
+        modelConfigId: props.modelConfigId ?? null,
+      },
+      { token: props.token },
+    )
+    activeRunId.value = res.runId
+    messages.value = messages.value.filter((item) => item.id <= message.id)
+    await waitForRunComplete(res.runId)
+  } catch (error) {
+    message.contentText = previousText
+    message.editedAt = previousEditedAt
+    runConnectionStatus.value = "failed"
+    activeRunId.value = null
+    agentError.value = formatAgentError(error)
+    await refreshMessages()
+  } finally {
+    editingRegenerating.value = false
     await scrollBottom()
   }
 }
@@ -396,6 +609,9 @@ async function waitForRunComplete(runId: number) {
       if (isTerminalRunStatus(run.status)) {
         await syncRunEvents(runId)
         settleRunStatus(run)
+        if (run.status === "FAILED" || run.status === "TIMEOUT") {
+          lastFailedRunId.value = run.id
+        }
         await refreshMessages()
         await scrollBottom()
         return
@@ -405,11 +621,13 @@ async function waitForRunComplete(runId: number) {
     runConnectionStatus.value = "failed"
     agentError.value = "Agent 运行超时，请稍后重试。"
     recoveryRunId.value = runId
+    lastFailedRunId.value = runId
     activeRunId.value = null
   } catch (error) {
     runConnectionStatus.value = "failed"
     agentError.value = formatAgentError(error)
     recoveryRunId.value = runId
+    lastFailedRunId.value = runId
     activeRunId.value = null
   }
 }
@@ -458,9 +676,14 @@ function appendRunEvent(event: AgentRunEvent) {
   events.value.push(event)
   if (event.eventType === "run.started") {
     agentError.value = null
+    lastFailedRunId.value = null
     runConnectionStatus.value = "running"
   }
+  if (event.eventType === "run.completed") {
+    lastFailedRunId.value = null
+  }
   if (event.eventType === "run.failed") {
+    lastFailedRunId.value = event.runId
     const payload = parseEventJson(event.eventJson)
     const errorCode = typeof payload.errorCode === "string" ? payload.errorCode : ""
     const errorMessage = typeof payload.errorMessage === "string" ? payload.errorMessage : event.eventText
@@ -490,10 +713,16 @@ function appendRunEvent(event: AgentRunEvent) {
 
 function settleRunStatus(run?: AgentRun) {
   if (run) {
-    runConnectionStatus.value = run.status === "FAILED" ? "failed" : "completed"
+    runConnectionStatus.value = run.status === "FAILED" || run.status === "TIMEOUT" ? "failed" : "completed"
+    if (run.status === "FAILED" || run.status === "TIMEOUT") {
+      lastFailedRunId.value = run.id
+    }
   } else {
     const terminalEvent = [...events.value].reverse().find(isTerminalRunEvent)
     runConnectionStatus.value = terminalEvent?.eventType === "run.failed" ? "failed" : "completed"
+    if (terminalEvent?.eventType === "run.failed") {
+      lastFailedRunId.value = terminalEvent.runId
+    }
   }
   activeRunId.value = null
   recoveryRunId.value = null
@@ -507,7 +736,12 @@ function isTerminalRunEvent(event: AgentRunEvent) {
 function parseEventJson(value?: string | null) {
   if (!value) return {} as Record<string, unknown>
   try {
-    return JSON.parse(value) as Record<string, unknown>
+    const parsed = JSON.parse(value) as unknown
+    if (typeof parsed === "string") {
+      const nested = JSON.parse(parsed) as unknown
+      return typeof nested === "object" && nested !== null && !Array.isArray(nested) ? nested as Record<string, unknown> : {}
+    }
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {}
   } catch {
     return {} as Record<string, unknown>
   }
@@ -515,6 +749,42 @@ function parseEventJson(value?: string | null) {
 
 function messageClass(role: string) {
   return role === "USER" ? "agent-message user" : "agent-message assistant"
+}
+
+function normalizeModality(value?: string | null) {
+  return (value || "TEXT").trim().toUpperCase()
+}
+
+function recommendToolsForAsset(asset: AssetPreviewItem): AssetPreviewRecommendation[] {
+  const target = asset.kind === "image" ? "IMAGE" : asset.kind === "video" ? "VIDEO" : asset.kind === "audio" ? "AUDIO" : ""
+  const keyword = asset.kind === "image" ? /图|图片|影像|photo|image|img|改图|参考/i : asset.kind === "video" ? /视频|短片|video|clip|movie/i : /音频|音乐|audio|voice|tts/i
+  const matches = previewTools.value.filter((tool) => {
+    const input = normalizeModality(tool.inputModality)
+    const text = `${tool.toolName} ${tool.description || ""} ${tool.configNote || ""} ${tool.toolCode}`
+    return (
+      (target && (input.includes(target) || input.includes("MULTIMODAL") || input.includes("FILE"))) ||
+      keyword.test(text)
+    )
+  })
+  return (matches.length ? matches : previewTools.value).slice(0, 8)
+}
+
+function openAssetPreview(asset: AssetPreviewItem) {
+  previewAsset.value = {
+    ...asset,
+    title: asset.title || "Agent 生成资产",
+    toolName: asset.toolName || "Agent",
+  }
+}
+
+function useAssetWithTool(tool: AssetPreviewRecommendation, asset: AssetPreviewItem) {
+  window.sessionStorage.setItem("dashboard_pending_asset", JSON.stringify(asset))
+  previewAsset.value = null
+  window.location.href = `/dashboard?modality=${encodeURIComponent(tool.outputModality || "IMAGE")}&tool=${encodeURIComponent(tool.toolCode)}`
+}
+
+function openPreviewTask() {
+  previewAsset.value = null
 }
 
 function formatFileSize(size: number) {
@@ -566,6 +836,7 @@ watch(composerExpanded, () => {
 onMounted(() => {
   window.addEventListener("resize", adjustComposerTextareaHeight)
   void loadPane()
+  void loadPreviewTools()
   void nextTick(() => adjustComposerTextareaHeight())
 })
 
@@ -604,8 +875,89 @@ defineExpose({
             <Bot v-if="message.role !== 'USER'" class="h-4 w-4" />
             <span v-else>我</span>
           </div>
-          <div class="bubble">
-            <ChatMessage :message="message.contentText" :is-user="message.role === 'USER'" />
+          <div class="message-main">
+            <div class="bubble">
+              <div v-if="editingMessageId === message.id" class="message-edit-box">
+                <textarea
+                  v-model="editingMessageDraft"
+                  class="message-edit-input"
+                  rows="3"
+                  :disabled="editingRegenerating"
+                  @keydown.enter.exact.prevent="submitEditedMessage(message)"
+                  @keydown.esc.prevent="cancelEditMessage"
+                />
+                <div class="message-edit-actions">
+                  <button
+                    type="button"
+                    class="message-action-btn"
+                    title="取消"
+                    aria-label="取消修改"
+                    :disabled="editingRegenerating"
+                    @click="cancelEditMessage"
+                  >
+                    <X class="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    class="message-action-btn primary"
+                    title="保存并重新发送"
+                    aria-label="保存并重新发送"
+                    :disabled="editingRegenerating || !editingMessageDraft.trim()"
+                    @click="submitEditedMessage(message)"
+                  >
+                    <Loader2 v-if="editingRegenerating" class="h-4 w-4 animate-spin" />
+                    <Check v-else class="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+              <ChatMessage
+                v-else
+                :message="message.contentText"
+                :is-user="message.role === 'USER'"
+                @preview="openAssetPreview"
+              />
+            </div>
+            <div class="message-actions" :class="{ 'message-actions--user': message.role === 'USER' }">
+              <button
+                type="button"
+                class="message-action-btn"
+                :title="copiedMessageId === message.id ? '已复制' : '复制'"
+                :aria-label="copiedMessageId === message.id ? '已复制' : '复制消息'"
+                @click="copyMessage(message)"
+              >
+                <Check v-if="copiedMessageId === message.id" class="h-4 w-4" />
+                <Copy v-else class="h-4 w-4" />
+              </button>
+              <button
+                v-if="message.role === 'USER'"
+                type="button"
+                class="message-action-btn"
+                title="修改"
+                aria-label="修改消息"
+                :disabled="hasActiveRun || sending || editingRegenerating || regeneratingMessageId != null"
+                @click="startEditMessage(message)"
+              >
+                <Pencil class="h-4 w-4" />
+              </button>
+              <button
+                v-if="message.role === 'ASSISTANT' && message.runId"
+                type="button"
+                class="message-action-btn"
+                title="重新生成"
+                aria-label="重新生成回复"
+                :disabled="hasActiveRun || sending || editingRegenerating || regeneratingMessageId != null || modelsLoading || !modelConfigId"
+                @click="regenerateAssistantMessage(message)"
+              >
+                <Loader2 v-if="regeneratingMessageId === message.id" class="h-4 w-4 animate-spin" />
+                <RefreshCw v-else class="h-4 w-4" />
+              </button>
+            </div>
+            <div
+              v-if="message.role === 'USER' && message.editedAt"
+              class="message-meta message-meta--user"
+            >
+              已编辑
+            </div>
           </div>
         </article>
 
@@ -671,6 +1023,18 @@ defineExpose({
           <div class="card-body error">
             <p class="card-title">Agent 暂时无法继续</p>
             <p class="card-desc">{{ agentError }}</p>
+            <div v-if="lastFailedRunId" class="card-actions">
+              <button
+                type="button"
+                class="primary-btn"
+                :disabled="retryingRun || hasActiveRun || modelsLoading || !modelConfigId"
+                @click="retryFailedRun"
+              >
+                <Loader2 v-if="retryingRun" class="h-4 w-4 animate-spin" />
+                <RefreshCw v-else class="h-4 w-4" />
+                重试
+              </button>
+            </div>
           </div>
         </article>
 
@@ -738,7 +1102,7 @@ defineExpose({
         <select
           class="composer-model-select"
           :value="modelConfigId ?? ''"
-          :disabled="modelsLoading || hasActiveRun || sending || agentModels.length === 0"
+          :disabled="modelsLoading || hasActiveRun || sending || editingRegenerating || regeneratingMessageId != null || agentModels.length === 0"
           @change="changeModel(($event.target as HTMLSelectElement).value)"
         >
           <option v-if="modelsLoading" value="">加载中...</option>
@@ -770,14 +1134,14 @@ defineExpose({
           rows="1"
           class="chat-input"
           :class="{ 'input-expand': composerExpanded }"
-          :placeholder="hasActiveRun ? 'Agent 正在处理当前请求' : '输入消息，回车发送'"
-          :disabled="hasActiveRun"
+          :placeholder="hasActiveRun || editingRegenerating || regeneratingMessageId != null ? 'Agent 正在处理当前请求' : '输入消息，回车发送'"
+          :disabled="hasActiveRun || editingRegenerating || regeneratingMessageId != null"
           @keydown.enter.exact.prevent="submitMessage()"
         />
         <button
           class="expand-btn"
           type="button"
-          :disabled="hasActiveRun"
+          :disabled="hasActiveRun || editingRegenerating || regeneratingMessageId != null"
           @click="toggleComposerExpanded"
         >
           <Minimize2 v-if="composerExpanded" class="h-4 w-4" />
@@ -787,24 +1151,25 @@ defineExpose({
 
       <div class="toolbar-row">
         <div class="left-tools">
-          <button class="tool-btn" :disabled="uploading || sending || hasActiveRun" @click="openFilePicker">
+          <button type="button" class="tool-btn" :disabled="uploading || sending || editingRegenerating || regeneratingMessageId != null || hasActiveRun" @click="openFilePicker">
             <Upload class="h-4 w-4" />
             附件
           </button>
-          <button class="tool-btn">
+          <button type="button" class="tool-btn">
             <Sparkles class="h-4 w-4" />
             深度思考
           </button>
-          <button class="tool-btn">
+          <button type="button" class="tool-btn">
             <Store class="h-4 w-4" />
             智能搜索
           </button> 
         </div>
 
         <button
+          type="button"
           class="send-circle-btn"
           :class="{ stop: sending || hasActiveRun }"
-          :disabled="(!sending && !hasActiveRun && ((!input.trim() && !files.length) || modelsLoading || !modelConfigId)) || cancellingRun"
+          :disabled="editingRegenerating || regeneratingMessageId != null || ((!sending && !hasActiveRun && ((!input.trim() && !files.length) || modelsLoading || !modelConfigId)) || cancellingRun)"
           @click="(sending || hasActiveRun) ? cancelCurrentRun() : submitMessage()"
         >
           <Loader2 v-if="cancellingRun" class="h-4 w-4 animate-spin" />
@@ -813,6 +1178,13 @@ defineExpose({
         </button>
       </div>
     </form>
+    <AssetPreviewModal
+      :asset="previewAsset"
+      :recommendations="previewRecommendations"
+      @close="previewAsset = null"
+      @use-tool="useAssetWithTool"
+      @open-task="openPreviewTask"
+    />
   </div>
 </template>
 
@@ -846,7 +1218,7 @@ defineExpose({
   z-index: 1;
   height: 100%;
   max-height: none;
-  padding: 60px 32px 42px;
+  padding: 64px clamp(36px, 6vw, 96px) 46px;
   scroll-behavior: smooth;
 }
 
@@ -989,10 +1361,10 @@ defineExpose({
   background: transparent;
   font-size: 15px;
   line-height: 1.6;
-  min-height: 34px;
-  max-height: 150px;
+  min-height: 64px;
+  max-height: 200px;
   resize: none;
-  padding: 6px 38px 6px 2px;
+  padding: 10px 38px 10px 2px;
   color: rgb(255 255 255 / 0.88);
 }
 
@@ -1032,14 +1404,16 @@ defineExpose({
 
 .toolbar-row {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: space-between;
+  gap: 14px;
 }
 
 .left-tools {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  align-items: center;
 }
 
 .tool-btn {
@@ -1178,9 +1552,18 @@ defineExpose({
   color: #fff;
 }
 
-.agent-message.user .bubble {
+.message-main {
+  min-width: 0;
+  width: fit-content;
+  max-width: 100%;
+}
+
+.agent-message.user .message-main {
   grid-column: 1;
   justify-self: end;
+}
+
+.agent-message.user .bubble {
   border-color: rgb(255 255 255 / 0.09);
   background:
     radial-gradient(circle at 18% 10%, rgb(176 92 255 / 0.16), transparent 42%),
@@ -1189,6 +1572,100 @@ defineExpose({
   border-radius: 24px 10px 24px 24px;
   box-shadow: 0 18px 48px rgb(0 0 0 / 0.20), inset 0 1px 0 rgb(255 255 255 / 0.045);
   backdrop-filter: blur(14px);
+}
+
+.message-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  min-height: 28px;
+  opacity: 0;
+  transition: opacity 0.16s ease;
+}
+
+.agent-message:hover .message-actions,
+.agent-message:focus-within .message-actions {
+  opacity: 1;
+}
+
+.message-actions--user {
+  justify-content: flex-end;
+}
+
+.message-meta {
+  margin-top: 2px;
+  color: rgb(255 255 255 / 0.34);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.message-meta--user {
+  text-align: right;
+}
+
+.message-action-btn {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.045);
+  color: rgb(255 255 255 / 0.52);
+  cursor: pointer;
+  transition: border-color 0.16s ease, background 0.16s ease, color 0.16s ease, transform 0.16s ease;
+}
+
+.message-action-btn:hover:not(:disabled) {
+  border-color: rgb(176 92 255 / 0.42);
+  background: rgb(176 92 255 / 0.14);
+  color: #fff;
+  transform: translateY(-1px);
+}
+
+.message-action-btn.primary {
+  border-color: rgb(176 92 255 / 0.48);
+  background: rgb(176 92 255 / 0.22);
+  color: #fff;
+}
+
+.message-action-btn:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.message-edit-box {
+  display: grid;
+  gap: 10px;
+  width: min(640px, 68vw);
+}
+
+.message-edit-input {
+  width: 100%;
+  min-height: 92px;
+  max-height: 260px;
+  resize: none;
+  border: 1px solid rgb(255 255 255 / 0.10);
+  border-radius: 16px;
+  background: rgb(0 0 0 / 0.24);
+  color: rgb(255 255 255 / 0.9);
+  outline: none;
+  padding: 10px 12px;
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+.message-edit-input:focus {
+  border-color: rgb(176 92 255 / 0.46);
+  box-shadow: 0 0 0 3px rgb(176 92 255 / 0.12);
+}
+
+.message-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .avatar,
@@ -1395,6 +1872,10 @@ defineExpose({
 .primary-btn,
 .ghost-btn {
   height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   border: 1px solid rgb(255 255 255 / 0.12);
   border-radius: 999px;
   padding: 0 12px;
@@ -1456,6 +1937,12 @@ defineExpose({
   }
   .agent-message.user {
     grid-template-columns: minmax(0, 1fr) 34px;
+  }
+  .message-actions {
+    opacity: 1;
+  }
+  .message-edit-box {
+    width: min(100%, 72vw);
   }
   .avatar,
   .card-icon {
