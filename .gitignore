@@ -1,5 +1,4 @@
 # env
-.env
 .env.local
 .env.*.local
 
@@ -38,6 +37,3 @@ Thumbs.db
 
 #项目规划
 项目规划/
-
-#微信支付证书
-WXcert/

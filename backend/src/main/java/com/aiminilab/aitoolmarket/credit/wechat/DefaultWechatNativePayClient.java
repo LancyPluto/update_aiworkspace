@@ -135,7 +135,7 @@ public class DefaultWechatNativePayClient implements WechatNativePayClient {
         payload.put("mchid", properties.getMchid());
         payload.put("description", request.description());
         payload.put("out_trade_no", request.orderNo());
-        payload.put("time_expire", RFC3339.format(request.expiresAt().atOffset(ZoneOffset.ofHours(8))));
+        payload.put("time_expire", RFC3339.format(request.expiresAt().withNano(0).atOffset(ZoneOffset.ofHours(8))));
         payload.put("notify_url", properties.getNotifyUrl());
         Map<String, Object> amount = new LinkedHashMap<>();
         amount.put("total", request.totalAmountFen());

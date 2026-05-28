@@ -23,7 +23,7 @@ import {
   X,
   Menu,
 } from "lucide-vue-next"
-import { ref, onMounted, computed, watch } from "vue"
+import { ref, onMounted, onUnmounted, computed, watch } from "vue"
 import { fetchCreditAccount } from "@/api/creditApi"
 import { fetchCustomerServiceSettings } from "@/api/settingsApi"
 import type { CustomerServiceSettings } from "@/api/settingsApi"
@@ -164,6 +164,15 @@ const creditPercent = computed(() => {
 
 const availableCredits = computed(() => credit.value?.available ?? null)
 
+function handleCreditsUpdated(event: Event) {
+  const detail = (event as CustomEvent<CreditAccount | undefined>).detail
+  if (detail) {
+    credit.value = detail
+    return
+  }
+  void loadCreditAccount()
+}
+
 async function loadCreditAccount() {
   if (!auth.isLoggedIn || !auth.token) {
     credit.value = null
@@ -227,7 +236,12 @@ onMounted(async () => {
   }
 
   ensureActiveGroupExpanded()
+  window.addEventListener("credits:updated", handleCreditsUpdated)
   await Promise.all([loadCreditAccount(), loadCustomerServiceSettings()])
+})
+
+onUnmounted(() => {
+  window.removeEventListener("credits:updated", handleCreditsUpdated)
 })
 </script>
 
@@ -328,9 +342,9 @@ onMounted(async () => {
 
       <div class="shrink-0 p-5">
         <div class="rounded-2xl border border-white/8 bg-white/[0.025] p-4 shadow-[inset_0_1px_0_rgb(255_255_255_/_0.035)]">
-          <p class="text-[11px] font-medium tracking-wide text-white/42">已用算力</p>
+          <p class="text-[11px] font-medium tracking-wide text-white/42">可用算力</p>
           <p class="mt-1 font-mono text-[12px] tabular-nums text-white/76">
-            {{ credit ? credit.totalConsumed.toLocaleString() : '---' }}
+            {{ credit ? credit.available.toLocaleString() : '---' }}
             <span class="font-normal text-white/32">
               / {{ credit ? credit.totalGranted.toLocaleString() : '---' }}
             </span>
@@ -345,7 +359,7 @@ onMounted(async () => {
             :to="'/billing'"
             class="mt-3 block text-center text-[11px] font-medium text-primary/80 transition hover:text-primary hover:drop-shadow-[0_0_10px_rgb(176_92_255_/_0.35)]"
           >
-            鍏呭€?/ 鍗囩骇濂楅
+            充值 / 升级套餐
           </RouterLink>
         </div>
       </div>
