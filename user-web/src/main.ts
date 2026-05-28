@@ -3,11 +3,14 @@ import { createPinia } from "pinia"
 import App from "./App.vue"
 import router from "./router"
 import { useAuthStore } from "./store/authStore"
+import { applyAppTheme, getStoredTheme } from "./utils/theme"
 import "./styles/main.css"
 // 与路由同步导入一致：启动时即参与 Tailwind 扫描，避免首跳懒加载样式滞后
 import "@/components/AppShell.vue"
 
 async function bootstrap() {
+  applyAppTheme(getStoredTheme())
+
   const app = createApp(App)
   const pinia = createPinia()
   app.use(pinia)

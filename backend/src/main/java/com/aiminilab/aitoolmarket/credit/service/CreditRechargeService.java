@@ -15,6 +15,15 @@ public interface CreditRechargeService {
 
     RechargeOrderResponse mockPaySuccess(Long userId, Long orderId);
 
+    void handleMockPaymentNotification(
+            String orderNo,
+            String externalTradeNo,
+            String tradeStatus,
+            String totalAmount
+    );
+
+    void handleAlipayPagePaymentNotification(java.util.Map<String, String> params);
+
     void handleWechatNativePaymentNotification(
             String serial,
             String signature,

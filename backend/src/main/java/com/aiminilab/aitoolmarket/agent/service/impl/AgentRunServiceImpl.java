@@ -72,6 +72,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.Comparator;
 import java.util.Collections;
@@ -97,6 +99,8 @@ public class AgentRunServiceImpl implements AgentRunService {
     private static final Set<String> CONFIRMABLE_STATUSES = Set.of("WAITING_USER_CONFIRMATION");
     private static final Set<String> TERMINAL_STATUSES = Set.of("SUCCESS", "FAILED", "CANCELLED", "TIMEOUT");
     private static final Set<String> TOOL_CALL_TERMINAL_STATUSES = Set.of("SUCCESS", "FAILED");
+    private static final BigDecimal CREDIT_PRICE_CNY = new BigDecimal("0.01");
+    private static final BigDecimal PLATFORM_MARKUP = new BigDecimal("1.20");
     private final Map<Long, CopyOnWriteArrayList<SseEmitter>> eventStreams = new ConcurrentHashMap<>();
 
     private final AgentSessionMapper agentSessionMapper;
@@ -686,15 +690,16 @@ public class AgentRunServiceImpl implements AgentRunService {
         assistant.setStatus("ACTIVE");
         assistant.setSupersededAt(null);
         assistant.setCreatedAt(now);
+        AgentModelConfig modelConfig = resolveModelConfigEntityForRun(run);
         int estimatedCredits = run.getEstimatedCredits() == null ? 0 : Math.max(0, run.getEstimatedCredits());
-        int consumedCredits = request.consumedCredits() == null ? 0 : Math.max(0, Math.min(request.consumedCredits(), estimatedCredits));
+        int consumedCredits = resolveConsumedCredits(request.consumedCredits(), request.promptTokens(), request.completionTokens(), modelConfig, estimatedCredits);
         if (agentRunMapper.markSuccess(runId, request.intent(), request.modelProviderCode(), request.modelName(), consumedCredits, now) == 0) {
             return AgentRunResponse.from(findRun(runId));
         }
         agentMessageMapper.insertMessage(assistant);
         creditService.settle(run.getUserId(), CreditSourceType.AGENT_RUN, runId, consumedCredits);
         creditService.release(run.getUserId(), CreditSourceType.AGENT_RUN, runId, estimatedCredits - consumedCredits);
-        billingService.recordUsage("AGENT_RUN", runId, run.getUserId(), resolveModelConfigEntityForRun(run),
+        billingService.recordUsage("AGENT_RUN", runId, run.getUserId(), modelConfig,
                 request.promptTokens(), request.completionTokens(), null, consumedCredits);
         appendEventInternal(runId, run.getUserId(), "run.completed", "Agent 运行已完成", null, now);
         agentSessionMapper.touch(run.getSessionId(), now);
@@ -716,6 +721,43 @@ public class AgentRunServiceImpl implements AgentRunService {
                 });
     }
 
+    private int resolveConsumedCredits(Integer reportedCredits,
+                                       Integer promptTokens,
+                                       Integer completionTokens,
+                                       AgentModelConfig modelConfig,
+                                       int estimatedCredits) {
+        int reported = reportedCredits == null ? 0 : Math.max(0, reportedCredits);
+        int priced = tokenPricedCredits(promptTokens, completionTokens, modelConfig);
+        int resolved = Math.max(reported, priced);
+        return Math.max(0, Math.min(resolved, Math.max(0, estimatedCredits)));
+    }
+
+    private int tokenPricedCredits(Integer promptTokens, Integer completionTokens, AgentModelConfig modelConfig) {
+        if (modelConfig == null) {
+            return 0;
+        }
+        int prompt = promptTokens == null ? 0 : Math.max(0, promptTokens);
+        int completion = completionTokens == null ? 0 : Math.max(0, completionTokens);
+        if (prompt == 0 && completion == 0) {
+            return 0;
+        }
+        BigDecimal inputCost = tokenCost(prompt, modelConfig.getInputTokenPricePer1m());
+        BigDecimal outputCost = tokenCost(completion, modelConfig.getOutputTokenPricePer1m());
+        BigDecimal customerCharge = inputCost.add(outputCost).multiply(PLATFORM_MARKUP);
+        if (customerCharge.compareTo(BigDecimal.ZERO) <= 0) {
+            return 0;
+        }
+        return customerCharge.divide(CREDIT_PRICE_CNY, 0, RoundingMode.CEILING).intValue();
+    }
+
+    private BigDecimal tokenCost(int tokens, BigDecimal pricePer1m) {
+        if (tokens <= 0 || pricePer1m == null || pricePer1m.compareTo(BigDecimal.ZERO) <= 0) {
+            return BigDecimal.ZERO;
+        }
+        return pricePer1m.multiply(BigDecimal.valueOf(tokens))
+                .divide(BigDecimal.valueOf(1_000_000), 8, RoundingMode.HALF_UP);
+    }
+
     @Override
     @Transactional
     public AgentRunResponse failRun(Long runId, FailAgentRunRequest request) {
@@ -724,10 +766,9 @@ public class AgentRunServiceImpl implements AgentRunService {
             return AgentRunResponse.from(run);
         }
         LocalDateTime now = LocalDateTime.now();
+        AgentModelConfig modelConfig = resolveModelConfigEntityForRun(run);
         int estimatedCredits = run.getEstimatedCredits() == null ? 0 : Math.max(0, run.getEstimatedCredits());
-        int consumedCredits = request.consumedCredits() == null
-                ? 0
-                : Math.max(0, Math.min(request.consumedCredits(), estimatedCredits));
+        int consumedCredits = resolveConsumedCredits(request.consumedCredits(), request.promptTokens(), request.completionTokens(), modelConfig, estimatedCredits);
         if (agentRunMapper.markFailedWithConsumedCredits(runId, request.errorCode(), request.errorMessage(), consumedCredits, now) == 0) {
             return AgentRunResponse.from(findRun(runId));
         }
@@ -736,7 +777,7 @@ public class AgentRunServiceImpl implements AgentRunService {
             creditService.settle(run.getUserId(), CreditSourceType.AGENT_RUN, runId, consumedCredits);
         }
         creditService.release(run.getUserId(), CreditSourceType.AGENT_RUN, runId, estimatedCredits - consumedCredits);
-        billingService.recordUsage("AGENT_RUN", runId, run.getUserId(), agentModelConfigMapper.findLatest(),
+        billingService.recordUsage("AGENT_RUN", runId, run.getUserId(), modelConfig,
                 request.promptTokens(), request.completionTokens(), null, consumedCredits);
         appendEventInternal(runId, run.getUserId(), "run.failed", request.errorMessage(), toJson(request), now);
         agentRateLimitService.decrementActiveRun(run.getUserId(), runId);
