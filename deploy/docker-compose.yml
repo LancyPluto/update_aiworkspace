@@ -137,6 +137,7 @@ services:
       - "${BACKEND_PORT:-8080}:8080"
     volumes:
       - ../backend:/app
+      - ../WXcert:/app/WXcert:ro
       - ../docs:/docs:ro
       - maven_cache:/root/.m2
       - generated_media:/data/generated-media

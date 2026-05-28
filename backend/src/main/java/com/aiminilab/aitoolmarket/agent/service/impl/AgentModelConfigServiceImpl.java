@@ -269,7 +269,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
     }
 
     private static String modelConfigTestFailureMessage(IllegalStateException exception) {
-        String detail = exception.getMessage();
+        String detail = rootMessage(exception);
         if (detail == null || detail.isBlank()) {
             return "调用 agent-service 失败，请查看后端日志并确认服务与内网签名配置。";
         }
@@ -280,6 +280,18 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         return "连通性测试失败：请确认 agent-service 已启动，且后端 AGENT_SERVICE_BASE_URL 在运行环境中可解析"
                 + "（Docker 内通常为 http://agent-service:8090），并与 agent-service 共用同一 INTERNAL_API_TOKEN。"
                 + " 详情：" + detail;
+    }
+
+    private static String rootMessage(Throwable throwable) {
+        Throwable current = throwable;
+        String message = null;
+        while (current != null) {
+            if (current.getMessage() != null && !current.getMessage().isBlank()) {
+                message = current.getMessage();
+            }
+            current = current.getCause();
+        }
+        return message == null ? "" : message;
     }
 
     private AgentModelConfig findOrDefault() {

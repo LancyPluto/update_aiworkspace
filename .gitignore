@@ -1,36 +1,10 @@
 # env
-.env
 .env.local
 .env.*.local
 
 # logs
 *.log
 logs/
-
-# runtime data
-backend/data/agent-files/
-data/generated-media/
-
-# PPT engine (banana-slides) runtime — code lives under engines/banana-slides/
-engines/banana-slides/.env
-engines/banana-slides/uploads/
-engines/banana-slides/backend/instance/
-engines/banana-slides/backend/.temp/
-
-# local planning docs
-项目规划/
-
-# development / design docs (keep local only, do not commit)
-/docs/**/*.md
-/docs/**/*.docx
-/engines/banana-slides/docs/
-/模型配置.md
-/模型配置后端文档.md
-/agent开发.md
-/agent开发_改进版.md
-/mergeD1.md
-/PROJECT_REVIEW_README.md
-/task_progress.md
 
 # local tool bundles
 .tools/
@@ -43,8 +17,6 @@ target/
 node_modules/
 dist/
 .vite/
-.next/
-admin-frontend/.next/
 *.tsbuildinfo
 admin-frontend/vite.config.js
 admin-frontend/vite.config.d.ts
@@ -62,3 +34,6 @@ venv/
 # OS
 .DS_Store
 Thumbs.db
+
+#项目规划
+项目规划/

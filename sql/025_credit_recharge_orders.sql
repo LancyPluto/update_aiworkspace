@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS credit_recharge_orders (
   payment_channel VARCHAR(32) NOT NULL DEFAULT 'MOCK',
   status VARCHAR(32) NOT NULL DEFAULT 'WAITING_PAYMENT',
   status_reason VARCHAR(255),
-  pay_url VARCHAR(512),
+  pay_url TEXT,
   qr_code_url VARCHAR(512),
   external_trade_no VARCHAR(128),
   idempotency_key VARCHAR(128),

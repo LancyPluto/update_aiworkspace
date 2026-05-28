@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue"
 import { RouterLink, useRoute } from "vue-router"
-import { Film, Sparkles } from "lucide-vue-next"
+import { Sparkles } from "lucide-vue-next"
 import AppShell from "@/components/AppShell.vue"
 import CreditCostBadge from "@/components/CreditCostBadge/CreditCostBadge.vue"
 import { getApiOrigin } from "@/api/client"
@@ -12,6 +12,7 @@ import type { TaskDetail } from "@/api/types"
 import { userRoutes } from "@/router/userRoutes"
 import { useAuthStore } from "@/store/authStore"
 import { isPptWorkspaceTool } from "@/api/pptApi"
+import { resolveModelBrand } from "@/utils/modelBrand"
 import { toolEntryRoute } from "@/utils/toolEntryRoute"
 
 const auth = useAuthStore()
@@ -60,6 +61,10 @@ function isVideoPreviewUrl(value?: string | null): boolean {
 
 function usesEffectMedia(tool: AITool): boolean {
   return tool.mediaDisplayMode === "effect" && Boolean(tool.iconUrl)
+}
+
+function modelBrand(tool: AITool) {
+  return resolveModelBrand(tool)
 }
 
 const sortedTools = computed(() => [...tools.value].sort((a, b) => a.order - b.order))
@@ -364,9 +369,15 @@ onMounted(() => {
                 </span>
               </div>
               <div
-                class="absolute left-3 top-3 flex h-8 w-8 items-center justify-center rounded-full bg-black/35 text-white ring-1 ring-white/20 backdrop-blur"
+                class="absolute left-3 top-3 flex items-center gap-1.5 rounded-full bg-white/90 py-1 pl-1 pr-2 text-[11px] font-medium text-slate-900 shadow-sm ring-1 ring-white/50 backdrop-blur"
+                :title="modelBrand(tool).name"
               >
-                <Film class="h-4 w-4" />
+                <img
+                  :src="normalizeMediaUrl(modelBrand(tool).iconUrl)"
+                  :alt="modelBrand(tool).name"
+                  class="h-5 w-5 rounded-full bg-white object-contain"
+                />
+                <span class="max-w-[88px] truncate">{{ modelBrand(tool).name }}</span>
               </div>
             </div>
             <div class="flex flex-1 flex-col px-4 py-4">
@@ -382,18 +393,20 @@ onMounted(() => {
 
           <div v-else class="flex min-h-[320px] flex-col px-5 pb-5 pt-6">
             <div
-              class="mb-5 flex h-[92px] w-[92px] items-center justify-center overflow-hidden rounded-3xl ring-1 ring-white/10 transition group-hover:ring-primary/50"
-              :style="{ backgroundColor: tool.primaryColor ? `${tool.primaryColor}18` : undefined }"
+              class="mb-5 flex h-[92px] w-[92px] items-center justify-center overflow-hidden rounded-3xl border border-border bg-white p-4 shadow-sm ring-1 ring-white/10 transition group-hover:ring-primary/50 dark:bg-white"
+              :style="{ backgroundColor: `${modelBrand(tool).color}14` }"
+              :title="modelBrand(tool).name"
             >
               <img
-                v-if="tool.iconUrl"
-                :src="normalizeMediaUrl(tool.iconUrl)"
-                :alt="tool.name"
-                class="h-full w-full object-cover"
+                :src="normalizeMediaUrl(modelBrand(tool).iconUrl)"
+                :alt="modelBrand(tool).name"
+                class="h-full w-full object-contain"
               />
-              <Sparkles v-else class="h-8 w-8 text-primary" />
             </div>
             <h3 class="text-xl font-semibold">{{ tool.name }}</h3>
+            <p class="mt-1 max-w-full truncate text-[11px] font-medium text-primary">
+              {{ modelBrand(tool).name }}
+            </p>
             <p class="mt-2 line-clamp-3 min-h-[60px] text-sm text-muted-foreground">
               {{ tool.description || (isPptWorkspaceTool(tool.id) ? "进入 PPT 工作台" : "点击进入对话") }}
             </p>
