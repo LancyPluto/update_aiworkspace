@@ -113,7 +113,8 @@ function isGroupExpanded(id: string) {
 }
 
 function isActive(path: string) {
-  if (path === "/marketplace") {
+
+if (path === "/marketplace") {
     return route.path === path || route.path.startsWith("/chat/")
   }
   if (path === "/agents") {
@@ -227,7 +228,7 @@ onMounted(async () => {
       <div class="flex h-20 shrink-0 items-center gap-3 px-6">
         <img src="/logo.svg" alt="AI Tool Market" class="h-10 w-10 rounded-xl object-contain" />
         <div class="flex flex-col leading-tight">
-          <span class="text-lg font-semibold">智擎 AI</span>
+          <span class="text-lg font-semibold">科创点AI</span>
           <span class="text-[11px] text-white/45">经营助手平台</span>
         </div>
       </div>

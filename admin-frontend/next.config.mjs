@@ -7,7 +7,7 @@ const nextConfig = {
   turbopack: {
     root: path.resolve(process.cwd()),
   },
-  allowedDevOrigins: ['127.0.0.1', 'localhost'],
+  allowedDevOrigins: ['127.0.0.1', 'localhost', '172.21.64.1'],
   typescript: {
     ignoreBuildErrors: true,
   },
