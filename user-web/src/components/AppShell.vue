@@ -69,27 +69,27 @@ const expandedGroups = ref<Set<string>>(new Set())
 const customerServiceOpen = ref(false)
 const customerService = ref<CustomerServiceSettings>({
   enabled: true,
-  title: "鑱旂郴瀹㈡湇",
-  description: "鎵爜娣诲姞瀹㈡湇锛岃幏鍙栦娇鐢ㄦ敮鎸?,
+  title: "联系客服",
+  description: "扫码添加客服，获取使用支持",
   qrCodeUrl: "",
 })
 
 const userNav: (NavLink | NavGroup)[] = [
   { type: "link", href: "/agent", label: "Agent", icon: Bot },
-  { type: "link", href: "/dashboard", label: "宸ヤ綔鍙?, icon: LayoutGrid },
+  { type: "link", href: "/dashboard", label: "工作台", icon: LayoutGrid },
   {
     type: "group",
     id: "ai-market",
-    label: "AI 宸ュ叿瓒呭競",
+    label: "AI 工具超市",
     icon: Store,
     children: [
-      { href: "/marketplace", label: "澶фā鍨?, icon: Sparkles },
-      { href: "/agents", label: "鏅鸿兘浣?, icon: BrainCircuit },
+      { href: "/marketplace", label: "大模型", icon: Sparkles },
+      { href: "/agents", label: "智能体", icon: BrainCircuit },
     ],
   },
-  { type: "link", href: "/tasks", label: "鎴戠殑浠诲姟", icon: ListChecks },
-  { type: "link", href: "/library", label: "绱犳潗搴?, icon: FolderHeart },
-  { type: "link", href: "/billing", label: "浼氬憳涓庣畻鍔?, icon: Wallet },
+  { type: "link", href: "/tasks", label: "我的任务", icon: ListChecks },
+  { type: "link", href: "/library", label: "素材库", icon: FolderHeart },
+  { type: "link", href: "/billing", label: "会员与算力", icon: Wallet },
 ]
 
 function toggleSidebar() {
@@ -172,7 +172,7 @@ async function loadCreditAccount() {
   try {
     credit.value = await fetchCreditAccount({ token: auth.token })
   } catch {
-    // 闈欓粯澶勭悊
+    // 静默处理
   }
 }
 
@@ -182,8 +182,8 @@ async function loadCustomerServiceSettings() {
   } catch {
     customerService.value = {
       enabled: true,
-      title: "鑱旂郴瀹㈡湇",
-      description: "鎵爜娣诲姞瀹㈡湇锛岃幏鍙栦娇鐢ㄦ敮鎸?,
+      title: "联系客服",
+      description: "扫码添加客服，获取使用支持",
       qrCodeUrl: "",
     }
   }
@@ -243,7 +243,7 @@ onMounted(async () => {
       <div class="flex h-20 shrink-0 items-center gap-3 px-6">
         <img src="/logo.svg" alt="AI Tool Market" class="h-10 w-10 rounded-xl object-contain" />
         <div class="flex flex-col leading-tight">
-          <span class="text-lg font-semibold">鏅烘搸 AI</span>
+          <span class="text-lg font-semibold">未来云 AI</span>
           <span class="text-[11px] text-white/45">缁忚惀鍔╂墜骞冲彴</span>
         </div>
       </div>
@@ -328,7 +328,7 @@ onMounted(async () => {
 
       <div class="shrink-0 p-5">
         <div class="rounded-2xl border border-white/8 bg-white/[0.025] p-4 shadow-[inset_0_1px_0_rgb(255_255_255_/_0.035)]">
-          <p class="text-[11px] font-medium tracking-wide text-white/42">宸茬敤绠楀姏</p>
+          <p class="text-[11px] font-medium tracking-wide text-white/42">已用算力</p>
           <p class="mt-1 font-mono text-[12px] tabular-nums text-white/76">
             {{ credit ? credit.totalConsumed.toLocaleString() : '---' }}
             <span class="font-normal text-white/32">
@@ -404,7 +404,7 @@ onMounted(async () => {
           @click="customerServiceOpen = true"
         >
           <Headphones class="h-4 w-4" aria-hidden="true" />
-          鑱旂郴瀹㈡湇
+          联系客服
         </button>
         <div class="flex items-center gap-3">
           <button
@@ -455,7 +455,7 @@ onMounted(async () => {
         <button
           type="button"
           class="absolute right-4 top-4 inline-flex h-8 w-8 items-center justify-center rounded-full text-white/45 hover:bg-white/10 hover:text-white"
-          aria-label="鍏抽棴鑱旂郴瀹㈡湇"
+          aria-label="关闭联系客服"
           @click="customerServiceOpen = false"
         >
           <X class="h-4 w-4" aria-hidden="true" />
@@ -464,21 +464,21 @@ onMounted(async () => {
         <div class="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/15 text-primary ring-1 ring-primary/25">
           <Headphones class="h-6 w-6" aria-hidden="true" />
         </div>
-        <h2 class="mt-4 text-xl font-semibold text-white">{{ customerService.title || "鑱旂郴瀹㈡湇" }}</h2>
+        <h2 class="mt-4 text-xl font-semibold text-white">{{ customerService.title || "联系客服" }}</h2>
         <p class="mt-2 text-sm leading-6 text-white/55">
-          {{ customerService.description || "鎵爜娣诲姞瀹㈡湇锛岃幏鍙栦娇鐢ㄦ敮鎸? }}
+          {{ customerService.description || "扫码添加客服，获取使用支持" }}
         </p>
 
         <div class="mx-auto mt-5 flex aspect-square w-56 max-w-full items-center justify-center rounded-3xl bg-white p-3">
           <img
             v-if="customerService.qrCodeUrl"
             :src="customerService.qrCodeUrl"
-            :alt="customerService.title || '瀹㈡湇浜岀淮鐮?"
+            :alt="customerService.title || '客服二维码'"
             class="h-full w-full rounded-2xl object-contain"
           />
           <div v-else class="flex h-full w-full flex-col items-center justify-center rounded-2xl border border-dashed border-black/15 text-black/45">
             <QrCode class="h-10 w-10" aria-hidden="true" />
-            <span class="mt-3 text-xs">鍚庡彴鏆傛湭閰嶇疆瀹㈡湇浜岀淮鐮?/span>
+            <span class="mt-3 text-xs">后台暂未配置客服二维码</span>
           </div>
         </div>
       </section>
