@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { watch } from "vue"
+import { reactive, watch } from "vue"
 import type { ToolField } from "@/api/types"
+import { uploadChatFile } from "@/api/aiToolApi"
 
 const props = defineProps<{
   fields: ToolField[]
+  toolId?: string
 }>()
 
 const model = defineModel<Record<string, unknown>>({ required: true })
@@ -56,6 +58,24 @@ function strVal(key: string): string {
 
 function setField(key: string, val: unknown) {
   model.value = { ...model.value, [key]: val }
+}
+
+const uploading = reactive<Record<string, boolean>>({})
+
+async function onFilePicked(key: string, ev: Event) {
+  const input = ev.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  uploading[key] = true
+  try {
+    const uploaded = await uploadChatFile(file, { toolId: props.toolId || null })
+    if (uploaded?.url) {
+      setField(key, uploaded.url)
+    }
+  } finally {
+    uploading[key] = false
+    input.value = ""
+  }
 }
 
 function setOptionField(key: string, val: string) {
@@ -178,14 +198,24 @@ defineExpose({ validate })
           <span>{{ f.placeholder || f.fieldName }}</span>
         </label>
 
-        <input
-          v-else-if="f.fieldType === 'image' || f.fieldType === 'file'"
-          type="url"
-          :value="strVal(f.fieldKey)"
-          :placeholder="f.placeholder || '请输入资源 URL'"
-          class="flex h-10 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
-          @input="setField(f.fieldKey, ($event.target as HTMLInputElement).value)"
-        />
+        <div v-else-if="f.fieldType === 'image' || f.fieldType === 'file'" class="space-y-2">
+          <input
+            type="url"
+            :value="strVal(f.fieldKey)"
+            :placeholder="f.placeholder || '请输入资源 URL'"
+            class="flex h-10 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+            @input="setField(f.fieldKey, ($event.target as HTMLInputElement).value)"
+          />
+          <div class="flex items-center gap-2">
+            <input
+              :accept="f.fieldType === 'image' ? 'image/*' : 'video/*,audio/*,image/*'"
+              type="file"
+              class="text-xs"
+              @change="onFilePicked(f.fieldKey, $event)"
+            />
+            <span v-if="uploading[f.fieldKey]" class="text-xs text-muted-foreground">上传中...</span>
+          </div>
+        </div>
 
         <input
           v-else

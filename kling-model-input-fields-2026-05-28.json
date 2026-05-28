@@ -477,7 +477,7 @@
         {
           "fieldKey": "imageUrl",
           "fieldName": "角色图",
-          "fieldType": "textarea",
+          "fieldType": "image",
           "placeholder": "待驱动角色图片 URL",
           "required": true,
           "executionRequired": false,
@@ -489,7 +489,7 @@
         {
           "fieldKey": "videoUrl",
           "fieldName": "动作参考视频",
-          "fieldType": "textarea",
+          "fieldType": "file",
           "placeholder": "动作参考视频 URL",
           "required": true,
           "executionRequired": false,
