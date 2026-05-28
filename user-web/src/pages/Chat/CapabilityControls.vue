@@ -45,6 +45,7 @@ const props = defineProps<{
   fields?: ToolField[]
   coreFieldKey?: string | null
   toolId?: string | null
+  initialParams?: Record<string, unknown> | null
 }>()
 
 const state = ref<CapabilityState>({
@@ -128,8 +129,12 @@ function buildDefaultState(): CapabilityState {
   if (webSearchCapability.value) next.webSearch = webSearchCapability.value.config.defaultEnabled === true
   if (codeCapability.value) next.language = codeLanguages.value[0] || "python"
   for (const field of configuredFields.value) {
-    next.fields[field.fieldKey] = defaultFieldValue(field)
+    const initial = props.initialParams?.[field.fieldKey]
+    next.fields[field.fieldKey] = initial !== undefined && initial !== null ? initial : defaultFieldValue(field)
   }
+  if (typeof props.initialParams?.imageRatio === "string") next.imageRatio = props.initialParams.imageRatio
+  if (typeof props.initialParams?.webSearch === "boolean") next.webSearch = props.initialParams.webSearch
+  if (typeof props.initialParams?.language === "string") next.language = props.initialParams.language
   return next
 }
 
@@ -139,7 +144,7 @@ function resetState() {
 }
 
 watch(
-  () => [props.capabilities, props.fields, props.coreFieldKey],
+  () => [props.capabilities, props.fields, props.coreFieldKey, props.initialParams],
   () => resetState(),
   { immediate: true, deep: true },
 )
@@ -539,68 +544,70 @@ defineExpose({
       </button>
     </div>
 
-    <div
-      v-if="materialPickerOpen"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/35 px-4 py-6"
-      @click.self="closeMaterialPicker"
-    >
-      <div class="flex max-h-[78vh] w-full max-w-3xl flex-col rounded-2xl border border-border bg-background shadow-2xl">
-        <div class="flex items-center justify-between border-b border-border px-5 py-4">
-          <div>
-            <h3 class="text-base font-semibold text-foreground">
-              选择{{ materialKindLabel(activeMaterialKind) }}素材
-            </h3>
-            <p class="mt-1 text-xs text-muted-foreground">
-              来自你已生成成功的历史任务，选择后会填入当前上传字段。
-            </p>
-          </div>
-          <button
-            type="button"
-            class="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-            @click="closeMaterialPicker"
-          >
-            <X class="h-4 w-4" />
-          </button>
-        </div>
-
-        <div class="min-h-[220px] overflow-y-auto p-5">
-          <div v-if="materialLoading" class="flex h-48 items-center justify-center gap-2 text-sm text-muted-foreground">
-            <Loader2 class="h-4 w-4 animate-spin" />
-            正在加载素材库...
-          </div>
-          <div v-else-if="materialError" class="flex h-48 items-center justify-center text-sm text-destructive">
-            {{ materialError }}
-          </div>
-          <div v-else-if="materialAssets.length === 0" class="flex h-48 items-center justify-center text-sm text-muted-foreground">
-            暂无可用{{ materialKindLabel(activeMaterialKind) }}素材
-          </div>
-          <div v-else class="grid grid-cols-2 gap-3 md:grid-cols-3">
+    <Teleport to="body">
+      <div
+        v-if="materialPickerOpen"
+        class="fixed inset-0 z-[120] flex items-start justify-center bg-black/65 px-4 pb-8 pt-[9vh] backdrop-blur-sm"
+        @click.self="closeMaterialPicker"
+      >
+        <div class="flex max-h-[82vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-white/10 bg-[#111217] text-white shadow-[0_28px_100px_rgb(0_0_0_/_0.72)]">
+          <div class="flex items-center justify-between border-b border-white/10 px-6 py-5">
+            <div>
+              <h3 class="text-lg font-semibold text-white">
+                选择{{ materialKindLabel(activeMaterialKind) }}素材
+              </h3>
+              <p class="mt-1 text-sm text-white/45">
+                来自你已生成成功的历史任务，选择后会填入当前上传字段。
+              </p>
+            </div>
             <button
-              v-for="asset in materialAssets"
-              :key="asset.id"
               type="button"
-              class="group overflow-hidden rounded-xl border border-border bg-card text-left transition hover:border-primary/60 hover:shadow-md"
-              @click="selectMaterialAsset(asset)"
+              class="rounded-full p-2 text-white/45 transition hover:bg-white/10 hover:text-white"
+              @click="closeMaterialPicker"
             >
-              <div class="flex aspect-[4/3] items-center justify-center bg-muted/40">
-                <img
-                  v-if="asset.kind === 'image' && asset.previewUrl"
-                  :src="asset.previewUrl"
-                  alt=""
-                  class="h-full w-full object-cover"
-                />
-                <FileVideo v-else-if="asset.kind === 'video'" class="h-9 w-9 text-muted-foreground group-hover:text-primary" />
-                <FileAudio v-else-if="asset.kind === 'audio'" class="h-9 w-9 text-muted-foreground group-hover:text-primary" />
-                <ImageIcon v-else class="h-9 w-9 text-muted-foreground group-hover:text-primary" />
-              </div>
-              <div class="space-y-1 p-3">
-                <p class="truncate text-sm font-medium text-foreground">{{ asset.title }}</p>
-                <p class="truncate text-xs text-muted-foreground">{{ asset.subtitle }}</p>
-              </div>
+              <X class="h-5 w-5" />
             </button>
           </div>
+
+          <div class="min-h-[260px] overflow-y-auto p-6">
+            <div v-if="materialLoading" class="flex h-56 items-center justify-center gap-2 text-sm text-white/45">
+              <Loader2 class="h-4 w-4 animate-spin" />
+              正在加载素材库...
+            </div>
+            <div v-else-if="materialError" class="flex h-56 items-center justify-center text-sm text-red-300">
+              {{ materialError }}
+            </div>
+            <div v-else-if="materialAssets.length === 0" class="flex h-56 items-center justify-center text-sm text-white/45">
+              暂无可用{{ materialKindLabel(activeMaterialKind) }}素材
+            </div>
+            <div v-else class="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-4">
+              <button
+                v-for="asset in materialAssets"
+                :key="asset.id"
+                type="button"
+                class="group overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04] text-left transition hover:-translate-y-0.5 hover:border-primary/60 hover:bg-white/[0.07]"
+                @click="selectMaterialAsset(asset)"
+              >
+                <div class="flex aspect-[4/3] items-center justify-center bg-white/[0.04]">
+                  <img
+                    v-if="asset.kind === 'image' && asset.previewUrl"
+                    :src="asset.previewUrl"
+                    alt=""
+                    class="h-full w-full object-cover"
+                  />
+                  <FileVideo v-else-if="asset.kind === 'video'" class="h-9 w-9 text-white/35 group-hover:text-primary" />
+                  <FileAudio v-else-if="asset.kind === 'audio'" class="h-9 w-9 text-white/35 group-hover:text-primary" />
+                  <ImageIcon v-else class="h-9 w-9 text-white/35 group-hover:text-primary" />
+                </div>
+                <div class="space-y-1.5 p-4">
+                  <p class="truncate text-sm font-semibold text-white">{{ asset.title }}</p>
+                  <p class="truncate text-xs text-white/40">{{ asset.subtitle }}</p>
+                </div>
+              </button>
+            </div>
+          </div>
         </div>
-      </div>
-    </div>
+              </div>
+    </Teleport>
   </div>
 </template>

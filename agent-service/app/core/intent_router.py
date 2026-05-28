@@ -1,10 +1,14 @@
+import logging
 import re
 from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
 from app.core.schemas import RunContext
-from app.tools.registry import ToolRegistry
+from app.tools.registry import ToolRegistry, requested_output_modality, tool_supports_modality
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class Intent(StrEnum):
@@ -70,7 +74,38 @@ class IntentRouter:
 
         registry = ToolRegistry(context)
         candidates = registry.rank_by_intent(message)
+        requested_modality = requested_output_modality(message)
+        if candidates or requested_modality:
+            LOGGER.info(
+                "agent intent route candidates runId=%s requestedModality=%s message=%s candidates=%s",
+                context.runId,
+                requested_modality or "-",
+                _clip(message),
+                [
+                    {
+                        "toolCode": candidate.tool.toolCode,
+                        "toolName": candidate.tool.toolName,
+                        "score": candidate.score,
+                        "matchedTerms": list(candidate.matched_terms),
+                    }
+                    for candidate in candidates[:8]
+                ],
+            )
         if candidates:
+            if requested_modality and self._looks_like_tool_request(message):
+                modality_candidates = [
+                    candidate for candidate in candidates
+                    if tool_supports_modality(candidate.tool, requested_modality)
+                ]
+                if modality_candidates:
+                    top = modality_candidates[0]
+                    return IntentResult(
+                        intent=Intent.TOOL_USE,
+                        confidence=0.88,
+                        selectedToolCode=top.tool.toolCode,
+                        candidateToolCodes=[candidate.tool.toolCode for candidate in modality_candidates[:3]],
+                        reason=f"{requested_modality}_modality_tool_match",
+                    )
             top = candidates[0]
             second_score = candidates[1].score if len(candidates) > 1 else 0
             candidate_codes = [candidate.tool.toolCode for candidate in candidates[:3]]
@@ -284,3 +319,9 @@ class IntentRouter:
         if "全部按照" in message and ("你给" in message or "你的" in message):
             return True
         return False
+
+
+def _clip(value: str, limit: int = 180) -> str:
+    if len(value) <= limit:
+        return value
+    return value[:limit] + "...<truncated>"

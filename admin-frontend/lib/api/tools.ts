@@ -32,8 +32,21 @@ export function updateToolCategoryStatus(categoryId: number, status: string) {
   return http.patch<ToolCategory>(`/api/admin/v1/tool-categories/${categoryId}/status`, { status })
 }
 
-export function fetchAdminTools() {
-  return http.get<PageResponse<ToolSummary>>('/api/admin/v1/tools')
+export function fetchAdminTools(params?: {
+  keyword?: string
+  categoryId?: number
+  status?: string
+  pageNo?: number
+  pageSize?: number
+}) {
+  const search = new URLSearchParams()
+  if (params?.keyword) search.set('keyword', params.keyword)
+  if (params?.categoryId != null) search.set('categoryId', String(params.categoryId))
+  if (params?.status) search.set('status', params.status)
+  if (params?.pageNo != null) search.set('pageNo', String(params.pageNo))
+  if (params?.pageSize != null) search.set('pageSize', String(params.pageSize))
+  const query = search.toString()
+  return http.get<PageResponse<ToolSummary>>(`/api/admin/v1/tools${query ? `?${query}` : ''}`)
 }
 
 export function createTool(payload: UpsertToolPayload) {

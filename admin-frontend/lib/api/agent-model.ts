@@ -51,11 +51,14 @@ export async function testSavedAgentModelConfig() {
     extraAuthJson: undefined,
     minimaxGroupId: config.minimaxGroupId || undefined,
     timeoutSeconds: config.timeoutSeconds,
+    connectTimeoutSeconds: config.connectTimeoutSeconds ?? undefined,
+    readTimeoutSeconds: config.readTimeoutSeconds ?? undefined,
     inputTokenPricePer1m: config.inputTokenPricePer1m ?? ((config.inputTokenPricePer1k || 0) * 1000),
     outputTokenPricePer1m: config.outputTokenPricePer1m ?? ((config.outputTokenPricePer1k || 0) * 1000),
     billingUnit: config.billingUnit || 'TOKEN_PER_M',
     unitPrice: config.unitPrice || 0,
     enabled: config.enabled,
+    agentEnabled: config.agentEnabled ?? true,
     isDefault: config.isDefault ?? true,
     capabilities: config.capabilities ?? undefined,
   })
@@ -66,6 +69,7 @@ function normalizeSingleConfig(config: AgentModelConfig): AgentModelConfig {
     ...config,
     displayName: config.displayName || config.modelName,
     configCode: config.configCode || String(config.id || 'default'),
+    agentEnabled: config.agentEnabled ?? true,
     isDefault: config.isDefault ?? true,
   }
 }

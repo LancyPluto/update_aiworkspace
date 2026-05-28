@@ -13,6 +13,11 @@ public record ToolFieldResponse(
         JsonNode options,
         String optionsJson,
         Boolean required,
+        Boolean executionRequired,
+        Boolean userRequired,
+        String defaultValue,
+        String agentFillStrategy,
+        String riskLevel,
         Integer sortOrder
 ) {
     public static ToolFieldResponse from(ToolFieldItem item, ObjectMapper objectMapper) {
@@ -24,6 +29,11 @@ public record ToolFieldResponse(
                 parseJson(item.getOptionsJson(), objectMapper),
                 item.getOptionsJson(),
                 item.getRequired(),
+                item.getExecutionRequired(),
+                item.getUserRequired(),
+                item.getDefaultValue(),
+                item.getAgentFillStrategy(),
+                item.getRiskLevel(),
                 item.getSortOrder()
         );
     }
@@ -37,6 +47,11 @@ public record ToolFieldResponse(
                 parseJson(item.getOptionsJson(), objectMapper),
                 item.getOptionsJson(),
                 item.getRequired(),
+                item.getRequired(),
+                item.getRequired(),
+                null,
+                item.getRequired() != null && item.getRequired() ? "ask_user" : "default",
+                "LOW",
                 item.getSortOrder()
         );
     }

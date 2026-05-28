@@ -5,6 +5,7 @@ import jakarta.validation.constraints.NotBlank;
 public record SmsAuthRequest(
         @NotBlank String phone,
         @NotBlank String code,
-        String nickname
+        String nickname,
+        String password
 ) {
 }

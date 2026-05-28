@@ -3,9 +3,14 @@ import type { TaskDetail } from "@/api/types"
 import type { ResultBlock } from "@/types/result"
 
 export function buildTaskResultBlocks(content: string, detail?: TaskDetail): ResultBlock[] {
-  const outputModality = (detail?.outputModality || detail?.result?.resourceType || "TEXT").toUpperCase()
   const parsed = parseJson(content)
   const finalVideoUrl = extractFinalVideoUrl(content)
+  const outputModality = (
+    detail?.outputModality ||
+    detail?.result?.resourceType ||
+    inferOutputModality(parsed, content, finalVideoUrl) ||
+    "TEXT"
+  ).toUpperCase()
 
   if (detail?.toolCode === "enterprise_diagnosis_agent") {
     return [
@@ -61,6 +66,23 @@ export function buildTaskResultBlocks(content: string, detail?: TaskDetail): Res
     return [{ type: "json", title: "结构化结果", content: JSON.stringify(parsed, null, 2) }]
   }
   return [{ type: "text", title: "生成结果", content }]
+}
+
+function inferOutputModality(parsed: unknown | null, content: string, finalVideoUrl: string): string {
+  if (finalVideoUrl) return "VIDEO"
+  if (parsed && typeof parsed === "object") {
+    const root = parsed as Record<string, unknown>
+    if (Array.isArray(root.images) && root.images.length > 0) return "IMAGE"
+    if (Array.isArray(root.videos) && root.videos.length > 0) return "VIDEO"
+    if (Array.isArray(root.audios) && root.audios.length > 0) return "AUDIO"
+    if (typeof root.imageUrl === "string" || typeof root.image_url === "string") return "IMAGE"
+    if (typeof root.videoUrl === "string" || typeof root.video_url === "string") return "VIDEO"
+    if (typeof root.audioUrl === "string" || typeof root.audio_url === "string") return "AUDIO"
+  }
+  if (/\/generated\/images\/|data:image\//i.test(content)) return "IMAGE"
+  if (/\/generated\/.*\.mp4|data:video\//i.test(content)) return "VIDEO"
+  if (/\/generated\/.*\.(mp3|wav|m4a)|data:audio\//i.test(content)) return "AUDIO"
+  return ""
 }
 
 function parseJson(content: string): unknown | null {

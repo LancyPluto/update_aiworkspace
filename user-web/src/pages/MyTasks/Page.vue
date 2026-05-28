@@ -5,18 +5,32 @@ import { CheckCircle2, Clock, Eye, Filter, Loader2, RotateCw, XCircle } from "lu
 import AppShell from "@/components/AppShell.vue"
 import TaskStatusTag from "@/components/TaskStatusTag/TaskStatusTag.vue"
 import { cancelTask, fetchTasks } from "@/api/taskApi"
-import type { TaskDetail, TaskStatus } from "@/api/types"
+import type { ListTasksQuery, TaskDetail, TaskStatus } from "@/api/types"
 import { userRoutes } from "@/router/userRoutes"
 import { useAuthStore } from "@/store/authStore"
 import { taskStatusDocLabel } from "@/utils/taskStatusLabels"
 
+const PAGE_SIZE = 20
+const MAX_FETCH_PAGE_SIZE = 100
+
+const RUNNING_STATUSES: TaskStatus[] = ["PROCESSING", "RETRYING"]
+const QUEUED_STATUSES: TaskStatus[] = ["QUEUED", "CREATED"]
+const FAILED_STATUSES: TaskStatus[] = ["FAILED", "TIMEOUT", "CANCELLED"]
+
 const auth = useAuthStore()
 const tasks = ref<TaskDetail[]>([])
-const total = ref(0)
+const listTotal = ref(0)
 const loading = ref(false)
 const error = ref("")
 const currentPage = ref(1)
 const selectedStatus = ref<string>("all")
+const statusCounts = ref({
+  all: 0,
+  processing: 0,
+  queued: 0,
+  success: 0,
+  failed: 0,
+})
 
 function mapStatus(status: TaskStatus): "running" | "success" | "failed" | "queued" {
   if (status === "PROCESSING" || status === "RETRYING") return "running"
@@ -26,34 +40,121 @@ function mapStatus(status: TaskStatus): "running" | "success" | "failed" | "queu
 }
 
 const statusFilters = computed(() => [
-  { id: "all", label: "全部任务", count: total.value, icon: Filter },
-  { id: "PROCESSING", label: "生成中", count: tasks.value.filter((task) => task.status === "PROCESSING" || task.status === "RETRYING").length, icon: Loader2 },
-  { id: "QUEUED", label: "排队中", count: tasks.value.filter((task) => task.status === "QUEUED" || task.status === "CREATED").length, icon: Clock },
-  { id: "SUCCESS", label: "已完成", count: tasks.value.filter((task) => task.status === "SUCCESS").length, icon: CheckCircle2 },
-  { id: "FAILED", label: "失败", count: tasks.value.filter((task) => task.status === "FAILED" || task.status === "TIMEOUT" || task.status === "CANCELLED").length, icon: XCircle },
+  { id: "all", label: "全部任务", count: statusCounts.value.all, icon: Filter },
+  { id: "PROCESSING", label: "生成中", count: statusCounts.value.processing, icon: Loader2 },
+  { id: "QUEUED", label: "排队中", count: statusCounts.value.queued, icon: Clock },
+  { id: "SUCCESS", label: "已完成", count: statusCounts.value.success, icon: CheckCircle2 },
+  { id: "FAILED", label: "失败", count: statusCounts.value.failed, icon: XCircle },
 ])
+
+async function fetchStatusTotal(status?: TaskStatus): Promise<number> {
+  const query: ListTasksQuery = { pageNo: 1, pageSize: 1 }
+  if (status) query.status = status
+  const response = await fetchTasks({ token: auth.token, query })
+  return response.total
+}
+
+async function loadStatusCounts() {
+  const [
+    all,
+    processing,
+    retrying,
+    queued,
+    created,
+    success,
+    failed,
+    timeout,
+    cancelled,
+  ] = await Promise.all([
+    fetchStatusTotal(),
+    fetchStatusTotal("PROCESSING"),
+    fetchStatusTotal("RETRYING"),
+    fetchStatusTotal("QUEUED"),
+    fetchStatusTotal("CREATED"),
+    fetchStatusTotal("SUCCESS"),
+    fetchStatusTotal("FAILED"),
+    fetchStatusTotal("TIMEOUT"),
+    fetchStatusTotal("CANCELLED"),
+  ])
+  statusCounts.value = {
+    all,
+    processing: processing + retrying,
+    queued: queued + created,
+    success,
+    failed: failed + timeout + cancelled,
+  }
+}
+
+async function fetchAllByStatus(status: TaskStatus): Promise<TaskDetail[]> {
+  const items: TaskDetail[] = []
+  let pageNo = 1
+  let total = 0
+  do {
+    const response = await fetchTasks({
+      token: auth.token,
+      query: { pageNo, pageSize: MAX_FETCH_PAGE_SIZE, status },
+    })
+    total = response.total
+    items.push(...response.list)
+    if (response.list.length === 0) break
+    pageNo += 1
+  } while (items.length < total)
+  return items
+}
+
+async function loadMergedTasks(statuses: TaskStatus[], groupTotal: number) {
+  if (groupTotal === 0) {
+    tasks.value = []
+    listTotal.value = 0
+    return
+  }
+  const responses = await Promise.all(statuses.map((status) => fetchAllByStatus(status)))
+  const merged = responses.flat().sort((a, b) => b.taskId - a.taskId)
+  const offset = (currentPage.value - 1) * PAGE_SIZE
+  tasks.value = merged.slice(offset, offset + PAGE_SIZE)
+  listTotal.value = groupTotal
+}
 
 async function loadTasks() {
   loading.value = true
   error.value = ""
   try {
-    const query: Record<string, string | number | boolean | undefined> = {
-      pageNo: currentPage.value,
-      pageSize: 20,
+    if (selectedStatus.value === "all") {
+      const response = await fetchTasks({
+        token: auth.token,
+        query: { pageNo: currentPage.value, pageSize: PAGE_SIZE },
+      })
+      tasks.value = response.list
+      listTotal.value = response.total
+    } else if (selectedStatus.value === "SUCCESS") {
+      const response = await fetchTasks({
+        token: auth.token,
+        query: { pageNo: currentPage.value, pageSize: PAGE_SIZE, status: "SUCCESS" },
+      })
+      tasks.value = response.list
+      listTotal.value = response.total
+    } else if (selectedStatus.value === "PROCESSING") {
+      await loadMergedTasks(RUNNING_STATUSES, statusCounts.value.processing)
+    } else if (selectedStatus.value === "QUEUED") {
+      await loadMergedTasks(QUEUED_STATUSES, statusCounts.value.queued)
+    } else if (selectedStatus.value === "FAILED") {
+      await loadMergedTasks(FAILED_STATUSES, statusCounts.value.failed)
+    } else {
+      tasks.value = []
+      listTotal.value = 0
     }
-    if (selectedStatus.value !== "all") {
-      query.status = selectedStatus.value
-    }
-    const response = await fetchTasks({ token: auth.token, query: query as any })
-    tasks.value = response.list
-    total.value = response.total
   } catch (err) {
     tasks.value = []
-    total.value = 0
+    listTotal.value = 0
     error.value = err instanceof Error ? err.message : "加载任务失败"
   } finally {
     loading.value = false
   }
+}
+
+async function refreshPage() {
+  await loadStatusCounts()
+  await loadTasks()
 }
 
 function filterByStatus(status: string) {
@@ -65,13 +166,13 @@ function filterByStatus(status: string) {
 async function handleCancel(taskId: number) {
   try {
     await cancelTask(taskId, { token: auth.token })
-    await loadTasks()
+    await refreshPage()
   } catch (err) {
     error.value = err instanceof Error ? err.message : "取消任务失败"
   }
 }
 
-onMounted(loadTasks)
+onMounted(refreshPage)
 </script>
 
 <template>

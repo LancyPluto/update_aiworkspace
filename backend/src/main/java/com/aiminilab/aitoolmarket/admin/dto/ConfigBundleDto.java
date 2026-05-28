@@ -31,6 +31,8 @@ public record ConfigBundleDto(
             String balanceUrl,
             String docsUrl,
             Integer timeoutSeconds,
+            Integer connectTimeoutSeconds,
+            Integer readTimeoutSeconds,
             BigDecimal inputTokenPricePer1k,
             BigDecimal outputTokenPricePer1k,
             BigDecimal inputTokenPricePer1m,
@@ -38,6 +40,7 @@ public record ConfigBundleDto(
             String billingUnit,
             BigDecimal unitPrice,
             Boolean enabled,
+            Boolean agentEnabled,
             Boolean isDefault,
             List<String> capabilities
     ) {
@@ -64,6 +67,8 @@ public record ConfigBundleDto(
             String status,
             Integer estimatedCreditCost,
             String modelConfigCode,
+            String executionHandler,
+            Boolean agentEnabled,
             List<Field> fields,
             List<Prompt> prompts,
             Workflow workflow
@@ -78,6 +83,11 @@ public record ConfigBundleDto(
             JsonNode options,
             String optionsJson,
             Boolean required,
+            Boolean executionRequired,
+            Boolean userRequired,
+            String defaultValue,
+            String agentFillStrategy,
+            String riskLevel,
             Integer sortOrder
     ) {
     }

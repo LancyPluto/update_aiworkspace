@@ -6,13 +6,15 @@ from app.runtime.deep_agents_engine import DeepAgentsRuntimeEngine
 
 
 class FakeBackend:
-    def __init__(self):
+    def __init__(self, *, resource_type: str = "MARKDOWN", content_text: str = "# Generated copy"):
         self.events = []
         self.completed = []
         self.failed = []
         self.tool_calls = []
         self.memory_items = []
         self.memory_requests = []
+        self.resource_type = resource_type
+        self.content_text = content_text
 
     async def append_event(self, run_id, event):
         self.events.append((run_id, event.eventType, event.eventText, event.eventJson))
@@ -32,7 +34,7 @@ class FakeBackend:
         return type("TaskStatus", (), {"taskId": 123, "status": "QUEUED"})
 
     async def get_task_detail(self, user_id, task_id):
-        result = type("TaskResult", (), {"resourceType": "MARKDOWN", "contentText": "# Generated copy"})
+        result = type("TaskResult", (), {"resourceType": self.resource_type, "contentText": self.content_text})
         return type(
             "TaskDetail",
             (),
@@ -171,6 +173,35 @@ async def test_confirmed_tool_uses_tool_output_when_summary_model_returns_empty(
 
 
 @pytest.mark.asyncio
+async def test_media_tool_output_emits_single_completed_event_without_delta_fanout():
+    media_result = '{"provider":"kling_video","model":"kling-v2-1","images":[{"url":"/generated/images/79/image-1.png"}]}'
+    backend = FakeBackend(resource_type="IMAGE", content_text=media_result)
+    engine = DeepAgentsRuntimeEngine(backend, FakeModel(response=""))
+    context = RunContext(
+        runId=14,
+        sessionId=1,
+        userId=1,
+        message="generate an image",
+        creditBudget=20,
+        availableTools=[
+            ToolDescriptor(
+                toolCode="kling_image_v21",
+                toolName="Kling Image",
+                description="image generation",
+                estimatedCreditCost=3,
+                autoCallable=True,
+            )
+        ],
+    )
+
+    await engine.run_confirmed_tool(context, "kling_image_v21")
+
+    message_events = [event for event in backend.events if event[1].startswith("message.")]
+    assert [(event[1], event[2]) for event in message_events] == [("message.completed", media_result)]
+    assert backend.completed == [(14, media_result, "tool_use")]
+
+
+@pytest.mark.asyncio
 async def test_general_chat_empty_answer_still_completes_run():
     backend = FakeBackend()
     engine = DeepAgentsRuntimeEngine(backend, FakeModel(response=""))
@@ -187,6 +218,138 @@ async def test_general_chat_empty_answer_still_completes_run():
 
     assert backend.failed == []
     assert backend.completed == [(11, "抱歉，本次未能生成有效回复，请换个说法或补充更多信息后再试。", "general_chat")]
+
+
+@pytest.mark.asyncio
+async def test_direct_image_generation_request_executes_even_without_auto_callable_flag():
+    backend = FakeBackend()
+    engine = DeepAgentsRuntimeEngine(backend, FakeModel(response="不应该走普通问答"))
+    context = RunContext(
+        runId=12,
+        sessionId=1,
+        userId=1,
+        message="我要生成一张漫展写真照片",
+        creditBudget=20,
+        availableTools=[
+            ToolDescriptor(
+                toolCode="kling_image_v21",
+                toolName="可灵生图 V2.1",
+                description="高质量图片生成，适合照片、写真、海报、文生图",
+                estimatedCreditCost=3,
+                autoCallable=False,
+            )
+        ],
+    )
+
+    await engine.run(context)
+
+    assert ("task", "kling_image_v21", {"userRequest": "我要生成一张漫展写真照片"}, "agent-run-12-tool-call-99") in backend.tool_calls
+    assert backend.completed == [(12, "# Generated copy", "tool_use")]
+
+
+@pytest.mark.asyncio
+async def test_image_generation_request_executes_when_tool_is_auto_callable():
+    backend = FakeBackend()
+    engine = DeepAgentsRuntimeEngine(backend, FakeModel(response=""))
+    context = RunContext(
+        runId=13,
+        sessionId=1,
+        userId=1,
+        message="我要生成一张漫展写真照片",
+        creditBudget=20,
+        availableTools=[
+            ToolDescriptor(
+                toolCode="kling_image_v21",
+                toolName="可灵生图 V2.1",
+                description="高质量图片生成，适合照片、写真、海报、文生图",
+                estimatedCreditCost=3,
+                autoCallable=True,
+            )
+        ],
+    )
+
+    await engine.run(context)
+
+    assert ("task", "kling_image_v21", {"userRequest": "我要生成一张漫展写真照片"}, "agent-run-13-tool-call-99") in backend.tool_calls
+    assert backend.completed == [(13, "# Generated copy", "tool_use")]
+
+
+@pytest.mark.asyncio
+async def test_visual_cosplay_shoot_request_prefers_image_tool_over_text_tool():
+    backend = FakeBackend()
+    engine = DeepAgentsRuntimeEngine(backend, FakeModel(response=""))
+    message = "生成科比布莱恩特穿着海贼王的大将披风cos黄猿的日常远景拍摄"
+    context = RunContext(
+        runId=15,
+        sessionId=1,
+        userId=1,
+        message=message,
+        creditBudget=20,
+        availableTools=[
+            ToolDescriptor(
+                toolCode="deepseek_text_generation",
+                toolName="文本生成-DeepSeek-V4-flash",
+                description="文本生成，适合文案、标题、脚本、通用问答",
+                estimatedCreditCost=1,
+                autoCallable=True,
+            ),
+            ToolDescriptor(
+                toolCode="kling_image_v21",
+                toolName="可灵生图 V2.1",
+                description="高质量图片生成，适合照片、写真、海报、文生图、摄影拍摄",
+                estimatedCreditCost=3,
+                autoCallable=True,
+            ),
+        ],
+    )
+
+    await engine.run(context)
+
+    assert ("task", "kling_image_v21", {"userRequest": message}, "agent-run-15-tool-call-99") in backend.tool_calls
+    assert not any(call[0] == "task" and call[1] == "deepseek_text_generation" for call in backend.tool_calls)
+    assert backend.completed == [(15, "# Generated copy", "tool_use")]
+
+
+@pytest.mark.asyncio
+async def test_llm_router_can_select_tool_when_rule_match_is_weak():
+    backend = FakeBackend()
+    router_json = (
+        '{"intent":"tool_use","selectedToolCode":"kling_image_v21",'
+        '"candidateToolCodes":["kling_image_v21"],"confidence":0.92,'
+        '"reason":"用户要做主视觉画面","clarifyingQuestion":null}'
+    )
+    engine = DeepAgentsRuntimeEngine(backend, FakeModel(response=router_json))
+    message = "帮我做一个赛博风主视觉，人物站在霓虹街头"
+    context = RunContext(
+        runId=16,
+        sessionId=1,
+        userId=1,
+        message=message,
+        creditBudget=20,
+        availableTools=[
+            ToolDescriptor(
+                toolCode="deepseek_text_generation",
+                toolName="文本生成-DeepSeek-V4-flash",
+                description="文本生成，适合文案、标题、脚本、通用问答",
+                estimatedCreditCost=1,
+                autoCallable=True,
+            ),
+            ToolDescriptor(
+                toolCode="kling_image_v21",
+                toolName="可灵生图 V2.1",
+                description="高质量图片生成，适合照片、写真、海报、文生图、摄影拍摄",
+                estimatedCreditCost=3,
+                autoCallable=True,
+            ),
+        ],
+    )
+
+    await engine.run(context)
+
+    assert ("task", "kling_image_v21", {"userRequest": message}, "agent-run-16-tool-call-99") in backend.tool_calls
+    assert not any(call[0] == "task" and call[1] == "deepseek_text_generation" for call in backend.tool_calls)
+    intent_events = [event for event in backend.events if event[1] == "intent.detected"]
+    assert intent_events[-1][3]["decisionSource"] == "llm_router"
 
 
 @pytest.mark.asyncio

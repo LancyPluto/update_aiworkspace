@@ -84,11 +84,12 @@ export interface LoginResponse {
   user?: UserProfile
 }
 
-export type SmsCodeScene = "REGISTER" | "LOGIN"
+export type SmsCodeScene = "REGISTER" | "LOGIN" | "LOGIN_OR_REGISTER" | "RESET_PASSWORD"
 
 export interface SmsCodeRequest {
   phone: string
   scene: SmsCodeScene
+  captchaVerifyParam?: string | null
 }
 
 export interface SmsCodeResponse {
@@ -101,6 +102,13 @@ export interface SmsAuthRequest {
   phone: string
   code: string
   nickname?: string
+  password?: string
+}
+
+export interface ResetPasswordRequest {
+  phone: string
+  code: string
+  password: string
 }
 
 export interface RegisterRequest {
@@ -169,6 +177,11 @@ export interface ToolField {
   options?: Array<ToolFieldOption | string> | null
   optionsJson?: string | null
   required: boolean
+  executionRequired?: boolean
+  userRequired?: boolean
+  defaultValue?: string | null
+  agentFillStrategy?: string | null
+  riskLevel?: string | null
   sortOrder: number
 }
 
@@ -212,6 +225,11 @@ export interface CreateTaskResponse {
   taskId: number
   taskNo: string
   status: TaskStatus
+}
+
+export interface RegenerateTaskRequest {
+  params: Record<string, unknown>
+  clientRequestId?: string
 }
 
 /** GET /api/v1/tasks/{taskId}/status —— 轮询用精简状态 */
@@ -375,6 +393,21 @@ export interface CreateAgentMessageResponse {
   messageId: number
   runId: number
   runStatus: AgentRunStatus
+}
+
+export interface AgentModelConfig {
+  id: number
+  displayName?: string | null
+  configCode?: string | null
+  provider: string
+  modelName: string
+  baseUrl?: string | null
+  apiKeyMasked?: string | null
+  extraAuthJsonMasked?: string | null
+  enabled: boolean
+  agentEnabled?: boolean | null
+  isDefault?: boolean | null
+  capabilities?: string[] | null
 }
 
 export interface AgentRun {

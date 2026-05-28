@@ -699,6 +699,33 @@ class AgentApiTest {
     }
 
     @Test
+    void internalAgentEventTextIsTruncatedBeforePersisting() throws Exception {
+        mockExternalAuthDependencies();
+        register("agent_long_event_user");
+        String token = login("agent_long_event_user");
+        Long sessionId = createSession(token, "Long Event");
+        Long runId = sendMessage(token, sessionId, "Create a verbose event.").runId();
+        String longEventText = "x".repeat(20_000);
+        String eventBody = objectMapper.writeValueAsString(java.util.Map.of(
+                "eventType", "tool.finished",
+                "eventText", longEventText
+        ));
+
+        mockMvc.perform(signed(post("/api/internal/v1/agent/runs/{runId}/events", runId), "POST",
+                        "/api/internal/v1/agent/runs/%d/events".formatted(runId), eventBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(eventBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.eventType").value("tool.finished"));
+
+        var events = agentRunEventMapper.findEventsForAdmin(runId, 10);
+        assertThat(events).hasSize(2);
+        assertThat(events.get(1).getEventText())
+                .hasSize(4000)
+                .endsWith("... [truncated]");
+    }
+
+    @Test
     void userCanManagePerToolAutoCallPreference() throws Exception {
         mockExternalAuthDependencies();
         register("agent_preference_user");
@@ -804,7 +831,7 @@ class AgentApiTest {
     }
 
     @Test
-    void userCannotStartAgentRunWhenModelConnectivityFails() throws Exception {
+    void userCanStartAgentRunWithoutPerMessageModelPreflight() throws Exception {
         mockExternalAuthDependencies();
         Mockito.when(agentServiceClient.testModelConfig(any()))
                 .thenReturn(new AgentModelConfigTestResponse(
@@ -825,25 +852,21 @@ class AgentApiTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
-                                  "content": "Start with invalid model",
-                                  "clientRequestId": "model-preflight-failure"
+                                  "content": "Start without model preflight",
+                                  "clientRequestId": "model-preflight-skipped"
                                 }
                                 """))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("MODEL_CALL_FAILED"))
-                .andExpect(jsonPath("$.message").value("connection refused"));
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.data.runStatus").value("RUNNING"));
 
-        Mockito.verify(agentServiceClient, Mockito.never()).executeRun(anyLong());
-        org.assertj.core.api.Assertions.assertThat(creditService.account(login.userId()).frozen()).isZero();
+        Mockito.verify(agentServiceClient, Mockito.never()).testModelConfig(any());
+        Mockito.verify(agentServiceClient).executeRun(anyLong());
 
-        var failedRuns = agentRunMapper.findForAdmin("FAILED", login.userId(), 10, 0);
-        org.assertj.core.api.Assertions.assertThat(failedRuns).hasSize(1);
-        org.assertj.core.api.Assertions.assertThat(failedRuns.get(0).errorCode()).isEqualTo("MODEL_CALL_FAILED");
-        org.assertj.core.api.Assertions.assertThat(failedRuns.get(0).errorMessage()).isEqualTo("connection refused");
-        var events = agentRunEventMapper.findEventsForAdmin(failedRuns.get(0).id(), 10);
-        org.assertj.core.api.Assertions.assertThat(events).hasSize(1);
-        org.assertj.core.api.Assertions.assertThat(events.get(0).getEventType()).isEqualTo("model.preflight_failed");
-        org.assertj.core.api.Assertions.assertThat(events.get(0).getEventText()).isEqualTo("connection refused");
+        var runningRuns = agentRunMapper.findForAdmin("RUNNING", login.userId(), 10, 0);
+        org.assertj.core.api.Assertions.assertThat(runningRuns).hasSize(1);
+        var events = agentRunEventMapper.findEventsForAdmin(runningRuns.get(0).id(), 10);
+        org.assertj.core.api.Assertions.assertThat(events).extracting(event -> event.getEventType()).contains("run.started");
     }
 
     @Test
@@ -902,6 +925,46 @@ class AgentApiTest {
         org.assertj.core.api.Assertions.assertThat(released.balance()).isEqualTo(100);
         org.assertj.core.api.Assertions.assertThat(released.frozen()).isEqualTo(0);
         org.assertj.core.api.Assertions.assertThat(released.available()).isEqualTo(100);
+    }
+
+    @Test
+    void failedAgentRunRecordsModelUsageAndSettlesConsumedCredits() throws Exception {
+        mockExternalAuthDependencies();
+        String username = "agent_failed_usage_user";
+        register(username);
+        LoginResult login = loginWithUser(username);
+        Long sessionId = createSession(login.token(), "Agent Failed Usage");
+
+        Long runId = sendMessage(login.token(), sessionId, "Fail after model usage.").runId();
+        org.assertj.core.api.Assertions.assertThat(creditService.account(login.userId()).frozen()).isEqualTo(20);
+
+        String failBody = """
+                {
+                  "errorCode": "TOOL_CALL_FAILED",
+                  "errorMessage": "Tool failed after model planning.",
+                  "consumedCredits": 3,
+                  "promptTokens": 111,
+                  "completionTokens": 22
+                }
+                """;
+        mockMvc.perform(signed(post("/api/internal/v1/agent/runs/{runId}/fail", runId), "POST",
+                        "/api/internal/v1/agent/runs/%d/fail".formatted(runId), failBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(failBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("FAILED"))
+                .andExpect(jsonPath("$.data.consumedCredits").value(3));
+
+        var settled = creditService.account(login.userId());
+        org.assertj.core.api.Assertions.assertThat(settled.balance()).isEqualTo(97);
+        org.assertj.core.api.Assertions.assertThat(settled.frozen()).isEqualTo(0);
+        org.assertj.core.api.Assertions.assertThat(settled.available()).isEqualTo(97);
+        Integer billingCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM billing_usage_logs WHERE source_type = 'AGENT_RUN' AND source_id = ? AND charged_credits = 3 AND prompt_tokens = 111 AND completion_tokens = 22 AND total_tokens = 133",
+                Integer.class,
+                runId
+        );
+        org.assertj.core.api.Assertions.assertThat(billingCount).isEqualTo(1);
     }
 
     @Test

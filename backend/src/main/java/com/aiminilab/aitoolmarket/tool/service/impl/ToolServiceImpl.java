@@ -3,6 +3,7 @@ package com.aiminilab.aitoolmarket.tool.service.impl;
 import com.aiminilab.aitoolmarket.config.AppProperties;
 import com.aiminilab.aitoolmarket.common.dto.PageResponse;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
+import com.aiminilab.aitoolmarket.common.enums.ExecutionHandler;
 import com.aiminilab.aitoolmarket.common.enums.ToolModality;
 import com.aiminilab.aitoolmarket.common.enums.ToolStatus;
 import com.aiminilab.aitoolmarket.common.enums.ToolType;
@@ -214,6 +215,9 @@ public class ToolServiceImpl implements ToolService {
 
         AiTool tool = fromRequest(request);
         tool.setToolCode(toolCode);
+        if (tool.getExecutionHandler() == null || tool.getExecutionHandler().isBlank()) {
+            tool.setExecutionHandler(ExecutionHandler.fromNullable(tool.getToolType()).name());
+        }
         Long toolId = toolMapper.insertTool(tool, operatorId);
         toolFieldSchemaMapper.createActiveDefaultSchema(toolId, operatorId);
         if (request.templateCode() != null && !request.templateCode().isBlank()) {
@@ -492,6 +496,9 @@ public class ToolServiceImpl implements ToolService {
         tool.setConfigNote(blankToNull(request.configNote()));
         tool.setEstimatedCreditCost(request.estimatedCreditCost());
         tool.setModelConfigId(request.modelConfigId());
+        if (request.executionHandler() != null && !request.executionHandler().isBlank()) {
+            tool.setExecutionHandler(ExecutionHandler.fromNullable(request.executionHandler()).name());
+        }
         return tool;
     }
 
@@ -668,6 +675,11 @@ public class ToolServiceImpl implements ToolService {
                 null,
                 item.optionsJson(),
                 item.required(),
+                item.required(),
+                item.required(),
+                null,
+                item.required() != null && item.required() ? "ask_user" : "default",
+                "LOW",
                 item.sortOrder()
         );
     }
@@ -717,8 +729,35 @@ public class ToolServiceImpl implements ToolService {
         item.setPlaceholder(request.placeholder());
         item.setOptionsJson(request.resolveOptionsJson());
         item.setRequired(request.required() == null || request.required());
+        item.setExecutionRequired(request.executionRequired() == null ? item.getRequired() : request.executionRequired());
+        item.setUserRequired(request.userRequired() == null ? item.getRequired() : request.userRequired());
+        item.setDefaultValue(blankToNull(request.defaultValue()));
+        item.setAgentFillStrategy(normalizeFillStrategy(request.agentFillStrategy(), item.getUserRequired()));
+        item.setRiskLevel(normalizeRiskLevel(request.riskLevel()));
         item.setSortOrder(request.sortOrder() == null ? 0 : request.sortOrder());
         return item;
+    }
+
+    private String normalizeFillStrategy(String value, Boolean userRequired) {
+        if (value == null || value.isBlank()) {
+            return Boolean.TRUE.equals(userRequired) ? "ask_user" : "default";
+        }
+        String normalized = value.trim().toLowerCase();
+        return switch (normalized) {
+            case "infer_from_user", "default", "ask_user", "derive", "none" -> normalized;
+            default -> Boolean.TRUE.equals(userRequired) ? "ask_user" : "default";
+        };
+    }
+
+    private String normalizeRiskLevel(String value) {
+        if (value == null || value.isBlank()) {
+            return "LOW";
+        }
+        String normalized = value.trim().toUpperCase();
+        return switch (normalized) {
+            case "LOW", "MEDIUM", "HIGH" -> normalized;
+            default -> "LOW";
+        };
     }
 
     private void validateSingleCoreField(List<ToolFieldRequest> fields) {

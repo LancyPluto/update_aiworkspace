@@ -169,6 +169,11 @@ services:
     environment:
       # 留空：浏览器请求走当前页面的 /api，由 Vite 代理到后端（避免 localhost vs 127.0.0.1 跨域导致 Failed to fetch）
       VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
+      VITE_ALIYUN_CAPTCHA_ENABLED: ${VITE_ALIYUN_CAPTCHA_ENABLED:-false}
+      VITE_ALIYUN_CAPTCHA_REGION: ${VITE_ALIYUN_CAPTCHA_REGION:-cn}
+      VITE_ALIYUN_CAPTCHA_PREFIX: ${VITE_ALIYUN_CAPTCHA_PREFIX:-}
+      VITE_ALIYUN_CAPTCHA_SCENE_ID: ${VITE_ALIYUN_CAPTCHA_SCENE_ID:-}
+      # 本机 mvn 启动后端时，容器内代理需用 host.docker.internal，不能用已停掉的 backend 服务名
       VITE_DEV_PROXY_TARGET: ${VITE_DEV_PROXY_TARGET:-http://host.docker.internal:8080}
       CHOKIDAR_USEPOLLING: "true"
     ports:

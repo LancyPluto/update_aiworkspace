@@ -5,6 +5,7 @@ from app.config import Settings
 
 MINIMAX_OPENAI_COMPATIBLE_BASE_URL = "https://api.minimax.io/v1"
 MINIMAX_ANTHROPIC_COMPATIBLE_BASE_URL = "https://api.minimaxi.com/anthropic"
+DEEPSEEK_OPENAI_COMPATIBLE_BASE_URL = "https://api.deepseek.com"
 
 
 class ChatModelProviderError(RuntimeError):
@@ -43,7 +44,7 @@ class ChatModelFactory:
         provider = self.settings.model_provider.strip().lower()
         if provider == "mock":
             return MockChatModel()
-        if provider == "openai_compatible":
+        if provider in {"openai_compatible", "deepseek", "deepseek_compatible"}:
             return self._create_openai_compatible()
         if provider == "anthropic_compatible":
             return self._create_anthropic_compatible()
@@ -53,10 +54,18 @@ class ChatModelFactory:
 
     def _create_openai_compatible(self):
         chat_openai_cls = self.chat_openai_cls or _load_chat_openai()
+        api_key = self.settings.model_api_key.strip()
+        if not api_key:
+            raise ChatModelProviderError(
+                f"API Key is required for model provider {self.settings.model_provider}"
+            )
+        base_url = self.settings.model_api_base_url.strip()
+        if not base_url and self.settings.model_provider.strip().lower() in {"deepseek", "deepseek_compatible"}:
+            base_url = DEEPSEEK_OPENAI_COMPATIBLE_BASE_URL
         return chat_openai_cls(
             model=self.settings.model_name,
-            api_key=self.settings.model_api_key,
-            base_url=self.settings.model_api_base_url.rstrip("/"),
+            api_key=api_key,
+            base_url=base_url.rstrip("/"),
             timeout=self.settings.model_timeout_seconds,
         )
 

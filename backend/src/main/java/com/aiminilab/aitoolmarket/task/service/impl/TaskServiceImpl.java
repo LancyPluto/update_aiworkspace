@@ -158,12 +158,19 @@ public class TaskServiceImpl implements TaskService {
     }
 
     @Override
+    @Transactional
     public TaskStatusResponse adminRetry(Long taskId) {
         AiTask task = findTask(taskId);
-        TaskStateMachine.ensureTransition(task.getStatus(), TaskStatus.QUEUED.name());
-        if (taskMapper.resetToQueued(taskId, List.of(TaskStatus.FAILED.name())) == 0) {
+        TaskStateMachine.ensureTransition(task.getStatus(), TaskStatus.RETRYING.name());
+        if (taskMapper.markRetrying(taskId, List.of(TaskStatus.FAILED.name(), TaskStatus.TIMEOUT.name())) == 0) {
+            TaskStateMachine.ensureTransition(findTask(taskId).getStatus(), TaskStatus.RETRYING.name());
+        }
+        AiTask retryingTask = findTask(taskId);
+        TaskStateMachine.ensureTransition(retryingTask.getStatus(), TaskStatus.QUEUED.name());
+        if (taskMapper.resetToQueued(taskId, List.of(TaskStatus.RETRYING.name())) == 0) {
             TaskStateMachine.ensureTransition(findTask(taskId).getStatus(), TaskStatus.QUEUED.name());
         }
+        creditService.freeze(task.getUserId(), CreditSourceType.TASK, taskId, task.getEstimatedCreditCost());
         taskOutboxService.enqueueTaskRetry(taskId);
         return TaskStatusResponse.from(findTask(taskId));
     }

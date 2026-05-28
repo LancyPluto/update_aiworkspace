@@ -39,6 +39,13 @@ public interface UserMapper extends BaseMapper<User> {
         return Optional.ofNullable(selectByPhone(phone));
     }
 
+    @Update("""
+            UPDATE users
+            SET password_hash = #{passwordHash}, updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{userId} AND is_deleted = 0
+            """)
+    void updatePasswordHash(@Param("userId") Long userId, @Param("passwordHash") String passwordHash);
+
     @Select("""
             SELECT *
             FROM users

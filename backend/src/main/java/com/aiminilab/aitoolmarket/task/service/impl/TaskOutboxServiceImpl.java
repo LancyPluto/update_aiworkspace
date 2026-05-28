@@ -20,6 +20,7 @@ public class TaskOutboxServiceImpl implements TaskOutboxService {
     private static final String EVENT_TASK_CREATED = "TASK_CREATED";
     private static final String EVENT_TASK_RETRY = "TASK_RETRY";
     private static final String STATUS_PENDING = "PENDING";
+    private static final int MAX_PUBLISH_RETRIES = 5;
 
     private final TaskOutboxMapper taskOutboxMapper;
     private final TaskQueuePublisher taskQueuePublisher;
@@ -79,13 +80,24 @@ public class TaskOutboxServiceImpl implements TaskOutboxService {
                 return true;
             }
             taskMetrics.recordQueuePublishFailure(event.getEventType());
-            taskOutboxMapper.markFailed(event.getId(), LocalDateTime.now().plusMinutes(1), "publish returned false");
+            markPublishFailure(event, "publish returned false");
             return false;
         } catch (RuntimeException exception) {
             taskMetrics.recordQueuePublishFailure(event.getEventType());
-            taskOutboxMapper.markFailed(event.getId(), LocalDateTime.now().plusMinutes(1), exception.getMessage());
+            markPublishFailure(event, exception.getMessage());
             return false;
         }
+    }
+
+    private void markPublishFailure(TaskOutboxEvent event, String lastError) {
+        String normalizedError = lastError == null || lastError.isBlank() ? "publish failed" : lastError;
+        int retryCount = event.getRetryCount() == null ? 0 : event.getRetryCount();
+        if (retryCount + 1 >= MAX_PUBLISH_RETRIES) {
+            taskOutboxMapper.markDead(event.getId(), normalizedError);
+            return;
+        }
+        long delayMinutes = Math.min(30, 1L << retryCount);
+        taskOutboxMapper.markFailed(event.getId(), LocalDateTime.now().plusMinutes(delayMinutes), normalizedError);
     }
 
     private String payload(Long taskId) {

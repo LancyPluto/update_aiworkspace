@@ -20,11 +20,13 @@ CREATE TABLE IF NOT EXISTS agent_model_configs (
   billing_unit VARCHAR(32) NOT NULL DEFAULT 'TOKEN_PER_M',
   unit_price DECIMAL(18,8) NOT NULL DEFAULT 0,
   enabled TINYINT NOT NULL DEFAULT 1,
+  agent_enabled TINYINT NOT NULL DEFAULT 1,
   is_default TINYINT NOT NULL DEFAULT 0,
   is_deleted TINYINT NOT NULL DEFAULT 0,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY uk_agent_model_configs_code (config_code),
   KEY idx_agent_model_configs_enabled (enabled, is_deleted, id),
+  KEY idx_agent_model_configs_agent_enabled (agent_enabled, enabled, is_deleted, is_default, id),
   KEY idx_agent_model_configs_default (is_default, is_deleted, id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

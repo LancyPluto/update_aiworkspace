@@ -2,9 +2,84 @@
 import { Download, FileDown, Printer } from "lucide-vue-next"
 import type { ResultBlock } from "@/types/result"
 
-defineProps<{
+const props = withDefaults(defineProps<{
   blocks: ResultBlock[]
-}>()
+  mode?: "default" | "compact"
+}>(), {
+  mode: "default",
+})
+
+function isMediaBlock(block: ResultBlock) {
+  return block.type === "image" || block.type === "audio" || block.type === "video"
+}
+
+function isCompactMediaBlock(block: ResultBlock) {
+  return props.mode === "compact" && isMediaBlock(block)
+}
+
+function rendererClass() {
+  return props.mode === "compact" ? "space-y-3" : "space-y-4"
+}
+
+function blockShellClass(block: ResultBlock) {
+  if (isCompactMediaBlock(block)) {
+    return "p-0 shadow-none"
+  }
+  return "rounded-xl border border-border bg-card p-4 shadow-sm sm:p-6"
+}
+
+function mediaGridClass(count = 0) {
+  if (props.mode !== "compact") return "grid gap-3 sm:grid-cols-2"
+  return count > 1 ? "grid gap-3 sm:grid-cols-2" : "grid gap-3"
+}
+
+function figureClass() {
+  return props.mode === "compact"
+    ? "group relative overflow-hidden rounded-xl bg-transparent shadow-[0_20px_72px_rgb(0_0_0_/_0.34)]"
+    : "overflow-hidden rounded-lg border border-border bg-background"
+}
+
+function imageFrameClass() {
+  return props.mode === "compact"
+    ? "flex max-h-[560px] items-center justify-center bg-transparent"
+    : "flex aspect-square items-center justify-center bg-secondary/30"
+}
+
+function imageClass() {
+  return props.mode === "compact" ? "max-h-[560px] w-full rounded-xl object-contain" : "h-full w-full object-contain"
+}
+
+function captionClass() {
+  return props.mode === "compact"
+    ? "flex items-center justify-between gap-3 px-3 py-2 text-xs text-white/55"
+    : "flex items-center justify-between gap-3 border-t border-border px-3 py-2 text-xs text-muted-foreground"
+}
+
+function downloadLinkClass() {
+  return props.mode === "compact"
+    ? "inline-flex items-center gap-1 text-white/70 hover:text-white"
+    : "inline-flex items-center gap-1 text-foreground hover:text-primary"
+}
+
+function floatingDownloadClass() {
+  return "absolute right-3 top-3 inline-flex h-9 items-center gap-1.5 rounded-full border border-white/12 bg-black/38 px-3 text-xs font-medium text-white/72 opacity-0 shadow-[0_10px_30px_rgb(0_0_0_/_0.28)] backdrop-blur-xl transition group-hover:opacity-100 hover:bg-white/14 hover:text-white"
+}
+
+function mediaActionClass() {
+  return props.mode === "compact"
+    ? "inline-flex h-8 items-center justify-center gap-2 rounded-full border border-white/10 bg-white/8 px-3 text-xs font-medium text-white/70 hover:bg-white/12 hover:text-white"
+    : "inline-flex h-9 items-center justify-center gap-2 rounded-md border border-border bg-background px-3 text-sm font-medium hover:bg-secondary"
+}
+
+function videoClass() {
+  return props.mode === "compact"
+    ? "aspect-video w-full rounded-xl bg-black shadow-[0_20px_72px_rgb(0_0_0_/_0.34)]"
+    : "aspect-video w-full rounded-lg border border-border bg-black"
+}
+
+function audioClass() {
+  return props.mode === "compact" ? "w-full px-2 pb-2" : "w-full"
+}
 
 function downloadReportDocx(block: Extract<ResultBlock, { type: "report" }>) {
   const blob = buildDocxBlob(block.title, block.content)
@@ -203,11 +278,11 @@ function escapeXml(value: string): string {
 </script>
 
 <template>
-  <div class="space-y-4">
+  <div :class="rendererClass()">
     <div
       v-for="(b, i) in blocks"
       :key="i"
-      class="rounded-xl border border-border bg-card p-4 sm:p-6 shadow-sm"
+      :class="blockShellClass(b)"
     >
       <template v-if="b.type === 'text'">
         <p class="text-xs text-muted-foreground mb-1">{{ b.title }}</p>
@@ -218,36 +293,48 @@ function escapeXml(value: string): string {
         <pre class="overflow-x-auto rounded-lg border border-border bg-background p-4 text-xs leading-relaxed text-foreground/90">{{ b.content }}</pre>
       </template>
       <template v-else-if="b.type === 'image'">
-        <div class="mb-3">
+        <div v-if="props.mode !== 'compact'" class="mb-3">
           <p class="text-xs text-muted-foreground">图片结果</p>
           <h2 class="text-base font-semibold text-foreground">{{ b.title }}</h2>
         </div>
-        <div class="grid gap-3 sm:grid-cols-2">
+        <div :class="mediaGridClass(b.images.length)">
           <figure
             v-for="image in b.images"
             :key="image.url"
-            class="overflow-hidden rounded-lg border border-border bg-background"
+            :class="figureClass()"
           >
-            <div class="flex aspect-square items-center justify-center bg-secondary/30">
+            <div :class="imageFrameClass()">
               <img
                 :src="image.url"
                 :alt="image.label ?? b.title"
-                class="h-full w-full object-contain"
+                :class="imageClass()"
                 loading="lazy"
               />
             </div>
-            <figcaption class="flex items-center justify-between gap-3 border-t border-border px-3 py-2 text-xs text-muted-foreground">
+            <figcaption v-if="props.mode !== 'compact'" :class="captionClass()">
               <span>{{ image.label ?? "图片" }}</span>
-              <a :href="image.url" download class="inline-flex items-center gap-1 text-foreground hover:text-primary">
+              <a :href="image.url" download :class="downloadLinkClass()">
                 <Download class="h-3.5 w-3.5" />
                 下载
               </a>
             </figcaption>
+            <a
+              v-if="props.mode === 'compact'"
+              :href="image.url"
+              download
+              :class="floatingDownloadClass()"
+            >
+              <Download class="h-3.5 w-3.5" />
+              下载
+            </a>
           </figure>
         </div>
       </template>
       <template v-else-if="b.type === 'audio'">
-        <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <div
+          v-if="props.mode !== 'compact'"
+          class="mb-3 flex flex-wrap items-center justify-between gap-3"
+        >
           <div>
             <p class="text-xs text-muted-foreground">音频结果</p>
             <h2 class="text-base font-semibold text-foreground">{{ b.title }}</h2>
@@ -261,12 +348,25 @@ function escapeXml(value: string): string {
             下载音频
           </a>
         </div>
-        <audio :src="b.url" controls preload="metadata" class="w-full">
+        <div v-else class="flex items-center justify-end p-2">
+          <a
+            :href="b.url"
+            :download="b.downloadName ?? 'audio-result'"
+            :class="mediaActionClass()"
+          >
+            <Download class="h-4 w-4" />
+            下载
+          </a>
+        </div>
+        <audio :src="b.url" controls preload="metadata" :class="audioClass()">
           当前浏览器不支持音频播放。
         </audio>
       </template>
       <template v-else-if="b.type === 'video'">
-        <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <div
+          v-if="props.mode !== 'compact'"
+          class="mb-3 flex flex-wrap items-center justify-between gap-3"
+        >
           <div>
             <p class="text-xs text-muted-foreground">视频结果</p>
             <h2 class="text-base font-semibold text-foreground">{{ b.title }}</h2>
@@ -285,10 +385,20 @@ function escapeXml(value: string): string {
           controls
           playsinline
           preload="metadata"
-          class="aspect-video w-full rounded-lg border border-border bg-black"
+          :class="videoClass()"
         >
           当前浏览器不支持视频播放。
         </video>
+        <div v-if="props.mode === 'compact'" class="flex justify-end px-2 pb-2 pt-2">
+          <a
+            :href="b.url"
+            :download="b.downloadName ?? 'digital-human-video.mp4'"
+            :class="mediaActionClass()"
+          >
+            <Download class="h-4 w-4" />
+            下载
+          </a>
+        </div>
       </template>
       <template v-else-if="b.type === 'report'">
         <div class="mb-4 flex flex-wrap items-center justify-between gap-3">

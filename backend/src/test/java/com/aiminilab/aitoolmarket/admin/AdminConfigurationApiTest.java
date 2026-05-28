@@ -122,6 +122,8 @@ class AdminConfigurationApiTest {
                                   "apiKey": "sk-secret-value",
                                   "extraAuthJson": "{\\"secretKey\\":\\"real-secret\\"}",
                                   "timeoutSeconds": 60,
+                                  "connectTimeoutSeconds": 30,
+                                  "readTimeoutSeconds": 300,
                                   "enabled": true,
                                   "isDefault": true
                                 }
@@ -136,7 +138,9 @@ class AdminConfigurationApiTest {
                 .andExpect(jsonPath("$.data.format").value("ai-tool-market-config-bundle"))
                 .andExpect(jsonPath("$.data.secretsRedacted").value(true))
                 .andExpect(jsonPath("$.data.modelConfigs[?(@.configCode=='secret_model')].apiKey").value(""))
-                .andExpect(jsonPath("$.data.modelConfigs[?(@.configCode=='secret_model')].extraAuthJson").value(""));
+                .andExpect(jsonPath("$.data.modelConfigs[?(@.configCode=='secret_model')].extraAuthJson").value(""))
+                .andExpect(jsonPath("$.data.modelConfigs[?(@.configCode=='secret_model')].connectTimeoutSeconds").value(30))
+                .andExpect(jsonPath("$.data.modelConfigs[?(@.configCode=='secret_model')].readTimeoutSeconds").value(300));
 
         mockMvc.perform(get("/api/admin/v1/config-bundles/export?includeSecrets=true")
                         .header("Authorization", "Bearer " + adminToken))
@@ -144,7 +148,9 @@ class AdminConfigurationApiTest {
                 .andExpect(jsonPath("$.data.secretsRedacted").value(false))
                 .andExpect(jsonPath("$.data.modelConfigs[?(@.configCode=='secret_model')].secretsRedacted").value(false))
                 .andExpect(jsonPath("$.data.modelConfigs[?(@.configCode=='secret_model')].apiKey").value("sk-secret-value"))
-                .andExpect(jsonPath("$.data.modelConfigs[?(@.configCode=='secret_model')].extraAuthJson").value("{\"secretKey\":\"real-secret\"}"));
+                .andExpect(jsonPath("$.data.modelConfigs[?(@.configCode=='secret_model')].extraAuthJson").value(org.hamcrest.Matchers.hasItem(org.hamcrest.Matchers.containsString("\"secretKey\":\"real-secret\""))))
+                .andExpect(jsonPath("$.data.modelConfigs[?(@.configCode=='secret_model')].extraAuthJson").value(org.hamcrest.Matchers.hasItem(org.hamcrest.Matchers.containsString("\"connectTimeoutSeconds\":30"))))
+                .andExpect(jsonPath("$.data.modelConfigs[?(@.configCode=='secret_model')].extraAuthJson").value(org.hamcrest.Matchers.hasItem(org.hamcrest.Matchers.containsString("\"readTimeoutSeconds\":300"))));
 
         mockMvc.perform(post("/api/admin/v1/config-bundles/import")
                         .header("Authorization", "Bearer " + adminToken)
@@ -166,6 +172,8 @@ class AdminConfigurationApiTest {
                                       "apiKey": "",
                                       "extraAuthJson": "",
                                       "timeoutSeconds": 60,
+                                      "connectTimeoutSeconds": 45,
+                                      "readTimeoutSeconds": 600,
                                       "enabled": true,
                                       "isDefault": true
                                     }
@@ -179,6 +187,8 @@ class AdminConfigurationApiTest {
                         .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data[?(@.configCode=='secret_model')].displayName").value("Imported Name"))
+                .andExpect(jsonPath("$.data[?(@.configCode=='secret_model')].connectTimeoutSeconds").value(45))
+                .andExpect(jsonPath("$.data[?(@.configCode=='secret_model')].readTimeoutSeconds").value(600))
                 .andExpect(jsonPath("$.data[?(@.configCode=='secret_model')].apiKeyMasked").value("sk***ue"))
                 .andExpect(jsonPath("$.data[?(@.configCode=='secret_model')].extraAuthJsonMasked").value("********"));
     }
@@ -252,6 +262,8 @@ class AdminConfigurationApiTest {
                                       "status": "ONLINE",
                                       "estimatedCreditCost": 1,
                                       "modelConfigCode": "model_99",
+                                      "executionHandler": "IMAGE_GENERATION",
+                                      "agentEnabled": false,
                                       "fields": [],
                                       "prompts": []
                                     }
@@ -272,7 +284,19 @@ class AdminConfigurationApiTest {
         mockMvc.perform(get("/api/admin/v1/tools?page=1&pageSize=50")
                         .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.list[?(@.toolCode=='dup_tool')].modelConfigId").value(existingModelId.intValue()));
+                .andExpect(jsonPath("$.data.list[?(@.toolCode=='dup_tool')].modelConfigId").value(existingModelId.intValue()))
+                .andExpect(jsonPath("$.data.list[?(@.toolCode=='dup_tool')].executionHandler").value("IMAGE_GENERATION"));
+
+        mockMvc.perform(get("/api/admin/v1/agent/tools")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[?(@.toolCode=='dup_tool')].agentEnabled").value(false));
+
+        mockMvc.perform(get("/api/admin/v1/config-bundles/export")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.tools[?(@.toolCode=='dup_tool')].executionHandler").value("IMAGE_GENERATION"))
+                .andExpect(jsonPath("$.data.tools[?(@.toolCode=='dup_tool')].agentEnabled").value(false));
     }
 
     private String loginAdmin() throws Exception {

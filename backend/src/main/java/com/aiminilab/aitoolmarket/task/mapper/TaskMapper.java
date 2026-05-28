@@ -217,7 +217,7 @@ public interface TaskMapper extends BaseMapper<AiTask> {
     @Update("""
             <script>
             UPDATE ai_tasks
-            SET status = 'FAILED', progress = 100, progress_message = #{progressMessage},
+            SET status = #{status}, progress = 100, progress_message = #{progressMessage},
                 error_code = #{errorCode}, error_message = #{errorMessage},
                 finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
             WHERE id = #{taskId}
@@ -228,6 +228,7 @@ public interface TaskMapper extends BaseMapper<AiTask> {
             </script>
             """)
     int markFailed(@Param("taskId") Long taskId,
+                   @Param("status") String status,
                    @Param("errorCode") String errorCode,
                    @Param("progressMessage") String progressMessage,
                    @Param("errorMessage") String errorMessage,
@@ -238,6 +239,7 @@ public interface TaskMapper extends BaseMapper<AiTask> {
             UPDATE ai_tasks
             SET status = 'QUEUED', progress = 0, progress_message = '任务已重新排队',
                 error_code = NULL, error_message = NULL,
+                retry_count = retry_count + 1,
                 queued_at = CURRENT_TIMESTAMP, started_at = NULL,
                 finished_at = NULL, updated_at = CURRENT_TIMESTAMP
             WHERE id = #{taskId}
@@ -249,6 +251,22 @@ public interface TaskMapper extends BaseMapper<AiTask> {
             """)
     int resetToQueued(@Param("taskId") Long taskId,
                       @Param("expectedStatuses") List<String> expectedStatuses);
+
+    @Update("""
+            <script>
+            UPDATE ai_tasks
+            SET status = 'RETRYING', progress = 0, progress_message = '任务正在重试',
+                error_code = NULL, error_message = NULL,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{taskId}
+              AND status IN
+              <foreach collection="expectedStatuses" item="status" open="(" separator="," close=")">
+                #{status}
+              </foreach>
+            </script>
+            """)
+    int markRetrying(@Param("taskId") Long taskId,
+                     @Param("expectedStatuses") List<String> expectedStatuses);
 
     @Update("""
             <script>

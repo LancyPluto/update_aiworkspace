@@ -1,6 +1,7 @@
 package com.aiminilab.aitoolmarket.config;
 
 import com.aiminilab.aitoolmarket.admin.mapper.SystemSettingMapper;
+import com.aiminilab.aitoolmarket.agent.config.AgentPromptSettings;
 import com.aiminilab.aitoolmarket.common.enums.UserStatus;
 import com.aiminilab.aitoolmarket.common.enums.UserType;
 import com.aiminilab.aitoolmarket.user.entity.User;
@@ -46,6 +47,22 @@ public class DataInitializer implements CommandLineRunner {
         createUserIfAbsent("user1", "123456", "User One", UserType.USER);
         toolCategoryMapper.ensureDefaultCategory();
         systemSettingMapper.ensureTable();
+        seedAgentPromptSettings();
+    }
+
+    private void seedAgentPromptSettings() {
+        systemSettingMapper.insertIfAbsent(
+                AgentPromptSettings.SYSTEM_PROMPT_KEY,
+                AgentPromptSettings.DEFAULT_SYSTEM_PROMPT,
+                "agent",
+                "Agent normal chat system prompt"
+        );
+        systemSettingMapper.insertIfAbsent(
+                AgentPromptSettings.DEEP_AGENTS_SYSTEM_PROMPT_KEY,
+                AgentPromptSettings.DEFAULT_DEEP_AGENTS_SYSTEM_PROMPT,
+                "agent",
+                "Agent deep-agents runtime system prompt"
+        );
     }
 
     private void ensureSchemaCompatibility() {
@@ -54,6 +71,19 @@ public class DataInitializer implements CommandLineRunner {
         ensureColumn("ai_tools", "input_modality", "ALTER TABLE ai_tools ADD COLUMN input_modality VARCHAR(32) NOT NULL DEFAULT 'TEXT'");
         ensureColumn("ai_tools", "output_modality", "ALTER TABLE ai_tools ADD COLUMN output_modality VARCHAR(32) NOT NULL DEFAULT 'TEXT'");
         ensureColumn("ai_tools", "config_note", "ALTER TABLE ai_tools ADD COLUMN config_note TEXT NULL");
+        ensureColumn("tool_field_schema_items", "execution_required", "ALTER TABLE tool_field_schema_items ADD COLUMN execution_required TINYINT NOT NULL DEFAULT 0");
+        ensureColumn("tool_field_schema_items", "user_required", "ALTER TABLE tool_field_schema_items ADD COLUMN user_required TINYINT NOT NULL DEFAULT 0");
+        ensureColumn("tool_field_schema_items", "default_value", "ALTER TABLE tool_field_schema_items ADD COLUMN default_value VARCHAR(512) NULL");
+        ensureColumn("tool_field_schema_items", "agent_fill_strategy", "ALTER TABLE tool_field_schema_items ADD COLUMN agent_fill_strategy VARCHAR(32) NOT NULL DEFAULT 'default'");
+        ensureColumn("tool_field_schema_items", "risk_level", "ALTER TABLE tool_field_schema_items ADD COLUMN risk_level VARCHAR(16) NOT NULL DEFAULT 'LOW'");
+        executeSql("""
+                UPDATE tool_field_schema_items
+                SET execution_required = required,
+                    user_required = required,
+                    agent_fill_strategy = CASE WHEN required = 1 THEN 'ask_user' ELSE 'default' END,
+                    risk_level = 'LOW'
+                WHERE agent_fill_strategy IS NULL OR agent_fill_strategy = ''
+                """);
         ensureColumn("ai_tasks", "user_deleted", "ALTER TABLE ai_tasks ADD COLUMN user_deleted TINYINT NOT NULL DEFAULT 0");
         ensureColumn("ai_tasks", "user_deleted_at", "ALTER TABLE ai_tasks ADD COLUMN user_deleted_at DATETIME NULL");
         ensureColumn("agent_model_configs", "display_name", "ALTER TABLE agent_model_configs ADD COLUMN display_name VARCHAR(128) NULL");
@@ -69,6 +99,12 @@ public class DataInitializer implements CommandLineRunner {
         ensureColumn("agent_model_configs", "billing_unit", "ALTER TABLE agent_model_configs ADD COLUMN billing_unit VARCHAR(32) NOT NULL DEFAULT 'TOKEN_PER_M'");
         ensureColumn("agent_model_configs", "unit_price", "ALTER TABLE agent_model_configs ADD COLUMN unit_price DECIMAL(18,8) NOT NULL DEFAULT 0");
         ensureColumn("agent_model_configs", "capabilities", "ALTER TABLE agent_model_configs ADD COLUMN capabilities TEXT NULL");
+        ensureColumn("agent_model_configs", "agent_enabled", "ALTER TABLE agent_model_configs ADD COLUMN agent_enabled TINYINT NOT NULL DEFAULT 1");
+        ensureIndex(
+                "agent_model_configs",
+                "idx_agent_model_configs_agent_enabled",
+                "CREATE INDEX idx_agent_model_configs_agent_enabled ON agent_model_configs(agent_enabled, enabled, is_deleted, is_default, id)"
+        );
         executeSql("""
                 UPDATE agent_model_configs
                 SET input_token_price_per_1m = input_token_price_per_1k * 1000
@@ -170,11 +206,73 @@ public class DataInitializer implements CommandLineRunner {
         ensureColumn("billing_usage_logs", "billing_unit", "ALTER TABLE billing_usage_logs ADD COLUMN billing_unit VARCHAR(32) NOT NULL DEFAULT 'TOKEN_PER_M'");
         ensureColumn("billing_usage_logs", "billable_units", "ALTER TABLE billing_usage_logs ADD COLUMN billable_units INT NOT NULL DEFAULT 0");
         ensureColumn("billing_usage_logs", "unit_price", "ALTER TABLE billing_usage_logs ADD COLUMN unit_price DECIMAL(18,8) NOT NULL DEFAULT 0");
+        ensureColumn("agent_files", "attached_run_id", "ALTER TABLE agent_files ADD COLUMN attached_run_id BIGINT NULL");
+        ensureIndex("agent_files", "idx_agent_files_attached_run", "CREATE INDEX idx_agent_files_attached_run ON agent_files(session_id, attached_run_id, id)");
         ensureColumn("agent_messages", "status", "ALTER TABLE agent_messages ADD COLUMN status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE'");
         ensureColumn("agent_messages", "superseded_at", "ALTER TABLE agent_messages ADD COLUMN superseded_at DATETIME NULL");
+        ensureColumn("agent_runs", "model_config_id", "ALTER TABLE agent_runs ADD COLUMN model_config_id BIGINT NULL");
         ensureColumn("agent_runs", "parent_run_id", "ALTER TABLE agent_runs ADD COLUMN parent_run_id BIGINT NULL");
         ensureColumn("agent_runs", "source_user_message_id", "ALTER TABLE agent_runs ADD COLUMN source_user_message_id BIGINT NULL");
+        ensureColumn("agent_runs", "context_snapshot_id", "ALTER TABLE agent_runs ADD COLUMN context_snapshot_id BIGINT NULL");
         ensureColumn("agent_runs", "client_request_id", "ALTER TABLE agent_runs ADD COLUMN client_request_id VARCHAR(64) NULL");
+        ensureIndex("agent_runs", "uk_agent_runs_user_client", "CREATE UNIQUE INDEX uk_agent_runs_user_client ON agent_runs(user_id, client_request_id)");
+        ensureIndex("agent_runs", "idx_agent_runs_model_config", "CREATE INDEX idx_agent_runs_model_config ON agent_runs(model_config_id)");
+        ensureIndex("agent_runs", "idx_agent_runs_context_snapshot", "CREATE INDEX idx_agent_runs_context_snapshot ON agent_runs(context_snapshot_id)");
+        ensureTable("agent_tool_descriptor_extension", """
+                CREATE TABLE agent_tool_descriptor_extension (
+                  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                  tool_id BIGINT NOT NULL,
+                  tool_code VARCHAR(64) NOT NULL,
+                  agent_enabled TINYINT NOT NULL DEFAULT 1,
+                  agent_recommendable TINYINT NOT NULL DEFAULT 1,
+                  agent_auto_callable TINYINT NOT NULL DEFAULT 0,
+                  confirmation_policy VARCHAR(32) DEFAULT 'auto',
+                  risk_level VARCHAR(16) DEFAULT 'low',
+                  keywords_json TEXT DEFAULT NULL,
+                  example_prompts_json TEXT DEFAULT NULL,
+                  applicable_scenarios_json TEXT DEFAULT NULL,
+                  not_applicable_scenarios_json TEXT DEFAULT NULL,
+                  result_schema_json TEXT DEFAULT NULL,
+                  output_type VARCHAR(32) DEFAULT 'text',
+                  health_status VARCHAR(32) NOT NULL DEFAULT 'UNKNOWN',
+                  health_message VARCHAR(512) NULL,
+                  health_checked_at DATETIME NULL,
+                  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  UNIQUE KEY uk_tool_code (tool_code),
+                  KEY idx_enabled_recommendable (agent_enabled, agent_recommendable),
+                  KEY idx_agent_tool_health (agent_enabled, health_status)
+                )
+                """);
+        ensureColumn("agent_tool_descriptor_extension", "health_status", "ALTER TABLE agent_tool_descriptor_extension ADD COLUMN health_status VARCHAR(32) NOT NULL DEFAULT 'UNKNOWN'");
+        ensureColumn("agent_tool_descriptor_extension", "health_message", "ALTER TABLE agent_tool_descriptor_extension ADD COLUMN health_message VARCHAR(512) NULL");
+        ensureColumn("agent_tool_descriptor_extension", "health_checked_at", "ALTER TABLE agent_tool_descriptor_extension ADD COLUMN health_checked_at DATETIME NULL");
+        ensureIndex("agent_tool_descriptor_extension", "idx_agent_tool_health", "CREATE INDEX idx_agent_tool_health ON agent_tool_descriptor_extension(agent_enabled, health_status)");
+        executeSqlIgnore("ALTER TABLE agent_run_events MODIFY COLUMN event_text MEDIUMTEXT NULL");
+        ensureTable("agent_context_snapshots", """
+                CREATE TABLE agent_context_snapshots (
+                  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                  run_id BIGINT NOT NULL,
+                  session_id BIGINT NOT NULL,
+                  user_id BIGINT NOT NULL,
+                  workspace_id BIGINT NULL,
+                  model_config_id BIGINT NULL,
+                  model_provider_code VARCHAR(64) NULL,
+                  model_name VARCHAR(128) NULL,
+                  strategy VARCHAR(64) NOT NULL,
+                  max_history_messages INT NOT NULL DEFAULT 20,
+                  history_message_count INT NOT NULL DEFAULT 0,
+                  file_count INT NOT NULL DEFAULT 0,
+                  file_chunk_count INT NOT NULL DEFAULT 0,
+                  memory_item_count INT NOT NULL DEFAULT 0,
+                  estimated_input_tokens INT NOT NULL DEFAULT 0,
+                  snapshot_json JSON NULL,
+                  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """);
+        ensureIndex("agent_context_snapshots", "idx_agent_context_snapshots_run", "CREATE INDEX idx_agent_context_snapshots_run ON agent_context_snapshots(run_id, id)");
+        ensureIndex("agent_context_snapshots", "idx_agent_context_snapshots_session", "CREATE INDEX idx_agent_context_snapshots_session ON agent_context_snapshots(session_id, id)");
+        ensureIndex("agent_context_snapshots", "idx_agent_context_snapshots_user", "CREATE INDEX idx_agent_context_snapshots_user ON agent_context_snapshots(user_id, id)");
         ensureTable("ppt_project_bindings", """
                 CREATE TABLE ppt_project_bindings (
                   id BIGINT PRIMARY KEY AUTO_INCREMENT,
@@ -294,6 +392,14 @@ public class DataInitializer implements CommandLineRunner {
             }
         }
         return false;
+    }
+
+    private void executeSqlIgnore(String sql) {
+        try (Connection connection = dataSource.getConnection()) {
+            connection.createStatement().executeUpdate(sql);
+        } catch (SQLException ignored) {
+            // Compatibility DDL is best-effort across MySQL and H2 test schemas.
+        }
     }
 
     private boolean indexExists(Connection connection, String tableName, String indexName) throws SQLException {

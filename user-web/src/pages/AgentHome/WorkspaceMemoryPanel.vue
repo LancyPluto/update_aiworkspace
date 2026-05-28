@@ -7,6 +7,7 @@ import {
   updateAgentWorkspaceMemory,
 } from "@/api"
 import type { AgentWorkspaceMemoryItem, UpdateAgentWorkspaceMemoryRequest } from "@/api/types"
+import { confirmDelete } from "@/composables/useConfirmDelete"
 
 const props = defineProps<{
   workspaceId: number | null
@@ -85,7 +86,11 @@ async function saveMemory(item: AgentWorkspaceMemoryItem) {
 
 async function deleteMemory(item: AgentWorkspaceMemoryItem) {
   if (!props.workspaceId || deletingId.value) return
-  if (!window.confirm(`确认删除「${item.title}」吗？`)) return
+  const confirmed = await confirmDelete({
+    title: "删除记忆",
+    itemName: item.title,
+  })
+  if (!confirmed) return
 
   deletingId.value = item.id
   errorMessage.value = null

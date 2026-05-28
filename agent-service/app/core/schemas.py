@@ -1,11 +1,28 @@
 from typing import Any
 
+from typing import Any
+
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 
 class ChatMessage(BaseModel):
     role: str
     content: str
+
+
+class ToolFieldDescriptor(BaseModel):
+    fieldKey: str
+    fieldName: str = ""
+    fieldType: str = "text"
+    description: str | None = None
+    options: Any | None = None
+    required: bool = False
+    executionRequired: bool | None = None
+    userRequired: bool | None = None
+    defaultValue: str | None = None
+    agentFillStrategy: str | None = None
+    riskLevel: str | None = None
+    sortOrder: int | None = None
 
 
 class ToolDescriptor(BaseModel):
@@ -17,6 +34,7 @@ class ToolDescriptor(BaseModel):
     estimatedCreditCost: int = Field(default=0, validation_alias=AliasChoices("estimatedCreditCost", "creditCost"))
     inputSchema: dict[str, Any] = Field(default_factory=dict)
     autoCallable: bool = False
+    fields: list[ToolFieldDescriptor] = Field(default_factory=list)
     hints: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -58,6 +76,7 @@ class WorkspaceMemoryItem(BaseModel):
 
 
 class AgentModelConfig(BaseModel):
+    id: int | None = None
     provider: str = "mock"
     modelName: str = "mock"
     baseUrl: str | None = None
@@ -65,6 +84,19 @@ class AgentModelConfig(BaseModel):
     minimaxGroupId: str | None = None
     timeoutSeconds: int = 60
     enabled: bool = True
+    agentEnabled: bool = True
+
+
+class ContextWindow(BaseModel):
+    snapshotId: int | None = None
+    strategy: str | None = None
+    maxHistoryMessages: int | None = None
+    historyMessageCount: int = 0
+    fileCount: int = 0
+    fileChunkCount: int = 0
+    memoryItemCount: int = 0
+    estimatedInputTokens: int = 0
+    snapshotJson: str | None = None
 
 
 class PendingToolContext(BaseModel):
@@ -98,6 +130,10 @@ class RunContext(BaseModel):
     availableTools: list[ToolDescriptor] = Field(default_factory=list, validation_alias=AliasChoices("availableTools", "tools"))
     toolPreferences: list[ToolPreference] = Field(default_factory=list)
     creditBudget: int = 0
+    contextWindow: ContextWindow | None = None
+    modelConfig: AgentModelConfig | None = None
+    agentSystemPrompt: str | None = None
+    deepAgentsSystemPrompt: str | None = None
     pendingToolContext: PendingToolContext | None = Field(default=None, validation_alias=AliasChoices("pendingToolContext", "pending_tool_context"))
 
 
@@ -121,11 +157,16 @@ class RunComplete(BaseModel):
     modelProviderCode: str | None = None
     modelName: str | None = None
     consumedCredits: int
+    promptTokens: int | None = None
+    completionTokens: int | None = None
 
 
 class RunFail(BaseModel):
     errorCode: str
     errorMessage: str
+    consumedCredits: int | None = None
+    promptTokens: int | None = None
+    completionTokens: int | None = None
 
 
 class ToolCallCreate(BaseModel):

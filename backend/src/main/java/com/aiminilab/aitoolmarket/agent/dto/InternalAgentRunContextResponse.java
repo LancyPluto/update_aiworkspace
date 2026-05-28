@@ -15,6 +15,10 @@ public record InternalAgentRunContextResponse(
         List<AgentToolDescriptorResponse> availableTools,
         List<AgentToolPreferenceResponse> toolPreferences,
         Integer creditBudget,
+        AgentContextWindowResponse contextWindow,
+        InternalAgentModelConfigResponse modelConfig,
+        String agentSystemPrompt,
+        String deepAgentsSystemPrompt,
         InternalPendingToolContextResponse pendingToolContext
 ) {
 }

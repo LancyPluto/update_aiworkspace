@@ -1,547 +1,395 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
+import { toast } from "sonner"
 import { AdminLayout } from "@/components/admin/admin-layout"
 import { AdminHeader } from "@/components/admin/header"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Skeleton } from "@/components/ui/skeleton"
+import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
-import { cn } from "@/lib/utils"
+import { fetchAdminAgentTools, updateAdminAgentToolAccess, type AgentToolAccess } from "@/lib/api/agent-tools"
 import { ApiError } from "@/lib/api/http"
-import { fetchAdminTools } from "@/lib/api/tools"
-import { createPrompt, createPromptVersion, fetchPrompts, fetchPromptVersions, publishPromptVersion, testGenerate } from "@/lib/api/prompts"
-import type { PromptRecord, PromptVersionRecord, ToolSummary } from "@/lib/api/types"
-import { Copy, Eye, FileText, History, Plus, RefreshCw, Rocket, Search, Sparkles } from "lucide-react"
+import { fetchSettings, updateSettings } from "@/lib/api/settings"
+import { AlertTriangle, Bot, BrainCircuit, CheckCircle2, Database, RefreshCw, Save, SlidersHorizontal, Wrench } from "lucide-react"
 
-interface PromptItem {
-  prompt: PromptRecord
-  tool: ToolSummary
-  versions: PromptVersionRecord[]
+const AGENT_SYSTEM_PROMPT_KEY = "agent.system_prompt"
+const DEEP_AGENTS_SYSTEM_PROMPT_KEY = "agent.deep_agents_system_prompt"
+
+const DEFAULT_AGENT_SYSTEM_PROMPT = `你是 AI 工具市场的云代理。你的任务是理解用户需求，基于平台中可用的 AI 工具进行推荐、参数收集和必要时调用工具。
+
+重要边界：
+1. 你当前使用的 Agent 模型只负责理解、规划、对话和工具编排。
+2. 每个 AI 工具会使用它在后台工具配置中绑定的模型、模板和执行器；不要把 Agent 模型误认为工具执行模型。
+3. 当用户只是咨询时，直接回答；当用户需要生成图片、视频、语音、文案、标题、评论分析等结果时，优先从可用工具列表中选择最合适的工具。
+4. 如果缺少工具必填参数，先用自然语言追问；不要编造参数。
+5. 回答要简洁、可执行，必要时说明你将使用哪个工具。`
+
+const DEFAULT_DEEP_AGENTS_SYSTEM_PROMPT = `你是 AI 工具市场的工作区 Agent。你可以结合会话历史、工作区记忆、文件上下文和可用工具来规划并完成任务。保持步骤清晰，优先使用平台工具完成用户明确要求的生成或分析任务，并在最终答案中给出清晰结果。`
+
+const MODALITY_LABELS: Record<string, string> = {
+  TEXT: "文本",
+  IMAGE: "图片",
+  AUDIO: "音频",
+  VIDEO: "视频",
+  JSON: "JSON",
+  FILE: "文件",
+  MULTIMODAL: "多模态",
+  UNKNOWN: "未分类",
 }
 
-interface VersionForm {
-  versionNo: string
-  systemPrompt: string
-  userPromptTemplate: string
-  outputFormat: string
+function errorMessage(error: unknown, fallback: string) {
+  return error instanceof ApiError ? error.message : fallback
 }
 
-function formatDate(value?: string | null) {
-  if (!value) return "-"
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString()
+function modalityKey(value?: string | null) {
+  const normalized = value?.trim().toUpperCase()
+  return normalized || "UNKNOWN"
 }
 
-function extractVariables(content: string): string[] {
-  const names = new Set<string>()
-  const pattern = /\{\{\s*([\w.-]+)\s*\}\}/g
-  let match: RegExpExecArray | null
-  while ((match = pattern.exec(content)) !== null) {
-    names.add(match[1])
+function modalityLabel(value?: string | null) {
+  const key = modalityKey(value)
+  return MODALITY_LABELS[key] || key
+}
+
+function toolHealthBadge(tool: AgentToolAccess) {
+  const status = (tool.healthStatus || "UNKNOWN").toUpperCase()
+  if (status === "FAILED") {
+    return <Badge variant="destructive">Health failed</Badge>
   }
-  return Array.from(names)
-}
-
-function activeVersion(item: PromptItem | null) {
-  if (!item) return null
-  return (
-    item.versions.find((version) => version.id === item.prompt.activeVersionId) ||
-    item.versions.find((version) => version.status === "ACTIVE") ||
-    item.versions[0] ||
-    null
-  )
-}
-
-function defaultVersionNo() {
-  return `v${new Date().toISOString().replace(/\D/g, "").slice(0, 12)}`
+  if (status === "HEALTHY") {
+    return <Badge variant="default">Healthy</Badge>
+  }
+  return <Badge variant="outline">Unknown</Badge>
 }
 
 export default function PromptsPage() {
-  const [tools, setTools] = useState<ToolSummary[]>([])
-  const [items, setItems] = useState<PromptItem[]>([])
-  const [selectedPromptId, setSelectedPromptId] = useState<number | null>(null)
-  const [searchQuery, setSearchQuery] = useState("")
+  const [agentPrompt, setAgentPrompt] = useState(DEFAULT_AGENT_SYSTEM_PROMPT)
+  const [deepAgentsPrompt, setDeepAgentsPrompt] = useState(DEFAULT_DEEP_AGENTS_SYSTEM_PROMPT)
+  const [tools, setTools] = useState<AgentToolAccess[]>([])
   const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [updatingToolCode, setUpdatingToolCode] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [createOpen, setCreateOpen] = useState(false)
-  const [versionOpen, setVersionOpen] = useState(false)
-  const [previewOpen, setPreviewOpen] = useState(false)
-  const [submitting, setSubmitting] = useState(false)
-  const [publishingId, setPublishingId] = useState<number | null>(null)
-  const [selectedToolId, setSelectedToolId] = useState("")
-  const [promptCode, setPromptCode] = useState("")
-  const [promptName, setPromptName] = useState("")
-  const [form, setForm] = useState<VersionForm>({
-    versionNo: defaultVersionNo(),
-    systemPrompt: "",
-    userPromptTemplate: "",
-    outputFormat: "MARKDOWN",
-  })
-  const [previewParams, setPreviewParams] = useState<Record<string, string>>({})
-  const [previewOutput, setPreviewOutput] = useState("")
 
-  async function loadAll(preferredPromptId?: number) {
+  async function loadConfig() {
     setLoading(true)
     setError(null)
     try {
-      const toolsResp = await fetchAdminTools()
-      setTools(toolsResp.list)
-      const loaded = await Promise.all(
-        toolsResp.list.map(async (tool) => {
-          const prompts = await fetchPrompts(tool.id).catch(() => [] as PromptRecord[])
-          const promptItems = await Promise.all(
-            prompts.map(async (prompt) => ({
-              prompt,
-              tool,
-              versions: await fetchPromptVersions(prompt.id).catch(() => [] as PromptVersionRecord[]),
-            })),
-          )
-          return promptItems
-        }),
-      )
-      const flattened = loaded.flat()
-      setItems(flattened)
-      const nextSelected = preferredPromptId ?? selectedPromptId ?? flattened[0]?.prompt.id ?? null
-      setSelectedPromptId(flattened.some((item) => item.prompt.id === nextSelected) ? nextSelected : flattened[0]?.prompt.id ?? null)
+      const [settings, agentTools] = await Promise.all([
+        fetchSettings(),
+        fetchAdminAgentTools(),
+      ])
+      setAgentPrompt(settings[AGENT_SYSTEM_PROMPT_KEY] || DEFAULT_AGENT_SYSTEM_PROMPT)
+      setDeepAgentsPrompt(settings[DEEP_AGENTS_SYSTEM_PROMPT_KEY] || DEFAULT_DEEP_AGENTS_SYSTEM_PROMPT)
+      setTools(agentTools || [])
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "加载 Prompt 数据失败")
+      setError(errorMessage(err, "加载 Agent 配置失败"))
     } finally {
       setLoading(false)
     }
   }
 
   useEffect(() => {
-    loadAll()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    loadConfig()
   }, [])
 
-  const filteredItems = useMemo(() => {
-    const keyword = searchQuery.trim().toLowerCase()
-    if (!keyword) return items
-    return items.filter((item) =>
-      [item.prompt.promptName, item.prompt.promptCode, item.tool.toolName, item.tool.toolCode]
-        .some((value) => value.toLowerCase().includes(keyword)),
+  async function saveConfig() {
+    setSaving(true)
+    setError(null)
+    const toastId = toast.loading("正在保存 Agent 配置...")
+    try {
+      await updateSettings({
+        [AGENT_SYSTEM_PROMPT_KEY]: agentPrompt.trim() || DEFAULT_AGENT_SYSTEM_PROMPT,
+        [DEEP_AGENTS_SYSTEM_PROMPT_KEY]: deepAgentsPrompt.trim() || DEFAULT_DEEP_AGENTS_SYSTEM_PROMPT,
+      })
+      toast.success("Agent 配置已保存", { id: toastId })
+    } catch (err) {
+      const message = errorMessage(err, "保存 Agent 配置失败")
+      setError(message)
+      toast.error("保存失败", { id: toastId, description: message })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function toggleToolAccess(tool: AgentToolAccess, agentEnabled: boolean) {
+    setUpdatingToolCode(tool.toolCode)
+    setError(null)
+    const previousTools = tools
+    setTools((current) =>
+      current.map((item) => (item.toolCode === tool.toolCode ? { ...item, agentEnabled } : item)),
     )
-  }, [items, searchQuery])
-
-  const selectedItem = useMemo(
-    () => items.find((item) => item.prompt.id === selectedPromptId) ?? null,
-    [items, selectedPromptId],
-  )
-  const selectedVersion = activeVersion(selectedItem)
-  const variables = useMemo(
-    () => extractVariables(selectedVersion?.userPromptTemplate ?? form.userPromptTemplate),
-    [selectedVersion, form.userPromptTemplate],
-  )
-
-  function updateVersionForm<K extends keyof VersionForm>(key: K, value: VersionForm[K]) {
-    setForm((current) => ({ ...current, [key]: value }))
-  }
-
-  function openVersionDialog() {
-    setForm({
-      versionNo: defaultVersionNo(),
-      systemPrompt: selectedVersion?.systemPrompt ?? "",
-      userPromptTemplate: selectedVersion?.userPromptTemplate ?? "",
-      outputFormat: selectedVersion?.outputFormat ?? "MARKDOWN",
-    })
-    setVersionOpen(true)
-  }
-
-  async function handleCreatePrompt() {
-    const toolId = Number(selectedToolId)
-    if (!toolId || !promptCode.trim() || !promptName.trim()) {
-      setError("请选择工具，并填写 Prompt 编码和名称")
-      return
-    }
-    setSubmitting(true)
-    setError(null)
     try {
-      const created = await createPrompt(toolId, {
-        promptCode: promptCode.trim(),
-        promptName: promptName.trim(),
+      const updated = await updateAdminAgentToolAccess(tool.toolCode, agentEnabled)
+      setTools((current) => current.map((item) => (item.toolCode === tool.toolCode ? updated : item)))
+      toast.success(agentEnabled ? "已启用 Agent 工具" : "已禁用 Agent 工具", {
+        description: tool.toolName,
       })
-      setCreateOpen(false)
-      setSelectedToolId("")
-      setPromptCode("")
-      setPromptName("")
-      await loadAll(created.id)
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "创建 Prompt 失败")
+      const message = errorMessage(err, "更新 Agent 工具可见性失败")
+      setTools(previousTools)
+      setError(message)
+      toast.error("更新失败", { description: message })
     } finally {
-      setSubmitting(false)
+      setUpdatingToolCode(null)
     }
   }
 
-  async function handleCreateVersion() {
-    if (!selectedItem) return
-    if (!form.versionNo.trim() || !form.userPromptTemplate.trim()) {
-      setError("请填写版本号和用户 Prompt 模板")
-      return
+  const modelBoundToolCount = useMemo(
+    () => tools.filter((tool) => tool.modelConfigId != null || tool.modelName).length,
+    [tools],
+  )
+  const agentEnabledToolCount = useMemo(
+    () => tools.filter((tool) => tool.agentEnabled).length,
+    [tools],
+  )
+  const groupedTools = useMemo(() => {
+    const groups = new Map<string, AgentToolAccess[]>()
+    for (const tool of tools) {
+      const key = modalityKey(tool.outputModality)
+      groups.set(key, [...(groups.get(key) || []), tool])
     }
-    setSubmitting(true)
-    setError(null)
-    try {
-      await createPromptVersion(selectedItem.prompt.id, {
-        versionNo: form.versionNo.trim(),
-        systemPrompt: form.systemPrompt.trim() || undefined,
-        userPromptTemplate: form.userPromptTemplate,
-        outputFormat: form.outputFormat,
-      })
-      setVersionOpen(false)
-      await loadAll(selectedItem.prompt.id)
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "创建版本失败")
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
-  async function handlePublish(versionId: number) {
-    if (!selectedItem) return
-    setPublishingId(versionId)
-    setError(null)
-    try {
-      await publishPromptVersion(versionId)
-      await loadAll(selectedItem.prompt.id)
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "发布版本失败")
-    } finally {
-      setPublishingId(null)
-    }
-  }
-
-  async function handlePreview(versionId: number) {
-    setSubmitting(true)
-    setPreviewOutput("")
-    setError(null)
-    try {
-      const result = await testGenerate(versionId, previewParams)
-      setPreviewOutput(result.output)
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "预览生成失败")
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
-  function copyContent() {
-    const content = selectedVersion?.userPromptTemplate
-    if (!content) return
-    navigator.clipboard?.writeText(content).catch(() => undefined)
-  }
-
-  const description = error
-    ? `联调异常：${error}`
-    : loading
-      ? "正在从后端加载工具、Prompt 与版本数据"
-      : "创建 Prompt、管理版本、发布生效版本并进行模板预览"
+    return Array.from(groups.entries())
+      .map(([key, items]) => ({
+        key,
+        label: modalityLabel(key),
+        tools: items.sort((left, right) => left.toolName.localeCompare(right.toolName, "zh-CN")),
+      }))
+      .sort((left, right) => left.label.localeCompare(right.label, "zh-CN"))
+  }, [tools])
 
   return (
     <AdminLayout>
-      <AdminHeader title="Prompt 管理" description={description} />
+      <AdminHeader
+        title="Agent 配置"
+        description="配置 Agent 的系统提示词，并管理它能读取的在线 AI 工具"
+      />
 
-      <div className="grid min-h-[calc(100vh-5rem)] grid-cols-[320px_1fr] border-t border-border">
-        <aside className="border-r border-border p-4">
-          <div className="mb-4 flex items-center gap-2">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={searchQuery}
-                onChange={(event) => setSearchQuery(event.target.value)}
-                placeholder="搜索 Prompt 或工具"
-                className="pl-9"
-              />
-            </div>
-            <Button variant="outline" size="icon" onClick={() => loadAll(selectedPromptId ?? undefined)} disabled={loading}>
-              <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
-            </Button>
-          </div>
+      <main className="space-y-6 p-6">
+        {error && (
+          <Alert variant="destructive">
+            <AlertTriangle />
+            <AlertTitle>配置加载异常</AlertTitle>
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
 
-          <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-            <DialogTrigger asChild>
-              <Button className="mb-4 w-full gap-2">
-                <Plus className="h-4 w-4" />
-                新建 Prompt
-              </Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>新建 Prompt</DialogTitle>
-                <DialogDescription>选择一个 AI 工具，为它创建可版本化的 Prompt。</DialogDescription>
-              </DialogHeader>
-              <div className="space-y-4 py-2">
-                <div className="space-y-2">
-                  <Label>所属工具</Label>
-                  <Select value={selectedToolId} onValueChange={setSelectedToolId}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="选择工具" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {tools.map((tool) => (
-                        <SelectItem key={tool.id} value={String(tool.id)}>
-                          {tool.toolName}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Prompt 编码</Label>
-                  <Input value={promptCode} onChange={(event) => setPromptCode(event.target.value)} placeholder="default" />
-                </div>
-                <div className="space-y-2">
-                  <Label>Prompt 名称</Label>
-                  <Input value={promptName} onChange={(event) => setPromptName(event.target.value)} placeholder="默认生成 Prompt" />
-                </div>
+        <section className="grid gap-4 md:grid-cols-3">
+          <Card className="rounded-lg">
+            <CardHeader className="flex-row items-center gap-3 space-y-0">
+              <div className="rounded-md border bg-muted p-2">
+                <Bot className="h-5 w-5 text-primary" />
               </div>
-              <DialogFooter>
-                <Button variant="outline" onClick={() => setCreateOpen(false)} disabled={submitting}>取消</Button>
-                <Button onClick={handleCreatePrompt} disabled={submitting}>{submitting ? "创建中..." : "创建"}</Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-
-          <div className="space-y-2">
-            {filteredItems.length === 0 ? (
-              <div className="rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
-                {loading ? "加载中..." : "暂无 Prompt"}
+              <div>
+                <CardTitle>Agent 模型</CardTitle>
+                <CardDescription>由后台模型表的 Agent 可用配置决定前台可选项</CardDescription>
               </div>
-            ) : (
-              filteredItems.map((item) => {
-                const active = activeVersion(item)
-                const isSelected = item.prompt.id === selectedPromptId
-                return (
-                  <button
-                    key={item.prompt.id}
-                    onClick={() => setSelectedPromptId(item.prompt.id)}
-                    className={cn(
-                      "w-full rounded-lg border p-3 text-left transition",
-                      isSelected ? "border-primary bg-primary/10" : "border-border bg-card hover:border-primary/40",
-                    )}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold">{item.prompt.promptName}</p>
-                        <p className="mt-1 truncate text-xs text-muted-foreground">{item.tool.toolName}</p>
-                      </div>
-                      <Badge variant={active?.status === "ACTIVE" ? "default" : "secondary"}>
-                        {active?.status === "ACTIVE" ? "已发布" : "草稿"}
-                      </Badge>
-                    </div>
-                    <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
-                      <span>{item.prompt.promptCode}</span>
-                      <span>{active?.versionNo ?? "无版本"}</span>
-                    </div>
-                  </button>
-                )
-              })
-            )}
-          </div>
-        </aside>
+            </CardHeader>
+          </Card>
 
-        <main className="p-6">
-          {!selectedItem ? (
-            <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-border text-sm text-muted-foreground">
-              请选择或创建一个 Prompt
-            </div>
-          ) : (
-            <div className="space-y-6">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h2 className="text-xl font-semibold">{selectedItem.prompt.promptName}</h2>
-                    <Badge variant="secondary">{selectedItem.prompt.promptCode}</Badge>
+          <Card className="rounded-lg">
+            <CardHeader className="flex-row items-center gap-3 space-y-0">
+              <div className="rounded-md border bg-muted p-2">
+                <Wrench className="h-5 w-5 text-primary" />
+              </div>
+              <div>
+                <CardTitle>AI 工具</CardTitle>
+                <CardDescription>Agent 只读取启用的在线工具，工具执行使用各自绑定模型</CardDescription>
+              </div>
+            </CardHeader>
+          </Card>
+
+          <Card className="rounded-lg">
+            <CardHeader className="flex-row items-center gap-3 space-y-0">
+              <div className="rounded-md border bg-muted p-2">
+                <Database className="h-5 w-5 text-primary" />
+              </div>
+              <div>
+                <CardTitle>系统配置</CardTitle>
+                <CardDescription>提示词保存到 system_settings，工具开关保存到 Agent 扩展表</CardDescription>
+              </div>
+            </CardHeader>
+          </Card>
+        </section>
+
+        <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
+          <div className="space-y-6">
+            <Card className="rounded-lg">
+              <CardHeader>
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <CardTitle className="flex items-center gap-2">
+                      <Bot className="h-5 w-5" />
+                      普通 Agent 系统提示词
+                    </CardTitle>
+                    <CardDescription>
+                      用于常规对话、工具推荐和参数追问。平台会在运行时自动追加启用的工具清单。
+                    </CardDescription>
                   </div>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    工具：{selectedItem.tool.toolName} · 当前版本：{selectedVersion?.versionNo ?? "未创建"}
-                  </p>
+                  <Badge variant="secondary">{AGENT_SYSTEM_PROMPT_KEY}</Badge>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Button variant="outline" className="gap-2" onClick={copyContent} disabled={!selectedVersion}>
-                    <Copy className="h-4 w-4" />
-                    复制
-                  </Button>
-                  <Button className="gap-2" onClick={openVersionDialog}>
-                    <Plus className="h-4 w-4" />
-                    新建版本
-                  </Button>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <Label htmlFor="agent-system-prompt">System Prompt</Label>
+                {loading ? (
+                  <Skeleton className="h-72 w-full" />
+                ) : (
+                  <Textarea
+                    id="agent-system-prompt"
+                    value={agentPrompt}
+                    onChange={(event) => setAgentPrompt(event.target.value)}
+                    className="min-h-72 resize-y font-mono text-sm leading-6"
+                  />
+                )}
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-lg">
+              <CardHeader>
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <CardTitle className="flex items-center gap-2">
+                      <BrainCircuit className="h-5 w-5" />
+                      Deep Agents 系统提示词
+                    </CardTitle>
+                    <CardDescription>
+                      用于后续更复杂的工作区 Agent、文件上下文和记忆能力。
+                    </CardDescription>
+                  </div>
+                  <Badge variant="secondary">{DEEP_AGENTS_SYSTEM_PROMPT_KEY}</Badge>
                 </div>
-              </div>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <Label htmlFor="deep-agents-system-prompt">System Prompt</Label>
+                {loading ? (
+                  <Skeleton className="h-44 w-full" />
+                ) : (
+                  <Textarea
+                    id="deep-agents-system-prompt"
+                    value={deepAgentsPrompt}
+                    onChange={(event) => setDeepAgentsPrompt(event.target.value)}
+                    className="min-h-44 resize-y font-mono text-sm leading-6"
+                  />
+                )}
+              </CardContent>
+            </Card>
+          </div>
 
-              <Tabs defaultValue="content">
-                <TabsList>
-                  <TabsTrigger value="content" className="gap-2"><FileText className="h-4 w-4" />内容</TabsTrigger>
-                  <TabsTrigger value="preview" className="gap-2"><Sparkles className="h-4 w-4" />预览</TabsTrigger>
-                  <TabsTrigger value="versions" className="gap-2"><History className="h-4 w-4" />版本</TabsTrigger>
-                </TabsList>
+          <aside className="space-y-6">
+            <Card className="rounded-lg">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <SlidersHorizontal className="h-5 w-5" />
+                  工具读取范围
+                </CardTitle>
+                <CardDescription>
+                  按输出模态管理 Agent 可见工具；禁用后不会进入 Agent 运行时工具清单。
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-lg border bg-muted/40 p-3">
+                    <div className="text-2xl font-semibold">{loading ? "-" : tools.length}</div>
+                    <div className="text-xs text-muted-foreground">在线工具</div>
+                  </div>
+                  <div className="rounded-lg border bg-muted/40 p-3">
+                    <div className="text-2xl font-semibold">{loading ? "-" : agentEnabledToolCount}</div>
+                    <div className="text-xs text-muted-foreground">Agent 可见</div>
+                  </div>
+                  <div className="rounded-lg border bg-muted/40 p-3">
+                    <div className="text-2xl font-semibold">{loading ? "-" : tools.length - agentEnabledToolCount}</div>
+                    <div className="text-xs text-muted-foreground">已禁用</div>
+                  </div>
+                  <div className="rounded-lg border bg-muted/40 p-3">
+                    <div className="text-2xl font-semibold">{loading ? "-" : modelBoundToolCount}</div>
+                    <div className="text-xs text-muted-foreground">已绑定模型</div>
+                  </div>
+                </div>
 
-                <TabsContent value="content" className="mt-4 space-y-4">
-                  <section className="rounded-lg border border-border bg-card p-5">
-                    <div className="mb-3 flex items-center justify-between">
-                      <h3 className="font-semibold">System Prompt</h3>
-                      <span className="text-xs text-muted-foreground">{formatDate(selectedVersion?.publishedAt ?? selectedVersion?.createdAt)}</span>
-                    </div>
-                    <pre className="min-h-20 whitespace-pre-wrap rounded-md bg-secondary p-4 text-sm">
-                      {selectedVersion?.systemPrompt || "未配置 System Prompt"}
-                    </pre>
-                  </section>
-                  <section className="rounded-lg border border-border bg-card p-5">
-                    <h3 className="mb-3 font-semibold">User Prompt 模板</h3>
-                    <pre className="min-h-60 whitespace-pre-wrap rounded-md bg-secondary p-4 text-sm">
-                      {selectedVersion?.userPromptTemplate || "请先创建 Prompt 版本"}
-                    </pre>
-                  </section>
-                </TabsContent>
-
-                <TabsContent value="preview" className="mt-4">
-                  <section className="rounded-lg border border-border bg-card p-5">
-                    <div className="mb-4 flex items-center justify-between">
-                      <div>
-                        <h3 className="font-semibold">模板变量预览</h3>
-                        <p className="text-sm text-muted-foreground">变量来自模板中的 {`{{变量名}}`}，提交后调用后端预览接口。</p>
-                      </div>
-                      <Button
-                        className="gap-2"
-                        disabled={!selectedVersion || submitting}
-                        onClick={() => selectedVersion && handlePreview(selectedVersion.id)}
-                      >
-                        <Eye className="h-4 w-4" />
-                        {submitting ? "生成中..." : "生成预览"}
-                      </Button>
-                    </div>
-                    <div className="grid gap-4 lg:grid-cols-2">
-                      <div className="space-y-3">
-                        {variables.length === 0 ? (
-                          <p className="rounded-md bg-secondary p-4 text-sm text-muted-foreground">当前模板没有变量。</p>
-                        ) : (
-                          variables.map((name) => (
-                            <div key={name} className="space-y-2">
-                              <Label>{`{{${name}}}`}</Label>
-                              <Input
-                                value={previewParams[name] ?? ""}
-                                onChange={(event) => setPreviewParams((current) => ({ ...current, [name]: event.target.value }))}
-                                placeholder={`输入 ${name}`}
-                              />
-                            </div>
-                          ))
-                        )}
-                      </div>
-                      <pre className="min-h-52 whitespace-pre-wrap rounded-md bg-secondary p-4 text-sm">
-                        {previewOutput || "预览结果会显示在这里"}
-                      </pre>
-                    </div>
-                  </section>
-                </TabsContent>
-
-                <TabsContent value="versions" className="mt-4">
-                  <div className="overflow-hidden rounded-lg border border-border bg-card">
-                    {selectedItem.versions.length === 0 ? (
-                      <div className="p-6 text-sm text-muted-foreground">暂无版本，点击右上角新建版本。</div>
-                    ) : (
-                      <div className="divide-y divide-border">
-                        {selectedItem.versions.map((version) => {
-                          const isActive = version.id === selectedItem.prompt.activeVersionId || version.status === "ACTIVE"
+                <div className="max-h-[560px] space-y-3 overflow-y-auto pr-1">
+                  {loading ? (
+                    Array.from({ length: 6 }).map((_, index) => (
+                      <Skeleton key={index} className="h-16 w-full" />
+                    ))
+                  ) : groupedTools.length ? (
+                    groupedTools.map((group) => (
+                      <div key={group.key} className="space-y-2">
+                        <div className="flex items-center justify-between text-xs text-muted-foreground">
+                          <span className="font-medium text-foreground">{group.label}</span>
+                          <span>{group.tools.filter((tool) => tool.agentEnabled).length}/{group.tools.length}</span>
+                        </div>
+                        {group.tools.map((tool) => {
+                          const hasModel = tool.modelConfigId != null || Boolean(tool.modelName)
+                          const healthStatus = (tool.healthStatus || "UNKNOWN").toUpperCase()
                           return (
-                            <div key={version.id} className="flex items-center justify-between gap-4 p-4">
-                              <div className="min-w-0">
-                                <div className="flex items-center gap-2">
-                                  <Badge variant={isActive ? "default" : "secondary"}>{version.versionNo}</Badge>
-                                  <span className="text-sm text-muted-foreground">{version.status}</span>
-                                  <span className="text-sm text-muted-foreground">{version.outputFormat}</span>
+                            <div key={tool.id} className="rounded-lg border px-3 py-3">
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0 space-y-1">
+                                  <div className="truncate text-sm font-medium">{tool.toolName}</div>
+                                  <div className="truncate text-xs text-muted-foreground">{tool.toolCode}</div>
+                                  <div className="flex flex-wrap gap-1.5">
+                                    <Badge variant={hasModel ? "default" : "outline"}>
+                                      {hasModel ? "有模型" : "未绑定"}
+                                    </Badge>
+                                    <Badge variant="secondary">{modalityLabel(tool.outputModality)}</Badge>
+                                    {toolHealthBadge(tool)}
+                                  </div>
+                                  {healthStatus === "FAILED" && tool.healthMessage ? (
+                                    <div className="line-clamp-2 text-xs text-destructive">{tool.healthMessage}</div>
+                                  ) : null}
                                 </div>
-                                <p className="mt-2 truncate text-sm text-muted-foreground">{version.userPromptTemplate}</p>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <Button variant="outline" size="sm" onClick={() => {
-                                  setPreviewParams({})
-                                  setPreviewOutput("")
-                                  setPreviewOpen(true)
-                                }}>
-                                  查看
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  className="gap-2"
-                                  disabled={isActive || publishingId === version.id}
-                                  onClick={() => handlePublish(version.id)}
-                                >
-                                  <Rocket className="h-4 w-4" />
-                                  {publishingId === version.id ? "发布中..." : isActive ? "已发布" : "发布"}
-                                </Button>
+                                <div className="flex shrink-0 flex-col items-end gap-2">
+                                  <Switch
+                                    checked={tool.agentEnabled}
+                                    disabled={updatingToolCode === tool.toolCode}
+                                    aria-label={`${tool.agentEnabled ? "禁用" : "启用"} ${tool.toolName}`}
+                                    onCheckedChange={(checked) => toggleToolAccess(tool, checked)}
+                                  />
+                                  <span className="text-xs text-muted-foreground">
+                                    {tool.agentEnabled ? "启用" : "禁用"}
+                                  </span>
+                                </div>
                               </div>
                             </div>
                           )
                         })}
                       </div>
-                    )}
-                  </div>
-                </TabsContent>
-              </Tabs>
-            </div>
-          )}
-        </main>
-      </div>
+                    ))
+                  ) : (
+                    <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
+                      暂无在线工具
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
 
-      <Dialog open={versionOpen} onOpenChange={setVersionOpen}>
-        <DialogContent className="max-w-3xl">
-          <DialogHeader>
-            <DialogTitle>新建 Prompt 版本</DialogTitle>
-            <DialogDescription>保存后会生成草稿版本，需要发布后才会成为工具生效版本。</DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4 py-2">
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label>版本号</Label>
-                <Input value={form.versionNo} onChange={(event) => updateVersionForm("versionNo", event.target.value)} />
-              </div>
-              <div className="space-y-2">
-                <Label>输出格式</Label>
-                <Select value={form.outputFormat} onValueChange={(value) => updateVersionForm("outputFormat", value)}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="MARKDOWN">Markdown</SelectItem>
-                    <SelectItem value="TEXT">纯文本</SelectItem>
-                    <SelectItem value="JSON">JSON</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label>System Prompt</Label>
-              <Textarea value={form.systemPrompt} onChange={(event) => updateVersionForm("systemPrompt", event.target.value)} className="min-h-24 font-mono text-sm" />
-            </div>
-            <div className="space-y-2">
-              <Label>User Prompt 模板</Label>
-              <Textarea value={form.userPromptTemplate} onChange={(event) => updateVersionForm("userPromptTemplate", event.target.value)} className="min-h-72 font-mono text-sm" />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setVersionOpen(false)} disabled={submitting}>取消</Button>
-            <Button onClick={handleCreateVersion} disabled={submitting}>{submitting ? "保存中..." : "保存草稿版本"}</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            <Alert>
+              <CheckCircle2 />
+              <AlertTitle>当前链路</AlertTitle>
+              <AlertDescription>
+                前台选择的是 Agent 推理模型；Agent 读取启用的在线 AI 工具列表；工具真正执行时继续使用后台工具绑定的模型和参数。
+              </AlertDescription>
+            </Alert>
+          </aside>
+        </section>
 
-      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>版本内容</DialogTitle>
-            <DialogDescription>可在内容页复制当前生效模板，历史版本可通过发布切换。</DialogDescription>
-          </DialogHeader>
-          <pre className="max-h-96 overflow-auto whitespace-pre-wrap rounded-md bg-secondary p-4 text-sm">
-            {selectedVersion?.userPromptTemplate || "暂无内容"}
-          </pre>
-        </DialogContent>
-      </Dialog>
+        <div className="sticky bottom-4 z-20 flex justify-end gap-3">
+          <Button variant="outline" onClick={loadConfig} disabled={loading || saving}>
+            <RefreshCw className="mr-2 h-4 w-4" />
+            刷新
+          </Button>
+          <Button onClick={saveConfig} disabled={loading || saving}>
+            <Save className="mr-2 h-4 w-4" />
+            {saving ? "保存中..." : "保存配置"}
+          </Button>
+        </div>
+      </main>
     </AdminLayout>
   )
 }

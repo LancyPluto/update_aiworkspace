@@ -1,8 +1,7 @@
 package com.aiminilab.aitoolmarket.agent.service.impl;
 
 import com.aiminilab.aitoolmarket.agent.client.AgentServiceClient;
-import com.aiminilab.aitoolmarket.agent.dto.AgentModelConfigRequest;
-import com.aiminilab.aitoolmarket.agent.dto.AgentModelConfigTestResponse;
+import com.aiminilab.aitoolmarket.agent.config.AgentPromptSettings;
 import com.aiminilab.aitoolmarket.agent.dto.AgentRunEventResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AgentRunResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AgentToolCallResponse;
@@ -28,6 +27,8 @@ import com.aiminilab.aitoolmarket.agent.dto.InternalPendingToolContextResponse;
 import com.aiminilab.aitoolmarket.agent.dto.UpdateAgentToolPreferenceRequest;
 import com.aiminilab.aitoolmarket.agent.entity.AgentFile;
 import com.aiminilab.aitoolmarket.agent.entity.AgentFileChunk;
+import com.aiminilab.aitoolmarket.agent.entity.AgentContextSnapshot;
+import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
 import com.aiminilab.aitoolmarket.agent.entity.AgentMessage;
 import com.aiminilab.aitoolmarket.agent.entity.AgentPendingToolContext;
 import com.aiminilab.aitoolmarket.agent.entity.AgentRun;
@@ -35,6 +36,7 @@ import com.aiminilab.aitoolmarket.agent.entity.AgentRunEvent;
 import com.aiminilab.aitoolmarket.agent.entity.AgentSession;
 import com.aiminilab.aitoolmarket.agent.entity.AgentToolCall;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentFileChunkMapper;
+import com.aiminilab.aitoolmarket.agent.mapper.AgentContextSnapshotMapper;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentMessageMapper;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentFileMapper;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentPendingToolContextMapper;
@@ -46,6 +48,7 @@ import com.aiminilab.aitoolmarket.agent.mapper.AgentToolPreferenceMapper;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentModelConfigMapper;
 import com.aiminilab.aitoolmarket.agent.metrics.AgentMetrics;
 import com.aiminilab.aitoolmarket.admin.service.BillingService;
+import com.aiminilab.aitoolmarket.admin.service.SystemSettingService;
 import com.aiminilab.aitoolmarket.agent.service.AgentModelConfigService;
 import com.aiminilab.aitoolmarket.agent.service.AgentRateLimitService;
 import com.aiminilab.aitoolmarket.agent.service.AgentFileService;
@@ -83,11 +86,12 @@ import java.util.concurrent.CopyOnWriteArrayList;
 public class AgentRunServiceImpl implements AgentRunService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(AgentRunServiceImpl.class);
-    private static final int HISTORY_LIMIT = 20;
     private static final int FILE_CONTEXT_LIMIT = 5;
     private static final int FILE_CHUNK_SCAN_LIMIT = 200;
     private static final int FILE_CHUNK_CONTEXT_LIMIT = 5;
     private static final int DEFAULT_EVENT_PAGE_SIZE = 100;
+    private static final int MAX_EVENT_TEXT_LENGTH = 4000;
+    private static final String EVENT_TEXT_TRUNCATED_SUFFIX = "... [truncated]";
     private static final long EVENT_STREAM_TIMEOUT_MILLIS = 30 * 60 * 1000L;
     private static final Set<String> CANCELLABLE_STATUSES = Set.of("CREATED", "RUNNING", "WAITING_USER_CONFIRMATION");
     private static final Set<String> CONFIRMABLE_STATUSES = Set.of("WAITING_USER_CONFIRMATION");
@@ -100,6 +104,7 @@ public class AgentRunServiceImpl implements AgentRunService {
     private final AgentFileMapper agentFileMapper;
     private final AgentFileService agentFileService;
     private final AgentFileChunkMapper agentFileChunkMapper;
+    private final AgentContextSnapshotMapper agentContextSnapshotMapper;
     private final AgentRunMapper agentRunMapper;
     private final AgentRunEventMapper agentRunEventMapper;
     private final AgentToolCallMapper agentToolCallMapper;
@@ -113,6 +118,7 @@ public class AgentRunServiceImpl implements AgentRunService {
     private final AgentServiceClient agentServiceClient;
     private final CreditService creditService;
     private final BillingService billingService;
+    private final SystemSettingService systemSettingService;
     private final AppProperties appProperties;
     private final ObjectMapper objectMapper;
     private final AgentMetrics agentMetrics;
@@ -123,6 +129,7 @@ public class AgentRunServiceImpl implements AgentRunService {
             AgentFileMapper agentFileMapper,
             AgentFileService agentFileService,
             AgentFileChunkMapper agentFileChunkMapper,
+            AgentContextSnapshotMapper agentContextSnapshotMapper,
             AgentRunMapper agentRunMapper,
             AgentRunEventMapper agentRunEventMapper,
             AgentToolCallMapper agentToolCallMapper,
@@ -136,6 +143,7 @@ public class AgentRunServiceImpl implements AgentRunService {
             AgentServiceClient agentServiceClient,
             CreditService creditService,
             BillingService billingService,
+            SystemSettingService systemSettingService,
             AppProperties appProperties,
             ObjectMapper objectMapper,
             AgentMetrics agentMetrics
@@ -145,6 +153,7 @@ public class AgentRunServiceImpl implements AgentRunService {
         this.agentFileMapper = agentFileMapper;
         this.agentFileService = agentFileService;
         this.agentFileChunkMapper = agentFileChunkMapper;
+        this.agentContextSnapshotMapper = agentContextSnapshotMapper;
         this.agentRunMapper = agentRunMapper;
         this.agentRunEventMapper = agentRunEventMapper;
         this.agentToolCallMapper = agentToolCallMapper;
@@ -158,6 +167,7 @@ public class AgentRunServiceImpl implements AgentRunService {
         this.agentServiceClient = agentServiceClient;
         this.creditService = creditService;
         this.billingService = billingService;
+        this.systemSettingService = systemSettingService;
         this.appProperties = appProperties;
         this.objectMapper = objectMapper;
         this.agentMetrics = agentMetrics;
@@ -196,13 +206,13 @@ public class AgentRunServiceImpl implements AgentRunService {
         message.setCreatedAt(now);
         agentMessageMapper.insertMessage(message);
 
-        return executeStartRun(userId, session, message, null, clientKey, trimmed, now, request.fileIds());
+        return executeStartRun(userId, session, message, null, clientKey, trimmed, now, request.fileIds(), request.modelConfigId());
     }
 
     @Override
     @Transactional(noRollbackFor = BusinessException.class)
     public CreateAgentMessageResponse regenerateRun(Long userId, Long runId, RegenerateAgentRunRequest request) {
-        RegenerateAgentRunRequest body = request == null ? new RegenerateAgentRunRequest(null) : request;
+        RegenerateAgentRunRequest body = request == null ? new RegenerateAgentRunRequest(null, null) : request;
         String clientKey = normalizeClientRequestId(body.clientRequestId());
         if (clientKey != null) {
             CreateAgentMessageResponse idempotent = tryIdempotentAgentRun(userId, clientKey);
@@ -235,7 +245,7 @@ public class AgentRunServiceImpl implements AgentRunService {
         LocalDateTime now = LocalDateTime.now();
         agentMessageMapper.supersedeMessagesAfter(sourceRun.getSessionId(), userMessage.getId(), now);
 
-        return executeStartRun(userId, session, userMessage, runId, clientKey, null, now, null);
+        return executeStartRun(userId, session, userMessage, runId, clientKey, null, now, null, body.modelConfigId());
     }
 
     @Override
@@ -281,7 +291,7 @@ public class AgentRunServiceImpl implements AgentRunService {
         agentMessageMapper.updateById(userMessage);
         agentMessageMapper.supersedeMessagesAfter(sessionId, messageId, now);
 
-        return executeStartRun(userId, session, userMessage, null, clientKey, trimmed, now, null);
+        return executeStartRun(userId, session, userMessage, null, clientKey, trimmed, now, null, request.modelConfigId());
     }
 
     @Override
@@ -394,7 +404,7 @@ public class AgentRunServiceImpl implements AgentRunService {
         if (anchorId == null) {
             history = List.of();
         } else {
-            history = agentMessageMapper.findActiveHistoryBefore(run.getSessionId(), anchorId, HISTORY_LIMIT)
+            history = agentMessageMapper.findActiveHistoryBefore(run.getSessionId(), anchorId, contextHistoryLimit())
                     .stream()
                     .sorted(Comparator.comparingLong(AgentMessage::getId))
                     .map(message -> new InternalAgentMessageResponse(message.getRole(), message.getContentText()))
@@ -423,6 +433,15 @@ public class AgentRunServiceImpl implements AgentRunService {
                 .stream()
                 .map(com.aiminilab.aitoolmarket.agent.dto.AgentToolPreferenceResponse::from)
                 .toList();
+        Map<String, String> settings = systemSettingService.settings();
+        String agentSystemPrompt = nonBlankOrDefault(
+                settings.get(AgentPromptSettings.SYSTEM_PROMPT_KEY),
+                AgentPromptSettings.DEFAULT_SYSTEM_PROMPT
+        );
+        String deepAgentsSystemPrompt = nonBlankOrDefault(
+                settings.get(AgentPromptSettings.DEEP_AGENTS_SYSTEM_PROMPT_KEY),
+                AgentPromptSettings.DEFAULT_DEEP_AGENTS_SYSTEM_PROMPT
+        );
         InternalPendingToolContextResponse pendingToolContextResponse = null;
         AgentPendingToolContext pendingCtx = agentPendingToolContextMapper.findActiveByRunId(runId);
         if (pendingCtx != null) {
@@ -453,8 +472,18 @@ public class AgentRunServiceImpl implements AgentRunService {
                 tools,
                 preferences,
                 run.getEstimatedCredits(),
+                com.aiminilab.aitoolmarket.agent.dto.AgentContextWindowResponse.from(
+                        agentContextSnapshotMapper.findLatestByRunId(runId)
+                ),
+                resolveModelConfigForRun(run),
+                agentSystemPrompt,
+                deepAgentsSystemPrompt,
                 pendingToolContextResponse
         );
+    }
+
+    private String nonBlankOrDefault(String value, String fallback) {
+        return value == null || value.isBlank() ? fallback : value;
     }
 
     private List<InternalAgentFileChunkContextResponse> retrieveRelevantFileChunks(
@@ -665,7 +694,7 @@ public class AgentRunServiceImpl implements AgentRunService {
         agentMessageMapper.insertMessage(assistant);
         creditService.settle(run.getUserId(), CreditSourceType.AGENT_RUN, runId, consumedCredits);
         creditService.release(run.getUserId(), CreditSourceType.AGENT_RUN, runId, estimatedCredits - consumedCredits);
-        billingService.recordUsage("AGENT_RUN", runId, run.getUserId(), agentModelConfigMapper.findLatest(),
+        billingService.recordUsage("AGENT_RUN", runId, run.getUserId(), resolveModelConfigEntityForRun(run),
                 request.promptTokens(), request.completionTokens(), null, consumedCredits);
         appendEventInternal(runId, run.getUserId(), "run.completed", "Agent 运行已完成", null, now);
         agentSessionMapper.touch(run.getSessionId(), now);
@@ -695,11 +724,20 @@ public class AgentRunServiceImpl implements AgentRunService {
             return AgentRunResponse.from(run);
         }
         LocalDateTime now = LocalDateTime.now();
-        if (agentRunMapper.markFailed(runId, request.errorCode(), request.errorMessage(), now) == 0) {
+        int estimatedCredits = run.getEstimatedCredits() == null ? 0 : Math.max(0, run.getEstimatedCredits());
+        int consumedCredits = request.consumedCredits() == null
+                ? 0
+                : Math.max(0, Math.min(request.consumedCredits(), estimatedCredits));
+        if (agentRunMapper.markFailedWithConsumedCredits(runId, request.errorCode(), request.errorMessage(), consumedCredits, now) == 0) {
             return AgentRunResponse.from(findRun(runId));
         }
         failOpenToolCalls(runId, run.getUserId(), request.errorCode(), request.errorMessage(), now);
-        creditService.release(run.getUserId(), CreditSourceType.AGENT_RUN, runId, Math.max(0, run.getEstimatedCredits()));
+        if (consumedCredits > 0) {
+            creditService.settle(run.getUserId(), CreditSourceType.AGENT_RUN, runId, consumedCredits);
+        }
+        creditService.release(run.getUserId(), CreditSourceType.AGENT_RUN, runId, estimatedCredits - consumedCredits);
+        billingService.recordUsage("AGENT_RUN", runId, run.getUserId(), agentModelConfigMapper.findLatest(),
+                request.promptTokens(), request.completionTokens(), null, consumedCredits);
         appendEventInternal(runId, run.getUserId(), "run.failed", request.errorMessage(), toJson(request), now);
         agentRateLimitService.decrementActiveRun(run.getUserId(), runId);
         agentPendingToolContextMapper.expireByRunId(runId);
@@ -715,7 +753,8 @@ public class AgentRunServiceImpl implements AgentRunService {
                                                        String clientRequestId,
                                                        String sessionTitleContentHint,
                                                        LocalDateTime now,
-                                                       List<Long> fileIds) {
+                                                       List<Long> fileIds,
+                                                       Long requestedModelConfigId) {
         Long sessionId = session.getId();
         int creditBudget = Math.max(0, appProperties.getAgent().getDefaultCreditBudget());
 
@@ -741,11 +780,13 @@ public class AgentRunServiceImpl implements AgentRunService {
             agentFileService.attachPendingFilesToRun(userId, sessionId, run.getId(), fileIds);
         }
 
-        ModelConnectivityCheck connectivity = checkModelConnectivity();
+        ModelConnectivityCheck connectivity = checkModelConnectivity(requestedModelConfigId);
+        run.setModelConfigId(connectivity.config().id());
         run.setModelProviderCode(connectivity.config().provider());
         run.setModelName(connectivity.config().modelName());
         agentRunMapper.updateModel(
                 run.getId(),
+                connectivity.config().id(),
                 connectivity.config().provider(),
                 connectivity.config().modelName(),
                 now
@@ -769,6 +810,10 @@ public class AgentRunServiceImpl implements AgentRunService {
             throw new BusinessException(ErrorCode.MODEL_CALL_FAILED, errorMessage);
         }
 
+        AgentContextSnapshot snapshot = createContextSnapshot(run, session, userMessage, connectivity.config(), now);
+        run.setContextSnapshotId(snapshot.getId());
+        agentRunMapper.updateContextSnapshot(run.getId(), snapshot.getId(), now);
+
         creditService.freeze(userId, CreditSourceType.AGENT_RUN, run.getId(), creditBudget);
         agentRunMapper.markRunning(run.getId(), now);
         agentRateLimitService.incrementActiveRun(userId, run.getId());
@@ -781,6 +826,139 @@ public class AgentRunServiceImpl implements AgentRunService {
         Long executeRunId = run.getId();
         runAfterCommit(() -> notifyAgentService(executeRunId, () -> agentServiceClient.executeRun(executeRunId)));
         return new CreateAgentMessageResponse(sessionId, userMessage.getId(), run.getId(), "RUNNING");
+    }
+
+    private AgentContextSnapshot createContextSnapshot(AgentRun run,
+                                                       AgentSession session,
+                                                       AgentMessage userMessage,
+                                                       InternalAgentModelConfigResponse modelConfig,
+                                                       LocalDateTime now) {
+        Long anchorId = run.getSourceUserMessageId() == null ? userMessage.getId() : run.getSourceUserMessageId();
+        int maxHistoryMessages = contextHistoryLimit();
+        List<AgentMessage> history = agentMessageMapper.findActiveHistoryBefore(run.getSessionId(), anchorId, maxHistoryMessages)
+                .stream()
+                .sorted(Comparator.comparingLong(AgentMessage::getId))
+                .toList();
+        List<AgentFile> readyFiles = agentFileMapper.findReadyByRun(
+                run.getUserId(),
+                run.getSessionId(),
+                run.getId(),
+                FILE_CONTEXT_LIMIT
+        );
+        Map<Long, String> filenames = readyFiles.stream()
+                .collect(java.util.stream.Collectors.toMap(AgentFile::getId, AgentFile::getOriginalFilename));
+        List<InternalAgentFileChunkContextResponse> fileChunks = retrieveRelevantFileChunks(
+                run,
+                userMessage == null ? "" : userMessage.getContentText(),
+                filenames
+        );
+        int estimatedTokens = estimateTokens(userMessage == null ? "" : userMessage.getContentText());
+        for (AgentMessage message : history) {
+            estimatedTokens += estimateTokens(message.getContentText());
+        }
+        for (InternalAgentFileChunkContextResponse chunk : fileChunks) {
+            estimatedTokens += estimateTokens(chunk.contentText());
+        }
+
+        var snapshotPayload = new java.util.LinkedHashMap<String, Object>();
+        snapshotPayload.put("version", 1);
+        snapshotPayload.put("strategy", "recent_history_plus_run_files");
+        snapshotPayload.put("runId", run.getId());
+        snapshotPayload.put("sessionId", run.getSessionId());
+        snapshotPayload.put("workspaceId", session.getWorkspaceId());
+        snapshotPayload.put("sourceUserMessageId", run.getSourceUserMessageId());
+        snapshotPayload.put("modelConfig", Map.of(
+                "id", modelConfig.id() == null ? 0 : modelConfig.id(),
+                "provider", modelConfig.provider(),
+                "modelName", modelConfig.modelName(),
+                "enabled", modelConfig.enabled()
+        ));
+        snapshotPayload.put("limits", Map.of(
+                "maxHistoryMessages", maxHistoryMessages,
+                "fileContextLimit", FILE_CONTEXT_LIMIT,
+                "fileChunkContextLimit", FILE_CHUNK_CONTEXT_LIMIT
+        ));
+        snapshotPayload.put("includedHistory", history.stream()
+                .map(message -> Map.of(
+                        "role", message.getRole(),
+                        "chars", message.getContentText() == null ? 0 : message.getContentText().length(),
+                        "preview", preview(message.getContentText(), 120)
+                ))
+                .toList());
+        snapshotPayload.put("includedFiles", readyFiles.stream()
+                .map(file -> Map.of(
+                        "id", file.getId(),
+                        "filename", file.getOriginalFilename(),
+                        "status", file.getStatus()
+                ))
+                .toList());
+        snapshotPayload.put("includedFileChunks", fileChunks.stream()
+                .map(chunk -> Map.of(
+                        "id", chunk.id(),
+                        "fileId", chunk.fileId(),
+                        "filename", chunk.originalFilename(),
+                        "chunkIndex", chunk.chunkIndex(),
+                        "score", chunk.score()
+                ))
+                .toList());
+
+        AgentContextSnapshot snapshot = new AgentContextSnapshot();
+        snapshot.setRunId(run.getId());
+        snapshot.setSessionId(run.getSessionId());
+        snapshot.setUserId(run.getUserId());
+        snapshot.setWorkspaceId(session.getWorkspaceId());
+        snapshot.setModelConfigId(modelConfig.id());
+        snapshot.setModelProviderCode(modelConfig.provider());
+        snapshot.setModelName(modelConfig.modelName());
+        snapshot.setStrategy("recent_history_plus_run_files");
+        snapshot.setMaxHistoryMessages(maxHistoryMessages);
+        snapshot.setHistoryMessageCount(history.size());
+        snapshot.setFileCount(readyFiles.size());
+        snapshot.setFileChunkCount(fileChunks.size());
+        snapshot.setMemoryItemCount(0);
+        snapshot.setEstimatedInputTokens(estimatedTokens);
+        snapshot.setSnapshotJson(toJson(snapshotPayload));
+        snapshot.setCreatedAt(now);
+        agentContextSnapshotMapper.insertSnapshot(snapshot);
+        return snapshot;
+    }
+
+    private int contextHistoryLimit() {
+        return Math.max(1, appProperties.getAgent().getMaxHistoryMessages());
+    }
+
+    private InternalAgentModelConfigResponse resolveModelConfigForRun(AgentRun run) {
+        AgentModelConfig config = resolveModelConfigEntityForRun(run);
+        if (config != null) {
+            return InternalAgentModelConfigResponse.from(config);
+        }
+        return agentModelConfigService.internalGet();
+    }
+
+    private AgentModelConfig resolveModelConfigEntityForRun(AgentRun run) {
+        if (run.getModelConfigId() != null) {
+            var config = agentModelConfigMapper.findActiveById(run.getModelConfigId());
+            if (config != null) {
+                return config;
+            }
+        }
+        var agentConfigs = agentModelConfigMapper.findAgentEnabled();
+        return agentConfigs.isEmpty() ? agentModelConfigMapper.findLatest() : agentConfigs.get(0);
+    }
+
+    private int estimateTokens(String content) {
+        if (content == null || content.isBlank()) {
+            return 0;
+        }
+        return Math.max(1, (content.length() + 3) / 4);
+    }
+
+    private String preview(String content, int maxChars) {
+        if (content == null || content.isBlank()) {
+            return "";
+        }
+        String compact = content.replaceAll("\\s+", " ").trim();
+        return compact.length() <= maxChars ? compact : compact.substring(0, maxChars);
     }
 
     private String normalizeClientRequestId(String clientRequestId) {
@@ -879,50 +1057,12 @@ public class AgentRunServiceImpl implements AgentRunService {
         }
     }
 
-    private ModelConnectivityCheck checkModelConnectivity() {
-        InternalAgentModelConfigResponse config = agentModelConfigService.internalGet();
-        if (Boolean.FALSE.equals(config.enabled())) {
+    private ModelConnectivityCheck checkModelConnectivity(Long requestedModelConfigId) {
+        InternalAgentModelConfigResponse config = agentModelConfigService.internalGet(requestedModelConfigId);
+        if (Boolean.FALSE.equals(config.enabled()) || Boolean.FALSE.equals(config.agentEnabled())) {
             return new ModelConnectivityCheck(config, false, "Agent model config is disabled");
         }
-        AgentModelConfigRequest request = new AgentModelConfigRequest(
-                null,
-                null,
-                config.provider(),
-                config.modelName(),
-                config.baseUrl(),
-                config.apiKey(),
-                config.extraAuthJson(),
-                config.minimaxGroupId(),
-                null,
-                null,
-                null,
-                config.timeoutSeconds(),
-                null,
-                null,
-                null,
-                null,
-                config.billingUnit(),
-                config.unitPrice(),
-                config.enabled(),
-                null,
-                null
-        );
-        AgentModelConfigTestResponse result;
-        try {
-            result = agentServiceClient.testModelConfig(request);
-        } catch (RuntimeException exception) {
-            return new ModelConnectivityCheck(config, false, messageOrDefault(
-                    exception.getMessage(),
-                    "Agent model connectivity check failed"
-            ));
-        }
-        if (result == null || !result.success()) {
-            return new ModelConnectivityCheck(config, false, messageOrDefault(
-                    result == null ? null : result.message(),
-                    "Agent model connectivity check failed"
-            ));
-        }
-        return new ModelConnectivityCheck(config, true, result.message());
+        return new ModelConnectivityCheck(config, true, "Agent model config accepted");
     }
 
     private String messageOrDefault(String message, String fallback) {
@@ -942,7 +1082,7 @@ public class AgentRunServiceImpl implements AgentRunService {
         event.setRunId(runId);
         event.setUserId(userId);
         event.setEventType(eventType);
-        event.setEventText(eventText);
+        event.setEventText(eventTextPreview(eventText));
         event.setEventJson(eventJson);
         event.setCreatedAt(now);
         agentRunEventMapper.insertEvent(event);
@@ -958,6 +1098,14 @@ public class AgentRunServiceImpl implements AgentRunService {
         for (SseEmitter emitter : emitters) {
             sendEvent(event.runId(), emitter, event);
         }
+    }
+
+    private String eventTextPreview(String eventText) {
+        if (eventText == null || eventText.length() <= MAX_EVENT_TEXT_LENGTH) {
+            return eventText;
+        }
+        int contentLength = Math.max(0, MAX_EVENT_TEXT_LENGTH - EVENT_TEXT_TRUNCATED_SUFFIX.length());
+        return eventText.substring(0, contentLength) + EVENT_TEXT_TRUNCATED_SUFFIX;
     }
 
     private void sendEvent(Long runId, SseEmitter emitter, AgentRunEventResponse event) {
