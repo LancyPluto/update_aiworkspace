@@ -1,3 +1,5 @@
+import logging
+
 from app.clients.backend_client import BackendClient, BackendClientError
 from app.clients.model_client import ModelClient, ModelClientError
 from app.config import Settings
@@ -6,6 +8,7 @@ from app.runtime.router import RuntimeRouter
 from app.tools.backend_tool import ToolExecutionError
 
 TERMINAL_RUN_STATUSES = {"SUCCESS", "FAILED", "CANCELLED", "TIMEOUT"}
+logger = logging.getLogger(__name__)
 
 
 class AgentRuntime:
@@ -29,7 +32,7 @@ class AgentRuntime:
             context = await self.backend.get_run_context(run_id)
             if getattr(context, "status", None) in TERMINAL_RUN_STATUSES:
                 return
-            model_client = await self._model_client()
+            model_client = await self._model_client(context)
             engine = self.runtime_router_factory(
                 self.backend,
                 model_client,
@@ -37,12 +40,16 @@ class AgentRuntime:
             ).select_engine(message=context.message)
             await engine.run(context)
         except BackendClientError as exc:
+            logger.exception("Agent run failed while calling backend, runId=%s", run_id)
             await self._fail(run_id, "BACKEND_CALL_FAILED", str(exc))
         except ModelClientError as exc:
+            logger.exception("Agent run failed while calling model provider, runId=%s", run_id)
             await self._fail(run_id, "MODEL_CALL_FAILED", str(exc))
         except ToolExecutionError as exc:
+            logger.exception("Agent run failed while executing tool, runId=%s", run_id)
             await self._fail(run_id, "TOOL_CALL_FAILED", str(exc))
         except Exception as exc:  # pragma: no cover - defensive runtime boundary.
+            logger.exception("Agent run failed with internal error, runId=%s", run_id)
             await self._fail(run_id, "AGENT_INTERNAL_ERROR", str(exc))
 
     async def execute_confirmed_tool(self, run_id: int, tool_code: str) -> None:
@@ -50,7 +57,7 @@ class AgentRuntime:
             context = await self.backend.get_run_context(run_id)
             if getattr(context, "status", None) in TERMINAL_RUN_STATUSES:
                 return
-            model_client = await self._model_client()
+            model_client = await self._model_client(context)
             engine = self.runtime_router_factory(
                 self.backend,
                 model_client,
@@ -58,18 +65,24 @@ class AgentRuntime:
             ).select_engine(message=context.message)
             await engine.run_confirmed_tool(context, tool_code)
         except BackendClientError as exc:
+            logger.exception("Agent confirmed-tool run failed while calling backend, runId=%s, toolCode=%s", run_id, tool_code)
             await self._fail(run_id, "BACKEND_CALL_FAILED", str(exc))
         except ModelClientError as exc:
+            logger.exception("Agent confirmed-tool run failed while calling model provider, runId=%s, toolCode=%s", run_id, tool_code)
             await self._fail(run_id, "MODEL_CALL_FAILED", str(exc))
         except ToolExecutionError as exc:
+            logger.exception("Agent confirmed-tool run failed while executing tool, runId=%s, toolCode=%s", run_id, tool_code)
             await self._fail(run_id, "TOOL_CALL_FAILED", str(exc))
         except Exception as exc:  # pragma: no cover - defensive runtime boundary.
+            logger.exception("Agent confirmed-tool run failed with internal error, runId=%s, toolCode=%s", run_id, tool_code)
             await self._fail(run_id, "AGENT_INTERNAL_ERROR", str(exc))
 
-    async def _model_client(self) -> ModelClient:
+    async def _model_client(self, context=None) -> ModelClient:
         if self.model_client is not None:
             return self.model_client
-        config = await self.backend.get_active_model_config()
+        config = getattr(context, "modelConfig", None) if context is not None else None
+        if config is None:
+            config = await self.backend.get_active_model_config()
         if not config.enabled:
             settings = Settings(model_provider="mock", model_name="mock")
         else:
@@ -104,4 +117,9 @@ class AgentRuntime:
                 ),
             )
         except Exception:
-            pass
+            logger.exception(
+                "Could not report failed agent run to backend, runId=%s, errorCode=%s, originalError=%s",
+                run_id,
+                error_code,
+                error_message,
+            )

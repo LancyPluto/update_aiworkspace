@@ -906,7 +906,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="flex h-[calc(100vh-4rem)] flex-col bg-background">
+  <div class="flex h-[calc(100vh-5rem)] flex-col bg-background">
     <header class="flex h-14 shrink-0 items-center justify-between border-b border-border px-4">
       <div class="flex min-w-0 items-center gap-3">
         <RouterLink

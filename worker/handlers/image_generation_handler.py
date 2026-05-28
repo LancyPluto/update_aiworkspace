@@ -103,6 +103,16 @@ class ImageGenerationHandler:
                 image_request["output_format"] = _first_text(params, "outputFormat", "output_format")
                 image_request["response_format"] = _first_text(params, "responseFormat", "response_format")
                 image_request["image_size"] = _resolve_openai_image_size(params)
+            LOGGER.info(
+                "image generation request built taskId=%s traceId=%s provider=%s protocol=%s model=%s params=%s request=%s",
+                task_id,
+                trace_id or "-",
+                provider or "-",
+                provider_protocol,
+                model_config.get("modelName") or "-",
+                _json_for_log(params),
+                _json_for_log(image_request),
+            )
             urls = client.generate_images(**image_request)
             usage = getattr(client, "last_usage", {}) or {}
 
@@ -136,8 +146,10 @@ class ImageGenerationHandler:
             return {"status": "SUCCESS", "taskId": task_id, "traceId": trace_id, "imageCount": len(urls)}
         except (SiliconFlowVideoTimeoutError, KlingVideoTimeoutError, OpenAIImagesTimeoutError) as exc:
             return self._mark_failed(task_id, "MODEL_TIMEOUT", str(exc), trace_id)
-        except (ProviderRegistryError, SiliconFlowVideoError, KlingVideoError, OpenAIImagesError) as exc:
-            return self._mark_failed(task_id, "MODEL_CALL_FAILED", str(exc), trace_id)
+        except ProviderRegistryError as exc:
+            return self._mark_failed(task_id, "MODEL_PROVIDER_UNAVAILABLE", str(exc), trace_id)
+        except (SiliconFlowVideoError, KlingVideoError, OpenAIImagesError) as exc:
+            return self._mark_failed(task_id, _model_call_error_code(str(exc)), str(exc), trace_id)
         except GeneratedImagePersistError as exc:
             return self._mark_failed(task_id, "MEDIA_PERSIST_FAILED", str(exc), trace_id)
         except BackendClientError:
@@ -354,3 +366,44 @@ def _limit_text(value: str, max_length: int) -> str:
     if len(value) <= max_length:
         return value
     return value[: max(0, max_length - 16)] + "...[truncated]"
+
+
+def _model_call_error_code(message: str) -> str:
+    normalized = message.lower()
+    if "status=401" in normalized or "status=403" in normalized:
+        return "MODEL_AUTH_FAILED"
+    if "invalid token" in normalized or "unauthorized" in normalized or "api key" in normalized:
+        return "MODEL_AUTH_FAILED"
+    if "status=429" in normalized or "rate limit" in normalized or "too many requests" in normalized:
+        return "MODEL_RATE_LIMITED"
+    if "timed out" in normalized or "timeout" in normalized:
+        return "MODEL_TIMEOUT"
+    return "MODEL_CALL_FAILED"
+
+
+def _json_for_log(value: Any) -> str:
+    try:
+        return json.dumps(_sanitize_for_log(value), ensure_ascii=False, separators=(",", ":"))[:4000]
+    except Exception:
+        return "<unserializable>"
+
+
+def _sanitize_for_log(value: Any) -> Any:
+    if isinstance(value, dict):
+        sanitized: dict[str, Any] = {}
+        for key, nested in value.items():
+            key_text = str(key)
+            lowered = key_text.lower()
+            if any(secret in lowered for secret in ("key", "secret", "token", "authorization")):
+                sanitized[key_text] = "***"
+                continue
+            if key_text in {"image", "image_tail"} and isinstance(nested, str) and len(nested) > 120:
+                sanitized[key_text] = f"<image-bytes:{len(nested)} chars>"
+                continue
+            sanitized[key_text] = _sanitize_for_log(nested)
+        return sanitized
+    if isinstance(value, list):
+        return [_sanitize_for_log(item) for item in value]
+    if isinstance(value, str) and len(value) > 800:
+        return value[:800] + f"...<{len(value)} chars>"
+    return value

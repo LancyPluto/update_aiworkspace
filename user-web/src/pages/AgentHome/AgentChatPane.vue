@@ -31,6 +31,7 @@ import {
 import type {
   AgentFile,
   AgentMessage,
+  AgentModelConfig,
   AgentRun,
   AgentRunEvent,
   AgentRunStatus,
@@ -43,10 +44,14 @@ const props = defineProps<{
   draft: string
   sessionSidebarOpen: boolean
   sessions: AgentSession[]
+  modelConfigId?: number | null
+  agentModels: AgentModelConfig[]
+  modelsLoading: boolean
 }>()
 
 const emit = defineEmits<{
   "update:draft": [value: string]
+  "change-model": [value: number | null]
   "toggle-session-sidebar": []
 }>()
 
@@ -112,6 +117,29 @@ const hasActiveRun = computed(() => {
 const showRunRecoveryBanner = computed(
   () => recoveryRunId.value != null && (showActiveRunLimitHint.value || hasActiveRun.value),
 )
+const selectedAgentModel = computed(() =>
+  props.agentModels.find((model) => model.id === props.modelConfigId) ?? props.agentModels[0] ?? null,
+)
+const showGenerationLoading = computed(() =>
+  sending.value || runConnectionStatus.value === "running" || runConnectionStatus.value === "awaiting_confirmation",
+)
+
+function modelLabel(model: AgentModelConfig) {
+  return model.displayName || model.modelName || model.configCode || `Model ${model.id}`
+}
+
+function modelMeta(model: AgentModelConfig) {
+  return `${model.provider} · ${model.modelName}`
+}
+
+function changeModel(rawId: string) {
+  if (!rawId) {
+    emit("change-model", null)
+    return
+  }
+  const id = Number(rawId)
+  emit("change-model", Number.isFinite(id) && id > 0 ? id : null)
+}
 
 function isResumableRunStatus(status: AgentRunStatus) {
   return status === "CREATED" || status === "RUNNING" || status === "WAITING_USER_CONFIRMATION"
@@ -208,6 +236,7 @@ async function cancelCurrentRun() {
   if (sending.value && !activeRunId.value) {
     sending.value = false
     agentError.value = null
+    runConnectionStatus.value = "idle"
     await scrollBottom()
     return
   }
@@ -261,10 +290,18 @@ async function submitMessage(content = input.value) {
   const text = content.trim()
   if (!text && files.value.length === 0) return
   if (!props.token || sending.value || hasActiveRun.value) return
+  if (props.modelsLoading) {
+    agentError.value = "模型列表仍在加载，请稍等一下再发送。"
+    return
+  }
+  if (!props.modelConfigId) {
+    agentError.value = "请先选择一个 Agent 模型。"
+    return
+  }
   sending.value = true
   agentError.value = null
   confirmationError.value = null
-  runConnectionStatus.value = "idle"
+  runConnectionStatus.value = "running"
   try {
     input.value = ""
     messages.value.push({
@@ -277,12 +314,19 @@ async function submitMessage(content = input.value) {
     events.value = []
     const res = await sendAgentMessage(
       props.sessionId,
-      { content: text, clientRequestId: crypto.randomUUID() },
+      {
+        content: text,
+        clientRequestId: crypto.randomUUID(),
+        modelConfigId: props.modelConfigId ?? null,
+        fileIds: files.value.map((item) => item.id),
+      },
       { token: props.token },
     )
     activeRunId.value = res.runId
     await waitForRunComplete(res.runId)
   } catch (error) {
+    runConnectionStatus.value = "failed"
+    activeRunId.value = null
     if (error instanceof ApiBusinessError && error.code === "AGENT_ACTIVE_RUN_LIMIT") {
       showActiveRunLimitHint.value = true
       const runId = await discoverActiveRunId(props.sessionId)
@@ -526,7 +570,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  window.removeEventListener("resize", adjustComposerTextareaHeight())
+  window.removeEventListener("resize", adjustComposerTextareaHeight)
 })
 
 defineExpose({
@@ -562,6 +606,27 @@ defineExpose({
           </div>
           <div class="bubble">
             <ChatMessage :message="message.contentText" :is-user="message.role === 'USER'" />
+          </div>
+        </article>
+
+        <article v-if="showGenerationLoading" class="agent-message assistant generating-message">
+          <div class="avatar">
+            <Bot class="h-4 w-4" />
+          </div>
+          <div class="bubble generating-bubble">
+            <div class="generating-orbit">
+              <Sparkles class="h-4 w-4" />
+            </div>
+            <div class="generating-copy">
+              <p>模型生成中</p>
+              <span v-if="selectedAgentModel">{{ modelLabel(selectedAgentModel) }} · {{ selectedAgentModel.modelName }}</span>
+              <span v-else>正在准备 Agent 模型</span>
+            </div>
+            <div class="typing-dots" aria-hidden="true">
+              <i></i>
+              <i></i>
+              <i></i>
+            </div>
           </div>
         </article>
 
@@ -663,6 +728,27 @@ defineExpose({
     <form class="composer" @submit.prevent="submitMessage()">
       <input ref="fileInputRef" type="file" class="sr-only" @change="handleFileSelected" />
 
+      <div class="composer-model-row">
+        <div class="composer-model-copy">
+          <span class="composer-model-kicker">Agent 模型</span>
+          <strong v-if="selectedAgentModel">{{ modelLabel(selectedAgentModel) }}</strong>
+          <strong v-else>{{ modelsLoading ? "模型加载中" : "未选择模型" }}</strong>
+          <small v-if="selectedAgentModel">{{ modelMeta(selectedAgentModel) }}</small>
+        </div>
+        <select
+          class="composer-model-select"
+          :value="modelConfigId ?? ''"
+          :disabled="modelsLoading || hasActiveRun || sending || agentModels.length === 0"
+          @change="changeModel(($event.target as HTMLSelectElement).value)"
+        >
+          <option v-if="modelsLoading" value="">加载中...</option>
+          <option v-else-if="agentModels.length === 0" value="">暂无可选模型</option>
+          <option v-for="model in agentModels" :key="model.id" :value="model.id">
+            {{ modelLabel(model) }}
+          </option>
+        </select>
+      </div>
+
       <!-- 上传的文件显示在输入框内部 -->
       <div v-if="files.length > 0" class="inner-file-list">
         <div v-for="file in files" :key="file.id" class="inner-file-item">
@@ -718,7 +804,7 @@ defineExpose({
         <button
           class="send-circle-btn"
           :class="{ stop: sending || hasActiveRun }"
-          :disabled="(!sending && !hasActiveRun && !input.trim() && !files.length) || cancellingRun"
+          :disabled="(!sending && !hasActiveRun && ((!input.trim() && !files.length) || modelsLoading || !modelConfigId)) || cancellingRun"
           @click="(sending || hasActiveRun) ? cancelCurrentRun() : submitMessage()"
         >
           <Loader2 v-if="cancellingRun" class="h-4 w-4 animate-spin" />
@@ -731,39 +817,118 @@ defineExpose({
 </template>
 
 <style scoped>
-/* 组件最外层 */
 .agent-chat-pane {
   width: 100%;
   height: 100%;
   display: flex;
   flex-direction: column;
   overflow: hidden !important;
+  position: relative;
+  background: #000;
+}
+
+.agent-chat-pane::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 50% 0%, rgb(176 92 255 / 0.095), transparent 34%),
+    radial-gradient(circle at 84% 18%, rgb(34 211 238 / 0.045), transparent 30%),
+    linear-gradient(180deg, rgb(255 255 255 / 0.018), transparent 22%);
 }
 
 .message-container {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 24px;
+  position: relative;
+  z-index: 1;
   height: 100%;
-  max-height: calc(100vh - 140px);
+  max-height: none;
+  padding: 60px 32px 42px;
+  scroll-behavior: smooth;
 }
 
-/* 输入框固定在底部，不参与滚动 */
+.message-container::-webkit-scrollbar {
+  width: 8px;
+}
+
+.message-container::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.12);
+}
+
 .composer {
-  width: min(860px, calc(100% - 32px));
-  margin: 0 auto 16px;
-  border: 1px solid var(--border);
-  border-radius: 20px;
-  background: var(--card);
-  padding: 14px 18px;
+  width: min(880px, calc(100% - 96px));
+  margin: 0 auto 30px;
+  border: 1px solid rgb(255 255 255 / 0.10);
+  border-radius: 28px;
+  background:
+    linear-gradient(135deg, rgb(176 92 255 / 0.055), transparent 38%),
+    rgb(25 25 25 / 0.62);
+  padding: 13px 15px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
   flex-shrink: 0;
+  position: relative;
+  z-index: 2;
+  box-shadow: 0 -18px 58px rgb(176 92 255 / 0.08), 0 24px 80px rgb(0 0 0 / 0.48), inset 0 1px 0 rgb(255 255 255 / 0.055);
+  backdrop-filter: blur(20px) saturate(135%);
 }
 
-/* 输入框内部文件预览 */
+.composer-model-row {
+  display: flex;
+  align-items: center;
+  align-self: flex-start;
+  justify-content: flex-start;
+  gap: 8px;
+  max-width: min(430px, 100%);
+  border: 1px solid rgb(255 255 255 / 0.07);
+  border-radius: 999px;
+  background: rgb(0 0 0 / 0.18);
+  padding: 5px 6px 5px 12px;
+}
+
+.composer-model-copy {
+  display: flex;
+  align-items: center;
+  min-width: auto;
+}
+
+.composer-model-kicker {
+  color: rgb(255 255 255 / 0.42);
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.composer-model-copy small {
+  display: none;
+}
+
+.composer-model-copy strong {
+  display: none;
+}
+
+.composer-model-select {
+  width: min(220px, 46vw);
+  min-height: 30px;
+  border: 1px solid rgb(176 92 255 / 0.18);
+  border-radius: 999px;
+  background: rgb(15 15 19 / 0.62);
+  color: rgb(255 255 255 / 0.68);
+  padding: 0 28px 0 10px;
+  outline: none;
+  font-size: 12px;
+}
+
+.composer-model-select:disabled {
+  opacity: 0.62;
+  cursor: not-allowed;
+}
+
 .inner-file-list {
   display: flex;
   flex-direction: column;
@@ -772,61 +937,74 @@ defineExpose({
   overflow-y: auto;
   padding-right: 4px;
 }
+
 .inner-file-item {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 10px;
-  background: var(--secondary);
-  border-radius: 10px;
+  padding: 7px 10px;
+  background: rgb(255 255 255 / 0.045);
+  border: 1px solid rgb(255 255 255 / 0.06);
+  border-radius: 14px;
   font-size: 12px;
 }
+
 .inner-file-info {
   flex: 1;
   display: flex;
   align-items: center;
   gap: 8px;
 }
+
 .inner-file-name {
-  color: var(--foreground);
+  color: rgb(255 255 255 / 0.84);
   font-weight: 500;
 }
+
 .inner-file-size {
-  color: var(--muted-foreground);
+  color: rgb(255 255 255 / 0.42);
   font-size: 11px;
 }
+
 .inner-file-close {
   background: transparent;
   border: none;
-  color: var(--muted-foreground);
+  color: rgb(255 255 255 / 0.42);
   cursor: pointer;
   padding: 2px;
 }
+
 .inner-file-close:hover {
-  color: var(--foreground);
+  color: #fff;
 }
 
-/* 输入框 */
 .input-wrap {
   position: relative;
 }
+
 .chat-input {
   width: 100%;
   border: none;
   outline: none;
   background: transparent;
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1.6;
-  min-height: 28px;
+  min-height: 34px;
   max-height: 150px;
   resize: none;
-  padding: 4px 32px 4px 0;
-  color: var(--foreground);
+  padding: 6px 38px 6px 2px;
+  color: rgb(255 255 255 / 0.88);
 }
+
+.chat-input::placeholder {
+  color: rgb(255 255 255 / 0.34);
+}
+
 .chat-input.input-expand {
   min-height: 110px;
   max-height: 40vh;
 }
+
 .chat-input:disabled {
   opacity: 0.7;
   cursor: not-allowed;
@@ -835,16 +1013,18 @@ defineExpose({
 .expand-btn {
   position: absolute;
   right: 0;
-  bottom: 4px;
+  bottom: 8px;
   border: none;
   background: transparent;
-  color: var(--muted-foreground);
+  color: rgb(255 255 255 / 0.42);
   cursor: pointer;
   padding: 2px;
 }
+
 .expand-btn:hover {
-  color: var(--foreground);
+  color: #fff;
 }
+
 .expand-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
@@ -855,56 +1035,75 @@ defineExpose({
   align-items: center;
   justify-content: space-between;
 }
+
 .left-tools {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
+
 .tool-btn {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 13px;
-  padding: 5px 12px;
+  font-size: 12px;
+  padding: 7px 13px;
   border-radius: 999px;
-  border: 1px solid var(--border);
-  background: transparent;
-  color: var(--foreground);
+  border: 1px solid rgb(255 255 255 / 0.07);
+  background: rgb(0 0 0 / 0.18);
+  color: rgb(255 255 255 / 0.56);
   cursor: pointer;
   transition: all 0.2s;
 }
+
 .tool-btn:hover:not(:disabled) {
-  background: var(--secondary);
+  border-color: rgb(176 92 255 / 0.48);
+  background: rgb(176 92 255 / 0.14);
+  color: #fff;
 }
+
 .tool-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
 .send-circle-btn {
-  width: 36px;
-  height: 36px;
+  width: 42px;
+  height: 42px;
   border-radius: 50%;
-  border: none;
-  background: var(--foreground);
-  color: var(--primary-foreground);
+  border: 1px solid rgb(255 255 255 / 0.14);
+  background:
+    radial-gradient(circle at 28% 20%, rgb(255 255 255 / 0.42), transparent 24%),
+    linear-gradient(135deg, rgb(205 132 255), rgb(176 92 255) 48%, rgb(115 72 255));
+  color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: transform 0.18s ease, filter 0.18s ease, background 0.2s;
+  box-shadow: 0 0 0 1px rgb(176 92 255 / 0.08), 0 10px 32px rgb(176 92 255 / 0.42), 0 0 70px rgb(176 92 255 / 0.22);
 }
+
+.send-circle-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  filter: brightness(1.08);
+}
+
 .send-circle-btn.stop {
-  background: #f53f3f;
+  border-color: rgb(248 113 113 / 0.72);
+  background: rgb(127 29 29);
+  box-shadow: 0 10px 30px rgb(248 113 113 / 0.22);
 }
+
 .send-circle-btn.stop:hover {
-  background: #d92c2c;
+  background: rgb(153 27 27);
 }
+
 .send-circle-btn:disabled {
-  opacity: 0.5;
+  opacity: 0.42;
   cursor: not-allowed;
 }
 
-/* 以下是原有样式，保持不变 */
 .empty-state {
   min-height: 60vh;
   display: flex;
@@ -912,23 +1111,25 @@ defineExpose({
   align-items: center;
   justify-content: center;
   text-align: center;
-  color: var(--muted-foreground);
+  color: rgb(255 255 255 / 0.48);
 }
 
 .empty-mark {
-  width: 48px;
-  height: 48px;
+  width: 62px;
+  height: 62px;
   display: grid;
   place-items: center;
-  border-radius: 12px;
-  background: var(--foreground);
-  color: var(--primary-foreground);
+  border-radius: 24px;
+  border: 1px solid rgb(176 92 255 / 0.36);
+  background: linear-gradient(145deg, rgb(176 92 255 / 0.22), rgb(255 255 255 / 0.05));
+  color: rgb(210 170 255);
+  animation: breathe-soft 2.8s ease-in-out infinite;
 }
 
 .empty-state h2 {
   margin: 18px 0 8px;
-  font-size: 24px;
-  color: var(--foreground);
+  font-size: 28px;
+  color: #fff;
 }
 
 .suggestions {
@@ -941,47 +1142,65 @@ defineExpose({
 
 .suggestions button {
   min-height: 44px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--card);
-  color: var(--foreground);
+  border: 1px solid rgb(255 255 255 / 0.09);
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgb(255 255 255 / 0.07), rgb(255 255 255 / 0.035));
+  color: rgb(255 255 255 / 0.74);
+  cursor: pointer;
+  transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease, transform 0.18s ease;
+}
+
+.suggestions button:hover {
+  border-color: rgb(176 92 255 / 0.48);
+  background: rgb(176 92 255 / 0.13);
+  color: #fff;
+  transform: translateY(-1px);
 }
 
 .agent-message {
   display: grid;
-  grid-template-columns: 34px minmax(0, 760px);
-  gap: 12px;
-  margin: 18px auto;
-  max-width: 900px;
+  grid-template-columns: 42px minmax(0, 820px);
+  gap: 14px;
+  margin: 30px auto;
+  max-width: 1040px;
+  animation: message-rise 0.24s ease-out;
 }
 
 .agent-message.user {
-  grid-template-columns: minmax(0, 760px) 34px;
+  grid-template-columns: minmax(0, 720px) 42px;
 }
 
 .agent-message.user .avatar {
   grid-column: 2;
   grid-row: 1;
-  background: var(--primary);
-  color: var(--primary-foreground);
+  background: rgb(176 92 255 / 0.16);
+  border-color: rgb(176 92 255 / 0.24);
+  color: #fff;
 }
 
 .agent-message.user .bubble {
   grid-column: 1;
   justify-self: end;
-  background: var(--foreground);
-  color: var(--primary-foreground);
+  border-color: rgb(255 255 255 / 0.09);
+  background:
+    radial-gradient(circle at 18% 10%, rgb(176 92 255 / 0.16), transparent 42%),
+    rgb(255 255 255 / 0.055);
+  color: rgb(255 255 255 / 0.91);
+  border-radius: 24px 10px 24px 24px;
+  box-shadow: 0 18px 48px rgb(0 0 0 / 0.20), inset 0 1px 0 rgb(255 255 255 / 0.045);
+  backdrop-filter: blur(14px);
 }
 
 .avatar,
 .card-icon {
-  width: 34px;
-  height: 34px;
+  width: 42px;
+  height: 42px;
   display: grid;
   place-items: center;
-  border-radius: 8px;
-  background: var(--secondary);
-  color: var(--foreground);
+  border-radius: 15px;
+  border: 1px solid rgb(255 255 255 / 0.075);
+  background: rgb(255 255 255 / 0.045);
+  color: rgb(255 255 255 / 0.82);
   font-size: 12px;
   font-weight: 700;
 }
@@ -989,80 +1208,163 @@ defineExpose({
 .bubble {
   width: fit-content;
   max-width: 100%;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--card);
-  padding: 12px 14px;
-  line-height: 1.7;
+  border: 1px solid rgb(255 255 255 / 0.065);
+  border-radius: 10px 24px 24px 24px;
+  background: rgb(255 255 255 / 0.045);
+  padding: 16px 18px;
+  line-height: 1.75;
+  color: rgb(255 255 255 / 0.86);
+  box-shadow: 0 18px 44px rgb(0 0 0 / 0.16), inset 0 1px 0 rgb(255 255 255 / 0.035);
+  backdrop-filter: blur(10px);
+}
+
+.agent-message.assistant .bubble:has(.agent-result-renderer) {
+  width: min(820px, 100%);
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
 }
 
 .agent-message.run-progress .bubble {
-  border-color: color-mix(in srgb, var(--foreground) 20%, var(--border));
+  width: min(820px, 100%);
+  border-color: rgb(255 255 255 / 0.10);
+  background: rgb(255 255 255 / 0.045);
+}
+
+.generating-message {
+  animation: message-rise 0.18s ease-out;
+}
+
+.generating-bubble {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  border-color: rgb(176 92 255 / 0.34);
+  background: linear-gradient(180deg, rgb(176 92 255 / 0.14), rgb(255 255 255 / 0.045));
+  box-shadow: 0 18px 56px rgb(176 92 255 / 0.12), 0 16px 40px rgb(0 0 0 / 0.34);
+  animation: breathe-panel 2.2s ease-in-out infinite;
+}
+
+.generating-orbit {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  border: 1px solid rgb(176 92 255 / 0.44);
+  color: rgb(210 170 255);
+  animation: pulse-ring 1.4s ease-in-out infinite;
+}
+
+.generating-copy {
+  min-width: 0;
+}
+
+.generating-copy p {
+  margin: 0;
+  color: #fff;
+  font-weight: 700;
+}
+
+.generating-copy span {
+  display: block;
+  max-width: min(420px, 52vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgb(255 255 255 / 0.48);
+  font-size: 12px;
+}
+
+.typing-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.typing-dots i {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: rgb(210 170 255);
+  animation: typing-dot 1s ease-in-out infinite;
+}
+
+.typing-dots i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.typing-dots i:nth-child(3) {
+  animation-delay: 0.3s;
 }
 
 .confirmation-card,
 .agent-error-card {
   display: grid;
-  grid-template-columns: 34px minmax(0, 760px);
-  gap: 12px;
-  max-width: 900px;
-  margin: 18px auto;
+  grid-template-columns: 42px minmax(0, 820px);
+  gap: 14px;
+  max-width: 1040px;
+  margin: 24px auto;
 }
 
 .run-status-card {
   width: fit-content;
-  max-width: min(860px, calc(100% - 32px));
-  min-height: 34px;
+  max-width: min(920px, calc(100% - 32px));
+  min-height: 38px;
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--card);
-  color: var(--muted-foreground);
+  border: 1px solid rgb(255 255 255 / 0.10);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.055);
+  color: rgb(255 255 255 / 0.54);
   font-size: 13px;
   margin: 8px auto 18px;
-  padding: 8px 12px;
+  padding: 8px 14px;
 }
 
 .run-status-card.running,
 .run-status-card.awaiting_confirmation {
-  border-color: color-mix(in srgb, var(--foreground) 12%, var(--border));
+  border-color: rgb(176 92 255 / 0.26);
+  animation: breathe-panel 2.4s ease-in-out infinite;
 }
 
 .run-status-card.awaiting_confirmation {
-  border-color: #fedf89;
-  background: #fffcf5;
-  color: #933708;
+  border-color: rgb(245 158 11 / 0.48);
+  background: rgb(245 158 11 / 0.10);
+  color: rgb(253 230 138);
 }
 
 .run-status-card.completed {
-  border-color: #abefc6;
-  background: #f6fef9;
-  color: #027a48;
+  border-color: rgb(52 211 153 / 0.42);
+  background: rgb(52 211 153 / 0.10);
+  color: rgb(167 243 208);
 }
 
 .run-status-card.failed {
-  border-color: #fecdca;
-  background: #fffbfa;
-  color: #b42318;
+  border-color: rgb(248 113 113 / 0.50);
+  background: rgb(248 113 113 / 0.10);
+  color: rgb(254 202 202);
 }
 
 .card-icon.error {
-  background: #fef3f2;
-  color: #b42318;
+  background: rgb(248 113 113 / 0.14);
+  color: rgb(254 202 202);
 }
 
 .card-body {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--card);
-  padding: 14px;
+  border: 1px solid rgb(255 255 255 / 0.10);
+  border-radius: 22px;
+  background: rgb(255 255 255 / 0.055);
+  padding: 16px;
+  box-shadow: 0 18px 44px rgb(0 0 0 / 0.18);
 }
 
 .card-body.error {
-  border-color: #fecdca;
-  background: #fffbfa;
+  border-color: rgb(248 113 113 / 0.34);
+  background: rgb(248 113 113 / 0.10);
 }
 
 .card-title {
@@ -1072,7 +1374,7 @@ defineExpose({
 
 .card-desc {
   margin: 6px 0 12px;
-  color: var(--muted-foreground);
+  color: rgb(255 255 255 / 0.52);
   font-size: 13px;
 }
 
@@ -1080,7 +1382,7 @@ defineExpose({
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  color: var(--foreground);
+  color: rgb(255 255 255 / 0.78);
   font-size: 13px;
 }
 
@@ -1093,7 +1395,8 @@ defineExpose({
 .primary-btn,
 .ghost-btn {
   height: 36px;
-  border: 1px solid var(--border);
+  border: 1px solid rgb(255 255 255 / 0.12);
+  border-radius: 999px;
   padding: 0 12px;
 }
 
@@ -1104,14 +1407,15 @@ defineExpose({
 }
 
 .primary-btn {
-  border-color: var(--foreground);
-  background: var(--foreground);
-  color: var(--primary-foreground);
+  border-color: rgb(176 92 255 / 0.48);
+  background: linear-gradient(135deg, rgb(205 132 255), rgb(176 92 255));
+  color: #fff;
+  box-shadow: 0 10px 26px rgb(176 92 255 / 0.18);
 }
 
 .ghost-btn {
-  background: var(--card);
-  color: var(--foreground);
+  background: rgb(255 255 255 / 0.06);
+  color: rgb(255 255 255 / 0.76);
 }
 
 .sr-only {
@@ -1124,16 +1428,99 @@ defineExpose({
 }
 
 @media (max-width: 900px) {
+  .message-container {
+    padding: 36px 14px 24px;
+  }
+  .composer {
+    width: calc(100% - 24px);
+    margin-bottom: 16px;
+    border-radius: 22px;
+  }
   .suggestions {
     grid-template-columns: 1fr;
+  }
+  .composer-model-row {
+    align-items: center;
+    flex-direction: row;
+    max-width: 100%;
+  }
+  .composer-model-select {
+    width: min(220px, 58vw);
   }
   .agent-message,
   .confirmation-card,
   .agent-error-card {
-    grid-template-columns: 30px minmax(0, 1fr);
+    grid-template-columns: 34px minmax(0, 1fr);
+    gap: 10px;
+    margin: 20px auto;
+  }
+  .agent-message.user {
+    grid-template-columns: minmax(0, 1fr) 34px;
+  }
+  .avatar,
+  .card-icon {
+    width: 34px;
+    height: 34px;
+    border-radius: 12px;
   }
   .run-status-card {
     max-width: 100%;
+  }
+}
+
+@keyframes message-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes breathe-soft {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgb(176 92 255 / 0.16);
+    transform: translateY(0);
+  }
+  50% {
+    box-shadow: 0 0 0 10px rgb(176 92 255 / 0);
+    transform: translateY(-1px);
+  }
+}
+
+@keyframes breathe-panel {
+  0%,
+  100% {
+    box-shadow: 0 18px 56px rgb(176 92 255 / 0.10), 0 16px 40px rgb(0 0 0 / 0.34);
+  }
+  50% {
+    box-shadow: 0 18px 68px rgb(176 92 255 / 0.22), 0 16px 40px rgb(0 0 0 / 0.34);
+  }
+}
+
+@keyframes pulse-ring {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgb(176 92 255 / 0.20);
+  }
+  50% {
+    box-shadow: 0 0 0 7px rgb(176 92 255 / 0);
+  }
+}
+
+@keyframes typing-dot {
+  0%,
+  80%,
+  100% {
+    opacity: 0.35;
+    transform: translateY(0);
+  }
+  40% {
+    opacity: 1;
+    transform: translateY(-3px);
   }
 }
 </style>

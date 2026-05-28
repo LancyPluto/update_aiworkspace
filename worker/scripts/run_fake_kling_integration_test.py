@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from handlers.image_generation_handler import ImageGenerationHandler
 from handlers.video_generation_handler import VideoGenerationHandler
-from client.kling_video_client import KlingVideoClient
+from client.kling_video_client import KlingVideoClient, KlingVideoError
 
 
 class FakeBackendClient:
@@ -290,10 +290,230 @@ def test_kling_client_polls_async_image_generation() -> None:
     assert client.requests[1] == ("GET", "/v1/images/generations/image-task-123", None)
 
 
+def test_kling_image_generation_accepts_success_reason_with_failed_status() -> None:
+    class RecordingKlingClient(KlingVideoClient):
+        def __init__(self) -> None:
+            super().__init__(access_key="fake-ak", secret_key="fake-sk", poll_interval_seconds=0.01, timeout_seconds=1)
+
+        def _request(self, method: str, path: str, payload: dict | None) -> dict:
+            if method == "POST":
+                return {"code": 0, "data": {"task_id": "image-task-456", "task_status": "submitted"}}
+            return {
+                "code": 0,
+                "data": {
+                    "task_id": "image-task-456",
+                    "task_status": "failed",
+                    "task_status_msg": "SUCCEED",
+                    "task_result": {
+                        "images": [{"url": "https://example.com/kling-result.png"}],
+                    },
+                },
+            }
+
+    client = RecordingKlingClient()
+
+    assert client.generate_images(prompt="画一只猫", model="kling-v3") == ["https://example.com/kling-result.png"]
+
+
+def test_kling_image_generation_accepts_signed_image_url_without_extension() -> None:
+    class RecordingKlingClient(KlingVideoClient):
+        def __init__(self) -> None:
+            super().__init__(access_key="fake-ak", secret_key="fake-sk", poll_interval_seconds=0.01, timeout_seconds=1)
+
+        def _request(self, method: str, path: str, payload: dict | None) -> dict:
+            if method == "POST":
+                return {"code": 0, "data": {"task_id": "image-task-789", "task_status": "submitted"}}
+            return {
+                "code": 0,
+                "data": {
+                    "task_id": "image-task-789",
+                    "task_status": "succeed",
+                    "task_result": {
+                        "images": [{"url": "https://cdn.example.com/download?id=abc&token=signed"}],
+                    },
+                },
+            }
+
+    client = RecordingKlingClient()
+
+    assert client.generate_images(prompt="画一只猫", model="kling-v3") == ["https://cdn.example.com/download?id=abc&token=signed"]
+
+
+def test_kling_image_generation_accepts_plural_result_urls_without_extension() -> None:
+    class RecordingKlingClient(KlingVideoClient):
+        def __init__(self) -> None:
+            super().__init__(access_key="fake-ak", secret_key="fake-sk", poll_interval_seconds=0.01, timeout_seconds=1)
+
+        def _request(self, method: str, path: str, payload: dict | None) -> dict:
+            if method == "POST":
+                return {"code": 0, "data": {"task_id": "image-task-790", "task_status": "submitted"}}
+            return {
+                "code": 0,
+                "data": {
+                    "task_id": "image-task-790",
+                    "task_status": "failed",
+                    "task_status_msg": "SUCCEED",
+                    "task_result": {
+                        "result_urls": [
+                            "https://cdn.example.com/download?id=abc&token=signed",
+                            "https://cdn.example.com/download?id=def&token=signed",
+                        ],
+                    },
+                },
+            }
+
+    client = RecordingKlingClient()
+
+    assert client.generate_images(prompt="draw a cat", model="kling-v3") == [
+        "https://cdn.example.com/download?id=abc&token=signed",
+        "https://cdn.example.com/download?id=def&token=signed",
+    ]
+
+
+def test_kling_video_generation_accepts_success_reason_with_failed_status() -> None:
+    class RecordingKlingClient(KlingVideoClient):
+        def __init__(self) -> None:
+            super().__init__(access_key="fake-ak", secret_key="fake-sk", poll_interval_seconds=0.01, timeout_seconds=1)
+
+        def _request(self, method: str, path: str, payload: dict | None) -> dict:
+            if method == "POST":
+                return {"code": 0, "data": {"task_id": "video-task-456", "task_status": "submitted"}}
+            return {
+                "code": 0,
+                "data": {
+                    "task_id": "video-task-456",
+                    "task_status": "failed",
+                    "task_status_msg": "SUCCEED",
+                    "task_result": {
+                        "videos": [{"url": "https://cdn.example.com/video-download?id=abc&token=signed"}],
+                    },
+                },
+            }
+
+    client = RecordingKlingClient()
+
+    result = client.generate_video(prompt="闀滃ご鎷夎繙", image_size="1280x720")
+    assert result["videoUrl"] == "https://cdn.example.com/video-download?id=abc&token=signed"
+
+
+def test_kling_video_generation_ignores_transport_success_message_while_submitted() -> None:
+    class RecordingKlingClient(KlingVideoClient):
+        def __init__(self) -> None:
+            super().__init__(access_key="fake-ak", secret_key="fake-sk", poll_interval_seconds=0.01, timeout_seconds=1)
+            self.polls = 0
+
+        def _request(self, method: str, path: str, payload: dict | None) -> dict:
+            if method == "POST":
+                return {"code": 0, "data": {"task_id": "video-task-submitted", "task_status": "submitted"}}
+            self.polls += 1
+            if self.polls == 1:
+                return {
+                    "code": 0,
+                    "message": "SUCCEED",
+                    "data": {
+                        "task_id": "video-task-submitted",
+                        "task_status": "submitted",
+                        "task_result": {},
+                    },
+                }
+            return {
+                "code": 0,
+                "message": "SUCCEED",
+                "data": {
+                    "task_id": "video-task-submitted",
+                    "task_status": "succeed",
+                    "task_result": {
+                        "videos": [{"url": "https://cdn.example.com/video-ready.mp4"}],
+                    },
+                },
+            }
+
+    client = RecordingKlingClient()
+
+    result = client.generate_video(prompt="normal prompt", image_size="1280x720")
+    assert client.polls == 2
+    assert result["videoUrl"] == "https://cdn.example.com/video-ready.mp4"
+
+
+def test_kling_video_generation_reports_nested_failure_reason() -> None:
+    class RecordingKlingClient(KlingVideoClient):
+        def __init__(self) -> None:
+            super().__init__(access_key="fake-ak", secret_key="fake-sk", poll_interval_seconds=0.01, timeout_seconds=1)
+
+        def _request(self, method: str, path: str, payload: dict | None) -> dict:
+            if method == "POST":
+                return {"code": 0, "data": {"task_id": "video-task-safety", "task_status": "submitted"}}
+            return {
+                "code": 0,
+                "data": {
+                    "task_id": "video-task-safety",
+                    "task_status": "failed",
+                    "task_status_msg": "SAFETY_CHECK_FAILED",
+                    "error": {
+                        "code": "content_policy",
+                        "message": "prompt rejected by safety policy",
+                    },
+                },
+            }
+
+    client = RecordingKlingClient()
+
+    try:
+        client.generate_video(prompt="unsafe prompt", image_size="1280x720")
+    except KlingVideoError as exc:
+        message = str(exc)
+        assert "kling video generation failed" in message
+        assert "data.task_status=failed" in message
+        assert "data.task_status_msg=SAFETY_CHECK_FAILED" in message
+        assert "data.error.message=prompt rejected by safety policy" in message
+    else:
+        raise AssertionError("expected KlingVideoError")
+
+
+def test_kling_video_generation_reports_success_without_url_payload() -> None:
+    class RecordingKlingClient(KlingVideoClient):
+        def __init__(self) -> None:
+            super().__init__(access_key="fake-ak", secret_key="fake-sk", poll_interval_seconds=0.01, timeout_seconds=1)
+
+        def _request(self, method: str, path: str, payload: dict | None) -> dict:
+            if method == "POST":
+                return {"code": 0, "data": {"task_id": "video-task-empty", "task_status": "submitted"}}
+            return {
+                "code": 0,
+                "data": {
+                    "task_id": "video-task-empty",
+                    "task_status": "succeed",
+                    "task_status_msg": "content blocked by safety policy",
+                    "task_result": {
+                        "videos": [],
+                    },
+                },
+            }
+
+    client = RecordingKlingClient()
+
+    try:
+        client.generate_video(prompt="blocked prompt", image_size="1280x720")
+    except KlingVideoError as exc:
+        message = str(exc)
+        assert "terminal success but no video url" in message
+        assert "data.task_status=succeed" in message
+        assert "data.task_status_msg=content blocked by safety policy" in message
+    else:
+        raise AssertionError("expected KlingVideoError")
+
+
 if __name__ == "__main__":
     test_kling_video_handler()
     test_kling_image_handler()
     test_kling_client_encodes_input_images()
     test_kling_client_uses_image2video_result_path()
     test_kling_client_polls_async_image_generation()
+    test_kling_image_generation_accepts_success_reason_with_failed_status()
+    test_kling_image_generation_accepts_signed_image_url_without_extension()
+    test_kling_image_generation_accepts_plural_result_urls_without_extension()
+    test_kling_video_generation_accepts_success_reason_with_failed_status()
+    test_kling_video_generation_ignores_transport_success_message_while_submitted()
+    test_kling_video_generation_reports_nested_failure_reason()
+    test_kling_video_generation_reports_success_without_url_payload()
     print("FAKE_KLING_INTEGRATION_TEST_PASSED")

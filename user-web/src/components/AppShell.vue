@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { RouterLink, useRoute } from "vue-router"
 import type { Component } from "vue"
 import {
@@ -15,10 +15,20 @@ import {
   PanelLeftClose,
   Sparkles,
   Sun,
+  Search,
+  Plus,
+  Bell,
+  Headphones,
+  QrCode,
+  X,
+  Menu,
 } from "lucide-vue-next"
 import { ref, onMounted, computed, watch } from "vue"
 import { fetchCreditAccount } from "@/api/creditApi"
+import { fetchCustomerServiceSettings } from "@/api/settingsApi"
+import type { CustomerServiceSettings } from "@/api/settingsApi"
 import type { CreditAccount } from "@/api/types"
+import { userRoutes } from "@/router/userRoutes"
 import { useAuthStore } from "@/store/authStore"
 import MemberBadge from "@/components/MemberBadge/MemberBadge.vue"
 import { applyAppTheme, getStoredTheme, storeAppTheme, type AppTheme } from "@/utils/theme"
@@ -56,23 +66,30 @@ const credit = ref<CreditAccount | null>(null)
 const theme = ref<AppTheme>("light")
 const sidebarOpen = ref(true)
 const expandedGroups = ref<Set<string>>(new Set())
+const customerServiceOpen = ref(false)
+const customerService = ref<CustomerServiceSettings>({
+  enabled: true,
+  title: "鑱旂郴瀹㈡湇",
+  description: "鎵爜娣诲姞瀹㈡湇锛岃幏鍙栦娇鐢ㄦ敮鎸?,
+  qrCodeUrl: "",
+})
 
 const userNav: (NavLink | NavGroup)[] = [
   { type: "link", href: "/agent", label: "Agent", icon: Bot },
-  { type: "link", href: "/dashboard", label: "工作台", icon: LayoutGrid },
+  { type: "link", href: "/dashboard", label: "宸ヤ綔鍙?, icon: LayoutGrid },
   {
     type: "group",
     id: "ai-market",
-    label: "AI 工具超市",
+    label: "AI 宸ュ叿瓒呭競",
     icon: Store,
     children: [
-      { href: "/marketplace", label: "大模型", icon: Sparkles },
-      { href: "/agents", label: "智能体", icon: BrainCircuit },
+      { href: "/marketplace", label: "澶фā鍨?, icon: Sparkles },
+      { href: "/agents", label: "鏅鸿兘浣?, icon: BrainCircuit },
     ],
   },
-  { type: "link", href: "/tasks", label: "我的任务", icon: ListChecks },
-  { type: "link", href: "/library", label: "素材库", icon: FolderHeart },
-  { type: "link", href: "/billing", label: "会员与算力", icon: Wallet },
+  { type: "link", href: "/tasks", label: "鎴戠殑浠诲姟", icon: ListChecks },
+  { type: "link", href: "/library", label: "绱犳潗搴?, icon: FolderHeart },
+  { type: "link", href: "/billing", label: "浼氬憳涓庣畻鍔?, icon: Wallet },
 ]
 
 function toggleSidebar() {
@@ -155,7 +172,20 @@ async function loadCreditAccount() {
   try {
     credit.value = await fetchCreditAccount({ token: auth.token })
   } catch {
-    // 静默处理
+    // 闈欓粯澶勭悊
+  }
+}
+
+async function loadCustomerServiceSettings() {
+  try {
+    customerService.value = await fetchCustomerServiceSettings({ token: auth.token })
+  } catch {
+    customerService.value = {
+      enabled: true,
+      title: "鑱旂郴瀹㈡湇",
+      description: "鎵爜娣诲姞瀹㈡湇锛岃幏鍙栦娇鐢ㄦ敮鎸?,
+      qrCodeUrl: "",
+    }
   }
 }
 
@@ -197,39 +227,45 @@ onMounted(async () => {
   }
 
   ensureActiveGroupExpanded()
-  await loadCreditAccount()
+  await Promise.all([loadCreditAccount(), loadCustomerServiceSettings()])
 })
 </script>
 
 <template>
-  <div class="app-shell-root flex h-screen overflow-hidden bg-background text-foreground">
+  <div
+    class="app-shell-root flex h-screen overflow-hidden bg-background text-foreground"
+    :style="{ '--app-sidebar-width': sidebarOpen ? '268px' : '0px' }"
+  >
     <aside
-      class="fixed inset-y-0 left-0 z-40 hidden w-60 shrink-0 flex-col border-r border-border bg-card"
+      class="hidden h-full w-[268px] shrink-0 flex-col border-r border-white/8 bg-[#141414]"
       :class="sidebarOpen ? 'lg:flex' : 'lg:hidden'"
     >
-      <div class="flex h-16 shrink-0 items-center gap-2.5 border-b border-border px-5">
-        <img src="/logo.svg" alt="AI Tool Market" class="h-9 w-9 rounded-lg object-contain" />
+      <div class="flex h-20 shrink-0 items-center gap-3 px-6">
+        <img src="/logo.svg" alt="AI Tool Market" class="h-10 w-10 rounded-xl object-contain" />
         <div class="flex flex-col leading-tight">
-          <span class="text-sm font-semibold">智擎 AI</span>
-          <span class="text-[11px] text-muted-foreground">经营助手平台</span>
+          <span class="text-lg font-semibold">鏅烘搸 AI</span>
+          <span class="text-[11px] text-white/45">缁忚惀鍔╂墜骞冲彴</span>
         </div>
       </div>
 
-      <nav class="flex-1 overflow-y-auto px-3 py-4 pb-36">
-        <p class="px-3 pb-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">工作区</p>
-        <ul class="flex flex-col gap-1">
+      <nav class="min-h-0 flex-1 overflow-y-auto px-4 py-2">
+        <ul class="flex flex-col gap-2">
           <template v-for="item in userNav" :key="item.type === 'link' ? item.href : item.id">
             <li v-if="item.type === 'link'">
               <RouterLink
                 :to="item.href"
-                class="flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors"
+                class="relative flex items-center gap-3 rounded-2xl px-4 py-3 text-[15px] font-semibold transition-colors before:absolute before:left-0 before:top-1/2 before:h-6 before:w-px before:-translate-y-1/2 before:rounded-full before:bg-transparent before:transition-colors"
                 :class="
                   isActive(item.href)
-                    ? 'bg-primary/10 text-primary'
-                    : 'text-foreground/80 hover:bg-secondary'
+                    ? 'bg-white/[0.045] text-white before:bg-primary'
+                    : 'text-white/70 hover:bg-white/6 hover:text-white'
                 "
               >
-                <component :is="item.icon" class="h-4 w-4" />
+                <component
+                  :is="item.icon"
+                  class="h-5 w-5 transition-colors"
+                  :class="isActive(item.href) ? 'text-primary' : 'text-white/68'"
+                />
                 <span>{{ item.label }}</span>
               </RouterLink>
             </li>
@@ -237,19 +273,23 @@ onMounted(async () => {
             <li v-else>
               <button
                 type="button"
-                class="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors"
+                class="flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-[15px] font-semibold transition-colors"
                 :class="
                   isGroupActive(item)
-                    ? 'bg-primary/10 text-primary'
-                    : 'text-foreground/80 hover:bg-secondary'
+                    ? 'text-white'
+                    : 'text-white/70 hover:bg-white/6 hover:text-white'
                 "
                 :aria-expanded="isGroupExpanded(item.id)"
                 @click="toggleGroup(item.id)"
               >
-                <component :is="item.icon" class="h-4 w-4 shrink-0" />
+                <component
+                  :is="item.icon"
+                  class="h-5 w-5 shrink-0 transition-colors"
+                  :class="isGroupActive(item) ? 'text-white/85' : 'text-white/60'"
+                />
                 <span class="flex-1 text-left">{{ item.label }}</span>
                 <ChevronDown
-                  class="h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200"
+                  class="h-4 w-4 shrink-0 text-white/40 transition-transform duration-200"
                   :class="{ 'rotate-180': isGroupExpanded(item.id) }"
                 />
               </button>
@@ -259,18 +299,22 @@ onMounted(async () => {
                 :class="isGroupExpanded(item.id) ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'"
               >
                 <div class="overflow-hidden">
-                  <ul class="mt-1 flex flex-col gap-0.5 border-l border-border/70 pl-3 ml-5">
+                  <ul class="ml-10 mt-1 flex flex-col gap-1 border-l border-white/10 pl-4">
                     <li v-for="child in item.children" :key="child.href">
                       <RouterLink
                         :to="child.href"
-                        class="flex items-center gap-2.5 rounded-md py-1.5 pl-3 pr-2 text-[13px] font-medium transition-colors"
+                        class="relative flex items-center gap-2.5 rounded-xl py-2 pl-3 pr-2 text-sm font-medium transition-colors before:absolute before:-left-[17px] before:top-1/2 before:h-px before:w-3 before:bg-white/10"
                         :class="
                           isActive(child.href)
-                            ? 'bg-primary/10 text-primary'
-                            : 'text-foreground/70 hover:bg-secondary hover:text-foreground'
+                            ? 'bg-white/[0.035] text-white'
+                            : 'text-white/55 hover:bg-white/6 hover:text-white'
                         "
                       >
-                        <component :is="child.icon" class="h-3.5 w-3.5 shrink-0" />
+                        <component
+                          :is="child.icon"
+                          class="h-3.5 w-3.5 shrink-0 transition-colors"
+                          :class="isActive(child.href) ? 'text-primary' : 'text-white/42'"
+                        />
                         <span>{{ child.label }}</span>
                       </RouterLink>
                     </li>
@@ -282,51 +326,90 @@ onMounted(async () => {
         </ul>
       </nav>
 
-      <div class="fixed bottom-0 left-0 z-50 w-60 border-t border-border bg-card p-4">
-        <div class="rounded-lg border border-border bg-accent/40 p-3">
-          <p class="text-xs font-medium">本月已用算力</p>
-          <p class="mt-1 text-lg font-semibold text-primary">
+      <div class="shrink-0 p-5">
+        <div class="rounded-2xl border border-white/8 bg-white/[0.025] p-4 shadow-[inset_0_1px_0_rgb(255_255_255_/_0.035)]">
+          <p class="text-[11px] font-medium tracking-wide text-white/42">宸茬敤绠楀姏</p>
+          <p class="mt-1 font-mono text-[12px] tabular-nums text-white/76">
             {{ credit ? credit.totalConsumed.toLocaleString() : '---' }}
-            <span class="text-xs font-normal text-muted-foreground">
+            <span class="font-normal text-white/32">
               / {{ credit ? credit.totalGranted.toLocaleString() : '---' }}
             </span>
           </p>
-          <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-secondary">
+          <div class="mt-3 h-[3px] overflow-hidden rounded-full bg-white/8">
             <div
-              class="h-full rounded-full bg-primary"
+              class="h-full rounded-full bg-gradient-to-r from-primary/75 to-sky-300/65"
               :style="{ width: Math.min(creditPercent, 100) + '%' }"
             />
           </div>
           <RouterLink
             :to="'/billing'"
-            class="mt-3 block text-center text-xs font-medium text-primary hover:underline"
+            class="mt-3 block text-center text-[11px] font-medium text-primary/80 transition hover:text-primary hover:drop-shadow-[0_0_10px_rgb(176_92_255_/_0.35)]"
           >
-            充值 / 升级套餐 →
+            鍏呭€?/ 鍗囩骇濂楅
           </RouterLink>
         </div>
       </div>
     </aside>
 
-    <div class="flex flex-1 flex-col min-w-0" :class="sidebarOpen ? 'lg:pl-60' : ''">
-      <header class="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-border bg-card/80 px-6 backdrop-blur">
+    <div class="flex h-full min-h-0 min-w-0 flex-1 flex-col">
+      <header class="z-30 flex h-20 shrink-0 items-center gap-4 border-b border-white/8 bg-[#151515]/95 px-5 backdrop-blur-xl">
         <button
           type="button"
-          class="hidden lg:inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border bg-background text-muted-foreground hover:bg-secondary hover:text-foreground"
-          :aria-label="sidebarOpen ? '隐藏侧栏' : '显示侧栏'"
+          class="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] text-white/70 hover:bg-white/10 hover:text-white lg:hidden"
+          aria-label="鑿滃崟"
+        >
+          <Menu class="h-5 w-5" aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          class="hidden h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] text-white/60 hover:bg-white/10 hover:text-white lg:inline-flex"
+          :aria-label="sidebarOpen ? '闅愯棌渚ф爮' : '鏄剧ず渚ф爮'"
           :aria-expanded="sidebarOpen"
           @click="toggleSidebar"
         >
           <PanelLeftClose v-if="sidebarOpen" class="h-4 w-4" aria-hidden="true" />
           <PanelLeft v-else class="h-4 w-4" aria-hidden="true" />
         </button>
-        <div class="min-w-0 flex-1">
+        <div class="min-w-0 flex-1 lg:max-w-[360px]">
           <h1 v-if="title" class="text-base font-semibold truncate">{{ title }}</h1>
-          <p v-if="description" class="text-xs text-muted-foreground truncate">{{ description }}</p>
+          <p v-if="description" class="text-xs text-white/45 truncate">{{ description }}</p>
         </div>
-        <div class="ml-auto flex items-center gap-3">
+        <div class="hidden h-12 min-w-0 flex-1 items-center rounded-full bg-white/[0.07] px-4 ring-1 ring-white/8 xl:flex">
+          <span class="pr-4 text-sm text-white/70">鍏ㄩ儴</span>
+          <span class="h-5 w-px bg-white/10" />
+          <Search class="ml-4 h-5 w-5 text-white/35" />
+          <input
+            class="h-full min-w-0 flex-1 bg-transparent px-3 text-sm text-white outline-none placeholder:text-white/35"
+            placeholder="搜索模型、智能体和素材"
+          />
+        </div>
+        <RouterLink
+          :to="userRoutes.toolList"
+          class="ml-auto hidden h-11 items-center gap-2 rounded-full bg-primary px-5 text-sm font-semibold text-white shadow-[0_12px_28px_rgb(176_92_255_/_0.32)] hover:brightness-110 md:inline-flex"
+        >
+          <Plus class="h-4 w-4" />
+          鍒涘缓
+        </RouterLink>
+        <button
+          type="button"
+          class="hidden h-10 w-10 shrink-0 items-center justify-center rounded-full text-white/55 hover:bg-white/8 hover:text-white md:inline-flex"
+          aria-label="閫氱煡"
+        >
+          <Bell class="h-5 w-5" />
+        </button>
+        <button
+          v-if="customerService.enabled"
+          type="button"
+          class="hidden h-10 shrink-0 items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-4 text-sm font-medium text-white/70 transition-colors hover:bg-white/10 hover:text-white md:inline-flex"
+          @click="customerServiceOpen = true"
+        >
+          <Headphones class="h-4 w-4" aria-hidden="true" />
+          鑱旂郴瀹㈡湇
+        </button>
+        <div class="flex items-center gap-3">
           <button
             type="button"
-            class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border bg-background/75 text-muted-foreground transition hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            class="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.04] text-white/60 transition hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
             :aria-label="theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'"
             :title="theme === 'dark' ? 'Light mode' : 'Dark mode'"
             :aria-pressed="theme === 'dark'"
@@ -338,29 +421,68 @@ onMounted(async () => {
           <template v-if="auth.isLoggedIn">
             <div class="flex items-center gap-2">
               <MemberBadge :available="availableCredits" />
-              <span class="text-xs text-muted-foreground">{{ auth.user?.nickname || auth.user?.username }}</span>
+              <span class="hidden text-xs text-white/60 sm:inline">{{ auth.user?.nickname || auth.user?.username }}</span>
             </div>
             <button
               type="button"
-              class="text-xs text-muted-foreground hover:text-foreground"
+              class="text-xs text-white/45 hover:text-white"
               @click="auth.logout()"
             >
-              退出
+              閫€鍑?
             </button>
           </template>
           <template v-else>
             <RouterLink
               :to="'/'"
-              class="text-xs text-primary hover:underline"
+              class="text-xs text-primary hover:text-white"
             >
-              登录
+              鐧诲綍
             </RouterLink>
           </template>
         </div>
       </header>
-      <main class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
+      <main class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto bg-[#111111]">
         <slot />
       </main>
     </div>
+
+    <div
+      v-if="customerServiceOpen"
+      class="fixed inset-0 z-[100] flex items-center justify-center bg-black/65 px-4 backdrop-blur-sm"
+      @click.self="customerServiceOpen = false"
+    >
+      <section class="relative w-full max-w-sm rounded-[28px] border border-white/10 bg-[#1d1d22] p-6 text-center shadow-[0_24px_80px_rgb(0_0_0_/_0.55)]">
+        <button
+          type="button"
+          class="absolute right-4 top-4 inline-flex h-8 w-8 items-center justify-center rounded-full text-white/45 hover:bg-white/10 hover:text-white"
+          aria-label="鍏抽棴鑱旂郴瀹㈡湇"
+          @click="customerServiceOpen = false"
+        >
+          <X class="h-4 w-4" aria-hidden="true" />
+        </button>
+
+        <div class="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/15 text-primary ring-1 ring-primary/25">
+          <Headphones class="h-6 w-6" aria-hidden="true" />
+        </div>
+        <h2 class="mt-4 text-xl font-semibold text-white">{{ customerService.title || "鑱旂郴瀹㈡湇" }}</h2>
+        <p class="mt-2 text-sm leading-6 text-white/55">
+          {{ customerService.description || "鎵爜娣诲姞瀹㈡湇锛岃幏鍙栦娇鐢ㄦ敮鎸? }}
+        </p>
+
+        <div class="mx-auto mt-5 flex aspect-square w-56 max-w-full items-center justify-center rounded-3xl bg-white p-3">
+          <img
+            v-if="customerService.qrCodeUrl"
+            :src="customerService.qrCodeUrl"
+            :alt="customerService.title || '瀹㈡湇浜岀淮鐮?"
+            class="h-full w-full rounded-2xl object-contain"
+          />
+          <div v-else class="flex h-full w-full flex-col items-center justify-center rounded-2xl border border-dashed border-black/15 text-black/45">
+            <QrCode class="h-10 w-10" aria-hidden="true" />
+            <span class="mt-3 text-xs">鍚庡彴鏆傛湭閰嶇疆瀹㈡湇浜岀淮鐮?/span>
+          </div>
+        </div>
+      </section>
+    </div>
   </div>
 </template>
+

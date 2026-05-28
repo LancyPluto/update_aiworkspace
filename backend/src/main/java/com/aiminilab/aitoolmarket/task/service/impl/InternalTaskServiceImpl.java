@@ -2,6 +2,7 @@ package com.aiminilab.aitoolmarket.task.service.impl;
 
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentModelConfigMapper;
+import com.aiminilab.aitoolmarket.agent.service.AgentToolDescriptorService;
 import com.aiminilab.aitoolmarket.agent.service.ModelCapabilityService;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolMapper;
 import com.aiminilab.aitoolmarket.tool.entity.AiTool;
@@ -40,6 +41,7 @@ public class InternalTaskServiceImpl implements InternalTaskService {
     private final TaskMapper taskMapper;
     private final ToolMapper toolMapper;
     private final AgentModelConfigMapper agentModelConfigMapper;
+    private final AgentToolDescriptorService agentToolDescriptorService;
     private final ModelCapabilityService modelCapabilityService;
     private final ToolFieldItemMapper toolFieldItemMapper;
     private final ObjectMapper objectMapper;
@@ -49,6 +51,7 @@ public class InternalTaskServiceImpl implements InternalTaskService {
 
     public InternalTaskServiceImpl(TaskMapper taskMapper, ToolMapper toolMapper,
                                    AgentModelConfigMapper agentModelConfigMapper,
+                                   AgentToolDescriptorService agentToolDescriptorService,
                                    ModelCapabilityService modelCapabilityService,
                                    ToolFieldItemMapper toolFieldItemMapper, ObjectMapper objectMapper,
                                    CreditService creditService, BillingService billingService,
@@ -56,6 +59,7 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         this.taskMapper = taskMapper;
         this.toolMapper = toolMapper;
         this.agentModelConfigMapper = agentModelConfigMapper;
+        this.agentToolDescriptorService = agentToolDescriptorService;
         this.modelCapabilityService = modelCapabilityService;
         this.toolFieldItemMapper = toolFieldItemMapper;
         this.objectMapper = objectMapper;
@@ -126,6 +130,7 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         billingService.recordUsage("TASK", taskId, task.getUserId(), modelCapabilityService.resolveModelConfigForTool(billingTool),
                 request.promptTokens(), request.completionTokens(), request.billableUnits(), chargedCredits);
         taskMapper.insertResult(taskId, task.getUserId(), request.resourceType(), request.contentText());
+        agentToolDescriptorService.markToolHealth(task.getToolCode(), "HEALTHY", null);
         taskMetrics.recordTaskOutcome(task.getToolCode(), "SUCCESS", task.getCreatedAt(), findTask(taskId).getFinishedAt());
         return TaskStatusResponse.from(findTask(taskId));
     }
@@ -161,8 +166,16 @@ public class InternalTaskServiceImpl implements InternalTaskService {
             TaskStateMachine.ensureTransition(current.getStatus(), targetStatus);
         }
         creditService.release(task.getUserId(), CreditSourceType.TASK, taskId, task.getEstimatedCreditCost());
+        if (shouldMarkToolUnhealthy(errorCode)) {
+            agentToolDescriptorService.markToolHealth(task.getToolCode(), "FAILED", errorMessage);
+        }
         taskMetrics.recordTaskOutcome(task.getToolCode(), targetStatus, task.getCreatedAt(), findTask(taskId).getFinishedAt());
         return TaskStatusResponse.from(findTask(taskId));
+    }
+
+    private boolean shouldMarkToolUnhealthy(String errorCode) {
+        return "MODEL_AUTH_FAILED".equals(errorCode)
+                || "MODEL_PROVIDER_UNAVAILABLE".equals(errorCode);
     }
 
     private AiTask findTask(Long taskId) {

@@ -1,5 +1,7 @@
 import importlib.util
 import inspect
+import json
+import logging
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -25,7 +27,7 @@ from app.core.event_types import (
     WORKSPACE_FILE_CREATED,
     WORKSPACE_FILE_READ,
 )
-from app.core.intent_router import Intent, IntentRouter
+from app.core.intent_router import Intent, IntentResult, IntentRouter
 from app.core.schemas import ChatMessage, RunComplete, RunContext, RunEventCreate, RunFail, ToolDescriptor, WorkspaceMemoryItem
 from app.runtime.subagent_profiles import default_subagent_profiles, profiles_to_deepagents_subagents
 from app.runtime.workspace_files import WorkspaceFileContext, build_workspace_file_context
@@ -38,10 +40,17 @@ from app.tools.memory_tool import (
     _format_memory_tool_definitions,
 )
 from app.tools.missing_argument_hints import format_missing_tool_arguments_message
-from app.tools.registry import ToolRegistry
+from app.tools.registry import ToolRegistry, requested_output_modality, tool_supports_modality
 from langchain_core.callbacks import AsyncCallbackHandler
 
+LOGGER = logging.getLogger(__name__)
+
 DEEP_AGENTS_INTENT = "deep_agents"
+DEFAULT_AGENT_SYSTEM_PROMPT = (
+    "You are a helpful cloud agent for an AI tool marketplace. "
+    "Your reasoning model is only used for conversation, planning, and orchestration. "
+    "Each AI tool runs with its own backend tool configuration and model binding."
+)
 DEEP_AGENTS_SYSTEM_PROMPT = (
     "You are a workspace agent for an AI tool marketplace. Plan and execute tasks carefully, "
     "use available context from the conversation, workspace memory, and files, "
@@ -105,7 +114,16 @@ class DeepAgentsRuntimeEngine:
             return
 
         # 1. Classify intent
-        intent = self.intent_router.classify(context)
+        intent = await self._classify_intent(context)
+        LOGGER.info(
+            "agent route selected runId=%s intent=%s confidence=%.2f selectedTool=%s candidates=%s reason=%s",
+            context.runId,
+            intent.intent.value,
+            intent.confidence,
+            intent.selectedToolCode or "-",
+            intent.candidateToolCodes,
+            intent.reason,
+        )
         await self._emit_intent_event(context, intent)
 
         # 2. Route by intent
@@ -214,6 +232,126 @@ class DeepAgentsRuntimeEngine:
 
     # --- Intent helpers ---
 
+    async def _classify_intent(self, context: RunContext):
+        rule_intent = self.intent_router.classify(context)
+        if not self._should_use_llm_router(context, rule_intent):
+            return rule_intent
+        llm_intent = await self._classify_intent_with_llm(context, rule_intent)
+        return llm_intent or rule_intent
+
+    def _should_use_llm_router(self, context: RunContext, rule_intent) -> bool:
+        if not settings.agent_llm_router_enabled:
+            return False
+        if not context.availableTools:
+            return False
+        hard_rule_reasons = {
+            "ready_file_context_available",
+            "file_analysis_request",
+            "phase_unsupported_capability",
+            "empty_request",
+            "session_recap_question",
+            "short_general_chat",
+            "restored_from_pending_tool_context",
+            "continuing_pending_tool_prompt",
+            "structured_tool_arguments",
+        }
+        return rule_intent.reason not in hard_rule_reasons
+
+    async def _classify_intent_with_llm(self, context: RunContext, rule_intent):
+        tools = ToolRegistry(context).list_tools()
+        tool_lines = []
+        for tool in tools[:30]:
+            tool_lines.append(
+                {
+                    "toolCode": tool.toolCode,
+                    "toolName": tool.toolName,
+                    "description": tool.description or "",
+                    "autoCallable": tool.autoCallable,
+                    "fields": [
+                        {
+                            "fieldKey": field.fieldKey,
+                            "fieldName": field.fieldName,
+                            "description": field.description or "",
+                            "required": field.required,
+                            "userRequired": field.userRequired,
+                            "agentFillStrategy": field.agentFillStrategy,
+                        }
+                        for field in tool.fields[:12]
+                    ],
+                }
+            )
+        prompt = (
+            "你是 AI 工具市场的路由器。根据用户请求选择最合适的意图和工具。\n"
+            "必须只返回 JSON，不要解释。\n"
+            "JSON schema: {"
+            "\"intent\":\"tool_use|general_chat|needs_clarification|unsupported\","
+            "\"selectedToolCode\":string|null,"
+            "\"candidateToolCodes\":string[],"
+            "\"confidence\":0到1,"
+            "\"reason\":string,"
+            "\"clarifyingQuestion\":string|null"
+            "}\n"
+            "选择原则：用户要生成图片/照片/视觉/拍摄/cos/海报/画面时优先图片生成工具；"
+            "用户要生成视频/短视频/成片时优先视频工具；用户要文案/标题/文章时选择文本工具。"
+            "只有关键目标完全不清楚才 needs_clarification，不要因为比例、张数、画质等可默认字段追问。\n\n"
+            f"用户请求：{context.message}\n"
+            f"规则兜底判断：intent={rule_intent.intent.value}, selectedTool={rule_intent.selectedToolCode}, reason={rule_intent.reason}\n"
+            f"可用工具：{json.dumps(tool_lines, ensure_ascii=False)}"
+        )
+        try:
+            raw = await self.model.chat([ChatMessage(role="user", content=prompt)])
+            parsed = _parse_json_object(raw)
+            result = self._validate_llm_intent(context, parsed)
+            LOGGER.info(
+                "agent llm router runId=%s accepted=%s raw=%s parsed=%s fallbackReason=%s",
+                context.runId,
+                result is not None,
+                _clip(raw, 500),
+                parsed,
+                "none" if result is not None else "invalid_or_low_confidence",
+            )
+            return result
+        except Exception as exc:
+            LOGGER.warning("agent llm router fallback runId=%s error=%s", context.runId, exc)
+            return None
+
+    def _validate_llm_intent(self, context: RunContext, parsed: Any):
+        if not isinstance(parsed, dict):
+            return None
+        raw_intent = str(parsed.get("intent") or "").strip()
+        try:
+            intent = Intent(raw_intent)
+        except ValueError:
+            return None
+        confidence = _safe_float(parsed.get("confidence"), 0)
+        if confidence < 0.7:
+            return None
+        selected_tool = parsed.get("selectedToolCode")
+        selected_tool = selected_tool.strip() if isinstance(selected_tool, str) else None
+        available = {tool.toolCode for tool in context.availableTools}
+        if intent == Intent.TOOL_USE:
+            if not selected_tool or selected_tool not in available:
+                return None
+        elif selected_tool and selected_tool not in available:
+            selected_tool = None
+        candidates = parsed.get("candidateToolCodes")
+        candidate_codes = [
+            code for code in candidates
+            if isinstance(code, str) and code in available
+        ] if isinstance(candidates, list) else []
+        if selected_tool and selected_tool not in candidate_codes:
+            candidate_codes.insert(0, selected_tool)
+        clarifying = parsed.get("clarifyingQuestion")
+        return IntentResult(
+            intent=intent,
+            confidence=confidence,
+            selectedToolCode=selected_tool,
+            candidateToolCodes=candidate_codes[:3],
+            clarifyingQuestion=clarifying if isinstance(clarifying, str) else None,
+            decisionSource="llm_router",
+            reason=str(parsed.get("reason") or "llm_router"),
+        )
+
     async def _emit_intent_event(self, context: RunContext, intent) -> None:
         await self.backend.append_event(
             context.runId,
@@ -268,6 +406,14 @@ class DeepAgentsRuntimeEngine:
             await self._complete_run(context, answer, intent=Intent.NEEDS_CLARIFICATION.value)
             return
 
+        LOGGER.info(
+            "agent tool path runId=%s selectedTool=%s toolName=%s autoCallable=%s candidateTools=%s",
+            context.runId,
+            tool.toolCode,
+            tool.toolName,
+            tool.autoCallable,
+            intent.candidateToolCodes,
+        )
         await self.backend.append_event(
             context.runId,
             RunEventCreate(eventType=TOOL_SELECTED, eventText=tool.toolCode, eventJson={"toolCode": tool.toolCode}),
@@ -276,17 +422,21 @@ class DeepAgentsRuntimeEngine:
         budget = BudgetState(credit_budget=context.creditBudget)
         missing_args = self.tool_bridge.missing_required_arguments(context, tool)
         extracted_args = None
+        LOGGER.info(
+            "agent tool arguments check runId=%s tool=%s missing=%s",
+            context.runId,
+            tool.toolCode,
+            missing_args,
+        )
 
         if missing_args:
             base_args = self.tool_bridge.build_arguments(context, tool, apply_placeholder_defaults=False)
             enriched = await self.tool_bridge.enrich_arguments(
                 self.tool_bridge.conversation_argument_text(context), tool, existing_args=base_args,
             )
-            still_missing = self._missing_from_enriched(enriched, tool)
+            still_missing = self._missing_user_arguments(enriched, tool)
             extracted_args = enriched
-            auto_call = any(
-                p.toolCode == tool.toolCode and p.autoCallEnabled for p in context.toolPreferences
-            )
+            auto_call = self._should_auto_call(context, tool)
             if not still_missing:
                 await self._emit_arguments_preview(context, tool, extracted_args, [], not auto_call)
                 if not auto_call:
@@ -296,6 +446,11 @@ class DeepAgentsRuntimeEngine:
                     result = await self._execute_tool_with_guard(context, tool, budget, arguments=enriched)
                 except BudgetExceeded as exception:
                     await self._fail_run(context.runId, exception.error_code, exception.message, budget=budget)
+                    return
+                if result.get("missing_tool_arguments"):
+                    answer = self._format_missing_arguments_message(tool, result["missing_tool_arguments"])
+                    await self._emit_answer_events(context.runId, answer)
+                    await self._complete_run(context, answer, intent=Intent.NEEDS_CLARIFICATION.value)
                     return
                 answer = await self._synthesize_answer(context, tool, result, budget)
                 await self._complete_run(context, answer, intent=Intent.TOOL_USE.value)
@@ -308,9 +463,7 @@ class DeepAgentsRuntimeEngine:
                 await self._complete_run(context, answer, intent=Intent.NEEDS_CLARIFICATION.value)
                 return
 
-        auto_call = any(
-            p.toolCode == tool.toolCode and p.autoCallEnabled for p in context.toolPreferences
-        )
+        auto_call = self._should_auto_call(context, tool)
         if not extracted_args:
             extracted_args = self.tool_bridge.build_arguments(context, tool, apply_placeholder_defaults=False)
         await self._emit_arguments_preview(context, tool, extracted_args, [], not auto_call)
@@ -325,6 +478,12 @@ class DeepAgentsRuntimeEngine:
             await self._fail_run(context.runId, exception.error_code, exception.message, budget=budget)
             return
 
+        if result.get("missing_tool_arguments"):
+            answer = self._format_missing_arguments_message(tool, result["missing_tool_arguments"])
+            await self._emit_answer_events(context.runId, answer)
+            await self._complete_run(context, answer, intent=Intent.NEEDS_CLARIFICATION.value)
+            return
+
         answer = await self._synthesize_answer(context, tool, result, budget)
         await self._complete_run(context, answer, intent=Intent.TOOL_USE.value)
         await self._emit_memory_candidate(context.runId, answer, None)
@@ -333,7 +492,10 @@ class DeepAgentsRuntimeEngine:
         self, context: RunContext, tool: ToolDescriptor, budget: BudgetState, arguments: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         if arguments:
-            missing = self._missing_from_enriched(arguments, tool)
+            prepared = self.tool_bridge.build_arguments(context, tool, apply_placeholder_defaults=True)
+            prepared.update({key: value for key, value in arguments.items() if value not in (None, "")})
+            arguments = prepared
+            missing = self._missing_execution_arguments(arguments, tool)
             if missing:
                 return {"missing_tool_arguments": missing}
         else:
@@ -341,8 +503,10 @@ class DeepAgentsRuntimeEngine:
             enriched = await self.tool_bridge.enrich_arguments(
                 self.tool_bridge.conversation_argument_text(context), tool, existing_args=base_args,
             )
-            missing = self._missing_from_enriched(enriched, tool)
-            arguments = enriched
+            prepared = self.tool_bridge.build_arguments(context, tool, apply_placeholder_defaults=True)
+            prepared.update({key: value for key, value in enriched.items() if value not in (None, "")})
+            missing = self._missing_execution_arguments(prepared, tool)
+            arguments = prepared
             if missing:
                 return {"missing_tool_arguments": missing}
 
@@ -385,8 +549,51 @@ class DeepAgentsRuntimeEngine:
             ),
         )
 
+    def _should_auto_call(self, context: RunContext, tool: ToolDescriptor) -> bool:
+        if tool.autoCallable:
+            return True
+        if any(p.toolCode == tool.toolCode and p.autoCallEnabled for p in context.toolPreferences):
+            return True
+        return self._is_direct_generation_request(context, tool)
+
+    def _is_direct_generation_request(self, context: RunContext, tool: ToolDescriptor) -> bool:
+        modality = requested_output_modality(context.message)
+        if not modality:
+            return False
+        if not tool_supports_modality(tool, modality):
+            return False
+        return self.intent_router._looks_like_tool_request(context.message)
+
     @staticmethod
-    def _missing_from_enriched(arguments: dict[str, Any], tool: ToolDescriptor) -> list[str]:
+    def _missing_user_arguments(arguments: dict[str, Any], tool: ToolDescriptor) -> list[str]:
+        if tool.fields:
+            return [
+                field.fieldKey
+                for field in tool.fields
+                if _field_requires_user_input(field, tool)
+                and (field.fieldKey not in arguments or arguments[field.fieldKey] in (None, ""))
+            ]
+        required = tool.inputSchema.get("required", [])
+        if not isinstance(required, list):
+            return []
+        properties = tool.inputSchema.get("properties", {})
+        return [
+            name
+            for name in required
+            if isinstance(name, str)
+            and _schema_property_user_required(properties.get(name) if isinstance(properties, dict) else None)
+            and (name not in arguments or arguments[name] in (None, ""))
+        ]
+
+    @staticmethod
+    def _missing_execution_arguments(arguments: dict[str, Any], tool: ToolDescriptor) -> list[str]:
+        if tool.fields:
+            return [
+                field.fieldKey
+                for field in tool.fields
+                if bool(field.executionRequired if field.executionRequired is not None else field.required)
+                and (field.fieldKey not in arguments or arguments[field.fieldKey] in (None, ""))
+            ]
         required = tool.inputSchema.get("required", [])
         if not isinstance(required, list):
             return []
@@ -403,19 +610,11 @@ class DeepAgentsRuntimeEngine:
     # --- Chat / Deep Agents flow ---
 
     async def _run_chat(self, context: RunContext, intent=None) -> str:
-        available_tools = context.availableTools or []
-        if available_tools:
-            tool_descriptions = []
-            for t in available_tools:
-                name = t.toolName or t.toolCode
-                desc = t.description or ""
-                tool_descriptions.append(f"- {name}: {desc}")
-            tool_list_text = "你可以使用的AI工具列表：\n" + "\n".join(tool_descriptions)
-        else:
-            tool_list_text = ""
-        system_prompt = "You are a helpful cloud agent for an AI tool marketplace."
-        if tool_list_text:
-            system_prompt += "\n\n" + tool_list_text
+        system_prompt = _compose_system_prompt(
+            context.agentSystemPrompt,
+            context,
+            DEFAULT_AGENT_SYSTEM_PROMPT,
+        )
 
         messages = [ChatMessage(role="system", content=system_prompt)]
         workspace_memory_context = await self._fetch_workspace_memory_context(context)
@@ -498,9 +697,14 @@ class DeepAgentsRuntimeEngine:
             chat_model = self._chat_model()
             workspace_memory_items = await self._fetch_workspace_memory_items(context)
             workspace_file_context = await self._build_workspace_file_context(context)
+            system_prompt = _compose_system_prompt(
+                context.deepAgentsSystemPrompt or context.agentSystemPrompt,
+                context,
+                DEEP_AGENTS_SYSTEM_PROMPT,
+            )
             agent = create_deep_agent(
                 tools=[],
-                system_prompt=DEEP_AGENTS_SYSTEM_PROMPT,
+                system_prompt=system_prompt,
                 model=chat_model,
                 subagents=profiles_to_deepagents_subagents(
                     default_subagent_profiles(),
@@ -556,7 +760,10 @@ class DeepAgentsRuntimeEngine:
         content_text = tool_data.get("contentText", "") if isinstance(tool_data, dict) else ""
         # 工具已成功产出正文时直接回显，避免二次 LLM 总结/记忆提示把正文换成「已生成」等空话。
         if isinstance(content_text, str) and content_text.strip():
-            await self._emit_answer_events(context.runId, content_text)
+            if _is_structured_media_result(content_text):
+                await self._emit_completed_answer_event(context.runId, content_text)
+            else:
+                await self._emit_answer_events(context.runId, content_text)
             return content_text
         messages_list = [
             ChatMessage(role="system", content="请直接展示工具返回的结果，不要添加额外的总结说明。"),
@@ -644,6 +851,12 @@ class DeepAgentsRuntimeEngine:
                 run_id,
                 RunEventCreate(eventType=MESSAGE_DELTA, eventText=chunk, eventJson={"delta": chunk}),
             )
+        await self.backend.append_event(
+            run_id,
+            RunEventCreate(eventType=MESSAGE_COMPLETED, eventText=answer, eventJson={"content": answer}),
+        )
+
+    async def _emit_completed_answer_event(self, run_id: int, answer: str) -> None:
         await self.backend.append_event(
             run_id,
             RunEventCreate(eventType=MESSAGE_COMPLETED, eventText=answer, eventJson={"content": answer}),
@@ -1030,8 +1243,131 @@ def _chunks(value: str, size: int) -> list[str]:
     return [value[index : index + size] for index in range(0, len(value), size)] or [""]
 
 
+def _parse_json_object(raw: str) -> Any:
+    text = raw.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines:
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        match = re.search(r"\{.*\}", text, re.DOTALL)
+        if not match:
+            return None
+        try:
+            return json.loads(match.group(0))
+        except json.JSONDecodeError:
+            return None
+
+
+def _safe_float(value: Any, fallback: float) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _clip(value: str, limit: int = 500) -> str:
+    if len(value) <= limit:
+        return value
+    return value[:limit] + "...<truncated>"
+
+
+def _is_structured_media_result(value: str) -> bool:
+    text = value.strip()
+    if not text or not text.startswith(("{", "[")):
+        return False
+    try:
+        import json
+
+        parsed = json.loads(text)
+    except Exception:
+        return False
+    return _contains_media_result(parsed)
+
+
+def _contains_media_result(value: Any) -> bool:
+    if isinstance(value, dict):
+        for key, nested in value.items():
+            lowered = str(key).lower()
+            if lowered in {
+                "images",
+                "videos",
+                "audios",
+                "imageurl",
+                "image_url",
+                "videourl",
+                "video_url",
+                "audiourl",
+                "audio_url",
+            }:
+                return True
+            if _contains_media_result(nested):
+                return True
+    if isinstance(value, list):
+        return any(_contains_media_result(item) for item in value)
+    return False
+
+
 def _looks_like_session_recap_question(message: str) -> bool:
     return IntentRouter._looks_like_session_recap_question(message)
+
+
+def _field_requires_user_input(field, tool: ToolDescriptor) -> bool:
+    strategy = (field.agentFillStrategy or "").strip().lower()
+    if strategy in {"default", "derive", "none"}:
+        return False
+    if field.defaultValue not in (None, "") and strategy != "ask_user":
+        return False
+    if field.userRequired is not None:
+        return bool(field.userRequired)
+    properties = tool.inputSchema.get("properties", {})
+    return _schema_property_user_required(properties.get(field.fieldKey) if isinstance(properties, dict) else None)
+
+
+def _schema_property_user_required(prop: Any) -> bool:
+    if not isinstance(prop, dict):
+        return True
+    if prop.get("x-user-required") is False:
+        return False
+    strategy = str(prop.get("x-agent-fill-strategy") or "").strip().lower()
+    if strategy in {"default", "derive", "none"}:
+        return False
+    if prop.get("default") not in (None, "") and strategy != "ask_user":
+        return False
+    return True
+
+
+def _compose_system_prompt(configured_prompt: str | None, context: RunContext, fallback: str) -> str:
+    base_prompt = (configured_prompt or "").strip() or fallback
+    tools_prompt = _format_available_tools_prompt(context)
+    if not tools_prompt:
+        return base_prompt
+    return f"{base_prompt}\n\n{tools_prompt}"
+
+
+def _format_available_tools_prompt(context: RunContext) -> str:
+    available_tools = context.availableTools or []
+    if not available_tools:
+        return ""
+    tool_descriptions = []
+    for tool in available_tools:
+        name = tool.toolName or tool.toolCode
+        desc = tool.description or ""
+        code = tool.toolCode or ""
+        if desc:
+            tool_descriptions.append(f"- {name} ({code}): {desc}")
+        else:
+            tool_descriptions.append(f"- {name} ({code})")
+    return (
+        "你可以读取并编排的平台 AI 工具如下。注意：这些工具会使用各自后台绑定的模型配置，"
+        "不要把当前 Agent 模型当作工具执行模型。\n"
+        + "\n".join(tool_descriptions)
+    )
 
 
 def _format_recent_session_summary(context: RunContext) -> str:

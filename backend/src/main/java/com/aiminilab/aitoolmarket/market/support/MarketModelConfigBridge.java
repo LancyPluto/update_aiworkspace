@@ -29,6 +29,8 @@ public class MarketModelConfigBridge {
                 config.getBalanceUrl(),
                 config.getDocsUrl(),
                 config.getTimeoutSeconds(),
+                null,
+                null,
                 config.getInputTokenPricePer1k(),
                 config.getOutputTokenPricePer1k(),
                 config.getInputTokenPricePer1m(),
@@ -36,6 +38,7 @@ public class MarketModelConfigBridge {
                 config.getBillingUnit(),
                 config.getUnitPrice(),
                 config.getEnabled(),
+                config.getAgentEnabled(),
                 config.getDefault(),
                 capabilitiesCodec.parse(config.getCapabilities())
         );

@@ -11,6 +11,11 @@ public record ToolFieldRequest(
         JsonNode options,
         String optionsJson,
         Boolean required,
+        Boolean executionRequired,
+        Boolean userRequired,
+        String defaultValue,
+        String agentFillStrategy,
+        String riskLevel,
         Integer sortOrder
 ) {
     public String resolveOptionsJson() {

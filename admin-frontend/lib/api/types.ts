@@ -278,6 +278,8 @@ export interface AgentModelConfig {
   balanceUrl?: string | null
   docsUrl?: string | null
   timeoutSeconds: number
+  connectTimeoutSeconds?: number | null
+  readTimeoutSeconds?: number | null
   inputTokenPricePer1k?: number | null
   outputTokenPricePer1k?: number | null
   inputTokenPricePer1m?: number | null
@@ -285,6 +287,7 @@ export interface AgentModelConfig {
   billingUnit?: 'TOKEN_PER_M' | 'PER_CALL' | 'IMAGE_TOKEN' | string | null
   unitPrice?: number | null
   enabled: boolean
+  agentEnabled?: boolean | null
   isDefault?: boolean | null
   /** 该凭证可用于的执行能力（与 executionHandler / toolType 对齐） */
   capabilities?: string[] | null
@@ -300,6 +303,11 @@ export interface ToolField {
   options?: unknown
   optionsJson?: string | null
   required?: boolean
+  executionRequired?: boolean
+  userRequired?: boolean
+  defaultValue?: string | null
+  agentFillStrategy?: 'infer_from_user' | 'default' | 'ask_user' | 'derive' | 'none' | string
+  riskLevel?: 'LOW' | 'MEDIUM' | 'HIGH' | string
   sortOrder?: number
 }
 
@@ -311,6 +319,11 @@ export interface ToolFieldPayload {
   optionsJson?: string
   validationJson?: string
   required?: boolean
+  executionRequired?: boolean
+  userRequired?: boolean
+  defaultValue?: string
+  agentFillStrategy?: 'infer_from_user' | 'default' | 'ask_user' | 'derive' | 'none' | string
+  riskLevel?: 'LOW' | 'MEDIUM' | 'HIGH' | string
   sortOrder?: number
 }
 
@@ -339,6 +352,8 @@ export interface AgentModelConfigPayload {
   balanceUrl?: string
   docsUrl?: string
   timeoutSeconds?: number
+  connectTimeoutSeconds?: number
+  readTimeoutSeconds?: number
   inputTokenPricePer1k?: number
   outputTokenPricePer1k?: number
   inputTokenPricePer1m?: number
@@ -346,6 +361,7 @@ export interface AgentModelConfigPayload {
   billingUnit?: 'TOKEN_PER_M' | 'PER_CALL' | 'IMAGE_TOKEN' | string
   unitPrice?: number
   enabled?: boolean
+  agentEnabled?: boolean
   isDefault?: boolean
   capabilities?: string[]
 }

@@ -3,23 +3,23 @@
 @source "../**/*.{vue,ts}";
 
 :root {
-  --background: oklch(0.985 0.003 247);
-  --foreground: oklch(0.205 0.04 256);
-  --card: oklch(1 0 0);
-  --muted: oklch(0.965 0.012 247);
-  --muted-foreground: oklch(0.52 0.025 256);
-  --primary: oklch(0.546 0.215 263);
+  --background: oklch(0.15 0.004 285);
+  --foreground: oklch(0.96 0.004 285);
+  --card: oklch(0.205 0.006 285);
+  --muted: oklch(0.255 0.006 285);
+  --muted-foreground: oklch(0.68 0.012 285);
+  --primary: oklch(0.69 0.21 305);
   --primary-foreground: oklch(0.99 0 0);
-  --secondary: oklch(0.965 0.012 247);
-  --secondary-foreground: oklch(0.275 0.04 256);
-  --accent: oklch(0.945 0.04 263);
-  --accent-foreground: oklch(0.39 0.18 263);
+  --secondary: oklch(0.285 0.008 285);
+  --secondary-foreground: oklch(0.92 0.004 285);
+  --accent: oklch(0.31 0.05 305);
+  --accent-foreground: oklch(0.88 0.11 305);
   --destructive: oklch(0.62 0.24 27);
   --destructive-foreground: oklch(0.99 0 0);
   --success: oklch(0.62 0.18 155);
   --warning: oklch(0.78 0.16 75);
-  --border: oklch(0.92 0.01 247);
-  --chart-2: oklch(0.65 0.18 220);
+  --border: oklch(0.33 0.008 285);
+  --chart-2: oklch(0.72 0.16 205);
 }
 
 html[data-theme="dark"] {
@@ -72,9 +72,88 @@ body,
 
 body {
   margin: 0;
-  background: var(--background);
+  background:
+    radial-gradient(circle at 84% 4%, rgb(176 92 255 / 0.12), transparent 28rem),
+    linear-gradient(180deg, #171717 0%, #111111 45%, #0f0f10 100%);
   color: var(--foreground);
   font-family: var(--font-sans);
+  color-scheme: dark;
+}
+
+* {
+  scrollbar-color: rgb(255 255 255 / 0.28) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.25);
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgb(255 255 255 / 0.38);
+  background-clip: content-box;
+}
+
+/* Compatibility layer for pages that still use older light utility classes. */
+.bg-white {
+  background-color: var(--card) !important;
+}
+
+.bg-gray-50,
+.bg-slate-50,
+.bg-gray-100 {
+  background-color: var(--muted) !important;
+}
+
+.border-gray-100,
+.border-gray-200 {
+  border-color: var(--border) !important;
+}
+
+.text-gray-900,
+.text-gray-800,
+.text-gray-700 {
+  color: var(--foreground) !important;
+}
+
+.text-gray-600,
+.text-gray-500,
+.text-gray-400 {
+  color: var(--muted-foreground) !important;
+}
+
+.text-blue-600,
+.text-blue-700,
+.text-blue-800 {
+  color: var(--primary) !important;
+}
+
+.bg-blue-600,
+.bg-blue-700 {
+  background-color: var(--primary) !important;
+}
+
+.focus\:border-blue-400:focus {
+  border-color: var(--primary) !important;
+}
+
+.shadow-sm,
+.shadow-md,
+.shadow-lg,
+.shadow-xl,
+.shadow-2xl {
+  --tw-shadow-color: rgb(0 0 0 / 0.45) !important;
 }
 
 html[data-theme="dark"] body {

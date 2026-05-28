@@ -12,6 +12,8 @@ public interface AgentModelConfigService {
 
     List<AgentModelConfigResponse> adminList();
 
+    List<AgentModelConfigResponse> agentSelectableList();
+
     AgentModelConfigResponse adminCreate(AgentModelConfigRequest request);
 
     AgentModelConfigResponse adminUpdate(Long id, AgentModelConfigRequest request);
@@ -25,4 +27,6 @@ public interface AgentModelConfigService {
     AgentModelConfigTestResponse adminTest(AgentModelConfigRequest request);
 
     InternalAgentModelConfigResponse internalGet();
+
+    InternalAgentModelConfigResponse internalGet(Long modelConfigId);
 }

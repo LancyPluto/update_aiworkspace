@@ -83,6 +83,11 @@ export interface EditableField {
   fieldType: FieldTypeValue
   placeholder: string
   required: boolean
+  executionRequired: boolean
+  userRequired: boolean
+  defaultValue: string
+  agentFillStrategy: "infer_from_user" | "default" | "ask_user" | "derive" | "none"
+  riskLevel: "LOW" | "MEDIUM" | "HIGH"
   sortOrder: number
   options: FieldOptionRow[]
   isCore: boolean
@@ -182,6 +187,11 @@ export function editableFromToolField(field: ToolField, index: number): Editable
     fieldType,
     placeholder: field.placeholder || "",
     required: field.required !== false,
+    executionRequired: field.executionRequired ?? field.required !== false,
+    userRequired: field.userRequired ?? field.required !== false,
+    defaultValue: field.defaultValue || "",
+    agentFillStrategy: normalizeFillStrategy(field.agentFillStrategy, field.userRequired ?? field.required !== false),
+    riskLevel: normalizeRiskLevel(field.riskLevel),
     sortOrder: field.sortOrder ?? index + 1,
     options: supportsOptions(fieldType) ? optionsFromToolField(field) : [],
     isCore: isCoreOptionsJson(field.optionsJson) || Boolean(
@@ -201,6 +211,11 @@ export function editableFromPayload(field: Partial<ToolFieldPayload>, index: num
     fieldType,
     placeholder: field.placeholder ? String(field.placeholder) : "",
     required: field.required !== false,
+    executionRequired: field.executionRequired ?? field.required !== false,
+    userRequired: field.userRequired ?? field.required !== false,
+    defaultValue: field.defaultValue ? String(field.defaultValue) : "",
+    agentFillStrategy: normalizeFillStrategy(field.agentFillStrategy, field.userRequired ?? field.required !== false),
+    riskLevel: normalizeRiskLevel(field.riskLevel),
     sortOrder: Number(field.sortOrder ?? index + 1),
     options: supportsOptions(fieldType) ? parseOptionsJson(field.optionsJson) : [],
     isCore: isCoreOptionsJson(field.optionsJson),
@@ -219,6 +234,11 @@ export function toFieldPayload(field: EditableField, index: number): ToolFieldPa
     placeholder: field.placeholder.trim() || undefined,
     optionsJson,
     required: field.required,
+    executionRequired: field.executionRequired,
+    userRequired: field.userRequired,
+    defaultValue: field.defaultValue.trim() || undefined,
+    agentFillStrategy: field.agentFillStrategy,
+    riskLevel: field.riskLevel,
     sortOrder: field.sortOrder || index + 1,
   }
 }
@@ -240,10 +260,31 @@ export function createEmptyField(sortOrder: number): EditableField {
     fieldType: "text",
     placeholder: "",
     required: false,
+    executionRequired: false,
+    userRequired: false,
+    defaultValue: "",
+    agentFillStrategy: "default",
+    riskLevel: "LOW",
     sortOrder,
     options: [],
     isCore: false,
   }
+}
+
+function normalizeFillStrategy(value: unknown, userRequired: boolean): EditableField["agentFillStrategy"] {
+  const normalized = String(value || "").trim().toLowerCase()
+  if (["infer_from_user", "default", "ask_user", "derive", "none"].includes(normalized)) {
+    return normalized as EditableField["agentFillStrategy"]
+  }
+  return userRequired ? "ask_user" : "default"
+}
+
+function normalizeRiskLevel(value: unknown): EditableField["riskLevel"] {
+  const normalized = String(value || "").trim().toUpperCase()
+  if (["LOW", "MEDIUM", "HIGH"].includes(normalized)) {
+    return normalized as EditableField["riskLevel"]
+  }
+  return "LOW"
 }
 
 export function applyOptionPreset(field: EditableField, preset: OptionPresetKey): EditableField {
