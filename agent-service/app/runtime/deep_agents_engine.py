@@ -825,12 +825,17 @@ class DeepAgentsRuntimeEngine:
             stream_iter = self.model.chat_stream(messages_list, tools=extra_kwargs.get("tools"))
         except TypeError:
             stream_iter = self.model.chat_stream(messages_list)
+        persisted_length = 0
         async for chunk in stream_iter:
             parts.append(chunk)
             await self.backend.append_event(
                 run_id,
                 RunEventCreate(eventType=MESSAGE_DELTA, eventText=chunk, eventJson={"delta": chunk}),
             )
+            current_answer = "".join(parts)
+            if len(current_answer) - persisted_length >= 160:
+                await self._upsert_streaming_answer(run_id, current_answer)
+                persisted_length = len(current_answer)
         answer = "".join(parts)
         if not answer.strip() and fallback_answer:
             answer = fallback_answer
@@ -839,11 +844,23 @@ class DeepAgentsRuntimeEngine:
                     run_id,
                     RunEventCreate(eventType=MESSAGE_DELTA, eventText=chunk, eventJson={"delta": chunk}),
                 )
+        await self._upsert_streaming_answer(run_id, answer)
         await self.backend.append_event(
             run_id,
             RunEventCreate(eventType=MESSAGE_COMPLETED, eventText=answer, eventJson={"content": answer}),
         )
         return answer
+
+    async def _upsert_streaming_answer(self, run_id: int, answer: str) -> None:
+        if not answer.strip():
+            return
+        upsert = getattr(self.backend, "upsert_streaming_answer", None)
+        if not callable(upsert):
+            return
+        try:
+            await upsert(run_id, answer)
+        except Exception:
+            LOGGER.exception("failed to persist streaming answer preview, runId=%s", run_id)
 
     async def _emit_answer_events(self, run_id: int, answer: str) -> None:
         for chunk in _chunks(answer, 32):

@@ -35,6 +35,7 @@ import {
   fetchTools,
   regenerateAgentRun,
   sendAgentMessage,
+  streamAgentRunEvents,
   uploadAgentFile,
 } from "@/api"
 import type {
@@ -78,6 +79,7 @@ const removingFileId = ref<number | null>(null)
 const agentError = ref<string | null>(null)
 const rememberTool = ref(true)
 const activeRunId = ref<number | null>(null)
+const streamingAssistantMessageId = ref<number | null>(null)
 const runConnectionStatus = ref<
   "idle" | "running" | "awaiting_confirmation" | "completed" | "failed"
 >("idle")
@@ -99,6 +101,7 @@ const fileInputRef = ref<HTMLInputElement | null>(null)
 const composerTextareaRef = ref<HTMLTextAreaElement | null>(null)
 const composerExpanded = ref(false)
 const messagesKey = computed(() => `agent_messages_${props.sessionId}`)
+let runStreamAbort: AbortController | null = null
 
 const input = computed({
   get: () => props.draft,
@@ -143,12 +146,19 @@ const showRunRecoveryBanner = computed(
 const selectedAgentModel = computed(() =>
   props.agentModels.find((model) => model.id === props.modelConfigId) ?? props.agentModels[0] ?? null,
 )
+const hasStreamingAssistantContent = computed(() =>
+  streamingAssistantMessageId.value != null &&
+  messages.value.some((message) => message.id === streamingAssistantMessageId.value && message.contentText.length > 0),
+)
 const showGenerationLoading = computed(() =>
-  sending.value ||
-  editingRegenerating.value ||
-  regeneratingMessageId.value != null ||
-  runConnectionStatus.value === "running" ||
-  runConnectionStatus.value === "awaiting_confirmation",
+  !hasStreamingAssistantContent.value &&
+  (
+    sending.value ||
+    editingRegenerating.value ||
+    regeneratingMessageId.value != null ||
+    runConnectionStatus.value === "running" ||
+    runConnectionStatus.value === "awaiting_confirmation"
+  ),
 )
 const previewRecommendations = computed<AssetPreviewRecommendation[]>(() =>
   previewAsset.value ? recommendToolsForAsset(previewAsset.value) : [],
@@ -246,6 +256,7 @@ async function cancelRecoveryRun() {
   agentError.value = null
   try {
     await cancelAgentRun(recoveryRunId.value, { token: props.token })
+    stopRunEventStream()
     showActiveRunLimitHint.value = false
     recoveryRunId.value = null
     activeRunId.value = null
@@ -276,6 +287,7 @@ async function cancelCurrentRun() {
     agentError.value = null
     try {
       await cancelAgentRun(activeRunId.value, { token: props.token })
+      stopRunEventStream()
       activeRunId.value = null
       lastFailedRunId.value = null
       runConnectionStatus.value = "idle"
@@ -603,6 +615,48 @@ function delay(ms: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, ms))
 }
 
+function stopRunEventStream() {
+  runStreamAbort?.abort()
+  runStreamAbort = null
+}
+
+function streamingMessageId(runId: number) {
+  return -Math.abs(runId)
+}
+
+function ensureStreamingAssistantMessage(runId: number) {
+  const existing = messages.value.find(
+    (message) => message.role === "ASSISTANT" && message.runId === runId && message.id === streamingAssistantMessageId.value,
+  )
+  if (existing) return existing
+  const tempId = streamingMessageId(runId)
+  const message: AgentMessage = {
+    id: tempId,
+    sessionId: props.sessionId,
+    role: "ASSISTANT",
+    contentText: "",
+    runId,
+    createdAt: new Date().toISOString(),
+  }
+  streamingAssistantMessageId.value = tempId
+  messages.value = [...messages.value.filter((item) => item.id !== tempId), message]
+  return message
+}
+
+function appendStreamingAssistantDelta(runId: number, delta: string) {
+  if (!delta) return
+  const message = ensureStreamingAssistantMessage(runId)
+  message.contentText += delta
+  void scrollBottom()
+}
+
+function completeStreamingAssistantMessage(runId: number, content: string) {
+  if (!content) return
+  const message = ensureStreamingAssistantMessage(runId)
+  message.contentText = content
+  void scrollBottom()
+}
+
 async function syncRunEvents(runId: number) {
   if (!props.token) return
   const afterEventId = events.value.length ? events.value.at(-1)!.id : undefined
@@ -611,6 +665,80 @@ async function syncRunEvents(runId: number) {
 }
 
 async function waitForRunComplete(runId: number) {
+  runConnectionStatus.value = "running"
+  stopRunEventStream()
+  const controller = new AbortController()
+  runStreamAbort = controller
+  try {
+    await streamAgentRunEvents(runId, {
+      token: props.token,
+      signal: controller.signal,
+      afterEventId: events.value.length ? events.value.at(-1)!.id : undefined,
+      onEvent: (event) => handleStreamedRunEvent(runId, event),
+    })
+  } catch (error) {
+    if (controller.signal.aborted) return
+    await pollRunUntilComplete(runId)
+    return
+  } finally {
+    if (runStreamAbort === controller) runStreamAbort = null
+  }
+
+  try {
+    const run = await fetchAgentRun(runId, { token: props.token })
+    if (run.status === "WAITING_USER_CONFIRMATION") {
+      await syncRunEvents(runId)
+      runConnectionStatus.value = "awaiting_confirmation"
+      await scrollBottom()
+      return
+    }
+    if (isTerminalRunStatus(run.status)) {
+      await syncRunEvents(runId)
+      settleRunStatus(run)
+      if (run.status === "FAILED" || run.status === "TIMEOUT") {
+        lastFailedRunId.value = run.id
+      }
+      await refreshMessages()
+      streamingAssistantMessageId.value = null
+      await scrollBottom()
+      return
+    }
+  } catch (error) {
+    runConnectionStatus.value = "failed"
+    agentError.value = formatAgentError(error)
+    recoveryRunId.value = runId
+    lastFailedRunId.value = runId
+    activeRunId.value = null
+    return
+  }
+
+  await pollRunUntilComplete(runId)
+}
+
+function handleStreamedRunEvent(runId: number, event: AgentRunEvent) {
+  const alreadySeen = events.value.some((item) => item.id === event.id)
+  appendRunEvent(event)
+  if (alreadySeen) return
+
+  if (event.eventType === "message.delta") {
+    const payload = parseEventJson(event.eventJson)
+    const delta = typeof payload.delta === "string" ? payload.delta : event.eventText ?? ""
+    appendStreamingAssistantDelta(runId, delta)
+    return
+  }
+  if (event.eventType === "message.completed") {
+    const payload = parseEventJson(event.eventJson)
+    const content = typeof payload.content === "string" ? payload.content : event.eventText ?? ""
+    completeStreamingAssistantMessage(runId, content)
+    return
+  }
+  if (event.eventType === "tool.confirmation_required") {
+    runConnectionStatus.value = "awaiting_confirmation"
+    stopRunEventStream()
+  }
+}
+
+async function pollRunUntilComplete(runId: number) {
   runConnectionStatus.value = "running"
   const POLL_INTERVAL_MS = 1200
   const MAX_WAIT_MS = 5 * 60 * 1000
@@ -631,6 +759,7 @@ async function waitForRunComplete(runId: number) {
           lastFailedRunId.value = run.id
         }
         await refreshMessages()
+        streamingAssistantMessageId.value = null
         await scrollBottom()
         return
       }
@@ -859,6 +988,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  stopRunEventStream()
   window.removeEventListener("resize", adjustComposerTextareaHeight)
 })
 
@@ -932,6 +1062,7 @@ defineExpose({
                 v-else
                 :message="message.contentText"
                 :is-user="message.role === 'USER'"
+                :streaming="message.id === streamingAssistantMessageId && hasActiveRun"
                 @preview="openAssetPreview"
               />
             </div>
