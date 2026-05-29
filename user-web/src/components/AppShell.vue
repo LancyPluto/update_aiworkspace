@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { RouterLink, useRoute } from "vue-router"
 import type { Component } from "vue"
 import {
@@ -10,9 +10,11 @@ import {
   Wallet,
   FolderHeart,
   ChevronDown,
+  Moon,
   PanelLeft,
   PanelLeftClose,
   Sparkles,
+  Sun,
   Search,
   Plus,
   Bell,
@@ -21,7 +23,7 @@ import {
   X,
   Menu,
 } from "lucide-vue-next"
-import { ref, onMounted, computed, watch } from "vue"
+import { ref, onMounted, onUnmounted, computed, watch } from "vue"
 import { fetchCreditAccount } from "@/api/creditApi"
 import { fetchCustomerServiceSettings } from "@/api/settingsApi"
 import type { CustomerServiceSettings } from "@/api/settingsApi"
@@ -29,6 +31,7 @@ import type { CreditAccount } from "@/api/types"
 import { userRoutes } from "@/router/userRoutes"
 import { useAuthStore } from "@/store/authStore"
 import MemberBadge from "@/components/MemberBadge/MemberBadge.vue"
+import { applyAppTheme, getStoredTheme, storeAppTheme, type AppTheme } from "@/utils/theme"
 
 withDefaults(
   defineProps<{
@@ -60,6 +63,7 @@ const SIDEBAR_OPEN_KEY = "ai_tool_market_sidebar_open"
 const EXPANDED_GROUPS_KEY = "ai_tool_market_nav_expanded_groups"
 
 const credit = ref<CreditAccount | null>(null)
+const theme = ref<AppTheme>("light")
 const sidebarOpen = ref(true)
 const expandedGroups = ref<Set<string>>(new Set())
 const customerServiceOpen = ref(false)
@@ -92,8 +96,17 @@ function toggleSidebar() {
   sidebarOpen.value = !sidebarOpen.value
 }
 
+function toggleTheme() {
+  theme.value = theme.value === "dark" ? "light" : "dark"
+}
+
 watch(sidebarOpen, (open) => {
   localStorage.setItem(SIDEBAR_OPEN_KEY, open ? "1" : "0")
+})
+
+watch(theme, (next) => {
+  applyAppTheme(next)
+  storeAppTheme(next)
 })
 
 function saveExpandedGroups() {
@@ -152,6 +165,15 @@ const creditPercent = computed(() => {
 
 const availableCredits = computed(() => credit.value?.available ?? null)
 
+function handleCreditsUpdated(event: Event) {
+  const detail = (event as CustomEvent<CreditAccount | undefined>).detail
+  if (detail) {
+    credit.value = detail
+    return
+  }
+  void loadCreditAccount()
+}
+
 async function loadCreditAccount() {
   if (!auth.isLoggedIn || !auth.token) {
     credit.value = null
@@ -195,6 +217,9 @@ watch(
 )
 
 onMounted(async () => {
+  theme.value = getStoredTheme()
+  applyAppTheme(theme.value)
+
   const saved = localStorage.getItem(SIDEBAR_OPEN_KEY)
   if (saved === "0") sidebarOpen.value = false
   if (saved === "1") sidebarOpen.value = true
@@ -212,13 +237,18 @@ onMounted(async () => {
   }
 
   ensureActiveGroupExpanded()
+  window.addEventListener("credits:updated", handleCreditsUpdated)
   await Promise.all([loadCreditAccount(), loadCustomerServiceSettings()])
+})
+
+onUnmounted(() => {
+  window.removeEventListener("credits:updated", handleCreditsUpdated)
 })
 </script>
 
 <template>
   <div
-    class="flex h-screen overflow-hidden bg-background text-foreground"
+    class="app-shell-root flex h-screen overflow-hidden bg-background text-foreground"
     :style="{ '--app-sidebar-width': sidebarOpen ? '268px' : '0px' }"
   >
     <aside
@@ -313,9 +343,9 @@ onMounted(async () => {
 
       <div class="shrink-0 p-5">
         <div class="rounded-2xl border border-white/8 bg-white/[0.025] p-4 shadow-[inset_0_1px_0_rgb(255_255_255_/_0.035)]">
-          <p class="text-[11px] font-medium tracking-wide text-white/42">已用算力</p>
+          <p class="text-[11px] font-medium tracking-wide text-white/42">可用算力</p>
           <p class="mt-1 font-mono text-[12px] tabular-nums text-white/76">
-            {{ credit ? credit.totalConsumed.toLocaleString() : '---' }}
+            {{ credit ? credit.available.toLocaleString() : '---' }}
             <span class="font-normal text-white/32">
               / {{ credit ? credit.totalGranted.toLocaleString() : '---' }}
             </span>
@@ -341,14 +371,14 @@ onMounted(async () => {
         <button
           type="button"
           class="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] text-white/70 hover:bg-white/10 hover:text-white lg:hidden"
-          aria-label="菜单"
+          aria-label="鑿滃崟"
         >
           <Menu class="h-5 w-5" aria-hidden="true" />
         </button>
         <button
           type="button"
           class="hidden h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] text-white/60 hover:bg-white/10 hover:text-white lg:inline-flex"
-          :aria-label="sidebarOpen ? '隐藏侧栏' : '显示侧栏'"
+          :aria-label="sidebarOpen ? '闅愯棌渚ф爮' : '鏄剧ず渚ф爮'"
           :aria-expanded="sidebarOpen"
           @click="toggleSidebar"
         >
@@ -360,7 +390,7 @@ onMounted(async () => {
           <p v-if="description" class="text-xs text-white/45 truncate">{{ description }}</p>
         </div>
         <div class="hidden h-12 min-w-0 flex-1 items-center rounded-full bg-white/[0.07] px-4 ring-1 ring-white/8 xl:flex">
-          <span class="pr-4 text-sm text-white/70">全部</span>
+          <span class="pr-4 text-sm text-white/70">鍏ㄩ儴</span>
           <span class="h-5 w-px bg-white/10" />
           <Search class="ml-4 h-5 w-5 text-white/35" />
           <input
@@ -373,12 +403,12 @@ onMounted(async () => {
           class="ml-auto hidden h-11 items-center gap-2 rounded-full bg-primary px-5 text-sm font-semibold text-white shadow-[0_12px_28px_rgb(176_92_255_/_0.32)] hover:brightness-110 md:inline-flex"
         >
           <Plus class="h-4 w-4" />
-          创建
+          鍒涘缓
         </RouterLink>
         <button
           type="button"
           class="hidden h-10 w-10 shrink-0 items-center justify-center rounded-full text-white/55 hover:bg-white/8 hover:text-white md:inline-flex"
-          aria-label="通知"
+          aria-label="閫氱煡"
         >
           <Bell class="h-5 w-5" />
         </button>
@@ -392,6 +422,17 @@ onMounted(async () => {
           联系客服
         </button>
         <div class="flex items-center gap-3">
+          <button
+            type="button"
+            class="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.04] text-white/60 transition hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            :aria-label="theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'"
+            :title="theme === 'dark' ? 'Light mode' : 'Dark mode'"
+            :aria-pressed="theme === 'dark'"
+            @click="toggleTheme"
+          >
+            <Sun v-if="theme === 'dark'" class="h-4 w-4" aria-hidden="true" />
+            <Moon v-else class="h-4 w-4" aria-hidden="true" />
+          </button>
           <template v-if="auth.isLoggedIn">
             <div class="flex items-center gap-2">
               <MemberBadge :available="availableCredits" />
@@ -402,7 +443,7 @@ onMounted(async () => {
               class="text-xs text-white/45 hover:text-white"
               @click="auth.logout()"
             >
-              退出
+              閫€鍑?
             </button>
           </template>
           <template v-else>
@@ -410,7 +451,7 @@ onMounted(async () => {
               :to="'/'"
               class="text-xs text-primary hover:text-white"
             >
-              登录
+              鐧诲綍
             </RouterLink>
           </template>
         </div>
@@ -459,3 +500,4 @@ onMounted(async () => {
     </div>
   </div>
 </template>
+

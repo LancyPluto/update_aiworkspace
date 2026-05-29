@@ -146,7 +146,7 @@ public class DataInitializer implements CommandLineRunner {
                   payment_channel VARCHAR(32) NOT NULL DEFAULT 'MOCK',
                   status VARCHAR(32) NOT NULL DEFAULT 'WAITING_PAYMENT',
                   status_reason VARCHAR(255),
-                  pay_url VARCHAR(512),
+                  pay_url TEXT,
                   qr_code_url VARCHAR(512),
                   external_trade_no VARCHAR(128),
                   idempotency_key VARCHAR(128),
@@ -158,6 +158,7 @@ public class DataInitializer implements CommandLineRunner {
                   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )
                 """);
+        executeSqlIgnore("ALTER TABLE credit_recharge_orders MODIFY COLUMN pay_url TEXT NULL");
         ensureIndex(
                 "credit_recharge_orders",
                 "uk_recharge_user_idem",

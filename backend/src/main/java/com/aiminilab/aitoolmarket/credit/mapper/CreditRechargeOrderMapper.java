@@ -65,4 +65,30 @@ public interface CreditRechargeOrderMapper extends BaseMapper<CreditRechargeOrde
     int bindExternalTradeNo(@Param("orderId") Long orderId,
                             @Param("externalTradeNo") String externalTradeNo,
                             @Param("eventAt") LocalDateTime eventAt);
+
+    @Update("""
+            UPDATE credit_recharge_orders
+            SET pay_url = #{payUrl},
+                qr_code_url = NULL,
+                status_reason = #{reason},
+                updated_at = #{eventAt}
+            WHERE id = #{orderId}
+              AND status = 'WAITING_PAYMENT'
+            """)
+    int bindPayUrl(@Param("orderId") Long orderId,
+                   @Param("payUrl") String payUrl,
+                   @Param("reason") String reason,
+                   @Param("eventAt") LocalDateTime eventAt);
+
+    @Update("""
+            UPDATE credit_recharge_orders
+            SET status_reason = #{reason},
+                updated_at = #{eventAt}
+            WHERE id = #{orderId}
+              AND status = #{status}
+            """)
+    int touchStatusReason(@Param("orderId") Long orderId,
+                          @Param("status") String status,
+                          @Param("reason") String reason,
+                          @Param("eventAt") LocalDateTime eventAt);
 }

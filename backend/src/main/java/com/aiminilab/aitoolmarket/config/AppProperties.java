@@ -512,6 +512,7 @@ public class AppProperties {
 
     public static class Payment {
         private WechatNative wechatNative = new WechatNative();
+        private AlipayPage alipayPage = new AlipayPage();
 
         public WechatNative getWechatNative() {
             return wechatNative;
@@ -519,6 +520,82 @@ public class AppProperties {
 
         public void setWechatNative(WechatNative wechatNative) {
             this.wechatNative = wechatNative == null ? new WechatNative() : wechatNative;
+        }
+
+        public AlipayPage getAlipayPage() {
+            return alipayPage;
+        }
+
+        public void setAlipayPage(AlipayPage alipayPage) {
+            this.alipayPage = alipayPage == null ? new AlipayPage() : alipayPage;
+        }
+    }
+
+    public static class AlipayPage {
+        private boolean enabled;
+        private String appId = "";
+        private String merchantPrivateKey = "";
+        private String alipayPublicKey = "";
+        private String notifyUrl = "";
+        private String returnUrl = "";
+        private String gatewayUrl = "https://openapi.alipay.com/gateway.do";
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public String getAppId() {
+            return appId;
+        }
+
+        public void setAppId(String appId) {
+            this.appId = appId == null ? "" : appId;
+        }
+
+        public String getMerchantPrivateKey() {
+            return merchantPrivateKey;
+        }
+
+        public void setMerchantPrivateKey(String merchantPrivateKey) {
+            this.merchantPrivateKey = merchantPrivateKey == null ? "" : merchantPrivateKey;
+        }
+
+        public String getAlipayPublicKey() {
+            return alipayPublicKey;
+        }
+
+        public void setAlipayPublicKey(String alipayPublicKey) {
+            this.alipayPublicKey = alipayPublicKey == null ? "" : alipayPublicKey;
+        }
+
+        public String getNotifyUrl() {
+            return notifyUrl;
+        }
+
+        public void setNotifyUrl(String notifyUrl) {
+            this.notifyUrl = notifyUrl == null ? "" : notifyUrl;
+        }
+
+        public String getReturnUrl() {
+            return returnUrl;
+        }
+
+        public void setReturnUrl(String returnUrl) {
+            this.returnUrl = returnUrl == null ? "" : returnUrl;
+        }
+
+        public String getGatewayUrl() {
+            return gatewayUrl;
+        }
+
+        public void setGatewayUrl(String gatewayUrl) {
+            this.gatewayUrl = gatewayUrl == null || gatewayUrl.isBlank()
+                    ? "https://openapi.alipay.com/gateway.do"
+                    : gatewayUrl;
         }
     }
 

@@ -38,6 +38,7 @@ import { useAuthStore } from "@/store/authStore"
 import { buildTaskResultBlocks } from "@/utils/taskResultBlocks"
 import { isPptWorkspaceTool } from "@/api/pptApi"
 import { userRoutes } from "@/router/userRoutes"
+import { resolveModelBrand } from "@/utils/modelBrand"
 
 const route = useRoute()
 const router = useRouter()
@@ -145,11 +146,7 @@ const inputPlaceholder = computed(() => {
 
 const chatIconUrl = computed(() => {
   if (!tool.value) return ""
-  if (tool.value.modelIconUrl) return tool.value.modelIconUrl
-  if (tool.value.mediaDisplayMode !== "effect" && tool.value.iconUrl && !isVideoPreviewUrl(tool.value.iconUrl)) {
-    return tool.value.iconUrl
-  }
-  return ""
+  return resolveModelBrand(tool.value).iconUrl
 })
 const chatAvatarText = computed(() => {
   const source = tool.value?.modelConfigName || tool.value?.modelName || tool.value?.name || "AI"
@@ -157,7 +154,7 @@ const chatAvatarText = computed(() => {
   if (latin) return latin.slice(0, 2).toUpperCase()
   return source.trim().slice(0, 2) || "AI"
 })
-const chatAvatarTitle = computed(() => tool.value?.modelConfigName || tool.value?.modelName || tool.value?.name || "AI")
+const chatAvatarTitle = computed(() => (tool.value ? resolveModelBrand(tool.value).name : "AI"))
 
 function lastSessionStorageKey(id: string) {
   return `ai_tool_market_marketplace_last_session_${id}`

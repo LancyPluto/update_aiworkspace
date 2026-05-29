@@ -23,6 +23,7 @@ async function loadBilling() {
     ])
     account.value = accountRes
     logs.value = logRes.list
+    window.dispatchEvent(new CustomEvent("credits:updated", { detail: accountRes }))
   } catch (err) {
     error.value = err instanceof Error ? err.message : "加载算力数据失败"
   } finally {
