@@ -49,6 +49,26 @@ export function fetchAdminTools(params?: {
   return http.get<PageResponse<ToolSummary>>(`/api/admin/v1/tools${query ? `?${query}` : ''}`)
 }
 
+/** 拉取全部工具（自动翻页），避免默认 pageSize=20 导致旧工具在管理端不可见 */
+export async function fetchAllAdminTools(
+  params?: Omit<NonNullable<Parameters<typeof fetchAdminTools>[0]>, 'pageNo' | 'pageSize'>,
+): Promise<PageResponse<ToolSummary>> {
+  const pageSize = 100
+  let pageNo = 1
+  const list: ToolSummary[] = []
+  let total = 0
+
+  while (true) {
+    const page = await fetchAdminTools({ ...params, pageNo, pageSize })
+    list.push(...page.list)
+    total = page.total
+    if (!page.hasNext) {
+      return { list, total, pageNo: 1, pageSize: list.length, hasNext: false }
+    }
+    pageNo += 1
+  }
+}
+
 export function createTool(payload: UpsertToolPayload) {
   return http.post<ToolSummary>('/api/admin/v1/tools', payload)
 }

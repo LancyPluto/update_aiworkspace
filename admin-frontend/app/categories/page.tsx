@@ -13,7 +13,7 @@ import { ApiError } from "@/lib/api/http"
 import {
   createToolCategory,
   fetchAdminToolCategories,
-  fetchAdminTools,
+  fetchAllAdminTools,
   updateToolCategory,
   updateToolCategoryStatus,
 } from "@/lib/api/tools"
@@ -64,7 +64,7 @@ export default function CategoriesPage() {
     try {
       const [cats, toolsResp] = await Promise.all([
         fetchAdminToolCategories(),
-        fetchAdminTools().catch(() => ({ list: [] as ToolSummary[], total: 0 })),
+        fetchAllAdminTools().catch(() => ({ list: [] as ToolSummary[], total: 0 })),
       ])
       setCategories(cats)
       setTools(toolsResp.list)
