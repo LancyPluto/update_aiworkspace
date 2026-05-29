@@ -11,6 +11,7 @@ public interface CreditLogMapper extends BaseMapper<CreditLog> {
     default List<CreditLog> findLogs(Long userId, String logType, int limit, int offset) {
         LambdaQueryWrapper<CreditLog> wrapper = new LambdaQueryWrapper<CreditLog>()
                 .eq(CreditLog::getUserId, userId)
+                .orderByDesc(CreditLog::getCreatedAt)
                 .orderByDesc(CreditLog::getId)
                 .last("LIMIT " + limit + " OFFSET " + offset);
         if (logType != null && !logType.isBlank()) {
