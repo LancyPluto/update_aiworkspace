@@ -98,6 +98,7 @@ services:
       banana-slides:
         condition: service_healthy
     environment:
+      TZ: Asia/Shanghai
       SERVER_PORT: 8080
       MYSQL_HOST: mysql
       MYSQL_PORT: 3306
@@ -206,6 +207,7 @@ services:
       rabbitmq:
         condition: service_healthy
     environment:
+      TZ: Asia/Shanghai
       PIP_INDEX_URL: https://mirrors.aliyun.com/pypi/simple/
       PIP_TRUSTED_HOST: mirrors.aliyun.com
       REDIS_HOST: redis
@@ -247,6 +249,7 @@ services:
       - backend
       - redis
     environment:
+      TZ: Asia/Shanghai
       PIP_INDEX_URL: https://mirrors.aliyun.com/pypi/simple/
       PIP_TRUSTED_HOST: mirrors.aliyun.com
       APP_ENV: local
