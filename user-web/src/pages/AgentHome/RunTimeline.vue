@@ -2,6 +2,7 @@
 import { computed, ref } from "vue"
 import { AlertTriangle, Bot, CheckCircle2, ChevronDown, Database, FileText, Hammer, Loader2, Sparkles, Store } from "lucide-vue-next"
 import type { AgentRunEvent } from "@/api/types"
+import { filterUserFacingRunEvents } from "./runTimelineEvents"
 
 const props = defineProps<{
   events: AgentRunEvent[]
@@ -12,41 +13,18 @@ type TimelineTone = "info" | "success" | "warning" | "error"
 
 const expandedEventIds = ref<Set<number>>(new Set())
 
-const visibleEvents = computed(() =>
-  props.events
-    .filter((event) =>
-      [
-        "run.started",
-        "intent.detected",
-        "tool.selected",
-        "tool.confirmation_required",
-        "subagent.started",
-        "subagent.completed",
-        "subagent.failed",
-        "memory.context_injected",
-        "memory.context_frozen",
-        "memory.candidate_created",
-        "memory.saved",
-        "workspace_file.created",
-        "workspace_file.updated",
-        "workspace_file.read",
-        "tool.started",
-        "tool.task_dispatched",
-        "tool.task_progress",
-        "tool.finished",
-        "message.completed",
-        "run.completed",
-        "run.failed",
-      ].includes(event.eventType),
-    )
-    .slice(-14),
-)
+const visibleEvents = computed(() => filterUserFacingRunEvents(props.events, props.inlineMode).slice(-14))
 
 function parseEventJson(value?: string | null | Record<string, unknown>) {
   if (value == null || value === "") return {} as Record<string, unknown>
   if (typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>
   try {
-    return JSON.parse(String(value)) as Record<string, unknown>
+    const parsed = JSON.parse(String(value)) as unknown
+    if (typeof parsed === "string") {
+      const nested = JSON.parse(parsed) as unknown
+      return typeof nested === "object" && nested !== null && !Array.isArray(nested) ? nested as Record<string, unknown> : {}
+    }
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {}
   } catch {
     return {} as Record<string, unknown>
   }

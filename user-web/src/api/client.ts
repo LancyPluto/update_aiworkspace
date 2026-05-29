@@ -115,13 +115,23 @@ export async function apiRequest<T>(
     headers.Authorization = `Bearer ${token}`
   }
 
-  const res = await fetch(url, {
-    method,
-    headers,
-    body: bodyInit,
-    credentials: "include",
-    signal: options?.signal,
-  })
+  let res: Response
+  try {
+    res = await fetch(url, {
+      method,
+      headers,
+      body: bodyInit,
+      credentials: "include",
+      signal: options?.signal,
+    })
+  } catch (error) {
+    const hint =
+      typeof window !== "undefined"
+        ? `请确认后端已启动（默认 ${getApiOrigin() || `${window.location.origin}/api`} → 8080）`
+        : "请确认后端已启动"
+    const message = error instanceof TypeError ? `无法连接服务器（${error.message}）。${hint}` : String(error)
+    throw new ApiBusinessError("SYSTEM_ERROR", message, undefined)
+  }
 
   const rawText = await res.text()
   let json: ApiResponse<T>

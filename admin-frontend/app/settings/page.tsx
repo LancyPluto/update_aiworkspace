@@ -14,7 +14,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { ApiError } from "@/lib/api/http"
 import { downloadConfigBundle, exportConfigBundle, importConfigBundle, readConfigBundleFile } from "@/lib/api/config-bundles"
-import { fetchSettings, updateSettings } from "@/lib/api/settings"
+import { getBaseUrl } from "@/lib/api/http"
+import { fetchSettings, updateSettings, uploadCustomerServiceQr } from "@/lib/api/settings"
+import { cn } from "@/lib/utils"
 import { CheckCircle, Database, Download, Headphones, KeyRound, RefreshCw, Save, Server, Settings2, Shield, Upload } from "lucide-react"
 
 interface SettingsForm {
@@ -58,6 +60,15 @@ function stringToBool(value: string | undefined, fallback: boolean) {
   return value === "true"
 }
 
+function resolveMediaUrl(url?: string) {
+  const raw = url?.trim()
+  if (!raw) return ""
+  if (raw.startsWith("http://") || raw.startsWith("https://") || raw.startsWith("data:")) return raw
+  const path = raw.startsWith("/") ? raw : `/${raw}`
+  const baseUrl = getBaseUrl().replace(/\/$/, "")
+  return baseUrl ? `${baseUrl}${path}` : path
+}
+
 export default function SettingsPage() {
   const [form, setForm] = useState<SettingsForm>(defaults)
   const [loading, setLoading] = useState(true)
@@ -69,6 +80,7 @@ export default function SettingsPage() {
   const [modelRefreshKey, setModelRefreshKey] = useState(0)
   const [exportDialogOpen, setExportDialogOpen] = useState(false)
   const [exporting, setExporting] = useState(false)
+  const [qrUploading, setQrUploading] = useState(false)
 
   async function loadSettings() {
     setLoading(true)
@@ -103,6 +115,23 @@ export default function SettingsPage() {
 
   function updateForm<K extends keyof SettingsForm>(key: K, value: SettingsForm[K]) {
     setForm((current) => ({ ...current, [key]: value }))
+  }
+
+  async function handleQrUpload(file?: File | null) {
+    if (!file) return
+    setQrUploading(true)
+    setError(null)
+    setNotice(null)
+    try {
+      const uploaded = await uploadCustomerServiceQr(file)
+      updateForm("customerServiceQrCodeUrl", uploaded.url)
+      setNotice("客服二维码已上传")
+      setTimeout(() => setNotice(null), 2000)
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "客服二维码上传失败")
+    } finally {
+      setQrUploading(false)
+    }
   }
 
   async function saveSettings() {
@@ -288,38 +317,83 @@ export default function SettingsPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label>客服二维码图片地址</Label>
-                  <Input
-                    value={form.customerServiceQrCodeUrl}
-                    onChange={(event) => updateForm("customerServiceQrCodeUrl", event.target.value)}
-                    placeholder="https://... 或 /uploads/customer-service.png"
-                  />
-                </div>
-              </div>
-
-              <div className="mt-5 grid gap-5 md:grid-cols-[minmax(0,1fr)_180px]">
-                <div className="space-y-2">
                   <Label>弹窗说明</Label>
                   <Textarea
                     value={form.customerServiceDescription}
                     onChange={(event) => updateForm("customerServiceDescription", event.target.value)}
                     placeholder="扫码添加客服，获取使用支持"
+                    className="min-h-[88px]"
                   />
                 </div>
-                <div className="rounded-lg border border-border bg-secondary/50 p-3">
-                  <p className="mb-2 text-sm font-medium">二维码预览</p>
-                  {form.customerServiceQrCodeUrl ? (
-                    <img
-                      src={form.customerServiceQrCodeUrl}
-                      alt="客服二维码预览"
-                      className="aspect-square w-full rounded-md bg-white object-contain p-2"
+              </div>
+
+              <div className="mt-5 space-y-3">
+                <Label>客服二维码</Label>
+                <div className="grid gap-5 md:grid-cols-[minmax(0,1fr)_200px]">
+                  <label
+                    className={cn(
+                      "flex cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-border bg-secondary/30 px-4 py-8 text-center transition hover:border-primary/60 hover:bg-secondary/50",
+                      qrUploading && "pointer-events-none opacity-70",
+                    )}
+                    onDragOver={(event) => event.preventDefault()}
+                    onDrop={(event) => {
+                      event.preventDefault()
+                      void handleQrUpload(event.dataTransfer.files?.[0])
+                    }}
+                  >
+                    <Upload className="mb-2 h-5 w-5 text-primary" />
+                    <span className="text-sm font-medium">{qrUploading ? "上传中..." : "点击选择或拖拽图片到此处"}</span>
+                    <span className="mt-1 text-xs text-muted-foreground">支持 JPG、PNG、WebP、GIF，最大 5MB；上传后自动保存</span>
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp,image/gif"
+                      className="hidden"
+                      disabled={qrUploading}
+                      onChange={(event) => {
+                        const file = event.target.files?.[0]
+                        void handleQrUpload(file)
+                        event.currentTarget.value = ""
+                      }}
                     />
-                  ) : (
-                    <div className="flex aspect-square w-full items-center justify-center rounded-md border border-dashed border-border text-center text-xs text-muted-foreground">
-                      未配置图片地址
-                    </div>
-                  )}
+                  </label>
+                  <div className="rounded-lg border border-border bg-secondary/50 p-3">
+                    <p className="mb-2 text-sm font-medium">预览</p>
+                    {form.customerServiceQrCodeUrl ? (
+                      <img
+                        src={resolveMediaUrl(form.customerServiceQrCodeUrl)}
+                        alt="客服二维码预览"
+                        className="aspect-square w-full rounded-md bg-white object-contain p-2"
+                      />
+                    ) : (
+                      <div className="flex aspect-square w-full items-center justify-center rounded-md border border-dashed border-border text-center text-xs text-muted-foreground">
+                        尚未上传
+                      </div>
+                    )}
+                  </div>
                 </div>
+                {form.customerServiceQrCodeUrl ? (
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    <span className="truncate">当前地址：{form.customerServiceQrCodeUrl}</span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-2"
+                      onClick={async () => {
+                        updateForm("customerServiceQrCodeUrl", "")
+                        try {
+                          await updateSettings({ "customerService.qrCodeUrl": "" })
+                          setNotice("已清除客服二维码")
+                          setTimeout(() => setNotice(null), 2000)
+                        } catch (err) {
+                          setError(err instanceof ApiError ? err.message : "清除客服二维码失败")
+                        }
+                      }}
+                    >
+                      清除
+                    </Button>
+                  </div>
+                ) : null}
               </div>
             </section>
           </TabsContent>

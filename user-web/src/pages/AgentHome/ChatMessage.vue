@@ -5,6 +5,7 @@ import { getRequestBaseUrl } from "@/api/client"
 import ResultRenderer from "@/components/ResultRenderer/ResultRenderer.vue"
 import { buildTaskResultBlocks } from "@/utils/taskResultBlocks"
 import { renderMarkdown } from "@/utils/markdownRender"
+import type { AssetPreviewItem } from "@/types/assetPreview"
 import type { ResultBlock } from "@/types/result"
 
 const props = defineProps({
@@ -13,7 +14,12 @@ const props = defineProps({
   streaming: { type: Boolean, default: false },
 })
 
+const emit = defineEmits<{
+  preview: [asset: AssetPreviewItem]
+}>()
+
 const displayed = ref("")
+let typeToken = 0
 const fullText = computed(() => props.message ?? "")
 const resultBlocks = computed(() => buildStructuredResultBlocks(fullText.value))
 const renderedText = computed(() => (resultBlocks.value.length > 0 ? "" : displayed.value))
@@ -32,14 +38,19 @@ const videoItems = computed(() =>
 
 // 流式打字动画
 async function type() {
-  displayed.value = ""
+  const token = ++typeToken
   const text = fullText.value
-  for (let i = 0; i < text.length; i++) {
-    if (!props.streaming) break
+  if (!text.startsWith(displayed.value)) {
+    displayed.value = ""
+  }
+  for (let i = displayed.value.length; i < text.length; i++) {
+    if (!props.streaming || token !== typeToken) return
     displayed.value += text[i]
     await new Promise((r) => setTimeout(r, 4))
   }
-  displayed.value = text
+  if (token === typeToken) {
+    displayed.value = text
+  }
 }
 
 function extractVideoUrls(value: string) {
@@ -88,6 +99,62 @@ function buildStructuredResultBlocks(value: string): ResultBlock[] {
   return blocks
 }
 
+function promptFromContent(value: string) {
+  const trimmed = value.trim()
+  if (!trimmed) return ""
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return trimmed
+  try {
+    return findPromptText(JSON.parse(trimmed) as unknown)
+  } catch {
+    return ""
+  }
+}
+
+function findPromptText(value: unknown): string {
+  if (!value || typeof value !== "object") return ""
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findPromptText(item)
+      if (found) return found
+    }
+    return ""
+  }
+  const record = value as Record<string, unknown>
+  for (const key of ["prompt", "text", "description", "videoTopic", "productName"]) {
+    const candidate = record[key]
+    if (typeof candidate === "string" && candidate.trim()) return candidate.trim()
+  }
+  for (const key of ["params", "input", "request", "payload"]) {
+    const found = findPromptText(record[key])
+    if (found) return found
+  }
+  return ""
+}
+
+function openVideoPreview(video: { url: string; downloadName: string }) {
+  const prompt = promptFromContent(fullText.value)
+  emit("preview", {
+    id: `agent-video-${video.url}`,
+    kind: "video",
+    title: video.downloadName || "Agent 生成视频",
+    url: video.url,
+    prompt,
+    rawText: prompt ? "" : fullText.value,
+    toolName: "Agent",
+  })
+}
+
+function openStructuredPreview(asset: AssetPreviewItem) {
+  const prompt = asset.prompt || promptFromContent(fullText.value)
+  const isMedia = asset.kind === "image" || asset.kind === "video" || asset.kind === "audio"
+  emit("preview", {
+    ...asset,
+    prompt,
+    rawText: asset.rawText || (isMedia ? "" : fullText.value),
+    toolName: asset.toolName || "Agent",
+  })
+}
+
 onMounted(() => {
   if (props.streaming) void type()
   else displayed.value = fullText.value
@@ -104,6 +171,19 @@ watch(
     }
   },
 )
+
+watch(
+  () => props.streaming,
+  async (streaming) => {
+    typeToken += 1
+    if (streaming) {
+      await nextTick()
+      void type()
+    } else {
+      displayed.value = fullText.value
+    }
+  },
+)
 </script>
 
 <template>
@@ -115,10 +195,10 @@ watch(
       v-html="renderedHtml"
     />
     <div v-if="videoItems.length" class="video-stack">
-      <section v-for="video in videoItems" :key="video.url" class="video-card">
+      <section v-for="video in videoItems" :key="video.url" class="video-card cursor-zoom-in" @click="openVideoPreview(video)">
         <div class="video-card__bar">
           <span>视频结果</span>
-          <a :href="video.url" :download="video.downloadName" class="video-download">
+          <a :href="video.url" :download="video.downloadName" class="video-download" @click.stop>
             <Download class="download-icon" />
             下载
           </a>
@@ -133,6 +213,7 @@ watch(
       class="agent-result-renderer"
       :blocks="resultBlocks"
       mode="compact"
+      @preview="openStructuredPreview"
     />
     <span v-if="streaming && !renderedHtml && !resultBlocks.length" class="stream-placeholder" />
     <span v-if="streaming" class="stream-cursor" />

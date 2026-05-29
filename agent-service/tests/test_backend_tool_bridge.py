@@ -3,7 +3,7 @@
 import pytest
 
 from app.core.schemas import ChatMessage, RunContext, TaskDetailResponse, ToolDescriptor
-from app.tools.backend_tool import BackendToolBridge
+from app.tools.backend_tool import BackendToolBridge, ToolExecutionError
 
 
 def _xiaohongshu_like_schema() -> dict:
@@ -241,3 +241,59 @@ async def test_wait_for_task_keeps_polling_if_run_is_already_success():
 
     assert detail.status == "SUCCESS"
     assert backend.polls == 1
+
+
+@pytest.mark.asyncio
+async def test_wait_for_task_reports_task_failure_before_run_abort():
+    class Backend:
+        async def get_run_context(self, run_id: int) -> RunContext:
+            return RunContext(runId=run_id, sessionId=1, userId=1, message="generate image", status="FAILED")
+
+        async def get_task_detail(self, user_id: int, task_id: int) -> TaskDetailResponse:
+            return TaskDetailResponse(
+                taskId=task_id,
+                status="FAILED",
+                progress=20,
+                progressMessage="request failed",
+                errorCode="MODEL_TIMEOUT",
+                errorMessage="Connection to api.ofox.ai timed out",
+            )
+
+    bridge = BackendToolBridge(backend_client=Backend(), timeout_seconds=1, poll_interval_seconds=0.01)  # type: ignore[arg-type]
+    context = RunContext(runId=70, sessionId=1, userId=1, message="generate image", status="RUNNING")
+
+    detail = await bridge._wait_for_task(context, "ofox_gpt_image2", 84)
+
+    assert detail.status == "FAILED"
+    assert detail.errorCode == "MODEL_TIMEOUT"
+
+
+@pytest.mark.asyncio
+async def test_wait_for_task_abort_message_includes_last_task_detail():
+    class Backend:
+        async def get_run_context(self, run_id: int) -> RunContext:
+            return RunContext(runId=run_id, sessionId=1, userId=1, message="generate image", status="FAILED")
+
+        async def get_task_detail(self, user_id: int, task_id: int) -> TaskDetailResponse:
+            return TaskDetailResponse(
+                taskId=task_id,
+                status="PROCESSING",
+                progress=30,
+                progressMessage="waiting provider",
+            )
+
+        async def append_event(self, run_id: int, event) -> None:
+            return None
+
+    bridge = BackendToolBridge(backend_client=Backend(), timeout_seconds=1, poll_interval_seconds=0.01)  # type: ignore[arg-type]
+    context = RunContext(runId=70, sessionId=1, userId=1, message="generate image", status="RUNNING")
+
+    with pytest.raises(ToolExecutionError) as exc:
+        await bridge._wait_for_task(context, "ofox_gpt_image2", 84)
+
+    message = str(exc.value)
+    assert "tool=ofox_gpt_image2" in message
+    assert "taskId=84" in message
+    assert "runStatus=FAILED" in message
+    assert "taskStatus=PROCESSING" in message
+    assert "waiting provider" in message

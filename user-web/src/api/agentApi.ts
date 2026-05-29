@@ -66,6 +66,33 @@ export function sendAgentMessage(
   })
 }
 
+export function regenerateAgentRun(
+  runId: number,
+  body: { clientRequestId?: string; modelConfigId?: number | null },
+  options?: { token?: string | null },
+) {
+  return apiRequest<CreateAgentMessageResponse>("POST", `/api/v1/agent/runs/${runId}/regenerate`, {
+    token: options?.token,
+    body,
+  })
+}
+
+export function editRegenerateAgentMessage(
+  sessionId: number,
+  messageId: number,
+  body: { content: string; clientRequestId?: string; modelConfigId?: number | null },
+  options?: { token?: string | null },
+) {
+  return apiRequest<CreateAgentMessageResponse>(
+    "POST",
+    `/api/v1/agent/sessions/${sessionId}/messages/${messageId}/edit-regenerate`,
+    {
+      token: options?.token,
+      body,
+    },
+  )
+}
+
 export function fetchAgentFiles(sessionId: number, options?: { token?: string | null }) {
   return apiRequest<PageResult<AgentFile>>("GET", `/api/v1/agent/sessions/${sessionId}/files`, {
     token: options?.token,
@@ -78,6 +105,12 @@ export function uploadAgentFile(sessionId: number, file: File, options?: { token
   return apiRequest<AgentFile>("POST", `/api/v1/agent/sessions/${sessionId}/files`, {
     token: options?.token,
     body,
+  })
+}
+
+export function deleteAgentFile(sessionId: number, fileId: number, options?: { token?: string | null }) {
+  return apiRequest<void>("DELETE", `/api/v1/agent/sessions/${sessionId}/files/${fileId}`, {
+    token: options?.token,
   })
 }
 
