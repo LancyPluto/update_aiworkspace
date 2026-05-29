@@ -7,9 +7,10 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { ApiError } from "@/lib/api/http"
-import { fetchBillingOverview, fetchBillingUsageLogs } from "@/lib/api/billing"
+import { fetchBillingOverview, fetchBillingUsageLogs, type BillingQuery } from "@/lib/api/billing"
 import type { BillingModelCostPoint, BillingOverview, BillingUsageLog } from "@/lib/api/types"
 import { Check, ChevronDown, ChevronRight, Coins, DollarSign, Gauge, Search, Sigma, WalletCards } from "lucide-react"
 
@@ -66,10 +67,6 @@ function taskDisplayId(log: BillingUsageLog) {
   return log.sourceId ? `${log.sourceType} #${log.sourceId}` : "-"
 }
 
-function uniqueValues(values: Array<string | number | null | undefined>) {
-  return Array.from(new Set(values.map((value) => String(value ?? "").trim()).filter(Boolean)))
-}
-
 function sortModelCosts(items: BillingModelCostPoint[], mode: ModelSortMode) {
   return [...items].sort((a, b) => {
     if (mode === "cost_desc") {
@@ -114,6 +111,62 @@ function findModelSelectionLabel(value: string, groups: ModelFilterGroup[]) {
 
 function toggleValue(values: string[], nextValue: string) {
   return values.includes(nextValue) ? values.filter((value) => value !== nextValue) : [...values, nextValue]
+}
+
+const LOG_PAGE_SIZE = 20
+
+function buildUsageLogQuery(pageNo: number, filters: {
+  userIds: string[]
+  modelSelections: string[]
+  startDate: string
+  endDate: string
+}): BillingQuery {
+  const query: BillingQuery = { pageNo, pageSize: LOG_PAGE_SIZE }
+  if (filters.startDate) query.startDate = filters.startDate
+  if (filters.endDate) query.endDate = filters.endDate
+  if (filters.userIds.length === 1) {
+    const userId = Number(filters.userIds[0])
+    if (Number.isFinite(userId)) query.userId = userId
+  }
+  const modelSelection = filters.modelSelections.find((selection) => selection.startsWith("model:"))
+  if (modelSelection) {
+    query.modelName = modelSelection.slice("model:".length)
+  }
+  return query
+}
+
+function logMatchesClientFilters(
+  log: BillingUsageLog,
+  filters: {
+    taskQuery: string
+    userIds: string[]
+    modelSelections: string[]
+    startDate: string
+    endDate: string
+  },
+) {
+  const taskKeyword = filters.taskQuery.trim().toLowerCase()
+  const taskMatched =
+    !taskKeyword ||
+    `${taskDisplayId(log)} ${log.sourceType || ""} ${log.sourceId || ""}`.toLowerCase().includes(taskKeyword)
+  const userMatched =
+    filters.userIds.length <= 1 || filters.userIds.includes(String(log.userId))
+  const modelMatched =
+    filters.modelSelections.length === 0 ||
+    filters.modelSelections.some((selection) => {
+      if (selection.startsWith("model:")) {
+        return (log.modelName || "-") === selection.slice("model:".length)
+      }
+      if (selection.startsWith("modality:")) {
+        const key = selection.slice("modality:".length)
+        return modalityValue(log) === key || (log.provider || "-") === key
+      }
+      return false
+    })
+  const usageDate = formatDate(log.createdAt)
+  const afterStart = !filters.startDate || usageDate >= filters.startDate
+  const beforeEnd = !filters.endDate || usageDate <= filters.endDate
+  return taskMatched && userMatched && modelMatched && afterStart && beforeEnd
 }
 
 function SortTriangles({
@@ -385,9 +438,143 @@ function ModelTreeFilter({
   )
 }
 
+function BillingLogPagination({
+  pageNo,
+  totalPages,
+  total,
+  pageSize,
+  loading,
+  hasNext,
+  onPageChange,
+}: {
+  pageNo: number
+  totalPages: number
+  total: number
+  pageSize: number
+  loading: boolean
+  hasNext: boolean
+  onPageChange: (page: number) => void
+}) {
+  const [pageInput, setPageInput] = useState(String(pageNo))
+  const pageOptions = useMemo(
+    () => Array.from({ length: totalPages }, (_, index) => index + 1),
+    [totalPages],
+  )
+  const useCompactJump = totalPages > 100
+
+  useEffect(() => {
+    setPageInput(String(pageNo))
+  }, [pageNo])
+
+  function goToPage(raw: number) {
+    if (!Number.isFinite(raw)) return
+    const target = Math.min(totalPages, Math.max(1, Math.floor(raw)))
+    onPageChange(target)
+  }
+
+  function submitPageInput() {
+    const parsed = Number(pageInput)
+    if (!Number.isFinite(parsed)) {
+      setPageInput(String(pageNo))
+      return
+    }
+    goToPage(parsed)
+  }
+
+  const disabled = loading || total <= 0
+
+  return (
+    <div className="mt-4 flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
+      <p className="text-sm text-muted-foreground">
+        共 {number(total)} 条
+        {total > 0 ? `，第 ${pageNo} / ${totalPages} 页（每页 ${pageSize} 条）` : ""}
+      </p>
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <span className="text-sm text-muted-foreground">页码</span>
+        {useCompactJump ? (
+          <div className="flex items-center gap-1">
+            <Input
+              type="number"
+              min={1}
+              max={totalPages}
+              value={pageInput}
+              disabled={disabled}
+              onChange={(event) => setPageInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") submitPageInput()
+              }}
+              className="h-8 w-20 text-center text-sm"
+              aria-label="页码"
+            />
+            <Button type="button" variant="outline" size="sm" disabled={disabled} onClick={submitPageInput}>
+              跳转
+            </Button>
+          </div>
+        ) : (
+          <Select
+            value={String(pageNo)}
+            onValueChange={(value) => goToPage(Number(value))}
+            disabled={disabled || totalPages <= 1}
+          >
+            <SelectTrigger className="h-8 w-[88px]" aria-label="选择页码">
+              <SelectValue placeholder="页码" />
+            </SelectTrigger>
+            <SelectContent className="max-h-64">
+              {pageOptions.map((page) => (
+                <SelectItem key={page} value={String(page)}>
+                  第 {page} 页
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={pageNo <= 1 || disabled}
+          onClick={() => goToPage(1)}
+        >
+          首页
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={pageNo <= 1 || disabled}
+          onClick={() => goToPage(pageNo - 1)}
+        >
+          上一页
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={!hasNext || disabled}
+          onClick={() => goToPage(pageNo + 1)}
+        >
+          下一页
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={pageNo >= totalPages || disabled}
+          onClick={() => goToPage(totalPages)}
+        >
+          末页
+        </Button>
+      </div>
+    </div>
+  )
+}
+
 export default function BillingPage() {
   const [overview, setOverview] = useState<BillingOverview | null>(null)
   const [logs, setLogs] = useState<BillingUsageLog[]>([])
+  const [logPageNo, setLogPageNo] = useState(1)
+  const [logTotal, setLogTotal] = useState(0)
+  const [logHasNext, setLogHasNext] = useState(false)
   const [modelSort, setModelSort] = useState<ModelSortMode>("tokens_desc")
   const [logFilters, setLogFilters] = useState({
     taskQuery: "",
@@ -397,18 +584,15 @@ export default function BillingPage() {
     endDate: "",
   })
   const [loading, setLoading] = useState(true)
+  const [logsLoading, setLogsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  async function loadBilling() {
+  async function loadOverview() {
     setLoading(true)
     setError(null)
     try {
-      const [overviewData, logData] = await Promise.all([
-        fetchBillingOverview({}),
-        fetchBillingUsageLogs({ pageNo: 1, pageSize: 200 }),
-      ])
+      const overviewData = await fetchBillingOverview({})
       setOverview(overviewData)
-      setLogs(logData.list)
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "加载计费数据失败")
     } finally {
@@ -416,9 +600,36 @@ export default function BillingPage() {
     }
   }
 
+  async function loadUsageLogs(pageNo: number, filters = logFilters) {
+    setLogsLoading(true)
+    try {
+      const logData = await fetchBillingUsageLogs(buildUsageLogQuery(pageNo, filters))
+      setLogs(logData.list)
+      setLogTotal(logData.total)
+      setLogHasNext(Boolean(logData.hasNext))
+      setLogPageNo(logData.pageNo || pageNo)
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "加载计费日志失败")
+      setLogs([])
+      setLogTotal(0)
+      setLogHasNext(false)
+    } finally {
+      setLogsLoading(false)
+    }
+  }
+
+  function patchLogFilters(patch: Partial<typeof logFilters>, resetPage = true) {
+    setLogFilters((current) => ({ ...current, ...patch }))
+    if (resetPage) setLogPageNo(1)
+  }
+
   useEffect(() => {
-    loadBilling()
+    loadOverview()
   }, [])
+
+  useEffect(() => {
+    loadUsageLogs(logPageNo)
+  }, [logPageNo, logFilters.startDate, logFilters.endDate, logFilters.userIds, logFilters.modelSelections])
 
   const stats = useMemo(
     () => [
@@ -435,30 +646,33 @@ export default function BillingPage() {
     [overview?.modelCosts, modelSort],
   )
 
-  const displayLogs = logs
   const userOptions = useMemo(
-    () => uniqueValues(displayLogs.map((log) => log.userId)).map((userId) => ({ value: userId, label: `U${userId}` })),
-    [displayLogs],
+    () =>
+      (overview?.userCosts || []).map((item) => ({
+        value: String(item.userId),
+        label: `U${item.userId}`,
+      })),
+    [overview?.userCosts],
   )
   const modelGroups = useMemo(() => {
     const groups = new Map<string, ModelFilterGroup>()
-    for (const log of displayLogs) {
-      const modality = modalityValue(log)
-      const modelName = log.modelName || "-"
-      if (!groups.has(modality)) {
-        groups.set(modality, {
-          value: modality,
-          label: modalityLabel(modality),
-          description: "按此模态筛选",
+    for (const item of overview?.modelCosts || []) {
+      const provider = item.provider || "未知 Provider"
+      const modelName = item.modelName || "-"
+      if (!groups.has(provider)) {
+        groups.set(provider, {
+          value: provider,
+          label: provider,
+          description: "按 Provider 筛选",
           models: [],
         })
       }
-      const group = groups.get(modality)
+      const group = groups.get(provider)
       if (group && !group.models.some((model) => model.value === modelName)) {
         group.models.push({
           value: modelName,
           label: modelName,
-          description: log.provider || undefined,
+          description: item.provider || undefined,
         })
       }
     }
@@ -466,34 +680,15 @@ export default function BillingPage() {
       ...group,
       models: group.models.sort((a, b) => a.label.localeCompare(b.label)),
     }))
-  }, [displayLogs])
+  }, [overview?.modelCosts])
 
   const filteredLogs = useMemo(
-    () =>
-      displayLogs.filter((log) => {
-        const taskKeyword = logFilters.taskQuery.trim().toLowerCase()
-        const taskMatched =
-          !taskKeyword ||
-          `${taskDisplayId(log)} ${log.sourceType || ""} ${log.sourceId || ""}`.toLowerCase().includes(taskKeyword)
-        const userMatched = logFilters.userIds.length === 0 || logFilters.userIds.includes(String(log.userId))
-        const modelMatched =
-          logFilters.modelSelections.length === 0 ||
-          logFilters.modelSelections.some((selection) => {
-            if (selection.startsWith("model:")) {
-              return (log.modelName || "-") === selection.slice("model:".length)
-            }
-            if (selection.startsWith("modality:")) {
-              return modalityValue(log) === selection.slice("modality:".length)
-            }
-            return false
-          })
-        const usageDate = formatDate(log.createdAt)
-        const afterStart = !logFilters.startDate || usageDate >= logFilters.startDate
-        const beforeEnd = !logFilters.endDate || usageDate <= logFilters.endDate
-        return taskMatched && userMatched && modelMatched && afterStart && beforeEnd
-      }),
-    [displayLogs, logFilters],
+    () => logs.filter((log) => logMatchesClientFilters(log, logFilters)),
+    [logs, logFilters],
   )
+
+  const logTotalPages = Math.max(1, Math.ceil(logTotal / LOG_PAGE_SIZE))
+  const tableLoading = loading || logsLoading
 
   return (
     <AdminLayout>
@@ -582,13 +777,13 @@ export default function BillingPage() {
                 <WalletCards className="h-5 w-5" />
                 最近计费日志
               </CardTitle>
-              <CardDescription>任务和 Agent 完成或失败时上报 token 后会写入这里</CardDescription>
+              <CardDescription>任务和 Agent 完成或失败时上报 token 后会写入这里，默认每页 20 条</CardDescription>
             </div>
             <div className="relative mx-auto w-full max-w-sm lg:w-80">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 value={logFilters.taskQuery}
-                onChange={(event) => setLogFilters((current) => ({ ...current, taskQuery: event.target.value }))}
+                onChange={(event) => patchLogFilters({ taskQuery: event.target.value }, false)}
                 placeholder="搜索任务 ID"
                 className="h-9 pl-8 text-sm"
               />
@@ -606,7 +801,7 @@ export default function BillingPage() {
                       values={logFilters.userIds}
                       allLabel="全部用户"
                       options={userOptions}
-                      onChange={(values) => setLogFilters((current) => ({ ...current, userIds: values }))}
+                      onChange={(values) => patchLogFilters({ userIds: values })}
                       widthClass="w-32"
                     />
                   </TableHead>
@@ -614,18 +809,22 @@ export default function BillingPage() {
                     <ModelTreeFilter
                       values={logFilters.modelSelections}
                       groups={modelGroups}
-                      onAll={() => setLogFilters((current) => ({ ...current, modelSelections: [] }))}
+                      onAll={() => patchLogFilters({ modelSelections: [] })}
                       onToggleModality={(value) =>
-                        setLogFilters((current) => ({
-                          ...current,
-                          modelSelections: toggleValue(current.modelSelections, modelSelectionValue("modality", value)),
-                        }))
+                        patchLogFilters({
+                          modelSelections: toggleValue(
+                            logFilters.modelSelections,
+                            modelSelectionValue("modality", value),
+                          ),
+                        })
                       }
                       onToggleModel={(value) =>
-                        setLogFilters((current) => ({
-                          ...current,
-                          modelSelections: toggleValue(current.modelSelections, modelSelectionValue("model", value)),
-                        }))
+                        patchLogFilters({
+                          modelSelections: toggleValue(
+                            logFilters.modelSelections,
+                            modelSelectionValue("model", value),
+                          ),
+                        })
                       }
                     />
                   </TableHead>
@@ -639,7 +838,7 @@ export default function BillingPage() {
                         aria-label="开始日期"
                         type="date"
                         value={logFilters.startDate}
-                        onChange={(event) => setLogFilters((current) => ({ ...current, startDate: event.target.value }))}
+                        onChange={(event) => patchLogFilters({ startDate: event.target.value })}
                         className="h-8 w-28 rounded-md border border-input bg-transparent px-2 text-xs font-normal text-foreground shadow-xs outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
                       />
                       <span className="text-xs font-normal text-muted-foreground">至</span>
@@ -647,7 +846,7 @@ export default function BillingPage() {
                         aria-label="结束日期"
                         type="date"
                         value={logFilters.endDate}
-                        onChange={(event) => setLogFilters((current) => ({ ...current, endDate: event.target.value }))}
+                        onChange={(event) => patchLogFilters({ endDate: event.target.value })}
                         className="h-8 w-28 rounded-md border border-input bg-transparent px-2 text-xs font-normal text-foreground shadow-xs outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
                       />
                     </div>
@@ -676,7 +875,7 @@ export default function BillingPage() {
                     <TableCell className={cellClass}>{formatTime(log.createdAt)}</TableCell>
                   </TableRow>
                 ))}
-                {!loading && filteredLogs.length === 0 ? (
+                {!tableLoading && filteredLogs.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={8} className="h-24 text-center text-muted-foreground">
                       暂无计费日志
@@ -685,6 +884,18 @@ export default function BillingPage() {
                 ) : null}
               </TableBody>
             </Table>
+            {logFilters.taskQuery.trim() || logFilters.userIds.length > 1 || logFilters.modelSelections.length > 1 ? (
+              <p className="mt-3 text-sm text-muted-foreground">任务搜索与多选筛选仅作用于当前页</p>
+            ) : null}
+            <BillingLogPagination
+              pageNo={logPageNo}
+              totalPages={logTotalPages}
+              total={logTotal}
+              pageSize={LOG_PAGE_SIZE}
+              loading={tableLoading}
+              hasNext={logHasNext}
+              onPageChange={setLogPageNo}
+            />
           </CardContent>
         </Card>
       </div>
