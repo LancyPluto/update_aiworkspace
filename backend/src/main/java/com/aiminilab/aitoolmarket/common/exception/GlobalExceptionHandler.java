@@ -13,6 +13,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -46,6 +47,17 @@ public class GlobalExceptionHandler {
                 exception);
         return ApiResponse.fail(ErrorCode.SYSTEM_ERROR,
                 "数据库操作失败：" + safeMessage(root) + traceHint());
+    }
+
+    @ExceptionHandler(NoResourceFoundException.class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public ApiResponse<Void> handleNoResourceFound(NoResourceFoundException exception) {
+        String path = exception.getResourcePath() == null ? "" : exception.getResourcePath();
+        log.warn("Resource not found: traceId={}, path={}, method={}", traceId(), path, exception.getHttpMethod());
+        String hint = path.isBlank()
+                ? "请求的接口或静态资源不存在"
+                : "请求的接口或静态资源不存在：" + path;
+        return ApiResponse.fail(ErrorCode.PARAM_ERROR, hint + traceHint());
     }
 
     @ExceptionHandler(Exception.class)

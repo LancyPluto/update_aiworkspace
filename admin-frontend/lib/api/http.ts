@@ -6,6 +6,15 @@ const USER_STORAGE_KEY = 'admin_user_profile'
 const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || ''
 const LOCAL_BACKEND_URL = 'http://127.0.0.1:8080'
 
+/** 去掉末尾斜杠与误配的 /api，避免拼出 /api/api/... 导致 404 */
+function normalizeApiBaseUrl(raw: string): string {
+  let base = raw.trim().replace(/\/+$/, '')
+  if (base.endsWith('/api')) {
+    base = base.slice(0, -4)
+  }
+  return base
+}
+
 export class ApiError extends Error {
   code: string
   status?: number
@@ -98,7 +107,11 @@ function buildUrl(path: string, query?: RequestOptions['query']): string {
 }
 
 export function getBaseUrl(): string {
-  if (BASE_URL) return BASE_URL
+  if (typeof window !== 'undefined' && window.location.port === '5174' && !BASE_URL) {
+    // 管理端 dev：走 Next.js /api 反向代理，兼容 Docker 与局域网访问
+    return ''
+  }
+  if (BASE_URL) return normalizeApiBaseUrl(BASE_URL)
   if (typeof window === 'undefined') return ''
   const { hostname, port } = window.location
   if ((hostname === '127.0.0.1' || hostname === 'localhost') && port === '5174') {

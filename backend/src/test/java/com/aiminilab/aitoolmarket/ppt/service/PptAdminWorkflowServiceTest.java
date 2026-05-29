@@ -39,6 +39,12 @@ class PptAdminWorkflowServiceTest {
             public Map<String, String> updateSettings(Map<String, String> settings) {
                 return Map.of();
             }
+
+            @Override
+            public com.aiminilab.aitoolmarket.admin.dto.CustomerServiceQrUploadResponse uploadCustomerServiceQr(
+                    org.springframework.web.multipart.MultipartFile file) {
+                throw new UnsupportedOperationException("not used in test");
+            }
         };
     }
 
