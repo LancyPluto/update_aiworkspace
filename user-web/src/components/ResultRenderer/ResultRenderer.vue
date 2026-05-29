@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { Download, FileDown, Printer } from "lucide-vue-next"
+import type { AssetPreviewItem } from "@/types/assetPreview"
 import type { ResultBlock } from "@/types/result"
 
 const props = withDefaults(defineProps<{
@@ -8,6 +9,10 @@ const props = withDefaults(defineProps<{
 }>(), {
   mode: "default",
 })
+
+const emit = defineEmits<{
+  preview: [asset: AssetPreviewItem]
+}>()
 
 function isMediaBlock(block: ResultBlock) {
   return block.type === "image" || block.type === "audio" || block.type === "video"
@@ -62,7 +67,7 @@ function downloadLinkClass() {
 }
 
 function floatingDownloadClass() {
-  return "absolute right-3 top-3 inline-flex h-9 items-center gap-1.5 rounded-full border border-white/12 bg-black/38 px-3 text-xs font-medium text-white/72 opacity-0 shadow-[0_10px_30px_rgb(0_0_0_/_0.28)] backdrop-blur-xl transition group-hover:opacity-100 hover:bg-white/14 hover:text-white"
+  return "absolute right-3 top-3 inline-flex h-9 items-center gap-1.5 rounded-full border border-white/12 bg-black/42 px-3 text-xs font-medium text-white/72 opacity-0 shadow-[0_10px_30px_rgb(0_0_0_/_0.28)] backdrop-blur-xl transition group-hover:opacity-100 hover:bg-white/14 hover:text-white"
 }
 
 function mediaActionClass() {
@@ -79,6 +84,35 @@ function videoClass() {
 
 function audioClass() {
   return props.mode === "compact" ? "w-full px-2 pb-2" : "w-full"
+}
+
+function previewImage(block: Extract<ResultBlock, { type: "image" }>, image: { url: string; label?: string }, index: number) {
+  emit("preview", {
+    id: `result-image-${index}-${image.url}`,
+    kind: "image",
+    title: image.label || block.title || "生成图片",
+    subtitle: block.title,
+    url: image.url,
+    urls: block.images.map((item) => item.url),
+  })
+}
+
+function previewVideo(block: Extract<ResultBlock, { type: "video" }>) {
+  emit("preview", {
+    id: `result-video-${block.url}`,
+    kind: "video",
+    title: block.title || "生成视频",
+    url: block.url,
+  })
+}
+
+function previewAudio(block: Extract<ResultBlock, { type: "audio" }>) {
+  emit("preview", {
+    id: `result-audio-${block.url}`,
+    kind: "audio",
+    title: block.title || "生成音频",
+    url: block.url,
+  })
 }
 
 function downloadReportDocx(block: Extract<ResultBlock, { type: "report" }>) {
@@ -299,9 +333,11 @@ function escapeXml(value: string): string {
         </div>
         <div :class="mediaGridClass(b.images.length)">
           <figure
-            v-for="image in b.images"
+            v-for="(image, imageIndex) in b.images"
             :key="image.url"
             :class="figureClass()"
+            class="cursor-zoom-in"
+            @click="previewImage(b, image, imageIndex)"
           >
             <div :class="imageFrameClass()">
               <img
@@ -313,7 +349,7 @@ function escapeXml(value: string): string {
             </div>
             <figcaption v-if="props.mode !== 'compact'" :class="captionClass()">
               <span>{{ image.label ?? "图片" }}</span>
-              <a :href="image.url" download :class="downloadLinkClass()">
+              <a :href="image.url" download :class="downloadLinkClass()" @click.stop>
                 <Download class="h-3.5 w-3.5" />
                 下载
               </a>
@@ -343,6 +379,7 @@ function escapeXml(value: string): string {
             :href="b.url"
             :download="b.downloadName ?? 'audio-result'"
             class="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-border bg-background px-3 text-sm font-medium hover:bg-secondary"
+            @click.stop
           >
             <Download class="h-4 w-4" />
             下载音频
@@ -353,6 +390,7 @@ function escapeXml(value: string): string {
             :href="b.url"
             :download="b.downloadName ?? 'audio-result'"
             :class="mediaActionClass()"
+            @click.stop
           >
             <Download class="h-4 w-4" />
             下载
@@ -361,6 +399,14 @@ function escapeXml(value: string): string {
         <audio :src="b.url" controls preload="metadata" :class="audioClass()">
           当前浏览器不支持音频播放。
         </audio>
+        <button
+          v-if="props.mode === 'compact'"
+          type="button"
+          class="mt-2 inline-flex rounded-full px-3 py-1 text-xs text-white/45 transition hover:bg-white/8 hover:text-white"
+          @click="previewAudio(b)"
+        >
+          打开资产卡片
+        </button>
       </template>
       <template v-else-if="b.type === 'video'">
         <div
@@ -375,6 +421,7 @@ function escapeXml(value: string): string {
             :href="b.url"
             :download="b.downloadName ?? 'digital-human-video.mp4'"
             class="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-border bg-background px-3 text-sm font-medium hover:bg-secondary"
+            @click.stop
           >
             <Download class="h-4 w-4" />
             下载视频
@@ -386,6 +433,8 @@ function escapeXml(value: string): string {
           playsinline
           preload="metadata"
           :class="videoClass()"
+          class="cursor-zoom-in"
+          @click="previewVideo(b)"
         >
           当前浏览器不支持视频播放。
         </video>
@@ -394,6 +443,7 @@ function escapeXml(value: string): string {
             :href="b.url"
             :download="b.downloadName ?? 'digital-human-video.mp4'"
             :class="mediaActionClass()"
+            @click.stop
           >
             <Download class="h-4 w-4" />
             下载

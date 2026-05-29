@@ -6,7 +6,7 @@ from typing import Any
 
 from app.config import settings
 from app.core.event_types import MESSAGE_DELTA, TOOL_TASK_DISPATCHED, TOOL_TASK_PROGRESS
-from app.core.schemas import ChatMessage, RunContext, RunEventCreate, TaskCreate, ToolCallComplete, ToolCallCreate, ToolCallFail, ToolDescriptor
+from app.core.schemas import ChatMessage, RunContext, RunEventCreate, TaskCreate, TaskDetailResponse, ToolCallComplete, ToolCallCreate, ToolCallFail, ToolDescriptor
 from app.tools.stream_preview import extract_stream_preview
 
 
@@ -131,6 +131,7 @@ class BackendToolBridge:
         if tool.toolCode == "xiaohongshu_copywriting":
             arguments = _with_xiaohongshu_defaults(context.message, arguments)
         call = await self.backend.create_tool_call(context.runId, ToolCallCreate(toolCode=tool.toolCode, argumentsJson=arguments))
+        task_id: int | None = None
         try:
             task = await self.backend.create_task(
                 TaskCreate(
@@ -140,6 +141,7 @@ class BackendToolBridge:
                     clientRequestId=f"agent-run-{context.runId}-tool-call-{call.id}",
                 )
             )
+            task_id = task.taskId
             await self.backend.append_event(
                 context.runId,
                 RunEventCreate(
@@ -152,14 +154,15 @@ class BackendToolBridge:
         except ToolExecutionError as exc:
             if "task" in locals():
                 await self._cancel_task(context.userId, task.taskId)
-            await self.backend.fail_tool_call(call.id, ToolCallFail(errorCode="TOOL_TASK_TIMEOUT", errorMessage=str(exc)))
+            await self.backend.fail_tool_call(call.id, ToolCallFail(errorCode="TOOL_TASK_FAILED", errorMessage=str(exc)))
             raise
         except Exception as exc:
-            await self.backend.fail_tool_call(call.id, ToolCallFail(errorCode="TOOL_TASK_FAILED", errorMessage=str(exc)))
+            message = _format_tool_error(tool.toolCode, task_id, None, None, f"{type(exc).__name__}: {exc}")
+            await self.backend.fail_tool_call(call.id, ToolCallFail(errorCode="TOOL_TASK_FAILED", errorMessage=message))
             raise
         if task_detail.status != "SUCCESS":
             error_code = task_detail.errorCode or f"TASK_{task_detail.status}"
-            error_message = task_detail.errorMessage or task_detail.progressMessage or f"Tool task ended with status {task_detail.status}"
+            error_message = _format_task_failure(tool.toolCode, task_detail)
             await self.backend.fail_tool_call(call.id, ToolCallFail(errorCode=error_code, errorMessage=error_message))
             raise ToolExecutionError(error_message)
         content_text = task_detail.result.contentText if task_detail.result is not None else ""
@@ -183,12 +186,11 @@ class BackendToolBridge:
     async def _wait_for_task(self, context: RunContext, tool_code: str, task_id: int):
         deadline = time.monotonic() + self.timeout_seconds
         last_status = ""
+        last_detail = None
         stream_state: dict[str, int] = {"emitted_len": 0}
         while time.monotonic() <= deadline:
-            run_context = await self.backend.get_run_context(context.runId)
-            if run_context.status in self.ABORTING_RUN_STATUSES:
-                raise ToolExecutionError(f"Agent run ended with status {run_context.status}")
             detail = await self.backend.get_task_detail(context.userId, task_id)
+            last_detail = detail
             if detail.status != last_status:
                 last_status = detail.status
                 if detail.status not in self.TERMINAL_TASK_STATUSES:
@@ -212,8 +214,18 @@ class BackendToolBridge:
                     await self._relay_task_stream_preview(context, preview, stream_state)
             if detail.status in self.TERMINAL_TASK_STATUSES:
                 return detail
+            run_context = await self.backend.get_run_context(context.runId)
+            if run_context.status in self.ABORTING_RUN_STATUSES:
+                raise ToolExecutionError(_format_run_abort(tool_code, task_id, run_context.status, last_detail))
             await asyncio.sleep(self.poll_interval_seconds)
-        raise ToolExecutionError(f"Tool task {task_id} timed out after {self.timeout_seconds} seconds")
+        raise ToolExecutionError(_format_tool_error(
+            tool_code,
+            task_id,
+            getattr(last_detail, "status", None),
+            getattr(last_detail, "errorCode", None),
+            f"timed out after {self.timeout_seconds} seconds; lastProgress={getattr(last_detail, 'progress', None)}; "
+            f"lastMessage={getattr(last_detail, 'progressMessage', None) or ''}",
+        ))
 
     async def _cancel_task(self, user_id: int, task_id: int) -> None:
         try:
@@ -442,6 +454,48 @@ def _agent_visible_content(tool_code: str, content_text: str | None) -> str:
     if final_video:
         return f"视频已生成，可直接播放或下载：{_sanitize_link(final_video)}"
     return "视频已生成，可直接播放或下载。"
+
+
+def _format_task_failure(tool_code: str, detail: TaskDetailResponse) -> str:
+    message = detail.errorMessage or detail.progressMessage or f"Tool task ended with status {detail.status}"
+    return _format_tool_error(tool_code, detail.taskId, detail.status, detail.errorCode, message)
+
+
+def _format_run_abort(tool_code: str, task_id: int, run_status: str | None, detail: TaskDetailResponse | None) -> str:
+    if detail is None:
+        return _format_tool_error(tool_code, task_id, None, None, f"agent run ended with status {run_status}")
+    message = detail.errorMessage or detail.progressMessage or f"agent run ended with status {run_status}"
+    return _format_tool_error(tool_code, task_id, detail.status, detail.errorCode, message, run_status=run_status)
+
+
+def _format_tool_error(
+    tool_code: str,
+    task_id: int | None,
+    task_status: str | None,
+    task_error_code: str | None,
+    message: str | None,
+    *,
+    run_status: str | None = None,
+) -> str:
+    parts = [f"tool={tool_code}"]
+    if task_id is not None:
+        parts.append(f"taskId={task_id}")
+    if run_status:
+        parts.append(f"runStatus={run_status}")
+    if task_status:
+        parts.append(f"taskStatus={task_status}")
+    if task_error_code:
+        parts.append(f"taskErrorCode={task_error_code}")
+    text = (message or "").strip()
+    if text:
+        parts.append(f"message={_limit_text(text, 1200)}")
+    return "; ".join(parts)
+
+
+def _limit_text(value: str, max_length: int) -> str:
+    if len(value) <= max_length:
+        return value
+    return value[: max(0, max_length - 16)] + "...[truncated]"
 
 
 def _first_match(text: str, pattern: str) -> str:
