@@ -19,12 +19,14 @@ import {
   StopCircle
 } from "lucide-vue-next"
 import RunTimeline from "./RunTimeline.vue"
+import { filterUserFacingRunEvents } from "./runTimelineEvents"
 import ChatMessage from "./ChatMessage.vue"
 import AssetPreviewModal from "@/components/AssetPreviewModal.vue"
 import {
   ApiBusinessError,
   cancelAgentRun,
   confirmAgentTool,
+  deleteAgentFile,
   editRegenerateAgentMessage,
   fetchAgentMessages,
   fetchAgentFiles,
@@ -72,6 +74,7 @@ const previewAsset = ref<AssetPreviewItem | null>(null)
 const paneLoading = ref(true)
 const sending = ref(false)
 const uploading = ref(false)
+const removingFileId = ref<number | null>(null)
 const agentError = ref<string | null>(null)
 const rememberTool = ref(true)
 const activeRunId = ref<number | null>(null)
@@ -115,6 +118,8 @@ const confirmationEvents = computed(() =>
     .filter((event) => !dismissedConfirmationIds.value.has(event.id))
     .map((event) => ({ event, payload: parseEventJson(event.eventJson) })),
 )
+
+const visibleRunTimelineEvents = computed(() => filterUserFacingRunEvents(events.value, true))
 
 const runStatusText = computed(() => {
   if (runConnectionStatus.value === "running") return "Agent 正在运行"
@@ -310,6 +315,19 @@ async function handleFileSelected(event: Event) {
     files.value = [uploaded, ...files.value.filter((item) => item.id !== uploaded.id)]
   } finally {
     uploading.value = false
+  }
+}
+
+async function removeFile(file: AgentFile) {
+  if (!props.token || removingFileId.value != null) return
+  removingFileId.value = file.id
+  try {
+    await deleteAgentFile(props.sessionId, file.id, { token: props.token })
+    files.value = files.value.filter((item) => item.id !== file.id)
+  } catch (error) {
+    agentError.value = formatAgentError(error)
+  } finally {
+    removingFileId.value = null
   }
 }
 
@@ -982,7 +1000,7 @@ defineExpose({
           </div>
         </article>
 
-        <article v-if="events.length" class="agent-message assistant run-progress">
+        <article v-if="visibleRunTimelineEvents.length" class="agent-message assistant run-progress">
           <div class="avatar">
             <Bot class="h-4 w-4" />
           </div>
@@ -1121,8 +1139,15 @@ defineExpose({
             <span class="inner-file-name">{{ file.originalFilename }}</span>
             <span class="inner-file-size">{{ formatFileSize(file.fileSize) }}</span>
           </div>
-          <button class="inner-file-close" @click="files = files.filter(x => x.id !== file.id)">
-            <X class="h-3 w-3" />
+          <button
+            type="button"
+            class="inner-file-close"
+            :disabled="removingFileId === file.id"
+            aria-label="移除附件"
+            @click.stop="removeFile(file)"
+          >
+            <Loader2 v-if="removingFileId === file.id" class="h-3 w-3 animate-spin" />
+            <X v-else class="h-3 w-3" />
           </button>
         </div>
       </div>
