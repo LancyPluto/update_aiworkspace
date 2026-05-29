@@ -80,9 +80,11 @@ services:
       retries: 10
 
   backend:
-    image: maven:3.9-eclipse-temurin-17
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    image: deploy-backend
     container_name: ai-supermarket-backend
-    working_dir: /app
     restart: unless-stopped
     env_file:
       - ../.env
@@ -138,13 +140,9 @@ services:
     ports:
       - "127.0.0.1:${BACKEND_PORT:-8080}:8080"
     volumes:
-      - ../backend:/app
       - ../WXcert:/app/WXcert:ro
       - ../docs:/docs:ro
-      - maven_cache:/root/.m2
-      - ./config/maven-settings-china.xml:/root/.m2/settings.xml:ro
       - generated_media:/data/generated-media
-    command: mvn spring-boot:run
 
   admin-frontend:
     image: node:22-alpine

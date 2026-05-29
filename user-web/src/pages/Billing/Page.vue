@@ -35,7 +35,7 @@ onMounted(loadBilling)
 </script>
 
 <template>
-  <AppShell title="会员与算力" description="充值套餐、算力账户与流水（套餐与支付接口待对接）">
+  <AppShell title="会员与算力" description="充值套餐、算力账户与流水">
     <div class="space-y-6 px-6 py-6">
       <div v-if="error" class="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
         {{ error }}
@@ -86,8 +86,11 @@ onMounted(loadBilling)
                 <td class="px-4 py-3 text-muted-foreground">{{ new Date(log.createdAt).toLocaleString() }}</td>
                 <td class="px-4 py-3">{{ log.logType }}</td>
                 <td class="px-4 py-3">{{ log.reason || "-" }}</td>
-                <td class="px-4 py-3 text-right" :class="log.amount >= 0 ? 'text-primary' : 'text-destructive'">
-                  {{ log.amount > 0 ? '+' : '' }}{{ log.amount }}
+                <td
+                  class="px-4 py-3 text-right"
+                  :class="log.logType === 'DEDUCT' || log.logType === 'FREEZE' || log.logType === 'MANUAL_DEDUCT' ? 'text-destructive' : 'text-primary'"
+                >
+                  {{ log.logType === 'DEDUCT' || log.logType === 'FREEZE' || log.logType === 'MANUAL_DEDUCT' ? '-' : '+' }}{{ log.amount }}
                 </td>
                 <td class="px-4 py-3 text-right">{{ log.balanceAfter }}</td>
               </tr>

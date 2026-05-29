@@ -156,8 +156,6 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
 
     @Override
     @Transactional
-    @Override
-    @Transactional
     public RechargeOrderResponse createCustomOrder(Long userId, CreateCustomRechargeOrderRequest request) {
         String idempotencyKey = normalizeIdempotencyKey(request.clientRequestId());
         if (idempotencyKey != null) {
@@ -188,37 +186,49 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
         order.setExpiresAt(expiresAt);
         order.setCreatedAt(now);
         order.setUpdatedAt(now);
-        if ("WECHAT_NATIVE".equals(paymentChannel)) {
-            try {
-                NativePrepayResponse prepay = wechatNativePayClient.createNativeOrder(new NativePrepayRequest(
-                        order.getOrderNo(),
-                        "Custom credits recharge " + credits + " credits",
-                        BigDecimal.valueOf(credits),
-                        amount
-                ));
-                order.setPayUrl(prepay.codeUrl());
-                order.setQrCodeUrl(qrCodeDataUriGenerator.generate(prepay.codeUrl()));
-            } catch (Exception exception) {
-                order.setPayUrl(null);
-            }
-        } else if ("ALIPAY_PAGE".equals(paymentChannel)) {
-            try {
-                AlipayPagePayResponse payResponse = alipayPagePayClient.create(new AlipayPagePayRequest(
-                        order.getOrderNo(),
-                        "Custom credits recharge " + credits + " credits",
-                        priceToFen(amount)
-                ));
-                order.setPayUrl(payResponse.payUrl());
-                order.setQrCodeUrl(qrCodeDataUriGenerator.generate(payResponse.payUrl()));
-            } catch (Exception exception) {
-                order.setPayUrl(null);
-            }
+        if ("WECHAT_NATIVE".equals(paymentChannel) || "ALIPAY_PAGE".equals(paymentChannel)) {
+            order.setPayUrl(null);
+            order.setQrCodeUrl(null);
         } else {
             order.setPayUrl("/mock-pay/recharge/" + order.getOrderNo());
             order.setQrCodeUrl(null);
         }
         orderMapper.insert(order);
-        return responseFrom(order);
+        if ("WECHAT_NATIVE".equals(paymentChannel)) {
+            try {
+                NativePrepayResponse prepay = wechatNativePayClient.createNativeOrder(new NativePrepayRequest(
+                        order.getOrderNo(),
+                        "Custom credits recharge " + credits + " credits",
+                        priceToFen(amount),
+                        "CNY",
+                        expiresAt
+                ));
+                if (orderMapper.bindPayUrl(order.getId(), prepay.codeUrl(), "WeChat Native prepay created", LocalDateTime.now()) != 1) {
+                    throw new BusinessException(ErrorCode.PARAM_ERROR, "recharge order status changed before WeChat prepay binding");
+                }
+            } catch (BusinessException exception) {
+                orderMapper.transit(order.getId(), RechargeOrderStatus.WAITING_PAYMENT.name(), RechargeOrderStatus.FAILED.name(),
+                        exception.getMessage(), LocalDateTime.now());
+                throw exception;
+            }
+        } else if ("ALIPAY_PAGE".equals(paymentChannel)) {
+            try {
+                AlipayPagePayResponse payResponse = alipayPagePayClient.createPagePayOrder(new AlipayPagePayRequest(
+                        order.getOrderNo(),
+                        "Custom credits recharge " + credits + " credits",
+                        amount,
+                        expiresAt
+                ));
+                if (orderMapper.bindPayUrl(order.getId(), payResponse.payUrl(), "Alipay page pay created", LocalDateTime.now()) != 1) {
+                    throw new BusinessException(ErrorCode.PARAM_ERROR, "recharge order status changed before Alipay pay url binding");
+                }
+            } catch (BusinessException exception) {
+                orderMapper.transit(order.getId(), RechargeOrderStatus.WAITING_PAYMENT.name(), RechargeOrderStatus.FAILED.name(),
+                        exception.getMessage(), LocalDateTime.now());
+                throw exception;
+            }
+        }
+        return responseFrom(orderMapper.findByOrderNo(order.getOrderNo()));
     }
 
     @Override

@@ -40,10 +40,10 @@ ENV UV_HTTP_TIMEOUT=300
 
 # 安装 Python 依赖
 # 如果有 uv.lock 文件则使用 --frozen，否则生成新的锁定文件
-RUN if [ -f uv.lock ]; then \
+RUN if [ -s uv.lock ]; then \
         uv sync --frozen; \
     else \
-        uv sync; \
+        rm -f uv.lock && uv sync; \
     fi
 
 # 复制后端代码

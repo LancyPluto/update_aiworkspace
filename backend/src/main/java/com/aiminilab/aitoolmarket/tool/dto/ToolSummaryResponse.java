@@ -22,6 +22,10 @@ public record ToolSummaryResponse(
         String executionHandler
 ) {
     public static ToolSummaryResponse from(AiTool tool) {
+        return from(tool, tool.getEstimatedCreditCost());
+    }
+
+    public static ToolSummaryResponse from(AiTool tool, Integer estimatedCreditCost) {
         return new ToolSummaryResponse(
                 tool.getId(),
                 tool.getToolCode(),
@@ -35,7 +39,7 @@ public record ToolSummaryResponse(
                 tool.getOutputModality(),
                 tool.getConfigNote(),
                 tool.getStatus(),
-                tool.getEstimatedCreditCost(),
+                estimatedCreditCost,
                 tool.getModelConfigId(),
                 tool.getModelConfigName(),
                 tool.getModelName(),

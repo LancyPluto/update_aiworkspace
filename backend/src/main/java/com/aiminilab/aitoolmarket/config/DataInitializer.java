@@ -139,7 +139,7 @@ public class DataInitializer implements CommandLineRunner {
                   id BIGINT PRIMARY KEY AUTO_INCREMENT,
                   order_no VARCHAR(64) NOT NULL UNIQUE,
                   user_id BIGINT NOT NULL,
-                  package_id BIGINT NOT NULL,
+                  package_id BIGINT NULL,
                   credits INT NOT NULL,
                   price_amount DECIMAL(18,2) NOT NULL,
                   currency VARCHAR(16) NOT NULL DEFAULT 'CNY',
@@ -159,6 +159,7 @@ public class DataInitializer implements CommandLineRunner {
                 )
                 """);
         executeSqlIgnore("ALTER TABLE credit_recharge_orders MODIFY COLUMN pay_url TEXT NULL");
+        executeSqlIgnore("ALTER TABLE credit_recharge_orders MODIFY COLUMN package_id BIGINT NULL");
         ensureIndex(
                 "credit_recharge_orders",
                 "uk_recharge_user_idem",

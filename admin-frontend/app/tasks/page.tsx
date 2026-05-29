@@ -176,7 +176,7 @@ function rowToTask(row: AdminTaskApiPayload): Task {
     status: mapped.status,
     statusLabel: mapped.label,
     rawStatus: row.status,
-    credits: null,
+    credits: row.consumedCredits ?? null,
     input: "",
     output: row.result?.contentText || "",
     outputResourceType: row.result?.resourceType || "",

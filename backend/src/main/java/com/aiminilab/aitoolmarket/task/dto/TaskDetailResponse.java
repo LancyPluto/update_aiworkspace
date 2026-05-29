@@ -21,12 +21,14 @@ public record TaskDetailResponse(
         String errorMessage,
         JsonNode params,
         TaskResultResponse result,
+        Integer consumedCredits,
         LocalDateTime createdAt,
         LocalDateTime queuedAt,
         LocalDateTime startedAt,
         LocalDateTime finishedAt
 ) {
-    public static TaskDetailResponse of(AiTask task, JsonNode params, TaskResultResponse result) {
+    public static TaskDetailResponse of(AiTask task, JsonNode params, TaskResultResponse result,
+                           Integer consumedCredits) {
         return new TaskDetailResponse(
                 task.getId(),
                 task.getTaskNo(),
@@ -43,6 +45,7 @@ public record TaskDetailResponse(
                 task.getErrorMessage(),
                 params,
                 result,
+                consumedCredits,
                 task.getCreatedAt(),
                 task.getQueuedAt(),
                 task.getStartedAt(),

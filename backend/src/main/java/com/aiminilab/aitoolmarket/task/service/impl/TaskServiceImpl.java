@@ -6,6 +6,7 @@ import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.enums.TaskStatus;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.credit.service.CreditService;
+import com.aiminilab.aitoolmarket.credit.service.TaskCreditEstimateService;
 import com.aiminilab.aitoolmarket.task.dto.CreateTaskRequest;
 import com.aiminilab.aitoolmarket.task.dto.RegenerateTaskRequest;
 import com.aiminilab.aitoolmarket.task.dto.TaskDetailResponse;
@@ -30,8 +31,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
-import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.util.UUID;
 
 @Service
@@ -47,6 +46,7 @@ public class TaskServiceImpl implements TaskService {
     private final ObjectMapper objectMapper;
     private final TaskOutboxService taskOutboxService;
     private final TaskMetrics taskMetrics;
+    private final TaskCreditEstimateService taskCreditEstimateService;
 
     public TaskServiceImpl(
             TaskMapper taskMapper,
@@ -56,7 +56,8 @@ public class TaskServiceImpl implements TaskService {
             CreditService creditService,
             ObjectMapper objectMapper,
             TaskOutboxService taskOutboxService,
-            TaskMetrics taskMetrics
+            TaskMetrics taskMetrics,
+            TaskCreditEstimateService taskCreditEstimateService
     ) {
         this.taskMapper = taskMapper;
         this.toolMapper = toolMapper;
@@ -66,6 +67,7 @@ public class TaskServiceImpl implements TaskService {
         this.objectMapper = objectMapper;
         this.taskOutboxService = taskOutboxService;
         this.taskMetrics = taskMetrics;
+        this.taskCreditEstimateService = taskCreditEstimateService;
     }
 
     @Override
@@ -203,7 +205,7 @@ public class TaskServiceImpl implements TaskService {
         task.setToolId(tool.getId());
         task.setParamsJson(params.toString());
         task.setIdempotencyKey(clientRequestId);
-        int estimatedCredits = chargeTaskCredits ? estimateTaskCredits(tool, modelConfig) : 0;
+        int estimatedCredits = chargeTaskCredits ? taskCreditEstimateService.estimateTaskCredits(tool, modelConfig) : 0;
         task.setEstimatedCreditCost(estimatedCredits);
 
         Long taskId = taskMapper.insertTask(task);
@@ -216,7 +218,8 @@ public class TaskServiceImpl implements TaskService {
 
     private TaskDetailResponse toDetail(AiTask task) {
         TaskResultResponse result = taskMapper.findFirstResult(task.getId()).orElse(null);
-        return TaskDetailResponse.of(task, parseParams(task.getParamsJson()), result);
+        int consumedCredits = taskMapper.sumConsumedCreditsByTaskId(task.getId());
+        return TaskDetailResponse.of(task, parseParams(task.getParamsJson()), result, consumedCredits);
     }
 
     private AiTask findTask(Long taskId, Long userId) {
@@ -239,22 +242,6 @@ public class TaskServiceImpl implements TaskService {
         } catch (Exception exception) {
             return objectMapper.createObjectNode();
         }
-    }
-
-    private int estimateTaskCredits(AiTool tool, AgentModelConfig modelConfig) {
-        int toolEstimate = tool.getEstimatedCreditCost() == null ? 0 : Math.max(0, tool.getEstimatedCreditCost());
-        if (modelConfig == null) {
-            return toolEstimate;
-        }
-        String billingUnit = modelConfig.getBillingUnit();
-        if ("PER_CALL".equals(billingUnit) && modelConfig.getUnitPrice() != null) {
-            // PER_CALL: cost = unitPrice × 1.2 / 0.01
-            BigDecimal cost = modelConfig.getUnitPrice().multiply(new BigDecimal("1.20"));
-            int calculated = cost.divide(new BigDecimal("0.01"), 0, RoundingMode.CEILING).intValue();
-            return calculated > 0 ? calculated : toolEstimate;
-        }
-        // TOKEN_PER_M: 无法提前预估 token 数，使用工具上配置的值
-        return toolEstimate;
     }
 
     private String generateTaskNo() {
