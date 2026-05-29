@@ -23,7 +23,7 @@ public interface TaskService {
 
     TaskStatusResponse regenerate(Long userId, Long taskId, RegenerateTaskRequest request);
 
-    PageResponse<TaskDetailResponse> adminList(String status, String toolCode, Long userId, Integer pageNo, Integer pageSize);
+    PageResponse<TaskDetailResponse> adminList(String status, String toolCode, Long userId, Long taskId, Integer pageNo, Integer pageSize);
 
     TaskDetailResponse adminDetail(Long taskId);
 

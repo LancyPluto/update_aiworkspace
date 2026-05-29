@@ -4,7 +4,9 @@ import com.aiminilab.aitoolmarket.agent.dto.AdminAgentToolAccessResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AgentToolDescriptorResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AgentToolFieldDescriptorResponse;
 import com.aiminilab.aitoolmarket.agent.dto.UpdateAgentToolAccessRequest;
+import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
 import com.aiminilab.aitoolmarket.agent.entity.AgentToolDescriptorExtension;
+import com.aiminilab.aitoolmarket.agent.mapper.AgentModelConfigMapper;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentToolDescriptorExtensionMapper;
 import com.aiminilab.aitoolmarket.agent.service.AgentToolDescriptorService;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
@@ -41,15 +43,18 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
     private final ToolMapper toolMapper;
     private final ToolFieldItemMapper toolFieldItemMapper;
     private final AgentToolDescriptorExtensionMapper extensionMapper;
+    private final AgentModelConfigMapper modelConfigMapper;
     private final ObjectMapper objectMapper;
 
     public AgentToolDescriptorServiceImpl(ToolMapper toolMapper,
                                           ToolFieldItemMapper toolFieldItemMapper,
                                           AgentToolDescriptorExtensionMapper extensionMapper,
+                                          AgentModelConfigMapper modelConfigMapper,
                                           ObjectMapper objectMapper) {
         this.toolMapper = toolMapper;
         this.toolFieldItemMapper = toolFieldItemMapper;
         this.extensionMapper = extensionMapper;
+        this.modelConfigMapper = modelConfigMapper;
         this.objectMapper = objectMapper;
     }
 
@@ -84,7 +89,7 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
         return tools.stream()
                 .map(tool -> {
                     AgentToolDescriptorExtension ext = extensions.get(tool.getToolCode());
-                    return AdminAgentToolAccessResponse.from(tool, agentEnabled(ext), healthStatus(ext), healthMessage(ext), healthCheckedAt(ext));
+                    return adminAccessResponse(tool, ext);
                 })
                 .toList();
     }
@@ -120,13 +125,7 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
         } else {
             extensionMapper.updateById(ext);
         }
-        return AdminAgentToolAccessResponse.from(
-                tool,
-                Boolean.TRUE.equals(ext.getAgentEnabled()),
-                ext.getHealthStatus(),
-                ext.getHealthMessage(),
-                ext.getHealthCheckedAt()
-        );
+        return adminAccessResponse(tool, ext);
     }
 
     @Override
@@ -275,6 +274,51 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
             return "text";
         }
         return outputModality.trim().toLowerCase();
+    }
+
+    private AdminAgentToolAccessResponse adminAccessResponse(AiTool tool, AgentToolDescriptorExtension ext) {
+        AgentModelConfig modelConfig = tool.getModelConfigId() == null
+                ? null
+                : modelConfigMapper.findActiveById(tool.getModelConfigId());
+        return AdminAgentToolAccessResponse.from(
+                tool,
+                agentEnabled(ext),
+                healthStatus(ext),
+                healthMessage(ext),
+                healthCheckedAt(ext),
+                modelConfig == null ? null : modelConfig.getProvider(),
+                modelConfig == null ? null : modelConfig.getBaseUrl(),
+                modelConfig == null ? null : modelConfig.getTimeoutSeconds(),
+                modelConfig == null ? null : extraAuthInt(modelConfig.getExtraAuthJson(), "connectTimeoutSeconds"),
+                modelConfig == null ? null : extraAuthInt(modelConfig.getExtraAuthJson(), "readTimeoutSeconds"),
+                modelConfig == null ? null : proxyConfigured(modelConfig.getExtraAuthJson())
+        );
+    }
+
+    private Integer extraAuthInt(String value, String key) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            JsonNode node = objectMapper.readTree(value);
+            JsonNode child = node.get(key);
+            return child == null || !child.canConvertToInt() ? null : child.asInt();
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private boolean proxyConfigured(String value) {
+        if (value == null || value.isBlank()) {
+            return false;
+        }
+        try {
+            JsonNode node = objectMapper.readTree(value);
+            JsonNode proxyUrl = node.get("proxyUrl");
+            return proxyUrl != null && !proxyUrl.asText("").isBlank();
+        } catch (Exception ignored) {
+            return false;
+        }
     }
 
     private Map<String, Object> loadHints(String toolCode, AgentToolDescriptorExtension ext) {

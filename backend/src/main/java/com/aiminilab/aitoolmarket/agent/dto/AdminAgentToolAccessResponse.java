@@ -19,6 +19,12 @@ public record AdminAgentToolAccessResponse(
         Long modelConfigId,
         String modelConfigName,
         String modelName,
+        String modelProvider,
+        String modelBaseUrl,
+        Integer modelTimeoutSeconds,
+        Integer modelConnectTimeoutSeconds,
+        Integer modelReadTimeoutSeconds,
+        Boolean modelProxyConfigured,
         String executionHandler,
         Boolean agentEnabled,
         String healthStatus,
@@ -34,6 +40,20 @@ public record AdminAgentToolAccessResponse(
                                                     String healthStatus,
                                                     String healthMessage,
                                                     java.time.LocalDateTime healthCheckedAt) {
+        return from(tool, agentEnabled, healthStatus, healthMessage, healthCheckedAt, null, null, null, null, null, null);
+    }
+
+    public static AdminAgentToolAccessResponse from(AiTool tool,
+                                                    boolean agentEnabled,
+                                                    String healthStatus,
+                                                    String healthMessage,
+                                                    java.time.LocalDateTime healthCheckedAt,
+                                                    String modelProvider,
+                                                    String modelBaseUrl,
+                                                    Integer modelTimeoutSeconds,
+                                                    Integer modelConnectTimeoutSeconds,
+                                                    Integer modelReadTimeoutSeconds,
+                                                    Boolean modelProxyConfigured) {
         return new AdminAgentToolAccessResponse(
                 tool.getId(),
                 tool.getToolCode(),
@@ -51,6 +71,12 @@ public record AdminAgentToolAccessResponse(
                 tool.getModelConfigId(),
                 tool.getModelConfigName(),
                 tool.getModelName(),
+                modelProvider,
+                modelBaseUrl,
+                modelTimeoutSeconds,
+                modelConnectTimeoutSeconds,
+                modelReadTimeoutSeconds,
+                modelProxyConfigured,
                 tool.getExecutionHandler(),
                 agentEnabled,
                 healthStatus == null || healthStatus.isBlank() ? "UNKNOWN" : healthStatus,

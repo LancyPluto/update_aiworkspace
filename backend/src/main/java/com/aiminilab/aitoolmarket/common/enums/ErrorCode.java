@@ -3,6 +3,7 @@ package com.aiminilab.aitoolmarket.common.enums;
 public enum ErrorCode {
     SUCCESS,
     PARAM_ERROR,
+    NOT_FOUND,
     UNAUTHORIZED,
     FORBIDDEN,
     ADMIN_UNAUTHORIZED,

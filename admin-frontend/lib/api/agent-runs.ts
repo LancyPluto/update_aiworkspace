@@ -9,9 +9,10 @@ import type {
 } from './types'
 
 export function fetchAdminAgentRuns(query: AdminAgentRunQuery = {}) {
-  return http.get<PageResponse<AdminAgentRunListItem>>('/api/admin/v1/agent/runs', {
-    query: query as Record<string, string | number | boolean | undefined>,
-  })
+  return http.get<PageResponse<AdminAgentRunListItem>>(
+    '/api/admin/v1/agent/runs',
+    query as Record<string, string | number | boolean | undefined>,
+  )
 }
 
 export function fetchAdminAgentRunStats() {

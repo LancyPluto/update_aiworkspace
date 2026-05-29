@@ -9,6 +9,7 @@ import MyTasksPage from "@/pages/MyTasks/Page.vue"
 import MaterialLibraryPage from "@/pages/MaterialLibrary/Page.vue"
 import BillingPage from "@/pages/Billing/Page.vue"
 import AgentPlaceholderPage from "@/pages/AgentPlaceholder/Page.vue"
+import ProfilePage from "@/pages/Profile/Page.vue"
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -81,6 +82,12 @@ const router = createRouter({
       name: "MaterialLibrary",
       meta: { requiresAuth: true },
       component: MaterialLibraryPage,
+    },
+    {
+      path: "/profile",
+      name: "Profile",
+      meta: { requiresAuth: true },
+      component: ProfilePage,
     },
     {
       path: "/billing",

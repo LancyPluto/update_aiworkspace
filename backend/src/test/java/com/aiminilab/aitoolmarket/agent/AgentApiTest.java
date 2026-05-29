@@ -13,6 +13,7 @@ import com.aiminilab.aitoolmarket.agent.mapper.AgentToolPreferenceMapper;
 import com.aiminilab.aitoolmarket.agent.service.AgentRateLimitService;
 import com.aiminilab.aitoolmarket.auth.security.InternalRequestSignatureVerifier;
 import com.aiminilab.aitoolmarket.auth.security.TokenDenylistService;
+import com.aiminilab.aitoolmarket.auth.service.HumanCaptchaService;
 import com.aiminilab.aitoolmarket.credit.service.CreditService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -27,6 +28,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
+
+import java.net.http.HttpTimeoutException;
 
 import static com.aiminilab.aitoolmarket.testsupport.InternalApiTestSupport.signed;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -78,6 +81,9 @@ class AgentApiTest {
 
     @MockBean
     private AgentServiceClient agentServiceClient;
+
+    @MockBean
+    private HumanCaptchaService humanCaptchaService;
 
     @Autowired
     private CreditService creditService;
@@ -221,6 +227,34 @@ class AgentApiTest {
                 .getResponse()
                 .getContentAsString();
         long toolCallId = objectMapper.readTree(startedResponse).path("data").path("id").asLong();
+        String bindTaskBody = """
+                {
+                  "taskId": 7001
+                }
+                """;
+        mockMvc.perform(signed(post("/api/internal/v1/agent/tool-calls/{toolCallId}/task", toolCallId), "POST",
+                        "/api/internal/v1/agent/tool-calls/%d/task".formatted(toolCallId), bindTaskBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(bindTaskBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.taskId").value(7001));
+        mockMvc.perform(signed(post("/api/internal/v1/agent/tool-calls/{toolCallId}/task", toolCallId), "POST",
+                        "/api/internal/v1/agent/tool-calls/%d/task".formatted(toolCallId), bindTaskBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(bindTaskBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.taskId").value(7001));
+        String differentTaskBody = """
+                {
+                  "taskId": 7002
+                }
+                """;
+        mockMvc.perform(signed(post("/api/internal/v1/agent/tool-calls/{toolCallId}/task", toolCallId), "POST",
+                        "/api/internal/v1/agent/tool-calls/%d/task".formatted(toolCallId), differentTaskBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(differentTaskBody))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("PARAM_ERROR"));
         mockMvc.perform(signed(post("/api/internal/v1/agent/runs/{runId}/tool-calls", runId), "POST",
                         "/api/internal/v1/agent/runs/%d/tool-calls".formatted(runId), """
                                 {
@@ -278,6 +312,7 @@ class AgentApiTest {
         var calls = agentToolCallMapper.findByRunId(runId);
         assertThat(calls).hasSize(1);
         assertThat(calls.get(0).getStatus()).isEqualTo("SUCCESS");
+        assertThat(calls.get(0).getTaskId()).isEqualTo(7001L);
         assertThat(calls.get(0).getResultJson()).contains("draft-001");
 
         String eventsResponse = mockMvc.perform(get("/api/v1/agent/runs/{runId}/events", runId)
@@ -294,6 +329,12 @@ class AgentApiTest {
         assertThat(events.get(2).path("eventType").asText()).isEqualTo("tool.confirmed");
         assertThat(events.get(3).path("eventType").asText()).isEqualTo("tool.started");
         assertThat(events.get(4).path("eventType").asText()).isEqualTo("tool.finished");
+        JsonNode finishedEventJson = parseEventJson(events.get(4).path("eventJson").asText());
+        assertThat(finishedEventJson.path("toolCode").asText()).isEqualTo("xiaohongshu_copywriting");
+        assertThat(finishedEventJson.path("toolCallId").asLong()).isEqualTo(toolCallId);
+        assertThat(finishedEventJson.path("taskId").asLong()).isEqualTo(7001L);
+        assertThat(finishedEventJson.path("status").asText()).isEqualTo("SUCCESS");
+        assertThat(finishedEventJson.path("postId").asText()).isEqualTo("draft-001");
 
         mockMvc.perform(get("/api/v1/agent/runs/{runId}/events", runId)
                         .header("Authorization", "Bearer " + token)
@@ -603,6 +644,33 @@ class AgentApiTest {
     }
 
     @Test
+    void agentServiceNotificationTimeoutKeepsRunActive() throws Exception {
+        mockExternalAuthDependencies();
+        register("agent_notify_timeout_user");
+        LoginResult login = loginWithUser("agent_notify_timeout_user");
+        Long sessionId = createSession(login.token(), "Agent Notify Timeout");
+        Mockito.doThrow(new IllegalStateException(
+                        "Could not notify agent service at /internal/v1/agent/runs/1/execute",
+                        new HttpTimeoutException("request timed out")
+                ))
+                .when(agentServiceClient)
+                .executeRun(anyLong());
+
+        Long runId = sendMessage(login.token(), sessionId, "Please handle notification timeout.").runId();
+
+        mockMvc.perform(get("/api/v1/agent/runs/{runId}", runId)
+                        .header("Authorization", "Bearer " + login.token()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("RUNNING"));
+
+        mockMvc.perform(get("/api/v1/agent/runs/{runId}/events", runId)
+                        .header("Authorization", "Bearer " + login.token()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].eventType").value("run.started"))
+                .andExpect(jsonPath("$.data.list[1].eventType").value("run.dispatch_timeout"));
+    }
+
+    @Test
     void userCanSubscribeRunEventStream() throws Exception {
         mockExternalAuthDependencies();
         register("agent_stream_user");
@@ -721,6 +789,83 @@ class AgentApiTest {
         var events = agentRunEventMapper.findEventsForAdmin(runId, 10);
         assertThat(events).hasSize(2);
         assertThat(events.get(1).getEventText())
+                .hasSize(4000)
+                .endsWith("... [truncated]");
+    }
+
+    @Test
+    void internalAgentFailureMessagesAreTruncatedBeforePersisting() throws Exception {
+        mockExternalAuthDependencies();
+        register("agent_long_failure_user");
+        String token = login("agent_long_failure_user");
+        Long sessionId = createSession(token, "Long Failure");
+        Long runId = sendMessage(token, sessionId, "Create a verbose failure.").runId();
+        ensureOnlineTool("xiaohongshu_copywriting");
+        String createToolBody = objectMapper.writeValueAsString(java.util.Map.of(
+                "toolCode", "xiaohongshu_copywriting",
+                "argumentsJson", java.util.Map.of("topic", "launch")
+        ));
+
+        String startedResponse = mockMvc.perform(signed(post("/api/internal/v1/agent/runs/{runId}/tool-calls", runId), "POST",
+                        "/api/internal/v1/agent/runs/%d/tool-calls".formatted(runId), createToolBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createToolBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("RUNNING"))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        long toolCallId = objectMapper.readTree(startedResponse).path("data").path("id").asLong();
+        String bindTaskBody = objectMapper.writeValueAsString(java.util.Map.of("taskId", 8001));
+        mockMvc.perform(signed(post("/api/internal/v1/agent/tool-calls/{toolCallId}/task", toolCallId), "POST",
+                        "/api/internal/v1/agent/tool-calls/%d/task".formatted(toolCallId), bindTaskBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(bindTaskBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.taskId").value(8001));
+
+        String longErrorMessage = "timeout diagnostics ".repeat(800);
+        String failToolBody = objectMapper.writeValueAsString(java.util.Map.of(
+                "errorCode", "MODEL_TIMEOUT",
+                "errorMessage", longErrorMessage
+        ));
+        mockMvc.perform(signed(post("/api/internal/v1/agent/tool-calls/{toolCallId}/fail", toolCallId), "POST",
+                        "/api/internal/v1/agent/tool-calls/%d/fail".formatted(toolCallId), failToolBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(failToolBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("FAILED"));
+
+        var toolCall = agentToolCallMapper.findById(toolCallId).orElseThrow();
+        assertThat(toolCall.getErrorMessage())
+                .hasSize(4000)
+                .endsWith("... [truncated]");
+        var toolEvents = agentRunEventMapper.findEventsForAdmin(runId, 10);
+        assertThat(toolEvents.get(toolEvents.size() - 1).getEventText())
+                .hasSize(4000)
+                .endsWith("... [truncated]");
+        JsonNode failedToolEventJson = parseEventJson(toolEvents.get(toolEvents.size() - 1).getEventJson());
+        assertThat(failedToolEventJson.path("toolCode").asText()).isEqualTo("xiaohongshu_copywriting");
+        assertThat(failedToolEventJson.path("toolCallId").asLong()).isEqualTo(toolCallId);
+        assertThat(failedToolEventJson.path("taskId").asLong()).isEqualTo(8001L);
+        assertThat(failedToolEventJson.path("status").asText()).isEqualTo("FAILED");
+        assertThat(failedToolEventJson.path("errorCode").asText()).isEqualTo("MODEL_TIMEOUT");
+        assertThat(failedToolEventJson.path("errorMessage").asText())
+                .hasSize(4000)
+                .endsWith("... [truncated]");
+
+        String failRunBody = objectMapper.writeValueAsString(java.util.Map.of(
+                "errorCode", "MODEL_TIMEOUT",
+                "errorMessage", longErrorMessage
+        ));
+        mockMvc.perform(signed(post("/api/internal/v1/agent/runs/{runId}/fail", runId), "POST",
+                        "/api/internal/v1/agent/runs/%d/fail".formatted(runId), failRunBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(failRunBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("FAILED"));
+
+        assertThat(agentRunMapper.findById(runId).orElseThrow().getErrorMessage())
                 .hasSize(4000)
                 .endsWith("... [truncated]");
     }
@@ -863,7 +1008,7 @@ class AgentApiTest {
         Mockito.verify(agentServiceClient, Mockito.never()).testModelConfig(any());
         Mockito.verify(agentServiceClient).executeRun(anyLong());
 
-        var runningRuns = agentRunMapper.findForAdmin("RUNNING", login.userId(), 10, 0);
+        var runningRuns = agentRunMapper.findForAdmin("RUNNING", login.userId(), null, 10, 0);
         org.assertj.core.api.Assertions.assertThat(runningRuns).hasSize(1);
         var events = agentRunEventMapper.findEventsForAdmin(runningRuns.get(0).id(), 10);
         org.assertj.core.api.Assertions.assertThat(events).extracting(event -> event.getEventType()).contains("run.started");
@@ -1094,6 +1239,86 @@ class AgentApiTest {
     }
 
     @Test
+    void runContextIncludesRecentStructuredToolResultMemory() throws Exception {
+        mockExternalAuthDependencies();
+        register("agent_tool_result_memory_user");
+        String token = login("agent_tool_result_memory_user");
+        Long sessionId = createSession(token, "Tool Result Memory");
+        Long runId1 = sendMessage(token, sessionId, "生成一张图片").runId();
+        ensureOnlineTool("ofox_gpt_image2");
+        String createToolBody = objectMapper.writeValueAsString(java.util.Map.of(
+                "toolCode", "ofox_gpt_image2",
+                "argumentsJson", java.util.Map.of("prompt", "family photo")
+        ));
+        String startedResponse = mockMvc.perform(signed(post("/api/internal/v1/agent/runs/{runId}/tool-calls", runId1), "POST",
+                        "/api/internal/v1/agent/runs/%d/tool-calls".formatted(runId1), createToolBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createToolBody))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        long toolCallId = objectMapper.readTree(startedResponse).path("data").path("id").asLong();
+        String bindTaskBody = objectMapper.writeValueAsString(java.util.Map.of("taskId", 9901));
+        mockMvc.perform(signed(post("/api/internal/v1/agent/tool-calls/{toolCallId}/task", toolCallId), "POST",
+                        "/api/internal/v1/agent/tool-calls/%d/task".formatted(toolCallId), bindTaskBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(bindTaskBody))
+                .andExpect(status().isOk());
+        String inlineBase64 = "data:image/png;base64," + "A".repeat(5000);
+        String imageContent = objectMapper.writeValueAsString(java.util.Map.of(
+                "images", java.util.List.of(java.util.Map.of(
+                        "url", "https://cdn.example.com/generated/family.png",
+                        "sourceUrl", inlineBase64
+                ))
+        ));
+        String completeToolBody = objectMapper.writeValueAsString(java.util.Map.of(
+                "resultJson", java.util.Map.of(
+                        "toolCode", "ofox_gpt_image2",
+                        "toolCallId", toolCallId,
+                        "taskId", 9901,
+                        "status", "SUCCESS",
+                        "data", java.util.Map.of(
+                                "resourceType", "IMAGE",
+                                "contentText", imageContent
+                        ),
+                        "summary", imageContent
+                )
+        ));
+        mockMvc.perform(signed(post("/api/internal/v1/agent/tool-calls/{toolCallId}/complete", toolCallId), "POST",
+                        "/api/internal/v1/agent/tool-calls/%d/complete".formatted(toolCallId), completeToolBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(completeToolBody))
+                .andExpect(status().isOk());
+        String completeRunBody = objectMapper.writeValueAsString(java.util.Map.of(
+                "finalAnswer", "图片已生成。" + inlineBase64,
+                "intent", "tool_use",
+                "modelProviderCode", "mock",
+                "modelName", "mock-chat",
+                "consumedCredits", 0
+        ));
+        completeRun(runId1, completeRunBody).andExpect(status().isOk());
+
+        Long runId2 = sendMessage(token, sessionId, "你刚刚用什么生成的？").runId();
+        String ctx = mockMvc.perform(signed(get("/api/internal/v1/agent/runs/{runId}/context", runId2), "GET",
+                        "/api/internal/v1/agent/runs/%d/context".formatted(runId2), ""))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        JsonNode history = objectMapper.readTree(ctx).path("data").path("history");
+        String historyText = history.toString();
+        assertThat(historyText).contains("\"role\":\"system\"");
+        assertThat(historyText).contains("toolCode=ofox_gpt_image2");
+        assertThat(historyText).contains("taskId=9901");
+        assertThat(historyText).contains("resourceType=IMAGE");
+        assertThat(historyText).contains("https://cdn.example.com/generated/family.png");
+        assertThat(historyText).contains("[inline-media-base64-omitted]");
+        assertThat(historyText).doesNotContain("data:image/png;base64");
+        assertThat(historyText).doesNotContain("AAAAAAAAAAAAAAAAAAAAAAAA");
+        assertThat(historyText.length()).isLessThan(3000);
+    }
+
+    @Test
     void editRegenerateTruncatesLaterTurns() throws Exception {
         mockExternalAuthDependencies();
         register("agent_edit_truncate_user");
@@ -1150,6 +1375,8 @@ class AgentApiTest {
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
         assertThat(listJson).contains("Round one edited");
+        assertThat(objectMapper.readTree(listJson).path("data").path("list").get(0).path("editedAt").isMissingNode()).isFalse();
+        assertThat(objectMapper.readTree(listJson).path("data").path("list").get(0).path("editedAt").isNull()).isFalse();
         assertThat(listJson).contains("Answer one revised.");
         assertThat(listJson).doesNotContain("Round two");
         assertThat(listJson).doesNotContain("Answer two.");
@@ -1311,6 +1538,11 @@ class AgentApiTest {
                         .content(completeBody));
     }
 
+    private JsonNode parseEventJson(String raw) throws Exception {
+        JsonNode node = objectMapper.readTree(raw);
+        return node.isTextual() ? objectMapper.readTree(node.asText()) : node;
+    }
+
     private String login(String account) throws Exception {
         return loginWithUser(account).token();
     }
@@ -1359,6 +1591,7 @@ class AgentApiTest {
                 toolCode
         );
         if (existingToolId != null) {
+            ensureAgentToolAccess(toolCode, existingToolId);
             return;
         }
 
@@ -1398,6 +1631,7 @@ class AgentApiTest {
                 Long.class,
                 toolCode
         );
+        ensureAgentToolAccess(toolCode, toolId);
         jdbcTemplate.update(
                 "INSERT INTO tool_field_schemas(tool_id, schema_version, status) VALUES (?, ?, 'ACTIVE')",
                 toolId,
@@ -1421,6 +1655,21 @@ class AgentApiTest {
                 "Provide a topic",
                 1,
                 1
+        );
+    }
+
+    private void ensureAgentToolAccess(String toolCode, Long toolId) {
+        jdbcTemplate.update("DELETE FROM agent_tool_descriptor_extension WHERE tool_code = ?", toolCode);
+        jdbcTemplate.update(
+                """
+                INSERT INTO agent_tool_descriptor_extension(
+                  tool_id, tool_code, agent_enabled, agent_recommendable, agent_auto_callable,
+                  confirmation_policy, risk_level, output_type, health_status
+                )
+                VALUES (?, ?, 1, 1, 0, 'auto', 'low', 'text', 'UNKNOWN')
+                """,
+                toolId,
+                toolCode
         );
     }
 

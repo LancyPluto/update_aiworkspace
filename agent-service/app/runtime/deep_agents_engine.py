@@ -9,6 +9,7 @@ from types import ModuleType
 from typing import Any
 
 from app.config import settings
+from app.core.agent_decision import AgentDecisionService
 from app.core.budget_guard import BudgetExceeded, BudgetGuard, BudgetState
 from app.core.event_types import (
     INTENT_DETECTED,
@@ -28,7 +29,17 @@ from app.core.event_types import (
     WORKSPACE_FILE_READ,
 )
 from app.core.intent_router import Intent, IntentResult, IntentRouter
-from app.core.schemas import ChatMessage, RunComplete, RunContext, RunEventCreate, RunFail, ToolDescriptor, WorkspaceMemoryItem
+from app.core.schemas import (
+    AgentRouteDebugResponse,
+    AgentRouteDebugTool,
+    ChatMessage,
+    RunComplete,
+    RunContext,
+    RunEventCreate,
+    RunFail,
+    ToolDescriptor,
+    WorkspaceMemoryItem,
+)
 from app.runtime.subagent_profiles import default_subagent_profiles, profiles_to_deepagents_subagents
 from app.runtime.workspace_files import WorkspaceFileContext, build_workspace_file_context
 from app.security.prompt_guard import PromptGuard
@@ -86,6 +97,7 @@ class DeepAgentsRuntimeEngine:
         self.prompt_guard = prompt_guard or PromptGuard()
         self.dependency_loader = dependency_loader or self._load_deepagents
         self.tool_bridge = BackendToolBridge(backend_client, model_client=model_client)
+        self.decision_service = AgentDecisionService(self.intent_router)
 
     async def run(self, context: RunContext) -> None:
         if self._explicit_deep_agents_flag and not self.deep_agents_enabled:
@@ -215,6 +227,29 @@ class DeepAgentsRuntimeEngine:
         await self._complete_run(context, answer, intent=Intent.TOOL_USE.value)
         await self._emit_memory_candidate(context.runId, answer, None)
 
+    async def debug_route(self, context: RunContext) -> AgentRouteDebugResponse:
+        intent = await self._classify_intent(context)
+        requested_modality = requested_output_modality(context.message)
+        return AgentRouteDebugResponse(
+            intent=intent.intent.value,
+            confidence=intent.confidence,
+            selectedToolCode=intent.selectedToolCode,
+            candidateToolCodes=intent.candidateToolCodes,
+            clarifyingQuestion=intent.clarifyingQuestion,
+            decisionSource=intent.decisionSource,
+            reason=intent.reason,
+            requestedOutputModality=requested_modality,
+            visibleToolCount=len(context.availableTools),
+            visibleTools=[
+                AgentRouteDebugTool(
+                    toolCode=tool.toolCode,
+                    toolName=tool.toolName,
+                    autoCallable=tool.autoCallable,
+                )
+                for tool in context.availableTools
+            ],
+        )
+
     def _get_available_module(self) -> ModuleType:
         module = self.dependency_loader()
         if module is None:
@@ -233,17 +268,15 @@ class DeepAgentsRuntimeEngine:
     # --- Intent helpers ---
 
     async def _classify_intent(self, context: RunContext):
-        rule_intent = self.intent_router.classify(context)
-        if not self._should_use_llm_router(context, rule_intent):
-            return rule_intent
-        llm_intent = await self._classify_intent_with_llm(context, rule_intent)
-        return llm_intent or rule_intent
+        llm_router = self._classify_intent_with_llm if self._should_use_llm_router(context) else None
+        return await self.decision_service.decide(
+            context,
+            hard_rule=self._is_hard_rule_intent,
+            llm_router=llm_router,
+        )
 
-    def _should_use_llm_router(self, context: RunContext, rule_intent) -> bool:
-        if not settings.agent_llm_router_enabled:
-            return False
-        if not context.availableTools:
-            return False
+    @staticmethod
+    def _is_hard_rule_intent(rule_intent) -> bool:
         hard_rule_reasons = {
             "ready_file_context_available",
             "file_analysis_request",
@@ -255,10 +288,18 @@ class DeepAgentsRuntimeEngine:
             "continuing_pending_tool_prompt",
             "structured_tool_arguments",
         }
-        return rule_intent.reason not in hard_rule_reasons
+        return rule_intent.reason in hard_rule_reasons
+
+    def _should_use_llm_router(self, context: RunContext) -> bool:
+        if not settings.agent_llm_router_enabled:
+            return False
+        if not context.availableTools:
+            return False
+        return True
 
     async def _classify_intent_with_llm(self, context: RunContext, rule_intent):
         tools = ToolRegistry(context).list_tools()
+        requested_modality = requested_output_modality(context.message)
         tool_lines = []
         for tool in tools[:30]:
             tool_lines.append(
@@ -267,6 +308,7 @@ class DeepAgentsRuntimeEngine:
                     "toolName": tool.toolName,
                     "description": tool.description or "",
                     "autoCallable": tool.autoCallable,
+                    "agentHints": tool.hints,
                     "fields": [
                         {
                             "fieldKey": field.fieldKey,
@@ -297,6 +339,17 @@ class DeepAgentsRuntimeEngine:
             f"用户请求：{context.message}\n"
             f"规则兜底判断：intent={rule_intent.intent.value}, selectedTool={rule_intent.selectedToolCode}, reason={rule_intent.reason}\n"
             f"可用工具：{json.dumps(tool_lines, ensure_ascii=False)}"
+        )
+        prompt = (
+            "You are the primary router for deciding whether an agent should call a tool. "
+            "Use the user's actual goal and the tool metadata as the source of truth. "
+            "The rule result is only a fallback hint and may be wrong.\n"
+            "Prefer the tool that directly produces the requested output modality. "
+            "For example, image/photo/poster requests should use image-generation tools, "
+            "and video/image-to-video requests should use video tools. "
+            "Do not select an image-to-video tool for a pure image request just because the message mentions images.\n"
+            f"Requested output modality: {requested_modality or 'unknown'}\n\n"
+            + prompt
         )
         try:
             raw = await self.model.chat([ChatMessage(role="user", content=prompt)])
@@ -365,6 +418,7 @@ class DeepAgentsRuntimeEngine:
                     "candidateToolCodes": intent.candidateToolCodes,
                     "clarifyingQuestion": intent.clarifyingQuestion,
                     "decisionSource": intent.decisionSource,
+                    "decisionSignals": intent.signals,
                 },
             ),
         )
@@ -643,6 +697,9 @@ class DeepAgentsRuntimeEngine:
         memory_tool = None
         recap_question = _looks_like_session_recap_question(context.message)
         if recap_question:
+            deterministic_answer = _direct_session_recap_answer(context)
+            if deterministic_answer:
+                return deterministic_answer
             summary = _format_recent_session_summary(context)
             if summary:
                 messages.append(ChatMessage(role="system", content=summary))
@@ -1410,6 +1467,63 @@ def _format_recent_session_summary(context: RunContext) -> str:
     if not lines:
         return ""
     return "本轮会话近期记录（供直接回答「做过什么」）：\n" + "\n".join(lines[-14:])
+
+
+def _direct_session_recap_answer(context: RunContext) -> str:
+    message = re.sub(r"\s+", "", context.message or "")
+    asks_generation_tool = (
+        ("用什么" in message or "哪个工具" in message or "什么生成" in message or "怎么生成" in message)
+        and ("生成" in message or "工具" in message or "这张图" in message or "图片" in message)
+    )
+    if not asks_generation_tool:
+        return ""
+    assistant_text = _latest_assistant_text(context)
+    tool_names = _extract_tool_mentions(assistant_text, context)
+    if not tool_names:
+        tool_names = _infer_tool_names_from_recent_text(context)
+    if not tool_names:
+        return "我这边没有在当前上下文里读到上一张图对应的工具记录，可能是历史记录还没同步完整。你可以在后台 Agent Run 详情里按最近一次 taskId 查看。"
+    tool_text = "、".join(tool_names[:3])
+    if _contains_media_hint(assistant_text):
+        return f"刚刚这次是用「{tool_text}」生成的，不是当前对话模型自己生成。当前 Agent 模型只负责理解需求和调度工具，真正出图走的是工具后台绑定的模型配置。"
+    return f"刚刚这次用到的是「{tool_text}」。当前 Agent 模型只负责理解需求和调度，工具本身会使用后台绑定的模型配置。"
+
+
+def _latest_assistant_text(context: RunContext) -> str:
+    for item in reversed(context.history[-12:]):
+        role = (item.role or "").strip().lower()
+        content = (item.content or "").strip()
+        if role in {"assistant", "ai"} and content:
+            return content
+    return ""
+
+
+def _extract_tool_mentions(text: str, context: RunContext) -> list[str]:
+    if not text:
+        return []
+    found: list[str] = []
+    for tool in context.availableTools or []:
+        candidates = [tool.toolName or "", tool.toolCode or ""]
+        for candidate in candidates:
+            name = candidate.strip()
+            if name and name in text and (tool.toolName or tool.toolCode) not in found:
+                found.append(tool.toolName or tool.toolCode)
+                break
+    quoted = re.findall(r"「([^」]{2,80})」", text)
+    for item in quoted:
+        if any(keyword in item.lower() for keyword in ("image", "图", "视频", "tts", "deepseek", "gpt")) and item not in found:
+            found.append(item)
+    return found
+
+
+def _infer_tool_names_from_recent_text(context: RunContext) -> list[str]:
+    combined = "\n".join((item.content or "") for item in context.history[-8:])
+    return _extract_tool_mentions(combined, context)
+
+
+def _contains_media_hint(text: str) -> bool:
+    lowered = (text or "").lower()
+    return any(keyword in lowered for keyword in ("图片", "照片", "生成图", "image", ".png", ".jpg", ".jpeg", "http"))
 
 
 def _format_file_context(context: RunContext) -> str:

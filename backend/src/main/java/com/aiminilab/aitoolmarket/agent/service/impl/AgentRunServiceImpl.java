@@ -6,6 +6,7 @@ import com.aiminilab.aitoolmarket.agent.dto.AgentRunEventResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AgentRunResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AgentToolCallResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AgentToolDescriptorResponse;
+import com.aiminilab.aitoolmarket.agent.dto.BindAgentToolCallTaskRequest;
 import com.aiminilab.aitoolmarket.agent.dto.CompleteAgentRunRequest;
 import com.aiminilab.aitoolmarket.agent.dto.UpsertStreamingAgentAnswerRequest;
 import com.aiminilab.aitoolmarket.agent.dto.CompleteAgentToolCallRequest;
@@ -62,6 +63,7 @@ import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.config.AppProperties;
 import com.aiminilab.aitoolmarket.credit.service.CreditService;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -74,11 +76,15 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.net.SocketTimeoutException;
+import java.net.http.HttpTimeoutException;
 import java.time.LocalDateTime;
 import java.util.Comparator;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -91,8 +97,12 @@ public class AgentRunServiceImpl implements AgentRunService {
     private static final int FILE_CONTEXT_LIMIT = 5;
     private static final int FILE_CHUNK_SCAN_LIMIT = 200;
     private static final int FILE_CHUNK_CONTEXT_LIMIT = 5;
+    private static final int RECENT_TOOL_RESULT_CONTEXT_LIMIT = 5;
+    private static final int MAX_TOOL_RESULT_CONTEXT_PREVIEW_LENGTH = 800;
+    private static final int MAX_HISTORY_MESSAGE_CONTEXT_LENGTH = 12000;
     private static final int DEFAULT_EVENT_PAGE_SIZE = 100;
     private static final int MAX_EVENT_TEXT_LENGTH = 4000;
+    private static final int MAX_ERROR_MESSAGE_LENGTH = 4000;
     private static final String EVENT_TEXT_TRUNCATED_SUFFIX = "... [truncated]";
     private static final long EVENT_STREAM_TIMEOUT_MILLIS = 30 * 60 * 1000L;
     private static final Set<String> CANCELLABLE_STATUSES = Set.of("CREATED", "RUNNING", "WAITING_USER_CONFIRMATION");
@@ -292,6 +302,7 @@ public class AgentRunServiceImpl implements AgentRunService {
 
         LocalDateTime now = LocalDateTime.now();
         userMessage.setContentText(trimmed);
+        userMessage.setEditedAt(now);
         agentMessageMapper.updateById(userMessage);
         agentMessageMapper.supersedeMessagesAfter(sessionId, messageId, now);
 
@@ -382,10 +393,15 @@ public class AgentRunServiceImpl implements AgentRunService {
 
         try {
             emitter.send(SseEmitter.event().name("connected").data("ok"));
-            agentRunEventMapper.findEvents(userId, runId, afterEventId, DEFAULT_EVENT_PAGE_SIZE)
+            List<AgentRunEventResponse> replayEvents = agentRunEventMapper.findEvents(userId, runId, afterEventId, DEFAULT_EVENT_PAGE_SIZE)
                     .stream()
                     .map(AgentRunEventResponse::from)
-                    .forEach(event -> sendEvent(runId, emitter, event));
+                    .toList();
+            replayEvents.forEach(event -> sendEvent(runId, emitter, event));
+            if (replayEvents.stream().anyMatch(this::isTerminalRunEvent)) {
+                removeEmitter(runId, emitter);
+                emitter.complete();
+            }
         } catch (IOException exception) {
             removeEmitter(runId, emitter);
             emitter.completeWithError(exception);
@@ -408,11 +424,17 @@ public class AgentRunServiceImpl implements AgentRunService {
         if (anchorId == null) {
             history = List.of();
         } else {
-            history = agentMessageMapper.findActiveHistoryBefore(run.getSessionId(), anchorId, contextHistoryLimit())
+            history = new java.util.ArrayList<>(agentMessageMapper.findActiveHistoryBefore(run.getSessionId(), anchorId, contextHistoryLimit())
                     .stream()
                     .sorted(Comparator.comparingLong(AgentMessage::getId))
-                    .map(message -> new InternalAgentMessageResponse(message.getRole(), message.getContentText()))
-                    .toList();
+                    .map(message -> new InternalAgentMessageResponse(
+                            message.getRole(),
+                            safeContextMessageText(message.getContentText(), MAX_HISTORY_MESSAGE_CONTEXT_LENGTH)
+                    ))
+                    .toList());
+            recentToolResultContext(run).ifPresent(summary ->
+                    history.add(new InternalAgentMessageResponse("system", summary))
+            );
         }
         List<AgentFile> readyFiles = agentFileMapper.findReadyByRun(
                 run.getUserId(),
@@ -610,6 +632,30 @@ public class AgentRunServiceImpl implements AgentRunService {
 
     @Override
     @Transactional
+    public AgentToolCallResponse bindToolCallTask(Long toolCallId, BindAgentToolCallTaskRequest request) {
+        AgentToolCall call = findToolCall(toolCallId);
+        if (call.getTaskId() != null) {
+            if (Objects.equals(call.getTaskId(), request.taskId())) {
+                return AgentToolCallResponse.from(call);
+            }
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "Agent tool call already bound to another task");
+        }
+        if (!"RUNNING".equals(call.getStatus())) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "Only running Agent tool calls can bind task");
+        }
+        int updated = agentToolCallMapper.bindTaskId(toolCallId, request.taskId());
+        if (updated == 0) {
+            AgentToolCall current = findToolCall(toolCallId);
+            if (Objects.equals(current.getTaskId(), request.taskId())) {
+                return AgentToolCallResponse.from(current);
+            }
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "Agent tool call cannot bind task");
+        }
+        return AgentToolCallResponse.from(findToolCall(toolCallId));
+    }
+
+    @Override
+    @Transactional
     public AgentToolCallResponse completeToolCall(Long toolCallId, CompleteAgentToolCallRequest request) {
         AgentToolCall call = findToolCall(toolCallId);
         if (TOOL_CALL_TERMINAL_STATUSES.contains(call.getStatus())) {
@@ -622,7 +668,14 @@ public class AgentRunServiceImpl implements AgentRunService {
         }
         LocalDateTime now = LocalDateTime.now();
         agentToolCallMapper.markSuccess(toolCallId, toJson(request.resultJson()), now);
-        appendEventInternal(call.getRunId(), call.getUserId(), "tool.finished", "工具调用已完成", toJson(request.resultJson()), now);
+        appendEventInternal(
+                call.getRunId(),
+                call.getUserId(),
+                "tool.finished",
+                "工具调用已完成",
+                toJson(toolFinishedEventJson(call, "SUCCESS", request.resultJson(), null, null)),
+                now
+        );
         agentMetrics.recordToolCallOutcome(call.getToolCode(), "SUCCESS", firstNonNull(call.getStartedAt(), call.getCreatedAt()), now);
         return AgentToolCallResponse.from(findToolCall(toolCallId));
     }
@@ -635,8 +688,16 @@ public class AgentRunServiceImpl implements AgentRunService {
             return AgentToolCallResponse.from(call);
         }
         LocalDateTime now = LocalDateTime.now();
-        agentToolCallMapper.markFailed(toolCallId, request.errorCode(), request.errorMessage(), now);
-        appendEventInternal(call.getRunId(), call.getUserId(), "tool.finished", request.errorMessage(), toJson(request), now);
+        String errorMessage = errorMessagePreview(request.errorMessage());
+        agentToolCallMapper.markFailed(toolCallId, request.errorCode(), errorMessage, now);
+        appendEventInternal(
+                call.getRunId(),
+                call.getUserId(),
+                "tool.finished",
+                errorMessage,
+                toJson(toolFinishedEventJson(call, "FAILED", null, request.errorCode(), errorMessage)),
+                now
+        );
         agentMetrics.recordToolCallOutcome(call.getToolCode(), "FAILED", firstNonNull(call.getStartedAt(), call.getCreatedAt()), now);
         return AgentToolCallResponse.from(findToolCall(toolCallId));
     }
@@ -666,7 +727,7 @@ public class AgentRunServiceImpl implements AgentRunService {
             assistant.setCreatedAt(now);
             agentMessageMapper.insertMessage(assistant);
         } else {
-            agentMessageMapper.updateContentText(assistant.getId(), contentText);
+            agentMessageMapper.updateContentText(assistant.getId(), contentText, null);
         }
         agentSessionMapper.touch(run.getSessionId(), now);
         return AgentRunResponse.from(findRun(runId));
@@ -699,7 +760,7 @@ public class AgentRunServiceImpl implements AgentRunService {
             assistant.setCreatedAt(now);
             agentMessageMapper.insertMessage(assistant);
         } else {
-            agentMessageMapper.updateContentText(assistant.getId(), request.finalAnswer());
+            agentMessageMapper.updateContentText(assistant.getId(), request.finalAnswer(), null);
         }
         creditService.settle(run.getUserId(), CreditSourceType.AGENT_RUN, runId, consumedCredits);
         creditService.release(run.getUserId(), CreditSourceType.AGENT_RUN, runId, estimatedCredits - consumedCredits);
@@ -715,12 +776,20 @@ public class AgentRunServiceImpl implements AgentRunService {
     }
 
     private void failOpenToolCalls(Long runId, Long userId, String errorCode, String errorMessage, LocalDateTime now) {
+        String limitedErrorMessage = errorMessagePreview(errorMessage);
         agentToolCallMapper.findByRunId(runId)
                 .stream()
                 .filter(call -> !TOOL_CALL_TERMINAL_STATUSES.contains(call.getStatus()))
                 .forEach(call -> {
-                    agentToolCallMapper.markFailed(call.getId(), errorCode, errorMessage, now);
-                    appendEventInternal(runId, userId, "tool.finished", errorMessage, toJson(new FailAgentToolCallRequest(errorCode, errorMessage)), now);
+                    agentToolCallMapper.markFailed(call.getId(), errorCode, limitedErrorMessage, now);
+                    appendEventInternal(
+                            runId,
+                            userId,
+                            "tool.finished",
+                            limitedErrorMessage,
+                            toJson(toolFinishedEventJson(call, "FAILED", null, errorCode, limitedErrorMessage)),
+                            now
+                    );
                     agentMetrics.recordToolCallOutcome(call.getToolCode(), "FAILED", firstNonNull(call.getStartedAt(), call.getCreatedAt()), now);
                 });
     }
@@ -773,17 +842,31 @@ public class AgentRunServiceImpl implements AgentRunService {
         AgentModelConfig modelConfig = resolveModelConfigEntityForRun(run);
         int estimatedCredits = run.getEstimatedCredits() == null ? 0 : Math.max(0, run.getEstimatedCredits());
         int consumedCredits = resolveConsumedCredits(request.consumedCredits(), request.promptTokens(), request.completionTokens(), modelConfig, estimatedCredits);
-        if (agentRunMapper.markFailedWithConsumedCredits(runId, request.errorCode(), request.errorMessage(), consumedCredits, now) == 0) {
+        String errorMessage = errorMessagePreview(request.errorMessage());
+        if (agentRunMapper.markFailedWithConsumedCredits(runId, request.errorCode(), errorMessage, consumedCredits, now) == 0) {
             return AgentRunResponse.from(findRun(runId));
         }
-        failOpenToolCalls(runId, run.getUserId(), request.errorCode(), request.errorMessage(), now);
+        failOpenToolCalls(runId, run.getUserId(), request.errorCode(), errorMessage, now);
         if (consumedCredits > 0) {
             creditService.settle(run.getUserId(), CreditSourceType.AGENT_RUN, runId, consumedCredits);
         }
         creditService.release(run.getUserId(), CreditSourceType.AGENT_RUN, runId, estimatedCredits - consumedCredits);
         billingService.recordUsage("AGENT_RUN", runId, run.getUserId(), modelConfig,
                 request.promptTokens(), request.completionTokens(), null, consumedCredits);
-        appendEventInternal(runId, run.getUserId(), "run.failed", request.errorMessage(), toJson(request), now);
+        appendEventInternal(
+                runId,
+                run.getUserId(),
+                "run.failed",
+                errorMessage,
+                toJson(new FailAgentRunRequest(
+                        request.errorCode(),
+                        errorMessage,
+                        request.consumedCredits(),
+                        request.promptTokens(),
+                        request.completionTokens()
+                )),
+                now
+        );
         agentRateLimitService.decrementActiveRun(run.getUserId(), runId);
         agentPendingToolContextMapper.expireByRunId(runId);
         agentMetrics.recordRunOutcome("FAILED", run.getIntent(), firstNonNull(run.getStartedAt(), run.getCreatedAt()), now);
@@ -837,7 +920,7 @@ public class AgentRunServiceImpl implements AgentRunService {
                 now
         );
         if (!connectivity.success()) {
-            String errorMessage = messageOrDefault(connectivity.message(), "Agent model connectivity check failed");
+            String errorMessage = errorMessagePreview(messageOrDefault(connectivity.message(), "Agent model connectivity check failed"));
             agentRunMapper.markFailed(run.getId(), "MODEL_CALL_FAILED", errorMessage, now);
             appendEventInternal(
                     run.getId(),
@@ -980,6 +1063,160 @@ public class AgentRunServiceImpl implements AgentRunService {
         return agentModelConfigService.internalGet();
     }
 
+    private Optional<String> recentToolResultContext(AgentRun run) {
+        List<AgentToolCall> calls = agentToolCallMapper.findRecentSuccessfulBeforeRun(
+                run.getUserId(),
+                run.getSessionId(),
+                run.getId(),
+                RECENT_TOOL_RESULT_CONTEXT_LIMIT
+        );
+        if (calls.isEmpty()) {
+            return Optional.empty();
+        }
+        List<String> lines = new java.util.ArrayList<>();
+        for (AgentToolCall call : calls) {
+            lines.add(formatToolResultMemoryLine(call));
+        }
+        return Optional.of(
+                "近期工具结果摘要（短期记忆；用户追问刚刚用了什么、结果在哪、能否继续修改时优先使用；不要因此再次调用工具）：\n"
+                        + String.join("\n", lines)
+        );
+    }
+
+    private String formatToolResultMemoryLine(AgentToolCall call) {
+        JsonNode result = parseJsonNode(call.getResultJson());
+        String resourceType = firstText(result.at("/data/resourceType"), result.path("resourceType"));
+        String contentText = firstText(
+                result.at("/data/contentText"),
+                result.path("contentText"),
+                result.path("resultSummary"),
+                result.path("summary")
+        );
+        String mediaUrls = extractMediaUrls(contentText);
+        StringBuilder line = new StringBuilder("- ");
+        line.append("toolCode=").append(nonBlankOrDefault(call.getToolCode(), "unknown"));
+        if (call.getTaskId() != null) {
+            line.append("; taskId=").append(call.getTaskId());
+        }
+        line.append("; status=").append(nonBlankOrDefault(call.getStatus(), "UNKNOWN"));
+        if (resourceType != null && !resourceType.isBlank()) {
+            line.append("; resourceType=").append(resourceType);
+        }
+        if (mediaUrls != null && !mediaUrls.isBlank()) {
+            line.append("; mediaUrls=").append(mediaUrls);
+        }
+        if (contentText != null && !contentText.isBlank()) {
+            line.append("; resultPreview=").append(toolResultContextPreview(contentText));
+        }
+        return line.toString();
+    }
+
+    private String toolResultContextPreview(String contentText) {
+        if (contentText == null || contentText.isBlank()) {
+            return "";
+        }
+        String sanitized = stripInlineMediaPayloads(contentText);
+        sanitized = sanitized.replaceAll("\\s+", " ").trim();
+        if (sanitized.length() <= MAX_TOOL_RESULT_CONTEXT_PREVIEW_LENGTH) {
+            return sanitized;
+        }
+        int contentLength = Math.max(0, MAX_TOOL_RESULT_CONTEXT_PREVIEW_LENGTH - EVENT_TEXT_TRUNCATED_SUFFIX.length());
+        return sanitized.substring(0, contentLength) + EVENT_TEXT_TRUNCATED_SUFFIX;
+    }
+
+    private String safeContextMessageText(String contentText, int maxLength) {
+        if (contentText == null || contentText.isBlank()) {
+            return contentText;
+        }
+        String sanitized = stripInlineMediaPayloads(contentText);
+        if (sanitized.length() <= maxLength) {
+            return sanitized;
+        }
+        int contentLength = Math.max(0, maxLength - EVENT_TEXT_TRUNCATED_SUFFIX.length());
+        return sanitized.substring(0, contentLength) + EVENT_TEXT_TRUNCATED_SUFFIX;
+    }
+
+    private String stripInlineMediaPayloads(String contentText) {
+        String sanitized = contentText.replaceAll(
+                "(?i)data:[^\\s\\\"']+;base64,[A-Za-z0-9+/=\\r\\n]+",
+                "[inline-media-base64-omitted]"
+        );
+        return sanitized.replaceAll(
+                "(?i)\\\"b64_json\\\"\\s*:\\s*\\\"[A-Za-z0-9+/=\\r\\n]+\\\"",
+                "\\\"b64_json\\\":\\\"[inline-media-base64-omitted]\\\""
+        );
+    }
+
+    private JsonNode parseJsonNode(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return objectMapper.createObjectNode();
+        }
+        try {
+            JsonNode node = objectMapper.readTree(raw);
+            if (node.isTextual()) {
+                return objectMapper.readTree(node.asText());
+            }
+            return node;
+        } catch (Exception ignored) {
+            return objectMapper.createObjectNode();
+        }
+    }
+
+    private String firstText(JsonNode... nodes) {
+        for (JsonNode node : nodes) {
+            if (node != null && !node.isMissingNode() && !node.isNull()) {
+                String text = node.asText("");
+                if (!text.isBlank()) {
+                    return text;
+                }
+            }
+        }
+        return "";
+    }
+
+    private String extractMediaUrls(String contentText) {
+        if (contentText == null || contentText.isBlank()) {
+            return "";
+        }
+        List<String> urls = new java.util.ArrayList<>();
+        try {
+            collectMediaUrls(objectMapper.readTree(contentText), urls);
+        } catch (Exception ignored) {
+            java.util.regex.Matcher matcher = java.util.regex.Pattern
+                    .compile("https?://\\S+")
+                    .matcher(contentText);
+            while (matcher.find() && urls.size() < 6) {
+                urls.add(matcher.group().replaceAll("[\\])},，。]+$", ""));
+            }
+        }
+        return String.join(",", urls);
+    }
+
+    private void collectMediaUrls(JsonNode node, List<String> urls) {
+        if (node == null || urls.size() >= 6) {
+            return;
+        }
+        if (node.isTextual()) {
+            String value = node.asText("");
+            if (value.startsWith("http://") || value.startsWith("https://") || value.startsWith("/generated/")) {
+                urls.add(value);
+            }
+            return;
+        }
+        if (node.isArray()) {
+            node.forEach(item -> collectMediaUrls(item, urls));
+            return;
+        }
+        if (node.isObject()) {
+            node.fields().forEachRemaining(entry -> {
+                String key = entry.getKey().toLowerCase();
+                if (key.contains("url") || key.contains("image") || key.contains("video") || key.contains("audio")) {
+                    collectMediaUrls(entry.getValue(), urls);
+                }
+            });
+        }
+    }
+
     private AgentModelConfig resolveModelConfigEntityForRun(AgentRun run) {
         if (run.getModelConfigId() != null) {
             var config = agentModelConfigMapper.findActiveById(run.getModelConfigId());
@@ -1094,12 +1331,39 @@ public class AgentRunServiceImpl implements AgentRunService {
         try {
             action.run();
         } catch (RuntimeException exception) {
+            if (isAgentServiceNotificationTimeout(exception)) {
+                LOGGER.warn("agent service notification timed out, runId={}, keep run active for async execution", runId, exception);
+                AgentRun run = findRun(runId);
+                appendEventInternal(
+                        runId,
+                        run.getUserId(),
+                        "run.dispatch_timeout",
+                        "Agent 服务启动通知超时，后台将继续等待运行结果",
+                        toJson(Map.of(
+                                "errorCode", "AGENT_SERVICE_NOTIFY_TIMEOUT",
+                                "message", messageOrDefault(exception.getMessage(), "Agent service notification timed out")
+                        )),
+                        LocalDateTime.now()
+                );
+                return;
+            }
             LOGGER.warn("agent service notification failed, runId={}", runId, exception);
             failRun(runId, new FailAgentRunRequest(
                     "AGENT_SERVICE_NOTIFY_FAILED",
                     "Agent 服务暂时不可用，请稍后重试"
             ));
         }
+    }
+
+    private boolean isAgentServiceNotificationTimeout(Throwable exception) {
+        Throwable current = exception;
+        while (current != null) {
+            if (current instanceof HttpTimeoutException || current instanceof SocketTimeoutException) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 
     private ModelConnectivityCheck checkModelConnectivity(Long requestedModelConfigId) {
@@ -1145,12 +1409,54 @@ public class AgentRunServiceImpl implements AgentRunService {
         }
     }
 
+    private boolean isTerminalRunEvent(AgentRunEventResponse event) {
+        return "run.completed".equals(event.eventType()) || "run.failed".equals(event.eventType());
+    }
+
     private String eventTextPreview(String eventText) {
         if (eventText == null || eventText.length() <= MAX_EVENT_TEXT_LENGTH) {
             return eventText;
         }
         int contentLength = Math.max(0, MAX_EVENT_TEXT_LENGTH - EVENT_TEXT_TRUNCATED_SUFFIX.length());
         return eventText.substring(0, contentLength) + EVENT_TEXT_TRUNCATED_SUFFIX;
+    }
+
+    private String errorMessagePreview(String errorMessage) {
+        if (errorMessage == null || errorMessage.length() <= MAX_ERROR_MESSAGE_LENGTH) {
+            return errorMessage;
+        }
+        int contentLength = Math.max(0, MAX_ERROR_MESSAGE_LENGTH - EVENT_TEXT_TRUNCATED_SUFFIX.length());
+        return errorMessage.substring(0, contentLength) + EVENT_TEXT_TRUNCATED_SUFFIX;
+    }
+
+    private Map<String, Object> toolFinishedEventJson(AgentToolCall call,
+                                                      String status,
+                                                      Object resultJson,
+                                                      String errorCode,
+                                                      String errorMessage) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        if (resultJson instanceof Map<?, ?> map) {
+            map.forEach((key, value) -> {
+                if (key instanceof String name) {
+                    payload.put(name, value);
+                }
+            });
+        } else if (resultJson != null) {
+            payload.put("result", resultJson);
+        }
+        payload.put("toolCode", call.getToolCode());
+        payload.put("toolCallId", call.getId());
+        if (call.getTaskId() != null) {
+            payload.put("taskId", call.getTaskId());
+        }
+        payload.put("status", status);
+        if (errorCode != null && !errorCode.isBlank()) {
+            payload.put("errorCode", errorCode);
+        }
+        if (errorMessage != null && !errorMessage.isBlank()) {
+            payload.put("errorMessage", errorMessage);
+        }
+        return payload;
     }
 
     private void sendEvent(Long runId, SseEmitter emitter, AgentRunEventResponse event) {
@@ -1214,6 +1520,7 @@ public class AgentRunServiceImpl implements AgentRunService {
                     call.getId(),
                     call.getRunId(),
                     call.getToolCode(),
+                    call.getTaskId(),
                     call.getStatus(),
                     call.getArgumentsJson(),
                     call.getResultJson(),

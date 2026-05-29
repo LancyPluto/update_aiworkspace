@@ -10,6 +10,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -17,6 +18,8 @@ import java.util.Set;
 
 import static org.hamcrest.Matchers.notNullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -34,7 +37,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "app.auth.sms.ihuyi-api-id=",
         "app.auth.sms.ihuyi-api-key=",
         "app.auth.sms.bmob-application-id=",
-        "app.auth.sms.bmob-rest-api-key="
+        "app.auth.sms.bmob-rest-api-key=",
+        "app.generated-media-dir=target/test-generated-media"
 })
 class AuthApiTest {
 
@@ -109,6 +113,72 @@ class AuthApiTest {
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.data.username").value("new_user"))
                 .andExpect(jsonPath("$.data.userType").value("USER"));
+    }
+
+    @Test
+    void updatesCurrentUserProfileAndReturnsAvatarUrl() throws Exception {
+        var registerResult = mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "username": "profile_user",
+                                  "password": "123456",
+                                  "nickname": "Profile User"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andReturn();
+        String token = AuthTestTokens.userJwtFrom(registerResult);
+
+        mockMvc.perform(patch("/api/v1/users/me")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "nickname": "Community Builder",
+                                  "avatarUrl": null
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.data.nickname").value("Community Builder"))
+                .andExpect(jsonPath("$.data.avatarUrl").value(org.hamcrest.Matchers.nullValue()));
+    }
+
+    @Test
+    void uploadsCurrentUserAvatarAndPersistsIt() throws Exception {
+        var registerResult = mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "username": "avatar_user",
+                                  "password": "123456",
+                                  "nickname": "Avatar User"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andReturn();
+        String token = AuthTestTokens.userJwtFrom(registerResult);
+
+        MockMultipartFile avatar = new MockMultipartFile(
+                "file",
+                "avatar.png",
+                "image/png",
+                new byte[]{(byte) 0x89, 'P', 'N', 'G'}
+        );
+
+        mockMvc.perform(multipart("/api/v1/users/me/avatar")
+                        .file(avatar)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.data.avatarUrl").value(org.hamcrest.Matchers.startsWith("/generated/avatars/")))
+                .andExpect(jsonPath("$.data.user.avatarUrl").value(org.hamcrest.Matchers.startsWith("/generated/avatars/")));
+
+        mockMvc.perform(get("/api/v1/users/me")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.avatarUrl").value(org.hamcrest.Matchers.startsWith("/generated/avatars/")));
     }
 
     @Test

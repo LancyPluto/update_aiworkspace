@@ -51,6 +51,7 @@ CALL add_index_if_missing('agent_files', 'idx_agent_files_attached_run', 'CREATE
 
 CALL add_column_if_missing('agent_messages', 'status', '`status` VARCHAR(32) NOT NULL DEFAULT ''ACTIVE''');
 CALL add_column_if_missing('agent_messages', 'superseded_at', '`superseded_at` DATETIME NULL');
+CALL add_column_if_missing('agent_messages', 'edited_at', '`edited_at` DATETIME NULL');
 CALL add_index_if_missing('agent_messages', 'idx_agent_messages_session_active', 'CREATE INDEX idx_agent_messages_session_active ON agent_messages(session_id, status, id)');
 
 CALL add_column_if_missing('agent_runs', 'parent_run_id', '`parent_run_id` BIGINT NULL');
@@ -59,8 +60,13 @@ CALL add_column_if_missing('agent_runs', 'client_request_id', '`client_request_i
 CALL add_column_if_missing('agent_runs', 'model_config_id', '`model_config_id` BIGINT NULL');
 CALL add_column_if_missing('agent_runs', 'context_snapshot_id', '`context_snapshot_id` BIGINT NULL');
 CALL add_index_if_missing('agent_runs', 'uk_agent_runs_user_client', 'CREATE UNIQUE INDEX uk_agent_runs_user_client ON agent_runs(user_id, client_request_id)');
+CALL add_index_if_missing('agent_runs', 'idx_agent_runs_session_user_id', 'CREATE INDEX idx_agent_runs_session_user_id ON agent_runs(session_id, user_id, id)');
 CALL add_index_if_missing('agent_runs', 'idx_agent_runs_model_config', 'CREATE INDEX idx_agent_runs_model_config ON agent_runs(model_config_id)');
 CALL add_index_if_missing('agent_runs', 'idx_agent_runs_context_snapshot', 'CREATE INDEX idx_agent_runs_context_snapshot ON agent_runs(context_snapshot_id)');
+
+CALL add_column_if_missing('agent_tool_calls', 'task_id', '`task_id` BIGINT NULL');
+CALL add_index_if_missing('agent_tool_calls', 'idx_agent_tool_calls_task_id', 'CREATE INDEX idx_agent_tool_calls_task_id ON agent_tool_calls(task_id)');
+CALL add_index_if_missing('agent_tool_calls', 'idx_agent_tool_calls_context_recent', 'CREATE INDEX idx_agent_tool_calls_context_recent ON agent_tool_calls(user_id, status, id)');
 
 CREATE TABLE IF NOT EXISTS agent_context_snapshots (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,

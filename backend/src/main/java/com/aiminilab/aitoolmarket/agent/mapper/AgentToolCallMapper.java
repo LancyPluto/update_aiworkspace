@@ -15,9 +15,9 @@ import java.util.Optional;
 public interface AgentToolCallMapper extends BaseMapper<AgentToolCall> {
 
     @Insert("""
-            INSERT INTO agent_tool_calls(run_id, user_id, tool_code, status, arguments_json, result_json,
+            INSERT INTO agent_tool_calls(run_id, user_id, tool_code, task_id, status, arguments_json, result_json,
                                          error_code, error_message, started_at, finished_at, created_at)
-            VALUES(#{call.runId}, #{call.userId}, #{call.toolCode}, #{call.status}, #{call.argumentsJson}, #{call.resultJson},
+            VALUES(#{call.runId}, #{call.userId}, #{call.toolCode}, #{call.taskId}, #{call.status}, #{call.argumentsJson}, #{call.resultJson},
                    #{call.errorCode}, #{call.errorMessage}, #{call.startedAt}, #{call.finishedAt}, #{call.createdAt})
             """)
     @Options(useGeneratedKeys = true, keyProperty = "call.id")
@@ -44,6 +44,40 @@ public interface AgentToolCallMapper extends BaseMapper<AgentToolCall> {
     List<AgentToolCall> findByRunId(@Param("runId") Long runId);
 
     @Select("""
+            SELECT c.*
+            FROM agent_tool_calls c
+            WHERE c.user_id = #{userId}
+              AND c.status = 'SUCCESS'
+              AND c.result_json IS NOT NULL
+              AND c.run_id IN (
+                SELECT r.id
+                FROM agent_runs r
+                WHERE r.session_id = #{sessionId}
+                  AND r.user_id = #{userId}
+                  AND r.id < #{runId}
+              )
+            ORDER BY c.id DESC
+            LIMIT #{limit}
+            """)
+    List<AgentToolCall> findRecentSuccessfulBeforeRun(@Param("userId") Long userId,
+                                                      @Param("sessionId") Long sessionId,
+                                                      @Param("runId") Long runId,
+                                                      @Param("limit") int limit);
+
+    @Select("""
+            SELECT *
+            FROM agent_tool_calls
+            WHERE task_id = #{taskId}
+            ORDER BY id ASC
+            LIMIT 1
+            """)
+    AgentToolCall selectByTaskId(@Param("taskId") Long taskId);
+
+    default Optional<AgentToolCall> findByTaskId(Long taskId) {
+        return Optional.ofNullable(selectByTaskId(taskId));
+    }
+
+    @Select("""
             SELECT *
             FROM agent_tool_calls
             WHERE run_id = #{runId}
@@ -52,6 +86,15 @@ public interface AgentToolCallMapper extends BaseMapper<AgentToolCall> {
             LIMIT 1
             """)
     AgentToolCall selectLatestByRunIdAndToolCode(@Param("runId") Long runId, @Param("toolCode") String toolCode);
+
+    @Update("""
+            UPDATE agent_tool_calls
+            SET task_id = #{taskId}
+            WHERE id = #{toolCallId}
+              AND task_id IS NULL
+              AND status = 'RUNNING'
+            """)
+    int bindTaskId(@Param("toolCallId") Long toolCallId, @Param("taskId") Long taskId);
 
     @Update("""
             UPDATE agent_tool_calls

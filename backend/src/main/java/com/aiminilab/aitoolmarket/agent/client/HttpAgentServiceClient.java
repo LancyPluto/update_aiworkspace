@@ -3,6 +3,8 @@ package com.aiminilab.aitoolmarket.agent.client;
 import com.aiminilab.aitoolmarket.agent.dto.AgentFileParseResult;
 import com.aiminilab.aitoolmarket.agent.dto.AgentModelConfigRequest;
 import com.aiminilab.aitoolmarket.agent.dto.AgentModelConfigTestResponse;
+import com.aiminilab.aitoolmarket.agent.dto.AdminAgentRouteDebugResponse;
+import com.aiminilab.aitoolmarket.agent.dto.InternalAgentRunContextResponse;
 import com.aiminilab.aitoolmarket.agent.dto.MarketChatCompletionRequest;
 import com.aiminilab.aitoolmarket.agent.dto.MarketChatCompletionResponse;
 import com.aiminilab.aitoolmarket.config.AppProperties;
@@ -102,6 +104,16 @@ public class HttpAgentServiceClient implements AgentServiceClient {
             return objectMapper.readValue(response, AgentModelConfigTestResponse.class);
         } catch (JsonProcessingException exception) {
             throw new IllegalStateException("Could not parse agent-service model config test response", exception);
+        }
+    }
+
+    @Override
+    public AdminAgentRouteDebugResponse debugRoute(InternalAgentRunContextResponse context) {
+        String response = postInternal("/internal/v1/agent/route-debug", toJson(context));
+        try {
+            return objectMapper.readValue(response, AdminAgentRouteDebugResponse.class);
+        } catch (JsonProcessingException exception) {
+            throw new IllegalStateException("Could not parse agent-service route debug response", exception);
         }
     }
 

@@ -5,6 +5,7 @@ CREATE TABLE users (
   phone VARCHAR(32) UNIQUE,
   email VARCHAR(128) UNIQUE,
   nickname VARCHAR(64),
+  avatar_url VARCHAR(512),
   user_type VARCHAR(32) NOT NULL DEFAULT 'USER',
   status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -28,6 +29,14 @@ CREATE TABLE system_settings (
   setting_group VARCHAR(64) NOT NULL DEFAULT 'system',
   description VARCHAR(255),
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+CREATE TABLE system_setting_versions (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  setting_key VARCHAR(128) NOT NULL,
+  setting_value TEXT,
+  operator_id BIGINT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE ai_tools (
@@ -340,6 +349,7 @@ CREATE TABLE agent_messages (
   run_id BIGINT,
   status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
   superseded_at DATETIME,
+  edited_at DATETIME,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -355,7 +365,7 @@ CREATE TABLE agent_runs (
   estimated_credits INT NOT NULL DEFAULT 0,
   consumed_credits INT NOT NULL DEFAULT 0,
   error_code VARCHAR(64),
-  error_message VARCHAR(512),
+  error_message CLOB,
   started_at DATETIME,
   finished_at DATETIME,
   parent_run_id BIGINT,
@@ -367,6 +377,7 @@ CREATE TABLE agent_runs (
 );
 
 CREATE UNIQUE INDEX uk_agent_runs_user_client ON agent_runs (user_id, client_request_id);
+CREATE INDEX idx_agent_runs_session_user_id ON agent_runs (session_id, user_id, id);
 CREATE INDEX idx_agent_runs_model_config ON agent_runs (model_config_id);
 CREATE INDEX idx_agent_runs_context_snapshot ON agent_runs (context_snapshot_id);
 CREATE INDEX idx_agent_messages_session_active ON agent_messages (session_id, status, id);
@@ -409,15 +420,18 @@ CREATE TABLE agent_tool_calls (
   run_id BIGINT NOT NULL,
   user_id BIGINT NOT NULL,
   tool_code VARCHAR(128) NOT NULL,
+  task_id BIGINT,
   status VARCHAR(32) NOT NULL,
   arguments_json JSON NOT NULL,
   result_json JSON,
   error_code VARCHAR(64),
-  error_message VARCHAR(512),
+  error_message CLOB,
   started_at DATETIME,
   finished_at DATETIME,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE INDEX idx_agent_tool_calls_task_id ON agent_tool_calls(task_id);
+CREATE INDEX idx_agent_tool_calls_context_recent ON agent_tool_calls(user_id, status, id);
 
 CREATE TABLE agent_tool_preferences (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
@@ -479,7 +493,7 @@ CREATE TABLE agent_files (
   status VARCHAR(32) NOT NULL,
   attached_run_id BIGINT,
   extracted_text CLOB,
-  error_message VARCHAR(512),
+  error_message CLOB,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

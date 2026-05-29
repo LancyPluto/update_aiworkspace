@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS agent_files (
   storage_path VARCHAR(1024) NOT NULL,
   status VARCHAR(32) NOT NULL,
   extracted_text MEDIUMTEXT NULL,
-  error_message VARCHAR(512) NULL,
+  error_message TEXT NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   KEY idx_agent_files_session_id (session_id, id),

@@ -36,11 +36,11 @@ public class AdminAgentRunServiceImpl implements AdminAgentRunService {
     }
 
     @Override
-    public PageResponse<AdminAgentRunListItemResponse> list(String status, Long userId, Integer pageNo, Integer pageSize) {
+    public PageResponse<AdminAgentRunListItemResponse> list(String status, Long userId, Long taskId, Integer pageNo, Integer pageSize) {
         int limit = PageResponse.normalizePageSize(pageSize);
         int offset = PageResponse.offset(pageNo, pageSize);
-        long total = agentRunMapper.countForAdmin(status, userId);
-        return PageResponse.of(agentRunMapper.findForAdmin(status, userId, limit, offset), total, pageNo, pageSize);
+        long total = agentRunMapper.countForAdmin(status, userId, taskId);
+        return PageResponse.of(agentRunMapper.findForAdmin(status, userId, taskId, limit, offset), total, pageNo, pageSize);
     }
 
     @Override

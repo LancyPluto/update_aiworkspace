@@ -3,6 +3,7 @@ package com.aiminilab.aitoolmarket.agent.service;
 import com.aiminilab.aitoolmarket.agent.dto.AgentRunEventResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AgentRunResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AgentToolCallResponse;
+import com.aiminilab.aitoolmarket.agent.dto.BindAgentToolCallTaskRequest;
 import com.aiminilab.aitoolmarket.agent.dto.CompleteAgentRunRequest;
 import com.aiminilab.aitoolmarket.agent.dto.CompleteAgentToolCallRequest;
 import com.aiminilab.aitoolmarket.agent.dto.ConfirmAgentToolRequest;
@@ -42,6 +43,8 @@ public interface AgentRunService {
     AgentRunEventResponse appendEvent(Long runId, CreateAgentRunEventRequest request);
 
     AgentToolCallResponse createToolCall(Long runId, CreateAgentToolCallRequest request);
+
+    AgentToolCallResponse bindToolCallTask(Long toolCallId, BindAgentToolCallTaskRequest request);
 
     AgentToolCallResponse completeToolCall(Long toolCallId, CompleteAgentToolCallRequest request);
 

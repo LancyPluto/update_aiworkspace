@@ -8,6 +8,7 @@ import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.credit.service.CreditService;
 import com.aiminilab.aitoolmarket.credit.service.TaskCreditEstimateService;
 import com.aiminilab.aitoolmarket.task.dto.CreateTaskRequest;
+import com.aiminilab.aitoolmarket.task.dto.AgentTaskSourceResponse;
 import com.aiminilab.aitoolmarket.task.dto.RegenerateTaskRequest;
 import com.aiminilab.aitoolmarket.task.dto.TaskDetailResponse;
 import com.aiminilab.aitoolmarket.task.dto.TaskResultResponse;
@@ -15,12 +16,14 @@ import com.aiminilab.aitoolmarket.task.dto.TaskStatusResponse;
 import com.aiminilab.aitoolmarket.task.entity.AiTask;
 import com.aiminilab.aitoolmarket.task.mapper.TaskMapper;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentModelConfigMapper;
+import com.aiminilab.aitoolmarket.agent.mapper.AgentToolCallMapper;
 import com.aiminilab.aitoolmarket.agent.service.ModelCapabilityService;
 import com.aiminilab.aitoolmarket.task.service.TaskOutboxService;
 import com.aiminilab.aitoolmarket.task.service.TaskService;
 import com.aiminilab.aitoolmarket.task.service.TaskStateMachine;
 import com.aiminilab.aitoolmarket.task.metrics.TaskMetrics;
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
+import com.aiminilab.aitoolmarket.agent.entity.AgentToolCall;
 import com.aiminilab.aitoolmarket.tool.entity.AiTool;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolMapper;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -41,6 +44,7 @@ public class TaskServiceImpl implements TaskService {
     private final TaskMapper taskMapper;
     private final ToolMapper toolMapper;
     private final AgentModelConfigMapper agentModelConfigMapper;
+    private final AgentToolCallMapper agentToolCallMapper;
     private final ModelCapabilityService modelCapabilityService;
     private final CreditService creditService;
     private final ObjectMapper objectMapper;
@@ -52,6 +56,7 @@ public class TaskServiceImpl implements TaskService {
             TaskMapper taskMapper,
             ToolMapper toolMapper,
             AgentModelConfigMapper agentModelConfigMapper,
+            AgentToolCallMapper agentToolCallMapper,
             ModelCapabilityService modelCapabilityService,
             CreditService creditService,
             ObjectMapper objectMapper,
@@ -62,6 +67,7 @@ public class TaskServiceImpl implements TaskService {
         this.taskMapper = taskMapper;
         this.toolMapper = toolMapper;
         this.agentModelConfigMapper = agentModelConfigMapper;
+        this.agentToolCallMapper = agentToolCallMapper;
         this.modelCapabilityService = modelCapabilityService;
         this.creditService = creditService;
         this.objectMapper = objectMapper;
@@ -145,14 +151,14 @@ public class TaskServiceImpl implements TaskService {
     }
 
     @Override
-    public PageResponse<TaskDetailResponse> adminList(String status, String toolCode, Long userId,
+    public PageResponse<TaskDetailResponse> adminList(String status, String toolCode, Long userId, Long taskId,
                                                       Integer pageNo, Integer pageSize) {
         int normalizedPageSize = PageResponse.normalizePageSize(pageSize);
         int offset = PageResponse.offset(pageNo, pageSize);
-        List<TaskDetailResponse> tasks = taskMapper.findForAdmin(status, toolCode, userId, normalizedPageSize, offset).stream()
+        List<TaskDetailResponse> tasks = taskMapper.findForAdmin(status, toolCode, userId, taskId, normalizedPageSize, offset).stream()
                 .map(this::toDetail)
                 .toList();
-        long total = taskMapper.countForAdmin(status, toolCode, userId);
+        long total = taskMapper.countForAdmin(status, toolCode, userId, taskId);
         return PageResponse.of(tasks, total, pageNo, pageSize);
     }
 
@@ -219,7 +225,14 @@ public class TaskServiceImpl implements TaskService {
     private TaskDetailResponse toDetail(AiTask task) {
         TaskResultResponse result = taskMapper.findFirstResult(task.getId()).orElse(null);
         int consumedCredits = taskMapper.sumConsumedCreditsByTaskId(task.getId());
-        return TaskDetailResponse.of(task, parseParams(task.getParamsJson()), result, consumedCredits);
+        AgentTaskSourceResponse agentSource = agentToolCallMapper.findByTaskId(task.getId())
+                .map(this::toAgentTaskSource)
+                .orElse(null);
+        return TaskDetailResponse.of(task, parseParams(task.getParamsJson()), result, agentSource, consumedCredits);
+    }
+
+    private AgentTaskSourceResponse toAgentTaskSource(AgentToolCall call) {
+        return new AgentTaskSourceResponse(call.getRunId(), call.getId(), call.getToolCode());
     }
 
     private AiTask findTask(Long taskId, Long userId) {

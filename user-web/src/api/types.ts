@@ -17,6 +17,7 @@ export type ApiErrorCode =
   | "TASK_NOT_FOUND"
   | "TASK_STATUS_INVALID"
   | "MODEL_CALL_FAILED"
+  | "MODEL_RISK_CONTROL_REJECTED"
   | "AGENT_SESSION_NOT_FOUND"
   | "AGENT_RUN_NOT_FOUND"
   | "AGENT_RUN_NOT_CANCELLABLE"
@@ -124,10 +125,21 @@ export interface UserProfile {
   id: number
   username: string
   nickname?: string
+  avatarUrl?: string | null
   userType: UserType
   phone?: string | null
   email?: string | null
   status: UserAccountStatus
+}
+
+export interface UpdateUserProfileRequest {
+  nickname?: string
+  avatarUrl?: string | null
+}
+
+export interface UserAvatarUploadResponse {
+  avatarUrl: string
+  user: UserProfile
 }
 
 /* ========== 工具相关 ========== */
@@ -385,6 +397,8 @@ export interface AgentMessage {
   contentText: string
   contentJson?: string | null
   runId?: number | null
+  status?: "ACTIVE" | "SUPERSEDED" | string
+  editedAt?: string | null
   createdAt: string
 }
 

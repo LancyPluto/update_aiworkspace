@@ -124,7 +124,7 @@ class VideoGenerationHandler:
         except (KlingVideoTimeoutError, SeedanceVideoTimeoutError) as exc:
             return self._mark_failed(task_id, "MODEL_TIMEOUT", str(exc), trace_id)
         except (KlingVideoError, SeedanceVideoError, provider_registry.ProviderRegistryError) as exc:
-            return self._mark_failed(task_id, "MODEL_CALL_FAILED", str(exc), trace_id)
+            return self._mark_failed(task_id, _model_call_error_code(str(exc)), str(exc), trace_id)
         except GeneratedVideoPersistError as exc:
             return self._mark_failed(task_id, "MEDIA_PERSIST_FAILED", str(exc), trace_id)
         except BackendClientError:
@@ -221,3 +221,24 @@ def _optional_int(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _model_call_error_code(message: str) -> str:
+    normalized = message.lower()
+    if (
+        "risk control" in normalized
+        or "content policy" in normalized
+        or "safety policy" in normalized
+        or "sensitive" in normalized
+        or ("task_status_msg" in normalized and "failed" in normalized)
+    ):
+        return "MODEL_RISK_CONTROL_REJECTED"
+    if "status=401" in normalized or "status=403" in normalized:
+        return "MODEL_AUTH_FAILED"
+    if "invalid token" in normalized or "unauthorized" in normalized or "api key" in normalized:
+        return "MODEL_AUTH_FAILED"
+    if "status=429" in normalized or "rate limit" in normalized or "too many requests" in normalized:
+        return "MODEL_RATE_LIMITED"
+    if "timed out" in normalized or "timeout" in normalized:
+        return "MODEL_TIMEOUT"
+    return "MODEL_CALL_FAILED"

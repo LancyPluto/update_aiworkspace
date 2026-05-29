@@ -17,6 +17,7 @@ public class User {
     private String phone;
     private String email;
     private String nickname;
+    private String avatarUrl;
     private String userType;
     private String status;
     private LocalDateTime createdAt;
@@ -71,6 +72,14 @@ public class User {
 
     public void setNickname(String nickname) {
         this.nickname = nickname;
+    }
+
+    public String getAvatarUrl() {
+        return avatarUrl;
+    }
+
+    public void setAvatarUrl(String avatarUrl) {
+        this.avatarUrl = avatarUrl;
     }
 
     public String getUserType() {

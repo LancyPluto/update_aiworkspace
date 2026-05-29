@@ -4,6 +4,7 @@ from app.clients.backend_client import BackendClient, BackendClientError
 from app.clients.model_client import ModelClient, ModelClientError
 from app.config import Settings
 from app.core.schemas import RunFail
+from app.runtime.deep_agents_engine import DeepAgentsRuntimeEngine
 from app.runtime.router import RuntimeRouter
 from app.tools.backend_tool import ToolExecutionError
 
@@ -48,7 +49,7 @@ class AgentRuntime:
             await self._fail(run_id, "MODEL_CALL_FAILED", str(exc))
         except ToolExecutionError as exc:
             logger.exception("Agent run failed while executing tool, runId=%s", run_id)
-            await self._fail(run_id, "TOOL_CALL_FAILED", str(exc))
+            await self._fail(run_id, exc.error_code or "TOOL_CALL_FAILED", str(exc))
         except Exception as exc:  # pragma: no cover - defensive runtime boundary.
             logger.exception("Agent run failed with internal error, runId=%s", run_id)
             await self._fail(run_id, "AGENT_INTERNAL_ERROR", str(exc))
@@ -73,10 +74,19 @@ class AgentRuntime:
             await self._fail(run_id, "MODEL_CALL_FAILED", str(exc))
         except ToolExecutionError as exc:
             logger.exception("Agent confirmed-tool run failed while executing tool, runId=%s, toolCode=%s", run_id, tool_code)
-            await self._fail(run_id, "TOOL_CALL_FAILED", str(exc))
+            await self._fail(run_id, exc.error_code or "TOOL_CALL_FAILED", str(exc))
         except Exception as exc:  # pragma: no cover - defensive runtime boundary.
             logger.exception("Agent confirmed-tool run failed with internal error, runId=%s, toolCode=%s", run_id, tool_code)
             await self._fail(run_id, "AGENT_INTERNAL_ERROR", str(exc))
+
+    async def debug_route(self, context):
+        model_client = await self._model_client(context)
+        engine = DeepAgentsRuntimeEngine(
+            self.backend,
+            model_client,
+            deep_agents_enabled=self.default_settings.agent_deep_agents_enabled,
+        )
+        return await engine.debug_route(context)
 
     async def _model_client(self, context=None) -> ModelClient:
         # Respect externally injected clients (tests/mocks), but avoid reusing

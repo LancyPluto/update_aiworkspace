@@ -1,11 +1,13 @@
 import json
 import logging
 import math
+import socket
 import time
 from typing import Any
+from urllib.parse import urlparse
 
 import requests
-from requests.exceptions import SSLError
+from requests.exceptions import ConnectTimeout, ReadTimeout, SSLError
 
 
 LOGGER = logging.getLogger(__name__)
@@ -121,15 +123,44 @@ class OpenAIImagesClient:
         raise OpenAIImagesError("openai images request failed")
 
     def _post_once(self, url: str, payload: dict[str, Any]) -> dict[str, Any]:
+        started_at = time.perf_counter()
+        diagnostics = self._connection_diagnostics(url)
+        LOGGER.info(
+            "openai images transport start url=%s timeout=%s diagnostics=%s",
+            _redact_url(url),
+            self.timeout,
+            diagnostics,
+        )
         try:
             response = self.session.post(
                 url,
                 json=payload,
                 timeout=self.timeout,
             )
+            LOGGER.info(
+                "openai images transport completed url=%s status=%s elapsed=%.3fs diagnostics=%s",
+                _redact_url(url),
+                response.status_code,
+                time.perf_counter() - started_at,
+                diagnostics,
+            )
         except requests.Timeout as exc:
+            elapsed = time.perf_counter() - started_at
+            timeout_kind = _timeout_kind(exc)
+            LOGGER.warning(
+                "openai images transport timeout url=%s kind=%s elapsed=%.3fs timeout=%s diagnostics=%s error=%s",
+                _redact_url(url),
+                timeout_kind,
+                elapsed,
+                self.timeout,
+                diagnostics,
+                exc,
+            )
             raise OpenAIImagesTimeoutError(
-                f"openai images request timed out: connectTimeout={self.timeout[0]}s, readTimeout={self.timeout[1]}s"
+                "openai images request timed out: "
+                f"kind={timeout_kind}; elapsed={elapsed:.3f}s; "
+                f"connectTimeout={self.timeout[0]}s; readTimeout={self.timeout[1]}s; "
+                f"diagnostics={diagnostics}"
             ) from exc
         except SSLError:
             raise
@@ -157,6 +188,17 @@ class OpenAIImagesClient:
         if not isinstance(data, dict):
             raise OpenAIImagesError("openai images returned invalid response")
         return data
+
+    def _connection_diagnostics(self, url: str) -> str:
+        parsed = urlparse(url)
+        host = parsed.hostname or ""
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        proxy_enabled = bool(self.session.proxies) or self.session.trust_env
+        addresses = _resolve_host_addresses(host, port)
+        return (
+            f"host={host or '-'}; port={port}; trustEnv={self.session.trust_env}; "
+            f"configuredProxy={bool(self.session.proxies)}; proxyEnabled={proxy_enabled}; resolved={addresses}"
+        )
 
     def _extract_image_urls(self, payload: dict[str, Any]) -> list[str]:
         data = payload.get("data")
@@ -305,3 +347,35 @@ def _as_bool(value: Any, fallback: bool) -> bool:
 def _is_ssl_eof_error(exc: BaseException) -> bool:
     message = str(exc).lower()
     return "eof occurred in violation of protocol" in message or "ssleoferror" in message
+
+
+def _timeout_kind(exc: requests.Timeout) -> str:
+    if isinstance(exc, ConnectTimeout):
+        return "connect"
+    if isinstance(exc, ReadTimeout):
+        return "read"
+    return "timeout"
+
+
+def _resolve_host_addresses(host: str, port: int) -> str:
+    if not host:
+        return "-"
+    try:
+        infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    except OSError as exc:
+        return f"dns_error:{exc}"
+    addresses: list[str] = []
+    for info in infos:
+        address = info[4][0]
+        if address not in addresses:
+            addresses.append(address)
+    return ",".join(addresses[:8]) or "-"
+
+
+def _redact_url(url: str) -> str:
+    parsed = urlparse(url)
+    if not parsed.hostname:
+        return url
+    port = f":{parsed.port}" if parsed.port else ""
+    path = parsed.path or "/"
+    return f"{parsed.scheme}://{parsed.hostname}{port}{path}"

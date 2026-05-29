@@ -184,10 +184,34 @@ class ToolCallFail(BaseModel):
     errorMessage: str
 
 
+class ToolCallTaskBind(BaseModel):
+    taskId: int
+
+
+class AgentRouteDebugTool(BaseModel):
+    toolCode: str
+    toolName: str = ""
+    autoCallable: bool = False
+
+
+class AgentRouteDebugResponse(BaseModel):
+    intent: str
+    confidence: float
+    selectedToolCode: str | None = None
+    candidateToolCodes: list[str] = Field(default_factory=list)
+    clarifyingQuestion: str | None = None
+    decisionSource: str
+    reason: str
+    requestedOutputModality: str | None = None
+    visibleToolCount: int = 0
+    visibleTools: list[AgentRouteDebugTool] = Field(default_factory=list)
+
+
 class ToolCallResponse(BaseModel):
     id: int
     runId: int | None = None
     toolCode: str
+    taskId: int | None = None
     status: str | None = None
     argumentsJson: str | dict[str, Any] | None = None
     resultJson: str | dict[str, Any] | None = None

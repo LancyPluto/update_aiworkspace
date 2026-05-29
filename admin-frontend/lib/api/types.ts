@@ -18,6 +18,7 @@ export interface AdminUser {
   id: number
   username: string
   nickname: string
+  avatarUrl?: string | null
   userType: 'ADMIN' | 'USER' | string
 }
 
@@ -169,6 +170,12 @@ export interface AdminTaskApiPayload {
   errorMessage?: string | null
   params?: unknown
   result?: TaskResult | null
+  agentSource?: {
+    runId: number
+    toolCallId: number
+    toolCode?: string | null
+  } | null
+  consumedCredits?: number | null
   createdAt: string
   queuedAt?: string | null
   startedAt?: string | null
@@ -193,6 +200,7 @@ export interface AdminTaskQuery {
   status?: string
   toolCode?: string
   userId?: number
+  taskId?: number
 }
 
 export interface DashboardChartPoint {
@@ -225,6 +233,7 @@ export interface AdminMember {
   phone?: string | null
   email?: string | null
   nickname: string
+  avatarUrl?: string | null
   userType: string
   status: string
   createdAt?: string | null
@@ -433,10 +442,14 @@ export interface AgentToolCall {
   runId: number
   toolCode: string
   toolName?: string | null
+  taskId?: number | null
   status: string
   argumentsJson?: string | null
   resultJson?: string | null
+  errorCode?: string | null
   errorMessage?: string | null
+  startedAt?: string | null
+  finishedAt?: string | null
   createdAt?: string | null
   updatedAt?: string | null
 }
@@ -478,6 +491,7 @@ export interface AdminAgentRunStats {
 export interface AdminAgentRunQuery {
   status?: string
   userId?: number
+  taskId?: number
   pageNo?: number
   pageSize?: number
 }

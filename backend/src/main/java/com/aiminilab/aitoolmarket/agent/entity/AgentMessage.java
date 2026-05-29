@@ -20,6 +20,7 @@ public class AgentMessage {
      */
     private String status;
     private LocalDateTime supersededAt;
+    private LocalDateTime editedAt;
     private LocalDateTime createdAt;
 
     public Long getId() { return id; }
@@ -40,6 +41,8 @@ public class AgentMessage {
     public void setStatus(String status) { this.status = status; }
     public LocalDateTime getSupersededAt() { return supersededAt; }
     public void setSupersededAt(LocalDateTime supersededAt) { this.supersededAt = supersededAt; }
+    public LocalDateTime getEditedAt() { return editedAt; }
+    public void setEditedAt(LocalDateTime editedAt) { this.editedAt = editedAt; }
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
 }

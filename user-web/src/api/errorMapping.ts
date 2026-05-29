@@ -43,6 +43,9 @@ export function formatAgentRunFailure(errorCode?: string, errorMessage?: string)
   if (errorCode === "AGENT_SERVICE_NOTIFY_FAILED") {
     return errorMessage || "Agent 服务暂时不可用，请稍后重试。"
   }
+  if (errorCode === "MODEL_RISK_CONTROL_REJECTED") {
+    return "第三方模型平台的内容风控未通过，本次没有生成结果。请换一种更安全、明确的描述后重试。"
+  }
   if (errorCode === "MODEL_CALL_FAILED") {
     return errorMessage || "模型调用失败，请稍后重试。"
   }

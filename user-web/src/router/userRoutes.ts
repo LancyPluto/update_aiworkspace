@@ -29,6 +29,9 @@ export const userRoutes = {
   get materialLibrary() {
     return { name: "MaterialLibrary" }
   },
+  get profile() {
+    return { name: "Profile" }
+  },
   get billing() {
     return { name: "Billing" }
   },

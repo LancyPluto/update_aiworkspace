@@ -63,6 +63,7 @@ interface Task {
   errorCode: string
   errorMessage: string
   progressMessage: string
+  agentSource?: AdminTaskApiPayload["agentSource"]
   createdAt: string
   queuedAt: string
   startedAt: string
@@ -184,6 +185,7 @@ function rowToTask(row: AdminTaskApiPayload): Task {
     errorCode: row.errorCode?.trim() || "",
     errorMessage: row.errorMessage?.trim() || "",
     progressMessage: row.progressMessage?.trim() || "",
+    agentSource: row.agentSource ?? null,
     createdAt: formatDateTime(row.createdAt),
     queuedAt: formatDateTime(row.queuedAt),
     startedAt: formatDateTime(row.startedAt),
@@ -330,7 +332,10 @@ export default function TasksPage() {
     setLoading(true)
     setError(null)
     try {
-      const resp = await fetchAdminTasks()
+      const taskIdParam = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("taskId") : null
+      const taskId = taskIdParam && /^\d+$/.test(taskIdParam) ? Number(taskIdParam) : undefined
+      if (taskIdParam && !searchQuery) setSearchQuery(taskIdParam)
+      const resp = await fetchAdminTasks({ taskId })
       setTasks(resp.list.map(rowToTask))
     } catch (err) {
       const message = err instanceof ApiError ? err.message : "加载任务列表失败"
@@ -395,6 +400,7 @@ export default function TasksPage() {
         errorCode: row.errorCode,
         errorMessage: row.errorMessage,
         progressMessage: row.progressMessage,
+        agentSource: detail.agentSource ?? null,
         credits: row.credits,
         queuedAt: row.queuedAt,
         startedAt: row.startedAt,
@@ -468,7 +474,7 @@ export default function TasksPage() {
                 <DialogDescription>
                   {detailLoadingId === item.rawId
                     ? "正在加载详情…"
-                    : `任务 ID: ${selectedTask?.id || item.id}`}
+                    : `任务 ID: ${selectedTask?.id || item.id}${selectedTask?.agentSource ? ` · Agent Run #${selectedTask.agentSource.runId} / Tool Call #${selectedTask.agentSource.toolCallId}` : ""}`}
                 </DialogDescription>
               </DialogHeader>
               <Tabs defaultValue="input" className="mt-4 flex min-h-0 flex-col overflow-hidden">

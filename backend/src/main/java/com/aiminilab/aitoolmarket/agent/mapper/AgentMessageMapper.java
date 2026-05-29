@@ -117,8 +117,10 @@ public interface AgentMessageMapper extends BaseMapper<AgentMessage> {
 
     @Update("""
             UPDATE agent_messages
-            SET content_text = #{contentText}
+            SET content_text = #{contentText}, edited_at = #{editedAt}
             WHERE id = #{messageId}
             """)
-    int updateContentText(@Param("messageId") Long messageId, @Param("contentText") String contentText);
+    int updateContentText(@Param("messageId") Long messageId,
+                          @Param("contentText") String contentText,
+                          @Param("editedAt") LocalDateTime editedAt);
 }

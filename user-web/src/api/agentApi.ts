@@ -68,12 +68,12 @@ export function sendAgentMessage(
 
 export function regenerateAgentRun(
   runId: number,
-  body: { clientRequestId?: string; modelConfigId?: number | null },
+  body?: { clientRequestId?: string; modelConfigId?: number | null },
   options?: { token?: string | null },
 ) {
   return apiRequest<CreateAgentMessageResponse>("POST", `/api/v1/agent/runs/${runId}/regenerate`, {
     token: options?.token,
-    body,
+    body: body ?? {},
   })
 }
 

@@ -26,9 +26,10 @@ public class AdminTaskController {
     public ApiResponse<PageResponse<TaskDetailResponse>> list(@RequestParam(required = false) String status,
                                                               @RequestParam(required = false) String toolCode,
                                                               @RequestParam(required = false) Long userId,
+                                                              @RequestParam(required = false) Long taskId,
                                                               @RequestParam(required = false) Integer pageNo,
                                                               @RequestParam(required = false) Integer pageSize) {
-        return ApiResponse.success(taskService.adminList(status, toolCode, userId, pageNo, pageSize));
+        return ApiResponse.success(taskService.adminList(status, toolCode, userId, taskId, pageNo, pageSize));
     }
 
     @GetMapping("/{taskId}")

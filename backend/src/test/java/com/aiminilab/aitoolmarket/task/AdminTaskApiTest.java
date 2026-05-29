@@ -6,6 +6,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -32,6 +33,9 @@ class AdminTaskApiTest {
     @Autowired
     private MockMvc mockMvc;
 
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
     @Test
     void adminCanListViewRetryAndCancelTasks() throws Exception {
         String adminToken = login("/api/admin/v1/auth/login", "admin");
@@ -39,6 +43,10 @@ class AdminTaskApiTest {
         publishTool(adminToken, toolId);
         String userToken = login("/api/v1/auth/login", "user1");
         Long taskId = createTask(userToken, "admin_task_tool");
+        jdbcTemplate.update("""
+                INSERT INTO agent_tool_calls(run_id, user_id, tool_code, task_id, status, arguments_json, created_at)
+                VALUES (?, ?, ?, ?, 'RUNNING', '{}', CURRENT_TIMESTAMP)
+                """, 77L, 2L, "admin_task_tool", taskId);
 
         mockMvc.perform(get("/api/admin/v1/tasks")
                         .header("Authorization", "Bearer " + adminToken))
@@ -53,11 +61,22 @@ class AdminTaskApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.list[0].taskId").value(taskId.intValue()));
 
+        mockMvc.perform(get("/api/admin/v1/tasks")
+                        .param("taskId", String.valueOf(taskId))
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(1))
+                .andExpect(jsonPath("$.data.list[0].taskId").value(taskId.intValue()))
+                .andExpect(jsonPath("$.data.list[0].agentSource.runId").value(77))
+                .andExpect(jsonPath("$.data.list[0].agentSource.toolCode").value("admin_task_tool"));
+
         mockMvc.perform(get("/api/admin/v1/tasks/{taskId}", taskId)
                         .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.taskId").value(taskId.intValue()))
-                .andExpect(jsonPath("$.data.params.productName").value("Admin Task Product"));
+                .andExpect(jsonPath("$.data.params.productName").value("Admin Task Product"))
+                .andExpect(jsonPath("$.data.agentSource.runId").value(77))
+                .andExpect(jsonPath("$.data.agentSource.toolCode").value("admin_task_tool"));
 
         String processingBody = """
                                 {

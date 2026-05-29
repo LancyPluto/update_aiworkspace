@@ -22,7 +22,7 @@ class PersistedImage:
     def to_result_item(self) -> dict[str, str]:
         return {
             "url": self.url,
-            "sourceUrl": self.source_url,
+            "sourceUrl": _safe_source_url_for_result(self.source_url),
         }
 
 
@@ -98,3 +98,11 @@ class GeneratedImagePersister:
     def _public_url(self, image_path: Path) -> str:
         relative_path = image_path.relative_to(self.output_dir).as_posix()
         return f"{self.public_base_url}/{relative_path}"
+
+
+def _safe_source_url_for_result(source_url: str) -> str:
+    if source_url.startswith("data:") and ";base64" in source_url[:128]:
+        return "[inline-image-base64-omitted]"
+    if len(source_url) > 2048:
+        return source_url[:2032] + "...[truncated]"
+    return source_url

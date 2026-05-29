@@ -161,6 +161,32 @@ async def test_backend_client_can_create_and_read_internal_task():
 
 
 @pytest.mark.asyncio
+async def test_backend_client_binds_tool_call_task():
+    seen: list[tuple[str, bytes]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((request.url.path, request.content))
+        return httpx.Response(
+            200,
+            json={
+                "code": "SUCCESS",
+                "message": "ok",
+                "data": {"id": 99, "runId": 7, "toolCode": "image_generation", "taskId": 123, "status": "RUNNING"},
+            },
+        )
+
+    client = BackendClient(
+        Settings(backend_internal_base_url="http://backend"),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    bound = await client.bind_tool_call_task(99, 123)
+
+    assert bound.taskId == 123
+    assert seen == [("/api/internal/v1/agent/tool-calls/99/task", b'{"taskId":123}')]
+
+
+@pytest.mark.asyncio
 async def test_backend_client_forwards_trace_id_header():
     seen_headers: list[str | None] = []
 

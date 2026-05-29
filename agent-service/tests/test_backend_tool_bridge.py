@@ -297,3 +297,117 @@ async def test_wait_for_task_abort_message_includes_last_task_detail():
     assert "runStatus=FAILED" in message
     assert "taskStatus=PROCESSING" in message
     assert "waiting provider" in message
+
+
+@pytest.mark.asyncio
+async def test_execute_continues_when_task_binding_endpoint_is_missing():
+    class Backend:
+        def __init__(self) -> None:
+            self.events = []
+            self.completed = []
+            self.failed = []
+            self.cancelled = []
+            self.bind_attempts = []
+
+        async def create_tool_call(self, run_id: int, request):
+            return type("ToolCall", (), {"id": 46, "toolCode": request.toolCode})()
+
+        async def create_task(self, request):
+            return type("TaskStatus", (), {"taskId": 130, "status": "QUEUED"})()
+
+        async def bind_tool_call_task(self, tool_call_id: int, task_id: int):
+            self.bind_attempts.append((tool_call_id, task_id))
+            raise RuntimeError("status=404")
+
+        async def append_event(self, run_id: int, event) -> None:
+            self.events.append((run_id, event.eventType, event.eventJson))
+
+        async def get_task_detail(self, user_id: int, task_id: int) -> TaskDetailResponse:
+            return TaskDetailResponse(
+                taskId=task_id,
+                status="SUCCESS",
+                progress=100,
+                progressMessage="done",
+                result={"resourceType": "IMAGE", "contentText": "image url"},
+            )
+
+        async def get_run_context(self, run_id: int) -> RunContext:
+            return RunContext(runId=run_id, sessionId=1, userId=1, message="generate image", status="RUNNING")
+
+        async def complete_tool_call(self, tool_call_id: int, request) -> None:
+            self.completed.append((tool_call_id, request.resultJson))
+
+        async def fail_tool_call(self, tool_call_id: int, request) -> None:
+            self.failed.append((tool_call_id, request.errorCode, request.errorMessage))
+
+        async def cancel_task(self, user_id: int, task_id: int) -> None:
+            self.cancelled.append((user_id, task_id))
+
+    backend = Backend()
+    bridge = BackendToolBridge(backend_client=backend, timeout_seconds=1, poll_interval_seconds=0.01)  # type: ignore[arg-type]
+    context = RunContext(runId=88, sessionId=1, userId=7, message="generate image", status="RUNNING")
+    tool = ToolDescriptor(
+        toolCode="ofox_gpt_image2",
+        toolName="GPT-image2.0",
+        autoCallable=True,
+        inputSchema={"type": "object", "properties": {"userRequest": {"type": "string"}}},
+    )
+
+    result = await bridge.execute_with_args(context, tool, {"userRequest": context.message})
+
+    assert result["taskId"] == 130
+    assert backend.bind_attempts == [(46, 130)]
+    assert backend.failed == []
+    assert backend.cancelled == []
+    assert backend.completed
+    assert backend.events[0][2]["taskId"] == 130
+    assert backend.events[0][2]["bindStatus"] == "FAILED"
+
+
+@pytest.mark.asyncio
+async def test_execute_propagates_task_error_code_to_runtime_boundary():
+    class Backend:
+        def __init__(self) -> None:
+            self.failed = []
+
+        async def create_tool_call(self, run_id: int, request):
+            return type("ToolCall", (), {"id": 47, "toolCode": request.toolCode})()
+
+        async def create_task(self, request):
+            return type("TaskStatus", (), {"taskId": 131, "status": "QUEUED"})()
+
+        async def bind_tool_call_task(self, tool_call_id: int, task_id: int):
+            return type("ToolCall", (), {"id": tool_call_id, "taskId": task_id})()
+
+        async def append_event(self, run_id: int, event) -> None:
+            pass
+
+        async def get_task_detail(self, user_id: int, task_id: int) -> TaskDetailResponse:
+            return TaskDetailResponse(
+                taskId=task_id,
+                status="FAILED",
+                progress=100,
+                progressMessage="risk rejected",
+                errorCode="MODEL_RISK_CONTROL_REJECTED",
+                errorMessage="Failure to pass the risk control system",
+            )
+
+        async def get_run_context(self, run_id: int) -> RunContext:
+            return RunContext(runId=run_id, sessionId=1, userId=1, message="generate video", status="RUNNING")
+
+        async def fail_tool_call(self, tool_call_id: int, request) -> None:
+            self.failed.append((tool_call_id, request.errorCode, request.errorMessage))
+
+        async def cancel_task(self, user_id: int, task_id: int) -> None:
+            pass
+
+    backend = Backend()
+    bridge = BackendToolBridge(backend_client=backend, timeout_seconds=1, poll_interval_seconds=0.01)  # type: ignore[arg-type]
+    context = RunContext(runId=89, sessionId=1, userId=7, message="generate video", status="RUNNING")
+    tool = ToolDescriptor(toolCode="kling_image_to_video", toolName="可灵生视频V2.6", autoCallable=True)
+
+    with pytest.raises(ToolExecutionError) as exc:
+        await bridge.execute_with_args(context, tool, {"prompt": context.message})
+
+    assert exc.value.error_code == "MODEL_RISK_CONTROL_REJECTED"
+    assert backend.failed[0][1] == "MODEL_RISK_CONTROL_REJECTED"

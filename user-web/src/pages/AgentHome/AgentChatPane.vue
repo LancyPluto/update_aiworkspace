@@ -2,7 +2,6 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue"
 import {
   AlertTriangle,
-  Bot,
   Check,
   Copy,
   FileText,
@@ -22,6 +21,8 @@ import RunTimeline from "./RunTimeline.vue"
 import { filterUserFacingRunEvents } from "./runTimelineEvents"
 import ChatMessage from "./ChatMessage.vue"
 import AssetPreviewModal from "@/components/AssetPreviewModal.vue"
+import UserAvatar from "@/components/UserAvatar.vue"
+import { useAuthStore } from "@/store/authStore"
 import {
   ApiBusinessError,
   cancelAgentRun,
@@ -49,6 +50,8 @@ import type {
   ToolSummary,
 } from "@/api/types"
 import type { AssetPreviewItem, AssetPreviewRecommendation } from "@/types/assetPreview"
+
+const auth = useAuthStore()
 
 const props = defineProps<{
   sessionId: number
@@ -102,6 +105,7 @@ const composerTextareaRef = ref<HTMLTextAreaElement | null>(null)
 const composerExpanded = ref(false)
 const messagesKey = computed(() => `agent_messages_${props.sessionId}`)
 let runStreamAbort: AbortController | null = null
+const terminalEventFinalizingRunIds = new Set<number>()
 
 const input = computed({
   get: () => props.draft,
@@ -172,6 +176,38 @@ function modelMeta(model: AgentModelConfig) {
   return `${model.provider} · ${model.modelName}`
 }
 
+function messageTime(value?: string | null) {
+  if (!value) return ""
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ""
+  return date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })
+}
+
+function messageDividerTime(value?: string | null) {
+  if (!value) return ""
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ""
+  const now = new Date()
+  const sameDay =
+    date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() &&
+    date.getDate() === now.getDate()
+  const datePart = sameDay
+    ? "今天"
+    : date.toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" })
+  return `${datePart} ${messageTime(value)}`
+}
+
+function shouldShowTimeDivider(message: AgentMessage, index: number) {
+  if (index === 0) return true
+  const previous = messages.value[index - 1]
+  if (!previous?.createdAt || !message.createdAt) return false
+  const currentTime = new Date(message.createdAt).getTime()
+  const previousTime = new Date(previous.createdAt).getTime()
+  if (Number.isNaN(currentTime) || Number.isNaN(previousTime)) return false
+  return currentTime - previousTime > 5 * 60 * 1000
+}
+
 function changeModel(rawId: string) {
   if (!rawId) {
     emit("change-model", null)
@@ -189,6 +225,18 @@ function findLatestRunIdInMessages(msgs: AgentMessage[]): number | null {
   for (let i = msgs.length - 1; i >= 0; i--) {
     const runId = msgs[i]?.runId
     if (runId != null) return runId
+  }
+  return null
+}
+
+function findRunIdForUserMessage(message: AgentMessage): number | null {
+  if (message.runId != null) return message.runId
+  const index = messages.value.findIndex((item) => item.id === message.id)
+  if (index < 0) return null
+  for (let i = index + 1; i < messages.value.length; i++) {
+    const item = messages.value[i]
+    if (item.role === "USER") break
+    if (item.runId != null) return item.runId
   }
   return null
 }
@@ -539,7 +587,40 @@ async function submitEditedMessage(message: AgentMessage) {
     return
   }
   if (text === message.contentText.trim()) {
-    cancelEditMessage()
+    const sourceRunId = findRunIdForUserMessage(message)
+    if (!sourceRunId) {
+      agentError.value = "这条消息暂时没有可重跑的 Agent 运行，请稍后刷新再试。"
+      return
+    }
+    editingRegenerating.value = true
+    agentError.value = null
+    confirmationError.value = null
+    lastFailedRunId.value = null
+    runConnectionStatus.value = "running"
+    events.value = []
+    editingMessageId.value = null
+    editingMessageDraft.value = ""
+    try {
+      const res = await regenerateAgentRun(
+        sourceRunId,
+        {
+          clientRequestId: crypto.randomUUID(),
+          modelConfigId: props.modelConfigId ?? null,
+        },
+        { token: props.token },
+      )
+      activeRunId.value = res.runId
+      messages.value = messages.value.filter((item) => item.id <= message.id)
+      await waitForRunComplete(res.runId)
+    } catch (error) {
+      runConnectionStatus.value = "failed"
+      activeRunId.value = null
+      agentError.value = formatAgentError(error)
+      await refreshMessages()
+    } finally {
+      editingRegenerating.value = false
+      await scrollBottom()
+    }
     return
   }
 
@@ -586,6 +667,9 @@ function formatAgentError(error: unknown) {
   if (error instanceof ApiBusinessError && error.code === "MODEL_CALL_FAILED") {
     const detail = error.message ? `后端返回：${error.message}` : "后端没有返回更多细节。"
     return `模型连接验证失败。请在管理端检查 provider、baseUrl、API Key、模型名称和 MiniMax Group ID 后重试。${detail}`
+  }
+  if (error instanceof ApiBusinessError && error.code === "MODEL_RISK_CONTROL_REJECTED") {
+    return "第三方模型平台的内容风控未通过，本次没有扣除生成结果。请换一种更安全、明确的描述后重试。"
   }
   if (error instanceof ApiBusinessError && error.code === "AGENT_ACTIVE_RUN_LIMIT") {
     return "上一次 Agent 任务尚未结束，占用了运行名额。请点击下方「取消进行中的任务」后再发送；若任务仍在进行，也可等待其完成。"
@@ -720,6 +804,14 @@ function handleStreamedRunEvent(runId: number, event: AgentRunEvent) {
   appendRunEvent(event)
   if (alreadySeen) return
 
+  if (isTerminalRunEvent(event)) {
+    settleRunStatus()
+    streamingAssistantMessageId.value = null
+    stopRunEventStream()
+    void finalizeTerminalRunFromEvent(runId, event)
+    return
+  }
+
   if (event.eventType === "message.delta") {
     const payload = parseEventJson(event.eventJson)
     const delta = typeof payload.delta === "string" ? payload.delta : event.eventText ?? ""
@@ -735,6 +827,30 @@ function handleStreamedRunEvent(runId: number, event: AgentRunEvent) {
   if (event.eventType === "tool.confirmation_required") {
     runConnectionStatus.value = "awaiting_confirmation"
     stopRunEventStream()
+  }
+}
+
+async function finalizeTerminalRunFromEvent(runId: number, event: AgentRunEvent) {
+  if (terminalEventFinalizingRunIds.has(runId)) return
+  terminalEventFinalizingRunIds.add(runId)
+  try {
+    const run = await fetchAgentRun(runId, { token: props.token })
+    await syncRunEvents(runId)
+    settleRunStatus(run)
+    if (run.status === "FAILED" || run.status === "TIMEOUT") {
+      lastFailedRunId.value = run.id
+    }
+    await refreshMessages()
+  } catch {
+    settleRunStatus()
+    if (event.eventType === "run.failed") {
+      lastFailedRunId.value = event.runId
+    }
+    await refreshMessages()
+  } finally {
+    streamingAssistantMessageId.value = null
+    terminalEventFinalizingRunIds.delete(runId)
+    await scrollBottom()
   }
 }
 
@@ -848,6 +964,10 @@ function appendRunEvent(event: AgentRunEvent) {
     }
     if (errorCode === "AGENT_SERVICE_NOTIFY_FAILED") {
       agentError.value = errorMessage || "Agent 服务暂时不可用，请稍后重试。"
+      return
+    }
+    if (errorCode === "MODEL_RISK_CONTROL_REJECTED") {
+      agentError.value = "第三方模型平台的内容风控未通过，本次没有生成结果。请换一种更安全、明确的描述后重试。"
       return
     }
     if (errorCode === "MODEL_CALL_FAILED") {
@@ -1018,12 +1138,22 @@ defineExpose({
       </div>
 
       <template v-else>
-        <article v-for="message in messages" :key="message.id" :class="messageClass(message.role)">
+        <template v-for="(message, index) in messages" :key="message.id">
+          <div v-if="shouldShowTimeDivider(message, index)" class="time-divider">
+            {{ messageDividerTime(message.createdAt) }}
+          </div>
+        <article :class="messageClass(message.role)">
           <div class="avatar">
-            <Bot v-if="message.role !== 'USER'" class="h-4 w-4" />
-            <span v-else>我</span>
+            <img v-if="message.role !== 'USER'" src="/logo.svg" alt="AI" />
+            <UserAvatar
+              v-else
+              :src="auth.user?.avatarUrl"
+              :name="auth.user?.nickname || auth.user?.username || '我'"
+              size="sm"
+            />
           </div>
           <div class="message-main">
+            <span class="message-time">{{ messageTime(message.createdAt) }}</span>
             <div class="bubble">
               <div v-if="editingMessageId === message.id" class="message-edit-box">
                 <textarea
@@ -1109,10 +1239,11 @@ defineExpose({
             </div>
           </div>
         </article>
+        </template>
 
         <article v-if="showGenerationLoading" class="agent-message assistant generating-message">
           <div class="avatar">
-            <Bot class="h-4 w-4" />
+            <img src="/logo.svg" alt="AI" />
           </div>
           <div class="bubble generating-bubble">
             <div class="generating-orbit">
@@ -1133,7 +1264,7 @@ defineExpose({
 
         <article v-if="visibleRunTimelineEvents.length" class="agent-message assistant run-progress">
           <div class="avatar">
-            <Bot class="h-4 w-4" />
+            <img src="/logo.svg" alt="AI" />
           </div>
           <div class="bubble">
             <RunTimeline :events="events" :inline-mode="true" />
@@ -1374,35 +1505,47 @@ defineExpose({
   z-index: 1;
   height: 100%;
   max-height: none;
-  padding: 64px clamp(36px, 6vw, 96px) 46px;
+  padding: 64px clamp(40px, 7vw, 128px) 34px;
   scroll-behavior: smooth;
+  scrollbar-gutter: stable both-edges;
+  scrollbar-width: thin;
+  scrollbar-color: rgb(255 255 255 / 0.14) transparent;
 }
 
 .message-container::-webkit-scrollbar {
-  width: 8px;
+  width: 4px;
 }
 
 .message-container::-webkit-scrollbar-thumb {
   border-radius: 999px;
-  background: rgb(255 255 255 / 0.12);
+  background: rgb(255 255 255 / 0.10);
+}
+
+.message-container:hover::-webkit-scrollbar-thumb {
+  background: rgb(255 255 255 / 0.18);
 }
 
 .composer {
-  width: min(880px, calc(100% - 96px));
-  margin: 0 auto 30px;
-  border: 1px solid rgb(255 255 255 / 0.10);
-  border-radius: 28px;
+  width: min(760px, calc(100% - 96px));
+  margin: 0 auto 22px;
+  border: 0;
+  border-radius: 24px;
   background:
-    linear-gradient(135deg, rgb(176 92 255 / 0.055), transparent 38%),
-    rgb(25 25 25 / 0.62);
-  padding: 13px 15px;
+    radial-gradient(circle at 12% 0%, rgb(176 92 255 / 0.10), transparent 34%),
+    linear-gradient(180deg, rgb(255 255 255 / 0.055), rgb(255 255 255 / 0.025)),
+    rgb(31 31 36 / 0.76);
+  padding: 10px 12px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 6px;
   flex-shrink: 0;
   position: relative;
   z-index: 2;
-  box-shadow: 0 -18px 58px rgb(176 92 255 / 0.08), 0 24px 80px rgb(0 0 0 / 0.48), inset 0 1px 0 rgb(255 255 255 / 0.055);
+  box-shadow:
+    0 -18px 58px rgb(176 92 255 / 0.08),
+    0 24px 80px rgb(0 0 0 / 0.48),
+    inset 0 1px 0 rgb(255 255 255 / 0.07),
+    inset 0 0 0 1px rgb(255 255 255 / 0.045);
   backdrop-filter: blur(20px) saturate(135%);
 }
 
@@ -1411,12 +1554,12 @@ defineExpose({
   align-items: center;
   align-self: flex-start;
   justify-content: flex-start;
-  gap: 8px;
-  max-width: min(430px, 100%);
-  border: 1px solid rgb(255 255 255 / 0.07);
+  gap: 6px;
+  max-width: min(250px, 100%);
+  border: 0;
   border-radius: 999px;
-  background: rgb(0 0 0 / 0.18);
-  padding: 5px 6px 5px 12px;
+  background: rgb(255 255 255 / 0.032);
+  padding: 3px 5px 3px 8px;
 }
 
 .composer-model-copy {
@@ -1426,8 +1569,8 @@ defineExpose({
 }
 
 .composer-model-kicker {
-  color: rgb(255 255 255 / 0.42);
-  font-size: 12px;
+  color: rgb(255 255 255 / 0.32);
+  font-size: 10px;
   line-height: 1;
   white-space: nowrap;
 }
@@ -1441,15 +1584,15 @@ defineExpose({
 }
 
 .composer-model-select {
-  width: min(220px, 46vw);
-  min-height: 30px;
-  border: 1px solid rgb(176 92 255 / 0.18);
+  width: min(164px, 40vw);
+  min-height: 26px;
+  border: 0;
   border-radius: 999px;
-  background: rgb(15 15 19 / 0.62);
-  color: rgb(255 255 255 / 0.68);
-  padding: 0 28px 0 10px;
+  background: rgb(0 0 0 / 0.14);
+  color: rgb(255 255 255 / 0.72);
+  padding: 0 24px 0 9px;
   outline: none;
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .composer-model-select:disabled {
@@ -1515,12 +1658,12 @@ defineExpose({
   border: none;
   outline: none;
   background: transparent;
-  font-size: 15px;
+  font-size: 14px;
   line-height: 1.6;
-  min-height: 64px;
-  max-height: 200px;
+  min-height: 48px;
+  max-height: 160px;
   resize: none;
-  padding: 10px 38px 10px 2px;
+  padding: 6px 36px 6px 2px;
   color: rgb(255 255 255 / 0.88);
 }
 
@@ -1562,7 +1705,7 @@ defineExpose({
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
-  gap: 14px;
+  gap: 10px;
 }
 
 .left-tools {
@@ -1575,20 +1718,19 @@ defineExpose({
 .tool-btn {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   font-size: 12px;
-  padding: 7px 13px;
+  padding: 7px 10px;
   border-radius: 999px;
-  border: 1px solid rgb(255 255 255 / 0.07);
-  background: rgb(0 0 0 / 0.18);
-  color: rgb(255 255 255 / 0.56);
+  border: 0;
+  background: transparent;
+  color: rgb(255 255 255 / 0.52);
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .tool-btn:hover:not(:disabled) {
-  border-color: rgb(176 92 255 / 0.48);
-  background: rgb(176 92 255 / 0.14);
+  background: rgb(255 255 255 / 0.07);
   color: #fff;
 }
 
@@ -1598,8 +1740,8 @@ defineExpose({
 }
 
 .send-circle-btn {
-  width: 42px;
-  height: 42px;
+  width: 40px;
+  height: 40px;
   border-radius: 50%;
   border: 1px solid rgb(255 255 255 / 0.14);
   background:
@@ -1689,15 +1831,18 @@ defineExpose({
 
 .agent-message {
   display: grid;
-  grid-template-columns: 42px minmax(0, 820px);
+  grid-template-columns: 42px minmax(0, 650px);
+  justify-content: start;
   gap: 14px;
   margin: 30px auto;
-  max-width: 1040px;
+  width: min(100%, 980px);
+  max-width: 980px;
   animation: message-rise 0.24s ease-out;
 }
 
 .agent-message.user {
-  grid-template-columns: minmax(0, 720px) 42px;
+  grid-template-columns: minmax(0, 650px) 42px;
+  justify-content: end;
 }
 
 .agent-message.user .avatar {
@@ -1708,10 +1853,50 @@ defineExpose({
   color: #fff;
 }
 
+.time-divider {
+  width: fit-content;
+  margin: 34px auto 12px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.035);
+  padding: 4px 11px;
+  color: rgb(255 255 255 / 0.32);
+  font-size: 11px;
+  letter-spacing: 0;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.045);
+}
+
 .message-main {
+  position: relative;
   min-width: 0;
   width: fit-content;
   max-width: 100%;
+}
+
+.message-time {
+  position: absolute;
+  left: calc(100% + 12px);
+  top: 4px;
+  min-width: 42px;
+  color: rgb(255 255 255 / 0.28);
+  font-size: 11px;
+  line-height: 1;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-4px);
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+.agent-message.user .message-time {
+  right: calc(100% + 12px);
+  left: auto;
+  text-align: right;
+  transform: translateX(4px);
+}
+
+.agent-message:hover .message-time,
+.agent-message:focus-within .message-time {
+  opacity: 1;
+  transform: translateX(0);
 }
 
 .agent-message.user .message-main {
@@ -1838,6 +2023,13 @@ defineExpose({
   font-weight: 700;
 }
 
+.avatar img {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+  filter: drop-shadow(0 0 10px rgb(176 92 255 / 0.28));
+}
+
 .bubble {
   width: fit-content;
   max-width: 100%;
@@ -1853,15 +2045,19 @@ defineExpose({
 
 .agent-message.assistant .bubble:has(.agent-result-renderer) {
   width: min(820px, 100%);
-  padding: 0;
-  border-color: transparent;
-  background: transparent;
-  box-shadow: none;
-  backdrop-filter: none;
+  padding: 10px;
+  border-color: rgb(255 255 255 / 0.07);
+  background:
+    radial-gradient(circle at 8% 0%, rgb(176 92 255 / 0.085), transparent 34%),
+    linear-gradient(180deg, rgb(255 255 255 / 0.035), rgb(255 255 255 / 0.018));
+  box-shadow:
+    0 20px 70px rgb(0 0 0 / 0.28),
+    inset 0 1px 0 rgb(255 255 255 / 0.04);
+  backdrop-filter: blur(10px);
 }
 
 .agent-message.run-progress .bubble {
-  width: min(820px, 100%);
+  width: min(650px, 100%);
   border-color: rgb(255 255 255 / 0.10);
   background: rgb(255 255 255 / 0.045);
 }
@@ -2096,6 +2292,9 @@ defineExpose({
   }
   .message-actions {
     opacity: 1;
+  }
+  .message-time {
+    display: none;
   }
   .message-edit-box {
     width: min(100%, 72vw);
