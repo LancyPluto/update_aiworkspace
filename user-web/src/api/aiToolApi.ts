@@ -101,6 +101,9 @@ function capabilitiesFromTool(tool: ToolSummary): Capability[] {
 
 function mapToolSummaryToAITool(tool: ToolSummary | ToolDetail): AITool {
   const style = parseFrontendStyle(tool.configNote)
+  const outputModality = (tool.outputModality || "").trim().toUpperCase()
+  const mediaDisplayMode =
+    style.mediaDisplayMode ?? (outputModality === "VIDEO" ? "effect" : "icon")
   return {
     id: tool.toolCode,
     name: tool.toolName,
@@ -110,7 +113,7 @@ function mapToolSummaryToAITool(tool: ToolSummary | ToolDetail): AITool {
     order: tool.id,
     primaryColor: style.primaryColor,
     welcomeMessage: style.welcomeMessage,
-    mediaDisplayMode: style.mediaDisplayMode,
+    mediaDisplayMode,
     modelIconUrl: style.modelIconUrl,
     capabilities: capabilitiesFromTool(tool),
     inputModality: tool.inputModality,

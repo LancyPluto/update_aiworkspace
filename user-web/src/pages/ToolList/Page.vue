@@ -1,10 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue"
+import { computed, onActivated, onMounted, ref, watch } from "vue"
 import { RouterLink, useRoute } from "vue-router"
 import { Sparkles } from "lucide-vue-next"
 import AppShell from "@/components/AppShell.vue"
 import CreditCostBadge from "@/components/CreditCostBadge/CreditCostBadge.vue"
-import { getApiOrigin } from "@/api/client"
 import { fetchEnabledAITools } from "@/api/aiToolApi"
 import { fetchTasks } from "@/api/taskApi"
 import type { AITool } from "@/api/aiToolTypes"
@@ -14,6 +13,14 @@ import { useAuthStore } from "@/store/authStore"
 import { isPptWorkspaceTool } from "@/api/pptApi"
 import { resolveModelBrand } from "@/utils/modelBrand"
 import { toolEntryRoute } from "@/utils/toolEntryRoute"
+import { extractTaskPreviewUrl } from "@/utils/taskResultBlocks"
+import {
+  isVideoPreviewUrl,
+  normalizeMediaUrl,
+  resolveToolCoverFallback,
+  resolveToolCoverUrl,
+  shouldUseEffectCard,
+} from "@/utils/toolCoverMedia"
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -45,22 +52,23 @@ function modalityLabel(value?: string | null): string {
   return modalityLabels[key] || key
 }
 
-function normalizeMediaUrl(value?: string | null): string {
-  const raw = value?.trim()
-  if (!raw) return ""
-  if (raw.startsWith("http://") || raw.startsWith("https://") || raw.startsWith("data:")) return raw
-  const path = raw.startsWith("/") ? raw : `/${raw}`
-  const apiOrigin = getApiOrigin()
-  return apiOrigin ? `${apiOrigin}${path}` : path
+const coverUseFallback = ref(new Set<string>())
+
+function coverSrcForTool(tool: AITool): string {
+  if (coverUseFallback.value.has(tool.id)) {
+    return resolveToolCoverFallback(tool)
+  }
+  return resolveToolCoverUrl(tool)
 }
 
-function isVideoPreviewUrl(value?: string | null): boolean {
-  const raw = value?.split(/[?#]/)[0]?.toLowerCase() || ""
-  return [".mp4", ".webm", ".mov", ".m4v"].some((ext) => raw.endsWith(ext))
+function onToolCoverError(tool: AITool) {
+  if (coverUseFallback.value.has(tool.id)) return
+  coverUseFallback.value = new Set([...coverUseFallback.value, tool.id])
 }
 
-function usesEffectMedia(tool: AITool): boolean {
-  return tool.mediaDisplayMode === "effect" && Boolean(tool.iconUrl)
+function coverForTopTool(modality: string): string {
+  const tool = topToolForModality(modality)
+  return tool ? coverSrcForTool(tool) : ""
 }
 
 function modelBrand(tool: AITool) {
@@ -89,7 +97,19 @@ const filteredTools = computed(() => {
   return sortedTools.value.filter((tool) => normalizeModality(tool.outputModality) === selectedOutputModality.value)
 })
 
-const toolsById = computed(() => new Map(tools.value.map((tool) => [tool.id, tool])))
+const toolsByCode = computed(() => new Map(tools.value.map((tool) => [tool.id, tool])))
+
+const tasksByRecency = computed(() =>
+  [...tasks.value].sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+  ),
+)
+
+type RecentUsedEntry = {
+  tool: AITool
+  previewUrl: string
+  previewIsVideo: boolean
+}
 
 const usageCounts = computed(() => {
   const counts = new Map<string, number>()
@@ -100,20 +120,32 @@ const usageCounts = computed(() => {
   return counts
 })
 
-const recentUsedTools = computed(() => {
+const recentUsedEntries = computed(() => {
   const seen = new Set<string>()
-  const list: AITool[] = []
-  for (const task of tasks.value) {
-    const tool = toolsById.value.get(task.toolCode)
+  const list: RecentUsedEntry[] = []
+  for (const task of tasksByRecency.value) {
+    const tool = toolsByCode.value.get(task.toolCode)
     if (!tool || seen.has(tool.id)) continue
     seen.add(tool.id)
-    list.push(tool)
+    const generatedPreview = extractTaskPreviewUrl(task)
+    const fallbackPreview = normalizeMediaUrl(tool.iconUrl)
+    const previewUrl = generatedPreview || fallbackPreview
+    list.push({
+      tool,
+      previewUrl,
+      previewIsVideo: isVideoPreviewUrl(previewUrl),
+    })
     if (list.length >= 5) break
   }
   if (list.length < 5) {
     for (const tool of sortedTools.value) {
       if (seen.has(tool.id)) continue
-      list.push(tool)
+      const previewUrl = normalizeMediaUrl(tool.iconUrl)
+      list.push({
+        tool,
+        previewUrl,
+        previewIsVideo: isVideoPreviewUrl(previewUrl),
+      })
       if (list.length >= 5) break
     }
   }
@@ -151,6 +183,17 @@ async function loadTools() {
 onMounted(() => {
   loadTools()
 })
+
+onActivated(() => {
+  loadTools()
+})
+
+watch(
+  () => auth.token,
+  (token, previous) => {
+    if (token !== previous) loadTools()
+  },
+)
 </script>
 
 <template>
@@ -171,10 +214,10 @@ onMounted(() => {
           <h2 class="text-xl font-semibold">图像生成</h2>
           <p class="mt-2 text-sm text-white/50">智能系统，即时开发</p>
           <div class="relative mt-8 h-24 overflow-hidden rounded-2xl bg-[linear-gradient(135deg,rgb(255_255_255_/_0.12),rgb(176_92_255_/_0.22))] transition group-hover:brightness-125">
-            <template v-if="topToolForModality('IMAGE')?.iconUrl">
+            <template v-if="coverForTopTool('IMAGE')">
               <video
-                v-if="isVideoPreviewUrl(topToolForModality('IMAGE')?.iconUrl)"
-                :src="normalizeMediaUrl(topToolForModality('IMAGE')?.iconUrl)"
+                v-if="isVideoPreviewUrl(coverForTopTool('IMAGE'))"
+                :src="coverForTopTool('IMAGE')"
                 class="h-full w-full object-cover"
                 muted
                 loop
@@ -184,7 +227,7 @@ onMounted(() => {
               />
               <img
                 v-else
-                :src="normalizeMediaUrl(topToolForModality('IMAGE')?.iconUrl)"
+                :src="coverForTopTool('IMAGE')"
                 :alt="topToolForModality('IMAGE')?.name"
                 class="h-full w-full object-cover"
               />
@@ -200,22 +243,24 @@ onMounted(() => {
           <h2 class="text-xl font-semibold">视频创作</h2>
           <p class="mt-2 text-sm text-white/50">图像、关键一代</p>
           <div class="relative mt-8 h-24 overflow-hidden rounded-2xl bg-[linear-gradient(135deg,rgb(70_170_255_/_0.22),rgb(255_255_255_/_0.1))] transition group-hover:brightness-125">
-            <template v-if="topToolForModality('VIDEO')?.iconUrl">
+            <template v-if="coverForTopTool('VIDEO')">
               <video
-                v-if="isVideoPreviewUrl(topToolForModality('VIDEO')?.iconUrl)"
-                :src="normalizeMediaUrl(topToolForModality('VIDEO')?.iconUrl)"
+                v-if="isVideoPreviewUrl(coverForTopTool('VIDEO'))"
+                :src="coverForTopTool('VIDEO')"
                 class="h-full w-full object-cover"
                 muted
                 loop
                 autoplay
                 playsinline
                 preload="metadata"
+                @error="topToolForModality('VIDEO') && onToolCoverError(topToolForModality('VIDEO')!)"
               />
               <img
                 v-else
-                :src="normalizeMediaUrl(topToolForModality('VIDEO')?.iconUrl)"
+                :src="coverForTopTool('VIDEO')"
                 :alt="topToolForModality('VIDEO')?.name"
                 class="h-full w-full object-cover"
+                @error="topToolForModality('VIDEO') && onToolCoverError(topToolForModality('VIDEO')!)"
               />
               <div class="absolute inset-0 bg-gradient-to-t from-black/55 to-transparent" />
               <span class="absolute bottom-3 left-3 text-sm font-semibold text-white">{{ topToolForModality('VIDEO')?.name }}</span>
@@ -249,14 +294,14 @@ onMounted(() => {
           </div>
           <div class="mt-4 flex gap-3 overflow-hidden">
             <RouterLink
-              v-for="tool in recentUsedTools"
-              :key="tool.id"
-              :to="toolEntryRoute(tool.id)"
+              v-for="entry in recentUsedEntries"
+              :key="entry.tool.id"
+              :to="toolEntryRoute(entry.tool.id)"
               class="h-28 w-20 shrink-0 overflow-hidden rounded-2xl bg-secondary"
             >
               <video
-                v-if="tool.iconUrl && isVideoPreviewUrl(tool.iconUrl)"
-                :src="normalizeMediaUrl(tool.iconUrl)"
+                v-if="entry.previewUrl && entry.previewIsVideo"
+                :src="entry.previewUrl"
                 class="h-full w-full object-cover"
                 muted
                 loop
@@ -265,9 +310,9 @@ onMounted(() => {
                 preload="metadata"
               />
               <img
-                v-else-if="tool.iconUrl"
-                :src="normalizeMediaUrl(tool.iconUrl)"
-                :alt="tool.name"
+                v-else-if="entry.previewUrl"
+                :src="entry.previewUrl"
+                :alt="entry.tool.name"
                 class="h-full w-full object-cover"
               />
               <div v-else class="flex h-full w-full items-center justify-center text-primary">
@@ -338,23 +383,25 @@ onMounted(() => {
           :to="toolEntryRoute(tool.id)"
           class="group overflow-hidden rounded-3xl border border-white/8 bg-white/[0.04] transition hover:-translate-y-1 hover:border-primary/50 hover:shadow-[0_20px_45px_rgb(0_0_0_/_0.38)]"
         >
-          <div v-if="usesEffectMedia(tool)" class="flex h-full flex-col">
+          <div v-if="shouldUseEffectCard(tool)" class="flex h-full flex-col">
             <div class="relative aspect-[3/4] overflow-hidden bg-muted">
               <video
-                v-if="isVideoPreviewUrl(tool.iconUrl)"
-                :src="normalizeMediaUrl(tool.iconUrl)"
+                v-if="isVideoPreviewUrl(coverSrcForTool(tool))"
+                :src="coverSrcForTool(tool)"
                 class="h-full w-full object-cover transition duration-500 group-hover:scale-[1.03]"
                 muted
                 loop
                 autoplay
                 playsinline
                 preload="metadata"
+                @error="onToolCoverError(tool)"
               />
               <img
-                v-else
-                :src="normalizeMediaUrl(tool.iconUrl)"
+                v-else-if="coverSrcForTool(tool)"
+                :src="coverSrcForTool(tool)"
                 :alt="tool.name"
                 class="h-full w-full object-cover transition duration-500 group-hover:scale-[1.03]"
+                @error="onToolCoverError(tool)"
               />
               <div class="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/85 via-black/10 to-transparent" />
               <div class="absolute bottom-4 left-4 right-4 flex items-end justify-between gap-3">

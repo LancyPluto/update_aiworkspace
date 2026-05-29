@@ -2,6 +2,18 @@ import { getRequestBaseUrl } from "@/api/client"
 import type { TaskDetail } from "@/api/types"
 import type { ResultBlock } from "@/types/result"
 
+/** 任务卡片封面：优先用生成结果中的视频/图片 URL */
+export function extractTaskPreviewUrl(detail?: TaskDetail | null): string {
+  const content = detail?.result?.contentText?.trim()
+  if (!content) return ""
+  const blocks = buildTaskResultBlocks(content, detail)
+  for (const block of blocks) {
+    if (block.type === "video" && block.url) return block.url
+    if (block.type === "image" && block.images.length > 0) return block.images[0]!.url
+  }
+  return ""
+}
+
 export function buildTaskResultBlocks(content: string, detail?: TaskDetail): ResultBlock[] {
   const parsed = parseJson(content)
   const finalVideoUrl = extractFinalVideoUrl(content)

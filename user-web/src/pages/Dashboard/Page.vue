@@ -40,6 +40,7 @@ import { userRoutes } from "@/router/userRoutes"
 import { useAuthStore } from "@/store/authStore"
 import { buildTaskResultBlocks } from "@/utils/taskResultBlocks"
 import { cleanToolDisplayText, toolDisplayDescription } from "@/utils/toolDisplayText"
+import { randomUUID } from "@/utils/randomUUID"
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -350,7 +351,7 @@ async function createWithSelectedTool() {
       {
         toolCode: tool.toolCode,
         params: taskParams,
-        clientRequestId: crypto.randomUUID(),
+        clientRequestId: randomUUID(),
       },
       { token: auth.token },
     )
@@ -568,7 +569,7 @@ async function retryTask(task: TaskDetail) {
       task.taskId,
       {
         params: { ...(task.params || {}) },
-        clientRequestId: crypto.randomUUID(),
+        clientRequestId: randomUUID(),
       },
       { token: auth.token },
     )

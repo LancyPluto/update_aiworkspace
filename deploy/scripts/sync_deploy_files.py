@@ -12,6 +12,9 @@ ROOT = Path(__file__).resolve().parents[2]
 REMOTE = "/root/ai_tool_market"
 
 FILES = [
+    "backend/Dockerfile",
+    "backend/.dockerignore",
+    "backend/src/main/java/com/aiminilab/aitoolmarket/task/dto/TaskDetailResponse.java",
     "engines/banana-slides/backend/Dockerfile",
     "engines/banana-slides/docker/debian-apt-mirror.sh",
     "engines/banana-slides/Dockerfile.allinone",

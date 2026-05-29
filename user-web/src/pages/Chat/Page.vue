@@ -39,6 +39,7 @@ import { buildTaskResultBlocks } from "@/utils/taskResultBlocks"
 import { isPptWorkspaceTool } from "@/api/pptApi"
 import { userRoutes } from "@/router/userRoutes"
 import { resolveModelBrand } from "@/utils/modelBrand"
+import { randomUUID } from "@/utils/randomUUID"
 
 const route = useRoute()
 const router = useRouter()
@@ -756,7 +757,7 @@ async function handleSend() {
         {
           toolCode: tool.value.id,
           params: taskParams,
-          clientRequestId: crypto.randomUUID(),
+          clientRequestId: randomUUID(),
         },
         { token: auth.token },
       )
@@ -839,7 +840,7 @@ async function regenerateMessage(msg: LocalChatMessage) {
           text: msg.content,
           attachments,
         },
-        clientRequestId: crypto.randomUUID(),
+        clientRequestId: randomUUID(),
       },
       { token: auth.token },
     )
