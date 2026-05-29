@@ -31,6 +31,8 @@ export {
   fetchAgentWorkspaces,
   fetchAgentWorkspaceMemory,
   sendAgentMessage,
+  regenerateAgentRun,
+  editRegenerateAgentMessage,
   streamAgentRunEvents,
   uploadAgentFile,
   updateAgentWorkspaceMemory,

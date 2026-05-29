@@ -220,7 +220,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
     @Override
     public AgentModelConfigTestResponse adminTest(AgentModelConfigRequest request) {
         validate(request);
-        AgentModelConfig existing = agentModelConfigMapper.findLatest();
+        AgentModelConfig existing = findExistingForTest(request);
         AgentModelConfigRequest merged = mergeSecretFields(request, existing);
         ModelProviderDefinition provider = providerRegistry.findByCode(merged.provider())
                 .orElseThrow(() -> new BusinessException(ErrorCode.PARAM_ERROR, "unsupported model provider"));
@@ -241,6 +241,31 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         } catch (IllegalStateException exception) {
             throw new BusinessException(ErrorCode.MODEL_CALL_FAILED, modelConfigTestFailureMessage(exception));
         }
+    }
+
+    private AgentModelConfig findExistingForTest(AgentModelConfigRequest request) {
+        String configCode = blankToNull(request.configCode());
+        if (configCode != null) {
+            AgentModelConfig byCode = agentModelConfigMapper.findActiveByConfigCode(configCode);
+            if (byCode != null) {
+                return byCode;
+            }
+        }
+        String provider = blankToNull(request.provider());
+        String modelName = blankToNull(request.modelName());
+        String baseUrl = blankToNull(request.baseUrl());
+        if (provider != null && modelName != null) {
+            AgentModelConfig byIdentity = agentModelConfigMapper.findAllActive().stream()
+                    .filter(item -> sameText(item.getProvider(), provider))
+                    .filter(item -> sameText(item.getModelName(), modelName))
+                    .filter(item -> baseUrl == null || sameText(item.getBaseUrl(), baseUrl))
+                    .findFirst()
+                    .orElse(null);
+            if (byIdentity != null) {
+                return byIdentity;
+            }
+        }
+        return null;
     }
 
     private static String modelConfigTestFailureMessage(IllegalStateException exception) {
@@ -347,6 +372,12 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
 
     private String blankToNull(String value) {
         return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    private boolean sameText(String left, String right) {
+        String l = left == null ? "" : left.trim();
+        String r = right == null ? "" : right.trim();
+        return l.equalsIgnoreCase(r);
     }
 
     private BigDecimal nonNegativeMoney(BigDecimal value) {

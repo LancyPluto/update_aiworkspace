@@ -70,7 +70,7 @@ import {
   createTool,
   deleteTool,
   fetchAdminToolCategories,
-  fetchAdminTools,
+  fetchAllAdminTools,
   fetchToolFields,
   offlineTool,
   publishTool,
@@ -381,7 +381,7 @@ export default function ToolsPage() {
     setError(null)
     try {
       const [toolsResp, cats, providers] = await Promise.all([
-        fetchAdminTools(),
+        fetchAllAdminTools(),
         fetchAdminToolCategories().catch(() => [] as ToolCategory[]),
         fetchModelProviders().catch(() => [] as ModelProviderDescriptor[]),
       ])
@@ -454,8 +454,8 @@ export default function ToolsPage() {
     return toolList.filter((tool) => {
       const matchesKeyword =
         !keyword ||
-        [tool.name, tool.description, tool.category, tool.toolCode].some((value) =>
-          value.toLowerCase().includes(keyword),
+        [tool.name, tool.description, tool.category, tool.toolCode, tool.modelConfigName, tool.modelName].some(
+          (value) => value && value.toLowerCase().includes(keyword),
         )
       const matchesOutput =
         !selectedOutputModality ||
@@ -680,7 +680,7 @@ export default function ToolsPage() {
       }
       let preservedMarkers: string[] | undefined
       if (integrationPluginId && editingTool) {
-        const toolsResp = await fetchAdminTools()
+        const toolsResp = await fetchAllAdminTools()
         const fresh = toolsResp.list.find((tool) => tool.id === editingTool.rawId)
         preservedMarkers = extractIntegrationMarkers(fresh?.configNote)
       }
@@ -1268,7 +1268,7 @@ export default function ToolsPage() {
                         pluginId={integrationPluginId}
                         toolId={editingTool.rawId}
                         onSaved={async () => {
-                          const toolsResp = await fetchAdminTools()
+                          const toolsResp = await fetchAllAdminTools()
                           const fresh = toolsResp.list.find((tool) => tool.id === editingTool.rawId)
                           if (fresh) {
                             const mapped = mapTool(fresh)

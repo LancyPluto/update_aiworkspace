@@ -50,7 +50,8 @@ cd backend
 PPT_ENGINE_BASE_URL=http://127.0.0.1:5001 AGENT_ENABLED=false mvn spring-boot:run
 ```
 
-Docker 内 backend 使用 `PPT_ENGINE_BASE_URL=http://banana-slides:5000`（见 `deploy/docker-compose.yml`）。
+Docker 内 backend 默认 `PPT_ENGINE_BASE_URL=http://host.docker.internal:5001`（见 `deploy/docker-compose.yml`）。  
+若使用 Clash 等工具，`banana-slides` 主机名可能被解析到假 IP（198.18.x），导致「header parser received no bytes」，请勿仅用 `http://banana-slides:5000`。
 
 ## 更新引擎代码
 

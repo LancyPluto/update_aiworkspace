@@ -1,0 +1,349 @@
+{
+  "format": "ai-tool-market-config-bundle",
+  "version": 1,
+  "exportedAt": "2026-05-28T16:35:00+08:00",
+  "exportedBy": "codex-generated",
+  "secretsRedacted": true,
+  "settings": {
+    "source": "kling image tools generated from current configured models",
+    "note": "Only tool/category definitions; model configs are reused by configCode."
+  },
+  "modelConfigs": [],
+  "categories": [
+    {
+      "categoryCode": "ai-image",
+      "categoryName": "AI 生图",
+      "sortOrder": 30,
+      "status": "ACTIVE"
+    }
+  ],
+  "tools": [
+    {
+      "toolCode": "kling-image-generation-v3",
+      "toolName": "可灵生图 V3",
+      "categoryCode": "ai-image",
+      "description": "可灵生图工具，支持文本生图与可选参考图。",
+      "coverUrl": null,
+      "toolType": "IMAGE_GENERATION",
+      "inputModality": "TEXT",
+      "outputModality": "IMAGE",
+      "configNote": "可灵生图（可灵生图 V3）",
+      "status": "ONLINE",
+      "estimatedCreditCost": 2,
+      "modelConfigCode": "kling-v3-omni",
+      "fields": [
+        {
+          "fieldKey": "prompt",
+          "fieldName": "画面描述",
+          "fieldType": "textarea",
+          "placeholder": "描述主体、场景、风格、构图与细节",
+          "options": {
+            "core": true
+          },
+          "optionsJson": "{\"core\": true}",
+          "required": true,
+          "sortOrder": 1
+        },
+        {
+          "fieldKey": "aspectRatio",
+          "fieldName": "画面比例",
+          "fieldType": "radio",
+          "placeholder": null,
+          "options": [
+            {
+              "label": "1:1",
+              "value": "1:1"
+            },
+            {
+              "label": "16:9",
+              "value": "16:9"
+            },
+            {
+              "label": "9:16",
+              "value": "9:16"
+            }
+          ],
+          "optionsJson": "[{\"label\":\"1:1\",\"value\":\"1:1\"},{\"label\":\"16:9\",\"value\":\"16:9\"},{\"label\":\"9:16\",\"value\":\"9:16\"}]",
+          "required": true,
+          "sortOrder": 2
+        },
+        {
+          "fieldKey": "count",
+          "fieldName": "生成数量",
+          "fieldType": "number",
+          "placeholder": "1-4，默认 1",
+          "options": null,
+          "optionsJson": null,
+          "required": false,
+          "sortOrder": 3
+        },
+        {
+          "fieldKey": "negativePrompt",
+          "fieldName": "反向提示词",
+          "fieldType": "textarea",
+          "placeholder": "不希望出现的元素（可选）",
+          "options": null,
+          "optionsJson": null,
+          "required": false,
+          "sortOrder": 4
+        },
+        {
+          "fieldKey": "imageUrl",
+          "fieldName": "参考图片（可选）",
+          "fieldType": "image",
+          "placeholder": "可选，用于垫图/参考",
+          "options": null,
+          "optionsJson": null,
+          "required": false,
+          "sortOrder": 5
+        },
+        {
+          "fieldKey": "seed",
+          "fieldName": "随机种子（可选）",
+          "fieldType": "number",
+          "placeholder": "留空则随机",
+          "options": null,
+          "optionsJson": null,
+          "required": false,
+          "sortOrder": 6
+        }
+      ],
+      "prompts": [
+        {
+          "promptCode": "default",
+          "promptName": "默认 Prompt",
+          "status": "ACTIVE",
+          "activeVersionNo": "tpl-kling-image-default-v1",
+          "versions": [
+            {
+              "versionNo": "tpl-kling-image-default-v1",
+              "systemPrompt": null,
+              "userPromptTemplate": "画面描述：{{prompt}}\n画面比例：{{aspectRatio}}\n生成数量：{{count}}\n反向提示词：{{negativePrompt}}\n参考图片：{{imageUrl}}\n随机种子：{{seed}}",
+              "outputFormat": "MARKDOWN",
+              "status": "ACTIVE"
+            }
+          ]
+        }
+      ],
+      "workflow": null
+    },
+    {
+      "toolCode": "kling-image-generation-v2-1",
+      "toolName": "可灵生图 V2.1",
+      "categoryCode": "ai-image",
+      "description": "可灵生图工具，支持文本生图与可选参考图。",
+      "coverUrl": null,
+      "toolType": "IMAGE_GENERATION",
+      "inputModality": "TEXT",
+      "outputModality": "IMAGE",
+      "configNote": "可灵生图（可灵生图 V2.1）",
+      "status": "ONLINE",
+      "estimatedCreditCost": 2,
+      "modelConfigCode": "8",
+      "fields": [
+        {
+          "fieldKey": "prompt",
+          "fieldName": "画面描述",
+          "fieldType": "textarea",
+          "placeholder": "描述主体、场景、风格、构图与细节",
+          "options": {
+            "core": true
+          },
+          "optionsJson": "{\"core\": true}",
+          "required": true,
+          "sortOrder": 1
+        },
+        {
+          "fieldKey": "aspectRatio",
+          "fieldName": "画面比例",
+          "fieldType": "radio",
+          "placeholder": null,
+          "options": [
+            {
+              "label": "1:1",
+              "value": "1:1"
+            },
+            {
+              "label": "16:9",
+              "value": "16:9"
+            },
+            {
+              "label": "9:16",
+              "value": "9:16"
+            }
+          ],
+          "optionsJson": "[{\"label\":\"1:1\",\"value\":\"1:1\"},{\"label\":\"16:9\",\"value\":\"16:9\"},{\"label\":\"9:16\",\"value\":\"9:16\"}]",
+          "required": true,
+          "sortOrder": 2
+        },
+        {
+          "fieldKey": "count",
+          "fieldName": "生成数量",
+          "fieldType": "number",
+          "placeholder": "1-4，默认 1",
+          "options": null,
+          "optionsJson": null,
+          "required": false,
+          "sortOrder": 3
+        },
+        {
+          "fieldKey": "negativePrompt",
+          "fieldName": "反向提示词",
+          "fieldType": "textarea",
+          "placeholder": "不希望出现的元素（可选）",
+          "options": null,
+          "optionsJson": null,
+          "required": false,
+          "sortOrder": 4
+        },
+        {
+          "fieldKey": "imageUrl",
+          "fieldName": "参考图片（可选）",
+          "fieldType": "image",
+          "placeholder": "可选，用于垫图/参考",
+          "options": null,
+          "optionsJson": null,
+          "required": false,
+          "sortOrder": 5
+        },
+        {
+          "fieldKey": "seed",
+          "fieldName": "随机种子（可选）",
+          "fieldType": "number",
+          "placeholder": "留空则随机",
+          "options": null,
+          "optionsJson": null,
+          "required": false,
+          "sortOrder": 6
+        }
+      ],
+      "prompts": [
+        {
+          "promptCode": "default",
+          "promptName": "默认 Prompt",
+          "status": "ACTIVE",
+          "activeVersionNo": "tpl-kling-image-default-v1",
+          "versions": [
+            {
+              "versionNo": "tpl-kling-image-default-v1",
+              "systemPrompt": null,
+              "userPromptTemplate": "画面描述：{{prompt}}\n画面比例：{{aspectRatio}}\n生成数量：{{count}}\n反向提示词：{{negativePrompt}}\n参考图片：{{imageUrl}}\n随机种子：{{seed}}",
+              "outputFormat": "MARKDOWN",
+              "status": "ACTIVE"
+            }
+          ]
+        }
+      ],
+      "workflow": null
+    },
+    {
+      "toolCode": "kling-image-generation-v1",
+      "toolName": "可灵生图 V1",
+      "categoryCode": "ai-image",
+      "description": "可灵生图工具，支持文本生图与可选参考图。",
+      "coverUrl": null,
+      "toolType": "IMAGE_GENERATION",
+      "inputModality": "TEXT",
+      "outputModality": "IMAGE",
+      "configNote": "可灵生图（可灵生图 V1）",
+      "status": "ONLINE",
+      "estimatedCreditCost": 2,
+      "modelConfigCode": "kling-v1-image-to-video",
+      "fields": [
+        {
+          "fieldKey": "prompt",
+          "fieldName": "画面描述",
+          "fieldType": "textarea",
+          "placeholder": "描述主体、场景、风格、构图与细节",
+          "options": {
+            "core": true
+          },
+          "optionsJson": "{\"core\": true}",
+          "required": true,
+          "sortOrder": 1
+        },
+        {
+          "fieldKey": "aspectRatio",
+          "fieldName": "画面比例",
+          "fieldType": "radio",
+          "placeholder": null,
+          "options": [
+            {
+              "label": "1:1",
+              "value": "1:1"
+            },
+            {
+              "label": "16:9",
+              "value": "16:9"
+            },
+            {
+              "label": "9:16",
+              "value": "9:16"
+            }
+          ],
+          "optionsJson": "[{\"label\":\"1:1\",\"value\":\"1:1\"},{\"label\":\"16:9\",\"value\":\"16:9\"},{\"label\":\"9:16\",\"value\":\"9:16\"}]",
+          "required": true,
+          "sortOrder": 2
+        },
+        {
+          "fieldKey": "count",
+          "fieldName": "生成数量",
+          "fieldType": "number",
+          "placeholder": "1-4，默认 1",
+          "options": null,
+          "optionsJson": null,
+          "required": false,
+          "sortOrder": 3
+        },
+        {
+          "fieldKey": "negativePrompt",
+          "fieldName": "反向提示词",
+          "fieldType": "textarea",
+          "placeholder": "不希望出现的元素（可选）",
+          "options": null,
+          "optionsJson": null,
+          "required": false,
+          "sortOrder": 4
+        },
+        {
+          "fieldKey": "imageUrl",
+          "fieldName": "参考图片（可选）",
+          "fieldType": "image",
+          "placeholder": "可选，用于垫图/参考",
+          "options": null,
+          "optionsJson": null,
+          "required": false,
+          "sortOrder": 5
+        },
+        {
+          "fieldKey": "seed",
+          "fieldName": "随机种子（可选）",
+          "fieldType": "number",
+          "placeholder": "留空则随机",
+          "options": null,
+          "optionsJson": null,
+          "required": false,
+          "sortOrder": 6
+        }
+      ],
+      "prompts": [
+        {
+          "promptCode": "default",
+          "promptName": "默认 Prompt",
+          "status": "ACTIVE",
+          "activeVersionNo": "tpl-kling-image-default-v1",
+          "versions": [
+            {
+              "versionNo": "tpl-kling-image-default-v1",
+              "systemPrompt": null,
+              "userPromptTemplate": "画面描述：{{prompt}}\n画面比例：{{aspectRatio}}\n生成数量：{{count}}\n反向提示词：{{negativePrompt}}\n参考图片：{{imageUrl}}\n随机种子：{{seed}}",
+              "outputFormat": "MARKDOWN",
+              "status": "ACTIVE"
+            }
+          ]
+        }
+      ],
+      "workflow": null
+    }
+  ]
+}

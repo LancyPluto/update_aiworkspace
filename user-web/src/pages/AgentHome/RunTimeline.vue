@@ -46,7 +46,12 @@ function parseEventJson(value?: string | null | Record<string, unknown>) {
   if (value == null || value === "") return {} as Record<string, unknown>
   if (typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>
   try {
-    return JSON.parse(String(value)) as Record<string, unknown>
+    const parsed = JSON.parse(String(value)) as unknown
+    if (typeof parsed === "string") {
+      const nested = JSON.parse(parsed) as unknown
+      return typeof nested === "object" && nested !== null && !Array.isArray(nested) ? nested as Record<string, unknown> : {}
+    }
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {}
   } catch {
     return {} as Record<string, unknown>
   }
