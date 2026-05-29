@@ -16,7 +16,6 @@ services:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_unicode_ci
       # 忽略客户端握手里的字符集，统一用服务端 utf8mb4，减少 JDBC/客户端默认 latin1 导致的乱码
-      - --skip-character-set-client-handshake
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot123456"]
       interval: 10s
