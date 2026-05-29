@@ -278,7 +278,7 @@ onMounted(() => {
         </div>
       </section>
 
-      <h2 class="mb-4 text-xl font-semibold">一个工作站类型的 AI 生产公司区</h2>
+      <h2 class="mb-4 text-xl font-semibold">智能创作区</h2>
 
       <div class="mb-6 flex flex-wrap items-center gap-2">
         <button
@@ -386,7 +386,6 @@ onMounted(() => {
               </p>
               <div class="mt-4 flex items-center justify-between gap-2">
                 <CreditCostBadge :cost="tool.estimatedCreditCost" />
-                <span class="text-lg font-semibold text-primary">4.7</span>
               </div>
             </div>
           </div>
