@@ -108,6 +108,12 @@ export function uploadAgentFile(sessionId: number, file: File, options?: { token
   })
 }
 
+export function deleteAgentFile(sessionId: number, fileId: number, options?: { token?: string | null }) {
+  return apiRequest<void>("DELETE", `/api/v1/agent/sessions/${sessionId}/files/${fileId}`, {
+    token: options?.token,
+  })
+}
+
 export function fetchAgentRun(runId: number, options?: { token?: string | null; signal?: AbortSignal }) {
   return apiRequest<AgentRun>("GET", `/api/v1/agent/runs/${runId}`, {
     token: options?.token,

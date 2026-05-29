@@ -19,12 +19,14 @@ import {
   StopCircle
 } from "lucide-vue-next"
 import RunTimeline from "./RunTimeline.vue"
+import { filterUserFacingRunEvents } from "./runTimelineEvents"
 import ChatMessage from "./ChatMessage.vue"
 import AssetPreviewModal from "@/components/AssetPreviewModal.vue"
 import {
   ApiBusinessError,
   cancelAgentRun,
   confirmAgentTool,
+  deleteAgentFile,
   editRegenerateAgentMessage,
   fetchAgentMessages,
   fetchAgentFiles,
@@ -33,6 +35,7 @@ import {
   fetchTools,
   regenerateAgentRun,
   sendAgentMessage,
+  streamAgentRunEvents,
   uploadAgentFile,
 } from "@/api"
 import type {
@@ -72,9 +75,11 @@ const previewAsset = ref<AssetPreviewItem | null>(null)
 const paneLoading = ref(true)
 const sending = ref(false)
 const uploading = ref(false)
+const removingFileId = ref<number | null>(null)
 const agentError = ref<string | null>(null)
 const rememberTool = ref(true)
 const activeRunId = ref<number | null>(null)
+const streamingAssistantMessageId = ref<number | null>(null)
 const runConnectionStatus = ref<
   "idle" | "running" | "awaiting_confirmation" | "completed" | "failed"
 >("idle")
@@ -96,6 +101,7 @@ const fileInputRef = ref<HTMLInputElement | null>(null)
 const composerTextareaRef = ref<HTMLTextAreaElement | null>(null)
 const composerExpanded = ref(false)
 const messagesKey = computed(() => `agent_messages_${props.sessionId}`)
+let runStreamAbort: AbortController | null = null
 
 const input = computed({
   get: () => props.draft,
@@ -115,6 +121,8 @@ const confirmationEvents = computed(() =>
     .filter((event) => !dismissedConfirmationIds.value.has(event.id))
     .map((event) => ({ event, payload: parseEventJson(event.eventJson) })),
 )
+
+const visibleRunTimelineEvents = computed(() => filterUserFacingRunEvents(events.value, true))
 
 const runStatusText = computed(() => {
   if (runConnectionStatus.value === "running") return "Agent 正在运行"
@@ -138,12 +146,19 @@ const showRunRecoveryBanner = computed(
 const selectedAgentModel = computed(() =>
   props.agentModels.find((model) => model.id === props.modelConfigId) ?? props.agentModels[0] ?? null,
 )
+const hasStreamingAssistantContent = computed(() =>
+  streamingAssistantMessageId.value != null &&
+  messages.value.some((message) => message.id === streamingAssistantMessageId.value && message.contentText.length > 0),
+)
 const showGenerationLoading = computed(() =>
-  sending.value ||
-  editingRegenerating.value ||
-  regeneratingMessageId.value != null ||
-  runConnectionStatus.value === "running" ||
-  runConnectionStatus.value === "awaiting_confirmation",
+  !hasStreamingAssistantContent.value &&
+  (
+    sending.value ||
+    editingRegenerating.value ||
+    regeneratingMessageId.value != null ||
+    runConnectionStatus.value === "running" ||
+    runConnectionStatus.value === "awaiting_confirmation"
+  ),
 )
 const previewRecommendations = computed<AssetPreviewRecommendation[]>(() =>
   previewAsset.value ? recommendToolsForAsset(previewAsset.value) : [],
@@ -241,6 +256,7 @@ async function cancelRecoveryRun() {
   agentError.value = null
   try {
     await cancelAgentRun(recoveryRunId.value, { token: props.token })
+    stopRunEventStream()
     showActiveRunLimitHint.value = false
     recoveryRunId.value = null
     activeRunId.value = null
@@ -271,6 +287,7 @@ async function cancelCurrentRun() {
     agentError.value = null
     try {
       await cancelAgentRun(activeRunId.value, { token: props.token })
+      stopRunEventStream()
       activeRunId.value = null
       lastFailedRunId.value = null
       runConnectionStatus.value = "idle"
@@ -310,6 +327,19 @@ async function handleFileSelected(event: Event) {
     files.value = [uploaded, ...files.value.filter((item) => item.id !== uploaded.id)]
   } finally {
     uploading.value = false
+  }
+}
+
+async function removeFile(file: AgentFile) {
+  if (!props.token || removingFileId.value != null) return
+  removingFileId.value = file.id
+  try {
+    await deleteAgentFile(props.sessionId, file.id, { token: props.token })
+    files.value = files.value.filter((item) => item.id !== file.id)
+  } catch (error) {
+    agentError.value = formatAgentError(error)
+  } finally {
+    removingFileId.value = null
   }
 }
 
@@ -585,6 +615,48 @@ function delay(ms: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, ms))
 }
 
+function stopRunEventStream() {
+  runStreamAbort?.abort()
+  runStreamAbort = null
+}
+
+function streamingMessageId(runId: number) {
+  return -Math.abs(runId)
+}
+
+function ensureStreamingAssistantMessage(runId: number) {
+  const existing = messages.value.find(
+    (message) => message.role === "ASSISTANT" && message.runId === runId && message.id === streamingAssistantMessageId.value,
+  )
+  if (existing) return existing
+  const tempId = streamingMessageId(runId)
+  const message: AgentMessage = {
+    id: tempId,
+    sessionId: props.sessionId,
+    role: "ASSISTANT",
+    contentText: "",
+    runId,
+    createdAt: new Date().toISOString(),
+  }
+  streamingAssistantMessageId.value = tempId
+  messages.value = [...messages.value.filter((item) => item.id !== tempId), message]
+  return message
+}
+
+function appendStreamingAssistantDelta(runId: number, delta: string) {
+  if (!delta) return
+  const message = ensureStreamingAssistantMessage(runId)
+  message.contentText += delta
+  void scrollBottom()
+}
+
+function completeStreamingAssistantMessage(runId: number, content: string) {
+  if (!content) return
+  const message = ensureStreamingAssistantMessage(runId)
+  message.contentText = content
+  void scrollBottom()
+}
+
 async function syncRunEvents(runId: number) {
   if (!props.token) return
   const afterEventId = events.value.length ? events.value.at(-1)!.id : undefined
@@ -593,6 +665,80 @@ async function syncRunEvents(runId: number) {
 }
 
 async function waitForRunComplete(runId: number) {
+  runConnectionStatus.value = "running"
+  stopRunEventStream()
+  const controller = new AbortController()
+  runStreamAbort = controller
+  try {
+    await streamAgentRunEvents(runId, {
+      token: props.token,
+      signal: controller.signal,
+      afterEventId: events.value.length ? events.value.at(-1)!.id : undefined,
+      onEvent: (event) => handleStreamedRunEvent(runId, event),
+    })
+  } catch (error) {
+    if (controller.signal.aborted) return
+    await pollRunUntilComplete(runId)
+    return
+  } finally {
+    if (runStreamAbort === controller) runStreamAbort = null
+  }
+
+  try {
+    const run = await fetchAgentRun(runId, { token: props.token })
+    if (run.status === "WAITING_USER_CONFIRMATION") {
+      await syncRunEvents(runId)
+      runConnectionStatus.value = "awaiting_confirmation"
+      await scrollBottom()
+      return
+    }
+    if (isTerminalRunStatus(run.status)) {
+      await syncRunEvents(runId)
+      settleRunStatus(run)
+      if (run.status === "FAILED" || run.status === "TIMEOUT") {
+        lastFailedRunId.value = run.id
+      }
+      await refreshMessages()
+      streamingAssistantMessageId.value = null
+      await scrollBottom()
+      return
+    }
+  } catch (error) {
+    runConnectionStatus.value = "failed"
+    agentError.value = formatAgentError(error)
+    recoveryRunId.value = runId
+    lastFailedRunId.value = runId
+    activeRunId.value = null
+    return
+  }
+
+  await pollRunUntilComplete(runId)
+}
+
+function handleStreamedRunEvent(runId: number, event: AgentRunEvent) {
+  const alreadySeen = events.value.some((item) => item.id === event.id)
+  appendRunEvent(event)
+  if (alreadySeen) return
+
+  if (event.eventType === "message.delta") {
+    const payload = parseEventJson(event.eventJson)
+    const delta = typeof payload.delta === "string" ? payload.delta : event.eventText ?? ""
+    appendStreamingAssistantDelta(runId, delta)
+    return
+  }
+  if (event.eventType === "message.completed") {
+    const payload = parseEventJson(event.eventJson)
+    const content = typeof payload.content === "string" ? payload.content : event.eventText ?? ""
+    completeStreamingAssistantMessage(runId, content)
+    return
+  }
+  if (event.eventType === "tool.confirmation_required") {
+    runConnectionStatus.value = "awaiting_confirmation"
+    stopRunEventStream()
+  }
+}
+
+async function pollRunUntilComplete(runId: number) {
   runConnectionStatus.value = "running"
   const POLL_INTERVAL_MS = 1200
   const MAX_WAIT_MS = 5 * 60 * 1000
@@ -613,6 +759,7 @@ async function waitForRunComplete(runId: number) {
           lastFailedRunId.value = run.id
         }
         await refreshMessages()
+        streamingAssistantMessageId.value = null
         await scrollBottom()
         return
       }
@@ -841,6 +988,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  stopRunEventStream()
   window.removeEventListener("resize", adjustComposerTextareaHeight)
 })
 
@@ -914,6 +1062,7 @@ defineExpose({
                 v-else
                 :message="message.contentText"
                 :is-user="message.role === 'USER'"
+                :streaming="message.id === streamingAssistantMessageId && hasActiveRun"
                 @preview="openAssetPreview"
               />
             </div>
@@ -982,7 +1131,7 @@ defineExpose({
           </div>
         </article>
 
-        <article v-if="events.length" class="agent-message assistant run-progress">
+        <article v-if="visibleRunTimelineEvents.length" class="agent-message assistant run-progress">
           <div class="avatar">
             <Bot class="h-4 w-4" />
           </div>
@@ -1121,8 +1270,15 @@ defineExpose({
             <span class="inner-file-name">{{ file.originalFilename }}</span>
             <span class="inner-file-size">{{ formatFileSize(file.fileSize) }}</span>
           </div>
-          <button class="inner-file-close" @click="files = files.filter(x => x.id !== file.id)">
-            <X class="h-3 w-3" />
+          <button
+            type="button"
+            class="inner-file-close"
+            :disabled="removingFileId === file.id"
+            aria-label="移除附件"
+            @click.stop="removeFile(file)"
+          >
+            <Loader2 v-if="removingFileId === file.id" class="h-3 w-3 animate-spin" />
+            <X v-else class="h-3 w-3" />
           </button>
         </div>
       </div>

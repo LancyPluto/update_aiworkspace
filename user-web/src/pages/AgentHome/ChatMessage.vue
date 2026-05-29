@@ -19,6 +19,7 @@ const emit = defineEmits<{
 }>()
 
 const displayed = ref("")
+let typeToken = 0
 const fullText = computed(() => props.message ?? "")
 const resultBlocks = computed(() => buildStructuredResultBlocks(fullText.value))
 const renderedText = computed(() => (resultBlocks.value.length > 0 ? "" : displayed.value))
@@ -37,14 +38,19 @@ const videoItems = computed(() =>
 
 // 流式打字动画
 async function type() {
-  displayed.value = ""
+  const token = ++typeToken
   const text = fullText.value
-  for (let i = 0; i < text.length; i++) {
-    if (!props.streaming) break
+  if (!text.startsWith(displayed.value)) {
+    displayed.value = ""
+  }
+  for (let i = displayed.value.length; i < text.length; i++) {
+    if (!props.streaming || token !== typeToken) return
     displayed.value += text[i]
     await new Promise((r) => setTimeout(r, 4))
   }
-  displayed.value = text
+  if (token === typeToken) {
+    displayed.value = text
+  }
 }
 
 function extractVideoUrls(value: string) {
@@ -162,6 +168,19 @@ watch(
       void type()
     } else {
       displayed.value = props.message ?? ""
+    }
+  },
+)
+
+watch(
+  () => props.streaming,
+  async (streaming) => {
+    typeToken += 1
+    if (streaming) {
+      await nextTick()
+      void type()
+    } else {
+      displayed.value = fullText.value
     }
   },
 )
