@@ -1,53 +1,20 @@
-<template>
+﻿<template>
   <div class="page-root">
-  <!-- 动态光圈 -->
-  <div class="orb orb-top-left" :class="{ expand: orbExpand }"></div>
-  <div class="orb orb-bottom-right" :class="{ expand: orbExpand }"></div>
-  
-  <!-- 鼠标跟随光晕 -->
-  <div class="mouse-glow" ref="mouseGlow"></div>
-  
-  <canvas id="cursor-trail"></canvas>
-
-  <div class="container">
-    <!-- 品牌区（开屏动画） -->
-    <div class="brand animate-item" :class="{ show: brandVisible }">
-      <div class="logo">
-        <div class="wave-logo">
-          <img src="/logo.svg" alt="logo" />
-        </div>
-        <span class="brand-text">AI Tool Market</span>
-      </div>
-    </div>
-
-    <!-- 主标题容器（打字机效果） -->
-    <div class="hero-title" ref="heroTitleRef" :style="{ visibility: titleVisible ? 'visible' : 'hidden', opacity: titleVisible ? 1 : 0 }">
-      <div class="hero-title-line" ref="line1El"></div>
-      <div class="hero-title-line" ref="line2El"></div>
-    </div>
-
-    <!-- 副标题（开屏动画） -->
-    <div class="hero-sub animate-item" :class="{ show: subVisible }">
-      统一管理工具、任务、算力与素材，让团队更快完成内容生产和知识沉淀。
-    </div>
-
-    <!-- 三个基础按钮（开屏动画） -->
-    <div class="button-group animate-item" :class="{ show: buttonsVisible }">
-      <button class="btn"><LayoutGrid class="btn-icon" /> 工具市场</button>
-      <button class="btn"><Shield class="btn-icon" /> 安全会话</button>
-      <button class="btn"><Zap class="btn-icon" /> 即时创作</button>
-    </div>
-
-    <!-- 立即使用按钮单独一行居中 -->
-    <div class="cta-wrapper">
-      <div class="button-glow-ring"></div>
-      <div class="button-glow-ring second"></div>
-      <div class="button-glow-ring third"></div>
-      <button class="btn cta-btn" @click="startExpand"><Rocket class="btn-icon" /> 立即使用</button>
-    </div>
-  </div>
-
-
+    <main class="relative min-h-screen overflow-x-hidden">
+      <Navigation @open-login="openLoginModal" />
+      <HeroSection @open-login="openLoginModal" />
+      <FeaturesSection />
+      <HowItWorksSection />
+      <InfrastructureSection />
+      <MetricsSection />
+      <IntegrationsSection />
+      <SecuritySection />
+      <DevelopersSection />
+      <TestimonialsSection />
+      <PricingSection @open-login="openLoginModal" />
+      <CtaSection @open-login="openLoginModal" />
+      <FooterSection />
+    </main>
 
   <!-- 登录弹窗 -->
   <div v-if="loginModalVisible" class="login-modal" @click.self="loginModalVisible = false">
@@ -171,20 +138,24 @@
 </template>
 
 <script setup>
-  import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue';
+  import { ref, computed, onMounted, onBeforeUnmount, defineAsyncComponent } from 'vue';
   import { useRoute, useRouter } from 'vue-router';
-  import { Eye, LayoutGrid, Rocket, Shield, Zap } from 'lucide-vue-next';
+  import { Eye } from 'lucide-vue-next';
   import { resetPassword, sendSmsCode } from '@/api';
   import { useAuthStore } from '@/store/authStore';
+  import { Navigation, HeroSection } from '@/components/landing';
 
-  // ================= 鼠标跟随效果 =================
-  const mouseGlow = ref(null);
-  function handleMouseMove(e) {
-    if (mouseGlow.value) {
-      mouseGlow.value.style.left = e.clientX + 'px';
-      mouseGlow.value.style.top = e.clientY + 'px';
-    }
-  }
+  const FeaturesSection = defineAsyncComponent(() => import('@/components/landing/FeaturesSection.vue'));
+  const HowItWorksSection = defineAsyncComponent(() => import('@/components/landing/HowItWorksSection.vue'));
+  const InfrastructureSection = defineAsyncComponent(() => import('@/components/landing/InfrastructureSection.vue'));
+  const MetricsSection = defineAsyncComponent(() => import('@/components/landing/MetricsSection.vue'));
+  const IntegrationsSection = defineAsyncComponent(() => import('@/components/landing/IntegrationsSection.vue'));
+  const SecuritySection = defineAsyncComponent(() => import('@/components/landing/SecuritySection.vue'));
+  const DevelopersSection = defineAsyncComponent(() => import('@/components/landing/DevelopersSection.vue'));
+  const TestimonialsSection = defineAsyncComponent(() => import('@/components/landing/TestimonialsSection.vue'));
+  const PricingSection = defineAsyncComponent(() => import('@/components/landing/PricingSection.vue'));
+  const CtaSection = defineAsyncComponent(() => import('@/components/landing/CtaSection.vue'));
+  const FooterSection = defineAsyncComponent(() => import('@/components/landing/FooterSection.vue'));
 
   const router = useRouter();
   const route = useRoute();
@@ -200,189 +171,10 @@
   let pendingCaptchaResolve = null;
   let pendingCaptchaReject = null;
 
-  // ================= 开屏动画控制 =================
-  const brandVisible = ref(false);
-  const subVisible = ref(false);
-  const buttonsVisible = ref(false);
-  const titleVisible = ref(false);
-  const line1El = ref(null);
-  const line2El = ref(null);
-  const heroTitleRef = ref(null);
-
-  const fullLine1 = '企业级 AI 工具市场';
-  const fullLine2 = '让每位成员都有专属 AI 助手';
-
-  // 打字机效果
-  function typeWriter(element, text, speed, callback) {
-    let i = 0;
-    element.innerHTML = '';
-    function addChar() {
-      if (i < text.length) {
-        const char = text[i];
-        const span = document.createElement('span');
-        span.textContent = char;
-        span.style.display = 'inline-block';
-        element.appendChild(span);
-        i++;
-        setTimeout(addChar, speed);
-      } else {
-        callback && callback();
-      }
-    }
-    addChar();
-  }
-
-  // 拆分标题为独立字符（用于跳动效果）
-  function splitTitleToChars() {
-    const lines = [line1El.value, line2El.value];
-    lines.forEach(line => {
-      if (!line) return;
-      const text = line.innerText;
-      if (!text) return;
-      const chars = text.split('');
-      line.innerHTML = '';
-      chars.forEach(ch => {
-        const span = document.createElement('span');
-        span.className = 'char';
-        if (ch === ' ') {
-          span.innerHTML = '&nbsp;';
-          span.style.opacity = '0.4';
-        } else {
-          span.textContent = ch;
-        }
-        line.appendChild(span);
-      });
-    });
-    bindCharEvents();
-  }
-
-  // 字符跳动事件（防抖）
-  let debounceMap = new Map();
-  const DELAY = 50;
-  function bounceChar(span) {
-    span.classList.remove('char-bounce');
-    void span.offsetWidth;
-    span.classList.add('char-bounce');
-    span.addEventListener('animationend', () => {
-      span.classList.remove('char-bounce');
-    }, { once: true });
-  }
-  function onEnter(span) {
-    if (debounceMap.has(span)) clearTimeout(debounceMap.get(span));
-    const timer = setTimeout(() => {
-      bounceChar(span);
-      debounceMap.delete(span);
-    }, DELAY);
-    debounceMap.set(span, timer);
-  }
-  function onLeave(span) {
-    if (debounceMap.has(span)) {
-      clearTimeout(debounceMap.get(span));
-      debounceMap.delete(span);
-    }
-  }
-  function bindCharEvents() {
-    document.querySelectorAll('.char').forEach(c => {
-      c.removeEventListener('mouseenter', () => onEnter(c));
-      c.removeEventListener('mouseleave', () => onLeave(c));
-      c.addEventListener('mouseenter', () => onEnter(c));
-      c.addEventListener('mouseleave', () => onLeave(c));
-    });
-  }
-
-  function startEntranceAnimation() {
-    setTimeout(() => { brandVisible.value = true; }, 100);
-    setTimeout(() => { subVisible.value = true; }, 300);
-    setTimeout(() => { buttonsVisible.value = true; }, 500);
-    setTimeout(async () => {
-      titleVisible.value = true;
-      await nextTick();
-      typeWriter(line1El.value, fullLine1, 50, () => {
-        typeWriter(line2El.value, fullLine2, 50, () => {
-          splitTitleToChars();
-        });
-      });
-    }, 800);
-  }
-
-  // ================= 光标跟随残影效果 =================
-  let trailCanvas = null;
-  let ctx = null;
-  let trailWidth = 0, trailHeight = 0;
-  let particles = [];
-  let trailAnimationId = null;
-  function resizeTrailCanvas() {
-    if (!trailCanvas) return;
-    trailWidth = window.innerWidth;
-    trailHeight = window.innerHeight;
-    trailCanvas.width = trailWidth;
-    trailCanvas.height = trailHeight;
-  }
-  function addTrailPoint(x, y) {
-    particles.push({ x, y, life: 1.0, size: 12 });
-    if (particles.length > 35) particles.shift();
-  }
-  function updateTrail() {
-    for (let i = 0; i < particles.length; i++) {
-      particles[i].life -= 0.035;
-      if (particles[i].life <= 0) {
-        particles.splice(i, 1);
-        i--;
-      }
-    }
-  }
-  function drawTrail() {
-    if (!ctx) return;
-    ctx.clearRect(0, 0, trailWidth, trailHeight);
-    for (let p of particles) {
-      const alpha = p.life * 0.5;
-      const size = p.size * p.life;
-      ctx.beginPath();
-      ctx.fillStyle = `rgba(150, 190, 225, ${alpha * 0.6})`;
-      ctx.arc(p.x, p.y, size * 0.6, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.beginPath();
-      ctx.fillStyle = `rgba(120, 170, 215, ${alpha * 0.3})`;
-      ctx.arc(p.x, p.y, size * 0.9, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  }
-  function animateTrail() {
-    updateTrail();
-    drawTrail();
-    trailAnimationId = requestAnimationFrame(animateTrail);
-  }
-  function initTrail() {
-    trailCanvas = document.getElementById('cursor-trail');
-    if (!trailCanvas) return;
-    ctx = trailCanvas.getContext('2d');
-    resizeTrailCanvas();
-    animateTrail();
-    window.addEventListener('mousemove', (e) => addTrailPoint(e.clientX, e.clientY));
-    window.addEventListener('resize', () => resizeTrailCanvas());
-  }
-
-  // ================= 光圈扩大 + 登录弹窗 =================
-  const orbExpand = ref(false);
   const loginModalVisible = ref(false);
-  let expandTimeout = null;
 
-  function resetOrbs() {
-    const orbTop = document.querySelector('.orb-top-left');
-    const orbBottom = document.querySelector('.orb-bottom-right');
-    if (orbTop) orbTop.classList.remove('expand');
-    if (orbBottom) orbBottom.classList.remove('expand');
-  }
-  function startExpand() {
-    if (expandTimeout) return;
-    orbExpand.value = true;
-    expandTimeout = setTimeout(() => {
-      loginModalVisible.value = true;
-      setTimeout(() => {
-        orbExpand.value = false;
-        expandTimeout = null;
-      }, 300);
-    }, 600);
+  function openLoginModal() {
+    loginModalVisible.value = true;
   }
 
   // ================= 登录弹窗逻辑 =================
@@ -693,95 +485,17 @@
   onMounted(() => {
     if (auth.isLoggedIn) {
       router.replace(resolvePostLoginRedirect());
-      return;
     }
-    startEntranceAnimation();
-    initTrail();
-    window.addEventListener('mousemove', handleMouseMove);
   });
   onBeforeUnmount(() => {
-    if (trailAnimationId) cancelAnimationFrame(trailAnimationId);
     if (countdownTimer) clearInterval(countdownTimer);
-    if (expandTimeout) clearTimeout(expandTimeout);
-    window.removeEventListener('mousemove', handleMouseMove);
   });
 </script>
 
 <style>
-/* 登录页样式限定在 .page-root，避免跳转后卸载全局 body/* 规则 */
-.page-root,
-.page-root * {
-  margin: 0;
-  padding: 0;
+.page-root .login-card,
+.page-root .login-card * {
   box-sizing: border-box;
-  user-select: none;
-}
-
-.wave-logo {
-  width: 44px;
-  height: 44px;
-  object-fit: contain;
-}
-
-
-.page-root {
-  min-height: 100vh;
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  position: relative;
-  font-family: "Inter", "Microsoft YaHei", "PingFang SC", "Segoe UI", system-ui, sans-serif;
-  background: radial-gradient(circle at 20% 30%, #e9f0fc, #f4f8ff);
-  overflow: hidden;
-}
-
-/* ========= 动态光圈 (左上 + 右下) ========= */
-.orb {
-  position: fixed;
-  border-radius: 50%;
-  filter: blur(80px);
-  opacity: 0.5;
-  pointer-events: none;
-  z-index: 0;
-  transition: all 0.6s cubic-bezier(0.2, 1.2, 0.4, 1);
-  will-change: transform, width, height, top, left, bottom, right;
-  animation: breathe 6s ease-in-out infinite alternate;
-}
-.orb-top-left {
-  top: -350px;
-  left: -350px;
-  width: 900px;
-  height: 900px;
-  background: radial-gradient(circle, rgba(100, 160, 230, 0.55), rgba(150, 200, 255, 0.3), rgba(200, 220, 255, 0));
-  animation-delay: 0s;
-}
-.orb-bottom-right {
-  bottom: -320px;
-  right: -320px;
-  width: 950px;
-  height: 950px;
-  background: radial-gradient(circle, rgba(80, 140, 220, 0.5), rgba(120, 180, 240, 0.25), rgba(180, 210, 255, 0));
-  animation-delay: -3s;
-}
-@keyframes breathe {
-  0% { transform: scale(0.9); opacity: 0.5; }
-  50% { transform: scale(1.15); opacity: 0.85; }
-  100% { transform: scale(0.9); opacity: 0.5; }
-}
-
-/* ========= 鼠标跟随光晕效果 ========= */
-.mouse-glow {
-  position: fixed;
-  width: 200px;
-  height: 200px;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(42, 110, 255, 0.15) 0%, rgba(42, 110, 255, 0) 70%);
-  pointer-events: none;
-  z-index: 0;
-  transform: translate(-50%, -50%);
-  transition: opacity 0.3s ease;
 }
 
 .aliyun-captcha-element,
@@ -794,50 +508,6 @@
   pointer-events: none;
 }
 
-/* ========= fade-up 入场（原生 @keyframes，保留 .animate-item / .show class） ========= */
-@keyframes fade-up {
-  from {
-    opacity: 0;
-    transform: translateY(20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-/* ========= 按钮波纹效果 ========= */
-.btn {
-  position: relative;
-  overflow: hidden;
-}
-.btn::after {
-  content: '';
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 0;
-  height: 0;
-  background: rgba(255, 255, 255, 0.3);
-  border-radius: 50%;
-  transform: translate(-50%, -50%);
-  transition: width 0.6s ease, height 0.6s ease;
-}
-.btn:active::after {
-  width: 300%;
-  height: 300%;
-}
-
-/* ========= 按钮悬浮增强效果 ========= */
-.btn {
-  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
-}
-.btn:hover {
-  transform: translateY(-3px) scale(1.02);
-  box-shadow: 0 12px 24px rgba(42, 110, 255, 0.15);
-}
-
-/* ========= 登录弹窗入场动画 ========= */
 .login-modal {
   animation: fadeIn 0.3s ease-out;
 }
@@ -857,265 +527,6 @@
     opacity: 1;
     transform: translateY(0) scale(1);
   }
-}
-
-/* ========= 输入框聚焦动画 ========= */
-.input-field {
-  transition: all 0.3s ease;
-}
-.input-field:focus {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(42, 110, 255, 0.2);
-}
-
-/* ========= 标签页切换动画 ========= */
-.mode-tabs button {
-  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
-}
-.mode-tabs button.active {
-  transform: scale(1.05);
-}
-
-/* ========= 波浪logo动画 ========= */
-.wave-logo {
-  animation: waveFloat 4s ease-in-out infinite;
-}
-@keyframes waveFloat {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-5px); }
-}
-
-.orb-top-left.expand {
-  top: 50% !important;
-  left: 50% !important;
-  transform: translate(-50%, -50%) scale(1) !important;
-  width: 80vw;
-  height: 80vw;
-  max-width: 600px;
-  max-height: 600px;
-  animation: none !important;
-}
-.orb-bottom-right.expand {
-  bottom: auto !important;
-  right: auto !important;
-  top: 50% !important;
-  left: 50% !important;
-  transform: translate(-50%, -50%) scale(1) !important;
-  width: 80vw;
-  height: 80vw;
-  max-width: 600px;
-  max-height: 600px;
-  animation: none !important;
-}
-
-/* 残影画布层 */
-#cursor-trail {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-  z-index: 9999;
-}
-
-.container {
-  width: 100%;
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 2rem 1rem;
-  text-align: center;
-  position: relative;
-  z-index: 10;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-}
-
-.animate-item {
-  opacity: 0;
-  transform: translateY(20px);
-}
-.animate-item.show {
-  animation: fade-up 0.6s ease forwards;
-}
-
-/* 品牌区 */
-.brand {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  gap: 1rem;
-  margin-bottom: 2rem;
-  flex-wrap: wrap;
-}
-.logo {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-.wave-logo svg {
-  width: 44px;
-  height: 44px;
-  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.02));
-}
-.brand-text {
-  font-size: 1.6rem;
-  font-weight: 700;
-  background: linear-gradient(135deg, #1a2a4a, #2c4a6a);
-  background-clip: text;
-  -webkit-background-clip: text;
-  color: transparent;
-  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-}
-
-/* 主标题容器 - 打字机效果时显示，初始透明 */
-.hero-title {
-  font-size: clamp(2.2rem, 6vw, 3.8rem);
-  font-weight: 500;
-  letter-spacing: -0.02em;
-  line-height: 1.2;
-  margin-bottom: 1rem;
-  width: 100%;
-  text-align: center;
-  transition: opacity 0.35s ease;
-  background: linear-gradient(135deg, #1e3a5f 0%, #4a90a4 50%, #7ab8c9 100%);
-  background-clip: text;
-  -webkit-background-clip: text;
-  color: transparent;
-  text-shadow: 
-    0 1px 0 #163050,
-    0 2px 0 #123048,
-    0 3px 0 #0e2840,
-    0 4px 0 #0a2038,
-    0 5px 0 #061830,
-    0 6px 10px rgba(30, 58, 95, 0.3),
-    0 10px 20px rgba(74, 144, 164, 0.2),
-    0 15px 30px rgba(122, 184, 201, 0.15);
-}
-.hero-title-line {
-  display: block;
-  white-space: pre-wrap;
-}
-/* 打字机光标 */
-.typewriter-cursor {
-  display: inline-block;
-  width: 2px;
-  height: 1.2em;
-  background-color: #13334b;
-  margin-left: 2px;
-  animation: blink 0.8s step-end infinite;
-  vertical-align: middle;
-}
-@keyframes blink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0; }
-}
-
-/* 副标题、按钮区 */
-.hero-sub {
-  font-size: 1.1rem;
-  color: #4a627a;
-  max-width: 600px;
-  margin: 1rem auto 0;
-  line-height: 1.6;
-}
-.button-group {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 1.5rem;
-  margin-top: 2rem;
-}
-.btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.6rem;
-  padding: 0.9rem 2rem;
-  font-size: 1rem;
-  font-weight: 500;
-  color: #1f2e3a;
-  background: #ffffff;
-  border: 1px solid #dce5ef;
-  border-radius: 48px;
-  cursor: pointer;
-  transition: all 0.25s ease;
-}
-.btn-icon {
-  width: 1.2rem;
-  height: 1.2rem;
-  color: #3a7bb5;
-  flex-shrink: 0;
-}
-.btn:hover {
-  border-color: #8bb4d6;
-  background: #fbfeff;
-  transform: translateY(-2px);
-}
-
-/* 立即使用按钮容器 - 单独一行居中 */
-.cta-wrapper {
-  display: flex;
-  justify-content: center;
-  margin-top: 1.5rem;
-  position: relative;
-}
-/* 1. 基础样式：改成横向椭圆/线条 */
-.button-glow-ring {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  border-radius: 50%;
-  border: 1px solid rgba(42, 110, 255, 0.3); /* 降低透明度，更柔和 */
-  animation: ringPulse 2s ease-out infinite;
-  pointer-events: none;
-
-  /* 关键修改：从正圆改成横向拉长的椭圆 */
-  width: 200px;    /* 横向宽度加大 */
-  height: 60px;    /* 纵向高度缩小，变成椭圆/线条感 */
-}
-
-.button-glow-ring.second {
-  animation-delay: 0.6s;
-  width: 300px;    /* 第二层更宽 */
-  height: 80px;
-}
-.button-glow-ring.third {
-  animation-delay: 1.2s;
-  width: 400px;    /* 第三层最宽 */
-  height: 100px;
-}
-
-/* 2. 修改动画，适配椭圆扩散 */
-@keyframes ringPulse {
-  0% {
-    opacity: 0.8;
-    transform: translate(-50%, -50%) scale(0.5);
-  }
-  100% {
-    opacity: 0;
-    transform: translate(-50%, -50%) scale(1.8); /* 扩大倍数，适配椭圆效果 */
-  }
-}
-@keyframes ringPulse {
-  0% { width: 100%; height: 100%; opacity: 0.8; border-width: 2px; }
-  100% { width: 200%; height: 200%; opacity: 0; border-width: 1px; }
-}
-.cta-btn {
-  background: #2a6eff;
-  border: none;
-  color: white;
-  box-shadow: 0 4px 12px rgba(42, 110, 255, 0.3);
-}
-.cta-btn .btn-icon {
-  color: white;
-}
-.cta-btn:hover {
-  background: #1a5ae8;
-  transform: translateY(-2px);
-  box-shadow: 0 8px 20px rgba(42, 110, 255, 0.4);
 }
 
 /* 登录弹窗 */
@@ -1363,55 +774,5 @@
   color: #1455d9;
   border-bottom: none;
   font-size: 0.875rem;
-}
-.spin-icon {
-  animation: spin 1s linear infinite;
-  width: 1rem;
-  height: 1rem;
-}
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-.tab-icon {
-  width: 1rem;
-  height: 1rem;
-}
-
-/* 字符跳动动画 */
-.char {
-  display: inline-block;
-  cursor: default;
-}
-.char-bounce {
-  animation: bounce 0.7s cubic-bezier(0.2, 1.1, 0.4, 1) forwards;
-}
-@keyframes bounce {
-  0% { transform: translateY(0); filter: drop-shadow(0 2px 3px rgba(0,0,0,0.1)); }
-  30% { transform: translateY(-38px); filter: drop-shadow(0 20px 22px rgba(0,0,0,0.5)) drop-shadow(0 0 12px rgba(0,0,0,0.4)); }
-  70% { transform: translateY(-4px); filter: drop-shadow(0 8px 10px rgba(0,0,0,0.3)); }
-  100% { transform: translateY(0); filter: drop-shadow(0 2px 3px rgba(0,0,0,0.1)); }
-}
-
-.scroll-hint {
-  position: fixed;
-  bottom: 20px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: rgba(220,235,250,0.85);
-  backdrop-filter: blur(8px);
-  padding: 6px 16px;
-  border-radius: 40px;
-  color: #3a5a7a;
-  font-size: 12px;
-  font-family: monospace;
-  z-index: 100;
-  pointer-events: none;
-  white-space: nowrap;
-}
-
-@media (max-width: 700px) {
-  .hero-title { font-size: 1.8rem; }
-  .brand-text { font-size: 1.3rem; }
-  .orb-top-left, .orb-bottom-right { width: 250px; height: 250px; filter: blur(40px); }
 }
 </style>
