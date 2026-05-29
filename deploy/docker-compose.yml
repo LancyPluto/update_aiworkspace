@@ -150,7 +150,7 @@ services:
     restart: unless-stopped
     environment:
       NEXT_PUBLIC_API_PROXY_TARGET: ${ADMIN_NEXT_PUBLIC_API_PROXY_TARGET:-http://backend:8080}
-      NEXT_PUBLIC_API_BASE_URL: ${ADMIN_NEXT_PUBLIC_API_BASE_URL:-http://127.0.0.1:8080}
+      NEXT_PUBLIC_API_BASE_URL: ${ADMIN_NEXT_PUBLIC_API_BASE_URL:-}
       CHOKIDAR_USEPOLLING: "true"
     ports:
       - "${ADMIN_FRONTEND_PORT:-5174}:5174"

@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import Any
 
+from app.clients.volcengine_model import resolve_volcengine_model_name
 from app.config import Settings
 
 MINIMAX_OPENAI_COMPATIBLE_BASE_URL = "https://api.minimax.io/v1"
@@ -62,10 +63,11 @@ class ChatModelFactory:
         base_url = self.settings.model_api_base_url.strip()
         if not base_url and self.settings.model_provider.strip().lower() in {"deepseek", "deepseek_compatible"}:
             base_url = DEEPSEEK_OPENAI_COMPATIBLE_BASE_URL
+        resolved_base_url = base_url.rstrip("/")
         return chat_openai_cls(
-            model=self.settings.model_name,
+            model=resolve_volcengine_model_name(self.settings.model_name, resolved_base_url),
             api_key=api_key,
-            base_url=base_url.rstrip("/"),
+            base_url=resolved_base_url,
             timeout=self.settings.model_timeout_seconds,
         )
 

@@ -484,6 +484,7 @@ export function AgentModelSettings({ refreshKey = 0 }: AgentModelSettingsProps) 
   const [testResult, setTestResult] = useState<AgentModelConfigTestResult | null>(null)
   const [modalityFilter, setModalityFilter] = useState<ModalityFilter>("ALL")
   const [modelPageNo, setModelPageNo] = useState(1)
+  const [togglingEnabledId, setTogglingEnabledId] = useState<number | null>(null)
 
   const catalogResolved = providerCatalog.length > 0 ? providerCatalog : [FALLBACK_PROVIDER]
 
@@ -711,6 +712,27 @@ export function AgentModelSettings({ refreshKey = 0 }: AgentModelSettingsProps) 
     }
   }
 
+  async function toggleConfigEnabled(config: AgentModelConfig, enabled: boolean) {
+    if (!config.id) return
+    setTogglingEnabledId(config.id)
+    setError(null)
+    const previousConfigs = configs
+    setConfigs((list) => list.map((item) => (item.id === config.id ? { ...item, enabled } : item)))
+    try {
+      const payload = toPayload({ ...toForm(config, catalogResolved), enabled })
+      const updated = await updateAgentModelConfig(config.id, payload)
+      setConfigs((list) => list.map((item) => (item.id === updated.id ? updated : item)))
+      if (dialogOpen && form.id === config.id) {
+        setForm((current) => ({ ...current, enabled }))
+      }
+    } catch (err) {
+      setConfigs(previousConfigs)
+      setError(err instanceof ApiError ? err.message : "更新启用状态失败")
+    } finally {
+      setTogglingEnabledId(null)
+    }
+  }
+
   async function deleteConfig() {
     if (!form.id) return
     if (typeof window !== "undefined") {
@@ -777,7 +799,7 @@ export function AgentModelSettings({ refreshKey = 0 }: AgentModelSettingsProps) 
             <CardDescription>
               共 {configs.length} 个模型 API
               {modalityFilter === "ALL" ? "" : `，当前筛选 ${filteredConfigs.length} 个`}
-              {filteredConfigs.length > MODEL_PAGE_SIZE ? `，每页最多 ${MODEL_PAGE_SIZE} 个` : ""}，点击卡片可编辑。
+              {filteredConfigs.length > MODEL_PAGE_SIZE ? `，每页最多 ${MODEL_PAGE_SIZE} 个` : ""}；列表可直接切换启用，点击卡片编辑详情。
             </CardDescription>
           </div>
           <Button className="gap-2" onClick={createConfig}>
@@ -848,14 +870,30 @@ export function AgentModelSettings({ refreshKey = 0 }: AgentModelSettingsProps) 
                             <p className="truncate text-base font-semibold">{config.displayName || config.modelName}</p>
                             <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{config.modelName}</p>
                           </div>
-                          {config.isDefault ? <Badge>默认</Badge> : null}
+                          <div
+                            className="flex shrink-0 flex-col items-end gap-2"
+                            onClick={(event) => event.stopPropagation()}
+                          >
+                            {config.isDefault ? <Badge>默认</Badge> : null}
+                            <div className="flex items-center gap-2 rounded-md border bg-background/80 px-2 py-1">
+                              <Label htmlFor={`model-enabled-${config.id}`} className="text-xs text-muted-foreground">
+                                启用
+                              </Label>
+                              <Switch
+                                id={`model-enabled-${config.id}`}
+                                checked={config.enabled !== false}
+                                disabled={togglingEnabledId === config.id}
+                                onCheckedChange={(value) => void toggleConfigEnabled(config, value)}
+                              />
+                            </div>
+                          </div>
                         </div>
                         <div className="mt-3 flex flex-wrap items-center gap-2">
                           <Badge variant="outline">{vendor.shortName}</Badge>
                           <Badge variant="secondary">{pickMeta(catalogResolved, config.provider).label}</Badge>
                           <Badge variant="outline">{capabilityModalityLabel(capabilities)}</Badge>
                           {config.agentEnabled !== false ? <Badge variant="outline">Agent 可选</Badge> : null}
-                          <Badge variant={config.enabled ? "default" : "secondary"}>{config.enabled ? "启用" : "停用"}</Badge>
+                          {config.enabled === false ? <Badge variant="secondary">已停用</Badge> : null}
                           {testStatusBadge(config)}
                         </div>
                         {!config.isDefault ? (
