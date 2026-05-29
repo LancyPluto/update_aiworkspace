@@ -529,15 +529,15 @@
   }
 }
 
-/* 登录弹窗 */
+/* 登录弹窗 — 与项目暗色 + 紫色 primary 风格一致 */
 .login-modal {
   position: fixed;
   top: 0;
   left: 0;
   width: 100%;
   height: 100%;
-  background: rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(8px);
+  background: rgb(0 0 0 / 0.65);
+  backdrop-filter: blur(12px);
   z-index: 10000;
   display: flex;
   align-items: center;
@@ -545,13 +545,19 @@
 }
 .login-container {
   width: 100%;
-  max-width: 380px;
+  max-width: 400px;
   margin: 1.25rem;
-  background: white;
-  border: 1px solid #d8e7ff;
-  border-radius: 24px;
-  box-shadow: 0 24px 60px rgba(37, 99, 235, 0.18);
+  background:
+    radial-gradient(circle at 82% 0%, rgb(176 92 255 / 0.12), transparent 42%),
+    linear-gradient(180deg, rgb(29 29 34 / 0.98), rgb(22 22 28 / 0.98));
+  border: 1px solid rgb(255 255 255 / 0.1);
+  border-radius: 28px;
+  box-shadow:
+    0 24px 80px rgb(0 0 0 / 0.55),
+    0 0 0 1px rgb(255 255 255 / 0.04) inset,
+    0 12px 40px rgb(176 92 255 / 0.12);
   overflow: hidden;
+  color: var(--foreground);
 }
 .login-container.compact-login .login-card {
   padding-top: 0.875rem;
@@ -563,7 +569,7 @@
 .login-title {
   font-size: 1.375rem;
   font-weight: 700;
-  color: #1455d9;
+  color: var(--foreground);
   margin: 0 0 0.45rem 0;
   letter-spacing: 0;
 }
@@ -572,8 +578,9 @@
 }
 .login-subtitle {
   font-size: 0.8125rem;
-  color: #5f7fb8;
+  color: var(--muted-foreground);
   margin: 0;
+  line-height: 1.6;
 }
 .login-card {
   padding: 0.5rem 1.375rem 0;
@@ -586,7 +593,7 @@
   margin-bottom: 0.5rem;
   font-size: 0.875rem;
   font-weight: 500;
-  color: #3a5a7a;
+  color: var(--muted-foreground);
 }
 .input-field {
   width: 100%;
@@ -595,33 +602,32 @@
   border: none;
   border-radius: 999px;
   background: transparent;
-  color: #121826;
+  color: var(--foreground);
   font-size: 0.9375rem;
   box-sizing: border-box;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 .input-field:focus {
   outline: none;
-  transform: none;
-  box-shadow: none;
 }
 .input-field::placeholder {
-  color: #b5bdc9;
+  color: rgb(255 255 255 / 0.35);
 }
 .pill-field,
 .phone-field {
   height: 48px;
   display: flex;
   align-items: center;
-  border: 1px solid #cfe0ff;
+  border: 1px solid rgb(255 255 255 / 0.1);
   border-radius: 999px;
-  background: #fff;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  background: rgb(255 255 255 / 0.04);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
 }
 .pill-field:focus-within,
 .phone-field:focus-within {
-  border-color: #2563eb;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+  border-color: rgb(176 92 255 / 0.55);
+  background: rgb(255 255 255 / 0.06);
+  box-shadow: 0 0 0 3px rgb(176 92 255 / 0.18);
 }
 .phone-field {
   padding-left: 1rem;
@@ -630,7 +636,7 @@
   padding-left: 0.55rem;
 }
 .country-code {
-  color: #1455d9;
+  color: var(--primary);
   font-size: 0.9375rem;
   white-space: nowrap;
 }
@@ -646,8 +652,11 @@
   place-items: center;
   border: none;
   background: transparent;
-  color: #2563eb;
+  color: var(--primary);
   cursor: pointer;
+}
+.eye-btn:hover {
+  color: var(--foreground);
 }
 .eye-icon {
   width: 16px;
@@ -665,33 +674,36 @@
   min-width: 118px;
   padding: 0 0.85rem;
   border: none;
-  border-left: 1px solid #d8e7ff;
+  border-left: 1px solid rgb(255 255 255 / 0.1);
   background: transparent;
-  color: #1455d9;
+  color: var(--primary);
   font-size: 0.8125rem;
   font-weight: 500;
   cursor: pointer;
   transition: color 0.2s ease, background 0.2s ease;
 }
 .code-btn:hover:not(:disabled) {
-  color: #2563eb;
-  background: #eff6ff;
+  color: var(--foreground);
+  background: rgb(176 92 255 / 0.12);
 }
 .code-btn:disabled {
-  opacity: 0.6;
+  opacity: 0.5;
   cursor: not-allowed;
 }
 .agreement-text {
   margin: 0.25rem 0 1.375rem;
-  color: #6b7280;
+  color: rgb(255 255 255 / 0.45);
   font-size: 0.75rem;
   line-height: 1.7;
 }
 .agreement-text a {
-  color: #1455d9;
+  color: var(--primary);
   font-weight: 600;
   text-decoration: underline;
   text-underline-offset: 2px;
+}
+.agreement-text a:hover {
+  color: var(--foreground);
 }
 .password-agreement {
   margin-top: -0.25rem;
@@ -705,10 +717,11 @@
   font-size: 0.8125rem;
 }
 .auth-row-links a {
-  color: #1455d9;
+  color: var(--primary);
   text-decoration: none;
 }
 .auth-row-links a:hover {
+  color: var(--foreground);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
@@ -718,19 +731,19 @@
 .tip-message,
 .error-message {
   font-size: 0.8rem;
-  padding: 0.5rem;
-  border-radius: 0.375rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.75rem;
   margin: 0.5rem 0;
 }
 .tip-message {
-  color: #4a8cdf;
-  background: rgba(74, 140, 223, 0.1);
-  border: 1px solid rgba(74, 140, 223, 0.3);
+  color: var(--success);
+  background: rgb(34 197 94 / 0.1);
+  border: 1px solid rgb(34 197 94 / 0.25);
 }
 .error-message {
-  color: #e54d42;
-  background: rgba(229, 77, 66, 0.1);
-  border: 1px solid rgba(229, 77, 66, 0.35);
+  color: var(--destructive);
+  background: rgb(239 68 68 / 0.1);
+  border: 1px solid rgb(239 68 68 / 0.28);
 }
 .login-btn {
   width: 100%;
@@ -741,38 +754,45 @@
   gap: 0.5rem;
   border: none;
   border-radius: 999px;
-  background: #2563eb;
-  color: white;
+  background: var(--primary);
+  color: var(--primary-foreground);
   font-size: 0.9375rem;
   font-weight: 600;
   cursor: pointer;
-  transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease, filter 0.2s ease;
+  box-shadow: 0 12px 28px rgb(176 92 255 / 0.32);
 }
 .login-btn:hover:not(:disabled) {
   transform: translateY(-1px);
-  box-shadow: 0 14px 24px rgba(37, 99, 235, 0.28);
+  filter: brightness(1.08);
+  box-shadow: 0 16px 36px rgb(176 92 255 / 0.4);
 }
 .login-btn:disabled {
-  opacity: 0.6;
+  opacity: 0.55;
   cursor: not-allowed;
 }
 .auth-switch {
   text-align: center;
   padding: 1rem 1.5rem 1.5rem;
   font-size: 0.75rem;
-  color: #6b7280;
+  color: rgb(255 255 255 / 0.45);
 }
 .auth-switch a {
-  color: #6b7280;
+  color: rgb(255 255 255 / 0.55);
   text-decoration: none;
-  border-bottom: 1px solid currentColor;
+  border-bottom: 1px solid rgb(255 255 255 / 0.25);
+  transition: color 0.2s ease;
 }
 .auth-switch a:hover {
-  color: #1455d9;
+  color: var(--primary);
+  border-bottom-color: var(--primary);
 }
 .auth-switch.plain-link a {
-  color: #1455d9;
+  color: var(--primary);
   border-bottom: none;
   font-size: 0.875rem;
+}
+.auth-switch.plain-link a:hover {
+  color: var(--foreground);
 }
 </style>
