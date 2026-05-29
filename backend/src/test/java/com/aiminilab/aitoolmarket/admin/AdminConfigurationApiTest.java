@@ -5,6 +5,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -104,6 +105,34 @@ class AdminConfigurationApiTest {
                         .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data['platform.name']").value("AI Tool Market"));
+    }
+
+    @Test
+    void adminCanUploadCustomerServiceQrCode() throws Exception {
+        String adminToken = loginAdmin();
+        byte[] png = new byte[]{
+                (byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+                0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52
+        };
+        MockMultipartFile file = new MockMultipartFile(
+                "file",
+                "service-qr.png",
+                "image/png",
+                png
+        );
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .multipart("/api/admin/v1/settings/customer-service/qr-upload")
+                        .file(file)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.url").value(org.hamcrest.Matchers.startsWith("/generated/customer-service/")))
+                .andExpect(jsonPath("$.data.filename").isNotEmpty());
+
+        mockMvc.perform(get("/api/admin/v1/settings")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data['customerService.qrCodeUrl']").value(org.hamcrest.Matchers.startsWith("/generated/customer-service/")));
     }
 
     @Test

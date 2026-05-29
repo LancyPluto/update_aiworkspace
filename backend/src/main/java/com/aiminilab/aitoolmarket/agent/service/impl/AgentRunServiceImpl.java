@@ -680,23 +680,27 @@ public class AgentRunServiceImpl implements AgentRunService {
             return AgentRunResponse.from(run);
         }
         LocalDateTime now = LocalDateTime.now();
-        agentMessageMapper.supersedeActiveAssistantsByRunId(runId, now);
-        AgentMessage assistant = new AgentMessage();
-        assistant.setSessionId(run.getSessionId());
-        assistant.setUserId(run.getUserId());
-        assistant.setRole("ASSISTANT");
-        assistant.setContentText(request.finalAnswer());
-        assistant.setRunId(runId);
-        assistant.setStatus("ACTIVE");
-        assistant.setSupersededAt(null);
-        assistant.setCreatedAt(now);
+        AgentMessage assistant = agentMessageMapper.findActiveAssistantByRunId(runId);
         AgentModelConfig modelConfig = resolveModelConfigEntityForRun(run);
         int estimatedCredits = run.getEstimatedCredits() == null ? 0 : Math.max(0, run.getEstimatedCredits());
         int consumedCredits = resolveConsumedCredits(request.consumedCredits(), request.promptTokens(), request.completionTokens(), modelConfig, estimatedCredits);
         if (agentRunMapper.markSuccess(runId, request.intent(), request.modelProviderCode(), request.modelName(), consumedCredits, now) == 0) {
             return AgentRunResponse.from(findRun(runId));
         }
-        agentMessageMapper.insertMessage(assistant);
+        if (assistant == null) {
+            assistant = new AgentMessage();
+            assistant.setSessionId(run.getSessionId());
+            assistant.setUserId(run.getUserId());
+            assistant.setRole("ASSISTANT");
+            assistant.setContentText(request.finalAnswer());
+            assistant.setRunId(runId);
+            assistant.setStatus("ACTIVE");
+            assistant.setSupersededAt(null);
+            assistant.setCreatedAt(now);
+            agentMessageMapper.insertMessage(assistant);
+        } else {
+            agentMessageMapper.updateContentText(assistant.getId(), request.finalAnswer());
+        }
         creditService.settle(run.getUserId(), CreditSourceType.AGENT_RUN, runId, consumedCredits);
         creditService.release(run.getUserId(), CreditSourceType.AGENT_RUN, runId, estimatedCredits - consumedCredits);
         billingService.recordUsage("AGENT_RUN", runId, run.getUserId(), modelConfig,

@@ -20,6 +20,7 @@ export {
   confirmAgentTool,
   createAgentSession,
   deleteAgentSession,
+  deleteAgentFile,
   createAgentWorkspaceMemory,
   deleteAgentWorkspaceMemory,
   fetchAgentFiles,
