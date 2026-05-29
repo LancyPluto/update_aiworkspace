@@ -39,6 +39,7 @@ import type { ResultBlock } from "@/types/result"
 import { userRoutes } from "@/router/userRoutes"
 import { useAuthStore } from "@/store/authStore"
 import { buildTaskResultBlocks } from "@/utils/taskResultBlocks"
+import { cleanToolDisplayText, toolDisplayDescription } from "@/utils/toolDisplayText"
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -680,7 +681,7 @@ function recommendToolsForAsset(asset: AssetPreviewItem): AssetPreviewRecommenda
   const keyword = asset.kind === "image" ? /图|图片|影像|photo|image|img|改图|参考/i : asset.kind === "video" ? /视频|短片|video|clip|movie/i : /音频|音乐|audio|voice|tts/i
   const matches = tools.value.filter((tool) => {
     const input = normalizeModality(tool.inputModality)
-    const text = `${tool.toolName} ${tool.description || ""} ${tool.configNote || ""} ${tool.toolCode}`
+    const text = `${tool.toolName} ${tool.description || ""} ${cleanToolDisplayText(tool.configNote)} ${tool.toolCode}`
     return (
       (target && (input.includes(target) || input.includes("MULTIMODAL") || input.includes("FILE"))) ||
       keyword.test(text)
@@ -910,9 +911,9 @@ onUnmounted(() => {
           </RouterLink>
         </div>
 
-        <main class="min-h-0 flex-1 overflow-y-auto px-5 pb-10 pt-6 lg:pl-[132px] xl:px-10 xl:pl-[132px]">
+        <main class="min-h-0 flex-1 overflow-y-auto px-5 pb-40 pt-6 lg:pl-[132px] xl:px-10 xl:pl-[132px]">
           <div class="mx-auto w-full max-w-[1380px]">
-            <div class="sticky top-0 z-20 -mx-5 mb-8 border-b border-white/8 bg-black/88 px-5 py-4 backdrop-blur-xl xl:-mx-10 xl:px-10">
+            <div class="sticky top-0 z-20 -mx-5 mb-8 border-b border-transparent bg-transparent px-5 py-4 backdrop-blur-0 xl:-mx-10 xl:px-10">
               <div class="flex flex-wrap items-center justify-between gap-4">
                 <div class="flex rounded-full border border-white/10 bg-white/[0.04] p-1 shadow-[0_16px_40px_rgb(0_0_0_/_0.25)]">
                   <button
@@ -1010,7 +1011,7 @@ onUnmounted(() => {
                   <div class="flex flex-1 flex-col p-5">
                     <h3 class="line-clamp-2 text-xl font-semibold">{{ tool.toolName }}</h3>
                     <p class="mt-2 line-clamp-2 text-sm text-white/50">
-                      {{ tool.description || tool.configNote || "点击选择模型后开始创作。" }}
+                      {{ toolDisplayDescription(tool, "点击选择模型后开始创作。") }}
                     </p>
                     <div class="mt-auto flex items-center justify-between pt-5">
                       <span class="text-xs text-white/45">{{ tool.modelConfigName || tool.modelName || tool.toolCode }}</span>
@@ -1201,7 +1202,7 @@ onUnmounted(() => {
           <button
             v-if="!composerOpen"
             type="button"
-            class="pointer-events-auto flex h-16 w-[min(720px,calc(100vw-2rem))] items-center gap-4 rounded-full border border-white/10 bg-[#1e1e24]/88 px-5 text-left text-white shadow-[0_24px_90px_rgb(0_0_0_/_0.58)] backdrop-blur-2xl transition hover:border-primary/45 hover:bg-[#252631]/92"
+            class="pointer-events-auto flex h-16 w-[min(720px,calc(100vw-2rem))] items-center gap-4 rounded-full border border-white/10 bg-[#1e1e24]/0.5 px-5 text-left text-white shadow-[0_24px_90px_rgb(0_0_0_/_0.3)] backdrop-blur-2xl transition hover:border-primary/45 hover:bg-[#252631]/0.7"
             @click="composerOpen = true"
           >
             <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-black/30 text-primary">
@@ -1381,7 +1382,7 @@ onUnmounted(() => {
                           </div>
                           <div class="p-4">
                             <h4 class="line-clamp-2 font-semibold text-white">{{ tool.toolName }}</h4>
-                            <p class="mt-2 line-clamp-2 text-xs text-white/45">{{ tool.description || tool.configNote || "模型工具" }}</p>
+                            <p class="mt-2 line-clamp-2 text-xs text-white/45">{{ toolDisplayDescription(tool, "模型工具") }}</p>
                             <p class="mt-3 inline-flex items-center gap-1 text-xs text-amber-300">
                               <Zap class="h-3.5 w-3.5" /> {{ tool.estimatedCreditCost }} 算力/次
                             </p>

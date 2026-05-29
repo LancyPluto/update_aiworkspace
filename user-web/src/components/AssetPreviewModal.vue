@@ -14,6 +14,7 @@ import {
 } from "lucide-vue-next"
 import { getApiOrigin } from "@/api/client"
 import type { AssetPreviewItem, AssetPreviewRecommendation } from "@/types/assetPreview"
+import { cleanToolDisplayText } from "@/utils/toolDisplayText"
 
 const props = defineProps<{
   asset: AssetPreviewItem | null
@@ -53,18 +54,11 @@ function recommendationHint(kind?: string) {
   return "适合继续创作的模型"
 }
 
-function cleanToolText(value?: string | null) {
-  return (value || "")
-    .replace(/<!--[\s\S]*?-->/g, "")
-    .replace(/\s+/g, " ")
-    .trim()
-}
-
 function toolDescription(tool: AssetPreviewRecommendation) {
   return (
-    cleanToolText(tool.description) ||
-    cleanToolText(tool.configNote) ||
-    cleanToolText(tool.modelConfigName) ||
+    cleanToolDisplayText(tool.description) ||
+    cleanToolDisplayText(tool.configNote) ||
+    cleanToolDisplayText(tool.modelConfigName) ||
     "继续创作"
   )
 }

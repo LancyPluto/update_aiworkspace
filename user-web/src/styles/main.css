@@ -20,6 +20,9 @@
   --warning: oklch(0.78 0.16 75);
   --border: oklch(0.33 0.008 285);
   --chart-2: oklch(0.72 0.16 205);
+  --input: oklch(0.33 0.008 285);
+  --ring: oklch(0.69 0.21 305);
+  --radius: 1rem;
 }
 
 html[data-theme="dark"] {
@@ -61,7 +64,12 @@ html[data-theme="dark"] {
   --color-warning: var(--warning);
   --color-border: var(--border);
   --color-chart-2: var(--chart-2);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
   --font-sans: ui-sans-serif, system-ui, sans-serif;
+  --radius-lg: var(--radius);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
 }
 
 html,
@@ -169,4 +177,22 @@ html[data-theme="dark"] .app-shell-root {
     radial-gradient(circle at 18% 0%, rgb(64 98 255 / 0.24), transparent 30%),
     radial-gradient(circle at 78% 6%, rgb(18 190 214 / 0.14), transparent 26%),
     linear-gradient(135deg, rgb(2 6 23 / 0.98), rgb(8 15 28 / 0.95) 52%, rgb(3 7 18 / 0.98));
+}
+
+.page-root {
+  min-height: 100vh;
+  width: 100%;
+  position: relative;
+  color: var(--foreground);
+  background-color: var(--background);
+  background-image:
+    radial-gradient(ellipse 80% 50% at 50% -20%, rgb(120 119 198 / 0.15), transparent),
+    radial-gradient(ellipse 60% 40% at 100% 0%, rgb(168 85 247 / 0.1), transparent),
+    linear-gradient(to bottom, var(--background), var(--background));
+}
+
+.page-root .font-display {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  letter-spacing: -0.03em;
 }
