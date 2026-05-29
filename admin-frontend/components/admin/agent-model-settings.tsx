@@ -555,7 +555,7 @@ export function AgentModelSettings({ refreshKey = 0 }: AgentModelSettingsProps) 
         list[0]
       setForm(selected ? toForm(selected, resolved) : { ...emptyForm, capabilities: [...pickMeta(resolved, emptyForm.provider).capabilities] })
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "鍔犺浇妯″瀷閰嶇疆澶辫触")
+      setError(err instanceof ApiError ? err.message : "加载模型配置失败")
     } finally {
       setLoading(false)
     }
@@ -696,7 +696,7 @@ export function AgentModelSettings({ refreshKey = 0 }: AgentModelSettingsProps) 
       await loadConfigs(savedConfig.id)
       setDialogOpen(false)
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "淇濆瓨妯″瀷閰嶇疆澶辫触")
+      setError(err instanceof ApiError ? err.message : "保存模型配置失败")
     } finally {
       setSaving(false)
     }
@@ -708,7 +708,7 @@ export function AgentModelSettings({ refreshKey = 0 }: AgentModelSettingsProps) 
       const updated = await setDefaultAgentModelConfig(config.id)
       await loadConfigs(updated.id)
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "璁剧疆榛樿妯″瀷澶辫触")
+      setError(err instanceof ApiError ? err.message : "设置默认模型失败")
     }
   }
 
@@ -746,7 +746,7 @@ export function AgentModelSettings({ refreshKey = 0 }: AgentModelSettingsProps) 
       setDialogOpen(false)
       await loadConfigs()
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "鍒犻櫎妯″瀷閰嶇疆澶辫触")
+      setError(err instanceof ApiError ? err.message : "删除模型配置失败")
     } finally {
       setSaving(false)
     }

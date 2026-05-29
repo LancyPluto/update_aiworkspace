@@ -310,4 +310,11 @@ public interface TaskMapper extends BaseMapper<AiTask> {
         resource.setSortOrder(0);
         insertResultResource(resource);
     }
+
+    @Select("""
+            SELECT COALESCE(SUM(charged_credits), 0)
+            FROM billing_usage_logs
+            WHERE source_type = 'TASK' AND source_id = #{taskId}
+            """)
+    int sumConsumedCreditsByTaskId(@Param("taskId") Long taskId);
 }

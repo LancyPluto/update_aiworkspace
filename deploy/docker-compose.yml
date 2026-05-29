@@ -8,7 +8,7 @@ services:
       MYSQL_DATABASE: ai_supermarket_v1
       TZ: Asia/Shanghai
     ports:
-      - "3307:3306"
+      - "127.0.0.1:3307:3306"
     volumes:
       - mysql_data:/var/lib/mysql
       - ../sql:/docker-entrypoint-initdb.d
@@ -16,7 +16,6 @@ services:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_unicode_ci
       # 忽略客户端握手里的字符集，统一用服务端 utf8mb4，减少 JDBC/客户端默认 latin1 导致的乱码
-      - --skip-character-set-client-handshake
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot123456"]
       interval: 10s
@@ -27,13 +26,16 @@ services:
     build:
       context: ../engines/banana-slides
       dockerfile: backend/Dockerfile
+      args:
+        APT_MIRROR: ${APT_MIRROR:-mirrors.aliyun.com}
+        PYPI_INDEX_URL: ${PYPI_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}
     container_name: ai-supermarket-banana-slides
     restart: unless-stopped
     env_file:
       - ../engines/banana-slides/.env
     ports:
-      - "${BANANA_SLIDES_PORT:-5001}:5000"
-      - "1455:1455"
+      - "127.0.0.1:${BANANA_SLIDES_PORT:-5001}:5000"
+      - "127.0.0.1:1455:1455"
     volumes:
       - ../engines/banana-slides/backend/instance:/app/backend/instance
       - ../engines/banana-slides/uploads:/app/uploads
@@ -49,7 +51,7 @@ services:
     container_name: ai-supermarket-redis
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
     command: redis-server --appendonly yes
@@ -67,8 +69,8 @@ services:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USERNAME:-guest}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}
     ports:
-      - "${RABBITMQ_PORT:-5672}:5672"
-      - "${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
+      - "127.0.0.1:${RABBITMQ_PORT:-5672}:5672"
+      - "127.0.0.1:${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
     healthcheck:
@@ -78,9 +80,11 @@ services:
       retries: 10
 
   backend:
-    image: maven:3.9-eclipse-temurin-17
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    image: deploy-backend
     container_name: ai-supermarket-backend
-    working_dir: /app
     restart: unless-stopped
     env_file:
       - ../.env
@@ -134,14 +138,11 @@ services:
       # 若 backend 与 banana-slides 同在 compose 且不用 Clash 假 IP，可设 PPT_ENGINE_BASE_URL=http://banana-slides:5000
       PPT_ENGINE_BASE_URL: ${PPT_ENGINE_BASE_URL:-http://host.docker.internal:5001}
     ports:
-      - "${BACKEND_PORT:-8080}:8080"
+      - "127.0.0.1:${BACKEND_PORT:-8080}:8080"
     volumes:
-      - ../backend:/app
       - ../WXcert:/app/WXcert:ro
       - ../docs:/docs:ro
-      - maven_cache:/root/.m2
       - generated_media:/data/generated-media
-    command: mvn spring-boot:run
 
   admin-frontend:
     image: node:22-alpine
@@ -152,13 +153,14 @@ services:
       NEXT_PUBLIC_API_PROXY_TARGET: ${ADMIN_NEXT_PUBLIC_API_PROXY_TARGET:-http://backend:8080}
       NEXT_PUBLIC_API_BASE_URL: ${ADMIN_NEXT_PUBLIC_API_BASE_URL:-}
       CHOKIDAR_USEPOLLING: "true"
+      NPM_CONFIG_REGISTRY: https://registry.npmmirror.com
     ports:
-      - "${ADMIN_FRONTEND_PORT:-5174}:5174"
+      - "127.0.0.1:${ADMIN_FRONTEND_PORT:-5174}:5174"
     volumes:
       - ../admin-frontend:/app
       - admin_frontend_next:/app/.next
       - /app/node_modules            
-    command: sh -c "npm install && npm run dev:docker"
+    command: sh -c "npm config set registry https://registry.npmmirror.com && npm install && npm run dev:docker"
 
   user-web:
     image: node:22-alpine
@@ -175,17 +177,22 @@ services:
       VITE_ALIYUN_CAPTCHA_PREFIX: ${VITE_ALIYUN_CAPTCHA_PREFIX:-}
       VITE_ALIYUN_CAPTCHA_SCENE_ID: ${VITE_ALIYUN_CAPTCHA_SCENE_ID:-}
       # 本机 mvn 启动后端时，容器内代理需用 host.docker.internal，不能用已停掉的 backend 服务名
-      VITE_DEV_PROXY_TARGET: ${VITE_DEV_PROXY_TARGET:-http://host.docker.internal:8080}
+      VITE_DEV_PROXY_TARGET: ${VITE_DEV_PROXY_TARGET:-http://backend:8080}
       CHOKIDAR_USEPOLLING: "true"
+      NPM_CONFIG_REGISTRY: https://registry.npmmirror.com
     ports:
-      - "${USER_WEB_PORT:-5173}:5173"
+      - "127.0.0.1:${USER_WEB_PORT:-5173}:5173"
     volumes:
       - ../user-web:/app
       - /app/node_modules     
-    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5173"
+    command: sh -c "npm config set registry https://registry.npmmirror.com && npm install && npm run dev -- --host 0.0.0.0 --port 5173"
 
   worker:
-    image: python:3.12-slim-bookworm
+    build:
+      context: ..
+      dockerfile: worker/Dockerfile
+      args:
+        APT_MIRROR: ${APT_MIRROR:-mirrors.aliyun.com}
     container_name: ai-supermarket-worker
     working_dir: /app
     restart: unless-stopped
@@ -199,6 +206,8 @@ services:
       rabbitmq:
         condition: service_healthy
     environment:
+      PIP_INDEX_URL: https://mirrors.aliyun.com/pypi/simple/
+      PIP_TRUSTED_HOST: mirrors.aliyun.com
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_PASSWORD: ""
@@ -221,10 +230,14 @@ services:
     volumes:
       - ../worker:/app
       - generated_media:/data/generated-media
-    command: sh -c "if command -v fc-match >/dev/null 2>&1 && fc-match 'Noto Sans CJK SC' >/dev/null 2>&1; then echo 'fonts ready'; else for i in 1 2 3; do apt-get update && apt-get install -y --no-install-recommends --fix-missing fontconfig fonts-noto-cjk && break; echo font install retry $$i; sleep 5; done; fi; if command -v fc-match >/dev/null 2>&1; then fc-match 'Noto Sans CJK SC' || true; else echo 'fontconfig unavailable, continuing without system font probe'; fi; rm -rf /var/lib/apt/lists/*; if python -c 'import requests, redis, dotenv, imageio_ffmpeg, pika' >/dev/null 2>&1; then echo 'python deps ready'; else pip install --no-cache-dir -r requirements.txt; fi; python main.py"
+    command: sh -c "pip install --no-cache-dir -r requirements.txt && python main.py"
 
   agent-service:
-    image: python:3.12-slim
+    build:
+      context: ..
+      dockerfile: agent-service/Dockerfile
+      args:
+        APT_MIRROR: ${APT_MIRROR:-mirrors.aliyun.com}
     container_name: ai-supermarket-agent-service
     working_dir: /app
     restart: unless-stopped
@@ -234,6 +247,8 @@ services:
       - backend
       - redis
     environment:
+      PIP_INDEX_URL: https://mirrors.aliyun.com/pypi/simple/
+      PIP_TRUSTED_HOST: mirrors.aliyun.com
       APP_ENV: local
       PORT: 8090
       BACKEND_INTERNAL_BASE_URL: http://backend:8080
@@ -245,7 +260,7 @@ services:
       AGENT_MODEL_CALL_COST: ${AGENT_MODEL_CALL_COST:-1}
       AGENT_DEFAULT_CONSUMED_CREDITS: ${AGENT_DEFAULT_CONSUMED_CREDITS:-1}
     ports:
-      - "${AGENT_SERVICE_PORT:-8090}:8090"
+      - "127.0.0.1:${AGENT_SERVICE_PORT:-8090}:8090"
     volumes:
       - ../agent-service:/app
     command: sh -c "pip install --no-cache-dir -r requirements.txt && uvicorn app.main:app --host 0.0.0.0 --port 8090"

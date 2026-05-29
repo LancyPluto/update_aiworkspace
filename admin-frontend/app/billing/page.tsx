@@ -634,7 +634,7 @@ export default function BillingPage() {
   const stats = useMemo(
     () => [
       { label: "今日 Token", value: number(overview?.todayTotalTokens), icon: Sigma },
-      { label: "用户消耗积分", value: number(overview?.todayChargedCredits), icon: Coins },
+      { label: "用户消耗算力", value: number(overview?.todayChargedCredits), icon: Coins },
       { label: "平台模型成本", value: money(overview?.todayCostAmount), icon: DollarSign },
       { label: "计费记录", value: number(overview?.todayUsageCount), icon: Gauge },
     ],
@@ -694,7 +694,7 @@ export default function BillingPage() {
     <AdminLayout>
       <AdminHeader
         title="计费日志"
-        description={error ? `计费数据加载异常：${error}` : "查看模型 token 消耗、平台成本和用户侧积分消费"}
+        description={error ? `计费数据加载异常：${error}` : "查看模型 token 消耗、平台成本和用户侧算力消费"}
       />
 
       <div className="space-y-6 p-6">
@@ -745,7 +745,7 @@ export default function BillingPage() {
                       onChange={setModelSort}
                     />
                   </TableHead>
-                  <TableHead className={headClass}>用户积分</TableHead>
+                  <TableHead className={headClass}>消耗算力</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -831,7 +831,7 @@ export default function BillingPage() {
                   <TableHead className={headClass}>输入/输出 Token</TableHead>
                   <TableHead className={headClass}>计费单位</TableHead>
                   <TableHead className={headClass}>成本</TableHead>
-                  <TableHead className={headClass}>积分</TableHead>
+                  <TableHead className={headClass}>算力</TableHead>
                   <TableHead className={headClass}>
                     <div className="mx-auto flex min-w-52 items-center justify-center gap-2">
                       <input

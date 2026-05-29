@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted, ref } from "vue"
 import { Check, Crown, CreditCard, Loader2, MessageCircle, QrCode, Sparkles, X } from "lucide-vue-next"
 import type { CreditAccount, RechargeOrder, RechargePackage } from "@/api/types"
-import { createRechargeOrder, fetchRechargeOrder, fetchRechargePackages, mockPayRechargeOrder } from "@/api/creditApi"
+import { createCustomRechargeOrder, createRechargeOrder, fetchRechargeOrder, fetchRechargePackages, mockPayRechargeOrder } from "@/api/creditApi"
 import { useAuthStore } from "@/store/authStore"
 
 const props = defineProps<{
@@ -18,7 +18,13 @@ type PaymentChannel = "WECHAT_NATIVE" | "ALIPAY_PAGE" | "MOCK"
 const auth = useAuthStore()
 const packages = ref<RechargePackage[]>([])
 const selectedId = ref<number | null>(null)
+const customAmount = ref("")
+const customCredits = computed(() => {
+  const amount = parseFloat(customAmount.value)
+  return Number.isFinite(amount) && amount > 0 ? Math.floor(amount * 100) : 0
+})
 const pendingPackage = ref<RechargePackage | null>(null)
+const isCustomRecharge = ref(false)
 const loadingPackages = ref(false)
 const ordering = ref(false)
 const orderingPackageId = ref<number | null>(null)
@@ -95,6 +101,7 @@ function closeChannelModal() {
   if (ordering.value) return
   showChannelModal.value = false
   pendingPackage.value = null
+  isCustomRecharge.value = false
 }
 
 function closePayModal() {
@@ -144,11 +151,68 @@ function startPolling(orderId: number) {
 }
 
 function openPaymentChoice(pkg: RechargePackage) {
+  isCustomRecharge.value = false
   pendingPackage.value = pkg
   selectedId.value = pkg.id
   paymentResult.value = null
   error.value = ""
   showChannelModal.value = true
+}
+
+function openCustomPaymentChoice() {
+  const amount = parseFloat(customAmount.value)
+  if (!Number.isFinite(amount) || amount < 0.01) {
+    error.value = "请输入有效的充值金额（最低 0.01 元）"
+    return
+  }
+  isCustomRecharge.value = true
+  pendingPackage.value = null
+  selectedId.value = null
+  paymentResult.value = null
+  error.value = ""
+  showChannelModal.value = true
+}
+
+async function submitCustomRecharge(channel: PaymentChannel) {
+  const amount = parseFloat(customAmount.value)
+  if (!Number.isFinite(amount) || amount < 0.01) {
+    error.value = "请输入有效的充值金额（最低 0.01 元）"
+    return
+  }
+  ordering.value = true
+  orderingPackageId.value = -1
+  error.value = ""
+  try {
+    const order = await createCustomRechargeOrder(
+      {
+        amount,
+        paymentChannel: channel,
+        clientRequestId: `custom-recharge-${channel}-${Date.now()}`,
+      },
+      { token: auth.token },
+    )
+    if (!openPayModalForOrder(order, channel)) {
+      return
+    }
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : "创建自定义充值订单失败"
+  } finally {
+    ordering.value = false
+    orderingPackageId.value = null
+  }
+}
+
+function openPayModalForOrder(order: RechargeOrder, channel: PaymentChannel): boolean {
+  if (channel !== "MOCK" && !order.qrCodeUrl && !order.payUrl) {
+    error.value = "支付二维码生成失败，请检查支付配置或稍后重试"
+    return false
+  }
+  activeOrder.value = order
+  paymentResult.value = null
+  showChannelModal.value = false
+  showPayModal.value = true
+  startPolling(order.id)
+  return true
 }
 
 async function createOrder(pkg: RechargePackage, channel: PaymentChannel) {
@@ -164,11 +228,9 @@ async function createOrder(pkg: RechargePackage, channel: PaymentChannel) {
       },
       { token: auth.token },
     )
-    activeOrder.value = order
-    paymentResult.value = null
-    showChannelModal.value = false
-    showPayModal.value = true
-    startPolling(order.id)
+    if (!openPayModalForOrder(order, channel)) {
+      return
+    }
   } catch (err) {
     error.value = err instanceof Error ? err.message : "创建充值订单失败"
   } finally {
@@ -296,9 +358,55 @@ onUnmounted(clearPolling)
             {{ ordering && orderingPackageId === pkg.id ? "下单中..." : "立即购买" }}
           </button>
         </div>
+
+      <!-- 自定义充值卡片 - 金额自选 -->
+        <div
+          class="group relative flex min-h-[286px] flex-col rounded-xl border bg-card p-6 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md"
+          :class="customAmount && parseFloat(customAmount) >= 0.01 ? 'border-primary ring-1 ring-primary/20' : 'border-border'"
+        >
+          <p class="text-3xl font-bold tabular-nums">
+            {{ customCredits.toLocaleString() }}
+            <span class="text-sm font-normal text-muted-foreground">算力</span>
+          </p>
+          <div class="mt-2">
+            <div class="flex items-center gap-1 text-2xl font-bold text-primary tabular-nums">
+              <span class="text-lg font-semibold">¥</span>
+              <input
+                v-model="customAmount"
+                type="number"
+                min="0.01"
+                step="0.01"
+                placeholder="输入金额"
+                class="w-full border-0 border-b border-border bg-transparent px-0 py-0.5 text-2xl font-bold tabular-nums text-primary outline-none placeholder:text-muted-foreground/40 focus:border-primary focus:ring-0"
+                @click.stop
+              />
+            </div>
+          </div>
+          <p class="mt-2 border-b border-border pb-4 text-xs text-muted-foreground">
+            自定义金额，1 元 = 100 算力
+          </p>
+          <ul class="mt-4 flex flex-1 flex-col gap-2">
+            <li class="flex items-center gap-2 text-sm text-muted-foreground">
+              <Check class="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+              任意金额随心充
+            </li>
+            <li class="flex items-center gap-2 text-sm text-muted-foreground">
+              <Check class="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+              最低 ¥0.01 起
+            </li>
+          </ul>
+          <button
+            type="button"
+            class="mt-6 w-full rounded-md bg-primary py-2.5 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+            :disabled="ordering || !customAmount || parseFloat(customAmount) < 0.01"
+            @click.stop="openCustomPaymentChoice"
+          >
+            {{ ordering ? "下单中..." : "立即购买" }}
+          </button>
+        </div>
+
       </div>
     </div>
-
     <Teleport to="body">
       <div
         v-if="showChannelModal"
@@ -313,7 +421,8 @@ onUnmounted(clearPolling)
             <div>
               <h3 id="payment-channel-title" class="text-lg font-semibold text-foreground">选择支付方式</h3>
               <p class="mt-1 text-sm text-muted-foreground">
-                {{ pendingPackage?.packageName }} · {{ pendingPackage?.credits.toLocaleString() }} 算力
+                <template v-if="isCustomRecharge">自定义充值 · {{ customCredits.toLocaleString() }} 算力</template>
+              <template v-else>{{ pendingPackage?.packageName }} · {{ pendingPackage?.credits.toLocaleString() }} 算力</template>
               </p>
             </div>
             <button
@@ -332,8 +441,8 @@ onUnmounted(clearPolling)
               :key="option.channel"
               type="button"
               class="flex w-full items-center gap-4 rounded-xl border border-border bg-background px-4 py-3 text-left transition hover:border-primary/50 hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-60"
-              :disabled="ordering || !pendingPackage"
-              @click="pendingPackage && createOrder(pendingPackage, option.channel)"
+              :disabled="ordering || (!isCustomRecharge && !pendingPackage)"
+              @click="isCustomRecharge ? submitCustomRecharge(option.channel) : (pendingPackage && createOrder(pendingPackage, option.channel))"
             >
               <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
                 <component :is="option.icon" class="h-5 w-5" aria-hidden="true" />
@@ -348,7 +457,7 @@ onUnmounted(clearPolling)
 
           <p class="mt-5 text-center text-xs text-muted-foreground">
             应付金额
-            <span class="font-semibold text-primary">¥{{ formatMoney(pendingPackage?.priceAmount) }}</span>
+            <span class="font-semibold text-primary">¥{{ isCustomRecharge ? customAmount || "0.00" : formatMoney(pendingPackage?.priceAmount) }}</span>
           </p>
         </div>
       </div>
@@ -388,6 +497,9 @@ onUnmounted(clearPolling)
                 :alt="`${activePaymentName}支付二维码`"
                 class="h-full w-full object-contain"
               />
+              <p v-else-if="activeOrder?.payUrl && !activeOrder?.qrCodeUrl" class="px-2 text-xs text-muted-foreground">
+                二维码生成中，请稍候…
+              </p>
               <QrCode v-else class="h-24 w-24 text-slate-900" aria-hidden="true" />
             </div>
 
@@ -454,3 +566,4 @@ onUnmounted(clearPolling)
     </Teleport>
   </section>
 </template>
+// HMR check

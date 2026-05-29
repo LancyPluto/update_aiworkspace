@@ -42,6 +42,7 @@ import com.aiminilab.aitoolmarket.tool.mapper.ToolMapper;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolPromptMapper;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolPromptVersionMapper;
 import com.aiminilab.aitoolmarket.agent.service.ModelCapabilityService;
+import com.aiminilab.aitoolmarket.credit.service.TaskCreditEstimateService;
 import com.aiminilab.aitoolmarket.tool.dto.ApplyToolTemplateRequest;
 import com.aiminilab.aitoolmarket.tool.dto.ToolIntegrationView;
 import com.aiminilab.aitoolmarket.tool.integration.ToolIntegrationConfig;
@@ -88,6 +89,7 @@ public class ToolServiceImpl implements ToolService {
     private final ObjectMapper objectMapper;
     private final ToolTemplateService toolTemplateService;
     private final ModelCapabilityService modelCapabilityService;
+    private final TaskCreditEstimateService taskCreditEstimateService;
     private final AppProperties appProperties;
     private final ToolIntegrationResolver toolIntegrationResolver;
     private final ToolIntegrationRegistry toolIntegrationRegistry;
@@ -96,7 +98,9 @@ public class ToolServiceImpl implements ToolService {
                            ToolFieldSchemaMapper toolFieldSchemaMapper, ToolFieldItemMapper toolFieldItemMapper,
                            ToolPromptMapper toolPromptMapper, ToolPromptVersionMapper toolPromptVersionMapper,
                            ObjectMapper objectMapper, ToolTemplateService toolTemplateService,
-                           ModelCapabilityService modelCapabilityService, AppProperties appProperties,
+                           ModelCapabilityService modelCapabilityService,
+                           TaskCreditEstimateService taskCreditEstimateService,
+                           AppProperties appProperties,
                            ToolIntegrationResolver toolIntegrationResolver,
                            ToolIntegrationRegistry toolIntegrationRegistry) {
         this.toolMapper = toolMapper;
@@ -108,6 +112,7 @@ public class ToolServiceImpl implements ToolService {
         this.objectMapper = objectMapper;
         this.toolTemplateService = toolTemplateService;
         this.modelCapabilityService = modelCapabilityService;
+        this.taskCreditEstimateService = taskCreditEstimateService;
         this.appProperties = appProperties;
         this.toolIntegrationResolver = toolIntegrationResolver;
         this.toolIntegrationRegistry = toolIntegrationRegistry;
@@ -160,7 +165,7 @@ public class ToolServiceImpl implements ToolService {
         List<ToolSummaryResponse> list = toolMapper
                 .findTools(true, keyword, categoryId, null, normalizedPageSize, offset)
                 .stream()
-                .map(ToolSummaryResponse::from)
+                .map(this::toUserFacingSummary)
                 .toList();
         long total = toolMapper.countTools(true, keyword, categoryId, null);
         return PageResponse.of(list, total, pageNo, pageSize);
@@ -170,8 +175,12 @@ public class ToolServiceImpl implements ToolService {
     public ToolDetailResponse userToolDetail(String toolCode) {
         AiTool tool = toolMapper.findOnlineByCode(toolCode)
                 .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在或未上线"));
-        ToolSummaryResponse summary = ToolSummaryResponse.from(tool);
+        ToolSummaryResponse summary = toUserFacingSummary(tool);
         return ToolDetailResponse.of(summary, fields(tool.getId()), resolveIntegrationView(tool));
+    }
+
+    private ToolSummaryResponse toUserFacingSummary(AiTool tool) {
+        return ToolSummaryResponse.from(tool, taskCreditEstimateService.estimateForTool(tool));
     }
 
     private ToolIntegrationView resolveIntegrationView(AiTool tool) {

@@ -7,7 +7,8 @@ const nextConfig = {
   turbopack: {
     root: path.resolve(process.cwd()),
   },
-  allowedDevOrigins: ['127.0.0.1', 'localhost', '172.21.64.1'],
+  webpack: (config, { dev }) => { if (dev) { config.watchOptions = { poll: false }; } return config; },
+  allowedDevOrigins: ['127.0.0.1', 'localhost'],
   typescript: {
     ignoreBuildErrors: true,
   },

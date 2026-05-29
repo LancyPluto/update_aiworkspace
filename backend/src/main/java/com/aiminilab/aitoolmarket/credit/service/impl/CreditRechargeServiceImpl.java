@@ -7,6 +7,7 @@ import com.aiminilab.aitoolmarket.credit.alipay.AlipayNotification;
 import com.aiminilab.aitoolmarket.credit.alipay.AlipayPagePayClient;
 import com.aiminilab.aitoolmarket.credit.alipay.AlipayPagePayRequest;
 import com.aiminilab.aitoolmarket.credit.alipay.AlipayPagePayResponse;
+import com.aiminilab.aitoolmarket.credit.dto.CreateCustomRechargeOrderRequest;
 import com.aiminilab.aitoolmarket.credit.dto.CreateRechargeOrderRequest;
 import com.aiminilab.aitoolmarket.credit.dto.RechargeOrderResponse;
 import com.aiminilab.aitoolmarket.credit.dto.RechargePackageResponse;
@@ -155,6 +156,82 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
 
     @Override
     @Transactional
+    public RechargeOrderResponse createCustomOrder(Long userId, CreateCustomRechargeOrderRequest request) {
+        String idempotencyKey = normalizeIdempotencyKey(request.clientRequestId());
+        if (idempotencyKey != null) {
+            CreditRechargeOrder existing = orderMapper.findByUserAndIdempotencyKey(userId, idempotencyKey);
+            if (existing != null) {
+                return responseFrom(existing);
+            }
+        }
+        BigDecimal amount = request.amount();
+        int credits = amount.multiply(new BigDecimal("100")).setScale(0, RoundingMode.DOWN).intValue();
+        if (credits <= 0) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "充值金额过小，至少需要 0.01 元");
+        }
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime expiresAt = now.plusMinutes(ORDER_EXPIRE_MINUTES);
+        String paymentChannel = normalizePaymentChannel(request.paymentChannel());
+        CreditRechargeOrder order = new CreditRechargeOrder();
+        order.setOrderNo(generateOrderNo());
+        order.setUserId(userId);
+        order.setPackageId(null);
+        order.setCredits(credits);
+        order.setPriceAmount(amount);
+        order.setCurrency("CNY");
+        order.setPaymentChannel(paymentChannel);
+        order.setStatus(RechargeOrderStatus.WAITING_PAYMENT.name());
+        order.setStatusReason("custom recharge");
+        order.setIdempotencyKey(idempotencyKey);
+        order.setExpiresAt(expiresAt);
+        order.setCreatedAt(now);
+        order.setUpdatedAt(now);
+        if ("WECHAT_NATIVE".equals(paymentChannel) || "ALIPAY_PAGE".equals(paymentChannel)) {
+            order.setPayUrl(null);
+            order.setQrCodeUrl(null);
+        } else {
+            order.setPayUrl("/mock-pay/recharge/" + order.getOrderNo());
+            order.setQrCodeUrl(null);
+        }
+        orderMapper.insert(order);
+        if ("WECHAT_NATIVE".equals(paymentChannel)) {
+            try {
+                NativePrepayResponse prepay = wechatNativePayClient.createNativeOrder(new NativePrepayRequest(
+                        order.getOrderNo(),
+                        "Custom credits recharge " + credits + " credits",
+                        priceToFen(amount),
+                        "CNY",
+                        expiresAt
+                ));
+                if (orderMapper.bindPayUrl(order.getId(), prepay.codeUrl(), "WeChat Native prepay created", LocalDateTime.now()) != 1) {
+                    throw new BusinessException(ErrorCode.PARAM_ERROR, "recharge order status changed before WeChat prepay binding");
+                }
+            } catch (BusinessException exception) {
+                orderMapper.transit(order.getId(), RechargeOrderStatus.WAITING_PAYMENT.name(), RechargeOrderStatus.FAILED.name(),
+                        exception.getMessage(), LocalDateTime.now());
+                throw exception;
+            }
+        } else if ("ALIPAY_PAGE".equals(paymentChannel)) {
+            try {
+                AlipayPagePayResponse payResponse = alipayPagePayClient.createPagePayOrder(new AlipayPagePayRequest(
+                        order.getOrderNo(),
+                        "Custom credits recharge " + credits + " credits",
+                        amount,
+                        expiresAt
+                ));
+                if (orderMapper.bindPayUrl(order.getId(), payResponse.payUrl(), "Alipay page pay created", LocalDateTime.now()) != 1) {
+                    throw new BusinessException(ErrorCode.PARAM_ERROR, "recharge order status changed before Alipay pay url binding");
+                }
+            } catch (BusinessException exception) {
+                orderMapper.transit(order.getId(), RechargeOrderStatus.WAITING_PAYMENT.name(), RechargeOrderStatus.FAILED.name(),
+                        exception.getMessage(), LocalDateTime.now());
+                throw exception;
+            }
+        }
+        return responseFrom(orderMapper.findByOrderNo(order.getOrderNo()));
+    }
+
+    @Override
     public RechargeOrderResponse getOrder(Long userId, Long orderId) {
         CreditRechargeOrder order = orderOrThrow(userId, orderId);
         refreshWechatOrderIfNeeded(order);

@@ -11,7 +11,7 @@ export default defineConfig({
       "@": fileURLToPath(new URL("./src", import.meta.url)),
     },
   },
-  server: {
+  server: { allowedHosts: ["wlcloudai.com", "www.wlcloudai.com", "8.134.93.203"],
     port: 5173,
     proxy: {
       "/api": {

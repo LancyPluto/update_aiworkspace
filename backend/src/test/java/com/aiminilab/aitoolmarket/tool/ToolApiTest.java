@@ -15,6 +15,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.hamcrest.Matchers.hasItem;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -305,6 +306,61 @@ class ToolApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data[0].id").value(promptId.intValue()))
                 .andExpect(jsonPath("$.data[0].activeVersionId").value(versionId.intValue()));
+    }
+
+    @Test
+    void userToolListShowsPerCallEstimatedCreditsFromModelConfig() throws Exception {
+        String adminToken = loginAdmin();
+
+        String modelResponse = mockMvc.perform(put("/api/admin/v1/agent/model-config")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "provider": "siliconflow_images",
+                                  "modelName": "Tongyi-MAI/Z-Image-Turbo",
+                                  "baseUrl": "https://api.siliconflow.cn",
+                                  "apiKey": "fake-key",
+                                  "timeoutSeconds": 60,
+                                  "billingUnit": "PER_CALL",
+                                  "unitPrice": 0.03,
+                                  "enabled": true
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        Long modelConfigId = Long.parseLong(modelResponse.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
+
+        String createResponse = mockMvc.perform(post("/api/admin/v1/tools")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "toolCode": "per_call_credit_display_tool",
+                                  "toolName": "Per Call Credit Display",
+                                  "categoryId": 1,
+                                  "description": "credit estimate test",
+                                  "coverUrl": "",
+                                  "estimatedCreditCost": 99,
+                                  "toolType": "IMAGE_GENERATION",
+                                  "modelConfigId": %d
+                                }
+                                """.formatted(modelConfigId)))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        Long toolId = Long.parseLong(createResponse.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
+        publishTool(adminToken, toolId);
+
+        mockMvc.perform(get("/api/v1/tools")
+                        .queryParam("pageNo", "1")
+                        .queryParam("pageSize", "100"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[?(@.toolCode=='per_call_credit_display_tool')].estimatedCreditCost")
+                        .value(hasItem(4)));
     }
 
     private String loginAdmin() throws Exception {

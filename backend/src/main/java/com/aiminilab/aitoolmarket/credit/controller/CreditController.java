@@ -5,6 +5,7 @@ import com.aiminilab.aitoolmarket.common.dto.ApiResponse;
 import com.aiminilab.aitoolmarket.common.dto.PageResponse;
 import com.aiminilab.aitoolmarket.credit.dto.CreditAccountResponse;
 import com.aiminilab.aitoolmarket.credit.dto.CreditLogResponse;
+import com.aiminilab.aitoolmarket.credit.dto.CreateCustomRechargeOrderRequest;
 import com.aiminilab.aitoolmarket.credit.dto.CreateRechargeOrderRequest;
 import com.aiminilab.aitoolmarket.credit.dto.RechargeOrderResponse;
 import com.aiminilab.aitoolmarket.credit.dto.RechargePackageResponse;
@@ -53,6 +54,11 @@ public class CreditController {
     @PostMapping("/recharge-orders")
     public ApiResponse<RechargeOrderResponse> createRechargeOrder(@Valid @RequestBody CreateRechargeOrderRequest request) {
         return ApiResponse.success(creditRechargeService.createOrder(AuthContext.get().userId(), request));
+    }
+
+    @PostMapping("/recharge-orders/custom")
+    public ApiResponse<RechargeOrderResponse> createCustomRechargeOrder(@Valid @RequestBody CreateCustomRechargeOrderRequest request) {
+        return ApiResponse.success(creditRechargeService.createCustomOrder(AuthContext.get().userId(), request));
     }
 
     @GetMapping("/recharge-orders/{orderId}")

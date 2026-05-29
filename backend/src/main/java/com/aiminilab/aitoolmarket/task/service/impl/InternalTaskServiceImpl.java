@@ -32,6 +32,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.List;
 
 @Service
@@ -118,21 +120,58 @@ public class InternalTaskServiceImpl implements InternalTaskService {
             }
             TaskStateMachine.ensureTransition(current.getStatus(), TaskStatus.SUCCESS.name());
         }
-        int chargedCredits = creditService.settleCompleted(task.getUserId(), CreditSourceType.TASK, taskId, task.getEstimatedCreditCost());
-        if (chargedCredits < task.getEstimatedCreditCost()) {
-            LOGGER.warn(
-                    "task success saved with incomplete credit settlement taskId={} userId={} expectedCredits={} chargedCredits={}",
-                    taskId, task.getUserId(), task.getEstimatedCreditCost(), chargedCredits
-            );
-        }
         AiTool billingTool = toolMapper.findById(task.getToolId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在"));
-        billingService.recordUsage("TASK", taskId, task.getUserId(), modelCapabilityService.resolveModelConfigForTool(billingTool),
+        AgentModelConfig modelConfig = modelCapabilityService.resolveModelConfigForTool(billingTool);
+        int actualCredits = calculateActualTaskCredits(request, modelConfig, task.getEstimatedCreditCost());
+        int chargedCredits = creditService.settleCompleted(task.getUserId(), CreditSourceType.TASK, taskId, actualCredits);
+        int estimated = task.getEstimatedCreditCost() == null ? 0 : task.getEstimatedCreditCost();
+        if (actualCredits < estimated) {
+            creditService.release(task.getUserId(), CreditSourceType.TASK, taskId, estimated - actualCredits);
+        }
+        if (chargedCredits < actualCredits) {
+            LOGGER.warn(
+                    "task success saved with incomplete credit settlement taskId={} userId={} expectedCredits={} chargedCredits={}",
+                    taskId, task.getUserId(), actualCredits, chargedCredits
+            );
+        }
+        billingService.recordUsage("TASK", taskId, task.getUserId(), modelConfig,
                 request.promptTokens(), request.completionTokens(), request.billableUnits(), chargedCredits);
         taskMapper.insertResult(taskId, task.getUserId(), request.resourceType(), request.contentText());
         agentToolDescriptorService.markToolHealth(task.getToolCode(), "HEALTHY", null);
         taskMetrics.recordTaskOutcome(task.getToolCode(), "SUCCESS", task.getCreatedAt(), findTask(taskId).getFinishedAt());
         return TaskStatusResponse.from(findTask(taskId));
+    }
+
+    private int calculateActualTaskCredits(WorkerSuccessRequest request, AgentModelConfig modelConfig, Integer fallbackCreditsObj) {
+        int fallbackCredits = fallbackCreditsObj == null ? 0 : Math.max(0, fallbackCreditsObj);
+        if (modelConfig == null) {
+            return fallbackCredits;
+        }
+        BigDecimal costAmount = BigDecimal.ZERO;
+        String billingUnit = modelConfig.getBillingUnit();
+        if ("PER_CALL".equals(billingUnit) && modelConfig.getUnitPrice() != null) {
+            int units = request.billableUnits() != null && request.billableUnits() > 0 ? request.billableUnits() : 1;
+            costAmount = modelConfig.getUnitPrice().multiply(BigDecimal.valueOf(units));
+        } else {
+            int prompt = request.promptTokens() != null ? Math.max(0, request.promptTokens()) : 0;
+            int completion = request.completionTokens() != null ? Math.max(0, request.completionTokens()) : 0;
+            if (prompt == 0 && completion == 0) {
+                return fallbackCredits;
+            }
+            BigDecimal inputPrice = modelConfig.getInputTokenPricePer1m() != null
+                    ? modelConfig.getInputTokenPricePer1m() : BigDecimal.ZERO;
+            BigDecimal outputPrice = modelConfig.getOutputTokenPricePer1m() != null
+                    ? modelConfig.getOutputTokenPricePer1m() : BigDecimal.ZERO;
+            costAmount = inputPrice.multiply(BigDecimal.valueOf(prompt))
+                    .add(outputPrice.multiply(BigDecimal.valueOf(completion)))
+                    .divide(BigDecimal.valueOf(1_000_000), 6, RoundingMode.HALF_UP);
+        }
+        if (costAmount.compareTo(BigDecimal.ZERO) <= 0) {
+            return fallbackCredits;
+        }
+        BigDecimal customerCharge = costAmount.multiply(new BigDecimal("1.20"));
+        return customerCharge.divide(new BigDecimal("0.01"), 0, RoundingMode.CEILING).intValue();
     }
 
     @Override

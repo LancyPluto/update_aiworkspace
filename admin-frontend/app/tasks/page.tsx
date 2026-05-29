@@ -176,7 +176,7 @@ function rowToTask(row: AdminTaskApiPayload): Task {
     status: mapped.status,
     statusLabel: mapped.label,
     rawStatus: row.status,
-    credits: null,
+    credits: row.consumedCredits ?? null,
     input: "",
     output: row.result?.contentText || "",
     outputResourceType: row.result?.resourceType || "",
@@ -441,7 +441,7 @@ export default function TasksPage() {
       key: "credits" as const,
       title: "消耗算力",
       render: (value: unknown) => (
-        <span>{value === null || value === undefined ? "—" : `${value as number} 点`}</span>
+        <span>{value === null || value === undefined ? "—" : `${value as number} 算力`}</span>
       ),
     },
     { key: "duration" as const, title: "耗时" },
@@ -562,7 +562,7 @@ export default function TasksPage() {
                   <p className="text-muted-foreground">消耗算力</p>
                   <p className="font-medium">
                     {selectedTask?.credits != null || item.credits != null
-                      ? `${selectedTask?.credits ?? item.credits} 点`
+                      ? `${selectedTask?.credits ?? item.credits} 算力`
                       : "—"}
                   </p>
                 </div>

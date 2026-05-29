@@ -6,6 +6,7 @@ import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.enums.TaskStatus;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.credit.service.CreditService;
+import com.aiminilab.aitoolmarket.credit.service.TaskCreditEstimateService;
 import com.aiminilab.aitoolmarket.task.dto.CreateTaskRequest;
 import com.aiminilab.aitoolmarket.task.dto.RegenerateTaskRequest;
 import com.aiminilab.aitoolmarket.task.dto.TaskDetailResponse;
@@ -45,6 +46,7 @@ public class TaskServiceImpl implements TaskService {
     private final ObjectMapper objectMapper;
     private final TaskOutboxService taskOutboxService;
     private final TaskMetrics taskMetrics;
+    private final TaskCreditEstimateService taskCreditEstimateService;
 
     public TaskServiceImpl(
             TaskMapper taskMapper,
@@ -54,7 +56,8 @@ public class TaskServiceImpl implements TaskService {
             CreditService creditService,
             ObjectMapper objectMapper,
             TaskOutboxService taskOutboxService,
-            TaskMetrics taskMetrics
+            TaskMetrics taskMetrics,
+            TaskCreditEstimateService taskCreditEstimateService
     ) {
         this.taskMapper = taskMapper;
         this.toolMapper = toolMapper;
@@ -64,6 +67,7 @@ public class TaskServiceImpl implements TaskService {
         this.objectMapper = objectMapper;
         this.taskOutboxService = taskOutboxService;
         this.taskMetrics = taskMetrics;
+        this.taskCreditEstimateService = taskCreditEstimateService;
     }
 
     @Override
@@ -201,11 +205,12 @@ public class TaskServiceImpl implements TaskService {
         task.setToolId(tool.getId());
         task.setParamsJson(params.toString());
         task.setIdempotencyKey(clientRequestId);
-        task.setEstimatedCreditCost(chargeTaskCredits ? tool.getEstimatedCreditCost() : 0);
+        int estimatedCredits = chargeTaskCredits ? taskCreditEstimateService.estimateTaskCredits(tool, modelConfig) : 0;
+        task.setEstimatedCreditCost(estimatedCredits);
 
         Long taskId = taskMapper.insertTask(task);
         if (chargeTaskCredits) {
-            creditService.freeze(userId, CreditSourceType.TASK, taskId, tool.getEstimatedCreditCost());
+            creditService.freeze(userId, CreditSourceType.TASK, taskId, estimatedCredits);
         }
         taskOutboxService.enqueueTaskCreated(taskId);
         return TaskStatusResponse.from(findTask(taskId, userId));
@@ -213,7 +218,8 @@ public class TaskServiceImpl implements TaskService {
 
     private TaskDetailResponse toDetail(AiTask task) {
         TaskResultResponse result = taskMapper.findFirstResult(task.getId()).orElse(null);
-        return TaskDetailResponse.of(task, parseParams(task.getParamsJson()), result);
+        int consumedCredits = taskMapper.sumConsumedCreditsByTaskId(task.getId());
+        return TaskDetailResponse.of(task, parseParams(task.getParamsJson()), result, consumedCredits);
     }
 
     private AiTask findTask(Long taskId, Long userId) {

@@ -239,7 +239,7 @@ export default function CreditsPage() {
 
   return (
     <AdminLayout>
-      <AdminHeader title="会员算力" description={error ? `加载失败：${error}` : "连接后端积分账户与流水数据"} />
+      <AdminHeader title="会员算力" description={error ? `加载失败：${error}` : "连接后端算力账户与流水数据"} />
 
       <div className="p-6 space-y-6">
         <div className="grid gap-4 md:grid-cols-4">
@@ -289,7 +289,7 @@ export default function CreditsPage() {
           <DialogContent className="bg-card border-border">
             <DialogHeader>
               <DialogTitle>{adjustType === "add" ? "增加算力" : "扣除算力"}</DialogTitle>
-              <DialogDescription>调整会写入后端积分账户，并生成流水记录。</DialogDescription>
+              <DialogDescription>调整会写入后端算力账户，并生成流水记录。</DialogDescription>
             </DialogHeader>
             <div className="space-y-4 py-4">
               <div className="space-y-2">
