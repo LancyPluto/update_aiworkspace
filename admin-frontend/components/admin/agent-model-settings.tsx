@@ -25,7 +25,6 @@ import {
   fetchAgentModelConfigs,
   setDefaultAgentModelConfig,
   testAgentModelConfig,
-  testSavedAgentModelConfig,
   updateAgentModelConfig,
 } from "@/lib/api/agent-model"
 import { fetchModelProviders } from "@/lib/api/model-providers"
@@ -600,9 +599,7 @@ export function AgentModelSettings({ refreshKey = 0 }: AgentModelSettingsProps) 
     setError(null)
     setTestResult(null)
     try {
-      setTestResult(form.id && !form.apiKey.trim() && !form.extraAuthJson.trim()
-        ? await testSavedAgentModelConfig()
-        : await testAgentModelConfig(toPayload(form)))
+      setTestResult(await testAgentModelConfig(toPayload(form)))
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "杩炴帴娴嬭瘯澶辫触")
     } finally {

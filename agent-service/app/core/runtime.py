@@ -23,6 +23,7 @@ class AgentRuntime:
     ) -> None:
         self.backend = backend_client
         self.model_client = model_client
+        self._injected_model_client = model_client is not None
         self.model_client_factory = model_client_factory
         self.runtime_router_factory = runtime_router_factory
         self.default_settings = default_settings or Settings()
@@ -78,7 +79,9 @@ class AgentRuntime:
             await self._fail(run_id, "AGENT_INTERNAL_ERROR", str(exc))
 
     async def _model_client(self, context=None) -> ModelClient:
-        if self.model_client is not None:
+        # Respect externally injected clients (tests/mocks), but avoid reusing
+        # a runtime-created client across different runs/model selections.
+        if self._injected_model_client and self.model_client is not None:
             return self.model_client
         config = getattr(context, "modelConfig", None) if context is not None else None
         if config is None:
@@ -94,8 +97,7 @@ class AgentRuntime:
                 minimax_group_id=config.minimaxGroupId or "",
                 model_timeout_seconds=config.timeoutSeconds,
             )
-        self.model_client = self.model_client_factory(settings)
-        return self.model_client
+        return self.model_client_factory(settings)
 
     async def _fail(self, run_id: int, error_code: str, error_message: str) -> None:
         try:

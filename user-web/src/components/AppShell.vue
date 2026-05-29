@@ -266,8 +266,12 @@ onUnmounted(() => {
       <div class="flex h-20 shrink-0 items-center gap-3 px-6">
         <img src="/logo.svg" alt="AI Tool Market" class="h-10 w-10 rounded-xl object-contain" />
         <div class="flex flex-col leading-tight">
-          <span class="text-lg font-semibold">未来云 AI</span>
-          <span class="text-[11px] text-white/45">经营助手平台</span>
+
+          <span class="text-lg font-semibold">科创点AI</span>
+          <span class="text-[11px] text-white/45">智能运营助手平台</span>
+
+
+
         </div>
       </div>
 
