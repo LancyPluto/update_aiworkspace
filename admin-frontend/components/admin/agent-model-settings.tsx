@@ -89,6 +89,131 @@ const modalityFilters: Array<{ value: ModalityFilter; label: string }> = [
   { value: "OTHER", label: "其他" },
 ]
 
+const MODEL_PAGE_SIZE = 10
+
+function ModelConfigPagination({
+  pageNo,
+  totalPages,
+  total,
+  loading,
+  onPageChange,
+}: {
+  pageNo: number
+  totalPages: number
+  total: number
+  loading: boolean
+  onPageChange: (page: number) => void
+}) {
+  const [pageInput, setPageInput] = useState(String(pageNo))
+  const pageOptions = useMemo(
+    () => Array.from({ length: totalPages }, (_, index) => index + 1),
+    [totalPages],
+  )
+  const useCompactJump = totalPages > 100
+
+  useEffect(() => {
+    setPageInput(String(pageNo))
+  }, [pageNo])
+
+  function goToPage(raw: number) {
+    if (!Number.isFinite(raw)) return
+    const target = Math.min(totalPages, Math.max(1, Math.floor(raw)))
+    onPageChange(target)
+  }
+
+  function submitPageInput() {
+    const parsed = Number(pageInput)
+    if (!Number.isFinite(parsed)) {
+      setPageInput(String(pageNo))
+      return
+    }
+    goToPage(parsed)
+  }
+
+  if (total <= MODEL_PAGE_SIZE) return null
+
+  const disabled = loading
+
+  return (
+    <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
+      <p className="text-sm text-muted-foreground">
+        第 {(pageNo - 1) * MODEL_PAGE_SIZE + 1}–{Math.min(pageNo * MODEL_PAGE_SIZE, total)} 个，共 {total} 个（每页{" "}
+        {MODEL_PAGE_SIZE} 个）
+      </p>
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <span className="text-sm text-muted-foreground">页码</span>
+        {useCompactJump ? (
+          <div className="flex items-center gap-1">
+            <Input
+              type="number"
+              min={1}
+              max={totalPages}
+              value={pageInput}
+              disabled={disabled}
+              onChange={(event) => setPageInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") submitPageInput()
+              }}
+              className="h-8 w-20 text-center text-sm"
+              aria-label="页码"
+            />
+            <Button type="button" variant="outline" size="sm" disabled={disabled} onClick={submitPageInput}>
+              跳转
+            </Button>
+          </div>
+        ) : (
+          <Select
+            value={String(pageNo)}
+            onValueChange={(value) => goToPage(Number(value))}
+            disabled={disabled || totalPages <= 1}
+          >
+            <SelectTrigger className="h-8 w-[88px]" aria-label="选择页码">
+              <SelectValue placeholder="页码" />
+            </SelectTrigger>
+            <SelectContent className="max-h-64">
+              {pageOptions.map((page) => (
+                <SelectItem key={page} value={String(page)}>
+                  第 {page} 页
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+        <Button type="button" variant="outline" size="sm" disabled={pageNo <= 1 || disabled} onClick={() => goToPage(1)}>
+          首页
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={pageNo <= 1 || disabled}
+          onClick={() => goToPage(pageNo - 1)}
+        >
+          上一页
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={pageNo >= totalPages || disabled}
+          onClick={() => goToPage(pageNo + 1)}
+        >
+          下一页
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={pageNo >= totalPages || disabled}
+          onClick={() => goToPage(totalPages)}
+        >
+          末页
+        </Button>
+      </div>
+    </div>
+  )
+}
+
 const FALLBACK_PROVIDER: ModelProviderDescriptor = {
   code: "openai_compatible",
   label: "OpenAI compatible",
@@ -358,6 +483,7 @@ export function AgentModelSettings({ refreshKey = 0 }: AgentModelSettingsProps) 
   const [saved, setSaved] = useState(false)
   const [testResult, setTestResult] = useState<AgentModelConfigTestResult | null>(null)
   const [modalityFilter, setModalityFilter] = useState<ModalityFilter>("ALL")
+  const [modelPageNo, setModelPageNo] = useState(1)
 
   const catalogResolved = providerCatalog.length > 0 ? providerCatalog : [FALLBACK_PROVIDER]
 
@@ -394,6 +520,21 @@ export function AgentModelSettings({ refreshKey = 0 }: AgentModelSettingsProps) 
       capabilityModalities(resolvedCapabilities(config, catalogResolved)).includes(modalityFilter),
     )
   }, [catalogResolved, configs, modalityFilter])
+  const modelTotalPages = Math.max(1, Math.ceil(filteredConfigs.length / MODEL_PAGE_SIZE))
+  const paginatedConfigs = useMemo(() => {
+    const start = (modelPageNo - 1) * MODEL_PAGE_SIZE
+    return filteredConfigs.slice(start, start + MODEL_PAGE_SIZE)
+  }, [filteredConfigs, modelPageNo])
+
+  useEffect(() => {
+    setModelPageNo(1)
+  }, [modalityFilter])
+
+  useEffect(() => {
+    if (modelPageNo > modelTotalPages) {
+      setModelPageNo(modelTotalPages)
+    }
+  }, [modelPageNo, modelTotalPages])
 
   async function loadConfigs(nextSelectedId?: number | null) {
     setLoading(true)
@@ -635,7 +776,8 @@ export function AgentModelSettings({ refreshKey = 0 }: AgentModelSettingsProps) 
             <CardTitle>已配置模型</CardTitle>
             <CardDescription>
               共 {configs.length} 个模型 API
-              {modalityFilter === "ALL" ? "" : `，当前筛选 ${filteredConfigs.length} 个`}，点击卡片可编辑。
+              {modalityFilter === "ALL" ? "" : `，当前筛选 ${filteredConfigs.length} 个`}
+              {filteredConfigs.length > MODEL_PAGE_SIZE ? `，每页最多 ${MODEL_PAGE_SIZE} 个` : ""}，点击卡片可编辑。
             </CardDescription>
           </div>
           <Button className="gap-2" onClick={createConfig}>
@@ -652,7 +794,10 @@ export function AgentModelSettings({ refreshKey = 0 }: AgentModelSettingsProps) 
                 variant={modalityFilter === filter.value ? "default" : "outline"}
                 size="sm"
                 className="gap-2"
-                onClick={() => setModalityFilter(filter.value)}
+                onClick={() => {
+                  setModalityFilter(filter.value)
+                  setModelPageNo(1)
+                }}
               >
                 {filter.label}
                 <Badge variant={modalityFilter === filter.value ? "secondary" : "outline"}>
@@ -678,7 +823,7 @@ export function AgentModelSettings({ refreshKey = 0 }: AgentModelSettingsProps) 
             </div>
           ) : (
             <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
-              {filteredConfigs.map((config) => {
+              {paginatedConfigs.map((config) => {
                 const vendor = detectModelVendor(config)
                 const capabilities = resolvedCapabilities(config, catalogResolved)
                 return (
@@ -753,6 +898,15 @@ export function AgentModelSettings({ refreshKey = 0 }: AgentModelSettingsProps) 
               })}
             </div>
           )}
+          {!loading && filteredConfigs.length > 0 ? (
+            <ModelConfigPagination
+              pageNo={modelPageNo}
+              totalPages={modelTotalPages}
+              total={filteredConfigs.length}
+              loading={loading}
+              onPageChange={setModelPageNo}
+            />
+          ) : null}
         </CardContent>
       </Card>
 

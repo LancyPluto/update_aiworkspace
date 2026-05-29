@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { fetchAgentModelConfigs } from "@/lib/api/agent-model"
 import { ApiError } from "@/lib/api/http"
-import { fetchAdminTools } from "@/lib/api/tools"
+import { fetchAllAdminTools } from "@/lib/api/tools"
 import type { AgentModelConfig, ToolSummary } from "@/lib/api/types"
 
 export default function ToolWorkflowPage() {
@@ -35,7 +35,7 @@ export default function ToolWorkflowPage() {
     setError(null)
 
     Promise.all([
-      fetchAdminTools(),
+      fetchAllAdminTools(),
       fetchAgentModelConfigs().catch(() => [] as AgentModelConfig[]),
     ])
       .then(([toolsResp, configs]) => {
