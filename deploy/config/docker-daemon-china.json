@@ -1,0 +1,16 @@
+{
+  "registry-mirrors": [
+    "https://docker.m.daocloud.io",
+    "https://mirror.baidubce.com",
+    "https://docker.1panel.live",
+    "https://docker.1ms.run",
+    "https://dockerhub.icu",
+    "https://0vmzj3q6.mirror.aliyuncs.com"
+  ],
+  "max-concurrent-downloads": 10,
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "100m",
+    "max-file": "3"
+  }
+}

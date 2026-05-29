@@ -1,40 +1,32 @@
 # 镜像源配置参数（可通过 build args 覆盖）
 ARG DOCKER_REGISTRY=
-ARG GHCR_REGISTRY=ghcr.io/
-ARG APT_MIRROR=
-ARG PYPI_INDEX_URL=
+ARG APT_MIRROR=mirrors.aliyun.com
+ARG PYPI_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
 
-# 安装 uv（使用中间阶段避免 COPY --from 的变量展开问题）
-FROM ${GHCR_REGISTRY}astral-sh/uv:latest AS uv
 
 # 使用 Python 3.10 作为基础镜像
 # 如果指定了 DOCKER_REGISTRY，使用镜像源；否则使用官方源
-FROM ${DOCKER_REGISTRY:-}python:3.10-slim
+FROM ${DOCKER_REGISTRY:-}python:3.12-slim
 
 # 重新声明ARG（FROM之后ARG作用域失效，需要重新声明）
-ARG APT_MIRROR=
-ARG PYPI_INDEX_URL=
+ARG APT_MIRROR=mirrors.aliyun.com
+ARG PYPI_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
 
 # 设置工作目录
 WORKDIR /app
 
-# 安装系统依赖（如果配置了 APT_MIRROR，先替换镜像源）
-RUN if [ -n "$APT_MIRROR" ]; then \
-        if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
-            sed -i "s@deb.debian.org@$APT_MIRROR@g" /etc/apt/sources.list.d/debian.sources; \
-        else \
-            echo "Warning: /etc/apt/sources.list.d/debian.sources not found, skipping mirror setup." >&2; \
-        fi; \
-    fi && \
-    apt-get update && apt-get install -y \
+# 安装系统依赖（默认使用国内 APT 镜像，可通过 build-arg APT_MIRROR 覆盖）
+COPY docker/debian-apt-mirror.sh /usr/local/bin/debian-apt-mirror.sh
+RUN chmod +x /usr/local/bin/debian-apt-mirror.sh \
+    && APT_MIRROR="${APT_MIRROR}" sh /usr/local/bin/debian-apt-mirror.sh \
+    && apt-get update && apt-get install -y \
     curl \
     ffmpeg \
     fonts-noto-cjk \
     && rm -rf /var/lib/apt/lists/*
 
-# 从 uv 阶段复制二进制文件
-COPY --from=uv /uv /usr/local/bin/uv
-RUN chmod +x /usr/local/bin/uv
+# 通过 pip 安装 uv
+RUN pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple/ uv
 
 # 复制项目配置文件
 COPY pyproject.toml ./

@@ -118,16 +118,22 @@ public class InternalTaskServiceImpl implements InternalTaskService {
             }
             TaskStateMachine.ensureTransition(current.getStatus(), TaskStatus.SUCCESS.name());
         }
-        int chargedCredits = creditService.settleCompleted(task.getUserId(), CreditSourceType.TASK, taskId, task.getEstimatedCreditCost());
-        if (chargedCredits < task.getEstimatedCreditCost()) {
-            LOGGER.warn(
-                    "task success saved with incomplete credit settlement taskId={} userId={} expectedCredits={} chargedCredits={}",
-                    taskId, task.getUserId(), task.getEstimatedCreditCost(), chargedCredits
-            );
-        }
         AiTool billingTool = toolMapper.findById(task.getToolId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在"));
-        billingService.recordUsage("TASK", taskId, task.getUserId(), modelCapabilityService.resolveModelConfigForTool(billingTool),
+        AgentModelConfig modelConfig = modelCapabilityService.resolveModelConfigForTool(billingTool);
+        int actualCredits = calculateActualTaskCredits(request, modelConfig, task.getEstimatedCreditCost());
+        int chargedCredits = creditService.settleCompleted(task.getUserId(), CreditSourceType.TASK, taskId, actualCredits);
+        int estimated = task.getEstimatedCreditCost() == null ? 0 : task.getEstimatedCreditCost();
+        if (actualCredits < estimated) {
+            creditService.release(task.getUserId(), CreditSourceType.TASK, taskId, estimated - actualCredits);
+        }
+        if (chargedCredits < actualCredits) {
+            LOGGER.warn(
+                    "task success saved with incomplete credit settlement taskId={} userId={} expectedCredits={} chargedCredits={}",
+                    taskId, task.getUserId(), actualCredits, chargedCredits
+            );
+        }
+        billingService.recordUsage("TASK", taskId, task.getUserId(), modelConfig,
                 request.promptTokens(), request.completionTokens(), request.billableUnits(), chargedCredits);
         taskMapper.insertResult(taskId, task.getUserId(), request.resourceType(), request.contentText());
         agentToolDescriptorService.markToolHealth(task.getToolCode(), "HEALTHY", null);

@@ -84,7 +84,8 @@ class AgentModelConfig(BaseModel):
     minimaxGroupId: str | None = None
     timeoutSeconds: int = 60
     enabled: bool = True
-    agentEnabled: bool = True
+    # Backend may send null for agentEnabled; accept it for compatibility.
+    agentEnabled: bool | None = True
 
 
 class ContextWindow(BaseModel):

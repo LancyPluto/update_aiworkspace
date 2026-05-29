@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted, ref } from "vue"
 import { Check, Crown, CreditCard, Loader2, MessageCircle, QrCode, Sparkles, X } from "lucide-vue-next"
 import type { CreditAccount, RechargeOrder, RechargePackage } from "@/api/types"
-import { createRechargeOrder, fetchRechargeOrder, fetchRechargePackages, mockPayRechargeOrder } from "@/api/creditApi"
+import { createCustomRechargeOrder, createRechargeOrder, fetchRechargeOrder, fetchRechargePackages, mockPayRechargeOrder } from "@/api/creditApi"
 import { useAuthStore } from "@/store/authStore"
 
 const props = defineProps<{
@@ -18,6 +18,11 @@ type PaymentChannel = "WECHAT_NATIVE" | "ALIPAY_PAGE" | "MOCK"
 const auth = useAuthStore()
 const packages = ref<RechargePackage[]>([])
 const selectedId = ref<number | null>(null)
+const customAmount = ref("")
+const customCredits = computed(() => {
+  const amount = parseFloat(customAmount.value)
+  return Number.isFinite(amount) && amount > 0 ? Math.floor(amount * 100) : 0
+})
 const pendingPackage = ref<RechargePackage | null>(null)
 const loadingPackages = ref(false)
 const ordering = ref(false)
@@ -149,6 +154,50 @@ function openPaymentChoice(pkg: RechargePackage) {
   paymentResult.value = null
   error.value = ""
   showChannelModal.value = true
+}
+
+function openCustomPaymentChoice() {
+  const amount = parseFloat(customAmount.value)
+  if (!Number.isFinite(amount) || amount < 0.01) {
+    error.value = "请输入有效的充值金额（最低 0.01 元）"
+    return
+  }
+  pendingPackage.value = null
+  selectedId.value = null
+  paymentResult.value = null
+  error.value = ""
+  showChannelModal.value = true
+}
+
+async function submitCustomRecharge(channel: PaymentChannel) {
+  const amount = parseFloat(customAmount.value)
+  if (!Number.isFinite(amount) || amount < 0.01) {
+    error.value = "请输入有效的充值金额（最低 0.01 元）"
+    return
+  }
+  ordering.value = true
+  orderingPackageId.value = -1
+  error.value = ""
+  try {
+    const order = await createCustomRechargeOrder(
+      {
+        amount,
+        paymentChannel: channel,
+        clientRequestId: `custom-recharge-${channel}-${Date.now()}`,
+      },
+      { token: auth.token },
+    )
+    activeOrder.value = order
+    paymentResult.value = null
+    showChannelModal.value = false
+    showPayModal.value = true
+    startPolling(order.id)
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : "创建自定义充值订单失败"
+  } finally {
+    ordering.value = false
+    orderingPackageId.value = null
+  }
 }
 
 async function createOrder(pkg: RechargePackage, channel: PaymentChannel) {
@@ -296,6 +345,49 @@ onUnmounted(clearPolling)
             {{ ordering && orderingPackageId === pkg.id ? "下单中..." : "立即购买" }}
           </button>
         </div>
+      </div>
+    </div>
+
+    <!-- 自定义充值 -->
+    <div class="mt-6 rounded-xl border border-border bg-card p-6">
+      <div class="flex items-start gap-3">
+        <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-500/10 text-blue-500">
+          <CreditCard class="h-5 w-5" aria-hidden="true" />
+        </div>
+        <div class="flex-1">
+          <h2 class="text-lg font-semibold tracking-tight">自定义充值</h2>
+          <p class="mt-1 text-sm text-muted-foreground">1 元 = 100 算力，输入任意金额自助充值</p>
+        </div>
+      </div>
+      <div class="mt-4 flex flex-col gap-3 sm:flex-row sm:items-end">
+        <div class="flex-1">
+          <label for="custom-recharge-amount" class="mb-1.5 block text-sm font-medium text-muted-foreground">充值金额（元）</label>
+          <div class="relative">
+            <span class="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">¥</span>
+            <input
+              id="custom-recharge-amount"
+              v-model="customAmount"
+              type="number"
+              min="0.01"
+              max="9999.99"
+              step="0.01"
+              placeholder="例如 10"
+              class="w-full rounded-lg border border-border bg-background py-2.5 pl-8 pr-4 text-sm outline-none transition-colors placeholder:text-muted-foreground/50 focus:border-primary/50 focus:ring-1 focus:ring-primary/30"
+            />
+          </div>
+        </div>
+        <div class="flex items-center gap-2 rounded-lg bg-secondary/50 px-4 py-2.5 text-sm">
+          <span class="text-muted-foreground">预计获得</span>
+          <span class="font-semibold text-primary">{{ customCredits.toLocaleString() }} 算力</span>
+        </div>
+        <button
+          type="button"
+          class="inline-flex h-[42px] shrink-0 items-center justify-center gap-2 rounded-lg bg-primary px-6 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+          :disabled="!customAmount || parseFloat(customAmount) < 0.01"
+          @click="openCustomPaymentChoice"
+        >
+          立即充值
+        </button>
       </div>
     </div>
 

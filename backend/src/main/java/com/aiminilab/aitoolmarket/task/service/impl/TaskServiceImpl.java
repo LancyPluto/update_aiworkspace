@@ -30,6 +30,8 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.UUID;
 
 @Service
@@ -201,11 +203,12 @@ public class TaskServiceImpl implements TaskService {
         task.setToolId(tool.getId());
         task.setParamsJson(params.toString());
         task.setIdempotencyKey(clientRequestId);
-        task.setEstimatedCreditCost(chargeTaskCredits ? tool.getEstimatedCreditCost() : 0);
+        int estimatedCredits = chargeTaskCredits ? estimateTaskCredits(tool, modelConfig) : 0;
+        task.setEstimatedCreditCost(estimatedCredits);
 
         Long taskId = taskMapper.insertTask(task);
         if (chargeTaskCredits) {
-            creditService.freeze(userId, CreditSourceType.TASK, taskId, tool.getEstimatedCreditCost());
+            creditService.freeze(userId, CreditSourceType.TASK, taskId, estimatedCredits);
         }
         taskOutboxService.enqueueTaskCreated(taskId);
         return TaskStatusResponse.from(findTask(taskId, userId));
@@ -236,6 +239,22 @@ public class TaskServiceImpl implements TaskService {
         } catch (Exception exception) {
             return objectMapper.createObjectNode();
         }
+    }
+
+    private int estimateTaskCredits(AiTool tool, AgentModelConfig modelConfig) {
+        int toolEstimate = tool.getEstimatedCreditCost() == null ? 0 : Math.max(0, tool.getEstimatedCreditCost());
+        if (modelConfig == null) {
+            return toolEstimate;
+        }
+        String billingUnit = modelConfig.getBillingUnit();
+        if ("PER_CALL".equals(billingUnit) && modelConfig.getUnitPrice() != null) {
+            // PER_CALL: cost = unitPrice × 1.2 / 0.01
+            BigDecimal cost = modelConfig.getUnitPrice().multiply(new BigDecimal("1.20"));
+            int calculated = cost.divide(new BigDecimal("0.01"), 0, RoundingMode.CEILING).intValue();
+            return calculated > 0 ? calculated : toolEstimate;
+        }
+        // TOKEN_PER_M: 无法提前预估 token 数，使用工具上配置的值
+        return toolEstimate;
     }
 
     private String generateTaskNo() {

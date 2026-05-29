@@ -17,6 +17,8 @@ import java.time.LocalDateTime;
 @Service
 public class BillingServiceImpl implements BillingService {
     private static final String BILLING_UNIT_PER_CALL = "PER_CALL";
+    private static final BigDecimal CREDIT_PRICE_CNY = new BigDecimal("0.01");
+    private static final BigDecimal PLATFORM_MARKUP = new BigDecimal("1.20");
 
     private final BillingUsageLogMapper billingUsageLogMapper;
 
@@ -101,10 +103,13 @@ public class BillingServiceImpl implements BillingService {
         log.setBillingUnit(billingUnit);
         log.setBillableUnits(units);
         log.setUnitPrice(unitPrice);
-        log.setCostAmount(costPerMillion(prompt, inputPricePer1m)
+        BigDecimal costAmount = costPerMillion(prompt, inputPricePer1m)
                 .add(costPerMillion(completion, outputPricePer1m))
-                .add(perCallCost(billingUnit, units, unitPrice)));
-        log.setChargedCredits(charged);
+                .add(perCallCost(billingUnit, units, unitPrice));
+        log.setCostAmount(costAmount);
+        int calculatedCredits = costToCredits(costAmount);
+        int finalCredits = calculatedCredits > 0 ? calculatedCredits : charged;
+        log.setChargedCredits(finalCredits);
         log.setCreatedAt(LocalDateTime.now());
         billingUsageLogMapper.insert(log);
     }
@@ -131,6 +136,14 @@ public class BillingServiceImpl implements BillingService {
 
     private int nonNegative(Integer value) {
         return value == null ? 0 : Math.max(0, value);
+    }
+
+    private int costToCredits(BigDecimal costAmount) {
+        if (costAmount == null || costAmount.compareTo(BigDecimal.ZERO) <= 0) {
+            return 0;
+        }
+        BigDecimal customerCharge = costAmount.multiply(PLATFORM_MARKUP);
+        return customerCharge.divide(CREDIT_PRICE_CNY, 0, RoundingMode.CEILING).intValue();
     }
 
     private String clean(String value) {

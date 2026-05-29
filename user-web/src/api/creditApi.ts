@@ -31,6 +31,16 @@ export async function createRechargeOrder(
   })
 }
 
+export async function createCustomRechargeOrder(
+  body: { amount: number; paymentChannel?: string; clientRequestId?: string },
+  options?: { token?: string | null },
+): Promise<RechargeOrder> {
+  return apiRequest<RechargeOrder>("POST", "/api/v1/credits/recharge-orders/custom", {
+    token: options?.token,
+    body,
+  })
+}
+
 export async function fetchRechargeOrder(orderId: number, options?: { token?: string | null }): Promise<RechargeOrder> {
   return apiRequest<RechargeOrder>("GET", `/api/v1/credits/recharge-orders/${orderId}`, { token: options?.token })
 }
