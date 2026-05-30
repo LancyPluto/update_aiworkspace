@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, watch } from "vue"
-import { RouterLink, useRouter } from "vue-router"
+import { RouterLink, useRoute, useRouter } from "vue-router"
 import { ArrowLeft, ChevronRight, Info, Loader2, Sparkles, Zap } from "lucide-vue-next"
 import AppShell from "@/components/AppShell.vue"
 import DynamicForm from "@/components/DynamicForm/DynamicForm.vue"
@@ -17,6 +17,7 @@ const props = defineProps<{
 }>()
 
 const router = useRouter()
+const route = useRoute()
 const auth = useAuthStore()
 
 const tool = ref<ToolDetail | null>(null)
@@ -80,10 +81,23 @@ function isVideoPreviewUrl(value?: string | null): boolean {
   return [".mp4", ".webm", ".mov", ".m4v"].some((ext) => raw.endsWith(ext))
 }
 
+function applyCommunityPromptPreset() {
+  const prompt = typeof route.query.prompt === "string" ? route.query.prompt.trim() : ""
+  if (!prompt || !tool.value?.fields?.length) return
+  const target =
+    tool.value.fields.find((field) => ["prompt", "description", "text", "content", "message"].includes(field.fieldKey.toLowerCase())) ||
+    tool.value.fields.find((field) => field.fieldType === "textarea") ||
+    tool.value.fields.find((field) => field.fieldType === "text")
+  if (target && formValues.value[target.fieldKey] === undefined) {
+    formValues.value = { ...formValues.value, [target.fieldKey]: prompt }
+  }
+}
+
 onMounted(async () => {
   try {
     tool.value = await fetchToolByCode(props.id, { token: auth.token })
     formValues.value = {}
+    applyCommunityPromptPreset()
   } catch (e) {
     pageError.value = (e as Error).message || "加载工具详情失败"
   } finally {

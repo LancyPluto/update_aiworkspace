@@ -10,6 +10,8 @@ TOOL_KEYWORDS: dict[str, tuple[str, ...]] = {
     "product_title_optimizer": ("商品标题", "标题优化", "电商标题"),
     "wechat_longform_generator": ("公众号", "微信长文", "长文"),
     "social_media_comment_insights_agent": ("社交媒体评论", "小红书评论", "抖音评论", "评论分析", "用户洞察", "产品建议"),
+    "ofox_gpt_image2": ("图片生成", "文生图", "生图", "写真", "照片", "产品照", "商品主图", "老照片", "海报", "插画"),
+    "kling_image_to_video": ("视频生成", "文生视频", "图生视频", "短视频", "宣传片", "成片", "转场视频"),
 }
 
 
@@ -93,7 +95,7 @@ def _score_modality_intent(text: str, tool: ToolDescriptor) -> tuple[int, set[st
         bonus = 2 if _has_any(combined, ("图片生成", "生图", "文生图", "image_generation")) else 0
         return 7 + bonus, {"image_intent"}
     if requested_modality == "video" and tool_supports_modality(tool, "video", combined):
-        bonus = 2 if _has_any(combined, ("视频生成", "文生视频", "video_generation")) else 0
+        bonus = 2 if _has_any(combined, ("视频生成", "文生视频", "图生视频", "video_generation")) else 0
         return 7 + bonus, {"video_intent"}
     if requested_modality == "audio" and tool_supports_modality(tool, "audio", combined):
         bonus = 2 if _has_any(combined, ("语音合成", "配音", "text_to_speech")) else 0
@@ -103,13 +105,35 @@ def _score_modality_intent(text: str, tool: ToolDescriptor) -> tuple[int, set[st
 
 def requested_output_modality(message: str) -> str | None:
     text = message.lower()
+    # Video wins over image when both "画面/图片" and "视频/成片" appear.
+    if _has_any(text, ("视频", "短视频", "成片", "宣传片", "转场视频", "生成一段", "生成一个视频", "图生视频", "文生视频")):
+        return "video"
     if _has_any(text, (
-        "图片", "图像", "照片", "写真", "写真照", "海报", "插画", "画面", "生成一张", "来一张",
-        "拍摄", "摄影", "远景", "近景", "全身", "半身", "cos", "cosplay", "角色照", "剧照",
+        "图片",
+        "图像",
+        "照片",
+        "写真",
+        "写真照",
+        "老照片",
+        "产品照",
+        "商品主图",
+        "海报",
+        "插画",
+        "画面",
+        "生成一张",
+        "来一张",
+        "拍摄",
+        "摄影",
+        "远景",
+        "近景",
+        "全身",
+        "半身",
+        "cos",
+        "cosplay",
+        "角色照",
+        "剧照",
     )):
         return "image"
-    if _has_any(text, ("视频", "短视频", "成片", "生成一段", "生成一个视频")):
-        return "video"
     if _has_any(text, ("语音", "配音", "朗读", "音频", "声音")):
         return "audio"
     return None
@@ -119,11 +143,36 @@ def tool_supports_modality(tool: ToolDescriptor, modality: str, combined_text: s
     combined = combined_text if combined_text is not None else " ".join(_phrases(tool)).lower()
     if modality == "image":
         return _has_any(combined, (
-            "image_generation", "image", "photo", "picture", "图片", "图像", "生图", "文生图",
-            "写真", "海报", "插画", "照片", "摄影", "拍摄",
+            "image_generation",
+            "image",
+            "photo",
+            "picture",
+            "图片",
+            "图像",
+            "生图",
+            "文生图",
+            "写真",
+            "海报",
+            "插画",
+            "照片",
+            "产品照",
+            "商品主图",
+            "老照片",
+            "摄影",
+            "拍摄",
         ))
     if modality == "video":
-        return _has_any(combined, ("video_generation", "video", "视频", "短视频", "成片", "生视频", "文生视频"))
+        return _has_any(combined, (
+            "video_generation",
+            "video",
+            "视频",
+            "短视频",
+            "成片",
+            "宣传片",
+            "生视频",
+            "文生视频",
+            "图生视频",
+        ))
     if modality == "audio":
         return _has_any(combined, ("text_to_speech", "speech", "tts", "语音", "配音", "朗读", "音频"))
     return False

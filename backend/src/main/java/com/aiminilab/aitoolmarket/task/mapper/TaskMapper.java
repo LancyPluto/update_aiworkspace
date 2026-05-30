@@ -133,6 +133,9 @@ public interface TaskMapper extends BaseMapper<AiTask> {
             <if test="userId != null">
               AND t.user_id = #{userId}
             </if>
+            <if test="taskId != null">
+              AND t.id = #{taskId}
+            </if>
             ORDER BY t.id DESC
             LIMIT #{limit} OFFSET #{offset}
             </script>
@@ -140,6 +143,7 @@ public interface TaskMapper extends BaseMapper<AiTask> {
     List<AiTask> findForAdmin(@Param("status") String status,
                               @Param("toolCode") String toolCode,
                               @Param("userId") Long userId,
+                              @Param("taskId") Long taskId,
                               @Param("limit") int limit,
                               @Param("offset") int offset);
 
@@ -158,11 +162,15 @@ public interface TaskMapper extends BaseMapper<AiTask> {
             <if test="userId != null">
               AND t.user_id = #{userId}
             </if>
+            <if test="taskId != null">
+              AND t.id = #{taskId}
+            </if>
             </script>
             """)
     long countForAdmin(@Param("status") String status,
                        @Param("toolCode") String toolCode,
-                       @Param("userId") Long userId);
+                       @Param("userId") Long userId,
+                       @Param("taskId") Long taskId);
 
     @Select("""
             SELECT resource_type, content_text

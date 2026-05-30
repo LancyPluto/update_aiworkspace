@@ -2,10 +2,12 @@ package com.aiminilab.aitoolmarket.admin.controller;
 
 import com.aiminilab.aitoolmarket.admin.dto.UpdateSettingsRequest;
 import com.aiminilab.aitoolmarket.admin.service.SystemSettingService;
+import com.aiminilab.aitoolmarket.auth.security.AuthContext;
 import com.aiminilab.aitoolmarket.common.dto.ApiResponse;
 import jakarta.validation.Valid;
 import com.aiminilab.aitoolmarket.admin.dto.CustomerServiceQrUploadResponse;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -33,7 +35,17 @@ public class AdminSettingController {
 
     @PutMapping
     public ApiResponse<Map<String, String>> update(@Valid @RequestBody UpdateSettingsRequest request) {
-        return ApiResponse.success(systemSettingService.updateSettings(request.settings()));
+        return ApiResponse.success(systemSettingService.updateSettings(request.settings(), AuthContext.get().userId()));
+    }
+
+    @GetMapping("/{key}/versions")
+    public ApiResponse<?> versions(@PathVariable String key) {
+        return ApiResponse.success(systemSettingService.settingVersions(key));
+    }
+
+    @PostMapping("/{key}/restore-default")
+    public ApiResponse<Map<String, String>> restoreDefault(@PathVariable String key) {
+        return ApiResponse.success(systemSettingService.restoreDefault(key, AuthContext.get().userId()));
     }
 
     @PostMapping("/customer-service/qr-upload")

@@ -566,6 +566,60 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+    patch:
+      tags: [UserAuth]
+      summary: Update current user profile
+      operationId: updateCurrentUserProfile
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateUserProfileRequest"
+      responses:
+        "200":
+          description: Updated profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProfileApiResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/users/me/avatar:
+    post:
+      tags: [UserAuth]
+      summary: Upload current user avatar
+      operationId: uploadCurrentUserAvatar
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        "200":
+          description: Uploaded avatar
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserAvatarUploadApiResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
   /api/admin/v1/auth/login:
     post:
       tags: [AdminAuth]
@@ -2031,6 +2085,10 @@ components:
           type: string
           nullable: true
           example: User One
+        avatarUrl:
+          type: string
+          nullable: true
+          example: /generated/avatars/2/avatar.png
         userType:
           type: string
           enum: [USER, ADMIN]
@@ -2045,6 +2103,34 @@ components:
         email:
           type: string
           nullable: true
+
+    UpdateUserProfileRequest:
+      type: object
+      properties:
+        nickname:
+          type: string
+          nullable: true
+          maxLength: 40
+        avatarUrl:
+          type: string
+          nullable: true
+
+    UserAvatarUploadApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponse"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/UserAvatarUploadResult"
+
+    UserAvatarUploadResult:
+      type: object
+      properties:
+        avatarUrl:
+          type: string
+          example: /generated/avatars/2/avatar.png
+        user:
+          $ref: "#/components/schemas/UserProfile"
 
     ToolStatus:
       type: string

@@ -12,6 +12,7 @@ public class AgentToolCall {
     private Long runId;
     private Long userId;
     private String toolCode;
+    private Long taskId;
     private String status;
     private String argumentsJson;
     private String resultJson;
@@ -29,6 +30,8 @@ public class AgentToolCall {
     public void setUserId(Long userId) { this.userId = userId; }
     public String getToolCode() { return toolCode; }
     public void setToolCode(String toolCode) { this.toolCode = toolCode; }
+    public Long getTaskId() { return taskId; }
+    public void setTaskId(Long taskId) { this.taskId = taskId; }
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
     public String getArgumentsJson() { return argumentsJson; }

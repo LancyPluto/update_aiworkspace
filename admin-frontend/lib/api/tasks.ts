@@ -11,6 +11,7 @@ export function fetchAdminTasks(query: AdminTaskQuery = {}) {
     status: query.status,
     toolCode: query.toolCode,
     userId: query.userId,
+    taskId: query.taskId,
   })
 }
 

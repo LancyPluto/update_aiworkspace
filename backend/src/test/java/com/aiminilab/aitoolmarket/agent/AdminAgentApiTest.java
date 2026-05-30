@@ -1,6 +1,7 @@
 package com.aiminilab.aitoolmarket.agent;
 
 import com.aiminilab.aitoolmarket.agent.client.AgentServiceClient;
+import com.aiminilab.aitoolmarket.agent.dto.AdminAgentRouteDebugResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AgentModelConfigTestResponse;
 import com.aiminilab.aitoolmarket.agent.service.AgentRateLimitService;
 import com.aiminilab.aitoolmarket.auth.security.InternalRequestSignatureVerifier;
@@ -14,6 +15,8 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
+
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static com.aiminilab.aitoolmarket.testsupport.InternalApiTestSupport.signed;
@@ -65,6 +68,7 @@ class AdminAgentApiTest {
         Long sessionId = createSession(userToken, "Admin Observability");
         Long runId = sendMessage(userToken, sessionId, "Recommend a writing tool.");
         Long toolCallId = createToolCall(runId);
+        bindToolCallTask(toolCallId, 9101L);
 
         mockMvc.perform(get("/api/admin/v1/agent/runs")
                         .param("status", "RUNNING")
@@ -76,6 +80,13 @@ class AdminAgentApiTest {
                 .andExpect(jsonPath("$.data.list[0].status").value("RUNNING"))
                 .andExpect(jsonPath("$.data.list[0].eventCount").value(2))
                 .andExpect(jsonPath("$.data.list[0].toolCallCount").value(1));
+
+        mockMvc.perform(get("/api/admin/v1/agent/runs")
+                        .param("taskId", "9101")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(1))
+                .andExpect(jsonPath("$.data.list[0].id").value(runId.intValue()));
 
         mockMvc.perform(get("/api/admin/v1/agent/runs/stats")
                         .header("Authorization", "Bearer " + adminToken))
@@ -90,6 +101,7 @@ class AdminAgentApiTest {
                 .andExpect(jsonPath("$.data.run.id").value(runId.intValue()))
                 .andExpect(jsonPath("$.data.events[0].eventType").value("run.started"))
                 .andExpect(jsonPath("$.data.toolCalls[0].id").value(toolCallId.intValue()))
+                .andExpect(jsonPath("$.data.toolCalls[0].taskId").value(9101))
                 .andExpect(jsonPath("$.data.toolCalls[0].toolCode").value("xiaohongshu_copywriting"));
 
         mockMvc.perform(post("/api/admin/v1/agent/runs/{runId}/cancel", runId)
@@ -167,6 +179,52 @@ class AdminAgentApiTest {
                         .content(body))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("AGENT_TOOL_NOT_AVAILABLE"));
+    }
+
+    @Test
+    void adminCanBulkUpdateAgentToolAccessAndDebugRoute() throws Exception {
+        mockExternalAuthDependencies();
+        String adminToken = login("/api/admin/v1/auth/login", "admin");
+        Long imageToolId = createTool(adminToken, "debug_image_tool");
+        Long videoToolId = createTool(adminToken, "debug_video_tool");
+        publishTool(adminToken, imageToolId);
+        publishTool(adminToken, videoToolId);
+        Mockito.when(agentServiceClient.debugRoute(any())).thenReturn(new AdminAgentRouteDebugResponse(
+                "tool_use",
+                0.95,
+                "debug_image_tool",
+                List.of("debug_image_tool"),
+                null,
+                "llm_router",
+                "image request",
+                "image",
+                1,
+                List.of(new AdminAgentRouteDebugResponse.RouteDebugToolResponse("debug_image_tool", "debug_image_tool", true)),
+                List.of()
+        ));
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put("/api/admin/v1/agent/tools/bulk-access")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "toolCodes": ["debug_video_tool"],
+                                  "agentEnabled": false
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.updatedTools[0].toolCode").value("debug_video_tool"))
+                .andExpect(jsonPath("$.data.updatedTools[0].agentEnabled").value(false))
+                .andExpect(jsonPath("$.data.failedToolCodes.length()").value(0));
+
+        mockMvc.perform(post("/api/admin/v1/agent/tools/route-debug")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"message\":\"生成一张老照片\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.selectedToolCode").value("debug_image_tool"))
+                .andExpect(jsonPath("$.data.visibleTools[0].toolCode").value("debug_image_tool"))
+                .andExpect(jsonPath("$.data.filteredTools[?(@.toolCode=='debug_video_tool')].reason").isNotEmpty());
     }
 
     @Test
@@ -517,5 +575,18 @@ class AdminAgentApiTest {
                 .getResponse()
                 .getContentAsString();
         return Long.parseLong(response.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
+    }
+
+    private void bindToolCallTask(Long toolCallId, Long taskId) throws Exception {
+        String body = """
+                {
+                  "taskId": %d
+                }
+                """.formatted(taskId);
+        mockMvc.perform(signed(post("/api/internal/v1/agent/tool-calls/{toolCallId}/task", toolCallId), "POST",
+                        "/api/internal/v1/agent/tool-calls/%d/task".formatted(toolCallId), body)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk());
     }
 }

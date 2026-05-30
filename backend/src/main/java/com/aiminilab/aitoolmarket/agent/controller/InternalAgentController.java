@@ -5,6 +5,7 @@ import com.aiminilab.aitoolmarket.agent.dto.AgentRunEventResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AgentRunResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AgentToolCallResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AgentWorkspaceMemoryItemResponse;
+import com.aiminilab.aitoolmarket.agent.dto.BindAgentToolCallTaskRequest;
 import com.aiminilab.aitoolmarket.agent.dto.CompleteAgentRunRequest;
 import com.aiminilab.aitoolmarket.agent.dto.CompleteAgentToolCallRequest;
 import com.aiminilab.aitoolmarket.agent.dto.CreateAgentArtifactRequest;
@@ -140,6 +141,12 @@ public class InternalAgentController {
     public ApiResponse<AgentToolCallResponse> createToolCall(@PathVariable Long runId,
                                                              @Valid @RequestBody CreateAgentToolCallRequest request) {
         return ApiResponse.success(agentRunService.createToolCall(runId, request));
+    }
+
+    @PostMapping("/tool-calls/{toolCallId}/task")
+    public ApiResponse<AgentToolCallResponse> bindToolCallTask(@PathVariable Long toolCallId,
+                                                               @Valid @RequestBody BindAgentToolCallTaskRequest request) {
+        return ApiResponse.success(agentRunService.bindToolCallTask(toolCallId, request));
     }
 
     @PostMapping("/tool-calls/{toolCallId}/complete")

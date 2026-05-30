@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import re
 import time
 from typing import Any
@@ -10,8 +11,13 @@ from app.core.schemas import ChatMessage, RunContext, RunEventCreate, TaskCreate
 from app.tools.stream_preview import extract_stream_preview
 
 
+logger = logging.getLogger(__name__)
+
+
 class ToolExecutionError(RuntimeError):
-    pass
+    def __init__(self, message: str, error_code: str | None = None) -> None:
+        super().__init__(message)
+        self.error_code = error_code
 
 
 class BackendToolBridge:
@@ -142,12 +148,33 @@ class BackendToolBridge:
                 )
             )
             task_id = task.taskId
+            bind_error: str | None = None
+            try:
+                await self.backend.bind_tool_call_task(call.id, task.taskId)
+            except Exception as exc:
+                bind_error = f"{type(exc).__name__}: {exc}"
+                logger.warning(
+                    "failed to bind agent tool call to task; continuing tool execution runId=%s toolCallId=%s taskId=%s",
+                    context.runId,
+                    call.id,
+                    task.taskId,
+                    exc_info=True,
+                )
+            event_json: dict[str, Any] = {
+                "toolCode": tool.toolCode,
+                "toolCallId": call.id,
+                "taskId": task.taskId,
+                "status": task.status,
+            }
+            if bind_error is not None:
+                event_json["bindStatus"] = "FAILED"
+                event_json["bindError"] = bind_error
             await self.backend.append_event(
                 context.runId,
                 RunEventCreate(
                     eventType=TOOL_TASK_DISPATCHED,
                     eventText=f"Tool {tool.toolCode} task dispatched",
-                    eventJson={"toolCode": tool.toolCode, "toolCallId": call.id, "taskId": task.taskId, "status": task.status},
+                    eventJson=event_json,
                 ),
             )
             task_detail = await self._wait_for_task(context, tool.toolCode, task.taskId)
@@ -157,6 +184,8 @@ class BackendToolBridge:
             await self.backend.fail_tool_call(call.id, ToolCallFail(errorCode="TOOL_TASK_FAILED", errorMessage=str(exc)))
             raise
         except Exception as exc:
+            if task_id is not None:
+                await self._cancel_task(context.userId, task_id)
             message = _format_tool_error(tool.toolCode, task_id, None, None, f"{type(exc).__name__}: {exc}")
             await self.backend.fail_tool_call(call.id, ToolCallFail(errorCode="TOOL_TASK_FAILED", errorMessage=message))
             raise
@@ -164,7 +193,7 @@ class BackendToolBridge:
             error_code = task_detail.errorCode or f"TASK_{task_detail.status}"
             error_message = _format_task_failure(tool.toolCode, task_detail)
             await self.backend.fail_tool_call(call.id, ToolCallFail(errorCode=error_code, errorMessage=error_message))
-            raise ToolExecutionError(error_message)
+            raise ToolExecutionError(error_message, error_code=error_code)
         content_text = task_detail.result.contentText if task_detail.result is not None else ""
         agent_content_text = _agent_visible_content(tool.toolCode, content_text)
         result = _tool_result(
@@ -429,6 +458,7 @@ def _tool_result(
     content_text: str | None,
     resource_type: str | None,
 ) -> dict[str, Any]:
+    safe_content_text = _sanitize_media_payload_text(content_text)
     return {
         "success": True,
         "toolCode": tool_code,
@@ -436,17 +466,17 @@ def _tool_result(
         "taskId": task_id,
         "status": task_status,
         "arguments": arguments,
-        "resultSummary": content_text or "",
+        "resultSummary": safe_content_text,
         "data": {
             "resourceType": resource_type,
-            "contentText": content_text or "",
+            "contentText": safe_content_text,
         },
-        "summary": content_text or "",
+        "summary": safe_content_text,
     }
 
 
 def _agent_visible_content(tool_code: str, content_text: str | None) -> str:
-    text = content_text or ""
+    text = _sanitize_media_payload_text(content_text)
     if tool_code != "digital_human_agent" or not text.strip():
         return text
 
@@ -496,6 +526,24 @@ def _limit_text(value: str, max_length: int) -> str:
     if len(value) <= max_length:
         return value
     return value[: max(0, max_length - 16)] + "...[truncated]"
+
+
+def _sanitize_media_payload_text(value: str | None, max_length: int = 12000) -> str:
+    if not value:
+        return ""
+    text = re.sub(
+        r"data:[^\s\"']+;base64,[A-Za-z0-9+/=\r\n]+",
+        "[inline-media-base64-omitted]",
+        value,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(
+        r'"b64_json"\s*:\s*"[A-Za-z0-9+/=\r\n]+"',
+        '"b64_json":"[inline-media-base64-omitted]"',
+        text,
+        flags=re.IGNORECASE,
+    )
+    return _limit_text(text, max_length)
 
 
 def _first_match(text: str, pattern: str) -> str:

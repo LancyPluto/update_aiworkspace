@@ -19,6 +19,7 @@ from app.core.schemas import (
     ToolCallCreate,
     ToolCallFail,
     ToolCallResponse,
+    ToolCallTaskBind,
     WorkspaceMemoryItem,
 )
 from app.observability.trace import TRACE_ID_HEADER, current_trace_id
@@ -109,6 +110,14 @@ class BackendClient:
 
     async def create_tool_call(self, run_id: int, request: ToolCallCreate) -> ToolCallResponse:
         data = await self._request("POST", f"/api/internal/v1/agent/runs/{run_id}/tool-calls", request)
+        return ToolCallResponse.model_validate(data)
+
+    async def bind_tool_call_task(self, tool_call_id: int, task_id: int) -> ToolCallResponse:
+        data = await self._request(
+            "POST",
+            f"/api/internal/v1/agent/tool-calls/{tool_call_id}/task",
+            ToolCallTaskBind(taskId=task_id),
+        )
         return ToolCallResponse.model_validate(data)
 
     async def complete_tool_call(self, tool_call_id: int, request: ToolCallComplete) -> None:

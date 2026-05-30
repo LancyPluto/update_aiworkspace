@@ -22,6 +22,10 @@ class FakeBackend:
     async def complete_tool_call(self, tool_call_id, request):
         self.tool_calls.append(("complete", tool_call_id, request.resultJson))
 
+    async def bind_tool_call_task(self, tool_call_id, task_id):
+        self.tool_calls.append(("bind_task", tool_call_id, task_id))
+        return type("ToolCall", (), {"id": tool_call_id, "taskId": task_id})()
+
     async def fail_tool_call(self, tool_call_id, request):
         self.tool_calls.append(("fail", tool_call_id, request.errorCode, request.errorMessage))
 
@@ -84,6 +88,45 @@ def test_prompt_guard_detects_secret_extraction_request():
 
     assert result.rejected is True
     assert result.error_code == "AGENT_SECURITY_REJECTED"
+
+
+@pytest.mark.asyncio
+async def test_recent_generation_tool_question_answers_from_context_without_calling_tool():
+    backend = FakeBackend()
+    engine = DeepAgentsRuntimeEngine(backend, FakeModel("should not be used"))
+    context = RunContext(
+        runId=10,
+        sessionId=1,
+        userId=1,
+        message="你刚刚用什么生成的？？",
+        history=[
+            {"role": "user", "content": "生成一张18年一家人除夕夜合影的老照片"},
+            {"role": "assistant", "content": "已使用「ofox_gpt_image2」生成图片，生成结果如下。"},
+        ],
+        availableTools=[
+            ToolDescriptor(
+                toolCode="ofox_gpt_image2",
+                toolName="GPT-image2.0",
+                description="图片生成",
+                autoCallable=True,
+            ),
+            ToolDescriptor(
+                toolCode="deepseek_text",
+                toolName="文本生成-DeepSeek-V4-flash",
+                description="文本生成",
+                autoCallable=True,
+            ),
+        ],
+        creditBudget=20,
+    )
+
+    await engine.run(context)
+
+    assert backend.tool_calls == []
+    assert backend.failed == []
+    assert backend.completed[0][2] == "general_chat"
+    assert "ofox_gpt_image2" in backend.completed[0][1] or "GPT-image2.0" in backend.completed[0][1]
+    assert "不是当前对话模型自己生成" in backend.completed[0][1]
 
 
 @pytest.mark.asyncio

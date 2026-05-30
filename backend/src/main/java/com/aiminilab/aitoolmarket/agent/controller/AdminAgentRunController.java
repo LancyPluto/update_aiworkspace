@@ -27,9 +27,10 @@ public class AdminAgentRunController {
     @GetMapping
     public ApiResponse<PageResponse<AdminAgentRunListItemResponse>> list(@RequestParam(required = false) String status,
                                                                          @RequestParam(required = false) Long userId,
+                                                                         @RequestParam(required = false) Long taskId,
                                                                          @RequestParam(required = false) Integer pageNo,
                                                                          @RequestParam(required = false) Integer pageSize) {
-        return ApiResponse.success(adminAgentRunService.list(status, userId, pageNo, pageSize));
+        return ApiResponse.success(adminAgentRunService.list(status, userId, taskId, pageNo, pageSize));
     }
 
     @GetMapping("/stats")

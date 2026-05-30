@@ -100,6 +100,14 @@ class ContextWindow(BaseModel):
     snapshotJson: str | None = None
 
 
+class MemorySettings(BaseModel):
+    autoSaveEnabled: bool = True
+    retrievalLimit: int = 6
+    enabledTypes: list[str] = Field(default_factory=lambda: ["user_profile", "project_knowledge", "custom"])
+    writePrompt: str | None = None
+    retrievalPrompt: str | None = None
+
+
 class PendingToolContext(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -135,6 +143,7 @@ class RunContext(BaseModel):
     modelConfig: AgentModelConfig | None = None
     agentSystemPrompt: str | None = None
     deepAgentsSystemPrompt: str | None = None
+    memorySettings: MemorySettings | None = None
     pendingToolContext: PendingToolContext | None = Field(default=None, validation_alias=AliasChoices("pendingToolContext", "pending_tool_context"))
 
 
@@ -184,10 +193,34 @@ class ToolCallFail(BaseModel):
     errorMessage: str
 
 
+class ToolCallTaskBind(BaseModel):
+    taskId: int
+
+
+class AgentRouteDebugTool(BaseModel):
+    toolCode: str
+    toolName: str = ""
+    autoCallable: bool = False
+
+
+class AgentRouteDebugResponse(BaseModel):
+    intent: str
+    confidence: float
+    selectedToolCode: str | None = None
+    candidateToolCodes: list[str] = Field(default_factory=list)
+    clarifyingQuestion: str | None = None
+    decisionSource: str
+    reason: str
+    requestedOutputModality: str | None = None
+    visibleToolCount: int = 0
+    visibleTools: list[AgentRouteDebugTool] = Field(default_factory=list)
+
+
 class ToolCallResponse(BaseModel):
     id: int
     runId: int | None = None
     toolCode: str
+    taskId: int | None = None
     status: str | None = None
     argumentsJson: str | dict[str, Any] | None = None
     resultJson: str | dict[str, Any] | None = None

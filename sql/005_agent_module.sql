@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS agent_messages (
   run_id BIGINT NULL,
   status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE' COMMENT 'ACTIVE|SUPERSEDED',
   superseded_at DATETIME NULL,
+  edited_at DATETIME NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   KEY idx_agent_messages_session_id (session_id, id),
   KEY idx_agent_messages_user_id (user_id, id),
@@ -41,7 +42,7 @@ CREATE TABLE IF NOT EXISTS agent_runs (
   estimated_credits INT NOT NULL DEFAULT 0,
   consumed_credits INT NOT NULL DEFAULT 0,
   error_code VARCHAR(64) NULL,
-  error_message VARCHAR(512) NULL,
+  error_message TEXT NULL,
   started_at DATETIME NULL,
   finished_at DATETIME NULL,
   parent_run_id BIGINT NULL,
@@ -51,6 +52,7 @@ CREATE TABLE IF NOT EXISTS agent_runs (
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   KEY idx_agent_runs_user_created (user_id, created_at),
   KEY idx_agent_runs_session_created (session_id, created_at),
+  KEY idx_agent_runs_session_user_id (session_id, user_id, id),
   KEY idx_agent_runs_status (status),
   UNIQUE KEY uk_agent_runs_user_client (user_id, client_request_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -72,15 +74,18 @@ CREATE TABLE IF NOT EXISTS agent_tool_calls (
   run_id BIGINT NOT NULL,
   user_id BIGINT NOT NULL,
   tool_code VARCHAR(128) NOT NULL,
+  task_id BIGINT NULL,
   status VARCHAR(32) NOT NULL,
   arguments_json JSON NOT NULL,
   result_json JSON NULL,
   error_code VARCHAR(64) NULL,
-  error_message VARCHAR(512) NULL,
+  error_message TEXT NULL,
   started_at DATETIME NULL,
   finished_at DATETIME NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   KEY idx_agent_tool_calls_run_id (run_id),
   KEY idx_agent_tool_calls_user_id (user_id, id),
-  KEY idx_agent_tool_calls_tool_code (tool_code)
+  KEY idx_agent_tool_calls_context_recent (user_id, status, id),
+  KEY idx_agent_tool_calls_tool_code (tool_code),
+  KEY idx_agent_tool_calls_task_id (task_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

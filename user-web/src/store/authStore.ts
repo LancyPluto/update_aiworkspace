@@ -8,6 +8,9 @@ import {
   register as apiRegister,
   smsLogin as apiSmsLogin,
   smsRegister as apiSmsRegister,
+  updateCurrentUserProfile,
+  updateCommunitySettings,
+  uploadCurrentUserAvatar,
 } from "@/api"
 import { SESSION_TOKEN_STORAGE_KEY } from "@/constants/authStorage"
 import { clearSessionBearerJwt, setSessionBearerJwt } from "@/api/sessionBearer"
@@ -80,6 +83,35 @@ export const useAuthStore = defineStore("auth", () => {
     }
   }
 
+  function setUserProfile(profile: UserProfile) {
+    user.value = profile
+  }
+
+  async function updateProfile(body: { nickname?: string; avatarUrl?: string | null }) {
+    if (!token.value) throw new Error("请先登录")
+    const profile = await updateCurrentUserProfile(body, { token: token.value })
+    user.value = profile
+    return profile
+  }
+
+  async function updateCommunityProfile(body: {
+    bio?: string | null
+    autoPublishAssets?: boolean
+    promptPublicByDefault?: boolean
+  }) {
+    if (!token.value) throw new Error("请先登录")
+    const profile = await updateCommunitySettings(body, { token: token.value })
+    user.value = profile
+    return profile
+  }
+
+  async function uploadAvatar(file: File) {
+    if (!token.value) throw new Error("请先登录")
+    const response = await uploadCurrentUserAvatar(file, { token: token.value })
+    user.value = response.user
+    return response
+  }
+
   async function logout() {
     if (token.value) {
       try {
@@ -136,6 +168,10 @@ export const useAuthStore = defineStore("auth", () => {
     smsLogin,
     logout,
     fetchCurrentUser,
+    setUserProfile,
+    updateProfile,
+    updateCommunityProfile,
+    uploadAvatar,
     init,
   }
 })

@@ -31,6 +31,7 @@ import { fetchCreditAccount } from "@/api/creditApi"
 import { ApiBusinessError, getApiOrigin } from "@/api/client"
 import { fetchAIToolById } from "@/api/aiToolApi"
 import { createTask, deleteTask, fetchTaskById, fetchTasks, fetchTaskStatus, regenerateTask } from "@/api/taskApi"
+import { publishCommunityPost, unpublishCommunityPost } from "@/api/communityApi"
 import { fetchTools } from "@/api/toolApi"
 import type { AITool } from "@/api/aiToolTypes"
 import type { CreditAccount, TaskDetail, TaskStatus, ToolField, ToolSummary } from "@/api/types"
@@ -39,6 +40,7 @@ import type { ResultBlock } from "@/types/result"
 import { userRoutes } from "@/router/userRoutes"
 import { useAuthStore } from "@/store/authStore"
 import { buildTaskResultBlocks } from "@/utils/taskResultBlocks"
+import { consumeDashboardPendingAsset } from "@/utils/assetReplay"
 import { cleanToolDisplayText, toolDisplayDescription } from "@/utils/toolDisplayText"
 import { randomUUID } from "@/utils/randomUUID"
 
@@ -75,7 +77,6 @@ const retryingTaskIds = ref<Set<number>>(new Set())
 const deletingTaskIds = ref<Set<number>>(new Set())
 const previewAsset = ref<AssetPreviewItem | null>(null)
 const pendingAssetReplay = ref<AssetPreviewItem | null>(null)
-const pendingAssetStorageKey = "dashboard_pending_asset"
 
 const modalityLabels: Record<string, string> = {
   IMAGE: "图像",
@@ -729,20 +730,42 @@ function buildAssetReplayParams(fields: ToolField[], asset: AssetPreviewItem): R
 }
 
 function consumePendingAssetFromStorage(): AssetPreviewItem | null {
-  try {
-    const raw = window.sessionStorage.getItem(pendingAssetStorageKey)
-    if (!raw) return null
-    window.sessionStorage.removeItem(pendingAssetStorageKey)
-    const parsed = JSON.parse(raw) as AssetPreviewItem
-    return parsed?.url || parsed?.rawText ? parsed : null
-  } catch {
-    return null
-  }
+  return consumeDashboardPendingAsset()
 }
 
 function openPreviewTask(asset: AssetPreviewItem) {
   if (!asset.taskId) return
   void router.push(userRoutes.taskResult(String(asset.taskId)))
+}
+
+async function publishPreviewAsset(asset: AssetPreviewItem) {
+  if (!auth.token || !asset.taskId) return
+  try {
+    const post = await publishCommunityPost(
+      {
+        taskId: asset.taskId,
+        title: asset.title,
+        description: asset.subtitle || null,
+        promptVisible: asset.promptVisible ?? false,
+      },
+      { token: auth.token },
+    )
+    previewAsset.value = { ...asset, communityPostId: post.id, promptVisible: post.promptVisible }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "发布失败"
+    window.alert(message)
+  }
+}
+
+async function unpublishPreviewAsset(asset: AssetPreviewItem) {
+  if (!auth.token || !asset.communityPostId) return
+  try {
+    await unpublishCommunityPost(asset.communityPostId, { token: auth.token })
+    previewAsset.value = { ...asset, communityPostId: undefined }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "撤回失败"
+    window.alert(message)
+  }
 }
 
 function textPreview(blocks: ResultBlock[], task: TaskDetail): string {
@@ -1422,6 +1445,8 @@ onUnmounted(() => {
         @close="previewAsset = null"
         @use-tool="useAssetWithTool"
         @open-task="openPreviewTask"
+        @publish="publishPreviewAsset"
+        @unpublish="unpublishPreviewAsset"
       />
     </div>
   </AppShell>

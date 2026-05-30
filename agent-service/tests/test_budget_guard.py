@@ -26,6 +26,10 @@ class FakeBackend:
     async def complete_tool_call(self, tool_call_id, request):
         self.tool_calls.append(("complete", tool_call_id, request.resultJson))
 
+    async def bind_tool_call_task(self, tool_call_id, task_id):
+        self.tool_calls.append(("bind_task", tool_call_id, task_id))
+        return type("ToolCall", (), {"id": tool_call_id, "taskId": task_id})()
+
     async def fail_tool_call(self, tool_call_id, request):
         self.tool_calls.append(("fail", tool_call_id, request.errorCode, request.errorMessage))
 
@@ -167,6 +171,7 @@ async def test_confirmed_tool_uses_tool_output_when_summary_model_returns_empty(
 
     await engine.run_confirmed_tool(context, "video_tool")
 
+    assert ("bind_task", 99, 123) in backend.tool_calls
     assert backend.completed == [(9, "# Generated copy", "tool_use")]
     completed_events = [event for event in backend.events if event[1] == "message.completed"]
     assert completed_events[-1][2] == "# Generated copy"
@@ -348,6 +353,49 @@ async def test_llm_router_can_select_tool_when_rule_match_is_weak():
 
     assert ("task", "kling_image_v21", {"userRequest": message}, "agent-run-16-tool-call-99") in backend.tool_calls
     assert not any(call[0] == "task" and call[1] == "deepseek_text_generation" for call in backend.tool_calls)
+    intent_events = [event for event in backend.events if event[1] == "intent.detected"]
+    assert intent_events[-1][3]["decisionSource"] == "llm_router"
+
+
+@pytest.mark.asyncio
+async def test_llm_router_is_primary_for_media_tool_selection():
+    backend = FakeBackend(resource_type="IMAGE", content_text='{"images":[{"url":"/generated/image.png"}]}')
+    router_json = (
+        '{"intent":"tool_use","selectedToolCode":"gpt_image",'
+        '"candidateToolCodes":["gpt_image"],"confidence":0.95,'
+        '"reason":"image_output_request","clarifyingQuestion":null}'
+    )
+    model = FakeModel(response=router_json)
+    engine = DeepAgentsRuntimeEngine(backend, model)
+    message = "生成一张08年一家人除夕夜合影的老照片"
+    context = RunContext(
+        runId=17,
+        sessionId=1,
+        userId=1,
+        message=message,
+        creditBudget=20,
+        availableTools=[
+            ToolDescriptor(
+                toolCode="kling_image_to_video",
+                toolName="可灵生视频V2.6",
+                description="图生视频，视频生成，image_to_video",
+                estimatedCreditCost=5,
+                autoCallable=True,
+            ),
+            ToolDescriptor(
+                toolCode="gpt_image",
+                toolName="GPT-image2.0",
+                description="图片生成，照片生成，文生图，image generation",
+                estimatedCreditCost=3,
+                autoCallable=True,
+            ),
+        ],
+    )
+
+    await engine.run(context)
+
+    assert ("task", "gpt_image", {"userRequest": message}, "agent-run-17-tool-call-99") in backend.tool_calls
+    assert not any(call[0] == "task" and call[1] == "kling_image_to_video" for call in backend.tool_calls)
     intent_events = [event for event in backend.events if event[1] == "intent.detected"]
     assert intent_events[-1][3]["decisionSource"] == "llm_router"
 

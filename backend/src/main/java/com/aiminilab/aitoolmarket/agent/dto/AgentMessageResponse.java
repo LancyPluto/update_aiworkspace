@@ -12,6 +12,7 @@ public record AgentMessageResponse(
         String contentJson,
         Long runId,
         String status,
+        LocalDateTime editedAt,
         LocalDateTime createdAt
 ) {
     public static AgentMessageResponse from(AgentMessage message) {
@@ -23,6 +24,7 @@ public record AgentMessageResponse(
                 message.getContentJson(),
                 message.getRunId(),
                 message.getStatus() == null ? "ACTIVE" : message.getStatus(),
+                message.getEditedAt(),
                 message.getCreatedAt()
         );
     }

@@ -55,7 +55,9 @@ async function withSessionMockFallback<T>(
 
 const FRONTEND_STYLE_PATTERN = /<!-- ai-tool-ui:(.*?) -->/s
 
-function parseFrontendStyle(configNote?: string | null): Pick<AITool, "primaryColor" | "welcomeMessage" | "mediaDisplayMode" | "modelIconUrl"> {
+function parseFrontendStyle(
+  configNote?: string | null,
+): Pick<AITool, "primaryColor" | "welcomeMessage" | "mediaDisplayMode" | "modelIconUrl" | "comparisonOriginalUrl" | "comparisonEffectUrl"> {
   const match = (configNote || "").match(FRONTEND_STYLE_PATTERN)
   if (!match) return {}
 
@@ -65,12 +67,16 @@ function parseFrontendStyle(configNote?: string | null): Pick<AITool, "primaryCo
       welcomeMessage?: unknown
       mediaDisplayMode?: unknown
       modelIconUrl?: unknown
+      comparisonOriginalUrl?: unknown
+      comparisonEffectUrl?: unknown
     }
     return {
       primaryColor: typeof parsed.primaryColor === "string" ? parsed.primaryColor : undefined,
       welcomeMessage: typeof parsed.welcomeMessage === "string" ? parsed.welcomeMessage : undefined,
-      mediaDisplayMode: parsed.mediaDisplayMode === "effect" ? "effect" : "icon",
+      mediaDisplayMode: parsed.mediaDisplayMode === "comparison" ? "comparison" : parsed.mediaDisplayMode === "effect" ? "effect" : "icon",
       modelIconUrl: typeof parsed.modelIconUrl === "string" ? parsed.modelIconUrl : undefined,
+      comparisonOriginalUrl: typeof parsed.comparisonOriginalUrl === "string" ? parsed.comparisonOriginalUrl : undefined,
+      comparisonEffectUrl: typeof parsed.comparisonEffectUrl === "string" ? parsed.comparisonEffectUrl : undefined,
     }
   } catch {
     return {}
@@ -115,6 +121,8 @@ function mapToolSummaryToAITool(tool: ToolSummary | ToolDetail): AITool {
     welcomeMessage: style.welcomeMessage,
     mediaDisplayMode,
     modelIconUrl: style.modelIconUrl,
+    comparisonOriginalUrl: style.comparisonOriginalUrl,
+    comparisonEffectUrl: style.comparisonEffectUrl,
     capabilities: capabilitiesFromTool(tool),
     inputModality: tool.inputModality,
     outputModality: tool.outputModality,

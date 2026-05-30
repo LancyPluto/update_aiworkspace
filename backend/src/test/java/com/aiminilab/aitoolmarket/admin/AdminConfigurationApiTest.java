@@ -108,6 +108,35 @@ class AdminConfigurationApiTest {
     }
 
     @Test
+    void adminSettingPromptVersionsCanBeQueriedAndRestored() throws Exception {
+        String adminToken = loginAdmin();
+
+        mockMvc.perform(put("/api/admin/v1/settings")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "settings": {
+                                    "agent.system_prompt": "custom prompt for test"
+                                  }
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data['agent.system_prompt']").value("custom prompt for test"));
+
+        mockMvc.perform(get("/api/admin/v1/settings/{key}/versions", "agent.system_prompt")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].settingKey").value("agent.system_prompt"))
+                .andExpect(jsonPath("$.data[0].settingValue").value("custom prompt for test"));
+
+        mockMvc.perform(post("/api/admin/v1/settings/{key}/restore-default", "agent.system_prompt")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data['agent.system_prompt']").value(org.hamcrest.Matchers.not("custom prompt for test")));
+    }
+
+    @Test
     void adminCanUploadCustomerServiceQrCode() throws Exception {
         String adminToken = loginAdmin();
         byte[] png = new byte[]{

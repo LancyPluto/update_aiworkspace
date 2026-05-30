@@ -21,6 +21,7 @@ public record TaskDetailResponse(
         String errorMessage,
         JsonNode params,
         TaskResultResponse result,
+        AgentTaskSourceResponse agentSource,
         Integer consumedCredits,
         LocalDateTime createdAt,
         LocalDateTime queuedAt,
@@ -29,6 +30,11 @@ public record TaskDetailResponse(
 ) {
     public static TaskDetailResponse of(AiTask task, JsonNode params, TaskResultResponse result,
                            Integer consumedCredits) {
+        return of(task, params, result, null, consumedCredits);
+    }
+
+    public static TaskDetailResponse of(AiTask task, JsonNode params, TaskResultResponse result,
+                           AgentTaskSourceResponse agentSource, Integer consumedCredits) {
         return new TaskDetailResponse(
                 task.getId(),
                 task.getTaskNo(),
@@ -45,6 +51,7 @@ public record TaskDetailResponse(
                 task.getErrorMessage(),
                 params,
                 result,
+                agentSource,
                 consumedCredits,
                 task.getCreatedAt(),
                 task.getQueuedAt(),

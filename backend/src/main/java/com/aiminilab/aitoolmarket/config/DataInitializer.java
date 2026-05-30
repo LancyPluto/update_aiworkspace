@@ -1,6 +1,7 @@
 package com.aiminilab.aitoolmarket.config;
 
 import com.aiminilab.aitoolmarket.admin.mapper.SystemSettingMapper;
+import com.aiminilab.aitoolmarket.admin.mapper.SystemSettingVersionMapper;
 import com.aiminilab.aitoolmarket.agent.config.AgentPromptSettings;
 import com.aiminilab.aitoolmarket.common.enums.UserStatus;
 import com.aiminilab.aitoolmarket.common.enums.UserType;
@@ -24,16 +25,19 @@ public class DataInitializer implements CommandLineRunner {
     private final UserMapper userMapper;
     private final ToolCategoryMapper toolCategoryMapper;
     private final SystemSettingMapper systemSettingMapper;
+    private final SystemSettingVersionMapper systemSettingVersionMapper;
     private final PasswordEncoder passwordEncoder;
     private final DataSource dataSource;
     private final ToolTemplateBootstrap toolTemplateBootstrap;
 
     public DataInitializer(UserMapper userMapper, ToolCategoryMapper toolCategoryMapper,
-                           SystemSettingMapper systemSettingMapper, PasswordEncoder passwordEncoder,
+                           SystemSettingMapper systemSettingMapper, SystemSettingVersionMapper systemSettingVersionMapper,
+                           PasswordEncoder passwordEncoder,
                            JdbcTemplate jdbcTemplate, ToolTemplateBootstrap toolTemplateBootstrap) {
         this.userMapper = userMapper;
         this.toolCategoryMapper = toolCategoryMapper;
         this.systemSettingMapper = systemSettingMapper;
+        this.systemSettingVersionMapper = systemSettingVersionMapper;
         this.passwordEncoder = passwordEncoder;
         this.dataSource = jdbcTemplate.getDataSource();
         this.toolTemplateBootstrap = toolTemplateBootstrap;
@@ -47,6 +51,7 @@ public class DataInitializer implements CommandLineRunner {
         createUserIfAbsent("user1", "123456", "User One", UserType.USER);
         toolCategoryMapper.ensureDefaultCategory();
         systemSettingMapper.ensureTable();
+        systemSettingVersionMapper.ensureTable();
         seedAgentPromptSettings();
     }
 
@@ -66,6 +71,10 @@ public class DataInitializer implements CommandLineRunner {
     }
 
     private void ensureSchemaCompatibility() {
+        ensureColumn("users", "avatar_url", "ALTER TABLE users ADD COLUMN avatar_url VARCHAR(512) NULL");
+        ensureColumn("users", "bio", "ALTER TABLE users ADD COLUMN bio VARCHAR(280) NULL");
+        ensureColumn("users", "auto_publish_assets", "ALTER TABLE users ADD COLUMN auto_publish_assets TINYINT NOT NULL DEFAULT 1");
+        ensureColumn("users", "prompt_public_by_default", "ALTER TABLE users ADD COLUMN prompt_public_by_default TINYINT NOT NULL DEFAULT 0");
         ensureColumn("ai_tools", "model_config_id", "ALTER TABLE ai_tools ADD COLUMN model_config_id BIGINT NULL");
         ensureColumn("ai_tools", "tool_type", "ALTER TABLE ai_tools ADD COLUMN tool_type VARCHAR(32) NOT NULL DEFAULT 'TEXT_GENERATION'");
         ensureColumn("ai_tools", "input_modality", "ALTER TABLE ai_tools ADD COLUMN input_modality VARCHAR(32) NOT NULL DEFAULT 'TEXT'");
@@ -212,14 +221,20 @@ public class DataInitializer implements CommandLineRunner {
         ensureIndex("agent_files", "idx_agent_files_attached_run", "CREATE INDEX idx_agent_files_attached_run ON agent_files(session_id, attached_run_id, id)");
         ensureColumn("agent_messages", "status", "ALTER TABLE agent_messages ADD COLUMN status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE'");
         ensureColumn("agent_messages", "superseded_at", "ALTER TABLE agent_messages ADD COLUMN superseded_at DATETIME NULL");
+        ensureColumn("agent_messages", "edited_at", "ALTER TABLE agent_messages ADD COLUMN edited_at DATETIME NULL");
+        ensureIndex("agent_messages", "idx_agent_messages_session_active", "CREATE INDEX idx_agent_messages_session_active ON agent_messages(session_id, status, id)");
         ensureColumn("agent_runs", "model_config_id", "ALTER TABLE agent_runs ADD COLUMN model_config_id BIGINT NULL");
         ensureColumn("agent_runs", "parent_run_id", "ALTER TABLE agent_runs ADD COLUMN parent_run_id BIGINT NULL");
         ensureColumn("agent_runs", "source_user_message_id", "ALTER TABLE agent_runs ADD COLUMN source_user_message_id BIGINT NULL");
         ensureColumn("agent_runs", "context_snapshot_id", "ALTER TABLE agent_runs ADD COLUMN context_snapshot_id BIGINT NULL");
         ensureColumn("agent_runs", "client_request_id", "ALTER TABLE agent_runs ADD COLUMN client_request_id VARCHAR(64) NULL");
         ensureIndex("agent_runs", "uk_agent_runs_user_client", "CREATE UNIQUE INDEX uk_agent_runs_user_client ON agent_runs(user_id, client_request_id)");
+        ensureIndex("agent_runs", "idx_agent_runs_session_user_id", "CREATE INDEX idx_agent_runs_session_user_id ON agent_runs(session_id, user_id, id)");
         ensureIndex("agent_runs", "idx_agent_runs_model_config", "CREATE INDEX idx_agent_runs_model_config ON agent_runs(model_config_id)");
         ensureIndex("agent_runs", "idx_agent_runs_context_snapshot", "CREATE INDEX idx_agent_runs_context_snapshot ON agent_runs(context_snapshot_id)");
+        ensureColumn("agent_tool_calls", "task_id", "ALTER TABLE agent_tool_calls ADD COLUMN task_id BIGINT NULL");
+        ensureIndex("agent_tool_calls", "idx_agent_tool_calls_task_id", "CREATE INDEX idx_agent_tool_calls_task_id ON agent_tool_calls(task_id)");
+        ensureIndex("agent_tool_calls", "idx_agent_tool_calls_context_recent", "CREATE INDEX idx_agent_tool_calls_context_recent ON agent_tool_calls(user_id, status, id)");
         ensureTable("agent_tool_descriptor_extension", """
                 CREATE TABLE agent_tool_descriptor_extension (
                   id BIGINT PRIMARY KEY AUTO_INCREMENT,
@@ -339,6 +354,48 @@ public class DataInitializer implements CommandLineRunner {
                   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                   UNIQUE KEY uk_workflow_version (workflow_id, version),
                   KEY idx_workflow_ver_created (workflow_id, created_at)
+                )
+                """);
+        ensureTable("community_posts", """
+                CREATE TABLE community_posts (
+                  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                  user_id BIGINT NOT NULL,
+                  task_id BIGINT NOT NULL,
+                  modality VARCHAR(32) NOT NULL,
+                  cover_url VARCHAR(1024),
+                  title VARCHAR(160) NOT NULL,
+                  description VARCHAR(500),
+                  prompt_visible TINYINT NOT NULL DEFAULT 0,
+                  prompt_snapshot MEDIUMTEXT,
+                  tool_code VARCHAR(128),
+                  tool_name VARCHAR(128),
+                  status VARCHAR(32) NOT NULL DEFAULT 'PUBLISHED',
+                  view_count BIGINT NOT NULL DEFAULT 0,
+                  like_count BIGINT NOT NULL DEFAULT 0,
+                  favorite_count BIGINT NOT NULL DEFAULT 0,
+                  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                  UNIQUE KEY uk_community_posts_task (task_id),
+                  KEY idx_community_posts_user_status_id (user_id, status, id),
+                  KEY idx_community_posts_status_id (status, id)
+                )
+                """);
+        ensureTable("community_post_likes", """
+                CREATE TABLE community_post_likes (
+                  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                  post_id BIGINT NOT NULL,
+                  user_id BIGINT NOT NULL,
+                  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  UNIQUE KEY uk_community_post_likes_user (post_id, user_id)
+                )
+                """);
+        ensureTable("community_post_favorites", """
+                CREATE TABLE community_post_favorites (
+                  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                  post_id BIGINT NOT NULL,
+                  user_id BIGINT NOT NULL,
+                  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  UNIQUE KEY uk_community_post_favorites_user (post_id, user_id)
                 )
                 """);
     }

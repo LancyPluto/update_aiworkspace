@@ -370,6 +370,14 @@ def _limit_text(value: str, max_length: int) -> str:
 
 def _model_call_error_code(message: str) -> str:
     normalized = message.lower()
+    if (
+        "risk control" in normalized
+        or "content policy" in normalized
+        or "safety policy" in normalized
+        or "sensitive" in normalized
+        or "task_status_msg" in normalized and "failed" in normalized
+    ):
+        return "MODEL_RISK_CONTROL_REJECTED"
     if "status=401" in normalized or "status=403" in normalized:
         return "MODEL_AUTH_FAILED"
     if "invalid token" in normalized or "unauthorized" in normalized or "api key" in normalized:

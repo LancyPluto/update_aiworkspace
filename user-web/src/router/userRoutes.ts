@@ -29,6 +29,15 @@ export const userRoutes = {
   get materialLibrary() {
     return { name: "MaterialLibrary" }
   },
+  get community() {
+    return { name: "CommunityDiscover" }
+  },
+  get profile() {
+    return { name: "Profile" }
+  },
+  publicProfile(userId: string | number) {
+    return { name: "PublicProfile", params: { userId: String(userId) } }
+  },
   get billing() {
     return { name: "Billing" }
   },

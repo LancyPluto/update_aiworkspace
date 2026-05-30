@@ -17,6 +17,7 @@ export type ApiErrorCode =
   | "TASK_NOT_FOUND"
   | "TASK_STATUS_INVALID"
   | "MODEL_CALL_FAILED"
+  | "MODEL_RISK_CONTROL_REJECTED"
   | "AGENT_SESSION_NOT_FOUND"
   | "AGENT_RUN_NOT_FOUND"
   | "AGENT_RUN_NOT_CANCELLABLE"
@@ -124,10 +125,70 @@ export interface UserProfile {
   id: number
   username: string
   nickname?: string
+  avatarUrl?: string | null
+  bio?: string | null
+  autoPublishAssets?: boolean
+  promptPublicByDefault?: boolean
   userType: UserType
   phone?: string | null
   email?: string | null
   status: UserAccountStatus
+}
+
+export interface UpdateUserProfileRequest {
+  nickname?: string
+  avatarUrl?: string | null
+}
+
+export interface CommunitySettingsRequest {
+  bio?: string | null
+  autoPublishAssets?: boolean
+  promptPublicByDefault?: boolean
+}
+
+export interface UserAvatarUploadResponse {
+  avatarUrl: string
+  user: UserProfile
+}
+
+export interface PublicUserProfile {
+  id: number
+  username: string
+  nickname?: string | null
+  avatarUrl?: string | null
+  bio?: string | null
+  postCount: number
+  likeCount: number
+  favoriteCount: number
+}
+
+export interface CommunityPost {
+  id: number
+  userId: number
+  taskId: number
+  modality: string
+  coverUrl?: string | null
+  title: string
+  description?: string | null
+  promptVisible: boolean
+  prompt?: string | null
+  toolCode?: string | null
+  toolName?: string | null
+  status: string
+  featured?: boolean
+  pinned?: boolean
+  topic?: string | null
+  tags?: string[]
+  sameStyleCount?: number
+  auditStatus?: string | null
+  auditReason?: string | null
+  viewCount: number
+  likeCount: number
+  favoriteCount: number
+  liked?: boolean
+  favorited?: boolean
+  createdAt: string
+  updatedAt?: string | null
 }
 
 /* ========== 工具相关 ========== */
@@ -385,6 +446,8 @@ export interface AgentMessage {
   contentText: string
   contentJson?: string | null
   runId?: number | null
+  status?: "ACTIVE" | "SUPERSEDED" | string
+  editedAt?: string | null
   createdAt: string
 }
 

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
 from app.config import Settings
-from app.core.schemas import AgentModelConfig
+from app.core.schemas import AgentModelConfig, RunContext
 from app.security.signature import verify_signature
 
 router = APIRouter()
@@ -37,6 +37,12 @@ async def confirm_tool(run_id: int, request: Request, background_tasks: Backgrou
 async def test_model_config(config: AgentModelConfig, request: Request):
     await _verify_internal_request(request)
     return await request.app.state.model_config_tester.test(config)
+
+
+@router.post("/internal/v1/agent/route-debug")
+async def debug_route(context: RunContext, request: Request):
+    await _verify_internal_request(request)
+    return await request.app.state.runtime.debug_route(context)
 
 
 async def _verify_internal_request(request: Request):

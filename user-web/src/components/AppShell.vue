@@ -9,6 +9,7 @@ import {
   ListChecks,
   Wallet,
   FolderHeart,
+  Images,
   ChevronDown,
   Moon,
   PanelLeft,
@@ -30,6 +31,7 @@ import type { CreditAccount } from "@/api/types"
 import { userRoutes } from "@/router/userRoutes"
 import { useAuthStore } from "@/store/authStore"
 import MemberBadge from "@/components/MemberBadge/MemberBadge.vue"
+import UserAvatar from "@/components/UserAvatar.vue"
 import { applyAppTheme, getStoredTheme, storeAppTheme, type AppTheme } from "@/utils/theme"
 
 withDefaults(
@@ -96,6 +98,7 @@ const userNav: (NavLink | NavGroup)[] = [
   },
   { type: "link", href: "/tasks", label: "我的任务", icon: ListChecks },
   { type: "link", href: "/library", label: "素材库", icon: FolderHeart },
+  { type: "link", href: "/community", label: "社区发现", icon: Images },
   { type: "link", href: "/billing", label: "会员与算力", icon: Wallet },
 ]
 
@@ -171,6 +174,7 @@ const creditPercent = computed(() => {
 })
 
 const availableCredits = computed(() => credit.value?.available ?? null)
+const isAgentRoute = computed(() => route.path === "/agent" || route.path.startsWith("/agent/"))
 const safeUserName = computed(() => {
   const nickname = auth.user?.nickname?.trim() || ""
   const username = auth.user?.username?.trim() || ""
@@ -426,6 +430,7 @@ onUnmounted(() => {
           />
         </div>
         <RouterLink
+          v-if="!isAgentRoute"
           :to="userRoutes.toolList"
           class="hidden h-11 items-center gap-2 rounded-full bg-gradient-to-br from-primary/90 via-fuchsia-400/85 to-primary/80 px-5 text-sm font-semibold text-white shadow-[0_14px_34px_rgb(176_92_255_/_0.24),inset_0_1px_0_rgb(255_255_255_/_0.22)] transition hover:brightness-110 md:inline-flex"
         >
@@ -461,10 +466,15 @@ onUnmounted(() => {
             <Moon v-else class="h-4 w-4" aria-hidden="true" />
           </button>
           <template v-if="auth.isLoggedIn">
-            <div class="flex items-center gap-2">
+            <RouterLink
+              :to="userRoutes.profile"
+              class="flex items-center gap-2 rounded-full px-2 py-1 transition hover:bg-white/8"
+              title="我的资料"
+            >
               <MemberBadge :available="availableCredits" />
+              <UserAvatar :src="auth.user?.avatarUrl" :name="safeUserName" size="sm" />
               <span class="hidden max-w-[140px] truncate text-xs text-white/60 sm:inline">{{ safeUserName }}</span>
-            </div>
+            </RouterLink>
             <button
               type="button"
               class="text-xs text-white/45 hover:text-white"

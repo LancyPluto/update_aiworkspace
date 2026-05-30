@@ -9,6 +9,7 @@ from types import ModuleType
 from typing import Any
 
 from app.config import settings
+from app.core.agent_decision import AgentDecisionService
 from app.core.budget_guard import BudgetExceeded, BudgetGuard, BudgetState
 from app.core.event_types import (
     INTENT_DETECTED,
@@ -28,7 +29,17 @@ from app.core.event_types import (
     WORKSPACE_FILE_READ,
 )
 from app.core.intent_router import Intent, IntentResult, IntentRouter
-from app.core.schemas import ChatMessage, RunComplete, RunContext, RunEventCreate, RunFail, ToolDescriptor, WorkspaceMemoryItem
+from app.core.schemas import (
+    AgentRouteDebugResponse,
+    AgentRouteDebugTool,
+    ChatMessage,
+    RunComplete,
+    RunContext,
+    RunEventCreate,
+    RunFail,
+    ToolDescriptor,
+    WorkspaceMemoryItem,
+)
 from app.runtime.subagent_profiles import default_subagent_profiles, profiles_to_deepagents_subagents
 from app.runtime.workspace_files import WorkspaceFileContext, build_workspace_file_context
 from app.security.prompt_guard import PromptGuard
@@ -86,6 +97,7 @@ class DeepAgentsRuntimeEngine:
         self.prompt_guard = prompt_guard or PromptGuard()
         self.dependency_loader = dependency_loader or self._load_deepagents
         self.tool_bridge = BackendToolBridge(backend_client, model_client=model_client)
+        self.decision_service = AgentDecisionService(self.intent_router)
 
     async def run(self, context: RunContext) -> None:
         if self._explicit_deep_agents_flag and not self.deep_agents_enabled:
@@ -215,6 +227,29 @@ class DeepAgentsRuntimeEngine:
         await self._complete_run(context, answer, intent=Intent.TOOL_USE.value)
         await self._emit_memory_candidate(context.runId, answer, None)
 
+    async def debug_route(self, context: RunContext) -> AgentRouteDebugResponse:
+        intent = await self._classify_intent(context)
+        requested_modality = requested_output_modality(context.message)
+        return AgentRouteDebugResponse(
+            intent=intent.intent.value,
+            confidence=intent.confidence,
+            selectedToolCode=intent.selectedToolCode,
+            candidateToolCodes=intent.candidateToolCodes,
+            clarifyingQuestion=intent.clarifyingQuestion,
+            decisionSource=intent.decisionSource,
+            reason=intent.reason,
+            requestedOutputModality=requested_modality,
+            visibleToolCount=len(context.availableTools),
+            visibleTools=[
+                AgentRouteDebugTool(
+                    toolCode=tool.toolCode,
+                    toolName=tool.toolName,
+                    autoCallable=tool.autoCallable,
+                )
+                for tool in context.availableTools
+            ],
+        )
+
     def _get_available_module(self) -> ModuleType:
         module = self.dependency_loader()
         if module is None:
@@ -233,17 +268,15 @@ class DeepAgentsRuntimeEngine:
     # --- Intent helpers ---
 
     async def _classify_intent(self, context: RunContext):
-        rule_intent = self.intent_router.classify(context)
-        if not self._should_use_llm_router(context, rule_intent):
-            return rule_intent
-        llm_intent = await self._classify_intent_with_llm(context, rule_intent)
-        return llm_intent or rule_intent
+        llm_router = self._classify_intent_with_llm if self._should_use_llm_router(context) else None
+        return await self.decision_service.decide(
+            context,
+            hard_rule=self._is_hard_rule_intent,
+            llm_router=llm_router,
+        )
 
-    def _should_use_llm_router(self, context: RunContext, rule_intent) -> bool:
-        if not settings.agent_llm_router_enabled:
-            return False
-        if not context.availableTools:
-            return False
+    @staticmethod
+    def _is_hard_rule_intent(rule_intent) -> bool:
         hard_rule_reasons = {
             "ready_file_context_available",
             "file_analysis_request",
@@ -255,10 +288,18 @@ class DeepAgentsRuntimeEngine:
             "continuing_pending_tool_prompt",
             "structured_tool_arguments",
         }
-        return rule_intent.reason not in hard_rule_reasons
+        return rule_intent.reason in hard_rule_reasons
+
+    def _should_use_llm_router(self, context: RunContext) -> bool:
+        if not settings.agent_llm_router_enabled:
+            return False
+        if not context.availableTools:
+            return False
+        return True
 
     async def _classify_intent_with_llm(self, context: RunContext, rule_intent):
         tools = ToolRegistry(context).list_tools()
+        requested_modality = requested_output_modality(context.message)
         tool_lines = []
         for tool in tools[:30]:
             tool_lines.append(
@@ -267,6 +308,7 @@ class DeepAgentsRuntimeEngine:
                     "toolName": tool.toolName,
                     "description": tool.description or "",
                     "autoCallable": tool.autoCallable,
+                    "agentHints": tool.hints,
                     "fields": [
                         {
                             "fieldKey": field.fieldKey,
@@ -297,6 +339,17 @@ class DeepAgentsRuntimeEngine:
             f"用户请求：{context.message}\n"
             f"规则兜底判断：intent={rule_intent.intent.value}, selectedTool={rule_intent.selectedToolCode}, reason={rule_intent.reason}\n"
             f"可用工具：{json.dumps(tool_lines, ensure_ascii=False)}"
+        )
+        prompt = (
+            "You are the primary router for deciding whether an agent should call a tool. "
+            "Use the user's actual goal and the tool metadata as the source of truth. "
+            "The rule result is only a fallback hint and may be wrong.\n"
+            "Prefer the tool that directly produces the requested output modality. "
+            "For example, image/photo/poster requests should use image-generation tools, "
+            "and video/image-to-video requests should use video tools. "
+            "Do not select an image-to-video tool for a pure image request just because the message mentions images.\n"
+            f"Requested output modality: {requested_modality or 'unknown'}\n\n"
+            + prompt
         )
         try:
             raw = await self.model.chat([ChatMessage(role="user", content=prompt)])
@@ -365,6 +418,7 @@ class DeepAgentsRuntimeEngine:
                     "candidateToolCodes": intent.candidateToolCodes,
                     "clarifyingQuestion": intent.clarifyingQuestion,
                     "decisionSource": intent.decisionSource,
+                    "decisionSignals": intent.signals,
                 },
             ),
         )
@@ -643,6 +697,9 @@ class DeepAgentsRuntimeEngine:
         memory_tool = None
         recap_question = _looks_like_session_recap_question(context.message)
         if recap_question:
+            deterministic_answer = _direct_session_recap_answer(context)
+            if deterministic_answer:
+                return deterministic_answer
             summary = _format_recent_session_summary(context)
             if summary:
                 messages.append(ChatMessage(role="system", content=summary))
@@ -657,9 +714,9 @@ class DeepAgentsRuntimeEngine:
                     ),
                 )
             )
-        elif context.workspaceId and settings.agent_memory_auto_save_enabled:
+        elif context.workspaceId and _memory_auto_save_enabled(context):
             memory_tool = MemoryTool(self.backend, context.workspaceId, context.userId, run_id=context.runId)
-            messages.append(ChatMessage(role="system", content=MEMORY_TOOL_SYSTEM_PROMPT))
+            messages.append(ChatMessage(role="system", content=_memory_tool_prompt(context)))
 
         messages.extend(context.history)
         messages.append(ChatMessage(role="user", content=context.message))
@@ -772,9 +829,9 @@ class DeepAgentsRuntimeEngine:
         if workspace_memory_context:
             messages_list.append(ChatMessage(role="system", content=workspace_memory_context))
         memory_tool = None
-        if context.workspaceId and settings.agent_memory_auto_save_enabled:
+        if context.workspaceId and _memory_auto_save_enabled(context):
             memory_tool = MemoryTool(self.backend, context.workspaceId, context.userId, run_id=context.runId)
-            messages_list.append(ChatMessage(role="system", content=MEMORY_TOOL_SYSTEM_PROMPT))
+            messages_list.append(ChatMessage(role="system", content=_memory_tool_prompt(context)))
         if content_text:
             messages_list.append(
                 ChatMessage(
@@ -810,7 +867,7 @@ class DeepAgentsRuntimeEngine:
         parts: list[str] = []
         stream = getattr(self.model, "chat_stream", None)
         extra_kwargs: dict[str, Any] = {}
-        if memory_tool is not None and settings.agent_memory_auto_save_enabled:
+        if memory_tool is not None:
             extra_kwargs["tools"] = _format_memory_tool_definitions()
         if stream is None:
             try:
@@ -826,16 +883,22 @@ class DeepAgentsRuntimeEngine:
         except TypeError:
             stream_iter = self.model.chat_stream(messages_list)
         persisted_length = 0
-        async for chunk in stream_iter:
-            parts.append(chunk)
-            await self.backend.append_event(
-                run_id,
-                RunEventCreate(eventType=MESSAGE_DELTA, eventText=chunk, eventJson={"delta": chunk}),
-            )
-            current_answer = "".join(parts)
-            if len(current_answer) - persisted_length >= 160:
-                await self._upsert_streaming_answer(run_id, current_answer)
-                persisted_length = len(current_answer)
+        try:
+            async for chunk in stream_iter:
+                parts.append(chunk)
+                await self.backend.append_event(
+                    run_id,
+                    RunEventCreate(eventType=MESSAGE_DELTA, eventText=chunk, eventJson={"delta": chunk}),
+                )
+                current_answer = "".join(parts)
+                if len(current_answer) - persisted_length >= 160:
+                    await self._upsert_streaming_answer(run_id, current_answer)
+                    persisted_length = len(current_answer)
+        except Exception:
+            partial_answer = "".join(parts)
+            if partial_answer.strip():
+                await self._upsert_streaming_answer(run_id, partial_answer)
+            raise
         answer = "".join(parts)
         if not answer.strip() and fallback_answer:
             answer = fallback_answer
@@ -943,14 +1006,18 @@ class DeepAgentsRuntimeEngine:
             return await self.backend.retrieve_workspace_memory(
                 workspace_id=workspace_id,
                 query=context.message,
-                limit=settings.agent_memory_retrieval_limit,
+                limit=_memory_retrieval_limit(context),
             )
         except Exception:
             return []
 
     async def _fetch_workspace_memory_context(self, context: RunContext) -> str:
         items = await self._fetch_workspace_memory_items(context)
-        return _format_workspace_memory_context(items)
+        memory_context = _format_workspace_memory_context(items)
+        retrieval_prompt = context.memorySettings.retrievalPrompt if context.memorySettings is not None else None
+        if memory_context and retrieval_prompt and retrieval_prompt.strip():
+            return f"{retrieval_prompt.strip()}\n\n{memory_context}"
+        return memory_context
 
     async def _build_workspace_file_context(self, context: RunContext) -> WorkspaceFileContext:
         workspace_file_context = build_workspace_file_context(context)
@@ -1006,7 +1073,7 @@ class DeepAgentsRuntimeEngine:
 
     async def _maybe_save_memory(self, context: RunContext, answer: str) -> None:
         """兜底：当 LLM 口头承诺'记住了'但未调用 memory_add 时，自动提取并写入。"""
-        if not context.workspaceId or not settings.agent_memory_auto_save_enabled:
+        if not context.workspaceId or not _memory_auto_save_enabled(context):
             return
         if not _contains_memory_promise(answer):
             return
@@ -1412,6 +1479,63 @@ def _format_recent_session_summary(context: RunContext) -> str:
     return "本轮会话近期记录（供直接回答「做过什么」）：\n" + "\n".join(lines[-14:])
 
 
+def _direct_session_recap_answer(context: RunContext) -> str:
+    message = re.sub(r"\s+", "", context.message or "")
+    asks_generation_tool = (
+        ("用什么" in message or "哪个工具" in message or "什么生成" in message or "怎么生成" in message)
+        and ("生成" in message or "工具" in message or "这张图" in message or "图片" in message)
+    )
+    if not asks_generation_tool:
+        return ""
+    assistant_text = _latest_assistant_text(context)
+    tool_names = _extract_tool_mentions(assistant_text, context)
+    if not tool_names:
+        tool_names = _infer_tool_names_from_recent_text(context)
+    if not tool_names:
+        return "我这边没有在当前上下文里读到上一张图对应的工具记录，可能是历史记录还没同步完整。你可以在后台 Agent Run 详情里按最近一次 taskId 查看。"
+    tool_text = "、".join(tool_names[:3])
+    if _contains_media_hint(assistant_text):
+        return f"刚刚这次是用「{tool_text}」生成的，不是当前对话模型自己生成。当前 Agent 模型只负责理解需求和调度工具，真正出图走的是工具后台绑定的模型配置。"
+    return f"刚刚这次用到的是「{tool_text}」。当前 Agent 模型只负责理解需求和调度，工具本身会使用后台绑定的模型配置。"
+
+
+def _latest_assistant_text(context: RunContext) -> str:
+    for item in reversed(context.history[-12:]):
+        role = (item.role or "").strip().lower()
+        content = (item.content or "").strip()
+        if role in {"assistant", "ai"} and content:
+            return content
+    return ""
+
+
+def _extract_tool_mentions(text: str, context: RunContext) -> list[str]:
+    if not text:
+        return []
+    found: list[str] = []
+    for tool in context.availableTools or []:
+        candidates = [tool.toolName or "", tool.toolCode or ""]
+        for candidate in candidates:
+            name = candidate.strip()
+            if name and name in text and (tool.toolName or tool.toolCode) not in found:
+                found.append(tool.toolName or tool.toolCode)
+                break
+    quoted = re.findall(r"「([^」]{2,80})」", text)
+    for item in quoted:
+        if any(keyword in item.lower() for keyword in ("image", "图", "视频", "tts", "deepseek", "gpt")) and item not in found:
+            found.append(item)
+    return found
+
+
+def _infer_tool_names_from_recent_text(context: RunContext) -> list[str]:
+    combined = "\n".join((item.content or "") for item in context.history[-8:])
+    return _extract_tool_mentions(combined, context)
+
+
+def _contains_media_hint(text: str) -> bool:
+    lowered = (text or "").lower()
+    return any(keyword in lowered for keyword in ("图片", "照片", "生成图", "image", ".png", ".jpg", ".jpeg", "http"))
+
+
 def _format_file_context(context: RunContext) -> str:
     ready_chunks = [chunk for chunk in context.agentFileChunks if chunk.contentText.strip()]
     if ready_chunks:
@@ -1445,19 +1569,19 @@ def _format_workspace_memory_context(items: list[WorkspaceMemoryItem]) -> str:
     if profiles:
         sections.append("[User Profile]")
         for item in profiles:
-            sections.append(f"  - {item.content[:4000]}")
+            sections.append(f"  - {_safe_memory_text(item.content, 800)}")
         sections.append("")
 
     if knowledge:
         sections.append("[Project Knowledge]")
         for item in knowledge:
-            sections.append(f"  [memory:{item.id}] {item.title} (score={item.score})\n  {item.content[:4000]}")
+            sections.append(f"  [memory:{item.id}] {_safe_memory_text(item.title, 120)} (score={item.score})\n  {_safe_memory_text(item.content, 1200)}")
         sections.append("")
 
     if others:
         sections.append("[Other Notes]")
         for item in others:
-            sections.append(f"  [memory:{item.id}] {item.title} ({item.memoryType}, score={item.score})\n  {item.content[:4000]}")
+            sections.append(f"  [memory:{item.id}] {_safe_memory_text(item.title, 120)} ({item.memoryType}, score={item.score})\n  {_safe_memory_text(item.content, 1200)}")
 
     return "\n".join(sections).strip()
 
@@ -1470,5 +1594,44 @@ def _format_workspace_memory_items(items: list[WorkspaceMemoryItem]) -> list[str
         title = item.title.strip() or "Untitled memory"
         content = item.content.strip()
         memory_type = item.memoryType.strip() or "memory"
-        memory_items.append(f"[memory:{item.id}] {title} ({memory_type}, score={item.score})\n{content[:4000]}")
+        memory_items.append(f"[memory:{item.id}] {_safe_memory_text(title, 120)} ({memory_type}, score={item.score})\n{_safe_memory_text(content, 1200)}")
     return memory_items
+
+
+def _memory_auto_save_enabled(context: RunContext) -> bool:
+    if context.memorySettings is not None and context.memorySettings.autoSaveEnabled is not None:
+        return bool(context.memorySettings.autoSaveEnabled)
+    return settings.agent_memory_auto_save_enabled
+
+
+def _memory_retrieval_limit(context: RunContext) -> int:
+    if context.memorySettings is not None and context.memorySettings.retrievalLimit is not None:
+        return max(1, min(int(context.memorySettings.retrievalLimit), 20))
+    return settings.agent_memory_retrieval_limit
+
+
+def _memory_tool_prompt(context: RunContext) -> str:
+    configured = context.memorySettings.writePrompt if context.memorySettings is not None else None
+    prompt = configured.strip() if configured else MEMORY_TOOL_SYSTEM_PROMPT
+    enabled_types = context.memorySettings.enabledTypes if context.memorySettings is not None else []
+    if enabled_types:
+        prompt = f"{prompt}\nAllowed memory types: {', '.join(enabled_types)}"
+    return prompt
+
+
+def _safe_memory_text(value: str, limit: int) -> str:
+    text = (value or "").strip()
+    if not text:
+        return ""
+    if _looks_like_large_media_payload(text):
+        return "[omitted large media payload]"
+    return text[:limit]
+
+
+def _looks_like_large_media_payload(text: str) -> bool:
+    if len(text) > 2000 and ("base64" in text[:300].lower() or "data:image/" in text[:300].lower()):
+        return True
+    if len(text) > 5000 and text.lstrip().startswith(("{", "[")):
+        lowered = text[:1000].lower()
+        return "resourceurl" in lowered or "imageurl" in lowered or "videourl" in lowered or "contenttext" in lowered
+    return False

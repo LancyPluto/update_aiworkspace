@@ -2,18 +2,20 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue"
 import {
   AlertTriangle,
-  Bot,
   Check,
   Copy,
+  Database,
   FileText,
   Loader2,
   Maximize2,
   Minimize2,
   Pencil,
+  Plus,
   RefreshCw,
   Send,
   Sparkles,
   Store,
+  Trash2,
   Upload,
   X,
   StopCircle
@@ -22,20 +24,29 @@ import RunTimeline from "./RunTimeline.vue"
 import { filterUserFacingRunEvents } from "./runTimelineEvents"
 import ChatMessage from "./ChatMessage.vue"
 import AssetPreviewModal from "@/components/AssetPreviewModal.vue"
+import UserAvatar from "@/components/UserAvatar.vue"
+import { useAuthStore } from "@/store/authStore"
 import {
   ApiBusinessError,
   cancelAgentRun,
   confirmAgentTool,
   deleteAgentFile,
   editRegenerateAgentMessage,
+  createAgentWorkspaceMemory,
+  deleteAgentWorkspaceMemory,
   fetchAgentMessages,
   fetchAgentFiles,
   fetchAgentRun,
   fetchAgentRunEvents,
+  fetchAgentWorkspaceMemory,
+  fetchAgentWorkspaces,
   fetchTools,
+  publishCommunityPost,
   regenerateAgentRun,
   sendAgentMessage,
   streamAgentRunEvents,
+  unpublishCommunityPost,
+  updateAgentWorkspaceMemory,
   uploadAgentFile,
 } from "@/api"
 import type {
@@ -46,10 +57,14 @@ import type {
   AgentRunEvent,
   AgentRunStatus,
   AgentSession,
+  AgentWorkspace,
+  AgentWorkspaceMemoryItem,
   ToolSummary,
 } from "@/api/types"
 import type { AssetPreviewItem, AssetPreviewRecommendation } from "@/types/assetPreview"
 import { randomUUID } from "@/utils/randomUUID"
+
+const auth = useAuthStore()
 
 const props = defineProps<{
   sessionId: number
@@ -73,6 +88,20 @@ const files = ref<AgentFile[]>([])
 const events = ref<AgentRunEvent[]>([])
 const previewTools = ref<ToolSummary[]>([])
 const previewAsset = ref<AssetPreviewItem | null>(null)
+const memoryPanelOpen = ref(false)
+const memoryWorkspaces = ref<AgentWorkspace[]>([])
+const memoryWorkspaceId = ref<number | null>(null)
+const memoryItems = ref<AgentWorkspaceMemoryItem[]>([])
+const memoryLoading = ref(false)
+const memorySaving = ref(false)
+const memoryDeletingId = ref<number | null>(null)
+const memoryEditingId = ref<number | null>(null)
+const memoryError = ref<string | null>(null)
+const memoryForm = ref({
+  memoryType: "user_profile",
+  title: "",
+  content: "",
+})
 const paneLoading = ref(true)
 const sending = ref(false)
 const uploading = ref(false)
@@ -103,6 +132,8 @@ const composerTextareaRef = ref<HTMLTextAreaElement | null>(null)
 const composerExpanded = ref(false)
 const messagesKey = computed(() => `agent_messages_${props.sessionId}`)
 let runStreamAbort: AbortController | null = null
+let runStatusWatchdog: number | null = null
+const terminalEventFinalizingRunIds = new Set<number>()
 
 const input = computed({
   get: () => props.draft,
@@ -164,6 +195,21 @@ const showGenerationLoading = computed(() =>
 const previewRecommendations = computed<AssetPreviewRecommendation[]>(() =>
   previewAsset.value ? recommendToolsForAsset(previewAsset.value) : [],
 )
+const memoryTypeOptions = [
+  { value: "user_profile", label: "用户偏好" },
+  { value: "project_knowledge", label: "项目知识" },
+  { value: "custom", label: "自定义" },
+]
+const groupedMemoryItems = computed(() => {
+  const order = ["user_profile", "project_knowledge", "custom"]
+  return order
+    .map((type) => ({
+      type,
+      label: memoryTypeOptions.find((item) => item.value === type)?.label ?? type,
+      items: memoryItems.value.filter((item) => item.memoryType === type),
+    }))
+    .filter((group) => group.items.length > 0)
+})
 
 function modelLabel(model: AgentModelConfig) {
   return model.displayName || model.modelName || model.configCode || `Model ${model.id}`
@@ -171,6 +217,38 @@ function modelLabel(model: AgentModelConfig) {
 
 function modelMeta(model: AgentModelConfig) {
   return `${model.provider} · ${model.modelName}`
+}
+
+function messageTime(value?: string | null) {
+  if (!value) return ""
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ""
+  return date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })
+}
+
+function messageDividerTime(value?: string | null) {
+  if (!value) return ""
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ""
+  const now = new Date()
+  const sameDay =
+    date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() &&
+    date.getDate() === now.getDate()
+  const datePart = sameDay
+    ? "今天"
+    : date.toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" })
+  return `${datePart} ${messageTime(value)}`
+}
+
+function shouldShowTimeDivider(message: AgentMessage, index: number) {
+  if (index === 0) return true
+  const previous = messages.value[index - 1]
+  if (!previous?.createdAt || !message.createdAt) return false
+  const currentTime = new Date(message.createdAt).getTime()
+  const previousTime = new Date(previous.createdAt).getTime()
+  if (Number.isNaN(currentTime) || Number.isNaN(previousTime)) return false
+  return currentTime - previousTime > 5 * 60 * 1000
 }
 
 function changeModel(rawId: string) {
@@ -190,6 +268,18 @@ function findLatestRunIdInMessages(msgs: AgentMessage[]): number | null {
   for (let i = msgs.length - 1; i >= 0; i--) {
     const runId = msgs[i]?.runId
     if (runId != null) return runId
+  }
+  return null
+}
+
+function findRunIdForUserMessage(message: AgentMessage): number | null {
+  if (message.runId != null) return message.runId
+  const index = messages.value.findIndex((item) => item.id === message.id)
+  if (index < 0) return null
+  for (let i = index + 1; i < messages.value.length; i++) {
+    const item = messages.value[i]
+    if (item.role === "USER") break
+    if (item.runId != null) return item.runId
   }
   return null
 }
@@ -311,6 +401,127 @@ async function loadFiles() {
   if (!props.token) return
   const res = await fetchAgentFiles(props.sessionId, { token: props.token })
   files.value = res.list
+}
+
+async function openMemoryPanel() {
+  memoryPanelOpen.value = true
+  if (!props.token) return
+  if (memoryWorkspaces.value.length === 0) {
+    await loadMemoryWorkspaces()
+  } else if (memoryWorkspaceId.value != null) {
+    await loadMemoryItems()
+  }
+}
+
+function closeMemoryPanel() {
+  memoryPanelOpen.value = false
+  resetMemoryForm()
+}
+
+async function loadMemoryWorkspaces() {
+  if (!props.token) return
+  memoryLoading.value = true
+  memoryError.value = null
+  try {
+    const res = await fetchAgentWorkspaces({ token: props.token })
+    memoryWorkspaces.value = res.list
+    memoryWorkspaceId.value = memoryWorkspaceId.value ?? res.list[0]?.id ?? null
+    if (memoryWorkspaceId.value != null) {
+      await loadMemoryItems()
+    }
+  } catch (error) {
+    memoryError.value = formatAgentError(error)
+  } finally {
+    memoryLoading.value = false
+  }
+}
+
+async function loadMemoryItems() {
+  if (!props.token || memoryWorkspaceId.value == null) return
+  memoryLoading.value = true
+  memoryError.value = null
+  try {
+    const res = await fetchAgentWorkspaceMemory(memoryWorkspaceId.value, { token: props.token })
+    memoryItems.value = res.list
+  } catch (error) {
+    memoryError.value = formatAgentError(error)
+  } finally {
+    memoryLoading.value = false
+  }
+}
+
+async function changeMemoryWorkspace(rawId: string) {
+  const id = Number(rawId)
+  memoryWorkspaceId.value = Number.isFinite(id) && id > 0 ? id : null
+  resetMemoryForm()
+  memoryItems.value = []
+  await loadMemoryItems()
+}
+
+function resetMemoryForm() {
+  memoryEditingId.value = null
+  memoryForm.value = {
+    memoryType: "user_profile",
+    title: "",
+    content: "",
+  }
+}
+
+function editMemory(item: AgentWorkspaceMemoryItem) {
+  memoryEditingId.value = item.id
+  memoryForm.value = {
+    memoryType: item.memoryType || "custom",
+    title: item.title || "",
+    content: item.content || "",
+  }
+}
+
+async function saveMemory() {
+  if (!props.token || memoryWorkspaceId.value == null || memorySaving.value) return
+  const title = memoryForm.value.title.trim()
+  const content = memoryForm.value.content.trim()
+  if (!title || !content) {
+    memoryError.value = "标题和内容都不能为空。"
+    return
+  }
+  memorySaving.value = true
+  memoryError.value = null
+  try {
+    const body = {
+      memoryType: memoryForm.value.memoryType,
+      title,
+      content,
+    }
+    const saved = memoryEditingId.value == null
+      ? await createAgentWorkspaceMemory(memoryWorkspaceId.value, body, { token: props.token })
+      : await updateAgentWorkspaceMemory(memoryWorkspaceId.value, memoryEditingId.value, body, { token: props.token })
+    memoryItems.value = [
+      saved,
+      ...memoryItems.value.filter((item) => item.id !== saved.id),
+    ]
+    resetMemoryForm()
+  } catch (error) {
+    memoryError.value = formatAgentError(error)
+  } finally {
+    memorySaving.value = false
+  }
+}
+
+async function removeMemory(item: AgentWorkspaceMemoryItem) {
+  if (!props.token || memoryWorkspaceId.value == null || memoryDeletingId.value != null) return
+  const confirmed = window.confirm(`删除这条记忆：${item.title || item.id}？`)
+  if (!confirmed) return
+  memoryDeletingId.value = item.id
+  memoryError.value = null
+  try {
+    await deleteAgentWorkspaceMemory(memoryWorkspaceId.value, item.id, { token: props.token })
+    memoryItems.value = memoryItems.value.filter((current) => current.id !== item.id)
+    if (memoryEditingId.value === item.id) resetMemoryForm()
+  } catch (error) {
+    memoryError.value = formatAgentError(error)
+  } finally {
+    memoryDeletingId.value = null
+  }
 }
 
 function openFilePicker() {
@@ -540,7 +751,40 @@ async function submitEditedMessage(message: AgentMessage) {
     return
   }
   if (text === message.contentText.trim()) {
-    cancelEditMessage()
+    const sourceRunId = findRunIdForUserMessage(message)
+    if (!sourceRunId) {
+      agentError.value = "这条消息暂时没有可重跑的 Agent 运行，请稍后刷新再试。"
+      return
+    }
+    editingRegenerating.value = true
+    agentError.value = null
+    confirmationError.value = null
+    lastFailedRunId.value = null
+    runConnectionStatus.value = "running"
+    events.value = []
+    editingMessageId.value = null
+    editingMessageDraft.value = ""
+    try {
+      const res = await regenerateAgentRun(
+        sourceRunId,
+        {
+          clientRequestId: crypto.randomUUID(),
+          modelConfigId: props.modelConfigId ?? null,
+        },
+        { token: props.token },
+      )
+      activeRunId.value = res.runId
+      messages.value = messages.value.filter((item) => item.id <= message.id)
+      await waitForRunComplete(res.runId)
+    } catch (error) {
+      runConnectionStatus.value = "failed"
+      activeRunId.value = null
+      agentError.value = formatAgentError(error)
+      await refreshMessages()
+    } finally {
+      editingRegenerating.value = false
+      await scrollBottom()
+    }
     return
   }
 
@@ -588,6 +832,9 @@ function formatAgentError(error: unknown) {
     const detail = error.message ? `后端返回：${error.message}` : "后端没有返回更多细节。"
     return `模型连接验证失败。请在管理端检查 provider、baseUrl、API Key、模型名称和 MiniMax Group ID 后重试。${detail}`
   }
+  if (error instanceof ApiBusinessError && error.code === "MODEL_RISK_CONTROL_REJECTED") {
+    return "第三方模型平台的内容风控未通过，本次没有扣除生成结果。请换一种更安全、明确的描述后重试。"
+  }
   if (error instanceof ApiBusinessError && error.code === "AGENT_ACTIVE_RUN_LIMIT") {
     return "上一次 Agent 任务尚未结束，占用了运行名额。请点击下方「取消进行中的任务」后再发送；若任务仍在进行，也可等待其完成。"
   }
@@ -621,14 +868,57 @@ function stopRunEventStream() {
   runStreamAbort = null
 }
 
+function stopRunStatusWatchdog() {
+  if (runStatusWatchdog == null) return
+  window.clearInterval(runStatusWatchdog)
+  runStatusWatchdog = null
+}
+
+function startRunStatusWatchdog(runId: number) {
+  stopRunStatusWatchdog()
+  runStatusWatchdog = window.setInterval(() => {
+    if (!props.token || activeRunId.value !== runId) {
+      stopRunStatusWatchdog()
+      return
+    }
+    if (runConnectionStatus.value !== "running" && runConnectionStatus.value !== "awaiting_confirmation") {
+      stopRunStatusWatchdog()
+      return
+    }
+    void reconcileRunStatus(runId)
+  }, 1500)
+}
+
+async function reconcileRunStatus(runId: number) {
+  try {
+    const run = await fetchAgentRun(runId, { token: props.token })
+    if (run.status === "WAITING_USER_CONFIRMATION") {
+      await syncRunEvents(runId, { replayRenderableEvents: true })
+      runConnectionStatus.value = "awaiting_confirmation"
+      await scrollBottom()
+      return
+    }
+    if (!isTerminalRunStatus(run.status)) return
+    await settleTerminalRun(runId, run)
+    stopRunEventStream()
+  } catch {
+    // Keep the live stream as the source of truth while watchdog polling is flaky.
+  }
+}
+
 function streamingMessageId(runId: number) {
   return -Math.abs(runId)
 }
 
-function ensureStreamingAssistantMessage(runId: number) {
-  const existing = messages.value.find(
-    (message) => message.role === "ASSISTANT" && message.runId === runId && message.id === streamingAssistantMessageId.value,
+function streamingMessageForRun(runId: number) {
+  const tempId = streamingMessageId(runId)
+  return messages.value.find(
+    (message) => message.role === "ASSISTANT" && message.runId === runId && message.id === tempId,
   )
+}
+
+function ensureStreamingAssistantMessage(runId: number) {
+  const existing = streamingMessageForRun(runId)
   if (existing) return existing
   const tempId = streamingMessageId(runId)
   const message: AgentMessage = {
@@ -644,8 +934,19 @@ function ensureStreamingAssistantMessage(runId: number) {
   return message
 }
 
+function clearStreamingAssistantMessage(runId: number, options?: { preserveReadableText?: boolean }) {
+  const tempId = streamingMessageId(runId)
+  const tempMessage = streamingMessageForRun(runId)
+  streamingAssistantMessageId.value = null
+  if (options?.preserveReadableText && tempMessage?.contentText?.trim() && !isStructuredMediaContent(tempMessage.contentText)) {
+    return
+  }
+  messages.value = messages.value.filter((message) => message.id !== tempId)
+}
+
 function appendStreamingAssistantDelta(runId: number, delta: string) {
   if (!delta) return
+  if (isStructuredMediaContent(delta)) return
   const message = ensureStreamingAssistantMessage(runId)
   message.contentText += delta
   void scrollBottom()
@@ -653,21 +954,32 @@ function appendStreamingAssistantDelta(runId: number, delta: string) {
 
 function completeStreamingAssistantMessage(runId: number, content: string) {
   if (!content) return
+  if (isStructuredMediaContent(content)) {
+    clearStreamingAssistantMessage(runId)
+    return
+  }
   const message = ensureStreamingAssistantMessage(runId)
   message.contentText = content
   void scrollBottom()
 }
 
-async function syncRunEvents(runId: number) {
+async function syncRunEvents(runId: number, options?: { replayRenderableEvents?: boolean }) {
   if (!props.token) return
   const afterEventId = events.value.length ? events.value.at(-1)!.id : undefined
   const res = await fetchAgentRunEvents(runId, { token: props.token, afterEventId })
-  res.list.forEach(appendRunEvent)
+  res.list.forEach((event) => {
+    if (options?.replayRenderableEvents) {
+      handleStreamedRunEvent(runId, event, { fromSync: true })
+    } else {
+      appendRunEvent(event)
+    }
+  })
 }
 
 async function waitForRunComplete(runId: number) {
   runConnectionStatus.value = "running"
   stopRunEventStream()
+  startRunStatusWatchdog(runId)
   const controller = new AbortController()
   runStreamAbort = controller
   try {
@@ -688,20 +1000,13 @@ async function waitForRunComplete(runId: number) {
   try {
     const run = await fetchAgentRun(runId, { token: props.token })
     if (run.status === "WAITING_USER_CONFIRMATION") {
-      await syncRunEvents(runId)
+      await syncRunEvents(runId, { replayRenderableEvents: true })
       runConnectionStatus.value = "awaiting_confirmation"
       await scrollBottom()
       return
     }
     if (isTerminalRunStatus(run.status)) {
-      await syncRunEvents(runId)
-      settleRunStatus(run)
-      if (run.status === "FAILED" || run.status === "TIMEOUT") {
-        lastFailedRunId.value = run.id
-      }
-      await refreshMessages()
-      streamingAssistantMessageId.value = null
-      await scrollBottom()
+      await settleTerminalRun(runId, run)
       return
     }
   } catch (error) {
@@ -716,10 +1021,19 @@ async function waitForRunComplete(runId: number) {
   await pollRunUntilComplete(runId)
 }
 
-function handleStreamedRunEvent(runId: number, event: AgentRunEvent) {
+function handleStreamedRunEvent(runId: number, event: AgentRunEvent, options?: { fromSync?: boolean }) {
   const alreadySeen = events.value.some((item) => item.id === event.id)
   appendRunEvent(event)
   if (alreadySeen) return
+
+  if (isTerminalRunEvent(event)) {
+    settleRunStatus()
+    clearStreamingAssistantMessage(runId, { preserveReadableText: event.eventType === "run.failed" })
+    stopRunStatusWatchdog()
+    if (!options?.fromSync) stopRunEventStream()
+    void finalizeTerminalRunFromEvent(runId, event)
+    return
+  }
 
   if (event.eventType === "message.delta") {
     const payload = parseEventJson(event.eventJson)
@@ -739,6 +1053,43 @@ function handleStreamedRunEvent(runId: number, event: AgentRunEvent) {
   }
 }
 
+async function finalizeTerminalRunFromEvent(runId: number, event: AgentRunEvent) {
+  if (terminalEventFinalizingRunIds.has(runId)) return
+  terminalEventFinalizingRunIds.add(runId)
+  try {
+    const run = await fetchAgentRun(runId, { token: props.token })
+    await syncRunEvents(runId, { replayRenderableEvents: true })
+    settleRunStatus(run)
+    if (run.status === "FAILED" || run.status === "TIMEOUT") {
+      lastFailedRunId.value = run.id
+    }
+    await refreshMessages({ preserveStreamingRunId: run.status === "FAILED" || run.status === "TIMEOUT" ? runId : undefined })
+  } catch {
+    settleRunStatus()
+    if (event.eventType === "run.failed") {
+      lastFailedRunId.value = event.runId
+    }
+    await refreshMessages({ preserveStreamingRunId: event.eventType === "run.failed" ? runId : undefined })
+  } finally {
+    clearStreamingAssistantMessage(runId, { preserveReadableText: event.eventType === "run.failed" })
+    stopRunStatusWatchdog()
+    terminalEventFinalizingRunIds.delete(runId)
+    await scrollBottom()
+  }
+}
+
+async function settleTerminalRun(runId: number, run: AgentRun) {
+  await syncRunEvents(runId, { replayRenderableEvents: true })
+  settleRunStatus(run)
+  if (run.status === "FAILED" || run.status === "TIMEOUT") {
+    lastFailedRunId.value = run.id
+  }
+  await refreshMessages({ preserveStreamingRunId: run.status === "FAILED" || run.status === "TIMEOUT" ? runId : undefined })
+  clearStreamingAssistantMessage(runId, { preserveReadableText: run.status === "FAILED" || run.status === "TIMEOUT" })
+  stopRunStatusWatchdog()
+  await scrollBottom()
+}
+
 async function pollRunUntilComplete(runId: number) {
   runConnectionStatus.value = "running"
   const POLL_INTERVAL_MS = 1200
@@ -748,20 +1099,13 @@ async function pollRunUntilComplete(runId: number) {
     while (Date.now() - startTime < MAX_WAIT_MS) {
       const run = await fetchAgentRun(runId, { token: props.token })
       if (run.status === "WAITING_USER_CONFIRMATION") {
-        await syncRunEvents(runId)
+        await syncRunEvents(runId, { replayRenderableEvents: true })
         runConnectionStatus.value = "awaiting_confirmation"
         await scrollBottom()
         return
       }
       if (isTerminalRunStatus(run.status)) {
-        await syncRunEvents(runId)
-        settleRunStatus(run)
-        if (run.status === "FAILED" || run.status === "TIMEOUT") {
-          lastFailedRunId.value = run.id
-        }
-        await refreshMessages()
-        streamingAssistantMessageId.value = null
-        await scrollBottom()
+        await settleTerminalRun(runId, run)
         return
       }
       await delay(POLL_INTERVAL_MS)
@@ -813,9 +1157,18 @@ async function confirmTool(eventId: number, toolCode: string, approved: boolean)
   }
 }
 
-async function refreshMessages() {
+async function refreshMessages(options?: { preserveStreamingRunId?: number }) {
   if (!props.token) return
+  const preserved = options?.preserveStreamingRunId != null ? streamingMessageForRun(options.preserveStreamingRunId) : undefined
   const messageRes = await fetchAgentMessages(props.sessionId, { token: props.token })
+  if (
+    preserved?.contentText?.trim() &&
+    !isStructuredMediaContent(preserved.contentText) &&
+    !messageRes.list.some((message) => message.runId === preserved.runId && message.role === "ASSISTANT")
+  ) {
+    messages.value = [...messageRes.list, preserved]
+    return
+  }
   messages.value = messageRes.list
 }
 
@@ -851,6 +1204,10 @@ function appendRunEvent(event: AgentRunEvent) {
       agentError.value = errorMessage || "Agent 服务暂时不可用，请稍后重试。"
       return
     }
+    if (errorCode === "MODEL_RISK_CONTROL_REJECTED") {
+      agentError.value = "第三方模型平台的内容风控未通过，本次没有生成结果。请换一种更安全、明确的描述后重试。"
+      return
+    }
     if (errorCode === "MODEL_CALL_FAILED") {
       agentError.value = errorMessage || "模型调用失败，请稍后重试。"
       return
@@ -875,6 +1232,7 @@ function settleRunStatus(run?: AgentRun) {
   activeRunId.value = null
   recoveryRunId.value = null
   showActiveRunLimitHint.value = false
+  stopRunStatusWatchdog()
 }
 
 function isTerminalRunEvent(event: AgentRunEvent) {
@@ -893,6 +1251,32 @@ function parseEventJson(value?: string | null) {
   } catch {
     return {} as Record<string, unknown>
   }
+}
+
+function isStructuredMediaContent(value: string) {
+  const trimmed = value.trim()
+  if (!trimmed || (!trimmed.startsWith("{") && !trimmed.startsWith("["))) return false
+  try {
+    const parsed = JSON.parse(trimmed) as unknown
+    return containsMediaResult(parsed)
+  } catch {
+    return false
+  }
+}
+
+function containsMediaResult(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false
+  if (Array.isArray(value)) return value.some(containsMediaResult)
+  const record = value as Record<string, unknown>
+  const resourceType = typeof record.resourceType === "string" ? record.resourceType.toUpperCase() : ""
+  if (["IMAGE", "VIDEO", "AUDIO"].includes(resourceType)) return true
+  for (const key of ["images", "videos", "audios", "assets", "files"]) {
+    if (Array.isArray(record[key]) && record[key].length > 0) return true
+  }
+  if (typeof record.url === "string" && /\.(png|jpe?g|webp|gif|mp4|webm|mp3|wav)(\?|$)/i.test(record.url)) {
+    return true
+  }
+  return Object.values(record).some(containsMediaResult)
 }
 
 function messageClass(role: string) {
@@ -933,6 +1317,36 @@ function useAssetWithTool(tool: AssetPreviewRecommendation, asset: AssetPreviewI
 
 function openPreviewTask() {
   previewAsset.value = null
+}
+
+async function publishPreviewAsset(asset: AssetPreviewItem) {
+  if (!auth.token || !asset.taskId) return
+  try {
+    const post = await publishCommunityPost(
+      {
+        taskId: asset.taskId,
+        title: asset.title,
+        description: asset.subtitle || null,
+        promptVisible: asset.promptVisible ?? false,
+      },
+      { token: auth.token },
+    )
+    previewAsset.value = { ...asset, communityPostId: post.id, promptVisible: post.promptVisible }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "发布失败"
+    window.alert(message)
+  }
+}
+
+async function unpublishPreviewAsset(asset: AssetPreviewItem) {
+  if (!auth.token || !asset.communityPostId) return
+  try {
+    await unpublishCommunityPost(asset.communityPostId, { token: auth.token })
+    previewAsset.value = { ...asset, communityPostId: undefined }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "撤回失败"
+    window.alert(message)
+  }
 }
 
 function formatFileSize(size: number) {
@@ -990,6 +1404,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   stopRunEventStream()
+  stopRunStatusWatchdog()
   window.removeEventListener("resize", adjustComposerTextareaHeight)
 })
 
@@ -1019,12 +1434,22 @@ defineExpose({
       </div>
 
       <template v-else>
-        <article v-for="message in messages" :key="message.id" :class="messageClass(message.role)">
+        <template v-for="(message, index) in messages" :key="message.id">
+          <div v-if="shouldShowTimeDivider(message, index)" class="time-divider">
+            {{ messageDividerTime(message.createdAt) }}
+          </div>
+        <article :class="messageClass(message.role)">
           <div class="avatar">
-            <Bot v-if="message.role !== 'USER'" class="h-4 w-4" />
-            <span v-else>我</span>
+            <img v-if="message.role !== 'USER'" src="/logo.svg" alt="AI" />
+            <UserAvatar
+              v-else
+              :src="auth.user?.avatarUrl"
+              :name="auth.user?.nickname || auth.user?.username || '我'"
+              size="sm"
+            />
           </div>
           <div class="message-main">
+            <span class="message-time">{{ messageTime(message.createdAt) }}</span>
             <div class="bubble">
               <div v-if="editingMessageId === message.id" class="message-edit-box">
                 <textarea
@@ -1110,10 +1535,11 @@ defineExpose({
             </div>
           </div>
         </article>
+        </template>
 
         <article v-if="showGenerationLoading" class="agent-message assistant generating-message">
           <div class="avatar">
-            <Bot class="h-4 w-4" />
+            <img src="/logo.svg" alt="AI" />
           </div>
           <div class="bubble generating-bubble">
             <div class="generating-orbit">
@@ -1134,7 +1560,7 @@ defineExpose({
 
         <article v-if="visibleRunTimelineEvents.length" class="agent-message assistant run-progress">
           <div class="avatar">
-            <Bot class="h-4 w-4" />
+            <img src="/logo.svg" alt="AI" />
           </div>
           <div class="bubble">
             <RunTimeline :events="events" :inline-mode="true" />
@@ -1320,6 +1746,10 @@ defineExpose({
             <Store class="h-4 w-4" />
             智能搜索
           </button> 
+          <button type="button" class="tool-btn" @click="openMemoryPanel">
+            <Database class="h-4 w-4" />
+            记忆
+          </button>
         </div>
 
         <button
@@ -1341,7 +1771,103 @@ defineExpose({
       @close="previewAsset = null"
       @use-tool="useAssetWithTool"
       @open-task="openPreviewTask"
+      @publish="publishPreviewAsset"
+      @unpublish="unpublishPreviewAsset"
     />
+    <div v-if="memoryPanelOpen" class="memory-panel-backdrop" @click.self="closeMemoryPanel">
+      <aside class="memory-panel" aria-label="Agent 长期记忆管理">
+        <header class="memory-panel-header">
+          <div>
+            <p class="memory-panel-kicker">Agent memory</p>
+            <h3>长期记忆</h3>
+            <span>只保存长期有价值的偏好、习惯和项目知识。</span>
+          </div>
+          <button type="button" class="memory-icon-btn" aria-label="关闭记忆管理" @click="closeMemoryPanel">
+            <X class="h-4 w-4" />
+          </button>
+        </header>
+
+        <div class="memory-panel-controls">
+          <select
+            class="memory-select"
+            :value="memoryWorkspaceId ?? ''"
+            :disabled="memoryLoading || memoryWorkspaces.length === 0"
+            @change="changeMemoryWorkspace(($event.target as HTMLSelectElement).value)"
+          >
+            <option v-if="memoryWorkspaces.length === 0" value="">暂无工作区</option>
+            <option v-for="workspace in memoryWorkspaces" :key="workspace.id" :value="workspace.id">
+              {{ workspace.name }}
+            </option>
+          </select>
+          <button type="button" class="memory-refresh-btn" :disabled="memoryLoading" @click="loadMemoryWorkspaces">
+            <Loader2 v-if="memoryLoading" class="h-4 w-4 animate-spin" />
+            <RefreshCw v-else class="h-4 w-4" />
+          </button>
+        </div>
+
+        <p v-if="memoryError" class="memory-error">{{ memoryError }}</p>
+
+        <section class="memory-editor">
+          <div class="memory-editor-grid">
+            <select v-model="memoryForm.memoryType" class="memory-input">
+              <option v-for="option in memoryTypeOptions" :key="option.value" :value="option.value">
+                {{ option.label }}
+              </option>
+            </select>
+            <input v-model="memoryForm.title" class="memory-input" placeholder="记忆标题" maxlength="160" />
+          </div>
+          <textarea
+            v-model="memoryForm.content"
+            class="memory-textarea"
+            rows="4"
+            placeholder="例如：用户偏好写实摄影风格，默认避免夸张动漫质感。"
+          />
+          <div class="memory-editor-actions">
+            <button v-if="memoryEditingId != null" type="button" class="ghost-btn" :disabled="memorySaving" @click="resetMemoryForm">
+              取消编辑
+            </button>
+            <button type="button" class="primary-btn" :disabled="memorySaving || memoryWorkspaceId == null" @click="saveMemory">
+              <Loader2 v-if="memorySaving" class="h-4 w-4 animate-spin" />
+              <Plus v-else-if="memoryEditingId == null" class="h-4 w-4" />
+              <Check v-else class="h-4 w-4" />
+              {{ memoryEditingId == null ? "添加记忆" : "保存记忆" }}
+            </button>
+          </div>
+        </section>
+
+        <div class="memory-list">
+          <div v-if="memoryLoading" class="memory-empty">
+            <Loader2 class="h-4 w-4 animate-spin" />
+            正在加载记忆
+          </div>
+          <div v-else-if="memoryItems.length === 0" class="memory-empty">
+            还没有长期记忆。你可以手动添加，或在对话里明确告诉 Agent “记住……”
+          </div>
+          <section v-for="group in groupedMemoryItems" v-else :key="group.type" class="memory-group">
+            <p class="memory-group-title">{{ group.label }}</p>
+            <article v-for="item in group.items" :key="item.id" class="memory-item">
+              <div class="memory-item-main">
+                <div class="memory-item-title-row">
+                  <strong>{{ item.title || `记忆 #${item.id}` }}</strong>
+                  <span v-if="item.sourceRunId">Run #{{ item.sourceRunId }}</span>
+                  <span v-else>手动/历史</span>
+                </div>
+                <p>{{ item.content }}</p>
+              </div>
+              <div class="memory-item-actions">
+                <button type="button" class="memory-icon-btn" aria-label="编辑记忆" @click="editMemory(item)">
+                  <Pencil class="h-4 w-4" />
+                </button>
+                <button type="button" class="memory-icon-btn danger" :disabled="memoryDeletingId === item.id" aria-label="删除记忆" @click="removeMemory(item)">
+                  <Loader2 v-if="memoryDeletingId === item.id" class="h-4 w-4 animate-spin" />
+                  <Trash2 v-else class="h-4 w-4" />
+                </button>
+              </div>
+            </article>
+          </section>
+        </div>
+      </aside>
+    </div>
   </div>
 </template>
 
@@ -1375,35 +1901,47 @@ defineExpose({
   z-index: 1;
   height: 100%;
   max-height: none;
-  padding: 64px clamp(36px, 6vw, 96px) 46px;
+  padding: 64px clamp(40px, 7vw, 128px) 34px;
   scroll-behavior: smooth;
+  scrollbar-gutter: stable both-edges;
+  scrollbar-width: thin;
+  scrollbar-color: rgb(255 255 255 / 0.14) transparent;
 }
 
 .message-container::-webkit-scrollbar {
-  width: 8px;
+  width: 4px;
 }
 
 .message-container::-webkit-scrollbar-thumb {
   border-radius: 999px;
-  background: rgb(255 255 255 / 0.12);
+  background: rgb(255 255 255 / 0.10);
+}
+
+.message-container:hover::-webkit-scrollbar-thumb {
+  background: rgb(255 255 255 / 0.18);
 }
 
 .composer {
-  width: min(880px, calc(100% - 96px));
-  margin: 0 auto 30px;
-  border: 1px solid rgb(255 255 255 / 0.10);
-  border-radius: 28px;
+  width: min(760px, calc(100% - 96px));
+  margin: 0 auto 22px;
+  border: 0;
+  border-radius: 24px;
   background:
-    linear-gradient(135deg, rgb(176 92 255 / 0.055), transparent 38%),
-    rgb(25 25 25 / 0.62);
-  padding: 13px 15px;
+    radial-gradient(circle at 12% 0%, rgb(176 92 255 / 0.10), transparent 34%),
+    linear-gradient(180deg, rgb(255 255 255 / 0.055), rgb(255 255 255 / 0.025)),
+    rgb(31 31 36 / 0.76);
+  padding: 10px 12px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 6px;
   flex-shrink: 0;
   position: relative;
   z-index: 2;
-  box-shadow: 0 -18px 58px rgb(176 92 255 / 0.08), 0 24px 80px rgb(0 0 0 / 0.48), inset 0 1px 0 rgb(255 255 255 / 0.055);
+  box-shadow:
+    0 -18px 58px rgb(176 92 255 / 0.08),
+    0 24px 80px rgb(0 0 0 / 0.48),
+    inset 0 1px 0 rgb(255 255 255 / 0.07),
+    inset 0 0 0 1px rgb(255 255 255 / 0.045);
   backdrop-filter: blur(20px) saturate(135%);
 }
 
@@ -1412,12 +1950,12 @@ defineExpose({
   align-items: center;
   align-self: flex-start;
   justify-content: flex-start;
-  gap: 8px;
-  max-width: min(430px, 100%);
-  border: 1px solid rgb(255 255 255 / 0.07);
+  gap: 6px;
+  max-width: min(250px, 100%);
+  border: 0;
   border-radius: 999px;
-  background: rgb(0 0 0 / 0.18);
-  padding: 5px 6px 5px 12px;
+  background: rgb(255 255 255 / 0.032);
+  padding: 3px 5px 3px 8px;
 }
 
 .composer-model-copy {
@@ -1427,8 +1965,8 @@ defineExpose({
 }
 
 .composer-model-kicker {
-  color: rgb(255 255 255 / 0.42);
-  font-size: 12px;
+  color: rgb(255 255 255 / 0.32);
+  font-size: 10px;
   line-height: 1;
   white-space: nowrap;
 }
@@ -1442,15 +1980,15 @@ defineExpose({
 }
 
 .composer-model-select {
-  width: min(220px, 46vw);
-  min-height: 30px;
-  border: 1px solid rgb(176 92 255 / 0.18);
+  width: min(164px, 40vw);
+  min-height: 26px;
+  border: 0;
   border-radius: 999px;
-  background: rgb(15 15 19 / 0.62);
-  color: rgb(255 255 255 / 0.68);
-  padding: 0 28px 0 10px;
+  background: rgb(0 0 0 / 0.14);
+  color: rgb(255 255 255 / 0.72);
+  padding: 0 24px 0 9px;
   outline: none;
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .composer-model-select:disabled {
@@ -1516,12 +2054,12 @@ defineExpose({
   border: none;
   outline: none;
   background: transparent;
-  font-size: 15px;
+  font-size: 14px;
   line-height: 1.6;
-  min-height: 64px;
-  max-height: 200px;
+  min-height: 48px;
+  max-height: 160px;
   resize: none;
-  padding: 10px 38px 10px 2px;
+  padding: 6px 36px 6px 2px;
   color: rgb(255 255 255 / 0.88);
 }
 
@@ -1563,7 +2101,7 @@ defineExpose({
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
-  gap: 14px;
+  gap: 10px;
 }
 
 .left-tools {
@@ -1576,20 +2114,19 @@ defineExpose({
 .tool-btn {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   font-size: 12px;
-  padding: 7px 13px;
+  padding: 7px 10px;
   border-radius: 999px;
-  border: 1px solid rgb(255 255 255 / 0.07);
-  background: rgb(0 0 0 / 0.18);
-  color: rgb(255 255 255 / 0.56);
+  border: 0;
+  background: transparent;
+  color: rgb(255 255 255 / 0.52);
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .tool-btn:hover:not(:disabled) {
-  border-color: rgb(176 92 255 / 0.48);
-  background: rgb(176 92 255 / 0.14);
+  background: rgb(255 255 255 / 0.07);
   color: #fff;
 }
 
@@ -1599,8 +2136,8 @@ defineExpose({
 }
 
 .send-circle-btn {
-  width: 42px;
-  height: 42px;
+  width: 40px;
+  height: 40px;
   border-radius: 50%;
   border: 1px solid rgb(255 255 255 / 0.14);
   background:
@@ -1690,15 +2227,18 @@ defineExpose({
 
 .agent-message {
   display: grid;
-  grid-template-columns: 42px minmax(0, 820px);
+  grid-template-columns: 42px minmax(0, 650px);
+  justify-content: start;
   gap: 14px;
   margin: 30px auto;
-  max-width: 1040px;
+  width: min(100%, 980px);
+  max-width: 980px;
   animation: message-rise 0.24s ease-out;
 }
 
 .agent-message.user {
-  grid-template-columns: minmax(0, 720px) 42px;
+  grid-template-columns: minmax(0, 650px) 42px;
+  justify-content: end;
 }
 
 .agent-message.user .avatar {
@@ -1709,10 +2249,50 @@ defineExpose({
   color: #fff;
 }
 
+.time-divider {
+  width: fit-content;
+  margin: 34px auto 12px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.035);
+  padding: 4px 11px;
+  color: rgb(255 255 255 / 0.32);
+  font-size: 11px;
+  letter-spacing: 0;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.045);
+}
+
 .message-main {
+  position: relative;
   min-width: 0;
   width: fit-content;
   max-width: 100%;
+}
+
+.message-time {
+  position: absolute;
+  left: calc(100% + 12px);
+  top: 4px;
+  min-width: 42px;
+  color: rgb(255 255 255 / 0.28);
+  font-size: 11px;
+  line-height: 1;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-4px);
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+.agent-message.user .message-time {
+  right: calc(100% + 12px);
+  left: auto;
+  text-align: right;
+  transform: translateX(4px);
+}
+
+.agent-message:hover .message-time,
+.agent-message:focus-within .message-time {
+  opacity: 1;
+  transform: translateX(0);
 }
 
 .agent-message.user .message-main {
@@ -1839,6 +2419,13 @@ defineExpose({
   font-weight: 700;
 }
 
+.avatar img {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+  filter: drop-shadow(0 0 10px rgb(176 92 255 / 0.28));
+}
+
 .bubble {
   width: fit-content;
   max-width: 100%;
@@ -1854,15 +2441,19 @@ defineExpose({
 
 .agent-message.assistant .bubble:has(.agent-result-renderer) {
   width: min(820px, 100%);
-  padding: 0;
-  border-color: transparent;
-  background: transparent;
-  box-shadow: none;
-  backdrop-filter: none;
+  padding: 10px;
+  border-color: rgb(255 255 255 / 0.07);
+  background:
+    radial-gradient(circle at 8% 0%, rgb(176 92 255 / 0.085), transparent 34%),
+    linear-gradient(180deg, rgb(255 255 255 / 0.035), rgb(255 255 255 / 0.018));
+  box-shadow:
+    0 20px 70px rgb(0 0 0 / 0.28),
+    inset 0 1px 0 rgb(255 255 255 / 0.04);
+  backdrop-filter: blur(10px);
 }
 
 .agent-message.run-progress .bubble {
-  width: min(820px, 100%);
+  width: min(650px, 100%);
   border-color: rgb(255 255 255 / 0.10);
   background: rgb(255 255 255 / 0.045);
 }
@@ -2065,6 +2656,224 @@ defineExpose({
   white-space: nowrap;
 }
 
+.memory-panel-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  justify-content: flex-end;
+  background: rgb(0 0 0 / 0.48);
+  backdrop-filter: blur(8px);
+}
+
+.memory-panel {
+  width: min(460px, calc(100% - 24px));
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  border-left: 1px solid rgb(255 255 255 / 0.10);
+  background:
+    radial-gradient(circle at 20% 0%, rgb(176 92 255 / 0.12), transparent 34%),
+    rgb(18 18 22 / 0.96);
+  padding: 20px;
+  color: rgb(255 255 255 / 0.88);
+  box-shadow: -20px 0 80px rgb(0 0 0 / 0.42);
+  overflow-y: auto;
+}
+
+.memory-panel-header,
+.memory-panel-controls,
+.memory-item-title-row,
+.memory-item-actions,
+.memory-editor-actions {
+  display: flex;
+  align-items: center;
+}
+
+.memory-panel-header {
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.memory-panel-kicker {
+  margin: 0 0 4px;
+  color: rgb(176 92 255);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.memory-panel-header h3 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.memory-panel-header span {
+  display: block;
+  margin-top: 6px;
+  color: rgb(255 255 255 / 0.52);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.memory-icon-btn,
+.memory-refresh-btn {
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid rgb(255 255 255 / 0.10);
+  background: rgb(255 255 255 / 0.055);
+  color: rgb(255 255 255 / 0.68);
+  cursor: pointer;
+}
+
+.memory-icon-btn:hover:not(:disabled),
+.memory-refresh-btn:hover:not(:disabled) {
+  border-color: rgb(176 92 255 / 0.42);
+  color: #fff;
+}
+
+.memory-icon-btn.danger:hover:not(:disabled) {
+  border-color: rgb(248 113 113 / 0.46);
+  color: rgb(254 202 202);
+}
+
+.memory-panel-controls {
+  gap: 8px;
+}
+
+.memory-select,
+.memory-input,
+.memory-textarea {
+  width: 100%;
+  border: 1px solid rgb(255 255 255 / 0.10);
+  border-radius: 14px;
+  background: rgb(0 0 0 / 0.22);
+  color: rgb(255 255 255 / 0.88);
+  outline: none;
+}
+
+.memory-select,
+.memory-input {
+  min-height: 38px;
+  padding: 0 12px;
+}
+
+.memory-textarea {
+  resize: vertical;
+  padding: 10px 12px;
+  line-height: 1.6;
+}
+
+.memory-editor {
+  display: grid;
+  gap: 10px;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 18px;
+  background: rgb(255 255 255 / 0.045);
+  padding: 12px;
+}
+
+.memory-editor-grid {
+  display: grid;
+  grid-template-columns: 132px minmax(0, 1fr);
+  gap: 8px;
+}
+
+.memory-editor-actions {
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.memory-list {
+  display: grid;
+  gap: 14px;
+}
+
+.memory-empty,
+.memory-error {
+  border-radius: 16px;
+  padding: 14px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.memory-empty {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  border: 1px dashed rgb(255 255 255 / 0.12);
+  color: rgb(255 255 255 / 0.48);
+}
+
+.memory-error {
+  border: 1px solid rgb(248 113 113 / 0.32);
+  background: rgb(248 113 113 / 0.10);
+  color: rgb(254 202 202);
+}
+
+.memory-group {
+  display: grid;
+  gap: 8px;
+}
+
+.memory-group-title {
+  margin: 0;
+  color: rgb(255 255 255 / 0.46);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.memory-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 16px;
+  background: rgb(255 255 255 / 0.045);
+  padding: 12px;
+}
+
+.memory-item-main {
+  min-width: 0;
+}
+
+.memory-item-title-row {
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.memory-item-title-row strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memory-item-title-row span {
+  flex-shrink: 0;
+  color: rgb(255 255 255 / 0.38);
+  font-size: 11px;
+}
+
+.memory-item p {
+  margin: 8px 0 0;
+  color: rgb(255 255 255 / 0.62);
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.memory-item-actions {
+  gap: 6px;
+  align-self: start;
+}
+
 @media (max-width: 900px) {
   .message-container {
     padding: 36px 14px 24px;
@@ -2097,6 +2906,9 @@ defineExpose({
   }
   .message-actions {
     opacity: 1;
+  }
+  .message-time {
+    display: none;
   }
   .message-edit-box {
     width: min(100%, 72vw);

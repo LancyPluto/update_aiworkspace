@@ -80,12 +80,21 @@ public interface AgentRunMapper extends BaseMapper<AgentRun> {
             <if test="userId != null">
               AND r.user_id = #{userId}
             </if>
+            <if test="taskId != null">
+              AND EXISTS (
+                SELECT 1
+                FROM agent_tool_calls c
+                WHERE c.run_id = r.id
+                  AND c.task_id = #{taskId}
+              )
+            </if>
             ORDER BY r.id DESC
             LIMIT #{limit} OFFSET #{offset}
             </script>
             """)
     List<AdminAgentRunListItemResponse> findForAdmin(@Param("status") String status,
                                                      @Param("userId") Long userId,
+                                                     @Param("taskId") Long taskId,
                                                      @Param("limit") int limit,
                                                      @Param("offset") int offset);
 
@@ -100,9 +109,17 @@ public interface AgentRunMapper extends BaseMapper<AgentRun> {
             <if test="userId != null">
               AND r.user_id = #{userId}
             </if>
+            <if test="taskId != null">
+              AND EXISTS (
+                SELECT 1
+                FROM agent_tool_calls c
+                WHERE c.run_id = r.id
+                  AND c.task_id = #{taskId}
+              )
+            </if>
             </script>
             """)
-    long countForAdmin(@Param("status") String status, @Param("userId") Long userId);
+    long countForAdmin(@Param("status") String status, @Param("userId") Long userId, @Param("taskId") Long taskId);
 
     @Select("""
             SELECT

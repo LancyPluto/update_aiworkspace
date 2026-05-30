@@ -1,8 +1,13 @@
 package com.aiminilab.aitoolmarket.admin.service.impl;
 
 import com.aiminilab.aitoolmarket.admin.dto.CustomerServiceQrUploadResponse;
+import com.aiminilab.aitoolmarket.admin.dto.SystemSettingVersionResponse;
+import com.aiminilab.aitoolmarket.admin.entity.SystemSettingVersion;
 import com.aiminilab.aitoolmarket.admin.mapper.SystemSettingMapper;
+import com.aiminilab.aitoolmarket.admin.mapper.SystemSettingVersionMapper;
 import com.aiminilab.aitoolmarket.admin.service.SystemSettingService;
+import com.aiminilab.aitoolmarket.agent.config.AgentMemorySettings;
+import com.aiminilab.aitoolmarket.agent.config.AgentPromptSettings;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.config.AppProperties;
@@ -18,6 +23,7 @@ import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
@@ -32,10 +38,14 @@ public class SystemSettingServiceImpl implements SystemSettingService {
     private static final String CUSTOMER_SERVICE_QR_SETTING_KEY = "customerService.qrCodeUrl";
 
     private final SystemSettingMapper systemSettingMapper;
+    private final SystemSettingVersionMapper versionMapper;
     private final AppProperties appProperties;
 
-    public SystemSettingServiceImpl(SystemSettingMapper systemSettingMapper, AppProperties appProperties) {
+    public SystemSettingServiceImpl(SystemSettingMapper systemSettingMapper,
+                                    SystemSettingVersionMapper versionMapper,
+                                    AppProperties appProperties) {
         this.systemSettingMapper = systemSettingMapper;
+        this.versionMapper = versionMapper;
         this.appProperties = appProperties;
     }
 
@@ -50,7 +60,33 @@ public class SystemSettingServiceImpl implements SystemSettingService {
     @Override
     @Transactional
     public Map<String, String> updateSettings(Map<String, String> settings) {
-        settings.forEach((key, value) -> systemSettingMapper.upsert(key, value == null ? "" : value));
+        return updateSettings(settings, null);
+    }
+
+    @Override
+    @Transactional
+    public Map<String, String> updateSettings(Map<String, String> settings, Long operatorId) {
+        settings.forEach((key, value) -> {
+            String normalizedValue = value == null ? "" : value;
+            systemSettingMapper.upsert(key, normalizedValue);
+            recordVersion(key, normalizedValue, operatorId);
+        });
+        return settings();
+    }
+
+    @Override
+    public List<SystemSettingVersionResponse> settingVersions(String key) {
+        return versionMapper.findByKey(key, 10).stream()
+                .map(SystemSettingVersionResponse::from)
+                .toList();
+    }
+
+    @Override
+    @Transactional
+    public Map<String, String> restoreDefault(String key, Long operatorId) {
+        String value = defaultValueFor(key);
+        systemSettingMapper.upsert(key, value);
+        recordVersion(key, value, operatorId);
         return settings();
     }
 
@@ -111,5 +147,49 @@ public class SystemSettingServiceImpl implements SystemSettingService {
             };
         }
         return "";
+    }
+
+    private void recordVersion(String key, String value, Long operatorId) {
+        if (!isVersionedSetting(key)) {
+            return;
+        }
+        SystemSettingVersion version = new SystemSettingVersion();
+        version.setSettingKey(key);
+        version.setSettingValue(value);
+        version.setOperatorId(operatorId);
+        version.setCreatedAt(LocalDateTime.now());
+        versionMapper.insertVersion(version);
+    }
+
+    private boolean isVersionedSetting(String key) {
+        return AgentPromptSettings.SYSTEM_PROMPT_KEY.equals(key)
+                || AgentPromptSettings.DEEP_AGENTS_SYSTEM_PROMPT_KEY.equals(key)
+                || AgentMemorySettings.WRITE_PROMPT_KEY.equals(key)
+                || AgentMemorySettings.RETRIEVAL_PROMPT_KEY.equals(key);
+    }
+
+    private String defaultValueFor(String key) {
+        if (AgentPromptSettings.SYSTEM_PROMPT_KEY.equals(key)) {
+            return AgentPromptSettings.DEFAULT_SYSTEM_PROMPT;
+        }
+        if (AgentPromptSettings.DEEP_AGENTS_SYSTEM_PROMPT_KEY.equals(key)) {
+            return AgentPromptSettings.DEFAULT_DEEP_AGENTS_SYSTEM_PROMPT;
+        }
+        if (AgentMemorySettings.AUTO_SAVE_ENABLED_KEY.equals(key)) {
+            return String.valueOf(AgentMemorySettings.DEFAULT_AUTO_SAVE_ENABLED);
+        }
+        if (AgentMemorySettings.RETRIEVAL_LIMIT_KEY.equals(key)) {
+            return String.valueOf(AgentMemorySettings.DEFAULT_RETRIEVAL_LIMIT);
+        }
+        if (AgentMemorySettings.ENABLED_TYPES_KEY.equals(key)) {
+            return AgentMemorySettings.DEFAULT_ENABLED_TYPES;
+        }
+        if (AgentMemorySettings.WRITE_PROMPT_KEY.equals(key)) {
+            return AgentMemorySettings.DEFAULT_WRITE_PROMPT;
+        }
+        if (AgentMemorySettings.RETRIEVAL_PROMPT_KEY.equals(key)) {
+            return AgentMemorySettings.DEFAULT_RETRIEVAL_PROMPT;
+        }
+        throw new BusinessException(ErrorCode.PARAM_ERROR, "setting key has no default value");
     }
 }

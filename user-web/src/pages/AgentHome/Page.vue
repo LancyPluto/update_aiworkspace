@@ -1,6 +1,6 @@
 <script setup lang="ts">
   import { computed, onMounted, ref, watch } from "vue"
-  import { Bot, ChevronLeft, ChevronRight, Loader2, Plus, Sparkles, Trash2 } from "lucide-vue-next"
+  import { ChevronLeft, ChevronRight, Loader2, Plus, Sparkles, Trash2 } from "lucide-vue-next"
   import AppShell from "@/components/AppShell.vue"
   import AgentChatPane from "./AgentChatPane.vue"
   import { confirmDelete } from "@/composables/useConfirmDelete"
@@ -29,11 +29,8 @@
   const sessionSidebarOpen = ref(true)
   const deletingSessionId = ref<number | null>(null)
   const deleteSessionError = ref<string | null>(null)
-  const selectedAgentModel = computed(() =>
-    agentModels.value.find((model) => model.id === selectedModelConfigId.value) ?? agentModels.value[0] ?? null,
-  )
+
   const groupedSessions = computed(() => {
-    const groups: Array<{ label: string; sessions: AgentSession[] }> = []
     const map = new Map<string, AgentSession[]>()
     for (const session of sessions.value) {
       const label = sessionTimeGroup(session.updatedAt || session.createdAt)
@@ -41,11 +38,9 @@
       list.push(session)
       map.set(label, list)
     }
-    for (const label of ["今天", "昨天", "前 7 天", "更早"]) {
-      const list = map.get(label)
-      if (list?.length) groups.push({ label, sessions: list })
-    }
-    return groups
+    return ["今天", "昨天", "前 7 天", "更早"]
+      .map((label) => ({ label, sessions: map.get(label) ?? [] }))
+      .filter((group) => group.sessions.length > 0)
   })
 
   function sessionTimeGroup(value?: string | null) {
@@ -203,8 +198,7 @@
 <template>
   <AppShell title="Agent" description="用自然语言让系统推荐、确认并调用工具">
     <div class="agent-page" :class="{ 'agent-page--session-collapsed': !sessionSidebarOpen }">
-      <!-- 侧边栏切换按钮 -->
-      <button class="sidebar-toggle-btn" @click="toggleSessionSidebar">
+      <button class="sidebar-toggle-btn" type="button" @click="toggleSessionSidebar">
         <ChevronRight v-if="!sessionSidebarOpen" class="h-4 w-4" />
         <ChevronLeft v-else class="h-4 w-4" />
       </button>
@@ -214,31 +208,14 @@
           <Plus class="h-4 w-4" />
           新会话
         </button>
-        <div class="agent-model-picker">
-          <label class="agent-model-label" for="agent-model-select">Agent 模型</label>
-          <select
-            id="agent-model-select"
-            class="agent-model-select"
-            :value="selectedModelConfigId ?? ''"
-            :disabled="modelsLoading || agentModels.length === 0"
-            @change="selectAgentModel(($event.target as HTMLSelectElement).value)"
-          >
-            <option v-if="modelsLoading" value="">加载中...</option>
-            <option v-else-if="agentModels.length === 0" value="">暂无可选模型</option>
-            <option v-for="model in agentModels" :key="model.id" :value="model.id">
-              {{ modelLabel(model) }}
-            </option>
-          </select>
-          <p v-if="selectedAgentModel" class="agent-model-meta">
-            {{ selectedAgentModel.provider }} · {{ selectedAgentModel.modelName }}
-          </p>
-        </div>
+
         <p v-if="deleteSessionError" class="sidebar-error">{{ deleteSessionError }}</p>
         <div v-if="sessionsLoading" class="session-list-loading">
           <Loader2 class="h-4 w-4 animate-spin" />
         </div>
-        <div class="session-list session-list--flat">
-          <template v-for="group in groupedSessions" :key="group.label">
+
+        <div class="session-list">
+          <section v-for="group in groupedSessions" :key="group.label" class="session-group">
             <p class="session-group-label">{{ group.label }}</p>
             <div
               v-for="session in group.sessions"
@@ -246,22 +223,21 @@
               class="session-row"
               :class="{ active: session.id === activeSessionId }"
             >
-            <button type="button" class="session-item" @click="selectSession(session.id)">
-              <Bot class="h-4 w-4 shrink-0" />
-              <span>{{ session.title }}</span>
-            </button>
-            <button
-              type="button"
-              class="session-delete"
-              :disabled="deletingSessionId === session.id"
-              :aria-label="`删除会话：${session.title}`"
-              @click="removeSession(session, $event)"
-            >
-              <Loader2 v-if="deletingSessionId === session.id" class="h-4 w-4 animate-spin" aria-hidden="true" />
-              <Trash2 v-else class="h-4 w-4" aria-hidden="true" />
-            </button>
+              <button type="button" class="session-item" @click="selectSession(session.id)">
+                <span>{{ session.title }}</span>
+              </button>
+              <button
+                type="button"
+                class="session-delete"
+                :disabled="deletingSessionId === session.id"
+                :aria-label="`删除会话：${session.title}`"
+                @click="removeSession(session, $event)"
+              >
+                <Loader2 v-if="deletingSessionId === session.id" class="h-4 w-4 animate-spin" aria-hidden="true" />
+                <Trash2 v-else class="h-4 w-4" aria-hidden="true" />
+              </button>
             </div>
-          </template>
+          </section>
         </div>
       </aside>
 
@@ -292,7 +268,6 @@
           </button>
         </div>
       </section>
-
     </div>
   </AppShell>
 </template>
@@ -301,7 +276,9 @@
   .agent-page {
     display: grid;
     grid-template-columns: 280px minmax(0, 1fr);
-    height: calc(100vh - 64px);
+    height: 100%;
+    max-height: 100%;
+    min-height: 0;
     overflow: hidden;
     position: relative;
     background: #000;
@@ -311,7 +288,6 @@
     grid-template-columns: 0 minmax(0, 1fr);
   }
 
-  /* 侧边栏显隐按钮样式 */
   .sidebar-toggle-btn {
     position: absolute;
     left: 10px;
@@ -352,6 +328,25 @@
     display: flex;
     flex-direction: column;
     box-shadow: inset -1px 0 0 rgb(255 255 255 / 0.025);
+    scrollbar-width: thin;
+    scrollbar-color: rgb(255 255 255 / 0.14) transparent;
+  }
+
+  .agent-sidebar::-webkit-scrollbar {
+    width: 4px;
+  }
+
+  .agent-sidebar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .agent-sidebar::-webkit-scrollbar-thumb {
+    border-radius: 999px;
+    background: rgb(255 255 255 / 0.10);
+  }
+
+  .agent-sidebar:hover::-webkit-scrollbar-thumb {
+    background: rgb(255 255 255 / 0.18);
   }
 
   .agent-sidebar--collapsed {
@@ -379,70 +374,26 @@
     width: 100%;
     height: 42px;
     border: 1px solid rgb(176 92 255 / 0.28);
-    background: linear-gradient(135deg, rgb(176 92 255 / 0.30), rgb(255 255 255 / 0.055) 54%, rgb(34 211 238 / 0.08));
+    background: linear-gradient(135deg, rgb(176 92 255 / 0.22), rgb(255 255 255 / 0.055) 54%, rgb(34 211 238 / 0.07));
     color: rgb(255 255 255 / 0.88);
     font-size: 14px;
     font-weight: 700;
     cursor: pointer;
     margin-top: 32px;
-    box-shadow: 0 14px 44px rgb(176 92 255 / 0.16), 0 10px 24px rgb(0 0 0 / 0.28);
+    box-shadow: 0 14px 44px rgb(176 92 255 / 0.12), 0 10px 24px rgb(0 0 0 / 0.28);
     transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
   }
 
   .new-chat:hover {
-    border-color: rgb(176 92 255 / 0.54);
+    border-color: rgb(176 92 255 / 0.48);
     transform: translateY(-1px);
-    box-shadow: 0 18px 56px rgb(176 92 255 / 0.24), 0 10px 24px rgb(0 0 0 / 0.32);
-  }
-
-  .agent-model-picker {
-    margin-top: 12px;
-    display: flex;
-    flex-direction: column;
-    gap: 7px;
-    border: 0;
-    border-radius: 18px;
-    background: rgb(255 255 255 / 0.035);
-    padding: 10px;
-    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.035);
-  }
-
-  .agent-model-label {
-    font-size: 11px;
-    font-weight: 700;
-    color: rgb(255 255 255 / 0.34);
-  }
-
-  .agent-model-select {
-    width: 100%;
-    min-height: 32px;
-    border: 1px solid rgb(255 255 255 / 0.08);
-    border-radius: 999px;
-    background: rgb(0 0 0 / 0.24);
-    color: rgb(255 255 255 / 0.72);
-    padding: 0 10px;
-    outline: none;
-    font-size: 12px;
-  }
-
-  .agent-model-select:disabled {
-    opacity: 0.65;
-    cursor: not-allowed;
-  }
-
-  .agent-model-meta {
-    margin: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-size: 11px;
-    color: rgb(255 255 255 / 0.32);
+    box-shadow: 0 18px 56px rgb(176 92 255 / 0.18), 0 10px 24px rgb(0 0 0 / 0.32);
   }
 
   .sidebar-error {
     margin: 10px 0 0;
     font-size: 12px;
-    color: #b42318;
+    color: #fca5a5;
   }
 
   .session-list-loading {
@@ -453,16 +404,16 @@
   }
 
   .session-list {
-    margin-top: 14px;
+    margin-top: 18px;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 14px;
     flex: 1;
     min-height: 0;
   }
 
   .session-group-label {
-    margin: 6px 8px 6px;
+    margin: 2px 8px 6px;
     color: rgb(255 255 255 / 0.28);
     font-size: 11px;
     font-weight: 700;
@@ -473,18 +424,18 @@
     display: flex;
     align-items: stretch;
     gap: 2px;
-    border-radius: 16px;
+    border-radius: 14px;
     min-width: 0;
     transition: background 0.18s ease, color 0.18s ease;
   }
 
   .session-row:hover {
-    background: rgb(255 255 255 / 0.045);
+    background: rgb(255 255 255 / 0.035);
   }
 
   .session-row.active {
-    background: rgb(176 92 255 / 0.14);
-    box-shadow: inset 0 0 0 1px rgb(176 92 255 / 0.12);
+    background: rgb(255 255 255 / 0.052);
+    box-shadow: inset 2px 0 0 rgb(176 92 255 / 0.78);
   }
 
   .session-item {
@@ -492,7 +443,7 @@
     min-width: 0;
     border: 0;
     background: transparent;
-    padding: 10px 6px 10px 10px;
+    padding: 10px 8px 10px 14px;
     color: rgb(255 255 255 / 0.42);
     font-size: 13px;
     text-align: left;
@@ -500,9 +451,12 @@
     transition: color 0.18s ease;
   }
 
-  .session-row:hover .session-item,
+  .session-row:hover .session-item {
+    color: rgb(255 255 255 / 0.72);
+  }
+
   .session-row.active .session-item {
-    color: rgb(255 255 255 / 0.86);
+    color: rgb(255 255 255 / 0.92);
   }
 
   .session-item span {
@@ -595,25 +549,12 @@
   @media (max-width: 900px) {
     .agent-page {
       grid-template-columns: minmax(140px, 36vw) minmax(0, 1fr);
-      height: calc(100vh - 64px);
+      height: 100%;
       overflow: hidden;
     }
 
     .agent-page--session-collapsed {
       grid-template-columns: 0 minmax(0, 1fr);
-    }
-
-    .agent-sidebar::-webkit-scrollbar {
-      width: 4px;
-    }
-    .agent-sidebar::-webkit-scrollbar-thumb {
-      background: var(--muted-foreground);
-      border-radius: 4px;
-      opacity: 0;
-      transition: opacity 0.2s;
-    }
-    .agent-sidebar:hover::-webkit-scrollbar-thumb {
-      opacity: 1;
     }
   }
 </style>

@@ -30,6 +30,7 @@ class IntentResult(BaseModel):
     clarifyingQuestion: str | None = None
     decisionSource: str = "rules"
     reason: str
+    signals: list[dict] = Field(default_factory=list)
 
 
 class IntentRouter:
@@ -195,10 +196,24 @@ class IntentRouter:
     @staticmethod
     def _looks_like_session_recap_question(message: str) -> bool:
         """用户追问「你刚才帮我做了什么」等元问题，应走对话回顾而非调工具。"""
+        compact = re.sub(r"\s+", "", message)
+        if (
+            ("刚刚" in compact or "刚才" in compact or "上次" in compact or "这张图" in compact or "这张图片" in compact)
+            and ("用什么" in compact or "什么生成" in compact or "哪个工具" in compact or "怎么生成" in compact)
+        ):
+            return True
         needles = (
             "你之前帮我",
             "你刚刚帮我",
             "你刚才帮我",
+            "你刚刚用什么",
+            "你刚才用什么",
+            "刚刚用什么生成",
+            "刚才用什么生成",
+            "刚刚是什么生成",
+            "刚才是什么生成",
+            "刚刚用哪个工具",
+            "刚才用哪个工具",
             "你帮我做了什么",
             "你帮我完成了",
             "完成了什么",

@@ -170,6 +170,7 @@ def test_failure_is_marked_processing_before_failed() -> None:
 def test_model_auth_failure_error_code_is_specific() -> None:
     assert _model_call_error_code('siliconflow request failed: status=401, body="Invalid token"') == "MODEL_AUTH_FAILED"
     assert _model_call_error_code("API Key is required for model provider") == "MODEL_AUTH_FAILED"
+    assert _model_call_error_code("task_status_msg=Failure to pass the risk control system") == "MODEL_RISK_CONTROL_REJECTED"
 
 
 def test_data_url_image_is_persisted() -> None:
@@ -191,10 +192,7 @@ def test_data_url_image_is_persisted() -> None:
             assert result == [
                 {
                     "url": "/generated/images/99123/image-1.png",
-                    "sourceUrl": (
-                        "data:image/png;base64,"
-                        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
-                    ),
+                    "sourceUrl": "[inline-image-base64-omitted]",
                 }
             ], result
             assert (Path(temp_dir) / "images" / "99123" / "image-1.png").exists()

@@ -19,6 +19,7 @@ public record InternalAgentRunContextResponse(
         InternalAgentModelConfigResponse modelConfig,
         String agentSystemPrompt,
         String deepAgentsSystemPrompt,
+        AgentMemorySettingsResponse memorySettings,
         InternalPendingToolContextResponse pendingToolContext
 ) {
 }

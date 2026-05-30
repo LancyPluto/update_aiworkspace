@@ -1,6 +1,7 @@
 export { apiRequest, ApiBusinessError } from "./client"
 export { login, logout, register, resetPassword, sendSmsCode, smsLogin, smsRegister } from "./authApi"
-export { getCurrentUser } from "./userApi"
+export { getCurrentUser, updateCurrentUserProfile, uploadCurrentUserAvatar, updateCommunitySettings } from "./userApi"
+export * from "./communityApi"
 export { fetchToolCategories, fetchTools, searchTools, fetchToolByCode } from "./toolApi"
 export * from "./pptApi"
 export {
@@ -23,6 +24,7 @@ export {
   deleteAgentFile,
   createAgentWorkspaceMemory,
   deleteAgentWorkspaceMemory,
+  editRegenerateAgentMessage,
   fetchAgentFiles,
   fetchAgentMessages,
   fetchAgentModelConfigs,
@@ -31,9 +33,8 @@ export {
   fetchAgentSessions,
   fetchAgentWorkspaces,
   fetchAgentWorkspaceMemory,
-  sendAgentMessage,
   regenerateAgentRun,
-  editRegenerateAgentMessage,
+  sendAgentMessage,
   streamAgentRunEvents,
   uploadAgentFile,
   updateAgentWorkspaceMemory,
