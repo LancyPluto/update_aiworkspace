@@ -3,6 +3,8 @@ package com.aiminilab.aitoolmarket.agent.controller;
 import com.aiminilab.aitoolmarket.admin.service.SystemSettingService;
 import com.aiminilab.aitoolmarket.agent.client.AgentServiceClient;
 import com.aiminilab.aitoolmarket.agent.config.AgentPromptSettings;
+import com.aiminilab.aitoolmarket.agent.config.AgentRouterSettings;
+import com.aiminilab.aitoolmarket.agent.dto.AgentRouterSettingsResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AdminAgentRouteDebugRequest;
 import com.aiminilab.aitoolmarket.agent.dto.AdminAgentRouteDebugResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AdminAgentToolAccessResponse;
@@ -109,6 +111,12 @@ public class AdminAgentToolAccessController {
                 nonBlankOrDefault(settings.get(AgentPromptSettings.SYSTEM_PROMPT_KEY), AgentPromptSettings.DEFAULT_SYSTEM_PROMPT),
                 nonBlankOrDefault(settings.get(AgentPromptSettings.DEEP_AGENTS_SYSTEM_PROMPT_KEY), AgentPromptSettings.DEFAULT_DEEP_AGENTS_SYSTEM_PROMPT),
                 null,
+                new AgentRouterSettingsResponse(
+                        parseBooleanSetting(settings.get(AgentRouterSettings.ENABLED_KEY), AgentRouterSettings.DEFAULT_ENABLED),
+                        nonBlankOrDefault(settings.get(AgentRouterSettings.PROMPT_KEY), AgentRouterSettings.DEFAULT_PROMPT),
+                        parseDoubleSetting(settings.get(AgentRouterSettings.MIN_CONFIDENCE_KEY), 0.7D, 0D, 1D),
+                        parseBooleanSetting(settings.get(AgentRouterSettings.FALLBACK_TO_RULES_KEY), AgentRouterSettings.DEFAULT_FALLBACK_TO_RULES)
+                ),
                 null
         );
         AdminAgentRouteDebugResponse response = agentServiceClient.debugRoute(context);
@@ -142,5 +150,31 @@ public class AdminAgentToolAccessController {
 
     private String nonBlankOrDefault(String value, String fallback) {
         return value == null || value.isBlank() ? fallback : value;
+    }
+
+    private boolean parseBooleanSetting(String value, boolean fallback) {
+        if (value == null || value.isBlank()) {
+            return fallback;
+        }
+        String normalized = value.trim().toLowerCase(java.util.Locale.ROOT);
+        if ("true".equals(normalized) || "1".equals(normalized) || "yes".equals(normalized) || "on".equals(normalized)) {
+            return true;
+        }
+        if ("false".equals(normalized) || "0".equals(normalized) || "no".equals(normalized) || "off".equals(normalized)) {
+            return false;
+        }
+        return fallback;
+    }
+
+    private double parseDoubleSetting(String value, double fallback, double min, double max) {
+        if (value == null || value.isBlank()) {
+            return fallback;
+        }
+        try {
+            double parsed = Double.parseDouble(value.trim());
+            return Math.max(min, Math.min(max, parsed));
+        } catch (NumberFormatException ignored) {
+            return fallback;
+        }
     }
 }

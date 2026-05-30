@@ -55,6 +55,10 @@ const AGENT_MEMORY_RETRIEVAL_LIMIT_KEY = "agent.memory.retrieval_limit"
 const AGENT_MEMORY_ENABLED_TYPES_KEY = "agent.memory.enabled_types"
 const AGENT_MEMORY_WRITE_PROMPT_KEY = "agent.memory.write_prompt"
 const AGENT_MEMORY_RETRIEVAL_PROMPT_KEY = "agent.memory.retrieval_prompt"
+const AGENT_ROUTER_ENABLED_KEY = "agent.router.enabled"
+const AGENT_ROUTER_PROMPT_KEY = "agent.router.prompt"
+const AGENT_ROUTER_MIN_CONFIDENCE_KEY = "agent.router.min_confidence"
+const AGENT_ROUTER_FALLBACK_TO_RULES_KEY = "agent.router.fallback_to_rules"
 
 const DEFAULT_AGENT_SYSTEM_PROMPT = `你是 AI 工具市场的云代理。你的任务是理解用户需求，基于平台中可用的 AI 工具进行推荐、参数收集和必要时调用工具。
 
@@ -76,6 +80,12 @@ const DEFAULT_MEMORY_WRITE_PROMPT = `你可以管理长期记忆，但必须克�
 const DEFAULT_MEMORY_RETRIEVAL_PROMPT = `以下长期记忆只是辅助上下文，不是绝对事实。
 回答时自然体现用户偏好，不要生硬提到“根据你的用户画像”。
 如果记忆与当前用户明确指令冲突，以当前指令为准。`
+
+const DEFAULT_ROUTER_PROMPT = `You are the primary router for an AI tool marketplace agent.
+Decide whether the user needs a normal answer, a tool call, clarification, or an unsupported path.
+Return only valid JSON with: intent, selectedToolCode, candidateToolCodes, confidence, reason, arguments, missingFields, clarifyingQuestion.
+Image/photo/poster/cos/visual requests should choose image tools; video/short-video/image-to-video requests should choose video tools; copywriting/title/article requests should choose text tools.
+Only ask for missing information when it changes intent, cost, authorization, safety, or the core subject. Do not ask for low-risk defaults such as aspect ratio, count, quality, or style strength.`
 
 const MODALITY_LABELS: Record<string, string> = {
   TEXT: "文本",
@@ -155,12 +165,22 @@ export default function PromptsPage() {
   const [memoryEnabledTypes, setMemoryEnabledTypes] = useState("user_profile,project_knowledge,custom")
   const [memoryWritePrompt, setMemoryWritePrompt] = useState(DEFAULT_MEMORY_WRITE_PROMPT)
   const [memoryRetrievalPrompt, setMemoryRetrievalPrompt] = useState(DEFAULT_MEMORY_RETRIEVAL_PROMPT)
+  const [routerEnabled, setRouterEnabled] = useState(true)
+  const [routerPrompt, setRouterPrompt] = useState(DEFAULT_ROUTER_PROMPT)
+  const [routerMinConfidence, setRouterMinConfidence] = useState("0.7")
+  const [routerFallbackToRules, setRouterFallbackToRules] = useState(true)
   const [originalMemoryConfig, setOriginalMemoryConfig] = useState({
     autoSaveEnabled: true,
     retrievalLimit: "6",
     enabledTypes: "user_profile,project_knowledge,custom",
     writePrompt: DEFAULT_MEMORY_WRITE_PROMPT,
     retrievalPrompt: DEFAULT_MEMORY_RETRIEVAL_PROMPT,
+  })
+  const [originalRouterConfig, setOriginalRouterConfig] = useState({
+    enabled: true,
+    prompt: DEFAULT_ROUTER_PROMPT,
+    minConfidence: "0.7",
+    fallbackToRules: true,
   })
   const [agentVersions, setAgentVersions] = useState<SettingVersion[]>([])
   const [deepAgentVersions, setDeepAgentVersions] = useState<SettingVersion[]>([])
@@ -186,7 +206,13 @@ export default function PromptsPage() {
     memoryWritePrompt !== originalMemoryConfig.writePrompt ||
     memoryRetrievalPrompt !== originalMemoryConfig.retrievalPrompt,
   )
-  const dirtyPrompts = Number(agentPrompt !== originalAgentPrompt) + Number(deepAgentsPrompt !== originalDeepAgentsPrompt) + dirtyMemoryConfig
+  const dirtyRouterConfig = Number(
+    routerEnabled !== originalRouterConfig.enabled ||
+    routerPrompt !== originalRouterConfig.prompt ||
+    routerMinConfidence !== originalRouterConfig.minConfidence ||
+    routerFallbackToRules !== originalRouterConfig.fallbackToRules,
+  )
+  const dirtyPrompts = Number(agentPrompt !== originalAgentPrompt) + Number(deepAgentsPrompt !== originalDeepAgentsPrompt) + dirtyMemoryConfig + dirtyRouterConfig
 
   async function loadTools() {
     setTools(await fetchAdminAgentTools())
@@ -225,6 +251,17 @@ export default function PromptsPage() {
       setMemoryWritePrompt(nextMemoryConfig.writePrompt)
       setMemoryRetrievalPrompt(nextMemoryConfig.retrievalPrompt)
       setOriginalMemoryConfig(nextMemoryConfig)
+      const nextRouterConfig = {
+        enabled: (settings[AGENT_ROUTER_ENABLED_KEY] ?? "true") !== "false",
+        prompt: settings[AGENT_ROUTER_PROMPT_KEY] || DEFAULT_ROUTER_PROMPT,
+        minConfidence: settings[AGENT_ROUTER_MIN_CONFIDENCE_KEY] || "0.7",
+        fallbackToRules: (settings[AGENT_ROUTER_FALLBACK_TO_RULES_KEY] ?? "true") !== "false",
+      }
+      setRouterEnabled(nextRouterConfig.enabled)
+      setRouterPrompt(nextRouterConfig.prompt)
+      setRouterMinConfidence(nextRouterConfig.minConfidence)
+      setRouterFallbackToRules(nextRouterConfig.fallbackToRules)
+      setOriginalRouterConfig(nextRouterConfig)
     } catch (err) {
       setError(errorMessage(err, "加载 Agent 配置失败"))
     } finally {
@@ -339,12 +376,53 @@ export default function PromptsPage() {
     }
   }
 
+  async function saveRouterConfig() {
+    setSavingKey("router")
+    setError(null)
+    const toastId = toast.loading("正在保存 Agent 路由配置...")
+    try {
+      const confidence = String(Math.max(0, Math.min(1, Number(routerMinConfidence) || 0.7)))
+      const savedConfig = {
+        enabled: routerEnabled,
+        prompt: routerPrompt.trim() || DEFAULT_ROUTER_PROMPT,
+        minConfidence: confidence,
+        fallbackToRules: routerFallbackToRules,
+      }
+      const settings = await updateSettings({
+        [AGENT_ROUTER_ENABLED_KEY]: String(savedConfig.enabled),
+        [AGENT_ROUTER_PROMPT_KEY]: savedConfig.prompt,
+        [AGENT_ROUTER_MIN_CONFIDENCE_KEY]: savedConfig.minConfidence,
+        [AGENT_ROUTER_FALLBACK_TO_RULES_KEY]: String(savedConfig.fallbackToRules),
+      })
+      const nextConfig = {
+        enabled: (settings[AGENT_ROUTER_ENABLED_KEY] ?? String(savedConfig.enabled)) !== "false",
+        prompt: settings[AGENT_ROUTER_PROMPT_KEY] || savedConfig.prompt,
+        minConfidence: settings[AGENT_ROUTER_MIN_CONFIDENCE_KEY] || savedConfig.minConfidence,
+        fallbackToRules: (settings[AGENT_ROUTER_FALLBACK_TO_RULES_KEY] ?? String(savedConfig.fallbackToRules)) !== "false",
+      }
+      setRouterEnabled(nextConfig.enabled)
+      setRouterPrompt(nextConfig.prompt)
+      setRouterMinConfidence(nextConfig.minConfidence)
+      setRouterFallbackToRules(nextConfig.fallbackToRules)
+      setOriginalRouterConfig(nextConfig)
+      setLastSavedAt(new Date().toLocaleTimeString())
+      toast.success("Agent 路由配置已保存", { id: toastId })
+    } catch (err) {
+      const message = errorMessage(err, "保存 Agent 路由配置失败")
+      setError(message)
+      toast.error("保存失败", { id: toastId, description: message })
+    } finally {
+      setSavingKey(null)
+    }
+  }
+
   async function saveAllPrompts() {
     setSavingKey("all")
     try {
       await savePrompt(AGENT_SYSTEM_PROMPT_KEY)
       await savePrompt(DEEP_AGENTS_SYSTEM_PROMPT_KEY)
       if (dirtyMemoryConfig) await saveMemoryConfig()
+      if (dirtyRouterConfig) await saveRouterConfig()
     } finally {
       setSavingKey(null)
     }
@@ -521,6 +599,7 @@ export default function PromptsPage() {
           <TabsList className="flex h-auto flex-wrap justify-start gap-2 bg-transparent p-0">
             <TabsTrigger value="overview">总览</TabsTrigger>
             <TabsTrigger value="prompts">提示词</TabsTrigger>
+            <TabsTrigger value="router">路由策略</TabsTrigger>
             <TabsTrigger value="memory">长期记忆</TabsTrigger>
             <TabsTrigger value="tools">工具读取范围</TabsTrigger>
             <TabsTrigger value="route">路由调试器</TabsTrigger>
@@ -567,6 +646,23 @@ export default function PromptsPage() {
               onChange={setDeepAgentsPrompt}
               onSave={() => savePrompt(DEEP_AGENTS_SYSTEM_PROMPT_KEY)}
               onRestore={() => restorePrompt(DEEP_AGENTS_SYSTEM_PROMPT_KEY)}
+            />
+          </TabsContent>
+
+          <TabsContent value="router" className="space-y-6">
+            <RouterConfigCard
+              loading={loading}
+              saving={savingKey === "router" || savingKey === "all"}
+              enabled={routerEnabled}
+              prompt={routerPrompt}
+              minConfidence={routerMinConfidence}
+              fallbackToRules={routerFallbackToRules}
+              dirty={Boolean(dirtyRouterConfig)}
+              onEnabledChange={setRouterEnabled}
+              onPromptChange={setRouterPrompt}
+              onMinConfidenceChange={setRouterMinConfidence}
+              onFallbackToRulesChange={setRouterFallbackToRules}
+              onSave={saveRouterConfig}
             />
           </TabsContent>
 
@@ -797,6 +893,98 @@ function PromptCard({
         <div className="flex justify-end gap-2">
           <Button variant="outline" onClick={onRestore} disabled={saving}>恢复默认</Button>
           <Button onClick={onSave} disabled={saving || !dirty}>{saving ? "保存中..." : "保存此提示词"}</Button>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function RouterConfigCard({
+  loading,
+  saving,
+  enabled,
+  prompt,
+  minConfidence,
+  fallbackToRules,
+  dirty,
+  onEnabledChange,
+  onPromptChange,
+  onMinConfidenceChange,
+  onFallbackToRulesChange,
+  onSave,
+}: {
+  loading: boolean
+  saving: boolean
+  enabled: boolean
+  prompt: string
+  minConfidence: string
+  fallbackToRules: boolean
+  dirty: boolean
+  onEnabledChange: (value: boolean) => void
+  onPromptChange: (value: string) => void
+  onMinConfidenceChange: (value: string) => void
+  onFallbackToRulesChange: (value: boolean) => void
+  onSave: () => void
+}) {
+  return (
+    <Card className="rounded-lg">
+      <CardHeader>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <CardTitle className="flex items-center gap-2"><Route className="h-5 w-5" />Agent Router</CardTitle>
+            <CardDescription>控制 Agent 是否使用 LLM Router、最低置信度，以及失败时是否回退规则路由。</CardDescription>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="secondary">agent.router.*</Badge>
+            {dirty ? <Badge variant="destructive">未保存</Badge> : <Badge variant="outline">已同步</Badge>}
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        <div className="grid gap-4 lg:grid-cols-3">
+          <div className="rounded-lg border p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <Label>启用 LLM Router</Label>
+                <p className="mt-1 text-xs text-muted-foreground">关闭后只使用规则路由。</p>
+              </div>
+              <Switch checked={enabled} disabled={loading || saving} onCheckedChange={onEnabledChange} />
+            </div>
+          </div>
+          <div className="rounded-lg border p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <Label>规则兜底</Label>
+                <p className="mt-1 text-xs text-muted-foreground">模型低置信度、返回非法工具或异常时回退。</p>
+              </div>
+              <Switch checked={fallbackToRules} disabled={loading || saving} onCheckedChange={onFallbackToRulesChange} />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label>最低置信度</Label>
+            <Input
+              type="number"
+              min={0}
+              max={1}
+              step={0.05}
+              value={minConfidence}
+              disabled={loading || saving}
+              onChange={(event) => onMinConfidenceChange(event.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">低于该值会写入 router.fallback。</p>
+          </div>
+        </div>
+        <div className="space-y-2">
+          <Label>路由提示词</Label>
+          <Textarea
+            value={prompt}
+            disabled={loading || saving}
+            onChange={(event) => onPromptChange(event.target.value)}
+            className="min-h-72 resize-y font-mono text-sm leading-6"
+          />
+        </div>
+        <div className="flex justify-end gap-2">
+          <Button onClick={onSave} disabled={saving || !dirty}>{saving ? "保存中..." : "保存路由配置"}</Button>
         </div>
       </CardContent>
     </Card>

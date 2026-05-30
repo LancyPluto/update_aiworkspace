@@ -3,6 +3,7 @@ package com.aiminilab.aitoolmarket.config;
 import com.aiminilab.aitoolmarket.admin.mapper.SystemSettingMapper;
 import com.aiminilab.aitoolmarket.admin.mapper.SystemSettingVersionMapper;
 import com.aiminilab.aitoolmarket.agent.config.AgentPromptSettings;
+import com.aiminilab.aitoolmarket.agent.config.AgentRouterSettings;
 import com.aiminilab.aitoolmarket.common.enums.UserStatus;
 import com.aiminilab.aitoolmarket.common.enums.UserType;
 import com.aiminilab.aitoolmarket.user.entity.User;
@@ -67,6 +68,30 @@ public class DataInitializer implements CommandLineRunner {
                 AgentPromptSettings.DEFAULT_DEEP_AGENTS_SYSTEM_PROMPT,
                 "agent",
                 "Agent deep-agents runtime system prompt"
+        );
+        systemSettingMapper.insertIfAbsent(
+                AgentRouterSettings.ENABLED_KEY,
+                String.valueOf(AgentRouterSettings.DEFAULT_ENABLED),
+                "agent",
+                "Agent LLM router enabled"
+        );
+        systemSettingMapper.insertIfAbsent(
+                AgentRouterSettings.PROMPT_KEY,
+                AgentRouterSettings.DEFAULT_PROMPT,
+                "agent",
+                "Agent LLM router prompt"
+        );
+        systemSettingMapper.insertIfAbsent(
+                AgentRouterSettings.MIN_CONFIDENCE_KEY,
+                AgentRouterSettings.DEFAULT_MIN_CONFIDENCE,
+                "agent",
+                "Agent LLM router minimum confidence"
+        );
+        systemSettingMapper.insertIfAbsent(
+                AgentRouterSettings.FALLBACK_TO_RULES_KEY,
+                String.valueOf(AgentRouterSettings.DEFAULT_FALLBACK_TO_RULES),
+                "agent",
+                "Agent LLM router fallback to rules"
         );
     }
 
