@@ -20,7 +20,6 @@ import {
   Plus,
   Bell,
   Headphones,
-  QrCode,
   X,
   Menu,
 } from "lucide-vue-next"
@@ -69,11 +68,19 @@ const theme = ref<AppTheme>("light")
 const sidebarOpen = ref(true)
 const expandedGroups = ref<Set<string>>(new Set())
 const customerServiceOpen = ref(false)
+/** Vite publicDir=asset，kf.jpg 对外路径为 /kf.jpg */
+const DEFAULT_CUSTOMER_SERVICE_QR = "/kf.jpg"
+
 const customerService = ref<CustomerServiceSettings>({
   enabled: true,
   title: "联系客服",
   description: "扫码添加客服，获取使用支持",
-  qrCodeUrl: "",
+  qrCodeUrl: DEFAULT_CUSTOMER_SERVICE_QR,
+})
+
+const customerServiceQrSrc = computed(() => {
+  const url = customerService.value.qrCodeUrl?.trim()
+  return url || DEFAULT_CUSTOMER_SERVICE_QR
 })
 
 const userNav: (NavLink | NavGroup)[] = [
@@ -199,15 +206,26 @@ async function loadCreditAccount() {
   }
 }
 
+const customerServiceQrBroken = ref(false)
+
+function onCustomerServiceQrError() {
+  customerServiceQrBroken.value = true
+}
+
+watch(customerServiceQrSrc, () => {
+  customerServiceQrBroken.value = false
+})
+
 async function loadCustomerServiceSettings() {
   try {
     customerService.value = await fetchCustomerServiceSettings({ token: auth.token })
+    customerServiceQrBroken.value = false
   } catch {
     customerService.value = {
       enabled: true,
       title: "联系客服",
       description: "扫码添加客服，获取使用支持",
-      qrCodeUrl: "",
+      qrCodeUrl: DEFAULT_CUSTOMER_SERVICE_QR,
     }
   }
 }
@@ -411,15 +429,6 @@ onUnmounted(() => {
             placeholder="搜索模型、智能体和素材"
           />
         </div>
-        <div
-          v-if="credit"
-          class="hidden h-10 shrink-0 items-center gap-2 rounded-full border border-white/10 bg-white/[0.035] px-3 font-mono text-xs tabular-nums text-white/62 shadow-[inset_0_1px_0_rgb(255_255_255_/_0.035)] lg:inline-flex"
-          title="剩余可用算力"
-        >
-          <Sparkles class="h-3.5 w-3.5 text-primary/75" />
-          <span class="font-sans text-white/38">剩余算力</span>
-          <strong class="font-mono font-medium text-white/78">{{ credit.available.toLocaleString() }}</strong>
-        </div>
         <RouterLink
           v-if="!isAgentRoute"
           :to="userRoutes.toolList"
@@ -514,15 +523,18 @@ onUnmounted(() => {
 
         <div class="mx-auto mt-5 flex aspect-square w-56 max-w-full items-center justify-center rounded-3xl bg-white p-3">
           <img
-            v-if="customerService.qrCodeUrl"
-            :src="customerService.qrCodeUrl"
+            v-if="!customerServiceQrBroken"
+            :src="customerServiceQrSrc"
+            :alt="customerService.title || '客服二维码'"
+            class="h-full w-full rounded-2xl object-contain"
+            @error="onCustomerServiceQrError"
+          />
+          <img
+            v-else
+            :src="DEFAULT_CUSTOMER_SERVICE_QR"
             :alt="customerService.title || '客服二维码'"
             class="h-full w-full rounded-2xl object-contain"
           />
-          <div v-else class="flex h-full w-full flex-col items-center justify-center rounded-2xl border border-dashed border-black/15 text-black/45">
-            <QrCode class="h-10 w-10" aria-hidden="true" />
-            <span class="mt-3 text-xs">后台暂未配置客服二维码</span>
-          </div>
         </div>
       </section>
     </div>

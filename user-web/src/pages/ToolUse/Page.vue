@@ -10,6 +10,7 @@ import { userRoutes } from "@/router/userRoutes"
 import { fetchToolByCode, createTask, ApiBusinessError } from "@/api"
 import type { ToolDetail, ToolField } from "@/api/types"
 import { useAuthStore } from "@/store/authStore"
+import { randomUUID } from "@/utils/randomUUID"
 
 const props = defineProps<{
   id: string
@@ -127,7 +128,7 @@ async function handleCreateTask() {
       {
         toolCode: tool.value.toolCode,
         params,
-        clientRequestId: crypto.randomUUID(),
+        clientRequestId: randomUUID(),
       },
       { token: auth.token },
     )

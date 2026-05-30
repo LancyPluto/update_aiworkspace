@@ -22,12 +22,25 @@ def main() -> int:
         print("Set DEPLOY_PASSWORD", file=sys.stderr)
         return 1
 
+    reset_volumes = os.environ.get("RESET_VOLUMES", "").lower() in ("1", "true", "yes")
+
+    volume_reset_block = ""
+    if reset_volumes:
+        volume_reset_block = r'''
+echo "==> Stop all services and remove Docker volumes (MySQL/Redis/RabbitMQ data will be wiped)"
+docker compose -f docker-compose.yml -f docker-compose.nginx.yml down -v --remove-orphans
+echo "==> Volumes removed; fresh data dirs will be created on next up"
+'''
+
     remote_script = r'''#!/bin/bash
 set -uo pipefail
 cd ''' + DEPLOY_DIR + r'''
+''' + volume_reset_block + r'''
+
+MYSQL_CLI="mysql --default-character-set=utf8mb4"
 
 mysql_q() {
-  docker exec ''' + MYSQL_CONTAINER + r''' mysql -u''' + MYSQL_USER + r''' -p''' + MYSQL_PASS + r''' "$@" 2>&1 | grep -v "Using a password" || true
+  docker exec ''' + MYSQL_CONTAINER + r''' $MYSQL_CLI -u''' + MYSQL_USER + r''' -p''' + MYSQL_PASS + r''' "$@" 2>&1 | grep -v "Using a password" || true
 }
 
 echo "==> Start MySQL for migrations (if not running)"
@@ -73,7 +86,7 @@ for f in $(ls -1 ''' + REMOTE_DIR + r'''/sql/*.sql | sort); do
   fi
   echo "  RUN $base"
   set +e
-  out=$(docker exec -i ''' + MYSQL_CONTAINER + r''' mysql -u''' + MYSQL_USER + r''' -p''' + MYSQL_PASS + r''' ''' + MYSQL_DB + r''' < "$f" 2>&1)
+  out=$(docker exec -i ''' + MYSQL_CONTAINER + r''' $MYSQL_CLI -u''' + MYSQL_USER + r''' -p''' + MYSQL_PASS + r''' ''' + MYSQL_DB + r''' < "$f" 2>&1)
   code=$?
   set -e
   if [ $code -eq 0 ]; then

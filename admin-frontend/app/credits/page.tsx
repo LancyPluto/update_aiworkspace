@@ -27,6 +27,7 @@ import {
   memberAccountBalance,
 } from "@/lib/api/users"
 import { ApiError } from "@/lib/api/http"
+import { compareCreditLogsByCreatedAtDesc } from "@/lib/credit-log-sort"
 import type { AdminMember, CreditLogItem } from "@/lib/api/types"
 
 interface CreditUserRow {
@@ -40,6 +41,8 @@ interface CreditUserRow {
 
 interface CreditRecordRow {
   id: string
+  logId: number
+  createdAt: string | null
   user: string
   type: string
   amount: number
@@ -93,6 +96,8 @@ export default function CreditsPage() {
             const logResp = await fetchUserCreditLogs(user.rawId)
             return logResp.list.map((log: CreditLogItem): CreditRecordRow => ({
               id: `C${log.id}`,
+              logId: log.id,
+              createdAt: log.createdAt ?? null,
               user: user.name,
               type: log.logType,
               amount: log.amount,
@@ -105,7 +110,16 @@ export default function CreditsPage() {
           }
         }),
       )
-      setRecords(logGroups.flat().sort((a, b) => b.id.localeCompare(a.id)))
+      setRecords(
+        logGroups
+          .flat()
+          .sort((a, b) =>
+            compareCreditLogsByCreatedAtDesc(
+              { createdAt: a.createdAt, id: a.logId },
+              { createdAt: b.createdAt, id: b.logId },
+            ),
+          ),
+      )
     } catch (err) {
       const message = err instanceof ApiError ? err.message : "加载算力数据失败"
       setError(message)

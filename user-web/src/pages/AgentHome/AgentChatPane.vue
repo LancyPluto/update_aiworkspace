@@ -62,6 +62,7 @@ import type {
   ToolSummary,
 } from "@/api/types"
 import type { AssetPreviewItem, AssetPreviewRecommendation } from "@/types/assetPreview"
+import { randomUUID } from "@/utils/randomUUID"
 
 const auth = useAuthStore()
 
@@ -586,7 +587,7 @@ async function submitMessage(content = input.value) {
       props.sessionId,
       {
         content: text,
-        clientRequestId: crypto.randomUUID(),
+        clientRequestId: randomUUID(),
         modelConfigId: props.modelConfigId ?? null,
         fileIds: files.value.map((item) => item.id),
       },
@@ -639,7 +640,7 @@ async function retryFailedRun() {
     const res = await regenerateAgentRun(
       sourceRunId,
       {
-        clientRequestId: crypto.randomUUID(),
+        clientRequestId: randomUUID(),
         modelConfigId: props.modelConfigId ?? null,
       },
       { token: props.token },
@@ -678,7 +679,7 @@ async function regenerateAssistantMessage(message: AgentMessage) {
     const res = await regenerateAgentRun(
       message.runId,
       {
-        clientRequestId: crypto.randomUUID(),
+        clientRequestId: randomUUID(),
         modelConfigId: props.modelConfigId ?? null,
       },
       { token: props.token },
@@ -805,7 +806,7 @@ async function submitEditedMessage(message: AgentMessage) {
       message.id,
       {
         content: text,
-        clientRequestId: crypto.randomUUID(),
+        clientRequestId: randomUUID(),
         modelConfigId: props.modelConfigId ?? null,
       },
       { token: props.token },
