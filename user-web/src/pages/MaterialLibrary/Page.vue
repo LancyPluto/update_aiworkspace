@@ -2,25 +2,25 @@
 import { computed, onMounted, ref, watch } from "vue"
 import { RouterLink } from "vue-router"
 import {
-  ArrowRight,
-  Clock,
-  FileText,
   Filter,
   LoaderCircle,
-  Music,
   Sparkles,
   Trash2,
 } from "lucide-vue-next"
 import AppShell from "@/components/AppShell.vue"
+import AssetCard from "@/components/AssetCard.vue"
 import AssetPreviewModal from "@/components/AssetPreviewModal.vue"
 import { confirmDelete } from "@/composables/useConfirmDelete"
 import { deleteTask, fetchTasks } from "@/api/taskApi"
+import { publishCommunityPost, unpublishCommunityPost } from "@/api/communityApi"
 import { fetchTools } from "@/api/toolApi"
 import type { TaskDetail, ToolSummary } from "@/api/types"
 import type { AssetPreviewItem, AssetPreviewRecommendation } from "@/types/assetPreview"
 import type { ResultBlock } from "@/types/result"
 import { userRoutes } from "@/router/userRoutes"
 import { useAuthStore } from "@/store/authStore"
+import { assetFromTask, taskPrompt, taskPromptPreview } from "@/utils/assetPreviewAdapter"
+import { openDashboardWithAsset } from "@/utils/assetReplay"
 import { buildTaskResultBlocks } from "@/utils/taskResultBlocks"
 
 type MaterialModality = "all" | "IMAGE" | "VIDEO" | "AUDIO" | "TEXT" | "OTHER"
@@ -29,6 +29,10 @@ type MaterialItem = {
   task: TaskDetail
   blocks: ResultBlock[]
   modality: Exclude<MaterialModality, "all">
+}
+
+type MaterialAssetItem = MaterialItem & {
+  asset: AssetPreviewItem
 }
 
 const auth = useAuthStore()
@@ -80,6 +84,15 @@ const materials = computed(() => {
   return list
 })
 
+const materialAssets = computed<MaterialAssetItem[]>(() =>
+  materials.value
+    .map((item) => {
+      const asset = assetFromMaterial(item)
+      return asset ? { ...item, asset } : null
+    })
+    .filter((item): item is MaterialAssetItem => Boolean(item)),
+)
+
 const toolOptions = computed(() => {
   const source =
     selectedModality.value === "all"
@@ -122,71 +135,21 @@ function inferModality(task: TaskDetail, blocks: ResultBlock[]): Exclude<Materia
   return "OTHER"
 }
 
-function primaryBlock(item: MaterialItem): ResultBlock | null {
-  return (
-    item.blocks.find((block) => block.type === "image" || block.type === "video" || block.type === "audio") ||
-    item.blocks[0] ||
-    null
-  )
-}
-
 function assetFromMaterial(item: MaterialItem): AssetPreviewItem | null {
-  const block = primaryBlock(item)
-  if (!block) return null
-  const base = {
-    id: `material-${item.task.taskId}`,
-    title: item.task.toolName || block.title || item.task.taskNo,
-    subtitle: item.task.taskNo,
-    prompt: taskPrompt(item.task),
-    taskId: item.task.taskId,
-    taskNo: item.task.taskNo,
-    toolName: item.task.toolName,
-    toolCode: item.task.toolCode,
-    createdAt: item.task.createdAt,
-  }
-  if (block.type === "image") {
-    return {
-      ...base,
-      kind: "image",
-      url: block.images[0]?.url,
-      urls: block.images.map((image) => image.url),
-      title: block.title || base.title,
-    }
-  }
-  if (block.type === "video") return { ...base, kind: "video", url: block.url, title: block.title || base.title }
-  if (block.type === "audio") return { ...base, kind: "audio", url: block.url, title: block.title || base.title }
-  if (block.type === "text" || block.type === "json" || block.type === "report") {
-    return { ...base, kind: "text", rawText: block.content, title: block.title || base.title }
-  }
-  if (block.type === "list") return { ...base, kind: "text", rawText: block.items.join("\n"), title: block.title || base.title }
-  return { ...base, kind: "other", rawText: item.task.result?.contentText || "", title: base.title }
+  return assetFromTask(item.task, {
+    blocks: item.blocks,
+    idPrefix: "material",
+    source: "private",
+    modality: item.modality,
+  })
 }
 
-function openAssetPreview(item: MaterialItem) {
-  previewAsset.value = assetFromMaterial(item)
+function openAssetPreview(item: MaterialAssetItem) {
+  previewAsset.value = item.asset
 }
 
 function normalizeModality(value?: string | null) {
   return (value || "TEXT").trim().toUpperCase()
-}
-
-function taskPrompt(task: TaskDetail): string {
-  const params = task.params || {}
-  const value = params.prompt || params.text || params.description || params.videoTopic || params.productName
-  return typeof value === "string" && value.trim() ? value.trim() : ""
-}
-
-const PROMPT_PREVIEW_MAX_LENGTH = 48
-
-function taskPromptText(task: TaskDetail): string {
-  return taskPrompt(task)
-}
-
-function taskPromptPreview(task: TaskDetail, maxLength = PROMPT_PREVIEW_MAX_LENGTH): string {
-  const prompt = taskPromptText(task)
-  if (!prompt) return task.taskNo
-  if (prompt.length <= maxLength) return prompt
-  return `${prompt.slice(0, maxLength)}...`
 }
 
 function recommendToolsForAsset(asset: AssetPreviewItem): AssetPreviewRecommendation[] {
@@ -204,11 +167,8 @@ function recommendToolsForAsset(asset: AssetPreviewItem): AssetPreviewRecommenda
 }
 
 function useAssetWithTool(tool: AssetPreviewRecommendation) {
-  if (previewAsset.value) {
-    window.sessionStorage.setItem("dashboard_pending_asset", JSON.stringify(previewAsset.value))
-  }
+  if (previewAsset.value) openDashboardWithAsset(previewAsset.value, tool)
   previewAsset.value = null
-  window.location.href = `/dashboard?modality=${encodeURIComponent(tool.outputModality || "IMAGE")}&tool=${encodeURIComponent(tool.toolCode)}`
 }
 
 function openPreviewTask(asset: AssetPreviewItem) {
@@ -216,28 +176,34 @@ function openPreviewTask(asset: AssetPreviewItem) {
   window.location.href = `/tasks/${asset.taskId}/result`
 }
 
-function modalityLabel(value: MaterialModality) {
-  return modalityOptions.find((option) => option.value === value)?.label || value
+async function publishPreviewAsset(asset: AssetPreviewItem) {
+  if (!auth.token || !asset.taskId) return
+  try {
+    const post = await publishCommunityPost(
+      {
+        taskId: asset.taskId,
+        title: asset.title,
+        description: asset.subtitle || null,
+        promptVisible: asset.promptVisible ?? false,
+      },
+      { token: auth.token },
+    )
+    previewAsset.value = { ...asset, communityPostId: post.id, promptVisible: post.promptVisible }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "发布失败"
+    window.alert(message)
+  }
 }
 
-function formatTime(value?: string | null) {
-  if (!value) return ""
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString("zh-CN", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  })
-}
-
-function textPreview(item: MaterialItem) {
-  const block = primaryBlock(item)
-  if (!block) return ""
-  if (block.type === "text" || block.type === "json" || block.type === "report") return block.content
-  if (block.type === "list") return block.items.join("\n")
-  return item.task.result?.contentText || ""
+async function unpublishPreviewAsset(asset: AssetPreviewItem) {
+  if (!auth.token || !asset.communityPostId) return
+  try {
+    await unpublishCommunityPost(asset.communityPostId, { token: auth.token })
+    previewAsset.value = { ...asset, communityPostId: undefined }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "撤回失败"
+    window.alert(message)
+  }
 }
 
 async function removeMaterial(item: MaterialItem) {
@@ -322,7 +288,7 @@ onMounted(loadMaterials)
       </div>
 
       <div
-        v-else-if="materials.length === 0"
+        v-else-if="materialAssets.length === 0"
         class="rounded-3xl border border-dashed border-white/12 bg-white/[0.04] p-10 text-center shadow-sm"
       >
         <div class="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-white/8">
@@ -341,72 +307,15 @@ onMounted(loadMaterials)
       </div>
 
       <div v-else class="columns-1 gap-5 sm:columns-2 lg:columns-3 2xl:columns-4">
-        <article
-          v-for="item in materials"
+        <AssetCard
+          v-for="item in materialAssets"
           :key="item.task.taskId"
-          class="group mb-5 inline-block w-full break-inside-avoid cursor-zoom-in overflow-hidden rounded-3xl border border-white/8 bg-white/[0.04] shadow-[0_18px_42px_rgb(0_0_0_/_0.24)] transition-all duration-200 hover:-translate-y-1 hover:border-primary/50"
-          @click="openAssetPreview(item)"
+          :asset="item.asset"
+          source="private"
+          class="mb-5"
+          @open="openAssetPreview(item)"
         >
-          <div class="relative bg-muted">
-            <template v-if="primaryBlock(item)?.type === 'image'">
-              <img
-                :src="primaryBlock(item)?.images[0]?.url"
-                :alt="item.task.toolName"
-                class="max-h-[560px] w-full object-cover"
-                loading="lazy"
-              />
-              <span
-                v-if="primaryBlock(item)?.images.length > 1"
-                class="absolute bottom-3 right-3 rounded-full bg-black/65 px-2.5 py-1 text-xs text-white"
-              >
-                {{ primaryBlock(item)?.images.length }} 张
-              </span>
-            </template>
-            <template v-else-if="primaryBlock(item)?.type === 'video'">
-              <video
-                :src="primaryBlock(item)?.url"
-                controls
-                playsinline
-                preload="metadata"
-                class="w-full bg-black"
-              />
-            </template>
-            <template v-else-if="primaryBlock(item)?.type === 'audio'">
-              <div class="space-y-5 bg-white/[0.05] p-5 pt-12">
-                <div class="flex items-center gap-3">
-                  <div class="flex h-12 w-12 items-center justify-center rounded-full bg-white/10 text-primary shadow-sm">
-                    <Music class="h-6 w-6" />
-                  </div>
-                  <div class="min-w-0">
-                    <p class="truncate text-sm font-medium text-white">{{ primaryBlock(item)?.title }}</p>
-                    <p class="text-xs text-white/45">音频作品</p>
-                  </div>
-                </div>
-                <audio :src="primaryBlock(item)?.url" controls preload="metadata" class="w-full" />
-              </div>
-            </template>
-            <template v-else>
-              <div class="space-y-4 bg-white/[0.05] p-5 pt-12">
-                <div class="flex items-center gap-3">
-                  <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/10 text-white/55 shadow-sm">
-                    <FileText class="h-5 w-5" />
-                  </div>
-                  <div class="min-w-0">
-                    <p class="truncate text-sm font-medium text-white">{{ primaryBlock(item)?.title || item.task.toolName }}</p>
-                    <p class="text-xs text-white/45">文本作品</p>
-                  </div>
-                </div>
-                <p class="line-clamp-10 whitespace-pre-line text-sm leading-6 text-white/70">
-                  {{ textPreview(item) }}
-                </p>
-              </div>
-            </template>
-
-            <div class="absolute left-3 top-3 flex items-center gap-2">
-              <span class="rounded-full bg-black/55 px-2.5 py-1 text-xs font-medium text-white shadow-sm backdrop-blur">
-                {{ modalityLabel(item.modality) }}
-              </span>
-            </div>
+          <template #media-actions>
             <button
               type="button"
               class="absolute right-3 top-3 inline-flex h-8 w-8 items-center justify-center rounded-full bg-black/55 text-white/55 opacity-0 shadow-sm backdrop-blur transition hover:bg-red-500/15 hover:text-red-300 group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-70"
@@ -417,35 +326,18 @@ onMounted(loadMaterials)
               <LoaderCircle v-if="deletingTaskId === item.task.taskId" class="h-4 w-4 animate-spin" />
               <Trash2 v-else class="h-4 w-4" />
             </button>
-          </div>
-
-          <div class="space-y-3 p-4">
-            <div class="flex items-start justify-between gap-3">
-              <div class="min-w-0">
-                <h3 class="truncate text-base font-semibold text-white">{{ item.task.toolName }}</h3>
-                <p class="mt-1 truncate text-xs text-white/45" :title="taskPromptText(item.task) || item.task.taskNo">
-                  {{ taskPromptPreview(item.task) }}
-                </p>
-              </div>
-              <div class="flex shrink-0 items-center gap-1 text-xs text-white/35">
-                <Clock class="h-3 w-3" />
-                {{ formatTime(item.task.createdAt) }}
-              </div>
-            </div>
-
-            <div class="flex items-center justify-between gap-3">
-              <span class="truncate text-xs text-white/35">{{ item.task.toolCode }}</span>
-              <RouterLink
-                :to="userRoutes.taskResult(String(item.task.taskId))"
-                class="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-primary transition hover:text-white"
-                @click.stop
-              >
-                查看完整内容
-                <ArrowRight class="h-3 w-3 transition-transform group-hover:translate-x-0.5" />
-              </RouterLink>
-            </div>
-          </div>
-        </article>
+          </template>
+          <template #footer>
+            <span class="truncate text-xs text-white/35">{{ item.task.toolCode }}</span>
+            <RouterLink
+              :to="userRoutes.taskResult(String(item.task.taskId))"
+              class="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-primary transition hover:text-white"
+              @click.stop
+            >
+              查看完整内容
+            </RouterLink>
+          </template>
+        </AssetCard>
       </div>
     </div>
     <AssetPreviewModal
@@ -454,6 +346,8 @@ onMounted(loadMaterials)
       @close="previewAsset = null"
       @use-tool="useAssetWithTool"
       @open-task="openPreviewTask"
+      @publish="publishPreviewAsset"
+      @unpublish="unpublishPreviewAsset"
     />
   </AppShell>
 </template>

@@ -1,9 +1,8 @@
 import logging
 import re
 from collections.abc import Awaitable, Callable
-from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from app.core.intent_router import Intent, IntentResult, IntentRouter
 from app.core.schemas import RunContext
@@ -64,6 +63,24 @@ class AgentDecisionService:
 
     def _conversation_guard(self, context: RunContext) -> IntentResult | None:
         message = context.message or ""
+        if _looks_like_session_recap_question(message):
+            return IntentResult(
+                intent=Intent.GENERAL_CHAT,
+                confidence=0.92,
+                selectedToolCode=None,
+                candidateToolCodes=[],
+                decisionSource="decision_layer",
+                reason="session_recap_question",
+            )
+        if _looks_like_tool_failure_question(message):
+            return IntentResult(
+                intent=Intent.GENERAL_CHAT,
+                confidence=0.9,
+                selectedToolCode=None,
+                candidateToolCodes=[],
+                decisionSource="decision_layer",
+                reason="tool_failure_question",
+            )
         if _looks_like_follow_up_or_meta_question(message):
             return IntentResult(
                 intent=Intent.GENERAL_CHAT,
@@ -83,19 +100,75 @@ def _looks_like_follow_up_or_meta_question(message: str) -> bool:
     compact = re.sub(r"\s+", "", message)
     if not compact:
         return False
-    has_previous_reference = any(term in compact for term in ("刚刚", "刚才", "之前", "上次", "上一轮", "这张图", "这张图片", "刚才那张", "上面那张"))
-    asks_about_context = any(term in compact for term in ("为什么", "怎么想", "怎么看", "觉得", "像不像", "评价", "分析", "猜猜", "用什么", "哪个工具", "怎么生成"))
+    has_previous_reference = _contains_any(
+        compact,
+        (
+            "刚才",
+            "刚刚",
+            "之前",
+            "上一轮",
+            "上次",
+            "上面",
+            "这张图",
+            "这张图片",
+            "这张照片",
+            "那张图",
+            "那张照片",
+            "刚才那张",
+            "上面那张",
+        ),
+    )
+    asks_about_context = _contains_any(
+        compact,
+        (
+            "为什么",
+            "怎么想",
+            "怎么看",
+            "觉得",
+            "像不像",
+            "评价",
+            "分析",
+            "猜猜",
+            "用什么",
+            "哪个工具",
+            "怎么生成",
+            "怎么优化",
+            "继续改",
+            "可以改",
+        ),
+    )
     if has_previous_reference and asks_about_context:
         return True
-    if "你猜猜" in compact and any(term in compact for term in ("为什么", "干嘛", "目的")):
+    if "你猜猜" in compact and _contains_any(compact, ("为什么", "干嘛", "目的")):
         return True
-    if any(term in compact for term in ("我为什么让你", "为什么让你", "为什么叫你", "为什么要你")) and any(
-        term in compact for term in ("生成", "做", "画", "图片", "照片", "视频", "文案")
+    if _contains_any(compact, ("我为什么让你", "为什么让你", "为什么叫你", "为什么要你")) and _contains_any(
+        compact,
+        ("生成", "做", "画", "图片", "照片", "视频", "文案"),
     ):
         return True
-    if compact.startswith(("你觉得", "你认为")) and any(term in compact for term in ("这张", "刚才", "之前", "上面")):
+    if compact.startswith(("你觉得", "你认为")) and _contains_any(compact, ("这张", "刚才", "之前", "上面")):
         return True
     return False
+
+
+def _looks_like_session_recap_question(message: str) -> bool:
+    compact = re.sub(r"\s+", "", message)
+    return _contains_any(compact, ("总结一下刚才", "总结刚才", "刚才的对话", "刚刚的对话")) and _contains_any(
+        compact,
+        ("总结", "回顾", "做了什么", "完成了什么", "结果"),
+    )
+
+
+def _looks_like_tool_failure_question(message: str) -> bool:
+    compact = re.sub(r"\s+", "", message)
+    return _contains_any(compact, ("失败", "报错", "异常", "原因")) and _contains_any(
+        compact,
+        ("是什么原因", "为什么", "一般", "怎么回事", "如何解决"),
+    )
+
+
+def _contains_any(value: str, needles: tuple[str, ...]) -> bool:
+    return any(needle in value for needle in needles)
 
 
 def _signal(source: str, verdict: str, confidence: float, reason: str) -> DecisionSignal:

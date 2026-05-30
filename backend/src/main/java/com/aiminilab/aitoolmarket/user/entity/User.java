@@ -18,6 +18,9 @@ public class User {
     private String email;
     private String nickname;
     private String avatarUrl;
+    private String bio;
+    private Boolean autoPublishAssets;
+    private Boolean promptPublicByDefault;
     private String userType;
     private String status;
     private LocalDateTime createdAt;
@@ -80,6 +83,30 @@ public class User {
 
     public void setAvatarUrl(String avatarUrl) {
         this.avatarUrl = avatarUrl;
+    }
+
+    public String getBio() {
+        return bio;
+    }
+
+    public void setBio(String bio) {
+        this.bio = bio;
+    }
+
+    public Boolean getAutoPublishAssets() {
+        return autoPublishAssets;
+    }
+
+    public void setAutoPublishAssets(Boolean autoPublishAssets) {
+        this.autoPublishAssets = autoPublishAssets;
+    }
+
+    public Boolean getPromptPublicByDefault() {
+        return promptPublicByDefault;
+    }
+
+    public void setPromptPublicByDefault(Boolean promptPublicByDefault) {
+        this.promptPublicByDefault = promptPublicByDefault;
     }
 
     public String getUserType() {

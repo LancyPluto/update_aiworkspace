@@ -1,9 +1,10 @@
 import { apiRequest } from "./client"
-import type { UpdateUserProfileRequest, UserAvatarUploadResponse, UserProfile } from "./types"
+import type { CommunitySettingsRequest, UpdateUserProfileRequest, UserAvatarUploadResponse, UserProfile } from "./types"
 
 const P = {
   me: "/api/v1/users/me",
   avatar: "/api/v1/users/me/avatar",
+  communitySettings: "/api/v1/users/me/community-settings",
 } as const
 
 /** GET /api/v1/users/me —— 获取当前登录用户信息 */
@@ -28,6 +29,16 @@ export async function uploadCurrentUserAvatar(
   const body = new FormData()
   body.append("file", file)
   return apiRequest<UserAvatarUploadResponse>("POST", P.avatar, {
+    body,
+    token: options?.token,
+  })
+}
+
+export async function updateCommunitySettings(
+  body: CommunitySettingsRequest,
+  options?: { token?: string | null },
+): Promise<UserProfile> {
+  return apiRequest<UserProfile>("PATCH", P.communitySettings, {
     body,
     token: options?.token,
   })

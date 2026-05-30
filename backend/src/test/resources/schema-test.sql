@@ -6,6 +6,9 @@ CREATE TABLE users (
   email VARCHAR(128) UNIQUE,
   nickname VARCHAR(64),
   avatar_url VARCHAR(512),
+  bio VARCHAR(280),
+  auto_publish_assets TINYINT NOT NULL DEFAULT 1,
+  prompt_public_by_default TINYINT NOT NULL DEFAULT 0,
   user_type VARCHAR(32) NOT NULL DEFAULT 'USER',
   status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -430,6 +433,64 @@ CREATE TABLE agent_tool_calls (
   finished_at DATETIME,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE community_posts (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  user_id BIGINT NOT NULL,
+  task_id BIGINT NOT NULL UNIQUE,
+  modality VARCHAR(32) NOT NULL,
+  cover_url VARCHAR(1024),
+  title VARCHAR(160) NOT NULL,
+  description VARCHAR(500),
+  prompt_visible TINYINT NOT NULL DEFAULT 0,
+  prompt_snapshot CLOB,
+  tool_code VARCHAR(128),
+  tool_name VARCHAR(128),
+  status VARCHAR(32) NOT NULL DEFAULT 'PUBLISHED',
+  featured TINYINT NOT NULL DEFAULT 0,
+  pinned TINYINT NOT NULL DEFAULT 0,
+  topic VARCHAR(64),
+  same_style_count BIGINT NOT NULL DEFAULT 0,
+  audit_status VARCHAR(32) NOT NULL DEFAULT 'APPROVED',
+  audit_reason VARCHAR(255),
+  view_count BIGINT NOT NULL DEFAULT 0,
+  like_count BIGINT NOT NULL DEFAULT 0,
+  favorite_count BIGINT NOT NULL DEFAULT 0,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_community_posts_user_status_id ON community_posts(user_id, status, id);
+CREATE INDEX idx_community_posts_status_id ON community_posts(status, id);
+CREATE INDEX idx_community_posts_discovery ON community_posts(status, pinned, featured, id);
+CREATE INDEX idx_community_posts_modality_id ON community_posts(status, modality, id);
+CREATE INDEX idx_community_posts_topic_id ON community_posts(status, topic, id);
+CREATE INDEX idx_community_posts_popular ON community_posts(status, like_count, favorite_count, id);
+CREATE INDEX idx_community_posts_same_style ON community_posts(status, same_style_count, id);
+
+CREATE TABLE community_post_likes (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  post_id BIGINT NOT NULL,
+  user_id BIGINT NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(post_id, user_id)
+);
+
+CREATE TABLE community_post_favorites (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  post_id BIGINT NOT NULL,
+  user_id BIGINT NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(post_id, user_id)
+);
+
+CREATE TABLE community_post_tags (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  post_id BIGINT NOT NULL,
+  tag VARCHAR(32) NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(post_id, tag)
+);
+CREATE INDEX idx_community_post_tags_tag_post ON community_post_tags(tag, post_id);
 CREATE INDEX idx_agent_tool_calls_task_id ON agent_tool_calls(task_id);
 CREATE INDEX idx_agent_tool_calls_context_recent ON agent_tool_calls(user_id, status, id);
 

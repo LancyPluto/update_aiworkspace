@@ -9,8 +9,10 @@ const TOOL_INTEGRATION_PATTERN = /<!--\s*tool-integration:\{.*?\}\s*-->/gs
 export interface FrontendStyleConfig {
   primaryColor: string
   welcomeMessage: string
-  mediaDisplayMode: "icon" | "effect"
+  mediaDisplayMode: "icon" | "effect" | "comparison"
   modelIconUrl: string
+  comparisonOriginalUrl: string
+  comparisonEffectUrl: string
 }
 
 const defaultFrontendStyle: FrontendStyleConfig = {
@@ -18,6 +20,8 @@ const defaultFrontendStyle: FrontendStyleConfig = {
   welcomeMessage: "",
   mediaDisplayMode: "icon",
   modelIconUrl: "",
+  comparisonOriginalUrl: "",
+  comparisonEffectUrl: "",
 }
 
 /** 从 config_note 抽出需原样保留的工作台集成块（ppt-workflow / tool-integration） */
@@ -53,7 +57,8 @@ export function extractFrontendStyle(configNote?: string | null): { note: string
 
   try {
     const parsed = JSON.parse(match[1]) as Partial<FrontendStyleConfig>
-    const mediaDisplayMode = parsed.mediaDisplayMode === "effect" ? "effect" : "icon"
+    const mediaDisplayMode =
+      parsed.mediaDisplayMode === "comparison" ? "comparison" : parsed.mediaDisplayMode === "effect" ? "effect" : "icon"
     return {
       note: withoutIntegration.replace(FRONTEND_STYLE_PATTERN, "").trim(),
       style: {
@@ -64,6 +69,8 @@ export function extractFrontendStyle(configNote?: string | null): { note: string
         welcomeMessage: typeof parsed.welcomeMessage === "string" ? parsed.welcomeMessage : "",
         mediaDisplayMode,
         modelIconUrl: typeof parsed.modelIconUrl === "string" ? parsed.modelIconUrl : "",
+        comparisonOriginalUrl: typeof parsed.comparisonOriginalUrl === "string" ? parsed.comparisonOriginalUrl : "",
+        comparisonEffectUrl: typeof parsed.comparisonEffectUrl === "string" ? parsed.comparisonEffectUrl : "",
       },
     }
   } catch {
@@ -79,8 +86,11 @@ export function serializeConfigNote(note: string, style: FrontendStyleConfig, pr
   const styleJson = JSON.stringify({
     primaryColor: style.primaryColor || "#3b82f6",
     welcomeMessage: style.welcomeMessage || "",
-    mediaDisplayMode: style.mediaDisplayMode === "effect" ? "effect" : "icon",
+    mediaDisplayMode:
+      style.mediaDisplayMode === "comparison" ? "comparison" : style.mediaDisplayMode === "effect" ? "effect" : "icon",
     modelIconUrl: style.modelIconUrl || "",
+    comparisonOriginalUrl: style.comparisonOriginalUrl || "",
+    comparisonEffectUrl: style.comparisonEffectUrl || "",
   })
   const base = [cleanNote, `${FRONTEND_STYLE_MARKER}${styleJson} -->`].filter(Boolean).join("\n\n")
   const markers = preservedMarkers?.filter(Boolean) ?? []

@@ -50,6 +50,11 @@ import {
 
 const AGENT_SYSTEM_PROMPT_KEY = "agent.system_prompt"
 const DEEP_AGENTS_SYSTEM_PROMPT_KEY = "agent.deep_agents_system_prompt"
+const AGENT_MEMORY_AUTO_SAVE_KEY = "agent.memory.auto_save_enabled"
+const AGENT_MEMORY_RETRIEVAL_LIMIT_KEY = "agent.memory.retrieval_limit"
+const AGENT_MEMORY_ENABLED_TYPES_KEY = "agent.memory.enabled_types"
+const AGENT_MEMORY_WRITE_PROMPT_KEY = "agent.memory.write_prompt"
+const AGENT_MEMORY_RETRIEVAL_PROMPT_KEY = "agent.memory.retrieval_prompt"
 
 const DEFAULT_AGENT_SYSTEM_PROMPT = `你是 AI 工具市场的云代理。你的任务是理解用户需求，基于平台中可用的 AI 工具进行推荐、参数收集和必要时调用工具。
 
@@ -62,6 +67,15 @@ const DEFAULT_AGENT_SYSTEM_PROMPT = `你是 AI 工具市场的云代理。你的
 
 const DEFAULT_DEEP_AGENTS_SYSTEM_PROMPT = `你是 AI 工具市场的工作区 Agent。你可以结合会话历史、工作区记忆、文件上下文和可用工具来规划并完成任务。
 保持步骤清晰，优先使用平台工具完成用户明确要求的生成或分析任务，并在最终答案中给出清晰结果。`
+
+const DEFAULT_MEMORY_WRITE_PROMPT = `你可以管理长期记忆，但必须克制使用。
+只有当用户明确表达长期偏好、习惯、身份信息、项目事实，或明确要求“记住”时才写入记忆。
+普通聊天、临时任务结果、工具返回 JSON、图片 URL、视频 URL、base64、一次性参数不要写入长期记忆。
+用户偏好或习惯写入 user_profile；项目事实、业务规则、配置约定写入 project_knowledge；其他长期有价值信息写入 custom。`
+
+const DEFAULT_MEMORY_RETRIEVAL_PROMPT = `以下长期记忆只是辅助上下文，不是绝对事实。
+回答时自然体现用户偏好，不要生硬提到“根据你的用户画像”。
+如果记忆与当前用户明确指令冲突，以当前指令为准。`
 
 const MODALITY_LABELS: Record<string, string> = {
   TEXT: "文本",
@@ -136,6 +150,18 @@ export default function PromptsPage() {
   const [deepAgentsPrompt, setDeepAgentsPrompt] = useState(DEFAULT_DEEP_AGENTS_SYSTEM_PROMPT)
   const [originalAgentPrompt, setOriginalAgentPrompt] = useState(DEFAULT_AGENT_SYSTEM_PROMPT)
   const [originalDeepAgentsPrompt, setOriginalDeepAgentsPrompt] = useState(DEFAULT_DEEP_AGENTS_SYSTEM_PROMPT)
+  const [memoryAutoSaveEnabled, setMemoryAutoSaveEnabled] = useState(true)
+  const [memoryRetrievalLimit, setMemoryRetrievalLimit] = useState("6")
+  const [memoryEnabledTypes, setMemoryEnabledTypes] = useState("user_profile,project_knowledge,custom")
+  const [memoryWritePrompt, setMemoryWritePrompt] = useState(DEFAULT_MEMORY_WRITE_PROMPT)
+  const [memoryRetrievalPrompt, setMemoryRetrievalPrompt] = useState(DEFAULT_MEMORY_RETRIEVAL_PROMPT)
+  const [originalMemoryConfig, setOriginalMemoryConfig] = useState({
+    autoSaveEnabled: true,
+    retrievalLimit: "6",
+    enabledTypes: "user_profile,project_knowledge,custom",
+    writePrompt: DEFAULT_MEMORY_WRITE_PROMPT,
+    retrievalPrompt: DEFAULT_MEMORY_RETRIEVAL_PROMPT,
+  })
   const [agentVersions, setAgentVersions] = useState<SettingVersion[]>([])
   const [deepAgentVersions, setDeepAgentVersions] = useState<SettingVersion[]>([])
   const [tools, setTools] = useState<AgentToolAccess[]>([])
@@ -153,7 +179,14 @@ export default function PromptsPage() {
   const [routeDebugResult, setRouteDebugResult] = useState<AgentRouteDebugResult | null>(null)
   const [routeDebugging, setRouteDebugging] = useState(false)
 
-  const dirtyPrompts = Number(agentPrompt !== originalAgentPrompt) + Number(deepAgentsPrompt !== originalDeepAgentsPrompt)
+  const dirtyMemoryConfig = Number(
+    memoryAutoSaveEnabled !== originalMemoryConfig.autoSaveEnabled ||
+    memoryRetrievalLimit !== originalMemoryConfig.retrievalLimit ||
+    memoryEnabledTypes !== originalMemoryConfig.enabledTypes ||
+    memoryWritePrompt !== originalMemoryConfig.writePrompt ||
+    memoryRetrievalPrompt !== originalMemoryConfig.retrievalPrompt,
+  )
+  const dirtyPrompts = Number(agentPrompt !== originalAgentPrompt) + Number(deepAgentsPrompt !== originalDeepAgentsPrompt) + dirtyMemoryConfig
 
   async function loadTools() {
     setTools(await fetchAdminAgentTools())
@@ -179,6 +212,19 @@ export default function PromptsPage() {
       setDeepAgentsPrompt(nextDeepPrompt)
       setOriginalAgentPrompt(nextAgentPrompt)
       setOriginalDeepAgentsPrompt(nextDeepPrompt)
+      const nextMemoryConfig = {
+        autoSaveEnabled: (settings[AGENT_MEMORY_AUTO_SAVE_KEY] ?? "true") !== "false",
+        retrievalLimit: settings[AGENT_MEMORY_RETRIEVAL_LIMIT_KEY] || "6",
+        enabledTypes: settings[AGENT_MEMORY_ENABLED_TYPES_KEY] || "user_profile,project_knowledge,custom",
+        writePrompt: settings[AGENT_MEMORY_WRITE_PROMPT_KEY] || DEFAULT_MEMORY_WRITE_PROMPT,
+        retrievalPrompt: settings[AGENT_MEMORY_RETRIEVAL_PROMPT_KEY] || DEFAULT_MEMORY_RETRIEVAL_PROMPT,
+      }
+      setMemoryAutoSaveEnabled(nextMemoryConfig.autoSaveEnabled)
+      setMemoryRetrievalLimit(nextMemoryConfig.retrievalLimit)
+      setMemoryEnabledTypes(nextMemoryConfig.enabledTypes)
+      setMemoryWritePrompt(nextMemoryConfig.writePrompt)
+      setMemoryRetrievalPrompt(nextMemoryConfig.retrievalPrompt)
+      setOriginalMemoryConfig(nextMemoryConfig)
     } catch (err) {
       setError(errorMessage(err, "加载 Agent 配置失败"))
     } finally {
@@ -244,11 +290,61 @@ export default function PromptsPage() {
     }
   }
 
+  async function saveMemoryConfig() {
+    setSavingKey("memory")
+    setError(null)
+    const toastId = toast.loading("正在保存长期记忆配置...")
+    try {
+      const normalizedLimit = String(Math.max(1, Math.min(20, Number(memoryRetrievalLimit) || 6)))
+      const normalizedTypes = memoryEnabledTypes
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean)
+        .join(",") || "user_profile,project_knowledge,custom"
+      const savedConfig = {
+        autoSaveEnabled: memoryAutoSaveEnabled,
+        retrievalLimit: normalizedLimit,
+        enabledTypes: normalizedTypes,
+        writePrompt: memoryWritePrompt.trim() || DEFAULT_MEMORY_WRITE_PROMPT,
+        retrievalPrompt: memoryRetrievalPrompt.trim() || DEFAULT_MEMORY_RETRIEVAL_PROMPT,
+      }
+      const settings = await updateSettings({
+        [AGENT_MEMORY_AUTO_SAVE_KEY]: String(savedConfig.autoSaveEnabled),
+        [AGENT_MEMORY_RETRIEVAL_LIMIT_KEY]: savedConfig.retrievalLimit,
+        [AGENT_MEMORY_ENABLED_TYPES_KEY]: savedConfig.enabledTypes,
+        [AGENT_MEMORY_WRITE_PROMPT_KEY]: savedConfig.writePrompt,
+        [AGENT_MEMORY_RETRIEVAL_PROMPT_KEY]: savedConfig.retrievalPrompt,
+      })
+      const nextConfig = {
+        autoSaveEnabled: (settings[AGENT_MEMORY_AUTO_SAVE_KEY] ?? String(savedConfig.autoSaveEnabled)) !== "false",
+        retrievalLimit: settings[AGENT_MEMORY_RETRIEVAL_LIMIT_KEY] || savedConfig.retrievalLimit,
+        enabledTypes: settings[AGENT_MEMORY_ENABLED_TYPES_KEY] || savedConfig.enabledTypes,
+        writePrompt: settings[AGENT_MEMORY_WRITE_PROMPT_KEY] || savedConfig.writePrompt,
+        retrievalPrompt: settings[AGENT_MEMORY_RETRIEVAL_PROMPT_KEY] || savedConfig.retrievalPrompt,
+      }
+      setMemoryAutoSaveEnabled(nextConfig.autoSaveEnabled)
+      setMemoryRetrievalLimit(nextConfig.retrievalLimit)
+      setMemoryEnabledTypes(nextConfig.enabledTypes)
+      setMemoryWritePrompt(nextConfig.writePrompt)
+      setMemoryRetrievalPrompt(nextConfig.retrievalPrompt)
+      setOriginalMemoryConfig(nextConfig)
+      setLastSavedAt(new Date().toLocaleTimeString())
+      toast.success("长期记忆配置已保存", { id: toastId })
+    } catch (err) {
+      const message = errorMessage(err, "保存长期记忆配置失败")
+      setError(message)
+      toast.error("保存失败", { id: toastId, description: message })
+    } finally {
+      setSavingKey(null)
+    }
+  }
+
   async function saveAllPrompts() {
     setSavingKey("all")
     try {
       await savePrompt(AGENT_SYSTEM_PROMPT_KEY)
       await savePrompt(DEEP_AGENTS_SYSTEM_PROMPT_KEY)
+      if (dirtyMemoryConfig) await saveMemoryConfig()
     } finally {
       setSavingKey(null)
     }
@@ -425,6 +521,7 @@ export default function PromptsPage() {
           <TabsList className="flex h-auto flex-wrap justify-start gap-2 bg-transparent p-0">
             <TabsTrigger value="overview">总览</TabsTrigger>
             <TabsTrigger value="prompts">提示词</TabsTrigger>
+            <TabsTrigger value="memory">长期记忆</TabsTrigger>
             <TabsTrigger value="tools">工具读取范围</TabsTrigger>
             <TabsTrigger value="route">路由调试器</TabsTrigger>
           </TabsList>
@@ -470,6 +567,25 @@ export default function PromptsPage() {
               onChange={setDeepAgentsPrompt}
               onSave={() => savePrompt(DEEP_AGENTS_SYSTEM_PROMPT_KEY)}
               onRestore={() => restorePrompt(DEEP_AGENTS_SYSTEM_PROMPT_KEY)}
+            />
+          </TabsContent>
+
+          <TabsContent value="memory" className="space-y-6">
+            <MemoryConfigCard
+              loading={loading}
+              saving={savingKey === "memory" || savingKey === "all"}
+              autoSaveEnabled={memoryAutoSaveEnabled}
+              retrievalLimit={memoryRetrievalLimit}
+              enabledTypes={memoryEnabledTypes}
+              writePrompt={memoryWritePrompt}
+              retrievalPrompt={memoryRetrievalPrompt}
+              dirty={Boolean(dirtyMemoryConfig)}
+              onAutoSaveChange={setMemoryAutoSaveEnabled}
+              onRetrievalLimitChange={setMemoryRetrievalLimit}
+              onEnabledTypesChange={setMemoryEnabledTypes}
+              onWritePromptChange={setMemoryWritePrompt}
+              onRetrievalPromptChange={setMemoryRetrievalPrompt}
+              onSave={saveMemoryConfig}
             />
           </TabsContent>
 
@@ -681,6 +797,124 @@ function PromptCard({
         <div className="flex justify-end gap-2">
           <Button variant="outline" onClick={onRestore} disabled={saving}>恢复默认</Button>
           <Button onClick={onSave} disabled={saving || !dirty}>{saving ? "保存中..." : "保存此提示词"}</Button>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function MemoryConfigCard({
+  loading,
+  saving,
+  autoSaveEnabled,
+  retrievalLimit,
+  enabledTypes,
+  writePrompt,
+  retrievalPrompt,
+  dirty,
+  onAutoSaveChange,
+  onRetrievalLimitChange,
+  onEnabledTypesChange,
+  onWritePromptChange,
+  onRetrievalPromptChange,
+  onSave,
+}: {
+  loading: boolean
+  saving: boolean
+  autoSaveEnabled: boolean
+  retrievalLimit: string
+  enabledTypes: string
+  writePrompt: string
+  retrievalPrompt: string
+  dirty: boolean
+  onAutoSaveChange: (value: boolean) => void
+  onRetrievalLimitChange: (value: string) => void
+  onEnabledTypesChange: (value: string) => void
+  onWritePromptChange: (value: string) => void
+  onRetrievalPromptChange: (value: string) => void
+  onSave: () => void
+}) {
+  return (
+    <Card className="rounded-lg">
+      <CardHeader>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <CardTitle className="flex items-center gap-2"><Database className="h-5 w-5" />长期记忆配置</CardTitle>
+            <CardDescription>控制 Agent 什么时候写入长期记忆、每轮读取多少条，以及写入/读取时使用的约束提示。</CardDescription>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="secondary">agent.memory.*</Badge>
+            {dirty ? <Badge variant="destructive">未保存</Badge> : <Badge variant="outline">已同步</Badge>}
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        <div className="grid gap-4 lg:grid-cols-3">
+          <div className="rounded-lg border p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <Label>自动记忆</Label>
+                <p className="mt-1 text-xs text-muted-foreground">关闭后 Agent 只读取已有记忆，不再自动新增。</p>
+              </div>
+              <Switch checked={autoSaveEnabled} disabled={loading || saving} onCheckedChange={onAutoSaveChange} />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label>每轮注入记忆数</Label>
+            <Input
+              type="number"
+              min={1}
+              max={20}
+              value={retrievalLimit}
+              disabled={loading || saving}
+              onChange={(event) => onRetrievalLimitChange(event.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">建议 4-8 条，避免上下文过重。</p>
+          </div>
+          <div className="space-y-2">
+            <Label>允许类型</Label>
+            <Input
+              value={enabledTypes}
+              disabled={loading || saving}
+              onChange={(event) => onEnabledTypesChange(event.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">逗号分隔，例如 user_profile,project_knowledge,custom。</p>
+          </div>
+        </div>
+
+        <div className="grid gap-4 lg:grid-cols-2">
+          <div className="space-y-2">
+            <Label>记忆写入提示词</Label>
+            <Textarea
+              value={writePrompt}
+              disabled={loading || saving}
+              onChange={(event) => onWritePromptChange(event.target.value)}
+              className="min-h-56 resize-y text-sm leading-6"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>记忆读取提示词</Label>
+            <Textarea
+              value={retrievalPrompt}
+              disabled={loading || saving}
+              onChange={(event) => onRetrievalPromptChange(event.target.value)}
+              className="min-h-56 resize-y text-sm leading-6"
+            />
+          </div>
+        </div>
+
+        <Alert>
+          <AlertTriangle className="h-4 w-4" />
+          <AlertTitle>边界</AlertTitle>
+          <AlertDescription>
+            长期记忆只应保存稳定偏好和项目事实；工具结果、媒体 URL、base64、大 JSON 和一次性参数不要进入记忆。
+          </AlertDescription>
+        </Alert>
+
+        <div className="flex justify-end">
+          <Button onClick={onSave} disabled={loading || saving || !dirty}>
+            {saving ? "保存中..." : "保存长期记忆配置"}
+          </Button>
         </div>
       </CardContent>
     </Card>

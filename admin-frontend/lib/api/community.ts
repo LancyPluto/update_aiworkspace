@@ -1,0 +1,37 @@
+import { http } from './http'
+import type { AdminCommunityPost, PageResponse } from './types'
+
+export interface AdminCommunityPostQuery {
+  userId?: number
+  status?: string
+  modality?: string
+  keyword?: string
+  topic?: string
+  featured?: boolean
+  pageNo?: number
+  pageSize?: number
+}
+
+export function fetchAdminCommunityPosts(query: AdminCommunityPostQuery = {}) {
+  return http.get<PageResponse<AdminCommunityPost>>('/api/admin/v1/community/posts', query)
+}
+
+export function hideAdminCommunityPost(postId: number, reason?: string) {
+  return http.post<AdminCommunityPost>(`/api/admin/v1/community/posts/${postId}/hide`, { reason })
+}
+
+export function restoreAdminCommunityPost(postId: number) {
+  return http.post<AdminCommunityPost>(`/api/admin/v1/community/posts/${postId}/restore`, {})
+}
+
+export function featureAdminCommunityPost(postId: number, enabled: boolean) {
+  return http.post<AdminCommunityPost>(`/api/admin/v1/community/posts/${postId}/feature`, { enabled })
+}
+
+export function pinAdminCommunityPost(postId: number, enabled: boolean) {
+  return http.post<AdminCommunityPost>(`/api/admin/v1/community/posts/${postId}/pin`, { enabled })
+}
+
+export function annotateAdminCommunityPost(postId: number, body: { topic?: string | null; tags?: string[] }) {
+  return http.post<AdminCommunityPost>(`/api/admin/v1/community/posts/${postId}/annotate`, body)
+}

@@ -9,6 +9,10 @@ import com.aiminilab.aitoolmarket.agent.service.AgentRunService;
 import com.aiminilab.aitoolmarket.auth.security.AuthContext;
 import com.aiminilab.aitoolmarket.common.dto.ApiResponse;
 import com.aiminilab.aitoolmarket.common.dto.PageResponse;
+import org.springframework.http.CacheControl;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -58,9 +62,16 @@ public class AgentRunController {
         return ApiResponse.success(agentRunService.events(AuthContext.get().userId(), runId, afterEventId, pageSize));
     }
 
-    @GetMapping("/{runId}/events/stream")
-    public SseEmitter streamEvents(@PathVariable Long runId,
-                                   @RequestParam(required = false) Long afterEventId) {
-        return agentRunService.streamEvents(AuthContext.get().userId(), runId, afterEventId);
+    @GetMapping(value = "/{runId}/events/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public ResponseEntity<SseEmitter> streamEvents(@PathVariable Long runId,
+                                                   @RequestParam(required = false) Long afterEventId) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.TEXT_EVENT_STREAM);
+        headers.setCacheControl(CacheControl.noCache());
+        headers.set("X-Accel-Buffering", "no");
+        headers.set(HttpHeaders.CONNECTION, "keep-alive");
+        return ResponseEntity.ok()
+                .headers(headers)
+                .body(agentRunService.streamEvents(AuthContext.get().userId(), runId, afterEventId));
     }
 }

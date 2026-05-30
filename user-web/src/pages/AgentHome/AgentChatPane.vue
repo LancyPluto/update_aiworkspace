@@ -4,15 +4,18 @@ import {
   AlertTriangle,
   Check,
   Copy,
+  Database,
   FileText,
   Loader2,
   Maximize2,
   Minimize2,
   Pencil,
+  Plus,
   RefreshCw,
   Send,
   Sparkles,
   Store,
+  Trash2,
   Upload,
   X,
   StopCircle
@@ -29,14 +32,21 @@ import {
   confirmAgentTool,
   deleteAgentFile,
   editRegenerateAgentMessage,
+  createAgentWorkspaceMemory,
+  deleteAgentWorkspaceMemory,
   fetchAgentMessages,
   fetchAgentFiles,
   fetchAgentRun,
   fetchAgentRunEvents,
+  fetchAgentWorkspaceMemory,
+  fetchAgentWorkspaces,
   fetchTools,
+  publishCommunityPost,
   regenerateAgentRun,
   sendAgentMessage,
   streamAgentRunEvents,
+  unpublishCommunityPost,
+  updateAgentWorkspaceMemory,
   uploadAgentFile,
 } from "@/api"
 import type {
@@ -47,6 +57,8 @@ import type {
   AgentRunEvent,
   AgentRunStatus,
   AgentSession,
+  AgentWorkspace,
+  AgentWorkspaceMemoryItem,
   ToolSummary,
 } from "@/api/types"
 import type { AssetPreviewItem, AssetPreviewRecommendation } from "@/types/assetPreview"
@@ -75,6 +87,20 @@ const files = ref<AgentFile[]>([])
 const events = ref<AgentRunEvent[]>([])
 const previewTools = ref<ToolSummary[]>([])
 const previewAsset = ref<AssetPreviewItem | null>(null)
+const memoryPanelOpen = ref(false)
+const memoryWorkspaces = ref<AgentWorkspace[]>([])
+const memoryWorkspaceId = ref<number | null>(null)
+const memoryItems = ref<AgentWorkspaceMemoryItem[]>([])
+const memoryLoading = ref(false)
+const memorySaving = ref(false)
+const memoryDeletingId = ref<number | null>(null)
+const memoryEditingId = ref<number | null>(null)
+const memoryError = ref<string | null>(null)
+const memoryForm = ref({
+  memoryType: "user_profile",
+  title: "",
+  content: "",
+})
 const paneLoading = ref(true)
 const sending = ref(false)
 const uploading = ref(false)
@@ -105,6 +131,7 @@ const composerTextareaRef = ref<HTMLTextAreaElement | null>(null)
 const composerExpanded = ref(false)
 const messagesKey = computed(() => `agent_messages_${props.sessionId}`)
 let runStreamAbort: AbortController | null = null
+let runStatusWatchdog: number | null = null
 const terminalEventFinalizingRunIds = new Set<number>()
 
 const input = computed({
@@ -167,6 +194,21 @@ const showGenerationLoading = computed(() =>
 const previewRecommendations = computed<AssetPreviewRecommendation[]>(() =>
   previewAsset.value ? recommendToolsForAsset(previewAsset.value) : [],
 )
+const memoryTypeOptions = [
+  { value: "user_profile", label: "用户偏好" },
+  { value: "project_knowledge", label: "项目知识" },
+  { value: "custom", label: "自定义" },
+]
+const groupedMemoryItems = computed(() => {
+  const order = ["user_profile", "project_knowledge", "custom"]
+  return order
+    .map((type) => ({
+      type,
+      label: memoryTypeOptions.find((item) => item.value === type)?.label ?? type,
+      items: memoryItems.value.filter((item) => item.memoryType === type),
+    }))
+    .filter((group) => group.items.length > 0)
+})
 
 function modelLabel(model: AgentModelConfig) {
   return model.displayName || model.modelName || model.configCode || `Model ${model.id}`
@@ -358,6 +400,127 @@ async function loadFiles() {
   if (!props.token) return
   const res = await fetchAgentFiles(props.sessionId, { token: props.token })
   files.value = res.list
+}
+
+async function openMemoryPanel() {
+  memoryPanelOpen.value = true
+  if (!props.token) return
+  if (memoryWorkspaces.value.length === 0) {
+    await loadMemoryWorkspaces()
+  } else if (memoryWorkspaceId.value != null) {
+    await loadMemoryItems()
+  }
+}
+
+function closeMemoryPanel() {
+  memoryPanelOpen.value = false
+  resetMemoryForm()
+}
+
+async function loadMemoryWorkspaces() {
+  if (!props.token) return
+  memoryLoading.value = true
+  memoryError.value = null
+  try {
+    const res = await fetchAgentWorkspaces({ token: props.token })
+    memoryWorkspaces.value = res.list
+    memoryWorkspaceId.value = memoryWorkspaceId.value ?? res.list[0]?.id ?? null
+    if (memoryWorkspaceId.value != null) {
+      await loadMemoryItems()
+    }
+  } catch (error) {
+    memoryError.value = formatAgentError(error)
+  } finally {
+    memoryLoading.value = false
+  }
+}
+
+async function loadMemoryItems() {
+  if (!props.token || memoryWorkspaceId.value == null) return
+  memoryLoading.value = true
+  memoryError.value = null
+  try {
+    const res = await fetchAgentWorkspaceMemory(memoryWorkspaceId.value, { token: props.token })
+    memoryItems.value = res.list
+  } catch (error) {
+    memoryError.value = formatAgentError(error)
+  } finally {
+    memoryLoading.value = false
+  }
+}
+
+async function changeMemoryWorkspace(rawId: string) {
+  const id = Number(rawId)
+  memoryWorkspaceId.value = Number.isFinite(id) && id > 0 ? id : null
+  resetMemoryForm()
+  memoryItems.value = []
+  await loadMemoryItems()
+}
+
+function resetMemoryForm() {
+  memoryEditingId.value = null
+  memoryForm.value = {
+    memoryType: "user_profile",
+    title: "",
+    content: "",
+  }
+}
+
+function editMemory(item: AgentWorkspaceMemoryItem) {
+  memoryEditingId.value = item.id
+  memoryForm.value = {
+    memoryType: item.memoryType || "custom",
+    title: item.title || "",
+    content: item.content || "",
+  }
+}
+
+async function saveMemory() {
+  if (!props.token || memoryWorkspaceId.value == null || memorySaving.value) return
+  const title = memoryForm.value.title.trim()
+  const content = memoryForm.value.content.trim()
+  if (!title || !content) {
+    memoryError.value = "标题和内容都不能为空。"
+    return
+  }
+  memorySaving.value = true
+  memoryError.value = null
+  try {
+    const body = {
+      memoryType: memoryForm.value.memoryType,
+      title,
+      content,
+    }
+    const saved = memoryEditingId.value == null
+      ? await createAgentWorkspaceMemory(memoryWorkspaceId.value, body, { token: props.token })
+      : await updateAgentWorkspaceMemory(memoryWorkspaceId.value, memoryEditingId.value, body, { token: props.token })
+    memoryItems.value = [
+      saved,
+      ...memoryItems.value.filter((item) => item.id !== saved.id),
+    ]
+    resetMemoryForm()
+  } catch (error) {
+    memoryError.value = formatAgentError(error)
+  } finally {
+    memorySaving.value = false
+  }
+}
+
+async function removeMemory(item: AgentWorkspaceMemoryItem) {
+  if (!props.token || memoryWorkspaceId.value == null || memoryDeletingId.value != null) return
+  const confirmed = window.confirm(`删除这条记忆：${item.title || item.id}？`)
+  if (!confirmed) return
+  memoryDeletingId.value = item.id
+  memoryError.value = null
+  try {
+    await deleteAgentWorkspaceMemory(memoryWorkspaceId.value, item.id, { token: props.token })
+    memoryItems.value = memoryItems.value.filter((current) => current.id !== item.id)
+    if (memoryEditingId.value === item.id) resetMemoryForm()
+  } catch (error) {
+    memoryError.value = formatAgentError(error)
+  } finally {
+    memoryDeletingId.value = null
+  }
 }
 
 function openFilePicker() {
@@ -704,14 +867,57 @@ function stopRunEventStream() {
   runStreamAbort = null
 }
 
+function stopRunStatusWatchdog() {
+  if (runStatusWatchdog == null) return
+  window.clearInterval(runStatusWatchdog)
+  runStatusWatchdog = null
+}
+
+function startRunStatusWatchdog(runId: number) {
+  stopRunStatusWatchdog()
+  runStatusWatchdog = window.setInterval(() => {
+    if (!props.token || activeRunId.value !== runId) {
+      stopRunStatusWatchdog()
+      return
+    }
+    if (runConnectionStatus.value !== "running" && runConnectionStatus.value !== "awaiting_confirmation") {
+      stopRunStatusWatchdog()
+      return
+    }
+    void reconcileRunStatus(runId)
+  }, 1500)
+}
+
+async function reconcileRunStatus(runId: number) {
+  try {
+    const run = await fetchAgentRun(runId, { token: props.token })
+    if (run.status === "WAITING_USER_CONFIRMATION") {
+      await syncRunEvents(runId, { replayRenderableEvents: true })
+      runConnectionStatus.value = "awaiting_confirmation"
+      await scrollBottom()
+      return
+    }
+    if (!isTerminalRunStatus(run.status)) return
+    await settleTerminalRun(runId, run)
+    stopRunEventStream()
+  } catch {
+    // Keep the live stream as the source of truth while watchdog polling is flaky.
+  }
+}
+
 function streamingMessageId(runId: number) {
   return -Math.abs(runId)
 }
 
-function ensureStreamingAssistantMessage(runId: number) {
-  const existing = messages.value.find(
-    (message) => message.role === "ASSISTANT" && message.runId === runId && message.id === streamingAssistantMessageId.value,
+function streamingMessageForRun(runId: number) {
+  const tempId = streamingMessageId(runId)
+  return messages.value.find(
+    (message) => message.role === "ASSISTANT" && message.runId === runId && message.id === tempId,
   )
+}
+
+function ensureStreamingAssistantMessage(runId: number) {
+  const existing = streamingMessageForRun(runId)
   if (existing) return existing
   const tempId = streamingMessageId(runId)
   const message: AgentMessage = {
@@ -727,8 +933,19 @@ function ensureStreamingAssistantMessage(runId: number) {
   return message
 }
 
+function clearStreamingAssistantMessage(runId: number, options?: { preserveReadableText?: boolean }) {
+  const tempId = streamingMessageId(runId)
+  const tempMessage = streamingMessageForRun(runId)
+  streamingAssistantMessageId.value = null
+  if (options?.preserveReadableText && tempMessage?.contentText?.trim() && !isStructuredMediaContent(tempMessage.contentText)) {
+    return
+  }
+  messages.value = messages.value.filter((message) => message.id !== tempId)
+}
+
 function appendStreamingAssistantDelta(runId: number, delta: string) {
   if (!delta) return
+  if (isStructuredMediaContent(delta)) return
   const message = ensureStreamingAssistantMessage(runId)
   message.contentText += delta
   void scrollBottom()
@@ -736,21 +953,32 @@ function appendStreamingAssistantDelta(runId: number, delta: string) {
 
 function completeStreamingAssistantMessage(runId: number, content: string) {
   if (!content) return
+  if (isStructuredMediaContent(content)) {
+    clearStreamingAssistantMessage(runId)
+    return
+  }
   const message = ensureStreamingAssistantMessage(runId)
   message.contentText = content
   void scrollBottom()
 }
 
-async function syncRunEvents(runId: number) {
+async function syncRunEvents(runId: number, options?: { replayRenderableEvents?: boolean }) {
   if (!props.token) return
   const afterEventId = events.value.length ? events.value.at(-1)!.id : undefined
   const res = await fetchAgentRunEvents(runId, { token: props.token, afterEventId })
-  res.list.forEach(appendRunEvent)
+  res.list.forEach((event) => {
+    if (options?.replayRenderableEvents) {
+      handleStreamedRunEvent(runId, event, { fromSync: true })
+    } else {
+      appendRunEvent(event)
+    }
+  })
 }
 
 async function waitForRunComplete(runId: number) {
   runConnectionStatus.value = "running"
   stopRunEventStream()
+  startRunStatusWatchdog(runId)
   const controller = new AbortController()
   runStreamAbort = controller
   try {
@@ -771,20 +999,13 @@ async function waitForRunComplete(runId: number) {
   try {
     const run = await fetchAgentRun(runId, { token: props.token })
     if (run.status === "WAITING_USER_CONFIRMATION") {
-      await syncRunEvents(runId)
+      await syncRunEvents(runId, { replayRenderableEvents: true })
       runConnectionStatus.value = "awaiting_confirmation"
       await scrollBottom()
       return
     }
     if (isTerminalRunStatus(run.status)) {
-      await syncRunEvents(runId)
-      settleRunStatus(run)
-      if (run.status === "FAILED" || run.status === "TIMEOUT") {
-        lastFailedRunId.value = run.id
-      }
-      await refreshMessages()
-      streamingAssistantMessageId.value = null
-      await scrollBottom()
+      await settleTerminalRun(runId, run)
       return
     }
   } catch (error) {
@@ -799,15 +1020,16 @@ async function waitForRunComplete(runId: number) {
   await pollRunUntilComplete(runId)
 }
 
-function handleStreamedRunEvent(runId: number, event: AgentRunEvent) {
+function handleStreamedRunEvent(runId: number, event: AgentRunEvent, options?: { fromSync?: boolean }) {
   const alreadySeen = events.value.some((item) => item.id === event.id)
   appendRunEvent(event)
   if (alreadySeen) return
 
   if (isTerminalRunEvent(event)) {
     settleRunStatus()
-    streamingAssistantMessageId.value = null
-    stopRunEventStream()
+    clearStreamingAssistantMessage(runId, { preserveReadableText: event.eventType === "run.failed" })
+    stopRunStatusWatchdog()
+    if (!options?.fromSync) stopRunEventStream()
     void finalizeTerminalRunFromEvent(runId, event)
     return
   }
@@ -835,23 +1057,36 @@ async function finalizeTerminalRunFromEvent(runId: number, event: AgentRunEvent)
   terminalEventFinalizingRunIds.add(runId)
   try {
     const run = await fetchAgentRun(runId, { token: props.token })
-    await syncRunEvents(runId)
+    await syncRunEvents(runId, { replayRenderableEvents: true })
     settleRunStatus(run)
     if (run.status === "FAILED" || run.status === "TIMEOUT") {
       lastFailedRunId.value = run.id
     }
-    await refreshMessages()
+    await refreshMessages({ preserveStreamingRunId: run.status === "FAILED" || run.status === "TIMEOUT" ? runId : undefined })
   } catch {
     settleRunStatus()
     if (event.eventType === "run.failed") {
       lastFailedRunId.value = event.runId
     }
-    await refreshMessages()
+    await refreshMessages({ preserveStreamingRunId: event.eventType === "run.failed" ? runId : undefined })
   } finally {
-    streamingAssistantMessageId.value = null
+    clearStreamingAssistantMessage(runId, { preserveReadableText: event.eventType === "run.failed" })
+    stopRunStatusWatchdog()
     terminalEventFinalizingRunIds.delete(runId)
     await scrollBottom()
   }
+}
+
+async function settleTerminalRun(runId: number, run: AgentRun) {
+  await syncRunEvents(runId, { replayRenderableEvents: true })
+  settleRunStatus(run)
+  if (run.status === "FAILED" || run.status === "TIMEOUT") {
+    lastFailedRunId.value = run.id
+  }
+  await refreshMessages({ preserveStreamingRunId: run.status === "FAILED" || run.status === "TIMEOUT" ? runId : undefined })
+  clearStreamingAssistantMessage(runId, { preserveReadableText: run.status === "FAILED" || run.status === "TIMEOUT" })
+  stopRunStatusWatchdog()
+  await scrollBottom()
 }
 
 async function pollRunUntilComplete(runId: number) {
@@ -863,20 +1098,13 @@ async function pollRunUntilComplete(runId: number) {
     while (Date.now() - startTime < MAX_WAIT_MS) {
       const run = await fetchAgentRun(runId, { token: props.token })
       if (run.status === "WAITING_USER_CONFIRMATION") {
-        await syncRunEvents(runId)
+        await syncRunEvents(runId, { replayRenderableEvents: true })
         runConnectionStatus.value = "awaiting_confirmation"
         await scrollBottom()
         return
       }
       if (isTerminalRunStatus(run.status)) {
-        await syncRunEvents(runId)
-        settleRunStatus(run)
-        if (run.status === "FAILED" || run.status === "TIMEOUT") {
-          lastFailedRunId.value = run.id
-        }
-        await refreshMessages()
-        streamingAssistantMessageId.value = null
-        await scrollBottom()
+        await settleTerminalRun(runId, run)
         return
       }
       await delay(POLL_INTERVAL_MS)
@@ -928,9 +1156,18 @@ async function confirmTool(eventId: number, toolCode: string, approved: boolean)
   }
 }
 
-async function refreshMessages() {
+async function refreshMessages(options?: { preserveStreamingRunId?: number }) {
   if (!props.token) return
+  const preserved = options?.preserveStreamingRunId != null ? streamingMessageForRun(options.preserveStreamingRunId) : undefined
   const messageRes = await fetchAgentMessages(props.sessionId, { token: props.token })
+  if (
+    preserved?.contentText?.trim() &&
+    !isStructuredMediaContent(preserved.contentText) &&
+    !messageRes.list.some((message) => message.runId === preserved.runId && message.role === "ASSISTANT")
+  ) {
+    messages.value = [...messageRes.list, preserved]
+    return
+  }
   messages.value = messageRes.list
 }
 
@@ -994,6 +1231,7 @@ function settleRunStatus(run?: AgentRun) {
   activeRunId.value = null
   recoveryRunId.value = null
   showActiveRunLimitHint.value = false
+  stopRunStatusWatchdog()
 }
 
 function isTerminalRunEvent(event: AgentRunEvent) {
@@ -1012,6 +1250,32 @@ function parseEventJson(value?: string | null) {
   } catch {
     return {} as Record<string, unknown>
   }
+}
+
+function isStructuredMediaContent(value: string) {
+  const trimmed = value.trim()
+  if (!trimmed || (!trimmed.startsWith("{") && !trimmed.startsWith("["))) return false
+  try {
+    const parsed = JSON.parse(trimmed) as unknown
+    return containsMediaResult(parsed)
+  } catch {
+    return false
+  }
+}
+
+function containsMediaResult(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false
+  if (Array.isArray(value)) return value.some(containsMediaResult)
+  const record = value as Record<string, unknown>
+  const resourceType = typeof record.resourceType === "string" ? record.resourceType.toUpperCase() : ""
+  if (["IMAGE", "VIDEO", "AUDIO"].includes(resourceType)) return true
+  for (const key of ["images", "videos", "audios", "assets", "files"]) {
+    if (Array.isArray(record[key]) && record[key].length > 0) return true
+  }
+  if (typeof record.url === "string" && /\.(png|jpe?g|webp|gif|mp4|webm|mp3|wav)(\?|$)/i.test(record.url)) {
+    return true
+  }
+  return Object.values(record).some(containsMediaResult)
 }
 
 function messageClass(role: string) {
@@ -1052,6 +1316,36 @@ function useAssetWithTool(tool: AssetPreviewRecommendation, asset: AssetPreviewI
 
 function openPreviewTask() {
   previewAsset.value = null
+}
+
+async function publishPreviewAsset(asset: AssetPreviewItem) {
+  if (!auth.token || !asset.taskId) return
+  try {
+    const post = await publishCommunityPost(
+      {
+        taskId: asset.taskId,
+        title: asset.title,
+        description: asset.subtitle || null,
+        promptVisible: asset.promptVisible ?? false,
+      },
+      { token: auth.token },
+    )
+    previewAsset.value = { ...asset, communityPostId: post.id, promptVisible: post.promptVisible }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "发布失败"
+    window.alert(message)
+  }
+}
+
+async function unpublishPreviewAsset(asset: AssetPreviewItem) {
+  if (!auth.token || !asset.communityPostId) return
+  try {
+    await unpublishCommunityPost(asset.communityPostId, { token: auth.token })
+    previewAsset.value = { ...asset, communityPostId: undefined }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "撤回失败"
+    window.alert(message)
+  }
 }
 
 function formatFileSize(size: number) {
@@ -1109,6 +1403,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   stopRunEventStream()
+  stopRunStatusWatchdog()
   window.removeEventListener("resize", adjustComposerTextareaHeight)
 })
 
@@ -1450,6 +1745,10 @@ defineExpose({
             <Store class="h-4 w-4" />
             智能搜索
           </button> 
+          <button type="button" class="tool-btn" @click="openMemoryPanel">
+            <Database class="h-4 w-4" />
+            记忆
+          </button>
         </div>
 
         <button
@@ -1471,7 +1770,103 @@ defineExpose({
       @close="previewAsset = null"
       @use-tool="useAssetWithTool"
       @open-task="openPreviewTask"
+      @publish="publishPreviewAsset"
+      @unpublish="unpublishPreviewAsset"
     />
+    <div v-if="memoryPanelOpen" class="memory-panel-backdrop" @click.self="closeMemoryPanel">
+      <aside class="memory-panel" aria-label="Agent 长期记忆管理">
+        <header class="memory-panel-header">
+          <div>
+            <p class="memory-panel-kicker">Agent memory</p>
+            <h3>长期记忆</h3>
+            <span>只保存长期有价值的偏好、习惯和项目知识。</span>
+          </div>
+          <button type="button" class="memory-icon-btn" aria-label="关闭记忆管理" @click="closeMemoryPanel">
+            <X class="h-4 w-4" />
+          </button>
+        </header>
+
+        <div class="memory-panel-controls">
+          <select
+            class="memory-select"
+            :value="memoryWorkspaceId ?? ''"
+            :disabled="memoryLoading || memoryWorkspaces.length === 0"
+            @change="changeMemoryWorkspace(($event.target as HTMLSelectElement).value)"
+          >
+            <option v-if="memoryWorkspaces.length === 0" value="">暂无工作区</option>
+            <option v-for="workspace in memoryWorkspaces" :key="workspace.id" :value="workspace.id">
+              {{ workspace.name }}
+            </option>
+          </select>
+          <button type="button" class="memory-refresh-btn" :disabled="memoryLoading" @click="loadMemoryWorkspaces">
+            <Loader2 v-if="memoryLoading" class="h-4 w-4 animate-spin" />
+            <RefreshCw v-else class="h-4 w-4" />
+          </button>
+        </div>
+
+        <p v-if="memoryError" class="memory-error">{{ memoryError }}</p>
+
+        <section class="memory-editor">
+          <div class="memory-editor-grid">
+            <select v-model="memoryForm.memoryType" class="memory-input">
+              <option v-for="option in memoryTypeOptions" :key="option.value" :value="option.value">
+                {{ option.label }}
+              </option>
+            </select>
+            <input v-model="memoryForm.title" class="memory-input" placeholder="记忆标题" maxlength="160" />
+          </div>
+          <textarea
+            v-model="memoryForm.content"
+            class="memory-textarea"
+            rows="4"
+            placeholder="例如：用户偏好写实摄影风格，默认避免夸张动漫质感。"
+          />
+          <div class="memory-editor-actions">
+            <button v-if="memoryEditingId != null" type="button" class="ghost-btn" :disabled="memorySaving" @click="resetMemoryForm">
+              取消编辑
+            </button>
+            <button type="button" class="primary-btn" :disabled="memorySaving || memoryWorkspaceId == null" @click="saveMemory">
+              <Loader2 v-if="memorySaving" class="h-4 w-4 animate-spin" />
+              <Plus v-else-if="memoryEditingId == null" class="h-4 w-4" />
+              <Check v-else class="h-4 w-4" />
+              {{ memoryEditingId == null ? "添加记忆" : "保存记忆" }}
+            </button>
+          </div>
+        </section>
+
+        <div class="memory-list">
+          <div v-if="memoryLoading" class="memory-empty">
+            <Loader2 class="h-4 w-4 animate-spin" />
+            正在加载记忆
+          </div>
+          <div v-else-if="memoryItems.length === 0" class="memory-empty">
+            还没有长期记忆。你可以手动添加，或在对话里明确告诉 Agent “记住……”
+          </div>
+          <section v-for="group in groupedMemoryItems" v-else :key="group.type" class="memory-group">
+            <p class="memory-group-title">{{ group.label }}</p>
+            <article v-for="item in group.items" :key="item.id" class="memory-item">
+              <div class="memory-item-main">
+                <div class="memory-item-title-row">
+                  <strong>{{ item.title || `记忆 #${item.id}` }}</strong>
+                  <span v-if="item.sourceRunId">Run #{{ item.sourceRunId }}</span>
+                  <span v-else>手动/历史</span>
+                </div>
+                <p>{{ item.content }}</p>
+              </div>
+              <div class="memory-item-actions">
+                <button type="button" class="memory-icon-btn" aria-label="编辑记忆" @click="editMemory(item)">
+                  <Pencil class="h-4 w-4" />
+                </button>
+                <button type="button" class="memory-icon-btn danger" :disabled="memoryDeletingId === item.id" aria-label="删除记忆" @click="removeMemory(item)">
+                  <Loader2 v-if="memoryDeletingId === item.id" class="h-4 w-4 animate-spin" />
+                  <Trash2 v-else class="h-4 w-4" />
+                </button>
+              </div>
+            </article>
+          </section>
+        </div>
+      </aside>
+    </div>
   </div>
 </template>
 
@@ -2258,6 +2653,224 @@ defineExpose({
   overflow: hidden;
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
+}
+
+.memory-panel-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  justify-content: flex-end;
+  background: rgb(0 0 0 / 0.48);
+  backdrop-filter: blur(8px);
+}
+
+.memory-panel {
+  width: min(460px, calc(100% - 24px));
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  border-left: 1px solid rgb(255 255 255 / 0.10);
+  background:
+    radial-gradient(circle at 20% 0%, rgb(176 92 255 / 0.12), transparent 34%),
+    rgb(18 18 22 / 0.96);
+  padding: 20px;
+  color: rgb(255 255 255 / 0.88);
+  box-shadow: -20px 0 80px rgb(0 0 0 / 0.42);
+  overflow-y: auto;
+}
+
+.memory-panel-header,
+.memory-panel-controls,
+.memory-item-title-row,
+.memory-item-actions,
+.memory-editor-actions {
+  display: flex;
+  align-items: center;
+}
+
+.memory-panel-header {
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.memory-panel-kicker {
+  margin: 0 0 4px;
+  color: rgb(176 92 255);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.memory-panel-header h3 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.memory-panel-header span {
+  display: block;
+  margin-top: 6px;
+  color: rgb(255 255 255 / 0.52);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.memory-icon-btn,
+.memory-refresh-btn {
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid rgb(255 255 255 / 0.10);
+  background: rgb(255 255 255 / 0.055);
+  color: rgb(255 255 255 / 0.68);
+  cursor: pointer;
+}
+
+.memory-icon-btn:hover:not(:disabled),
+.memory-refresh-btn:hover:not(:disabled) {
+  border-color: rgb(176 92 255 / 0.42);
+  color: #fff;
+}
+
+.memory-icon-btn.danger:hover:not(:disabled) {
+  border-color: rgb(248 113 113 / 0.46);
+  color: rgb(254 202 202);
+}
+
+.memory-panel-controls {
+  gap: 8px;
+}
+
+.memory-select,
+.memory-input,
+.memory-textarea {
+  width: 100%;
+  border: 1px solid rgb(255 255 255 / 0.10);
+  border-radius: 14px;
+  background: rgb(0 0 0 / 0.22);
+  color: rgb(255 255 255 / 0.88);
+  outline: none;
+}
+
+.memory-select,
+.memory-input {
+  min-height: 38px;
+  padding: 0 12px;
+}
+
+.memory-textarea {
+  resize: vertical;
+  padding: 10px 12px;
+  line-height: 1.6;
+}
+
+.memory-editor {
+  display: grid;
+  gap: 10px;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 18px;
+  background: rgb(255 255 255 / 0.045);
+  padding: 12px;
+}
+
+.memory-editor-grid {
+  display: grid;
+  grid-template-columns: 132px minmax(0, 1fr);
+  gap: 8px;
+}
+
+.memory-editor-actions {
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.memory-list {
+  display: grid;
+  gap: 14px;
+}
+
+.memory-empty,
+.memory-error {
+  border-radius: 16px;
+  padding: 14px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.memory-empty {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  border: 1px dashed rgb(255 255 255 / 0.12);
+  color: rgb(255 255 255 / 0.48);
+}
+
+.memory-error {
+  border: 1px solid rgb(248 113 113 / 0.32);
+  background: rgb(248 113 113 / 0.10);
+  color: rgb(254 202 202);
+}
+
+.memory-group {
+  display: grid;
+  gap: 8px;
+}
+
+.memory-group-title {
+  margin: 0;
+  color: rgb(255 255 255 / 0.46);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.memory-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 16px;
+  background: rgb(255 255 255 / 0.045);
+  padding: 12px;
+}
+
+.memory-item-main {
+  min-width: 0;
+}
+
+.memory-item-title-row {
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.memory-item-title-row strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memory-item-title-row span {
+  flex-shrink: 0;
+  color: rgb(255 255 255 / 0.38);
+  font-size: 11px;
+}
+
+.memory-item p {
+  margin: 8px 0 0;
+  color: rgb(255 255 255 / 0.62);
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.memory-item-actions {
+  gap: 6px;
+  align-self: start;
 }
 
 @media (max-width: 900px) {

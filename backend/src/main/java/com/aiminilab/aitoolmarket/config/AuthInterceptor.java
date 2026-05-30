@@ -80,7 +80,7 @@ public class AuthInterceptor implements HandlerInterceptor, Filter {
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
         String path = request.getRequestURI();
-        if ("OPTIONS".equalsIgnoreCase(request.getMethod()) || isPublicPath(path)) {
+        if ("OPTIONS".equalsIgnoreCase(request.getMethod()) || isPublicPath(request.getMethod(), path)) {
             return true;
         }
 
@@ -113,7 +113,7 @@ public class AuthInterceptor implements HandlerInterceptor, Filter {
         AuthContext.clear();
     }
 
-    private boolean isPublicPath(String path) {
+    private boolean isPublicPath(String method, String path) {
         return path.equals("/api/health")
                 || path.equals("/api/v1/ping")
                 || path.equals("/api/admin/v1/ping")
@@ -131,6 +131,9 @@ public class AuthInterceptor implements HandlerInterceptor, Filter {
                 || path.startsWith("/api/v1/tools/")
                 || path.equals("/api/v1/ai-tools")
                 || path.startsWith("/api/v1/ai-tools/")
+                || ("GET".equalsIgnoreCase(method) && path.startsWith("/api/v1/community/users/"))
+                || ("GET".equalsIgnoreCase(method) && path.equals("/api/v1/community/posts"))
+                || ("GET".equalsIgnoreCase(method) && path.matches("/api/v1/community/posts/\\d+"))
                 || path.equals("/api/admin/v1/auth/login");
     }
 

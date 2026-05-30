@@ -108,6 +108,7 @@ public class AdminAgentToolAccessController {
                 agentModelConfigService.internalGet(),
                 nonBlankOrDefault(settings.get(AgentPromptSettings.SYSTEM_PROMPT_KEY), AgentPromptSettings.DEFAULT_SYSTEM_PROMPT),
                 nonBlankOrDefault(settings.get(AgentPromptSettings.DEEP_AGENTS_SYSTEM_PROMPT_KEY), AgentPromptSettings.DEFAULT_DEEP_AGENTS_SYSTEM_PROMPT),
+                null,
                 null
         );
         AdminAgentRouteDebugResponse response = agentServiceClient.debugRoute(context);

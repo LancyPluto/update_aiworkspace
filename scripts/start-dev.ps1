@@ -1,6 +1,8 @@
 param(
     [ValidateSet("auto", "0", "1")]
     [string]$StartInfra = $(if ($env:START_INFRA) { $env:START_INFRA } else { "auto" }),
+    [ValidateSet("check", "auto", "0", "1")]
+    [string]$ApplySql = $(if ($env:APPLY_SQL) { $env:APPLY_SQL } else { "check" }),
     [switch]$InstallDeps
 )
 
@@ -111,6 +113,256 @@ function Test-HttpReady($Url, $Seconds) {
     return $false
 }
 
+function Get-SqlMigrationFiles {
+    $SqlRoot = Join-Path $Root "sql"
+    if (-not (Test-Path -LiteralPath $SqlRoot)) {
+        return @()
+    }
+
+    $Files = @(Get-ChildItem -LiteralPath $SqlRoot -Filter "*.sql" -File -ErrorAction SilentlyContinue)
+    $MigrationDir = Join-Path $SqlRoot "migrations"
+    if (Test-Path -LiteralPath $MigrationDir) {
+        $Files += Get-ChildItem -LiteralPath $MigrationDir -Filter "*.sql" -File -ErrorAction SilentlyContinue
+    }
+
+    return @($Files | Sort-Object FullName)
+}
+
+function Get-SqlMigrationName($File) {
+    $SqlRoot = (Resolve-Path (Join-Path $Root "sql")).Path
+    $FullName = (Resolve-Path $File.FullName).Path
+    if ($FullName.StartsWith($SqlRoot, [StringComparison]::OrdinalIgnoreCase)) {
+        $Relative = $FullName.Substring($SqlRoot.Length).TrimStart("\", "/")
+        if ($Relative -notmatch "[\\/]") {
+            return $File.Name
+        }
+        return $Relative.Replace("\", "/")
+    }
+    return $File.Name
+}
+
+function New-MysqlRunner {
+    $MysqlDb = if ($env:MYSQL_DATABASE) { $env:MYSQL_DATABASE } else { "ai_supermarket_v1" }
+    $MysqlUser = if ($env:MYSQL_USERNAME) { $env:MYSQL_USERNAME } else { "root" }
+    $MysqlPass = if ($env:MYSQL_PASSWORD) { $env:MYSQL_PASSWORD } else { "root123456" }
+    $MysqlHost = if ($env:MYSQL_HOST) { $env:MYSQL_HOST } else { "127.0.0.1" }
+    $MysqlPort = if ($env:MYSQL_PORT) { $env:MYSQL_PORT } else { "3307" }
+    $ContainerName = if ($env:MYSQL_CONTAINER) { $env:MYSQL_CONTAINER } else { "ai-supermarket-mysql" }
+
+    $Docker = Get-Command docker -ErrorAction SilentlyContinue
+    if ($Docker) {
+        $Containers = @(& docker ps --format "{{.Names}}" 2>$null)
+        if ($LASTEXITCODE -eq 0 -and ($Containers -contains $ContainerName)) {
+            return @{
+                Mode = "docker"
+                Container = $ContainerName
+                Database = $MysqlDb
+                User = $MysqlUser
+                Password = $MysqlPass
+            }
+        }
+    }
+
+    if (Get-Command mysql -ErrorAction SilentlyContinue) {
+        return @{
+            Mode = "host"
+            Host = $MysqlHost
+            Port = $MysqlPort
+            Database = $MysqlDb
+            User = $MysqlUser
+            Password = $MysqlPass
+        }
+    }
+
+    return $null
+}
+
+function Invoke-MysqlScalar($Runner, $Sql) {
+    $PreviousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        if ($Runner.Mode -eq "docker") {
+            $Output = & docker exec -e "MYSQL_PWD=$($Runner.Password)" $Runner.Container mysql "-u$($Runner.User)" $Runner.Database -N -B -e $Sql 2>&1
+        } else {
+            $PreviousMysqlPwd = $env:MYSQL_PWD
+            $env:MYSQL_PWD = $Runner.Password
+            try {
+                $Output = & mysql "-h$($Runner.Host)" "-P$($Runner.Port)" "-u$($Runner.User)" $Runner.Database -N -B -e $Sql 2>&1
+            } finally {
+                $env:MYSQL_PWD = $PreviousMysqlPwd
+            }
+        }
+    } finally {
+        $ErrorActionPreference = $PreviousErrorActionPreference
+    }
+    if ($LASTEXITCODE -ne 0) {
+        throw "mysql query failed: $($Output -join "`n")"
+    }
+    $Rows = @($Output | Where-Object { $_ -notmatch "Using a password" })
+    if ($Rows.Count -eq 0) {
+        return ""
+    }
+    return ($Rows[-1].ToString()).Trim()
+}
+
+function Invoke-MysqlCommand($Runner, $Sql) {
+    $PreviousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        if ($Runner.Mode -eq "docker") {
+            $Output = & docker exec -e "MYSQL_PWD=$($Runner.Password)" $Runner.Container mysql "-u$($Runner.User)" $Runner.Database -e $Sql 2>&1
+        } else {
+            $PreviousMysqlPwd = $env:MYSQL_PWD
+            $env:MYSQL_PWD = $Runner.Password
+            try {
+                $Output = & mysql "-h$($Runner.Host)" "-P$($Runner.Port)" "-u$($Runner.User)" $Runner.Database -e $Sql 2>&1
+            } finally {
+                $env:MYSQL_PWD = $PreviousMysqlPwd
+            }
+        }
+    } finally {
+        $ErrorActionPreference = $PreviousErrorActionPreference
+    }
+    if ($LASTEXITCODE -ne 0) {
+        throw "mysql command failed: $($Output -join "`n")"
+    }
+}
+
+function Invoke-MysqlFile($Runner, $Path) {
+    $SqlText = Get-Content -LiteralPath $Path -Raw
+    $PreviousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        if ($Runner.Mode -eq "docker") {
+            $Output = $SqlText | & docker exec -i -e "MYSQL_PWD=$($Runner.Password)" $Runner.Container mysql "-u$($Runner.User)" $Runner.Database 2>&1
+        } else {
+            $PreviousMysqlPwd = $env:MYSQL_PWD
+            $env:MYSQL_PWD = $Runner.Password
+            try {
+                $Output = $SqlText | & mysql "-h$($Runner.Host)" "-P$($Runner.Port)" "-u$($Runner.User)" $Runner.Database 2>&1
+            } finally {
+                $env:MYSQL_PWD = $PreviousMysqlPwd
+            }
+        }
+    } finally {
+        $ErrorActionPreference = $PreviousErrorActionPreference
+    }
+    return @{
+        Code = $LASTEXITCODE
+        Output = ($Output -join "`n")
+    }
+}
+
+function Escape-SqlString($Value) {
+    return $Value.Replace("\", "\\").Replace("'", "''")
+}
+
+function Apply-LocalSqlMigrations {
+    if ($ApplySql -eq "0") {
+        Write-Host "[SKIP] SQL migration check disabled by APPLY_SQL=0"
+        return
+    }
+
+    Write-Section "Checking local SQL migrations"
+    $Files = @(Get-SqlMigrationFiles)
+    if ($Files.Count -eq 0) {
+        Write-Host "[OK] No SQL files found"
+        return
+    }
+
+    $Runner = New-MysqlRunner
+    if (-not $Runner) {
+        $Message = "No MySQL runner found. Start Docker MySQL or install mysql client."
+        if ($ApplySql -eq "1") {
+            throw $Message
+        }
+        Write-Host "[SKIP] $Message"
+        return
+    }
+
+    Write-Host "[OK] MySQL runner: $($Runner.Mode)"
+    Invoke-MysqlCommand $Runner @"
+CREATE TABLE IF NOT EXISTS _sql_migration_log (
+  name VARCHAR(255) NOT NULL PRIMARY KEY,
+  applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+"@
+
+    if ($ApplySql -eq "check" -or $ApplySql -eq "auto") {
+        $Pending = @()
+        foreach ($File in $Files) {
+            $Name = Get-SqlMigrationName $File
+            $EscapedName = Escape-SqlString $Name
+            $Exists = Invoke-MysqlScalar $Runner "SELECT COUNT(*) FROM _sql_migration_log WHERE name='$EscapedName';"
+            if ($Exists -ne "1") {
+                $Pending += $Name
+            }
+        }
+
+        if ($Pending.Count -eq 0) {
+            Write-Host "[OK] No pending SQL files"
+            return
+        }
+
+        Write-Host "[WARN] Pending SQL files: $($Pending.Count)"
+        $Pending | Select-Object -First 12 | ForEach-Object { Write-Host "  $_" }
+        if ($Pending.Count -gt 12) {
+            Write-Host "  ... $($Pending.Count - 12) more"
+        }
+        Write-Host "[INFO] Startup will continue without applying SQL. To apply explicitly: `$env:APPLY_SQL='1'; .\start-dev.bat"
+        return
+    }
+
+    $Applied = 0
+    $Skipped = 0
+    $Failed = 0
+    foreach ($File in $Files) {
+        $Name = Get-SqlMigrationName $File
+        $EscapedName = Escape-SqlString $Name
+        $Exists = Invoke-MysqlScalar $Runner "SELECT COUNT(*) FROM _sql_migration_log WHERE name='$EscapedName';"
+        if ($Exists -eq "1") {
+            $Skipped++
+            continue
+        }
+
+        if ($Name -eq "001_init_v1.sql") {
+            $HasUsers = Invoke-MysqlScalar $Runner "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='users';"
+            if ($HasUsers -eq "1") {
+                Write-Host "  SKIP $Name (schema already initialized)"
+                Invoke-MysqlCommand $Runner "INSERT IGNORE INTO _sql_migration_log (name) VALUES ('$EscapedName');"
+                $Skipped++
+                continue
+            }
+        }
+
+        Write-Host "  RUN  $Name"
+        $Result = Invoke-MysqlFile $Runner $File.FullName
+        if ($Result.Code -eq 0) {
+            Invoke-MysqlCommand $Runner "INSERT INTO _sql_migration_log (name) VALUES ('$EscapedName');"
+            $Applied++
+            continue
+        }
+
+        if ($Result.Output -match "Duplicate (column|key|entry)|already exists|1060|1061|1062") {
+            Write-Host "    idempotent skip: $($Result.Output.Split("`n")[0])"
+            Invoke-MysqlCommand $Runner "INSERT IGNORE INTO _sql_migration_log (name) VALUES ('$EscapedName');"
+            $Applied++
+            continue
+        }
+
+        Write-Host "    FAILED: $($Result.Output.Split("`n")[0])"
+        $Failed++
+    }
+
+    Write-Host "SQL summary: applied=$Applied skipped=$Skipped failed=$Failed"
+    if ($Failed -gt 0 -and $ApplySql -eq "1") {
+        throw "One or more SQL migrations failed."
+    }
+    if ($Failed -gt 0) {
+        Write-Host "[WARN] Some SQL migrations failed. Backend startup will continue; check the SQL output above."
+    }
+}
+
 function Start-InfraIfNeeded {
     if ($StartInfra -eq "0") {
         Write-Host "[SKIP] Infra startup disabled by START_INFRA=0"
@@ -179,6 +431,11 @@ Set-DefaultEnv "BACKEND_INTERNAL_BASE_URL" "http://127.0.0.1:8080"
 Set-DefaultEnv "AGENT_SERVICE_BASE_URL" "http://127.0.0.1:8090"
 Set-DefaultEnv "AGENT_ENABLED" "true"
 Set-DefaultEnv "SERVER_PORT" "8080"
+Set-DefaultEnv "MYSQL_HOST" "127.0.0.1"
+Set-DefaultEnv "MYSQL_PORT" "3307"
+Set-DefaultEnv "MYSQL_DATABASE" "ai_supermarket_v1"
+Set-DefaultEnv "MYSQL_USERNAME" "root"
+Set-DefaultEnv "MYSQL_PASSWORD" "root123456"
 Set-DefaultEnv "REDIS_HOST" "127.0.0.1"
 Set-DefaultEnv "REDIS_PORT" "6379"
 Set-DefaultEnv "AI_TASK_QUEUE" "ai:task:queue"
@@ -194,6 +451,7 @@ Set-DefaultEnv "GENERATED_MEDIA_PUBLIC_BASE_URL" "/generated"
 Write-Section "AI Tool Market - Local Dev Launcher"
 Write-Host "Root:          $Root"
 Write-Host "Infra mode:    $StartInfra"
+Write-Host "SQL check:     $ApplySql"
 Write-Host "Backend:       http://localhost:8080"
 Write-Host "Agent Service: http://localhost:8090"
 Write-Host "User Web:      http://localhost:5173"
@@ -207,6 +465,7 @@ Require-Command "npm" "Node.js/npm"
 Require-Command "python" "Python 3.11+"
 
 Start-InfraIfNeeded
+Apply-LocalSqlMigrations
 
 Install-NodeDeps "user-web"
 Install-NodeDeps "admin-frontend"

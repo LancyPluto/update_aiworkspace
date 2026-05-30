@@ -203,6 +203,33 @@ export interface AdminTaskQuery {
   taskId?: number
 }
 
+export interface AdminCommunityPost {
+  id: number
+  userId: number
+  taskId: number
+  modality: string
+  coverUrl?: string | null
+  title: string
+  description?: string | null
+  promptVisible: boolean
+  prompt?: string | null
+  toolCode?: string | null
+  toolName?: string | null
+  status: string
+  featured?: boolean
+  pinned?: boolean
+  topic?: string | null
+  tags?: string[]
+  sameStyleCount?: number
+  auditStatus?: string | null
+  auditReason?: string | null
+  viewCount: number
+  likeCount: number
+  favoriteCount: number
+  createdAt: string
+  updatedAt?: string | null
+}
+
 export interface DashboardChartPoint {
   name: string
   value: number
