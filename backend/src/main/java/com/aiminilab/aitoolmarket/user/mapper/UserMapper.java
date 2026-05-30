@@ -139,4 +139,17 @@ public interface UserMapper extends BaseMapper<User> {
             WHERE id = #{userId} AND is_deleted = 0
             """)
     int updateAvatarUrl(@Param("userId") Long userId, @Param("avatarUrl") String avatarUrl);
+
+    @Update("""
+            UPDATE users
+            SET bio = #{bio},
+                auto_publish_assets = #{autoPublishAssets},
+                prompt_public_by_default = #{promptPublicByDefault},
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{userId} AND is_deleted = 0
+            """)
+    int updateCommunitySettings(@Param("userId") Long userId,
+                                @Param("bio") String bio,
+                                @Param("autoPublishAssets") boolean autoPublishAssets,
+                                @Param("promptPublicByDefault") boolean promptPublicByDefault);
 }

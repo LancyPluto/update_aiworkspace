@@ -3,6 +3,7 @@ package com.aiminilab.aitoolmarket.user.service.impl;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.config.AppProperties;
+import com.aiminilab.aitoolmarket.user.dto.CommunitySettingsRequest;
 import com.aiminilab.aitoolmarket.user.dto.UpdateUserProfileRequest;
 import com.aiminilab.aitoolmarket.user.dto.UserAvatarUploadResponse;
 import com.aiminilab.aitoolmarket.user.dto.UserProfileResponse;
@@ -26,6 +27,7 @@ public class UserProfileServiceImpl implements UserProfileService {
 
     private static final long MAX_AVATAR_BYTES = 5L * 1024L * 1024L;
     private static final int MAX_NICKNAME_LENGTH = 40;
+    private static final int MAX_BIO_LENGTH = 280;
     private static final Set<String> AVATAR_CONTENT_TYPES = Set.of("image/jpeg", "image/png", "image/webp");
     private static final Set<String> AVATAR_EXTENSIONS = Set.of("jpg", "jpeg", "png", "webp");
     private static final DateTimeFormatter AVATAR_FILENAME_TIME = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
@@ -92,6 +94,20 @@ public class UserProfileServiceImpl implements UserProfileService {
         return new UserAvatarUploadResponse(avatarUrl, user);
     }
 
+    @Override
+    public UserProfileResponse updateCommunitySettings(Long userId, CommunitySettingsRequest request) {
+        User existing = requireUser(userId);
+        String bio = normalizeBio(request == null ? null : request.bio(), existing.getBio());
+        boolean autoPublishAssets = request == null || request.autoPublishAssets() == null
+                ? Boolean.TRUE.equals(existing.getAutoPublishAssets())
+                : Boolean.TRUE.equals(request.autoPublishAssets());
+        boolean promptPublicByDefault = request == null || request.promptPublicByDefault() == null
+                ? Boolean.TRUE.equals(existing.getPromptPublicByDefault())
+                : Boolean.TRUE.equals(request.promptPublicByDefault());
+        userMapper.updateCommunitySettings(userId, bio, autoPublishAssets, promptPublicByDefault);
+        return UserProfileResponse.from(requireUser(userId));
+    }
+
     private User requireUser(Long userId) {
         return userMapper.findById(userId)
                 .filter(user -> user.getDeleted() == null || !user.getDeleted())
@@ -119,6 +135,17 @@ public class UserProfileServiceImpl implements UserProfileService {
         }
         if (!normalized.startsWith("/generated/avatars/")) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "头像地址无效");
+        }
+        return normalized;
+    }
+
+    private String normalizeBio(String value, String current) {
+        String normalized = value == null ? current : value.trim();
+        if (normalized == null || normalized.isBlank()) {
+            return null;
+        }
+        if (normalized.length() > MAX_BIO_LENGTH) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "简介不能超过 280 个字");
         }
         return normalized;
     }

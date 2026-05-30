@@ -714,9 +714,9 @@ class DeepAgentsRuntimeEngine:
                     ),
                 )
             )
-        elif context.workspaceId and settings.agent_memory_auto_save_enabled:
+        elif context.workspaceId and _memory_auto_save_enabled(context):
             memory_tool = MemoryTool(self.backend, context.workspaceId, context.userId, run_id=context.runId)
-            messages.append(ChatMessage(role="system", content=MEMORY_TOOL_SYSTEM_PROMPT))
+            messages.append(ChatMessage(role="system", content=_memory_tool_prompt(context)))
 
         messages.extend(context.history)
         messages.append(ChatMessage(role="user", content=context.message))
@@ -829,9 +829,9 @@ class DeepAgentsRuntimeEngine:
         if workspace_memory_context:
             messages_list.append(ChatMessage(role="system", content=workspace_memory_context))
         memory_tool = None
-        if context.workspaceId and settings.agent_memory_auto_save_enabled:
+        if context.workspaceId and _memory_auto_save_enabled(context):
             memory_tool = MemoryTool(self.backend, context.workspaceId, context.userId, run_id=context.runId)
-            messages_list.append(ChatMessage(role="system", content=MEMORY_TOOL_SYSTEM_PROMPT))
+            messages_list.append(ChatMessage(role="system", content=_memory_tool_prompt(context)))
         if content_text:
             messages_list.append(
                 ChatMessage(
@@ -867,7 +867,7 @@ class DeepAgentsRuntimeEngine:
         parts: list[str] = []
         stream = getattr(self.model, "chat_stream", None)
         extra_kwargs: dict[str, Any] = {}
-        if memory_tool is not None and settings.agent_memory_auto_save_enabled:
+        if memory_tool is not None:
             extra_kwargs["tools"] = _format_memory_tool_definitions()
         if stream is None:
             try:
@@ -883,16 +883,22 @@ class DeepAgentsRuntimeEngine:
         except TypeError:
             stream_iter = self.model.chat_stream(messages_list)
         persisted_length = 0
-        async for chunk in stream_iter:
-            parts.append(chunk)
-            await self.backend.append_event(
-                run_id,
-                RunEventCreate(eventType=MESSAGE_DELTA, eventText=chunk, eventJson={"delta": chunk}),
-            )
-            current_answer = "".join(parts)
-            if len(current_answer) - persisted_length >= 160:
-                await self._upsert_streaming_answer(run_id, current_answer)
-                persisted_length = len(current_answer)
+        try:
+            async for chunk in stream_iter:
+                parts.append(chunk)
+                await self.backend.append_event(
+                    run_id,
+                    RunEventCreate(eventType=MESSAGE_DELTA, eventText=chunk, eventJson={"delta": chunk}),
+                )
+                current_answer = "".join(parts)
+                if len(current_answer) - persisted_length >= 160:
+                    await self._upsert_streaming_answer(run_id, current_answer)
+                    persisted_length = len(current_answer)
+        except Exception:
+            partial_answer = "".join(parts)
+            if partial_answer.strip():
+                await self._upsert_streaming_answer(run_id, partial_answer)
+            raise
         answer = "".join(parts)
         if not answer.strip() and fallback_answer:
             answer = fallback_answer
@@ -1000,14 +1006,18 @@ class DeepAgentsRuntimeEngine:
             return await self.backend.retrieve_workspace_memory(
                 workspace_id=workspace_id,
                 query=context.message,
-                limit=settings.agent_memory_retrieval_limit,
+                limit=_memory_retrieval_limit(context),
             )
         except Exception:
             return []
 
     async def _fetch_workspace_memory_context(self, context: RunContext) -> str:
         items = await self._fetch_workspace_memory_items(context)
-        return _format_workspace_memory_context(items)
+        memory_context = _format_workspace_memory_context(items)
+        retrieval_prompt = context.memorySettings.retrievalPrompt if context.memorySettings is not None else None
+        if memory_context and retrieval_prompt and retrieval_prompt.strip():
+            return f"{retrieval_prompt.strip()}\n\n{memory_context}"
+        return memory_context
 
     async def _build_workspace_file_context(self, context: RunContext) -> WorkspaceFileContext:
         workspace_file_context = build_workspace_file_context(context)
@@ -1063,7 +1073,7 @@ class DeepAgentsRuntimeEngine:
 
     async def _maybe_save_memory(self, context: RunContext, answer: str) -> None:
         """兜底：当 LLM 口头承诺'记住了'但未调用 memory_add 时，自动提取并写入。"""
-        if not context.workspaceId or not settings.agent_memory_auto_save_enabled:
+        if not context.workspaceId or not _memory_auto_save_enabled(context):
             return
         if not _contains_memory_promise(answer):
             return
@@ -1559,19 +1569,19 @@ def _format_workspace_memory_context(items: list[WorkspaceMemoryItem]) -> str:
     if profiles:
         sections.append("[User Profile]")
         for item in profiles:
-            sections.append(f"  - {item.content[:4000]}")
+            sections.append(f"  - {_safe_memory_text(item.content, 800)}")
         sections.append("")
 
     if knowledge:
         sections.append("[Project Knowledge]")
         for item in knowledge:
-            sections.append(f"  [memory:{item.id}] {item.title} (score={item.score})\n  {item.content[:4000]}")
+            sections.append(f"  [memory:{item.id}] {_safe_memory_text(item.title, 120)} (score={item.score})\n  {_safe_memory_text(item.content, 1200)}")
         sections.append("")
 
     if others:
         sections.append("[Other Notes]")
         for item in others:
-            sections.append(f"  [memory:{item.id}] {item.title} ({item.memoryType}, score={item.score})\n  {item.content[:4000]}")
+            sections.append(f"  [memory:{item.id}] {_safe_memory_text(item.title, 120)} ({item.memoryType}, score={item.score})\n  {_safe_memory_text(item.content, 1200)}")
 
     return "\n".join(sections).strip()
 
@@ -1584,5 +1594,44 @@ def _format_workspace_memory_items(items: list[WorkspaceMemoryItem]) -> list[str
         title = item.title.strip() or "Untitled memory"
         content = item.content.strip()
         memory_type = item.memoryType.strip() or "memory"
-        memory_items.append(f"[memory:{item.id}] {title} ({memory_type}, score={item.score})\n{content[:4000]}")
+        memory_items.append(f"[memory:{item.id}] {_safe_memory_text(title, 120)} ({memory_type}, score={item.score})\n{_safe_memory_text(content, 1200)}")
     return memory_items
+
+
+def _memory_auto_save_enabled(context: RunContext) -> bool:
+    if context.memorySettings is not None and context.memorySettings.autoSaveEnabled is not None:
+        return bool(context.memorySettings.autoSaveEnabled)
+    return settings.agent_memory_auto_save_enabled
+
+
+def _memory_retrieval_limit(context: RunContext) -> int:
+    if context.memorySettings is not None and context.memorySettings.retrievalLimit is not None:
+        return max(1, min(int(context.memorySettings.retrievalLimit), 20))
+    return settings.agent_memory_retrieval_limit
+
+
+def _memory_tool_prompt(context: RunContext) -> str:
+    configured = context.memorySettings.writePrompt if context.memorySettings is not None else None
+    prompt = configured.strip() if configured else MEMORY_TOOL_SYSTEM_PROMPT
+    enabled_types = context.memorySettings.enabledTypes if context.memorySettings is not None else []
+    if enabled_types:
+        prompt = f"{prompt}\nAllowed memory types: {', '.join(enabled_types)}"
+    return prompt
+
+
+def _safe_memory_text(value: str, limit: int) -> str:
+    text = (value or "").strip()
+    if not text:
+        return ""
+    if _looks_like_large_media_payload(text):
+        return "[omitted large media payload]"
+    return text[:limit]
+
+
+def _looks_like_large_media_payload(text: str) -> bool:
+    if len(text) > 2000 and ("base64" in text[:300].lower() or "data:image/" in text[:300].lower()):
+        return True
+    if len(text) > 5000 and text.lstrip().startswith(("{", "[")):
+        lowered = text[:1000].lower()
+        return "resourceurl" in lowered or "imageurl" in lowered or "videourl" in lowered or "contenttext" in lowered
+    return False

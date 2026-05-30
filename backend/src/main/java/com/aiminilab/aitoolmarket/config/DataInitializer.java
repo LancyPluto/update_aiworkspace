@@ -72,6 +72,9 @@ public class DataInitializer implements CommandLineRunner {
 
     private void ensureSchemaCompatibility() {
         ensureColumn("users", "avatar_url", "ALTER TABLE users ADD COLUMN avatar_url VARCHAR(512) NULL");
+        ensureColumn("users", "bio", "ALTER TABLE users ADD COLUMN bio VARCHAR(280) NULL");
+        ensureColumn("users", "auto_publish_assets", "ALTER TABLE users ADD COLUMN auto_publish_assets TINYINT NOT NULL DEFAULT 1");
+        ensureColumn("users", "prompt_public_by_default", "ALTER TABLE users ADD COLUMN prompt_public_by_default TINYINT NOT NULL DEFAULT 0");
         ensureColumn("ai_tools", "model_config_id", "ALTER TABLE ai_tools ADD COLUMN model_config_id BIGINT NULL");
         ensureColumn("ai_tools", "tool_type", "ALTER TABLE ai_tools ADD COLUMN tool_type VARCHAR(32) NOT NULL DEFAULT 'TEXT_GENERATION'");
         ensureColumn("ai_tools", "input_modality", "ALTER TABLE ai_tools ADD COLUMN input_modality VARCHAR(32) NOT NULL DEFAULT 'TEXT'");
@@ -351,6 +354,48 @@ public class DataInitializer implements CommandLineRunner {
                   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                   UNIQUE KEY uk_workflow_version (workflow_id, version),
                   KEY idx_workflow_ver_created (workflow_id, created_at)
+                )
+                """);
+        ensureTable("community_posts", """
+                CREATE TABLE community_posts (
+                  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                  user_id BIGINT NOT NULL,
+                  task_id BIGINT NOT NULL,
+                  modality VARCHAR(32) NOT NULL,
+                  cover_url VARCHAR(1024),
+                  title VARCHAR(160) NOT NULL,
+                  description VARCHAR(500),
+                  prompt_visible TINYINT NOT NULL DEFAULT 0,
+                  prompt_snapshot MEDIUMTEXT,
+                  tool_code VARCHAR(128),
+                  tool_name VARCHAR(128),
+                  status VARCHAR(32) NOT NULL DEFAULT 'PUBLISHED',
+                  view_count BIGINT NOT NULL DEFAULT 0,
+                  like_count BIGINT NOT NULL DEFAULT 0,
+                  favorite_count BIGINT NOT NULL DEFAULT 0,
+                  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                  UNIQUE KEY uk_community_posts_task (task_id),
+                  KEY idx_community_posts_user_status_id (user_id, status, id),
+                  KEY idx_community_posts_status_id (status, id)
+                )
+                """);
+        ensureTable("community_post_likes", """
+                CREATE TABLE community_post_likes (
+                  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                  post_id BIGINT NOT NULL,
+                  user_id BIGINT NOT NULL,
+                  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  UNIQUE KEY uk_community_post_likes_user (post_id, user_id)
+                )
+                """);
+        ensureTable("community_post_favorites", """
+                CREATE TABLE community_post_favorites (
+                  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                  post_id BIGINT NOT NULL,
+                  user_id BIGINT NOT NULL,
+                  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  UNIQUE KEY uk_community_post_favorites_user (post_id, user_id)
                 )
                 """);
     }

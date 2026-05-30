@@ -4,6 +4,7 @@ import com.aiminilab.aitoolmarket.auth.security.AuthContext;
 import com.aiminilab.aitoolmarket.auth.service.AuthService;
 import com.aiminilab.aitoolmarket.common.dto.ApiResponse;
 import com.aiminilab.aitoolmarket.user.dto.UpdateUserProfileRequest;
+import com.aiminilab.aitoolmarket.user.dto.CommunitySettingsRequest;
 import com.aiminilab.aitoolmarket.user.dto.UserAvatarUploadResponse;
 import com.aiminilab.aitoolmarket.user.dto.UserProfileResponse;
 import com.aiminilab.aitoolmarket.user.service.UserProfileService;
@@ -41,5 +42,10 @@ public class UserController {
     @PostMapping("/me/avatar")
     public ApiResponse<UserAvatarUploadResponse> uploadAvatar(@RequestParam("file") MultipartFile file) {
         return ApiResponse.success(userProfileService.uploadAvatar(AuthContext.get().userId(), file));
+    }
+
+    @PatchMapping("/me/community-settings")
+    public ApiResponse<UserProfileResponse> updateCommunitySettings(@RequestBody CommunitySettingsRequest request) {
+        return ApiResponse.success(userProfileService.updateCommunitySettings(AuthContext.get().userId(), request));
     }
 }

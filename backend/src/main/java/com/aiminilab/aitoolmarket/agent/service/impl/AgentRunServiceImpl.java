@@ -1,6 +1,7 @@
 package com.aiminilab.aitoolmarket.agent.service.impl;
 
 import com.aiminilab.aitoolmarket.agent.client.AgentServiceClient;
+import com.aiminilab.aitoolmarket.agent.config.AgentMemorySettings;
 import com.aiminilab.aitoolmarket.agent.config.AgentPromptSettings;
 import com.aiminilab.aitoolmarket.agent.dto.AgentRunEventResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AgentRunResponse;
@@ -84,6 +85,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Arrays;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -468,6 +470,13 @@ public class AgentRunServiceImpl implements AgentRunService {
                 settings.get(AgentPromptSettings.DEEP_AGENTS_SYSTEM_PROMPT_KEY),
                 AgentPromptSettings.DEFAULT_DEEP_AGENTS_SYSTEM_PROMPT
         );
+        var memorySettings = new com.aiminilab.aitoolmarket.agent.dto.AgentMemorySettingsResponse(
+                parseBooleanSetting(settings.get(AgentMemorySettings.AUTO_SAVE_ENABLED_KEY), AgentMemorySettings.DEFAULT_AUTO_SAVE_ENABLED),
+                parseIntSetting(settings.get(AgentMemorySettings.RETRIEVAL_LIMIT_KEY), AgentMemorySettings.DEFAULT_RETRIEVAL_LIMIT, 1, 20),
+                parseCsvSetting(settings.get(AgentMemorySettings.ENABLED_TYPES_KEY), AgentMemorySettings.DEFAULT_ENABLED_TYPES),
+                nonBlankOrDefault(settings.get(AgentMemorySettings.WRITE_PROMPT_KEY), AgentMemorySettings.DEFAULT_WRITE_PROMPT),
+                nonBlankOrDefault(settings.get(AgentMemorySettings.RETRIEVAL_PROMPT_KEY), AgentMemorySettings.DEFAULT_RETRIEVAL_PROMPT)
+        );
         InternalPendingToolContextResponse pendingToolContextResponse = null;
         AgentPendingToolContext pendingCtx = agentPendingToolContextMapper.findActiveByRunId(runId);
         if (pendingCtx != null) {
@@ -504,12 +513,48 @@ public class AgentRunServiceImpl implements AgentRunService {
                 resolveModelConfigForRun(run),
                 agentSystemPrompt,
                 deepAgentsSystemPrompt,
+                memorySettings,
                 pendingToolContextResponse
         );
     }
 
     private String nonBlankOrDefault(String value, String fallback) {
         return value == null || value.isBlank() ? fallback : value;
+    }
+
+    private boolean parseBooleanSetting(String value, boolean fallback) {
+        if (value == null || value.isBlank()) {
+            return fallback;
+        }
+        String normalized = value.trim().toLowerCase(java.util.Locale.ROOT);
+        if ("true".equals(normalized) || "1".equals(normalized) || "yes".equals(normalized) || "on".equals(normalized)) {
+            return true;
+        }
+        if ("false".equals(normalized) || "0".equals(normalized) || "no".equals(normalized) || "off".equals(normalized)) {
+            return false;
+        }
+        return fallback;
+    }
+
+    private int parseIntSetting(String value, int fallback, int min, int max) {
+        if (value == null || value.isBlank()) {
+            return fallback;
+        }
+        try {
+            int parsed = Integer.parseInt(value.trim());
+            return Math.max(min, Math.min(max, parsed));
+        } catch (NumberFormatException ignored) {
+            return fallback;
+        }
+    }
+
+    private List<String> parseCsvSetting(String value, String fallback) {
+        String source = value == null || value.isBlank() ? fallback : value;
+        return Arrays.stream(source.split(","))
+                .map(String::trim)
+                .filter(item -> !item.isBlank())
+                .distinct()
+                .toList();
     }
 
     private List<InternalAgentFileChunkContextResponse> retrieveRelevantFileChunks(

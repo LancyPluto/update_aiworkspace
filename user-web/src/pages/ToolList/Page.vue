@@ -22,6 +22,7 @@ const tasks = ref<TaskDetail[]>([])
 const loading = ref(false)
 const error = ref<string | null>(null)
 const selectedOutputModality = ref<string | undefined>(undefined)
+const comparisonPositions = ref<Record<string, number>>({})
 const offlineNotice = computed(() => route.query.notice === "offline")
 
 const modalityLabels: Record<string, string> = {
@@ -61,6 +62,21 @@ function isVideoPreviewUrl(value?: string | null): boolean {
 
 function usesEffectMedia(tool: AITool): boolean {
   return tool.mediaDisplayMode === "effect" && Boolean(tool.iconUrl)
+}
+
+function usesComparisonMedia(tool: AITool): boolean {
+  return tool.mediaDisplayMode === "comparison" && Boolean(tool.comparisonOriginalUrl) && Boolean(tool.comparisonEffectUrl)
+}
+
+function comparisonPosition(tool: AITool): number {
+  return comparisonPositions.value[tool.id] ?? 50
+}
+
+function updateComparisonPosition(event: MouseEvent, tool: AITool) {
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
+  if (rect.width <= 0) return
+  const next = Math.min(92, Math.max(8, ((event.clientX - rect.left) / rect.width) * 100))
+  comparisonPositions.value = { ...comparisonPositions.value, [tool.id]: next }
 }
 
 function modelBrand(tool: AITool) {
@@ -338,7 +354,57 @@ onMounted(() => {
           :to="toolEntryRoute(tool.id)"
           class="group overflow-hidden rounded-3xl border border-white/8 bg-white/[0.04] transition hover:-translate-y-1 hover:border-primary/50 hover:shadow-[0_20px_45px_rgb(0_0_0_/_0.38)]"
         >
-          <div v-if="usesEffectMedia(tool)" class="flex h-full flex-col">
+          <div v-if="usesComparisonMedia(tool)" class="flex h-full flex-col">
+            <div class="relative aspect-[3/4] overflow-hidden bg-muted" @mousemove="updateComparisonPosition($event, tool)">
+              <img
+                :src="normalizeMediaUrl(tool.comparisonOriginalUrl)"
+                :alt="`${tool.name} 原图`"
+                class="absolute inset-0 h-full w-full object-cover"
+                draggable="false"
+              />
+              <img
+                :src="normalizeMediaUrl(tool.comparisonEffectUrl)"
+                :alt="`${tool.name} 效果图`"
+                class="absolute inset-0 h-full w-full object-cover"
+                :style="{ clipPath: `inset(0 0 0 ${comparisonPosition(tool)}%)` }"
+                draggable="false"
+              />
+              <div
+                class="pointer-events-none absolute inset-y-0 z-10 w-px bg-white shadow-[0_0_0_1px_rgb(0_0_0_/_0.35)]"
+                :style="{ left: `${comparisonPosition(tool)}%` }"
+              />
+              <div
+                class="pointer-events-none absolute top-1/2 z-10 flex h-9 w-9 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-white/65 bg-black/45 text-[11px] font-semibold text-white shadow-lg backdrop-blur"
+                :style="{ left: `${comparisonPosition(tool)}%` }"
+              >
+                ↔
+              </div>
+              <div class="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/85 via-black/8 to-transparent" />
+              <span class="absolute left-3 top-3 rounded-full bg-black/45 px-2.5 py-1 text-[11px] font-medium text-white/85 backdrop-blur">原图</span>
+              <span class="absolute right-3 top-3 rounded-full bg-primary/90 px-2.5 py-1 text-[11px] font-medium text-white backdrop-blur">效果</span>
+              <div class="absolute bottom-4 left-4 right-4 flex items-end justify-between gap-3">
+                <div class="min-w-0">
+                  <h3 class="truncate text-2xl font-semibold text-white drop-shadow">{{ tool.name }}</h3>
+                  <p class="mt-1 line-clamp-1 text-xs text-white/75">
+                    {{ tool.description || (isPptWorkspaceTool(tool.id) ? "进入 PPT 工作台" : "点击进入对话") }}
+                  </p>
+                </div>
+                <span class="shrink-0 rounded-full bg-white/18 px-2.5 py-1 text-[11px] font-medium text-white ring-1 ring-white/25 backdrop-blur">
+                  {{ modalityLabel(tool.outputModality) }}
+                </span>
+              </div>
+            </div>
+            <div class="flex flex-1 flex-col px-4 py-4">
+              <p class="line-clamp-2 min-h-[40px] text-sm text-muted-foreground">
+                {{ tool.description || (isPptWorkspaceTool(tool.id) ? "进入 PPT 工作台" : "点击进入对话") }}
+              </p>
+              <div class="mt-4 flex items-center justify-between gap-2">
+                <CreditCostBadge :cost="tool.estimatedCreditCost" />
+              </div>
+            </div>
+          </div>
+
+          <div v-else-if="usesEffectMedia(tool)" class="flex h-full flex-col">
             <div class="relative aspect-[3/4] overflow-hidden bg-muted">
               <video
                 v-if="isVideoPreviewUrl(tool.iconUrl)"

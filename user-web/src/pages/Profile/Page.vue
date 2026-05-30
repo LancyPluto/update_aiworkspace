@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue"
-import { Camera, Check, Loader2, Shield, Sparkles, Wallet } from "lucide-vue-next"
+import { Camera, Check, ExternalLink, Loader2, Shield, Sparkles, ToggleLeft, Wallet } from "lucide-vue-next"
 import AppShell from "@/components/AppShell.vue"
 import UserAvatar from "@/components/UserAvatar.vue"
 import { fetchCreditAccount } from "@/api/creditApi"
@@ -11,7 +11,11 @@ import { useAuthStore } from "@/store/authStore"
 const auth = useAuthStore()
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const nickname = ref("")
+const bio = ref("")
+const autoPublishAssets = ref(true)
+const promptPublicByDefault = ref(false)
 const saving = ref(false)
+const savingCommunity = ref(false)
 const uploading = ref(false)
 const loadingStats = ref(false)
 const error = ref("")
@@ -23,6 +27,7 @@ const successTasks = ref<number | null>(null)
 const displayName = computed(() => auth.user?.nickname || auth.user?.username || "用户")
 const joinedLabel = computed(() => `UID ${auth.user?.id ?? "--"}`)
 const accountLabel = computed(() => auth.user?.phone || auth.user?.email || auth.user?.username || "--")
+const publicProfileUrl = computed(() => (auth.user?.id ? `/u/${auth.user.id}` : "/profile"))
 
 async function loadProfileStats() {
   if (!auth.token) return
@@ -81,9 +86,30 @@ async function saveProfile() {
   }
 }
 
+async function saveCommunitySettings() {
+  error.value = ""
+  success.value = ""
+  savingCommunity.value = true
+  try {
+    await auth.updateCommunityProfile({
+      bio: bio.value,
+      autoPublishAssets: autoPublishAssets.value,
+      promptPublicByDefault: promptPublicByDefault.value,
+    })
+    success.value = "社区设置已保存"
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : "社区设置保存失败"
+  } finally {
+    savingCommunity.value = false
+  }
+}
+
 onMounted(async () => {
   if (!auth.user) await auth.fetchCurrentUser({ clearOnFailure: false })
   nickname.value = auth.user?.nickname || auth.user?.username || ""
+  bio.value = auth.user?.bio || ""
+  autoPublishAssets.value = auth.user?.autoPublishAssets !== false
+  promptPublicByDefault.value = auth.user?.promptPublicByDefault === true
   void loadProfileStats()
 })
 </script>
@@ -172,7 +198,35 @@ onMounted(async () => {
               <strong>{{ credit?.available ?? "--" }}</strong>
             </div>
           </div>
-          <p class="profile-note">{{ joinedLabel }} · 公开主页会在社区系统阶段开启。</p>
+          <div class="community-settings">
+            <div class="settings-title">
+              <ToggleLeft class="h-4 w-4" />
+              <span>社区公开</span>
+            </div>
+            <label class="bio-field">
+              <span>个人简介</span>
+              <textarea v-model="bio" maxlength="280" placeholder="写一句会出现在公开主页上的介绍" />
+            </label>
+            <label class="switch-line">
+              <span>新生成作品默认公开</span>
+              <input v-model="autoPublishAssets" type="checkbox" />
+            </label>
+            <label class="switch-line">
+              <span>默认公开提示词</span>
+              <input v-model="promptPublicByDefault" type="checkbox" />
+            </label>
+            <div class="settings-actions">
+              <button type="button" class="secondary-action" @click="$router.push(publicProfileUrl)">
+                <ExternalLink class="h-4 w-4" />
+                我的公开主页
+              </button>
+              <button type="button" class="primary-action compact" :disabled="savingCommunity" @click="saveCommunitySettings">
+                <Loader2 v-if="savingCommunity" class="h-4 w-4 animate-spin" />
+                保存社区设置
+              </button>
+            </div>
+          </div>
+          <p class="profile-note">{{ joinedLabel }} · 成功生成的新作品会按上方设置进入公开主页。</p>
         </div>
       </section>
     </div>
@@ -339,6 +393,33 @@ onMounted(async () => {
   box-shadow: 0 0 0 3px rgb(176 92 255 / 0.13);
 }
 
+.bio-field {
+  display: grid;
+  gap: 8px;
+}
+
+.bio-field span {
+  color: rgb(255 255 255 / 0.42);
+  font-size: 13px;
+}
+
+.bio-field textarea {
+  min-height: 86px;
+  resize: none;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 16px;
+  background: rgb(0 0 0 / 0.2);
+  color: #fff;
+  outline: none;
+  padding: 12px 14px;
+  line-height: 1.6;
+}
+
+.bio-field textarea:focus {
+  border-color: rgb(176 92 255 / 0.46);
+  box-shadow: 0 0 0 3px rgb(176 92 255 / 0.13);
+}
+
 .account-lines,
 .stat-list {
   display: grid;
@@ -368,6 +449,26 @@ onMounted(async () => {
   box-shadow: 0 16px 42px rgb(176 92 255 / 0.22);
 }
 
+.primary-action.compact {
+  align-self: auto;
+  min-height: 42px;
+}
+
+.secondary-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 42px;
+  border: 1px solid rgb(255 255 255 / 0.1);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.055);
+  color: rgb(255 255 255 / 0.78);
+  padding: 0 15px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
 .stats-panel {
   display: flex;
   flex-direction: column;
@@ -395,6 +496,42 @@ onMounted(async () => {
 .profile-note {
   margin-top: auto;
   line-height: 1.7;
+}
+
+.community-settings {
+  display: grid;
+  gap: 13px;
+  border-top: 1px solid rgb(255 255 255 / 0.08);
+  padding-top: 20px;
+}
+
+.settings-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: rgb(255 255 255 / 0.74);
+  font-weight: 800;
+}
+
+.switch-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  color: rgb(255 255 255 / 0.64);
+  font-size: 13px;
+}
+
+.switch-line input {
+  width: 42px;
+  height: 24px;
+  accent-color: #b05cff;
+}
+
+.settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
 @media (max-width: 900px) {

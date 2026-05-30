@@ -9,6 +9,7 @@ import {
   smsLogin as apiSmsLogin,
   smsRegister as apiSmsRegister,
   updateCurrentUserProfile,
+  updateCommunitySettings,
   uploadCurrentUserAvatar,
 } from "@/api"
 import { SESSION_TOKEN_STORAGE_KEY } from "@/constants/authStorage"
@@ -93,6 +94,17 @@ export const useAuthStore = defineStore("auth", () => {
     return profile
   }
 
+  async function updateCommunityProfile(body: {
+    bio?: string | null
+    autoPublishAssets?: boolean
+    promptPublicByDefault?: boolean
+  }) {
+    if (!token.value) throw new Error("请先登录")
+    const profile = await updateCommunitySettings(body, { token: token.value })
+    user.value = profile
+    return profile
+  }
+
   async function uploadAvatar(file: File) {
     if (!token.value) throw new Error("请先登录")
     const response = await uploadCurrentUserAvatar(file, { token: token.value })
@@ -158,6 +170,7 @@ export const useAuthStore = defineStore("auth", () => {
     fetchCurrentUser,
     setUserProfile,
     updateProfile,
+    updateCommunityProfile,
     uploadAvatar,
     init,
   }

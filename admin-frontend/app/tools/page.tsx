@@ -109,8 +109,10 @@ interface ToolRow {
   coverUrl: string | null
   primaryColor: string
   welcomeMessage: string
-  mediaDisplayMode: "icon" | "effect"
+  mediaDisplayMode: "icon" | "effect" | "comparison"
   modelIconUrl: string
+  comparisonOriginalUrl: string
+  comparisonEffectUrl: string
   icon: LucideIcon
   credits: number
   status: boolean
@@ -133,8 +135,10 @@ interface ToolForm {
   coverUrl: string
   primaryColor: string
   welcomeMessage: string
-  mediaDisplayMode: "icon" | "effect"
+  mediaDisplayMode: "icon" | "effect" | "comparison"
   modelIconUrl: string
+  comparisonOriginalUrl: string
+  comparisonEffectUrl: string
   estimatedCreditCost: string
   modelConfigId: string
   templateCode: string
@@ -154,6 +158,8 @@ const initialForm: ToolForm = {
   welcomeMessage: "",
   mediaDisplayMode: "icon",
   modelIconUrl: "",
+  comparisonOriginalUrl: "",
+  comparisonEffectUrl: "",
   estimatedCreditCost: "5",
   modelConfigId: "",
   templateCode: "text_generation_default",
@@ -333,6 +339,8 @@ function mapTool(tool: ToolSummary): ToolRow {
     welcomeMessage: style.welcomeMessage,
     mediaDisplayMode: style.mediaDisplayMode,
     modelIconUrl: style.modelIconUrl,
+    comparisonOriginalUrl: style.comparisonOriginalUrl,
+    comparisonEffectUrl: style.comparisonEffectUrl,
     icon: pickIcon(tool.categoryName),
     credits: tool.estimatedCreditCost ?? 0,
     status: (tool.status || "").toUpperCase() === "ONLINE",
@@ -559,7 +567,10 @@ export default function ToolsPage() {
     return selected?.displayName || selected?.modelName || ""
   }
 
-  async function handleCoverUpload(file?: File | null) {
+  async function handleCoverUpload(
+    file?: File | null,
+    target: "coverUrl" | "comparisonOriginalUrl" | "comparisonEffectUrl" = "coverUrl",
+  ) {
     if (!file) return
     setFormError(null)
     setCoverUploading(true)
@@ -570,7 +581,7 @@ export default function ToolsPage() {
         toolCode: form.toolCode.trim(),
         modelName: selectedModelName(),
       })
-      updateForm("coverUrl", uploaded.url)
+      updateForm(target, uploaded.url)
     } catch (err) {
       const message = err instanceof ApiError ? err.message : "工具展示素材上传失败，请查看后端日志。"
       console.error("[AI Tool Management] 工具展示素材上传失败", err)
@@ -634,6 +645,8 @@ export default function ToolsPage() {
       welcomeMessage: tool.welcomeMessage || "",
       mediaDisplayMode: tool.mediaDisplayMode || "icon",
       modelIconUrl: tool.modelIconUrl || "",
+      comparisonOriginalUrl: tool.comparisonOriginalUrl || "",
+      comparisonEffectUrl: tool.comparisonEffectUrl || "",
       estimatedCreditCost: String(tool.credits),
       modelConfigId: tool.modelConfigId ? String(tool.modelConfigId) : "",
       templateCode: "",
@@ -669,6 +682,10 @@ export default function ToolsPage() {
       reportSaveValidationError(`默认模型不支持「${capabilityLabel(requiredModelCapability)}」，请选择一个匹配的模型配置。`)
       return
     }
+    if (form.mediaDisplayMode === "comparison" && (!form.comparisonOriginalUrl.trim() || !form.comparisonEffectUrl.trim())) {
+      reportSaveValidationError("选择「效果对比」时，请同时配置原图和模型效果图。")
+      return
+    }
     setSubmitting(true)
     const toastId = toast.loading(editingTool ? "正在保存工具..." : "正在创建工具...")
     try {
@@ -677,6 +694,8 @@ export default function ToolsPage() {
         welcomeMessage: form.welcomeMessage,
         mediaDisplayMode: form.mediaDisplayMode,
         modelIconUrl: form.modelIconUrl,
+        comparisonOriginalUrl: form.comparisonOriginalUrl,
+        comparisonEffectUrl: form.comparisonEffectUrl,
       }
       let preservedMarkers: string[] | undefined
       if (integrationPluginId && editingTool) {
@@ -1059,19 +1078,72 @@ export default function ToolsPage() {
                   <div className="grid gap-4 sm:grid-cols-2">
                     <div className="space-y-2 sm:col-span-2">
                       <Label>模型卡片展示</Label>
-                      <Select value={form.mediaDisplayMode} onValueChange={(value) => updateForm("mediaDisplayMode", value as "icon" | "effect")}>
+                      <Select value={form.mediaDisplayMode} onValueChange={(value) => updateForm("mediaDisplayMode", value as "icon" | "effect" | "comparison")}>
                         <SelectTrigger>
                           <SelectValue placeholder="选择模型卡片展示方式" />
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="icon">模型图标</SelectItem>
                           <SelectItem value="effect">模型效果</SelectItem>
+                          <SelectItem value="comparison">效果对比</SelectItem>
                         </SelectContent>
                       </Select>
                       <p className="text-xs text-muted-foreground">
-                        模型图标会在 C 端展示圆形图标；模型效果会使用展示素材作为宽幅图片或视频预览。
+                        模型图标会在 C 端展示圆形图标；模型效果使用展示素材；效果对比会用原图和效果图做可拖动分界预览。
                       </p>
                     </div>
+                    {form.mediaDisplayMode === "comparison" ? (
+                      <div className="space-y-3 rounded-lg border border-border bg-card p-3 sm:col-span-2">
+                        <div>
+                          <Label>效果对比图片</Label>
+                          <p className="mt-1 text-xs text-muted-foreground">适合风格转换、图像编辑类模型。左侧放原图，右侧放模型效果图。</p>
+                        </div>
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <div className="space-y-2">
+                            <Label>原图 URL</Label>
+                            <Input
+                              value={form.comparisonOriginalUrl}
+                              onChange={(event) => updateForm("comparisonOriginalUrl", event.target.value)}
+                              placeholder="上传或填写原图地址"
+                            />
+                            <label className="inline-flex cursor-pointer items-center rounded-md border px-3 py-2 text-xs font-medium hover:bg-secondary">
+                              上传原图
+                              <input
+                                type="file"
+                                accept="image/jpeg,image/png,image/webp,image/gif"
+                                className="hidden"
+                                onChange={(event) => {
+                                  const file = event.target.files?.[0]
+                                  void handleCoverUpload(file, "comparisonOriginalUrl")
+                                  event.currentTarget.value = ""
+                                }}
+                              />
+                            </label>
+                          </div>
+                          <div className="space-y-2">
+                            <Label>模型效果图 URL</Label>
+                            <Input
+                              value={form.comparisonEffectUrl}
+                              onChange={(event) => updateForm("comparisonEffectUrl", event.target.value)}
+                              placeholder="上传或填写效果图地址"
+                            />
+                            <label className="inline-flex cursor-pointer items-center rounded-md border px-3 py-2 text-xs font-medium hover:bg-secondary">
+                              上传效果图
+                              <input
+                                type="file"
+                                accept="image/jpeg,image/png,image/webp,image/gif"
+                                className="hidden"
+                                onChange={(event) => {
+                                  const file = event.target.files?.[0]
+                                  void handleCoverUpload(file, "comparisonEffectUrl")
+                                  event.currentTarget.value = ""
+                                }}
+                              />
+                            </label>
+                          </div>
+                        </div>
+                      </div>
+                    ) : null}
                     <div className="space-y-2">
                       <Label>主题色</Label>
                       <div className="flex items-center gap-2">
@@ -1107,7 +1179,18 @@ export default function ToolsPage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-3 rounded-lg border border-border bg-card p-3">
-                    {form.modelIconUrl.trim() ? (
+                    {form.mediaDisplayMode === "comparison" && form.comparisonOriginalUrl.trim() && form.comparisonEffectUrl.trim() ? (
+                      <div className="relative h-16 w-28 shrink-0 overflow-hidden rounded-lg bg-muted ring-1 ring-border">
+                        <img src={normalizeToolMediaUrl(form.comparisonOriginalUrl)} alt="comparison original preview" className="h-full w-full object-cover" />
+                        <img
+                          src={normalizeToolMediaUrl(form.comparisonEffectUrl)}
+                          alt="comparison effect preview"
+                          className="absolute inset-0 h-full w-full object-cover"
+                          style={{ clipPath: "inset(0 0 0 50%)" }}
+                        />
+                        <div className="absolute inset-y-0 left-1/2 w-px bg-white/80" />
+                      </div>
+                    ) : form.modelIconUrl.trim() ? (
                       <div
                         className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full ring-1 ring-border"
                         style={{ backgroundColor: `${form.primaryColor || "#3b82f6"}18` }}

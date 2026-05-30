@@ -6,6 +6,7 @@ import com.aiminilab.aitoolmarket.admin.entity.SystemSettingVersion;
 import com.aiminilab.aitoolmarket.admin.mapper.SystemSettingMapper;
 import com.aiminilab.aitoolmarket.admin.mapper.SystemSettingVersionMapper;
 import com.aiminilab.aitoolmarket.admin.service.SystemSettingService;
+import com.aiminilab.aitoolmarket.agent.config.AgentMemorySettings;
 import com.aiminilab.aitoolmarket.agent.config.AgentPromptSettings;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
@@ -162,7 +163,9 @@ public class SystemSettingServiceImpl implements SystemSettingService {
 
     private boolean isVersionedSetting(String key) {
         return AgentPromptSettings.SYSTEM_PROMPT_KEY.equals(key)
-                || AgentPromptSettings.DEEP_AGENTS_SYSTEM_PROMPT_KEY.equals(key);
+                || AgentPromptSettings.DEEP_AGENTS_SYSTEM_PROMPT_KEY.equals(key)
+                || AgentMemorySettings.WRITE_PROMPT_KEY.equals(key)
+                || AgentMemorySettings.RETRIEVAL_PROMPT_KEY.equals(key);
     }
 
     private String defaultValueFor(String key) {
@@ -171,6 +174,21 @@ public class SystemSettingServiceImpl implements SystemSettingService {
         }
         if (AgentPromptSettings.DEEP_AGENTS_SYSTEM_PROMPT_KEY.equals(key)) {
             return AgentPromptSettings.DEFAULT_DEEP_AGENTS_SYSTEM_PROMPT;
+        }
+        if (AgentMemorySettings.AUTO_SAVE_ENABLED_KEY.equals(key)) {
+            return String.valueOf(AgentMemorySettings.DEFAULT_AUTO_SAVE_ENABLED);
+        }
+        if (AgentMemorySettings.RETRIEVAL_LIMIT_KEY.equals(key)) {
+            return String.valueOf(AgentMemorySettings.DEFAULT_RETRIEVAL_LIMIT);
+        }
+        if (AgentMemorySettings.ENABLED_TYPES_KEY.equals(key)) {
+            return AgentMemorySettings.DEFAULT_ENABLED_TYPES;
+        }
+        if (AgentMemorySettings.WRITE_PROMPT_KEY.equals(key)) {
+            return AgentMemorySettings.DEFAULT_WRITE_PROMPT;
+        }
+        if (AgentMemorySettings.RETRIEVAL_PROMPT_KEY.equals(key)) {
+            return AgentMemorySettings.DEFAULT_RETRIEVAL_PROMPT;
         }
         throw new BusinessException(ErrorCode.PARAM_ERROR, "setting key has no default value");
     }

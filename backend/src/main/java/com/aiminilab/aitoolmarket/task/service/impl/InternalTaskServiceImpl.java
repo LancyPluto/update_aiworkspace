@@ -7,6 +7,7 @@ import com.aiminilab.aitoolmarket.agent.service.ModelCapabilityService;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolMapper;
 import com.aiminilab.aitoolmarket.tool.entity.AiTool;
 import com.aiminilab.aitoolmarket.admin.service.BillingService;
+import com.aiminilab.aitoolmarket.community.service.CommunityService;
 import com.aiminilab.aitoolmarket.common.enums.CreditSourceType;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.enums.TaskStatus;
@@ -50,6 +51,7 @@ public class InternalTaskServiceImpl implements InternalTaskService {
     private final CreditService creditService;
     private final BillingService billingService;
     private final TaskMetrics taskMetrics;
+    private final CommunityService communityService;
 
     public InternalTaskServiceImpl(TaskMapper taskMapper, ToolMapper toolMapper,
                                    AgentModelConfigMapper agentModelConfigMapper,
@@ -57,7 +59,7 @@ public class InternalTaskServiceImpl implements InternalTaskService {
                                    ModelCapabilityService modelCapabilityService,
                                    ToolFieldItemMapper toolFieldItemMapper, ObjectMapper objectMapper,
                                    CreditService creditService, BillingService billingService,
-                                   TaskMetrics taskMetrics) {
+                                   TaskMetrics taskMetrics, CommunityService communityService) {
         this.taskMapper = taskMapper;
         this.toolMapper = toolMapper;
         this.agentModelConfigMapper = agentModelConfigMapper;
@@ -68,6 +70,7 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         this.creditService = creditService;
         this.billingService = billingService;
         this.taskMetrics = taskMetrics;
+        this.communityService = communityService;
     }
 
     @Override
@@ -138,6 +141,7 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         billingService.recordUsage("TASK", taskId, task.getUserId(), modelConfig,
                 request.promptTokens(), request.completionTokens(), request.billableUnits(), chargedCredits);
         taskMapper.insertResult(taskId, task.getUserId(), request.resourceType(), request.contentText());
+        communityService.autoPublishTask(findTask(taskId), request.resourceType(), request.contentText());
         agentToolDescriptorService.markToolHealth(task.getToolCode(), "HEALTHY", null);
         taskMetrics.recordTaskOutcome(task.getToolCode(), "SUCCESS", task.getCreatedAt(), findTask(taskId).getFinishedAt());
         return TaskStatusResponse.from(findTask(taskId));

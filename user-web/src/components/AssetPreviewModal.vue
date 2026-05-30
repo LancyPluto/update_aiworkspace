@@ -4,6 +4,7 @@ import {
   CalendarDays,
   Download,
   FileText,
+  Globe2,
   Image as ImageIcon,
   Music,
   Sparkles,
@@ -25,6 +26,8 @@ const emit = defineEmits<{
   close: []
   "use-tool": [tool: AssetPreviewRecommendation, asset: AssetPreviewItem]
   "open-task": [asset: AssetPreviewItem]
+  "publish": [asset: AssetPreviewItem]
+  "unpublish": [asset: AssetPreviewItem]
 }>()
 
 function formatTime(value?: string | null) {
@@ -198,6 +201,32 @@ function normalizeMediaUrl(value?: string | null) {
               记录
               <ArrowRight class="h-4 w-4" />
             </button>
+          </div>
+
+          <div v-if="asset.taskId" class="mb-5 rounded-[24px] border border-white/8 bg-white/[0.035] p-4">
+            <p class="text-xs font-semibold text-white/35">公开主页</p>
+            <p class="mt-2 text-sm leading-6 text-white/52">
+              {{ asset.communityPostId ? "这个作品已经展示在你的公开主页中。" : "发布后会展示在你的公开个人主页，可随时撤回。" }}
+            </p>
+            <div class="mt-4 flex gap-2">
+              <button
+                v-if="!asset.communityPostId"
+                type="button"
+                class="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-full border border-primary/35 bg-primary/18 px-4 text-sm font-semibold text-white transition hover:bg-primary/25"
+                @click="emit('publish', asset)"
+              >
+                <Globe2 class="h-4 w-4" />
+                发布到主页
+              </button>
+              <button
+                v-else
+                type="button"
+                class="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-full border border-white/10 bg-white/[0.06] px-4 text-sm font-semibold text-white/72 transition hover:bg-white/10"
+                @click="emit('unpublish', asset)"
+              >
+                撤回公开
+              </button>
+            </div>
           </div>
 
           <div class="rounded-[26px] border border-white/8 bg-white/[0.035] p-5 shadow-[inset_0_1px_0_rgb(255_255_255_/_0.035)]">
