@@ -27,8 +27,12 @@ public class CommunityPost {
     private String auditStatus;
     private String auditReason;
     private Long viewCount;
+    private Long detailClickCount;
+    private Long shareCount;
+    private Long qualityScore;
     private Long likeCount;
     private Long favoriteCount;
+    private LocalDateTime lastFeaturedAt;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 
@@ -70,10 +74,18 @@ public class CommunityPost {
     public void setAuditReason(String auditReason) { this.auditReason = auditReason; }
     public Long getViewCount() { return viewCount; }
     public void setViewCount(Long viewCount) { this.viewCount = viewCount; }
+    public Long getDetailClickCount() { return detailClickCount; }
+    public void setDetailClickCount(Long detailClickCount) { this.detailClickCount = detailClickCount; }
+    public Long getShareCount() { return shareCount; }
+    public void setShareCount(Long shareCount) { this.shareCount = shareCount; }
+    public Long getQualityScore() { return qualityScore; }
+    public void setQualityScore(Long qualityScore) { this.qualityScore = qualityScore; }
     public Long getLikeCount() { return likeCount; }
     public void setLikeCount(Long likeCount) { this.likeCount = likeCount; }
     public Long getFavoriteCount() { return favoriteCount; }
     public void setFavoriteCount(Long favoriteCount) { this.favoriteCount = favoriteCount; }
+    public LocalDateTime getLastFeaturedAt() { return lastFeaturedAt; }
+    public void setLastFeaturedAt(LocalDateTime lastFeaturedAt) { this.lastFeaturedAt = lastFeaturedAt; }
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }

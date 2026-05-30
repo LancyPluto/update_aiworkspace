@@ -8,6 +8,7 @@ import com.aiminilab.aitoolmarket.admin.mapper.SystemSettingVersionMapper;
 import com.aiminilab.aitoolmarket.admin.service.SystemSettingService;
 import com.aiminilab.aitoolmarket.agent.config.AgentMemorySettings;
 import com.aiminilab.aitoolmarket.agent.config.AgentPromptSettings;
+import com.aiminilab.aitoolmarket.agent.config.AgentRouterSettings;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.config.AppProperties;
@@ -164,6 +165,7 @@ public class SystemSettingServiceImpl implements SystemSettingService {
     private boolean isVersionedSetting(String key) {
         return AgentPromptSettings.SYSTEM_PROMPT_KEY.equals(key)
                 || AgentPromptSettings.DEEP_AGENTS_SYSTEM_PROMPT_KEY.equals(key)
+                || AgentRouterSettings.PROMPT_KEY.equals(key)
                 || AgentMemorySettings.WRITE_PROMPT_KEY.equals(key)
                 || AgentMemorySettings.RETRIEVAL_PROMPT_KEY.equals(key);
     }
@@ -174,6 +176,18 @@ public class SystemSettingServiceImpl implements SystemSettingService {
         }
         if (AgentPromptSettings.DEEP_AGENTS_SYSTEM_PROMPT_KEY.equals(key)) {
             return AgentPromptSettings.DEFAULT_DEEP_AGENTS_SYSTEM_PROMPT;
+        }
+        if (AgentRouterSettings.ENABLED_KEY.equals(key)) {
+            return String.valueOf(AgentRouterSettings.DEFAULT_ENABLED);
+        }
+        if (AgentRouterSettings.PROMPT_KEY.equals(key)) {
+            return AgentRouterSettings.DEFAULT_PROMPT;
+        }
+        if (AgentRouterSettings.MIN_CONFIDENCE_KEY.equals(key)) {
+            return AgentRouterSettings.DEFAULT_MIN_CONFIDENCE;
+        }
+        if (AgentRouterSettings.FALLBACK_TO_RULES_KEY.equals(key)) {
+            return String.valueOf(AgentRouterSettings.DEFAULT_FALLBACK_TO_RULES);
         }
         if (AgentMemorySettings.AUTO_SAVE_ENABLED_KEY.equals(key)) {
             return String.valueOf(AgentMemorySettings.DEFAULT_AUTO_SAVE_ENABLED);

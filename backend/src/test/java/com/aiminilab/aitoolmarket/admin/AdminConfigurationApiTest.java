@@ -137,6 +137,39 @@ class AdminConfigurationApiTest {
     }
 
     @Test
+    void adminCanConfigureAgentRouterSettings() throws Exception {
+        String adminToken = loginAdmin();
+
+        mockMvc.perform(put("/api/admin/v1/settings")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "settings": {
+                                    "agent.router.enabled": "true",
+                                    "agent.router.prompt": "router prompt for test",
+                                    "agent.router.min_confidence": "0.8",
+                                    "agent.router.fallback_to_rules": "true"
+                                  }
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data['agent.router.prompt']").value("router prompt for test"))
+                .andExpect(jsonPath("$.data['agent.router.min_confidence']").value("0.8"));
+
+        mockMvc.perform(get("/api/admin/v1/settings/{key}/versions", "agent.router.prompt")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].settingKey").value("agent.router.prompt"))
+                .andExpect(jsonPath("$.data[0].settingValue").value("router prompt for test"));
+
+        mockMvc.perform(post("/api/admin/v1/settings/{key}/restore-default", "agent.router.prompt")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data['agent.router.prompt']").value(org.hamcrest.Matchers.not("router prompt for test")));
+    }
+
+    @Test
     void adminCanUploadCustomerServiceQrCode() throws Exception {
         String adminToken = loginAdmin();
         byte[] png = new byte[]{

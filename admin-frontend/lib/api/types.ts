@@ -224,10 +224,32 @@ export interface AdminCommunityPost {
   auditStatus?: string | null
   auditReason?: string | null
   viewCount: number
+  detailClickCount?: number
+  shareCount?: number
+  qualityScore?: number
   likeCount: number
   favoriteCount: number
   createdAt: string
   updatedAt?: string | null
+}
+
+export interface AdminCommunityMetricPoint {
+  name: string
+  value: number
+}
+
+export interface AdminCommunityStats {
+  postCount: number
+  pendingCount: number
+  hiddenCount: number
+  impressionCount: number
+  detailViewCount: number
+  sameStyleClickCount: number
+  taskCreatedCount: number
+  creditSpent: number
+  topTools: AdminCommunityMetricPoint[]
+  topTopics: AdminCommunityMetricPoint[]
+  topCreators: AdminCommunityMetricPoint[]
 }
 
 export interface DashboardChartPoint {

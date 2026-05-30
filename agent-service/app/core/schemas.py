@@ -108,6 +108,13 @@ class MemorySettings(BaseModel):
     retrievalPrompt: str | None = None
 
 
+class AgentRouterSettings(BaseModel):
+    enabled: bool = True
+    prompt: str | None = None
+    minConfidence: float = 0.7
+    fallbackToRules: bool = True
+
+
 class PendingToolContext(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -144,6 +151,7 @@ class RunContext(BaseModel):
     agentSystemPrompt: str | None = None
     deepAgentsSystemPrompt: str | None = None
     memorySettings: MemorySettings | None = None
+    routerSettings: AgentRouterSettings | None = None
     pendingToolContext: PendingToolContext | None = Field(default=None, validation_alias=AliasChoices("pendingToolContext", "pending_tool_context"))
 
 

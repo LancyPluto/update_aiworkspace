@@ -99,6 +99,7 @@ const userNav: (NavLink | NavGroup)[] = [
   { type: "link", href: "/tasks", label: "我的任务", icon: ListChecks },
   { type: "link", href: "/library", label: "素材库", icon: FolderHeart },
   { type: "link", href: "/community", label: "社区发现", icon: Images },
+  { type: "link", href: "/community/inspirations", label: "灵感收藏", icon: FolderHeart },
   { type: "link", href: "/billing", label: "会员与算力", icon: Wallet },
 ]
 

@@ -3,8 +3,10 @@ package com.aiminilab.aitoolmarket.agent.service.impl;
 import com.aiminilab.aitoolmarket.agent.client.AgentServiceClient;
 import com.aiminilab.aitoolmarket.agent.config.AgentMemorySettings;
 import com.aiminilab.aitoolmarket.agent.config.AgentPromptSettings;
+import com.aiminilab.aitoolmarket.agent.config.AgentRouterSettings;
 import com.aiminilab.aitoolmarket.agent.dto.AgentRunEventResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AgentRunResponse;
+import com.aiminilab.aitoolmarket.agent.dto.AgentRouterSettingsResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AgentToolCallResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AgentToolDescriptorResponse;
 import com.aiminilab.aitoolmarket.agent.dto.BindAgentToolCallTaskRequest;
@@ -477,6 +479,12 @@ public class AgentRunServiceImpl implements AgentRunService {
                 nonBlankOrDefault(settings.get(AgentMemorySettings.WRITE_PROMPT_KEY), AgentMemorySettings.DEFAULT_WRITE_PROMPT),
                 nonBlankOrDefault(settings.get(AgentMemorySettings.RETRIEVAL_PROMPT_KEY), AgentMemorySettings.DEFAULT_RETRIEVAL_PROMPT)
         );
+        var routerSettings = new AgentRouterSettingsResponse(
+                parseBooleanSetting(settings.get(AgentRouterSettings.ENABLED_KEY), AgentRouterSettings.DEFAULT_ENABLED),
+                nonBlankOrDefault(settings.get(AgentRouterSettings.PROMPT_KEY), AgentRouterSettings.DEFAULT_PROMPT),
+                parseDoubleSetting(settings.get(AgentRouterSettings.MIN_CONFIDENCE_KEY), 0.7D, 0D, 1D),
+                parseBooleanSetting(settings.get(AgentRouterSettings.FALLBACK_TO_RULES_KEY), AgentRouterSettings.DEFAULT_FALLBACK_TO_RULES)
+        );
         InternalPendingToolContextResponse pendingToolContextResponse = null;
         AgentPendingToolContext pendingCtx = agentPendingToolContextMapper.findActiveByRunId(runId);
         if (pendingCtx != null) {
@@ -514,6 +522,7 @@ public class AgentRunServiceImpl implements AgentRunService {
                 agentSystemPrompt,
                 deepAgentsSystemPrompt,
                 memorySettings,
+                routerSettings,
                 pendingToolContextResponse
         );
     }
@@ -542,6 +551,18 @@ public class AgentRunServiceImpl implements AgentRunService {
         }
         try {
             int parsed = Integer.parseInt(value.trim());
+            return Math.max(min, Math.min(max, parsed));
+        } catch (NumberFormatException ignored) {
+            return fallback;
+        }
+    }
+
+    private double parseDoubleSetting(String value, double fallback, double min, double max) {
+        if (value == null || value.isBlank()) {
+            return fallback;
+        }
+        try {
+            double parsed = Double.parseDouble(value.trim());
             return Math.max(min, Math.min(max, parsed));
         } catch (NumberFormatException ignored) {
             return fallback;

@@ -3,15 +3,16 @@ import { computed, onMounted, ref, watch } from "vue"
 import { useRoute, useRouter } from "vue-router"
 import { ArrowLeft, Eye, Heart, Loader2, Star, UserRound } from "lucide-vue-next"
 import UserAvatar from "@/components/UserAvatar.vue"
-import { fetchPublicUser, fetchPublicUserPosts } from "@/api/communityApi"
+import { fetchCommunityCreator, fetchPublicUserPosts } from "@/api/communityApi"
 import { getApiOrigin } from "@/api/client"
-import type { CommunityPost, PublicUserProfile } from "@/api/types"
+import type { CommunityCreator, CommunityPost, PublicUserProfile } from "@/api/types"
 import { useAuthStore } from "@/store/authStore"
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 const profile = ref<PublicUserProfile | null>(null)
+const creator = ref<CommunityCreator | null>(null)
 const posts = ref<CommunityPost[]>([])
 const loading = ref(false)
 const loadingMore = ref(false)
@@ -52,13 +53,16 @@ async function load(reset = true) {
   try {
     const currentPage = reset ? 1 : pageNo.value
     const [user, page] = await Promise.all([
-      reset ? fetchPublicUser(userId.value, { token: auth.token }) : Promise.resolve(profile.value),
+      reset ? fetchCommunityCreator(userId.value, { token: auth.token }) : Promise.resolve(creator.value),
       fetchPublicUserPosts(userId.value, {
         token: auth.token,
         query: { pageNo: currentPage, pageSize: 12 },
       }),
     ])
-    if (user) profile.value = user
+    if (user) {
+      creator.value = user
+      profile.value = user.profile
+    }
     posts.value = reset ? page.list : [...posts.value, ...page.list]
     hasNext.value = page.hasNext
     pageNo.value = currentPage + 1
@@ -101,6 +105,10 @@ onMounted(() => void load(true))
         <div>
           <strong>{{ profile?.favoriteCount ?? "--" }}</strong>
           <span>收藏</span>
+        </div>
+        <div>
+          <strong>{{ creator?.sameStyleCount ?? "--" }}</strong>
+          <span>同款</span>
         </div>
       </div>
     </section>

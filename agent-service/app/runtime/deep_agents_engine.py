@@ -23,6 +23,7 @@ from app.core.event_types import (
     SUBAGENT_STARTED,
     TOOL_ARGUMENTS_PREVIEW,
     TOOL_CONFIRMATION_REQUIRED,
+    TOOL_MISSING_ARGUMENTS,
     TOOL_RECOMMENDATIONS,
     TOOL_SELECTED,
     WORKSPACE_FILE_CREATED,
@@ -41,6 +42,7 @@ from app.core.schemas import (
     WorkspaceMemoryItem,
 )
 from app.runtime.subagent_profiles import default_subagent_profiles, profiles_to_deepagents_subagents
+from app.runtime.agent_router_service import AgentRouterService
 from app.runtime.workspace_files import WorkspaceFileContext, build_workspace_file_context
 from app.security.prompt_guard import PromptGuard
 from app.tools.backend_tool import BackendToolBridge
@@ -98,6 +100,11 @@ class DeepAgentsRuntimeEngine:
         self.dependency_loader = dependency_loader or self._load_deepagents
         self.tool_bridge = BackendToolBridge(backend_client, model_client=model_client)
         self.decision_service = AgentDecisionService(self.intent_router)
+        self.router_service = AgentRouterService(
+            backend_client,
+            model_client,
+            intent_router=self.intent_router,
+        )
 
     async def run(self, context: RunContext) -> None:
         if self._explicit_deep_agents_flag and not self.deep_agents_enabled:
@@ -218,6 +225,7 @@ class DeepAgentsRuntimeEngine:
             return
 
         if result.get("missing_tool_arguments"):
+            await self._emit_missing_arguments(context, tool, result["missing_tool_arguments"])
             answer = self._format_missing_arguments_message(tool, result["missing_tool_arguments"])
             await self._emit_answer_events(context.runId, answer)
             await self._complete_run(context, answer, intent=Intent.NEEDS_CLARIFICATION.value)
@@ -268,11 +276,10 @@ class DeepAgentsRuntimeEngine:
     # --- Intent helpers ---
 
     async def _classify_intent(self, context: RunContext):
-        llm_router = self._classify_intent_with_llm if self._should_use_llm_router(context) else None
         return await self.decision_service.decide(
             context,
             hard_rule=self._is_hard_rule_intent,
-            llm_router=llm_router,
+            llm_router=self.router_service.classify,
         )
 
     @staticmethod
@@ -289,121 +296,6 @@ class DeepAgentsRuntimeEngine:
             "structured_tool_arguments",
         }
         return rule_intent.reason in hard_rule_reasons
-
-    def _should_use_llm_router(self, context: RunContext) -> bool:
-        if not settings.agent_llm_router_enabled:
-            return False
-        if not context.availableTools:
-            return False
-        return True
-
-    async def _classify_intent_with_llm(self, context: RunContext, rule_intent):
-        tools = ToolRegistry(context).list_tools()
-        requested_modality = requested_output_modality(context.message)
-        tool_lines = []
-        for tool in tools[:30]:
-            tool_lines.append(
-                {
-                    "toolCode": tool.toolCode,
-                    "toolName": tool.toolName,
-                    "description": tool.description or "",
-                    "autoCallable": tool.autoCallable,
-                    "agentHints": tool.hints,
-                    "fields": [
-                        {
-                            "fieldKey": field.fieldKey,
-                            "fieldName": field.fieldName,
-                            "description": field.description or "",
-                            "required": field.required,
-                            "userRequired": field.userRequired,
-                            "agentFillStrategy": field.agentFillStrategy,
-                        }
-                        for field in tool.fields[:12]
-                    ],
-                }
-            )
-        prompt = (
-            "你是 AI 工具市场的路由器。根据用户请求选择最合适的意图和工具。\n"
-            "必须只返回 JSON，不要解释。\n"
-            "JSON schema: {"
-            "\"intent\":\"tool_use|general_chat|needs_clarification|unsupported\","
-            "\"selectedToolCode\":string|null,"
-            "\"candidateToolCodes\":string[],"
-            "\"confidence\":0到1,"
-            "\"reason\":string,"
-            "\"clarifyingQuestion\":string|null"
-            "}\n"
-            "选择原则：用户要生成图片/照片/视觉/拍摄/cos/海报/画面时优先图片生成工具；"
-            "用户要生成视频/短视频/成片时优先视频工具；用户要文案/标题/文章时选择文本工具。"
-            "只有关键目标完全不清楚才 needs_clarification，不要因为比例、张数、画质等可默认字段追问。\n\n"
-            f"用户请求：{context.message}\n"
-            f"规则兜底判断：intent={rule_intent.intent.value}, selectedTool={rule_intent.selectedToolCode}, reason={rule_intent.reason}\n"
-            f"可用工具：{json.dumps(tool_lines, ensure_ascii=False)}"
-        )
-        prompt = (
-            "You are the primary router for deciding whether an agent should call a tool. "
-            "Use the user's actual goal and the tool metadata as the source of truth. "
-            "The rule result is only a fallback hint and may be wrong.\n"
-            "Prefer the tool that directly produces the requested output modality. "
-            "For example, image/photo/poster requests should use image-generation tools, "
-            "and video/image-to-video requests should use video tools. "
-            "Do not select an image-to-video tool for a pure image request just because the message mentions images.\n"
-            f"Requested output modality: {requested_modality or 'unknown'}\n\n"
-            + prompt
-        )
-        try:
-            raw = await self.model.chat([ChatMessage(role="user", content=prompt)])
-            parsed = _parse_json_object(raw)
-            result = self._validate_llm_intent(context, parsed)
-            LOGGER.info(
-                "agent llm router runId=%s accepted=%s raw=%s parsed=%s fallbackReason=%s",
-                context.runId,
-                result is not None,
-                _clip(raw, 500),
-                parsed,
-                "none" if result is not None else "invalid_or_low_confidence",
-            )
-            return result
-        except Exception as exc:
-            LOGGER.warning("agent llm router fallback runId=%s error=%s", context.runId, exc)
-            return None
-
-    def _validate_llm_intent(self, context: RunContext, parsed: Any):
-        if not isinstance(parsed, dict):
-            return None
-        raw_intent = str(parsed.get("intent") or "").strip()
-        try:
-            intent = Intent(raw_intent)
-        except ValueError:
-            return None
-        confidence = _safe_float(parsed.get("confidence"), 0)
-        if confidence < 0.7:
-            return None
-        selected_tool = parsed.get("selectedToolCode")
-        selected_tool = selected_tool.strip() if isinstance(selected_tool, str) else None
-        available = {tool.toolCode for tool in context.availableTools}
-        if intent == Intent.TOOL_USE:
-            if not selected_tool or selected_tool not in available:
-                return None
-        elif selected_tool and selected_tool not in available:
-            selected_tool = None
-        candidates = parsed.get("candidateToolCodes")
-        candidate_codes = [
-            code for code in candidates
-            if isinstance(code, str) and code in available
-        ] if isinstance(candidates, list) else []
-        if selected_tool and selected_tool not in candidate_codes:
-            candidate_codes.insert(0, selected_tool)
-        clarifying = parsed.get("clarifyingQuestion")
-        return IntentResult(
-            intent=intent,
-            confidence=confidence,
-            selectedToolCode=selected_tool,
-            candidateToolCodes=candidate_codes[:3],
-            clarifyingQuestion=clarifying if isinstance(clarifying, str) else None,
-            decisionSource="llm_router",
-            reason=str(parsed.get("reason") or "llm_router"),
-        )
 
     async def _emit_intent_event(self, context: RunContext, intent) -> None:
         await self.backend.append_event(
@@ -502,6 +394,7 @@ class DeepAgentsRuntimeEngine:
                     await self._fail_run(context.runId, exception.error_code, exception.message, budget=budget)
                     return
                 if result.get("missing_tool_arguments"):
+                    await self._emit_missing_arguments(context, tool, result["missing_tool_arguments"])
                     answer = self._format_missing_arguments_message(tool, result["missing_tool_arguments"])
                     await self._emit_answer_events(context.runId, answer)
                     await self._complete_run(context, answer, intent=Intent.NEEDS_CLARIFICATION.value)
@@ -512,6 +405,7 @@ class DeepAgentsRuntimeEngine:
                 return
             else:
                 await self._emit_arguments_preview(context, tool, enriched, still_missing, False)
+                await self._emit_missing_arguments(context, tool, still_missing)
                 answer = self._format_missing_arguments_message(tool, still_missing)
                 await self._emit_answer_events(context.runId, answer)
                 await self._complete_run(context, answer, intent=Intent.NEEDS_CLARIFICATION.value)
@@ -533,6 +427,7 @@ class DeepAgentsRuntimeEngine:
             return
 
         if result.get("missing_tool_arguments"):
+            await self._emit_missing_arguments(context, tool, result["missing_tool_arguments"])
             answer = self._format_missing_arguments_message(tool, result["missing_tool_arguments"])
             await self._emit_answer_events(context.runId, answer)
             await self._complete_run(context, answer, intent=Intent.NEEDS_CLARIFICATION.value)
@@ -583,6 +478,20 @@ class DeepAgentsRuntimeEngine:
                     "arguments": extracted_args,
                     "missingArguments": missing,
                     "needsConfirmation": needs_confirmation,
+                },
+            ),
+        )
+
+    async def _emit_missing_arguments(self, context: RunContext, tool: ToolDescriptor, missing: list[str]) -> None:
+        await self.backend.append_event(
+            context.runId,
+            RunEventCreate(
+                eventType=TOOL_MISSING_ARGUMENTS,
+                eventText=f"Tool {tool.toolCode} missing arguments",
+                eventJson={
+                    "toolCode": tool.toolCode,
+                    "toolName": tool.toolName,
+                    "missingArguments": missing,
                 },
             ),
         )

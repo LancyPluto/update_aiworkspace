@@ -345,6 +345,8 @@ async function createWithSelectedTool() {
     text: content,
     attachments,
   }
+  const rawSourcePost = Array.isArray(route.query.sourcePost) ? route.query.sourcePost[0] : route.query.sourcePost
+  const sourcePostId = rawSourcePost && !Number.isNaN(Number(rawSourcePost)) ? Number(rawSourcePost) : undefined
 
   submitting.value = true
   try {
@@ -353,6 +355,7 @@ async function createWithSelectedTool() {
         toolCode: tool.toolCode,
         params: taskParams,
         clientRequestId: randomUUID(),
+        sourcePostId,
       },
       { token: auth.token },
     )
@@ -594,6 +597,15 @@ async function retryTask(task: TaskDetail) {
       { ...(task.params || {}) },
     )
     upsertTask(optimisticTask, true)
+    if (response.taskId !== task.taskId) {
+      stopTaskPolling(task.taskId)
+      tasks.value = tasks.value.filter((item) => item.taskId !== task.taskId)
+      try {
+        await deleteTask(task.taskId, { token: auth.token })
+      } catch {
+        // The replacement task is already visible; keep the workspace clear even if cleanup is retried later.
+      }
+    }
     activePanel.value = "tasks"
     startTaskPolling(response.taskId)
   } catch (e) {
