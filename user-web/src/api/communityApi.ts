@@ -1,5 +1,5 @@
 import { apiRequest } from "./client"
-import type { CommunityPost, PageResult, PublicUserProfile } from "./types"
+import type { CommunityCollection, CommunityCreator, CommunityPost, PageResult, PublicUserProfile } from "./types"
 
 export interface PublishCommunityPostRequest {
   taskId: number
@@ -26,6 +26,8 @@ export interface CommunityDiscoverQuery {
   topic?: string
   sort?: "LATEST" | "POPULAR" | "FAVORITES" | "SAME_STYLE" | "VIEWS" | string
   featured?: boolean
+  keyword?: string
+  toolCode?: string
 }
 
 export function fetchCommunityPosts(options?: { token?: string | null; query?: CommunityDiscoverQuery }) {
@@ -33,6 +35,97 @@ export function fetchCommunityPosts(options?: { token?: string | null; query?: C
     token: options?.token,
     query: options?.query,
   })
+}
+
+export function searchCommunityPosts(options?: { token?: string | null; query?: CommunityDiscoverQuery }) {
+  return apiRequest<PageResult<CommunityPost>>("GET", "/api/v1/community/search", {
+    token: options?.token,
+    query: options?.query,
+  })
+}
+
+export function fetchCommunityTopicPosts(
+  topic: string,
+  options?: { token?: string | null; query?: Pick<CommunityDiscoverQuery, "pageNo" | "pageSize" | "modality" | "sort"> },
+) {
+  return apiRequest<PageResult<CommunityPost>>("GET", `/api/v1/community/topics/${encodeURIComponent(topic)}`, {
+    token: options?.token,
+    query: options?.query,
+  })
+}
+
+export function fetchCommunityCreator(userId: number | string, options?: { token?: string | null }) {
+  return apiRequest<CommunityCreator>("GET", `/api/v1/community/creators/${encodeURIComponent(String(userId))}`, {
+    token: options?.token,
+  })
+}
+
+export function trackCommunityEvent(
+  body: {
+    postId?: number
+    eventType: string
+    source?: string
+    toolCode?: string | null
+    taskId?: number
+    credits?: number
+  },
+  options?: { token?: string | null },
+) {
+  return apiRequest<void>("POST", "/api/v1/community/events", {
+    token: options?.token,
+    body,
+  })
+}
+
+export function fetchCommunityCollections(options?: { token?: string | null }) {
+  return apiRequest<CommunityCollection[]>("GET", "/api/v1/community/collections", {
+    token: options?.token,
+  })
+}
+
+export function createCommunityCollection(name: string, options?: { token?: string | null }) {
+  return apiRequest<CommunityCollection>("POST", "/api/v1/community/collections", {
+    token: options?.token,
+    body: { name },
+  })
+}
+
+export function renameCommunityCollection(collectionId: number | string, name: string, options?: { token?: string | null }) {
+  return apiRequest<CommunityCollection>("PATCH", `/api/v1/community/collections/${encodeURIComponent(String(collectionId))}`, {
+    token: options?.token,
+    body: { name },
+  })
+}
+
+export function deleteCommunityCollection(collectionId: number | string, options?: { token?: string | null }) {
+  return apiRequest<void>("DELETE", `/api/v1/community/collections/${encodeURIComponent(String(collectionId))}`, {
+    token: options?.token,
+  })
+}
+
+export function addCommunityCollectionItem(
+  collectionId: number | string,
+  postId: number | string,
+  options?: { token?: string | null },
+) {
+  return apiRequest<CommunityCollection>("POST", `/api/v1/community/collections/${encodeURIComponent(String(collectionId))}/items`, {
+    token: options?.token,
+    body: { postId: Number(postId) },
+  })
+}
+
+export function removeCommunityCollectionItem(
+  collectionId: number | string,
+  postId: number | string,
+  options?: { token?: string | null },
+) {
+  return apiRequest<void>(
+    "DELETE",
+    `/api/v1/community/collections/${encodeURIComponent(String(collectionId))}/items/${encodeURIComponent(String(postId))}`,
+    {
+      token: options?.token,
+    },
+  )
 }
 
 export function fetchPublicUser(userId: number | string, options?: { token?: string | null }) {

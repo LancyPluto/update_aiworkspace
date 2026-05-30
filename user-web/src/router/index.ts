@@ -12,6 +12,7 @@ import AgentPlaceholderPage from "@/pages/AgentPlaceholder/Page.vue"
 import ProfilePage from "@/pages/Profile/Page.vue"
 import PublicProfilePage from "@/pages/PublicProfile/Page.vue"
 import CommunityDiscoverPage from "@/pages/CommunityDiscover/Page.vue"
+import InspirationCollectionsPage from "@/pages/InspirationCollections/Page.vue"
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -96,6 +97,12 @@ const router = createRouter({
       name: "CommunityDiscover",
       meta: { requiresAuth: false },
       component: CommunityDiscoverPage,
+    },
+    {
+      path: "/community/inspirations",
+      name: "InspirationCollections",
+      meta: { requiresAuth: true },
+      component: InspirationCollectionsPage,
     },
     {
       path: "/u/:userId",

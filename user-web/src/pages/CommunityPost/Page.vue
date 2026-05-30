@@ -5,8 +5,11 @@ import { ArrowLeft, Copy, Download, Heart, Loader2, Send, Star, UserRound } from
 import {
   favoriteCommunityPost,
   fetchCommunityPost,
+  fetchCommunityCollections,
+  addCommunityCollectionItem,
   likeCommunityPost,
   markCommunityPostSameStyle,
+  trackCommunityEvent,
   unfavoriteCommunityPost,
   unlikeCommunityPost,
 } from "@/api/communityApi"
@@ -23,6 +26,7 @@ const post = ref<CommunityPost | null>(null)
 const loading = ref(false)
 const acting = ref(false)
 const sameStyleLoading = ref(false)
+const collecting = ref(false)
 const error = ref("")
 
 const postId = computed(() => String(route.params.postId || ""))
@@ -86,6 +90,10 @@ async function createSameStyle() {
   sameStyleLoading.value = true
   try {
     post.value = await markCommunityPostSameStyle(post.value.id, { token: auth.token })
+    void trackCommunityEvent(
+      { postId: post.value.id, eventType: "dashboard_open", source: "community_detail", toolCode: post.value.toolCode },
+      { token: auth.token },
+    ).catch(() => undefined)
     openDashboardWithAsset(
       assetFromCommunityPost(post.value, mediaUrl(post.value.coverUrl)),
       post.value.toolCode,
@@ -97,6 +105,32 @@ async function createSameStyle() {
   } finally {
     sameStyleLoading.value = false
   }
+}
+
+async function addToInspiration() {
+  if (!post.value || !auth.token) return router.push({ name: "Login", query: { redirect: route.fullPath } })
+  collecting.value = true
+  try {
+    const collections = await fetchCommunityCollections({ token: auth.token })
+    const target = collections.find((item) => item.defaultCollection) || collections[0]
+    if (target) {
+      await addCommunityCollectionItem(target.id, post.value.id, { token: auth.token })
+      post.value = { ...post.value, favorited: true, favoriteCount: post.value.favoriteCount + (post.value.favorited ? 0 : 1) }
+    }
+  } finally {
+    collecting.value = false
+  }
+}
+
+async function sharePost() {
+  if (!post.value) return
+  const url = window.location.href
+  if (navigator.share) await navigator.share({ title: post.value.title, url })
+  else await navigator.clipboard?.writeText(url)
+  void trackCommunityEvent(
+    { postId: post.value.id, eventType: "share", source: "community_detail", toolCode: post.value.toolCode },
+    { token: auth.token },
+  ).catch(() => undefined)
 }
 
 async function copyPrompt() {
@@ -150,6 +184,14 @@ onMounted(() => void load())
           <button type="button" :disabled="acting" :class="{ active: post.favorited }" @click="toggleFavorite">
             <Star class="h-4 w-4" />
             {{ post.favoriteCount }}
+          </button>
+          <button type="button" :disabled="collecting" @click="addToInspiration">
+            <Star class="h-4 w-4" />
+            灵感
+          </button>
+          <button type="button" @click="sharePost">
+            <Send class="h-4 w-4" />
+            分享
           </button>
           <a v-if="mediaUrl(post.coverUrl)" :href="mediaUrl(post.coverUrl)" download>
             <Download class="h-4 w-4" />

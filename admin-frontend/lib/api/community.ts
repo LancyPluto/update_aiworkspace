@@ -1,5 +1,5 @@
 import { http } from './http'
-import type { AdminCommunityPost, PageResponse } from './types'
+import type { AdminCommunityPost, AdminCommunityStats, PageResponse } from './types'
 
 export interface AdminCommunityPostQuery {
   userId?: number
@@ -8,6 +8,7 @@ export interface AdminCommunityPostQuery {
   keyword?: string
   topic?: string
   featured?: boolean
+  auditStatus?: string
   pageNo?: number
   pageSize?: number
 }
@@ -16,12 +17,24 @@ export function fetchAdminCommunityPosts(query: AdminCommunityPostQuery = {}) {
   return http.get<PageResponse<AdminCommunityPost>>('/api/admin/v1/community/posts', query)
 }
 
+export function fetchAdminCommunityStats() {
+  return http.get<AdminCommunityStats>('/api/admin/v1/community/posts/stats')
+}
+
 export function hideAdminCommunityPost(postId: number, reason?: string) {
   return http.post<AdminCommunityPost>(`/api/admin/v1/community/posts/${postId}/hide`, { reason })
 }
 
 export function restoreAdminCommunityPost(postId: number) {
   return http.post<AdminCommunityPost>(`/api/admin/v1/community/posts/${postId}/restore`, {})
+}
+
+export function approveAdminCommunityPost(postId: number) {
+  return http.post<AdminCommunityPost>(`/api/admin/v1/community/posts/${postId}/approve`, {})
+}
+
+export function rejectAdminCommunityPost(postId: number, reason?: string) {
+  return http.post<AdminCommunityPost>(`/api/admin/v1/community/posts/${postId}/reject`, { reason })
 }
 
 export function featureAdminCommunityPost(postId: number, enabled: boolean) {

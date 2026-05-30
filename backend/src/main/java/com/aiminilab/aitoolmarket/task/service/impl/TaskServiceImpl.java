@@ -5,6 +5,7 @@ import com.aiminilab.aitoolmarket.common.enums.CreditSourceType;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.enums.TaskStatus;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
+import com.aiminilab.aitoolmarket.community.mapper.CommunityEventMapper;
 import com.aiminilab.aitoolmarket.credit.service.CreditService;
 import com.aiminilab.aitoolmarket.credit.service.TaskCreditEstimateService;
 import com.aiminilab.aitoolmarket.task.dto.CreateTaskRequest;
@@ -51,6 +52,7 @@ public class TaskServiceImpl implements TaskService {
     private final TaskOutboxService taskOutboxService;
     private final TaskMetrics taskMetrics;
     private final TaskCreditEstimateService taskCreditEstimateService;
+    private final CommunityEventMapper communityEventMapper;
 
     public TaskServiceImpl(
             TaskMapper taskMapper,
@@ -62,7 +64,8 @@ public class TaskServiceImpl implements TaskService {
             ObjectMapper objectMapper,
             TaskOutboxService taskOutboxService,
             TaskMetrics taskMetrics,
-            TaskCreditEstimateService taskCreditEstimateService
+            TaskCreditEstimateService taskCreditEstimateService,
+            CommunityEventMapper communityEventMapper
     ) {
         this.taskMapper = taskMapper;
         this.toolMapper = toolMapper;
@@ -74,6 +77,7 @@ public class TaskServiceImpl implements TaskService {
         this.taskOutboxService = taskOutboxService;
         this.taskMetrics = taskMetrics;
         this.taskCreditEstimateService = taskCreditEstimateService;
+        this.communityEventMapper = communityEventMapper;
     }
 
     @Override
@@ -81,7 +85,7 @@ public class TaskServiceImpl implements TaskService {
     public TaskStatusResponse create(Long userId, CreateTaskRequest request) {
         return taskMapper.findByUserIdAndIdempotencyKey(userId, request.clientRequestId())
                 .map(TaskStatusResponse::from)
-                .orElseGet(() -> createNewTask(userId, request.toolCode(), request.params(), request.clientRequestId(), true));
+                .orElseGet(() -> createNewTask(userId, request.toolCode(), request.params(), request.clientRequestId(), request.sourcePostId(), true));
     }
 
     @Override
@@ -89,7 +93,7 @@ public class TaskServiceImpl implements TaskService {
     public TaskStatusResponse createForAgentTool(Long userId, CreateTaskRequest request) {
         return taskMapper.findByUserIdAndIdempotencyKey(userId, request.clientRequestId())
                 .map(TaskStatusResponse::from)
-                .orElseGet(() -> createNewTask(userId, request.toolCode(), request.params(), request.clientRequestId(), false));
+                .orElseGet(() -> createNewTask(userId, request.toolCode(), request.params(), request.clientRequestId(), request.sourcePostId(), false));
     }
 
     @Override
@@ -147,7 +151,7 @@ public class TaskServiceImpl implements TaskService {
         AiTask originalTask = findTask(taskId, userId);
         return taskMapper.findByUserIdAndIdempotencyKey(userId, request.clientRequestId())
                 .map(TaskStatusResponse::from)
-                .orElseGet(() -> createNewTask(userId, originalTask.getToolCode(), request.params(), request.clientRequestId(), true));
+                .orElseGet(() -> createNewTask(userId, originalTask.getToolCode(), request.params(), request.clientRequestId(), null, true));
     }
 
     @Override
@@ -199,7 +203,8 @@ public class TaskServiceImpl implements TaskService {
         return TaskStatusResponse.from(findTask(taskId));
     }
 
-    private TaskStatusResponse createNewTask(Long userId, String toolCode, JsonNode params, String clientRequestId, boolean chargeTaskCredits) {
+    private TaskStatusResponse createNewTask(Long userId, String toolCode, JsonNode params, String clientRequestId,
+                                             Long sourcePostId, boolean chargeTaskCredits) {
         AiTool tool = toolMapper.findOnlineByCode(toolCode)
                 .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在或未上线"));
         AgentModelConfig modelConfig = modelCapabilityService.resolveModelConfigForTool(tool);
@@ -217,6 +222,9 @@ public class TaskServiceImpl implements TaskService {
         Long taskId = taskMapper.insertTask(task);
         if (chargeTaskCredits) {
             creditService.freeze(userId, CreditSourceType.TASK, taskId, estimatedCredits);
+        }
+        if (sourcePostId != null) {
+            communityEventMapper.insertEvent(sourcePostId, userId, "task_created", "dashboard", tool.getToolCode(), taskId, 0);
         }
         taskOutboxService.enqueueTaskCreated(taskId);
         return TaskStatusResponse.from(findTask(taskId, userId));

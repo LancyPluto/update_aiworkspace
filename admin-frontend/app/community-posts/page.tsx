@@ -10,11 +10,12 @@ import {
   annotateAdminCommunityPost,
   featureAdminCommunityPost,
   fetchAdminCommunityPosts,
+  fetchAdminCommunityStats,
   hideAdminCommunityPost,
   pinAdminCommunityPost,
   restoreAdminCommunityPost,
 } from "@/lib/api/community"
-import type { AdminCommunityPost } from "@/lib/api/types"
+import type { AdminCommunityPost, AdminCommunityStats } from "@/lib/api/types"
 
 function statusTone(status: string) {
   if (status === "PUBLISHED") return "active"
@@ -44,6 +45,8 @@ export default function CommunityPostsPage() {
   const [modality, setModality] = useState("")
   const [keyword, setKeyword] = useState("")
   const [featured, setFeatured] = useState("")
+  const [auditStatus, setAuditStatus] = useState("")
+  const [stats, setStats] = useState<AdminCommunityStats | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [editing, setEditing] = useState<AdminCommunityPost | null>(null)
@@ -62,9 +65,11 @@ export default function CommunityPostsPage() {
         modality: modality || undefined,
         keyword: keyword.trim() || undefined,
         featured: featured ? featured === "true" : undefined,
+        auditStatus: auditStatus || undefined,
         userId: userId.trim() ? Number(userId.trim()) : undefined,
       })
       setPosts(resp.list)
+      setStats(await fetchAdminCommunityStats())
     } catch (err) {
       setError(err instanceof Error ? err.message : "加载社区作品失败")
     } finally {
@@ -119,6 +124,7 @@ export default function CommunityPostsPage() {
         user: `用户 ${post.userId}`,
         curation: `${post.pinned ? "置顶 " : ""}${post.featured ? "精选" : "普通"}`,
         stats: `${post.viewCount} 浏览 / ${post.likeCount} 赞 / ${post.favoriteCount} 收藏 / ${post.sameStyleCount || 0} 同款`,
+        quality: `${post.qualityScore || 0} / ${post.auditStatus || "-"}`,
         tagsText: [post.topic, ...(post.tags || []).map((tag) => `#${tag}`)].filter(Boolean).join(" "),
         time: formatTime(post.createdAt),
       })),
@@ -133,6 +139,26 @@ export default function CommunityPostsPage() {
       />
 
       <div className="space-y-6 p-6">
+        {stats && (
+          <div className="grid gap-3 md:grid-cols-4">
+            {[
+              ["作品", stats.postCount],
+              ["待审", stats.pendingCount],
+              ["隐藏", stats.hiddenCount],
+              ["详情访问", stats.detailViewCount],
+              ["同款点击", stats.sameStyleClickCount],
+              ["任务创建", stats.taskCreatedCount],
+              ["曝光", stats.impressionCount],
+              ["积分消费", stats.creditSpent],
+            ].map(([label, value]) => (
+              <div key={label} className="rounded-xl border border-border bg-card p-4 shadow-sm">
+                <div className="text-xs text-muted-foreground">{label}</div>
+                <div className="mt-1 text-2xl font-semibold">{value}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
         <div className="flex flex-wrap items-center gap-3">
           <Input className="w-40" placeholder="用户 ID" value={userId} onChange={(event) => setUserId(event.target.value)} />
           <Input className="w-56" placeholder="搜索标题、工具、描述" value={keyword} onChange={(event) => setKeyword(event.target.value)} />
@@ -154,6 +180,12 @@ export default function CommunityPostsPage() {
             <option value="">全部推荐</option>
             <option value="true">只看精选</option>
             <option value="false">非精选</option>
+          </select>
+          <select className="h-10 rounded-md border border-input bg-background px-3 text-sm" value={auditStatus} onChange={(event) => setAuditStatus(event.target.value)}>
+            <option value="">全部审核</option>
+            <option value="PENDING">PENDING</option>
+            <option value="APPROVED">APPROVED</option>
+            <option value="REJECTED">REJECTED</option>
           </select>
           <Button type="button" onClick={() => void load()} disabled={loading}>
             {loading ? "加载中..." : "筛选"}

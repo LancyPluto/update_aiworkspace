@@ -3,6 +3,7 @@ package com.aiminilab.aitoolmarket.community.controller;
 import com.aiminilab.aitoolmarket.common.dto.ApiResponse;
 import com.aiminilab.aitoolmarket.common.dto.PageResponse;
 import com.aiminilab.aitoolmarket.community.dto.CommunityPostResponse;
+import com.aiminilab.aitoolmarket.community.dto.CommunityStatsResponse;
 import com.aiminilab.aitoolmarket.community.service.CommunityService;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -29,9 +30,15 @@ public class AdminCommunityController {
                                                                  @RequestParam(required = false) String keyword,
                                                                  @RequestParam(required = false) String topic,
                                                                  @RequestParam(required = false) Boolean featured,
+                                                                 @RequestParam(required = false) String auditStatus,
                                                                  @RequestParam(required = false) Integer pageNo,
                                                                  @RequestParam(required = false) Integer pageSize) {
-        return ApiResponse.success(communityService.adminList(userId, status, modality, keyword, topic, featured, pageNo, pageSize));
+        return ApiResponse.success(communityService.adminList(userId, status, modality, keyword, topic, featured, auditStatus, pageNo, pageSize));
+    }
+
+    @GetMapping("/stats")
+    public ApiResponse<CommunityStatsResponse> stats() {
+        return ApiResponse.success(communityService.adminStats());
     }
 
     @PostMapping("/{postId}/hide")
@@ -43,6 +50,17 @@ public class AdminCommunityController {
     @PostMapping("/{postId}/restore")
     public ApiResponse<CommunityPostResponse> restore(@PathVariable Long postId) {
         return ApiResponse.success(communityService.adminRestore(postId));
+    }
+
+    @PostMapping("/{postId}/approve")
+    public ApiResponse<CommunityPostResponse> approve(@PathVariable Long postId) {
+        return ApiResponse.success(communityService.adminApprove(postId));
+    }
+
+    @PostMapping("/{postId}/reject")
+    public ApiResponse<CommunityPostResponse> reject(@PathVariable Long postId,
+                                                     @RequestBody(required = false) AdminCommunityActionRequest request) {
+        return ApiResponse.success(communityService.adminReject(postId, request == null ? null : request.reason()));
     }
 
     @PostMapping("/{postId}/feature")

@@ -4,11 +4,18 @@ import com.aiminilab.aitoolmarket.common.dto.PageResponse;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.enums.TaskStatus;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
+import com.aiminilab.aitoolmarket.community.dto.CommunityCollectionResponse;
+import com.aiminilab.aitoolmarket.community.dto.CommunityCreatorResponse;
+import com.aiminilab.aitoolmarket.community.dto.CommunityEventRequest;
 import com.aiminilab.aitoolmarket.community.dto.CommunityPostResponse;
+import com.aiminilab.aitoolmarket.community.dto.CommunityStatsResponse;
 import com.aiminilab.aitoolmarket.community.dto.PublicUserProfileResponse;
 import com.aiminilab.aitoolmarket.community.dto.PublishPostRequest;
 import com.aiminilab.aitoolmarket.community.dto.UpdateCommunityPostRequest;
+import com.aiminilab.aitoolmarket.community.entity.CommunityCollection;
 import com.aiminilab.aitoolmarket.community.entity.CommunityPost;
+import com.aiminilab.aitoolmarket.community.mapper.CommunityCollectionMapper;
+import com.aiminilab.aitoolmarket.community.mapper.CommunityEventMapper;
 import com.aiminilab.aitoolmarket.community.mapper.CommunityPostMapper;
 import com.aiminilab.aitoolmarket.community.service.CommunityService;
 import com.aiminilab.aitoolmarket.task.entity.AiTask;
@@ -33,15 +40,21 @@ public class CommunityServiceImpl implements CommunityService {
     private static final int MAX_TOPIC_LENGTH = 64;
     private static final int MAX_TAG_LENGTH = 32;
     private static final int MAX_TAGS = 6;
+    private static final int MAX_COLLECTION_NAME_LENGTH = 80;
 
     private final CommunityPostMapper postMapper;
+    private final CommunityCollectionMapper collectionMapper;
+    private final CommunityEventMapper eventMapper;
     private final TaskMapper taskMapper;
     private final UserMapper userMapper;
     private final ObjectMapper objectMapper;
 
-    public CommunityServiceImpl(CommunityPostMapper postMapper, TaskMapper taskMapper,
+    public CommunityServiceImpl(CommunityPostMapper postMapper, CommunityCollectionMapper collectionMapper,
+                                CommunityEventMapper eventMapper, TaskMapper taskMapper,
                                 UserMapper userMapper, ObjectMapper objectMapper) {
         this.postMapper = postMapper;
+        this.collectionMapper = collectionMapper;
+        this.eventMapper = eventMapper;
         this.taskMapper = taskMapper;
         this.userMapper = userMapper;
         this.objectMapper = objectMapper;
@@ -156,19 +169,66 @@ public class CommunityServiceImpl implements CommunityService {
         String normalizedTag = normalizeTag(tag);
         String normalizedTopic = normalizeTopic(topic);
         List<CommunityPostResponse> list = postMapper.discover(
-                        normalizedModality,
-                        normalizedTag,
-                        normalizedTopic,
-                        normalizedSort,
-                        featured,
-                        normalizedPageSize,
-                        offset
-                )
+                        normalizedModality, normalizedTag, normalizedTopic, null, null,
+                        normalizedSort, featured, normalizedPageSize, offset)
                 .stream()
                 .map(post -> response(post, viewerId))
                 .toList();
-        long total = postMapper.countDiscover(normalizedModality, normalizedTag, normalizedTopic, featured);
+        long total = postMapper.countDiscover(normalizedModality, normalizedTag, normalizedTopic, null, null, featured);
         return PageResponse.of(list, total, pageNo, pageSize);
+    }
+
+    @Override
+    public PageResponse<CommunityPostResponse> search(String keyword, String modality, String tag, String topic,
+                                                      String toolCode, String sort, Boolean featured, Long viewerId,
+                                                      Integer pageNo, Integer pageSize) {
+        int normalizedPageSize = PageResponse.normalizePageSize(pageSize);
+        int offset = PageResponse.offset(pageNo, pageSize);
+        String normalizedModality = normalizeModality(modality);
+        String normalizedTag = normalizeTag(tag);
+        String normalizedTopic = normalizeTopic(topic);
+        String normalizedKeyword = normalizeKeyword(keyword);
+        String normalizedToolCode = normalizeToolCode(toolCode);
+        String normalizedSort = normalizeSort(sort);
+        List<CommunityPostResponse> list = postMapper.discover(
+                        normalizedModality, normalizedTag, normalizedTopic, normalizedKeyword, normalizedToolCode,
+                        normalizedSort, featured, normalizedPageSize, offset)
+                .stream()
+                .map(post -> response(post, viewerId))
+                .toList();
+        long total = postMapper.countDiscover(normalizedModality, normalizedTag, normalizedTopic,
+                normalizedKeyword, normalizedToolCode, featured);
+        return PageResponse.of(list, total, pageNo, pageSize);
+    }
+
+    @Override
+    public PageResponse<CommunityPostResponse> topicPosts(String topic, String modality, String sort, Long viewerId,
+                                                         Integer pageNo, Integer pageSize) {
+        String normalizedTopic = normalizeTopic(topic);
+        if (normalizedTopic == null) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "topic is required");
+        }
+        return search(null, modality, null, normalizedTopic, null, sort, null, viewerId, pageNo, pageSize);
+    }
+
+    @Override
+    public CommunityCreatorResponse creator(Long userId, Long viewerId) {
+        PublicUserProfileResponse profile = publicUser(userId);
+        List<CommunityPostResponse> featured = postMapper.findFeaturedByUserId(userId, 6)
+                .stream()
+                .map(post -> response(post, viewerId))
+                .toList();
+        List<CommunityPostResponse> recent = postMapper.findPublicByUserId(userId, null, 12, 0)
+                .stream()
+                .map(post -> response(post, viewerId))
+                .toList();
+        return new CommunityCreatorResponse(
+                profile,
+                postMapper.sumSameStyleByUserId(userId),
+                postMapper.countFeaturedByUserId(userId),
+                featured,
+                recent
+        );
     }
 
     @Override
@@ -189,18 +249,108 @@ public class CommunityServiceImpl implements CommunityService {
     @Transactional
     public CommunityPostResponse detail(Long postId, Long viewerId) {
         CommunityPost post = requirePost(postId);
-        if (!"PUBLISHED".equals(post.getStatus())) {
+        if (!isPubliclyVisible(post)) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "Post not found");
         }
         postMapper.incrementViews(postId);
+        postMapper.incrementDetailClicks(postId);
+        if (viewerId != null) {
+            recordEvent(viewerId, new CommunityEventRequest(postId, "detail_view", "detail", post.getToolCode(), null, null));
+        }
         return response(requirePost(postId), viewerId);
     }
 
     @Override
     @Transactional
-    public CommunityPostResponse markSameStyle(Long userId, Long postId) {
+    public void recordEvent(Long userId, CommunityEventRequest request) {
+        if (request == null || request.eventType() == null || request.eventType().isBlank()) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "eventType is required");
+        }
+        Long postId = request.postId();
+        if (postId != null) {
+            CommunityPost post = requirePublished(postId);
+            if ("share".equals(normalizeEventType(request.eventType()))) {
+                postMapper.incrementShares(postId);
+            }
+            eventMapper.insertEvent(postId, userId, normalizeEventType(request.eventType()),
+                    limitNullable(request.source(), 64),
+                    normalizeToolCode(request.toolCode() == null ? post.getToolCode() : request.toolCode()),
+                    request.taskId(),
+                    request.credits() == null ? 0 : Math.max(request.credits(), 0));
+            return;
+        }
+        eventMapper.insertEvent(null, userId, normalizeEventType(request.eventType()),
+                limitNullable(request.source(), 64), normalizeToolCode(request.toolCode()),
+                request.taskId(), request.credits() == null ? 0 : Math.max(request.credits(), 0));
+    }
+
+    @Override
+    @Transactional
+    public List<CommunityCollectionResponse> collections(Long userId) {
+        ensureDefaultCollection(userId);
+        return collectionMapper.findByUserId(userId).stream()
+                .map(collection -> collectionResponse(collection, userId, 12))
+                .toList();
+    }
+
+    @Override
+    @Transactional
+    public CommunityCollectionResponse createCollection(Long userId, String name) {
+        CommunityCollection collection = new CommunityCollection();
+        collection.setUserId(userId);
+        collection.setName(normalizeCollectionName(name));
+        collection.setDefaultCollection(false);
+        collection.setItemCount(0L);
+        collectionMapper.insertAndReturnId(collection);
+        return collectionResponse(collectionMapper.findOwned(collection.getId(), userId), userId, 12);
+    }
+
+    @Override
+    @Transactional
+    public CommunityCollectionResponse renameCollection(Long userId, Long collectionId, String name) {
+        requireOwnedCollection(collectionId, userId);
+        if (collectionMapper.rename(collectionId, userId, normalizeCollectionName(name)) == 0) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "Default collection cannot be renamed");
+        }
+        return collectionResponse(requireOwnedCollection(collectionId, userId), userId, 12);
+    }
+
+    @Override
+    @Transactional
+    public void deleteCollection(Long userId, Long collectionId) {
+        requireOwnedCollection(collectionId, userId);
+        collectionMapper.removeAllItems(collectionId, userId);
+        if (collectionMapper.deleteOwned(collectionId, userId) == 0) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "Default collection cannot be deleted");
+        }
+    }
+
+    @Override
+    @Transactional
+    public CommunityCollectionResponse addCollectionItem(Long userId, Long collectionId, Long postId) {
+        CommunityCollection collection = collectionId == null ? ensureDefaultCollection(userId) : requireOwnedCollection(collectionId, userId);
         requirePublished(postId);
+        collectionMapper.addItem(collection.getId(), postId, userId);
+        collectionMapper.refreshItemCount(collection.getId());
+        recordEvent(userId, new CommunityEventRequest(postId, "favorite", "collection", null, null, null));
+        return collectionResponse(requireOwnedCollection(collection.getId(), userId), userId, 24);
+    }
+
+    @Override
+    @Transactional
+    public void removeCollectionItem(Long userId, Long collectionId, Long postId) {
+        CommunityCollection collection = requireOwnedCollection(collectionId, userId);
+        collectionMapper.removeItem(collection.getId(), postId, userId);
+        collectionMapper.refreshItemCount(collection.getId());
+    }
+
+    @Override
+    @Transactional
+    public CommunityPostResponse markSameStyle(Long userId, Long postId) {
+        CommunityPost post = requirePublished(postId);
         postMapper.incrementSameStyle(postId);
+        postMapper.refreshQualityScore(postId);
+        recordEvent(userId, new CommunityEventRequest(postId, "same_style_click", "community", post.getToolCode(), null, null));
         return response(requirePost(postId), userId);
     }
 
@@ -210,6 +360,8 @@ public class CommunityServiceImpl implements CommunityService {
         requirePublished(postId);
         postMapper.insertLike(postId, userId);
         postMapper.refreshLikeCount(postId);
+        postMapper.refreshQualityScore(postId);
+        recordEvent(userId, new CommunityEventRequest(postId, "like", "community", null, null, null));
         return response(requirePost(postId), userId);
     }
 
@@ -219,6 +371,7 @@ public class CommunityServiceImpl implements CommunityService {
         requirePublished(postId);
         postMapper.deleteLike(postId, userId);
         postMapper.refreshLikeCount(postId);
+        postMapper.refreshQualityScore(postId);
         return response(requirePost(postId), userId);
     }
 
@@ -228,6 +381,8 @@ public class CommunityServiceImpl implements CommunityService {
         requirePublished(postId);
         postMapper.insertFavorite(postId, userId);
         postMapper.refreshFavoriteCount(postId);
+        postMapper.refreshQualityScore(postId);
+        recordEvent(userId, new CommunityEventRequest(postId, "favorite", "community", null, null, null));
         return response(requirePost(postId), userId);
     }
 
@@ -237,24 +392,43 @@ public class CommunityServiceImpl implements CommunityService {
         requirePublished(postId);
         postMapper.deleteFavorite(postId, userId);
         postMapper.refreshFavoriteCount(postId);
+        postMapper.refreshQualityScore(postId);
         return response(requirePost(postId), userId);
     }
 
     @Override
     public PageResponse<CommunityPostResponse> adminList(Long userId, String status, String modality, String keyword,
-                                                         String topic, Boolean featured, Integer pageNo, Integer pageSize) {
+                                                         String topic, Boolean featured, String auditStatus,
+                                                         Integer pageNo, Integer pageSize) {
         int normalizedPageSize = PageResponse.normalizePageSize(pageSize);
         int offset = PageResponse.offset(pageNo, pageSize);
         String normalizedKeyword = normalizeKeyword(keyword);
         String normalizedTopic = normalizeTopic(topic);
         List<CommunityPostResponse> list = postMapper.findForAdmin(userId, normalizeStatus(status), normalizeModality(modality),
-                        normalizedKeyword, normalizedTopic, featured, normalizedPageSize, offset)
+                        normalizedKeyword, normalizedTopic, featured, normalizeAuditStatus(auditStatus), normalizedPageSize, offset)
                 .stream()
                 .map(post -> response(post, null))
                 .toList();
         long total = postMapper.countForAdmin(userId, normalizeStatus(status), normalizeModality(modality),
-                normalizedKeyword, normalizedTopic, featured);
+                normalizedKeyword, normalizedTopic, featured, normalizeAuditStatus(auditStatus));
         return PageResponse.of(list, total, pageNo, pageSize);
+    }
+
+    @Override
+    public CommunityStatsResponse adminStats() {
+        return new CommunityStatsResponse(
+                postMapper.countForStats(null, null),
+                postMapper.countForStats(null, "PENDING"),
+                postMapper.countForStats("HIDDEN", null),
+                eventMapper.countByType("impression"),
+                eventMapper.countByType("detail_view"),
+                eventMapper.countByType("same_style_click"),
+                eventMapper.countByType("task_created"),
+                eventMapper.sumCredits(),
+                eventMapper.topTools(8),
+                eventMapper.topTopics(8),
+                eventMapper.topCreators(8)
+        );
     }
 
     @Override
@@ -275,9 +449,26 @@ public class CommunityServiceImpl implements CommunityService {
 
     @Override
     @Transactional
+    public CommunityPostResponse adminApprove(Long postId) {
+        requirePost(postId);
+        postMapper.updateAdminStatus(postId, "PUBLISHED", "APPROVED", null);
+        return response(requirePost(postId), null);
+    }
+
+    @Override
+    @Transactional
+    public CommunityPostResponse adminReject(Long postId, String reason) {
+        requirePost(postId);
+        postMapper.updateAdminStatus(postId, "HIDDEN", "REJECTED", normalizeAuditReason(reason));
+        return response(requirePost(postId), null);
+    }
+
+    @Override
+    @Transactional
     public CommunityPostResponse adminFeature(Long postId, boolean featured) {
         requirePost(postId);
         postMapper.updateFeatured(postId, featured);
+        postMapper.refreshQualityScore(postId);
         return response(requirePost(postId), null);
     }
 
@@ -286,6 +477,7 @@ public class CommunityServiceImpl implements CommunityService {
     public CommunityPostResponse adminPin(Long postId, boolean pinned) {
         requirePost(postId);
         postMapper.updatePinned(postId, pinned);
+        postMapper.refreshQualityScore(postId);
         return response(requirePost(postId), null);
     }
 
@@ -328,9 +520,13 @@ public class CommunityServiceImpl implements CommunityService {
         post.setAuditStatus("APPROVED");
         post.setAuditReason(null);
         post.setViewCount(0L);
+        post.setDetailClickCount(0L);
+        post.setShareCount(0L);
+        post.setQualityScore(0L);
         post.setLikeCount(0L);
         post.setFavoriteCount(0L);
         postMapper.insertAndReturnId(post);
+        postMapper.refreshQualityScore(post.getId());
         return requirePost(post.getId());
     }
 
@@ -349,10 +545,57 @@ public class CommunityServiceImpl implements CommunityService {
 
     private CommunityPost requirePublished(Long postId) {
         CommunityPost post = requirePost(postId);
-        if (!"PUBLISHED".equals(post.getStatus())) {
+        if (!isPubliclyVisible(post)) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "Post not found");
         }
         return post;
+    }
+
+    private boolean isPubliclyVisible(CommunityPost post) {
+        return post != null
+                && "PUBLISHED".equals(post.getStatus())
+                && (post.getAuditStatus() == null || "APPROVED".equals(post.getAuditStatus()));
+    }
+
+    private CommunityCollection ensureDefaultCollection(Long userId) {
+        CommunityCollection existing = collectionMapper.findDefault(userId);
+        if (existing != null) {
+            return existing;
+        }
+        CommunityCollection collection = new CommunityCollection();
+        collection.setUserId(userId);
+        collection.setName("Default inspiration");
+        collection.setDefaultCollection(true);
+        collection.setItemCount(0L);
+        collectionMapper.insertAndReturnId(collection);
+        return collectionMapper.findDefault(userId);
+    }
+
+    private CommunityCollection requireOwnedCollection(Long collectionId, Long userId) {
+        if (collectionId == null) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "collectionId is required");
+        }
+        CommunityCollection collection = collectionMapper.findOwned(collectionId, userId);
+        if (collection == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "Collection not found");
+        }
+        return collection;
+    }
+
+    private CommunityCollectionResponse collectionResponse(CommunityCollection collection, Long userId, int itemLimit) {
+        List<CommunityPostResponse> items = collection == null ? List.of() : collectionMapper.findItems(collection.getId(), userId, itemLimit, 0)
+                .stream()
+                .map(post -> response(post, userId))
+                .toList();
+        return new CommunityCollectionResponse(
+                collection.getId(),
+                collection.getName(),
+                Boolean.TRUE.equals(collection.getDefaultCollection()),
+                collection.getItemCount() == null ? 0L : collection.getItemCount(),
+                collection.getCreatedAt(),
+                collection.getUpdatedAt(),
+                items
+        );
     }
 
     private CommunityPostResponse response(CommunityPost post, Long viewerId) {
@@ -408,9 +651,40 @@ public class CommunityServiceImpl implements CommunityService {
             return "LATEST";
         }
         String normalized = value.trim().toUpperCase(Locale.ROOT);
-        return List.of("LATEST", "POPULAR", "FAVORITES", "SAME_STYLE", "VIEWS").contains(normalized)
+        return List.of("LATEST", "POPULAR", "FAVORITES", "SAME_STYLE", "VIEWS", "QUALITY").contains(normalized)
                 ? normalized
                 : "LATEST";
+    }
+
+    private String normalizeAuditStatus(String value) {
+        if (value == null || value.trim().isBlank()) {
+            return null;
+        }
+        String normalized = value.trim().toUpperCase(Locale.ROOT);
+        return List.of("PENDING", "APPROVED", "REJECTED").contains(normalized) ? normalized : null;
+    }
+
+    private String normalizeToolCode(String value) {
+        if (value == null || value.trim().isBlank()) {
+            return null;
+        }
+        return limit(value.trim(), 128);
+    }
+
+    private String normalizeEventType(String value) {
+        String normalized = value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
+        if (List.of("impression", "detail_view", "like", "favorite", "same_style_click",
+                "dashboard_open", "task_created", "credit_spent", "share").contains(normalized)) {
+            return normalized;
+        }
+        return "impression";
+    }
+
+    private String normalizeCollectionName(String value) {
+        if (value == null || value.trim().isBlank()) {
+            return "New inspiration";
+        }
+        return limit(value.trim(), MAX_COLLECTION_NAME_LENGTH);
     }
 
     private String normalizeTopic(String value) {
@@ -432,6 +706,13 @@ public class CommunityServiceImpl implements CommunityService {
             return null;
         }
         return limit(value.trim(), 255);
+    }
+
+    private String limitNullable(String value, int max) {
+        if (value == null || value.trim().isBlank()) {
+            return null;
+        }
+        return limit(value.trim(), max);
     }
 
     private String normalizeTag(String value) {

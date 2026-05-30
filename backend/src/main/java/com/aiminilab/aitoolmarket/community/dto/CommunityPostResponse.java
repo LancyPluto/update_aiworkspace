@@ -26,6 +26,9 @@ public record CommunityPostResponse(
         String auditStatus,
         String auditReason,
         Long viewCount,
+        Long detailClickCount,
+        Long shareCount,
+        Long qualityScore,
         Long likeCount,
         Long favoriteCount,
         Boolean liked,
@@ -58,13 +61,20 @@ public record CommunityPostResponse(
                 post.getSameStyleCount() == null ? 0L : post.getSameStyleCount(),
                 post.getAuditStatus(),
                 post.getAuditReason(),
-                post.getViewCount(),
-                post.getLikeCount(),
-                post.getFavoriteCount(),
+                zero(post.getViewCount()),
+                zero(post.getDetailClickCount()),
+                zero(post.getShareCount()),
+                zero(post.getQualityScore()),
+                zero(post.getLikeCount()),
+                zero(post.getFavoriteCount()),
                 liked,
                 favorited,
                 post.getCreatedAt(),
                 post.getUpdatedAt()
         );
+    }
+
+    private static Long zero(Long value) {
+        return value == null ? 0L : value;
     }
 }

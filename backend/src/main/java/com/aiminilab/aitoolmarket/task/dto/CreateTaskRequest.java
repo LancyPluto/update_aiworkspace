@@ -7,6 +7,7 @@ import jakarta.validation.constraints.NotNull;
 public record CreateTaskRequest(
         @NotBlank String toolCode,
         @NotNull JsonNode params,
-        String clientRequestId
+        String clientRequestId,
+        Long sourcePostId
 ) {
 }

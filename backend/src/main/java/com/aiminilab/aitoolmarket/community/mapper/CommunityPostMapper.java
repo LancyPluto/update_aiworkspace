@@ -50,6 +50,7 @@ public interface CommunityPostMapper extends BaseMapper<CommunityPost> {
             FROM community_posts
             WHERE user_id = #{userId}
               AND status = 'PUBLISHED'
+              AND COALESCE(audit_status, 'APPROVED') = 'APPROVED'
             <if test="modality != null and modality.trim() != ''">
               AND modality = #{modality}
             </if>
@@ -70,6 +71,17 @@ public interface CommunityPostMapper extends BaseMapper<CommunityPost> {
             INNER JOIN community_post_tags t ON t.post_id = p.id AND t.tag = #{tag}
             </if>
             WHERE p.status = 'PUBLISHED'
+              AND COALESCE(p.audit_status, 'APPROVED') = 'APPROVED'
+            <if test="keyword != null and keyword.trim() != ''">
+              AND (p.title LIKE CONCAT('%', #{keyword}, '%')
+                OR p.description LIKE CONCAT('%', #{keyword}, '%')
+                OR p.tool_name LIKE CONCAT('%', #{keyword}, '%')
+                OR p.tool_code LIKE CONCAT('%', #{keyword}, '%')
+                OR p.prompt_snapshot LIKE CONCAT('%', #{keyword}, '%'))
+            </if>
+            <if test="toolCode != null and toolCode.trim() != ''">
+              AND p.tool_code = #{toolCode}
+            </if>
             <if test="modality != null and modality.trim() != ''">
               AND p.modality = #{modality}
             </if>
@@ -92,8 +104,11 @@ public interface CommunityPostMapper extends BaseMapper<CommunityPost> {
               <when test="sort == 'VIEWS'">
                 ORDER BY p.pinned DESC, p.view_count DESC, p.id DESC
               </when>
+              <when test="sort == 'QUALITY'">
+                ORDER BY p.pinned DESC, p.featured DESC, p.quality_score DESC, p.like_count DESC, p.favorite_count DESC, p.same_style_count DESC, p.id DESC
+              </when>
               <otherwise>
-                ORDER BY p.pinned DESC, p.featured DESC, p.id DESC
+                ORDER BY p.pinned DESC, p.featured DESC, p.created_at DESC, p.id DESC
               </otherwise>
             </choose>
             LIMIT #{limit} OFFSET #{offset}
@@ -102,6 +117,8 @@ public interface CommunityPostMapper extends BaseMapper<CommunityPost> {
     List<CommunityPost> discover(@Param("modality") String modality,
                                  @Param("tag") String tag,
                                  @Param("topic") String topic,
+                                 @Param("keyword") String keyword,
+                                 @Param("toolCode") String toolCode,
                                  @Param("sort") String sort,
                                  @Param("featured") Boolean featured,
                                  @Param("limit") int limit,
@@ -115,6 +132,17 @@ public interface CommunityPostMapper extends BaseMapper<CommunityPost> {
             INNER JOIN community_post_tags t ON t.post_id = p.id AND t.tag = #{tag}
             </if>
             WHERE p.status = 'PUBLISHED'
+              AND COALESCE(p.audit_status, 'APPROVED') = 'APPROVED'
+            <if test="keyword != null and keyword.trim() != ''">
+              AND (p.title LIKE CONCAT('%', #{keyword}, '%')
+                OR p.description LIKE CONCAT('%', #{keyword}, '%')
+                OR p.tool_name LIKE CONCAT('%', #{keyword}, '%')
+                OR p.tool_code LIKE CONCAT('%', #{keyword}, '%')
+                OR p.prompt_snapshot LIKE CONCAT('%', #{keyword}, '%'))
+            </if>
+            <if test="toolCode != null and toolCode.trim() != ''">
+              AND p.tool_code = #{toolCode}
+            </if>
             <if test="modality != null and modality.trim() != ''">
               AND p.modality = #{modality}
             </if>
@@ -129,6 +157,8 @@ public interface CommunityPostMapper extends BaseMapper<CommunityPost> {
     long countDiscover(@Param("modality") String modality,
                        @Param("tag") String tag,
                        @Param("topic") String topic,
+                       @Param("keyword") String keyword,
+                       @Param("toolCode") String toolCode,
                        @Param("featured") Boolean featured);
 
     @Select("""
@@ -137,6 +167,7 @@ public interface CommunityPostMapper extends BaseMapper<CommunityPost> {
             FROM community_posts
             WHERE user_id = #{userId}
               AND status = 'PUBLISHED'
+              AND COALESCE(audit_status, 'APPROVED') = 'APPROVED'
             <if test="modality != null and modality.trim() != ''">
               AND modality = #{modality}
             </if>
@@ -149,6 +180,7 @@ public interface CommunityPostMapper extends BaseMapper<CommunityPost> {
             FROM community_posts
             WHERE user_id = #{userId}
               AND status = 'PUBLISHED'
+              AND COALESCE(audit_status, 'APPROVED') = 'APPROVED'
             """)
     long sumLikesByUserId(@Param("userId") Long userId);
 
@@ -157,8 +189,40 @@ public interface CommunityPostMapper extends BaseMapper<CommunityPost> {
             FROM community_posts
             WHERE user_id = #{userId}
               AND status = 'PUBLISHED'
+              AND COALESCE(audit_status, 'APPROVED') = 'APPROVED'
             """)
     long sumFavoritesByUserId(@Param("userId") Long userId);
+
+    @Select("""
+            SELECT COALESCE(SUM(same_style_count), 0)
+            FROM community_posts
+            WHERE user_id = #{userId}
+              AND status = 'PUBLISHED'
+              AND COALESCE(audit_status, 'APPROVED') = 'APPROVED'
+            """)
+    long sumSameStyleByUserId(@Param("userId") Long userId);
+
+    @Select("""
+            SELECT COUNT(*)
+            FROM community_posts
+            WHERE user_id = #{userId}
+              AND status = 'PUBLISHED'
+              AND featured = 1
+              AND COALESCE(audit_status, 'APPROVED') = 'APPROVED'
+            """)
+    long countFeaturedByUserId(@Param("userId") Long userId);
+
+    @Select("""
+            SELECT *
+            FROM community_posts
+            WHERE user_id = #{userId}
+              AND status = 'PUBLISHED'
+              AND featured = 1
+              AND COALESCE(audit_status, 'APPROVED') = 'APPROVED'
+            ORDER BY pinned DESC, last_featured_at DESC, id DESC
+            LIMIT #{limit}
+            """)
+    List<CommunityPost> findFeaturedByUserId(@Param("userId") Long userId, @Param("limit") int limit);
 
     @Update("""
             UPDATE community_posts
@@ -202,7 +266,9 @@ public interface CommunityPostMapper extends BaseMapper<CommunityPost> {
 
     @Update("""
             UPDATE community_posts
-            SET featured = #{featured}, updated_at = CURRENT_TIMESTAMP
+            SET featured = #{featured},
+                last_featured_at = CASE WHEN #{featured} THEN CURRENT_TIMESTAMP ELSE last_featured_at END,
+                updated_at = CURRENT_TIMESTAMP
             WHERE id = #{postId}
             """)
     int updateFeatured(@Param("postId") Long postId, @Param("featured") boolean featured);
@@ -228,6 +294,22 @@ public interface CommunityPostMapper extends BaseMapper<CommunityPost> {
               AND status = 'PUBLISHED'
             """)
     int incrementViews(@Param("postId") Long postId);
+
+    @Update("""
+            UPDATE community_posts
+            SET detail_click_count = detail_click_count + 1, updated_at = updated_at
+            WHERE id = #{postId}
+              AND status = 'PUBLISHED'
+            """)
+    int incrementDetailClicks(@Param("postId") Long postId);
+
+    @Update("""
+            UPDATE community_posts
+            SET share_count = share_count + 1, updated_at = updated_at
+            WHERE id = #{postId}
+              AND status = 'PUBLISHED'
+            """)
+    int incrementShares(@Param("postId") Long postId);
 
     @Update("""
             UPDATE community_posts
@@ -303,6 +385,22 @@ public interface CommunityPostMapper extends BaseMapper<CommunityPost> {
             """)
     int refreshFavoriteCount(@Param("postId") Long postId);
 
+    @Update("""
+            UPDATE community_posts
+            SET quality_score =
+                (CASE WHEN featured = 1 THEN 100 ELSE 0 END)
+                + (CASE WHEN pinned = 1 THEN 200 ELSE 0 END)
+                + (CASE WHEN cover_url IS NOT NULL AND cover_url != '' THEN 20 ELSE 0 END)
+                + (CASE WHEN title IS NOT NULL AND title != '' THEN 10 ELSE 0 END)
+                + (CASE WHEN prompt_visible = 1 AND prompt_snapshot IS NOT NULL AND prompt_snapshot != '' THEN 30 ELSE 0 END)
+                + LEAST(COALESCE(like_count, 0), 100)
+                + LEAST(COALESCE(favorite_count, 0) * 2, 160)
+                + LEAST(COALESCE(same_style_count, 0) * 3, 240),
+                updated_at = updated_at
+            WHERE id = #{postId}
+            """)
+    int refreshQualityScore(@Param("postId") Long postId);
+
     @Select("""
             <script>
             SELECT *
@@ -313,6 +411,9 @@ public interface CommunityPostMapper extends BaseMapper<CommunityPost> {
             </if>
             <if test="status != null and status.trim() != ''">
               AND status = #{status}
+            </if>
+            <if test="auditStatus != null and auditStatus.trim() != ''">
+              AND audit_status = #{auditStatus}
             </if>
             <if test="modality != null and modality.trim() != ''">
               AND modality = #{modality}
@@ -339,6 +440,7 @@ public interface CommunityPostMapper extends BaseMapper<CommunityPost> {
                                      @Param("keyword") String keyword,
                                      @Param("topic") String topic,
                                      @Param("featured") Boolean featured,
+                                     @Param("auditStatus") String auditStatus,
                                      @Param("limit") int limit,
                                      @Param("offset") int offset);
 
@@ -352,6 +454,9 @@ public interface CommunityPostMapper extends BaseMapper<CommunityPost> {
             </if>
             <if test="status != null and status.trim() != ''">
               AND status = #{status}
+            </if>
+            <if test="auditStatus != null and auditStatus.trim() != ''">
+              AND audit_status = #{auditStatus}
             </if>
             <if test="modality != null and modality.trim() != ''">
               AND modality = #{modality}
@@ -375,7 +480,23 @@ public interface CommunityPostMapper extends BaseMapper<CommunityPost> {
                        @Param("modality") String modality,
                        @Param("keyword") String keyword,
                        @Param("topic") String topic,
-                       @Param("featured") Boolean featured);
+                       @Param("featured") Boolean featured,
+                       @Param("auditStatus") String auditStatus);
+
+    @Select("""
+            <script>
+            SELECT COUNT(*)
+            FROM community_posts
+            WHERE 1 = 1
+            <if test="status != null and status.trim() != ''">
+              AND status = #{status}
+            </if>
+            <if test="auditStatus != null and auditStatus.trim() != ''">
+              AND audit_status = #{auditStatus}
+            </if>
+            </script>
+            """)
+    long countForStats(@Param("status") String status, @Param("auditStatus") String auditStatus);
 
     @Insert("""
             INSERT INTO community_post_tags (post_id, tag)

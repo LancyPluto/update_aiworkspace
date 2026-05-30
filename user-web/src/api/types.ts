@@ -160,6 +160,8 @@ export interface PublicUserProfile {
   postCount: number
   likeCount: number
   favoriteCount: number
+  sameStyleCount?: number
+  featuredCount?: number
 }
 
 export interface CommunityPost {
@@ -183,12 +185,33 @@ export interface CommunityPost {
   auditStatus?: string | null
   auditReason?: string | null
   viewCount: number
+  detailClickCount?: number
+  shareCount?: number
+  qualityScore?: number
   likeCount: number
   favoriteCount: number
   liked?: boolean
   favorited?: boolean
   createdAt: string
   updatedAt?: string | null
+}
+
+export interface CommunityCreator {
+  profile: PublicUserProfile
+  sameStyleCount: number
+  featuredCount: number
+  featuredPosts: CommunityPost[]
+  recentPosts: CommunityPost[]
+}
+
+export interface CommunityCollection {
+  id: number
+  name: string
+  defaultCollection: boolean
+  itemCount: number
+  createdAt: string
+  updatedAt?: string | null
+  items: CommunityPost[]
 }
 
 /* ========== 工具相关 ========== */
@@ -280,6 +303,7 @@ export interface CreateTaskRequest {
   toolCode: string
   params: Record<string, unknown>
   clientRequestId?: string
+  sourcePostId?: number
 }
 
 export interface CreateTaskResponse {

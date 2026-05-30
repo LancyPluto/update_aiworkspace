@@ -4,7 +4,7 @@ import { useRouter } from "vue-router"
 import { Loader2, RefreshCcw, Search } from "lucide-vue-next"
 import AppShell from "@/components/AppShell.vue"
 import AssetCard from "@/components/AssetCard.vue"
-import { fetchCommunityPosts } from "@/api/communityApi"
+import { searchCommunityPosts, trackCommunityEvent } from "@/api/communityApi"
 import { getApiOrigin } from "@/api/client"
 import type { CommunityPost } from "@/api/types"
 import { useAuthStore } from "@/store/authStore"
@@ -66,7 +66,7 @@ async function load(reset = true) {
   error.value = ""
   try {
     const currentPage = reset ? 1 : pageNo.value
-    const page = await fetchCommunityPosts({
+    const page = await searchCommunityPosts({
       token: auth.token,
       query: {
         pageNo: currentPage,
@@ -74,10 +74,17 @@ async function load(reset = true) {
         modality: modality.value || undefined,
         sort: sort.value,
         featured: featuredOnly.value ? true : undefined,
+        keyword: tag.value.trim() || undefined,
         tag: tag.value.trim() || undefined,
       },
     })
     posts.value = reset ? page.list : [...posts.value, ...page.list]
+    for (const post of page.list.slice(0, 8)) {
+      void trackCommunityEvent(
+        { postId: post.id, eventType: "impression", source: "discover", toolCode: post.toolCode },
+        { token: auth.token },
+      ).catch(() => undefined)
+    }
     hasNext.value = page.hasNext
     pageNo.value = currentPage + 1
   } catch (err) {
