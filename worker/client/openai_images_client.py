@@ -7,7 +7,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import requests
-from requests.exceptions import ConnectTimeout, ReadTimeout, SSLError
+from requests.exceptions import ConnectTimeout, ProxyError, ReadTimeout, RequestException, SSLError, Timeout
 
 
 LOGGER = logging.getLogger(__name__)
@@ -144,7 +144,7 @@ class OpenAIImagesClient:
                 time.perf_counter() - started_at,
                 diagnostics,
             )
-        except requests.Timeout as exc:
+        except Timeout as exc:
             elapsed = time.perf_counter() - started_at
             timeout_kind = _timeout_kind(exc)
             LOGGER.warning(
@@ -164,14 +164,14 @@ class OpenAIImagesClient:
             ) from exc
         except SSLError:
             raise
-        except requests.ProxyError as exc:
+        except ProxyError as exc:
             raise OpenAIImagesError(
                 "openai images proxy connection failed. "
                 "The request is using an environment or configured proxy; set extraAuthJson trustEnv=false to bypass it, "
                 "or configure proxyUrl explicitly. "
                 f"detail={exc}"
             ) from exc
-        except requests.RequestException as exc:
+        except RequestException as exc:
             raise OpenAIImagesError(f"openai images request failed: {exc}") from exc
 
         try:
@@ -349,7 +349,7 @@ def _is_ssl_eof_error(exc: BaseException) -> bool:
     return "eof occurred in violation of protocol" in message or "ssleoferror" in message
 
 
-def _timeout_kind(exc: requests.Timeout) -> str:
+def _timeout_kind(exc: Timeout) -> str:
     if isinstance(exc, ConnectTimeout):
         return "connect"
     if isinstance(exc, ReadTimeout):

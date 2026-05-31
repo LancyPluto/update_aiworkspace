@@ -7,6 +7,7 @@ import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.community.dto.CommunityCollectionResponse;
 import com.aiminilab.aitoolmarket.community.dto.CommunityCreatorResponse;
 import com.aiminilab.aitoolmarket.community.dto.CommunityEventRequest;
+import com.aiminilab.aitoolmarket.community.dto.CommunityPostDiscoverRow;
 import com.aiminilab.aitoolmarket.community.dto.CommunityPostResponse;
 import com.aiminilab.aitoolmarket.community.dto.CommunityStatsResponse;
 import com.aiminilab.aitoolmarket.community.dto.PublicUserProfileResponse;
@@ -29,7 +30,11 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 public class CommunityServiceImpl implements CommunityService {
@@ -168,12 +173,10 @@ public class CommunityServiceImpl implements CommunityService {
         String normalizedSort = normalizeSort(sort);
         String normalizedTag = normalizeTag(tag);
         String normalizedTopic = normalizeTopic(topic);
-        List<CommunityPostResponse> list = postMapper.discover(
+        List<CommunityPost> posts = postMapper.discover(
                         normalizedModality, normalizedTag, normalizedTopic, null, null,
-                        normalizedSort, featured, normalizedPageSize, offset)
-                .stream()
-                .map(post -> response(post, viewerId))
-                .toList();
+                        normalizedSort, featured, normalizedPageSize, offset);
+        List<CommunityPostResponse> list = responseBatch(posts, viewerId);
         long total = postMapper.countDiscover(normalizedModality, normalizedTag, normalizedTopic, null, null, featured);
         return PageResponse.of(list, total, pageNo, pageSize);
     }
@@ -190,12 +193,10 @@ public class CommunityServiceImpl implements CommunityService {
         String normalizedKeyword = normalizeKeyword(keyword);
         String normalizedToolCode = normalizeToolCode(toolCode);
         String normalizedSort = normalizeSort(sort);
-        List<CommunityPostResponse> list = postMapper.discover(
+        List<CommunityPost> posts = postMapper.discover(
                         normalizedModality, normalizedTag, normalizedTopic, normalizedKeyword, normalizedToolCode,
-                        normalizedSort, featured, normalizedPageSize, offset)
-                .stream()
-                .map(post -> response(post, viewerId))
-                .toList();
+                        normalizedSort, featured, normalizedPageSize, offset);
+        List<CommunityPostResponse> list = responseBatch(posts, viewerId);
         long total = postMapper.countDiscover(normalizedModality, normalizedTag, normalizedTopic,
                 normalizedKeyword, normalizedToolCode, featured);
         return PageResponse.of(list, total, pageNo, pageSize);
@@ -237,10 +238,9 @@ public class CommunityServiceImpl implements CommunityService {
         publicUser(userId);
         int normalizedPageSize = PageResponse.normalizePageSize(pageSize);
         int offset = PageResponse.offset(pageNo, pageSize);
-        List<CommunityPostResponse> list = postMapper.findPublicByUserId(userId, normalizeModality(modality), normalizedPageSize, offset)
-                .stream()
-                .map(post -> response(post, viewerId))
-                .toList();
+        List<CommunityPostDiscoverRow> rows = postMapper.findPublicByUserIdWithAuthor(
+                userId, normalizeModality(modality), normalizedPageSize, offset);
+        List<CommunityPostResponse> list = responseBatch(rows, viewerId);
         long total = postMapper.countPublicByUserId(userId, normalizeModality(modality));
         return PageResponse.of(list, total, pageNo, pageSize);
     }
@@ -404,11 +404,9 @@ public class CommunityServiceImpl implements CommunityService {
         int offset = PageResponse.offset(pageNo, pageSize);
         String normalizedKeyword = normalizeKeyword(keyword);
         String normalizedTopic = normalizeTopic(topic);
-        List<CommunityPostResponse> list = postMapper.findForAdmin(userId, normalizeStatus(status), normalizeModality(modality),
-                        normalizedKeyword, normalizedTopic, featured, normalizeAuditStatus(auditStatus), normalizedPageSize, offset)
-                .stream()
-                .map(post -> response(post, null))
-                .toList();
+        List<CommunityPost> posts = postMapper.findForAdmin(userId, normalizeStatus(status), normalizeModality(modality),
+                        normalizedKeyword, normalizedTopic, featured, normalizeAuditStatus(auditStatus), normalizedPageSize, offset);
+        List<CommunityPostResponse> list = responseBatch(posts, null);
         long total = postMapper.countForAdmin(userId, normalizeStatus(status), normalizeModality(modality),
                 normalizedKeyword, normalizedTopic, featured, normalizeAuditStatus(auditStatus));
         return PageResponse.of(list, total, pageNo, pageSize);
@@ -598,10 +596,112 @@ public class CommunityServiceImpl implements CommunityService {
         );
     }
 
-    private CommunityPostResponse response(CommunityPost post, Long viewerId) {
+    private List<CommunityPostResponse> responseBatch(List<? extends CommunityPost> posts, Long viewerId) {
+        if (posts == null || posts.isEmpty()) {
+            return List.of();
+        }
+        if (posts.get(0) instanceof CommunityPostDiscoverRow) {
+            return posts.stream()
+                    .map(post -> {
+                        CommunityPostDiscoverRow row = (CommunityPostDiscoverRow) post;
+                        String authorNickname = row.getAuthorNickname();
+                        String authorAvatarUrl = row.getAuthorAvatarUrl();
+                        if (authorNickname == null || authorNickname.isBlank()) {
+                            User user = row.getUserId() == null ? null : userMapper.selectById(row.getUserId());
+                            authorNickname = resolveAuthorNickname(user, row.getUserId());
+                            if (authorAvatarUrl == null && user != null) {
+                                authorAvatarUrl = user.getAvatarUrl();
+                            }
+                        } else {
+                            authorNickname = normalizeAuthorNickname(authorNickname, row.getUserId());
+                        }
+                        return buildResponse(row, viewerId, authorNickname, authorAvatarUrl);
+                    })
+                    .toList();
+        }
+        List<Long> userIds = posts.stream()
+                .map(CommunityPost::getUserId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        Map<Long, User> usersById = userIds.isEmpty()
+                ? Map.of()
+                : userMapper.findByIds(userIds).stream()
+                .collect(Collectors.toMap(User::getId, Function.identity(), (left, right) -> left));
+        return posts.stream()
+                .map(post -> buildResponse(post, viewerId, usersById.get(post.getUserId())))
+                .toList();
+    }
+
+    private CommunityPostResponse buildResponse(CommunityPost post, Long viewerId, User author) {
+        return buildResponse(
+                post,
+                viewerId,
+                resolveAuthorNickname(author, post.getUserId()),
+                author == null ? null : author.getAvatarUrl()
+        );
+    }
+
+    private CommunityPostResponse buildResponse(CommunityPost post,
+                                              Long viewerId,
+                                              String authorNickname,
+                                              String authorAvatarUrl) {
         boolean liked = viewerId != null && postMapper.countLike(post.getId(), viewerId) > 0;
         boolean favorited = viewerId != null && postMapper.countFavorite(post.getId(), viewerId) > 0;
-        return CommunityPostResponse.from(post, liked, favorited, postMapper.findTags(post.getId()));
+        String promptSnapshot = resolvePromptSnapshot(post);
+        return CommunityPostResponse.from(
+                post,
+                liked,
+                favorited,
+                postMapper.findTags(post.getId()),
+                authorNickname,
+                authorAvatarUrl,
+                promptSnapshot
+        );
+    }
+
+    private String resolvePromptSnapshot(CommunityPost post) {
+        if (post.getPromptSnapshot() != null && !post.getPromptSnapshot().isBlank()) {
+            return post.getPromptSnapshot();
+        }
+        if (post.getTaskId() == null) {
+            return null;
+        }
+        return taskMapper.findById(post.getTaskId())
+                .map(task -> extractPrompt(task.getParamsJson()))
+                .filter(value -> value != null && !value.isBlank())
+                .orElse(null);
+    }
+
+    private CommunityPostResponse response(CommunityPost post, Long viewerId) {
+        User user = post.getUserId() == null ? null : userMapper.findById(post.getUserId()).orElse(null);
+        return buildResponse(post, viewerId, user);
+    }
+
+    private CommunityPostResponse response(CommunityPost post, Long viewerId, User author) {
+        return buildResponse(post, viewerId, author);
+    }
+
+    private String resolveAuthorNickname(User user, Long userId) {
+        if (user != null) {
+            if (user.getNickname() != null && !user.getNickname().isBlank()) {
+                return user.getNickname().trim();
+            }
+            if (user.getUsername() != null && !user.getUsername().isBlank()) {
+                return user.getUsername().trim();
+            }
+        }
+        return normalizeAuthorNickname(null, userId);
+    }
+
+    private String normalizeAuthorNickname(String nickname, Long userId) {
+        if (nickname != null && !nickname.isBlank()) {
+            return nickname.trim();
+        }
+        if (userId != null) {
+            return "用户" + userId;
+        }
+        return null;
     }
 
     private String resolveModality(AiTask task, String resourceType) {

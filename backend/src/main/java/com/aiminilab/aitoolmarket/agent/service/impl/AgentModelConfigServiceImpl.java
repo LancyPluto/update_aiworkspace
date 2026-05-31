@@ -157,14 +157,17 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         config.setProvider(providerTrimmed);
         config.setModelName(request.modelName().trim());
         config.setBaseUrl(blankToNull(request.baseUrl()));
+        config.setExtraAuthJson(mergeExtraAuthJson(request, existing));
         if (request.apiKey() != null && !request.apiKey().isBlank()) {
             config.setApiKey(request.apiKey().trim());
+        } else if (Boolean.TRUE.equals(request.clearApiKey())
+                || ("kling_video".equalsIgnoreCase(providerTrimmed) && shouldClearKlingApiKey(config.getExtraAuthJson(), existing))) {
+            config.setApiKey("");
         } else if (existing != null) {
             config.setApiKey(existing.getApiKey());
         } else {
             config.setApiKey("");
         }
-        config.setExtraAuthJson(mergeExtraAuthJson(request, existing));
         config.setMinimaxGroupId(blankToNull(request.minimaxGroupId()));
         config.setConsoleUrl(blankToNull(request.consoleUrl()));
         config.setBalanceUrl(blankToNull(request.balanceUrl()));
@@ -401,6 +404,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                 request.modelName(),
                 request.baseUrl(),
                 hasApiKey ? request.apiKey() : existing.getApiKey(),
+                request.clearApiKey(),
                 hasExtraAuth ? request.extraAuthJson() : existing.getExtraAuthJson(),
                 request.minimaxGroupId(),
                 request.consoleUrl(),
@@ -469,6 +473,45 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         } catch (com.fasterxml.jackson.core.JsonProcessingException exception) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "extraAuthJson must be valid JSON");
         }
+    }
+
+    private boolean shouldClearKlingApiKey(String extraAuthJson, AgentModelConfig existing) {
+        if (!hasKlingAccessSecretPair(extraAuthJson)) {
+            return false;
+        }
+        if (existing == null || existing.getApiKey() == null) {
+            return true;
+        }
+        String previous = existing.getApiKey().trim();
+        return previous.isEmpty() || !previous.contains(".") || previous.length() <= 8;
+    }
+
+    private boolean hasKlingAccessSecretPair(String extraAuthJson) {
+        if (extraAuthJson == null || extraAuthJson.isBlank()) {
+            return false;
+        }
+        try {
+            JsonNode parsed = objectMapper.readTree(extraAuthJson);
+            if (parsed == null || !parsed.isObject()) {
+                return false;
+            }
+            String accessKey = textValue(parsed.get("accessKey"), parsed.get("access_key"));
+            String secretKey = textValue(parsed.get("secretKey"), parsed.get("secret_key"));
+            return accessKey != null && secretKey != null;
+        } catch (com.fasterxml.jackson.core.JsonProcessingException exception) {
+            return false;
+        }
+    }
+
+    private String textValue(JsonNode primary, JsonNode fallback) {
+        JsonNode node = primary != null && primary.isTextual() && !primary.asText().isBlank()
+                ? primary
+                : fallback;
+        if (node == null || !node.isTextual()) {
+            return null;
+        }
+        String value = node.asText().trim();
+        return value.isBlank() || value.startsWith("replace-with-") ? null : value;
     }
 
     private AgentModelConfig findActiveOrThrow(Long id) {

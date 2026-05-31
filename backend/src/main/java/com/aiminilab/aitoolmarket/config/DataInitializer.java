@@ -395,6 +395,12 @@ public class DataInitializer implements CommandLineRunner {
                   tool_code VARCHAR(128),
                   tool_name VARCHAR(128),
                   status VARCHAR(32) NOT NULL DEFAULT 'PUBLISHED',
+                  featured TINYINT NOT NULL DEFAULT 0,
+                  pinned TINYINT NOT NULL DEFAULT 0,
+                  topic VARCHAR(64) NULL,
+                  same_style_count BIGINT NOT NULL DEFAULT 0,
+                  audit_status VARCHAR(32) NOT NULL DEFAULT 'APPROVED',
+                  audit_reason VARCHAR(255) NULL,
                   view_count BIGINT NOT NULL DEFAULT 0,
                   like_count BIGINT NOT NULL DEFAULT 0,
                   favorite_count BIGINT NOT NULL DEFAULT 0,
@@ -402,9 +408,20 @@ public class DataInitializer implements CommandLineRunner {
                   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                   UNIQUE KEY uk_community_posts_task (task_id),
                   KEY idx_community_posts_user_status_id (user_id, status, id),
-                  KEY idx_community_posts_status_id (status, id)
+                  KEY idx_community_posts_status_id (status, id),
+                  KEY idx_community_posts_discovery (status, pinned, featured, id),
+                  KEY idx_community_posts_modality_id (status, modality, id),
+                  KEY idx_community_posts_topic_id (status, topic, id),
+                  KEY idx_community_posts_popular (status, like_count, favorite_count, id),
+                  KEY idx_community_posts_same_style (status, same_style_count, id)
                 )
                 """);
+        ensureColumn("community_posts", "featured", "ALTER TABLE community_posts ADD COLUMN featured TINYINT NOT NULL DEFAULT 0");
+        ensureColumn("community_posts", "pinned", "ALTER TABLE community_posts ADD COLUMN pinned TINYINT NOT NULL DEFAULT 0");
+        ensureColumn("community_posts", "topic", "ALTER TABLE community_posts ADD COLUMN topic VARCHAR(64) NULL");
+        ensureColumn("community_posts", "same_style_count", "ALTER TABLE community_posts ADD COLUMN same_style_count BIGINT NOT NULL DEFAULT 0");
+        ensureColumn("community_posts", "audit_status", "ALTER TABLE community_posts ADD COLUMN audit_status VARCHAR(32) NOT NULL DEFAULT 'APPROVED'");
+        ensureColumn("community_posts", "audit_reason", "ALTER TABLE community_posts ADD COLUMN audit_reason VARCHAR(255) NULL");
         ensureTable("community_post_likes", """
                 CREATE TABLE community_post_likes (
                   id BIGINT PRIMARY KEY AUTO_INCREMENT,
@@ -423,12 +440,6 @@ public class DataInitializer implements CommandLineRunner {
                   UNIQUE KEY uk_community_post_favorites_user (post_id, user_id)
                 )
                 """);
-        ensureColumn("community_posts", "featured", "ALTER TABLE community_posts ADD COLUMN featured TINYINT NOT NULL DEFAULT 0");
-        ensureColumn("community_posts", "pinned", "ALTER TABLE community_posts ADD COLUMN pinned TINYINT NOT NULL DEFAULT 0");
-        ensureColumn("community_posts", "topic", "ALTER TABLE community_posts ADD COLUMN topic VARCHAR(64) NULL");
-        ensureColumn("community_posts", "same_style_count", "ALTER TABLE community_posts ADD COLUMN same_style_count BIGINT NOT NULL DEFAULT 0");
-        ensureColumn("community_posts", "audit_status", "ALTER TABLE community_posts ADD COLUMN audit_status VARCHAR(32) NOT NULL DEFAULT 'APPROVED'");
-        ensureColumn("community_posts", "audit_reason", "ALTER TABLE community_posts ADD COLUMN audit_reason VARCHAR(255) NULL");
         ensureColumn("community_posts", "detail_click_count", "ALTER TABLE community_posts ADD COLUMN detail_click_count BIGINT NOT NULL DEFAULT 0");
         ensureColumn("community_posts", "share_count", "ALTER TABLE community_posts ADD COLUMN share_count BIGINT NOT NULL DEFAULT 0");
         ensureColumn("community_posts", "quality_score", "ALTER TABLE community_posts ADD COLUMN quality_score BIGINT NOT NULL DEFAULT 0");
@@ -486,6 +497,11 @@ public class DataInitializer implements CommandLineRunner {
                   KEY idx_community_collection_items_user (user_id, collection_id, id)
                 )
                 """);
+        ensureIndex("community_posts", "idx_community_posts_discovery", "CREATE INDEX idx_community_posts_discovery ON community_posts(status, pinned, featured, id)");
+        ensureIndex("community_posts", "idx_community_posts_modality_id", "CREATE INDEX idx_community_posts_modality_id ON community_posts(status, modality, id)");
+        ensureIndex("community_posts", "idx_community_posts_topic_id", "CREATE INDEX idx_community_posts_topic_id ON community_posts(status, topic, id)");
+        ensureIndex("community_posts", "idx_community_posts_popular", "CREATE INDEX idx_community_posts_popular ON community_posts(status, like_count, favorite_count, id)");
+        ensureIndex("community_posts", "idx_community_posts_same_style", "CREATE INDEX idx_community_posts_same_style ON community_posts(status, same_style_count, id)");
     }
 
     private void ensureTable(String tableName, String ddl) {

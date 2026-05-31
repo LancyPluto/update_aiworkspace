@@ -1,5 +1,45 @@
-import { apiRequest } from "./client"
+import { ApiBusinessError, apiRequest } from "./client"
 import type { CommunityCollection, CommunityCreator, CommunityPost, PageResult, PublicUserProfile } from "./types"
+import {
+  collectMissingAuthorUserIds,
+  getCachedCommunityAuthorProfile,
+  mergeCommunityPostAuthor,
+  normalizeCommunityPost,
+  normalizeCommunityPosts,
+  rememberCommunityAuthorProfile,
+} from "@/utils/communityPostNormalize"
+
+async function enrichCommunityPostsWithAuthors(
+  posts: CommunityPost[],
+  options?: { token?: string | null },
+): Promise<CommunityPost[]> {
+  const missingUserIds = collectMissingAuthorUserIds(posts)
+  if (!missingUserIds.length) return posts
+
+  await Promise.all(
+    missingUserIds.map(async (userId) => {
+      try {
+        const profile = await fetchPublicUser(userId, options)
+        rememberCommunityAuthorProfile(profile)
+      } catch {
+        // Ignore missing profiles; cards fall back to userId label.
+      }
+    }),
+  )
+
+  return posts.map((post) => mergeCommunityPostAuthor(post, getCachedCommunityAuthorProfile(post.userId)))
+}
+
+function normalizeCommunityPage(page: PageResult<CommunityPost>, options?: { token?: string | null }) {
+  const normalized = {
+    ...page,
+    list: normalizeCommunityPosts(page.list as CommunityPost[]),
+  }
+  return enrichCommunityPostsWithAuthors(normalized.list, options).then((list) => ({
+    ...normalized,
+    list,
+  }))
+}
 
 export interface PublishCommunityPostRequest {
   taskId: number
@@ -30,11 +70,31 @@ export interface CommunityDiscoverQuery {
   toolCode?: string
 }
 
+/** 合并 dev 后旧后端尚未部署 /search、/collections 等路由时的 404 识别 */
+export function isCommunityEndpointMissing(error: unknown, pathFragment: string): boolean {
+  if (!(error instanceof ApiBusinessError)) return false
+  return error.message.includes(pathFragment) && error.message.includes("不存在")
+}
+
+function discoverQueryFromSearch(query?: CommunityDiscoverQuery): CommunityDiscoverQuery | undefined {
+  if (!query) return undefined
+  const tag = query.tag?.trim() || query.keyword?.trim() || undefined
+  return {
+    pageNo: query.pageNo,
+    pageSize: query.pageSize,
+    modality: query.modality,
+    sort: query.sort,
+    featured: query.featured,
+    tag,
+    topic: query.topic,
+  }
+}
+
 export function fetchCommunityPosts(options?: { token?: string | null; query?: CommunityDiscoverQuery }) {
   return apiRequest<PageResult<CommunityPost>>("GET", "/api/v1/community/posts", {
     token: options?.token,
     query: options?.query,
-  })
+  }).then((page) => normalizeCommunityPage(page, options))
 }
 
 export function searchCommunityPosts(options?: { token?: string | null; query?: CommunityDiscoverQuery }) {
@@ -42,6 +102,14 @@ export function searchCommunityPosts(options?: { token?: string | null; query?: 
     token: options?.token,
     query: options?.query,
   })
+    .then((page) => normalizeCommunityPage(page, options))
+    .catch((error) => {
+      if (!isCommunityEndpointMissing(error, "community/search")) throw error
+      return fetchCommunityPosts({
+        token: options?.token,
+        query: discoverQueryFromSearch(options?.query),
+      })
+    })
 }
 
 export function fetchCommunityTopicPosts(
@@ -77,10 +145,24 @@ export function trackCommunityEvent(
   })
 }
 
-export function fetchCommunityCollections(options?: { token?: string | null }) {
-  return apiRequest<CommunityCollection[]>("GET", "/api/v1/community/collections", {
-    token: options?.token,
-  })
+export interface CommunityCollectionsResult {
+  collections: CommunityCollection[]
+  /** false 表示当前后端尚未提供 /collections（合并 dev 后需重启后端） */
+  supported: boolean
+}
+
+export async function fetchCommunityCollections(options?: { token?: string | null }): Promise<CommunityCollectionsResult> {
+  try {
+    const collections = await apiRequest<CommunityCollection[]>("GET", "/api/v1/community/collections", {
+      token: options?.token,
+    })
+    return { collections, supported: true }
+  } catch (error) {
+    if (isCommunityEndpointMissing(error, "community/collections")) {
+      return { collections: [], supported: false }
+    }
+    throw error
+  }
 }
 
 export function createCommunityCollection(name: string, options?: { token?: string | null }) {
@@ -131,6 +213,9 @@ export function removeCommunityCollectionItem(
 export function fetchPublicUser(userId: number | string, options?: { token?: string | null }) {
   return apiRequest<PublicUserProfile>("GET", `/api/v1/community/users/${encodeURIComponent(String(userId))}`, {
     token: options?.token,
+  }).then((profile) => {
+    rememberCommunityAuthorProfile(profile)
+    return profile
   })
 }
 
@@ -145,20 +230,22 @@ export function fetchPublicUserPosts(
       token: options?.token,
       query: options?.query,
     },
-  )
+  ).then((page) => normalizeCommunityPage(page, options))
 }
 
 export function fetchCommunityPost(postId: number | string, options?: { token?: string | null }) {
   return apiRequest<CommunityPost>("GET", `/api/v1/community/posts/${encodeURIComponent(String(postId))}`, {
     token: options?.token,
   })
+    .then((post) => normalizeCommunityPost(post as CommunityPost))
+    .then((post) => enrichCommunityPostsWithAuthors([post], options).then((list) => list[0] ?? post))
 }
 
 export function publishCommunityPost(body: PublishCommunityPostRequest, options?: { token?: string | null }) {
   return apiRequest<CommunityPost>("POST", "/api/v1/community/posts", {
     token: options?.token,
     body,
-  })
+  }).then((post) => normalizeCommunityPost(post as CommunityPost))
 }
 
 export function updateCommunityPost(

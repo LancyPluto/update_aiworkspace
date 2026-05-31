@@ -433,21 +433,41 @@ class KlingVideoClient:
         }
 
     def _has_auth(self) -> bool:
-        if self.api_key and self.api_key.strip() and not self.api_key.startswith("replace-with-"):
+        if self._has_ak_sk_auth():
             return True
-        return bool(
-            self.access_key
-            and self.access_key.strip()
-            and self.secret_key
-            and self.secret_key.strip()
-            and not self.access_key.startswith("replace-with-")
-            and not self.secret_key.startswith("replace-with-")
-        )
+        api_key = (self.api_key or "").strip()
+        return bool(api_key and not api_key.startswith("replace-with-") and self._looks_like_jwt(api_key))
 
     def _bearer_token(self) -> str:
-        if self.api_key and self.api_key.strip() and not self.api_key.startswith("replace-with-"):
-            return self.api_key.strip()
-        return self._jwt_token()
+        if self._has_ak_sk_auth():
+            return self._jwt_token()
+        api_key = (self.api_key or "").strip()
+        if api_key and not api_key.startswith("replace-with-"):
+            if self._looks_like_jwt(api_key):
+                return api_key
+            raise KlingVideoError(
+                "Kling auth is misconfigured: API Key must be a JWT token, or configure "
+                'extraAuthJson as {"accessKey":"...","secretKey":"..."} (official AK/SK).'
+            )
+        raise KlingVideoError(
+            'Kling credentials are not configured. Set extraAuthJson to '
+            '{"accessKey":"...","secretKey":"..."} on the model config.'
+        )
+
+    @staticmethod
+    def _looks_like_jwt(value: str) -> bool:
+        parts = value.split(".")
+        return len(parts) == 3 and all(part.strip() for part in parts)
+
+    def _has_ak_sk_auth(self) -> bool:
+        access_key = (self.access_key or "").strip()
+        secret_key = (self.secret_key or "").strip()
+        return bool(
+            access_key
+            and secret_key
+            and not access_key.startswith("replace-with-")
+            and not secret_key.startswith("replace-with-")
+        )
 
     def _jwt_token(self) -> str:
         now = int(time.time())

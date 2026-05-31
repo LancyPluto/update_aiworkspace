@@ -17,7 +17,8 @@ WORKDIR /app
 
 # 安装系统依赖（默认使用国内 APT 镜像，可通过 build-arg APT_MIRROR 覆盖）
 COPY docker/debian-apt-mirror.sh /usr/local/bin/debian-apt-mirror.sh
-RUN chmod +x /usr/local/bin/debian-apt-mirror.sh \
+RUN sed -i 's/\r$//' /usr/local/bin/debian-apt-mirror.sh \
+    && chmod +x /usr/local/bin/debian-apt-mirror.sh \
     && APT_MIRROR="${APT_MIRROR}" sh /usr/local/bin/debian-apt-mirror.sh \
     && apt-get update && apt-get install -y \
     curl \

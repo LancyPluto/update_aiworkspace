@@ -167,6 +167,8 @@ export interface PublicUserProfile {
 export interface CommunityPost {
   id: number
   userId: number
+  authorNickname?: string | null
+  authorAvatarUrl?: string | null
   taskId: number
   modality: string
   coverUrl?: string | null
@@ -174,6 +176,7 @@ export interface CommunityPost {
   description?: string | null
   promptVisible: boolean
   prompt?: string | null
+  promptPreview?: string | null
   toolCode?: string | null
   toolName?: string | null
   status: string

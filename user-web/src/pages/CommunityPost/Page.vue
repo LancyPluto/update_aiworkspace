@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue"
 import { useRoute, useRouter } from "vue-router"
-import { ArrowLeft, Copy, Download, Heart, Loader2, Send, Star, UserRound } from "lucide-vue-next"
+import { ArrowLeft, Copy, Download, Heart, Loader2, Send, Star } from "lucide-vue-next"
+import UserAvatar from "@/components/UserAvatar.vue"
 import {
   favoriteCommunityPost,
   fetchCommunityPost,
@@ -17,6 +18,8 @@ import { getApiOrigin } from "@/api/client"
 import type { CommunityPost } from "@/api/types"
 import { useAuthStore } from "@/store/authStore"
 import { assetFromCommunityPost } from "@/utils/assetPreviewAdapter"
+import { communityDisplayTitle } from "@/utils/communityDisplay"
+import { resolveCommunityAuthorName, resolveCommunityAuthorAvatar, resolveCommunityPrompt } from "@/utils/communityPostNormalize"
 import { openDashboardWithAsset } from "@/utils/assetReplay"
 
 const route = useRoute()
@@ -36,6 +39,23 @@ const kind = computed(() => {
   if (modality.includes("audio")) return "audio"
   if (modality.includes("image")) return "image"
   return "text"
+})
+
+const authorName = computed(() => (post.value ? resolveCommunityAuthorName(post.value) : ""))
+
+const displayTitle = computed(() => {
+  if (!post.value) return ""
+  const prompt = resolveCommunityPrompt(post.value)
+  return communityDisplayTitle({
+    title: post.value.title,
+    prompt,
+    promptPreview: post.value.promptPreview || prompt,
+    topic: post.value.topic,
+    tags: post.value.tags,
+    toolName: post.value.toolName,
+    toolCode: post.value.toolCode,
+    kind: kind.value,
+  })
 })
 
 function mediaUrl(value?: string | null) {
@@ -111,7 +131,14 @@ async function addToInspiration() {
   if (!post.value || !auth.token) return router.push({ name: "Login", query: { redirect: route.fullPath } })
   collecting.value = true
   try {
-    const collections = await fetchCommunityCollections({ token: auth.token })
+    const { collections, supported } = await fetchCommunityCollections({ token: auth.token })
+    if (!supported) {
+      if (!post.value.favorited) {
+        await favoriteCommunityPost(post.value.id, { token: auth.token })
+        post.value = { ...post.value, favorited: true, favoriteCount: post.value.favoriteCount + 1 }
+      }
+      return
+    }
     const target = collections.find((item) => item.defaultCollection) || collections[0]
     if (target) {
       await addCommunityCollectionItem(target.id, post.value.id, { token: auth.token })
@@ -173,7 +200,7 @@ onMounted(() => void load())
 
       <aside class="post-panel">
         <p class="eyebrow">{{ post.modality }} creation</p>
-        <h1>{{ post.title }}</h1>
+        <h1>{{ displayTitle }}</h1>
         <p v-if="post.description" class="description">{{ post.description }}</p>
 
         <div class="action-row">
@@ -202,8 +229,8 @@ onMounted(() => void load())
           <div>
             <span>作者</span>
             <button class="author-link" type="button" @click="router.push(`/u/${post.userId}`)">
-              <UserRound class="h-4 w-4" />
-              查看公开主页
+              <UserAvatar :src="resolveCommunityAuthorAvatar(post)" :name="authorName" size="sm" />
+              {{ authorName }}
             </button>
           </div>
           <div>
@@ -363,12 +390,12 @@ onMounted(() => void load())
   align-items: center;
   gap: 8px;
   border: 1px solid rgb(255 255 255 / 0.1);
-  border-radius: 8px;
+  border-radius: 999px;
   background: rgb(255 255 255 / 0.055);
-  color: rgb(255 255 255 / 0.72);
-  padding: 8px 11px;
+  color: rgb(255 255 255 / 0.82);
+  padding: 6px 12px 6px 6px;
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .prompt-copy {

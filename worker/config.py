@@ -106,9 +106,33 @@ def resolve_siliconflow_api_key(model_config: dict[str, Any] | None = None) -> s
     return env_key
 
 
+def _kling_ak_sk_from_extra_auth(extra_auth: Any) -> tuple[str, str]:
+    if extra_auth is None or not str(extra_auth).strip():
+        return "", ""
+    try:
+        auth_data = json.loads(str(extra_auth))
+    except json.JSONDecodeError:
+        return "", ""
+    if not isinstance(auth_data, dict):
+        return "", ""
+    access_key = auth_data.get("accessKey") or auth_data.get("access_key")
+    secret_key = auth_data.get("secretKey") or auth_data.get("secret_key")
+    resolved_access = str(access_key).strip() if access_key is not None else ""
+    resolved_secret = str(secret_key).strip() if secret_key is not None else ""
+    if resolved_access.startswith("replace-with-") or resolved_secret.startswith("replace-with-"):
+        return "", ""
+    return resolved_access, resolved_secret
+
+
 def resolve_kling_api_key(model_config: dict[str, Any] | None = None) -> str:
-    """Prefer backend model config apiKey, then KLING_API_KEY env."""
+    """Prefer backend model config apiKey, then KLING_API_KEY env.
+
+    When extraAuthJson already contains AK/SK, ignore apiKey so Kling always uses JWT.
+    """
     if model_config:
+        access_key, secret_key = _kling_ak_sk_from_extra_auth(model_config.get("extraAuthJson"))
+        if access_key and secret_key:
+            return ""
         configured = model_config.get("apiKey")
         if configured is not None:
             configured_text = str(configured).strip()
@@ -127,19 +151,11 @@ def resolve_kling_credentials(model_config: dict[str, Any] | None = None) -> tup
     access_key = ""
     secret_key = ""
     if model_config:
-        extra_auth = model_config.get("extraAuthJson")
-        if extra_auth is not None and str(extra_auth).strip():
-            try:
-                auth_data = json.loads(str(extra_auth))
-            except json.JSONDecodeError:
-                auth_data = {}
-            if isinstance(auth_data, dict):
-                configured_access = auth_data.get("accessKey") or auth_data.get("access_key")
-                configured_secret = auth_data.get("secretKey") or auth_data.get("secret_key")
-                if configured_access is not None:
-                    access_key = str(configured_access).strip()
-                if configured_secret is not None:
-                    secret_key = str(configured_secret).strip()
+        parsed_access, parsed_secret = _kling_ak_sk_from_extra_auth(model_config.get("extraAuthJson"))
+        if parsed_access:
+            access_key = parsed_access
+        if parsed_secret:
+            secret_key = parsed_secret
         configured_access = model_config.get("apiKey")
         configured_secret = model_config.get("minimaxGroupId")
         if configured_access is not None:

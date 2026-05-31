@@ -1,6 +1,8 @@
 import type { CommunityPost, TaskDetail } from "@/api/types"
 import type { AssetPreviewItem } from "@/types/assetPreview"
 import type { ResultBlock } from "@/types/result"
+import { communityDisplaySubtitle, communityDisplayTitle } from "@/utils/communityDisplay"
+import { resolveCommunityAuthorName, resolveCommunityAuthorAvatar, resolveCommunityPrompt } from "@/utils/communityPostNormalize"
 import { buildTaskResultBlocks } from "@/utils/taskResultBlocks"
 
 export function primaryResultBlock(blocks: ResultBlock[]): ResultBlock | null {
@@ -70,19 +72,36 @@ export function assetFromTask(
 
 export function assetFromCommunityPost(post: CommunityPost, url?: string): AssetPreviewItem {
   const kind = communityKind(post.modality)
+  const resolvedPrompt = resolveCommunityPrompt(post)
+  const displayInput = {
+    title: post.title,
+    subtitle: post.description || undefined,
+    description: post.description || undefined,
+    prompt: resolvedPrompt || undefined,
+    promptPreview: post.promptPreview || resolvedPrompt || undefined,
+    topic: post.topic,
+    tags: post.tags || [],
+    toolName: post.toolName,
+    toolCode: post.toolCode,
+    kind,
+  }
+  const authorName = resolveCommunityAuthorName(post)
   return {
     id: `community-${post.id}`,
     source: "community",
     kind,
-    title: post.title,
-    subtitle: post.description || post.toolName || post.toolCode || undefined,
+    title: communityDisplayTitle(displayInput),
+    subtitle: communityDisplaySubtitle({ ...displayInput, authorName: undefined }) || undefined,
     url: url || post.coverUrl || undefined,
-    prompt: post.promptVisible ? post.prompt || undefined : undefined,
-    rawText: kind === "text" ? post.prompt || post.description || post.title : undefined,
+    prompt: resolvedPrompt || undefined,
+    rawText: kind === "text" ? resolvedPrompt || post.description || post.title : undefined,
     taskId: post.taskId,
     toolName: post.toolName || undefined,
     toolCode: post.toolCode || undefined,
     communityPostId: post.id,
+    authorName: authorName || undefined,
+    authorAvatarUrl: resolveCommunityAuthorAvatar(post) || undefined,
+    authorUserId: post.userId,
     promptVisible: post.promptVisible,
     modality: post.modality,
     topic: post.topic,
