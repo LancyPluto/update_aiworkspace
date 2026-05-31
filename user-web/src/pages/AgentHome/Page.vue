@@ -1,8 +1,9 @@
 <script setup lang="ts">
-  import { computed, onMounted, ref, watch } from "vue"
+  import { computed, nextTick, onMounted, ref, watch } from "vue"
   import { ChevronLeft, ChevronRight, Loader2, Plus, Sparkles, Trash2 } from "lucide-vue-next"
   import AppShell from "@/components/AppShell.vue"
   import AgentChatPane from "./AgentChatPane.vue"
+  import AgentThemePicker from "./AgentThemePicker.vue"
   import { confirmDelete } from "@/composables/useConfirmDelete"
   import { useAuthStore } from "@/store/authStore"
   import {
@@ -12,6 +13,7 @@
     fetchAgentSessions,
   } from "@/api"
   import type { AgentModelConfig, AgentSession } from "@/api/types"
+  import { applyStoredAgentTheme } from "@/utils/agentTheme"
 
   const auth = useAuthStore()
   const sessions = ref<AgentSession[]>([])
@@ -190,6 +192,7 @@
     const saved = localStorage.getItem(AGENT_SESSION_SIDEBAR_KEY)
     if (saved === "0") sessionSidebarOpen.value = false
     if (saved === "1") sessionSidebarOpen.value = true
+    void nextTick(() => applyStoredAgentTheme())
     void loadAgentModels()
     void loadSessions()
   })
@@ -239,6 +242,8 @@
             </div>
           </section>
         </div>
+
+        <AgentThemePicker />
       </aside>
 
       <section class="chat-pane">
@@ -317,7 +322,7 @@
   .agent-sidebar {
     border-right: 0;
     background:
-      radial-gradient(circle at 20% 8%, rgb(176 92 255 / 0.10), transparent 28%),
+      radial-gradient(circle at 20% 8%, var(--agent-bg-mesh-1, rgb(176 92 255 / 0.10)), transparent 28%),
       #121214;
     padding: 16px 12px;
     min-width: 0;
@@ -373,21 +378,21 @@
   .new-chat {
     width: 100%;
     height: 42px;
-    border: 1px solid rgb(176 92 255 / 0.28);
-    background: linear-gradient(135deg, rgb(176 92 255 / 0.22), rgb(255 255 255 / 0.055) 54%, rgb(34 211 238 / 0.07));
+    border: 1px solid var(--agent-accent-soft);
+    background: linear-gradient(135deg, var(--agent-accent-soft), rgb(255 255 255 / 0.055) 54%, var(--agent-bg-mesh-2));
     color: rgb(255 255 255 / 0.88);
     font-size: 14px;
     font-weight: 700;
     cursor: pointer;
     margin-top: 32px;
-    box-shadow: 0 14px 44px rgb(176 92 255 / 0.12), 0 10px 24px rgb(0 0 0 / 0.28);
+    box-shadow: 0 14px 44px var(--agent-accent-glow), 0 10px 24px rgb(0 0 0 / 0.28);
     transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
   }
 
   .new-chat:hover {
-    border-color: rgb(176 92 255 / 0.48);
+    border-color: var(--agent-accent);
     transform: translateY(-1px);
-    box-shadow: 0 18px 56px rgb(176 92 255 / 0.18), 0 10px 24px rgb(0 0 0 / 0.32);
+    box-shadow: 0 18px 56px var(--agent-accent-glow), 0 10px 24px rgb(0 0 0 / 0.32);
   }
 
   .sidebar-error {
@@ -435,7 +440,7 @@
 
   .session-row.active {
     background: rgb(255 255 255 / 0.052);
-    box-shadow: inset 2px 0 0 rgb(176 92 255 / 0.78);
+    box-shadow: inset 2px 0 0 var(--agent-accent);
   }
 
   .session-item {
@@ -522,11 +527,11 @@
     display: grid;
     place-items: center;
     border-radius: 22px;
-    border: 1px solid rgb(176 92 255 / 0.32);
+    border: 1px solid var(--agent-accent-soft);
     background:
-      radial-gradient(circle at 65% 25%, rgb(176 92 255 / 0.34), transparent 45%),
+      radial-gradient(circle at 65% 25%, var(--agent-accent-soft), transparent 45%),
       rgb(255 255 255 / 0.045);
-    color: rgb(210 170 255);
+    color: var(--agent-accent-light);
   }
 
   .chat-pane-empty h2 {
@@ -539,8 +544,8 @@
     margin-top: 22px;
     height: 40px;
     padding: 0 16px;
-    border: 1px solid rgb(176 92 255 / 0.36);
-    background: rgb(176 92 255 / 0.24);
+    border: 1px solid var(--agent-accent-soft);
+    background: var(--agent-accent-soft);
     color: #fff;
     font-size: 14px;
     cursor: pointer;

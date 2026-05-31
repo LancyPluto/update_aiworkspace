@@ -1,0 +1,13 @@
+.public-profile-page {
+  --profile-accent: rgb(176 92 255);
+  --profile-accent-light: rgb(205 132 255);
+  --profile-accent-dark: rgb(115 72 255);
+  --profile-accent-soft: rgb(176 92 255 / 0.14);
+  --profile-accent-glow: rgb(176 92 255 / 0.22);
+  --profile-mesh-1: rgb(176 92 255 / 0.095);
+  --profile-mesh-2: rgb(34 211 238 / 0.045);
+  --profile-mesh-3: rgb(255 255 255 / 0.018);
+  --profile-glass-bg: rgb(255 255 255 / 0.06);
+  --profile-card-hover-shadow: 0 20px 50px rgb(176 92 255 / 0.18), 0 8px 24px rgb(0 0 0 / 0.35);
+  --profile-send-gradient: linear-gradient(135deg, rgb(205 132 255), rgb(176 92 255) 48%, rgb(115 72 255));
+}

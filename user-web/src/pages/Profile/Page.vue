@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from "vue"
 import { Camera, Check, ExternalLink, Loader2, Shield, Sparkles, ToggleLeft, Wallet } from "lucide-vue-next"
 import AppShell from "@/components/AppShell.vue"
 import UserAvatar from "@/components/UserAvatar.vue"
+import ProfileThemePicker from "@/pages/PublicProfile/ProfileThemePicker.vue"
 import { fetchCreditAccount } from "@/api/creditApi"
 import { fetchTasks } from "@/api/taskApi"
 import type { CreditAccount } from "@/api/types"
@@ -215,6 +216,7 @@ onMounted(async () => {
               <span>默认公开提示词</span>
               <input v-model="promptPublicByDefault" type="checkbox" />
             </label>
+            <ProfileThemePicker />
             <div class="settings-actions">
               <button type="button" class="secondary-action" @click="$router.push(publicProfileUrl)">
                 <ExternalLink class="h-4 w-4" />

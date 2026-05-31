@@ -3,28 +3,29 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue"
 import {
   AlertTriangle,
   Check,
-  Copy,
-  Database,
-  FileText,
   Loader2,
-  Maximize2,
-  Minimize2,
   Pencil,
   Plus,
   RefreshCw,
-  Send,
   Sparkles,
   Store,
   Trash2,
-  Upload,
   X,
-  StopCircle
 } from "lucide-vue-next"
 import RunTimeline from "./RunTimeline.vue"
 import { filterUserFacingRunEvents } from "./runTimelineEvents"
-import ChatMessage from "./ChatMessage.vue"
+import AgentComposer from "./AgentComposer.vue"
+import AgentMessageRow from "./AgentMessageRow.vue"
+import AgentAvatar from "./AgentAvatar.vue"
+import AgentAmbientBackground from "./AgentAmbientBackground.vue"
+import ConversationScrollNav from "./ConversationScrollNav.vue"
+import ConversationPhaseTimeline from "./ConversationPhaseTimeline.vue"
 import AssetPreviewModal from "@/components/AssetPreviewModal.vue"
-import UserAvatar from "@/components/UserAvatar.vue"
+import {
+  buildConversationPhases,
+  buildScrollNavNodes,
+} from "@/utils/conversationPhases"
+import type { AgentAvatarState } from "./AgentAvatar.vue"
 import { useAuthStore } from "@/store/authStore"
 import {
   ApiBusinessError,
@@ -127,9 +128,11 @@ const editingMessageDraft = ref("")
 const editingRegenerating = ref(false)
 const copiedMessageId = ref<number | null>(null)
 const bottomRef = ref<HTMLElement | null>(null)
-const fileInputRef = ref<HTMLInputElement | null>(null)
-const composerTextareaRef = ref<HTMLTextAreaElement | null>(null)
-const composerExpanded = ref(false)
+const messageContainerRef = ref<HTMLElement | null>(null)
+const composerRef = ref<InstanceType<typeof AgentComposer> | null>(null)
+const scrollOffset = ref(0)
+const stickToBottom = ref(true)
+const navLayoutTick = ref(0)
 const messagesKey = computed(() => `agent_messages_${props.sessionId}`)
 let runStreamAbort: AbortController | null = null
 let runStatusWatchdog: number | null = null
@@ -210,6 +213,41 @@ const groupedMemoryItems = computed(() => {
     }))
     .filter((group) => group.items.length > 0)
 })
+
+const ambientState = computed(() => {
+  if (runConnectionStatus.value === "awaiting_confirmation") return "awaiting_confirmation" as const
+  if (hasActiveRun.value || showGenerationLoading.value) return "thinking" as const
+  return "idle" as const
+})
+
+const conversationPhases = computed(() =>
+  buildConversationPhases(messages.value, events.value),
+)
+
+const scrollNavNodes = computed(() => {
+  void navLayoutTick.value
+  const container = messageContainerRef.value
+  if (!container) return []
+  const scrollHeight = container.scrollHeight
+  const offsets = new Map<number, number>()
+  for (const message of messages.value) {
+    const el = container.querySelector(`[data-message-id="${message.id}"]`) as HTMLElement | null
+    if (el) offsets.set(message.id, el.offsetTop)
+  }
+  return buildScrollNavNodes(messages.value, events.value, scrollHeight, offsets)
+})
+
+function resolveAssistantAvatarState(message: AgentMessage): AgentAvatarState {
+  if (message.id === streamingAssistantMessageId.value && hasActiveRun.value) return "streaming"
+  const lastAssistant = [...messages.value].reverse().find((m) => m.role === "ASSISTANT")
+  if (
+    lastAssistant?.id === message.id &&
+    (showGenerationLoading.value || runConnectionStatus.value === "running")
+  ) {
+    return "thinking"
+  }
+  return "idle"
+}
 
 function modelLabel(model: AgentModelConfig) {
   return model.displayName || model.modelName || model.configCode || `Model ${model.id}`
@@ -317,7 +355,8 @@ async function loadPane() {
     await resumePendingRunForSession()
   } finally {
     paneLoading.value = false
-    await scrollBottom()
+    stickToBottom.value = true
+    await scrollBottom(true)
   }
 }
 
@@ -524,10 +563,6 @@ async function removeMemory(item: AgentWorkspaceMemoryItem) {
   }
 }
 
-function openFilePicker() {
-  fileInputRef.value?.click()
-}
-
 async function handleFileSelected(event: Event) {
   const target = event.target as HTMLInputElement
   const selected = target.files?.[0]
@@ -559,6 +594,7 @@ async function submitMessage(content = input.value) {
   const text = content.trim()
   if (!text && files.value.length === 0) return
   if (!props.token || sending.value || editingRegenerating.value || hasActiveRun.value) return
+  stickToBottom.value = true
   if (props.modelsLoading) {
     agentError.value = "模型列表仍在加载，请稍等一下再发送。"
     return
@@ -1279,10 +1315,6 @@ function containsMediaResult(value: unknown): boolean {
   return Object.values(record).some(containsMediaResult)
 }
 
-function messageClass(role: string) {
-  return role === "USER" ? "agent-message user" : "agent-message assistant"
-}
-
 function normalizeModality(value?: string | null) {
   return (value || "TEXT").trim().toUpperCase()
 }
@@ -1349,38 +1381,39 @@ async function unpublishPreviewAsset(asset: AssetPreviewItem) {
   }
 }
 
-function formatFileSize(size: number) {
-  if (size < 1024) return `${size} B`
-  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
-  return `${(size / 1024 / 1024).toFixed(1)} MB`
-}
-
-function toggleComposerExpanded() {
-  composerExpanded.value = !composerExpanded.value
-  void nextTick(() => {
-    const el = composerTextareaRef.value
-    if (el) el.style.removeProperty("height")
-    adjustComposerTextareaHeight()
-  })
-}
-
 function adjustComposerTextareaHeight() {
-  const el = composerTextareaRef.value
-  if (!el) return
-  const minH = composerExpanded.value ? 120 : 28
-  const maxH = composerExpanded.value ? Math.min(window.innerHeight * 0.5, 420) : 150
-  el.style.overflowY = "hidden"
-  el.style.height = "0px"
-  void el.offsetHeight
-  const scrollH = el.scrollHeight
-  const target = Math.min(Math.max(scrollH, minH), maxH)
-  el.style.height = `${target}px`
-  el.style.overflowY = scrollH > maxH ? "auto" : "hidden"
+  composerRef.value?.adjustComposerTextareaHeight()
 }
 
-async function scrollBottom() {
+function isNearBottom(threshold = 120) {
+  const el = messageContainerRef.value
+  if (!el) return true
+  return el.scrollHeight - el.scrollTop - el.clientHeight <= threshold
+}
+
+function onMessageContainerScroll() {
+  const el = messageContainerRef.value
+  if (!el) return
+  scrollOffset.value = el.scrollTop
+  stickToBottom.value = isNearBottom()
+}
+
+function scheduleNavLayoutUpdate() {
+  navLayoutTick.value += 1
+}
+
+function navigateToMessage(messageId: number) {
+  const container = messageContainerRef.value
+  if (!container) return
+  const el = container.querySelector(`[data-message-id="${messageId}"]`) as HTMLElement | null
+  el?.scrollIntoView({ behavior: "smooth", block: "center" })
+}
+
+async function scrollBottom(force = false) {
+  if (!force && !stickToBottom.value) return
   await nextTick()
   bottomRef.value?.scrollIntoView({ block: "end" })
+  scheduleNavLayoutUpdate()
 }
 
 function showError(message: string) {
@@ -1391,12 +1424,19 @@ watch(input, () => {
   void nextTick(() => adjustComposerTextareaHeight())
 })
 
-watch(composerExpanded, () => {
-  void nextTick(() => adjustComposerTextareaHeight())
+watch(messages, () => {
+  void nextTick(() => scheduleNavLayoutUpdate())
 })
 
+watch(
+  () => props.sessionId,
+  () => {
+    stickToBottom.value = true
+    scrollOffset.value = 0
+  },
+)
+
 onMounted(() => {
-  window.addEventListener("resize", adjustComposerTextareaHeight)
   void loadPane()
   void loadPreviewTools()
   void nextTick(() => adjustComposerTextareaHeight())
@@ -1405,7 +1445,6 @@ onMounted(() => {
 onUnmounted(() => {
   stopRunEventStream()
   stopRunStatusWatchdog()
-  window.removeEventListener("resize", adjustComposerTextareaHeight)
 })
 
 defineExpose({
@@ -1416,8 +1455,19 @@ defineExpose({
 
 <template>
   <div class="agent-chat-pane">
-    <!-- 聊天内容区域（内部独立滚动）-->
-    <div class="message-container">
+    <AgentAmbientBackground :ambient-state="ambientState" :scroll-offset="scrollOffset" />
+
+    <div
+      ref="messageContainerRef"
+      class="message-container"
+      @scroll.passive="onMessageContainerScroll"
+    >
+      <ConversationScrollNav
+        v-if="!paneLoading && messages.length > 0"
+        :nodes="scrollNavNodes"
+        @navigate="navigateToMessage"
+      />
+
       <div v-if="paneLoading" class="empty-state">
         <Loader2 class="h-5 w-5 animate-spin" />
       </div>
@@ -1438,109 +1488,34 @@ defineExpose({
           <div v-if="shouldShowTimeDivider(message, index)" class="time-divider">
             {{ messageDividerTime(message.createdAt) }}
           </div>
-        <article :class="messageClass(message.role)">
-          <div class="avatar">
-            <img v-if="message.role !== 'USER'" src="/logo.svg" alt="AI" />
-            <UserAvatar
-              v-else
-              :src="auth.user?.avatarUrl"
-              :name="auth.user?.nickname || auth.user?.username || '我'"
-              size="sm"
-            />
-          </div>
-          <div class="message-main">
-            <span class="message-time">{{ messageTime(message.createdAt) }}</span>
-            <div class="bubble">
-              <div v-if="editingMessageId === message.id" class="message-edit-box">
-                <textarea
-                  v-model="editingMessageDraft"
-                  class="message-edit-input"
-                  rows="3"
-                  :disabled="editingRegenerating"
-                  @keydown.enter.exact.prevent="submitEditedMessage(message)"
-                  @keydown.esc.prevent="cancelEditMessage"
-                />
-                <div class="message-edit-actions">
-                  <button
-                    type="button"
-                    class="message-action-btn"
-                    title="取消"
-                    aria-label="取消修改"
-                    :disabled="editingRegenerating"
-                    @click="cancelEditMessage"
-                  >
-                    <X class="h-4 w-4" />
-                  </button>
-                  <button
-                    type="button"
-                    class="message-action-btn primary"
-                    title="保存并重新发送"
-                    aria-label="保存并重新发送"
-                    :disabled="editingRegenerating || !editingMessageDraft.trim()"
-                    @click="submitEditedMessage(message)"
-                  >
-                    <Loader2 v-if="editingRegenerating" class="h-4 w-4 animate-spin" />
-                    <Check v-else class="h-4 w-4" />
-                  </button>
-                </div>
-              </div>
-              <ChatMessage
-                v-else
-                :message="message.contentText"
-                :is-user="message.role === 'USER'"
-                :streaming="message.id === streamingAssistantMessageId && hasActiveRun"
-                @preview="openAssetPreview"
-              />
-            </div>
-            <div class="message-actions" :class="{ 'message-actions--user': message.role === 'USER' }">
-              <button
-                type="button"
-                class="message-action-btn"
-                :title="copiedMessageId === message.id ? '已复制' : '复制'"
-                :aria-label="copiedMessageId === message.id ? '已复制' : '复制消息'"
-                @click="copyMessage(message)"
-              >
-                <Check v-if="copiedMessageId === message.id" class="h-4 w-4" />
-                <Copy v-else class="h-4 w-4" />
-              </button>
-              <button
-                v-if="message.role === 'USER'"
-                type="button"
-                class="message-action-btn"
-                title="修改"
-                aria-label="修改消息"
-                :disabled="hasActiveRun || sending || editingRegenerating || regeneratingMessageId != null"
-                @click="startEditMessage(message)"
-              >
-                <Pencil class="h-4 w-4" />
-              </button>
-              <button
-                v-if="message.role === 'ASSISTANT' && message.runId"
-                type="button"
-                class="message-action-btn"
-                title="重新生成"
-                aria-label="重新生成回复"
-                :disabled="hasActiveRun || sending || editingRegenerating || regeneratingMessageId != null || modelsLoading || !modelConfigId"
-                @click="regenerateAssistantMessage(message)"
-              >
-                <Loader2 v-if="regeneratingMessageId === message.id" class="h-4 w-4 animate-spin" />
-                <RefreshCw v-else class="h-4 w-4" />
-              </button>
-            </div>
-            <div
-              v-if="message.role === 'USER' && message.editedAt"
-              class="message-meta message-meta--user"
-            >
-              已编辑
-            </div>
-          </div>
-        </article>
+          <AgentMessageRow
+            :message="message"
+            :index="index"
+            :user-avatar-url="auth.user?.avatarUrl"
+            :user-display-name="auth.user?.nickname || auth.user?.username || '我'"
+            :editing-message-id="editingMessageId"
+            v-model:editing-message-draft="editingMessageDraft"
+            :editing-regenerating="editingRegenerating"
+            :copied-message-id="copiedMessageId"
+            :regenerating-message-id="regeneratingMessageId"
+            :streaming-message-id="streamingAssistantMessageId"
+            :has-active-run="hasActiveRun"
+            :sending="sending"
+            :models-loading="modelsLoading"
+            :model-config-id="modelConfigId"
+            :avatar-state="message.role === 'ASSISTANT' ? resolveAssistantAvatarState(message) : undefined"
+            :is-streaming="message.id === streamingAssistantMessageId && hasActiveRun"
+            @copy="copyMessage"
+            @start-edit="startEditMessage"
+            @cancel-edit="cancelEditMessage"
+            @submit-edit="submitEditedMessage"
+            @regenerate="regenerateAssistantMessage"
+            @preview="openAssetPreview"
+          />
         </template>
 
         <article v-if="showGenerationLoading" class="agent-message assistant generating-message">
-          <div class="avatar">
-            <img src="/logo.svg" alt="AI" />
-          </div>
+          <AgentAvatar state="thinking" />
           <div class="bubble generating-bubble">
             <div class="generating-orbit">
               <Sparkles class="h-4 w-4" />
@@ -1559,9 +1534,7 @@ defineExpose({
         </article>
 
         <article v-if="visibleRunTimelineEvents.length" class="agent-message assistant run-progress">
-          <div class="avatar">
-            <img src="/logo.svg" alt="AI" />
-          </div>
+          <AgentAvatar state="thinking" />
           <div class="bubble">
             <RunTimeline :events="events" :inline-mode="true" />
           </div>
@@ -1664,107 +1637,45 @@ defineExpose({
       </template>
     </div>
 
-    <!-- 输入框区域（固定在底部，不滚动）-->
-    <form class="composer" @submit.prevent="submitMessage()">
-      <input ref="fileInputRef" type="file" class="sr-only" @change="handleFileSelected" />
+    <div v-if="!paneLoading && messages.length > 0" class="chat-floating-actions">
+      <ConversationPhaseTimeline
+        :phases="conversationPhases"
+        @navigate="navigateToMessage"
+      />
+      <button
+        v-if="!stickToBottom"
+        type="button"
+        class="scroll-to-bottom"
+        aria-label="回到底部"
+        @click="stickToBottom = true; scrollBottom(true)"
+      >
+        ↓
+      </button>
+    </div>
 
-      <div class="composer-model-row">
-        <div class="composer-model-copy">
-          <span class="composer-model-kicker">Agent 模型</span>
-          <strong v-if="selectedAgentModel">{{ modelLabel(selectedAgentModel) }}</strong>
-          <strong v-else>{{ modelsLoading ? "模型加载中" : "未选择模型" }}</strong>
-          <small v-if="selectedAgentModel">{{ modelMeta(selectedAgentModel) }}</small>
-        </div>
-        <select
-          class="composer-model-select"
-          :value="modelConfigId ?? ''"
-          :disabled="modelsLoading || hasActiveRun || sending || editingRegenerating || regeneratingMessageId != null || agentModels.length === 0"
-          @change="changeModel(($event.target as HTMLSelectElement).value)"
-        >
-          <option v-if="modelsLoading" value="">加载中...</option>
-          <option v-else-if="agentModels.length === 0" value="">暂无可选模型</option>
-          <option v-for="model in agentModels" :key="model.id" :value="model.id">
-            {{ modelLabel(model) }}
-          </option>
-        </select>
-      </div>
-
-      <!-- 上传的文件显示在输入框内部 -->
-      <div v-if="files.length > 0" class="inner-file-list">
-        <div v-for="file in files" :key="file.id" class="inner-file-item">
-          <FileText class="h-4 w-4" />
-          <div class="inner-file-info">
-            <span class="inner-file-name">{{ file.originalFilename }}</span>
-            <span class="inner-file-size">{{ formatFileSize(file.fileSize) }}</span>
-          </div>
-          <button
-            type="button"
-            class="inner-file-close"
-            :disabled="removingFileId === file.id"
-            aria-label="移除附件"
-            @click.stop="removeFile(file)"
-          >
-            <Loader2 v-if="removingFileId === file.id" class="h-3 w-3 animate-spin" />
-            <X v-else class="h-3 w-3" />
-          </button>
-        </div>
-      </div>
-
-      <div class="input-wrap">
-        <textarea
-          ref="composerTextareaRef"
-          v-model="input"
-          rows="1"
-          class="chat-input"
-          :class="{ 'input-expand': composerExpanded }"
-          :placeholder="hasActiveRun || editingRegenerating || regeneratingMessageId != null ? 'Agent 正在处理当前请求' : '输入消息，回车发送'"
-          :disabled="hasActiveRun || editingRegenerating || regeneratingMessageId != null"
-          @keydown.enter.exact.prevent="submitMessage()"
-        />
-        <button
-          class="expand-btn"
-          type="button"
-          :disabled="hasActiveRun || editingRegenerating || regeneratingMessageId != null"
-          @click="toggleComposerExpanded"
-        >
-          <Minimize2 v-if="composerExpanded" class="h-4 w-4" />
-          <Maximize2 v-else class="h-4 w-4" />
-        </button>
-      </div>
-
-      <div class="toolbar-row">
-        <div class="left-tools">
-          <button type="button" class="tool-btn" :disabled="uploading || sending || editingRegenerating || regeneratingMessageId != null || hasActiveRun" @click="openFilePicker">
-            <Upload class="h-4 w-4" />
-            附件
-          </button>
-          <button type="button" class="tool-btn">
-            <Sparkles class="h-4 w-4" />
-            深度思考
-          </button>
-          <button type="button" class="tool-btn">
-            <Store class="h-4 w-4" />
-            智能搜索
-          </button> 
-          <button type="button" class="tool-btn" @click="openMemoryPanel">
-            <Database class="h-4 w-4" />
-            记忆
-          </button>
-        </div>
-
-        <button
-          type="button"
-          class="send-circle-btn"
-          :class="{ stop: sending || hasActiveRun }"
-          :disabled="editingRegenerating || regeneratingMessageId != null || ((!sending && !hasActiveRun && ((!input.trim() && !files.length) || modelsLoading || !modelConfigId)) || cancellingRun)"
-          @click="(sending || hasActiveRun) ? cancelCurrentRun() : submitMessage()"
-        >
-          <Loader2 v-if="cancellingRun" class="h-4 w-4 animate-spin" />
-          <StopCircle v-else-if="sending || hasActiveRun" class="h-4 w-4" />
-          <Send v-else class="h-4 w-4" />
-        </button>
-      </div>
-    </form>
+    <AgentComposer
+      ref="composerRef"
+      :model-config-id="modelConfigId"
+      :agent-models="agentModels"
+      :models-loading="modelsLoading"
+      :draft="input"
+      :files="files"
+      :uploading="uploading"
+      :removing-file-id="removingFileId"
+      :has-active-run="hasActiveRun"
+      :sending="sending"
+      :editing-regenerating="editingRegenerating"
+      :regenerating-message-id="regeneratingMessageId"
+      :cancelling-run="cancellingRun"
+      :memory-panel-open="memoryPanelOpen"
+      @update:draft="emit('update:draft', $event)"
+      @change-model="emit('change-model', $event)"
+      @submit="submitMessage()"
+      @cancel-run="cancelCurrentRun()"
+      @file-selected="handleFileSelected"
+      @remove-file="removeFile"
+      @open-memory="openMemoryPanel"
+    />
     <AssetPreviewModal
       :asset="previewAsset"
       :recommendations="previewRecommendations"
@@ -1882,15 +1793,40 @@ defineExpose({
   background: #000;
 }
 
-.agent-chat-pane::before {
-  content: "";
+.scroll-to-bottom {
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  border: 1px solid rgb(255 255 255 / 0.12);
+  background: rgb(24 24 28 / 0.88);
+  color: rgb(255 255 255 / 0.78);
+  cursor: pointer;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.35);
+  transition: transform 0.18s ease, border-color 0.18s ease;
+  flex-shrink: 0;
+}
+
+.scroll-to-bottom:hover {
+  transform: translateY(-2px);
+  border-color: var(--agent-accent-soft);
+  color: #fff;
+}
+
+.chat-floating-actions {
   position: absolute;
-  inset: 0;
+  right: max(20px, calc((100% - min(760px, calc(100% - 96px))) / 2 + 8px));
+  bottom: 118px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
   pointer-events: none;
-  background:
-    radial-gradient(circle at 50% 0%, rgb(176 92 255 / 0.095), transparent 34%),
-    radial-gradient(circle at 84% 18%, rgb(34 211 238 / 0.045), transparent 30%),
-    linear-gradient(180deg, rgb(255 255 255 / 0.018), transparent 22%);
+}
+
+.chat-floating-actions > * {
+  pointer-events: auto;
 }
 
 .message-container {
@@ -2188,9 +2124,9 @@ defineExpose({
   display: grid;
   place-items: center;
   border-radius: 24px;
-  border: 1px solid rgb(176 92 255 / 0.36);
-  background: linear-gradient(145deg, rgb(176 92 255 / 0.22), rgb(255 255 255 / 0.05));
-  color: rgb(210 170 255);
+  border: 1px solid var(--agent-accent-soft);
+  background: linear-gradient(145deg, var(--agent-accent-soft), rgb(255 255 255 / 0.05));
+  color: var(--agent-accent);
   animation: breathe-soft 2.8s ease-in-out infinite;
 }
 
@@ -2219,8 +2155,8 @@ defineExpose({
 }
 
 .suggestions button:hover {
-  border-color: rgb(176 92 255 / 0.48);
-  background: rgb(176 92 255 / 0.13);
+  border-color: var(--agent-accent-soft);
+  background: var(--agent-accent-soft);
   color: #fff;
   transform: translateY(-1px);
 }
@@ -2444,7 +2380,7 @@ defineExpose({
   padding: 10px;
   border-color: rgb(255 255 255 / 0.07);
   background:
-    radial-gradient(circle at 8% 0%, rgb(176 92 255 / 0.085), transparent 34%),
+    radial-gradient(circle at 8% 0%, var(--agent-bubble-assistant-tint), transparent 34%),
     linear-gradient(180deg, rgb(255 255 255 / 0.035), rgb(255 255 255 / 0.018));
   box-shadow:
     0 20px 70px rgb(0 0 0 / 0.28),
@@ -2466,9 +2402,9 @@ defineExpose({
   display: inline-flex;
   align-items: center;
   gap: 12px;
-  border-color: rgb(176 92 255 / 0.34);
-  background: linear-gradient(180deg, rgb(176 92 255 / 0.14), rgb(255 255 255 / 0.045));
-  box-shadow: 0 18px 56px rgb(176 92 255 / 0.12), 0 16px 40px rgb(0 0 0 / 0.34);
+  border-color: var(--agent-accent-soft);
+  background: linear-gradient(180deg, var(--agent-accent-soft), rgb(255 255 255 / 0.045));
+  box-shadow: 0 18px 56px var(--agent-accent-glow), 0 16px 40px rgb(0 0 0 / 0.34);
   animation: breathe-panel 2.2s ease-in-out infinite;
 }
 
@@ -2478,8 +2414,8 @@ defineExpose({
   display: grid;
   place-items: center;
   border-radius: 12px;
-  border: 1px solid rgb(176 92 255 / 0.44);
-  color: rgb(210 170 255);
+  border: 1px solid var(--agent-accent-soft);
+  color: var(--agent-accent);
   animation: pulse-ring 1.4s ease-in-out infinite;
 }
 
@@ -2552,7 +2488,7 @@ defineExpose({
 
 .run-status-card.running,
 .run-status-card.awaiting_confirmation {
-  border-color: rgb(176 92 255 / 0.26);
+  border-color: var(--agent-accent-soft);
   animation: breathe-panel 2.4s ease-in-out infinite;
 }
 
@@ -2636,10 +2572,10 @@ defineExpose({
 }
 
 .primary-btn {
-  border-color: rgb(176 92 255 / 0.48);
-  background: linear-gradient(135deg, rgb(205 132 255), rgb(176 92 255));
+  border-color: var(--agent-accent-soft);
+  background: var(--agent-send-gradient);
   color: #fff;
-  box-shadow: 0 10px 26px rgb(176 92 255 / 0.18);
+  box-shadow: 0 10px 26px var(--agent-accent-glow);
 }
 
 .ghost-btn {
@@ -2674,7 +2610,7 @@ defineExpose({
   gap: 14px;
   border-left: 1px solid rgb(255 255 255 / 0.10);
   background:
-    radial-gradient(circle at 20% 0%, rgb(176 92 255 / 0.12), transparent 34%),
+    radial-gradient(circle at 20% 0%, var(--agent-composer-tint), transparent 34%),
     rgb(18 18 22 / 0.96);
   padding: 20px;
   color: rgb(255 255 255 / 0.88);
@@ -2698,7 +2634,7 @@ defineExpose({
 
 .memory-panel-kicker {
   margin: 0 0 4px;
-  color: rgb(176 92 255);
+  color: var(--agent-accent);
   font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
@@ -2875,6 +2811,10 @@ defineExpose({
 }
 
 @media (max-width: 900px) {
+  .chat-floating-actions {
+    right: 16px;
+    bottom: 108px;
+  }
   .message-container {
     padding: 36px 14px 24px;
   }
