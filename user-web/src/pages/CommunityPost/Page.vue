@@ -4,10 +4,10 @@ import { useRoute, useRouter } from "vue-router"
 import { ArrowLeft, Copy, Download, Heart, Loader2, Send, Star } from "lucide-vue-next"
 import UserAvatar from "@/components/UserAvatar.vue"
 import {
-  favoriteCommunityPost,
-  fetchCommunityPost,
-  fetchCommunityCollections,
   addCommunityCollectionItem,
+  favoriteCommunityPost,
+  fetchCommunityCollections,
+  fetchCommunityPost,
   likeCommunityPost,
   markCommunityPostSameStyle,
   trackCommunityEvent,
@@ -19,7 +19,7 @@ import type { CommunityPost } from "@/api/types"
 import { useAuthStore } from "@/store/authStore"
 import { assetFromCommunityPost } from "@/utils/assetPreviewAdapter"
 import { communityDisplayTitle } from "@/utils/communityDisplay"
-import { resolveCommunityAuthorName, resolveCommunityAuthorAvatar, resolveCommunityPrompt } from "@/utils/communityPostNormalize"
+import { resolveCommunityAuthorAvatar, resolveCommunityAuthorName, resolveCommunityPrompt } from "@/utils/communityPostNormalize"
 import { openDashboardWithAsset } from "@/utils/assetReplay"
 
 const route = useRoute()
@@ -114,14 +114,10 @@ async function createSameStyle() {
       { postId: post.value.id, eventType: "dashboard_open", source: "community_detail", toolCode: post.value.toolCode },
       { token: auth.token },
     ).catch(() => undefined)
-    openDashboardWithAsset(
-      assetFromCommunityPost(post.value, mediaUrl(post.value.coverUrl)),
-      post.value.toolCode,
-      {
-        modality: post.value.modality,
-        sourcePost: post.value.id,
-      },
-    )
+    openDashboardWithAsset(assetFromCommunityPost(post.value, mediaUrl(post.value.coverUrl)), post.value.toolCode, {
+      modality: post.value.modality,
+      sourcePost: post.value.id,
+    })
   } finally {
     sameStyleLoading.value = false
   }
@@ -152,7 +148,7 @@ async function addToInspiration() {
 async function sharePost() {
   if (!post.value) return
   const url = window.location.href
-  if (navigator.share) await navigator.share({ title: post.value.title, url })
+  if (navigator.share) await navigator.share({ title: displayTitle.value, url })
   else await navigator.clipboard?.writeText(url)
   void trackCommunityEvent(
     { postId: post.value.id, eventType: "share", source: "community_detail", toolCode: post.value.toolCode },
@@ -176,17 +172,13 @@ onMounted(() => void load())
 
     <div v-if="loading" class="state-panel">
       <Loader2 class="h-5 w-5 animate-spin" />
-      加载作品中
+      正在加载作品
     </div>
     <div v-else-if="error" class="state-panel error">{{ error }}</div>
 
     <section v-else-if="post" class="post-layout">
       <div class="media-stage">
-        <img
-          v-if="kind === 'image' && mediaUrl(post.coverUrl)"
-          :src="mediaUrl(post.coverUrl)"
-          :alt="post.title"
-        />
+        <img v-if="kind === 'image' && mediaUrl(post.coverUrl)" :src="mediaUrl(post.coverUrl)" :alt="displayTitle" />
         <video
           v-else-if="kind === 'video' && mediaUrl(post.coverUrl)"
           :src="mediaUrl(post.coverUrl)"
@@ -195,7 +187,7 @@ onMounted(() => void load())
           preload="metadata"
         />
         <audio v-else-if="kind === 'audio' && mediaUrl(post.coverUrl)" :src="mediaUrl(post.coverUrl)" controls />
-        <article v-else class="text-result">{{ post.prompt || post.description || post.title }}</article>
+        <article v-else class="text-result">{{ post.prompt || post.description || displayTitle }}</article>
       </div>
 
       <aside class="post-panel">
@@ -220,7 +212,7 @@ onMounted(() => void load())
             <Send class="h-4 w-4" />
             分享
           </button>
-          <a v-if="mediaUrl(post.coverUrl)" :href="mediaUrl(post.coverUrl)" download>
+          <a v-if="mediaUrl(post.coverUrl)" :href="mediaUrl(post.coverUrl)" download aria-label="下载作品">
             <Download class="h-4 w-4" />
           </a>
         </div>
@@ -234,27 +226,31 @@ onMounted(() => void load())
             </button>
           </div>
           <div>
-            <span>模型</span>
+            <span>工具</span>
             <strong>{{ post.toolName || post.toolCode || "AI 创作" }}</strong>
           </div>
           <div v-if="post.topic || post.tags?.length">
-            <span>标签</span>
+            <span>专题与标签</span>
             <div class="tag-row">
               <strong v-if="post.topic">{{ post.topic }}</strong>
               <strong v-for="tag in post.tags" :key="tag">#{{ tag }}</strong>
             </div>
           </div>
           <div>
-            <span>浏览</span>
-            <strong>{{ post.viewCount }} · 同款 {{ post.sameStyleCount || 0 }}</strong>
+            <span>数据</span>
+            <strong>{{ post.viewCount }} 浏览 / 同款 {{ post.sameStyleCount || 0 }}</strong>
           </div>
           <div v-if="post.promptVisible && post.prompt">
-            <span>提示词</span>
+            <span>公开 Prompt</span>
             <p>{{ post.prompt }}</p>
             <button class="prompt-copy" type="button" @click="copyPrompt">
               <Copy class="h-4 w-4" />
               复制 Prompt
             </button>
+          </div>
+          <div v-else>
+            <span>Prompt</span>
+            <strong>作者未公开 Prompt，同款创作只会带入工具与可用媒体。</strong>
           </div>
         </div>
 
@@ -353,6 +349,7 @@ onMounted(() => void load())
 
 .action-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   margin: 22px 0;
 }

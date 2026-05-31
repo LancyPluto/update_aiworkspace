@@ -134,6 +134,7 @@ public class AuthInterceptor implements HandlerInterceptor, Filter {
                 || ("GET".equalsIgnoreCase(method) && path.startsWith("/api/v1/community/users/"))
                 || ("GET".equalsIgnoreCase(method) && path.startsWith("/api/v1/community/creators/"))
                 || ("GET".equalsIgnoreCase(method) && path.equals("/api/v1/community/search"))
+                || ("GET".equalsIgnoreCase(method) && path.equals("/api/v1/community/topics"))
                 || ("GET".equalsIgnoreCase(method) && path.startsWith("/api/v1/community/topics/"))
                 || ("GET".equalsIgnoreCase(method) && path.equals("/api/v1/community/posts"))
                 || ("GET".equalsIgnoreCase(method) && path.matches("/api/v1/community/posts/\\d+"))

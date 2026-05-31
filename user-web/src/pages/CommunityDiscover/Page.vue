@@ -1,36 +1,36 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue"
+import { computed, onMounted, ref, watch } from "vue"
 import { useRouter } from "vue-router"
-import { Loader2, RefreshCcw, Search, SlidersHorizontal, X } from "lucide-vue-next"
+import { Clock3, Flame, Loader2, RefreshCcw, Search, SlidersHorizontal, Sparkles, Wand2, X } from "lucide-vue-next"
 import AppShell from "@/components/AppShell.vue"
 import AssetCard from "@/components/AssetCard.vue"
-import UserAvatar from "@/components/UserAvatar.vue"
-import { searchCommunityPosts, trackCommunityEvent } from "@/api/communityApi"
+import { fetchCommunityTopics, searchCommunityPosts, trackCommunityEvent } from "@/api/communityApi"
 import { getApiOrigin } from "@/api/client"
-import type { CommunityPost } from "@/api/types"
+import type { CommunityPost, CommunityTopic } from "@/api/types"
 import { useAuthStore } from "@/store/authStore"
 import { assetFromCommunityPost } from "@/utils/assetPreviewAdapter"
-import { communityDisplaySubtitle, communityDisplayTitle } from "@/utils/communityDisplay"
-import { resolveCommunityAuthorName, resolveCommunityAuthorAvatar, resolveCommunityPrompt } from "@/utils/communityPostNormalize"
 
 const router = useRouter()
 const auth = useAuthStore()
 
 const posts = ref<CommunityPost[]>([])
+const featuredPosts = ref<CommunityPost[]>([])
+const latestPosts = ref<CommunityPost[]>([])
+const popularPosts = ref<CommunityPost[]>([])
+const topics = ref<CommunityTopic[]>([])
 const loading = ref(false)
 const loadingMore = ref(false)
+const sectionsLoading = ref(false)
 const error = ref("")
 const pageNo = ref(1)
 const hasNext = ref(false)
 const modality = ref("")
-const sort = ref("LATEST")
+const sort = ref("QUALITY")
 const featuredOnly = ref(false)
-const tag = ref("")
+const keyword = ref("")
+const topic = ref("")
 const searchOpen = ref(false)
 const filtersExpanded = ref(false)
-const filterRef = ref<HTMLElement | null>(null)
-const filterButtons = ref<(HTMLElement | null)[]>([])
-const indicator = ref({ width: 0, left: 0 })
 
 const filters = [
   { label: "全部", value: "" },
@@ -41,27 +41,18 @@ const filters = [
 ]
 
 const sorts = [
-  { label: "最新", value: "LATEST" },
-  { label: "热门", value: "POPULAR" },
+  { label: "质量推荐", value: "QUALITY" },
+  { label: "最新发布", value: "LATEST" },
+  { label: "最多点赞", value: "POPULAR" },
   { label: "最多收藏", value: "FAVORITES" },
-  { label: "同款最多", value: "SAME_STYLE" },
+  { label: "最多同款", value: "SAME_STYLE" },
 ]
 
-const activeFilterIndex = computed(() => filters.findIndex((item) => item.value === modality.value))
-
-const featuredPosts = computed(() => posts.value.filter((post) => post.featured || post.pinned).slice(0, 4))
-
-const postAssets = computed(() =>
-  posts.value.map((post) => ({
-    post,
-    asset: assetFromCommunityPost(post, mediaUrl(post.coverUrl)),
-  })),
-)
-
-const indicatorStyle = computed(() => ({
-  width: `${indicator.value.width}px`,
-  transform: `translateX(${indicator.value.left}px)`,
-}))
+const postAssets = computed(() => posts.value.map((post) => ({ post, asset: assetFromCommunityPost(post, mediaUrl(post.coverUrl)) })))
+const featuredAssets = computed(() => featuredPosts.value.map((post) => ({ post, asset: assetFromCommunityPost(post, mediaUrl(post.coverUrl)) })))
+const latestAssets = computed(() => latestPosts.value.map((post) => ({ post, asset: assetFromCommunityPost(post, mediaUrl(post.coverUrl)) })))
+const popularAssets = computed(() => popularPosts.value.map((post) => ({ post, asset: assetFromCommunityPost(post, mediaUrl(post.coverUrl)) })))
+const selectedTopicLabel = computed(() => topic.value || "全部话题")
 
 function mediaUrl(value?: string | null) {
   const raw = value?.trim()
@@ -72,76 +63,53 @@ function mediaUrl(value?: string | null) {
   return apiOrigin ? `${apiOrigin}${path}` : path
 }
 
-function featuredTitle(post: CommunityPost) {
-  const prompt = resolveCommunityPrompt(post)
-  return communityDisplayTitle({
-    title: post.title,
-    prompt,
-    promptPreview: post.promptPreview || prompt,
-    topic: post.topic,
-    tags: post.tags,
-    toolName: post.toolName,
-    toolCode: post.toolCode,
-    kind: post.modality?.toLowerCase().includes("video")
-      ? "video"
-      : post.modality?.toLowerCase().includes("image")
-        ? "image"
-        : post.modality?.toLowerCase().includes("audio")
-          ? "audio"
-          : "text",
-  })
-}
-
-function featuredSubtitle(post: CommunityPost) {
-  const prompt = resolveCommunityPrompt(post)
-  return (
-    communityDisplaySubtitle({
-      description: post.description,
-      prompt,
-      promptPreview: post.promptPreview || prompt,
-      topic: post.topic,
-      tags: post.tags,
-      toolName: post.toolName,
-      toolCode: post.toolCode,
-    }) || "探索创作背后的故事"
+async function trackImpressions(list: CommunityPost[], source: string) {
+  await Promise.all(
+    list.slice(0, 8).map((post) =>
+      trackCommunityEvent(
+        { postId: post.id, eventType: "impression", source, toolCode: post.toolCode },
+        { token: auth.token },
+      ).catch(() => undefined),
+    ),
   )
 }
 
-function featuredAuthorName(post: CommunityPost) {
-  return resolveCommunityAuthorName(post)
-}
-
-function openPost(post: CommunityPost) {
+function openPost(post: CommunityPost, source = "discover") {
+  void trackCommunityEvent(
+    { postId: post.id, eventType: "detail_view", source, toolCode: post.toolCode },
+    { token: auth.token },
+  ).catch(() => undefined)
   router.push(`/community/posts/${post.id}`)
 }
 
-function setFilterButtonRef(index: number, element: HTMLElement | null) {
-  filterButtons.value[index] = element
+function selectTopic(nextTopic: string) {
+  topic.value = topic.value === nextTopic ? "" : nextTopic
 }
 
-async function syncFilterIndicator() {
-  await nextTick()
-  const index = activeFilterIndex.value
-  const button = filterButtons.value[index]
-  const container = filterRef.value
-  if (!button || !container) return
-  indicator.value = {
-    width: button.offsetWidth,
-    left: button.offsetLeft,
+async function loadSections() {
+  sectionsLoading.value = true
+  try {
+    const [topicList, featured, latest, popular] = await Promise.all([
+      fetchCommunityTopics({ token: auth.token, limit: 8 }),
+      searchCommunityPosts({ token: auth.token, query: { pageNo: 1, pageSize: 6, sort: "QUALITY", featured: true } }),
+      searchCommunityPosts({ token: auth.token, query: { pageNo: 1, pageSize: 6, sort: "LATEST" } }),
+      searchCommunityPosts({ token: auth.token, query: { pageNo: 1, pageSize: 6, sort: "SAME_STYLE" } }),
+    ])
+    topics.value = topicList.filter((item) => item.name && item.postCount > 0)
+    featuredPosts.value = featured.list
+    latestPosts.value = latest.list
+    popularPosts.value = popular.list
+    void trackImpressions(featured.list, "discover_featured")
+    void trackImpressions(latest.list, "discover_latest")
+    void trackImpressions(popular.list, "discover_popular")
+  } catch {
+    topics.value = []
+    featuredPosts.value = []
+    latestPosts.value = []
+    popularPosts.value = []
+  } finally {
+    sectionsLoading.value = false
   }
-}
-
-function toggleSearch() {
-  searchOpen.value = !searchOpen.value
-  if (!searchOpen.value) return
-  nextTick(() => {
-    const input = document.querySelector<HTMLInputElement>(".community-search-input")
-    input?.focus()
-  })
-}
-
-function closeSearch() {
-  searchOpen.value = false
 }
 
 async function load(reset = true) {
@@ -163,19 +131,15 @@ async function load(reset = true) {
         modality: modality.value || undefined,
         sort: sort.value,
         featured: featuredOnly.value ? true : undefined,
-        keyword: tag.value.trim() || undefined,
-        tag: tag.value.trim() || undefined,
+        keyword: keyword.value.trim() || undefined,
+        tag: keyword.value.trim() || undefined,
+        topic: topic.value || undefined,
       },
     })
     posts.value = reset ? page.list : [...posts.value, ...page.list]
-    for (const post of page.list.slice(0, 8)) {
-      void trackCommunityEvent(
-        { postId: post.id, eventType: "impression", source: "discover", toolCode: post.toolCode },
-        { token: auth.token },
-      ).catch(() => undefined)
-    }
     hasNext.value = page.hasNext
     pageNo.value = currentPage + 1
+    void trackImpressions(page.list, "discover_feed")
   } catch (err) {
     error.value = err instanceof Error ? err.message : "社区作品加载失败"
   } finally {
@@ -184,47 +148,33 @@ async function load(reset = true) {
   }
 }
 
-let resizeObserver: ResizeObserver | null = null
-
-watch([modality, sort, featuredOnly], () => void load(true))
-watch(activeFilterIndex, () => void syncFilterIndicator())
-
+watch([modality, sort, featuredOnly, topic], () => void load(true))
 onMounted(() => {
+  void loadSections()
   void load(true)
-  void syncFilterIndicator()
-  if (typeof ResizeObserver !== "undefined" && filterRef.value) {
-    resizeObserver = new ResizeObserver(() => void syncFilterIndicator())
-    resizeObserver.observe(filterRef.value)
-  }
-})
-
-onUnmounted(() => {
-  resizeObserver?.disconnect()
 })
 </script>
 
 <template>
-  <AppShell title="社区发现" description="浏览优秀作品，学习公开 Prompt，并一键同款创作">
+  <AppShell title="社区发现" description="浏览优秀作品，收藏灵感，并回到工作台继续同款创作">
     <div class="community-discover">
       <section class="hero">
-        <div class="hero-copy">
+        <div>
           <p class="eyebrow">Community Gallery</p>
-          <h1>作品、Prompt<br />和工具灵感流</h1>
-          <p class="hero-lead">发现真实创作，收藏灵感，回到工具继续创作。</p>
+          <h1>发现作品，学习 Prompt，回到工具继续创作</h1>
+          <p class="hero-lead">社区不是论坛入口，而是从公开案例到工作台复用的增长路径。</p>
         </div>
-        <button type="button" class="ghost-button" :disabled="loading" @click="load(true)">
-          <RefreshCcw class="h-4 w-4" :class="{ 'animate-spin': loading }" />
+        <button type="button" class="ghost-button" :disabled="loading || sectionsLoading" @click="loadSections(); load(true)">
+          <RefreshCcw class="h-4 w-4" :class="{ 'animate-spin': loading || sectionsLoading }" />
           刷新
         </button>
       </section>
 
       <section class="toolbar">
-        <div ref="filterRef" class="filter-capsule">
-          <span class="filter-indicator" :style="indicatorStyle" aria-hidden="true" />
+        <div class="filter-capsule" aria-label="作品类型">
           <button
-            v-for="(item, index) in filters"
+            v-for="item in filters"
             :key="item.value || 'all'"
-            :ref="(el) => setFilterButtonRef(index, el as HTMLElement | null)"
             type="button"
             class="filter-chip"
             :class="{ active: modality === item.value }"
@@ -235,22 +185,16 @@ onUnmounted(() => {
         </div>
 
         <div class="toolbar-actions">
-          <button type="button" class="icon-button" :class="{ active: filtersExpanded }" @click="filtersExpanded = !filtersExpanded">
+          <button type="button" class="icon-button" :class="{ active: filtersExpanded }" aria-label="筛选" @click="filtersExpanded = !filtersExpanded">
             <SlidersHorizontal class="h-4 w-4" />
           </button>
-
           <div class="search-shell" :class="{ expanded: searchOpen }">
-            <button type="button" class="icon-button" aria-label="搜索" @click="toggleSearch">
+            <button type="button" class="icon-button" aria-label="搜索" @click="searchOpen = true">
               <Search class="h-4 w-4" />
             </button>
             <form class="search-form" @submit.prevent="load(true)">
-              <input
-                v-model="tag"
-                class="community-search-input"
-                placeholder="标签、主题…"
-                @keydown.esc="closeSearch"
-              />
-              <button v-if="searchOpen" type="button" class="search-close" aria-label="关闭搜索" @click="closeSearch">
+              <input v-model="keyword" class="community-search-input" placeholder="搜索标题、标签、工具" @keydown.esc="searchOpen = false" />
+              <button type="button" class="search-close" aria-label="关闭搜索" @click="searchOpen = false">
                 <X class="h-3.5 w-3.5" />
               </button>
             </form>
@@ -258,28 +202,88 @@ onUnmounted(() => {
         </div>
       </section>
 
-      <Transition name="toolbar-slide">
-        <section v-if="filtersExpanded" class="secondary-toolbar">
-          <select v-model="sort" class="select-control">
-            <option v-for="item in sorts" :key="item.value" :value="item.value">{{ item.label }}</option>
-          </select>
-          <label class="toggle-control">
-            <input v-model="featuredOnly" type="checkbox" />
-            <span>只看精选</span>
-          </label>
-        </section>
-      </Transition>
+      <section v-if="topics.length" class="topic-strip" aria-label="运营话题">
+        <button
+          v-for="item in topics"
+          :key="item.name"
+          type="button"
+          :class="{ active: topic === item.name }"
+          @click="selectTopic(item.name)"
+        >
+          {{ item.name }}
+          <span>{{ item.postCount }}</span>
+        </button>
+      </section>
 
-      <section v-if="featuredPosts.length" class="featured-strip">
-        <article v-for="post in featuredPosts" :key="post.id" class="featured-card" @click="openPost(post)">
-          <span class="featured-badge">{{ post.pinned ? "置顶" : "精选" }}</span>
-          <div class="featured-author">
-            <UserAvatar :src="resolveCommunityAuthorAvatar(post)" :name="featuredAuthorName(post)" size="sm" />
-            <span>{{ featuredAuthorName(post) }}</span>
+      <section v-if="filtersExpanded" class="secondary-toolbar">
+        <select v-model="sort" class="select-control" aria-label="排序">
+          <option v-for="item in sorts" :key="item.value" :value="item.value">{{ item.label }}</option>
+        </select>
+        <label class="toggle-control">
+          <input v-model="featuredOnly" type="checkbox" />
+          <span>只看精选</span>
+        </label>
+      </section>
+
+      <section v-if="featuredAssets.length" class="content-section">
+        <header class="section-title">
+          <span><Sparkles class="h-4 w-4" />精选作品</span>
+          <button type="button" @click="featuredOnly = true">查看精选</button>
+        </header>
+        <div class="section-grid compact">
+          <AssetCard
+            v-for="item in featuredAssets"
+            :key="item.post.id"
+            :asset="item.asset"
+            source="community"
+            compact
+            gallery
+            @open="openPost(item.post, 'discover_featured')"
+          />
+        </div>
+      </section>
+
+      <section v-if="latestAssets.length || popularAssets.length" class="split-sections">
+        <div v-if="latestAssets.length" class="content-section">
+          <header class="section-title">
+            <span><Clock3 class="h-4 w-4" />最新作品</span>
+          </header>
+          <div class="section-grid small">
+            <AssetCard
+              v-for="item in latestAssets"
+              :key="item.post.id"
+              :asset="item.asset"
+              source="community"
+              compact
+              gallery
+              @open="openPost(item.post, 'discover_latest')"
+            />
           </div>
-          <strong>{{ featuredTitle(post) }}</strong>
-          <p>{{ featuredSubtitle(post) }}</p>
-        </article>
+        </div>
+        <div v-if="popularAssets.length" class="content-section">
+          <header class="section-title">
+            <span><Flame class="h-4 w-4" />热门同款</span>
+          </header>
+          <div class="section-grid small">
+            <AssetCard
+              v-for="item in popularAssets"
+              :key="item.post.id"
+              :asset="item.asset"
+              source="community"
+              compact
+              gallery
+              @open="openPost(item.post, 'discover_popular')"
+            />
+          </div>
+        </div>
+      </section>
+
+      <section class="feed-header">
+        <div>
+          <p>全部作品</p>
+          <strong>{{ selectedTopicLabel }}</strong>
+        </div>
+        <span><Wand2 class="h-4 w-4" />点击作品进入详情后使用同款创作</span>
       </section>
 
       <div v-if="loading" class="state-panel">
@@ -287,7 +291,9 @@ onUnmounted(() => {
         正在加载社区作品
       </div>
       <div v-else-if="error" class="state-panel error">{{ error }}</div>
-      <div v-else-if="!posts.length" class="state-panel">暂时没有匹配的公开作品</div>
+      <div v-else-if="!posts.length" class="state-panel">
+        暂时没有匹配的公开作品，换个筛选条件再试试。
+      </div>
 
       <section v-else class="post-grid">
         <AssetCard
@@ -296,7 +302,7 @@ onUnmounted(() => {
           :asset="item.asset"
           source="community"
           gallery
-          @open="openPost(item.post)"
+          @open="openPost(item.post, 'discover_feed')"
         />
       </section>
 
@@ -320,11 +326,7 @@ onUnmounted(() => {
   align-items: flex-end;
   justify-content: space-between;
   gap: 28px;
-  padding-bottom: clamp(28px, 4vw, 40px);
-}
-
-.hero-copy {
-  max-width: 760px;
+  padding-bottom: 32px;
 }
 
 .eyebrow {
@@ -332,103 +334,88 @@ onUnmounted(() => {
   color: rgb(255 255 255 / 0.38);
   font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.22em;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
 }
 
 .hero h1 {
+  max-width: 820px;
   margin: 0;
-  font-size: clamp(34px, 5vw, 62px);
+  font-size: clamp(32px, 4.8vw, 58px);
   font-weight: 700;
-  line-height: 1.04;
-  letter-spacing: -0.03em;
+  line-height: 1.08;
 }
 
 .hero-lead {
-  max-width: 420px;
-  margin: 20px 0 0;
-  color: rgb(255 255 255 / 0.48);
-  font-size: 15px;
-  line-height: 2;
+  max-width: 520px;
+  margin: 18px 0 0;
+  color: rgb(255 255 255 / 0.58);
+  line-height: 1.9;
 }
 
-.ghost-button,
-.load-more {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  border: 0;
-  border-radius: 999px;
-  background: rgb(255 255 255 / 0.06);
-  backdrop-filter: blur(20px) saturate(140%);
-  color: rgb(255 255 255 / 0.72);
-  padding: 11px 18px;
-  font-size: 13px;
-  font-weight: 600;
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.06);
-  transition: background 0.22s ease, transform 0.22s ease, box-shadow 0.22s ease;
-}
-
-.ghost-button:hover:not(:disabled),
-.load-more:hover:not(:disabled) {
-  background: rgb(255 255 255 / 0.1);
-  transform: translateY(-1px);
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.08),
-    0 12px 32px rgb(0 0 0 / 0.28);
-}
-
-.toolbar {
+.toolbar,
+.secondary-toolbar,
+.topic-strip,
+.section-title,
+.feed-header {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 12px;
+  gap: 12px;
 }
 
-.filter-capsule {
-  position: relative;
+.toolbar,
+.section-title,
+.feed-header {
+  justify-content: space-between;
+}
+
+.toolbar {
+  margin-bottom: 14px;
+}
+
+.filter-capsule,
+.search-shell {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px;
   border-radius: 999px;
-  background: rgb(255 255 255 / 0.04);
-  backdrop-filter: blur(18px) saturate(130%);
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.05);
+  background: rgb(255 255 255 / 0.05);
+  padding: 4px;
 }
 
-.filter-indicator {
-  position: absolute;
-  top: 4px;
-  left: 0;
-  height: calc(100% - 8px);
+.filter-chip,
+.topic-strip button,
+.ghost-button,
+.load-more,
+.icon-button,
+.section-title button {
+  border: 0;
   border-radius: 999px;
-  background: rgb(255 255 255 / 0.12);
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.14),
-    0 8px 24px rgb(0 0 0 / 0.18);
-  transition: transform 0.32s cubic-bezier(0.22, 1, 0.36, 1), width 0.32s cubic-bezier(0.22, 1, 0.36, 1);
-  pointer-events: none;
+  background: rgb(255 255 255 / 0.07);
+  color: rgb(255 255 255 / 0.74);
+  padding: 10px 16px;
+  font-weight: 700;
 }
 
 .filter-chip {
-  position: relative;
-  z-index: 1;
-  border: 0;
-  border-radius: 999px;
   background: transparent;
-  color: rgb(255 255 255 / 0.52);
-  padding: 10px 18px;
-  font-size: 13px;
-  font-weight: 600;
-  transition: color 0.22s ease;
 }
 
-.filter-chip.active {
+.filter-chip.active,
+.topic-strip button.active,
+.icon-button.active {
+  background: rgb(255 255 255 / 0.15);
   color: #fff;
+}
+
+.topic-strip {
+  margin-bottom: 22px;
+}
+
+.topic-strip span {
+  margin-left: 8px;
+  color: rgb(255 255 255 / 0.46);
+  font-size: 12px;
 }
 
 .toolbar-actions {
@@ -443,45 +430,23 @@ onUnmounted(() => {
   height: 42px;
   align-items: center;
   justify-content: center;
-  border: 0;
-  border-radius: 999px;
-  background: rgb(255 255 255 / 0.04);
-  color: rgb(255 255 255 / 0.58);
-  backdrop-filter: blur(16px);
-  transition: background 0.2s ease, color 0.2s ease, transform 0.2s ease;
-}
-
-.icon-button:hover,
-.icon-button.active {
-  background: rgb(255 255 255 / 0.1);
-  color: #fff;
+  padding: 0;
 }
 
 .search-shell {
-  display: inline-flex;
-  align-items: center;
   overflow: hidden;
-  border-radius: 999px;
-  background: rgb(255 255 255 / 0.04);
-  backdrop-filter: blur(16px);
-  transition: background 0.24s ease, box-shadow 0.24s ease;
-}
-
-.search-shell.expanded {
-  background: rgb(255 255 255 / 0.07);
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.06);
+  padding: 0;
 }
 
 .search-form {
   display: flex;
-  align-items: center;
   width: 0;
   opacity: 0;
-  transition: width 0.28s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.2s ease;
+  transition: width 0.22s ease, opacity 0.18s ease;
 }
 
 .search-shell.expanded .search-form {
-  width: min(240px, 42vw);
+  width: min(300px, 56vw);
   opacity: 1;
 }
 
@@ -490,30 +455,17 @@ onUnmounted(() => {
   border: 0;
   background: transparent;
   color: #fff;
-  padding: 0 8px 0 4px;
-  font-size: 13px;
   outline: none;
 }
 
-.community-search-input::placeholder {
-  color: rgb(255 255 255 / 0.34);
-}
-
 .search-close {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
   border: 0;
   background: transparent;
-  color: rgb(255 255 255 / 0.42);
-  padding: 0 12px 0 4px;
+  color: rgb(255 255 255 / 0.55);
+  padding: 0 12px;
 }
 
 .secondary-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 12px;
   margin-bottom: 28px;
 }
 
@@ -521,124 +473,101 @@ onUnmounted(() => {
   height: 40px;
   border: 0;
   border-radius: 999px;
-  background: rgb(255 255 255 / 0.05);
-  color: rgb(255 255 255 / 0.78);
+  background: rgb(255 255 255 / 0.07);
+  color: rgb(255 255 255 / 0.84);
   padding: 0 16px;
-  font-size: 13px;
-  outline: none;
 }
 
 .toggle-control {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  color: rgb(255 255 255 / 0.72);
+}
+
+.content-section {
+  margin: 26px 0 34px;
+}
+
+.section-title {
+  margin-bottom: 16px;
+}
+
+.section-title span,
+.feed-header span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: rgb(255 255 255 / 0.78);
+  font-weight: 800;
+}
+
+.section-title button {
+  padding: 8px 13px;
+}
+
+.section-grid {
+  display: grid;
+  gap: 18px;
+}
+
+.section-grid.compact {
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+}
+
+.section-grid.small {
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+}
+
+.split-sections {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: clamp(22px, 3vw, 34px);
+}
+
+.feed-header {
+  margin: 34px 0 18px;
+}
+
+.feed-header p,
+.feed-header strong {
+  display: block;
+  margin: 0;
+}
+
+.feed-header p {
+  color: rgb(255 255 255 / 0.48);
+  font-size: 13px;
+}
+
+.feed-header strong {
+  margin-top: 4px;
+  font-size: 22px;
+}
+
+.feed-header span {
   color: rgb(255 255 255 / 0.56);
   font-size: 13px;
 }
 
-.featured-strip {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 20px;
-  margin: 28px 0 36px;
-}
-
-.featured-card {
-  position: relative;
-  overflow: hidden;
-  border: 0;
-  border-radius: 28px;
-  background: rgb(255 255 255 / 0.035);
-  padding: 22px;
-  cursor: pointer;
-  box-shadow:
-    0 24px 60px rgb(0 0 0 / 0.32),
-    inset 0 1px 0 rgb(255 255 255 / 0.05);
-  transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.28s ease;
-}
-
-@supports (corner-shape: squircle) {
-  .featured-card {
-    corner-shape: squircle;
-  }
-}
-
-.featured-card::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(120deg, transparent 30%, rgb(255 255 255 / 0.08) 50%, transparent 70%);
-  transform: translateX(-120%);
-  transition: transform 0.65s ease;
-}
-
-.featured-card:hover {
-  transform: translateY(-4px);
-  box-shadow:
-    0 32px 72px rgb(0 0 0 / 0.42),
-    inset 0 1px 0 rgb(255 255 255 / 0.08);
-}
-
-.featured-card:hover::after {
-  transform: translateX(120%);
-}
-
-.featured-badge {
-  display: inline-flex;
-  border-radius: 999px;
-  background: rgb(255 255 255 / 0.08);
-  backdrop-filter: blur(12px);
-  color: rgb(255 255 255 / 0.82);
-  padding: 5px 10px;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-}
-
-.featured-author {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 14px;
-  color: rgb(255 255 255 / 0.68);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.featured-card strong,
-.featured-card p {
-  display: block;
-  margin: 12px 0 0;
-}
-
-.featured-card strong {
-  font-size: 17px;
-  font-weight: 700;
-  line-height: 1.4;
-}
-
-.featured-card p {
-  color: rgb(255 255 255 / 0.46);
-  font-size: 13px;
-  line-height: 1.75;
-}
-
 .post-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: clamp(24px, 3vw, 36px);
+  columns: 4 260px;
+  column-gap: clamp(20px, 2.6vw, 32px);
+}
+
+.post-grid :deep(.asset-card) {
+  margin-bottom: clamp(20px, 2.6vw, 32px);
 }
 
 .state-panel {
   display: flex;
-  min-height: 280px;
+  min-height: 260px;
   align-items: center;
   justify-content: center;
   gap: 10px;
-  border-radius: 28px;
-  background: rgb(255 255 255 / 0.02);
-  color: rgb(255 255 255 / 0.44);
-  font-size: 14px;
+  border-radius: 8px;
+  background: rgb(255 255 255 / 0.04);
+  color: rgb(255 255 255 / 0.58);
 }
 
 .state-panel.error {
@@ -646,38 +575,21 @@ onUnmounted(() => {
 }
 
 .load-more {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin: 40px auto 0;
 }
 
-.toolbar-slide-enter-active,
-.toolbar-slide-leave-active {
-  transition: opacity 0.22s ease, transform 0.22s ease;
-}
-
-.toolbar-slide-enter-from,
-.toolbar-slide-leave-to {
-  opacity: 0;
-  transform: translateY(-6px);
-}
-
-@media (max-width: 760px) {
-  .hero {
+@media (max-width: 860px) {
+  .hero,
+  .toolbar {
     align-items: flex-start;
     flex-direction: column;
   }
 
-  .toolbar {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .filter-capsule {
-    overflow-x: auto;
-    max-width: 100%;
-  }
-
-  .toolbar-actions {
-    justify-content: flex-end;
+  .split-sections {
+    grid-template-columns: 1fr;
   }
 }
 </style>

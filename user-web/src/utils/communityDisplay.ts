@@ -24,15 +24,15 @@ export function promptExcerpt(value?: string | null, maxLength = 56) {
   const prompt = normalize(value).replace(/\s+/g, " ")
   if (!prompt) return ""
   if (prompt.length <= maxLength) return prompt
-  return `${prompt.slice(0, maxLength).trim()}…`
+  return `${prompt.slice(0, maxLength).trim()}...`
 }
 
 function kindPlaceholder(kind?: AssetPreviewItem["kind"]) {
-  if (kind === "video") return "光影留声"
-  if (kind === "image") return "一笔成画"
-  if (kind === "audio") return "声线漫游"
-  if (kind === "text") return "文字拾光"
-  return "一件灵感之作"
+  if (kind === "video") return "视频灵感案例"
+  if (kind === "image") return "视觉生成案例"
+  if (kind === "audio") return "音频创作案例"
+  if (kind === "text") return "文案生成案例"
+  return "AI 创作案例"
 }
 
 export function communityDisplayTitle(input: {

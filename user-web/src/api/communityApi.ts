@@ -1,5 +1,5 @@
 import { ApiBusinessError, apiRequest } from "./client"
-import type { CommunityCollection, CommunityCreator, CommunityPost, PageResult, PublicUserProfile } from "./types"
+import type { CommunityCollection, CommunityCreator, CommunityPost, CommunityTopic, PageResult, PublicUserProfile } from "./types"
 import {
   collectMissingAuthorUserIds,
   getCachedCommunityAuthorProfile,
@@ -22,7 +22,7 @@ async function enrichCommunityPostsWithAuthors(
         const profile = await fetchPublicUser(userId, options)
         rememberCommunityAuthorProfile(profile)
       } catch {
-        // Ignore missing profiles; cards fall back to userId label.
+        // Cards can still render with the post-level fallback author label.
       }
     }),
   )
@@ -64,16 +64,17 @@ export interface CommunityDiscoverQuery {
   modality?: string
   tag?: string
   topic?: string
-  sort?: "LATEST" | "POPULAR" | "FAVORITES" | "SAME_STYLE" | "VIEWS" | string
+  sort?: "LATEST" | "POPULAR" | "FAVORITES" | "SAME_STYLE" | "VIEWS" | "QUALITY" | string
   featured?: boolean
   keyword?: string
   toolCode?: string
 }
 
-/** 合并 dev 后旧后端尚未部署 /search、/collections 等路由时的 404 识别 */
+/** Detects older backend deployments that do not expose newer community endpoints yet. */
 export function isCommunityEndpointMissing(error: unknown, pathFragment: string): boolean {
   if (!(error instanceof ApiBusinessError)) return false
-  return error.message.includes(pathFragment) && error.message.includes("不存在")
+  const message = error.message.toLowerCase()
+  return error.message.includes(pathFragment) && (message.includes("not found") || error.message.includes("不存在"))
 }
 
 function discoverQueryFromSearch(query?: CommunityDiscoverQuery): CommunityDiscoverQuery | undefined {
@@ -122,6 +123,18 @@ export function fetchCommunityTopicPosts(
   })
 }
 
+export async function fetchCommunityTopics(options?: { token?: string | null; limit?: number }): Promise<CommunityTopic[]> {
+  try {
+    return await apiRequest<CommunityTopic[]>("GET", "/api/v1/community/topics", {
+      token: options?.token,
+      query: { limit: options?.limit },
+    })
+  } catch (error) {
+    if (isCommunityEndpointMissing(error, "community/topics")) return []
+    throw error
+  }
+}
+
 export function fetchCommunityCreator(userId: number | string, options?: { token?: string | null }) {
   return apiRequest<CommunityCreator>("GET", `/api/v1/community/creators/${encodeURIComponent(String(userId))}`, {
     token: options?.token,
@@ -147,7 +160,6 @@ export function trackCommunityEvent(
 
 export interface CommunityCollectionsResult {
   collections: CommunityCollection[]
-  /** false 表示当前后端尚未提供 /collections（合并 dev 后需重启后端） */
   supported: boolean
 }
 

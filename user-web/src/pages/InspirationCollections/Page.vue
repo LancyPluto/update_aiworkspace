@@ -9,6 +9,7 @@ import {
   deleteCommunityCollection,
   fetchCommunityCollections,
   removeCommunityCollectionItem,
+  trackCommunityEvent,
 } from "@/api/communityApi"
 import { getApiOrigin } from "@/api/client"
 import type { CommunityCollection, CommunityPost } from "@/api/types"
@@ -51,10 +52,10 @@ async function load() {
     collections.value = result.collections
     activeId.value = activeId.value || collections.value[0]?.id || null
     if (!result.supported) {
-      error.value = "灵感收藏功能需要后端升级到最新版本后可用，可先使用帖子详情页的收藏功能。"
+      error.value = "灵感收藏夹需要后端升级后可用。当前仍可在作品详情页使用普通收藏。"
     }
   } catch (err) {
-    error.value = err instanceof Error ? err.message : "Failed to load inspirations"
+    error.value = err instanceof Error ? err.message : "灵感收藏夹加载失败"
   } finally {
     loading.value = false
   }
@@ -62,7 +63,7 @@ async function load() {
 
 async function createCollection() {
   const name = newName.value.trim()
-  if (!name) return
+  if (!name || !collectionsSupported.value) return
   const created = await createCommunityCollection(name, { token: auth.token })
   newName.value = ""
   collections.value = [created, ...collections.value]
@@ -85,6 +86,10 @@ async function removePost(post: CommunityPost) {
 
 function replay(post: CommunityPost) {
   if (!post.toolCode) return
+  void trackCommunityEvent(
+    { postId: post.id, eventType: "dashboard_open", source: "inspiration_collection", toolCode: post.toolCode },
+    { token: auth.token },
+  ).catch(() => undefined)
   openDashboardWithAsset(assetFromCommunityPost(post, mediaUrl(post.coverUrl)), post.toolCode, {
     modality: post.modality,
     sourcePost: post.id,
@@ -101,14 +106,15 @@ onMounted(() => void load())
         <div>
           <p class="eyebrow">Inspiration Library</p>
           <h1>灵感收藏夹</h1>
+          <p class="lead">这里保存的是社区灵感，不会混入素材库。素材库仍只管理你自己的生成资产。</p>
         </div>
         <form class="create-form" @submit.prevent="createCollection">
-          <input v-model="newName" placeholder="新收藏夹名称" />
-          <button type="submit"><Plus class="h-4 w-4" />新建</button>
+          <input v-model="newName" :disabled="!collectionsSupported" placeholder="新收藏夹名称" />
+          <button type="submit" :disabled="!collectionsSupported"><Plus class="h-4 w-4" />新建</button>
         </form>
       </section>
 
-      <div v-if="loading" class="state-panel"><Loader2 class="h-5 w-5 animate-spin" />Loading</div>
+      <div v-if="loading" class="state-panel"><Loader2 class="h-5 w-5 animate-spin" />正在加载灵感收藏夹</div>
       <div v-else-if="error" class="state-panel error">{{ error }}</div>
       <section v-else class="content-grid">
         <aside class="collection-list">
@@ -128,7 +134,7 @@ onMounted(() => void load())
         </aside>
 
         <section class="asset-grid">
-          <div v-if="!assets.length" class="state-panel">还没有收藏作品</div>
+          <div v-if="!assets.length" class="state-panel">还没有收藏作品。去社区详情页把好案例加入灵感收藏夹吧。</div>
           <AssetCard
             v-for="item in assets"
             :key="item.post.id"
@@ -182,6 +188,12 @@ h1 {
   font-size: 40px;
 }
 
+.lead {
+  max-width: 560px;
+  color: rgb(255 255 255 / 0.52);
+  line-height: 1.8;
+}
+
 .create-form {
   align-items: center;
 }
@@ -200,6 +212,11 @@ button {
   align-items: center;
   justify-content: center;
   font-weight: 800;
+}
+
+button:disabled,
+input:disabled {
+  opacity: 0.55;
 }
 
 .content-grid {

@@ -33,7 +33,7 @@ export function resolveCommunityAuthorName(post: Pick<CommunityPost, "authorNick
   const cached = authorProfileCache.get(post.userId)
   const nickname = post.authorNickname?.trim() || cached?.nickname?.trim() || cached?.username?.trim()
   if (nickname) return nickname
-  if (post.userId) return `用户${post.userId}`
+  if (post.userId) return `用户 ${post.userId}`
   return ""
 }
 
@@ -57,7 +57,7 @@ export function mergeCommunityPostAuthor(
   if (post.authorNickname?.trim()) return post
   return {
     ...post,
-    authorNickname: profile.nickname?.trim() || profile.username?.trim() || `用户${post.userId}`,
+    authorNickname: profile.nickname?.trim() || profile.username?.trim() || `用户 ${post.userId}`,
     authorAvatarUrl: post.authorAvatarUrl ?? profile.avatarUrl ?? null,
   }
 }

@@ -11,6 +11,7 @@ import com.aiminilab.aitoolmarket.community.dto.CommunityEventRequest;
 import com.aiminilab.aitoolmarket.community.dto.CommunityPostResponse;
 import com.aiminilab.aitoolmarket.community.dto.PublicUserProfileResponse;
 import com.aiminilab.aitoolmarket.community.dto.PublishPostRequest;
+import com.aiminilab.aitoolmarket.community.dto.CommunityTopicResponse;
 import com.aiminilab.aitoolmarket.community.dto.UpdateCommunityPostRequest;
 import com.aiminilab.aitoolmarket.community.service.CommunityService;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -73,6 +74,11 @@ public class CommunityController {
                                                                    @RequestParam(required = false) Integer pageNo,
                                                                    @RequestParam(required = false) Integer pageSize) {
         return ApiResponse.success(communityService.search(keyword, modality, tag, topic, toolCode, sort, featured, currentUserIdOrNull(), pageNo, pageSize));
+    }
+
+    @GetMapping("/topics")
+    public ApiResponse<java.util.List<CommunityTopicResponse>> topics(@RequestParam(required = false) Integer limit) {
+        return ApiResponse.success(communityService.topics(limit));
     }
 
     @GetMapping("/topics/{topic}")

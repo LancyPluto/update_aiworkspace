@@ -260,6 +260,18 @@ public class DataInitializer implements CommandLineRunner {
         ensureColumn("agent_tool_calls", "task_id", "ALTER TABLE agent_tool_calls ADD COLUMN task_id BIGINT NULL");
         ensureIndex("agent_tool_calls", "idx_agent_tool_calls_task_id", "CREATE INDEX idx_agent_tool_calls_task_id ON agent_tool_calls(task_id)");
         ensureIndex("agent_tool_calls", "idx_agent_tool_calls_context_recent", "CREATE INDEX idx_agent_tool_calls_context_recent ON agent_tool_calls(user_id, status, id)");
+        ensureColumn("agent_workspace_memory_items", "source_message_id", "ALTER TABLE agent_workspace_memory_items ADD COLUMN source_message_id BIGINT NULL");
+        ensureColumn("agent_workspace_memory_items", "source_tool_call_id", "ALTER TABLE agent_workspace_memory_items ADD COLUMN source_tool_call_id BIGINT NULL");
+        ensureColumn("agent_workspace_memory_items", "importance", "ALTER TABLE agent_workspace_memory_items ADD COLUMN importance INT NOT NULL DEFAULT 5");
+        ensureColumn("agent_workspace_memory_items", "confidence", "ALTER TABLE agent_workspace_memory_items ADD COLUMN confidence DOUBLE NOT NULL DEFAULT 0.7");
+        ensureColumn("agent_workspace_memory_items", "pinned", "ALTER TABLE agent_workspace_memory_items ADD COLUMN pinned TINYINT NOT NULL DEFAULT 0");
+        ensureColumn("agent_workspace_memory_items", "tags_json", "ALTER TABLE agent_workspace_memory_items ADD COLUMN tags_json JSON NULL");
+        ensureColumn("agent_workspace_memory_items", "metadata_json", "ALTER TABLE agent_workspace_memory_items ADD COLUMN metadata_json JSON NULL");
+        ensureColumn("agent_workspace_memory_items", "last_accessed_at", "ALTER TABLE agent_workspace_memory_items ADD COLUMN last_accessed_at DATETIME NULL");
+        ensureColumn("agent_workspace_memory_items", "access_count", "ALTER TABLE agent_workspace_memory_items ADD COLUMN access_count INT NOT NULL DEFAULT 0");
+        ensureColumn("agent_workspace_memory_items", "expires_at", "ALTER TABLE agent_workspace_memory_items ADD COLUMN expires_at DATETIME NULL");
+        ensureIndex("agent_workspace_memory_items", "idx_agent_memory_context_pack", "CREATE INDEX idx_agent_memory_context_pack ON agent_workspace_memory_items(workspace_id, status, pinned, importance, updated_at)");
+        ensureIndex("agent_workspace_memory_items", "idx_agent_memory_user_type", "CREATE INDEX idx_agent_memory_user_type ON agent_workspace_memory_items(workspace_id, user_id, memory_type, status)");
         ensureTable("agent_tool_descriptor_extension", """
                 CREATE TABLE agent_tool_descriptor_extension (
                   id BIGINT PRIMARY KEY AUTO_INCREMENT,
