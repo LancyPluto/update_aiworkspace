@@ -46,6 +46,12 @@ class Settings:
     agent_llm_router_enabled: bool = _bool("AGENT_LLM_ROUTER_ENABLED", True)
     agent_memory_retrieval_limit: int = int(os.getenv("AGENT_MEMORY_RETRIEVAL_LIMIT", "10"))
     agent_memory_auto_save_enabled: bool = _bool("AGENT_MEMORY_AUTO_SAVE", True)
+    agent_memory_tool_loop_enabled: bool = _bool("AGENT_MEMORY_TOOL_LOOP_ENABLED", True)
+    agent_memory_consolidation_enabled: bool = _bool("AGENT_MEMORY_CONSOLIDATION_ENABLED", True)
+    agent_memory_consolidation_turn_interval: int = int(os.getenv("AGENT_MEMORY_CONSOLIDATION_TURN_INTERVAL", "8"))
+    agent_memory_consolidation_char_threshold: int = int(os.getenv("AGENT_MEMORY_CONSOLIDATION_CHAR_THRESHOLD", "4000"))
+    agent_memory_consolidation_min_confidence: float = float(os.getenv("AGENT_MEMORY_CONSOLIDATION_MIN_CONFIDENCE", "0.72"))
+    agent_memory_candidate_confidence_threshold: float = float(os.getenv("AGENT_MEMORY_CANDIDATE_CONFIDENCE_THRESHOLD", "0.55"))
 
 
 settings = Settings()

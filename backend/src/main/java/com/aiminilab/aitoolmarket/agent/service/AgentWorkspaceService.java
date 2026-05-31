@@ -2,6 +2,9 @@ package com.aiminilab.aitoolmarket.agent.service;
 
 import com.aiminilab.aitoolmarket.agent.dto.AgentWorkspaceMemoryItemResponse;
 import com.aiminilab.aitoolmarket.agent.dto.CreateAgentWorkspaceMemoryRequest;
+import com.aiminilab.aitoolmarket.agent.dto.InternalAgentSessionSearchItemResponse;
+import com.aiminilab.aitoolmarket.agent.dto.InternalAgentSessionSearchRequest;
+import com.aiminilab.aitoolmarket.agent.dto.InternalCreateWorkspaceMemoryCandidateRequest;
 import com.aiminilab.aitoolmarket.agent.dto.InternalWorkspaceMemoryItemResponse;
 import com.aiminilab.aitoolmarket.agent.dto.InternalWorkspaceMemoryRetrieveRequest;
 import com.aiminilab.aitoolmarket.agent.dto.UpdateAgentWorkspaceMemoryRequest;
@@ -22,7 +25,13 @@ public interface AgentWorkspaceService {
 
     void deleteMemory(Long userId, Long workspaceId, Long memoryId);
 
+    AgentWorkspaceMemoryItemResponse updateMemoryPinned(Long userId, Long workspaceId, Long memoryId, boolean pinned);
+
+    AgentWorkspaceMemoryItemResponse createMemoryCandidate(Long workspaceId, InternalCreateWorkspaceMemoryCandidateRequest request);
+
     PageResponse<InternalWorkspaceMemoryItemResponse> retrieveMemory(Long workspaceId, InternalWorkspaceMemoryRetrieveRequest request);
+
+    PageResponse<InternalAgentSessionSearchItemResponse> searchSession(InternalAgentSessionSearchRequest request);
 
     record WorkspaceResponse(
             Long id,

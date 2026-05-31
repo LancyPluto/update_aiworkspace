@@ -123,6 +123,13 @@ class AgentWorkspaceApiTest {
                 .andExpect(jsonPath("$.data.list[0].id").value(firstMemoryId))
                 .andExpect(jsonPath("$.data.list[0].title").value("Tone updated"));
 
+        mockMvc.perform(put("/api/v1/agent/workspaces/{workspaceId}/memory/{memoryId}/pin", workspaceId, firstMemoryId)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"pinned\":true}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.pinned").value(true));
+
         mockMvc.perform(delete("/api/v1/agent/workspaces/{workspaceId}/memory/{memoryId}", workspaceId, secondMemoryId)
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk());
@@ -216,6 +223,76 @@ class AgentWorkspaceApiTest {
                 .andExpect(jsonPath("$.data.list[0].score").value(2))
                 .andExpect(jsonPath("$.data.list[1].id").value(contentMatchId))
                 .andExpect(jsonPath("$.data.list[1].score").value(1));
+    }
+
+    @Test
+    void retrievesHighValueMemoryContextPackWhenQueryHasNoLexicalMatch() throws Exception {
+        Mockito.when(tokenDenylistService.isDenied(anyString())).thenReturn(false);
+        Mockito.when(internalRequestSignatureVerifier.verify(
+                        anyString(), anyString(), anyString(), anyString(), anyString(), any(byte[].class)
+                ))
+                .thenReturn(true);
+        register("workspace_memory_context_pack_user");
+        String token = login("workspace_memory_context_pack_user");
+        long workspaceId = defaultWorkspaceId(token);
+        long profileId = createMemory(
+                token,
+                workspaceId,
+                "user_profile",
+                "User creative profile",
+                "User enjoys absurd anime meme aesthetics and playful AI-generated visual ideas."
+        );
+
+        String body = """
+                {
+                  "query": "我是何人？",
+                  "limit": 5,
+                  "view": "chat"
+                }
+                """;
+
+        mockMvc.perform(signed(post("/api/internal/v1/agent/workspaces/{workspaceId}/memory/retrieve", workspaceId), "POST",
+                        "/api/internal/v1/agent/workspaces/%d/memory/retrieve".formatted(workspaceId), body)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list.length()").value(1))
+                .andExpect(jsonPath("$.data.list[0].id").value(profileId))
+                .andExpect(jsonPath("$.data.list[0].reason").value("context_pack"));
+    }
+
+    @Test
+    void createsMemoryCandidateForSignedInternalRequest() throws Exception {
+        Mockito.when(tokenDenylistService.isDenied(anyString())).thenReturn(false);
+        Mockito.when(internalRequestSignatureVerifier.verify(
+                        anyString(), anyString(), anyString(), anyString(), anyString(), any(byte[].class)
+                ))
+                .thenReturn(true);
+        register("workspace_memory_candidate_user");
+        String token = login("workspace_memory_candidate_user");
+        long workspaceId = defaultWorkspaceId(token);
+
+        String body = """
+                {
+                  "userId": 1,
+                  "action": "candidate",
+                  "memoryType": "workflow_recipe",
+                  "title": "Image defaults",
+                  "content": "Use square ratio for anime poster tests.",
+                  "importance": 6,
+                  "confidence": 0.66,
+                  "reason": "workflow candidate"
+                }
+                """;
+
+        mockMvc.perform(signed(post("/api/internal/v1/agent/workspaces/{workspaceId}/memory/candidates", workspaceId), "POST",
+                        "/api/internal/v1/agent/workspaces/%d/memory/candidates".formatted(workspaceId), body)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("CANDIDATE"))
+                .andExpect(jsonPath("$.data.memoryType").value("workflow_recipe"))
+                .andExpect(jsonPath("$.data.importance").value(6));
     }
 
     private void register(String username) throws Exception {

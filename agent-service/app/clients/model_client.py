@@ -1,9 +1,10 @@
 from collections.abc import AsyncIterator
+from dataclasses import dataclass, field
+import json
 from typing import Any
 
 import httpx
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-from langchain_core.utils.function_calling import convert_to_openai_tool
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from app.clients.chat_model_factory import ChatModelFactory, ChatModelProviderError
 from app.clients.volcengine_model import resolve_volcengine_model_name
@@ -13,6 +14,22 @@ from app.core.schemas import ChatMessage
 
 class ModelClientError(RuntimeError):
     pass
+
+
+@dataclass(slots=True)
+class ChatToolCall:
+    id: str
+    name: str
+    arguments: dict[str, Any] = field(default_factory=dict)
+    raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class ChatTurnResult:
+    content: str = ""
+    tool_calls: list[ChatToolCall] = field(default_factory=list)
+    finish_reason: str | None = None
+    raw: Any | None = None
 
 
 class ModelClient:
@@ -45,6 +62,9 @@ class ModelClient:
         }
 
     async def chat(self, messages: list[ChatMessage], tools: list[dict[str, Any]] | None = None) -> str:
+        if tools:
+            turn = await self.chat_turn(messages, tools=tools)
+            return turn.content
         safe_tools = _prepare_tools_for_provider(tools, self.settings.model_provider)
         if self._should_use_direct_openai_compatible():
             return await self._chat_openai_compatible_direct(messages, tools=safe_tools)
@@ -57,6 +77,31 @@ class ModelClient:
             raise ModelClientError(f"model request failed: {exception}") from exception
         self._record_usage(result)
         return _message_content(result)
+
+    async def chat_turn(
+        self,
+        messages: list[ChatMessage],
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
+    ) -> ChatTurnResult:
+        safe_tools = _prepare_tools_for_provider(tools, self.settings.model_provider)
+        if self._should_use_direct_openai_compatible():
+            return await self._chat_turn_openai_compatible_direct(
+                messages,
+                tools=safe_tools,
+                tool_choice=tool_choice,
+            )
+        kwargs: dict[str, Any] = {}
+        if safe_tools:
+            kwargs["tools"] = safe_tools
+        if tool_choice is not None and self.settings.model_provider.strip().lower() != "anthropic_compatible":
+            kwargs["tool_choice"] = tool_choice
+        try:
+            result = await self._chat_model.ainvoke(_to_langchain_messages(messages), **kwargs)
+        except Exception as exception:
+            raise ModelClientError(f"model request failed: {exception}") from exception
+        self._record_usage(result)
+        return _langchain_turn_result(result)
 
     async def chat_stream(self, messages: list[ChatMessage], tools: list[dict[str, Any]] | None = None) -> AsyncIterator[str]:
         if self._should_stream_locally():
@@ -117,6 +162,35 @@ class ModelClient:
         self._record_openai_usage(data)
         return _openai_compatible_content(data)
 
+    async def _chat_turn_openai_compatible_direct(
+        self,
+        messages: list[ChatMessage],
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
+    ) -> ChatTurnResult:
+        base_url = self.settings.model_api_base_url.rstrip("/")
+        payload: dict[str, Any] = {
+            "model": resolve_volcengine_model_name(self.settings.model_name, base_url),
+            "messages": [_to_openai_message(message) for message in messages],
+            "stream": False,
+        }
+        if tools:
+            payload["tools"] = tools
+        if tool_choice is not None:
+            payload["tool_choice"] = tool_choice
+        headers = {"Authorization": f"Bearer {self.settings.model_api_key}"}
+        try:
+            async with httpx.AsyncClient(timeout=self.settings.model_timeout_seconds) as client:
+                response = await client.post(f"{base_url}/chat/completions", headers=headers, json=payload)
+                response.raise_for_status()
+                data = response.json()
+        except httpx.HTTPStatusError as exception:
+            raise ModelClientError(f"model request failed: {_format_http_error(exception.response)}") from exception
+        except Exception as exception:
+            raise ModelClientError(f"model request failed: {exception}") from exception
+        self._record_openai_usage(data)
+        return _openai_compatible_turn_result(data)
+
     def _record_usage(self, result: Any) -> None:
         usage = getattr(result, "usage_metadata", None)
         if isinstance(usage, dict):
@@ -144,7 +218,11 @@ def _to_langchain_message(message: ChatMessage):
     role = message.role.lower()
     if role == "system":
         return SystemMessage(content=message.content)
+    if role == "tool":
+        return ToolMessage(content=message.content, tool_call_id=message.toolCallId or "")
     if role == "assistant" or role == "ai":
+        if message.toolCalls:
+            return AIMessage(content=message.content or "", tool_calls=[_to_langchain_tool_call(call) for call in message.toolCalls])
         return AIMessage(content=message.content)
     return HumanMessage(content=message.content)
 
@@ -204,13 +282,41 @@ def _to_anthropic_tool(tool: dict[str, Any]) -> dict[str, Any]:
     return anthropic_tool
 
 
-def _to_openai_message(message: ChatMessage) -> dict[str, str]:
+def _to_openai_message(message: ChatMessage) -> dict[str, Any]:
     role = message.role.lower()
     if role == "ai":
         role = "assistant"
     if role not in {"system", "assistant", "user", "tool"}:
         role = "user"
-    return {"role": role, "content": message.content}
+    payload: dict[str, Any] = {"role": role, "content": message.content or ""}
+    if role == "tool" and message.toolCallId:
+        payload["tool_call_id"] = message.toolCallId
+    if role == "assistant" and message.toolCalls:
+        payload["tool_calls"] = [_to_openai_tool_call(call) for call in message.toolCalls]
+    if message.name:
+        payload["name"] = message.name
+    return payload
+
+
+def _to_langchain_tool_call(call: dict[str, Any]) -> dict[str, Any]:
+    function = call.get("function") if isinstance(call.get("function"), dict) else {}
+    name = call.get("name") or function.get("name") or ""
+    args = call.get("args") or call.get("arguments") or _parse_json_object(function.get("arguments"))
+    return {"id": str(call.get("id") or ""), "name": str(name), "args": args if isinstance(args, dict) else {}}
+
+
+def _to_openai_tool_call(call: dict[str, Any]) -> dict[str, Any]:
+    function = call.get("function") if isinstance(call.get("function"), dict) else {}
+    name = call.get("name") or function.get("name") or ""
+    args = call.get("args") or call.get("arguments") or _parse_json_object(function.get("arguments"))
+    return {
+        "id": str(call.get("id") or ""),
+        "type": "function",
+        "function": {
+            "name": str(name),
+            "arguments": json_dumps(args if isinstance(args, dict) else {}),
+        },
+    }
 
 
 def _openai_compatible_content(data: Any) -> str:
@@ -236,6 +342,119 @@ def _openai_compatible_content(data: Any) -> str:
     if isinstance(text, str):
         return text
     raise ModelClientError("model returned invalid chat completion message")
+
+
+def _openai_compatible_turn_result(data: Any) -> ChatTurnResult:
+    if not isinstance(data, dict):
+        raise ModelClientError("model returned non-object chat completion response")
+    choices = data.get("choices")
+    if not isinstance(choices, list) or not choices:
+        raise ModelClientError("model returned empty chat completion choices")
+    first = choices[0]
+    if not isinstance(first, dict):
+        raise ModelClientError("model returned invalid chat completion choice")
+    message = first.get("message")
+    if not isinstance(message, dict):
+        raise ModelClientError("model returned invalid chat completion message")
+    content = _extract_content(message.get("content")) if message.get("content") is not None else ""
+    tool_calls = _extract_openai_tool_calls(message.get("tool_calls"))
+    return ChatTurnResult(
+        content=content,
+        tool_calls=tool_calls,
+        finish_reason=first.get("finish_reason") if isinstance(first.get("finish_reason"), str) else None,
+        raw=data,
+    )
+
+
+def _langchain_turn_result(result: Any) -> ChatTurnResult:
+    return ChatTurnResult(
+        content=_message_content(result, allow_empty=True),
+        tool_calls=_extract_langchain_tool_calls(result),
+        finish_reason=_langchain_finish_reason(result),
+        raw=result,
+    )
+
+
+def _extract_openai_tool_calls(raw_tool_calls: Any) -> list[ChatToolCall]:
+    if not isinstance(raw_tool_calls, list):
+        return []
+    calls: list[ChatToolCall] = []
+    for index, call in enumerate(raw_tool_calls):
+        if not isinstance(call, dict):
+            continue
+        function = call.get("function")
+        if not isinstance(function, dict):
+            continue
+        name = function.get("name")
+        if not isinstance(name, str) or not name.strip():
+            continue
+        calls.append(
+            ChatToolCall(
+                id=str(call.get("id") or f"tool-call-{index}"),
+                name=name.strip(),
+                arguments=_parse_json_object(function.get("arguments")),
+                raw=call,
+            )
+        )
+    return calls
+
+
+def _extract_langchain_tool_calls(result: Any) -> list[ChatToolCall]:
+    raw_calls = getattr(result, "tool_calls", None)
+    calls: list[ChatToolCall] = []
+    if isinstance(raw_calls, list):
+        for index, call in enumerate(raw_calls):
+            if not isinstance(call, dict):
+                continue
+            name = call.get("name")
+            if not isinstance(name, str) or not name.strip():
+                continue
+            args = call.get("args") if isinstance(call.get("args"), dict) else call.get("arguments")
+            calls.append(
+                ChatToolCall(
+                    id=str(call.get("id") or f"tool-call-{index}"),
+                    name=name.strip(),
+                    arguments=args if isinstance(args, dict) else _parse_json_object(args),
+                    raw=call,
+                )
+            )
+    metadata = getattr(result, "additional_kwargs", None)
+    if isinstance(metadata, dict):
+        calls.extend(_extract_openai_tool_calls(metadata.get("tool_calls")))
+    seen: set[str] = set()
+    unique: list[ChatToolCall] = []
+    for call in calls:
+        key = call.id or call.name
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(call)
+    return unique
+
+
+def _langchain_finish_reason(result: Any) -> str | None:
+    metadata = getattr(result, "response_metadata", None)
+    if isinstance(metadata, dict):
+        reason = metadata.get("finish_reason") or metadata.get("stop_reason")
+        if isinstance(reason, str):
+            return reason
+    return None
+
+
+def _parse_json_object(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if not isinstance(value, str) or not value.strip():
+        return {}
+    try:
+        parsed = json.loads(value)
+    except ValueError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def json_dumps(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
 
 def _int_usage(value: Any) -> int:

@@ -1,7 +1,11 @@
 package com.aiminilab.aitoolmarket.agent.dto;
 
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Size;
+
+import java.time.LocalDateTime;
 
 public record CreateAgentWorkspaceMemoryRequest(
         @NotBlank(message = "memoryType is required")
@@ -12,6 +16,16 @@ public record CreateAgentWorkspaceMemoryRequest(
         String title,
         @NotBlank(message = "content is required")
         String content,
-        Long sourceRunId
+        Long sourceRunId,
+        Long sourceMessageId,
+        Long sourceToolCallId,
+        @Min(value = 0, message = "importance must be >= 0")
+        @Max(value = 10, message = "importance must be <= 10")
+        Integer importance,
+        Double confidence,
+        Boolean pinned,
+        String tagsJson,
+        String metadataJson,
+        LocalDateTime expiresAt
 ) {
 }

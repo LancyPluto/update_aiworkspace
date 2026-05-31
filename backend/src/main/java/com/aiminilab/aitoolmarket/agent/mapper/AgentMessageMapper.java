@@ -123,4 +123,19 @@ public interface AgentMessageMapper extends BaseMapper<AgentMessage> {
     int updateContentText(@Param("messageId") Long messageId,
                           @Param("contentText") String contentText,
                           @Param("editedAt") LocalDateTime editedAt);
+
+    @Select("""
+            SELECT m.*
+            FROM agent_messages m
+            WHERE m.session_id = #{sessionId}
+              AND m.user_id = #{userId}
+              AND m.status = 'ACTIVE'
+              AND (#{query} IS NULL OR #{query} = '' OR LOWER(m.content_text) LIKE CONCAT('%', LOWER(#{query}), '%'))
+            ORDER BY m.id DESC
+            LIMIT #{limit}
+            """)
+    List<AgentMessage> searchActiveBySession(@Param("userId") Long userId,
+                                             @Param("sessionId") Long sessionId,
+                                             @Param("query") String query,
+                                             @Param("limit") int limit);
 }

@@ -478,7 +478,13 @@ public class AgentRunServiceImpl implements AgentRunService {
                 parseIntSetting(settings.get(AgentMemorySettings.RETRIEVAL_LIMIT_KEY), AgentMemorySettings.DEFAULT_RETRIEVAL_LIMIT, 1, 20),
                 parseCsvSetting(settings.get(AgentMemorySettings.ENABLED_TYPES_KEY), AgentMemorySettings.DEFAULT_ENABLED_TYPES),
                 nonBlankOrDefault(settings.get(AgentMemorySettings.WRITE_PROMPT_KEY), AgentMemorySettings.DEFAULT_WRITE_PROMPT),
-                nonBlankOrDefault(settings.get(AgentMemorySettings.RETRIEVAL_PROMPT_KEY), AgentMemorySettings.DEFAULT_RETRIEVAL_PROMPT)
+                nonBlankOrDefault(settings.get(AgentMemorySettings.RETRIEVAL_PROMPT_KEY), AgentMemorySettings.DEFAULT_RETRIEVAL_PROMPT),
+                parseBooleanSetting(settings.get(AgentMemorySettings.TOOL_LOOP_ENABLED_KEY), AgentMemorySettings.DEFAULT_TOOL_LOOP_ENABLED),
+                parseBooleanSetting(settings.get(AgentMemorySettings.CONSOLIDATION_ENABLED_KEY), AgentMemorySettings.DEFAULT_CONSOLIDATION_ENABLED),
+                parseIntSetting(settings.get(AgentMemorySettings.CONSOLIDATION_TURN_INTERVAL_KEY), AgentMemorySettings.DEFAULT_CONSOLIDATION_TURN_INTERVAL, 2, 50),
+                parseIntSetting(settings.get(AgentMemorySettings.CONSOLIDATION_CHAR_THRESHOLD_KEY), AgentMemorySettings.DEFAULT_CONSOLIDATION_CHAR_THRESHOLD, 500, 50000),
+                parseDoubleSetting(settings.get(AgentMemorySettings.CONSOLIDATION_MIN_CONFIDENCE_KEY), AgentMemorySettings.DEFAULT_CONSOLIDATION_MIN_CONFIDENCE, 0D, 1D),
+                parseDoubleSetting(settings.get(AgentMemorySettings.CANDIDATE_CONFIDENCE_THRESHOLD_KEY), AgentMemorySettings.DEFAULT_CANDIDATE_CONFIDENCE_THRESHOLD, 0D, 1D)
         );
         var routerSettings = new AgentRouterSettingsResponse(
                 parseBooleanSetting(settings.get(AgentRouterSettings.ENABLED_KEY), AgentRouterSettings.DEFAULT_ENABLED),

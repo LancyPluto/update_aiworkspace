@@ -3,6 +3,7 @@ package com.aiminilab.aitoolmarket.agent.controller;
 import com.aiminilab.aitoolmarket.agent.dto.AgentWorkspaceMemoryItemResponse;
 import com.aiminilab.aitoolmarket.agent.dto.CreateAgentWorkspaceMemoryRequest;
 import com.aiminilab.aitoolmarket.agent.dto.UpdateAgentWorkspaceMemoryRequest;
+import com.aiminilab.aitoolmarket.agent.dto.UpdateAgentWorkspaceMemoryPinRequest;
 import com.aiminilab.aitoolmarket.agent.service.AgentWorkspaceService;
 import com.aiminilab.aitoolmarket.auth.security.AuthContext;
 import com.aiminilab.aitoolmarket.common.dto.ApiResponse;
@@ -48,6 +49,18 @@ public class AgentWorkspaceController {
                                                                       @PathVariable Long memoryId,
                                                                       @Valid @RequestBody UpdateAgentWorkspaceMemoryRequest request) {
         return ApiResponse.success(agentWorkspaceService.updateMemory(AuthContext.get().userId(), workspaceId, memoryId, request));
+    }
+
+    @PutMapping("/{workspaceId}/memory/{memoryId}/pin")
+    public ApiResponse<AgentWorkspaceMemoryItemResponse> updateMemoryPinned(@PathVariable Long workspaceId,
+                                                                            @PathVariable Long memoryId,
+                                                                            @RequestBody UpdateAgentWorkspaceMemoryPinRequest request) {
+        return ApiResponse.success(agentWorkspaceService.updateMemoryPinned(
+                AuthContext.get().userId(),
+                workspaceId,
+                memoryId,
+                request != null && Boolean.TRUE.equals(request.pinned())
+        ));
     }
 
     @DeleteMapping("/{workspaceId}/memory/{memoryId}")

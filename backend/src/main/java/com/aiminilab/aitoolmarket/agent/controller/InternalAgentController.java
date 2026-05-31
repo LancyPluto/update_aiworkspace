@@ -13,9 +13,12 @@ import com.aiminilab.aitoolmarket.agent.dto.CreateAgentRunEventRequest;
 import com.aiminilab.aitoolmarket.agent.dto.CreateAgentToolCallRequest;
 import com.aiminilab.aitoolmarket.agent.dto.FailAgentRunRequest;
 import com.aiminilab.aitoolmarket.agent.dto.FailAgentToolCallRequest;
+import com.aiminilab.aitoolmarket.agent.dto.InternalAgentSessionSearchItemResponse;
+import com.aiminilab.aitoolmarket.agent.dto.InternalAgentSessionSearchRequest;
 import com.aiminilab.aitoolmarket.agent.dto.UpsertStreamingAgentAnswerRequest;
 import com.aiminilab.aitoolmarket.agent.dto.InternalAgentRunContextResponse;
 import com.aiminilab.aitoolmarket.agent.dto.InternalAgentModelConfigResponse;
+import com.aiminilab.aitoolmarket.agent.dto.InternalCreateWorkspaceMemoryCandidateRequest;
 import com.aiminilab.aitoolmarket.agent.dto.InternalCreateWorkspaceMemoryRequest;
 import com.aiminilab.aitoolmarket.agent.dto.InternalWorkspaceMemoryItemResponse;
 import com.aiminilab.aitoolmarket.agent.dto.InternalWorkspaceMemoryRetrieveRequest;
@@ -84,9 +87,26 @@ public class InternalAgentController {
             @RequestBody InternalCreateWorkspaceMemoryRequest request
     ) {
         var createRequest = new com.aiminilab.aitoolmarket.agent.dto.CreateAgentWorkspaceMemoryRequest(
-                request.memoryType(), request.title(), request.content(), request.sourceRunId()
+                request.memoryType(), request.title(), request.content(), request.sourceRunId(),
+                request.sourceMessageId(), request.sourceToolCallId(), request.importance(), request.confidence(),
+                request.pinned(), request.tagsJson(), request.metadataJson(), request.expiresAt()
         );
         return ApiResponse.success(agentWorkspaceService.createMemory(request.userId(), workspaceId, createRequest));
+    }
+
+    @PostMapping("/workspaces/{workspaceId}/memory/candidates")
+    public ApiResponse<AgentWorkspaceMemoryItemResponse> createMemoryCandidate(
+            @PathVariable Long workspaceId,
+            @RequestBody InternalCreateWorkspaceMemoryCandidateRequest request
+    ) {
+        return ApiResponse.success(agentWorkspaceService.createMemoryCandidate(workspaceId, request));
+    }
+
+    @PostMapping("/session-search")
+    public ApiResponse<PageResponse<InternalAgentSessionSearchItemResponse>> searchSession(
+            @Valid @RequestBody InternalAgentSessionSearchRequest request
+    ) {
+        return ApiResponse.success(agentWorkspaceService.searchSession(request));
     }
 
     @PutMapping("/workspaces/{workspaceId}/memory/{memoryId}")
@@ -102,11 +122,19 @@ public class InternalAgentController {
         entity.setMemoryType(request.memoryType());
         entity.setTitle(request.title());
         entity.setContent(request.content());
+        entity.setImportance(request.importance());
+        entity.setConfidence(request.confidence());
+        entity.setPinned(request.pinned());
+        entity.setTagsJson(request.tagsJson());
+        entity.setMetadataJson(request.metadataJson());
+        entity.setExpiresAt(request.expiresAt());
         entity.setUpdatedAt(now);
         agentWorkspaceMemoryItemMapper.updateById(entity);
         return ApiResponse.success(new AgentWorkspaceMemoryItemResponse(
                 memoryId, workspaceId, null, request.memoryType(),
-                request.title(), request.content(), null, "ACTIVE", now, now
+                request.title(), request.content(), null, null, null, request.importance(), request.confidence(),
+                Boolean.TRUE.equals(request.pinned()), request.tagsJson(), request.metadataJson(), null, null,
+                request.expiresAt(), "ACTIVE", now, now
         ));
     }
 

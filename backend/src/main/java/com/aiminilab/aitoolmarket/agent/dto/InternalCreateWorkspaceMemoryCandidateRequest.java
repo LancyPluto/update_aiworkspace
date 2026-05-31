@@ -2,10 +2,9 @@ package com.aiminilab.aitoolmarket.agent.dto;
 
 import java.time.LocalDateTime;
 
-public record AgentWorkspaceMemoryItemResponse(
-        Long id,
-        Long workspaceId,
+public record InternalCreateWorkspaceMemoryCandidateRequest(
         Long userId,
+        String action,
         String memoryType,
         String title,
         String content,
@@ -14,14 +13,9 @@ public record AgentWorkspaceMemoryItemResponse(
         Long sourceToolCallId,
         Integer importance,
         Double confidence,
-        Boolean pinned,
+        String reason,
         String tagsJson,
         String metadataJson,
-        LocalDateTime lastAccessedAt,
-        Integer accessCount,
-        LocalDateTime expiresAt,
-        String status,
-        LocalDateTime createdAt,
-        LocalDateTime updatedAt
+        LocalDateTime expiresAt
 ) {
 }

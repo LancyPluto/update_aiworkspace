@@ -1,13 +1,14 @@
 from typing import Any
 
-from typing import Any
-
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 
 class ChatMessage(BaseModel):
     role: str
     content: str
+    name: str | None = None
+    toolCallId: str | None = Field(default=None, validation_alias=AliasChoices("toolCallId", "tool_call_id"))
+    toolCalls: list[dict[str, Any]] | None = Field(default=None, validation_alias=AliasChoices("toolCalls", "tool_calls"))
 
 
 class ToolFieldDescriptor(BaseModel):
@@ -69,10 +70,41 @@ class WorkspaceMemoryItem(BaseModel):
     content: str
     memoryType: str = Field(validation_alias=AliasChoices("memoryType", "memory_type"))
     score: float
+    reason: str | None = None
+    matchedFields: list[str] = Field(default_factory=list, validation_alias=AliasChoices("matchedFields", "matched_fields"))
+    userId: int | None = Field(default=None, validation_alias=AliasChoices("userId", "user_id"))
     workspaceId: int | None = Field(default=None, validation_alias=AliasChoices("workspaceId", "workspace_id"))
     sourceRunId: int | None = Field(default=None, validation_alias=AliasChoices("sourceRunId", "source_run_id"))
+    sourceMessageId: int | None = Field(default=None, validation_alias=AliasChoices("sourceMessageId", "source_message_id"))
+    sourceToolCallId: int | None = Field(default=None, validation_alias=AliasChoices("sourceToolCallId", "source_tool_call_id"))
+    importance: int | None = None
+    confidence: float | None = None
+    pinned: bool = False
+    tagsJson: str | None = Field(default=None, validation_alias=AliasChoices("tagsJson", "tags_json"))
+    metadataJson: str | None = Field(default=None, validation_alias=AliasChoices("metadataJson", "metadata_json"))
+    lastAccessedAt: str | None = Field(default=None, validation_alias=AliasChoices("lastAccessedAt", "last_accessed_at"))
+    accessCount: int | None = Field(default=None, validation_alias=AliasChoices("accessCount", "access_count"))
+    expiresAt: str | None = Field(default=None, validation_alias=AliasChoices("expiresAt", "expires_at"))
     status: str | None = None
     updatedAt: str | None = Field(default=None, validation_alias=AliasChoices("updatedAt", "updated_at"))
+
+
+class SessionSearchItem(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    itemType: str = Field(validation_alias=AliasChoices("itemType", "item_type"))
+    id: int
+    runId: int | None = Field(default=None, validation_alias=AliasChoices("runId", "run_id"))
+    taskId: int | None = Field(default=None, validation_alias=AliasChoices("taskId", "task_id"))
+    role: str | None = None
+    toolCode: str | None = Field(default=None, validation_alias=AliasChoices("toolCode", "tool_code"))
+    content: str | None = None
+    argumentsJson: str | None = Field(default=None, validation_alias=AliasChoices("argumentsJson", "arguments_json"))
+    resultJson: str | None = Field(default=None, validation_alias=AliasChoices("resultJson", "result_json"))
+    errorCode: str | None = Field(default=None, validation_alias=AliasChoices("errorCode", "error_code"))
+    errorMessage: str | None = Field(default=None, validation_alias=AliasChoices("errorMessage", "error_message"))
+    score: int = 0
+    createdAt: str | None = Field(default=None, validation_alias=AliasChoices("createdAt", "created_at"))
 
 
 class AgentModelConfig(BaseModel):
@@ -106,6 +138,12 @@ class MemorySettings(BaseModel):
     enabledTypes: list[str] = Field(default_factory=lambda: ["user_profile", "project_knowledge", "custom"])
     writePrompt: str | None = None
     retrievalPrompt: str | None = None
+    toolLoopEnabled: bool | None = None
+    consolidationEnabled: bool | None = None
+    consolidationTurnInterval: int | None = None
+    consolidationCharThreshold: int | None = None
+    consolidationMinConfidence: float | None = None
+    candidateConfidenceThreshold: float | None = None
 
 
 class AgentRouterSettings(BaseModel):
