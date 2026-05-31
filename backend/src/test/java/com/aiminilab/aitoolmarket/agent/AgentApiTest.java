@@ -1306,6 +1306,7 @@ class AgentApiTest {
                 .andReturn().getResponse().getContentAsString();
 
         JsonNode history = objectMapper.readTree(ctx).path("data").path("history");
+        JsonNode recentToolCalls = objectMapper.readTree(ctx).path("data").path("recentToolCalls");
         String historyText = history.toString();
         assertThat(historyText).contains("\"role\":\"system\"");
         assertThat(historyText).contains("toolCode=ofox_gpt_image2");
@@ -1316,6 +1317,12 @@ class AgentApiTest {
         assertThat(historyText).doesNotContain("data:image/png;base64");
         assertThat(historyText).doesNotContain("AAAAAAAAAAAAAAAAAAAAAAAA");
         assertThat(historyText.length()).isLessThan(3000);
+        assertThat(recentToolCalls.size()).isEqualTo(1);
+        assertThat(recentToolCalls.get(0).path("toolCode").asText()).isEqualTo("ofox_gpt_image2");
+        assertThat(recentToolCalls.get(0).path("taskId").asLong()).isEqualTo(9901L);
+        assertThat(recentToolCalls.get(0).path("resourceType").asText()).isEqualTo("IMAGE");
+        assertThat(recentToolCalls.get(0).path("argumentsJson").path("prompt").asText()).isEqualTo("family photo");
+        assertThat(recentToolCalls.get(0).path("mediaUrls").get(0).asText()).isEqualTo("https://cdn.example.com/generated/family.png");
     }
 
     @Test

@@ -6,7 +6,7 @@ from app.config import settings
 from app.core.event_types import ROUTER_CANDIDATES, ROUTER_FALLBACK, ROUTER_SELECTED, ROUTER_STARTED
 from app.core.intent_router import Intent, IntentResult, IntentRouter
 from app.core.schemas import ChatMessage, RunContext, RunEventCreate
-from app.tools.registry import ToolRegistry, requested_output_modality
+from app.tools.registry import ToolRegistry, infer_output_modality, requested_output_modality
 
 LOGGER = logging.getLogger(__name__)
 
@@ -17,10 +17,11 @@ DEFAULT_ROUTER_PROMPT = (
     "{\"intent\":\"tool_use|general_chat|needs_clarification|unsupported\","
     "\"selectedToolCode\":string|null,\"candidateToolCodes\":string[],"
     "\"confidence\":number,\"reason\":string,\"arguments\":object,\"missingFields\":string[],"
-    "\"clarifyingQuestion\":string|null}. "
+    "\"followupPatch\":object,\"requiresConfirmation\":boolean|null,\"clarifyingQuestion\":string|null}. "
     "Use the available tool metadata as source of truth. "
     "Prefer the tool that directly produces the requested output modality: image/photo/poster/cos/visual requests use image tools; "
     "video/short-video/image-to-video requests use video tools; copywriting/title/article requests use text tools. "
+    "Use recentToolCalls to detect follow-up requests, inherit prior arguments, and return only the user's changes in followupPatch. "
     "Only ask for missing information when it changes intent, cost, authorization, safety, or the core subject. "
     "Do not ask for low-risk defaults such as aspect ratio, count, quality, or style strength."
 )
@@ -112,6 +113,10 @@ class AgentRouterService:
                 "description": tool.description or "",
                 "autoCallable": tool.autoCallable,
                 "agentHints": tool.hints,
+                "inputSchema": tool.inputSchema,
+                "outputModality": infer_output_modality(tool),
+                "estimatedCreditCost": tool.estimatedCreditCost,
+                "autoCallPolicy": "auto" if tool.autoCallable else "configured_or_confirm",
                 "rank": ranked.get(tool.toolCode),
                 "fields": [
                     {
@@ -135,6 +140,25 @@ class AgentRouterService:
         payload = {
             "userMessage": context.message,
             "requestedOutputModality": requested_output_modality(context.message),
+            "recentHistory": [
+                {
+                    "role": message.role,
+                    "content": _clip(message.content, 500),
+                }
+                for message in context.history[-8:]
+            ],
+            "recentToolCalls": [
+                {
+                    "id": call.id,
+                    "toolCode": call.toolCode,
+                    "taskId": call.taskId,
+                    "argumentsJson": call.argumentsJson,
+                    "resourceType": call.resourceType,
+                    "mediaUrls": call.mediaUrls,
+                    "createdAt": call.createdAt,
+                }
+                for call in context.recentToolCalls[:5]
+            ],
             "ruleFallback": {
                 "intent": rule_intent.intent.value,
                 "selectedToolCode": rule_intent.selectedToolCode,
@@ -164,6 +188,11 @@ class AgentRouterService:
         if intent == Intent.TOOL_USE:
             if not selected_tool or selected_tool not in available:
                 return None
+            selected_descriptor = next((tool for tool in context.availableTools if tool.toolCode == selected_tool), None)
+            requested_modality = requested_output_modality(context.message)
+            selected_modality = infer_output_modality(selected_descriptor) if selected_descriptor else None
+            if requested_modality and selected_modality and requested_modality != selected_modality:
+                return None
         elif selected_tool and selected_tool not in available:
             selected_tool = None
 
@@ -185,6 +214,13 @@ class AgentRouterService:
             clarifyingQuestion=clarifying if isinstance(clarifying, str) else None,
             decisionSource="llm_router",
             reason=reason,
+            arguments=parsed.get("arguments") if isinstance(parsed.get("arguments"), dict) else {},
+            missingFields=[
+                item for item in parsed.get("missingFields", [])
+                if isinstance(item, str)
+            ] if isinstance(parsed.get("missingFields"), list) else [],
+            followupPatch=parsed.get("followupPatch") if isinstance(parsed.get("followupPatch"), dict) else {},
+            requiresConfirmation=parsed.get("requiresConfirmation") if isinstance(parsed.get("requiresConfirmation"), bool) else None,
         )
 
     async def _emit_started(self, context: RunContext, rule_intent: IntentResult) -> None:
@@ -233,6 +269,8 @@ class AgentRouterService:
                     "reason": result.reason,
                     "arguments": parsed.get("arguments") if isinstance(parsed.get("arguments"), dict) else {},
                     "missingFields": parsed.get("missingFields") if isinstance(parsed.get("missingFields"), list) else [],
+                    "followupPatch": parsed.get("followupPatch") if isinstance(parsed.get("followupPatch"), dict) else {},
+                    "requiresConfirmation": parsed.get("requiresConfirmation") if isinstance(parsed.get("requiresConfirmation"), bool) else None,
                     "clarifyingQuestion": result.clarifyingQuestion,
                 },
             ),

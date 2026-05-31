@@ -12,6 +12,10 @@ from app.config import settings
 from app.core.agent_decision import AgentDecisionService
 from app.core.budget_guard import BudgetExceeded, BudgetGuard, BudgetState
 from app.core.event_types import (
+    ARGUMENTS_MERGED,
+    FOLLOWUP_DETECTED,
+    FOLLOWUP_INHERITED,
+    FOLLOWUP_REJECTED,
     INTENT_DETECTED,
     MEMORY_CANDIDATE_CREATED,
     MEMORY_CONTEXT_FROZEN,
@@ -41,8 +45,10 @@ from app.core.schemas import (
     ToolDescriptor,
     WorkspaceMemoryItem,
 )
+from app.runtime.followup_task_resolver import FollowupTaskResolver, FollowupResolution
 from app.runtime.subagent_profiles import default_subagent_profiles, profiles_to_deepagents_subagents
 from app.runtime.agent_router_service import AgentRouterService
+from app.runtime.tool_decision_validator import ToolDecisionValidator
 from app.runtime.workspace_files import WorkspaceFileContext, build_workspace_file_context
 from app.security.prompt_guard import PromptGuard
 from app.tools.backend_tool import BackendToolBridge
@@ -53,7 +59,7 @@ from app.tools.memory_tool import (
     _format_memory_tool_definitions,
 )
 from app.tools.missing_argument_hints import format_missing_tool_arguments_message
-from app.tools.registry import ToolRegistry, requested_output_modality, tool_supports_modality
+from app.tools.registry import ToolRegistry, infer_output_modality, requested_output_modality, tool_supports_modality
 from langchain_core.callbacks import AsyncCallbackHandler
 
 LOGGER = logging.getLogger(__name__)
@@ -105,6 +111,8 @@ class DeepAgentsRuntimeEngine:
             model_client,
             intent_router=self.intent_router,
         )
+        self.followup_resolver = FollowupTaskResolver()
+        self.tool_decision_validator = ToolDecisionValidator()
 
     async def run(self, context: RunContext) -> None:
         if self._explicit_deep_agents_flag and not self.deep_agents_enabled:
@@ -341,7 +349,28 @@ class DeepAgentsRuntimeEngine:
     # --- Tool use flow ---
 
     async def _handle_tool_use(self, context: RunContext, intent) -> None:
-        tool = ToolRegistry(context).get(intent.selectedToolCode or "") if intent.selectedToolCode else None
+        registry = ToolRegistry(context)
+        tool = registry.get(intent.selectedToolCode or "") if intent.selectedToolCode else None
+        followup = self._resolve_router_followup(context, intent, tool)
+        if not followup.accepted and intent.decisionSource != "llm_router":
+            followup = self.followup_resolver.resolve(context, tool)
+        await self._emit_followup_event(context, followup)
+        if followup.accepted and followup.tool_code:
+            inherited_tool = registry.get(followup.tool_code)
+            if inherited_tool is not None:
+                tool = inherited_tool
+                intent.selectedToolCode = inherited_tool.toolCode
+                intent.candidateToolCodes = [inherited_tool.toolCode, *[
+                    code for code in intent.candidateToolCodes if code != inherited_tool.toolCode
+                ]][:3]
+                intent.arguments = self._merge_tool_arguments(
+                    followup.inherited_arguments,
+                    followup.patched_arguments,
+                    intent.arguments,
+                    user_request=context.message,
+                )
+                intent.isFollowUp = True
+                intent.inheritedFromToolCallId = followup.inherited_from_tool_call_id
         if tool is None:
             from app.core.intent_router import IntentResult
             intent_result = IntentResult(
@@ -351,6 +380,37 @@ class DeepAgentsRuntimeEngine:
             await self._emit_answer_events(context.runId, answer)
             await self._complete_run(context, answer, intent=Intent.NEEDS_CLARIFICATION.value)
             return
+
+        validation = self.tool_decision_validator.validate(context, intent, tool)
+        if not validation.accepted:
+            replacement_tool = self._select_valid_candidate_tool(context, registry, intent, excluded_tool_code=tool.toolCode)
+            if replacement_tool is not None:
+                tool = replacement_tool
+                intent.selectedToolCode = replacement_tool.toolCode
+                intent.candidateToolCodes = [replacement_tool.toolCode, *[
+                    code for code in intent.candidateToolCodes if code != replacement_tool.toolCode
+                ]][:3]
+                validation = self.tool_decision_validator.validate(context, intent, tool)
+        if not validation.accepted:
+            LOGGER.info(
+                "agent tool decision rejected runId=%s selectedTool=%s reason=%s warnings=%s",
+                context.runId,
+                tool.toolCode,
+                validation.reason,
+                validation.warnings,
+            )
+            intent_result = IntentResult(
+                intent=Intent.NEEDS_CLARIFICATION,
+                confidence=0.55,
+                reason=validation.reason,
+                candidateToolCodes=intent.candidateToolCodes,
+            )
+            answer = self._format_clarifying_answer(context, intent_result)
+            await self._emit_answer_events(context.runId, answer)
+            await self._complete_run(context, answer, intent=Intent.NEEDS_CLARIFICATION.value)
+            return
+        if validation.requires_confirmation:
+            intent.requiresConfirmation = True
 
         LOGGER.info(
             "agent tool path runId=%s selectedTool=%s toolName=%s autoCallable=%s candidateTools=%s",
@@ -366,8 +426,9 @@ class DeepAgentsRuntimeEngine:
         )
 
         budget = BudgetState(credit_budget=context.creditBudget)
-        missing_args = self.tool_bridge.missing_required_arguments(context, tool)
-        extracted_args = None
+        seed_args = dict(intent.arguments or {})
+        missing_args = self._missing_user_arguments(seed_args, tool) if seed_args else self.tool_bridge.missing_required_arguments(context, tool)
+        extracted_args = seed_args or None
         LOGGER.info(
             "agent tool arguments check runId=%s tool=%s missing=%s",
             context.runId,
@@ -377,14 +438,16 @@ class DeepAgentsRuntimeEngine:
 
         if missing_args:
             base_args = self.tool_bridge.build_arguments(context, tool, apply_placeholder_defaults=False)
+            base_args.update({key: value for key, value in seed_args.items() if value not in (None, "")})
             enriched = await self.tool_bridge.enrich_arguments(
                 self.tool_bridge.conversation_argument_text(context), tool, existing_args=base_args,
             )
             still_missing = self._missing_user_arguments(enriched, tool)
             extracted_args = enriched
-            auto_call = self._should_auto_call(context, tool)
+            auto_call = self._should_auto_call(context, tool, followup, intent)
             if not still_missing:
                 await self._emit_arguments_preview(context, tool, extracted_args, [], not auto_call)
+                await self._emit_arguments_merged(context, tool, intent, extracted_args)
                 if not auto_call:
                     await self._request_confirmation(context, tool)
                     return
@@ -411,17 +474,21 @@ class DeepAgentsRuntimeEngine:
                 await self._complete_run(context, answer, intent=Intent.NEEDS_CLARIFICATION.value)
                 return
 
-        auto_call = self._should_auto_call(context, tool)
+        auto_call = self._should_auto_call(context, tool, followup, intent)
         if not extracted_args:
             extracted_args = self.tool_bridge.build_arguments(context, tool, apply_placeholder_defaults=False)
+        else:
+            current_args = self.tool_bridge.build_arguments(context, tool, apply_placeholder_defaults=False)
+            extracted_args = self._merge_tool_arguments(current_args, extracted_args, {}, user_request=context.message)
         await self._emit_arguments_preview(context, tool, extracted_args, [], not auto_call)
+        await self._emit_arguments_merged(context, tool, intent, extracted_args)
 
         if not auto_call:
             await self._request_confirmation(context, tool)
             return
 
         try:
-            result = await self._execute_tool_with_guard(context, tool, budget)
+            result = await self._execute_tool_with_guard(context, tool, budget, arguments=extracted_args)
         except BudgetExceeded as exception:
             await self._fail_run(context.runId, exception.error_code, exception.message, budget=budget)
             return
@@ -482,6 +549,131 @@ class DeepAgentsRuntimeEngine:
             ),
         )
 
+    async def _emit_followup_event(self, context: RunContext, followup: FollowupResolution) -> None:
+        if not followup.accepted and followup.reason == "not_followup":
+            return
+        event_type = FOLLOWUP_INHERITED if followup.accepted else FOLLOWUP_REJECTED
+        await self.backend.append_event(
+            context.runId,
+            RunEventCreate(
+                eventType=FOLLOWUP_DETECTED,
+                eventText=followup.reason,
+                eventJson={
+                    "accepted": followup.accepted,
+                    "reason": followup.reason,
+                    "toolCode": followup.tool_code,
+                    "inheritedFromToolCallId": followup.inherited_from_tool_call_id,
+                    "mediaUrls": followup.media_urls,
+                },
+            ),
+        )
+        await self.backend.append_event(
+            context.runId,
+            RunEventCreate(
+                eventType=event_type,
+                eventText=followup.tool_code or followup.reason,
+                eventJson={
+                    "reason": followup.reason,
+                    "toolCode": followup.tool_code,
+                    "inheritedFromToolCallId": followup.inherited_from_tool_call_id,
+                    "inheritedArguments": followup.inherited_arguments if followup.accepted else {},
+                    "patchedArguments": followup.patched_arguments if followup.accepted else {},
+                },
+            ),
+        )
+
+    async def _emit_arguments_merged(self, context: RunContext, tool: ToolDescriptor, intent, arguments: dict[str, Any]) -> None:
+        await self.backend.append_event(
+            context.runId,
+            RunEventCreate(
+                eventType=ARGUMENTS_MERGED,
+                eventText=tool.toolCode,
+                eventJson={
+                    "toolCode": tool.toolCode,
+                    "arguments": arguments,
+                    "routerArguments": intent.arguments or {},
+                    "isFollowUp": bool(intent.isFollowUp),
+                    "inheritedFromToolCallId": intent.inheritedFromToolCallId,
+                    "missingFields": intent.missingFields or [],
+                },
+            ),
+        )
+
+    @staticmethod
+    def _merge_tool_arguments(*sources: dict[str, Any], user_request: str | None = None) -> dict[str, Any]:
+        merged: dict[str, Any] = {}
+        for source in sources:
+            for key, value in (source or {}).items():
+                if value not in (None, ""):
+                    merged[key] = value
+        if user_request:
+            merged["userRequest"] = user_request
+        return merged
+
+    def _resolve_router_followup(self, context: RunContext, intent, tool: ToolDescriptor | None) -> FollowupResolution:
+        if not context.recentToolCalls:
+            return FollowupResolution(False, "not_followup")
+        if not (intent.isFollowUp or intent.inheritedFromToolCallId or intent.followupPatch):
+            return FollowupResolution(False, "not_followup")
+
+        selected_source = None
+        if intent.inheritedFromToolCallId:
+            selected_source = next((call for call in context.recentToolCalls if call.id == intent.inheritedFromToolCallId), None)
+        if selected_source is None and tool is not None:
+            selected_source = next((call for call in context.recentToolCalls if call.toolCode == tool.toolCode), None)
+        if selected_source is None:
+            selected_source = context.recentToolCalls[0]
+
+        inherited = dict(selected_source.argumentsJson or {})
+        patch = dict(intent.followupPatch or {})
+        if not patch and intent.arguments:
+            patch = dict(intent.arguments)
+        if not patch and tool is not None:
+            fallback = self.followup_resolver.resolve(context, tool)
+            if fallback.accepted:
+                return fallback
+        if selected_source.mediaUrls and tool is not None and tool_supports_modality(tool, "VIDEO"):
+            image_key = self._first_schema_key(tool, ("imageUrl", "image_url", "referenceImageUrl", "reference_image_url", "initImage", "inputImage"))
+            if image_key and image_key not in patch:
+                patch[image_key] = selected_source.mediaUrls[0]
+
+        tool_code = tool.toolCode if tool is not None else selected_source.toolCode
+        return FollowupResolution(
+            True,
+            "router_followup_inherited",
+            tool_code=tool_code,
+            inherited_from_tool_call_id=selected_source.id,
+            inherited_arguments=inherited,
+            patched_arguments=self._merge_tool_arguments(inherited, patch, intent.arguments, user_request=context.message),
+            media_urls=selected_source.mediaUrls or [],
+        )
+
+    @staticmethod
+    def _first_schema_key(tool: ToolDescriptor, keys: tuple[str, ...]) -> str | None:
+        properties = tool.inputSchema.get("properties", {}) if isinstance(tool.inputSchema, dict) else {}
+        if not isinstance(properties, dict):
+            return None
+        return next((key for key in keys if key in properties), None)
+
+    @staticmethod
+    def _select_valid_candidate_tool(
+        context: RunContext,
+        registry: ToolRegistry,
+        intent,
+        *,
+        excluded_tool_code: str | None = None,
+    ) -> ToolDescriptor | None:
+        requested_modality = requested_output_modality(context.message)
+        if not requested_modality:
+            return None
+        for code in intent.candidateToolCodes:
+            if code == excluded_tool_code:
+                continue
+            candidate = registry.get(code)
+            if candidate is not None and infer_output_modality(candidate) == requested_modality:
+                return candidate
+        return None
+
     async def _emit_missing_arguments(self, context: RunContext, tool: ToolDescriptor, missing: list[str]) -> None:
         await self.backend.append_event(
             context.runId,
@@ -512,12 +704,26 @@ class DeepAgentsRuntimeEngine:
             ),
         )
 
-    def _should_auto_call(self, context: RunContext, tool: ToolDescriptor) -> bool:
+    def _should_auto_call(self, context: RunContext, tool: ToolDescriptor, followup: FollowupResolution | None = None, intent=None) -> bool:
+        if intent is not None and intent.requiresConfirmation is True:
+            return False
         if tool.autoCallable:
             return True
         if any(p.toolCode == tool.toolCode and p.autoCallEnabled for p in context.toolPreferences):
             return True
+        if followup is not None and followup.accepted and self._is_safe_followup_auto_call(tool):
+            return True
         return self._is_direct_generation_request(context, tool)
+
+    @staticmethod
+    def _is_safe_followup_auto_call(tool: ToolDescriptor) -> bool:
+        if tool.estimatedCreditCost and tool.estimatedCreditCost > 20:
+            return False
+        high_risk = {"high", "critical", "danger"}
+        for field in tool.fields:
+            if (field.riskLevel or "").strip().lower() in high_risk:
+                return False
+        return True
 
     def _is_direct_generation_request(self, context: RunContext, tool: ToolDescriptor) -> bool:
         modality = requested_output_modality(context.message)

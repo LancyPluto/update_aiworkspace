@@ -115,6 +115,20 @@ class AgentRouterSettings(BaseModel):
     fallbackToRules: bool = True
 
 
+class RecentToolCallContext(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: int
+    runId: int | None = None
+    toolCode: str
+    taskId: int | None = None
+    argumentsJson: dict[str, Any] = Field(default_factory=dict)
+    resultJson: dict[str, Any] = Field(default_factory=dict)
+    resourceType: str | None = None
+    mediaUrls: list[str] = Field(default_factory=list)
+    createdAt: str | None = None
+
+
 class PendingToolContext(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -152,6 +166,7 @@ class RunContext(BaseModel):
     deepAgentsSystemPrompt: str | None = None
     memorySettings: MemorySettings | None = None
     routerSettings: AgentRouterSettings | None = None
+    recentToolCalls: list[RecentToolCallContext] = Field(default_factory=list)
     pendingToolContext: PendingToolContext | None = Field(default=None, validation_alias=AliasChoices("pendingToolContext", "pending_tool_context"))
 
 

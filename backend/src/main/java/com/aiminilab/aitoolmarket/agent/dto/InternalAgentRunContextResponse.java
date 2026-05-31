@@ -21,6 +21,7 @@ public record InternalAgentRunContextResponse(
         String deepAgentsSystemPrompt,
         AgentMemorySettingsResponse memorySettings,
         AgentRouterSettingsResponse routerSettings,
+        List<InternalRecentToolCallContextResponse> recentToolCalls,
         InternalPendingToolContextResponse pendingToolContext
 ) {
 }

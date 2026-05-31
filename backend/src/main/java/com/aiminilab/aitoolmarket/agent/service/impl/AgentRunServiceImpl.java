@@ -27,6 +27,7 @@ import com.aiminilab.aitoolmarket.agent.dto.InternalAgentModelConfigResponse;
 import com.aiminilab.aitoolmarket.agent.dto.InternalAgentMessageResponse;
 import com.aiminilab.aitoolmarket.agent.dto.InternalAgentRunContextResponse;
 import com.aiminilab.aitoolmarket.agent.dto.InternalAgentFileContextResponse;
+import com.aiminilab.aitoolmarket.agent.dto.InternalRecentToolCallContextResponse;
 import com.aiminilab.aitoolmarket.agent.dto.InternalPendingToolContextResponse;
 import com.aiminilab.aitoolmarket.agent.dto.UpdateAgentToolPreferenceRequest;
 import com.aiminilab.aitoolmarket.agent.entity.AgentFile;
@@ -523,6 +524,7 @@ public class AgentRunServiceImpl implements AgentRunService {
                 deepAgentsSystemPrompt,
                 memorySettings,
                 routerSettings,
+                recentToolCallContext(run),
                 pendingToolContextResponse
         );
     }
@@ -1149,6 +1151,42 @@ public class AgentRunServiceImpl implements AgentRunService {
         );
     }
 
+    private List<InternalRecentToolCallContextResponse> recentToolCallContext(AgentRun run) {
+        return agentToolCallMapper.findRecentSuccessfulBeforeRun(
+                        run.getUserId(),
+                        run.getSessionId(),
+                        run.getId(),
+                        RECENT_TOOL_RESULT_CONTEXT_LIMIT
+                )
+                .stream()
+                .map(call -> {
+                    JsonNode result = parseJsonNode(call.getResultJson());
+                    String resourceType = firstText(result.at("/data/resourceType"), result.path("resourceType"));
+                    String contentText = firstText(
+                            result.at("/data/contentText"),
+                            result.path("contentText"),
+                            result.path("resultSummary"),
+                            result.path("summary")
+                    );
+                    String mediaUrls = extractMediaUrls(contentText);
+                    if (mediaUrls.isBlank()) {
+                        mediaUrls = extractMediaUrls(call.getResultJson());
+                    }
+                    return new InternalRecentToolCallContextResponse(
+                            call.getId(),
+                            call.getRunId(),
+                            call.getToolCode(),
+                            call.getTaskId(),
+                            parseJsonMap(call.getArgumentsJson()),
+                            parseJsonMap(call.getResultJson()),
+                            resourceType,
+                            splitMediaUrls(mediaUrls),
+                            call.getCreatedAt()
+                    );
+                })
+                .toList();
+    }
+
     private String formatToolResultMemoryLine(AgentToolCall call) {
         JsonNode result = parseJsonNode(call.getResultJson());
         String resourceType = firstText(result.at("/data/resourceType"), result.path("resourceType"));
@@ -1256,6 +1294,36 @@ public class AgentRunServiceImpl implements AgentRunService {
             }
         }
         return String.join(",", urls);
+    }
+
+    private List<String> splitMediaUrls(String value) {
+        if (value == null || value.isBlank()) {
+            return List.of();
+        }
+        return Arrays.stream(value.split(","))
+                .map(String::trim)
+                .filter(item -> !item.isBlank())
+                .distinct()
+                .limit(6)
+                .toList();
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> parseJsonMap(String value) {
+        if (value == null || value.isBlank()) {
+            return Map.of();
+        }
+        try {
+            Object parsed = objectMapper.readValue(value, Object.class);
+            if (parsed instanceof String string && !string.isBlank()) {
+                parsed = objectMapper.readValue(string, Object.class);
+            }
+            if (parsed instanceof Map<?, ?> map) {
+                return (Map<String, Object>) map;
+            }
+        } catch (Exception ignored) {
+        }
+        return Map.of();
     }
 
     private void collectMediaUrls(JsonNode node, List<String> urls) {

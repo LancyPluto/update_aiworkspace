@@ -1,5 +1,5 @@
 from app.core.intent_router import Intent, IntentRouter
-from app.core.schemas import ChatMessage, RunContext, ToolDescriptor
+from app.core.schemas import ChatMessage, RecentToolCallContext, RunContext, ToolDescriptor
 
 
 def context(message: str) -> RunContext:
@@ -246,3 +246,49 @@ def test_clear_image_request_filters_out_video_candidates():
     assert result.intent == Intent.TOOL_USE
     assert result.selectedToolCode == "z_image_turbo"
     assert "kling_video_v26" not in result.candidateToolCodes
+
+
+def test_recent_image_followup_routes_to_image_tool_without_clarification():
+    ctx = RunContext(
+        runId=7,
+        sessionId=1,
+        userId=1,
+        message="给狛枝凪斗也来一张同款",
+        recentToolCalls=[
+            RecentToolCallContext(
+                id=99,
+                toolCode="kling-image-generation-v3",
+                taskId=1099,
+                argumentsJson={"prompt": "动漫人物甜品广告图", "aspectRatio": "16:9"},
+                resourceType="IMAGE",
+                mediaUrls=["/generated/images/1099/image-1.png"],
+            )
+        ],
+        availableTools=[
+            ToolDescriptor(
+                toolCode="kling-image-generation-v3",
+                toolName="可灵生图 V3",
+                description="图片生成，文生图，写真，海报",
+                autoCallable=False,
+            ),
+            ToolDescriptor(
+                toolCode="ofox_gpt_image2",
+                toolName="GPT-image2.0",
+                description="图片生成，照片，海报",
+                autoCallable=False,
+            ),
+            ToolDescriptor(
+                toolCode="kling-v3-image-to-video",
+                toolName="可灵 V3 图生视频",
+                description="图生视频，视频生成，image to video",
+                autoCallable=False,
+            ),
+        ],
+    )
+
+    result = IntentRouter().classify(ctx)
+
+    assert result.intent == Intent.TOOL_USE
+    assert result.reason == "recent_tool_followup"
+    assert result.selectedToolCode == "kling-image-generation-v3"
+    assert "kling-v3-image-to-video" not in result.candidateToolCodes
