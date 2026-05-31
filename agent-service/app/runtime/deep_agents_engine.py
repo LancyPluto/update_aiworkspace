@@ -434,8 +434,10 @@ class DeepAgentsRuntimeEngine:
 
         budget = BudgetState(credit_budget=context.creditBudget)
         seed_args = dict(intent.arguments or {})
-        missing_args = self._missing_user_arguments(seed_args, tool) if seed_args else self.tool_bridge.missing_required_arguments(context, tool)
-        extracted_args = seed_args or None
+        base_args = self.tool_bridge.build_arguments(context, tool, apply_placeholder_defaults=True)
+        base_args.update({key: value for key, value in seed_args.items() if value not in (None, "")})
+        missing_args = self._missing_user_arguments(base_args, tool)
+        extracted_args = base_args
         LOGGER.info(
             "agent tool arguments check runId=%s tool=%s missing=%s",
             context.runId,
@@ -444,11 +446,12 @@ class DeepAgentsRuntimeEngine:
         )
 
         if missing_args:
-            base_args = self.tool_bridge.build_arguments(context, tool, apply_placeholder_defaults=False)
-            base_args.update({key: value for key, value in seed_args.items() if value not in (None, "")})
             enriched = await self.tool_bridge.enrich_arguments(
                 self.tool_bridge.conversation_argument_text(context), tool, existing_args=base_args,
             )
+            prepared_enriched = self.tool_bridge.build_arguments(context, tool, apply_placeholder_defaults=True)
+            prepared_enriched.update({key: value for key, value in enriched.items() if value not in (None, "")})
+            enriched = prepared_enriched
             still_missing = self._missing_user_arguments(enriched, tool)
             extracted_args = enriched
             auto_call = self._should_auto_call(context, tool, followup, intent)
@@ -482,11 +485,8 @@ class DeepAgentsRuntimeEngine:
                 return
 
         auto_call = self._should_auto_call(context, tool, followup, intent)
-        if not extracted_args:
-            extracted_args = self.tool_bridge.build_arguments(context, tool, apply_placeholder_defaults=False)
-        else:
-            current_args = self.tool_bridge.build_arguments(context, tool, apply_placeholder_defaults=False)
-            extracted_args = self._merge_tool_arguments(current_args, extracted_args, {}, user_request=context.message)
+        current_args = self.tool_bridge.build_arguments(context, tool, apply_placeholder_defaults=True)
+        extracted_args = self._merge_tool_arguments(current_args, extracted_args, {}, user_request=context.message)
         await self._emit_arguments_preview(context, tool, extracted_args, [], not auto_call)
         await self._emit_arguments_merged(context, tool, intent, extracted_args)
 

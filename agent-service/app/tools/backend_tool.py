@@ -8,6 +8,7 @@ from typing import Any
 from app.config import settings
 from app.core.event_types import MESSAGE_DELTA, TOOL_TASK_DISPATCHED, TOOL_TASK_PROGRESS
 from app.core.schemas import ChatMessage, RunContext, RunEventCreate, TaskCreate, TaskDetailResponse, ToolCallComplete, ToolCallCreate, ToolCallFail, ToolDescriptor
+from app.tools.registry import infer_output_modality
 from app.tools.stream_preview import extract_stream_preview
 
 
@@ -54,6 +55,7 @@ class BackendToolBridge:
         if apply_placeholder_defaults and tool.toolCode == "xiaohongshu_copywriting":
             arguments = _with_xiaohongshu_defaults(context.message, arguments)
         if apply_placeholder_defaults:
+            arguments = _with_generation_argument_defaults(context, tool, arguments)
             arguments = _with_field_strategy_defaults(tool, arguments)
         return arguments
 
@@ -88,14 +90,17 @@ class BackendToolBridge:
         if existing_args:
             existing_info = f"\n已从格式匹配中提取的参数 (不要覆盖): {json.dumps(existing_args, ensure_ascii=False)}"
         prompt = (
-            f"从用户消息中提取工具参数。只提取消息中明确提到的字段值，不要编造。\n\n"
-            f"工具: {tool.toolName or tool.toolCode}\n"
-            f"描述: {tool.description or '无'}\n\n"
-            f"参数字段:\n{chr(10).join(field_descriptions)}\n"
+            "You are filling arguments for an AI tool call. Return a pure JSON object only.\n"
+            "Fill safe, low-risk generation fields from the user's request, recent context, existing arguments, "
+            "and the tool schema. For prompt-like fields, expand short user intent into a useful production prompt. "
+            "Do not invent credentials, account ids, payment, publishing authorization, personal private data, "
+            "or other high-risk values. Preserve existing arguments unless a field is empty.\n\n"
+            f"Tool: {tool.toolName or tool.toolCode}\n"
+            f"Description: {tool.description or 'none'}\n"
+            f"Fields:\n{chr(10).join(field_descriptions)}\n"
             f"{existing_info}\n"
-            f"用户消息: {message}\n\n"
-            f"返回纯 JSON 对象，key 用英文字段名，value 是提取的中文值。"
-            f"只包含能从消息中识别出的字段。不要添加任何解释文字，只返回 JSON。"
+            f"Recent user context:\n{message}\n\n"
+            "JSON only. Use the exact English field keys from the schema."
         )
         try:
             raw = await self.model.chat([ChatMessage(role="user", content=prompt)])
@@ -403,6 +408,173 @@ def _with_field_strategy_defaults(tool: ToolDescriptor, arguments: dict[str, Any
         if strategy in {"default", "derive"} and field.defaultValue not in (None, ""):
             normalized[field.fieldKey] = field.defaultValue
     return normalized
+
+
+def _with_generation_argument_defaults(context: RunContext, tool: ToolDescriptor, arguments: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(arguments)
+    properties = tool.inputSchema.get("properties", {})
+    if not isinstance(properties, dict):
+        return normalized
+
+    prompt_key = _infer_prompt_field(tool)
+    if prompt_key and not normalized.get(prompt_key):
+        prompt = _compose_generation_prompt(context, tool)
+        if prompt:
+            normalized[prompt_key] = prompt
+
+    for key, prop in properties.items():
+        if not isinstance(key, str) or key in normalized and normalized[key] not in (None, ""):
+            continue
+        default_value = _safe_default_for_property(key, prop)
+        if default_value not in (None, ""):
+            normalized[key] = default_value
+
+    for field in tool.fields:
+        if field.fieldKey in normalized and normalized[field.fieldKey] not in (None, ""):
+            continue
+        default_value = _safe_default_for_field(field)
+        if default_value not in (None, ""):
+            normalized[field.fieldKey] = default_value
+    return normalized
+
+
+def _infer_prompt_field(tool: ToolDescriptor) -> str | None:
+    properties = tool.inputSchema.get("properties", {})
+    if not isinstance(properties, dict):
+        return None
+    preferred = (
+        "prompt",
+        "positivePrompt",
+        "imagePrompt",
+        "videoPrompt",
+        "textPrompt",
+        "description",
+        "content",
+        "subject",
+        "topic",
+    )
+    for key in preferred:
+        if key in properties and key != "userRequest":
+            return key
+    for key, prop in properties.items():
+        if not isinstance(key, str) or key == "userRequest":
+            continue
+        if _is_non_prompt_generation_control(key):
+            continue
+        text = f"{key} {_prop_text(prop)}".lower()
+        if any(token in text for token in ("prompt", "description", "subject", "topic", "画面", "提示词", "主题")):
+            return key
+    return None
+
+
+def _is_non_prompt_generation_control(key: str) -> bool:
+    lower = key.lower()
+    return any(
+        token in lower
+        for token in (
+            "ratio",
+            "aspect",
+            "size",
+            "width",
+            "height",
+            "count",
+            "num",
+            "number",
+            "quality",
+            "seed",
+            "steps",
+            "duration",
+            "fps",
+            "negative",
+        )
+    )
+
+
+def _compose_generation_prompt(context: RunContext, tool: ToolDescriptor) -> str:
+    request = _compact(context.message, 600)
+    if not request:
+        return ""
+    modality = infer_output_modality(tool)
+    if modality == "image":
+        return (
+            f"{request}。高质量图片，主体清晰，构图自然，细节丰富，审美高级；"
+            "如果用户只给出简短主体，请自动补足适合商业生成的场景、光线、镜头和风格。"
+        )
+    if modality == "video":
+        return (
+            f"{request}。高质量短视频画面，主体明确，运动自然，镜头连贯，节奏清晰；"
+            "如果用户只给出简短主体，请自动补足场景、镜头运动和视觉风格。"
+        )
+    if modality == "audio":
+        return f"{request}。语气自然，节奏清晰，适合直接生成音频。"
+    if modality == "text":
+        return request
+    return request
+
+
+def _safe_default_for_field(field) -> Any | None:
+    if field.defaultValue not in (None, ""):
+        return field.defaultValue
+    strategy = (field.agentFillStrategy or "").strip().lower()
+    if strategy not in {"default", "derive", "none"} and field.userRequired:
+        return None
+    return _safe_default_for_key(field.fieldKey, field.fieldType, field.options)
+
+
+def _safe_default_for_property(key: str, prop: Any) -> Any | None:
+    if not isinstance(prop, dict):
+        return None
+    if prop.get("default") not in (None, ""):
+        return prop.get("default")
+    if _schema_property_user_required(prop):
+        return None
+    return _safe_default_for_key(key, str(prop.get("type") or ""), prop.get("enum"))
+
+
+def _safe_default_for_key(key: str, field_type: str = "", options: Any = None) -> Any | None:
+    lower = key.lower()
+    option_values = _option_values(options)
+    if option_values:
+        for preferred in ("1:1", "1024x1024", "standard", "normal", "medium", "auto", "default"):
+            if preferred in option_values:
+                return preferred
+        return option_values[0]
+    if any(token in lower for token in ("ratio", "aspect")):
+        return "1:1"
+    if lower in {"size", "image_size", "imageSize"} or "size" in lower:
+        return "1024x1024"
+    if any(token in lower for token in ("count", "num", "number")) and "negative" not in lower:
+        return 1
+    if "quality" in lower:
+        return "standard"
+    if "style" in lower and "strength" not in lower:
+        return "auto"
+    if "negative" in lower:
+        return ""
+    if field_type in {"boolean", "bool"}:
+        return False
+    return None
+
+
+def _option_values(options: Any) -> list[Any]:
+    if not isinstance(options, list):
+        return []
+    values: list[Any] = []
+    for item in options:
+        if isinstance(item, dict):
+            value = item.get("value")
+        else:
+            value = item
+        if value not in (None, ""):
+            values.append(value)
+    return values
+
+
+def _prop_text(prop: Any) -> str:
+    if not isinstance(prop, dict):
+        return ""
+    values = [prop.get("title"), prop.get("description")]
+    return " ".join(str(value) for value in values if value)
 
 
 def _recent_user_messages(context: RunContext) -> list[str]:

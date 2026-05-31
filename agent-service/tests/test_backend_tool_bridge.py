@@ -104,6 +104,80 @@ def test_defaultable_execution_required_field_does_not_trigger_clarification():
     assert bridge.build_arguments(ctx, tool)["aspectRatio"] == "3:4"
 
 
+def test_generation_prompt_field_is_derived_from_short_user_request():
+    bridge = BackendToolBridge(backend_client=None)  # type: ignore[arg-type]
+    tool = ToolDescriptor(
+        toolCode="image_generation",
+        toolName="图片生成",
+        description="根据提示词生成图片",
+        autoCallable=True,
+        inputSchema={
+            "type": "object",
+            "required": ["prompt", "aspectRatio", "count"],
+            "properties": {
+                "userRequest": {"type": "string"},
+                "prompt": {
+                    "type": "string",
+                    "title": "提示词",
+                    "description": "图片生成提示词",
+                    "x-user-required": False,
+                    "x-agent-fill-strategy": "derive",
+                },
+                "aspectRatio": {
+                    "type": "string",
+                    "title": "画面比例",
+                    "enum": ["1:1", "3:4", "16:9"],
+                    "x-user-required": False,
+                    "x-agent-fill-strategy": "default",
+                },
+                "count": {
+                    "type": "integer",
+                    "title": "生成张数",
+                    "x-user-required": False,
+                    "x-agent-fill-strategy": "default",
+                },
+            },
+        },
+        fields=[
+            {
+                "fieldKey": "prompt",
+                "fieldName": "提示词",
+                "required": True,
+                "executionRequired": True,
+                "userRequired": False,
+                "agentFillStrategy": "derive",
+                "riskLevel": "LOW",
+            },
+            {
+                "fieldKey": "aspectRatio",
+                "fieldName": "画面比例",
+                "required": True,
+                "executionRequired": True,
+                "userRequired": False,
+                "agentFillStrategy": "default",
+                "riskLevel": "LOW",
+            },
+            {
+                "fieldKey": "count",
+                "fieldName": "生成张数",
+                "required": True,
+                "executionRequired": True,
+                "userRequired": False,
+                "agentFillStrategy": "default",
+                "riskLevel": "LOW",
+            },
+        ],
+    )
+    ctx = RunContext(runId=1, sessionId=1, userId=1, message="生成美女")
+
+    assert bridge.missing_required_arguments(ctx, tool) == []
+    args = bridge.build_arguments(ctx, tool, apply_placeholder_defaults=True)
+    assert "生成美女" in args["prompt"]
+    assert len(args["prompt"]) > len("生成美女")
+    assert args["aspectRatio"] == "1:1"
+    assert args["count"] == 1
+
+
 def test_user_required_field_still_triggers_clarification():
     bridge = BackendToolBridge(backend_client=None)  # type: ignore[arg-type]
     tool = ToolDescriptor(
