@@ -6,6 +6,7 @@ from pydantic import BaseModel
 
 from app.core.intent_router import Intent, IntentResult, IntentRouter
 from app.core.schemas import RunContext
+from app.tools.registry import ToolRegistry, requested_output_modality, tool_supports_modality
 
 LOGGER = logging.getLogger(__name__)
 
@@ -63,19 +64,44 @@ class AgentDecisionService:
                     return _with_signals(guarded, signals)
                 return _with_signals(llm_intent, signals)
 
-        if rule_intent.reason == "default_general_chat" and rule_intent.confidence <= 0.6 and context.availableTools:
-            fallback = IntentResult(
-                intent=Intent.GENERAL_CHAT,
-                confidence=rule_intent.confidence,
-                selectedToolCode=None,
-                candidateToolCodes=rule_intent.candidateToolCodes,
-                decisionSource="decision_layer",
-                reason="llm_router_unavailable_default_chat",
-            )
-            signals.append(_signal("fallback", fallback.intent.value, fallback.confidence, fallback.reason))
-            return _with_signals(fallback, signals)
+        schema_fallback = self._schema_tool_fallback(context, rule_intent)
+        if schema_fallback is not None:
+            signals.append(_signal("fallback", schema_fallback.intent.value, schema_fallback.confidence, schema_fallback.reason))
+            return _with_signals(schema_fallback, signals)
 
         return _with_signals(rule_intent, signals)
+
+    def _schema_tool_fallback(self, context: RunContext, rule_intent: IntentResult) -> IntentResult | None:
+        requested_modality = requested_output_modality(context.message or "")
+        if not requested_modality:
+            return None
+        registry = ToolRegistry(context)
+        candidates = registry.rank_by_intent(context.message or "")
+        if not candidates:
+            return None
+        modality_candidates = [
+            candidate for candidate in candidates
+            if tool_supports_modality(candidate.tool, requested_modality)
+        ]
+        if not modality_candidates:
+            return None
+        if requested_modality == "image":
+            pure_image_candidates = [
+                candidate for candidate in modality_candidates
+                if not tool_supports_modality(candidate.tool, "video")
+            ]
+            modality_candidates = pure_image_candidates or modality_candidates
+        top = modality_candidates[0]
+        if top.score < 7:
+            return None
+        return IntentResult(
+            intent=Intent.TOOL_USE,
+            confidence=max(0.78, rule_intent.confidence),
+            selectedToolCode=top.tool.toolCode,
+            candidateToolCodes=[candidate.tool.toolCode for candidate in modality_candidates[:3]],
+            decisionSource="decision_layer",
+            reason=f"schema_{requested_modality}_tool_fallback",
+        )
 
     def _conversation_guard(self, context: RunContext) -> IntentResult | None:
         message = context.message or ""
