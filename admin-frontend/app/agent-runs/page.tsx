@@ -183,6 +183,11 @@ function eventTitle(event: AgentRunEvent) {
   if (event.eventType === "intent.detected") return "意图决策"
   if (event.eventType === "message.delta") return "流式片段"
   if (event.eventType === "message.completed") return "回复完成"
+  if (event.eventType === "tool_call.loop_started") return "Tool-call loop started"
+  if (event.eventType === "tool_call.requested") return `Tool requested · ${textValue(payload.name) || "tool"}`
+  if (event.eventType === "tool_call.executed") return `Tool executed · ${textValue(payload.name) || "tool"}`
+  if (event.eventType === "tool_call.rejected") return `Tool rejected · ${textValue(payload.name) || "tool"}`
+  if (event.eventType === "tool_call.loop_completed") return "Tool-call loop completed"
   return event.eventType
 }
 
@@ -263,6 +268,38 @@ function MemoryTracePanel({ events }: { events: AgentRunEvent[] }) {
                 {payload.memory_type ? <div>类型：{textValue(payload.memory_type)}</div> : null}
                 {payload.count ? <div>注入数量：{textValue(payload.count)}</div> : null}
                 {payload.title ? <div className="text-foreground">标题：{textValue(payload.title)}</div> : null}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </section>
+  )
+}
+
+function ToolCallTracePanel({ events }: { events: AgentRunEvent[] }) {
+  const toolCallEvents = events.filter((event) => event.eventType.startsWith("tool_call."))
+  if (!toolCallEvents.length) {
+    return null
+  }
+  return (
+    <section className="space-y-2">
+      <h3 className="flex items-center gap-2 font-semibold"><Wrench className="h-4 w-4" />Tool-call loop</h3>
+      <div className="grid gap-2">
+        {toolCallEvents.map((event) => {
+          const payload = objectPayload(event.eventJson)
+          return (
+            <div key={event.id} className="rounded-lg border bg-muted/20 p-3 text-sm">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant={event.eventType === "tool_call.rejected" ? "destructive" : "outline"}>{event.eventType}</Badge>
+                <span className="text-muted-foreground">{formatDateTime(event.createdAt)}</span>
+              </div>
+              <div className="mt-2 grid gap-1 text-muted-foreground">
+                {payload.name ? <div>Tool: {textValue(payload.name)}</div> : null}
+                {payload.id ? <div>Call ID: {textValue(payload.id)}</div> : null}
+                {payload.reason ? <div>Reason: {textValue(payload.reason)}</div> : null}
+                {payload.executedToolCalls ? <div>Executed: {textValue(payload.executedToolCalls)}</div> : null}
+                {payload.iterations ? <div>Iterations: {textValue(payload.iterations)}</div> : null}
               </div>
             </div>
           )
@@ -593,6 +630,7 @@ export function AgentRunsContent() {
               )}
 
               <DecisionSignalPanel events={detail.events} />
+              <ToolCallTracePanel events={detail.events} />
               <MemoryTracePanel events={detail.events} />
 
               <section className="space-y-2">

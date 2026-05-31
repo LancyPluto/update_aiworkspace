@@ -116,4 +116,26 @@ public interface AgentToolCallMapper extends BaseMapper<AgentToolCall> {
                     @Param("errorCode") String errorCode,
                     @Param("errorMessage") String errorMessage,
                     @Param("now") LocalDateTime now);
+
+    @Select("""
+            SELECT c.*
+            FROM agent_tool_calls c
+            JOIN agent_runs r ON r.id = c.run_id
+            WHERE c.user_id = #{userId}
+              AND r.session_id = #{sessionId}
+              AND (#{toolCode} IS NULL OR #{toolCode} = '' OR c.tool_code = #{toolCode})
+              AND (
+                #{query} IS NULL OR #{query} = ''
+                OR LOWER(c.tool_code) LIKE CONCAT('%', LOWER(#{query}), '%')
+                OR LOWER(COALESCE(c.arguments_json, '')) LIKE CONCAT('%', LOWER(#{query}), '%')
+                OR LOWER(COALESCE(c.result_json, '')) LIKE CONCAT('%', LOWER(#{query}), '%')
+              )
+            ORDER BY c.id DESC
+            LIMIT #{limit}
+            """)
+    List<AgentToolCall> searchBySession(@Param("userId") Long userId,
+                                        @Param("sessionId") Long sessionId,
+                                        @Param("query") String query,
+                                        @Param("toolCode") String toolCode,
+                                        @Param("limit") int limit);
 }

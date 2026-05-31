@@ -81,6 +81,34 @@ async def test_direct_image_generation_still_routes_to_tool():
 
 
 @pytest.mark.asyncio
+async def test_llm_router_overrides_non_hard_rule_tool_guess():
+    service = AgentDecisionService()
+
+    async def llm_router(context, rule_intent):
+        return rule_intent.model_copy(
+            update={
+                "intent": Intent.TOOL_USE,
+                "confidence": 0.95,
+                "selectedToolCode": "kling_image_to_video",
+                "candidateToolCodes": ["kling_image_to_video"],
+                "decisionSource": "llm_router",
+                "reason": "schema_selected_video_tool",
+            }
+        )
+
+    decision = await service.decide(
+        _context("帮我做一个 5 秒产品展示视频"),
+        hard_rule=_hard_rule,
+        llm_router=llm_router,
+    )
+
+    assert decision.intent == Intent.TOOL_USE
+    assert decision.selectedToolCode == "kling_image_to_video"
+    assert decision.reason == "schema_selected_video_tool"
+    assert decision.signals[-1]["source"] == "llm_router"
+
+
+@pytest.mark.asyncio
 async def test_llm_tool_call_is_blocked_when_message_is_follow_up():
     service = AgentDecisionService()
 

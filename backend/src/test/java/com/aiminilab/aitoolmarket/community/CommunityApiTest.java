@@ -1,0 +1,171 @@
+package com.aiminilab.aitoolmarket.community;
+
+import com.aiminilab.aitoolmarket.auth.security.AuthTestTokens;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.web.servlet.MockMvc;
+
+import static org.hamcrest.Matchers.everyItem;
+import static org.hamcrest.Matchers.hasItem;
+import static org.hamcrest.Matchers.nullValue;
+import static org.hamcrest.Matchers.not;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+@SpringBootTest
+@AutoConfigureMockMvc
+@TestPropertySource(properties = {
+        "spring.datasource.url=jdbc:h2:mem:community_api_test;MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1",
+        "spring.datasource.driver-class-name=org.h2.Driver",
+        "spring.datasource.username=sa",
+        "spring.datasource.password=",
+        "spring.datasource.hikari.connection-init-sql=",
+        "spring.sql.init.mode=always",
+        "spring.sql.init.schema-locations=classpath:schema-test.sql"
+})
+class CommunityApiTest {
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    @Test
+    void hiddenRejectedAndPendingPostsAreNotVisibleInPublicEntrances() throws Exception {
+        long approvedId = insertPost("PUBLISHED", "APPROVED", "产品图生成", true);
+        long hiddenId = insertPost("HIDDEN", "APPROVED", "隐藏作品", true);
+        long rejectedId = insertPost("PUBLISHED", "REJECTED", "驳回作品", true);
+        long pendingId = insertPost("PUBLISHED", "PENDING", "待审作品", true);
+
+        mockMvc.perform(get("/api/v1/community/search")
+                        .param("keyword", "作品")
+                        .param("pageSize", "20"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[*].id", everyItem(not((int) hiddenId))))
+                .andExpect(jsonPath("$.data.list[*].id", everyItem(not((int) rejectedId))))
+                .andExpect(jsonPath("$.data.list[*].id", everyItem(not((int) pendingId))));
+
+        mockMvc.perform(get("/api/v1/community/posts/{postId}", approvedId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.id").value((int) approvedId));
+
+        mockMvc.perform(get("/api/v1/community/posts/{postId}", hiddenId))
+                .andExpect(status().is4xxClientError());
+        mockMvc.perform(get("/api/v1/community/posts/{postId}", rejectedId))
+                .andExpect(status().is4xxClientError());
+        mockMvc.perform(get("/api/v1/community/posts/{postId}", pendingId))
+                .andExpect(status().is4xxClientError());
+    }
+
+    @Test
+    void promptHiddenPostDoesNotReturnPrompt() throws Exception {
+        long postId = insertPost("PUBLISHED", "APPROVED", "隐藏 Prompt", false);
+
+        mockMvc.perform(get("/api/v1/community/posts/{postId}", postId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.promptVisible").value(false))
+                .andExpect(jsonPath("$.data.prompt").value(nullValue()));
+    }
+
+    @Test
+    void addingSamePostToInspirationCollectionIsIdempotent() throws Exception {
+        String userToken = loginUser();
+        long postId = insertPost("PUBLISHED", "APPROVED", "收藏灵感", true);
+
+        String collectionResponse = mockMvc.perform(get("/api/v1/community/collections")
+                        .header("Authorization", "Bearer " + userToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].defaultCollection").value(true))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        long collectionId = Long.parseLong(collectionResponse.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
+
+        String body = "{\"postId\":%d}".formatted(postId);
+        mockMvc.perform(post("/api/v1/community/collections/{collectionId}/items", collectionId)
+                        .header("Authorization", "Bearer " + userToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.itemCount").value(1));
+
+        mockMvc.perform(post("/api/v1/community/collections/{collectionId}/items", collectionId)
+                        .header("Authorization", "Bearer " + userToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.itemCount").value(1));
+    }
+
+    @Test
+    void sameStyleRecordsCountAndEvent() throws Exception {
+        String userToken = loginUser();
+        long postId = insertPost("PUBLISHED", "APPROVED", "同款归因", true);
+
+        mockMvc.perform(post("/api/v1/community/posts/{postId}/same-style", postId)
+                        .header("Authorization", "Bearer " + userToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.sameStyleCount").value(1));
+
+        Integer eventCount = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM community_events
+                WHERE post_id = ? AND event_type = 'same_style_click'
+                """, Integer.class, postId);
+        org.junit.jupiter.api.Assertions.assertEquals(1, eventCount);
+    }
+
+    @Test
+    void topicEntriesOnlyComeFromVisibleApprovedPosts() throws Exception {
+        long visibleId = insertPost("PUBLISHED", "APPROVED", "Visible topic post", true);
+        long hiddenId = insertPost("HIDDEN", "APPROVED", "Hidden topic post", true);
+        long rejectedId = insertPost("PUBLISHED", "REJECTED", "Rejected topic post", true);
+        jdbcTemplate.update("UPDATE community_posts SET topic = ? WHERE id = ?", "产品图生成", visibleId);
+        jdbcTemplate.update("UPDATE community_posts SET topic = ? WHERE id = ?", "不应展示", hiddenId);
+        jdbcTemplate.update("UPDATE community_posts SET topic = ? WHERE id = ?", "驳回话题", rejectedId);
+
+        mockMvc.perform(get("/api/v1/community/topics").param("limit", "10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[*].name", hasItem("产品图生成")))
+                .andExpect(jsonPath("$.data[*].name", everyItem(not("不应展示"))))
+                .andExpect(jsonPath("$.data[*].name", everyItem(not("驳回话题"))));
+    }
+
+    private String loginUser() throws Exception {
+        var result = mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "account": "user1",
+                                  "password": "123456"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andReturn();
+        return AuthTestTokens.userJwtFrom(result);
+    }
+
+    private long insertPost(String status, String auditStatus, String title, boolean promptVisible) {
+        Long nextTaskId = jdbcTemplate.queryForObject("SELECT COALESCE(MAX(task_id), 1000) + 1 FROM community_posts", Long.class);
+        jdbcTemplate.update("""
+                INSERT INTO community_posts (
+                  user_id, task_id, modality, cover_url, title, description, prompt_visible,
+                  prompt_snapshot, tool_code, tool_name, status, audit_status, view_count,
+                  like_count, favorite_count, same_style_count, quality_score
+                )
+                VALUES (
+                  2, ?, 'IMAGE', '/generated/community-test.png', ?, '社区接口测试作品',
+                  ?, '公开 prompt 内容', 'image_tool', '图片工具', ?, ?, 0, 0, 0, 0, 0
+                )
+                """, nextTaskId, title, promptVisible ? 1 : 0, status, auditStatus);
+        return jdbcTemplate.queryForObject("SELECT MAX(id) FROM community_posts", Long.class);
+    }
+}

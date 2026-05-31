@@ -14,7 +14,7 @@ from app.core.event_types import (
     WORKSPACE_FILE_CREATED,
     WORKSPACE_FILE_READ,
 )
-from app.core.schemas import AgentFileChunkContext, AgentFileContext, RunContext, WorkspaceMemoryItem
+from app.core.schemas import AgentFileChunkContext, AgentFileContext, ChatMessage, RunContext, WorkspaceMemoryItem
 from app.runtime.langgraph_engine import LangGraphRuntimeEngine
 from app.runtime.router import RuntimeRouter
 
@@ -44,6 +44,8 @@ class FakeBackend:
         self.completed_runs = []
         self.memory_items = []
         self.memory_requests = []
+        self.created_memories = []
+        self.updated_memories = []
         self.created_artifacts = []
 
     async def append_event(self, run_id, event):
@@ -55,9 +57,21 @@ class FakeBackend:
     async def complete_run(self, run_id, completion):
         self.completed_runs.append((run_id, completion))
 
-    async def retrieve_workspace_memory(self, workspace_id: int, query: str, limit: int):
-        self.memory_requests.append((workspace_id, query, limit))
+    async def retrieve_workspace_memory(self, workspace_id: int, query: str, limit: int, view: str | None = None):
+        self.memory_requests.append((workspace_id, query, limit, view))
         return self.memory_items
+
+    async def create_workspace_memory_candidate(self, **kwargs):
+        self.events.append((kwargs.get("source_run_id", 0), type("Candidate", (), {"eventType": "memory.candidate.persisted", "eventJson": kwargs})()))
+        return {"id": 51}
+
+    async def create_workspace_memory(self, **kwargs):
+        self.created_memories.append(kwargs)
+        return {"id": 52}
+
+    async def update_workspace_memory(self, **kwargs):
+        self.updated_memories.append(kwargs)
+        return {"id": kwargs.get("memory_id")}
 
     async def create_run_artifact(self, run_id: int, filename: str, content: str, content_type: str):
         self.created_artifacts.append((run_id, filename, content, content_type))
@@ -113,11 +127,7 @@ async def test_deep_agents_engine_invokes_deep_agent_and_completes_run():
     assert backend.completed_runs[0][1].finalAnswer == "Deep plan ready"
     assert backend.completed_runs[0][1].intent == "deep_agents"
     memory_events = [event for _, event in backend.events if event.eventType == MEMORY_CANDIDATE_CREATED]
-    assert memory_events[0].eventJson == {
-        "title": "Deep plan ready",
-        "content": "Deep plan ready",
-        "sourceRunId": 11,
-    }
+    assert memory_events == []
 
 
 @pytest.mark.asyncio
@@ -201,15 +211,16 @@ async def test_deep_agents_engine_injects_workspace_memory_into_messages():
 
     await engine.run(context)
 
-    assert backend.memory_requests == [(7, "plan pricing rollout", 10)]
+    assert backend.memory_requests[0] == (7, "plan pricing rollout", 10, "chat")
     prompt_text = "\n".join(message["content"] for message in module.invocations[0]["messages"])
-    assert "Workspace memory" in prompt_text
+    assert "Frozen workspace memory snapshot" in prompt_text
     assert "memory:11" in prompt_text
     assert "Pricing policy" in prompt_text
     assert "Use prepaid credits before invoicing." in prompt_text
-    assert module.created_agents[0]["memory"] == [
-        "[memory:11] Pricing policy (PROJECT, score=2.0)\nUse prepaid credits before invoicing."
-    ]
+    native_memory = "\n".join(module.created_agents[0]["memory"])
+    assert "memory:11" in native_memory
+    assert "Pricing policy" in native_memory
+    assert "Use prepaid credits before invoicing." in native_memory
 
 
 @pytest.mark.asyncio
@@ -279,6 +290,60 @@ async def test_deep_agents_engine_skips_workspace_memory_without_workspace_id():
     await engine.run(context)
 
     assert backend.memory_requests == []
+
+
+@pytest.mark.asyncio
+async def test_memory_curator_skips_duplicate_when_tool_loop_already_saved():
+    from app.runtime.deep_agents_engine import DeepAgentsRuntimeEngine
+
+    backend = FakeBackend()
+    engine = DeepAgentsRuntimeEngine(backend, object())
+    context = RunContext(
+        runId=31,
+        sessionId=4,
+        userId=5,
+        workspaceId=7,
+        message="你觉得我是什么样的人？写入你的记忆里",
+    )
+    engine._memory_tool_executed_runs.add(31)
+
+    await engine._curate_memory_after_run(context, "已记录。用户喜欢二次元梗图。")
+
+    assert backend.created_memories == []
+    assert not any(event.eventType == MEMORY_CANDIDATE_CREATED for _, event in backend.events)
+
+
+@pytest.mark.asyncio
+async def test_memory_consolidation_updates_existing_profile_after_enough_turns():
+    from app.runtime.deep_agents_engine import DeepAgentsRuntimeEngine
+
+    backend = FakeBackend()
+    backend.memory_items = [
+        WorkspaceMemoryItem(
+            id=91,
+            workspaceId=7,
+            title="用户画像与偏好摘要",
+            content="旧画像",
+            memoryType="user_profile",
+            score=2,
+        )
+    ]
+    engine = DeepAgentsRuntimeEngine(backend, object())
+    context = RunContext(
+        runId=32,
+        sessionId=4,
+        userId=5,
+        workspaceId=7,
+        message="以后继续保持这种二次元梗图风格",
+        history=[ChatMessage(role="user", content=f"我喜欢第{i}种二次元梗图风格") for i in range(7)],
+    )
+    engine._memory_tool_executed_runs.add(32)
+
+    await engine._curate_memory_after_run(context, "好的，继续保持。")
+
+    assert backend.updated_memories
+    assert backend.updated_memories[0]["memory_id"] == 91
+    assert "二次元" in backend.updated_memories[0]["content"]
 
 
 @pytest.mark.asyncio

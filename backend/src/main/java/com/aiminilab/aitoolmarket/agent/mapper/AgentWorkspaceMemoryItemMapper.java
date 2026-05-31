@@ -14,9 +14,12 @@ import java.util.List;
 public interface AgentWorkspaceMemoryItemMapper extends BaseMapper<AgentWorkspaceMemoryItem> {
 
     @Insert("""
-            INSERT INTO agent_workspace_memory_items(workspace_id, user_id, memory_type, title, content, source_run_id, status, created_at, updated_at)
+            INSERT INTO agent_workspace_memory_items(workspace_id, user_id, memory_type, title, content, source_run_id,
+                                                     source_message_id, source_tool_call_id, importance, confidence, pinned,
+                                                     tags_json, metadata_json, expires_at, status, created_at, updated_at)
             VALUES(#{item.workspaceId}, #{item.userId}, #{item.memoryType}, #{item.title}, #{item.content}, #{item.sourceRunId},
-                   #{item.status}, #{item.createdAt}, #{item.updatedAt})
+                   #{item.sourceMessageId}, #{item.sourceToolCallId}, #{item.importance}, #{item.confidence}, #{item.pinned},
+                   #{item.tagsJson}, #{item.metadataJson}, #{item.expiresAt}, #{item.status}, #{item.createdAt}, #{item.updatedAt})
             """)
     @Options(useGeneratedKeys = true, keyProperty = "item.id")
     void insertMemory(@Param("item") AgentWorkspaceMemoryItem item);
@@ -26,7 +29,7 @@ public interface AgentWorkspaceMemoryItemMapper extends BaseMapper<AgentWorkspac
             FROM agent_workspace_memory_items
             WHERE workspace_id = #{workspaceId}
               AND status = 'ACTIVE'
-            ORDER BY updated_at DESC, id DESC
+            ORDER BY pinned DESC, importance DESC, updated_at DESC, id DESC
             """)
     List<AgentWorkspaceMemoryItem> findActiveByWorkspaceId(@Param("workspaceId") Long workspaceId);
 
@@ -45,6 +48,12 @@ public interface AgentWorkspaceMemoryItemMapper extends BaseMapper<AgentWorkspac
             SET memory_type = #{item.memoryType},
                 title = #{item.title},
                 content = #{item.content},
+                importance = #{item.importance},
+                confidence = #{item.confidence},
+                pinned = #{item.pinned},
+                tags_json = #{item.tagsJson},
+                metadata_json = #{item.metadataJson},
+                expires_at = #{item.expiresAt},
                 updated_at = #{item.updatedAt}
             WHERE id = #{item.id}
               AND workspace_id = #{item.workspaceId}
@@ -70,7 +79,7 @@ public interface AgentWorkspaceMemoryItemMapper extends BaseMapper<AgentWorkspac
             WHERE workspace_id = #{workspaceId}
               AND status = 'ACTIVE'
               AND MATCH(title, content) AGAINST(#{query} IN NATURAL LANGUAGE MODE)
-            ORDER BY score DESC, updated_at DESC
+            ORDER BY pinned DESC, score DESC, importance DESC, updated_at DESC
             LIMIT #{limit}
             """)
     List<InternalWorkspaceMemoryItemResponse> searchByFulltext(
@@ -84,11 +93,31 @@ public interface AgentWorkspaceMemoryItemMapper extends BaseMapper<AgentWorkspac
                    updated_at
             FROM agent_workspace_memory_items
             WHERE workspace_id = #{workspaceId} AND status = 'ACTIVE'
-            ORDER BY updated_at DESC
+            ORDER BY pinned DESC, importance DESC, updated_at DESC
             LIMIT #{limit}
             """)
     List<InternalWorkspaceMemoryItemResponse> findLatestByWorkspace(
             @Param("workspaceId") Long workspaceId,
             @Param("limit") int limit
     );
+
+    @Update("""
+            UPDATE agent_workspace_memory_items
+            SET pinned = #{pinned},
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{memoryId}
+              AND workspace_id = #{workspaceId}
+              AND status = 'ACTIVE'
+            """)
+    int updatePinned(@Param("workspaceId") Long workspaceId, @Param("memoryId") Long memoryId, @Param("pinned") boolean pinned);
+
+    @Update("""
+            UPDATE agent_workspace_memory_items
+            SET last_accessed_at = CURRENT_TIMESTAMP,
+                access_count = access_count + 1
+            WHERE workspace_id = #{workspaceId}
+              AND id IN (${ids})
+              AND status = 'ACTIVE'
+            """)
+    int markAccessed(@Param("workspaceId") Long workspaceId, @Param("ids") String ids);
 }

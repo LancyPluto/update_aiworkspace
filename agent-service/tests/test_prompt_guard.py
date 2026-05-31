@@ -60,7 +60,7 @@ class FakeBackend:
     async def fail_run(self, run_id, request):
         self.failed.append((run_id, request.errorCode))
 
-    async def retrieve_workspace_memory(self, workspace_id, query, limit):
+    async def retrieve_workspace_memory(self, workspace_id, query, limit, view=None):
         return []
 
     async def create_run_artifact(self, run_id, filename, content, content_type):

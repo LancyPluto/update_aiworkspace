@@ -1,34 +1,38 @@
+from __future__ import annotations
+
 from typing import Any
 
 from app.core.event_types import MEMORY_SAVED
-from app.core.schemas import RunEventCreate, WorkspaceMemoryItem
+from app.core.schemas import RunEventCreate
 
-_INJECTION_PATTERNS = [
+_ALLOWED_MEMORY_TYPES = {
+    "user_profile",
+    "workspace_fact",
+    "preference",
+    "tool_lesson",
+    "workflow_recipe",
+    "custom",
+}
+
+_INJECTION_PATTERNS = (
     "ignore previous instructions",
     "ignore all previous",
     "forget all",
     "you are now",
     "system prompt",
-    "你被",
     "忽略之前",
     "忘记所有",
-]
+    "系统提示词",
+)
 
 
 def _is_safe(content: str) -> bool:
     lower = content.lower()
-    for pattern in _INJECTION_PATTERNS:
-        if pattern in lower:
-            return False
-    return True
+    return not any(pattern in lower for pattern in _INJECTION_PATTERNS)
 
 
 class MemoryTool:
-    """Agent 用来自主读写记忆的工具。
-
-    Agent 在对话中发现重要信息时，可以调用此工具的 add/replace/remove 方法
-    来持久化记忆。写入的记忆会被安全扫描，防止 prompt 注入。
-    """
+    """Safe memory tool exposed to the agent through function calling."""
 
     def __init__(self, backend, workspace_id: int, user_id: int, run_id: int | None = None) -> None:
         self.backend = backend
@@ -36,19 +40,18 @@ class MemoryTool:
         self.user_id = user_id
         self.run_id = run_id
 
-    async def add_memory(self, memory_type: str, title: str, content: str, source_run_id: int | None = None) -> dict[str, Any]:
-        """添加一条新的记忆。
-
-        Args:
-            memory_type: 记忆类型，可选 project_knowledge / user_profile / custom
-            title: 记忆标题，最长 160 字符
-            content: 记忆内容
-            source_run_id: （可选）来源运行 ID
-        """
-        if len(title) > 160:
-            title = title[:160]
-        if memory_type not in ("project_knowledge", "user_profile", "custom"):
-            memory_type = "custom"
+    async def add_memory(
+        self,
+        memory_type: str,
+        title: str,
+        content: str,
+        source_run_id: int | None = None,
+    ) -> dict[str, Any]:
+        memory_type = _normalize_memory_type(memory_type)
+        title = _trim(title, 160)
+        content = _trim(content, 2000)
+        if not title or not content:
+            return {"success": False, "error": "title and content are required"}
         if not _is_safe(content) or not _is_safe(title):
             return {"success": False, "error": "content rejected by security scan"}
         result = await self.backend.create_workspace_memory(
@@ -58,44 +61,33 @@ class MemoryTool:
             title=title,
             content=content,
             source_run_id=source_run_id,
+            importance=8 if memory_type in {"user_profile", "preference"} else None,
+            confidence=0.9,
+            tags_json=None,
         )
-
         await self._emit_saved_event("add", result.get("id"), memory_type, title)
-
         return {"success": True, "memory_id": result.get("id")}
 
     async def replace_memory(self, memory_type: str, new_title: str, new_content: str) -> dict[str, Any]:
-        """替换某类记忆的最新一条。
-
-        例如更新 user_profile 类型的最新记忆内容。
-
-        Args:
-            memory_type: 要替换的记忆类型
-            new_title: 新标题
-            new_content: 新内容
-        """
+        memory_type = _normalize_memory_type(memory_type)
+        new_title = _trim(new_title, 160)
+        new_content = _trim(new_content, 2000)
+        if not new_title or not new_content:
+            return {"success": False, "error": "new_title and new_content are required"}
         if not _is_safe(new_content) or not _is_safe(new_title):
             return {"success": False, "error": "content rejected by security scan"}
         try:
             items = await self.backend.retrieve_workspace_memory(
                 workspace_id=self.workspace_id,
-                query="",
+                query=new_title,
                 limit=20,
             )
         except Exception:
             return {"success": False, "error": "failed to retrieve existing memories"}
 
-        target = None
-        for item in items:
-            if item.memoryType == memory_type:
-                target = item
-                break
-
+        target = next((item for item in items if item.memoryType == memory_type), None)
         if target is None:
-            result = await self.add_memory(memory_type, new_title, new_content)
-            return result
-
-        from app.clients.backend_client import BackendClient
+            return await self.add_memory(memory_type, new_title, new_content, source_run_id=self.run_id)
         if not hasattr(self.backend, "update_workspace_memory"):
             return {"success": False, "error": "update not supported"}
 
@@ -106,17 +98,10 @@ class MemoryTool:
             title=new_title,
             content=new_content,
         )
-
         await self._emit_saved_event("replace", target.id, memory_type, new_title)
-
         return {"success": True, "memory_id": target.id}
 
     async def remove_memory(self, memory_id: int) -> dict[str, Any]:
-        """删除一条记忆。
-
-        Args:
-            memory_id: 要删除的记忆 ID
-        """
         try:
             await self.backend.delete_workspace_memory(
                 workspace_id=self.workspace_id,
@@ -147,28 +132,35 @@ class MemoryTool:
 
 
 def _format_memory_tool_definitions() -> list[dict[str, Any]]:
-    """返回 LLM function calling 格式的记忆工具定义。"""
     return [
         {
             "type": "function",
             "function": {
                 "name": "memory_add",
-                "description": "记住一条信息，供未来对话长期使用。适合记录项目事实、用户偏好、工作流程等。不要过度使用，每条记忆应有明确的长期价值。",
+                "description": (
+                    "Save a durable memory for future conversations. Use only for stable user profile facts, "
+                    "preferences, workspace facts, tool lessons, or workflow recipes. Do not save one-off prompts, "
+                    "generated media URLs, large JSON, or temporary chat."
+                ),
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "memory_type": {
                             "type": "string",
-                            "enum": ["project_knowledge", "user_profile", "custom"],
-                            "description": "project_knowledge=项目事实/约定/workaround, user_profile=用户偏好/沟通风格, custom=其他",
+                            "enum": sorted(_ALLOWED_MEMORY_TYPES),
+                            "description": (
+                                "user_profile=stable facts about the user; preference=stable user preference; "
+                                "workspace_fact=project/business/system fact; tool_lesson=tool lesson; "
+                                "workflow_recipe=reusable workflow; custom=other durable memory."
+                            ),
                         },
-                        "title": {
-                            "type": "string",
-                            "description": "简短标题，概括这条记忆的核心内容",
-                        },
+                        "title": {"type": "string", "description": "Short title summarizing the memory."},
                         "content": {
                             "type": "string",
-                            "description": "详细的记忆内容",
+                            "description": (
+                                "Memory content. For reflective requests like 'what kind of person am I, write it to memory', "
+                                "save your final profile summary, not the raw question."
+                            ),
                         },
                     },
                     "required": ["memory_type", "title", "content"],
@@ -179,23 +171,16 @@ def _format_memory_tool_definitions() -> list[dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": "memory_replace",
-                "description": "替换某类记忆的最新一条。用于更新过时的信息，比如用户偏好发生了变化。会先查找同类型的最新记忆，如果找不到则创建新的。",
+                "description": (
+                    "Replace the latest memory of the same type when a durable profile, preference, or fact changed. "
+                    "If no matching memory exists, create one."
+                ),
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "memory_type": {
-                            "type": "string",
-                            "enum": ["project_knowledge", "user_profile", "custom"],
-                            "description": "要替换的记忆类型",
-                        },
-                        "new_title": {
-                            "type": "string",
-                            "description": "新的标题",
-                        },
-                        "new_content": {
-                            "type": "string",
-                            "description": "新的内容",
-                        },
+                        "memory_type": {"type": "string", "enum": sorted(_ALLOWED_MEMORY_TYPES)},
+                        "new_title": {"type": "string", "description": "New title."},
+                        "new_content": {"type": "string", "description": "New content."},
                     },
                     "required": ["memory_type", "new_title", "new_content"],
                 },
@@ -205,15 +190,10 @@ def _format_memory_tool_definitions() -> list[dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": "memory_remove",
-                "description": "删除一条记忆。当发现某条记忆已经不准确或不再需要时使用。",
+                "description": "Delete a memory when the user explicitly asks to forget it or it is clearly inaccurate.",
                 "parameters": {
                     "type": "object",
-                    "properties": {
-                        "memory_id": {
-                            "type": "integer",
-                            "description": "要删除的记忆 ID，格式为 memory:<id> 中的 id 部分",
-                        },
-                    },
+                    "properties": {"memory_id": {"type": "integer", "description": "Memory id to delete."}},
                     "required": ["memory_id"],
                 },
             },
@@ -221,34 +201,29 @@ def _format_memory_tool_definitions() -> list[dict[str, Any]]:
     ]
 
 
-_MEMORY_PROMISE_KEYWORDS = [
-    "记住了",
-    "记下来了",
-    "我记下",
-    "我记住了",
-    "已经记下",
-    "已记录",
-    "已记住",
-]
-
-
 def _contains_memory_promise(text: str) -> bool:
-    """检查 LLM 回复中是否包含'记住了'等承诺性表述。"""
     lower = text.lower()
-    return any(kw in lower for kw in _MEMORY_PROMISE_KEYWORDS)
+    return any(token in lower for token in ("记住了", "记下来了", "已记录", "已记下", "已保存", "i saved", "recorded"))
 
 
 MEMORY_TOOL_SYSTEM_PROMPT = (
-    "你有一个记忆系统，可以通过 memory_add / memory_replace / memory_remove 工具管理长期记忆。\n"
-    "注意：没有 memory_search 工具；工作区记忆（若有）已在上方 system 快照中给出。\n"
-    "用户问「你刚才/之前帮我做了什么」时，必须直接根据对话历史与记忆快照列出已完成事项，"
-    "禁止只说「让我查一下记忆/记录」却不给出具体结果。\n"
-    "当你发现以下情况时，必须立即使用对应的记忆工具，**不要只是口头答应**：\n"
-    "- 用户告诉你关于自己的偏好或习惯 → 立即调 memory_add，type=user_profile\n"
-    "- 用户告诉你项目事实、业务规则、配置信息 → 立即调 memory_add，type=project_knowledge\n"
-    "- 用户明确要求你记住某件事 → 立即调 memory_add\n"
-    "- 用户告诉你某条旧信息已经过时 → 调 memory_replace 或 memory_remove\n"
-    "规则：如果你准备回复'记住了'、'已记录'之类的话，必须先调 memory_add 把信息真实写入记忆系统，"
-    "然后再回复用户。不要只口头答应而不实际写入。\n"
-    "注意：不要过度写入，每条记忆应该有明确的长期价值。"
+    "You have a long-term memory system. You may call memory_add, memory_replace, and memory_remove.\n"
+    "There is no memory_search tool; relevant memories have already been injected above as a frozen snapshot.\n"
+    "Use memory tools only for durable information: stable user profile facts, stable preferences, workspace facts, tool lessons, and reusable workflow recipes.\n"
+    "Do not save one-off image prompts, generated media URLs, large JSON, temporary jokes, or data that looks sensitive or uncertain.\n"
+    "If the user explicitly says to remember/write/save something, call a memory tool before saying it has been recorded.\n"
+    "If the user asks you to infer their profile and write it to memory, first answer naturally, then save your concise final profile summary as user_profile or preference.\n"
+    "Current user instruction has highest priority; memory is helpful context, not absolute truth."
 )
+
+
+def _normalize_memory_type(memory_type: str) -> str:
+    normalized = (memory_type or "").strip()
+    if normalized == "project_knowledge":
+        normalized = "workspace_fact"
+    return normalized if normalized in _ALLOWED_MEMORY_TYPES else "custom"
+
+
+def _trim(value: str, limit: int) -> str:
+    clean = str(value or "").strip()
+    return clean[:limit]

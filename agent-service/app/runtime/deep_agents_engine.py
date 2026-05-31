@@ -12,9 +12,17 @@ from app.config import settings
 from app.core.agent_decision import AgentDecisionService
 from app.core.budget_guard import BudgetExceeded, BudgetGuard, BudgetState
 from app.core.event_types import (
+    ARGUMENTS_MERGED,
+    FOLLOWUP_DETECTED,
+    FOLLOWUP_INHERITED,
+    FOLLOWUP_REJECTED,
     INTENT_DETECTED,
     MEMORY_CANDIDATE_CREATED,
+    MEMORY_CONSOLIDATED,
     MEMORY_CONTEXT_FROZEN,
+    MEMORY_CURATOR_STARTED,
+    MEMORY_REJECTED,
+    MEMORY_RETRIEVED,
     MESSAGE_COMPLETED,
     MESSAGE_DELTA,
     RUN_STARTED,
@@ -38,22 +46,25 @@ from app.core.schemas import (
     RunContext,
     RunEventCreate,
     RunFail,
+    SessionSearchItem,
     ToolDescriptor,
     WorkspaceMemoryItem,
 )
+from app.runtime.followup_task_resolver import FollowupTaskResolver, FollowupResolution
+from app.runtime.memory_curator import MemoryCuratorService, build_memory_metadata
 from app.runtime.subagent_profiles import default_subagent_profiles, profiles_to_deepagents_subagents
 from app.runtime.agent_router_service import AgentRouterService
+from app.runtime.tool_call_loop import AgentToolCallLoopExecutor
+from app.runtime.tool_decision_validator import ToolDecisionValidator
 from app.runtime.workspace_files import WorkspaceFileContext, build_workspace_file_context
 from app.security.prompt_guard import PromptGuard
 from app.tools.backend_tool import BackendToolBridge
 from app.tools.memory_tool import (
     MEMORY_TOOL_SYSTEM_PROMPT,
     MemoryTool,
-    _contains_memory_promise,
-    _format_memory_tool_definitions,
 )
 from app.tools.missing_argument_hints import format_missing_tool_arguments_message
-from app.tools.registry import ToolRegistry, requested_output_modality, tool_supports_modality
+from app.tools.registry import ToolRegistry, infer_output_modality, requested_output_modality, tool_supports_modality
 from langchain_core.callbacks import AsyncCallbackHandler
 
 LOGGER = logging.getLogger(__name__)
@@ -105,6 +116,10 @@ class DeepAgentsRuntimeEngine:
             model_client,
             intent_router=self.intent_router,
         )
+        self.followup_resolver = FollowupTaskResolver()
+        self.tool_decision_validator = ToolDecisionValidator()
+        self.memory_curator = MemoryCuratorService()
+        self._memory_tool_executed_runs: set[int] = set()
 
     async def run(self, context: RunContext) -> None:
         if self._explicit_deep_agents_flag and not self.deep_agents_enabled:
@@ -157,8 +172,8 @@ class DeepAgentsRuntimeEngine:
             except BudgetExceeded as exception:
                 await self._fail_run(context.runId, exception.error_code, exception.message)
                 return
-            await self._maybe_save_memory(context, answer)
             await self._complete_run(context, answer, intent=intent_enum.value)
+            await self._curate_memory_after_run(context, answer)
             return
 
         if intent_enum == Intent.TOOL_USE:
@@ -192,8 +207,8 @@ class DeepAgentsRuntimeEngine:
             except BudgetExceeded as exception:
                 await self._fail_run(context.runId, exception.error_code, exception.message)
                 return
-            await self._maybe_save_memory(context, answer)
             await self._complete_run(context, answer, intent=intent_enum.value)
+            await self._curate_memory_after_run(context, answer)
             return
 
         # Fallback for any other intent — try deep agents if available, else fall back to chat
@@ -233,7 +248,7 @@ class DeepAgentsRuntimeEngine:
 
         answer = await self._synthesize_answer(context, tool, result, budget)
         await self._complete_run(context, answer, intent=Intent.TOOL_USE.value)
-        await self._emit_memory_candidate(context.runId, answer, None)
+        await self._curate_memory_after_run(context, answer, tool_result=result)
 
     async def debug_route(self, context: RunContext) -> AgentRouteDebugResponse:
         intent = await self._classify_intent(context)
@@ -341,7 +356,28 @@ class DeepAgentsRuntimeEngine:
     # --- Tool use flow ---
 
     async def _handle_tool_use(self, context: RunContext, intent) -> None:
-        tool = ToolRegistry(context).get(intent.selectedToolCode or "") if intent.selectedToolCode else None
+        registry = ToolRegistry(context)
+        tool = registry.get(intent.selectedToolCode or "") if intent.selectedToolCode else None
+        followup = self._resolve_router_followup(context, intent, tool)
+        if not followup.accepted and intent.decisionSource != "llm_router":
+            followup = self.followup_resolver.resolve(context, tool)
+        await self._emit_followup_event(context, followup)
+        if followup.accepted and followup.tool_code:
+            inherited_tool = registry.get(followup.tool_code)
+            if inherited_tool is not None:
+                tool = inherited_tool
+                intent.selectedToolCode = inherited_tool.toolCode
+                intent.candidateToolCodes = [inherited_tool.toolCode, *[
+                    code for code in intent.candidateToolCodes if code != inherited_tool.toolCode
+                ]][:3]
+                intent.arguments = self._merge_tool_arguments(
+                    followup.inherited_arguments,
+                    followup.patched_arguments,
+                    intent.arguments,
+                    user_request=context.message,
+                )
+                intent.isFollowUp = True
+                intent.inheritedFromToolCallId = followup.inherited_from_tool_call_id
         if tool is None:
             from app.core.intent_router import IntentResult
             intent_result = IntentResult(
@@ -351,6 +387,37 @@ class DeepAgentsRuntimeEngine:
             await self._emit_answer_events(context.runId, answer)
             await self._complete_run(context, answer, intent=Intent.NEEDS_CLARIFICATION.value)
             return
+
+        validation = self.tool_decision_validator.validate(context, intent, tool)
+        if not validation.accepted:
+            replacement_tool = self._select_valid_candidate_tool(context, registry, intent, excluded_tool_code=tool.toolCode)
+            if replacement_tool is not None:
+                tool = replacement_tool
+                intent.selectedToolCode = replacement_tool.toolCode
+                intent.candidateToolCodes = [replacement_tool.toolCode, *[
+                    code for code in intent.candidateToolCodes if code != replacement_tool.toolCode
+                ]][:3]
+                validation = self.tool_decision_validator.validate(context, intent, tool)
+        if not validation.accepted:
+            LOGGER.info(
+                "agent tool decision rejected runId=%s selectedTool=%s reason=%s warnings=%s",
+                context.runId,
+                tool.toolCode,
+                validation.reason,
+                validation.warnings,
+            )
+            intent_result = IntentResult(
+                intent=Intent.NEEDS_CLARIFICATION,
+                confidence=0.55,
+                reason=validation.reason,
+                candidateToolCodes=intent.candidateToolCodes,
+            )
+            answer = self._format_clarifying_answer(context, intent_result)
+            await self._emit_answer_events(context.runId, answer)
+            await self._complete_run(context, answer, intent=Intent.NEEDS_CLARIFICATION.value)
+            return
+        if validation.requires_confirmation:
+            intent.requiresConfirmation = True
 
         LOGGER.info(
             "agent tool path runId=%s selectedTool=%s toolName=%s autoCallable=%s candidateTools=%s",
@@ -366,8 +433,9 @@ class DeepAgentsRuntimeEngine:
         )
 
         budget = BudgetState(credit_budget=context.creditBudget)
-        missing_args = self.tool_bridge.missing_required_arguments(context, tool)
-        extracted_args = None
+        seed_args = dict(intent.arguments or {})
+        missing_args = self._missing_user_arguments(seed_args, tool) if seed_args else self.tool_bridge.missing_required_arguments(context, tool)
+        extracted_args = seed_args or None
         LOGGER.info(
             "agent tool arguments check runId=%s tool=%s missing=%s",
             context.runId,
@@ -377,14 +445,16 @@ class DeepAgentsRuntimeEngine:
 
         if missing_args:
             base_args = self.tool_bridge.build_arguments(context, tool, apply_placeholder_defaults=False)
+            base_args.update({key: value for key, value in seed_args.items() if value not in (None, "")})
             enriched = await self.tool_bridge.enrich_arguments(
                 self.tool_bridge.conversation_argument_text(context), tool, existing_args=base_args,
             )
             still_missing = self._missing_user_arguments(enriched, tool)
             extracted_args = enriched
-            auto_call = self._should_auto_call(context, tool)
+            auto_call = self._should_auto_call(context, tool, followup, intent)
             if not still_missing:
                 await self._emit_arguments_preview(context, tool, extracted_args, [], not auto_call)
+                await self._emit_arguments_merged(context, tool, intent, extracted_args)
                 if not auto_call:
                     await self._request_confirmation(context, tool)
                     return
@@ -401,7 +471,7 @@ class DeepAgentsRuntimeEngine:
                     return
                 answer = await self._synthesize_answer(context, tool, result, budget)
                 await self._complete_run(context, answer, intent=Intent.TOOL_USE.value)
-                await self._emit_memory_candidate(context.runId, answer, None)
+                await self._curate_memory_after_run(context, answer, tool_result=result)
                 return
             else:
                 await self._emit_arguments_preview(context, tool, enriched, still_missing, False)
@@ -411,17 +481,21 @@ class DeepAgentsRuntimeEngine:
                 await self._complete_run(context, answer, intent=Intent.NEEDS_CLARIFICATION.value)
                 return
 
-        auto_call = self._should_auto_call(context, tool)
+        auto_call = self._should_auto_call(context, tool, followup, intent)
         if not extracted_args:
             extracted_args = self.tool_bridge.build_arguments(context, tool, apply_placeholder_defaults=False)
+        else:
+            current_args = self.tool_bridge.build_arguments(context, tool, apply_placeholder_defaults=False)
+            extracted_args = self._merge_tool_arguments(current_args, extracted_args, {}, user_request=context.message)
         await self._emit_arguments_preview(context, tool, extracted_args, [], not auto_call)
+        await self._emit_arguments_merged(context, tool, intent, extracted_args)
 
         if not auto_call:
             await self._request_confirmation(context, tool)
             return
 
         try:
-            result = await self._execute_tool_with_guard(context, tool, budget)
+            result = await self._execute_tool_with_guard(context, tool, budget, arguments=extracted_args)
         except BudgetExceeded as exception:
             await self._fail_run(context.runId, exception.error_code, exception.message, budget=budget)
             return
@@ -435,7 +509,7 @@ class DeepAgentsRuntimeEngine:
 
         answer = await self._synthesize_answer(context, tool, result, budget)
         await self._complete_run(context, answer, intent=Intent.TOOL_USE.value)
-        await self._emit_memory_candidate(context.runId, answer, None)
+        await self._curate_memory_after_run(context, answer, tool_result=result)
 
     async def _execute_tool_with_guard(
         self, context: RunContext, tool: ToolDescriptor, budget: BudgetState, arguments: dict[str, Any] | None = None,
@@ -482,6 +556,131 @@ class DeepAgentsRuntimeEngine:
             ),
         )
 
+    async def _emit_followup_event(self, context: RunContext, followup: FollowupResolution) -> None:
+        if not followup.accepted and followup.reason == "not_followup":
+            return
+        event_type = FOLLOWUP_INHERITED if followup.accepted else FOLLOWUP_REJECTED
+        await self.backend.append_event(
+            context.runId,
+            RunEventCreate(
+                eventType=FOLLOWUP_DETECTED,
+                eventText=followup.reason,
+                eventJson={
+                    "accepted": followup.accepted,
+                    "reason": followup.reason,
+                    "toolCode": followup.tool_code,
+                    "inheritedFromToolCallId": followup.inherited_from_tool_call_id,
+                    "mediaUrls": followup.media_urls,
+                },
+            ),
+        )
+        await self.backend.append_event(
+            context.runId,
+            RunEventCreate(
+                eventType=event_type,
+                eventText=followup.tool_code or followup.reason,
+                eventJson={
+                    "reason": followup.reason,
+                    "toolCode": followup.tool_code,
+                    "inheritedFromToolCallId": followup.inherited_from_tool_call_id,
+                    "inheritedArguments": followup.inherited_arguments if followup.accepted else {},
+                    "patchedArguments": followup.patched_arguments if followup.accepted else {},
+                },
+            ),
+        )
+
+    async def _emit_arguments_merged(self, context: RunContext, tool: ToolDescriptor, intent, arguments: dict[str, Any]) -> None:
+        await self.backend.append_event(
+            context.runId,
+            RunEventCreate(
+                eventType=ARGUMENTS_MERGED,
+                eventText=tool.toolCode,
+                eventJson={
+                    "toolCode": tool.toolCode,
+                    "arguments": arguments,
+                    "routerArguments": intent.arguments or {},
+                    "isFollowUp": bool(intent.isFollowUp),
+                    "inheritedFromToolCallId": intent.inheritedFromToolCallId,
+                    "missingFields": intent.missingFields or [],
+                },
+            ),
+        )
+
+    @staticmethod
+    def _merge_tool_arguments(*sources: dict[str, Any], user_request: str | None = None) -> dict[str, Any]:
+        merged: dict[str, Any] = {}
+        for source in sources:
+            for key, value in (source or {}).items():
+                if value not in (None, ""):
+                    merged[key] = value
+        if user_request:
+            merged["userRequest"] = user_request
+        return merged
+
+    def _resolve_router_followup(self, context: RunContext, intent, tool: ToolDescriptor | None) -> FollowupResolution:
+        if not context.recentToolCalls:
+            return FollowupResolution(False, "not_followup")
+        if not (intent.isFollowUp or intent.inheritedFromToolCallId or intent.followupPatch):
+            return FollowupResolution(False, "not_followup")
+
+        selected_source = None
+        if intent.inheritedFromToolCallId:
+            selected_source = next((call for call in context.recentToolCalls if call.id == intent.inheritedFromToolCallId), None)
+        if selected_source is None and tool is not None:
+            selected_source = next((call for call in context.recentToolCalls if call.toolCode == tool.toolCode), None)
+        if selected_source is None:
+            selected_source = context.recentToolCalls[0]
+
+        inherited = dict(selected_source.argumentsJson or {})
+        patch = dict(intent.followupPatch or {})
+        if not patch and intent.arguments:
+            patch = dict(intent.arguments)
+        if not patch and tool is not None:
+            fallback = self.followup_resolver.resolve(context, tool)
+            if fallback.accepted:
+                return fallback
+        if selected_source.mediaUrls and tool is not None and tool_supports_modality(tool, "VIDEO"):
+            image_key = self._first_schema_key(tool, ("imageUrl", "image_url", "referenceImageUrl", "reference_image_url", "initImage", "inputImage"))
+            if image_key and image_key not in patch:
+                patch[image_key] = selected_source.mediaUrls[0]
+
+        tool_code = tool.toolCode if tool is not None else selected_source.toolCode
+        return FollowupResolution(
+            True,
+            "router_followup_inherited",
+            tool_code=tool_code,
+            inherited_from_tool_call_id=selected_source.id,
+            inherited_arguments=inherited,
+            patched_arguments=self._merge_tool_arguments(inherited, patch, intent.arguments, user_request=context.message),
+            media_urls=selected_source.mediaUrls or [],
+        )
+
+    @staticmethod
+    def _first_schema_key(tool: ToolDescriptor, keys: tuple[str, ...]) -> str | None:
+        properties = tool.inputSchema.get("properties", {}) if isinstance(tool.inputSchema, dict) else {}
+        if not isinstance(properties, dict):
+            return None
+        return next((key for key in keys if key in properties), None)
+
+    @staticmethod
+    def _select_valid_candidate_tool(
+        context: RunContext,
+        registry: ToolRegistry,
+        intent,
+        *,
+        excluded_tool_code: str | None = None,
+    ) -> ToolDescriptor | None:
+        requested_modality = requested_output_modality(context.message)
+        if not requested_modality:
+            return None
+        for code in intent.candidateToolCodes:
+            if code == excluded_tool_code:
+                continue
+            candidate = registry.get(code)
+            if candidate is not None and infer_output_modality(candidate) == requested_modality:
+                return candidate
+        return None
+
     async def _emit_missing_arguments(self, context: RunContext, tool: ToolDescriptor, missing: list[str]) -> None:
         await self.backend.append_event(
             context.runId,
@@ -512,12 +711,26 @@ class DeepAgentsRuntimeEngine:
             ),
         )
 
-    def _should_auto_call(self, context: RunContext, tool: ToolDescriptor) -> bool:
+    def _should_auto_call(self, context: RunContext, tool: ToolDescriptor, followup: FollowupResolution | None = None, intent=None) -> bool:
+        if intent is not None and intent.requiresConfirmation is True:
+            return False
         if tool.autoCallable:
             return True
         if any(p.toolCode == tool.toolCode and p.autoCallEnabled for p in context.toolPreferences):
             return True
+        if followup is not None and followup.accepted and self._is_safe_followup_auto_call(tool):
+            return True
         return self._is_direct_generation_request(context, tool)
+
+    @staticmethod
+    def _is_safe_followup_auto_call(tool: ToolDescriptor) -> bool:
+        if tool.estimatedCreditCost and tool.estimatedCreditCost > 20:
+            return False
+        high_risk = {"high", "critical", "danger"}
+        for field in tool.fields:
+            if (field.riskLevel or "").strip().lower() in high_risk:
+                return False
+        return True
 
     def _is_direct_generation_request(self, context: RunContext, tool: ToolDescriptor) -> bool:
         modality = requested_output_modality(context.message)
@@ -630,7 +843,13 @@ class DeepAgentsRuntimeEngine:
         messages.extend(context.history)
         messages.append(ChatMessage(role="user", content=context.message))
         budget = BudgetState(credit_budget=context.creditBudget)
-        return await self._stream_model_answer(context.runId, messages, budget, memory_tool=memory_tool)
+        return await self._stream_model_answer(
+            context.runId,
+            messages,
+            budget,
+            memory_tool=memory_tool,
+            memory_tool_loop_enabled=_memory_tool_loop_enabled(context),
+        )
 
     def _format_clarifying_answer(self, context: RunContext, intent) -> str:
         if intent.clarifyingQuestion:
@@ -716,7 +935,7 @@ class DeepAgentsRuntimeEngine:
         else:
             await self._emit_answer_events(context.runId, answer)
         await self._complete_run(context, answer, intent=DEEP_AGENTS_INTENT)
-        await self._emit_memory_candidate(context.runId, answer, artifact)
+        await self._curate_memory_after_run(context, answer)
 
     # --- Synthesize tool answer ---
 
@@ -761,6 +980,7 @@ class DeepAgentsRuntimeEngine:
             budget,
             memory_tool=memory_tool,
             fallback_answer=content_text,
+            memory_tool_loop_enabled=_memory_tool_loop_enabled(context),
         )
 
     # --- Common helpers ---
@@ -770,17 +990,37 @@ class DeepAgentsRuntimeEngine:
         budget: BudgetState | None = None,
         memory_tool: MemoryTool | None = None,
         fallback_answer: str | None = None,
+        memory_tool_loop_enabled: bool | None = None,
     ) -> str:
-        if budget is not None:
-            self.budget_guard.reserve_model_call(budget)
         parts: list[str] = []
         stream = getattr(self.model, "chat_stream", None)
-        extra_kwargs: dict[str, Any] = {}
-        if memory_tool is not None:
-            extra_kwargs["tools"] = _format_memory_tool_definitions()
+        if memory_tool is not None and (settings.agent_memory_tool_loop_enabled if memory_tool_loop_enabled is None else memory_tool_loop_enabled) and callable(getattr(self.model, "chat_turn", None)):
+            try:
+                loop = AgentToolCallLoopExecutor(
+                    backend=self.backend,
+                    model=self.model,
+                    run_id=run_id,
+                    memory_tool=memory_tool,
+                    reserve_model_call=lambda: self.budget_guard.reserve_model_call(budget) if budget is not None else None,
+                    max_iterations=settings.agent_max_tool_calls,
+                    max_tool_calls_per_turn=4,
+                )
+                result = await loop.run(messages_list)
+                if result.executed_tool_calls > 0:
+                    self._memory_tool_executed_runs.add(run_id)
+                answer = result.answer.strip()
+                if not answer and fallback_answer:
+                    answer = fallback_answer
+                if answer:
+                    await self._emit_answer_events(run_id, answer)
+                    return answer
+            except Exception as exc:
+                LOGGER.debug("memory tool-call loop skipped runId=%s error=%s", run_id, exc)
+        if budget is not None:
+            self.budget_guard.reserve_model_call(budget)
         if stream is None:
             try:
-                answer = await self.model.chat(messages_list, tools=extra_kwargs.get("tools"))
+                answer = await self.model.chat(messages_list)
             except TypeError:
                 answer = await self.model.chat(messages_list)
             if not answer.strip() and fallback_answer:
@@ -788,7 +1028,7 @@ class DeepAgentsRuntimeEngine:
             await self._emit_answer_events(run_id, answer)
             return answer
         try:
-            stream_iter = self.model.chat_stream(messages_list, tools=extra_kwargs.get("tools"))
+            stream_iter = self.model.chat_stream(messages_list)
         except TypeError:
             stream_iter = self.model.chat_stream(messages_list)
         persisted_length = 0
@@ -912,21 +1152,56 @@ class DeepAgentsRuntimeEngine:
         if workspace_id is None:
             return []
         try:
-            return await self.backend.retrieve_workspace_memory(
+            view = _memory_view_for_context(context)
+            items = await self.backend.retrieve_workspace_memory(
                 workspace_id=workspace_id,
                 query=context.message,
                 limit=_memory_retrieval_limit(context),
+                view=view,
             )
+            if items:
+                await self.backend.append_event(
+                    context.runId,
+                    RunEventCreate(
+                        eventType=MEMORY_RETRIEVED,
+                        eventJson={
+                            "count": len(items),
+                            "view": view,
+                            "memoryIds": [item.id for item in items],
+                            "types": [item.memoryType for item in items],
+                        },
+                    ),
+                )
+            return items
         except Exception:
             return []
 
     async def _fetch_workspace_memory_context(self, context: RunContext) -> str:
         items = await self._fetch_workspace_memory_items(context)
         memory_context = _format_workspace_memory_context(items)
+        session_context = await self._fetch_session_search_context(context)
+        if session_context:
+            memory_context = f"{memory_context}\n\n{session_context}".strip()
         retrieval_prompt = context.memorySettings.retrievalPrompt if context.memorySettings is not None else None
         if memory_context and retrieval_prompt and retrieval_prompt.strip():
             return f"{retrieval_prompt.strip()}\n\n{memory_context}"
         return memory_context
+
+    async def _fetch_session_search_context(self, context: RunContext) -> str:
+        if not _looks_like_session_search_request(context.message):
+            return ""
+        if not hasattr(self.backend, "search_session"):
+            return ""
+        try:
+            items = await self.backend.search_session(
+                user_id=context.userId,
+                session_id=context.sessionId,
+                query=context.message,
+                limit=6,
+            )
+        except Exception:
+            return ""
+        return _format_session_search_context(items)
 
     async def _build_workspace_file_context(self, context: RunContext) -> WorkspaceFileContext:
         workspace_file_context = build_workspace_file_context(context)
@@ -968,35 +1243,138 @@ class DeepAgentsRuntimeEngine:
             ),
         )
 
-    async def _emit_memory_candidate(self, run_id: int, answer: str, artifact: "ArtifactDirective | None") -> None:
-        content = artifact.content if artifact is not None else answer
-        title = artifact.filename if artifact is not None else _memory_candidate_title(content)
+    async def _emit_memory_candidate(self, context: RunContext, *, title: str, content: str, decision_json: dict[str, Any]) -> None:
         await self.backend.append_event(
-            run_id,
+            context.runId,
             RunEventCreate(
                 eventType=MEMORY_CANDIDATE_CREATED,
                 eventText=title,
-                eventJson={"title": title, "content": content, "sourceRunId": run_id},
+                eventJson={"title": title, "content": content, "sourceRunId": context.runId, **decision_json},
             ),
         )
 
-    async def _maybe_save_memory(self, context: RunContext, answer: str) -> None:
-        """兜底：当 LLM 口头承诺'记住了'但未调用 memory_add 时，自动提取并写入。"""
+    async def _curate_memory_after_run(self, context: RunContext, answer: str, tool_result: dict[str, Any] | None = None) -> None:
         if not context.workspaceId or not _memory_auto_save_enabled(context):
             return
-        if not _contains_memory_promise(answer):
+        try:
+            existing = await self._fetch_workspace_memory_items(context)
+            await self.backend.append_event(
+                context.runId,
+                RunEventCreate(
+                    eventType=MEMORY_CURATOR_STARTED,
+                    eventJson={"existingCount": len(existing), "mode": "light"},
+                ),
+            )
+            if context.runId in self._memory_tool_executed_runs:
+                await self._maybe_consolidate_memory(context, answer, existing)
+                return
+            decision = self.memory_curator.decide(context, answer, existing_items=existing, tool_result=tool_result)
+            payload = {
+                "action": decision.action,
+                "memoryType": decision.memory_type,
+                "title": decision.title,
+                "importance": decision.importance,
+                "confidence": decision.confidence,
+                "reason": decision.reason,
+            }
+            if decision.action == "none":
+                await self.backend.append_event(
+                    context.runId,
+                    RunEventCreate(eventType=MEMORY_REJECTED, eventText=decision.reason, eventJson=payload),
+                )
+                return
+            if decision.action == "add" and decision.confidence >= _memory_consolidation_min_confidence(context):
+                tool = MemoryTool(self.backend, context.workspaceId, context.userId, run_id=context.runId)
+                await tool.add_memory(
+                    memory_type=decision.memory_type,
+                    title=decision.title,
+                    content=decision.content,
+                    source_run_id=context.runId,
+                )
+                return
+            if decision.confidence < _memory_candidate_confidence_threshold(context):
+                await self.backend.append_event(
+                    context.runId,
+                    RunEventCreate(eventType=MEMORY_REJECTED, eventText=decision.reason, eventJson={**payload, "belowCandidateThreshold": True}),
+                )
+                return
+            await self.backend.create_workspace_memory_candidate(
+                workspace_id=context.workspaceId,
+                user_id=context.userId,
+                action=decision.action,
+                memory_type=decision.memory_type,
+                title=decision.title,
+                content=decision.content,
+                source_run_id=context.runId,
+                importance=decision.importance,
+                confidence=decision.confidence,
+                reason=decision.reason,
+                metadata_json=build_memory_metadata(decision),
+            )
+            await self._emit_memory_candidate(
+                context,
+                title=decision.title,
+                content=decision.content,
+                decision_json=payload,
+            )
+        except Exception as exc:
+            LOGGER.debug("memory curator failed runId=%s error=%s", context.runId, exc)
+
+    async def _maybe_consolidate_memory(self, context: RunContext, answer: str, existing: list[WorkspaceMemoryItem]) -> None:
+        if not _memory_consolidation_enabled(context):
             return
-        text = context.message.strip()
-        if not text or len(text) < 4:
+        user_turns = [message.content for message in context.history if message.role.lower() == "user"]
+        user_turns.append(context.message)
+        combined = "\n".join(user_turns)
+        should_run = (
+            len(user_turns) >= _memory_consolidation_turn_interval(context)
+            or len(combined) >= _memory_consolidation_char_threshold(context)
+            or _successful_recent_tool_count(context) >= 3
+        )
+        if not should_run:
             return
-        # 提取用户消息中的有效信息作为记忆内容
-        from app.tools.memory_tool import MemoryTool as MT
-        tool = MT(self.backend, context.workspaceId, context.userId, run_id=context.runId)
-        await tool.add_memory(
-            memory_type="project_knowledge",
-            title=text[:60],
-            content=text,
-            source_run_id=context.runId,
+        existing_profile = next((item for item in existing if item.memoryType in {"user_profile", "preference", "workflow_recipe"}), None)
+        summary = _build_consolidated_memory_summary(context, answer)
+        if not summary:
+            return
+        tool = MemoryTool(self.backend, context.workspaceId, context.userId, run_id=context.runId)
+        if existing_profile is None:
+            await tool.add_memory(
+                memory_type="user_profile",
+                title="用户画像与偏好摘要",
+                content=summary,
+                source_run_id=context.runId,
+            )
+            action = "add"
+        else:
+            update = getattr(self.backend, "update_workspace_memory", None)
+            if callable(update):
+                await update(
+                    workspace_id=context.workspaceId,
+                    memory_id=existing_profile.id,
+                    memory_type=existing_profile.memoryType,
+                    title=existing_profile.title or "用户画像与偏好摘要",
+                    content=summary,
+                )
+            else:
+                await tool.replace_memory(
+                    memory_type=existing_profile.memoryType,
+                    new_title=existing_profile.title or "用户画像与偏好摘要",
+                    new_content=summary,
+                )
+            action = "replace"
+        await self.backend.append_event(
+            context.runId,
+            RunEventCreate(
+                eventType=MEMORY_CONSOLIDATED,
+                eventText="用户画像与偏好已整理",
+                eventJson={
+                    "action": action,
+                    "turnCount": len(user_turns),
+                    "charCount": len(combined),
+                    "recentToolCount": _successful_recent_tool_count(context),
+                },
+            ),
         )
 
 
@@ -1470,27 +1848,34 @@ def _format_workspace_memory_context(items: list[WorkspaceMemoryItem]) -> str:
     if not active_items:
         return ""
 
-    sections = ["Workspace memory"]
-    profiles = [it for it in active_items if it.memoryType == "user_profile"]
-    knowledge = [it for it in active_items if it.memoryType == "project_knowledge"]
-    others = [it for it in active_items if it.memoryType not in ("user_profile", "project_knowledge")]
+    sections = ["Frozen workspace memory snapshot", "Priority: current user instruction > live tool result > recent tool calls > long-term memory."]
+    profiles = [it for it in active_items if it.memoryType in ("user_profile", "preference")]
+    knowledge = [it for it in active_items if it.memoryType in ("project_knowledge", "workspace_fact")]
+    procedural = [it for it in active_items if it.memoryType in ("tool_lesson", "workflow_recipe")]
+    others = [it for it in active_items if it.memoryType not in ("user_profile", "preference", "project_knowledge", "workspace_fact", "tool_lesson", "workflow_recipe")]
 
     if profiles:
         sections.append("[User Profile]")
         for item in profiles:
-            sections.append(f"  - {_safe_memory_text(item.content, 800)}")
+            sections.append(f"  - {_memory_label(item)} {_safe_memory_text(item.content, 800)}")
         sections.append("")
 
     if knowledge:
-        sections.append("[Project Knowledge]")
+        sections.append("[Workspace Facts]")
         for item in knowledge:
-            sections.append(f"  [memory:{item.id}] {_safe_memory_text(item.title, 120)} (score={item.score})\n  {_safe_memory_text(item.content, 1200)}")
+            sections.append(f"  {_memory_label(item)} {_safe_memory_text(item.title, 120)}\n  {_safe_memory_text(item.content, 1200)}")
+        sections.append("")
+
+    if procedural:
+        sections.append("[Procedural Lessons]")
+        for item in procedural:
+            sections.append(f"  {_memory_label(item)} {_safe_memory_text(item.title, 120)}\n  {_safe_memory_text(item.content, 1200)}")
         sections.append("")
 
     if others:
         sections.append("[Other Notes]")
         for item in others:
-            sections.append(f"  [memory:{item.id}] {_safe_memory_text(item.title, 120)} ({item.memoryType}, score={item.score})\n  {_safe_memory_text(item.content, 1200)}")
+            sections.append(f"  {_memory_label(item)} {_safe_memory_text(item.title, 120)}\n  {_safe_memory_text(item.content, 1200)}")
 
     return "\n".join(sections).strip()
 
@@ -1503,8 +1888,41 @@ def _format_workspace_memory_items(items: list[WorkspaceMemoryItem]) -> list[str
         title = item.title.strip() or "Untitled memory"
         content = item.content.strip()
         memory_type = item.memoryType.strip() or "memory"
-        memory_items.append(f"[memory:{item.id}] {_safe_memory_text(title, 120)} ({memory_type}, score={item.score})\n{_safe_memory_text(content, 1200)}")
+        memory_items.append(f"{_memory_label(item)} {_safe_memory_text(title, 120)} ({memory_type})\n{_safe_memory_text(content, 1200)}")
     return memory_items
+
+
+def _format_session_search_context(items: list[SessionSearchItem]) -> str:
+    active_items = [item for item in items if (item.content or item.argumentsJson or item.resultJson)]
+    if not active_items:
+        return ""
+    sections = ["Session search results (episodic memory, not long-term facts)"]
+    for item in active_items[:6]:
+        if item.itemType == "tool_call":
+            sections.append(
+                f"  [tool_call:{item.id}, tool={item.toolCode}, run={item.runId}, task={item.taskId}, score={item.score}]\n"
+                f"  args={_safe_memory_text(item.argumentsJson or '', 500)}\n"
+                f"  result={_safe_memory_text(item.resultJson or item.content or '', 900)}"
+            )
+        else:
+            sections.append(
+                f"  [message:{item.id}, role={item.role}, run={item.runId}, score={item.score}]\n"
+                f"  {_safe_memory_text(item.content or '', 900)}"
+            )
+    return "\n".join(sections).strip()
+
+
+def _looks_like_session_search_request(message: str) -> bool:
+    compact = re.sub(r"\s+", "", (message or "").lower())
+    return any(token in compact for token in ("上次", "之前", "刚才", "那张", "那个", "历史", "previous", "lasttime"))
+
+
+def _memory_label(item: WorkspaceMemoryItem) -> str:
+    pinned = ", pinned" if item.pinned else ""
+    importance = item.importance if item.importance is not None else "-"
+    confidence = item.confidence if item.confidence is not None else "-"
+    updated = item.updatedAt or "unknown"
+    return f"[memory:{item.id}, type={item.memoryType}, score={item.score}, importance={importance}, confidence={confidence}, updated={updated}{pinned}]"
 
 
 def _memory_auto_save_enabled(context: RunContext) -> bool:
@@ -1513,10 +1931,104 @@ def _memory_auto_save_enabled(context: RunContext) -> bool:
     return settings.agent_memory_auto_save_enabled
 
 
+def _memory_tool_loop_enabled(context: RunContext) -> bool:
+    if context.memorySettings is not None and context.memorySettings.toolLoopEnabled is not None:
+        return bool(context.memorySettings.toolLoopEnabled)
+    return settings.agent_memory_tool_loop_enabled
+
+
+def _memory_consolidation_enabled(context: RunContext) -> bool:
+    if context.memorySettings is not None and context.memorySettings.consolidationEnabled is not None:
+        return bool(context.memorySettings.consolidationEnabled)
+    return settings.agent_memory_consolidation_enabled
+
+
+def _memory_consolidation_turn_interval(context: RunContext) -> int:
+    if context.memorySettings is not None and context.memorySettings.consolidationTurnInterval is not None:
+        return max(2, min(int(context.memorySettings.consolidationTurnInterval), 50))
+    return settings.agent_memory_consolidation_turn_interval
+
+
+def _memory_consolidation_char_threshold(context: RunContext) -> int:
+    if context.memorySettings is not None and context.memorySettings.consolidationCharThreshold is not None:
+        return max(500, min(int(context.memorySettings.consolidationCharThreshold), 50000))
+    return settings.agent_memory_consolidation_char_threshold
+
+
+def _memory_consolidation_min_confidence(context: RunContext) -> float:
+    if context.memorySettings is not None and context.memorySettings.consolidationMinConfidence is not None:
+        return max(0.0, min(float(context.memorySettings.consolidationMinConfidence), 1.0))
+    return settings.agent_memory_consolidation_min_confidence
+
+
+def _memory_candidate_confidence_threshold(context: RunContext) -> float:
+    if context.memorySettings is not None and context.memorySettings.candidateConfidenceThreshold is not None:
+        return max(0.0, min(float(context.memorySettings.candidateConfidenceThreshold), 1.0))
+    return settings.agent_memory_candidate_confidence_threshold
+
+
 def _memory_retrieval_limit(context: RunContext) -> int:
     if context.memorySettings is not None and context.memorySettings.retrievalLimit is not None:
         return max(1, min(int(context.memorySettings.retrievalLimit), 20))
     return settings.agent_memory_retrieval_limit
+
+
+def _memory_view_for_context(context: RunContext) -> str:
+    message = (context.message or "").lower()
+    if any(token in message for token in (
+        "记得",
+        "记住",
+        "喜欢",
+        "偏好",
+        "我是谁",
+        "我是何人",
+        "你了解我",
+        "用户画像",
+        "个人画像",
+        "remember",
+        "preference",
+        "profile",
+    )):
+        return "chat"
+    if context.recentToolCalls or any(token in message for token in ("生成", "工具", "同款", "again", "image", "video")):
+        return "router"
+    return "chat"
+
+
+def _successful_recent_tool_count(context: RunContext) -> int:
+    count = 0
+    for call in context.recentToolCalls or []:
+        result = call.resultJson if isinstance(call.resultJson, dict) else {}
+        if result and not result.get("error") and not result.get("errorCode"):
+            count += 1
+    return count
+
+
+def _build_consolidated_memory_summary(context: RunContext, answer: str) -> str:
+    user_turns = [message.content.strip() for message in context.history if message.role.lower() == "user" and message.content.strip()]
+    assistant_turns = [message.content.strip() for message in context.history if message.role.lower() in {"assistant", "ai"} and message.content.strip()]
+    user_turns.append((context.message or "").strip())
+    clues: list[str] = []
+    for text in user_turns[-12:]:
+        if _looks_like_large_media_payload(text):
+            continue
+        if any(token in text for token in ("喜欢", "偏好", "习惯", "以后", "记住", "二次元", "梗", "风格", "默认", "配置")):
+            clues.append(text)
+    if answer and any(token in context.message for token in ("我是什么样的人", "用户画像", "个人画像")):
+        clues.append(answer)
+    for call in (context.recentToolCalls or [])[:5]:
+        if call.toolCode:
+            clues.append(f"常用工具倾向：{call.toolCode}")
+    if not clues and len(user_turns) < settings.agent_memory_consolidation_turn_interval:
+        return ""
+    summary_lines = [
+        "根据近期对话整理出的用户画像与偏好。若与用户当前明确指令冲突，以当前指令为准。",
+    ]
+    for clue in clues[:8]:
+        summary_lines.append(f"- {_safe_memory_text(clue, 240)}")
+    if not clues and assistant_turns:
+        summary_lines.append(f"- 近期对话主题：{_safe_memory_text(user_turns[-1], 240)}")
+    return "\n".join(summary_lines)[:1600]
 
 
 def _memory_tool_prompt(context: RunContext) -> str:

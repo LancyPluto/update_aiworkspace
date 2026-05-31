@@ -10,6 +10,7 @@ import com.aiminilab.aitoolmarket.community.dto.CommunityEventRequest;
 import com.aiminilab.aitoolmarket.community.dto.CommunityPostDiscoverRow;
 import com.aiminilab.aitoolmarket.community.dto.CommunityPostResponse;
 import com.aiminilab.aitoolmarket.community.dto.CommunityStatsResponse;
+import com.aiminilab.aitoolmarket.community.dto.CommunityTopicResponse;
 import com.aiminilab.aitoolmarket.community.dto.PublicUserProfileResponse;
 import com.aiminilab.aitoolmarket.community.dto.PublishPostRequest;
 import com.aiminilab.aitoolmarket.community.dto.UpdateCommunityPostRequest;
@@ -105,17 +106,26 @@ public class CommunityServiceImpl implements CommunityService {
                     userId,
                     normalizeTitle(request.title(), post.getTitle()),
                     normalizeDescription(request.description()),
-                    Boolean.TRUE.equals(request.promptVisible()),
-                    normalizeTopic(request.topic())
+                    request.promptVisible() == null ? Boolean.TRUE.equals(post.getPromptVisible()) : Boolean.TRUE.equals(request.promptVisible()),
+                    request.topic() == null ? post.getTopic() : normalizeTopic(request.topic())
             );
-            replaceTags(post.getId(), request.tags());
+            if (request.tags() != null) {
+                replaceTags(post.getId(), request.tags());
+            }
+            applyRuleLabelsIfEmpty(post.getId(), task);
+            postMapper.refreshQualityScore(post.getId());
             return response(requirePost(post.getId()), userId);
         }
         String title = normalizeTitle(request.title(), task.getToolName());
         boolean promptVisible = Boolean.TRUE.equals(request.promptVisible());
         CommunityPost post = createPost(task, null, null, title, request.description(), promptVisible, "PUBLISHED");
-        postMapper.updateTopic(post.getId(), normalizeTopic(request.topic()));
-        replaceTags(post.getId(), request.tags());
+        if (request.topic() != null) {
+            postMapper.updateTopic(post.getId(), normalizeTopic(request.topic()));
+        }
+        if (request.tags() != null) {
+            replaceTags(post.getId(), request.tags());
+        }
+        postMapper.refreshQualityScore(post.getId());
         return response(requirePost(post.getId()), userId);
     }
 
@@ -128,13 +138,15 @@ public class CommunityServiceImpl implements CommunityService {
         boolean promptVisible = request == null || request.promptVisible() == null
                 ? Boolean.TRUE.equals(post.getPromptVisible())
                 : Boolean.TRUE.equals(request.promptVisible());
-        String topic = request == null ? post.getTopic() : normalizeTopic(request.topic());
+        String topic = request == null || request.topic() == null ? post.getTopic() : normalizeTopic(request.topic());
         if (postMapper.updateOwnerMetadata(postId, userId, title, description, promptVisible, topic) == 0) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "Post not found");
         }
         if (request != null && request.tags() != null) {
             replaceTags(postId, request.tags());
         }
+        applyRuleLabelsIfEmpty(postId, taskMapper.findById(post.getTaskId()).orElse(null));
+        postMapper.refreshQualityScore(postId);
         return response(requirePost(postId), userId);
     }
 
@@ -200,6 +212,12 @@ public class CommunityServiceImpl implements CommunityService {
         long total = postMapper.countDiscover(normalizedModality, normalizedTag, normalizedTopic,
                 normalizedKeyword, normalizedToolCode, featured);
         return PageResponse.of(list, total, pageNo, pageSize);
+    }
+
+    @Override
+    public List<CommunityTopicResponse> topics(Integer limit) {
+        int normalizedLimit = limit == null ? 8 : Math.max(1, Math.min(limit, 20));
+        return postMapper.findTopTopics(normalizedLimit);
     }
 
     @Override
@@ -406,7 +424,9 @@ public class CommunityServiceImpl implements CommunityService {
         String normalizedTopic = normalizeTopic(topic);
         List<CommunityPost> posts = postMapper.findForAdmin(userId, normalizeStatus(status), normalizeModality(modality),
                         normalizedKeyword, normalizedTopic, featured, normalizeAuditStatus(auditStatus), normalizedPageSize, offset);
-        List<CommunityPostResponse> list = responseBatch(posts, null);
+        List<CommunityPostResponse> list = posts.stream()
+                .map(this::adminResponse)
+                .toList();
         long total = postMapper.countForAdmin(userId, normalizeStatus(status), normalizeModality(modality),
                 normalizedKeyword, normalizedTopic, featured, normalizeAuditStatus(auditStatus));
         return PageResponse.of(list, total, pageNo, pageSize);
@@ -434,7 +454,7 @@ public class CommunityServiceImpl implements CommunityService {
     public CommunityPostResponse adminHide(Long postId, String reason) {
         requirePost(postId);
         postMapper.updateAdminStatus(postId, "HIDDEN", "REJECTED", normalizeAuditReason(reason));
-        return response(requirePost(postId), null);
+        return adminResponse(requirePost(postId));
     }
 
     @Override
@@ -442,7 +462,7 @@ public class CommunityServiceImpl implements CommunityService {
     public CommunityPostResponse adminRestore(Long postId) {
         requirePost(postId);
         postMapper.updateAdminStatus(postId, "PUBLISHED", "APPROVED", null);
-        return response(requirePost(postId), null);
+        return adminResponse(requirePost(postId));
     }
 
     @Override
@@ -450,7 +470,7 @@ public class CommunityServiceImpl implements CommunityService {
     public CommunityPostResponse adminApprove(Long postId) {
         requirePost(postId);
         postMapper.updateAdminStatus(postId, "PUBLISHED", "APPROVED", null);
-        return response(requirePost(postId), null);
+        return adminResponse(requirePost(postId));
     }
 
     @Override
@@ -458,7 +478,7 @@ public class CommunityServiceImpl implements CommunityService {
     public CommunityPostResponse adminReject(Long postId, String reason) {
         requirePost(postId);
         postMapper.updateAdminStatus(postId, "HIDDEN", "REJECTED", normalizeAuditReason(reason));
-        return response(requirePost(postId), null);
+        return adminResponse(requirePost(postId));
     }
 
     @Override
@@ -467,7 +487,7 @@ public class CommunityServiceImpl implements CommunityService {
         requirePost(postId);
         postMapper.updateFeatured(postId, featured);
         postMapper.refreshQualityScore(postId);
-        return response(requirePost(postId), null);
+        return adminResponse(requirePost(postId));
     }
 
     @Override
@@ -476,7 +496,7 @@ public class CommunityServiceImpl implements CommunityService {
         requirePost(postId);
         postMapper.updatePinned(postId, pinned);
         postMapper.refreshQualityScore(postId);
-        return response(requirePost(postId), null);
+        return adminResponse(requirePost(postId));
     }
 
     @Override
@@ -485,7 +505,8 @@ public class CommunityServiceImpl implements CommunityService {
         requirePost(postId);
         postMapper.updateTopic(postId, normalizeTopic(topic));
         replaceTags(postId, tags);
-        return response(requirePost(postId), null);
+        postMapper.refreshQualityScore(postId);
+        return adminResponse(requirePost(postId));
     }
 
     private CommunityPost createPost(AiTask task, String resourceType, String contentText, String title,
@@ -513,7 +534,7 @@ public class CommunityServiceImpl implements CommunityService {
         post.setStatus(status);
         post.setFeatured(false);
         post.setPinned(false);
-        post.setTopic(null);
+        post.setTopic(defaultTopicFor(task, post.getModality()));
         post.setSameStyleCount(0L);
         post.setAuditStatus("APPROVED");
         post.setAuditReason(null);
@@ -524,6 +545,7 @@ public class CommunityServiceImpl implements CommunityService {
         post.setLikeCount(0L);
         post.setFavoriteCount(0L);
         postMapper.insertAndReturnId(post);
+        addDefaultTags(post.getId(), task, post.getModality(), post.getTopic());
         postMapper.refreshQualityScore(post.getId());
         return requirePost(post.getId());
     }
@@ -682,6 +704,17 @@ public class CommunityServiceImpl implements CommunityService {
         return buildResponse(post, viewerId, author);
     }
 
+    private CommunityPostResponse adminResponse(CommunityPost post) {
+        User user = post.getUserId() == null ? null : userMapper.findById(post.getUserId()).orElse(null);
+        return CommunityPostResponse.adminFrom(
+                post,
+                postMapper.findTags(post.getId()),
+                resolveAuthorNickname(user, post.getUserId()),
+                user == null ? null : user.getAvatarUrl(),
+                resolvePromptSnapshot(post)
+        );
+    }
+
     private String resolveAuthorNickname(User user, Long userId) {
         if (user != null) {
             if (user.getNickname() != null && !user.getNickname().isBlank()) {
@@ -699,7 +732,7 @@ public class CommunityServiceImpl implements CommunityService {
             return nickname.trim();
         }
         if (userId != null) {
-            return "用户" + userId;
+            return "用户 " + userId;
         }
         return null;
     }
@@ -715,6 +748,105 @@ public class CommunityServiceImpl implements CommunityService {
         if (normalized.contains("VIDEO")) return "VIDEO";
         if (normalized.contains("AUDIO")) return "AUDIO";
         return "TEXT";
+    }
+
+    private void applyRuleLabelsIfEmpty(Long postId, AiTask task) {
+        if (postId == null || task == null) {
+            return;
+        }
+        CommunityPost post = requirePost(postId);
+        String modality = post.getModality();
+        String topic = post.getTopic();
+        if (topic == null || topic.isBlank()) {
+            topic = defaultTopicFor(task, modality);
+            if (topic != null) {
+                postMapper.updateTopic(postId, topic);
+            }
+        }
+        if (postMapper.findTags(postId).isEmpty()) {
+            addDefaultTags(postId, task, modality, topic);
+        }
+    }
+
+    private void addDefaultTags(Long postId, AiTask task, String modality, String topic) {
+        defaultTagsFor(task, modality, topic).forEach(tag -> postMapper.insertTag(postId, tag));
+    }
+
+    private String defaultTopicFor(AiTask task, String modality) {
+        String text = labelSource(task, modality);
+        if (containsAny(text, "digital", "avatar", "human", "talking", "数字人", "口播", "音视频")) {
+            return "数字人案例";
+        }
+        if ("VIDEO".equals(modality) || containsAny(text, "video", "script", "short", "reel", "短视频", "脚本", "分镜")) {
+            return "短视频脚本";
+        }
+        if (containsAny(text, "xiaohongshu", "redbook", "copy", "marketing", "文案", "营销", "小红书")) {
+            return "小红书文案";
+        }
+        if ("IMAGE".equals(modality) || containsAny(text, "image", "photo", "product", "商品", "产品图", "图片")) {
+            return "产品图生成";
+        }
+        if ("TEXT".equals(modality)) {
+            return "小红书文案";
+        }
+        return null;
+    }
+
+    private List<String> defaultTagsFor(AiTask task, String modality, String topic) {
+        List<String> values = new java.util.ArrayList<>();
+        addTag(values, topic);
+        if ("IMAGE".equals(modality)) addTag(values, "图片");
+        if ("VIDEO".equals(modality)) addTag(values, "视频");
+        if ("AUDIO".equals(modality)) addTag(values, "音频");
+        if ("TEXT".equals(modality)) addTag(values, "文案");
+
+        String source = labelSource(task, modality);
+        if (containsAny(source, "product", "商品", "产品图")) addTag(values, "商品图");
+        if (containsAny(source, "script", "脚本", "分镜")) addTag(values, "脚本");
+        if (containsAny(source, "xiaohongshu", "redbook", "小红书")) addTag(values, "小红书");
+        if (containsAny(source, "digital", "avatar", "数字人", "口播")) addTag(values, "数字人");
+        if (task != null) {
+            addTag(values, task.getToolName());
+        }
+        return values.stream()
+                .map(this::normalizeTag)
+                .filter(tag -> tag != null && !tag.isBlank())
+                .distinct()
+                .limit(MAX_TAGS)
+                .toList();
+    }
+
+    private void addTag(List<String> tags, String value) {
+        String tag = normalizeTag(value);
+        if (tag != null && !tags.contains(tag)) {
+            tags.add(tag);
+        }
+    }
+
+    private boolean containsAny(String text, String... needles) {
+        if (text == null || text.isBlank()) {
+            return false;
+        }
+        for (String needle : needles) {
+            if (needle != null && !needle.isBlank() && text.contains(needle.toLowerCase(Locale.ROOT))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private String labelSource(AiTask task, String modality) {
+        if (task == null) {
+            return modality == null ? "" : modality.toLowerCase(Locale.ROOT);
+        }
+        return String.join(" ",
+                Optional.ofNullable(task.getToolCode()).orElse(""),
+                Optional.ofNullable(task.getToolName()).orElse(""),
+                Optional.ofNullable(task.getToolType()).orElse(""),
+                Optional.ofNullable(task.getInputModality()).orElse(""),
+                Optional.ofNullable(task.getOutputModality()).orElse(""),
+                Optional.ofNullable(modality).orElse("")
+        ).toLowerCase(Locale.ROOT);
     }
 
     private String normalizeTitle(String value, String fallback) {
@@ -748,12 +880,12 @@ public class CommunityServiceImpl implements CommunityService {
 
     private String normalizeSort(String value) {
         if (value == null || value.trim().isBlank()) {
-            return "LATEST";
+            return "QUALITY";
         }
         String normalized = value.trim().toUpperCase(Locale.ROOT);
         return List.of("LATEST", "POPULAR", "FAVORITES", "SAME_STYLE", "VIEWS", "QUALITY").contains(normalized)
                 ? normalized
-                : "LATEST";
+                : "QUALITY";
     }
 
     private String normalizeAuditStatus(String value) {

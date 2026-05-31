@@ -31,6 +31,12 @@ class IntentResult(BaseModel):
     decisionSource: str = "rules"
     reason: str
     signals: list[dict] = Field(default_factory=list)
+    arguments: dict = Field(default_factory=dict)
+    missingFields: list[str] = Field(default_factory=list)
+    isFollowUp: bool = False
+    inheritedFromToolCallId: int | None = None
+    followupPatch: dict = Field(default_factory=dict)
+    requiresConfirmation: bool | None = None
 
 
 class IntentRouter:
@@ -93,6 +99,19 @@ class IntentRouter:
                 ],
             )
         if candidates:
+            if context.recentToolCalls and self._looks_like_generation_followup(message):
+                followup_candidates = self._filter_by_requested_output_modality(candidates, requested_modality)
+                if followup_candidates:
+                    top = followup_candidates[0]
+                    return IntentResult(
+                        intent=Intent.TOOL_USE,
+                        confidence=0.9,
+                        selectedToolCode=top.tool.toolCode,
+                        candidateToolCodes=[candidate.tool.toolCode for candidate in followup_candidates[:3]],
+                        decisionSource="rules",
+                        reason="recent_tool_followup",
+                        isFollowUp=True,
+                    )
             if requested_modality and self._looks_like_tool_request(message):
                 modality_candidates = [
                     candidate for candidate in candidates
@@ -192,6 +211,41 @@ class IntentRouter:
             return False
         lowered = message.lower()
         return any(keyword in lowered for keyword in self.tool_action_keywords)
+
+    @staticmethod
+    def _looks_like_generation_followup(message: str) -> bool:
+        compact = re.sub(r"\s+", "", message)
+        if not compact:
+            return False
+        if _contains_any(compact, ("也来", "同款", "再来", "来一张", "来一个", "换成", "改成", "按刚才", "按上次", "沿用")):
+            return True
+        return len(compact) <= 18 and _contains_any(compact, ("科比", "乔丹", "詹姆斯", "赛博朋克", "黄袍", "黑袍"))
+
+    @staticmethod
+    def _filter_by_requested_output_modality(candidates, requested_modality: str | None):
+        if requested_modality == "image":
+            image_candidates = [
+                candidate for candidate in candidates
+                if tool_supports_modality(candidate.tool, "image")
+            ]
+            pure_image_candidates = [
+                candidate for candidate in image_candidates
+                if not tool_supports_modality(candidate.tool, "video")
+            ]
+            return pure_image_candidates or image_candidates
+        if requested_modality == "video":
+            video_candidates = [
+                candidate for candidate in candidates
+                if tool_supports_modality(candidate.tool, "video")
+            ]
+            return video_candidates or candidates
+        if requested_modality == "audio":
+            audio_candidates = [
+                candidate for candidate in candidates
+                if tool_supports_modality(candidate.tool, "audio")
+            ]
+            return audio_candidates or candidates
+        return candidates
 
     @staticmethod
     def _looks_like_session_recap_question(message: str) -> bool:
@@ -340,3 +394,7 @@ def _clip(value: str, limit: int = 180) -> str:
     if len(value) <= limit:
         return value
     return value[:limit] + "...<truncated>"
+
+
+def _contains_any(value: str, needles: tuple[str, ...]) -> bool:
+    return any(needle in value for needle in needles)

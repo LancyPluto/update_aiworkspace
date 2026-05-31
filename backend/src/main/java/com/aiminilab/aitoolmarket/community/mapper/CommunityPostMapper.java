@@ -1,6 +1,7 @@
 package com.aiminilab.aitoolmarket.community.mapper;
 
 import com.aiminilab.aitoolmarket.community.dto.CommunityPostDiscoverRow;
+import com.aiminilab.aitoolmarket.community.dto.CommunityTopicResponse;
 import com.aiminilab.aitoolmarket.community.entity.CommunityPost;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Delete;
@@ -54,6 +55,7 @@ public interface CommunityPostMapper extends BaseMapper<CommunityPost> {
             LEFT JOIN users u ON u.id = p.user_id AND u.is_deleted = 0
             WHERE p.user_id = #{userId}
               AND p.status = 'PUBLISHED'
+              AND COALESCE(p.audit_status, 'APPROVED') = 'APPROVED'
             <if test="modality != null and modality.trim() != ''">
               AND p.modality = #{modality}
             </if>
@@ -96,6 +98,7 @@ public interface CommunityPostMapper extends BaseMapper<CommunityPost> {
             INNER JOIN community_post_tags t ON t.post_id = p.id AND t.tag = #{tag}
             </if>
             WHERE p.status = 'PUBLISHED'
+              AND COALESCE(p.audit_status, 'APPROVED') = 'APPROVED'
             <if test="modality != null and modality.trim() != ''">
               AND p.modality = #{modality}
             </if>
@@ -230,6 +233,19 @@ public interface CommunityPostMapper extends BaseMapper<CommunityPost> {
                        @Param("keyword") String keyword,
                        @Param("toolCode") String toolCode,
                        @Param("featured") Boolean featured);
+
+    @Select("""
+            SELECT topic AS name, COUNT(*) AS postCount
+            FROM community_posts
+            WHERE status = 'PUBLISHED'
+              AND COALESCE(audit_status, 'APPROVED') = 'APPROVED'
+              AND topic IS NOT NULL
+              AND topic != ''
+            GROUP BY topic
+            ORDER BY postCount DESC, MAX(id) DESC
+            LIMIT #{limit}
+            """)
+    List<CommunityTopicResponse> findTopTopics(@Param("limit") int limit);
 
     @Select("""
             <script>
@@ -463,9 +479,13 @@ public interface CommunityPostMapper extends BaseMapper<CommunityPost> {
                 + (CASE WHEN cover_url IS NOT NULL AND cover_url != '' THEN 20 ELSE 0 END)
                 + (CASE WHEN title IS NOT NULL AND title != '' THEN 10 ELSE 0 END)
                 + (CASE WHEN prompt_visible = 1 AND prompt_snapshot IS NOT NULL AND prompt_snapshot != '' THEN 30 ELSE 0 END)
+                + (CASE WHEN topic IS NOT NULL AND topic != '' THEN 15 ELSE 0 END)
+                + (CASE WHEN EXISTS (SELECT 1 FROM community_post_tags WHERE post_id = #{postId}) THEN 10 ELSE 0 END)
                 + LEAST(COALESCE(like_count, 0), 100)
                 + LEAST(COALESCE(favorite_count, 0) * 2, 160)
-                + LEAST(COALESCE(same_style_count, 0) * 3, 240),
+                + LEAST(COALESCE(same_style_count, 0) * 3, 240)
+                + LEAST(COALESCE(detail_click_count, 0), 120)
+                + LEAST(COALESCE(share_count, 0) * 3, 90),
                 updated_at = updated_at
             WHERE id = #{postId}
             """)

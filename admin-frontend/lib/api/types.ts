@@ -206,6 +206,8 @@ export interface AdminTaskQuery {
 export interface AdminCommunityPost {
   id: number
   userId: number
+  authorNickname?: string | null
+  authorAvatarUrl?: string | null
   taskId: number
   modality: string
   coverUrl?: string | null

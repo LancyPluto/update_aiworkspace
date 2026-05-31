@@ -27,6 +27,7 @@ import com.aiminilab.aitoolmarket.agent.dto.InternalAgentModelConfigResponse;
 import com.aiminilab.aitoolmarket.agent.dto.InternalAgentMessageResponse;
 import com.aiminilab.aitoolmarket.agent.dto.InternalAgentRunContextResponse;
 import com.aiminilab.aitoolmarket.agent.dto.InternalAgentFileContextResponse;
+import com.aiminilab.aitoolmarket.agent.dto.InternalRecentToolCallContextResponse;
 import com.aiminilab.aitoolmarket.agent.dto.InternalPendingToolContextResponse;
 import com.aiminilab.aitoolmarket.agent.dto.UpdateAgentToolPreferenceRequest;
 import com.aiminilab.aitoolmarket.agent.entity.AgentFile;
@@ -477,7 +478,13 @@ public class AgentRunServiceImpl implements AgentRunService {
                 parseIntSetting(settings.get(AgentMemorySettings.RETRIEVAL_LIMIT_KEY), AgentMemorySettings.DEFAULT_RETRIEVAL_LIMIT, 1, 20),
                 parseCsvSetting(settings.get(AgentMemorySettings.ENABLED_TYPES_KEY), AgentMemorySettings.DEFAULT_ENABLED_TYPES),
                 nonBlankOrDefault(settings.get(AgentMemorySettings.WRITE_PROMPT_KEY), AgentMemorySettings.DEFAULT_WRITE_PROMPT),
-                nonBlankOrDefault(settings.get(AgentMemorySettings.RETRIEVAL_PROMPT_KEY), AgentMemorySettings.DEFAULT_RETRIEVAL_PROMPT)
+                nonBlankOrDefault(settings.get(AgentMemorySettings.RETRIEVAL_PROMPT_KEY), AgentMemorySettings.DEFAULT_RETRIEVAL_PROMPT),
+                parseBooleanSetting(settings.get(AgentMemorySettings.TOOL_LOOP_ENABLED_KEY), AgentMemorySettings.DEFAULT_TOOL_LOOP_ENABLED),
+                parseBooleanSetting(settings.get(AgentMemorySettings.CONSOLIDATION_ENABLED_KEY), AgentMemorySettings.DEFAULT_CONSOLIDATION_ENABLED),
+                parseIntSetting(settings.get(AgentMemorySettings.CONSOLIDATION_TURN_INTERVAL_KEY), AgentMemorySettings.DEFAULT_CONSOLIDATION_TURN_INTERVAL, 2, 50),
+                parseIntSetting(settings.get(AgentMemorySettings.CONSOLIDATION_CHAR_THRESHOLD_KEY), AgentMemorySettings.DEFAULT_CONSOLIDATION_CHAR_THRESHOLD, 500, 50000),
+                parseDoubleSetting(settings.get(AgentMemorySettings.CONSOLIDATION_MIN_CONFIDENCE_KEY), AgentMemorySettings.DEFAULT_CONSOLIDATION_MIN_CONFIDENCE, 0D, 1D),
+                parseDoubleSetting(settings.get(AgentMemorySettings.CANDIDATE_CONFIDENCE_THRESHOLD_KEY), AgentMemorySettings.DEFAULT_CANDIDATE_CONFIDENCE_THRESHOLD, 0D, 1D)
         );
         var routerSettings = new AgentRouterSettingsResponse(
                 parseBooleanSetting(settings.get(AgentRouterSettings.ENABLED_KEY), AgentRouterSettings.DEFAULT_ENABLED),
@@ -523,6 +530,7 @@ public class AgentRunServiceImpl implements AgentRunService {
                 deepAgentsSystemPrompt,
                 memorySettings,
                 routerSettings,
+                recentToolCallContext(run),
                 pendingToolContextResponse
         );
     }
@@ -1149,6 +1157,42 @@ public class AgentRunServiceImpl implements AgentRunService {
         );
     }
 
+    private List<InternalRecentToolCallContextResponse> recentToolCallContext(AgentRun run) {
+        return agentToolCallMapper.findRecentSuccessfulBeforeRun(
+                        run.getUserId(),
+                        run.getSessionId(),
+                        run.getId(),
+                        RECENT_TOOL_RESULT_CONTEXT_LIMIT
+                )
+                .stream()
+                .map(call -> {
+                    JsonNode result = parseJsonNode(call.getResultJson());
+                    String resourceType = firstText(result.at("/data/resourceType"), result.path("resourceType"));
+                    String contentText = firstText(
+                            result.at("/data/contentText"),
+                            result.path("contentText"),
+                            result.path("resultSummary"),
+                            result.path("summary")
+                    );
+                    String mediaUrls = extractMediaUrls(contentText);
+                    if (mediaUrls.isBlank()) {
+                        mediaUrls = extractMediaUrls(call.getResultJson());
+                    }
+                    return new InternalRecentToolCallContextResponse(
+                            call.getId(),
+                            call.getRunId(),
+                            call.getToolCode(),
+                            call.getTaskId(),
+                            parseJsonMap(call.getArgumentsJson()),
+                            parseJsonMap(call.getResultJson()),
+                            resourceType,
+                            splitMediaUrls(mediaUrls),
+                            call.getCreatedAt()
+                    );
+                })
+                .toList();
+    }
+
     private String formatToolResultMemoryLine(AgentToolCall call) {
         JsonNode result = parseJsonNode(call.getResultJson());
         String resourceType = firstText(result.at("/data/resourceType"), result.path("resourceType"));
@@ -1256,6 +1300,36 @@ public class AgentRunServiceImpl implements AgentRunService {
             }
         }
         return String.join(",", urls);
+    }
+
+    private List<String> splitMediaUrls(String value) {
+        if (value == null || value.isBlank()) {
+            return List.of();
+        }
+        return Arrays.stream(value.split(","))
+                .map(String::trim)
+                .filter(item -> !item.isBlank())
+                .distinct()
+                .limit(6)
+                .toList();
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> parseJsonMap(String value) {
+        if (value == null || value.isBlank()) {
+            return Map.of();
+        }
+        try {
+            Object parsed = objectMapper.readValue(value, Object.class);
+            if (parsed instanceof String string && !string.isBlank()) {
+                parsed = objectMapper.readValue(string, Object.class);
+            }
+            if (parsed instanceof Map<?, ?> map) {
+                return (Map<String, Object>) map;
+            }
+        } catch (Exception ignored) {
+        }
+        return Map.of();
     }
 
     private void collectMediaUrls(JsonNode node, List<String> urls) {

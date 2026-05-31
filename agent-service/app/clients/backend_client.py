@@ -15,6 +15,7 @@ from app.core.schemas import (
     TaskDetailResponse,
     TaskStatusResponse,
     AgentModelConfig,
+    SessionSearchItem,
     ToolCallComplete,
     ToolCallCreate,
     ToolCallFail,
@@ -51,11 +52,14 @@ class BackendClient:
         data = await self._request("GET", "/api/internal/v1/agent/model-config")
         return AgentModelConfig.model_validate(data)
 
-    async def retrieve_workspace_memory(self, workspace_id: int, query: str, limit: int) -> list[WorkspaceMemoryItem]:
+    async def retrieve_workspace_memory(self, workspace_id: int, query: str, limit: int, view: str | None = None) -> list[WorkspaceMemoryItem]:
+        body: dict[str, Any] = {"query": query, "limit": limit}
+        if view:
+            body["view"] = view
         data = await self._request(
             "POST",
             f"/api/internal/v1/agent/workspaces/{workspace_id}/memory/retrieve",
-            {"query": query, "limit": limit},
+            body,
         )
         return [WorkspaceMemoryItem.model_validate(item) for item in data.get("list", [])]
 
@@ -63,6 +67,13 @@ class BackendClient:
         self, workspace_id: int, user_id: int,
         memory_type: str, title: str, content: str,
         source_run_id: int | None = None,
+        source_message_id: int | None = None,
+        source_tool_call_id: int | None = None,
+        importance: int | None = None,
+        confidence: float | None = None,
+        pinned: bool | None = None,
+        tags_json: str | None = None,
+        metadata_json: str | None = None,
     ) -> dict[str, Any]:
         return await self._request(
             "POST",
@@ -72,9 +83,74 @@ class BackendClient:
                 "title": title,
                 "content": content,
                 "sourceRunId": source_run_id,
+                "sourceMessageId": source_message_id,
+                "sourceToolCallId": source_tool_call_id,
+                "importance": importance,
+                "confidence": confidence,
+                "pinned": pinned,
+                "tagsJson": tags_json,
+                "metadataJson": metadata_json,
                 "userId": user_id,
             },
         )
+
+    async def create_workspace_memory_candidate(
+        self,
+        workspace_id: int,
+        user_id: int,
+        action: str,
+        memory_type: str,
+        title: str,
+        content: str,
+        source_run_id: int | None = None,
+        source_message_id: int | None = None,
+        source_tool_call_id: int | None = None,
+        importance: int | None = None,
+        confidence: float | None = None,
+        reason: str | None = None,
+        tags_json: str | None = None,
+        metadata_json: str | None = None,
+    ) -> dict[str, Any]:
+        return await self._request(
+            "POST",
+            f"/api/internal/v1/agent/workspaces/{workspace_id}/memory/candidates",
+            {
+                "userId": user_id,
+                "action": action,
+                "memoryType": memory_type,
+                "title": title,
+                "content": content,
+                "sourceRunId": source_run_id,
+                "sourceMessageId": source_message_id,
+                "sourceToolCallId": source_tool_call_id,
+                "importance": importance,
+                "confidence": confidence,
+                "reason": reason,
+                "tagsJson": tags_json,
+                "metadataJson": metadata_json,
+            },
+        )
+
+    async def search_session(
+        self,
+        user_id: int,
+        session_id: int,
+        query: str,
+        limit: int = 8,
+        tool_code: str | None = None,
+    ) -> list[SessionSearchItem]:
+        data = await self._request(
+            "POST",
+            "/api/internal/v1/agent/session-search",
+            {
+                "userId": user_id,
+                "sessionId": session_id,
+                "query": query,
+                "toolCode": tool_code,
+                "limit": limit,
+            },
+        )
+        return [SessionSearchItem.model_validate(item) for item in data.get("list", [])]
 
     async def update_workspace_memory(
         self, workspace_id: int, memory_id: int,

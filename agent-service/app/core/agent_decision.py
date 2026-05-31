@@ -45,6 +45,10 @@ class AgentDecisionService:
         if llm_router is not None:
             llm_intent = await llm_router(context, rule_intent)
             if llm_intent is not None:
+                if rule_intent.isFollowUp and llm_intent.intent == Intent.TOOL_USE:
+                    llm_intent.isFollowUp = True
+                    if not llm_intent.inheritedFromToolCallId:
+                        llm_intent.inheritedFromToolCallId = rule_intent.inheritedFromToolCallId
                 signals.append(_signal("llm_router", llm_intent.intent.value, llm_intent.confidence, llm_intent.reason))
                 if self._llm_overcalled_tool_for_follow_up(context, llm_intent):
                     guarded = IntentResult(
@@ -58,6 +62,18 @@ class AgentDecisionService:
                     signals.append(_signal("conversation_guard", guarded.intent.value, guarded.confidence, guarded.reason))
                     return _with_signals(guarded, signals)
                 return _with_signals(llm_intent, signals)
+
+        if rule_intent.reason == "default_general_chat" and rule_intent.confidence <= 0.6 and context.availableTools:
+            fallback = IntentResult(
+                intent=Intent.GENERAL_CHAT,
+                confidence=rule_intent.confidence,
+                selectedToolCode=None,
+                candidateToolCodes=rule_intent.candidateToolCodes,
+                decisionSource="decision_layer",
+                reason="llm_router_unavailable_default_chat",
+            )
+            signals.append(_signal("fallback", fallback.intent.value, fallback.confidence, fallback.reason))
+            return _with_signals(fallback, signals)
 
         return _with_signals(rule_intent, signals)
 

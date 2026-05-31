@@ -1,7 +1,7 @@
 import pytest
 
 from app.core.budget_guard import BudgetGuard, BudgetState
-from app.core.schemas import RunContext, ToolDescriptor
+from app.core.schemas import RecentToolCallContext, RunContext, ToolDescriptor
 from app.runtime.deep_agents_engine import DeepAgentsRuntimeEngine
 
 
@@ -65,8 +65,8 @@ class FakeBackend:
     async def fail_run(self, run_id, request):
         self.failed.append((run_id, request.errorCode))
 
-    async def retrieve_workspace_memory(self, workspace_id: int, query: str, limit: int):
-        self.memory_requests.append((workspace_id, query, limit))
+    async def retrieve_workspace_memory(self, workspace_id: int, query: str, limit: int, view: str | None = None):
+        self.memory_requests.append((workspace_id, query, limit, view))
         return self.memory_items
 
     async def create_run_artifact(self, run_id: int, filename: str, content: str, content_type: str):
@@ -355,6 +355,68 @@ async def test_llm_router_can_select_tool_when_rule_match_is_weak():
     assert not any(call[0] == "task" and call[1] == "deepseek_text_generation" for call in backend.tool_calls)
     intent_events = [event for event in backend.events if event[1] == "intent.detected"]
     assert intent_events[-1][3]["decisionSource"] == "llm_router"
+
+
+@pytest.mark.asyncio
+async def test_followup_image_request_inherits_previous_tool_arguments_and_dispatches_task():
+    backend = FakeBackend(resource_type="IMAGE", content_text='{"images":[{"url":"/generated/images/124/image-1.png"}]}')
+    router_json = (
+        '{"intent":"tool_use","selectedToolCode":"kling_image_v21",'
+        '"candidateToolCodes":["kling_image_v21"],"confidence":0.95,'
+        '"reason":"followup_image_request","arguments":{},"missingFields":[]}'
+    )
+    engine = DeepAgentsRuntimeEngine(backend, FakeModel(response=router_json))
+    context = RunContext(
+        runId=18,
+        sessionId=1,
+        userId=1,
+        message="给科比也来一张",
+        creditBudget=20,
+        recentToolCalls=[
+            RecentToolCallContext(
+                id=77,
+                runId=17,
+                toolCode="kling_image_v21",
+                taskId=123,
+                argumentsJson={
+                    "prompt": "石原里美在漫展穿着火影忍者晓袍的远景写真",
+                    "aspectRatio": "3:4",
+                },
+                resultJson={},
+                resourceType="IMAGE",
+                mediaUrls=["/generated/images/123/image-1.png"],
+            )
+        ],
+        availableTools=[
+            ToolDescriptor(
+                toolCode="kling_image_v21",
+                toolName="可灵生图 V2.1",
+                description="图片生成，写真，海报",
+                estimatedCreditCost=3,
+                autoCallable=False,
+                inputSchema={
+                    "type": "object",
+                    "required": ["prompt"],
+                    "properties": {
+                        "prompt": {"type": "string", "title": "提示词"},
+                        "aspectRatio": {"type": "string", "title": "比例"},
+                    },
+                },
+            ),
+        ],
+    )
+
+    await engine.run(context)
+
+    task_calls = [call for call in backend.tool_calls if call[0] == "task"]
+    assert len(task_calls) == 1
+    params = task_calls[0][2]
+    assert params["aspectRatio"] == "3:4"
+    assert "科比" in params["prompt"]
+    assert params["userRequest"] == "给科比也来一张"
+    event_types = [event[1] for event in backend.events]
+    assert "followup.inherited" in event_types
+    assert "arguments.merged" in event_types
 
 
 @pytest.mark.asyncio

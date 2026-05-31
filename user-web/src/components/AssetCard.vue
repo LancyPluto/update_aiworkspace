@@ -30,7 +30,7 @@ const showFeaturedBadge = computed(() => Boolean(props.asset.featured || props.a
 const featuredBadgeText = computed(() => (props.asset.pinned ? "置顶" : "精选"))
 const showCreator = computed(() => Boolean(props.gallery && props.source === "community" && props.asset.authorUserId))
 const creatorName = computed(
-  () => props.asset.authorName?.trim() || (props.asset.authorUserId ? `用户${props.asset.authorUserId}` : ""),
+  () => props.asset.authorName?.trim() || (props.asset.authorUserId ? `用户 ${props.asset.authorUserId}` : ""),
 )
 const subtitle = computed(() => props.asset.subtitle || props.asset.toolName || props.asset.toolCode || "")
 const previewText = computed(() => props.asset.rawText || props.asset.prompt || props.asset.title)

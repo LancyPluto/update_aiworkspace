@@ -68,6 +68,25 @@ public record CommunityPostResponse(
                                              String authorNickname,
                                              String authorAvatarUrl,
                                              String promptSnapshot) {
+        return from(post, liked, favorited, tags, authorNickname, authorAvatarUrl, promptSnapshot, Boolean.TRUE.equals(post.getPromptVisible()));
+    }
+
+    public static CommunityPostResponse adminFrom(CommunityPost post,
+                                                  List<String> tags,
+                                                  String authorNickname,
+                                                  String authorAvatarUrl,
+                                                  String promptSnapshot) {
+        return from(post, false, false, tags, authorNickname, authorAvatarUrl, promptSnapshot, true);
+    }
+
+    private static CommunityPostResponse from(CommunityPost post,
+                                              boolean liked,
+                                              boolean favorited,
+                                              List<String> tags,
+                                              String authorNickname,
+                                              String authorAvatarUrl,
+                                              String promptSnapshot,
+                                              boolean exposePrompt) {
         return new CommunityPostResponse(
                 post.getId(),
                 post.getUserId(),
@@ -79,7 +98,7 @@ public record CommunityPostResponse(
                 post.getTitle(),
                 post.getDescription(),
                 Boolean.TRUE.equals(post.getPromptVisible()),
-                Boolean.TRUE.equals(post.getPromptVisible()) ? promptSnapshot : null,
+                exposePrompt ? promptSnapshot : null,
                 resolvePromptPreview(promptSnapshot),
                 post.getToolCode(),
                 post.getToolName(),
@@ -120,7 +139,7 @@ public record CommunityPostResponse(
         if (normalized.length() <= PROMPT_PREVIEW_MAX) {
             return normalized;
         }
-        return normalized.substring(0, PROMPT_PREVIEW_MAX - 1).trim() + "…";
+        return normalized.substring(0, PROMPT_PREVIEW_MAX - 1).trim() + "...";
     }
 
     private static String extractPromptText(String snapshot) {

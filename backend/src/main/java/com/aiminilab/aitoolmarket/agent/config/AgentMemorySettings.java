@@ -7,10 +7,22 @@ public final class AgentMemorySettings {
     public static final String ENABLED_TYPES_KEY = "agent.memory.enabled_types";
     public static final String WRITE_PROMPT_KEY = "agent.memory.write_prompt";
     public static final String RETRIEVAL_PROMPT_KEY = "agent.memory.retrieval_prompt";
+    public static final String TOOL_LOOP_ENABLED_KEY = "agent.memory.tool_loop_enabled";
+    public static final String CONSOLIDATION_ENABLED_KEY = "agent.memory.consolidation_enabled";
+    public static final String CONSOLIDATION_TURN_INTERVAL_KEY = "agent.memory.consolidation_turn_interval";
+    public static final String CONSOLIDATION_CHAR_THRESHOLD_KEY = "agent.memory.consolidation_char_threshold";
+    public static final String CONSOLIDATION_MIN_CONFIDENCE_KEY = "agent.memory.consolidation_min_confidence";
+    public static final String CANDIDATE_CONFIDENCE_THRESHOLD_KEY = "agent.memory.candidate_confidence_threshold";
 
     public static final boolean DEFAULT_AUTO_SAVE_ENABLED = true;
     public static final int DEFAULT_RETRIEVAL_LIMIT = 6;
     public static final String DEFAULT_ENABLED_TYPES = "user_profile,project_knowledge,custom";
+    public static final boolean DEFAULT_TOOL_LOOP_ENABLED = true;
+    public static final boolean DEFAULT_CONSOLIDATION_ENABLED = true;
+    public static final int DEFAULT_CONSOLIDATION_TURN_INTERVAL = 8;
+    public static final int DEFAULT_CONSOLIDATION_CHAR_THRESHOLD = 4000;
+    public static final double DEFAULT_CONSOLIDATION_MIN_CONFIDENCE = 0.72D;
+    public static final double DEFAULT_CANDIDATE_CONFIDENCE_THRESHOLD = 0.55D;
 
     public static final String DEFAULT_WRITE_PROMPT = """
             你可以管理长期记忆，但必须克制使用。

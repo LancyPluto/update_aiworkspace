@@ -6,8 +6,10 @@ from app.core.schemas import ChatMessage
 
 
 class FakeLangChainMessage:
-    def __init__(self, content: str):
+    def __init__(self, content: str, tool_calls=None, additional_kwargs=None):
         self.content = content
+        self.tool_calls = tool_calls or []
+        self.additional_kwargs = additional_kwargs or {}
 
 
 class FakeLangChainModel:
@@ -22,6 +24,8 @@ class FakeLangChainModel:
         self.kwargs.append(kwargs)
         if isinstance(self.response, Exception):
             raise self.response
+        if isinstance(self.response, FakeLangChainMessage):
+            return self.response
         return FakeLangChainMessage(self.response)
 
     async def astream(self, messages, **kwargs):
@@ -219,3 +223,95 @@ async def test_model_client_calls_modelscope_directly(monkeypatch):
     assert FakeAsyncHttpClient.requests[0]["url"] == "https://api-inference.modelscope.cn/v1/chat/completions"
     assert FakeAsyncHttpClient.requests[0]["json"]["model"] == "deepseek-ai/DeepSeek-V4-Pro"
     assert FakeAsyncHttpClient.requests[0]["json"]["messages"] == [{"role": "user", "content": "ping"}]
+
+
+@pytest.mark.asyncio
+async def test_chat_turn_parses_langchain_tool_calls():
+    langchain_model = FakeLangChainModel(
+        FakeLangChainMessage(
+            "",
+            tool_calls=[
+                {
+                    "id": "call_1",
+                    "name": "memory_add",
+                    "args": {"memory_type": "preference", "title": "Style", "content": "Likes playful images."},
+                }
+            ],
+        )
+    )
+    client = ModelClient(
+        Settings(model_provider="openai_compatible", model_api_base_url="http://model", model_api_key="key"),
+        chat_model=langchain_model,
+    )
+
+    turn = await client.chat_turn([ChatMessage(role="user", content="remember this")], tools=[
+        {
+            "type": "function",
+            "function": {
+                "name": "memory_add",
+                "parameters": {"type": "object", "properties": {"content": {"type": "string"}}},
+            },
+        }
+    ])
+
+    assert turn.content == ""
+    assert turn.tool_calls[0].id == "call_1"
+    assert turn.tool_calls[0].name == "memory_add"
+    assert turn.tool_calls[0].arguments["memory_type"] == "preference"
+
+
+@pytest.mark.asyncio
+async def test_chat_turn_parses_openai_compatible_tool_calls(monkeypatch):
+    FakeAsyncHttpClient.requests = []
+
+    class ToolCallHttpClient(FakeAsyncHttpClient):
+        async def post(self, url, headers=None, json=None):
+            FakeAsyncHttpClient.requests.append({"url": url, "headers": headers, "json": json, "timeout": self.timeout})
+            return FakeAsyncResponse(
+                {
+                    "choices": [
+                        {
+                            "finish_reason": "tool_calls",
+                            "message": {
+                                "content": "",
+                                "tool_calls": [
+                                    {
+                                        "id": "call_2",
+                                        "type": "function",
+                                        "function": {
+                                            "name": "memory_add",
+                                            "arguments": "{\"memory_type\":\"user_profile\",\"title\":\"Profile\",\"content\":\"Creative user.\"}",
+                                        },
+                                    }
+                                ],
+                            },
+                        }
+                    ]
+                }
+            )
+
+    monkeypatch.setattr("app.clients.model_client.httpx.AsyncClient", ToolCallHttpClient)
+    client = ModelClient(
+        Settings(
+            model_provider="openai_compatible",
+            model_api_base_url="https://api-inference.modelscope.cn/v1",
+            model_api_key="key",
+            model_name="deepseek-ai/DeepSeek-V4-Pro",
+        ),
+        chat_model=FakeLangChainModel(RuntimeError("langchain should not be used")),
+    )
+
+    turn = await client.chat_turn([ChatMessage(role="user", content="remember")], tools=[
+        {
+            "type": "function",
+            "function": {
+                "name": "memory_add",
+                "parameters": {"type": "object", "properties": {"content": {"type": "string"}}},
+            },
+        }
+    ])
+
+    assert turn.content == ""
+    assert turn.finish_reason == "tool_calls"
+    assert turn.tool_calls[0].id == "call_2"
+    assert turn.tool_calls[0].arguments["content"] == "Creative user."

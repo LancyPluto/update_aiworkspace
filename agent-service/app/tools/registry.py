@@ -178,6 +178,20 @@ def tool_supports_modality(tool: ToolDescriptor, modality: str, combined_text: s
     return False
 
 
+def infer_output_modality(tool: ToolDescriptor) -> str | None:
+    hint_values = " ".join(str(value) for value in tool.hints.values()).lower()
+    combined = f"{' '.join(_phrases(tool)).lower()} {hint_values}"
+    if _has_any(combined, ("video_generation", "文生视频", "图生视频", "视频生成", "生视频", "short video")):
+        return "video"
+    if _has_any(combined, ("image_generation", "图片生成", "文生图", "生图", "写真", "海报", "照片")):
+        return "image"
+    if _has_any(combined, ("text_to_speech", "audio_generation", "语音合成", "配音", "音频")):
+        return "audio"
+    if _has_any(combined, ("text_generation", "copywriting", "文案", "标题", "文章", "总结")):
+        return "text"
+    return None
+
+
 def _has_any(value: str, needles: tuple[str, ...]) -> bool:
     return any(needle in value for needle in needles)
 

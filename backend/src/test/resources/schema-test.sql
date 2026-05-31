@@ -337,6 +337,16 @@ CREATE TABLE agent_workspace_memory_items (
   title VARCHAR(160) NOT NULL,
   content CLOB NOT NULL,
   source_run_id BIGINT,
+  source_message_id BIGINT,
+  source_tool_call_id BIGINT,
+  importance INT NOT NULL DEFAULT 5,
+  confidence DOUBLE NOT NULL DEFAULT 0.7,
+  pinned BOOLEAN NOT NULL DEFAULT FALSE,
+  tags_json JSON,
+  metadata_json JSON,
+  last_accessed_at DATETIME,
+  access_count INT NOT NULL DEFAULT 0,
+  expires_at DATETIME,
   status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -454,6 +464,10 @@ CREATE TABLE community_posts (
   audit_status VARCHAR(32) NOT NULL DEFAULT 'APPROVED',
   audit_reason VARCHAR(255),
   view_count BIGINT NOT NULL DEFAULT 0,
+  detail_click_count BIGINT NOT NULL DEFAULT 0,
+  share_count BIGINT NOT NULL DEFAULT 0,
+  quality_score BIGINT NOT NULL DEFAULT 0,
+  last_featured_at DATETIME,
   like_count BIGINT NOT NULL DEFAULT 0,
   favorite_count BIGINT NOT NULL DEFAULT 0,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -461,6 +475,7 @@ CREATE TABLE community_posts (
 );
 CREATE INDEX idx_community_posts_user_status_id ON community_posts(user_id, status, id);
 CREATE INDEX idx_community_posts_status_id ON community_posts(status, id);
+CREATE INDEX idx_community_posts_quality ON community_posts(status, audit_status, pinned, featured, quality_score, id);
 CREATE INDEX idx_community_posts_discovery ON community_posts(status, pinned, featured, id);
 CREATE INDEX idx_community_posts_modality_id ON community_posts(status, modality, id);
 CREATE INDEX idx_community_posts_topic_id ON community_posts(status, topic, id);
@@ -491,6 +506,43 @@ CREATE TABLE community_post_tags (
   UNIQUE(post_id, tag)
 );
 CREATE INDEX idx_community_post_tags_tag_post ON community_post_tags(tag, post_id);
+
+CREATE TABLE community_events (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  post_id BIGINT,
+  user_id BIGINT,
+  event_type VARCHAR(64) NOT NULL,
+  source VARCHAR(64),
+  tool_code VARCHAR(128),
+  task_id BIGINT,
+  credits INT NOT NULL DEFAULT 0,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_community_events_type_created ON community_events(event_type, created_at, id);
+CREATE INDEX idx_community_events_post_type ON community_events(post_id, event_type, id);
+CREATE INDEX idx_community_events_tool ON community_events(tool_code, event_type, id);
+
+CREATE TABLE community_collections (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  user_id BIGINT NOT NULL,
+  name VARCHAR(80) NOT NULL,
+  default_collection TINYINT NOT NULL DEFAULT 0,
+  item_count BIGINT NOT NULL DEFAULT 0,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX uk_community_collections_user_name ON community_collections(user_id, name);
+
+CREATE TABLE community_collection_items (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  collection_id BIGINT NOT NULL,
+  post_id BIGINT NOT NULL,
+  user_id BIGINT NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(collection_id, post_id)
+);
+CREATE INDEX idx_community_collection_items_collection ON community_collection_items(collection_id, id);
+CREATE INDEX idx_community_collection_items_user ON community_collection_items(user_id, collection_id, id);
 CREATE INDEX idx_agent_tool_calls_task_id ON agent_tool_calls(task_id);
 CREATE INDEX idx_agent_tool_calls_context_recent ON agent_tool_calls(user_id, status, id);
 

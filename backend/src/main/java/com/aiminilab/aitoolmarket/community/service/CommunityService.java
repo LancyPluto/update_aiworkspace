@@ -6,6 +6,7 @@ import com.aiminilab.aitoolmarket.community.dto.CommunityCreatorResponse;
 import com.aiminilab.aitoolmarket.community.dto.CommunityEventRequest;
 import com.aiminilab.aitoolmarket.community.dto.CommunityPostResponse;
 import com.aiminilab.aitoolmarket.community.dto.CommunityStatsResponse;
+import com.aiminilab.aitoolmarket.community.dto.CommunityTopicResponse;
 import com.aiminilab.aitoolmarket.community.dto.PublicUserProfileResponse;
 import com.aiminilab.aitoolmarket.community.dto.PublishPostRequest;
 import com.aiminilab.aitoolmarket.community.dto.UpdateCommunityPostRequest;
@@ -19,6 +20,7 @@ public interface CommunityService {
     PublicUserProfileResponse publicUser(Long userId);
     PageResponse<CommunityPostResponse> discover(String modality, String tag, String topic, String sort, Boolean featured, Long viewerId, Integer pageNo, Integer pageSize);
     PageResponse<CommunityPostResponse> search(String keyword, String modality, String tag, String topic, String toolCode, String sort, Boolean featured, Long viewerId, Integer pageNo, Integer pageSize);
+    java.util.List<CommunityTopicResponse> topics(Integer limit);
     PageResponse<CommunityPostResponse> topicPosts(String topic, String modality, String sort, Long viewerId, Integer pageNo, Integer pageSize);
     CommunityCreatorResponse creator(Long userId, Long viewerId);
     PageResponse<CommunityPostResponse> publicPosts(Long userId, String modality, Long viewerId, Integer pageNo, Integer pageSize);

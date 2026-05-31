@@ -217,6 +217,11 @@ export interface CommunityCollection {
   items: CommunityPost[]
 }
 
+export interface CommunityTopic {
+  name: string
+  postCount: number
+}
+
 /* ========== 工具相关 ========== */
 
 /** GET /api/v1/tool-categories */
@@ -450,8 +455,18 @@ export type AgentRunEventType =
   | "workspace_file.read"
   | "memory.context_injected"
   | "memory.context_frozen"
+  | "memory.retrieved"
   | "memory.candidate_created"
   | "memory.saved"
+  | "memory.updated"
+  | "memory.consolidated"
+  | "memory.rejected"
+  | "memory.curator_started"
+  | "tool_call.loop_started"
+  | "tool_call.requested"
+  | "tool_call.executed"
+  | "tool_call.rejected"
+  | "tool_call.loop_completed"
   | "message.delta"
   | "message.completed"
   | "run.completed"

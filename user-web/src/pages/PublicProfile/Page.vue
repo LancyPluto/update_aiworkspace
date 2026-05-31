@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue"
 import { useRoute, useRouter } from "vue-router"
-import { ArrowLeft, Eye, Heart, Loader2, Star, UserRound } from "lucide-vue-next"
+import { ArrowLeft, Loader2, Star, UserRound } from "lucide-vue-next"
+import AssetCard from "@/components/AssetCard.vue"
 import UserAvatar from "@/components/UserAvatar.vue"
-import { fetchCommunityCreator, fetchPublicUserPosts } from "@/api/communityApi"
+import { fetchCommunityCreator, fetchPublicUserPosts, trackCommunityEvent } from "@/api/communityApi"
 import { getApiOrigin } from "@/api/client"
 import type { CommunityCreator, CommunityPost, PublicUserProfile } from "@/api/types"
 import { useAuthStore } from "@/store/authStore"
+import { assetFromCommunityPost } from "@/utils/assetPreviewAdapter"
+import type { AssetPreviewItem } from "@/types/assetPreview"
 
 const route = useRoute()
 const router = useRouter()
@@ -22,6 +25,8 @@ const hasNext = ref(false)
 
 const userId = computed(() => String(route.params.userId || ""))
 const displayName = computed(() => profile.value?.nickname || profile.value?.username || `用户 ${userId.value}`)
+const featuredPosts = computed(() => creator.value?.featuredPosts || [])
+const recentPosts = computed(() => posts.value)
 
 function mediaUrl(value?: string | null) {
   const raw = value?.trim()
@@ -32,12 +37,17 @@ function mediaUrl(value?: string | null) {
   return apiOrigin ? `${apiOrigin}${path}` : path
 }
 
-function postKind(post: CommunityPost) {
-  const modality = (post.modality || "").toLowerCase()
-  if (modality.includes("video")) return "video"
-  if (modality.includes("audio")) return "audio"
-  if (modality.includes("image")) return "image"
-  return "text"
+function toAsset(post: CommunityPost): AssetPreviewItem {
+  return assetFromCommunityPost(post, mediaUrl(post.coverUrl))
+}
+
+function openPost(asset: AssetPreviewItem) {
+  if (!asset.communityPostId) return
+  void trackCommunityEvent(
+    { postId: asset.communityPostId, eventType: "detail_view", source: "creator_profile", toolCode: asset.toolCode },
+    { token: auth.token },
+  ).catch(() => undefined)
+  router.push(`/community/posts/${asset.communityPostId}`)
 }
 
 async function load(reset = true) {
@@ -80,9 +90,9 @@ onMounted(() => void load(true))
 
 <template>
   <main class="public-profile-page">
-    <button class="back-button" type="button" @click="router.push('/marketplace')">
+    <button class="back-button" type="button" @click="router.push('/community')">
       <ArrowLeft class="h-4 w-4" />
-      返回
+      返回社区
     </button>
 
     <section class="profile-hero">
@@ -91,7 +101,7 @@ onMounted(() => void load(true))
       <div class="hero-copy">
         <p class="eyebrow">Public creator</p>
         <h1>{{ displayName }}</h1>
-        <p>{{ profile?.bio || "这个用户还没有写简介。" }}</p>
+        <p>{{ profile?.bio || "这个创作者还没有填写简介。" }}</p>
       </div>
       <div class="hero-stats">
         <div>
@@ -113,6 +123,23 @@ onMounted(() => void load(true))
       </div>
     </section>
 
+    <section v-if="featuredPosts.length" class="post-section">
+      <div class="section-title">
+        <Star class="h-4 w-4" />
+        <span>代表作</span>
+      </div>
+      <div class="post-grid featured-grid">
+        <AssetCard
+          v-for="item in featuredPosts"
+          :key="`featured-${item.id}`"
+          :asset="toAsset(item)"
+          source="community"
+          gallery
+          @open="openPost"
+        />
+      </div>
+    </section>
+
     <section class="post-section">
       <div class="section-title">
         <UserRound class="h-4 w-4" />
@@ -121,42 +148,22 @@ onMounted(() => void load(true))
 
       <div v-if="loading" class="state-panel">
         <Loader2 class="h-5 w-5 animate-spin" />
-        加载主页中
+        正在加载主页
       </div>
       <div v-else-if="error" class="state-panel error">{{ error }}</div>
-      <div v-else-if="!posts.length" class="state-panel">暂时没有公开作品</div>
+      <div v-else-if="!recentPosts.length" class="state-panel">
+        这个创作者暂时没有公开且审核通过的作品。
+      </div>
 
       <div v-else class="post-grid">
-        <article v-for="post in posts" :key="post.id" class="post-card" @click="router.push(`/community/posts/${post.id}`)">
-          <div class="media-frame">
-            <img
-              v-if="postKind(post) === 'image' && mediaUrl(post.coverUrl)"
-              :src="mediaUrl(post.coverUrl)"
-              :alt="post.title"
-            />
-            <video
-              v-else-if="postKind(post) === 'video' && mediaUrl(post.coverUrl)"
-              :src="mediaUrl(post.coverUrl)"
-              muted
-              loop
-              playsinline
-              preload="metadata"
-            />
-            <div v-else class="text-cover">
-              {{ post.prompt || post.description || post.title }}
-            </div>
-            <span class="kind-pill">{{ post.modality }}</span>
-          </div>
-          <div class="post-body">
-            <h2>{{ post.title }}</h2>
-            <p>{{ post.description || post.toolName || "AI 创作" }}</p>
-            <div class="post-meta">
-              <span><Eye class="h-3.5 w-3.5" />{{ post.viewCount }}</span>
-              <span><Heart class="h-3.5 w-3.5" />{{ post.likeCount }}</span>
-              <span><Star class="h-3.5 w-3.5" />{{ post.favoriteCount }}</span>
-            </div>
-          </div>
-        </article>
+        <AssetCard
+          v-for="item in recentPosts"
+          :key="item.id"
+          :asset="toAsset(item)"
+          source="community"
+          gallery
+          @open="openPost"
+        />
       </div>
 
       <button v-if="hasNext" class="load-more" type="button" :disabled="loadingMore" @click="load(false)">
@@ -244,7 +251,7 @@ onMounted(() => void load(true))
 .hero-stats div {
   min-width: 94px;
   border: 1px solid rgb(255 255 255 / 0.08);
-  border-radius: 20px;
+  border-radius: 8px;
   background: rgb(255 255 255 / 0.045);
   padding: 14px;
 }
@@ -274,84 +281,16 @@ onMounted(() => void load(true))
 
 .post-grid {
   margin-top: 24px;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 22px;
+  columns: 4 240px;
+  column-gap: 22px;
 }
 
-.post-card {
-  overflow: hidden;
-  border: 1px solid rgb(255 255 255 / 0.08);
-  border-radius: 28px;
-  background: rgb(255 255 255 / 0.055);
-  cursor: pointer;
-  transition: transform 0.2s ease, border-color 0.2s ease;
+.post-grid :deep(.asset-card) {
+  margin-bottom: 22px;
 }
 
-.post-card:hover {
-  transform: translateY(-3px);
-  border-color: rgb(176 92 255 / 0.42);
-}
-
-.media-frame {
-  position: relative;
-  aspect-ratio: 4 / 3;
-  overflow: hidden;
-  background: rgb(255 255 255 / 0.04);
-}
-
-.media-frame img,
-.media-frame video {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.text-cover {
-  display: grid;
-  height: 100%;
-  place-items: center;
-  padding: 22px;
-  color: rgb(255 255 255 / 0.68);
-  line-height: 1.7;
-}
-
-.kind-pill {
-  position: absolute;
-  left: 14px;
-  top: 14px;
-  border-radius: 999px;
-  background: rgb(0 0 0 / 0.45);
-  padding: 6px 10px;
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.post-body {
-  padding: 18px;
-}
-
-.post-body h2 {
-  margin: 0;
-  font-size: 20px;
-}
-
-.post-body p {
-  margin: 9px 0 16px;
-  min-height: 22px;
-  color: rgb(255 255 255 / 0.45);
-}
-
-.post-meta {
-  display: flex;
-  gap: 14px;
-  color: rgb(255 255 255 / 0.46);
-}
-
-.post-meta span {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
+.featured-grid {
+  columns: 3 280px;
 }
 
 .state-panel {

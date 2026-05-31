@@ -7,6 +7,12 @@ public record AgentMemorySettingsResponse(
         Integer retrievalLimit,
         List<String> enabledTypes,
         String writePrompt,
-        String retrievalPrompt
+        String retrievalPrompt,
+        Boolean toolLoopEnabled,
+        Boolean consolidationEnabled,
+        Integer consolidationTurnInterval,
+        Integer consolidationCharThreshold,
+        Double consolidationMinConfidence,
+        Double candidateConfidenceThreshold
 ) {
 }
