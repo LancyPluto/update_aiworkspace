@@ -1,19 +1,24 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue"
+import { computed, nextTick, onMounted, onUnmounted, ref, useTemplateRef, watch } from "vue"
 import { useRoute, useRouter } from "vue-router"
-import { ArrowLeft, Loader2, Star, UserRound } from "lucide-vue-next"
-import AssetCard from "@/components/AssetCard.vue"
-import UserAvatar from "@/components/UserAvatar.vue"
-import { fetchCommunityCreator, fetchPublicUserPosts, trackCommunityEvent } from "@/api/communityApi"
-import { getApiOrigin } from "@/api/client"
+import { ArrowLeft } from "lucide-vue-next"
+import { fetchCommunityCreator, fetchPublicUserPosts } from "@/api/communityApi"
 import type { CommunityCreator, CommunityPost, PublicUserProfile } from "@/api/types"
+import { useProfileParallax } from "@/composables/useProfileParallax"
+import ProfileAmbientBackground from "@/pages/PublicProfile/ProfileAmbientBackground.vue"
+import ProfileHeroSection from "@/pages/PublicProfile/ProfileHeroSection.vue"
+import ProfilePortfolioGrid from "@/pages/PublicProfile/ProfilePortfolioGrid.vue"
+import ProfileStatsRow from "@/pages/PublicProfile/ProfileStatsRow.vue"
+import ProfileStickyHeader from "@/pages/PublicProfile/ProfileStickyHeader.vue"
 import { useAuthStore } from "@/store/authStore"
-import { assetFromCommunityPost } from "@/utils/assetPreviewAdapter"
-import type { AssetPreviewItem } from "@/types/assetPreview"
+import { applyProfileThemeToElement, resolveProfileThemeId } from "@/utils/profileTheme"
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
+const pageRoot = useTemplateRef<HTMLElement>("pageRoot")
+const heroRef = useTemplateRef<HTMLElement>("heroRef")
+
 const profile = ref<PublicUserProfile | null>(null)
 const creator = ref<CommunityCreator | null>(null)
 const posts = ref<CommunityPost[]>([])
@@ -22,32 +27,37 @@ const loadingMore = ref(false)
 const error = ref("")
 const pageNo = ref(1)
 const hasNext = ref(false)
+const headerCompact = ref(false)
+const scrollOffset = ref(0)
 
 const userId = computed(() => String(route.params.userId || ""))
 const displayName = computed(() => profile.value?.nickname || profile.value?.username || `用户 ${userId.value}`)
-const featuredPosts = computed(() => creator.value?.featuredPosts || [])
-const recentPosts = computed(() => posts.value)
+const featuredCount = computed(() => creator.value?.featuredCount ?? creator.value?.featuredPosts?.length ?? 0)
 
-function mediaUrl(value?: string | null) {
-  const raw = value?.trim()
-  if (!raw) return ""
-  if (raw.startsWith("http://") || raw.startsWith("https://") || raw.startsWith("data:")) return raw
-  const path = raw.startsWith("/") ? raw : `/${raw}`
-  const apiOrigin = getApiOrigin()
-  return apiOrigin ? `${apiOrigin}${path}` : path
+const { offsetX, offsetY } = useProfileParallax(pageRoot)
+
+let heroObserver: IntersectionObserver | null = null
+
+function applyTheme() {
+  if (!pageRoot.value || !userId.value) return
+  const themeId = resolveProfileThemeId(userId.value, auth.user?.id)
+  applyProfileThemeToElement(pageRoot.value, themeId)
 }
 
-function toAsset(post: CommunityPost): AssetPreviewItem {
-  return assetFromCommunityPost(post, mediaUrl(post.coverUrl))
+function onScroll() {
+  scrollOffset.value = window.scrollY
 }
 
-function openPost(asset: AssetPreviewItem) {
-  if (!asset.communityPostId) return
-  void trackCommunityEvent(
-    { postId: asset.communityPostId, eventType: "detail_view", source: "creator_profile", toolCode: asset.toolCode },
-    { token: auth.token },
-  ).catch(() => undefined)
-  router.push(`/community/posts/${asset.communityPostId}`)
+function setupHeroObserver() {
+  heroObserver?.disconnect()
+  if (!heroRef.value) return
+  heroObserver = new IntersectionObserver(
+    ([entry]) => {
+      headerCompact.value = !entry?.isIntersecting
+    },
+    { root: null, threshold: 0, rootMargin: "-40% 0px 0px 0px" },
+  )
+  heroObserver.observe(heroRef.value)
 }
 
 async function load(reset = true) {
@@ -84,242 +94,125 @@ async function load(reset = true) {
   }
 }
 
-watch(userId, () => void load(true))
-onMounted(() => void load(true))
+function goBack() {
+  if (window.history.length > 1) {
+    router.back()
+  } else {
+    router.push("/marketplace")
+  }
+}
+
+watch(userId, () => {
+  applyTheme()
+  void load(true)
+})
+
+onMounted(() => {
+  applyTheme()
+  void load(true)
+  window.addEventListener("scroll", onScroll, { passive: true })
+  void nextTick(setupHeroObserver)
+})
+
+onUnmounted(() => {
+  window.removeEventListener("scroll", onScroll)
+  heroObserver?.disconnect()
+})
 </script>
 
 <template>
-  <main class="public-profile-page">
-    <button class="back-button" type="button" @click="router.push('/community')">
+  <main ref="pageRoot" class="public-profile-page">
+    <ProfileAmbientBackground
+      :offset-x="offsetX"
+      :offset-y="offsetY"
+      :scroll-offset="scrollOffset"
+    />
+
+    <ProfileStickyHeader
+      :visible="headerCompact"
+      :display-name="displayName"
+      :avatar-url="profile?.avatarUrl"
+      :post-count="profile?.postCount"
+      @back="goBack"
+    />
+
+    <button
+      v-show="!headerCompact"
+      class="back-fab"
+      type="button"
+      aria-label="返回"
+      @click="goBack"
+    >
       <ArrowLeft class="h-4 w-4" />
-      返回社区
     </button>
 
-    <section class="profile-hero">
-      <div class="hero-glow" />
-      <UserAvatar :src="profile?.avatarUrl" :name="displayName" size="xl" />
-      <div class="hero-copy">
-        <p class="eyebrow">Public creator</p>
-        <h1>{{ displayName }}</h1>
-        <p>{{ profile?.bio || "这个创作者还没有填写简介。" }}</p>
-      </div>
-      <div class="hero-stats">
-        <div>
-          <strong>{{ profile?.postCount ?? "--" }}</strong>
-          <span>作品</span>
-        </div>
-        <div>
-          <strong>{{ profile?.likeCount ?? "--" }}</strong>
-          <span>获赞</span>
-        </div>
-        <div>
-          <strong>{{ profile?.favoriteCount ?? "--" }}</strong>
-          <span>收藏</span>
-        </div>
-        <div>
-          <strong>{{ creator?.sameStyleCount ?? "--" }}</strong>
-          <span>同款</span>
-        </div>
-      </div>
-    </section>
-
-    <section v-if="featuredPosts.length" class="post-section">
-      <div class="section-title">
-        <Star class="h-4 w-4" />
-        <span>代表作</span>
-      </div>
-      <div class="post-grid featured-grid">
-        <AssetCard
-          v-for="item in featuredPosts"
-          :key="`featured-${item.id}`"
-          :asset="toAsset(item)"
-          source="community"
-          gallery
-          @open="openPost"
+    <div class="public-profile-page__content">
+      <div ref="heroRef">
+        <ProfileHeroSection
+          :avatar-url="profile?.avatarUrl"
+          :display-name="displayName"
+          :bio="profile?.bio"
+          :featured-count="featuredCount"
         />
-      </div>
-    </section>
-
-    <section class="post-section">
-      <div class="section-title">
-        <UserRound class="h-4 w-4" />
-        <span>公开作品</span>
-      </div>
-
-      <div v-if="loading" class="state-panel">
-        <Loader2 class="h-5 w-5 animate-spin" />
-        正在加载主页
-      </div>
-      <div v-else-if="error" class="state-panel error">{{ error }}</div>
-      <div v-else-if="!recentPosts.length" class="state-panel">
-        这个创作者暂时没有公开且审核通过的作品。
-      </div>
-
-      <div v-else class="post-grid">
-        <AssetCard
-          v-for="item in recentPosts"
-          :key="item.id"
-          :asset="toAsset(item)"
-          source="community"
-          gallery
-          @open="openPost"
+        <ProfileStatsRow
+          :post-count="profile?.postCount"
+          :like-count="profile?.likeCount"
+          :favorite-count="profile?.favoriteCount"
+          :same-style-count="creator?.sameStyleCount"
         />
       </div>
 
-      <button v-if="hasNext" class="load-more" type="button" :disabled="loadingMore" @click="load(false)">
-        <Loader2 v-if="loadingMore" class="h-4 w-4 animate-spin" />
-        加载更多
-      </button>
-    </section>
+      <ProfilePortfolioGrid
+        :posts="posts"
+        :featured-posts="creator?.featuredPosts"
+        :loading="loading"
+        :loading-more="loadingMore"
+        :error="error"
+        :has-next="hasNext"
+        @load-more="load(false)"
+      />
+    </div>
   </main>
 </template>
 
 <style scoped>
 .public-profile-page {
+  position: relative;
   min-height: 100vh;
-  background:
-    radial-gradient(circle at 18% 8%, rgb(176 92 255 / 0.16), transparent 34%),
-    radial-gradient(circle at 92% 12%, rgb(34 211 238 / 0.1), transparent 32%),
-    #050505;
+  background: #050505;
   color: #fff;
+  overflow-x: hidden;
+}
+
+.public-profile-page__content {
+  position: relative;
+  z-index: 1;
+  max-width: 1200px;
+  margin: 0 auto;
   padding: clamp(22px, 4vw, 64px);
 }
 
-.back-button,
-.load-more {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  border: 1px solid rgb(255 255 255 / 0.1);
-  border-radius: 999px;
-  background: rgb(255 255 255 / 0.06);
-  color: rgb(255 255 255 / 0.72);
-  padding: 10px 16px;
-  font-weight: 800;
-}
-
-.profile-hero {
-  position: relative;
-  margin-top: 24px;
+.back-fab {
+  position: fixed;
+  left: clamp(16px, 4vw, 48px);
+  top: clamp(16px, 3vw, 28px);
+  z-index: 25;
+  width: 44px;
+  height: 44px;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 24px;
-  align-items: end;
-  border-bottom: 1px solid rgb(255 255 255 / 0.08);
-  padding: 72px 0 36px;
+  place-items: center;
+  border-radius: 999px;
+  border: 1px solid rgb(255 255 255 / 0.1);
+  background: rgb(5 5 5 / 0.55);
+  backdrop-filter: blur(12px) saturate(140%);
+  color: rgb(255 255 255 / 0.78);
+  cursor: pointer;
+  transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease;
 }
 
-.hero-glow {
-  position: absolute;
-  inset: 20% 10% auto;
-  height: 180px;
-  background: linear-gradient(90deg, transparent, rgb(176 92 255 / 0.18), rgb(34 211 238 / 0.08), transparent);
-  filter: blur(60px);
-  pointer-events: none;
-}
-
-.hero-copy {
-  position: relative;
-}
-
-.eyebrow {
-  margin: 0 0 10px;
-  color: rgb(255 255 255 / 0.38);
-  font-size: 12px;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-}
-
-.hero-copy h1 {
-  margin: 0;
-  font-size: clamp(44px, 8vw, 110px);
-  line-height: 0.9;
-}
-
-.hero-copy p {
-  max-width: 620px;
-  margin: 18px 0 0;
-  color: rgb(255 255 255 / 0.55);
-  line-height: 1.8;
-}
-
-.hero-stats {
-  display: flex;
-  gap: 14px;
-}
-
-.hero-stats div {
-  min-width: 94px;
-  border: 1px solid rgb(255 255 255 / 0.08);
-  border-radius: 8px;
-  background: rgb(255 255 255 / 0.045);
-  padding: 14px;
-}
-
-.hero-stats strong {
-  display: block;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 24px;
-}
-
-.hero-stats span {
-  color: rgb(255 255 255 / 0.42);
-  font-size: 12px;
-}
-
-.post-section {
-  padding-top: 34px;
-}
-
-.section-title {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  color: rgb(255 255 255 / 0.58);
-  font-weight: 900;
-}
-
-.post-grid {
-  margin-top: 24px;
-  columns: 4 240px;
-  column-gap: 22px;
-}
-
-.post-grid :deep(.asset-card) {
-  margin-bottom: 22px;
-}
-
-.featured-grid {
-  columns: 3 280px;
-}
-
-.state-panel {
-  margin-top: 24px;
-  display: flex;
-  min-height: 180px;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  border: 1px dashed rgb(255 255 255 / 0.12);
-  border-radius: 28px;
-  color: rgb(255 255 255 / 0.5);
-}
-
-.state-panel.error {
-  color: rgb(254 202 202);
-}
-
-.load-more {
-  margin: 26px auto 0;
-}
-
-@media (max-width: 900px) {
-  .profile-hero {
-    grid-template-columns: 1fr;
-  }
-
-  .hero-stats {
-    flex-wrap: wrap;
-  }
+.back-fab:hover {
+  border-color: var(--profile-accent-soft);
+  background: rgb(255 255 255 / 0.08);
+  color: #fff;
 }
 </style>

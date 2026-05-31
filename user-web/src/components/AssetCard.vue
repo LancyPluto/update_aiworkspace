@@ -221,7 +221,7 @@ function openAuthorProfile() {
   transform: translateY(-6px);
   background: rgb(255 255 255 / 0.04);
   box-shadow:
-    0 36px 88px rgb(0 0 0 / 0.48),
+    var(--profile-card-hover-shadow, 0 36px 88px rgb(0 0 0 / 0.48)),
     inset 0 1px 0 rgb(255 255 255 / 0.06);
 }
 
