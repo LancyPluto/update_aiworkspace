@@ -345,6 +345,7 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                     config.modelName(),
                     config.baseUrl(),
                     secretsRedacted ? "" : nullToEmpty(config.apiKey()),
+                    null,
                     secretsRedacted ? "" : nullToEmpty(config.extraAuthJson()),
                     config.minimaxGroupId(),
                     config.consoleUrl(),

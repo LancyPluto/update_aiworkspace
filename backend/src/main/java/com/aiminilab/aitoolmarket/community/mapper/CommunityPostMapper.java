@@ -1,5 +1,6 @@
 package com.aiminilab.aitoolmarket.community.mapper;
 
+import com.aiminilab.aitoolmarket.community.dto.CommunityPostDiscoverRow;
 import com.aiminilab.aitoolmarket.community.entity.CommunityPost;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Delete;
@@ -46,6 +47,27 @@ public interface CommunityPostMapper extends BaseMapper<CommunityPost> {
 
     @Select("""
             <script>
+            SELECT p.*,
+                   COALESCE(NULLIF(TRIM(u.nickname), ''), NULLIF(TRIM(u.username), '')) AS author_nickname,
+                   u.avatar_url AS author_avatar_url
+            FROM community_posts p
+            LEFT JOIN users u ON u.id = p.user_id AND u.is_deleted = 0
+            WHERE p.user_id = #{userId}
+              AND p.status = 'PUBLISHED'
+            <if test="modality != null and modality.trim() != ''">
+              AND p.modality = #{modality}
+            </if>
+            ORDER BY p.id DESC
+            LIMIT #{limit} OFFSET #{offset}
+            </script>
+            """)
+    List<CommunityPostDiscoverRow> findPublicByUserIdWithAuthor(@Param("userId") Long userId,
+                                                                @Param("modality") String modality,
+                                                                @Param("limit") int limit,
+                                                                @Param("offset") int offset);
+
+    @Select("""
+            <script>
             SELECT *
             FROM community_posts
             WHERE user_id = #{userId}
@@ -62,6 +84,54 @@ public interface CommunityPostMapper extends BaseMapper<CommunityPost> {
                                            @Param("modality") String modality,
                                            @Param("limit") int limit,
                                            @Param("offset") int offset);
+
+    @Select("""
+            <script>
+            SELECT p.*,
+                   COALESCE(NULLIF(TRIM(u.nickname), ''), NULLIF(TRIM(u.username), '')) AS author_nickname,
+                   u.avatar_url AS author_avatar_url
+            FROM community_posts p
+            LEFT JOIN users u ON u.id = p.user_id AND u.is_deleted = 0
+            <if test="tag != null and tag.trim() != ''">
+            INNER JOIN community_post_tags t ON t.post_id = p.id AND t.tag = #{tag}
+            </if>
+            WHERE p.status = 'PUBLISHED'
+            <if test="modality != null and modality.trim() != ''">
+              AND p.modality = #{modality}
+            </if>
+            <if test="topic != null and topic.trim() != ''">
+              AND p.topic = #{topic}
+            </if>
+            <if test="featured != null">
+              AND p.featured = #{featured}
+            </if>
+            <choose>
+              <when test="sort == 'POPULAR'">
+                ORDER BY p.pinned DESC, p.like_count DESC, p.favorite_count DESC, p.id DESC
+              </when>
+              <when test="sort == 'FAVORITES'">
+                ORDER BY p.pinned DESC, p.favorite_count DESC, p.id DESC
+              </when>
+              <when test="sort == 'SAME_STYLE'">
+                ORDER BY p.pinned DESC, p.same_style_count DESC, p.id DESC
+              </when>
+              <when test="sort == 'VIEWS'">
+                ORDER BY p.pinned DESC, p.view_count DESC, p.id DESC
+              </when>
+              <otherwise>
+                ORDER BY p.pinned DESC, p.featured DESC, p.id DESC
+              </otherwise>
+            </choose>
+            LIMIT #{limit} OFFSET #{offset}
+            </script>
+            """)
+    List<CommunityPostDiscoverRow> discoverWithAuthor(@Param("modality") String modality,
+                                                      @Param("tag") String tag,
+                                                      @Param("topic") String topic,
+                                                      @Param("sort") String sort,
+                                                      @Param("featured") Boolean featured,
+                                                      @Param("limit") int limit,
+                                                      @Param("offset") int offset);
 
     @Select("""
             <script>

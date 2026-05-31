@@ -404,6 +404,7 @@ export interface AgentModelConfigPayload {
   modelName: string
   baseUrl?: string
   apiKey?: string
+  clearApiKey?: boolean
   extraAuthJson?: string
   minimaxGroupId?: string
   consoleUrl?: string

@@ -46,6 +46,7 @@ interface ModelForm {
   baseUrl: string
   apiKey: string
   apiKeyMasked: string
+  clearApiKey: boolean
   extraAuthJson: string
   extraAuthJsonMasked: string
   consoleUrl: string
@@ -264,8 +265,9 @@ const emptyForm: ModelForm = {
   provider: "openai_compatible",
   modelName: "gpt-4o-mini",
   baseUrl: "https://api.openai.com/v1",
-  apiKey: "",
-  apiKeyMasked: "",
+    apiKey: "",
+    apiKeyMasked: "",
+    clearApiKey: false,
   extraAuthJson: "",
   extraAuthJsonMasked: "",
   consoleUrl: "",
@@ -297,6 +299,7 @@ function toForm(config: AgentModelConfig, catalog: ModelProviderDescriptor[]): M
     baseUrl: config.baseUrl || meta.defaultBaseUrl,
     apiKey: "",
     apiKeyMasked: config.apiKeyMasked || "",
+    clearApiKey: false,
     extraAuthJson: "",
     extraAuthJsonMasked: config.extraAuthJsonMasked || "",
     consoleUrl: config.consoleUrl || "",
@@ -329,6 +332,7 @@ function toPayload(form: ModelForm): AgentModelConfigPayload {
     modelName: form.modelName.trim(),
     baseUrl: form.baseUrl.trim(),
     apiKey: form.apiKey.trim(),
+    clearApiKey: form.clearApiKey || undefined,
     extraAuthJson: form.extraAuthJson.trim(),
     consoleUrl: form.consoleUrl.trim(),
     balanceUrl: form.balanceUrl.trim(),
@@ -694,6 +698,7 @@ export function AgentModelSettings({ refreshKey = 0 }: AgentModelSettingsProps) 
         : await createAgentModelConfig(toPayload(form))
       setSaved(true)
       await loadConfigs(savedConfig.id)
+      updateForm("clearApiKey", false)
       setDialogOpen(false)
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "保存模型配置失败")
@@ -1145,6 +1150,25 @@ export function AgentModelSettings({ refreshKey = 0 }: AgentModelSettingsProps) 
                     onChange={(event) => updateForm("apiKey", event.target.value)}
                   />
                 </div>
+                {(form.apiKeyMasked || form.provider === "kling_video") && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      updateForm("apiKey", "")
+                      updateForm("apiKeyMasked", "")
+                      updateForm("clearApiKey", true)
+                    }}
+                  >
+                    清除已保存的 API Key
+                  </Button>
+                )}
+                {form.provider === "kling_video" && (
+                  <p className="text-xs text-amber-600 dark:text-amber-400">
+                    可灵请把 Access Key / Secret Key 写在下方 JSON；若 API Key 里留有旧值会优先导致鉴权失败，请点「清除」后只保留 JSON 再保存。
+                  </p>
+                )}
               </div>
               <div className="space-y-2">
                 <Label>运行信息</Label>

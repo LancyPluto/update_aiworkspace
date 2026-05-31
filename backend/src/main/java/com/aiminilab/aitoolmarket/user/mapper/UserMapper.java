@@ -16,6 +16,26 @@ public interface UserMapper extends BaseMapper<User> {
     }
 
     @Select("""
+            <script>
+            SELECT *
+            FROM users
+            WHERE is_deleted = 0
+              AND id IN
+              <foreach collection="ids" item="id" open="(" separator="," close=")">
+                #{id}
+              </foreach>
+            </script>
+            """)
+    List<User> selectUsersByIdList(@Param("ids") List<Long> ids);
+
+    default List<User> findByIds(List<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return List.of();
+        }
+        return selectUsersByIdList(ids);
+    }
+
+    @Select("""
             SELECT *
             FROM users
             WHERE username = #{username} AND is_deleted = 0

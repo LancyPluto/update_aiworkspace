@@ -1,5 +1,6 @@
 # Build from repository root: docker build -f backend/Dockerfile .
-FROM maven:3.9-eclipse-temurin-17 AS build
+ARG DOCKER_REGISTRY=
+FROM ${DOCKER_REGISTRY:-}maven:3.9-eclipse-temurin-17 AS build
 
 WORKDIR /build
 
@@ -12,7 +13,8 @@ RUN mvn -B -q dependency:go-offline -DskipTests || true
 COPY backend/src ./src
 RUN mvn -B -q -DskipTests package
 
-FROM eclipse-temurin:17-jre-jammy
+ARG DOCKER_REGISTRY=
+FROM ${DOCKER_REGISTRY:-}eclipse-temurin:17-jre-jammy
 
 WORKDIR /app
 

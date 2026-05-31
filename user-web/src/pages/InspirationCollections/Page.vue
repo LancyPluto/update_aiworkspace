@@ -19,6 +19,7 @@ import { openDashboardWithAsset } from "@/utils/assetReplay"
 const auth = useAuthStore()
 const router = useRouter()
 const collections = ref<CommunityCollection[]>([])
+const collectionsSupported = ref(true)
 const activeId = ref<number | null>(null)
 const loading = ref(false)
 const error = ref("")
@@ -45,8 +46,13 @@ async function load() {
   loading.value = true
   error.value = ""
   try {
-    collections.value = await fetchCommunityCollections({ token: auth.token })
+    const result = await fetchCommunityCollections({ token: auth.token })
+    collectionsSupported.value = result.supported
+    collections.value = result.collections
     activeId.value = activeId.value || collections.value[0]?.id || null
+    if (!result.supported) {
+      error.value = "灵感收藏功能需要后端升级到最新版本后可用，可先使用帖子详情页的收藏功能。"
+    }
   } catch (err) {
     error.value = err instanceof Error ? err.message : "Failed to load inspirations"
   } finally {

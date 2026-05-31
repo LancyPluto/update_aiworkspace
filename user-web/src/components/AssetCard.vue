@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed } from "vue"
+import { useRouter } from "vue-router"
 import { ArrowRight, Clock, Eye, FileText, Heart, Image as ImageIcon, Music, Sparkles, Star, Video, Wand2 } from "lucide-vue-next"
 import { getApiOrigin } from "@/api/client"
+import UserAvatar from "@/components/UserAvatar.vue"
 import type { AssetPreviewItem } from "@/types/assetPreview"
 
 const props = withDefaults(
@@ -9,10 +11,12 @@ const props = withDefaults(
     asset: AssetPreviewItem
     source?: "private" | "community"
     compact?: boolean
+    gallery?: boolean
   }>(),
   {
     source: "private",
     compact: false,
+    gallery: false,
   },
 )
 
@@ -20,14 +24,21 @@ const emit = defineEmits<{
   open: [asset: AssetPreviewItem]
 }>()
 
+const router = useRouter()
 const mediaUrl = computed(() => normalizeMediaUrl(props.asset.url))
-const badgeText = computed(() => {
-  if (props.asset.pinned) return "置顶"
-  if (props.asset.featured) return "精选"
-  return props.asset.modality || kindLabel(props.asset.kind)
-})
+const showFeaturedBadge = computed(() => Boolean(props.asset.featured || props.asset.pinned))
+const featuredBadgeText = computed(() => (props.asset.pinned ? "置顶" : "精选"))
+const showCreator = computed(() => Boolean(props.gallery && props.source === "community" && props.asset.authorUserId))
+const creatorName = computed(
+  () => props.asset.authorName?.trim() || (props.asset.authorUserId ? `用户${props.asset.authorUserId}` : ""),
+)
 const subtitle = computed(() => props.asset.subtitle || props.asset.toolName || props.asset.toolCode || "")
 const previewText = computed(() => props.asset.rawText || props.asset.prompt || props.asset.title)
+const primaryStat = computed(() => {
+  const likes = props.asset.stats?.likes || 0
+  const views = props.asset.stats?.views || 0
+  return likes > 0 ? { icon: Heart, value: likes, label: "点赞" } : { icon: Eye, value: views, label: "浏览" }
+})
 
 function normalizeMediaUrl(value?: string | null) {
   const raw = value?.trim()
@@ -36,14 +47,6 @@ function normalizeMediaUrl(value?: string | null) {
   const path = raw.startsWith("/") ? raw : `/${raw}`
   const apiOrigin = getApiOrigin()
   return apiOrigin ? `${apiOrigin}${path}` : path
-}
-
-function kindLabel(kind: AssetPreviewItem["kind"]) {
-  if (kind === "image") return "图片"
-  if (kind === "video") return "视频"
-  if (kind === "audio") return "音频"
-  if (kind === "text") return "文本"
-  return "作品"
 }
 
 function formatTime(value?: string | null) {
@@ -57,10 +60,19 @@ function formatTime(value?: string | null) {
     minute: "2-digit",
   })
 }
+
+function openAuthorProfile() {
+  if (!props.asset.authorUserId) return
+  router.push(`/u/${props.asset.authorUserId}`)
+}
 </script>
 
 <template>
-  <article class="asset-card group" :class="{ compact }" @click="emit('open', asset)">
+  <article
+    class="asset-card group"
+    :class="{ compact, gallery: gallery || (source === 'community' && compact) }"
+    @click="emit('open', asset)"
+  >
     <div class="media-frame">
       <img
         v-if="asset.kind === 'image' && mediaUrl"
@@ -90,38 +102,64 @@ function formatTime(value?: string | null) {
         <p>{{ previewText }}</p>
       </div>
 
-      <div class="absolute left-3 top-3 flex items-center gap-2">
-        <span class="pill">
+      <div class="media-overlay" aria-hidden="true" />
+
+      <div class="badge-stack">
+        <span v-if="showFeaturedBadge" class="glass-badge featured">
+          <Sparkles class="h-3.5 w-3.5" />
+          {{ featuredBadgeText }}
+        </span>
+        <span v-else-if="gallery || source === 'community'" class="glass-badge icon-only" :aria-label="asset.kind">
+          <ImageIcon v-if="asset.kind === 'image'" class="h-3.5 w-3.5" />
+          <Video v-else-if="asset.kind === 'video'" class="h-3.5 w-3.5" />
+          <Music v-else-if="asset.kind === 'audio'" class="h-3.5 w-3.5" />
+          <FileText v-else class="h-3.5 w-3.5" />
+        </span>
+        <span v-else class="glass-badge">
           <Sparkles v-if="asset.featured || asset.pinned" class="h-3.5 w-3.5" />
           <ImageIcon v-else-if="asset.kind === 'image'" class="h-3.5 w-3.5" />
           <Video v-else-if="asset.kind === 'video'" class="h-3.5 w-3.5" />
           <Music v-else-if="asset.kind === 'audio'" class="h-3.5 w-3.5" />
           <FileText v-else class="h-3.5 w-3.5" />
-          {{ badgeText }}
+          {{ asset.modality || asset.kind }}
         </span>
+      </div>
+
+      <div v-if="source === 'community' && (gallery || compact)" class="hover-stats">
+        <span><component :is="primaryStat.icon" class="h-3.5 w-3.5" />{{ primaryStat.value }}</span>
       </div>
 
       <slot name="media-actions" />
     </div>
 
     <div class="body">
-      <div class="flex items-start justify-between gap-3">
+      <button
+        v-if="showCreator"
+        type="button"
+        class="creator-row"
+        @click.stop="openAuthorProfile"
+      >
+        <UserAvatar :src="asset.authorAvatarUrl" :name="creatorName" size="sm" />
+        <span class="creator-name">{{ creatorName }}</span>
+      </button>
+
+      <div class="title-row">
         <div class="min-w-0">
           <h3>{{ asset.title }}</h3>
-          <p class="subtitle" :title="subtitle">{{ subtitle }}</p>
+          <p v-if="subtitle" class="subtitle" :title="subtitle">{{ subtitle }}</p>
         </div>
-        <div v-if="formatTime(asset.createdAt)" class="time">
+        <div v-if="!gallery && formatTime(asset.createdAt)" class="time">
           <Clock class="h-3 w-3" />
           {{ formatTime(asset.createdAt) }}
         </div>
       </div>
 
-      <div v-if="asset.topic || asset.tags?.length" class="tag-row">
+      <div v-if="!gallery && (asset.topic || asset.tags?.length)" class="tag-row">
         <span v-if="asset.topic">{{ asset.topic }}</span>
         <span v-for="tag in asset.tags?.slice(0, 3)" :key="tag">#{{ tag }}</span>
       </div>
 
-      <div class="footer">
+      <div v-if="!gallery" class="footer">
         <div v-if="source === 'community'" class="stats">
           <span><Eye class="h-3.5 w-3.5" />{{ asset.stats?.views || 0 }}</span>
           <span><Heart class="h-3.5 w-3.5" />{{ asset.stats?.likes || 0 }}</span>
@@ -151,11 +189,26 @@ function formatTime(value?: string | null) {
   background: rgb(255 255 255 / 0.04);
   box-shadow: 0 18px 42px rgb(0 0 0 / 0.24);
   cursor: zoom-in;
-  transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+  transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.28s ease, background 0.28s ease;
 }
 
 .asset-card.compact {
   border-radius: 8px;
+}
+
+.asset-card.gallery {
+  border: 0;
+  border-radius: 28px;
+  background: rgb(255 255 255 / 0.028);
+  box-shadow:
+    0 28px 64px rgb(0 0 0 / 0.38),
+    inset 0 1px 0 rgb(255 255 255 / 0.04);
+}
+
+@supports (corner-shape: squircle) {
+  .asset-card.gallery {
+    corner-shape: squircle;
+  }
 }
 
 .asset-card:hover {
@@ -164,10 +217,22 @@ function formatTime(value?: string | null) {
   background: rgb(255 255 255 / 0.055);
 }
 
+.asset-card.gallery:hover {
+  transform: translateY(-6px);
+  background: rgb(255 255 255 / 0.04);
+  box-shadow:
+    0 36px 88px rgb(0 0 0 / 0.48),
+    inset 0 1px 0 rgb(255 255 255 / 0.06);
+}
+
 .media-frame {
   position: relative;
   overflow: hidden;
   background: rgb(255 255 255 / 0.05);
+}
+
+.gallery .media-frame {
+  border-radius: 28px 28px 0 0;
 }
 
 .media {
@@ -175,14 +240,36 @@ function formatTime(value?: string | null) {
   width: 100%;
   max-height: 560px;
   object-fit: cover;
+  transition: transform 0.45s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-.compact .media-frame {
+.asset-card.gallery:hover .media {
+  transform: scale(1.03);
+}
+
+.compact .media-frame,
+.gallery .media-frame {
   aspect-ratio: 4 / 3;
 }
 
-.compact .media {
+.compact .media,
+.gallery .media {
   height: 100%;
+}
+
+.media-overlay {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  background: linear-gradient(120deg, transparent 35%, rgb(255 255 255 / 0.16) 50%, transparent 65%);
+  transform: translateX(-120%);
+  transition: transform 0.75s ease, opacity 0.3s ease;
+  pointer-events: none;
+}
+
+.asset-card.gallery:hover .media-overlay {
+  opacity: 1;
+  transform: translateX(120%);
 }
 
 .audio-cover,
@@ -216,17 +303,65 @@ function formatTime(value?: string | null) {
   color: rgb(176 92 255);
 }
 
-.pill {
+.badge-stack {
+  position: absolute;
+  left: 14px;
+  top: 14px;
+  display: flex;
+  gap: 8px;
+}
+
+.glass-badge {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   border-radius: 999px;
-  background: rgb(0 0 0 / 0.58);
-  color: #fff;
-  padding: 6px 10px;
+  background: rgb(255 255 255 / 0.1);
+  color: rgb(255 255 255 / 0.88);
+  padding: 7px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  backdrop-filter: blur(16px) saturate(140%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.12);
+}
+
+.glass-badge.icon-only {
+  width: 34px;
+  height: 34px;
+  justify-content: center;
+  padding: 0;
+  color: rgb(255 255 255 / 0.82);
+}
+
+.glass-badge.featured {
+  background: rgb(176 92 255 / 0.22);
+}
+
+.hover-stats {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity 0.24s ease, transform 0.24s ease;
+}
+
+.hover-stats span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-radius: 999px;
+  background: rgb(0 0 0 / 0.42);
+  backdrop-filter: blur(14px);
+  color: rgb(255 255 255 / 0.88);
+  padding: 7px 11px;
   font-size: 12px;
-  font-weight: 800;
-  backdrop-filter: blur(12px);
+  font-weight: 500;
+}
+
+.asset-card.gallery:hover .hover-stats {
+  opacity: 1;
+  transform: translateY(0);
 }
 
 .body {
@@ -235,22 +370,69 @@ function formatTime(value?: string | null) {
   padding: 16px;
 }
 
+.gallery .body {
+  gap: 10px;
+  padding: 14px 6px 6px;
+}
+
+.creator-row {
+  display: inline-flex;
+  width: fit-content;
+  max-width: 100%;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  background: transparent;
+  color: rgb(255 255 255 / 0.72);
+  padding: 0;
+  cursor: pointer;
+  transition: color 0.2s ease;
+}
+
+.creator-row:hover {
+  color: #fff;
+}
+
+.creator-name {
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 h3 {
   margin: 0;
   overflow: hidden;
   color: #fff;
   font-size: 16px;
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.gallery h3 {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
 .subtitle {
-  margin: 5px 0 0;
+  margin: 6px 0 0;
   overflow: hidden;
-  color: rgb(255 255 255 / 0.45);
+  color: rgb(255 255 255 / 0.42);
   font-size: 12px;
+  font-weight: 400;
+  line-height: 1.5;
   text-overflow: ellipsis;
   white-space: nowrap;
 }

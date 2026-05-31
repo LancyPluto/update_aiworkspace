@@ -1,6 +1,6 @@
 services:
   mysql:
-    image: mysql:8.0
+    image: ${DOCKER_REGISTRY:-docker.1ms.run/}mysql:8.0
     container_name: ai-supermarket-mysql
     restart: unless-stopped
     environment:
@@ -23,10 +23,12 @@ services:
       retries: 10
 
   banana-slides:
+    profiles: ["banana-slides"]
     build:
       context: ../engines/banana-slides
       dockerfile: backend/Dockerfile
       args:
+        DOCKER_REGISTRY: ${DOCKER_REGISTRY:-docker.1ms.run/}
         APT_MIRROR: ${APT_MIRROR:-mirrors.aliyun.com}
         PYPI_INDEX_URL: ${PYPI_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}
     container_name: ai-supermarket-banana-slides
@@ -47,7 +49,7 @@ services:
       start_period: 15s
 
   redis:
-    image: redis:7
+    image: ${DOCKER_REGISTRY:-docker.1ms.run/}redis:7
     container_name: ai-supermarket-redis
     restart: unless-stopped
     ports:
@@ -62,7 +64,7 @@ services:
       retries: 10
 
   rabbitmq:
-    image: rabbitmq:3.13-management
+    image: ${DOCKER_REGISTRY:-docker.1ms.run/}rabbitmq:3.13-management
     container_name: ai-supermarket-rabbitmq
     restart: unless-stopped
     environment:
@@ -83,6 +85,8 @@ services:
     build:
       context: ..
       dockerfile: backend/Dockerfile
+      args:
+        DOCKER_REGISTRY: ${DOCKER_REGISTRY:-docker.1ms.run/}
     image: deploy-backend
     container_name: ai-supermarket-backend
     restart: unless-stopped
@@ -94,8 +98,6 @@ services:
       redis:
         condition: service_healthy
       rabbitmq:
-        condition: service_healthy
-      banana-slides:
         condition: service_healthy
     environment:
       TZ: Asia/Shanghai
@@ -143,10 +145,10 @@ services:
     volumes:
       - ../WXcert:/app/WXcert:ro
       - ../docs:/docs:ro
-      - generated_media:/data/generated-media
+      - ../data/generated-media:/data/generated-media
 
   admin-frontend:
-    image: node:22-alpine
+    image: ${DOCKER_REGISTRY:-docker.1ms.run/}node:22-alpine
     container_name: ai-supermarket-admin-frontend
     working_dir: /app
     restart: unless-stopped
@@ -164,7 +166,7 @@ services:
     command: sh -c "npm config set registry https://registry.npmmirror.com && npm install && npm run dev:docker"
 
   user-web:
-    image: node:22-alpine
+    image: ${DOCKER_REGISTRY:-docker.1ms.run/}node:22-alpine
     container_name: ai-supermarket-user-web
     working_dir: /app
     restart: unless-stopped
@@ -193,6 +195,7 @@ services:
       context: ..
       dockerfile: worker/Dockerfile
       args:
+        DOCKER_REGISTRY: ${DOCKER_REGISTRY:-docker.1ms.run/}
         APT_MIRROR: ${APT_MIRROR:-mirrors.aliyun.com}
     container_name: ai-supermarket-worker
     working_dir: /app
@@ -231,7 +234,7 @@ services:
       GENERATED_MEDIA_PUBLIC_BASE_URL: /generated
     volumes:
       - ../worker:/app
-      - generated_media:/data/generated-media
+      - ../data/generated-media:/data/generated-media
     command: sh -c "pip install --no-cache-dir -r requirements.txt && python main.py"
 
   agent-service:
@@ -239,6 +242,7 @@ services:
       context: ..
       dockerfile: agent-service/Dockerfile
       args:
+        DOCKER_REGISTRY: ${DOCKER_REGISTRY:-docker.1ms.run/}
         APT_MIRROR: ${APT_MIRROR:-mirrors.aliyun.com}
     container_name: ai-supermarket-agent-service
     working_dir: /app
@@ -273,5 +277,4 @@ volumes:
   redis_data:
   rabbitmq_data:
   maven_cache:
-  generated_media:
   admin_frontend_next:

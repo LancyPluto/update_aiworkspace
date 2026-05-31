@@ -23,6 +23,7 @@ public class MarketModelConfigBridge {
                 config.getModelName(),
                 config.getBaseUrl(),
                 config.getApiKey(),
+                null,
                 config.getExtraAuthJson(),
                 config.getMinimaxGroupId(),
                 config.getConsoleUrl(),
