@@ -58,7 +58,8 @@ from app.runtime.tool_call_loop import AgentToolCallLoopExecutor
 from app.runtime.tool_decision_validator import ToolDecisionValidator
 from app.runtime.workspace_files import WorkspaceFileContext, build_workspace_file_context
 from app.security.prompt_guard import PromptGuard
-from app.tools.backend_tool import BackendToolBridge
+from app.tools.backend_tool import BackendToolBridge, ToolExecutionError
+from app.tools.task_dispatch_credit import assert_task_dispatch_credits
 from app.tools.memory_tool import (
     MEMORY_TOOL_SYSTEM_PROMPT,
     MemoryTool,
@@ -187,6 +188,18 @@ class DeepAgentsRuntimeEngine:
             return
 
         if intent_enum == Intent.UNSUPPORTED:
+            if self._should_fallback_from_unsupported(context):
+                if self.deep_agents_enabled:
+                    await self._run_deep_agents_or_chat(context, None)
+                    return
+                try:
+                    answer = await self._run_chat(context, None)
+                except BudgetExceeded as exception:
+                    await self._fail_run(context.runId, exception.error_code, exception.message)
+                    return
+                await self._complete_run(context, answer, intent=Intent.GENERAL_CHAT.value)
+                await self._curate_memory_after_run(context, answer)
+                return
             answer = "当前阶段暂不支持文件分析、知识库检索或复杂工作流。我可以先帮你完成通用问答或调用已开放的工具。"
             await self._emit_answer_events(context.runId, answer)
             await self._complete_run(context, answer, intent=intent_enum.value)
@@ -237,6 +250,14 @@ class DeepAgentsRuntimeEngine:
             result = await self._execute_tool_with_guard(context, tool, budget)
         except BudgetExceeded as exception:
             await self._fail_run(context.runId, exception.error_code, exception.message, budget=budget)
+            return
+        except ToolExecutionError as exception:
+            await self._fail_run(
+                context.runId,
+                exception.error_code or "TOOL_CALL_FAILED",
+                str(exception),
+                budget=budget,
+            )
             return
 
         if result.get("missing_tool_arguments"):
@@ -296,6 +317,12 @@ class DeepAgentsRuntimeEngine:
             hard_rule=self._is_hard_rule_intent,
             llm_router=self.router_service.classify,
         )
+
+    def _should_fallback_from_unsupported(self, context: RunContext) -> bool:
+        message = (context.message or "").strip()
+        if not message:
+            return False
+        return self.intent_router._looks_like_copywriting_generation(message) or self.intent_router._looks_like_tool_request(message)
 
     @staticmethod
     def _is_hard_rule_intent(rule_intent) -> bool:
@@ -466,6 +493,14 @@ class DeepAgentsRuntimeEngine:
                 except BudgetExceeded as exception:
                     await self._fail_run(context.runId, exception.error_code, exception.message, budget=budget)
                     return
+                except ToolExecutionError as exception:
+                    await self._fail_run(
+                        context.runId,
+                        exception.error_code or "TOOL_CALL_FAILED",
+                        str(exception),
+                        budget=budget,
+                    )
+                    return
                 if result.get("missing_tool_arguments"):
                     await self._emit_missing_arguments(context, tool, result["missing_tool_arguments"])
                     answer = self._format_missing_arguments_message(tool, result["missing_tool_arguments"])
@@ -498,6 +533,14 @@ class DeepAgentsRuntimeEngine:
             result = await self._execute_tool_with_guard(context, tool, budget, arguments=extracted_args)
         except BudgetExceeded as exception:
             await self._fail_run(context.runId, exception.error_code, exception.message, budget=budget)
+            return
+        except ToolExecutionError as exception:
+            await self._fail_run(
+                context.runId,
+                exception.error_code or "TOOL_CALL_FAILED",
+                str(exception),
+                budget=budget,
+            )
             return
 
         if result.get("missing_tool_arguments"):
@@ -533,6 +576,7 @@ class DeepAgentsRuntimeEngine:
             if missing:
                 return {"missing_tool_arguments": missing}
 
+        assert_task_dispatch_credits(context, tool)
         self.budget_guard.reserve_tool_call(budget, tool.estimatedCreditCost)
         result = await self.tool_bridge.execute_with_args(context, tool, arguments)
         return result
@@ -1097,7 +1141,7 @@ class DeepAgentsRuntimeEngine:
             normalized_answer = "抱歉，本次未能生成有效回复，请换个说法或补充更多信息后再试。"
         consumed_credits = self.budget_guard.default_consumed_credits
         model_name = getattr(self.model, "model_name", settings.model_name)
-        usage = self._model_usage()
+        usage = self._model_usage_or_estimate(context, normalized_answer)
         await self.backend.complete_run(
             context.runId,
             RunComplete(
@@ -1140,6 +1184,21 @@ class DeepAgentsRuntimeEngine:
         return {
             "promptTokens": max(0, int(usage.get("promptTokens") or 0)),
             "completionTokens": max(0, int(usage.get("completionTokens") or 0)),
+        }
+
+    def _model_usage_or_estimate(self, context: RunContext, final_answer: str) -> dict[str, int]:
+        usage = self._model_usage()
+        if usage["promptTokens"] > 0 or usage["completionTokens"] > 0:
+            return usage
+        prompt_text = "\n".join(
+            [
+                *[message.content for message in context.history if message.content],
+                context.message or "",
+            ]
+        )
+        return {
+            "promptTokens": _estimate_tokens(prompt_text),
+            "completionTokens": _estimate_tokens(final_answer),
         }
 
     def _chat_model(self):
@@ -1612,6 +1671,13 @@ def _raw_message_content(message) -> str:
 
 def _chunks(value: str, size: int) -> list[str]:
     return [value[index : index + size] for index in range(0, len(value), size)] or [""]
+
+
+def _estimate_tokens(value: str) -> int:
+    text = value or ""
+    if not text.strip():
+        return 0
+    return max(1, (len(text) + 3) // 4)
 
 
 def _parse_json_object(raw: str) -> Any:

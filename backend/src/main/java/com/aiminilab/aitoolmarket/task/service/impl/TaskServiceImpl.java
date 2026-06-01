@@ -19,6 +19,7 @@ import com.aiminilab.aitoolmarket.task.mapper.TaskMapper;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentModelConfigMapper;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentToolCallMapper;
 import com.aiminilab.aitoolmarket.agent.service.ModelCapabilityService;
+import com.aiminilab.aitoolmarket.task.service.TaskCreditDispatchService;
 import com.aiminilab.aitoolmarket.task.service.TaskOutboxService;
 import com.aiminilab.aitoolmarket.task.service.TaskService;
 import com.aiminilab.aitoolmarket.task.service.TaskStateMachine;
@@ -52,6 +53,7 @@ public class TaskServiceImpl implements TaskService {
     private final TaskOutboxService taskOutboxService;
     private final TaskMetrics taskMetrics;
     private final TaskCreditEstimateService taskCreditEstimateService;
+    private final TaskCreditDispatchService taskCreditDispatchService;
     private final CommunityEventMapper communityEventMapper;
 
     public TaskServiceImpl(
@@ -65,6 +67,7 @@ public class TaskServiceImpl implements TaskService {
             TaskOutboxService taskOutboxService,
             TaskMetrics taskMetrics,
             TaskCreditEstimateService taskCreditEstimateService,
+            TaskCreditDispatchService taskCreditDispatchService,
             CommunityEventMapper communityEventMapper
     ) {
         this.taskMapper = taskMapper;
@@ -77,6 +80,7 @@ public class TaskServiceImpl implements TaskService {
         this.taskOutboxService = taskOutboxService;
         this.taskMetrics = taskMetrics;
         this.taskCreditEstimateService = taskCreditEstimateService;
+        this.taskCreditDispatchService = taskCreditDispatchService;
         this.communityEventMapper = communityEventMapper;
     }
 
@@ -93,7 +97,20 @@ public class TaskServiceImpl implements TaskService {
     public TaskStatusResponse createForAgentTool(Long userId, CreateTaskRequest request) {
         return taskMapper.findByUserIdAndIdempotencyKey(userId, request.clientRequestId())
                 .map(TaskStatusResponse::from)
-                .orElseGet(() -> createNewTask(userId, request.toolCode(), request.params(), request.clientRequestId(), request.sourcePostId(), false));
+                .orElseGet(() -> {
+                    AiTool tool = toolMapper.findOnlineByCode(request.toolCode())
+                            .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在或未上线"));
+                    AgentModelConfig modelConfig = modelCapabilityService.resolveModelConfigForTool(tool);
+                    taskCreditDispatchService.ensureDispatchAllowed(userId, tool, modelConfig);
+                    return createNewTask(
+                            userId,
+                            request.toolCode(),
+                            request.params(),
+                            request.clientRequestId(),
+                            request.sourcePostId(),
+                            true
+                    );
+                });
     }
 
     @Override
@@ -209,6 +226,9 @@ public class TaskServiceImpl implements TaskService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在或未上线"));
         AgentModelConfig modelConfig = modelCapabilityService.resolveModelConfigForTool(tool);
         modelCapabilityService.validateExecution(tool, modelConfig);
+        if (chargeTaskCredits) {
+            taskCreditDispatchService.ensureDispatchAllowed(userId, tool, modelConfig);
+        }
 
         AiTask task = new AiTask();
         task.setTaskNo(generateTaskNo());

@@ -327,7 +327,8 @@ public class SmsCodeServiceImpl implements SmsCodeService {
         if (!"REGISTER".equals(normalized)
                 && !"LOGIN".equals(normalized)
                 && !"LOGIN_OR_REGISTER".equals(normalized)
-                && !"RESET_PASSWORD".equals(normalized)) {
+                && !"RESET_PASSWORD".equals(normalized)
+                && !"CANCEL_ACCOUNT".equals(normalized)) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "验证码场景不正确");
         }
         return normalized;

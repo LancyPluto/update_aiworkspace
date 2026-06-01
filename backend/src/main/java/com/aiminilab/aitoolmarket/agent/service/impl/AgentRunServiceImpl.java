@@ -981,6 +981,7 @@ public class AgentRunServiceImpl implements AgentRunService {
         } else {
             agentFileService.attachPendingFilesToRun(userId, sessionId, run.getId(), fileIds);
         }
+        persistUserMessageAttachments(userMessage, userId, sessionId, run.getId());
 
         ModelConnectivityCheck connectivity = checkModelConnectivity(requestedModelConfigId);
         run.setModelConfigId(connectivity.config().id());
@@ -1028,6 +1029,26 @@ public class AgentRunServiceImpl implements AgentRunService {
         Long executeRunId = run.getId();
         runAfterCommit(() -> notifyAgentService(executeRunId, () -> agentServiceClient.executeRun(executeRunId)));
         return new CreateAgentMessageResponse(sessionId, userMessage.getId(), run.getId(), "RUNNING");
+    }
+
+    private void persistUserMessageAttachments(AgentMessage userMessage, Long userId, Long sessionId, Long runId) {
+        List<AgentFile> attachedFiles = agentFileMapper.findByRun(userId, sessionId, runId, FILE_CONTEXT_LIMIT);
+        if (attachedFiles.isEmpty()) {
+            return;
+        }
+        List<Map<String, Object>> attachments = attachedFiles.stream()
+                .map(file -> {
+                    Map<String, Object> item = new LinkedHashMap<>();
+                    item.put("id", file.getId());
+                    item.put("name", file.getOriginalFilename());
+                    item.put("contentType", file.getContentType());
+                    item.put("size", file.getFileSize());
+                    item.put("status", file.getStatus());
+                    return item;
+                })
+                .toList();
+        userMessage.setContentJson(toJson(Map.of("attachments", attachments)));
+        agentMessageMapper.updateById(userMessage);
     }
 
     private AgentContextSnapshot createContextSnapshot(AgentRun run,

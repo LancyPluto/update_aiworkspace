@@ -1,5 +1,7 @@
 package com.aiminilab.aitoolmarket.credit.controller;
 
+import com.aiminilab.aitoolmarket.admin.dto.BillingUsageLogResponse;
+import com.aiminilab.aitoolmarket.admin.service.BillingService;
 import com.aiminilab.aitoolmarket.auth.security.AuthContext;
 import com.aiminilab.aitoolmarket.common.dto.ApiResponse;
 import com.aiminilab.aitoolmarket.common.dto.PageResponse;
@@ -28,10 +30,14 @@ public class CreditController {
 
     private final CreditService creditService;
     private final CreditRechargeService creditRechargeService;
+    private final BillingService billingService;
 
-    public CreditController(CreditService creditService, CreditRechargeService creditRechargeService) {
+    public CreditController(CreditService creditService,
+                            CreditRechargeService creditRechargeService,
+                            BillingService billingService) {
         this.creditService = creditService;
         this.creditRechargeService = creditRechargeService;
+        this.billingService = billingService;
     }
 
     @GetMapping("/account")
@@ -44,6 +50,13 @@ public class CreditController {
                                                              @RequestParam(required = false) Integer pageNo,
                                                              @RequestParam(required = false) Integer pageSize) {
         return ApiResponse.success(creditService.logs(AuthContext.get().userId(), logType, pageNo, pageSize));
+    }
+
+    @GetMapping("/usage-logs")
+    public ApiResponse<PageResponse<BillingUsageLogResponse>> usageLogs(@RequestParam(required = false) Integer pageNo,
+                                                                        @RequestParam(required = false) Integer pageSize) {
+        return ApiResponse.success(billingService.logs(pageNo, pageSize, AuthContext.get().userId(), null,
+                null, null, null, null, null, null));
     }
 
     @GetMapping("/recharge-packages")

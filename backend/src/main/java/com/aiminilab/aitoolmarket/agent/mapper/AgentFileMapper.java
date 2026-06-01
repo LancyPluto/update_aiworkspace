@@ -48,13 +48,24 @@ public interface AgentFileMapper extends BaseMapper<AgentFile> {
                                    @Param("runId") Long runId,
                                    @Param("limit") int limit);
 
+    @Select("""
+            SELECT *
+            FROM agent_files
+            WHERE session_id = #{sessionId} AND user_id = #{userId} AND attached_run_id = #{runId}
+            ORDER BY id DESC
+            LIMIT #{limit}
+            """)
+    List<AgentFile> findByRun(@Param("userId") Long userId,
+                              @Param("sessionId") Long sessionId,
+                              @Param("runId") Long runId,
+                              @Param("limit") int limit);
+
     @Update("""
             UPDATE agent_files
             SET attached_run_id = #{runId}, updated_at = #{updatedAt}
             WHERE session_id = #{sessionId}
               AND user_id = #{userId}
               AND attached_run_id IS NULL
-              AND status = 'READY'
             """)
     int attachAllPendingFilesToRun(@Param("userId") Long userId,
                                    @Param("sessionId") Long sessionId,
@@ -68,7 +79,6 @@ public interface AgentFileMapper extends BaseMapper<AgentFile> {
               AND session_id = #{sessionId}
               AND user_id = #{userId}
               AND attached_run_id IS NULL
-              AND status = 'READY'
             """)
     int attachPendingFileToRun(@Param("userId") Long userId,
                                @Param("sessionId") Long sessionId,

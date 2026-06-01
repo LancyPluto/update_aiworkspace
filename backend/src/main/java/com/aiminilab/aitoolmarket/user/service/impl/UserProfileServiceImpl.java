@@ -1,16 +1,21 @@
 package com.aiminilab.aitoolmarket.user.service.impl;
 
+import com.aiminilab.aitoolmarket.auth.dto.SmsCodeResponse;
+import com.aiminilab.aitoolmarket.auth.service.SmsCodeService;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.config.AppProperties;
+import com.aiminilab.aitoolmarket.user.dto.CancelAccountRequest;
 import com.aiminilab.aitoolmarket.user.dto.CommunitySettingsRequest;
 import com.aiminilab.aitoolmarket.user.dto.UpdateUserProfileRequest;
 import com.aiminilab.aitoolmarket.user.dto.UserAvatarUploadResponse;
 import com.aiminilab.aitoolmarket.user.dto.UserProfileResponse;
 import com.aiminilab.aitoolmarket.user.entity.User;
+import com.aiminilab.aitoolmarket.user.mapper.AccountDataCleanupMapper;
 import com.aiminilab.aitoolmarket.user.mapper.UserMapper;
 import com.aiminilab.aitoolmarket.user.service.UserProfileService;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
@@ -31,13 +36,21 @@ public class UserProfileServiceImpl implements UserProfileService {
     private static final Set<String> AVATAR_CONTENT_TYPES = Set.of("image/jpeg", "image/png", "image/webp");
     private static final Set<String> AVATAR_EXTENSIONS = Set.of("jpg", "jpeg", "png", "webp");
     private static final DateTimeFormatter AVATAR_FILENAME_TIME = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
+    private static final String CANCEL_ACCOUNT_SMS_SCENE = "CANCEL_ACCOUNT";
 
     private final UserMapper userMapper;
     private final AppProperties appProperties;
+    private final SmsCodeService smsCodeService;
+    private final AccountDataCleanupMapper accountDataCleanupMapper;
 
-    public UserProfileServiceImpl(UserMapper userMapper, AppProperties appProperties) {
+    public UserProfileServiceImpl(UserMapper userMapper,
+                                  AppProperties appProperties,
+                                  SmsCodeService smsCodeService,
+                                  AccountDataCleanupMapper accountDataCleanupMapper) {
         this.userMapper = userMapper;
         this.appProperties = appProperties;
+        this.smsCodeService = smsCodeService;
+        this.accountDataCleanupMapper = accountDataCleanupMapper;
     }
 
     @Override
@@ -108,10 +121,67 @@ public class UserProfileServiceImpl implements UserProfileService {
         return UserProfileResponse.from(requireUser(userId));
     }
 
+    @Override
+    public SmsCodeResponse sendCancelAccountSmsCode(Long userId) {
+        User existing = requireUser(userId);
+        String phone = normalizePhone(existing.getPhone());
+        return smsCodeService.sendCode(phone, CANCEL_ACCOUNT_SMS_SCENE);
+    }
+
+    @Override
+    @Transactional
+    public void cancelAccount(Long userId, CancelAccountRequest request) {
+        User existing = requireUser(userId);
+        String phone = normalizePhone(existing.getPhone());
+        String smsCode = normalizeBlank(request == null ? null : request.smsCode());
+        if (smsCode == null) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "请输入短信验证码");
+        }
+        smsCodeService.verifyCode(phone, CANCEL_ACCOUNT_SMS_SCENE, smsCode);
+
+        accountDataCleanupMapper.deleteAgentFileChunks(userId);
+        accountDataCleanupMapper.deleteAgentFiles(userId);
+        accountDataCleanupMapper.deleteAgentPendingToolContext(userId);
+        accountDataCleanupMapper.deleteAgentToolCalls(userId);
+        accountDataCleanupMapper.deleteAgentRunEvents(userId);
+        accountDataCleanupMapper.deleteAgentContextSnapshots(userId);
+        accountDataCleanupMapper.deleteAgentMessages(userId);
+        accountDataCleanupMapper.deleteAgentRuns(userId);
+        accountDataCleanupMapper.deleteAgentWorkspaceMemoryItems(userId);
+        accountDataCleanupMapper.deleteAgentWorkspaceMembers(userId);
+        accountDataCleanupMapper.deleteAgentWorkspaces(userId);
+        accountDataCleanupMapper.deleteAgentToolPreferences(userId);
+        accountDataCleanupMapper.deleteMarketMessageAttachments(userId);
+        accountDataCleanupMapper.deleteMarketMessages(userId);
+        accountDataCleanupMapper.deleteMarketSessions(userId);
+        accountDataCleanupMapper.deleteMarketFiles(userId);
+
+        String suffix = userId + "_" + System.currentTimeMillis();
+        int updated = userMapper.cancelAccount(userId, "cancelled_" + suffix, "CANCELLED:" + UUID.randomUUID());
+        if (updated != 1) {
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "账号注销失败，请稍后再试");
+        }
+    }
+
     private User requireUser(Long userId) {
         return userMapper.findById(userId)
                 .filter(user -> user.getDeleted() == null || !user.getDeleted())
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "用户不存在"));
+    }
+
+    private String normalizePhone(String value) {
+        String phone = normalizeBlank(value);
+        if (phone == null || !phone.matches("^1\\d{10}$")) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "当前账号未绑定有效手机号，无法注销");
+        }
+        return phone;
+    }
+
+    private String normalizeBlank(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        return value.trim();
     }
 
     private String normalizeNickname(String value, String current, String fallback) {

@@ -1,5 +1,5 @@
 import { apiRequest } from "./client"
-import type { CreditAccount, PageResult, CreditLog, RechargeOrder, RechargePackage } from "./types"
+import type { BillingUsageLog, CreditAccount, PageResult, CreditLog, RechargeOrder, RechargePackage } from "./types"
 
 /** GET /api/v1/credits/account */
 export async function fetchCreditAccount(options?: { token?: string | null }): Promise<CreditAccount> {
@@ -12,6 +12,16 @@ export async function fetchCreditLogs(options?: {
   query?: Record<string, string | number | boolean | undefined>
 }): Promise<PageResult<CreditLog>> {
   return apiRequest<PageResult<CreditLog>>("GET", "/api/v1/credits/logs", {
+    token: options?.token,
+    query: options?.query,
+  })
+}
+
+export async function fetchCreditUsageLogs(options?: {
+  token?: string | null
+  query?: Record<string, string | number | boolean | undefined>
+}): Promise<PageResult<BillingUsageLog>> {
+  return apiRequest<PageResult<BillingUsageLog>>("GET", "/api/v1/credits/usage-logs", {
     token: options?.token,
     query: options?.query,
   })

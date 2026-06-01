@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue"
+import { computed, onMounted, ref } from "vue"
 import { ReceiptText, Wallet } from "lucide-vue-next"
 import AppShell from "@/components/AppShell.vue"
 import RechargeSection from "@/pages/Billing/RechargeSection.vue"
-import { fetchCreditAccount, fetchCreditLogs } from "@/api/creditApi"
-import type { CreditAccount, CreditLog } from "@/api/types"
+import { fetchCreditAccount, fetchCreditLogs, fetchCreditUsageLogs } from "@/api/creditApi"
+import type { BillingUsageLog, CreditAccount, CreditLog, PageResult } from "@/api/types"
 import { useAuthStore } from "@/store/authStore"
 import { sortCreditLogsByCreatedAtDesc } from "@/utils/creditLogSort"
 
@@ -12,18 +12,100 @@ const auth = useAuthStore()
 const loading = ref(false)
 const error = ref("")
 const account = ref<CreditAccount | null>(null)
-const logs = ref<CreditLog[]>([])
+type BillingRow = {
+  id: string
+  createdAt: string
+  type: string
+  reason: string
+  changeText: string
+  negative: boolean
+  balanceText: string
+}
+
+const logs = ref<BillingRow[]>([])
+const currentPage = ref(1)
+const pageSize = 20
+const pagedLogs = computed(() => logs.value.slice((currentPage.value - 1) * pageSize, currentPage.value * pageSize))
+const totalPages = computed(() => Math.max(1, Math.ceil(logs.value.length / pageSize)))
+
+function emptyUsageLogs(): PageResult<BillingUsageLog> {
+  return {
+    list: [],
+    total: 0,
+    pageNo: 1,
+    pageSize: 100,
+    hasNext: false,
+  }
+}
+
+function creditSourceKey(log: CreditLog) {
+  if (log.agentRunId != null) return `AGENT_RUN:${log.agentRunId}`
+  if (log.taskId != null) return `TASK:${log.taskId}`
+  return ""
+}
+
+function usageSourceKey(log: BillingUsageLog) {
+  return `${log.sourceType}:${log.sourceId}`
+}
+
+function usageTitle(log: BillingUsageLog) {
+  if (log.sourceType === "AGENT_RUN") return `Agent运行 #${log.sourceId}`
+  return log.taskNo || `任务 #${log.sourceId}`
+}
+
+function usageReason(log: BillingUsageLog) {
+  const model = log.modelName || log.provider || "模型调用"
+  const tokens = log.totalTokens > 0 ? `，${log.promptTokens.toLocaleString()} / ${log.completionTokens.toLocaleString()} tokens` : ""
+  const units = (log.billableUnits ?? 0) > 0 ? `，${log.billableUnits} 次` : ""
+  return `${model}${tokens}${units}`
+}
+
+function mergeBillingRows(creditLogs: CreditLog[], usageLogs: BillingUsageLog[]) {
+  const usageKeys = new Set(usageLogs.map(usageSourceKey))
+  const creditRows = creditLogs
+    .filter((log) => !(log.logType === "DEDUCT" && usageKeys.has(creditSourceKey(log))))
+    .filter((log) => log.amount !== 0)
+    .map((log): BillingRow => {
+      const negative = log.logType === "DEDUCT" || log.logType === "MANUAL_DEDUCT"
+      return {
+        id: `credit-${log.id}`,
+        createdAt: log.createdAt,
+        type: log.logType,
+        reason: log.reason || "-",
+        changeText: `${negative ? "-" : "+"}${log.amount}`,
+        negative,
+        balanceText: String(log.balanceAfter),
+      }
+    })
+  const usageRows = usageLogs
+    .filter((log) => log.chargedCredits !== 0)
+    .map((log): BillingRow => ({
+      id: `usage-${log.id}`,
+      createdAt: log.createdAt,
+      type: usageTitle(log),
+      reason: usageReason(log),
+      changeText: `-${log.chargedCredits}`,
+      negative: true,
+      balanceText: "-",
+    }))
+  return [...creditRows, ...usageRows].sort((a, b) => {
+    const diff = new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    return Number.isNaN(diff) || diff === 0 ? b.id.localeCompare(a.id) : diff
+  })
+}
 
 async function loadBilling() {
   loading.value = true
   error.value = ""
   try {
-    const [accountRes, logRes] = await Promise.all([
+    const [accountRes, creditLogRes, usageLogRes] = await Promise.all([
       fetchCreditAccount({ token: auth.token }),
-      fetchCreditLogs({ token: auth.token, query: { pageNo: 1, pageSize: 20 } }),
+      fetchCreditLogs({ token: auth.token, query: { pageNo: 1, pageSize: 100 } }),
+      fetchCreditUsageLogs({ token: auth.token, query: { pageNo: 1, pageSize: 100 } }).catch(emptyUsageLogs),
     ])
     account.value = accountRes
-    logs.value = sortCreditLogsByCreatedAtDesc(logRes.list)
+    logs.value = mergeBillingRows(sortCreditLogsByCreatedAtDesc(creditLogRes.list), usageLogRes.list)
+    currentPage.value = 1
     window.dispatchEvent(new CustomEvent("credits:updated", { detail: accountRes }))
   } catch (err) {
     error.value = err instanceof Error ? err.message : "加载算力数据失败"
@@ -83,20 +165,44 @@ onMounted(loadBilling)
               </tr>
             </thead>
             <tbody class="divide-y divide-border">
-              <tr v-for="log in logs" :key="log.id">
-                <td class="px-4 py-3 text-muted-foreground">{{ new Date(log.createdAt).toLocaleString() }}</td>
-                <td class="px-4 py-3">{{ log.logType }}</td>
+              <tr v-for="log in pagedLogs" :key="log.id">
+                <td class="px-4 py-3 text-muted-foreground">
+                  {{ new Date(log.createdAt).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false }) }}
+                </td>
+                <td class="px-4 py-3">{{ log.type }}</td>
                 <td class="px-4 py-3">{{ log.reason || "-" }}</td>
                 <td
                   class="px-4 py-3 text-right"
-                  :class="log.logType === 'DEDUCT' || log.logType === 'FREEZE' || log.logType === 'MANUAL_DEDUCT' ? 'text-destructive' : 'text-primary'"
+                  :class="log.negative ? 'text-destructive' : 'text-primary'"
                 >
-                  {{ log.logType === 'DEDUCT' || log.logType === 'FREEZE' || log.logType === 'MANUAL_DEDUCT' ? '-' : '+' }}{{ log.amount }}
+                  {{ log.changeText }}
                 </td>
-                <td class="px-4 py-3 text-right">{{ log.balanceAfter }}</td>
+                <td class="px-4 py-3 text-right">{{ log.balanceText }}</td>
               </tr>
             </tbody>
           </table>
+          <div v-if="logs.length > 0" class="flex items-center justify-between border-t border-border px-5 py-4 text-sm text-muted-foreground">
+            <span>共 {{ logs.length }} 条，每页 {{ pageSize }} 条</span>
+            <div class="flex items-center gap-2">
+              <button
+                type="button"
+                class="rounded-md border border-border px-3 py-1.5 transition-colors hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-50"
+                :disabled="currentPage <= 1"
+                @click="currentPage -= 1"
+              >
+                上一页
+              </button>
+              <span>{{ currentPage }} / {{ totalPages }}</span>
+              <button
+                type="button"
+                class="rounded-md border border-border px-3 py-1.5 transition-colors hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-50"
+                :disabled="currentPage >= totalPages"
+                @click="currentPage += 1"
+              >
+                下一页
+              </button>
+            </div>
+          </div>
           <div v-if="logs.length === 0" class="px-5 py-8 text-center text-sm text-muted-foreground">暂无算力流水</div>
         </div>
       </section>

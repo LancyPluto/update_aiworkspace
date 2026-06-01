@@ -25,9 +25,9 @@ defineProps<{
 .agent-avatar {
   display: grid;
   place-items: center;
-  border-radius: 15px;
-  border: 1px solid rgb(255 255 255 / 0.075);
-  background: rgb(255 255 255 / 0.045);
+  border-radius: 0;
+  border: 0;
+  background: transparent;
   flex-shrink: 0;
 }
 
@@ -39,7 +39,6 @@ defineProps<{
 .agent-avatar--sm {
   width: 34px;
   height: 34px;
-  border-radius: 12px;
 }
 
 .agent-avatar__logo {
@@ -79,11 +78,9 @@ defineProps<{
   0%,
   100% {
     box-shadow: 0 0 0 0 var(--agent-accent-soft, rgb(176 92 255 / 0.2));
-    border-color: rgb(255 255 255 / 0.075);
   }
   50% {
     box-shadow: 0 0 0 6px transparent;
-    border-color: var(--agent-accent-soft, rgb(176 92 255 / 0.35));
   }
 }
 
