@@ -26,6 +26,10 @@ export function restoreDefaultSetting(key: string) {
   return http.post<SettingsMap>(`/api/admin/v1/settings/${encodeURIComponent(key)}/restore-default`, {})
 }
 
+export function restoreAgentDefaults() {
+  return restoreDefaultSetting('agent')
+}
+
 export interface CustomerServiceQrUploadResult {
   url: string
   filename: string

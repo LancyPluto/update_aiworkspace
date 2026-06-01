@@ -153,6 +153,20 @@ class AgentRouterSettings(BaseModel):
     fallbackToRules: bool = True
 
 
+class RuntimeSettings(BaseModel):
+    maxModelCalls: int | None = None
+    maxToolCalls: int | None = None
+    maxHistoryMessages: int | None = None
+    toolExecutionTimeoutSeconds: int | None = None
+    imageToolExecutionTimeoutSeconds: int | None = None
+    videoToolExecutionTimeoutSeconds: int | None = None
+    toolPollIntervalSeconds: float | None = None
+    toolStreamRelayEnabled: bool | None = None
+    productToolLoopEnabled: bool | None = None
+    productToolLoopMaxCalls: int | None = None
+    productToolLoopFallbackToRouter: bool | None = None
+
+
 class RecentToolCallContext(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -204,6 +218,7 @@ class RunContext(BaseModel):
     deepAgentsSystemPrompt: str | None = None
     memorySettings: MemorySettings | None = None
     routerSettings: AgentRouterSettings | None = None
+    runtimeSettings: RuntimeSettings | None = None
     recentToolCalls: list[RecentToolCallContext] = Field(default_factory=list)
     pendingToolContext: PendingToolContext | None = Field(default=None, validation_alias=AliasChoices("pendingToolContext", "pending_tool_context"))
 

@@ -47,4 +47,11 @@ public final class AgentPromptSettings {
 
     private AgentPromptSettings() {
     }
+
+    public static java.util.Map<String, String> defaults() {
+        java.util.Map<String, String> defaults = new java.util.LinkedHashMap<>();
+        defaults.put(SYSTEM_PROMPT_KEY, DEFAULT_SYSTEM_PROMPT);
+        defaults.put(DEEP_AGENTS_SYSTEM_PROMPT_KEY, DEFAULT_DEEP_AGENTS_SYSTEM_PROMPT);
+        return defaults;
+    }
 }

@@ -9,6 +9,7 @@ import com.aiminilab.aitoolmarket.admin.service.SystemSettingService;
 import com.aiminilab.aitoolmarket.agent.config.AgentMemorySettings;
 import com.aiminilab.aitoolmarket.agent.config.AgentPromptSettings;
 import com.aiminilab.aitoolmarket.agent.config.AgentRouterSettings;
+import com.aiminilab.aitoolmarket.agent.config.AgentRuntimeSettings;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.config.AppProperties;
@@ -85,6 +86,14 @@ public class SystemSettingServiceImpl implements SystemSettingService {
     @Override
     @Transactional
     public Map<String, String> restoreDefault(String key, Long operatorId) {
+        if ("agent".equals(key) || "agent.*".equals(key)) {
+            Map<String, String> defaults = agentDefaults();
+            defaults.forEach((settingKey, value) -> {
+                systemSettingMapper.upsert(settingKey, value);
+                recordVersion(settingKey, value, operatorId);
+            });
+            return settings();
+        }
         String value = defaultValueFor(key);
         systemSettingMapper.upsert(key, value);
         recordVersion(key, value, operatorId);
@@ -171,39 +180,19 @@ public class SystemSettingServiceImpl implements SystemSettingService {
     }
 
     private String defaultValueFor(String key) {
-        if (AgentPromptSettings.SYSTEM_PROMPT_KEY.equals(key)) {
-            return AgentPromptSettings.DEFAULT_SYSTEM_PROMPT;
-        }
-        if (AgentPromptSettings.DEEP_AGENTS_SYSTEM_PROMPT_KEY.equals(key)) {
-            return AgentPromptSettings.DEFAULT_DEEP_AGENTS_SYSTEM_PROMPT;
-        }
-        if (AgentRouterSettings.ENABLED_KEY.equals(key)) {
-            return String.valueOf(AgentRouterSettings.DEFAULT_ENABLED);
-        }
-        if (AgentRouterSettings.PROMPT_KEY.equals(key)) {
-            return AgentRouterSettings.DEFAULT_PROMPT;
-        }
-        if (AgentRouterSettings.MIN_CONFIDENCE_KEY.equals(key)) {
-            return AgentRouterSettings.DEFAULT_MIN_CONFIDENCE;
-        }
-        if (AgentRouterSettings.FALLBACK_TO_RULES_KEY.equals(key)) {
-            return String.valueOf(AgentRouterSettings.DEFAULT_FALLBACK_TO_RULES);
-        }
-        if (AgentMemorySettings.AUTO_SAVE_ENABLED_KEY.equals(key)) {
-            return String.valueOf(AgentMemorySettings.DEFAULT_AUTO_SAVE_ENABLED);
-        }
-        if (AgentMemorySettings.RETRIEVAL_LIMIT_KEY.equals(key)) {
-            return String.valueOf(AgentMemorySettings.DEFAULT_RETRIEVAL_LIMIT);
-        }
-        if (AgentMemorySettings.ENABLED_TYPES_KEY.equals(key)) {
-            return AgentMemorySettings.DEFAULT_ENABLED_TYPES;
-        }
-        if (AgentMemorySettings.WRITE_PROMPT_KEY.equals(key)) {
-            return AgentMemorySettings.DEFAULT_WRITE_PROMPT;
-        }
-        if (AgentMemorySettings.RETRIEVAL_PROMPT_KEY.equals(key)) {
-            return AgentMemorySettings.DEFAULT_RETRIEVAL_PROMPT;
+        String value = agentDefaults().get(key);
+        if (value != null) {
+            return value;
         }
         throw new BusinessException(ErrorCode.PARAM_ERROR, "setting key has no default value");
+    }
+
+    private Map<String, String> agentDefaults() {
+        Map<String, String> defaults = new LinkedHashMap<>();
+        defaults.putAll(AgentPromptSettings.defaults());
+        defaults.putAll(AgentRouterSettings.defaults());
+        defaults.putAll(AgentMemorySettings.defaults());
+        defaults.putAll(AgentRuntimeSettings.defaults());
+        return defaults;
     }
 }

@@ -5,7 +5,9 @@ import re
 import time
 from typing import Any
 
+from app.clients.backend_client import BackendBusinessError
 from app.config import settings
+from app.credit_messages import credit_message_from_backend_error
 from app.core.event_types import MESSAGE_DELTA, TOOL_TASK_DISPATCHED, TOOL_TASK_PROGRESS
 from app.core.schemas import ChatMessage, RunContext, RunEventCreate, TaskCreate, TaskDetailResponse, ToolCallComplete, ToolCallCreate, ToolCallFail, ToolDescriptor
 from app.tools.registry import infer_output_modality
@@ -22,7 +24,7 @@ class ToolExecutionError(RuntimeError):
 
 
 class BackendToolBridge:
-    TERMINAL_TASK_STATUSES = {"SUCCESS", "FAILED", "CANCELLED"}
+    TERMINAL_TASK_STATUSES = {"SUCCESS", "FAILED", "TIMEOUT", "CANCELLED"}
     ABORTING_RUN_STATUSES = {"FAILED", "CANCELLED", "TIMEOUT"}
 
     def __init__(
@@ -188,6 +190,19 @@ class BackendToolBridge:
                 await self._cancel_task(context.userId, task.taskId)
             await self.backend.fail_tool_call(call.id, ToolCallFail(errorCode="TOOL_TASK_FAILED", errorMessage=str(exc)))
             raise
+        except BackendBusinessError as exc:
+            if task_id is not None:
+                await self._cancel_task(context.userId, task_id)
+            if exc.error_code in {"CREDIT_NOT_ENOUGH", "AGENT_CREDIT_NOT_ENOUGH"}:
+                message = credit_message_from_backend_error(exc, tool.toolCode)
+                await self.backend.fail_tool_call(
+                    call.id,
+                    ToolCallFail(errorCode=exc.error_code, errorMessage=message),
+                )
+                raise ToolExecutionError(message, error_code=exc.error_code) from exc
+            message = _format_tool_error(tool.toolCode, task_id, None, None, str(exc))
+            await self.backend.fail_tool_call(call.id, ToolCallFail(errorCode="TOOL_TASK_FAILED", errorMessage=message))
+            raise ToolExecutionError(message, error_code="TOOL_TASK_FAILED") from exc
         except Exception as exc:
             if task_id is not None:
                 await self._cancel_task(context.userId, task_id)
@@ -218,7 +233,8 @@ class BackendToolBridge:
         return await self.execute_with_args(context, tool, arguments)
 
     async def _wait_for_task(self, context: RunContext, tool_code: str, task_id: int):
-        deadline = time.monotonic() + self.timeout_seconds
+        timeout_seconds = self._timeout_for_tool(tool_code, context)
+        deadline = time.monotonic() + timeout_seconds
         last_status = ""
         last_detail = None
         stream_state: dict[str, int] = {"emitted_len": 0}
@@ -242,7 +258,7 @@ class BackendToolBridge:
                             },
                         ),
                     )
-            if settings.agent_tool_stream_relay_enabled:
+            if _runtime_bool(context, "toolStreamRelayEnabled", settings.agent_tool_stream_relay_enabled):
                 preview = extract_stream_preview(detail.progressMessage)
                 if preview:
                     await self._relay_task_stream_preview(context, preview, stream_state)
@@ -251,15 +267,38 @@ class BackendToolBridge:
             run_context = await self.backend.get_run_context(context.runId)
             if run_context.status in self.ABORTING_RUN_STATUSES:
                 raise ToolExecutionError(_format_run_abort(tool_code, task_id, run_context.status, last_detail))
-            await asyncio.sleep(self.poll_interval_seconds)
+            await asyncio.sleep(
+                _runtime_float(
+                    context,
+                    "toolPollIntervalSeconds",
+                    self.poll_interval_seconds,
+                    0.2,
+                    30.0,
+                )
+            )
         raise ToolExecutionError(_format_tool_error(
             tool_code,
             task_id,
             getattr(last_detail, "status", None),
             getattr(last_detail, "errorCode", None),
-            f"timed out after {self.timeout_seconds} seconds; lastProgress={getattr(last_detail, 'progress', None)}; "
+            f"timed out after {timeout_seconds} seconds; lastProgress={getattr(last_detail, 'progress', None)}; "
             f"lastMessage={getattr(last_detail, 'progressMessage', None) or ''}",
-        ))
+        ), error_code="TOOL_TASK_TIMEOUT")
+
+    def _timeout_for_tool(self, tool_code: str, context: RunContext | None = None) -> int:
+        configured_timeout = _runtime_int(context, "toolExecutionTimeoutSeconds", self.timeout_seconds, 1, 3600)
+        tool_text = (tool_code or "").lower()
+        if _looks_like_video_tool(tool_text):
+            return max(
+                configured_timeout,
+                _runtime_int(context, "videoToolExecutionTimeoutSeconds", settings.agent_video_tool_execution_timeout_seconds, 1, 7200),
+            )
+        if _looks_like_image_tool(tool_text):
+            return max(
+                configured_timeout,
+                _runtime_int(context, "imageToolExecutionTimeoutSeconds", settings.agent_image_tool_execution_timeout_seconds, 1, 3600),
+            )
+        return configured_timeout
 
     async def _cancel_task(self, user_id: int, task_id: int) -> None:
         try:
@@ -436,6 +475,44 @@ def _with_generation_argument_defaults(context: RunContext, tool: ToolDescriptor
         if default_value not in (None, ""):
             normalized[field.fieldKey] = default_value
     return normalized
+
+
+def _looks_like_image_tool(tool_code: str) -> bool:
+    return any(marker in tool_code for marker in ("image", "img", "photo", "picture", "gpt_image"))
+
+
+def _looks_like_video_tool(tool_code: str) -> bool:
+    return any(marker in tool_code for marker in ("video", "movie", "kling", "seedance"))
+
+
+def _runtime_int(context: RunContext | None, field: str, fallback: int, min_value: int, max_value: int) -> int:
+    runtime = getattr(context, "runtimeSettings", None)
+    value = getattr(runtime, field, None) if runtime is not None else None
+    if value is None:
+        value = fallback
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = int(fallback)
+    return max(min_value, min(parsed, max_value))
+
+
+def _runtime_bool(context: RunContext | None, field: str, fallback: bool) -> bool:
+    runtime = getattr(context, "runtimeSettings", None)
+    value = getattr(runtime, field, None) if runtime is not None else None
+    return fallback if value is None else bool(value)
+
+
+def _runtime_float(context: RunContext | None, field: str, fallback: float, min_value: float, max_value: float) -> float:
+    runtime = getattr(context, "runtimeSettings", None)
+    value = getattr(runtime, field, None) if runtime is not None else None
+    if value is None:
+        value = fallback
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        parsed = float(fallback)
+    return max(min_value, min(parsed, max_value))
 
 
 def _infer_prompt_field(tool: ToolDescriptor) -> str | None:

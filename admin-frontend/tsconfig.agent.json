@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "next-env.d.ts",
+    "app/settings/page.tsx",
+    "components/admin/agent-runtime-settings.tsx",
+    "components/admin/agent-memory-management.tsx",
+    "lib/api/agent-memory.ts",
+    "lib/api/settings.ts",
+    "lib/api/client.ts"
+  ]
+}

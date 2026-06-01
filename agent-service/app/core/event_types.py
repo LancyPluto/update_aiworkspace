@@ -1,4 +1,5 @@
 RUN_STARTED = "run.started"
+RUNTIME_SETTINGS_APPLIED = "runtime_settings.applied"
 INTENT_DETECTED = "intent.detected"
 ROUTER_STARTED = "router.started"
 ROUTER_CANDIDATES = "router.candidates"

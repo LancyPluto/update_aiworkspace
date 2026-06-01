@@ -34,6 +34,81 @@ public interface AgentWorkspaceMemoryItemMapper extends BaseMapper<AgentWorkspac
     List<AgentWorkspaceMemoryItem> findActiveByWorkspaceId(@Param("workspaceId") Long workspaceId);
 
     @Select("""
+            <script>
+            SELECT *
+            FROM agent_workspace_memory_items
+            WHERE 1 = 1
+            <if test="userId != null">
+              AND user_id = #{userId}
+            </if>
+            <if test="workspaceId != null">
+              AND workspace_id = #{workspaceId}
+            </if>
+            <if test="status != null and status != ''">
+              AND status = #{status}
+            </if>
+            <if test="memoryType != null and memoryType != ''">
+              AND memory_type = #{memoryType}
+            </if>
+            <if test="keyword != null and keyword != ''">
+              AND (LOWER(title) LIKE CONCAT('%', LOWER(#{keyword}), '%')
+                   OR LOWER(content) LIKE CONCAT('%', LOWER(#{keyword}), '%'))
+            </if>
+            ORDER BY CASE status WHEN 'CANDIDATE' THEN 0 WHEN 'ACTIVE' THEN 1 ELSE 2 END,
+                     pinned DESC, importance DESC, updated_at DESC, id DESC
+            LIMIT #{limit} OFFSET #{offset}
+            </script>
+            """)
+    List<AgentWorkspaceMemoryItem> adminSearch(
+            @Param("userId") Long userId,
+            @Param("workspaceId") Long workspaceId,
+            @Param("status") String status,
+            @Param("memoryType") String memoryType,
+            @Param("keyword") String keyword,
+            @Param("limit") int limit,
+            @Param("offset") int offset
+    );
+
+    @Select("""
+            <script>
+            SELECT COUNT(*)
+            FROM agent_workspace_memory_items
+            WHERE 1 = 1
+            <if test="userId != null">
+              AND user_id = #{userId}
+            </if>
+            <if test="workspaceId != null">
+              AND workspace_id = #{workspaceId}
+            </if>
+            <if test="status != null and status != ''">
+              AND status = #{status}
+            </if>
+            <if test="memoryType != null and memoryType != ''">
+              AND memory_type = #{memoryType}
+            </if>
+            <if test="keyword != null and keyword != ''">
+              AND (LOWER(title) LIKE CONCAT('%', LOWER(#{keyword}), '%')
+                   OR LOWER(content) LIKE CONCAT('%', LOWER(#{keyword}), '%'))
+            </if>
+            </script>
+            """)
+    long adminCount(
+            @Param("userId") Long userId,
+            @Param("workspaceId") Long workspaceId,
+            @Param("status") String status,
+            @Param("memoryType") String memoryType,
+            @Param("keyword") String keyword
+    );
+
+    @Select("""
+            SELECT *
+            FROM agent_workspace_memory_items
+            WHERE id = #{memoryId}
+            LIMIT 1
+            """)
+    AgentWorkspaceMemoryItem findAnyById(@Param("memoryId") Long memoryId);
+
+    @Select("""
             SELECT *
             FROM agent_workspace_memory_items
             WHERE id = #{memoryId}
@@ -63,6 +138,23 @@ public interface AgentWorkspaceMemoryItemMapper extends BaseMapper<AgentWorkspac
 
     @Update("""
             UPDATE agent_workspace_memory_items
+            SET memory_type = #{item.memoryType},
+                title = #{item.title},
+                content = #{item.content},
+                importance = #{item.importance},
+                confidence = #{item.confidence},
+                pinned = #{item.pinned},
+                tags_json = #{item.tagsJson},
+                metadata_json = #{item.metadataJson},
+                expires_at = #{item.expiresAt},
+                status = #{item.status},
+                updated_at = #{item.updatedAt}
+            WHERE id = #{item.id}
+            """)
+    int adminUpdateMemory(@Param("item") AgentWorkspaceMemoryItem item);
+
+    @Update("""
+            UPDATE agent_workspace_memory_items
             SET status = 'DELETED',
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = #{memoryId}
@@ -70,6 +162,14 @@ public interface AgentWorkspaceMemoryItemMapper extends BaseMapper<AgentWorkspac
               AND status = 'ACTIVE'
             """)
     int softDelete(@Param("workspaceId") Long workspaceId, @Param("memoryId") Long memoryId);
+
+    @Update("""
+            UPDATE agent_workspace_memory_items
+            SET status = #{status},
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{memoryId}
+            """)
+    int adminUpdateStatus(@Param("memoryId") Long memoryId, @Param("status") String status);
 
     @Select("""
             SELECT id, workspace_id, source_run_id, title, content, memory_type, status,

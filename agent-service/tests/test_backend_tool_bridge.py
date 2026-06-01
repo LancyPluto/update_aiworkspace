@@ -104,6 +104,14 @@ def test_defaultable_execution_required_field_does_not_trigger_clarification():
     assert bridge.build_arguments(ctx, tool)["aspectRatio"] == "3:4"
 
 
+def test_generation_tool_timeout_uses_modality_specific_floor():
+    bridge = BackendToolBridge(backend_client=None, timeout_seconds=120)  # type: ignore[arg-type]
+
+    assert bridge._timeout_for_tool("ofox_gpt_image2") == 600
+    assert bridge._timeout_for_tool("kling_image_to_video") == 900
+    assert bridge._timeout_for_tool("xiaohongshu_copywriting") == 120
+
+
 def test_generation_prompt_field_is_derived_from_short_user_request():
     bridge = BackendToolBridge(backend_client=None)  # type: ignore[arg-type]
     tool = ToolDescriptor(
@@ -339,6 +347,28 @@ async def test_wait_for_task_reports_task_failure_before_run_abort():
     detail = await bridge._wait_for_task(context, "ofox_gpt_image2", 84)
 
     assert detail.status == "FAILED"
+    assert detail.errorCode == "MODEL_TIMEOUT"
+
+
+@pytest.mark.asyncio
+async def test_wait_for_task_returns_timeout_task_as_terminal():
+    class Backend:
+        async def get_task_detail(self, user_id: int, task_id: int) -> TaskDetailResponse:
+            return TaskDetailResponse(
+                taskId=task_id,
+                status="TIMEOUT",
+                progress=100,
+                progressMessage="model timed out",
+                errorCode="MODEL_TIMEOUT",
+                errorMessage="model timed out",
+            )
+
+    bridge = BackendToolBridge(backend_client=Backend(), timeout_seconds=1, poll_interval_seconds=0.01)  # type: ignore[arg-type]
+    context = RunContext(runId=70, sessionId=1, userId=1, message="generate image", status="RUNNING")
+
+    detail = await bridge._wait_for_task(context, "ofox_gpt_image2", 84)
+
+    assert detail.status == "TIMEOUT"
     assert detail.errorCode == "MODEL_TIMEOUT"
 
 

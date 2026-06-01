@@ -117,6 +117,7 @@ public class AdminAgentToolAccessController {
                         parseDoubleSetting(settings.get(AgentRouterSettings.MIN_CONFIDENCE_KEY), 0.7D, 0D, 1D),
                         parseBooleanSetting(settings.get(AgentRouterSettings.FALLBACK_TO_RULES_KEY), AgentRouterSettings.DEFAULT_FALLBACK_TO_RULES)
                 ),
+                null,
                 List.of(),
                 null
         );
