@@ -618,6 +618,9 @@ async function submitMessage(content = input.value) {
       editedAt: null,
       createdAt: new Date().toISOString(),
     })
+    // 发送后立即滚动到底部，避免用户输入后仍停留在当前视图。
+    // 流式过程中若仍处于贴底状态，也会在 messages 更新时继续保持贴底。
+    await scrollBottom(true)
     events.value = []
     const res = await sendAgentMessage(
       props.sessionId,
@@ -1425,7 +1428,14 @@ watch(input, () => {
 })
 
 watch(messages, () => {
-  void nextTick(() => scheduleNavLayoutUpdate())
+  void nextTick(() => {
+    scheduleNavLayoutUpdate()
+    // 对话在流式生成时会不断更新 messages（包括同一条 assistant 消息内容增长）。
+    // 若用户当前仍在贴底范围，则持续保持滚动到底部。
+    if (stickToBottom.value && (sending.value || hasActiveRun.value || runConnectionStatus.value === "running")) {
+      void scrollBottom()
+    }
+  })
 })
 
 watch(
