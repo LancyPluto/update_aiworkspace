@@ -86,6 +86,8 @@ const emit = defineEmits<{
 const messages = ref<AgentMessage[]>([])
 const files = ref<AgentFile[]>([])
 const events = ref<AgentRunEvent[]>([])
+const runEventsByRunId = ref<Record<number, AgentRunEvent[]>>({})
+const submittedAttachmentJsonByRunId = ref<Record<number, string>>({})
 const previewTools = ref<ToolSummary[]>([])
 const previewAsset = ref<AssetPreviewItem | null>(null)
 const memoryPanelOpen = ref(false)
@@ -155,8 +157,6 @@ const confirmationEvents = computed(() =>
     .filter((event) => !dismissedConfirmationIds.value.has(event.id))
     .map((event) => ({ event, payload: parseEventJson(event.eventJson) })),
 )
-
-const activeToolProcessEvents = computed(() => filterToolProcessEvents(events.value))
 
 const runStatusText = computed(() => {
   if (runConnectionStatus.value === "running") return "Agent 正在运行"
@@ -278,10 +278,9 @@ function messageContentJsonForFiles(items: AgentFile[]) {
 
 function runEventsForMessage(message: AgentMessage) {
   if (message.role !== "ASSISTANT" || message.runId == null) return []
-  if (activeRunId.value === message.runId || events.value.some((event) => event.runId === message.runId)) {
-    return activeToolProcessEvents.value
-  }
-  return []
+  const cachedEvents = runEventsByRunId.value[message.runId] ?? []
+  if (cachedEvents.length > 0) return filterToolProcessEvents(cachedEvents)
+  return activeRunId.value === message.runId ? filterToolProcessEvents(events.value) : []
 }
 
 function messageDividerTime(value?: string | null) {
@@ -631,13 +630,15 @@ async function submitMessage(content = input.value) {
   try {
     input.value = ""
     const submittedFiles = [...files.value]
+    const submittedAttachmentJson = messageContentJsonForFiles(submittedFiles)
+    const optimisticMessageId = Date.now()
     files.value = []
     messages.value.push({
-      id: Date.now(),
+      id: optimisticMessageId,
       sessionId: props.sessionId,
       role: "USER",
       contentText: text,
-      contentJson: messageContentJsonForFiles(submittedFiles),
+      contentJson: submittedAttachmentJson,
       editedAt: null,
       createdAt: new Date().toISOString(),
     })
@@ -653,6 +654,17 @@ async function submitMessage(content = input.value) {
       { token: props.token },
     )
     activeRunId.value = res.runId
+    if (submittedAttachmentJson) {
+      submittedAttachmentJsonByRunId.value = {
+        ...submittedAttachmentJsonByRunId.value,
+        [res.runId]: submittedAttachmentJson,
+      }
+    }
+    messages.value = messages.value.map((message) =>
+      message.id === optimisticMessageId
+        ? { ...message, id: res.messageId, runId: res.runId }
+        : message,
+    )
     await waitForRunComplete(res.runId)
   } catch (error) {
     await loadFiles()
@@ -1025,7 +1037,8 @@ function completeStreamingAssistantMessage(runId: number, content: string) {
 
 async function syncRunEvents(runId: number, options?: { replayRenderableEvents?: boolean }) {
   if (!props.token) return
-  const afterEventId = events.value.length ? events.value.at(-1)!.id : undefined
+  const cachedEvents = runEventsByRunId.value[runId] ?? []
+  const afterEventId = cachedEvents.length ? cachedEvents.at(-1)!.id : undefined
   const res = await fetchAgentRunEvents(runId, { token: props.token, afterEventId })
   res.list.forEach((event) => {
     if (options?.replayRenderableEvents) {
@@ -1221,18 +1234,31 @@ async function refreshMessages(options?: { preserveStreamingRunId?: number }) {
   if (!props.token) return
   const preserved = options?.preserveStreamingRunId != null ? streamingMessageForRun(options.preserveStreamingRunId) : undefined
   const messageRes = await fetchAgentMessages(props.sessionId, { token: props.token })
+  const mergedMessages = messageRes.list.map((message) => {
+    if (message.role !== "USER" || message.runId == null || message.contentJson) return message
+    const cachedJson = submittedAttachmentJsonByRunId.value[message.runId]
+    return cachedJson ? { ...message, contentJson: cachedJson } : message
+  })
   if (
     preserved?.contentText?.trim() &&
     !isStructuredMediaContent(preserved.contentText) &&
-    !messageRes.list.some((message) => message.runId === preserved.runId && message.role === "ASSISTANT")
+    !mergedMessages.some((message) => message.runId === preserved.runId && message.role === "ASSISTANT")
   ) {
-    messages.value = [...messageRes.list, preserved]
+    messages.value = [...mergedMessages, preserved]
     return
   }
-  messages.value = messageRes.list
+  messages.value = mergedMessages
 }
 
 function appendRunEvent(event: AgentRunEvent) {
+  const cached = runEventsByRunId.value[event.runId] ?? []
+  const alreadyCached = cached.some((item) => item.id === event.id)
+  if (!alreadyCached) {
+    runEventsByRunId.value = {
+      ...runEventsByRunId.value,
+      [event.runId]: [...cached, event],
+    }
+  }
   if (events.value.some((item) => item.id === event.id)) return
   events.value.push(event)
   if (event.eventType === "run.started") {
@@ -1540,21 +1566,20 @@ defineExpose({
         </template>
 
         <article v-if="showGenerationLoading" class="agent-message assistant generating-message">
-          <AgentAvatar state="thinking" />
-          <div class="bubble generating-bubble">
-            <div class="generating-orbit">
-              <Sparkles class="h-4 w-4" />
-            </div>
-            <div class="generating-copy">
-              <p>模型生成中</p>
-              <span v-if="selectedAgentModel">{{ modelLabel(selectedAgentModel) }} · {{ selectedAgentModel.modelName }}</span>
-              <span v-else>正在准备 Agent 模型</span>
-            </div>
-            <div class="typing-dots" aria-hidden="true">
+          <div class="thinking-avatar-stack">
+            <AgentAvatar state="thinking" />
+            <div class="typing-dots typing-dots--under-avatar" aria-hidden="true">
               <i></i>
               <i></i>
               <i></i>
             </div>
+          </div>
+          <div class="generating-inline">
+            <div class="assistant-name-row">
+              <strong>科创点AI</strong>
+            </div>
+            <span v-if="selectedAgentModel">{{ modelLabel(selectedAgentModel) }} · {{ selectedAgentModel.modelName }}</span>
+            <span v-else>正在准备 Agent 模型</span>
           </div>
         </article>
 
@@ -1833,8 +1858,8 @@ defineExpose({
 
 .chat-floating-actions {
   position: absolute;
-  right: max(20px, calc((100% - min(760px, calc(100% - 96px))) / 2 + 8px));
-  bottom: 118px;
+  right: max(14px, calc((100% - min(760px, calc(100% - 96px))) / 2 - 52px));
+  bottom: 38px;
   z-index: 5;
   display: flex;
   flex-direction: column;
@@ -2416,38 +2441,33 @@ defineExpose({
   animation: message-rise 0.18s ease-out;
 }
 
-.generating-bubble {
-  display: inline-flex;
-  align-items: center;
-  gap: 12px;
-  border-color: var(--agent-accent-soft);
-  background: linear-gradient(180deg, var(--agent-accent-soft), rgb(255 255 255 / 0.045));
-  box-shadow: 0 18px 56px var(--agent-accent-glow), 0 16px 40px rgb(0 0 0 / 0.34);
-  animation: breathe-panel 2.2s ease-in-out infinite;
-}
-
-.generating-orbit {
-  width: 34px;
-  height: 34px;
+.thinking-avatar-stack {
   display: grid;
-  place-items: center;
-  border-radius: 12px;
-  border: 1px solid var(--agent-accent-soft);
-  color: var(--agent-accent);
-  animation: pulse-ring 1.4s ease-in-out infinite;
+  justify-items: center;
+  gap: 7px;
 }
 
-.generating-copy {
+.generating-inline {
   min-width: 0;
+  padding-top: 2px;
 }
 
-.generating-copy p {
+.assistant-name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+  margin-bottom: 6px;
+}
+
+.assistant-name-row strong {
   margin: 0;
-  color: #fff;
+  color: var(--agent-text-primary);
+  font-size: 14px;
   font-weight: 700;
 }
 
-.generating-copy span {
+.generating-inline span {
   display: block;
   max-width: min(420px, 52vw);
   overflow: hidden;
@@ -2469,6 +2489,12 @@ defineExpose({
   border-radius: 999px;
   background: rgb(210 170 255);
   animation: typing-dot 1s ease-in-out infinite;
+}
+
+.typing-dots--under-avatar i {
+  width: 4px;
+  height: 4px;
+  background: var(--agent-accent);
 }
 
 .typing-dots i:nth-child(2) {
@@ -2830,8 +2856,8 @@ defineExpose({
 
 @media (max-width: 900px) {
   .chat-floating-actions {
-    right: 16px;
-    bottom: 108px;
+    right: 12px;
+    bottom: 94px;
   }
   .message-container {
     padding: 36px 14px 24px;

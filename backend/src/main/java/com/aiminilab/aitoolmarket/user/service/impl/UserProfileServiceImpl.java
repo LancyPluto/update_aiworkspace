@@ -5,8 +5,6 @@ import com.aiminilab.aitoolmarket.auth.service.SmsCodeService;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.config.AppProperties;
-import com.aiminilab.aitoolmarket.credit.entity.CreditAccount;
-import com.aiminilab.aitoolmarket.credit.mapper.CreditMapper;
 import com.aiminilab.aitoolmarket.user.dto.CancelAccountRequest;
 import com.aiminilab.aitoolmarket.user.dto.CommunitySettingsRequest;
 import com.aiminilab.aitoolmarket.user.dto.UpdateUserProfileRequest;
@@ -43,18 +41,15 @@ public class UserProfileServiceImpl implements UserProfileService {
     private final UserMapper userMapper;
     private final AppProperties appProperties;
     private final SmsCodeService smsCodeService;
-    private final CreditMapper creditMapper;
     private final AccountDataCleanupMapper accountDataCleanupMapper;
 
     public UserProfileServiceImpl(UserMapper userMapper,
                                   AppProperties appProperties,
                                   SmsCodeService smsCodeService,
-                                  CreditMapper creditMapper,
                                   AccountDataCleanupMapper accountDataCleanupMapper) {
         this.userMapper = userMapper;
         this.appProperties = appProperties;
         this.smsCodeService = smsCodeService;
-        this.creditMapper = creditMapper;
         this.accountDataCleanupMapper = accountDataCleanupMapper;
     }
 
@@ -142,7 +137,6 @@ public class UserProfileServiceImpl implements UserProfileService {
         if (smsCode == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "请输入短信验证码");
         }
-        assertCreditBalanceCleared(userId);
         smsCodeService.verifyCode(phone, CANCEL_ACCOUNT_SMS_SCENE, smsCode);
 
         accountDataCleanupMapper.deleteAgentFileChunks(userId);
@@ -173,18 +167,6 @@ public class UserProfileServiceImpl implements UserProfileService {
         return userMapper.findById(userId)
                 .filter(user -> user.getDeleted() == null || !user.getDeleted())
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "用户不存在"));
-    }
-
-    private void assertCreditBalanceCleared(Long userId) {
-        CreditAccount account = creditMapper.findByUserId(userId).orElse(null);
-        if (account == null) {
-            return;
-        }
-        int balance = account.getBalance() == null ? 0 : account.getBalance();
-        int frozen = account.getFrozen() == null ? 0 : account.getFrozen();
-        if (balance != 0 || frozen != 0) {
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "注销前请先清空余额并处理冻结算力");
-        }
     }
 
     private String normalizePhone(String value) {

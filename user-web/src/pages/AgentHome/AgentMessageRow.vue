@@ -4,7 +4,6 @@ import { Check, Copy, FileText, Image, Loader2, Pencil, RefreshCw, X } from "luc
 import ChatMessage from "./ChatMessage.vue"
 import AgentAvatar from "./AgentAvatar.vue"
 import RunTimeline from "./RunTimeline.vue"
-import UserAvatar from "@/components/UserAvatar.vue"
 import type { AgentAvatarState } from "./AgentAvatar.vue"
 import type { AgentMessage, AgentRunEvent } from "@/api/types"
 import type { AssetPreviewItem } from "@/types/assetPreview"
@@ -98,12 +97,13 @@ function isImageAttachment(file: MessageAttachment) {
     <div v-if="message.role !== 'USER'" class="avatar-slot">
       <AgentAvatar :state="avatarState ?? 'idle'" />
     </div>
-    <div v-else class="avatar-slot avatar-slot--user">
-      <UserAvatar :src="userAvatarUrl" :name="userDisplayName" size="sm" />
-    </div>
 
     <div class="message-main">
-      <span class="message-time">{{ messageTime(message.createdAt) }}</span>
+      <div v-if="message.role !== 'USER'" class="assistant-name-row">
+        <strong>科创点AI</strong>
+        <span class="message-time-inline">{{ messageTime(message.createdAt) }}</span>
+      </div>
+      <span v-else class="message-time">{{ messageTime(message.createdAt) }}</span>
       <div class="bubble" :class="{ 'bubble--streaming': isStreaming }">
         <div v-if="editingMessageId === message.id" class="message-edit-box">
           <textarea
@@ -140,18 +140,6 @@ function isImageAttachment(file: MessageAttachment) {
           </div>
         </div>
         <template v-else>
-          <RunTimeline
-            v-if="message.role === 'ASSISTANT' && runEvents.length > 0"
-            :events="runEvents"
-            :inline-mode="true"
-            :process-mode="true"
-          />
-          <ChatMessage
-            :message="message.contentText"
-            :is-user="message.role === 'USER'"
-            :streaming="message.id === streamingMessageId && hasActiveRun"
-            @preview="emit('preview', $event)"
-          />
           <div v-if="message.role === 'USER' && attachments.length" class="message-attachments">
             <article v-for="file in attachments" :key="file.id" class="message-attachment-card">
               <span class="attachment-icon">
@@ -164,6 +152,19 @@ function isImageAttachment(file: MessageAttachment) {
               </span>
             </article>
           </div>
+          <RunTimeline
+            v-if="message.role === 'ASSISTANT' && runEvents.length > 0"
+            :events="runEvents"
+            :inline-mode="true"
+            :process-mode="true"
+          />
+          <ChatMessage
+            v-if="message.contentText.trim() || message.role !== 'USER'"
+            :message="message.contentText"
+            :is-user="message.role === 'USER'"
+            :streaming="message.id === streamingMessageId && hasActiveRun"
+            @preview="emit('preview', $event)"
+          />
         </template>
       </div>
       <div class="message-actions" :class="{ 'message-actions--user': message.role === 'USER' }">
@@ -228,13 +229,8 @@ function isImageAttachment(file: MessageAttachment) {
 }
 
 .agent-message-row.user {
-  grid-template-columns: minmax(0, 650px) 42px;
+  grid-template-columns: minmax(0, 650px);
   justify-content: end;
-}
-
-.agent-message-row.user .avatar-slot {
-  grid-column: 2;
-  grid-row: 1;
 }
 
 .message-main {
@@ -247,6 +243,25 @@ function isImageAttachment(file: MessageAttachment) {
 .agent-message-row.user .message-main {
   grid-column: 1;
   justify-self: end;
+}
+
+.assistant-name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+  margin-bottom: 6px;
+}
+
+.assistant-name-row strong {
+  color: var(--agent-text-primary);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.message-time-inline {
+  color: rgb(255 255 255 / 0.32);
+  font-size: 11px;
 }
 
 .message-time {
@@ -279,16 +294,14 @@ function isImageAttachment(file: MessageAttachment) {
 .bubble {
   width: fit-content;
   max-width: 100%;
-  border: 1px solid var(--agent-surface-border);
-  border-radius: 10px 24px 24px 24px;
-  background:
-    radial-gradient(circle at 8% 0%, var(--agent-bubble-assistant-tint), transparent 34%),
-    var(--agent-surface);
-  padding: 16px 18px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
   line-height: 1.75;
   color: var(--agent-text-primary);
-  box-shadow: 0 18px 44px rgb(0 0 0 / 0.16), inset 0 1px 0 rgb(255 255 255 / 0.035);
-  backdrop-filter: blur(10px);
+  box-shadow: none;
+  backdrop-filter: none;
   position: relative;
   overflow: hidden;
 }
@@ -358,11 +371,18 @@ function isImageAttachment(file: MessageAttachment) {
 }
 
 .agent-message-row.user .bubble {
-  border-color: rgb(255 255 255 / 0.09);
-  background:
-    radial-gradient(circle at 18% 10%, var(--agent-bubble-user-tint), transparent 42%),
-    rgb(255 255 255 / 0.055);
-  border-radius: 24px 10px 24px 24px;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  background: rgb(255 255 255 / 0.06);
+  border-radius: 16px 6px 16px 16px;
+  padding: 10px 13px;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.04);
+}
+
+.agent-message-row.assistant .bubble:has(.agent-result-renderer) {
+  width: min(820px, 100%);
+  border-radius: 12px;
+  padding: 8px;
+  background: rgb(255 255 255 / 0.025);
 }
 
 .message-actions {
@@ -476,7 +496,7 @@ function isImageAttachment(file: MessageAttachment) {
     margin: 20px auto;
   }
   .agent-message-row.user {
-    grid-template-columns: minmax(0, 1fr) 34px;
+    grid-template-columns: minmax(0, 1fr);
   }
   .message-actions {
     opacity: 1;

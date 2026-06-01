@@ -23,7 +23,9 @@ async function loadBilling() {
       fetchCreditLogs({ token: auth.token, query: { pageNo: 1, pageSize: 20 } }),
     ])
     account.value = accountRes
-    logs.value = sortCreditLogsByCreatedAtDesc(logRes.list)
+    logs.value = sortCreditLogsByCreatedAtDesc(
+      logRes.list.filter((log) => log.logType !== "FREEZE" && log.logType !== "RELEASE"),
+    )
     window.dispatchEvent(new CustomEvent("credits:updated", { detail: accountRes }))
   } catch (err) {
     error.value = err instanceof Error ? err.message : "加载算力数据失败"

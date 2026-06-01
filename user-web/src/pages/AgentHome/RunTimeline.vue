@@ -14,18 +14,35 @@ type TimelineTone = "info" | "success" | "warning" | "error"
 
 const expandedEventIds = ref<Set<number>>(new Set())
 
-const processExpanded = ref(false)
+const processExpanded = ref(true)
+const processEvents = computed(() =>
+  props.processMode ? filterToolProcessEvents(props.events) : filterUserFacingRunEvents(props.events, props.inlineMode),
+)
 const visibleEvents = computed(() =>
-  (props.processMode ? filterToolProcessEvents(props.events) : filterUserFacingRunEvents(props.events, props.inlineMode)).slice(-14),
+  processEvents.value.slice(-14),
 )
 const latestEvent = computed(() => visibleEvents.value.at(-1) ?? null)
-const hasRunningTool = computed(() =>
-  visibleEvents.value.some((event) =>
-    event.eventType === "tool.started" ||
-    event.eventType === "tool.task_dispatched" ||
-    event.eventType === "tool.task_progress",
-  ) && !visibleEvents.value.some((event) => event.eventType === "tool.finished"),
+const processFinishedEvent = computed(() =>
+  [...processEvents.value].reverse().find((event) => event.eventType === "tool.finished") ?? null,
 )
+const hasRunningTool = computed(() => {
+  const lastEvent = latestEvent.value
+  return Boolean(lastEvent && lastEvent.eventType !== "tool.finished")
+})
+const processElapsedSeconds = computed(() => {
+  const startedAt = processEvents.value[0]?.createdAt
+  const endedAt = processFinishedEvent.value?.createdAt ?? latestEvent.value?.createdAt
+  if (!startedAt || !endedAt) return null
+  const start = new Date(startedAt).getTime()
+  const end = new Date(endedAt).getTime()
+  if (Number.isNaN(start) || Number.isNaN(end) || end < start) return null
+  return Math.max(1, Math.round((end - start) / 1000))
+})
+const processSummaryText = computed(() => {
+  if (!processFinishedEvent.value) return "调用中"
+  const elapsed = processElapsedSeconds.value
+  return elapsed == null ? "调用结束" : `调用结束（用时 ${elapsed} 秒）`
+})
 
 function parseEventJson(value?: string | null | Record<string, unknown>) {
   if (value == null || value === "") return {} as Record<string, unknown>
@@ -175,7 +192,7 @@ function toggleExpanded(eventId: number) {
         <Hammer v-else class="h-3.5 w-3.5" />
       </span>
       <span>
-        <strong>工具调用过程</strong>
+        <strong>{{ processSummaryText }}</strong>
         <small>{{ latestEvent ? titleFor(latestEvent) : "等待工具事件" }}</small>
       </span>
       <ChevronDown class="h-4 w-4 process-chevron" :class="{ open: processExpanded }" />

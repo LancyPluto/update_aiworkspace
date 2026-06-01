@@ -1032,7 +1032,7 @@ public class AgentRunServiceImpl implements AgentRunService {
     }
 
     private void persistUserMessageAttachments(AgentMessage userMessage, Long userId, Long sessionId, Long runId) {
-        List<AgentFile> attachedFiles = agentFileMapper.findReadyByRun(userId, sessionId, runId, FILE_CONTEXT_LIMIT);
+        List<AgentFile> attachedFiles = agentFileMapper.findByRun(userId, sessionId, runId, FILE_CONTEXT_LIMIT);
         if (attachedFiles.isEmpty()) {
             return;
         }

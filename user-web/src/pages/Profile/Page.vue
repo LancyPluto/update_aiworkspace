@@ -39,10 +39,9 @@ const displayName = computed(() => auth.user?.nickname || auth.user?.username ||
 const joinedLabel = computed(() => `UID ${auth.user?.id ?? "--"}`)
 const accountLabel = computed(() => auth.user?.phone || auth.user?.email || auth.user?.username || "--")
 const publicProfileUrl = computed(() => (auth.user?.id ? `/u/${auth.user.id}` : "/profile"))
-const canCancelByBalance = computed(() => (credit.value?.balance ?? 0) === 0 && (credit.value?.frozen ?? 0) === 0)
 const cancelConfirmPhrase = computed(() => `确认注销我的账号`)
 const canSubmitCancel = computed(
-  () => canCancelByBalance.value && cancelSmsCode.value.trim().length >= 4 && cancelConfirmText.value.trim() === cancelConfirmPhrase.value,
+  () => cancelSmsCode.value.trim().length >= 4 && cancelConfirmText.value.trim() === cancelConfirmPhrase.value,
 )
 const maskedPhone = computed(() => {
   const phone = auth.user?.phone || ""
@@ -154,10 +153,6 @@ async function requestCancelSmsCode() {
 
 async function submitCancelAccount() {
   if (!auth.token) return
-  if (!canCancelByBalance.value) {
-    error.value = "注销前请先清空余额并处理冻结算力"
-    return
-  }
   if (cancelConfirmText.value.trim() !== cancelConfirmPhrase.value) {
     error.value = `请在确认框输入“${cancelConfirmPhrase.value}”`
     return
@@ -307,7 +302,7 @@ onMounted(async () => {
         <div>
           <p class="panel-kicker">Account closure</p>
           <h2>注销账号</h2>
-          <p>注销前需要余额为 0，并通过绑定手机号 {{ maskedPhone }} 完成身份验证。注销后将清理你的持久化记忆、会话、上下文快照和文件索引。</p>
+          <p>注销需要通过绑定手机号 {{ maskedPhone }} 完成身份验证。注销后将清理你的持久化记忆、会话、上下文快照和文件索引，账号余额不会退款。</p>
         </div>
         <button type="button" class="danger-action" @click="cancelDialogOpen = true">
           <Trash2 class="h-4 w-4" />
@@ -331,8 +326,8 @@ onMounted(async () => {
               <p>当前账号的 agent 会话、消息、运行记录、上下文快照和持久化记忆会被清理，无法找回。</p>
             </section>
             <section>
-              <h3>充值余额必须清零</h3>
-              <p>当前余额和冻结算力都必须为 0 才能注销；系统不会在注销时自动吞掉剩余算力。</p>
+              <h3>充值余额不会退款</h3>
+              <p>注销不会要求余额为 0，但当前账号剩余余额和冻结算力会随账号关闭失效，系统不会自动退款。</p>
             </section>
             <section>
               <h3>请勿频繁重复注销</h3>
