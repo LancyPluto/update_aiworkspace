@@ -85,7 +85,7 @@ export interface LoginResponse {
   user?: UserProfile
 }
 
-export type SmsCodeScene = "REGISTER" | "LOGIN" | "LOGIN_OR_REGISTER" | "RESET_PASSWORD"
+export type SmsCodeScene = "REGISTER" | "LOGIN" | "LOGIN_OR_REGISTER" | "RESET_PASSWORD" | "CANCEL_ACCOUNT"
 
 export interface SmsCodeRequest {
   phone: string
@@ -144,6 +144,10 @@ export interface CommunitySettingsRequest {
   bio?: string | null
   autoPublishAssets?: boolean
   promptPublicByDefault?: boolean
+}
+
+export interface CancelAccountRequest {
+  smsCode: string
 }
 
 export interface UserAvatarUploadResponse {
@@ -398,6 +402,28 @@ export interface CreditLog {
   operatorType: string
   operatorId?: number | null
   reason: string
+  createdAt: string
+}
+
+export interface BillingUsageLog {
+  id: number
+  sourceType: string
+  sourceId: number
+  taskNo?: string | null
+  inputModality?: string | null
+  outputModality?: string | null
+  userId: number
+  modelConfigId?: number | null
+  provider?: string | null
+  modelName?: string | null
+  promptTokens: number
+  completionTokens: number
+  totalTokens: number
+  billingUnit?: string | null
+  billableUnits?: number | null
+  unitPrice?: number | null
+  costAmount: number
+  chargedCredits: number
   createdAt: string
 }
 

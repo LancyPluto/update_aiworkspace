@@ -137,8 +137,7 @@ function isGroupExpanded(id: string) {
 }
 
 function isActive(path: string) {
-
-if (path === "/marketplace") {
+  if (path === "/marketplace") {
     return route.path === path || route.path.startsWith("/chat/")
   }
   if (path === "/agents") {
@@ -146,6 +145,9 @@ if (path === "/marketplace") {
   }
   if (path === "/agent") {
     return route.path === path || route.path.startsWith(path + "/")
+  }
+  if (path === "/community") {
+    return route.path === path || route.path.startsWith("/community/posts/")
   }
   return route.path === path || route.path.startsWith(path + "/")
 }

@@ -236,12 +236,17 @@ public class CreditServiceImpl implements CreditService {
 
     @Override
     public PageResponse<CreditLogResponse> logs(Long userId, String logType, Integer pageNo, Integer pageSize) {
+        return logs(userId, logType, pageNo, pageSize, false);
+    }
+
+    @Override
+    public PageResponse<CreditLogResponse> logs(Long userId, String logType, Integer pageNo, Integer pageSize, boolean includeInternal) {
         int normalizedPageSize = PageResponse.normalizePageSize(pageSize);
         int offset = PageResponse.offset(pageNo, pageSize);
-        List<CreditLogResponse> list = creditLogMapper.findLogs(userId, logType, normalizedPageSize, offset).stream()
+        List<CreditLogResponse> list = creditLogMapper.findLogs(userId, logType, normalizedPageSize, offset, includeInternal).stream()
                 .map(this::toResponse)
                 .toList();
-        long total = creditLogMapper.countLogs(userId, logType);
+        long total = creditLogMapper.countLogs(userId, logType, includeInternal);
         return PageResponse.of(list, total, pageNo, pageSize);
     }
 

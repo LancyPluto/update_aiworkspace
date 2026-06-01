@@ -30,6 +30,8 @@ import { ApiError } from "@/lib/api/http"
 import { compareCreditLogsByCreatedAtDesc } from "@/lib/credit-log-sort"
 import type { AdminMember, CreditLogItem } from "@/lib/api/types"
 
+const CREDIT_RECORD_PAGE_SIZE = 20
+
 interface CreditUserRow {
   id: string
   rawId: number
@@ -66,7 +68,19 @@ function formatTime(value?: string | null) {
   if (!value) return "-"
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString()
+  return date.toLocaleString("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    hour12: false,
+  })
+}
+
+function signedCreditAmount(log: CreditLogItem) {
+  const rawAmount = Number(log.amount || 0)
+  const rawFrozenAmount = Number(log.frozenAmount || 0)
+  const displayAmount = rawAmount !== 0 ? Math.abs(rawAmount) : Math.abs(rawFrozenAmount)
+  if (displayAmount === 0) return 0
+  if (["DEDUCT", "FREEZE", "MANUAL_DEDUCT"].includes(log.logType)) return -displayAmount
+  return displayAmount
 }
 
 export default function CreditsPage() {
@@ -81,17 +95,18 @@ export default function CreditsPage() {
   const [amount, setAmount] = useState("100")
   const [reason, setReason] = useState("运营手动调整")
   const [submitting, setSubmitting] = useState(false)
+  const [recordPage, setRecordPage] = useState(1)
 
   const loadCredits = async () => {
     setLoading(true)
     setError(null)
     try {
-      const userResp = await fetchAdminUsers()
+      const userResp = await fetchAdminUsers({ pageNo: 1, pageSize: 200 })
       const mappedUsers = userResp.list.map(mapUser)
       setUsers(mappedUsers)
 
       const logGroups = await Promise.all(
-        mappedUsers.slice(0, 10).map(async (user) => {
+        mappedUsers.map(async (user) => {
           try {
             const logResp = await fetchUserCreditLogs(user.rawId)
             return logResp.list.map((log: CreditLogItem): CreditRecordRow => ({
@@ -100,7 +115,7 @@ export default function CreditsPage() {
               createdAt: log.createdAt ?? null,
               user: user.name,
               type: log.logType,
-              amount: log.amount,
+              amount: signedCreditAmount(log),
               balance: log.balanceAfter,
               reason: log.reason || "-",
               time: formatTime(log.createdAt),
@@ -139,6 +154,16 @@ export default function CreditsPage() {
       ),
     )
   }, [records, searchQuery])
+
+  useEffect(() => {
+    setRecordPage(1)
+  }, [searchQuery])
+
+  const recordTotalPages = Math.max(1, Math.ceil(filteredRecords.length / CREDIT_RECORD_PAGE_SIZE))
+  const pagedRecords = filteredRecords.slice(
+    (recordPage - 1) * CREDIT_RECORD_PAGE_SIZE,
+    recordPage * CREDIT_RECORD_PAGE_SIZE,
+  )
 
   const filteredUsers = useMemo(() => {
     return users.filter((user) =>
@@ -291,7 +316,31 @@ export default function CreditsPage() {
           </div>
 
           <TabsContent value="records">
-            <DataTable columns={creditColumns} data={filteredRecords} />
+            <div className="space-y-3">
+              <DataTable columns={creditColumns} data={pagedRecords} />
+              <div className="flex items-center justify-between rounded-xl border border-border bg-card px-4 py-3 text-sm text-muted-foreground">
+                <span>共 {filteredRecords.length.toLocaleString()} 条，每页 {CREDIT_RECORD_PAGE_SIZE} 条</span>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={recordPage <= 1}
+                    onClick={() => setRecordPage((page) => Math.max(1, page - 1))}
+                  >
+                    上一页
+                  </Button>
+                  <span>{recordPage} / {recordTotalPages}</span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={recordPage >= recordTotalPages}
+                    onClick={() => setRecordPage((page) => Math.min(recordTotalPages, page + 1))}
+                  >
+                    下一页
+                  </Button>
+                </div>
+              </div>
+            </div>
           </TabsContent>
 
           <TabsContent value="users">

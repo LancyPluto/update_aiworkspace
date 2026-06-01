@@ -86,6 +86,23 @@ function formatMoney(value: number | string | undefined | null) {
   return Number.isInteger(amount) ? String(amount) : amount.toFixed(2)
 }
 
+function localizeBenefit(benefit: string) {
+  return benefit
+    .replace(/valid\s+for\s+(\d+)\s+days?/gi, "有效期 $1 天")
+    .replace(/(\d+)\s+days?/gi, "$1 天")
+    .replace(/\bcredits?\b/gi, "算力")
+    .replace(/\bbonus\b/gi, "赠送")
+    .replace(/\bpackage\b/gi, "套餐")
+    .replace(/\brecharge\b/gi, "充值")
+    .replace(/\bvalidity\b/gi, "有效期")
+}
+
+function packageBenefits(pkg: RechargePackage) {
+  const benefits = pkg.benefits?.filter(Boolean) ?? []
+  if (benefits.length > 0) return benefits.map(localizeBenefit)
+  return [`到账 ${pkg.credits.toLocaleString()} 点算力`, `有效期 ${pkg.validityDays} 天`]
+}
+
 function selectPackage(id: number) {
   selectedId.value = id
 }
@@ -344,7 +361,7 @@ onUnmounted(clearPolling)
             套餐权益周期 {{ pkg.validityDays }} 天
           </p>
           <ul class="mt-4 flex flex-1 flex-col gap-2">
-            <li v-for="benefit in pkg.benefits" :key="benefit" class="flex items-center gap-2 text-sm text-muted-foreground">
+            <li v-for="benefit in packageBenefits(pkg)" :key="benefit" class="flex items-center gap-2 text-sm text-muted-foreground">
               <Check class="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
               {{ benefit }}
             </li>

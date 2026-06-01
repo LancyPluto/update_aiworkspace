@@ -62,7 +62,7 @@ public class AdminUserController {
                                                                    @RequestParam(required = false) String logType,
                                                                    @RequestParam(required = false) Integer pageNo,
                                                                    @RequestParam(required = false) Integer pageSize) {
-        return ApiResponse.success(creditService.logs(userId, logType, pageNo, pageSize));
+        return ApiResponse.success(creditService.logs(userId, logType, pageNo, pageSize, true));
     }
 
     @PostMapping("/{userId}/credits/manual-add")

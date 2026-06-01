@@ -1,15 +1,17 @@
 <script setup lang="ts">
-import { Check, Copy, Loader2, Pencil, RefreshCw, X } from "lucide-vue-next"
+import { computed } from "vue"
+import { Check, Copy, FileText, Image, Loader2, Pencil, RefreshCw, X } from "lucide-vue-next"
 import ChatMessage from "./ChatMessage.vue"
 import AgentAvatar from "./AgentAvatar.vue"
-import UserAvatar from "@/components/UserAvatar.vue"
+import RunTimeline from "./RunTimeline.vue"
 import type { AgentAvatarState } from "./AgentAvatar.vue"
-import type { AgentMessage } from "@/api/types"
+import type { AgentMessage, AgentRunEvent } from "@/api/types"
 import type { AssetPreviewItem } from "@/types/assetPreview"
 
-defineProps<{
+const props = defineProps<{
   message: AgentMessage
   index: number
+  runEvents: AgentRunEvent[]
   userAvatarUrl?: string | null
   userDisplayName: string
   editingMessageId: number | null
@@ -17,7 +19,6 @@ defineProps<{
   editingRegenerating: boolean
   copiedMessageId: number | null
   regeneratingMessageId: number | null
-  streamingMessageId: number | null
   hasActiveRun: boolean
   sending: boolean
   modelsLoading: boolean
@@ -36,11 +37,47 @@ const emit = defineEmits<{
   "update:editingMessageDraft": [value: string]
 }>()
 
-function messageTime(value?: string | null) {
-  if (!value) return ""
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return ""
-  return date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })
+interface MessageAttachment {
+  id: number
+  name: string
+  contentType?: string | null
+  size?: number | null
+  status?: string | null
+}
+
+function parseMessageJson(value?: string | null) {
+  if (!value) return {} as Record<string, unknown>
+  try {
+    const parsed = JSON.parse(value) as unknown
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {}
+  } catch {
+    return {}
+  }
+}
+
+function isAttachment(value: unknown): value is MessageAttachment {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false
+  const item = value as Record<string, unknown>
+  return typeof item.id === "number" && typeof item.name === "string"
+}
+
+const attachments = computed(() => {
+  const payload = parseMessageJson(props.message.contentJson)
+  const raw = payload.attachments
+  return Array.isArray(raw) ? raw.filter(isAttachment) : []
+})
+
+function formatFileSize(size?: number | null) {
+  if (size == null || !Number.isFinite(size)) return ""
+  if (size < 1024) return `${size}B`
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)}KB`
+  return `${(size / 1024 / 1024).toFixed(1)}MB`
+}
+
+function isImageAttachment(file: MessageAttachment) {
+  return (file.contentType || "").toLowerCase().startsWith("image/")
 }
 </script>
 
@@ -49,15 +86,13 @@ function messageTime(value?: string | null) {
     :class="['agent-message-row', message.role === 'USER' ? 'user' : 'assistant']"
     :data-message-id="message.id"
   >
-    <div v-if="message.role !== 'USER'" class="avatar-slot">
-      <AgentAvatar :state="avatarState ?? 'idle'" />
-    </div>
-    <div v-else class="avatar-slot avatar-slot--user">
-      <UserAvatar :src="userAvatarUrl" :name="userDisplayName" size="sm" />
-    </div>
-
     <div class="message-main">
-      <span class="message-time">{{ messageTime(message.createdAt) }}</span>
+      <div v-if="message.role !== 'USER'" class="assistant-name-row">
+        <AgentAvatar :state="avatarState ?? 'idle'" />
+        <div>
+          <strong>科创点AI</strong>
+        </div>
+      </div>
       <div class="bubble" :class="{ 'bubble--streaming': isStreaming }">
         <div v-if="editingMessageId === message.id" class="message-edit-box">
           <textarea
@@ -93,13 +128,33 @@ function messageTime(value?: string | null) {
             </button>
           </div>
         </div>
-        <ChatMessage
-          v-else
-          :message="message.contentText"
-          :is-user="message.role === 'USER'"
-          :streaming="message.id === streamingMessageId && hasActiveRun"
-          @preview="emit('preview', $event)"
-        />
+        <template v-else>
+          <div v-if="message.role === 'USER' && attachments.length" class="message-attachments">
+            <article v-for="file in attachments" :key="file.id" class="message-attachment-card">
+              <span class="attachment-icon">
+                <Image v-if="isImageAttachment(file)" class="h-5 w-5" />
+                <FileText v-else class="h-5 w-5" />
+              </span>
+              <span class="attachment-copy">
+                <strong>{{ file.name }}</strong>
+                <small>{{ file.contentType || "FILE" }} {{ formatFileSize(file.size) }}</small>
+              </span>
+            </article>
+          </div>
+          <RunTimeline
+            v-if="message.role === 'ASSISTANT' && runEvents.length > 0"
+            :events="runEvents"
+            :inline-mode="true"
+            :process-mode="true"
+          />
+          <ChatMessage
+            v-if="message.contentText.trim() || message.role !== 'USER'"
+            :message="message.contentText"
+            :is-user="message.role === 'USER'"
+            :streaming="isStreaming"
+            @preview="emit('preview', $event)"
+          />
+        </template>
       </div>
       <div class="message-actions" :class="{ 'message-actions--user': message.role === 'USER' }">
         <button
@@ -152,10 +207,8 @@ function messageTime(value?: string | null) {
 
 <style scoped>
 .agent-message-row {
-  display: grid;
-  grid-template-columns: 42px minmax(0, 650px);
-  justify-content: start;
-  gap: 14px;
+  display: flex;
+  justify-content: flex-start;
   margin: 30px auto;
   width: min(100%, 980px);
   max-width: 980px;
@@ -163,13 +216,7 @@ function messageTime(value?: string | null) {
 }
 
 .agent-message-row.user {
-  grid-template-columns: minmax(0, 650px) 42px;
-  justify-content: end;
-}
-
-.agent-message-row.user .avatar-slot {
-  grid-column: 2;
-  grid-row: 1;
+  justify-content: flex-end;
 }
 
 .message-main {
@@ -180,52 +227,105 @@ function messageTime(value?: string | null) {
 }
 
 .agent-message-row.user .message-main {
-  grid-column: 1;
-  justify-self: end;
+  margin-left: auto;
 }
 
-.message-time {
-  position: absolute;
-  left: calc(100% + 12px);
-  top: 4px;
-  min-width: 42px;
-  color: rgb(255 255 255 / 0.28);
-  font-size: 11px;
-  line-height: 1;
-  opacity: 0;
-  pointer-events: none;
-  transform: translateX(-4px);
-  transition: opacity 0.16s ease, transform 0.16s ease;
+.agent-message-row.assistant .message-main {
+  margin-left: -4px;
 }
 
-.agent-message-row.user .message-time {
-  right: calc(100% + 12px);
-  left: auto;
-  text-align: right;
-  transform: translateX(4px);
+.assistant-name-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 50px;
+  margin-bottom: 10px;
 }
 
-.agent-message-row:hover .message-time,
-.agent-message-row:focus-within .message-time {
-  opacity: 1;
-  transform: translateX(0);
+.assistant-name-row :deep(.agent-avatar--md) {
+  width: 50px;
+  height: 50px;
+}
+
+.assistant-name-row :deep(.agent-avatar__logo) {
+  width: 28px;
+  height: 28px;
+}
+
+.assistant-name-row strong {
+  display: block;
+  color: var(--agent-text-primary);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.2;
 }
 
 .bubble {
   width: fit-content;
   max-width: 100%;
-  border: 1px solid var(--agent-surface-border);
-  border-radius: 10px 24px 24px 24px;
-  background:
-    radial-gradient(circle at 8% 0%, var(--agent-bubble-assistant-tint), transparent 34%),
-    var(--agent-surface);
-  padding: 16px 18px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
   line-height: 1.75;
   color: var(--agent-text-primary);
-  box-shadow: 0 18px 44px rgb(0 0 0 / 0.16), inset 0 1px 0 rgb(255 255 255 / 0.035);
-  backdrop-filter: blur(10px);
+  box-shadow: none;
+  backdrop-filter: none;
   position: relative;
   overflow: hidden;
+}
+
+.message-attachments {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.message-attachment-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: min(240px, 72vw);
+  border: 1px solid rgb(255 255 255 / 0.10);
+  border-radius: 14px;
+  background: rgb(255 255 255 / 0.06);
+  padding: 9px 11px;
+}
+
+.attachment-icon {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 10px;
+  background: rgb(96 165 250 / 0.18);
+  color: rgb(147 197 253);
+}
+
+.attachment-copy {
+  min-width: 0;
+  display: grid;
+  line-height: 1.25;
+}
+
+.attachment-copy strong,
+.attachment-copy small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachment-copy strong {
+  color: var(--agent-text-primary);
+  font-size: 13px;
+}
+
+.attachment-copy small {
+  margin-top: 2px;
+  color: var(--agent-text-muted);
+  font-size: 11px;
 }
 
 .bubble--streaming::before {
@@ -240,11 +340,18 @@ function messageTime(value?: string | null) {
 }
 
 .agent-message-row.user .bubble {
-  border-color: rgb(255 255 255 / 0.09);
-  background:
-    radial-gradient(circle at 18% 10%, var(--agent-bubble-user-tint), transparent 42%),
-    rgb(255 255 255 / 0.055);
-  border-radius: 24px 10px 24px 24px;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  background: rgb(255 255 255 / 0.06);
+  border-radius: 16px 6px 16px 16px;
+  padding: 10px 13px;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.04);
+}
+
+.agent-message-row.assistant .bubble:has(.agent-result-renderer) {
+  width: min(820px, 100%);
+  border-radius: 12px;
+  padding: 8px;
+  background: rgb(255 255 255 / 0.025);
 }
 
 .message-actions {
@@ -353,18 +460,10 @@ function messageTime(value?: string | null) {
 
 @media (max-width: 720px) {
   .agent-message-row {
-    grid-template-columns: 34px minmax(0, 1fr);
-    gap: 10px;
     margin: 20px auto;
-  }
-  .agent-message-row.user {
-    grid-template-columns: minmax(0, 1fr) 34px;
   }
   .message-actions {
     opacity: 1;
-  }
-  .message-time {
-    display: none;
   }
 }
 </style>
