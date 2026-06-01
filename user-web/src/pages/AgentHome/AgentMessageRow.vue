@@ -1,15 +1,18 @@
 <script setup lang="ts">
-import { Check, Copy, Loader2, Pencil, RefreshCw, X } from "lucide-vue-next"
+import { computed } from "vue"
+import { Check, Copy, FileText, Image, Loader2, Pencil, RefreshCw, X } from "lucide-vue-next"
 import ChatMessage from "./ChatMessage.vue"
 import AgentAvatar from "./AgentAvatar.vue"
+import RunTimeline from "./RunTimeline.vue"
 import UserAvatar from "@/components/UserAvatar.vue"
 import type { AgentAvatarState } from "./AgentAvatar.vue"
-import type { AgentMessage } from "@/api/types"
+import type { AgentMessage, AgentRunEvent } from "@/api/types"
 import type { AssetPreviewItem } from "@/types/assetPreview"
 
-defineProps<{
+const props = defineProps<{
   message: AgentMessage
   index: number
+  runEvents: AgentRunEvent[]
   userAvatarUrl?: string | null
   userDisplayName: string
   editingMessageId: number | null
@@ -41,6 +44,49 @@ function messageTime(value?: string | null) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return ""
   return date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })
+}
+
+interface MessageAttachment {
+  id: number
+  name: string
+  contentType?: string | null
+  size?: number | null
+  status?: string | null
+}
+
+function parseMessageJson(value?: string | null) {
+  if (!value) return {} as Record<string, unknown>
+  try {
+    const parsed = JSON.parse(value) as unknown
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {}
+  } catch {
+    return {}
+  }
+}
+
+function isAttachment(value: unknown): value is MessageAttachment {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false
+  const item = value as Record<string, unknown>
+  return typeof item.id === "number" && typeof item.name === "string"
+}
+
+const attachments = computed(() => {
+  const payload = parseMessageJson(props.message.contentJson)
+  const raw = payload.attachments
+  return Array.isArray(raw) ? raw.filter(isAttachment) : []
+})
+
+function formatFileSize(size?: number | null) {
+  if (size == null || !Number.isFinite(size)) return ""
+  if (size < 1024) return `${size}B`
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)}KB`
+  return `${(size / 1024 / 1024).toFixed(1)}MB`
+}
+
+function isImageAttachment(file: MessageAttachment) {
+  return (file.contentType || "").toLowerCase().startsWith("image/")
 }
 </script>
 
@@ -93,13 +139,32 @@ function messageTime(value?: string | null) {
             </button>
           </div>
         </div>
-        <ChatMessage
-          v-else
-          :message="message.contentText"
-          :is-user="message.role === 'USER'"
-          :streaming="message.id === streamingMessageId && hasActiveRun"
-          @preview="emit('preview', $event)"
-        />
+        <template v-else>
+          <RunTimeline
+            v-if="message.role === 'ASSISTANT' && runEvents.length > 0"
+            :events="runEvents"
+            :inline-mode="true"
+            :process-mode="true"
+          />
+          <ChatMessage
+            :message="message.contentText"
+            :is-user="message.role === 'USER'"
+            :streaming="message.id === streamingMessageId && hasActiveRun"
+            @preview="emit('preview', $event)"
+          />
+          <div v-if="message.role === 'USER' && attachments.length" class="message-attachments">
+            <article v-for="file in attachments" :key="file.id" class="message-attachment-card">
+              <span class="attachment-icon">
+                <Image v-if="isImageAttachment(file)" class="h-5 w-5" />
+                <FileText v-else class="h-5 w-5" />
+              </span>
+              <span class="attachment-copy">
+                <strong>{{ file.name }}</strong>
+                <small>{{ file.contentType || "FILE" }} {{ formatFileSize(file.size) }}</small>
+              </span>
+            </article>
+          </div>
+        </template>
       </div>
       <div class="message-actions" :class="{ 'message-actions--user': message.role === 'USER' }">
         <button
@@ -226,6 +291,59 @@ function messageTime(value?: string | null) {
   backdrop-filter: blur(10px);
   position: relative;
   overflow: hidden;
+}
+
+.message-attachments {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.message-attachment-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: min(240px, 72vw);
+  border: 1px solid rgb(255 255 255 / 0.10);
+  border-radius: 14px;
+  background: rgb(255 255 255 / 0.06);
+  padding: 9px 11px;
+}
+
+.attachment-icon {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 10px;
+  background: rgb(96 165 250 / 0.18);
+  color: rgb(147 197 253);
+}
+
+.attachment-copy {
+  min-width: 0;
+  display: grid;
+  line-height: 1.25;
+}
+
+.attachment-copy strong,
+.attachment-copy small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachment-copy strong {
+  color: var(--agent-text-primary);
+  font-size: 13px;
+}
+
+.attachment-copy small {
+  margin-top: 2px;
+  color: var(--agent-text-muted);
+  font-size: 11px;
 }
 
 .bubble--streaming::before {

@@ -85,7 +85,7 @@ export interface LoginResponse {
   user?: UserProfile
 }
 
-export type SmsCodeScene = "REGISTER" | "LOGIN" | "LOGIN_OR_REGISTER" | "RESET_PASSWORD"
+export type SmsCodeScene = "REGISTER" | "LOGIN" | "LOGIN_OR_REGISTER" | "RESET_PASSWORD" | "CANCEL_ACCOUNT"
 
 export interface SmsCodeRequest {
   phone: string
@@ -144,6 +144,10 @@ export interface CommunitySettingsRequest {
   bio?: string | null
   autoPublishAssets?: boolean
   promptPublicByDefault?: boolean
+}
+
+export interface CancelAccountRequest {
+  smsCode: string
 }
 
 export interface UserAvatarUploadResponse {

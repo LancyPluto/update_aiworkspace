@@ -7,7 +7,9 @@ import com.aiminilab.aitoolmarket.auth.security.InternalRequestSignatureVerifier
 import com.aiminilab.aitoolmarket.auth.security.JwtTokenProvider;
 import com.aiminilab.aitoolmarket.common.dto.ApiResponse;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
+import com.aiminilab.aitoolmarket.common.enums.UserStatus;
 import com.aiminilab.aitoolmarket.common.enums.UserType;
+import com.aiminilab.aitoolmarket.user.mapper.UserMapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.Filter;
 import jakarta.servlet.FilterChain;
@@ -42,13 +44,16 @@ public class AuthInterceptor implements HandlerInterceptor, Filter {
     private final JwtTokenProvider jwtTokenProvider;
     private final ObjectMapper objectMapper;
     private final InternalRequestSignatureVerifier internalRequestSignatureVerifier;
+    private final UserMapper userMapper;
 
     public AuthInterceptor(JwtTokenProvider jwtTokenProvider,
                            ObjectMapper objectMapper,
-                           InternalRequestSignatureVerifier internalRequestSignatureVerifier) {
+                           InternalRequestSignatureVerifier internalRequestSignatureVerifier,
+                           UserMapper userMapper) {
         this.jwtTokenProvider = jwtTokenProvider;
         this.objectMapper = objectMapper;
         this.internalRequestSignatureVerifier = internalRequestSignatureVerifier;
+        this.userMapper = userMapper;
     }
 
     @Override
@@ -98,6 +103,11 @@ public class AuthInterceptor implements HandlerInterceptor, Filter {
             return false;
         }
 
+        if (!isActiveUser(authUser.get())) {
+            writeError(response, HttpStatus.UNAUTHORIZED, ErrorCode.UNAUTHORIZED, "账号已注销或被禁用");
+            return false;
+        }
+
         if (requiresAdmin(path)
                 && !UserType.ADMIN.name().equals(authUser.get().userType())) {
             writeError(response, HttpStatus.FORBIDDEN, ErrorCode.ADMIN_FORBIDDEN, "管理员无权限");
@@ -106,6 +116,13 @@ public class AuthInterceptor implements HandlerInterceptor, Filter {
 
         AuthContext.set(authUser.get());
         return true;
+    }
+
+    private boolean isActiveUser(AuthUser authUser) {
+        return userMapper.findById(authUser.userId())
+                .filter(user -> user.getDeleted() == null || !user.getDeleted())
+                .filter(user -> UserStatus.ACTIVE.name().equals(user.getStatus()))
+                .isPresent();
     }
 
     @Override

@@ -2,18 +2,30 @@
 import { computed, ref } from "vue"
 import { AlertTriangle, Bot, CheckCircle2, ChevronDown, Database, FileText, Hammer, Loader2, Sparkles, Store } from "lucide-vue-next"
 import type { AgentRunEvent } from "@/api/types"
-import { filterUserFacingRunEvents } from "./runTimelineEvents"
+import { filterToolProcessEvents, filterUserFacingRunEvents } from "./runTimelineEvents"
 
 const props = defineProps<{
   events: AgentRunEvent[]
   inlineMode?: boolean
+  processMode?: boolean
 }>()
 
 type TimelineTone = "info" | "success" | "warning" | "error"
 
 const expandedEventIds = ref<Set<number>>(new Set())
 
-const visibleEvents = computed(() => filterUserFacingRunEvents(props.events, props.inlineMode).slice(-14))
+const processExpanded = ref(false)
+const visibleEvents = computed(() =>
+  (props.processMode ? filterToolProcessEvents(props.events) : filterUserFacingRunEvents(props.events, props.inlineMode)).slice(-14),
+)
+const latestEvent = computed(() => visibleEvents.value.at(-1) ?? null)
+const hasRunningTool = computed(() =>
+  visibleEvents.value.some((event) =>
+    event.eventType === "tool.started" ||
+    event.eventType === "tool.task_dispatched" ||
+    event.eventType === "tool.task_progress",
+  ) && !visibleEvents.value.some((event) => event.eventType === "tool.finished"),
+)
 
 function parseEventJson(value?: string | null | Record<string, unknown>) {
   if (value == null || value === "") return {} as Record<string, unknown>
@@ -157,6 +169,19 @@ function toggleExpanded(eventId: number) {
     :class="{ inline: inlineMode }"
     aria-label="Agent run timeline"
   >
+    <button v-if="processMode" class="process-summary" type="button" @click="processExpanded = !processExpanded">
+      <span class="process-icon" :class="{ running: hasRunningTool }">
+        <Loader2 v-if="hasRunningTool" class="h-3.5 w-3.5 animate-spin" />
+        <Hammer v-else class="h-3.5 w-3.5" />
+      </span>
+      <span>
+        <strong>工具调用过程</strong>
+        <small>{{ latestEvent ? titleFor(latestEvent) : "等待工具事件" }}</small>
+      </span>
+      <ChevronDown class="h-4 w-4 process-chevron" :class="{ open: processExpanded }" />
+    </button>
+    <div v-if="processMode && !processExpanded" class="process-collapsed-spacer" />
+    <template v-if="!processMode || processExpanded">
     <article v-for="event in visibleEvents" :key="event.id" class="timeline-row" :class="toneFor(event)">
       <div class="timeline-icon">
         <component :is="iconFor(event)" class="h-4 w-4" />
@@ -171,6 +196,7 @@ function toggleExpanded(eventId: number) {
         <pre v-if="expandedEventIds.has(event.id) && detailJson(event)" class="detail-json">{{ detailJson(event) }}</pre>
       </div>
     </article>
+    </template>
   </section>
 </template>
 
@@ -186,11 +212,76 @@ function toggleExpanded(eventId: number) {
 }
 
 .run-timeline.inline {
-  max-height: 150px;
+  max-height: none;
   margin: 0;
   padding: 0;
   border: none;
   background: transparent;
+}
+
+.run-timeline.inline:has(.process-summary) {
+  margin-bottom: 12px;
+}
+
+.process-summary {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 14px;
+  background: rgb(255 255 255 / 0.045);
+  color: var(--agent-text-primary);
+  cursor: pointer;
+  padding: 9px 10px;
+  text-align: left;
+}
+
+.process-icon {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: var(--agent-accent-soft);
+  color: var(--agent-accent);
+}
+
+.process-icon.running {
+  box-shadow: 0 0 0 4px var(--agent-accent-soft);
+}
+
+.process-summary strong,
+.process-summary small {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.process-summary strong {
+  font-size: 13px;
+}
+
+.process-summary small {
+  margin-top: 2px;
+  color: var(--agent-text-muted);
+  font-size: 11px;
+}
+
+.process-chevron {
+  color: var(--agent-text-muted);
+  transition: transform 0.16s ease;
+}
+
+.process-chevron.open {
+  transform: rotate(180deg);
+}
+
+.process-collapsed-spacer {
+  display: none;
 }
 
 .timeline-row {

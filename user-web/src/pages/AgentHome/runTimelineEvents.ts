@@ -24,3 +24,18 @@ export function filterUserFacingRunEvents(events: AgentRunEvent[], inlineMode = 
   const allowed = new Set<string>(inlineMode ? INLINE_VISIBLE_EVENT_TYPES : USER_FACING_EVENT_TYPES)
   return events.filter((event) => allowed.has(event.eventType))
 }
+
+export function filterToolProcessEvents(events: AgentRunEvent[]) {
+  return events.filter((event) =>
+    event.eventType === "tool.selected" ||
+    event.eventType === "tool.started" ||
+    event.eventType === "tool.task_dispatched" ||
+    event.eventType === "tool.task_progress" ||
+    event.eventType === "tool.finished" ||
+    event.eventType === "tool_call.requested" ||
+    event.eventType === "tool_call.executed" ||
+    event.eventType === "tool_call.rejected" ||
+    event.eventType === "tool_call.loop_started" ||
+    event.eventType === "tool_call.loop_completed",
+  )
+}

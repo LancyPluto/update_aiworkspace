@@ -172,4 +172,24 @@ public interface UserMapper extends BaseMapper<User> {
                                 @Param("bio") String bio,
                                 @Param("autoPublishAssets") boolean autoPublishAssets,
                                 @Param("promptPublicByDefault") boolean promptPublicByDefault);
+
+    @Update("""
+            UPDATE users
+            SET username = #{cancelledUsername},
+                password_hash = #{cancelledPasswordHash},
+                phone = NULL,
+                email = NULL,
+                nickname = 'Cancelled User',
+                avatar_url = NULL,
+                bio = NULL,
+                auto_publish_assets = 0,
+                prompt_public_by_default = 0,
+                status = 'DISABLED',
+                is_deleted = 1,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{userId} AND is_deleted = 0
+            """)
+    int cancelAccount(@Param("userId") Long userId,
+                      @Param("cancelledUsername") String cancelledUsername,
+                      @Param("cancelledPasswordHash") String cancelledPasswordHash);
 }

@@ -12,8 +12,7 @@ import {
   Trash2,
   X,
 } from "lucide-vue-next"
-import RunTimeline from "./RunTimeline.vue"
-import { filterUserFacingRunEvents } from "./runTimelineEvents"
+import { filterToolProcessEvents } from "./runTimelineEvents"
 import AgentComposer from "./AgentComposer.vue"
 import AgentMessageRow from "./AgentMessageRow.vue"
 import AgentAvatar from "./AgentAvatar.vue"
@@ -157,7 +156,7 @@ const confirmationEvents = computed(() =>
     .map((event) => ({ event, payload: parseEventJson(event.eventJson) })),
 )
 
-const visibleRunTimelineEvents = computed(() => filterUserFacingRunEvents(events.value, true))
+const activeToolProcessEvents = computed(() => filterToolProcessEvents(events.value))
 
 const runStatusText = computed(() => {
   if (runConnectionStatus.value === "running") return "Agent 正在运行"
@@ -262,6 +261,27 @@ function messageTime(value?: string | null) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return ""
   return date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })
+}
+
+function messageContentJsonForFiles(items: AgentFile[]) {
+  if (items.length === 0) return undefined
+  return JSON.stringify({
+    attachments: items.map((file) => ({
+      id: file.id,
+      name: file.originalFilename,
+      contentType: file.contentType,
+      size: file.fileSize,
+      status: file.status,
+    })),
+  })
+}
+
+function runEventsForMessage(message: AgentMessage) {
+  if (message.role !== "ASSISTANT" || message.runId == null) return []
+  if (activeRunId.value === message.runId || events.value.some((event) => event.runId === message.runId)) {
+    return activeToolProcessEvents.value
+  }
+  return []
 }
 
 function messageDividerTime(value?: string | null) {
@@ -610,11 +630,14 @@ async function submitMessage(content = input.value) {
   runConnectionStatus.value = "running"
   try {
     input.value = ""
+    const submittedFiles = [...files.value]
+    files.value = []
     messages.value.push({
       id: Date.now(),
       sessionId: props.sessionId,
       role: "USER",
       contentText: text,
+      contentJson: messageContentJsonForFiles(submittedFiles),
       editedAt: null,
       createdAt: new Date().toISOString(),
     })
@@ -625,13 +648,14 @@ async function submitMessage(content = input.value) {
         content: text,
         clientRequestId: randomUUID(),
         modelConfigId: props.modelConfigId ?? null,
-        fileIds: files.value.map((item) => item.id),
+        fileIds: submittedFiles.map((item) => item.id),
       },
       { token: props.token },
     )
     activeRunId.value = res.runId
     await waitForRunComplete(res.runId)
   } catch (error) {
+    await loadFiles()
     runConnectionStatus.value = "failed"
     activeRunId.value = null
     if (error instanceof ApiBusinessError && error.code === "AGENT_ACTIVE_RUN_LIMIT") {
@@ -1491,6 +1515,7 @@ defineExpose({
           <AgentMessageRow
             :message="message"
             :index="index"
+            :run-events="runEventsForMessage(message)"
             :user-avatar-url="auth.user?.avatarUrl"
             :user-display-name="auth.user?.nickname || auth.user?.username || '我'"
             :editing-message-id="editingMessageId"
@@ -1530,13 +1555,6 @@ defineExpose({
               <i></i>
               <i></i>
             </div>
-          </div>
-        </article>
-
-        <article v-if="visibleRunTimelineEvents.length" class="agent-message assistant run-progress">
-          <AgentAvatar state="thinking" />
-          <div class="bubble">
-            <RunTimeline :events="events" :inline-mode="true" />
           </div>
         </article>
 
