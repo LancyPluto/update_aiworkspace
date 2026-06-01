@@ -19,6 +19,9 @@ import AgentAmbientBackground from "./AgentAmbientBackground.vue"
 import ConversationScrollNav from "./ConversationScrollNav.vue"
 import ConversationPhaseTimeline from "./ConversationPhaseTimeline.vue"
 import AssetPreviewModal from "@/components/AssetPreviewModal.vue"
+import CreditRechargeModal from "@/components/CreditRechargeModal.vue"
+import { formatAgentRunFailure } from "@/api/errorMapping"
+import { isCreditInsufficient } from "@/utils/creditInsufficient"
 import {
   buildConversationPhases,
   buildScrollNavNodes,
@@ -108,6 +111,7 @@ const sending = ref(false)
 const uploading = ref(false)
 const removingFileId = ref<number | null>(null)
 const agentError = ref<string | null>(null)
+const creditModalOpen = ref(false)
 const rememberTool = ref(true)
 const activeRunId = ref<number | null>(null)
 const streamingAssistantMessageId = ref<number | null>(null)
@@ -403,7 +407,7 @@ async function cancelRecoveryRun() {
     dismissedConfirmationIds.value = new Set()
     await refreshMessages()
   } catch (error) {
-    agentError.value = formatAgentError(error)
+    applyAgentFailure(error)
   } finally {
     cancellingRun.value = false
     await scrollBottom()
@@ -434,7 +438,7 @@ async function cancelCurrentRun() {
       showActiveRunLimitHint.value = false
       await refreshMessages()
     } catch (error) {
-      agentError.value = formatAgentError(error)
+      applyAgentFailure(error)
     } finally {
       cancellingRun.value = false
       sending.value = false
@@ -591,7 +595,7 @@ async function removeFile(file: AgentFile) {
     await deleteAgentFile(props.sessionId, file.id, { token: props.token })
     files.value = files.value.filter((item) => item.id !== file.id)
   } catch (error) {
-    agentError.value = formatAgentError(error)
+    applyAgentFailure(error)
   } finally {
     removingFileId.value = null
   }
@@ -663,7 +667,7 @@ async function submitMessage(content = input.value) {
       const runId = await discoverActiveRunId(props.sessionId)
       if (runId != null) recoveryRunId.value = runId
     }
-    agentError.value = formatAgentError(error)
+    applyAgentFailure(error)
   } finally {
     sending.value = false
     await scrollBottom()
@@ -710,7 +714,7 @@ async function retryFailedRun() {
     await waitForRunComplete(res.runId)
   } catch (error) {
     runConnectionStatus.value = "failed"
-    agentError.value = formatAgentError(error)
+    applyAgentFailure(error)
   } finally {
     retryingRun.value = false
     await scrollBottom()
@@ -749,7 +753,7 @@ async function regenerateAssistantMessage(message: AgentMessage) {
     await waitForRunComplete(res.runId)
   } catch (error) {
     runConnectionStatus.value = "failed"
-    agentError.value = formatAgentError(error)
+    applyAgentFailure(error)
     await refreshMessages()
   } finally {
     regeneratingMessageId.value = null
@@ -839,7 +843,7 @@ async function submitEditedMessage(message: AgentMessage) {
     } catch (error) {
       runConnectionStatus.value = "failed"
       activeRunId.value = null
-      agentError.value = formatAgentError(error)
+      applyAgentFailure(error)
       await refreshMessages()
     } finally {
       editingRegenerating.value = false
@@ -879,7 +883,7 @@ async function submitEditedMessage(message: AgentMessage) {
     message.editedAt = previousEditedAt
     runConnectionStatus.value = "failed"
     activeRunId.value = null
-    agentError.value = formatAgentError(error)
+    applyAgentFailure(error)
     await refreshMessages()
   } finally {
     editingRegenerating.value = false
@@ -901,13 +905,34 @@ function formatAgentError(error: unknown) {
   if (error instanceof ApiBusinessError && error.code === "AGENT_RATE_LIMITED") {
     return "Agent 请求过于频繁，请稍后重试。"
   }
-  if (error instanceof ApiBusinessError && error.code === "AGENT_CREDIT_NOT_ENOUGH") {
-    return "可用算力不足，暂时无法启动 Agent。请先补充或释放算力。"
-  }
   if (error instanceof ApiBusinessError) {
     return error.message || error.code
   }
   return error instanceof Error ? error.message : "Agent 请求失败，请稍后重试"
+}
+
+function applyAgentFailure(
+  error: unknown,
+  options?: { errorCode?: string; errorMessage?: string },
+) {
+  const errorCode = options?.errorCode
+  const errorMessage =
+    options?.errorMessage ??
+    (error instanceof ApiBusinessError ? error.message : error instanceof Error ? error.message : undefined)
+  if (isCreditInsufficient(error, errorCode, errorMessage)) {
+    agentError.value = null
+    creditModalOpen.value = true
+    return
+  }
+  if (error instanceof ApiBusinessError) {
+    applyAgentFailure(error)
+    return
+  }
+  if (errorCode || errorMessage) {
+    agentError.value = formatAgentRunFailure(errorCode, errorMessage)
+    return
+  }
+  agentError.value = error instanceof Error ? error.message : "Agent 请求失败，请稍后重试"
 }
 
 function isTerminalRunStatus(status: AgentRunStatus) {
@@ -1095,7 +1120,7 @@ async function waitForRunComplete(runId: number) {
     }
   } catch (error) {
     runConnectionStatus.value = "failed"
-    agentError.value = formatAgentError(error)
+    applyAgentFailure(error)
     recoveryRunId.value = runId
     lastFailedRunId.value = runId
     activeRunId.value = null
@@ -1204,7 +1229,7 @@ async function pollRunUntilComplete(runId: number) {
     activeRunId.value = null
   } catch (error) {
     runConnectionStatus.value = "failed"
-    agentError.value = formatAgentError(error)
+    applyAgentFailure(error)
     recoveryRunId.value = runId
     lastFailedRunId.value = runId
     activeRunId.value = null
@@ -1288,6 +1313,10 @@ function appendRunEvent(event: AgentRunEvent) {
     const payload = parseEventJson(event.eventJson)
     const errorCode = typeof payload.errorCode === "string" ? payload.errorCode : ""
     const errorMessage = typeof payload.errorMessage === "string" ? payload.errorMessage : event.eventText
+    if (isCreditInsufficient(null, errorCode, errorMessage)) {
+      applyAgentFailure(null, { errorCode, errorMessage })
+      return
+    }
     if (errorCode === "AGENT_SECURITY_REJECTED") {
       agentError.value = errorMessage || "这条请求包含敏感指令，Agent 已拒绝执行。"
       return
@@ -1612,6 +1641,12 @@ defineExpose({
             </div>
           </div>
         </article>
+
+        <CreditRechargeModal
+          v-if="creditModalOpen"
+          @close="creditModalOpen = false"
+          @credits-updated="creditModalOpen = false"
+        />
 
         <article v-if="agentError" class="agent-error-card">
           <div class="card-icon error"><AlertTriangle class="h-4 w-4" /></div>
