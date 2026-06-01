@@ -970,7 +970,9 @@ class AgentApiTest {
                                 }
                                 """))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("AGENT_CREDIT_NOT_ENOUGH"));
+                .andExpect(jsonPath("$.code").value("AGENT_CREDIT_NOT_ENOUGH"))
+                .andExpect(jsonPath("$.data.availableCredits").value(0))
+                .andExpect(jsonPath("$.data.requiredCredits").exists());
 
         Mockito.verify(agentServiceClient, Mockito.never()).executeRun(anyLong());
     }

@@ -32,7 +32,10 @@ class BackendClientError(RuntimeError):
 
 
 class BackendBusinessError(BackendClientError):
-    pass
+    def __init__(self, message: str, *, error_code: str = "", data: Any | None = None) -> None:
+        super().__init__(message)
+        self.error_code = error_code
+        self.data = data
 
 
 logger = logging.getLogger(__name__)
@@ -243,30 +246,45 @@ class BackendClient:
         return self._parse_response(response)
 
     def _parse_response(self, response: httpx.Response) -> dict[str, Any]:
+        payload = self._read_json_payload(response)
         if response.status_code < 200 or response.status_code >= 300:
+            if isinstance(payload, dict) and payload.get("code"):
+                self._raise_business_error(response, payload)
             message = (
                 f"backend request failed: method={response.request.method}, "
                 f"url={response.request.url}, status={response.status_code}, body={_truncate(response.text)}"
             )
             logger.error(message)
             raise BackendClientError(message)
-        try:
-            payload = response.json()
-        except ValueError as exc:
+        if not isinstance(payload, dict):
             message = (
                 f"backend returned non-json response: method={response.request.method}, "
                 f"url={response.request.url}, status={response.status_code}, body={_truncate(response.text)}"
             )
             logger.error(message)
-            raise BackendClientError(message) from exc
+            raise BackendClientError(message)
         if payload.get("code") != "SUCCESS":
-            message = (
-                f"backend business error: method={response.request.method}, url={response.request.url}, "
-                f"code={payload.get('code')}, message={payload.get('message', '')}, traceId={payload.get('traceId')}"
-            )
-            logger.error(message)
-            raise BackendBusinessError(message)
+            self._raise_business_error(response, payload)
         return payload.get("data") or {}
+
+    def _read_json_payload(self, response: httpx.Response) -> dict[str, Any] | None:
+        try:
+            payload = response.json()
+        except ValueError:
+            return None
+        return payload if isinstance(payload, dict) else None
+
+    def _raise_business_error(self, response: httpx.Response, payload: dict[str, Any]) -> None:
+        message = (
+            f"backend business error: method={response.request.method}, url={response.request.url}, "
+            f"code={payload.get('code')}, message={payload.get('message', '')}, traceId={payload.get('traceId')}"
+        )
+        logger.error(message)
+        raise BackendBusinessError(
+            str(payload.get("message") or payload.get("code") or "backend business error"),
+            error_code=str(payload.get("code") or ""),
+            data=payload.get("data"),
+        )
 
 
 def _truncate(value: str, limit: int = 1200) -> str:

@@ -6,6 +6,8 @@
     "dev": "next dev -p 5174",
     "dev:docker": "next dev -H 0.0.0.0 -p 5174 --webpack",
     "build": "next build",
+    "typecheck": "tsc --noEmit",
+    "typecheck:agent": "tsc -p tsconfig.agent.json",
     "start": "next start",
     "lint": "eslint ."
   },

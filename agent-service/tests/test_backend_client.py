@@ -40,6 +40,34 @@ async def test_backend_client_parses_success_response_and_signs_request():
 
 
 @pytest.mark.asyncio
+async def test_backend_client_raises_business_error_with_credit_payload_on_http_400():
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            400,
+            json={
+                "code": "CREDIT_NOT_ENOUGH",
+                "message": "可用算力不足：当前 5，调用「image_generation」至少需要 10",
+                "data": {"availableCredits": 5, "requiredCredits": 10, "toolCode": "image_generation"},
+            },
+        )
+
+    client = BackendClient(
+        Settings(backend_internal_base_url="http://backend"),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    with pytest.raises(BackendBusinessError) as exc_info:
+        await client.create_task(
+            TaskCreate(userId=2, toolCode="image_generation", params={}, clientRequestId="agent-run-1")
+        )
+
+    error = exc_info.value
+    assert error.error_code == "CREDIT_NOT_ENOUGH"
+    assert error.data["availableCredits"] == 5
+    assert error.data["requiredCredits"] == 10
+
+
+@pytest.mark.asyncio
 async def test_backend_client_raises_business_error():
     def handler(_: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"code": "AGENT_RUN_NOT_FOUND", "message": "missing"})

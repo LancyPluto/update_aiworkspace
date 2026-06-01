@@ -1,8 +1,10 @@
 import pytest
 
 from app.clients.model_client import ChatToolCall, ChatTurnResult
-from app.core.event_types import MEMORY_SAVED, TOOL_CALL_EXECUTED, TOOL_CALL_LOOP_COMPLETED, TOOL_CALL_REQUESTED
-from app.core.schemas import ChatMessage
+from app.core.event_types import MEMORY_SAVED, TOOL_CALL_EXECUTED, TOOL_CALL_LOOP_COMPLETED, TOOL_CALL_REJECTED, TOOL_CALL_REQUESTED
+from app.core.intent_router import Intent
+from app.core.schemas import ChatMessage, RunContext, ToolDescriptor
+from app.runtime.product_tool_call_loop import ProductToolCallLoopExecutor
 from app.runtime.tool_call_loop import AgentToolCallLoopExecutor
 from app.tools.memory_tool import MemoryTool
 
@@ -45,6 +47,16 @@ class FakeToolLoopBackend:
         return {"id": 88}
 
 
+class FakeProductToolModel:
+    def __init__(self, turn):
+        self.turn = turn
+        self.calls = []
+
+    async def chat_turn(self, messages, tools=None, tool_choice=None):
+        self.calls.append((messages, tools, tool_choice))
+        return self.turn
+
+
 @pytest.mark.asyncio
 async def test_tool_call_loop_executes_memory_add_before_final_answer():
     backend = FakeToolLoopBackend()
@@ -69,3 +81,111 @@ async def test_tool_call_loop_executes_memory_add_before_final_answer():
     assert TOOL_CALL_EXECUTED in event_types
     assert TOOL_CALL_LOOP_COMPLETED in event_types
     assert model.calls[1][0][-1].role == "tool"
+
+
+@pytest.mark.asyncio
+async def test_product_tool_call_loop_selects_tool_by_alias():
+    backend = FakeToolLoopBackend()
+    model = FakeProductToolModel(
+        ChatTurnResult(
+            tool_calls=[
+                ChatToolCall(
+                    id="call_product_1",
+                    name="agent_tool__kling_image_v21",
+                    arguments={"userRequest": "生成一张 cos 远景拍摄图片"},
+                )
+            ],
+            finish_reason="tool_calls",
+        )
+    )
+    loop = ProductToolCallLoopExecutor(backend=backend, model=model)
+    context = RunContext(
+        runId=41,
+        sessionId=1,
+        userId=2,
+        message="生成一张 cos 远景拍摄图片",
+        availableTools=[
+            ToolDescriptor(
+                toolCode="kling-image-v21",
+                toolName="可灵生图 V2.1",
+                description="图片生成，写真，海报，文生图",
+                autoCallable=True,
+            )
+        ],
+    )
+
+    result = await loop.run(context)
+
+    assert result.intent is not None
+    assert result.intent.intent == Intent.TOOL_USE
+    assert result.intent.selectedToolCode == "kling-image-v21"
+    assert result.intent.arguments == {"userRequest": "生成一张 cos 远景拍摄图片"}
+    assert model.calls[0][2] == "auto"
+    assert model.calls[0][1][0]["function"]["name"] == "agent_tool__kling_image_v21"
+
+
+@pytest.mark.asyncio
+async def test_product_tool_call_loop_rejects_unknown_tool_call():
+    backend = FakeToolLoopBackend()
+    model = FakeProductToolModel(
+        ChatTurnResult(
+            tool_calls=[ChatToolCall(id="call_bad", name="agent_tool__missing", arguments={})],
+            finish_reason="tool_calls",
+        )
+    )
+    loop = ProductToolCallLoopExecutor(backend=backend, model=model)
+    context = RunContext(
+        runId=42,
+        sessionId=1,
+        userId=2,
+        message="生成一张图片",
+        availableTools=[
+            ToolDescriptor(
+                toolCode="kling_image_v21",
+                toolName="可灵生图 V2.1",
+                description="图片生成，文生图",
+                autoCallable=True,
+            )
+        ],
+    )
+
+    result = await loop.run(context)
+
+    assert result.intent is None
+    assert result.rejected is True
+    assert result.rejection_reason == "tool_not_available"
+    assert TOOL_CALL_REJECTED in [event.eventType for _, event in backend.events]
+
+
+@pytest.mark.asyncio
+async def test_product_tool_call_loop_rejects_output_modality_mismatch():
+    backend = FakeToolLoopBackend()
+    model = FakeProductToolModel(
+        ChatTurnResult(
+            tool_calls=[ChatToolCall(id="call_video", name="agent_tool__kling_video", arguments={})],
+            finish_reason="tool_calls",
+        )
+    )
+    loop = ProductToolCallLoopExecutor(backend=backend, model=model)
+    context = RunContext(
+        runId=43,
+        sessionId=1,
+        userId=2,
+        message="生成一张图片",
+        availableTools=[
+            ToolDescriptor(
+                toolCode="kling_video",
+                toolName="可灵视频",
+                description="视频生成，文生视频",
+                autoCallable=True,
+            )
+        ],
+    )
+
+    result = await loop.run(context)
+
+    assert result.intent is None
+    assert result.rejected is True
+    assert result.rejection_reason == "output_modality_mismatch"
+    rejected_events = [event for _, event in backend.events if event.eventType == TOOL_CALL_REJECTED]
+    assert rejected_events[0].eventJson["requestedOutputModality"] == "image"

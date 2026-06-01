@@ -1,7 +1,8 @@
 import pytest
 
+from app.clients.model_client import ChatToolCall, ChatTurnResult
 from app.core.budget_guard import BudgetGuard, BudgetState
-from app.core.schemas import RecentToolCallContext, RunContext, ToolDescriptor
+from app.core.schemas import RecentToolCallContext, RunContext, RuntimeSettings, ToolDescriptor
 from app.runtime.deep_agents_engine import DeepAgentsRuntimeEngine
 
 
@@ -87,6 +88,29 @@ class FakeModel:
     @property
     def model_name(self):
         return "test-model"
+
+
+class FakeProductToolModel(FakeModel):
+    def __init__(self, tool_name: str | None = None, arguments: dict | None = None, response: str = ""):
+        super().__init__(response=response)
+        self.tool_name = tool_name
+        self.arguments = arguments or {}
+        self.turn_calls = []
+
+    async def chat_turn(self, messages, tools=None, tool_choice=None):
+        self.turn_calls.append((messages, tools, tool_choice))
+        if not self.tool_name:
+            return ChatTurnResult(content="")
+        return ChatTurnResult(
+            tool_calls=[
+                ChatToolCall(
+                    id="call_product",
+                    name=self.tool_name,
+                    arguments=self.arguments,
+                )
+            ],
+            finish_reason="tool_calls",
+        )
 
 
 @pytest.mark.asyncio
@@ -277,6 +301,158 @@ async def test_image_generation_request_executes_when_tool_is_auto_callable():
 
     assert ("task", "kling_image_v21", {"userRequest": "我要生成一张漫展写真照片"}, "agent-run-13-tool-call-99") in backend.tool_calls
     assert backend.completed == [(13, "# Generated copy", "tool_use")]
+
+
+@pytest.mark.asyncio
+async def test_product_tool_loop_routes_explicit_image_request_before_general_chat():
+    backend = FakeBackend(resource_type="IMAGE", content_text='{"images":[{"url":"/generated/images/24/image-1.png"}]}')
+    message = "张雪峰的技能应该融合“马拉松”和“巧乐兹”元素"
+    engine = DeepAgentsRuntimeEngine(
+        backend,
+        FakeProductToolModel(
+            tool_name="agent_tool__ofox_gpt_image2",
+            arguments={"userRequest": message},
+            response="不应该走普通聊天",
+        ),
+    )
+    context = RunContext(
+        runId=24,
+        sessionId=1,
+        userId=1,
+        message=message,
+        creditBudget=20,
+        availableTools=[
+            ToolDescriptor(
+                toolCode="ofox_gpt_image2",
+                toolName="GPT-image2.0",
+                description="图片生成工具，支持文生图、写真、海报、插画",
+                estimatedCreditCost=3,
+                autoCallable=True,
+                hints={"modality": "image_generation"},
+            ),
+            ToolDescriptor(
+                toolCode="text_deepseek",
+                toolName="文本生成",
+                description="文本生成，普通问答",
+                estimatedCreditCost=1,
+                autoCallable=True,
+                hints={"modality": "text_generation"},
+            ),
+        ],
+    )
+
+    await engine.run(context)
+
+    assert ("task", "ofox_gpt_image2", {"userRequest": message}, "agent-run-24-tool-call-99") in backend.tool_calls
+    assert backend.completed == [(24, '{"images":[{"url":"/generated/images/24/image-1.png"}]}', "tool_use")]
+    intent_events = [event for event in backend.events if event[1] == "intent.detected"]
+    assert intent_events[-1][3]["decisionSource"] == "tool_call_loop"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("message", "tool_name", "tool_code"),
+    [
+        ("生成一张 cos 远景拍摄图片", "agent_tool__kling_image_v21", "kling_image_v21"),
+        ("给我一张赛博朋克城市海报", "agent_tool__kling_image_v21", "kling_image_v21"),
+        ("拍摄一张咖啡杯近景产品照", "agent_tool__kling_image_v21", "kling_image_v21"),
+        ("生成一段短视频", "agent_tool__kling_video_v26", "kling_video_v26"),
+        ("把这个画面生成视频", "agent_tool__kling_video_v26", "kling_video_v26"),
+    ],
+)
+async def test_product_tool_loop_routes_media_requests_by_model_tool_call(message, tool_name, tool_code):
+    backend = FakeBackend(resource_type="IMAGE" if "image" in tool_name else "VIDEO", content_text='{"ok":true}')
+    engine = DeepAgentsRuntimeEngine(
+        backend,
+        FakeProductToolModel(tool_name=tool_name, arguments={"userRequest": message}),
+    )
+    context = RunContext(
+        runId=25,
+        sessionId=1,
+        userId=1,
+        message=message,
+        creditBudget=20,
+        availableTools=[
+            ToolDescriptor(
+                toolCode="kling_image_v21",
+                toolName="可灵生图 V2.1",
+                description="图片生成，写真，海报，文生图，摄影拍摄",
+                estimatedCreditCost=3,
+                autoCallable=True,
+            ),
+            ToolDescriptor(
+                toolCode="kling_video_v26",
+                toolName="可灵生视频 V2.6",
+                description="视频生成，短视频，文生视频，图生视频",
+                estimatedCreditCost=5,
+                autoCallable=True,
+            ),
+        ],
+    )
+
+    await engine.run(context)
+
+    assert ("task", tool_code, {"userRequest": message}, "agent-run-25-tool-call-99") in backend.tool_calls
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("message", ["你是谁", "刚才那张图是哪个工具做的？", "图片生成失败一般是什么原因？"])
+async def test_product_tool_loop_skips_general_or_meta_chat(message):
+    backend = FakeBackend()
+    model = FakeProductToolModel(tool_name="agent_tool__kling_image_v21", arguments={"userRequest": message}, response="普通回答")
+    engine = DeepAgentsRuntimeEngine(backend, model)
+    context = RunContext(
+        runId=26,
+        sessionId=1,
+        userId=1,
+        message=message,
+        creditBudget=20,
+        availableTools=[
+            ToolDescriptor(
+                toolCode="kling_image_v21",
+                toolName="可灵生图 V2.1",
+                description="图片生成，写真，海报，文生图",
+                estimatedCreditCost=3,
+                autoCallable=True,
+            ),
+        ],
+    )
+
+    await engine.run(context)
+
+    assert not any(call[0] == "task" for call in backend.tool_calls)
+    assert model.turn_calls == []
+    assert backend.completed[-1][2] == "general_chat"
+
+
+@pytest.mark.asyncio
+async def test_product_tool_loop_rejects_modality_mismatch_before_task_dispatch():
+    backend = FakeBackend()
+    engine = DeepAgentsRuntimeEngine(
+        backend,
+        FakeProductToolModel(tool_name="agent_tool__kling_video_v26", arguments={"userRequest": "生成一张图片"}, response="fallback chat"),
+    )
+    context = RunContext(
+        runId=27,
+        sessionId=1,
+        userId=1,
+        message="生成一张图片",
+        creditBudget=20,
+        availableTools=[
+            ToolDescriptor(
+                toolCode="kling_video_v26",
+                toolName="可灵生视频 V2.6",
+                description="视频生成，短视频，文生视频",
+                estimatedCreditCost=5,
+                autoCallable=True,
+            ),
+        ],
+    )
+
+    await engine.run(context)
+
+    assert not any(call[0] == "task" for call in backend.tool_calls)
+    assert any(event[1] == "tool_call.rejected" for event in backend.events)
 
 
 @pytest.mark.asyncio
@@ -476,6 +652,37 @@ async def test_graph_fails_when_model_call_limit_is_exceeded():
 
     assert backend.completed == []
     assert backend.failed == [(8, "AGENT_MODEL_CALL_LIMIT")]
+
+
+@pytest.mark.asyncio
+async def test_runtime_settings_do_not_mutate_shared_engine_limits():
+    backend = FakeBackend()
+    engine = DeepAgentsRuntimeEngine(backend, FakeModel("ok"))
+    original_model_limit = engine.budget_guard.max_model_calls
+    original_tool_limit = engine.budget_guard.max_tool_calls
+    original_product_limit = engine.product_tool_loop.max_tool_calls
+    context = RunContext(
+        runId=18,
+        sessionId=1,
+        userId=1,
+        message="tell me about this platform",
+        creditBudget=20,
+        runtimeSettings=RuntimeSettings(
+            maxModelCalls=1,
+            maxToolCalls=2,
+            productToolLoopMaxCalls=7,
+        ),
+    )
+
+    await engine.run(context)
+
+    assert engine.budget_guard.max_model_calls == original_model_limit
+    assert engine.budget_guard.max_tool_calls == original_tool_limit
+    assert engine.product_tool_loop.max_tool_calls == original_product_limit
+    runtime_events = [event for event in backend.events if event[1] == "runtime_settings.applied"]
+    assert runtime_events[-1][3]["maxModelCalls"] == 1
+    assert runtime_events[-1][3]["maxToolCalls"] == 2
+    assert runtime_events[-1][3]["productToolLoopMaxCalls"] == 7
 
 
 def test_budget_state_records_consumed_credit_without_exceeding_budget():

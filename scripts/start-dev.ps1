@@ -62,33 +62,81 @@ function Run-Command($WorkingDirectory, $FilePath, [string[]]$Arguments) {
     }
 }
 
+$VenvDir = Join-Path $Root ".venv"
+$VenvPython = Join-Path $VenvDir "Scripts\python.exe"
+$RequirementsDev = Join-Path $Root "requirements-dev.txt"
+
+function Ensure-PythonVenv {
+    if (Test-Path -LiteralPath $VenvPython) {
+        & $VenvPython --version *> $null
+        if ($LASTEXITCODE -eq 0) {
+            return
+        }
+        $ResolvedVenv = (Resolve-Path -LiteralPath $VenvDir -ErrorAction SilentlyContinue).Path
+        if ($ResolvedVenv -and $ResolvedVenv.StartsWith($Root, [StringComparison]::OrdinalIgnoreCase)) {
+            Write-Host "[WARN] Existing .venv is not executable; recreating it."
+            Remove-Item -LiteralPath $ResolvedVenv -Recurse -Force
+        } else {
+            throw "Refusing to recreate venv outside repo root: $VenvDir"
+        }
+    }
+    Write-Section "Creating project Python venv (.venv)"
+    Run-Command $Root "python" @("-m", "venv", $VenvDir)
+    if (-not (Test-Path -LiteralPath $VenvPython)) {
+        throw "Failed to create venv at $VenvDir"
+    }
+    Write-Host "[OK] Created $VenvDir"
+}
+
+function Test-PythonVenvReady {
+    if (-not (Test-Path -LiteralPath $VenvPython)) {
+        return $false
+    }
+    & $VenvPython -c "import uvicorn, pika" 2>$null
+    return $LASTEXITCODE -eq 0
+}
+
+function Sync-PythonVenvDeps {
+    Write-Section "Checking Python venv (.venv)"
+    Ensure-PythonVenv
+    if (-not (Test-Path -LiteralPath $RequirementsDev)) {
+        throw "Missing requirements-dev.txt at repo root."
+    }
+    if (-not $InstallDeps -and (Test-PythonVenvReady)) {
+        Write-Host "[OK] Python venv deps ready"
+        return
+    }
+    if ($InstallDeps) {
+        Write-Host "[..] Reinstalling Python deps (-InstallDeps)"
+    } else {
+        Write-Host "[..] Installing Python deps (first run or incomplete venv)"
+    }
+    Run-Command $Root $VenvPython @("-m", "pip", "install", "-U", "pip", "wheel")
+    Run-Command $Root $VenvPython @("-m", "pip", "install", "-r", $RequirementsDev)
+    if (-not (Test-PythonVenvReady)) {
+        throw "Python venv install finished but uvicorn/pika are still missing."
+    }
+    Write-Host "[OK] Python venv deps installed"
+}
+
+function Get-VenvPythonCommand {
+    Ensure-PythonVenv
+    return "'$($VenvPython.Replace("'", "''"))'"
+}
+
 function Install-NodeDeps($RelativePath) {
     $Path = Join-Path $Root $RelativePath
     Write-Section "Checking npm deps: $RelativePath"
-    if (Test-Path -LiteralPath (Join-Path $Path "node_modules")) {
+    if ((Test-Path -LiteralPath (Join-Path $Path "node_modules")) -and -not $InstallDeps) {
         Write-Host "[OK] node_modules exists"
         return
     }
-    if (-not $InstallDeps) {
-        Write-Host "[SKIP] node_modules missing. Run with -InstallDeps to install automatically."
-        return
+    if ($InstallDeps) {
+        Write-Host "[..] npm install (-InstallDeps)"
+    } else {
+        Write-Host "[..] npm install (first run or missing node_modules)"
     }
     Run-Command $Path "npm" @("install")
-}
-
-function Install-PythonDeps($RelativePath) {
-    $Path = Join-Path $Root $RelativePath
-    $Requirements = Join-Path $Path "requirements.txt"
-    Write-Section "Checking Python deps: $RelativePath"
-    if (-not (Test-Path -LiteralPath $Requirements)) {
-        Write-Host "[OK] No requirements.txt"
-        return
-    }
-    if (-not $InstallDeps) {
-        Write-Host "[SKIP] requirements.txt found. Run with -InstallDeps to install automatically."
-        return
-    }
-    Run-Command $Path "python" @("-m", "pip", "install", "-r", "requirements.txt")
 }
 
 function Start-DevWindow($Title, $RelativePath, $Command) {
@@ -469,8 +517,9 @@ Apply-LocalSqlMigrations
 
 Install-NodeDeps "user-web"
 Install-NodeDeps "admin-frontend"
-Install-PythonDeps "agent-service"
-Install-PythonDeps "worker"
+Sync-PythonVenvDeps
+
+$VenvPyCmd = Get-VenvPythonCommand
 
 Write-Section "Starting app services on host"
 Start-DevWindow "Backend :8080" "backend" "mvn spring-boot:run"
@@ -482,7 +531,7 @@ if (Test-HttpReady "http://localhost:8080/api/health" 80) {
     Write-Host "[WARN] Backend did not answer health check yet. Check the Backend window."
 }
 
-Start-DevWindow "Agent Service :8090" "agent-service" "python -m uvicorn app.main:app --reload --port 8090"
+Start-DevWindow "Agent Service :8090" "agent-service" "$VenvPyCmd -m uvicorn app.main:app --reload --port 8090"
 
 Write-Host "[..] Waiting for agent-service health..."
 if (Test-HttpReady "http://localhost:8090/health" 40) {
@@ -491,7 +540,7 @@ if (Test-HttpReady "http://localhost:8090/health" 40) {
     Write-Host "[WARN] Agent Service did not answer health check yet. Check the Agent Service window."
 }
 
-Start-DevWindow "Worker Queue" "worker" "python main.py"
+Start-DevWindow "Worker Queue" "worker" "$VenvPyCmd main.py"
 Start-DevWindow "User Web :5173" "user-web" "npm run dev"
 Start-DevWindow "Admin Web :5174" "admin-frontend" "npm run dev"
 

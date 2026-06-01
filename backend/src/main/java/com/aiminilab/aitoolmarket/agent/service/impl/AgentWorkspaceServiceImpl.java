@@ -1,6 +1,8 @@
 package com.aiminilab.aitoolmarket.agent.service.impl;
 
 import com.aiminilab.aitoolmarket.agent.dto.AgentWorkspaceMemoryItemResponse;
+import com.aiminilab.aitoolmarket.agent.dto.AdminAgentMemoryQuery;
+import com.aiminilab.aitoolmarket.agent.dto.AdminAgentMemoryUpdateRequest;
 import com.aiminilab.aitoolmarket.agent.dto.CreateAgentWorkspaceMemoryRequest;
 import com.aiminilab.aitoolmarket.agent.dto.InternalAgentSessionSearchItemResponse;
 import com.aiminilab.aitoolmarket.agent.dto.InternalAgentSessionSearchRequest;
@@ -106,7 +108,7 @@ public class AgentWorkspaceServiceImpl implements AgentWorkspaceService {
         AgentWorkspaceMemoryItem item = new AgentWorkspaceMemoryItem();
         item.setWorkspaceId(workspaceId);
         item.setUserId(userId);
-        item.setMemoryType(request.memoryType());
+        item.setMemoryType(normalizeMemoryType(request.memoryType()));
         item.setTitle(request.title());
         item.setContent(request.content());
         item.setSourceRunId(request.sourceRunId());
@@ -134,7 +136,7 @@ public class AgentWorkspaceServiceImpl implements AgentWorkspaceService {
         if (existing == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "Workspace memory item not found");
         }
-        existing.setMemoryType(request.memoryType());
+        existing.setMemoryType(normalizeMemoryType(request.memoryType()));
         existing.setTitle(request.title());
         existing.setContent(request.content());
         existing.setImportance(request.importance() == null ? existing.getImportance() : clampImportance(request.importance()));
@@ -267,6 +269,73 @@ public class AgentWorkspaceServiceImpl implements AgentWorkspaceService {
             results = results.subList(0, limit);
         }
         return new PageResponse<>(results, results.size(), 1, limit, results.size() == limit);
+    }
+
+    @Override
+    public PageResponse<AgentWorkspaceMemoryItemResponse> adminListMemory(AdminAgentMemoryQuery query) {
+        AdminAgentMemoryQuery q = query == null ? new AdminAgentMemoryQuery(null, null, null, null, null, 1, 20) : query;
+        int pageNo = PageResponse.normalizePageNo(q.pageNo());
+        int pageSize = PageResponse.normalizePageSize(q.pageSize());
+        String status = normalizeAdminStatus(q.status());
+        String memoryType = q.memoryType() == null || q.memoryType().isBlank() ? "" : normalizeMemoryType(q.memoryType());
+        String keyword = q.keyword() == null ? "" : q.keyword().trim();
+        long total = agentWorkspaceMemoryItemMapper.adminCount(q.userId(), q.workspaceId(), status, memoryType, keyword);
+        var items = agentWorkspaceMemoryItemMapper.adminSearch(
+                        q.userId(),
+                        q.workspaceId(),
+                        status,
+                        memoryType,
+                        keyword,
+                        pageSize,
+                        (pageNo - 1) * pageSize
+                )
+                .stream()
+                .map(this::toMemoryResponse)
+                .toList();
+        return new PageResponse<>(items, total, pageNo, pageSize, (long) pageNo * pageSize < total);
+    }
+
+    @Override
+    @Transactional
+    public AgentWorkspaceMemoryItemResponse adminUpdateMemory(Long memoryId, AdminAgentMemoryUpdateRequest request) {
+        AgentWorkspaceMemoryItem existing = requireAdminMemory(memoryId);
+        existing.setMemoryType(normalizeMemoryType(request.memoryType()));
+        existing.setTitle(truncate(request.title(), 160));
+        existing.setContent(request.content());
+        existing.setImportance(request.importance() == null ? existing.getImportance() : clampImportance(request.importance()));
+        existing.setConfidence(request.confidence() == null ? existing.getConfidence() : clampConfidence(request.confidence()));
+        existing.setPinned(request.pinned() == null ? Boolean.TRUE.equals(existing.getPinned()) : Boolean.TRUE.equals(request.pinned()));
+        existing.setTagsJson(request.tagsJson() == null ? existing.getTagsJson() : request.tagsJson());
+        existing.setMetadataJson(request.metadataJson() == null ? existing.getMetadataJson() : request.metadataJson());
+        existing.setExpiresAt(request.expiresAt() == null ? existing.getExpiresAt() : request.expiresAt());
+        existing.setUpdatedAt(LocalDateTime.now());
+        agentWorkspaceMemoryItemMapper.adminUpdateMemory(existing);
+        return toMemoryResponse(agentWorkspaceMemoryItemMapper.findAnyById(memoryId));
+    }
+
+    @Override
+    @Transactional
+    public AgentWorkspaceMemoryItemResponse adminApproveMemory(Long memoryId) {
+        AgentWorkspaceMemoryItem existing = requireAdminMemory(memoryId);
+        existing.setStatus(ACTIVE_STATUS);
+        existing.setUpdatedAt(LocalDateTime.now());
+        agentWorkspaceMemoryItemMapper.adminUpdateMemory(existing);
+        return toMemoryResponse(agentWorkspaceMemoryItemMapper.findAnyById(memoryId));
+    }
+
+    @Override
+    @Transactional
+    public AgentWorkspaceMemoryItemResponse adminRejectMemory(Long memoryId) {
+        requireAdminMemory(memoryId);
+        agentWorkspaceMemoryItemMapper.adminUpdateStatus(memoryId, "REJECTED");
+        return toMemoryResponse(agentWorkspaceMemoryItemMapper.findAnyById(memoryId));
+    }
+
+    @Override
+    @Transactional
+    public void adminDeleteMemory(Long memoryId) {
+        requireAdminMemory(memoryId);
+        agentWorkspaceMemoryItemMapper.adminUpdateStatus(memoryId, "DELETED");
     }
 
     private List<InternalWorkspaceMemoryItemResponse> buildMemoryContextPack(List<AgentWorkspaceMemoryItem> items, int limit) {
@@ -501,6 +570,25 @@ public class AgentWorkspaceServiceImpl implements AgentWorkspaceService {
             case "profile" -> "user_profile";
             default -> "custom";
         };
+    }
+
+    private String normalizeAdminStatus(String status) {
+        String value = defaultString(status, "").trim().toUpperCase(Locale.ROOT);
+        if (value.isBlank() || "ALL".equals(value)) {
+            return "";
+        }
+        return switch (value) {
+            case "ACTIVE", "CANDIDATE", "REJECTED", "DELETED" -> value;
+            default -> "";
+        };
+    }
+
+    private AgentWorkspaceMemoryItem requireAdminMemory(Long memoryId) {
+        AgentWorkspaceMemoryItem existing = agentWorkspaceMemoryItemMapper.findAnyById(memoryId);
+        if (existing == null) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "Workspace memory item not found");
+        }
+        return existing;
     }
 
     private Integer clampImportance(Integer value) {
