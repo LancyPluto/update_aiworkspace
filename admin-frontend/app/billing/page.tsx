@@ -39,16 +39,25 @@ function formatDate(value?: string | null) {
   if (!value) return "-"
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value.slice(0, 10).replaceAll("/", "-")
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, "0")
-  const day = String(date.getDate()).padStart(2, "0")
-  return `${year}-${month}-${day}`
+  return date
+    .toLocaleDateString("zh-CN", {
+      timeZone: "Asia/Shanghai",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    })
+    .replaceAll("/", "-")
 }
 
 function formatTime(value?: string | null) {
   if (!value) return "-"
   const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
+  return Number.isNaN(date.getTime())
+    ? value
+    : date.toLocaleString("zh-CN", {
+        timeZone: "Asia/Shanghai",
+        hour12: false,
+      })
 }
 
 function billingUnit(log: BillingUsageLog) {

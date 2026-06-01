@@ -19,7 +19,6 @@ const props = defineProps<{
   editingRegenerating: boolean
   copiedMessageId: number | null
   regeneratingMessageId: number | null
-  streamingMessageId: number | null
   hasActiveRun: boolean
   sending: boolean
   modelsLoading: boolean
@@ -37,13 +36,6 @@ const emit = defineEmits<{
   preview: [asset: AssetPreviewItem]
   "update:editingMessageDraft": [value: string]
 }>()
-
-function messageTime(value?: string | null) {
-  if (!value) return ""
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return ""
-  return date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })
-}
 
 interface MessageAttachment {
   id: number
@@ -94,16 +86,13 @@ function isImageAttachment(file: MessageAttachment) {
     :class="['agent-message-row', message.role === 'USER' ? 'user' : 'assistant']"
     :data-message-id="message.id"
   >
-    <div v-if="message.role !== 'USER'" class="avatar-slot">
-      <AgentAvatar :state="avatarState ?? 'idle'" />
-    </div>
-
     <div class="message-main">
       <div v-if="message.role !== 'USER'" class="assistant-name-row">
-        <strong>科创点AI</strong>
-        <span class="message-time-inline">{{ messageTime(message.createdAt) }}</span>
+        <AgentAvatar :state="avatarState ?? 'idle'" />
+        <div>
+          <strong>科创点AI</strong>
+        </div>
       </div>
-      <span v-else class="message-time">{{ messageTime(message.createdAt) }}</span>
       <div class="bubble" :class="{ 'bubble--streaming': isStreaming }">
         <div v-if="editingMessageId === message.id" class="message-edit-box">
           <textarea
@@ -162,7 +151,7 @@ function isImageAttachment(file: MessageAttachment) {
             v-if="message.contentText.trim() || message.role !== 'USER'"
             :message="message.contentText"
             :is-user="message.role === 'USER'"
-            :streaming="message.id === streamingMessageId && hasActiveRun"
+            :streaming="isStreaming"
             @preview="emit('preview', $event)"
           />
         </template>
@@ -218,10 +207,8 @@ function isImageAttachment(file: MessageAttachment) {
 
 <style scoped>
 .agent-message-row {
-  display: grid;
-  grid-template-columns: 42px minmax(0, 650px);
-  justify-content: start;
-  gap: 14px;
+  display: flex;
+  justify-content: flex-start;
   margin: 30px auto;
   width: min(100%, 980px);
   max-width: 980px;
@@ -229,8 +216,7 @@ function isImageAttachment(file: MessageAttachment) {
 }
 
 .agent-message-row.user {
-  grid-template-columns: minmax(0, 650px);
-  justify-content: end;
+  justify-content: flex-end;
 }
 
 .message-main {
@@ -241,54 +227,37 @@ function isImageAttachment(file: MessageAttachment) {
 }
 
 .agent-message-row.user .message-main {
-  grid-column: 1;
-  justify-self: end;
+  margin-left: auto;
+}
+
+.agent-message-row.assistant .message-main {
+  margin-left: -4px;
 }
 
 .assistant-name-row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  min-height: 24px;
-  margin-bottom: 6px;
+  gap: 10px;
+  min-height: 50px;
+  margin-bottom: 10px;
+}
+
+.assistant-name-row :deep(.agent-avatar--md) {
+  width: 50px;
+  height: 50px;
+}
+
+.assistant-name-row :deep(.agent-avatar__logo) {
+  width: 28px;
+  height: 28px;
 }
 
 .assistant-name-row strong {
+  display: block;
   color: var(--agent-text-primary);
   font-size: 14px;
   font-weight: 700;
-}
-
-.message-time-inline {
-  color: rgb(255 255 255 / 0.32);
-  font-size: 11px;
-}
-
-.message-time {
-  position: absolute;
-  left: calc(100% + 12px);
-  top: 4px;
-  min-width: 42px;
-  color: rgb(255 255 255 / 0.28);
-  font-size: 11px;
-  line-height: 1;
-  opacity: 0;
-  pointer-events: none;
-  transform: translateX(-4px);
-  transition: opacity 0.16s ease, transform 0.16s ease;
-}
-
-.agent-message-row.user .message-time {
-  right: calc(100% + 12px);
-  left: auto;
-  text-align: right;
-  transform: translateX(4px);
-}
-
-.agent-message-row:hover .message-time,
-.agent-message-row:focus-within .message-time {
-  opacity: 1;
-  transform: translateX(0);
+  line-height: 1.2;
 }
 
 .bubble {
@@ -491,18 +460,10 @@ function isImageAttachment(file: MessageAttachment) {
 
 @media (max-width: 720px) {
   .agent-message-row {
-    grid-template-columns: 34px minmax(0, 1fr);
-    gap: 10px;
     margin: 20px auto;
-  }
-  .agent-message-row.user {
-    grid-template-columns: minmax(0, 1fr);
   }
   .message-actions {
     opacity: 1;
-  }
-  .message-time {
-    display: none;
   }
 }
 </style>

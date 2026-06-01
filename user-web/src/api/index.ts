@@ -52,6 +52,7 @@ export {
   createRechargeOrder,
   fetchCreditAccount,
   fetchCreditLogs,
+  fetchCreditUsageLogs,
   fetchRechargeOrder,
   fetchRechargePackages,
   mockPayRechargeOrder,

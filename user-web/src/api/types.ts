@@ -405,6 +405,28 @@ export interface CreditLog {
   createdAt: string
 }
 
+export interface BillingUsageLog {
+  id: number
+  sourceType: string
+  sourceId: number
+  taskNo?: string | null
+  inputModality?: string | null
+  outputModality?: string | null
+  userId: number
+  modelConfigId?: number | null
+  provider?: string | null
+  modelName?: string | null
+  promptTokens: number
+  completionTokens: number
+  totalTokens: number
+  billingUnit?: string | null
+  billableUnits?: number | null
+  unitPrice?: number | null
+  costAmount: number
+  chargedCredits: number
+  createdAt: string
+}
+
 export interface RechargePackage {
   id: number
   packageCode: string

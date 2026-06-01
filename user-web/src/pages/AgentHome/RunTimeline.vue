@@ -15,19 +15,26 @@ type TimelineTone = "info" | "success" | "warning" | "error"
 const expandedEventIds = ref<Set<number>>(new Set())
 
 const processExpanded = ref(true)
+const toolEvents = computed(() => filterToolProcessEvents(props.events))
+const hasToolProcess = computed(() => toolEvents.value.length > 0)
 const processEvents = computed(() =>
-  props.processMode ? filterToolProcessEvents(props.events) : filterUserFacingRunEvents(props.events, props.inlineMode),
+  props.processMode && hasToolProcess.value ? toolEvents.value : filterUserFacingRunEvents(props.events, props.inlineMode),
 )
 const visibleEvents = computed(() =>
   processEvents.value.slice(-14),
 )
 const latestEvent = computed(() => visibleEvents.value.at(-1) ?? null)
 const processFinishedEvent = computed(() =>
-  [...processEvents.value].reverse().find((event) => event.eventType === "tool.finished") ?? null,
+  [...processEvents.value].reverse().find((event) =>
+    hasToolProcess.value ? event.eventType === "tool.finished" : event.eventType === "run.completed" || event.eventType === "message.completed" || event.eventType === "run.failed",
+  ) ?? null,
 )
 const hasRunningTool = computed(() => {
   const lastEvent = latestEvent.value
-  return Boolean(lastEvent && lastEvent.eventType !== "tool.finished")
+  if (!lastEvent) return false
+  return hasToolProcess.value
+    ? lastEvent.eventType !== "tool.finished"
+    : lastEvent.eventType !== "run.completed" && lastEvent.eventType !== "message.completed" && lastEvent.eventType !== "run.failed"
 })
 const processElapsedSeconds = computed(() => {
   const startedAt = processEvents.value[0]?.createdAt
@@ -39,9 +46,10 @@ const processElapsedSeconds = computed(() => {
   return Math.max(1, Math.round((end - start) / 1000))
 })
 const processSummaryText = computed(() => {
-  if (!processFinishedEvent.value) return "调用中"
+  if (!processFinishedEvent.value) return hasToolProcess.value ? "调用中" : "思考中"
   const elapsed = processElapsedSeconds.value
-  return elapsed == null ? "调用结束" : `调用结束（用时 ${elapsed} 秒）`
+  const label = hasToolProcess.value ? "调用完成" : "思考完成"
+  return elapsed == null ? label : `${label}（用时 ${elapsed} 秒）`
 })
 
 function parseEventJson(value?: string | null | Record<string, unknown>) {
@@ -186,10 +194,11 @@ function toggleExpanded(eventId: number) {
     :class="{ inline: inlineMode }"
     aria-label="Agent run timeline"
   >
-    <button v-if="processMode" class="process-summary" type="button" @click="processExpanded = !processExpanded">
+    <button v-if="processMode" class="process-summary" :class="{ thinking: !hasToolProcess }" type="button" @click="processExpanded = !processExpanded">
       <span class="process-icon" :class="{ running: hasRunningTool }">
         <Loader2 v-if="hasRunningTool" class="h-3.5 w-3.5 animate-spin" />
-        <Hammer v-else class="h-3.5 w-3.5" />
+        <Hammer v-else-if="hasToolProcess" class="h-3.5 w-3.5" />
+        <Sparkles v-else class="h-3.5 w-3.5" />
       </span>
       <span>
         <strong>{{ processSummaryText }}</strong>
@@ -237,36 +246,37 @@ function toggleExpanded(eventId: number) {
 }
 
 .run-timeline.inline:has(.process-summary) {
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
 
 .process-summary {
-  width: 100%;
+  width: fit-content;
+  max-width: 100%;
   display: grid;
-  grid-template-columns: 28px minmax(0, 1fr) auto;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 9px;
-  border: 1px solid rgb(255 255 255 / 0.08);
-  border-radius: 14px;
-  background: rgb(255 255 255 / 0.045);
+  gap: 7px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   color: var(--agent-text-primary);
   cursor: pointer;
-  padding: 9px 10px;
+  padding: 0;
   text-align: left;
 }
 
 .process-icon {
-  width: 28px;
-  height: 28px;
+  width: 18px;
+  height: 18px;
   display: grid;
   place-items: center;
-  border-radius: 10px;
-  background: var(--agent-accent-soft);
+  border-radius: 0;
+  background: transparent;
   color: var(--agent-accent);
 }
 
 .process-icon.running {
-  box-shadow: 0 0 0 4px var(--agent-accent-soft);
+  box-shadow: none;
 }
 
 .process-summary strong,
@@ -279,10 +289,13 @@ function toggleExpanded(eventId: number) {
 }
 
 .process-summary strong {
+  color: rgb(255 255 255 / 0.78);
   font-size: 13px;
+  font-weight: 600;
 }
 
 .process-summary small {
+  display: none;
   margin-top: 2px;
   color: var(--agent-text-muted);
   font-size: 11px;
@@ -306,8 +319,8 @@ function toggleExpanded(eventId: number) {
   grid-template-columns: 32px minmax(0, 1fr);
   gap: 10px;
   align-items: start;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--border);
+  padding: 8px 0 8px 25px;
+  border-bottom: 0;
 }
 
 .timeline-row:last-child {

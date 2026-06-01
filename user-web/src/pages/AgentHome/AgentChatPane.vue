@@ -12,7 +12,6 @@ import {
   Trash2,
   X,
 } from "lucide-vue-next"
-import { filterToolProcessEvents } from "./runTimelineEvents"
 import AgentComposer from "./AgentComposer.vue"
 import AgentMessageRow from "./AgentMessageRow.vue"
 import AgentAvatar from "./AgentAvatar.vue"
@@ -137,6 +136,7 @@ const navLayoutTick = ref(0)
 const messagesKey = computed(() => `agent_messages_${props.sessionId}`)
 let runStreamAbort: AbortController | null = null
 let runStatusWatchdog: number | null = null
+let streamingAnimationTimer: number | null = null
 const terminalEventFinalizingRunIds = new Set<number>()
 
 const input = computed({
@@ -158,14 +158,6 @@ const confirmationEvents = computed(() =>
     .map((event) => ({ event, payload: parseEventJson(event.eventJson) })),
 )
 
-const runStatusText = computed(() => {
-  if (runConnectionStatus.value === "running") return "Agent 正在运行"
-  if (runConnectionStatus.value === "awaiting_confirmation") return "等待你确认工具调用"
-  if (runConnectionStatus.value === "completed") return "Agent 已完成"
-  if (runConnectionStatus.value === "failed") return "Agent 运行失败"
-  return ""
-})
-
 const hasActiveRun = computed(() => {
   if (!activeRunId.value) return false
   return (
@@ -175,10 +167,7 @@ const hasActiveRun = computed(() => {
 })
 
 const showRunRecoveryBanner = computed(
-  () => recoveryRunId.value != null && (showActiveRunLimitHint.value || hasActiveRun.value),
-)
-const selectedAgentModel = computed(() =>
-  props.agentModels.find((model) => model.id === props.modelConfigId) ?? props.agentModels[0] ?? null,
+  () => recoveryRunId.value != null && showActiveRunLimitHint.value,
 )
 const hasStreamingAssistantContent = computed(() =>
   streamingAssistantMessageId.value != null &&
@@ -248,19 +237,15 @@ function resolveAssistantAvatarState(message: AgentMessage): AgentAvatarState {
   return "idle"
 }
 
-function modelLabel(model: AgentModelConfig) {
-  return model.displayName || model.modelName || model.configCode || `Model ${model.id}`
-}
-
-function modelMeta(model: AgentModelConfig) {
-  return `${model.provider} · ${model.modelName}`
-}
-
 function messageTime(value?: string | null) {
   if (!value) return ""
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return ""
-  return date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })
+  return date.toLocaleTimeString("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    hour: "2-digit",
+    minute: "2-digit",
+  })
 }
 
 function messageContentJsonForFiles(items: AgentFile[]) {
@@ -279,8 +264,8 @@ function messageContentJsonForFiles(items: AgentFile[]) {
 function runEventsForMessage(message: AgentMessage) {
   if (message.role !== "ASSISTANT" || message.runId == null) return []
   const cachedEvents = runEventsByRunId.value[message.runId] ?? []
-  if (cachedEvents.length > 0) return filterToolProcessEvents(cachedEvents)
-  return activeRunId.value === message.runId ? filterToolProcessEvents(events.value) : []
+  if (cachedEvents.length > 0) return cachedEvents
+  return activeRunId.value === message.runId ? events.value : []
 }
 
 function messageDividerTime(value?: string | null) {
@@ -288,13 +273,16 @@ function messageDividerTime(value?: string | null) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return ""
   const now = new Date()
-  const sameDay =
-    date.getFullYear() === now.getFullYear() &&
-    date.getMonth() === now.getMonth() &&
-    date.getDate() === now.getDate()
+  const shanghaiDate = date.toLocaleDateString("zh-CN", { timeZone: "Asia/Shanghai" })
+  const shanghaiToday = now.toLocaleDateString("zh-CN", { timeZone: "Asia/Shanghai" })
+  const sameDay = shanghaiDate === shanghaiToday
   const datePart = sameDay
     ? "今天"
-    : date.toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" })
+    : date.toLocaleDateString("zh-CN", {
+        timeZone: "Asia/Shanghai",
+        month: "2-digit",
+        day: "2-digit",
+      })
   return `${datePart} ${messageTime(value)}`
 }
 
@@ -946,6 +934,26 @@ function stopRunStatusWatchdog() {
   runStatusWatchdog = null
 }
 
+function stopStreamingAnimationTimer() {
+  if (streamingAnimationTimer == null) return
+  window.clearTimeout(streamingAnimationTimer)
+  streamingAnimationTimer = null
+}
+
+function animateCompletedAssistantMessage(runId: number) {
+  const assistant = messages.value.find((message) => message.role === "ASSISTANT" && message.runId === runId)
+  if (!assistant?.contentText?.trim() || isStructuredMediaContent(assistant.contentText)) return
+  stopStreamingAnimationTimer()
+  streamingAssistantMessageId.value = assistant.id
+  const duration = Math.min(Math.max(assistant.contentText.length * 4 + 240, 600), 3200)
+  streamingAnimationTimer = window.setTimeout(() => {
+    if (streamingAssistantMessageId.value === assistant.id) {
+      streamingAssistantMessageId.value = null
+    }
+    streamingAnimationTimer = null
+  }, duration)
+}
+
 function startRunStatusWatchdog(runId: number) {
   stopRunStatusWatchdog()
   runStatusWatchdog = window.setInterval(() => {
@@ -993,6 +1001,7 @@ function ensureStreamingAssistantMessage(runId: number) {
   const existing = streamingMessageForRun(runId)
   if (existing) return existing
   const tempId = streamingMessageId(runId)
+  stopStreamingAnimationTimer()
   const message: AgentMessage = {
     id: tempId,
     sessionId: props.sessionId,
@@ -1009,7 +1018,9 @@ function ensureStreamingAssistantMessage(runId: number) {
 function clearStreamingAssistantMessage(runId: number, options?: { preserveReadableText?: boolean }) {
   const tempId = streamingMessageId(runId)
   const tempMessage = streamingMessageForRun(runId)
-  streamingAssistantMessageId.value = null
+  if (streamingAssistantMessageId.value === tempId) {
+    streamingAssistantMessageId.value = null
+  }
   if (options?.preserveReadableText && tempMessage?.contentText?.trim() && !isStructuredMediaContent(tempMessage.contentText)) {
     return
   }
@@ -1159,6 +1170,9 @@ async function settleTerminalRun(runId: number, run: AgentRun) {
   }
   await refreshMessages({ preserveStreamingRunId: run.status === "FAILED" || run.status === "TIMEOUT" ? runId : undefined })
   clearStreamingAssistantMessage(runId, { preserveReadableText: run.status === "FAILED" || run.status === "TIMEOUT" })
+  if (run.status === "SUCCESS") {
+    animateCompletedAssistantMessage(runId)
+  }
   stopRunStatusWatchdog()
   await scrollBottom()
 }
@@ -1495,6 +1509,7 @@ onMounted(() => {
 onUnmounted(() => {
   stopRunEventStream()
   stopRunStatusWatchdog()
+  stopStreamingAnimationTimer()
 })
 
 defineExpose({
@@ -1549,13 +1564,12 @@ defineExpose({
             :editing-regenerating="editingRegenerating"
             :copied-message-id="copiedMessageId"
             :regenerating-message-id="regeneratingMessageId"
-            :streaming-message-id="streamingAssistantMessageId"
             :has-active-run="hasActiveRun"
             :sending="sending"
             :models-loading="modelsLoading"
             :model-config-id="modelConfigId"
             :avatar-state="message.role === 'ASSISTANT' ? resolveAssistantAvatarState(message) : undefined"
-            :is-streaming="message.id === streamingAssistantMessageId && hasActiveRun"
+            :is-streaming="message.id === streamingAssistantMessageId"
             @copy="copyMessage"
             @start-edit="startEditMessage"
             @cancel-edit="cancelEditMessage"
@@ -1566,31 +1580,20 @@ defineExpose({
         </template>
 
         <article v-if="showGenerationLoading" class="agent-message assistant generating-message">
-          <div class="thinking-avatar-stack">
-            <AgentAvatar state="thinking" />
-            <div class="typing-dots typing-dots--under-avatar" aria-hidden="true">
-              <i></i>
-              <i></i>
-              <i></i>
-            </div>
-          </div>
-          <div class="generating-inline">
+          <div class="generating-main">
             <div class="assistant-name-row">
+              <AgentAvatar state="thinking" />
               <strong>科创点AI</strong>
             </div>
-            <span v-if="selectedAgentModel">{{ modelLabel(selectedAgentModel) }} · {{ selectedAgentModel.modelName }}</span>
-            <span v-else>正在准备 Agent 模型</span>
+            <div class="thinking-line">
+              <span>思考中</span>
+              <div class="typing-dots typing-dots--under-avatar" aria-hidden="true">
+                <i></i>
+                <i></i>
+                <i></i>
+              </div>
+            </div>
           </div>
-        </article>
-
-        <article v-if="runStatusText" class="run-status-card" :class="runConnectionStatus">
-          <Loader2
-            v-if="runConnectionStatus === 'running' || runConnectionStatus === 'awaiting_confirmation'"
-            class="h-4 w-4 animate-spin"
-          />
-          <Check v-else-if="runConnectionStatus === 'completed'" class="h-4 w-4" />
-          <AlertTriangle v-else-if="runConnectionStatus === 'failed'" class="h-4 w-4" />
-          <span>{{ runStatusText }}</span>
         </article>
 
         <article v-if="showRunRecoveryBanner" class="agent-recovery-card">
@@ -2205,10 +2208,8 @@ defineExpose({
 }
 
 .agent-message {
-  display: grid;
-  grid-template-columns: 42px minmax(0, 650px);
+  display: flex;
   justify-content: start;
-  gap: 14px;
   margin: 30px auto;
   width: min(100%, 980px);
   max-width: 980px;
@@ -2441,23 +2442,32 @@ defineExpose({
   animation: message-rise 0.18s ease-out;
 }
 
-.thinking-avatar-stack {
-  display: grid;
-  justify-items: center;
-  gap: 7px;
-}
-
-.generating-inline {
+.generating-main {
   min-width: 0;
   padding-top: 2px;
+  margin-left: -4px;
 }
 
 .assistant-name-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  min-height: 24px;
+  min-height: 50px;
   margin-bottom: 6px;
+}
+
+.assistant-name-row :deep(.agent-avatar) {
+  margin-right: 2px;
+}
+
+.assistant-name-row :deep(.agent-avatar--md) {
+  width: 50px;
+  height: 50px;
+}
+
+.assistant-name-row :deep(.agent-avatar__logo) {
+  width: 28px;
+  height: 28px;
 }
 
 .assistant-name-row strong {
@@ -2467,12 +2477,10 @@ defineExpose({
   font-weight: 700;
 }
 
-.generating-inline span {
-  display: block;
-  max-width: min(420px, 52vw);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.thinking-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
   color: rgb(255 255 255 / 0.48);
   font-size: 12px;
 }

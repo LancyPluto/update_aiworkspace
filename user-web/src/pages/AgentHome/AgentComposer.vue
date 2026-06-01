@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue"
 import {
+  Check,
+  ChevronDown,
   Database,
   FileText,
   Loader2,
@@ -48,6 +50,8 @@ const { reducedMotion } = useReducedMotion()
 const composerTextareaRef = ref<HTMLTextAreaElement | null>(null)
 const composerExpanded = ref(false)
 const fileInputRef = ref<HTMLInputElement | null>(null)
+const modelDropdownOpen = ref(false)
+const selectedProviderKey = ref("")
 
 const input = computed({
   get: () => props.draft,
@@ -57,6 +61,34 @@ const input = computed({
 const selectedAgentModel = computed(
   () => props.agentModels.find((m) => m.id === props.modelConfigId) ?? props.agentModels[0] ?? null,
 )
+
+const modelGroups = computed(() => {
+  const groups = new Map<string, { key: string; label: string; icon: string; models: AgentModelConfig[] }>()
+  for (const model of props.agentModels) {
+    const key = model.provider || "unknown"
+    const existing = groups.get(key)
+    if (existing) {
+      existing.models.push(model)
+    } else {
+      groups.set(key, {
+        key,
+        label: providerLabel(key),
+        icon: providerIcon(key),
+        models: [model],
+      })
+    }
+  }
+  return Array.from(groups.values())
+})
+
+const activeModelGroup = computed(() => {
+  const selected = selectedAgentModel.value
+  const selectedKey = selected?.provider || selectedProviderKey.value
+  return modelGroups.value.find((group) => group.key === selectedProviderKey.value)
+    ?? modelGroups.value.find((group) => group.key === selectedKey)
+    ?? modelGroups.value[0]
+    ?? null
+})
 
 const inputBlocked = computed(
   () => props.hasActiveRun || props.editingRegenerating || props.regeneratingMessageId != null,
@@ -84,6 +116,39 @@ function modelLabel(model: AgentModelConfig) {
   return model.displayName || model.modelName || model.configCode || `Model ${model.id}`
 }
 
+function providerLabel(provider: string) {
+  const normalized = provider.toLowerCase()
+  if (normalized.includes("openai")) return "OpenAI"
+  if (normalized.includes("anthropic")) return "Anthropic"
+  if (normalized.includes("deepseek")) return "DeepSeek"
+  if (normalized.includes("doubao") || normalized.includes("volc")) return "豆包"
+  if (normalized.includes("qwen") || normalized.includes("dashscope")) return "通义千问"
+  if (normalized.includes("gemini") || normalized.includes("google")) return "Google"
+  if (normalized.includes("mock")) return "Mock"
+  return provider || "Models"
+}
+
+function providerIcon(provider: string) {
+  const label = providerLabel(provider)
+  if (/^[A-Za-z]/.test(label)) return label.slice(0, 1).toUpperCase()
+  return label.slice(0, 1)
+}
+
+function providerIconClass(provider: string) {
+  const normalized = provider.toLowerCase()
+  if (normalized.includes("deepseek")) return "model-provider-icon--blue"
+  if (normalized.includes("doubao") || normalized.includes("volc")) return "model-provider-icon--cyan"
+  if (normalized.includes("qwen") || normalized.includes("dashscope")) return "model-provider-icon--purple"
+  if (normalized.includes("google") || normalized.includes("gemini")) return "model-provider-icon--rainbow"
+  if (normalized.includes("openai")) return "model-provider-icon--green"
+  return "model-provider-icon--neutral"
+}
+
+function modelMeta(model: AgentModelConfig) {
+  const capabilities = model.capabilities?.filter(Boolean).slice(0, 2).join(" · ")
+  return capabilities || model.modelName || model.configCode || model.provider
+}
+
 function changeModel(rawId: string) {
   if (!rawId) {
     emit("change-model", null)
@@ -91,6 +156,18 @@ function changeModel(rawId: string) {
   }
   const id = Number(rawId)
   emit("change-model", Number.isFinite(id) && id > 0 ? id : null)
+  modelDropdownOpen.value = false
+}
+
+function toggleModelDropdown() {
+  if (props.modelsLoading || props.hasActiveRun || props.sending || props.editingRegenerating || props.regeneratingMessageId != null || props.agentModels.length === 0) return
+  selectedProviderKey.value = selectedAgentModel.value?.provider || modelGroups.value[0]?.key || ""
+  modelDropdownOpen.value = !modelDropdownOpen.value
+}
+
+function chooseModel(model: AgentModelConfig) {
+  emit("change-model", model.id)
+  modelDropdownOpen.value = false
 }
 
 function formatFileSize(size: number) {
@@ -176,6 +253,54 @@ defineExpose({ adjustComposerTextareaHeight })
         <span class="composer-model-kicker">Agent 模型</span>
         <strong v-if="selectedAgentModel">{{ modelLabel(selectedAgentModel) }}</strong>
         <strong v-else>{{ modelsLoading ? "模型加载中" : "未选择模型" }}</strong>
+      </div>
+      <button
+        type="button"
+        class="composer-model-trigger"
+        :disabled="
+          modelsLoading ||
+          hasActiveRun ||
+          sending ||
+          editingRegenerating ||
+          regeneratingMessageId != null ||
+          agentModels.length === 0
+        "
+        @click="toggleModelDropdown"
+      >
+        <span>{{ selectedAgentModel ? modelLabel(selectedAgentModel) : (modelsLoading ? "加载中" : "暂无模型") }}</span>
+        <ChevronDown class="h-3.5 w-3.5" :class="{ 'rotate-180': modelDropdownOpen }" />
+      </button>
+      <div v-if="modelDropdownOpen" class="model-picker-popover">
+        <aside class="model-picker-groups">
+          <button
+            v-for="group in modelGroups"
+            :key="group.key"
+            type="button"
+            class="model-provider-item"
+            :class="{ active: activeModelGroup?.key === group.key }"
+            @click="selectedProviderKey = group.key"
+          >
+            <span class="model-provider-icon" :class="providerIconClass(group.key)">{{ group.icon }}</span>
+            <span>{{ group.label }}</span>
+          </button>
+        </aside>
+        <section class="model-picker-models">
+          <button
+            v-for="model in activeModelGroup?.models ?? []"
+            :key="model.id"
+            type="button"
+            class="model-detail-item"
+            :class="{ active: model.id === modelConfigId }"
+            @click="chooseModel(model)"
+          >
+            <span class="model-provider-icon" :class="providerIconClass(model.provider)">{{ providerIcon(model.provider) }}</span>
+            <span class="model-detail-copy">
+              <strong>{{ modelLabel(model) }}</strong>
+              <small>{{ modelMeta(model) }}</small>
+            </span>
+            <Check v-if="model.id === modelConfigId" class="h-4 w-4 text-primary" />
+          </button>
+        </section>
       </div>
       <select
         class="composer-model-select"
@@ -332,10 +457,11 @@ defineExpose({ adjustComposerTextareaHeight })
   align-items: center;
   align-self: flex-start;
   gap: 6px;
-  max-width: min(250px, 100%);
+  max-width: min(360px, 100%);
   border-radius: 999px;
   background: rgb(255 255 255 / 0.028);
   padding: 2px 5px 2px 8px;
+  position: relative;
 }
 
 .composer-model-kicker {
@@ -350,6 +476,7 @@ defineExpose({ adjustComposerTextareaHeight })
 }
 
 .composer-model-select {
+  display: none;
   width: min(164px, 40vw);
   min-height: 24px;
   border: 0;
@@ -358,6 +485,134 @@ defineExpose({ adjustComposerTextareaHeight })
   color: rgb(255 255 255 / 0.72);
   padding: 0 24px 0 9px;
   outline: none;
+  font-size: 11px;
+}
+
+.composer-model-trigger {
+  min-height: 24px;
+  max-width: min(210px, 46vw);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  border-radius: 999px;
+  background: rgb(0 0 0 / 0.14);
+  color: rgb(255 255 255 / 0.78);
+  padding: 0 9px;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.composer-model-trigger span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-model-trigger svg {
+  transition: transform 0.16s ease;
+}
+
+.composer-model-trigger:disabled {
+  opacity: 0.62;
+  cursor: not-allowed;
+}
+
+.model-picker-popover {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 10px);
+  z-index: 20;
+  display: grid;
+  grid-template-columns: 168px minmax(260px, 360px);
+  width: min(540px, calc(100vw - 36px));
+  overflow: hidden;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 14px;
+  background: rgb(21 21 29 / 0.98);
+  box-shadow: 0 18px 60px rgb(0 0 0 / 0.42);
+}
+
+.model-picker-groups,
+.model-picker-models {
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  max-height: 310px;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.model-picker-groups {
+  border-right: 1px solid rgb(255 255 255 / 0.07);
+}
+
+.model-provider-item,
+.model-detail-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: rgb(255 255 255 / 0.72);
+  padding: 8px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.model-provider-item.active,
+.model-provider-item:hover,
+.model-detail-item.active,
+.model-detail-item:hover {
+  background: rgb(255 255 255 / 0.07);
+  color: #fff;
+}
+
+.model-provider-icon {
+  width: 24px;
+  height: 24px;
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 7px;
+  background: rgb(255 255 255 / 0.09);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.model-provider-icon--blue { background: rgb(37 99 235 / 0.32); }
+.model-provider-icon--cyan { background: rgb(8 145 178 / 0.34); }
+.model-provider-icon--purple { background: rgb(124 58 237 / 0.34); }
+.model-provider-icon--green { background: rgb(22 163 74 / 0.34); }
+.model-provider-icon--rainbow { background: linear-gradient(135deg, #4285f4, #34a853 45%, #fbbc05 70%, #ea4335); }
+.model-provider-icon--neutral { background: rgb(255 255 255 / 0.09); }
+
+.model-detail-copy {
+  min-width: 0;
+  display: grid;
+  flex: 1;
+  gap: 3px;
+}
+
+.model-detail-copy strong,
+.model-detail-copy small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-detail-copy strong {
+  color: rgb(255 255 255 / 0.88);
+  font-size: 13px;
+}
+
+.model-detail-copy small {
+  color: rgb(255 255 255 / 0.42);
   font-size: 11px;
 }
 
