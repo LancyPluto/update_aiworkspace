@@ -535,6 +535,12 @@ export interface AgentModelConfig {
   baseUrl?: string | null
   apiKeyMasked?: string | null
   extraAuthJsonMasked?: string | null
+  inputTokenPricePer1k?: number | null
+  outputTokenPricePer1k?: number | null
+  inputTokenPricePer1m?: number | null
+  outputTokenPricePer1m?: number | null
+  billingUnit?: string | null
+  unitPrice?: number | null
   enabled: boolean
   agentEnabled?: boolean | null
   isDefault?: boolean | null

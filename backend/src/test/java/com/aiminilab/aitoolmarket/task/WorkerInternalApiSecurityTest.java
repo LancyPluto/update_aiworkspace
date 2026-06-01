@@ -7,6 +7,7 @@ import com.aiminilab.aitoolmarket.task.controller.InternalTaskController;
 import com.aiminilab.aitoolmarket.task.dto.TaskStatusResponse;
 import com.aiminilab.aitoolmarket.task.service.InternalTaskService;
 import com.aiminilab.aitoolmarket.task.service.TaskService;
+import com.aiminilab.aitoolmarket.user.mapper.UserMapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -46,7 +47,8 @@ class WorkerInternalApiSecurityTest {
         AuthInterceptor authInterceptor = new AuthInterceptor(
                 mock(JwtTokenProvider.class),
                 new ObjectMapper(),
-                verifier
+                verifier,
+                mock(UserMapper.class)
         );
         authInterceptor.init(new MockFilterConfig());
 
