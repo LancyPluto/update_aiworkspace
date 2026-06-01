@@ -2,10 +2,10 @@
 import { Code2, Image, Music, FileText } from 'lucide-vue-next'
 
 const infrastructureItems = [
-  { icon: Code2, title: 'GPT-4o', description: 'OpenAI 旗舰模型，驱动智能路由与内容生成' },
-  { icon: Image, title: 'Midjourney V6', description: '业界领先的文生图模型，艺术感与细节兼备' },
-  { icon: Music, title: 'Runway Gen-3', description: '专业级图生视频模型，效果出众' },
-  { icon: FileText, title: 'Suno V4', description: 'AI 音乐生成标杆，支持多种风格' },
+  { icon: Code2, title: '智能内容生成', description: '全场景理解与创作模型，驱动智能路由与多模态生成。' },
+  { icon: Image, title: 'AI 图像生成', description: '文生图与图生图模型，支持高分辨率输出与风格定制。' },
+  { icon: Music, title: '图生视频生成', description: '动态视频生成模型，支持静态图转视频与运动控制。' },
+  { icon: FileText, title: '语音与音乐生成', description: '一站式音频创作模型，支持语音合成、AI 作曲与声音克隆。' },
 ]
 </script>
 

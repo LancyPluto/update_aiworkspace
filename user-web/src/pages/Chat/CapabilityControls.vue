@@ -8,6 +8,7 @@ import { fetchTasks } from "@/api/taskApi"
 import { useAuthStore } from "@/store/authStore"
 import { buildTaskResultBlocks } from "@/utils/taskResultBlocks"
 import { FileAudio, FileVideo, ImageIcon, ImageUp, Library, Loader2, Mic, Paperclip, UploadCloud, X } from "lucide-vue-next"
+import { BookOpen } from 'lucide-vue-next'
 
 export interface PendingAttachment {
   localId: string
@@ -444,30 +445,39 @@ defineExpose({
             @dragover.prevent
             @drop.prevent="handleFieldUpload(field, ($event as DragEvent).dataTransfer?.files || null)"
           >
-            <label
-              class="flex h-7 min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg border border-dashed border-border/60 bg-background px-2 text-xs text-muted-foreground hover:border-primary/60"
-            >
-              <input
-                type="file"
-                class="hidden"
-                :accept="uploadAccept(field)"
-                @change="handleFieldUpload(field, ($event.target as HTMLInputElement).files)"
-              />
-              <Loader2 v-if="uploadState(field.fieldKey).uploading" class="h-3.5 w-3.5 animate-spin" />
-              <ImageUp v-else-if="materialKindForField(field) === 'image'" class="h-3.5 w-3.5" />
-              <UploadCloud v-else class="h-3.5 w-3.5" />
-              <span class="truncate text-xs">
-                {{ uploadState(field.fieldKey).uploading ? "上传中..." : (uploadState(field.fieldKey).fileName || "上传文件") }}
-              </span>
-            </label>
-            <button
-              type="button"
-              class="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-border/60 bg-background text-muted-foreground hover:border-primary/50 hover:text-primary"
-              :title="`从历史${materialKindLabel(materialKindForField(field))}素材中选择`"
-              @click="openMaterialPicker(field)"
-            >
-              <Library class="h-3.5 w-3.5" />
-            </button>
+<label
+  class="flex h-8 min-w-0 flex-1 items-center justify-between rounded-lg border border-border/60 bg-background px-3 text-xs text-muted-foreground transition"
+>
+  <!-- 左侧：本地上传 → 只在这里加 hover 文字 + 鼠标小手 -->
+  <div
+    class="cursor-pointer flex items-center"
+    title="从本地文件上传"
+  >
+    <input
+      type="file"
+      class="hidden"
+      :accept="uploadAccept(field)"
+      @change="handleFieldUpload(field, ($event.target as HTMLInputElement).files)"
+    />
+
+    <Loader2 v-if="uploadState(field.fieldKey).uploading" class="h-3.5 w-3.5 animate-spin text-primary" />
+    <ImageUp v-else-if="materialKindForField(field) === 'image'" class="h-3.5 w-3.5" />
+    <UploadCloud v-else class="h-3.5 w-3.5" />
+  </div>
+
+  <span class="text-muted-foreground"> | </span>
+
+  <!-- 右侧：素材库 → 保留原有提示 + 鼠标小手 -->
+  <button
+    type="button"
+    class="cursor-pointer flex items-center rounded-md px-1 py-1 text-xs hover:text-primary transition"
+    :title="`从历史${materialKindLabel(materialKindForField(field))}素材中选择`"
+    @click="openMaterialPicker(field)"
+  >
+    <BookOpen class="h-3.5 w-3.5" />
+  </button>
+</label>
+           
           </div>
           <div v-if="strField(field.fieldKey)" class="flex items-center gap-1">
             <img
