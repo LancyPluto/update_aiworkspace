@@ -3,6 +3,7 @@ package com.aiminilab.aitoolmarket.market.support;
 import com.aiminilab.aitoolmarket.agent.dto.AgentModelConfigRequest;
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
 import com.aiminilab.aitoolmarket.agent.support.ModelCapabilitiesCodec;
+import com.aiminilab.aitoolmarket.agent.support.ModelConfigCredentialResolver;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Component;
 
@@ -10,38 +11,43 @@ import org.springframework.stereotype.Component;
 public class MarketModelConfigBridge {
 
     private final ModelCapabilitiesCodec capabilitiesCodec;
+    private final ModelConfigCredentialResolver credentialResolver;
 
-    public MarketModelConfigBridge(ObjectMapper objectMapper) {
+    public MarketModelConfigBridge(ObjectMapper objectMapper,
+                                   ModelConfigCredentialResolver credentialResolver) {
         this.capabilitiesCodec = new ModelCapabilitiesCodec(objectMapper);
+        this.credentialResolver = credentialResolver;
     }
 
     public AgentModelConfigRequest toRequest(AgentModelConfig config) {
+        AgentModelConfig resolved = credentialResolver.resolveForExecution(config);
         return new AgentModelConfigRequest(
-                config.getDisplayName(),
+                resolved.getVendorAccountId(),
+                resolved.getDisplayName(),
                 config.getConfigCode(),
-                config.getProvider(),
-                config.getModelName(),
-                config.getBaseUrl(),
-                config.getApiKey(),
+                resolved.getProvider(),
+                resolved.getModelName(),
+                resolved.getBaseUrl(),
+                resolved.getApiKey(),
                 null,
-                config.getExtraAuthJson(),
-                config.getMinimaxGroupId(),
-                config.getConsoleUrl(),
-                config.getBalanceUrl(),
-                config.getDocsUrl(),
-                config.getTimeoutSeconds(),
+                resolved.getExtraAuthJson(),
+                resolved.getMinimaxGroupId(),
+                resolved.getConsoleUrl(),
+                resolved.getBalanceUrl(),
+                resolved.getDocsUrl(),
+                resolved.getTimeoutSeconds(),
                 null,
                 null,
-                config.getInputTokenPricePer1k(),
-                config.getOutputTokenPricePer1k(),
-                config.getInputTokenPricePer1m(),
-                config.getOutputTokenPricePer1m(),
-                config.getBillingUnit(),
-                config.getUnitPrice(),
-                config.getEnabled(),
-                config.getAgentEnabled(),
-                config.getDefault(),
-                capabilitiesCodec.parse(config.getCapabilities())
+                resolved.getInputTokenPricePer1k(),
+                resolved.getOutputTokenPricePer1k(),
+                resolved.getInputTokenPricePer1m(),
+                resolved.getOutputTokenPricePer1m(),
+                resolved.getBillingUnit(),
+                resolved.getUnitPrice(),
+                resolved.getEnabled(),
+                resolved.getAgentEnabled(),
+                resolved.getDefault(),
+                capabilitiesCodec.parse(resolved.getCapabilities())
         );
     }
 }
