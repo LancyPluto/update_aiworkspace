@@ -622,8 +622,32 @@ CREATE TABLE agent_file_chunks (
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE model_vendor_accounts (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  vendor_code VARCHAR(64) NOT NULL,
+  account_name VARCHAR(128) NOT NULL DEFAULT '默认账户',
+  base_url VARCHAR(512),
+  api_key VARCHAR(1024),
+  extra_auth_json TEXT,
+  console_url VARCHAR(512),
+  balance_url VARCHAR(512),
+  balance_query_mode VARCHAR(32) NOT NULL DEFAULT 'MANUAL',
+  balance_amount DECIMAL(18,4),
+  balance_currency VARCHAR(8) DEFAULT 'CNY',
+  balance_status VARCHAR(32) NOT NULL DEFAULT 'UNKNOWN',
+  balance_low_threshold DECIMAL(18,4),
+  balance_updated_at DATETIME,
+  balance_error_message VARCHAR(512),
+  health_status VARCHAR(32) NOT NULL DEFAULT 'UNKNOWN',
+  enabled TINYINT NOT NULL DEFAULT 1,
+  is_deleted TINYINT NOT NULL DEFAULT 0,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE agent_model_configs (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  vendor_account_id BIGINT,
   display_name VARCHAR(128),
   config_code VARCHAR(64),
   provider VARCHAR(64) NOT NULL,

@@ -10,6 +10,7 @@ import java.time.LocalDateTime;
 public class AgentModelConfig {
     @TableId
     private Long id;
+    private Long vendorAccountId;
     private String displayName;
     private String configCode;
     private String provider;
@@ -37,6 +38,8 @@ public class AgentModelConfig {
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
+    public Long getVendorAccountId() { return vendorAccountId; }
+    public void setVendorAccountId(Long vendorAccountId) { this.vendorAccountId = vendorAccountId; }
     public String getDisplayName() { return displayName; }
     public void setDisplayName(String displayName) { this.displayName = displayName; }
     public String getConfigCode() { return configCode; }

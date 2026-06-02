@@ -8,6 +8,7 @@ import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 public interface AgentModelConfigMapper extends BaseMapper<AgentModelConfig> {
@@ -106,14 +107,24 @@ public interface AgentModelConfigMapper extends BaseMapper<AgentModelConfig> {
             """)
     AgentModelConfig findForToolExecution(@Param("toolId") Long toolId);
 
+    @Update("""
+            UPDATE agent_model_configs
+            SET vendor_account_id = #{vendorAccountId},
+                updated_at = #{updatedAt}
+            WHERE id = #{id}
+            """)
+    void updateVendorAccountId(@Param("id") Long id,
+                               @Param("vendorAccountId") Long vendorAccountId,
+                               @Param("updatedAt") LocalDateTime updatedAt);
+
     @Insert("""
-            INSERT INTO agent_model_configs(display_name, config_code, provider, model_name, base_url, api_key,
+            INSERT INTO agent_model_configs(vendor_account_id, display_name, config_code, provider, model_name, base_url, api_key,
                                             extra_auth_json, minimax_group_id, console_url, balance_url, docs_url,
                                             timeout_seconds, input_token_price_per_1k, output_token_price_per_1k,
                                             input_token_price_per_1m, output_token_price_per_1m,
                                             billing_unit, unit_price, capabilities, enabled, agent_enabled,
                                             is_default, created_at, updated_at)
-            VALUES(#{config.displayName}, #{config.configCode}, #{config.provider}, #{config.modelName},
+            VALUES(#{config.vendorAccountId}, #{config.displayName}, #{config.configCode}, #{config.provider}, #{config.modelName},
                    #{config.baseUrl}, #{config.apiKey}, #{config.extraAuthJson}, #{config.minimaxGroupId},
                    #{config.consoleUrl}, #{config.balanceUrl}, #{config.docsUrl}, #{config.timeoutSeconds},
                    #{config.inputTokenPricePer1k}, #{config.outputTokenPricePer1k},
@@ -127,7 +138,8 @@ public interface AgentModelConfigMapper extends BaseMapper<AgentModelConfig> {
 
     @Update("""
             UPDATE agent_model_configs
-            SET display_name = #{config.displayName},
+            SET vendor_account_id = #{config.vendorAccountId},
+                display_name = #{config.displayName},
                 config_code = #{config.configCode},
                 provider = #{config.provider},
                 model_name = #{config.modelName},
