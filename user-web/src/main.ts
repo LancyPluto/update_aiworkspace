@@ -3,7 +3,7 @@ import { createPinia } from "pinia"
 import App from "./App.vue"
 import router from "./router"
 import { useAuthStore } from "./store/authStore"
-import { applyAppTheme, getStoredTheme } from "./utils/theme"
+import { applyAppTheme } from "./utils/theme"
 import "./styles/main.css"
 import "./styles/agent-theme.css"
 import "./styles/profile-theme.css"
@@ -11,7 +11,7 @@ import "./styles/profile-theme.css"
 import "@/components/AppShell.vue"
 
 async function bootstrap() {
-  applyAppTheme(getStoredTheme())
+  applyAppTheme("dark")
 
   const app = createApp(App)
   const pinia = createPinia()

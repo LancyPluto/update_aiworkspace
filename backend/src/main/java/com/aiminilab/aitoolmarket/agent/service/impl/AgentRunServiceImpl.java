@@ -1171,7 +1171,7 @@ public class AgentRunServiceImpl implements AgentRunService {
     private InternalAgentModelConfigResponse resolveModelConfigForRun(AgentRun run) {
         AgentModelConfig config = resolveModelConfigEntityForRun(run);
         if (config != null) {
-            return InternalAgentModelConfigResponse.from(config);
+            return InternalAgentModelConfigResponse.from(agentModelConfigService.resolveForExecution(config));
         }
         return agentModelConfigService.internalGet();
     }

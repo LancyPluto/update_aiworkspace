@@ -7,6 +7,7 @@ import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 public interface CreditRechargeOrderMapper extends BaseMapper<CreditRechargeOrder> {
 
@@ -37,6 +38,18 @@ public interface CreditRechargeOrderMapper extends BaseMapper<CreditRechargeOrde
             LIMIT 1
             """)
     CreditRechargeOrder findByOrderNo(@Param("orderNo") String orderNo);
+
+    @Select("""
+            SELECT *
+            FROM credit_recharge_orders
+            WHERE status = 'PAID'
+              AND credited_at IS NULL
+              AND updated_at <= #{updatedBefore}
+            ORDER BY id ASC
+            LIMIT #{limit}
+            """)
+    List<CreditRechargeOrder> findPaidNotCredited(@Param("updatedBefore") LocalDateTime updatedBefore,
+                                                 @Param("limit") int limit);
 
     @Update("""
             UPDATE credit_recharge_orders

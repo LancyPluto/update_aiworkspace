@@ -27,6 +27,8 @@ public interface AgentModelConfigService {
 
     AgentModelConfigTestResponse adminTest(AgentModelConfigRequest request);
 
+    AgentModelConfigTestResponse adminTestById(Long id);
+
     InternalAgentModelConfigResponse internalGet();
 
     InternalAgentModelConfigResponse internalGet(Long modelConfigId);

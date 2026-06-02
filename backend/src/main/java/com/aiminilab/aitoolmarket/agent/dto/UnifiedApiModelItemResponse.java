@@ -3,6 +3,7 @@ package com.aiminilab.aitoolmarket.agent.dto;
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
 import com.aiminilab.aitoolmarket.agent.support.ModelCapabilitiesCodec;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 public record UnifiedApiModelItemResponse(
@@ -14,6 +15,10 @@ public record UnifiedApiModelItemResponse(
         String provider,
         String modelName,
         List<String> capabilities,
+        String billingUnit,
+        BigDecimal unitPrice,
+        BigDecimal inputTokenPricePer1m,
+        BigDecimal outputTokenPricePer1m,
         Boolean enabled,
         Boolean agentEnabled,
         Boolean isDefault,
@@ -31,6 +36,10 @@ public record UnifiedApiModelItemResponse(
                 config.getProvider(),
                 config.getModelName(),
                 codec.parse(config.getCapabilities()),
+                config.getBillingUnit(),
+                config.getUnitPrice(),
+                config.getInputTokenPricePer1m(),
+                config.getOutputTokenPricePer1m(),
                 config.getEnabled(),
                 config.getAgentEnabled(),
                 config.getDefault(),

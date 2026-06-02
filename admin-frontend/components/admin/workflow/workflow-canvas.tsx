@@ -17,6 +17,7 @@ import {
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
 import { Redo2, Save, Undo2 } from "lucide-react"
+import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import type {
@@ -924,6 +925,7 @@ export function WorkflowCanvas({
   const [edges, setEdges, onEdgesChange] = useEdgesState<WFEdge>([])
   const [groups, setGroups] = useState<WorkflowGroup[]>([])
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [saveStatus, setSaveStatus] = useState<"idle" | "saved" | "error">("idle")
   const [loading, setLoading] = useState(true)
@@ -1143,7 +1145,12 @@ export function WorkflowCanvas({
   const onConnect = useCallback(
     (connection: Connection) => {
       if (!connection.source || !connection.target) return
-      if (!canConnectBySlot(nodes, connection)) return
+      if (!canConnectBySlot(nodes, connection)) {
+        toast.error("无法建立连线", {
+          description: "输出/输入参数不匹配，或目标节点没有可用的输入槽位。",
+        })
+        return
+      }
       pushChange()
 
       const { nodes: mappedNodes, sourceSlot, targetSlot } = applyConnectionMapping(nodes, connection)
@@ -1169,6 +1176,16 @@ export function WorkflowCanvas({
       ])
     },
     [nodes, pushChange, setNodes, setEdges],
+  )
+
+  const deleteEdge = useCallback(
+    (edgeId: string) => {
+      if (!edgeId) return
+      pushChange()
+      setEdges((current: WFEdge[]) => current.filter((edge) => edge.id !== edgeId))
+      if (selectedEdgeId === edgeId) setSelectedEdgeId(null)
+    },
+    [pushChange, setEdges, selectedEdgeId],
   )
 
   const deleteNode = useCallback(
@@ -1255,6 +1272,9 @@ export function WorkflowCanvas({
         if (selectedNodeId) {
           event.preventDefault()
           deleteNode(selectedNodeId)
+        } else if (selectedEdgeId) {
+          event.preventDefault()
+          deleteEdge(selectedEdgeId)
         }
       } else if (mod && event.key === "d") {
         event.preventDefault()
@@ -1264,7 +1284,7 @@ export function WorkflowCanvas({
 
     window.addEventListener("keydown", handler)
     return () => window.removeEventListener("keydown", handler)
-  }, [doSave, handleRedo, handleUndo, selectedNodeId, deleteNode, duplicateNode, setNodes])
+  }, [doSave, handleRedo, handleUndo, selectedNodeId, selectedEdgeId, deleteNode, deleteEdge, duplicateNode, setNodes])
 
   if (loading) {
     return (
@@ -1317,10 +1337,18 @@ export function WorkflowCanvas({
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
           onNodeClick={(_event, node) => setSelectedNodeId(node.id)}
-          onPaneClick={() => setSelectedNodeId(null)}
+          onEdgeClick={(_event, edge) => {
+            setSelectedEdgeId(edge.id)
+            setSelectedNodeId(null)
+          }}
+          onPaneClick={() => {
+            setSelectedNodeId(null)
+            setSelectedEdgeId(null)
+          }}
           onNodeContextMenu={(event, node) => {
             event.preventDefault()
             setSelectedNodeId(node.id)
+            setSelectedEdgeId(null)
             const canDelete = getNodeDef(node.data)?.type !== "start"
             showMenu(event.clientX, event.clientY, [
               ...buildNodeActions(
@@ -1329,6 +1357,18 @@ export function WorkflowCanvas({
                 canDelete,
               ),
             ])
+          }}
+          onEdgeContextMenu={(event, edge) => {
+            event.preventDefault()
+            setSelectedEdgeId(edge.id)
+            setSelectedNodeId(null)
+            showMenu(event.clientX, event.clientY, [
+              {
+                label: "删除连线",
+                onClick: () => deleteEdge(edge.id),
+                destructive: true,
+              },
+            ] as any)
           }}
           onInit={setReactFlowInstance}
           onDragOver={onDragOver}

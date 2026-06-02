@@ -24,6 +24,7 @@ import {
   createAgentModelConfig,
   deleteAgentModelConfig,
   setDefaultAgentModelConfig,
+  testAgentModelConfigById,
   updateAgentModelConfig,
 } from "@/lib/api/agent-model"
 import { ApiError } from "@/lib/api/http"
@@ -54,17 +55,21 @@ import {
 } from "@/components/ui/dropdown-menu"
 import {
   AlertCircle,
+  Activity,
   CheckCircle2,
   ChevronDown,
   ExternalLink,
+  Layers,
   Loader2,
   MoreHorizontal,
   Plus,
   RefreshCw,
+  Search,
   ServerCog,
   Settings2,
   Star,
   Trash2,
+  Wallet,
   Zap,
 } from "lucide-react"
 import { toast } from "sonner"
@@ -167,6 +172,53 @@ function capabilityLabel(cap: string) {
   return map[cap] || cap
 }
 
+function renderModelCost(model: UnifiedApiModelItem) {
+  const billingUnit = (model.billingUnit || "").toString().trim().toUpperCase()
+  if (!billingUnit) {
+    return <span>—</span>
+  }
+  if (billingUnit === "PER_CALL") {
+    const price = model.unitPrice
+    return (
+      <>
+        <div>按次计费</div>
+        <div className="font-medium text-foreground">{price != null ? `¥${price}` : "¥—"}/次</div>
+      </>
+    )
+  }
+  if (billingUnit === "TOKEN_PER_M") {
+    const input = model.inputTokenPricePer1m
+    const output = model.outputTokenPricePer1m
+    return (
+      <>
+        <div>按 Token 计费</div>
+        <div className="font-medium text-foreground">
+          输入 {input != null ? `¥${input}` : "¥—"}/百万 · 输出 {output != null ? `¥${output}` : "¥—"}/百万
+        </div>
+      </>
+    )
+  }
+  if (billingUnit === "IMAGE_TOKEN") {
+    const unit = model.unitPrice
+    const input = model.inputTokenPricePer1m
+    const output = model.outputTokenPricePer1m
+    return (
+      <>
+        <div>图片 Token</div>
+        <div className="font-medium text-foreground">
+          {unit != null ? `¥${unit}` : "¥—"} · 输入 {input ?? "—"}/百万 · 输出 {output ?? "—"}/百万
+        </div>
+      </>
+    )
+  }
+  return (
+    <>
+      <div>{billingUnit}</div>
+      <div className="font-medium text-foreground">—</div>
+    </>
+  )
+}
+
 const emptyAccountForm = (): ModelVendorAccountPayload & { id?: number; apiKeyMasked?: string } => ({
   vendorCode: "deepseek",
   accountName: "默认账户",
@@ -198,6 +250,23 @@ interface UnifiedApiSettingsProps {
   refreshKey?: number
 }
 
+type VendorFilter = "ALL" | "ISSUES" | "LOW_BALANCE" | "UNHEALTHY" | "DISABLED"
+type VendorSort = "ISSUE_FIRST" | "MODEL_COUNT" | "NAME"
+
+const vendorFilterOptions: Array<{ value: VendorFilter; label: string }> = [
+  { value: "ALL", label: "全部渠道" },
+  { value: "ISSUES", label: "只看异常" },
+  { value: "LOW_BALANCE", label: "低余额" },
+  { value: "UNHEALTHY", label: "连通异常" },
+  { value: "DISABLED", label: "停用账户" },
+]
+
+const vendorSortOptions: Array<{ value: VendorSort; label: string }> = [
+  { value: "ISSUE_FIRST", label: "异常优先" },
+  { value: "MODEL_COUNT", label: "模型数优先" },
+  { value: "NAME", label: "名称排序" },
+]
+
 export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) {
   const [overview, setOverview] = useState<UnifiedApiOverview | null>(null)
   const [providers, setProviders] = useState<ModelProviderDescriptor[]>([])
@@ -216,7 +285,11 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
 
   const [openVendors, setOpenVendors] = useState<Record<string, boolean>>({})
   const [togglingModelId, setTogglingModelId] = useState<number | null>(null)
+  const [testingModelId, setTestingModelId] = useState<number | null>(null)
   const [testingAccountId, setTestingAccountId] = useState<number | null>(null)
+  const [vendorFilter, setVendorFilter] = useState<VendorFilter>("ALL")
+  const [vendorSort, setVendorSort] = useState<VendorSort>("ISSUE_FIRST")
+  const [modelKeyword, setModelKeyword] = useState("")
 
   const fetchOverviewData = useCallback(async () => {
     const [data, catalog] = await Promise.all([
@@ -373,6 +446,36 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
     [patchVendorAccount],
   )
 
+  const runModelTest = useCallback(async (model: UnifiedApiModelItem, vendorLabel: string) => {
+    setTestingModelId(model.id)
+    setError(null)
+    const label = model.displayName || model.modelName
+    const toastId = toast.loading(`${label}：正在测试连接…`)
+    try {
+      const result = await testAgentModelConfigById(model.id)
+      const latencyText =
+        result.latencyMs != null && result.latencyMs >= 0 ? `（${result.latencyMs} ms）` : ""
+      const sampleText = result.sample?.trim() ? ` · 响应：${result.sample.trim().slice(0, 80)}` : ""
+      if (result.success) {
+        toast.success(`${label}：连接成功${latencyText}`, {
+          id: toastId,
+          description: `${result.message || "测试通过"}${sampleText}`,
+        })
+      } else {
+        toast.error(`${label}：连接失败`, {
+          id: toastId,
+          description: result.message || "测试未通过",
+        })
+      }
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : "测试失败"
+      toast.error(`${vendorLabel}：${label} 测试失败`, { id: toastId, description: message })
+      setError(message)
+    } finally {
+      setTestingModelId(null)
+    }
+  }, [])
+
   const toggleModelEnabled = useCallback(
     async (model: UnifiedApiModelItem, enabled: boolean) => {
       const previous = model.enabled
@@ -414,6 +517,62 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
     if (!modelVendorCode) return providers
     return providers
   }, [providers, modelVendorCode])
+
+  const filteredVendors = useMemo(() => {
+    if (!overview) return []
+    const keyword = modelKeyword.trim().toLowerCase()
+    const issueScore = (vendor: UnifiedApiVendorGroup) => {
+      const lowBalance = vendor.accounts.filter((a) => a.balanceStatus === "LOW" || a.balanceStatus === "SUSPECTED_INSUFFICIENT").length
+      const unhealthy = vendor.accounts.filter((a) => a.healthStatus === "ERROR").length
+      const disabled = vendor.accounts.filter((a) => !a.enabled).length
+      const unbound = vendor.models.filter((m) => !m.vendorAccountId).length
+      return lowBalance * 4 + unhealthy * 5 + disabled * 2 + unbound
+    }
+    return overview.vendors
+      .map((vendor) => {
+        const models = keyword
+          ? vendor.models.filter((model) =>
+              [
+                model.displayName,
+                model.modelName,
+                model.configCode,
+                model.provider,
+                model.vendorAccountName,
+                ...(model.capabilities || []),
+              ]
+                .filter(Boolean)
+                .join(" ")
+                .toLowerCase()
+                .includes(keyword),
+            )
+          : vendor.models
+        return { ...vendor, models }
+      })
+      .filter((vendor) => {
+        if (keyword && vendor.models.length === 0 && !vendor.label.toLowerCase().includes(keyword)) return false
+        if (vendorFilter === "LOW_BALANCE") {
+          return vendor.accounts.some((a) => a.balanceStatus === "LOW" || a.balanceStatus === "SUSPECTED_INSUFFICIENT")
+        }
+        if (vendorFilter === "UNHEALTHY") return vendor.accounts.some((a) => a.healthStatus === "ERROR")
+        if (vendorFilter === "DISABLED") return vendor.accounts.some((a) => !a.enabled)
+        if (vendorFilter === "ISSUES") return issueScore(vendor) > 0
+        return true
+      })
+      .sort((a, b) => {
+        if (vendorSort === "MODEL_COUNT") return b.models.length - a.models.length || a.label.localeCompare(b.label)
+        if (vendorSort === "NAME") return a.label.localeCompare(b.label)
+        return issueScore(b) - issueScore(a) || b.models.length - a.models.length || a.label.localeCompare(b.label)
+      })
+  }, [modelKeyword, overview, vendorFilter, vendorSort])
+
+  const gatewayHealth = useMemo(() => {
+    if (!overview) return { enabledRate: 0, issueCount: 0 }
+    const total = Math.max(1, overview.summary.modelCount)
+    return {
+      enabledRate: Math.round((overview.summary.enabledModelCount / total) * 100),
+      issueCount: overview.summary.lowBalanceCount + overview.summary.unhealthyAccountCount,
+    }
+  }, [overview])
 
   async function handleRefreshAllBalances() {
     setRefreshingBalance(true)
@@ -608,6 +767,8 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
     const primaryAccount = pickPrimaryAccount(vendor.accounts)
     const isOpen = openVendors[vendor.vendorCode] ?? true
     const accountIdForNewModel = primaryAccount?.id
+    const lowBalanceCount = vendor.accounts.filter((account) => account.balanceStatus === "LOW" || account.balanceStatus === "SUSPECTED_INSUFFICIENT").length
+    const unhealthyCount = vendor.accounts.filter((account) => account.healthStatus === "ERROR").length
 
     return (
       <Collapsible
@@ -621,8 +782,12 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
             <ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${isOpen ? "" : "-rotate-90"}`} />
             <VendorIcon iconAsset={vendor.iconAsset} label={vendor.label} />
             <div className="min-w-0">
-              <p className="font-semibold">{vendor.label}</p>
-              <p className="text-xs text-muted-foreground">{vendor.models.length} 个模型</p>
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="font-semibold">{vendor.label}</p>
+                {lowBalanceCount > 0 ? <Badge variant="destructive" className="text-xs">低余额 {lowBalanceCount}</Badge> : null}
+                {unhealthyCount > 0 ? <Badge variant="destructive" className="text-xs">异常 {unhealthyCount}</Badge> : null}
+              </div>
+              <p className="text-xs text-muted-foreground">{vendor.accounts.length} 个账户 · {vendor.models.length} 个模型</p>
             </div>
           </CollapsibleTrigger>
           <div className="flex flex-wrap items-center gap-2">
@@ -659,6 +824,28 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
           </div>
         </div>
         <CollapsibleContent className="px-4 py-3">
+          {vendor.accounts.length > 0 ? (
+            <div className="mb-4 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+              {vendor.accounts.map((account) => (
+                <div key={account.id} className="rounded-lg border bg-muted/20 p-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium">{account.accountName}</p>
+                      <p className="truncate text-xs text-muted-foreground">{account.baseUrl || "未配置 Base URL"}</p>
+                    </div>
+                    {renderVendorAccountMenu(account, vendor.label)}
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    {balanceStatusBadge(account)}
+                    <Badge variant={account.enabled ? "outline" : "destructive"}>{account.enabled ? "已启用" : "已停用"}</Badge>
+                    <span className="text-xs text-muted-foreground">{account.modelCount} 个模型</span>
+                  </div>
+                  <p className="mt-2 text-xs font-medium tabular-nums">{formatBalance(account)}</p>
+                  {account.apiKeyMasked ? <p className="mt-1 text-xs text-muted-foreground">Key {account.apiKeyMasked}</p> : null}
+                </div>
+              ))}
+            </div>
+          ) : null}
           {vendor.accounts.length === 0 ? (
             <p className="py-4 text-center text-sm text-muted-foreground">请先接入 API 密钥，再添加模型。</p>
           ) : vendor.models.length === 0 ? (
@@ -684,8 +871,9 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                   <TableRow>
                     <TableHead>模型名称</TableHead>
                     <TableHead>能力</TableHead>
+                    <TableHead>成本</TableHead>
                     <TableHead className="w-[72px]">启用</TableHead>
-                    <TableHead className="w-[140px] text-right">操作</TableHead>
+                    <TableHead className="w-[200px] text-right">操作</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -713,6 +901,11 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                         </div>
                       </TableCell>
                       <TableCell>
+                        <div className="space-y-1 text-xs text-muted-foreground">
+                          {renderModelCost(model)}
+                        </div>
+                      </TableCell>
+                      <TableCell>
                         <Switch
                           checked={model.enabled}
                           disabled={togglingModelId === model.id}
@@ -720,14 +913,31 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                         />
                       </TableCell>
                       <TableCell className="text-right">
-                        <Button type="button" variant="ghost" size="sm" onClick={() => openEditModel(model, vendor.vendorCode)}>
-                          编辑
-                        </Button>
+                        <div className="inline-flex items-center justify-end gap-1">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            disabled={testingModelId === model.id || !model.vendorAccountId}
+                            title={!model.vendorAccountId ? "请先绑定厂商账户" : "测试连接"}
+                            onClick={() => runModelTest(model, vendor.label)}
+                          >
+                            {testingModelId === model.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Zap className="h-4 w-4" />
+                            )}
+                          </Button>
+                          <Button type="button" variant="ghost" size="sm" className="h-8" onClick={() => openEditModel(model, vendor.vendorCode)}>
+                            编辑
+                          </Button>
                         {!model.isDefault ? (
                           <Button
                             type="button"
                             variant="ghost"
                             size="sm"
+                            className="h-8"
                             onClick={async () => {
                               try {
                                 await setDefaultAgentModelConfig(model.id)
@@ -743,7 +953,8 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                         <Button
                           type="button"
                           variant="ghost"
-                          size="sm"
+                          size="icon"
+                          className="h-8 w-8"
                           className="text-destructive"
                           onClick={async () => {
                             if (!window.confirm("确认删除该模型配置？")) return
@@ -757,6 +968,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                         >
                           <Trash2 className="h-3 w-3" />
                         </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -783,13 +995,36 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
 
   return (
     <div className="space-y-6">
-      <Alert>
-        <ServerCog className="h-4 w-4" />
-        <AlertTitle>统一 API</AlertTitle>
-        <AlertDescription>
-          按厂商查看余额与模型列表。API 密钥在厂商标题栏右侧「···」中配置；模型行仅维护名称、能力与启用状态。
-        </AlertDescription>
-      </Alert>
+      <div className="grid gap-3 md:grid-cols-4">
+        <Card className="border-primary/20 bg-primary/5">
+          <CardHeader className="space-y-0 pb-2">
+            <CardDescription className="flex items-center gap-2"><Layers className="h-4 w-4" />渠道账户</CardDescription>
+            <CardTitle className="text-2xl">{overview?.summary.accountCount ?? "--"}</CardTitle>
+          </CardHeader>
+          <CardContent className="text-xs text-muted-foreground">{overview?.summary.vendorCount ?? "--"} 个厂商已接入</CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="space-y-0 pb-2">
+            <CardDescription className="flex items-center gap-2"><ServerCog className="h-4 w-4" />模型池</CardDescription>
+            <CardTitle className="text-2xl">{overview?.summary.modelCount ?? "--"}</CardTitle>
+          </CardHeader>
+          <CardContent className="text-xs text-muted-foreground">启用 {overview?.summary.enabledModelCount ?? "--"} 个，启用率 {gatewayHealth.enabledRate}%</CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="space-y-0 pb-2">
+            <CardDescription className="flex items-center gap-2"><Wallet className="h-4 w-4" />余额预警</CardDescription>
+            <CardTitle className="text-2xl">{overview?.summary.lowBalanceCount ?? "--"}</CardTitle>
+          </CardHeader>
+          <CardContent className="text-xs text-muted-foreground">支持自动余额探测与手动额度登记</CardContent>
+        </Card>
+        <Card className={gatewayHealth.issueCount > 0 ? "border-destructive/25 bg-destructive/5" : ""}>
+          <CardHeader className="space-y-0 pb-2">
+            <CardDescription className="flex items-center gap-2"><Activity className="h-4 w-4" />运行健康</CardDescription>
+            <CardTitle className="text-2xl">{overview?.summary.unhealthyAccountCount ?? "--"}</CardTitle>
+          </CardHeader>
+          <CardContent className="text-xs text-muted-foreground">异常账户会优先展示，便于快速处理</CardContent>
+        </Card>
+      </div>
 
       {error ? (
         <Alert variant="destructive">
@@ -820,13 +1055,48 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
+          <div className="flex flex-col gap-3 rounded-xl border bg-muted/20 p-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="relative min-w-0 flex-1">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={modelKeyword}
+                onChange={(event) => setModelKeyword(event.target.value)}
+                placeholder="搜索模型、configCode、能力或账户"
+                className="pl-9"
+              />
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Select value={vendorFilter} onValueChange={(value) => setVendorFilter(value as VendorFilter)}>
+                <SelectTrigger className="w-[132px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {vendorFilterOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select value={vendorSort} onValueChange={(value) => setVendorSort(value as VendorSort)}>
+                <SelectTrigger className="w-[132px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {vendorSortOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
           {loading ? (
             <p className="text-sm text-muted-foreground">加载中...</p>
           ) : overview && overview.vendors.length === 0 && overview.unconfiguredVendors.length === 0 ? (
             <p className="text-sm text-muted-foreground">暂无配置，请先接入厂商账户。</p>
+          ) : filteredVendors.length === 0 ? (
+            <p className="rounded-lg border border-dashed py-8 text-center text-sm text-muted-foreground">没有匹配的模型渠道</p>
           ) : (
             <>
-              {overview?.vendors.map(renderVendorSection)}
+              {filteredVendors.map(renderVendorSection)}
               {overview && overview.unconfiguredVendors.length > 0 ? (
                 <div className="rounded-xl border border-dashed p-4">
                   <p className="mb-3 font-medium">可接入厂商</p>
@@ -1031,13 +1301,45 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
               </div>
             </div>
           </div>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setModelDialogOpen(false)}>
-              取消
+          <DialogFooter className="gap-2 sm:justify-between">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={!modelForm.id || modelSaving || testingModelId === modelForm.id}
+              onClick={async () => {
+                if (!modelForm.id) return
+                await runModelTest(
+                  {
+                    id: modelForm.id,
+                    vendorAccountId: modelForm.vendorAccountId,
+                    displayName: modelForm.displayName,
+                    configCode: modelForm.configCode,
+                    provider: modelForm.provider,
+                    modelName: modelForm.modelName,
+                    capabilities: modelForm.capabilities,
+                    enabled: modelForm.enabled !== false,
+                    agentEnabled: modelForm.agentEnabled,
+                    healthStatus: "OK",
+                  },
+                  modelVendorCode,
+                )
+              }}
+            >
+              {testingModelId === modelForm.id ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Zap className="mr-2 h-4 w-4" />
+              )}
+              测试连接
             </Button>
-            <Button type="button" disabled={modelSaving} onClick={saveModel}>
-              保存
-            </Button>
+            <div className="flex gap-2">
+              <Button type="button" variant="outline" onClick={() => setModelDialogOpen(false)}>
+                取消
+              </Button>
+              <Button type="button" disabled={modelSaving} onClick={saveModel}>
+                保存
+              </Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>

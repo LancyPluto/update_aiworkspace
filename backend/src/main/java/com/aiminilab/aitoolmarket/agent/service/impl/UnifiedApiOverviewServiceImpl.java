@@ -94,7 +94,7 @@ public class UnifiedApiOverviewServiceImpl implements UnifiedApiOverviewService 
                 .map(vendorCode -> new UnifiedApiVendorGroupResponse(
                         vendorCode,
                         vendorCodeResolver.vendorLabel(vendorCode),
-                        iconAsset(vendorCode),
+                        vendorCodeResolver.vendorIconAsset(vendorCode),
                         sortAccounts(accountsByVendor.getOrDefault(vendorCode, List.of())),
                         sortModels(modelsByVendor.getOrDefault(vendorCode, List.of()))
                 ))
@@ -107,7 +107,7 @@ public class UnifiedApiOverviewServiceImpl implements UnifiedApiOverviewService 
                 .map(entry -> new UnifiedApiUnconfiguredVendorResponse(
                         entry.getKey(),
                         entry.getValue(),
-                        iconAsset(entry.getKey()),
+                        vendorCodeResolver.vendorIconAsset(entry.getKey()),
                         providersForVendor(entry.getKey())
                 ))
                 .toList();
@@ -172,14 +172,5 @@ public class UnifiedApiOverviewServiceImpl implements UnifiedApiOverviewService 
                 .toList();
     }
 
-    private static String iconAsset(String vendorCode) {
-        if (vendorCode == null) {
-            return "api";
-        }
-        return switch (vendorCode) {
-            case "openai_gateway" -> "openrouter";
-            case "volcengine" -> "doubao";
-            default -> vendorCode;
-        };
-    }
+    // iconAsset moved to VendorCodeResolver (DB-first, with compatibility fallbacks).
 }

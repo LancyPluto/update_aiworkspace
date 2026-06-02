@@ -16,6 +16,8 @@ import com.aiminilab.aitoolmarket.agent.service.AgentModelConfigService;
 import com.aiminilab.aitoolmarket.agent.service.AgentToolDescriptorService;
 import com.aiminilab.aitoolmarket.auth.security.AuthContext;
 import com.aiminilab.aitoolmarket.common.dto.ApiResponse;
+import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
+import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -121,7 +123,12 @@ public class AdminAgentToolAccessController {
                 List.of(),
                 null
         );
-        AdminAgentRouteDebugResponse response = agentServiceClient.debugRoute(context);
+        AdminAgentRouteDebugResponse response;
+        try {
+            response = agentServiceClient.debugRoute(context);
+        } catch (IllegalStateException exception) {
+            throw new BusinessException(ErrorCode.MODEL_CALL_FAILED, routeDebugFailureMessage(exception));
+        }
         return ApiResponse.success(new AdminAgentRouteDebugResponse(
                 response.intent(),
                 response.confidence(),
@@ -135,6 +142,29 @@ public class AdminAgentToolAccessController {
                 response.visibleTools(),
                 filteredTools
         ));
+    }
+
+    private String routeDebugFailureMessage(IllegalStateException exception) {
+        String detail = exception.getMessage() == null ? "" : exception.getMessage();
+        String normalized = detail.toLowerCase(java.util.Locale.ROOT);
+        if (detail.contains("HTTP 401") || normalized.contains("invalid internal signature")) {
+            return "路由调试器调用 agent-service 失败：内部签名校验未通过（HTTP 401）。"
+                    + " 请检查 backend 的 internalApiToken 与 agent-service 的 INTERNAL_API_TOKEN 是否一致，"
+                    + "并确认两边机器时间误差不超过 5 分钟。原始信息：" + detail;
+        }
+        if (normalized.contains("could not notify agent service")) {
+            return "路由调试器调用 agent-service 失败：无法连接 agent-service。"
+                    + " 请检查 backend 配置的 app.agent.serviceBaseUrl 是否可达（Docker 内通常为 http://agent-service:8090），"
+                    + "并确认 agent-service 容器已启动。原始信息：" + detail;
+        }
+        if (normalized.contains("could not parse agent-service route debug response")) {
+            return "路由调试器调用 agent-service 失败：返回内容无法解析。"
+                    + " 请确认 backend 与 agent-service 版本匹配，或查看 agent-service 日志。原始信息：" + detail;
+        }
+        if (normalized.contains("agent service rejected") && normalized.contains("http")) {
+            return "路由调试器调用 agent-service 被拒绝：" + detail;
+        }
+        return "路由调试器调用 agent-service 失败：" + detail;
     }
 
     private String filteredReason(AdminAgentToolAccessResponse tool) {

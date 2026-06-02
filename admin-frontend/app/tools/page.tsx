@@ -352,9 +352,50 @@ function mapTool(tool: ToolSummary): ToolRow {
   }
 }
 
-export default function ToolsPage() {
+type ToolStatusFilter = "ALL" | "ONLINE" | "OFFLINE"
+
+function isAgentTool(tool: Pick<ToolRow, "toolCode" | "toolType" | "executionHandler" | "category" | "name">) {
+  const text = [tool.toolCode, tool.toolType, tool.executionHandler, tool.category, tool.name]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase()
+  return text.includes("agent") || text.includes("智能体")
+}
+
+function modelVendorKey(config?: AgentModelConfig | null) {
+  if (!config) return "unbound"
+  const text = [config.provider, config.displayName, config.modelName, config.baseUrl].filter(Boolean).join(" ").toLowerCase()
+  if (text.includes("deepseek")) return "deepseek"
+  if (text.includes("doubao") || text.includes("volc") || text.includes("ark.cn")) return "volcengine"
+  if (text.includes("siliconflow")) return "siliconflow"
+  if (text.includes("qwen") || text.includes("dashscope") || text.includes("aliyun")) return "aliyun"
+  if (text.includes("kling")) return "kling"
+  if (text.includes("minimax")) return "minimax"
+  if (text.includes("openai")) return "openai"
+  return config.provider || "other"
+}
+
+function modelVendorLabel(key: string) {
+  const labels: Record<string, string> = {
+    deepseek: "DeepSeek",
+    volcengine: "火山引擎 / 豆包",
+    siliconflow: "SiliconFlow",
+    aliyun: "阿里云 / 通义千问",
+    kling: "可灵",
+    minimax: "MiniMax",
+    openai: "OpenAI",
+    unbound: "未绑定模型",
+    other: "其他厂商",
+  }
+  return labels[key] || key
+}
+
+type ToolManagementMode = "models" | "agents"
+
+export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementMode } = {}) {
   const [searchQuery, setSearchQuery] = useState("")
   const [selectedOutputModality, setSelectedOutputModality] = useState<string | null>(null)
+  const [statusFilter, setStatusFilter] = useState<ToolStatusFilter>("ALL")
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [editingTool, setEditingTool] = useState<ToolRow | null>(null)
   const [toolList, setToolList] = useState<ToolRow[]>([])
@@ -460,6 +501,9 @@ export default function ToolsPage() {
   const filteredTools = useMemo(() => {
     const keyword = searchQuery.trim().toLowerCase()
     return toolList.filter((tool) => {
+      const agent = isAgentTool(tool)
+      if (mode === "models" && agent) return false
+      if (mode === "agents" && !agent) return false
       const matchesKeyword =
         !keyword ||
         [tool.name, tool.description, tool.category, tool.toolCode, tool.modelConfigName, tool.modelName].some(
@@ -468,13 +512,42 @@ export default function ToolsPage() {
       const matchesOutput =
         !selectedOutputModality ||
         (tool.outputModality || "").trim().toUpperCase() === selectedOutputModality
-      return matchesKeyword && matchesOutput
+      const matchesStatus =
+        statusFilter === "ALL" ||
+        (statusFilter === "ONLINE" ? tool.status : !tool.status)
+      return matchesKeyword && matchesOutput && matchesStatus
     })
-  }, [toolList, searchQuery, selectedOutputModality])
+  }, [toolList, searchQuery, selectedOutputModality, statusFilter, mode])
+
+  const modelConfigById = useMemo(
+    () => new Map(modelConfigs.map((config) => [config.id, config])),
+    [modelConfigs],
+  )
+
+  const groupedModelTools = useMemo(() => {
+    const groups = new Map<string, ToolRow[]>()
+    for (const tool of filteredTools) {
+      const key = mode === "agents"
+        ? "agent-workflow"
+        : modelVendorKey(tool.modelConfigId ? modelConfigById.get(tool.modelConfigId) : null)
+      groups.set(key, [...(groups.get(key) || []), tool])
+    }
+    return [...groups.entries()]
+      .sort(([a], [b]) => groupLabel(a).localeCompare(groupLabel(b), "zh-CN"))
+      .map(([key, tools]) => ({
+        key,
+        label: groupLabel(key),
+        tools,
+        modalityGroups: groupToolsByOutputModality(tools),
+      }))
+  }, [filteredTools, modelConfigById, mode])
 
   const outputModalityFilters = useMemo(() => {
     const counts = new Map<string, number>()
     for (const tool of toolList) {
+      const agent = isAgentTool(tool)
+      if (mode === "models" && agent) continue
+      if (mode === "agents" && !agent) continue
       const key = (tool.outputModality || "TEXT").trim().toUpperCase()
       counts.set(key, (counts.get(key) || 0) + 1)
     }
@@ -486,7 +559,32 @@ export default function ToolsPage() {
         return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib)
       })
       .map(([key, count]) => ({ key, label: optionLabel(modalityOptions, key), count }))
-  }, [toolList])
+  }, [toolList, mode])
+
+  function groupLabel(key: string) {
+    if (key === "agent-workflow") return "智能体工作流"
+    return modelVendorLabel(key)
+  }
+
+  function groupToolsByOutputModality(tools: ToolRow[]) {
+    const order = ["TEXT", "IMAGE", "AUDIO", "VIDEO", "JSON", "FILE", "MULTIMODAL"]
+    const groups = new Map<string, ToolRow[]>()
+    for (const tool of tools) {
+      const key = (tool.outputModality || "TEXT").trim().toUpperCase()
+      groups.set(key, [...(groups.get(key) || []), tool])
+    }
+    return [...groups.entries()]
+      .sort(([a], [b]) => {
+        const ia = order.indexOf(a)
+        const ib = order.indexOf(b)
+        return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib)
+      })
+      .map(([key, groupedTools]) => ({
+        key,
+        label: optionLabel(modalityOptions, key),
+        tools: groupedTools,
+      }))
+  }
 
   const requiredModelCapability = useMemo(() => {
     const code = editingTool?.toolCode ?? form.toolCode ?? ""
@@ -871,11 +969,13 @@ export default function ToolsPage() {
       ? notice
     : loading
       ? "正在加载工具列表..."
-      : "管理 AI 工具工作流入口和画布配置。"
+      : mode === "agents"
+        ? "管理智能体工具、上线状态和工作流画布。"
+        : "按模型厂商管理大模型工具，不包含智能体工作流。"
 
   return (
     <AdminLayout>
-      <AdminHeader title="大模型管理" description={headerDescription} />
+      <AdminHeader title={mode === "agents" ? "智能体管理" : "大模型管理"} description={headerDescription} />
 
       <div className="space-y-6 p-6">
         {saveFeedback ? (
@@ -936,6 +1036,21 @@ export default function ToolsPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {([
+            ["ALL", "全部状态"],
+            ["ONLINE", "已上线"],
+            ["OFFLINE", "未上线"],
+          ] as const).map(([value, label]) => (
+            <Button
+              key={value}
+              type="button"
+              size="sm"
+              variant={statusFilter === value ? "default" : "outline"}
+              onClick={() => setStatusFilter(value)}
+            >
+              {label}
+            </Button>
+          ))}
           <Button
             type="button"
             size="sm"
@@ -943,7 +1058,7 @@ export default function ToolsPage() {
             onClick={() => setSelectedOutputModality(null)}
           >
             全部
-            <span className="ml-1 opacity-70">{toolList.length}</span>
+            <span className="ml-1 opacity-70">{filteredTools.length}</span>
           </Button>
           {outputModalityFilters.map((item) => (
             <Button
@@ -1342,7 +1457,7 @@ export default function ToolsPage() {
                 </div>
                 <div className="space-y-2">
                   <Label>模型配置</Label>
-                  {integrationPluginId ? (
+                  {integrationPluginId && editingTool ? (
                     <div className="space-y-3 rounded-lg border border-border p-3">
                       <p className="text-xs text-amber-700">
                         工作台类工具的大模型绑定保存在下方「保存配置」中；仅点对话框底部「保存工具」不会写入文本/文生图模型。
@@ -1408,46 +1523,39 @@ export default function ToolsPage() {
             </DialogContent>
           </Dialog>
 
-        {false ? (
-        <div className="rounded-2xl border border-border bg-card p-5">
-          <div className="mb-4 flex items-center justify-between gap-4">
-            <div>
-              <h2 className="text-base font-semibold text-card-foreground">已配置模型能力</h2>
-              <p className="text-sm text-muted-foreground">确认当前后台可绑定到不同模态工具的模型配置。</p>
+        <div className="space-y-5">
+          {groupedModelTools.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-border bg-card px-6 py-12 text-center text-sm text-muted-foreground">
+              {mode === "agents" ? "暂无匹配的智能体工具。" : "暂无匹配的大模型工具。"}
             </div>
-            <Badge variant="secondary">{configuredModelRows.length} 个模型</Badge>
-          </div>
-          {configuredModelRows.length === 0 ? (
-            <p className="text-sm text-muted-foreground">暂无可用模型配置。</p>
-          ) : (
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-              {configuredModelRows.map(({ config, capabilities }) => (
-                <div key={config.id} className="rounded-xl border border-border/70 bg-secondary/40 p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="truncate font-medium text-card-foreground">{config.displayName || config.modelName}</p>
-                      <p className="truncate text-xs text-muted-foreground">{config.provider} · {config.modelName}</p>
-                    </div>
-                    {config.isDefault ? <Badge variant="outline">默认</Badge> : null}
-                  </div>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {capabilities.length > 0 ? capabilities.map((capability) => (
-                      <Badge key={capability} variant="secondary" className="text-xs">
-                        {capabilityLabel(capability)}
-                      </Badge>
-                    )) : (
-                      <Badge variant="destructive" className="text-xs">未识别能力</Badge>
-                    )}
-                  </div>
+          ) : groupedModelTools.map((group) => (
+            <section key={group.key} className="rounded-lg border border-border bg-card/40 p-4">
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-base font-semibold text-card-foreground">{group.label}</h2>
+                  <p className="text-xs text-muted-foreground">
+                    {mode === "agents" ? "仅展示智能体工具，工作流画布入口在这里维护。" : "按模型厂商归类展示，不包含智能体工具。"}
+                  </p>
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
-        ) : null}
-
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {filteredTools.map((tool) => (
+                <Badge variant="secondary">{group.tools.length} 个工具</Badge>
+              </div>
+              <div className="space-y-5">
+                {(mode === "agents"
+                  ? [{ key: "ALL", label: "全部", tools: group.tools }]
+                  : group.modalityGroups
+                ).map((modalityGroup) => (
+                  <div key={`${group.key}-${modalityGroup.key}`} className="space-y-3">
+                    {mode === "agents" ? null : (
+                      <div className="flex items-center justify-between gap-3 border-t border-border/70 pt-4 first:border-t-0 first:pt-0">
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline">{modalityGroup.label}</Badge>
+                          <span className="text-xs text-muted-foreground">输出模态</span>
+                        </div>
+                        <span className="text-xs text-muted-foreground">{modalityGroup.tools.length} 个工具</span>
+                      </div>
+                    )}
+                    <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 md:grid-cols-3">
+          {modalityGroup.tools.map((tool) => (
             <div
               key={tool.id}
               className={cn(
@@ -1499,11 +1607,13 @@ export default function ToolsPage() {
                     <DropdownMenuItem className="gap-2" onClick={() => openEditDialog(tool)}>
                       <Pencil className="h-4 w-4" /> 编辑
                     </DropdownMenuItem>
-                    <DropdownMenuItem asChild className="gap-2">
-                      <Link href={`/tools/${tool.rawId}/workflow`}>
-                        <Workflow className="h-4 w-4" /> 工作流画布
-                      </Link>
-                    </DropdownMenuItem>
+                    {mode === "agents" ? (
+                      <DropdownMenuItem asChild className="gap-2">
+                        <Link href={`/tools/${tool.rawId}/workflow`}>
+                          <Workflow className="h-4 w-4" /> 工作流画布
+                        </Link>
+                      </DropdownMenuItem>
+                    ) : null}
                     <DropdownMenuItem className="gap-2" onClick={() => openFieldDialog(tool)}>
                       <FileText className="h-4 w-4" /> 字段配置
                     </DropdownMenuItem>
@@ -1552,12 +1662,14 @@ export default function ToolsPage() {
                   </span>
                 </div>
               </div>
-              <Button asChild variant="outline" size="sm" className="mt-4 w-full gap-2">
-                <Link href={`/tools/${tool.rawId}/workflow`}>
-                  <Workflow className="h-4 w-4" />
-                  编辑工作流
-                </Link>
-              </Button>
+              {mode === "agents" ? (
+                <Button asChild variant="outline" size="sm" className="mt-4 w-full gap-2">
+                  <Link href={`/tools/${tool.rawId}/workflow`}>
+                    <Workflow className="h-4 w-4" />
+                    编辑工作流
+                  </Link>
+                </Button>
+              ) : null}
 
               <div className="mt-4 flex items-center justify-between border-t border-border pt-4">
                 <div className="text-sm">
@@ -1575,39 +1687,18 @@ export default function ToolsPage() {
                 />
               </div>
 
-              {false ? (<>
-              <div className="mt-4 flex items-center justify-between border-t border-border pt-4">
-                <div className="flex items-center gap-4 text-sm">
-                  <div className="flex items-center gap-1 text-muted-foreground">
-                    <Sparkles className="h-4 w-4" />
-                    <span>{tool.credits} 算力</span>
-                  </div>
-                  <div className="text-muted-foreground">{tool.rawStatus}</div>
-                </div>
-                {false ? <Switch checked={tool.status} disabled={togglingId === tool.rawId} onCheckedChange={() => toggleToolStatus(tool.id)} /> : null}
-              </div>
-              <div className="mt-3 flex flex-wrap gap-2 text-xs">
-                <Badge variant="outline">{optionLabel(toolTypeOptions, tool.toolType)}</Badge>
-                <Badge variant="secondary">
-                  {optionLabel(modalityOptions, tool.inputModality)} → {optionLabel(modalityOptions, tool.outputModality)}
-                </Badge>
-              </div>
-              <div className="mt-3 rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
-                模型：{tool.modelConfigName || tool.modelName || "默认模型配置"}
-              </div>
-              <Button asChild variant="outline" size="sm" className="mt-4 w-full gap-2">
-                <Link href={`/tools/${tool.rawId}/workflow`}>
-                  <Workflow className="h-4 w-4" />
-                  打开工作流画布
-                </Link>
-              </Button>
-              </>) : null}
               {tool.welcomeMessage ? (
                 <div className="mt-2 rounded-lg bg-secondary/40 px-3 py-2 text-xs text-muted-foreground">
                   欢迎语：{tool.welcomeMessage}
                 </div>
               ) : null}
             </div>
+          ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
           ))}
         </div>
       </div>
@@ -1738,4 +1829,8 @@ export default function ToolsPage() {
       </Dialog>
     </AdminLayout>
   )
+}
+
+export default function ToolsPage() {
+  return <ToolManagementPage mode="models" />
 }

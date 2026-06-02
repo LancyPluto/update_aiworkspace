@@ -155,6 +155,7 @@ services:
     environment:
       NEXT_PUBLIC_API_PROXY_TARGET: ${ADMIN_NEXT_PUBLIC_API_PROXY_TARGET:-http://backend:8080}
       NEXT_PUBLIC_API_BASE_URL: ${ADMIN_NEXT_PUBLIC_API_BASE_URL:-}
+      NEXT_PUBLIC_ADMIN_BASE_PATH: ${NEXT_PUBLIC_ADMIN_BASE_PATH:-/admin}
       CHOKIDAR_USEPOLLING: "true"
       NPM_CONFIG_REGISTRY: https://registry.npmmirror.com
     ports:
@@ -236,6 +237,11 @@ services:
       - ../worker:/app
       - ../data/generated-media:/data/generated-media
     command: sh -c "pip install --no-cache-dir -r requirements.txt && python main.py"
+    dns:
+      # Avoid Clash/Fake-IP DNS poisoning inside containers (198.18.x.x)
+      - 223.5.5.5
+      - 1.1.1.1
+      - 8.8.8.8
 
   agent-service:
     build:
@@ -271,6 +277,11 @@ services:
     volumes:
       - ../agent-service:/app
     command: sh -c "pip install --no-cache-dir -r requirements.txt && uvicorn app.main:app --host 0.0.0.0 --port 8090"
+    dns:
+      # Avoid Clash/Fake-IP DNS poisoning inside containers (198.18.x.x)
+      - 223.5.5.5
+      - 1.1.1.1
+      - 8.8.8.8
 
 volumes:
   mysql_data:

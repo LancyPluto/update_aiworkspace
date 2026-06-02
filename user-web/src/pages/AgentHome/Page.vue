@@ -93,17 +93,12 @@
     }
   }
 
-  function modelHasRuntimeAuth(model: AgentModelConfig) {
-    if (model.provider.toLowerCase() === "mock") return true
-    return Boolean(model.apiKeyMasked || model.extraAuthJsonMasked)
-  }
-
   async function loadAgentModels() {
     if (!auth.token) return
     modelsLoading.value = true
     try {
       const list = (await fetchAgentModelConfigs({ token: auth.token }))
-        .filter((model) => model.enabled !== false && model.agentEnabled !== false && modelHasRuntimeAuth(model))
+        .filter((model) => model.enabled !== false && model.agentEnabled !== false)
       agentModels.value = list
       if (!list.length) {
         selectedModelConfigId.value = null

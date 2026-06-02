@@ -460,6 +460,10 @@ export interface UnifiedApiModelItem {
   provider: string
   modelName: string
   capabilities?: string[] | null
+  billingUnit?: string | null
+  unitPrice?: number | null
+  inputTokenPricePer1m?: number | null
+  outputTokenPricePer1m?: number | null
   enabled: boolean
   agentEnabled?: boolean | null
   isDefault?: boolean | null

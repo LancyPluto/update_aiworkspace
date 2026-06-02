@@ -581,6 +581,7 @@ export interface AgentFile {
   originalFilename: string
   contentType?: string | null
   fileSize: number
+  downloadUrl?: string | null
   status: "PARSING" | "READY" | "FAILED"
   extractedText?: string | null
   errorMessage?: string | null

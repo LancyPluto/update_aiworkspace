@@ -143,6 +143,36 @@ class AgentApiTest {
     }
 
     @Test
+    void sessionMessagesReturnNewestPageInChronologicalOrder() throws Exception {
+        mockExternalAuthDependencies();
+        register("agent_message_page_user");
+        LoginResult login = loginWithUser("agent_message_page_user");
+        Long sessionId = createSession(login.token(), "Message Page");
+
+        for (int i = 1; i <= 101; i++) {
+            jdbcTemplate.update(
+                    """
+                    INSERT INTO agent_messages(session_id, user_id, role, content_text, status, created_at)
+                    VALUES (?, ?, 'USER', ?, 'ACTIVE', CURRENT_TIMESTAMP)
+                    """,
+                    sessionId,
+                    login.userId(),
+                    "message-" + i
+            );
+        }
+
+        mockMvc.perform(get("/api/v1/agent/sessions/{sessionId}/messages", sessionId)
+                        .header("Authorization", "Bearer " + login.token())
+                        .param("pageNo", "1")
+                        .param("pageSize", "100"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(101))
+                .andExpect(jsonPath("$.data.list.length()").value(100))
+                .andExpect(jsonPath("$.data.list[0].contentText").value("message-2"))
+                .andExpect(jsonPath("$.data.list[99].contentText").value("message-101"));
+    }
+
+    @Test
     void userCanReplayEventsAfterEventIdAndResumeWaitingRunOnConfirmation() throws Exception {
         mockExternalAuthDependencies();
         register("agent_confirm_resume_user");

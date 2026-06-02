@@ -68,4 +68,9 @@ public class AdminAgentModelConfigController {
     public ApiResponse<AgentModelConfigTestResponse> test(@Valid @RequestBody AgentModelConfigRequest request) {
         return ApiResponse.success(agentModelConfigService.adminTest(request));
     }
+
+    @PostMapping("/{id}/test")
+    public ApiResponse<AgentModelConfigTestResponse> testById(@PathVariable Long id) {
+        return ApiResponse.success(agentModelConfigService.adminTestById(id));
+    }
 }

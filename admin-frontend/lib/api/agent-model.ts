@@ -40,6 +40,10 @@ export function testAgentModelConfig(payload: AgentModelConfigPayload) {
   return http.post<AgentModelConfigTestResult>(`${MODEL_CONFIG_PATH}/test`, payload)
 }
 
+export function testAgentModelConfigById(id: number) {
+  return http.post<AgentModelConfigTestResult>(`${MODEL_CONFIG_PATH}/${id}/test`)
+}
+
 export async function testSavedAgentModelConfig() {
   const config = await fetchAgentModelConfig()
   return testAgentModelConfig({

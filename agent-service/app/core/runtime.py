@@ -80,7 +80,11 @@ class AgentRuntime:
             await self._fail(run_id, "AGENT_INTERNAL_ERROR", str(exc))
 
     async def debug_route(self, context):
-        model_client = await self._model_client(context)
+        try:
+            model_client = await self._model_client(context)
+        except ModelClientError as exc:
+            logger.warning("Route debug falls back to mock model because model config is unavailable: %s", exc)
+            model_client = self.model_client_factory(Settings(model_provider="mock", model_name="mock"))
         engine = DeepAgentsRuntimeEngine(
             self.backend,
             model_client,

@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue"
+import { computed, onMounted, onUnmounted, ref, watch } from "vue"
 import { RouterLink } from "vue-router"
 import {
   Filter,
+  ChevronDown,
+  Check,
   LoaderCircle,
   Sparkles,
   Trash2,
@@ -43,6 +45,7 @@ const tools = ref<ToolSummary[]>([])
 const selectedModality = ref<MaterialModality>("all")
 const selectTool = ref("all")
 const sortType = ref("desc")
+const activeFilterMenu = ref<"tool" | "sort" | null>(null)
 const deletingTaskId = ref<number | null>(null)
 const previewAsset = ref<AssetPreviewItem | null>(null)
 
@@ -53,6 +56,11 @@ const modalityOptions: Array<{ value: MaterialModality; label: string }> = [
   { value: "AUDIO", label: "音频" },
   { value: "TEXT", label: "文本" },
   { value: "OTHER", label: "其他" },
+]
+
+const sortOptions = [
+  { value: "desc", label: "最新时间" },
+  { value: "asc", label: "最早时间" },
 ]
 
 const originMaterials = computed<MaterialItem[]>(() =>
@@ -100,13 +108,48 @@ const toolOptions = computed(() => {
       : originMaterials.value.filter((item) => item.modality === selectedModality.value)
   return Array.from(new Set(source.map((item) => item.task.toolName).filter(Boolean)))
 })
+const selectedToolLabel = computed(() => (selectTool.value === "all" ? "全部工具" : selectTool.value))
+const selectedSortLabel = computed(() => sortOptions.find((item) => item.value === sortType.value)?.label ?? "最新时间")
 const previewRecommendations = computed<AssetPreviewRecommendation[]>(() =>
   previewAsset.value ? recommendToolsForAsset(previewAsset.value) : [],
 )
 
+const toolByName = computed(() => {
+  const map = new Map<string, ToolSummary>()
+  for (const tool of tools.value) {
+    if (!tool?.toolName) continue
+    map.set(tool.toolName, tool)
+  }
+  return map
+})
+
+function modelLabelForTask(task: TaskDetail) {
+  const tool = toolByName.value.get(task.toolName)
+  const model = tool?.modelConfigName || tool?.modelName
+  return model ? String(model) : "默认"
+}
+
 watch(selectedModality, () => {
   selectTool.value = "all"
 })
+
+function toggleFilterMenu(menu: "tool" | "sort") {
+  activeFilterMenu.value = activeFilterMenu.value === menu ? null : menu
+}
+
+function selectMaterialTool(value: string) {
+  selectTool.value = value
+  activeFilterMenu.value = null
+}
+
+function selectMaterialSort(value: string) {
+  sortType.value = value
+  activeFilterMenu.value = null
+}
+
+function closeFilterMenu() {
+  activeFilterMenu.value = null
+}
 
 async function loadMaterials() {
   loading.value = true
@@ -226,7 +269,14 @@ async function removeMaterial(item: MaterialItem) {
   }
 }
 
-onMounted(loadMaterials)
+onMounted(() => {
+  document.addEventListener("click", closeFilterMenu)
+  void loadMaterials()
+})
+
+onUnmounted(() => {
+  document.removeEventListener("click", closeFilterMenu)
+})
 </script>
 
 <template>
@@ -254,22 +304,67 @@ onMounted(loadMaterials)
                 {{ option.label }}
               </button>
             </div>
-            <select
-              v-model="selectTool"
-              class="h-10 rounded-2xl border border-white/10 bg-white/[0.05] px-3 text-sm text-white outline-none focus:border-primary"
-            >
-              <option value="all">全部工具</option>
-              <option v-for="tool in toolOptions" :key="tool" :value="tool">
-                {{ tool }}
-              </option>
-            </select>
-            <select
-              v-model="sortType"
-              class="h-10 rounded-2xl border border-white/10 bg-white/[0.05] px-3 text-sm text-white outline-none focus:border-primary"
-            >
-              <option value="desc">最新时间</option>
-              <option value="asc">最早时间</option>
-            </select>
+            <div class="relative" @click.stop>
+              <button
+                type="button"
+                class="flex h-10 min-w-[148px] items-center justify-between gap-3 rounded-2xl border border-white/10 bg-[#18181c]/90 px-3 text-sm text-white shadow-[inset_0_1px_0_rgb(255_255_255_/_0.05)] outline-none transition hover:border-white/18 hover:bg-[#202026] focus:border-primary"
+                @click="toggleFilterMenu('tool')"
+              >
+                <span class="truncate">{{ selectedToolLabel }}</span>
+                <ChevronDown class="h-4 w-4 text-white/45 transition" :class="{ 'rotate-180': activeFilterMenu === 'tool' }" />
+              </button>
+              <div
+                v-if="activeFilterMenu === 'tool'"
+                class="absolute right-0 z-30 mt-2 max-h-72 w-56 overflow-y-auto rounded-2xl border border-white/10 bg-[#18181d] p-1.5 shadow-[0_18px_54px_rgb(0_0_0_/_0.48)] ring-1 ring-black/40"
+              >
+                <button
+                  type="button"
+                  class="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-white/72 transition hover:bg-white/8 hover:text-white"
+                  :class="{ 'bg-white/10 text-white': selectTool === 'all' }"
+                  @click="selectMaterialTool('all')"
+                >
+                  <span>全部工具</span>
+                  <Check v-if="selectTool === 'all'" class="h-4 w-4 text-primary" />
+                </button>
+                <button
+                  v-for="tool in toolOptions"
+                  :key="tool"
+                  type="button"
+                  class="flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-sm text-white/72 transition hover:bg-white/8 hover:text-white"
+                  :class="{ 'bg-white/10 text-white': selectTool === tool }"
+                  @click="selectMaterialTool(tool)"
+                >
+                  <span class="truncate">{{ tool }}</span>
+                  <Check v-if="selectTool === tool" class="h-4 w-4 shrink-0 text-primary" />
+                </button>
+              </div>
+            </div>
+            <div class="relative" @click.stop>
+              <button
+                type="button"
+                class="flex h-10 min-w-[132px] items-center justify-between gap-3 rounded-2xl border border-white/10 bg-[#18181c]/90 px-3 text-sm text-white shadow-[inset_0_1px_0_rgb(255_255_255_/_0.05)] outline-none transition hover:border-white/18 hover:bg-[#202026] focus:border-primary"
+                @click="toggleFilterMenu('sort')"
+              >
+                <span>{{ selectedSortLabel }}</span>
+                <ChevronDown class="h-4 w-4 text-white/45 transition" :class="{ 'rotate-180': activeFilterMenu === 'sort' }" />
+              </button>
+              <div
+                v-if="activeFilterMenu === 'sort'"
+                class="absolute right-0 z-30 mt-2 w-40 rounded-2xl border border-white/10 bg-[#18181d] p-1.5 shadow-[0_18px_54px_rgb(0_0_0_/_0.48)] ring-1 ring-black/40"
+              >
+                <button
+                  v-for="option in sortOptions"
+                  :key="option.value"
+                  type="button"
+                  class="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-white/72 transition hover:bg-white/8 hover:text-white"
+                  :class="{ 'bg-white/10 text-white': sortType === option.value }"
+                  @click="selectMaterialSort(option.value)"
+                >
+                  <span>{{ option.label }}</span>
+                  <Check v-if="sortType === option.value" class="h-4 w-4 text-primary" />
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -328,13 +423,16 @@ onMounted(loadMaterials)
             </button>
           </template>
           <template #footer>
-            <span class="truncate text-xs text-white/35">{{ item.task.toolCode }}</span>
+            <div class="min-w-0 space-y-0.5">
+              <div class="truncate text-xs text-white/40">任务ID：{{ item.task.taskId }}</div>
+              <div class="truncate text-xs text-white/40">模型：{{ modelLabelForTask(item.task) }}</div>
+            </div>
             <RouterLink
               :to="userRoutes.taskResult(String(item.task.taskId))"
               class="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-primary transition hover:text-white"
               @click.stop
             >
-              查看完整内容
+              只看
             </RouterLink>
           </template>
         </AssetCard>

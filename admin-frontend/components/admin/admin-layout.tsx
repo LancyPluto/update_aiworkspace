@@ -19,7 +19,8 @@ export function AdminLayout({ children }: AdminLayoutProps) {
     let cancelled = false
     const redirectToLogin = () => {
       const redirect = encodeURIComponent(pathname || "/")
-      const loginUrl = `/login?redirect=${redirect}`
+      const basePath = (process.env.NEXT_PUBLIC_ADMIN_BASE_PATH || "").replace(/\/$/, "")
+      const loginUrl = `${basePath}/login?redirect=${redirect}`
       if (typeof window !== "undefined") {
         window.location.replace(loginUrl)
         return

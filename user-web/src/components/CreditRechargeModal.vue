@@ -26,6 +26,7 @@ const paymentResult = ref<"success" | "fail" | null>(null)
 let pollingTimer: ReturnType<typeof setInterval> | null = null
 
 const selectedPackage = computed(() => packages.value.find((item) => item.id === selectedId.value) ?? null)
+const displayedPackages = computed<RechargePackage[]>(() => pickDisplayPackages(packages.value))
 
 const paymentOptions: Array<{
   channel: PaymentChannel
@@ -34,7 +35,7 @@ const paymentOptions: Array<{
   icon: typeof QrCode
 }> = [
   { channel: "WECHAT_NATIVE", title: "微信扫码支付", description: "使用微信扫一扫完成付款", icon: MessageCircle },
-  { channel: "ALIPAY_PAGE", title: "支付宝扫码支付", description: "使用支付宝扫码或打开收银台", icon: CreditCard },
+  { channel: "ALIPAY_PAGE", title: "支付宝扫码支付", description: "使用支付宝扫一扫完成付款", icon: CreditCard },
   { channel: "MOCK", title: "模拟支付", description: "本地开发测试到账", icon: Sparkles },
 ]
 
@@ -43,15 +44,40 @@ function formatMoney(value: number | string | undefined | null) {
   return Number.isInteger(amount) ? String(amount) : amount.toFixed(2)
 }
 
+function normalizePackageName(name: string) {
+  const raw = (name || "").trim()
+  if (!raw) return "充值套餐"
+  const lower = raw.toLowerCase()
+  if (lower.includes("starter")) return "入门套餐"
+  if (lower.includes("test")) return "体验套餐"
+  if (lower.includes("growth")) return "成长套餐"
+  if (lower.includes("pro")) return "专业套餐"
+  if (lower.includes("ultra")) return "旗舰套餐"
+  return raw
+}
+
+function translateBenefit(text: string) {
+  const raw = (text || "").trim()
+  if (!raw) return raw
+  const lower = raw.toLowerCase()
+  if (lower.includes("priority queue") || lower.includes("priority")) return "优先队列"
+  if (lower.includes("api acceleration") || lower.includes("acceleration")) return "API 加速"
+  if (lower.includes("commercial") || lower.includes("business")) return "商用授权"
+  if (lower.includes("support")) return "专属支持"
+  return raw
+}
+
 function packageBenefits(pkg: RechargePackage) {
   const benefits = pkg.benefits?.filter(Boolean) ?? []
   if (benefits.length > 0) {
     return benefits.map((item) =>
-      item
-        .replace(/valid\s+for\s+(\d+)\s+days?/gi, "有效期 $1 天")
-        .replace(/(\d+)\s+days?/gi, "$1 天")
-        .replace(/\bcredits?\b/gi, "算力")
-        .replace(/\bbonus\b/gi, "赠送"),
+      translateBenefit(
+        item
+          .replace(/valid\s+for\s+(\d+)\s+days?/gi, "有效期 $1 天")
+          .replace(/(\d+)\s+days?/gi, "$1 天")
+          .replace(/\bcredits?\b/gi, "算力")
+          .replace(/\bbonus\b/gi, "赠送"),
+      ),
     )
   }
   return [`到账 ${pkg.credits.toLocaleString()} 点算力`, `有效期 ${pkg.validityDays} 天`]
@@ -83,13 +109,35 @@ function closeAll() {
   emit("close")
 }
 
+function pickDisplayPackages(list: RechargePackage[]) {
+  const source = (list || []).filter(Boolean)
+  if (source.length <= 3) return source
+  const recommended = source.find((item) => item.recommended) ?? null
+  const remaining = source.filter((item) => item.id !== recommended?.id)
+  const byPrice = [...remaining].sort((a, b) => Number(a.priceAmount ?? 0) - Number(b.priceAmount ?? 0))
+  const cheapest = byPrice[0] ?? null
+  const mostExpensive = byPrice.length ? byPrice[byPrice.length - 1] : null
+  const middle = byPrice.length >= 3 ? byPrice[Math.floor(byPrice.length / 2)] : (byPrice[1] ?? null)
+  const picked = [recommended, cheapest, middle, mostExpensive].filter(Boolean) as RechargePackage[]
+  const uniq: RechargePackage[] = []
+  const seen = new Set<number>()
+  for (const item of picked) {
+    if (seen.has(item.id)) continue
+    seen.add(item.id)
+    uniq.push(item)
+    if (uniq.length >= 3) break
+  }
+  return uniq.length === 3 ? uniq : source.slice(0, 3)
+}
+
 async function loadPackages() {
   loadingPackages.value = true
   loadError.value = ""
   try {
     const list = await fetchRechargePackages({ token: auth.token })
     packages.value = list
-    selectedId.value = list.find((item) => item.recommended)?.id ?? list[0]?.id ?? null
+    const displayList = pickDisplayPackages(list)
+    selectedId.value = displayList.find((item) => item.recommended)?.id ?? displayList[0]?.id ?? null
   } catch (err) {
     loadError.value = err instanceof Error ? err.message : "加载充值套餐失败"
   } finally {
@@ -192,7 +240,7 @@ onUnmounted(clearPolling)
 
         <div v-else class="credit-package-list">
           <button
-            v-for="pkg in packages"
+            v-for="pkg in displayedPackages"
             :key="pkg.id"
             type="button"
             class="credit-package-card"
@@ -200,7 +248,7 @@ onUnmounted(clearPolling)
             @click="selectedId = pkg.id"
           >
             <span v-if="pkg.recommended" class="credit-package-badge">推荐</span>
-            <p class="credit-package-name">{{ pkg.packageName }}</p>
+            <p class="credit-package-name">{{ normalizePackageName(pkg.packageName) }}</p>
             <p class="credit-package-credits">
               {{ pkg.credits.toLocaleString() }}
               <span>算力</span>
@@ -286,6 +334,15 @@ onUnmounted(clearPolling)
                 alt="支付二维码"
                 class="h-full w-full object-contain"
               />
+              <a
+                v-else-if="activeOrder?.paymentChannel === 'ALIPAY_PAGE' && activeOrder.payUrl"
+                :href="activeOrder.payUrl"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="credit-cashier-link"
+              >
+                打开支付宝收银台
+              </a>
               <QrCode v-else class="h-20 w-20 text-slate-900" />
             </div>
             <p class="mt-4 flex items-center justify-center gap-2 text-sm text-white/60">
@@ -395,15 +452,14 @@ onUnmounted(clearPolling)
 
 .credit-package-list {
   margin-top: 18px;
-  display: flex;
-  gap: 10px;
-  overflow-x: auto;
-  padding-bottom: 4px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
 }
 
 .credit-package-card {
   position: relative;
-  flex: 1 0 200px;
+  width: 100%;
   min-height: 200px;
   display: flex;
   flex-direction: column;
@@ -417,6 +473,16 @@ onUnmounted(clearPolling)
   cursor: pointer;
   text-align: left;
   transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.credit-package-card.recommended {
+  background: linear-gradient(160deg, rgb(176 146 255 / 0.12), rgb(255 255 255 / 0.03));
+}
+
+@media (max-width: 720px) {
+  .credit-package-list {
+    grid-template-columns: 1fr;
+  }
 }
 
 .credit-package-card:hover {
@@ -532,9 +598,26 @@ onUnmounted(clearPolling)
   margin: 20px auto 0;
   width: 160px;
   height: 160px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   padding: 8px;
   background: #fff;
   border-radius: 12px;
+}
+
+.credit-cashier-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 44px;
+  border-radius: 999px;
+  background: #1677ff;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  text-decoration: none;
 }
 
 .credit-mock-pay {

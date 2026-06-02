@@ -35,7 +35,26 @@ export function assetFromTask(
 ): AssetPreviewItem | null {
   const blocks = options.blocks || buildTaskResultBlocks(task.result?.contentText || "", task)
   const block = primaryResultBlock(blocks)
-  if (!block) return null
+  if (!block) {
+    const fallbackUrl = extractPrimaryMediaUrl(task.result?.contentText || "")
+    if (!fallbackUrl) return null
+    const kind = inferKindFromUrl(fallbackUrl)
+    return {
+      id: `${options.idPrefix || "task"}-${task.taskId}`,
+      source: options.source || "private",
+      kind,
+      title: task.toolName || task.taskNo,
+      subtitle: task.taskNo,
+      prompt: taskPrompt(task),
+      taskId: task.taskId,
+      taskNo: task.taskNo,
+      toolName: task.toolName,
+      toolCode: task.toolCode,
+      modality: options.modality || task.outputModality || task.result?.resourceType || "TEXT",
+      createdAt: task.createdAt,
+      url: fallbackUrl,
+    } as AssetPreviewItem
+  }
   const base = {
     id: `${options.idPrefix || "task"}-${task.taskId}`,
     source: options.source || "private",
@@ -51,11 +70,12 @@ export function assetFromTask(
   } satisfies Partial<AssetPreviewItem>
 
   if (block.type === "image") {
+    const url = block.images[0]?.url || extractPrimaryMediaUrl(task.result?.contentText || "") || ""
     return {
       ...base,
       kind: "image",
-      url: block.images[0]?.url,
-      urls: block.images.map((image) => image.url),
+      url,
+      urls: block.images.map((image) => image.url).filter(Boolean),
       title: block.title || base.title,
     } as AssetPreviewItem
   }
@@ -68,6 +88,23 @@ export function assetFromTask(
     return { ...base, kind: "text", rawText: block.items.join("\n"), title: block.title || base.title } as AssetPreviewItem
   }
   return { ...base, kind: "other", rawText: task.result?.contentText || "", title: base.title } as AssetPreviewItem
+}
+
+function extractPrimaryMediaUrl(text: string): string {
+  const raw = (text || "").trim()
+  if (!raw) return ""
+  const matches = raw.match(
+    /(https?:\/\/\S+?\.(?:png|jpe?g|webp|gif|mp4|mp3|wav)(?:\?\S*)?)|(\/generated\/\S+?\.(?:png|jpe?g|webp|gif|mp4|mp3|wav)(?:\?\S*)?)/i,
+  )
+  return (matches?.[1] || matches?.[2] || "").replace(/[)\]，。,.、；;]+$/g, "")
+}
+
+function inferKindFromUrl(url: string): AssetPreviewItem["kind"] {
+  const lower = (url || "").toLowerCase()
+  if (lower.endsWith(".mp4") || lower.includes(".mp4?")) return "video"
+  if (lower.endsWith(".mp3") || lower.endsWith(".wav") || lower.includes(".mp3?") || lower.includes(".wav?")) return "audio"
+  if (/\.(png|jpg|jpeg|webp|gif)(\?|$)/i.test(lower)) return "image"
+  return "other"
 }
 
 export function assetFromCommunityPost(post: CommunityPost, url?: string): AssetPreviewItem {

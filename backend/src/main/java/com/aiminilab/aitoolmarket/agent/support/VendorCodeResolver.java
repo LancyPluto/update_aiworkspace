@@ -3,6 +3,8 @@ package com.aiminilab.aitoolmarket.agent.support;
 import com.aiminilab.aitoolmarket.agent.config.ModelProviderDefinition;
 import com.aiminilab.aitoolmarket.agent.config.ModelProviderRegistry;
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
+import com.aiminilab.aitoolmarket.agent.entity.ModelVendor;
+import com.aiminilab.aitoolmarket.agent.mapper.ModelVendorMapper;
 import org.springframework.stereotype.Component;
 
 import java.util.LinkedHashMap;
@@ -48,9 +50,11 @@ public class VendorCodeResolver {
     }
 
     private final ModelProviderRegistry providerRegistry;
+    private final ModelVendorMapper modelVendorMapper;
 
-    public VendorCodeResolver(ModelProviderRegistry providerRegistry) {
+    public VendorCodeResolver(ModelProviderRegistry providerRegistry, ModelVendorMapper modelVendorMapper) {
         this.providerRegistry = providerRegistry;
+        this.modelVendorMapper = modelVendorMapper;
     }
 
     public String resolveVendorCode(AgentModelConfig config) {
@@ -83,6 +87,11 @@ public class VendorCodeResolver {
         if (vendorCode == null || vendorCode.isBlank()) {
             return "其他";
         }
+        ModelVendor vendor = modelVendorMapper.findByCode(vendorCode);
+        if (vendor != null && Boolean.TRUE.equals(vendor.getEnabled())
+                && vendor.getVendorLabel() != null && !vendor.getVendorLabel().isBlank()) {
+            return vendor.getVendorLabel();
+        }
         return VENDOR_LABELS.getOrDefault(vendorCode, capitalize(vendorCode));
     }
 
@@ -96,11 +105,36 @@ public class VendorCodeResolver {
     }
 
     public Map<String, String> vendorCatalog() {
-        LinkedHashMap<String, String> catalog = new LinkedHashMap<>(VENDOR_LABELS);
+        LinkedHashMap<String, String> catalog = new LinkedHashMap<>();
+        for (ModelVendor vendor : modelVendorMapper.findAllEnabled()) {
+            if (vendor.getVendorCode() == null || vendor.getVendorCode().isBlank()) {
+                continue;
+            }
+            catalog.putIfAbsent(vendor.getVendorCode(), vendorLabel(vendor.getVendorCode()));
+        }
+        catalog.putAll(VENDOR_LABELS);
         for (String code : allKnownVendorCodes()) {
             catalog.putIfAbsent(code, vendorLabel(code));
         }
         return catalog;
+    }
+
+    public String vendorIconAsset(String vendorCode) {
+        if (vendorCode == null || vendorCode.isBlank()) {
+            return "api";
+        }
+        ModelVendor vendor = modelVendorMapper.findByCode(vendorCode);
+        if (vendor != null && Boolean.TRUE.equals(vendor.getEnabled())
+                && vendor.getIconAsset() != null && !vendor.getIconAsset().isBlank()) {
+            return vendor.getIconAsset();
+        }
+        if ("openai_gateway".equalsIgnoreCase(vendorCode)) {
+            return "openrouter";
+        }
+        if ("volcengine".equalsIgnoreCase(vendorCode)) {
+            return "doubao";
+        }
+        return vendorCode;
     }
 
     private static String inferFromBaseUrl(String baseUrl) {

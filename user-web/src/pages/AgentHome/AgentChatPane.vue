@@ -123,6 +123,59 @@ const confirmingEventIds = ref<Set<number>>(new Set())
 const confirmationError = ref<string | null>(null)
 const dismissedConfirmationIds = ref<Set<number>>(new Set())
 const recoveryRunId = ref<number | null>(null)
+
+const AGENT_RUN_EVENT_CACHE_KEY = "ai_tool_market_agent_run_event_cache_v1"
+
+type PersistedRunEventCache = {
+  sessionId: number
+  runEventsByRunId: Record<string, AgentRunEvent[]>
+  submittedAttachmentJsonByRunId: Record<string, string>
+  dismissedConfirmationIds: number[]
+}
+
+function loadPersistedRunEventCache() {
+  try {
+    const raw = localStorage.getItem(AGENT_RUN_EVENT_CACHE_KEY)
+    if (!raw) return
+    const parsed = JSON.parse(raw) as PersistedRunEventCache
+    if (!parsed || parsed.sessionId !== props.sessionId) return
+    const restoredEvents: Record<number, AgentRunEvent[]> = {}
+    for (const [runId, list] of Object.entries(parsed.runEventsByRunId || {})) {
+      const id = Number(runId)
+      if (!Number.isFinite(id)) continue
+      restoredEvents[id] = Array.isArray(list) ? list.slice(-120) : []
+    }
+    runEventsByRunId.value = restoredEvents
+    const restoredJson: Record<number, string> = {}
+    for (const [runId, value] of Object.entries(parsed.submittedAttachmentJsonByRunId || {})) {
+      const id = Number(runId)
+      if (!Number.isFinite(id) || typeof value !== "string") continue
+      restoredJson[id] = value
+    }
+    submittedAttachmentJsonByRunId.value = restoredJson
+    dismissedConfirmationIds.value = new Set((parsed.dismissedConfirmationIds || []).filter((id) => Number.isFinite(id)))
+  } catch {
+    // ignore corrupted cache
+  }
+}
+
+function persistRunEventCache() {
+  try {
+    const payload: PersistedRunEventCache = {
+      sessionId: props.sessionId,
+      runEventsByRunId: Object.fromEntries(
+        Object.entries(runEventsByRunId.value).map(([runId, list]) => [runId, (list || []).slice(-120)]),
+      ),
+      submittedAttachmentJsonByRunId: Object.fromEntries(
+        Object.entries(submittedAttachmentJsonByRunId.value).map(([runId, value]) => [runId, value]),
+      ),
+      dismissedConfirmationIds: Array.from(dismissedConfirmationIds.value),
+    }
+    localStorage.setItem(AGENT_RUN_EVENT_CACHE_KEY, JSON.stringify(payload))
+  } catch {
+    // ignore quota
+  }
+}
 const lastFailedRunId = ref<number | null>(null)
 const showActiveRunLimitHint = ref(false)
 const cancellingRun = ref(false)
@@ -143,6 +196,59 @@ let runStreamAbort: AbortController | null = null
 let runStatusWatchdog: number | null = null
 let streamingAnimationTimer: number | null = null
 const terminalEventFinalizingRunIds = new Set<number>()
+const CHAT_SCROLL_KEY_PREFIX = "ai_tool_market_agent_chat_scroll_v1:"
+
+type PersistedChatScroll = {
+  scrollTop: number
+  stickToBottom: boolean
+  updatedAt: number
+}
+
+function scrollStorageKey(sessionId: number) {
+  return `${CHAT_SCROLL_KEY_PREFIX}${sessionId}`
+}
+
+function persistChatScroll() {
+  const container = messageContainerRef.value
+  if (!container) return
+  const payload: PersistedChatScroll = {
+    scrollTop: container.scrollTop,
+    stickToBottom: stickToBottom.value,
+    updatedAt: Date.now(),
+  }
+  try {
+    window.sessionStorage.setItem(scrollStorageKey(props.sessionId), JSON.stringify(payload))
+  } catch {
+    // ignore quota
+  }
+}
+
+function loadPersistedChatScroll(sessionId: number): PersistedChatScroll | null {
+  try {
+    const raw = window.sessionStorage.getItem(scrollStorageKey(sessionId))
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as PersistedChatScroll
+    if (!parsed || !Number.isFinite(parsed.scrollTop)) return null
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+async function withAutoScrollBehavior(fn: () => void | Promise<void>) {
+  const container = messageContainerRef.value
+  if (!container) {
+    await fn()
+    return
+  }
+  const previous = container.style.scrollBehavior
+  container.style.scrollBehavior = "auto"
+  try {
+    await fn()
+  } finally {
+    container.style.scrollBehavior = previous
+  }
+}
 
 const input = computed({
   get: () => props.draft,
@@ -261,6 +367,7 @@ function messageContentJsonForFiles(items: AgentFile[]) {
       name: file.originalFilename,
       contentType: file.contentType,
       size: file.fileSize,
+      url: file.downloadUrl,
       status: file.status,
     })),
   })
@@ -367,8 +474,20 @@ async function loadPane() {
     await resumePendingRunForSession()
   } finally {
     paneLoading.value = false
-    stickToBottom.value = true
-    await scrollBottom(true)
+    await nextTick()
+    const persisted = loadPersistedChatScroll(props.sessionId)
+    if (persisted && messageContainerRef.value) {
+      stickToBottom.value = persisted.stickToBottom
+      scrollOffset.value = persisted.scrollTop
+      await withAutoScrollBehavior(async () => {
+        await nextTick()
+        messageContainerRef.value!.scrollTop = persisted.scrollTop
+      })
+      scheduleNavLayoutUpdate()
+    } else {
+      stickToBottom.value = true
+      await withAutoScrollBehavior(() => scrollBottom(true))
+    }
   }
 }
 
@@ -989,7 +1108,7 @@ function animateCompletedAssistantMessage(runId: number) {
 function startRunStatusWatchdog(runId: number) {
   stopRunStatusWatchdog()
   runStatusWatchdog = window.setInterval(() => {
-    if (!props.token || activeRunId.value !== runId) {
+    if (activeRunId.value !== runId) {
       stopRunStatusWatchdog()
       return
     }
@@ -1069,17 +1188,12 @@ function appendStreamingAssistantDelta(runId: number, delta: string) {
 
 function completeStreamingAssistantMessage(runId: number, content: string) {
   if (!content) return
-  if (isStructuredMediaContent(content)) {
-    clearStreamingAssistantMessage(runId)
-    return
-  }
   const message = ensureStreamingAssistantMessage(runId)
   message.contentText = content
   void scrollBottom()
 }
 
 async function syncRunEvents(runId: number, options?: { replayRenderableEvents?: boolean }) {
-  if (!props.token) return
   const cachedEvents = runEventsByRunId.value[runId] ?? []
   const afterEventId = cachedEvents.length ? cachedEvents.at(-1)!.id : undefined
   const res = await fetchAgentRunEvents(runId, { token: props.token, afterEventId })
@@ -1144,7 +1258,7 @@ function handleStreamedRunEvent(runId: number, event: AgentRunEvent, options?: {
 
   if (isTerminalRunEvent(event)) {
     settleRunStatus()
-    clearStreamingAssistantMessage(runId, { preserveReadableText: event.eventType === "run.failed" })
+    clearStreamingAssistantMessage(runId, { preserveReadableText: true })
     stopRunStatusWatchdog()
     if (!options?.fromSync) stopRunEventStream()
     void finalizeTerminalRunFromEvent(runId, event)
@@ -1187,7 +1301,7 @@ async function finalizeTerminalRunFromEvent(runId: number, event: AgentRunEvent)
     }
     await refreshMessages({ preserveStreamingRunId: event.eventType === "run.failed" ? runId : undefined })
   } finally {
-    clearStreamingAssistantMessage(runId, { preserveReadableText: event.eventType === "run.failed" })
+    clearStreamingAssistantMessage(runId, { preserveReadableText: true })
     stopRunStatusWatchdog()
     terminalEventFinalizingRunIds.delete(runId)
     await scrollBottom()
@@ -1201,7 +1315,7 @@ async function settleTerminalRun(runId: number, run: AgentRun) {
     lastFailedRunId.value = run.id
   }
   await refreshMessages({ preserveStreamingRunId: run.status === "FAILED" || run.status === "TIMEOUT" ? runId : undefined })
-  clearStreamingAssistantMessage(runId, { preserveReadableText: run.status === "FAILED" || run.status === "TIMEOUT" })
+  clearStreamingAssistantMessage(runId, { preserveReadableText: true })
   if (run.status === "SUCCESS") {
     animateCompletedAssistantMessage(runId)
   }
@@ -1500,6 +1614,7 @@ function onMessageContainerScroll() {
   if (!el) return
   scrollOffset.value = el.scrollTop
   stickToBottom.value = isNearBottom()
+  persistChatScroll()
 }
 
 function scheduleNavLayoutUpdate() {
@@ -1542,18 +1657,29 @@ watch(messages, () => {
 watch(
   () => props.sessionId,
   () => {
+    persistChatScroll()
     stickToBottom.value = true
     scrollOffset.value = 0
   },
 )
 
+watch(
+  [runEventsByRunId, submittedAttachmentJsonByRunId, dismissedConfirmationIds],
+  () => {
+    persistRunEventCache()
+  },
+  { deep: true },
+)
+
 onMounted(() => {
+  loadPersistedRunEventCache()
   void loadPane()
   void loadPreviewTools()
   void nextTick(() => adjustComposerTextareaHeight())
 })
 
 onUnmounted(() => {
+  persistChatScroll()
   stopRunEventStream()
   stopRunStatusWatchdog()
   stopStreamingAnimationTimer()

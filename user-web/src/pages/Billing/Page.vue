@@ -48,6 +48,31 @@ function usageSourceKey(log: BillingUsageLog) {
   return `${log.sourceType}:${log.sourceId}`
 }
 
+function parseShanghaiDate(value?: string | null) {
+  if (!value) return null
+  const normalized = value.trim()
+  if (!normalized) return null
+  if (/[zZ]$|[+-]\d{2}:?\d{2}$/.test(normalized)) return new Date(normalized)
+  return new Date(`${normalized.replace(" ", "T")}+08:00`)
+}
+
+function formatShanghaiTime(value?: string | null) {
+  const date = parseShanghaiDate(value)
+  if (!date || Number.isNaN(date.getTime())) return "-"
+  const parts = new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(date)
+  const pick = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value || ""
+  return `${pick("year")}-${pick("month")}-${pick("day")} ${pick("hour")}:${pick("minute")}:${pick("second")}`
+}
+
 function usageTitle(log: BillingUsageLog) {
   if (log.sourceType === "AGENT_RUN") return `Agent运行 #${log.sourceId}`
   return log.taskNo || `任务 #${log.sourceId}`
@@ -89,7 +114,7 @@ function mergeBillingRows(creditLogs: CreditLog[], usageLogs: BillingUsageLog[])
       balanceText: "-",
     }))
   return [...creditRows, ...usageRows].sort((a, b) => {
-    const diff = new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    const diff = (parseShanghaiDate(b.createdAt)?.getTime() ?? 0) - (parseShanghaiDate(a.createdAt)?.getTime() ?? 0)
     return Number.isNaN(diff) || diff === 0 ? b.id.localeCompare(a.id) : diff
   })
 }
@@ -167,7 +192,7 @@ onMounted(loadBilling)
             <tbody class="divide-y divide-border">
               <tr v-for="log in pagedLogs" :key="log.id">
                 <td class="px-4 py-3 text-muted-foreground">
-                  {{ new Date(log.createdAt).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false }) }}
+                  {{ formatShanghaiTime(log.createdAt) }}
                 </td>
                 <td class="px-4 py-3">{{ log.type }}</td>
                 <td class="px-4 py-3">{{ log.reason || "-" }}</td>
