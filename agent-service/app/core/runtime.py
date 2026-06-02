@@ -4,7 +4,6 @@ from app.clients.backend_client import BackendClient, BackendClientError
 from app.clients.model_client import ModelClient, ModelClientError
 from app.config import Settings
 from app.core.schemas import RunFail
-from app.runtime.deep_agents_engine import DeepAgentsRuntimeEngine
 from app.runtime.router import RuntimeRouter
 from app.tools.backend_tool import ToolExecutionError
 
@@ -81,11 +80,13 @@ class AgentRuntime:
 
     async def debug_route(self, context):
         model_client = await self._model_client(context)
-        engine = DeepAgentsRuntimeEngine(
+        router = self.runtime_router_factory(
             self.backend,
             model_client,
             deep_agents_enabled=self.default_settings.agent_deep_agents_enabled,
         )
+        selector = getattr(router, "select_debug_engine", router.select_engine)
+        engine = selector(message=context.message)
         return await engine.debug_route(context)
 
     async def _model_client(self, context=None) -> ModelClient:

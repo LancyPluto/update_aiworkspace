@@ -119,11 +119,6 @@ function Sync-PythonVenvDeps {
     Write-Host "[OK] Python venv deps installed"
 }
 
-function Get-VenvPythonCommand {
-    Ensure-PythonVenv
-    return "'$($VenvPython.Replace("'", "''"))'"
-}
-
 function Install-NodeDeps($RelativePath) {
     $Path = Join-Path $Root $RelativePath
     Write-Section "Checking npm deps: $RelativePath"
@@ -142,8 +137,9 @@ function Install-NodeDeps($RelativePath) {
 function Start-DevWindow($Title, $RelativePath, $Command) {
     $Path = Join-Path $Root $RelativePath
     $EscapedPath = $Path.Replace("'", "''")
-    $EscapedCommand = $Command.Replace("'", "''")
-    $Script = "Set-Location -LiteralPath '$EscapedPath'; Write-Host '[$Title] $Command'; $EscapedCommand"
+    $EscapedTitle = $Title.Replace("'", "''")
+    # Do not escape $Command — doubling quotes breaks paths like 'D:\...\python.exe'.
+    $Script = "Set-Location -LiteralPath '$EscapedPath'; Write-Host '[$EscapedTitle]'; $Command"
     Start-Process powershell -ArgumentList @("-NoExit", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", $Script) -WindowStyle Normal
     Write-Host "[OK] Started $Title"
 }
@@ -519,8 +515,6 @@ Install-NodeDeps "user-web"
 Install-NodeDeps "admin-frontend"
 Sync-PythonVenvDeps
 
-$VenvPyCmd = Get-VenvPythonCommand
-
 Write-Section "Starting app services on host"
 Start-DevWindow "Backend :8080" "backend" "mvn spring-boot:run"
 
@@ -531,7 +525,7 @@ if (Test-HttpReady "http://localhost:8080/api/health" 80) {
     Write-Host "[WARN] Backend did not answer health check yet. Check the Backend window."
 }
 
-Start-DevWindow "Agent Service :8090" "agent-service" "$VenvPyCmd -m uvicorn app.main:app --reload --port 8090"
+Start-DevWindow "Agent Service :8090" "agent-service" "& '$($VenvPython.Replace("'", "''"))' -m uvicorn app.main:app --reload --port 8090"
 
 Write-Host "[..] Waiting for agent-service health..."
 if (Test-HttpReady "http://localhost:8090/health" 40) {
@@ -540,7 +534,7 @@ if (Test-HttpReady "http://localhost:8090/health" 40) {
     Write-Host "[WARN] Agent Service did not answer health check yet. Check the Agent Service window."
 }
 
-Start-DevWindow "Worker Queue" "worker" "$VenvPyCmd main.py"
+Start-DevWindow "Worker Queue" "worker" "& '$($VenvPython.Replace("'", "''"))' main.py"
 Start-DevWindow "User Web :5173" "user-web" "npm run dev"
 Start-DevWindow "Admin Web :5174" "admin-frontend" "npm run dev"
 
