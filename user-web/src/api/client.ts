@@ -1,4 +1,4 @@
-import type { ApiErrorCode, ApiResponse } from "./types"
+import type { ApiErrorCode, ApiResponse, CreditInsufficientDetail } from "./types"
 import { SESSION_TOKEN_STORAGE_KEY } from "@/constants/authStorage"
 import { clearSessionBearerJwt, getSessionBearerJwt } from "./sessionBearer"
 
@@ -32,12 +32,14 @@ export function getRequestBaseUrl(): string {
 export class ApiBusinessError extends Error {
   readonly code: ApiErrorCode
   readonly traceId?: string
+  readonly data?: CreditInsufficientDetail
 
-  constructor(code: ApiErrorCode, message: string, traceId?: string) {
+  constructor(code: ApiErrorCode, message: string, traceId?: string, data?: CreditInsufficientDetail) {
     super(message)
     this.name = "ApiBusinessError"
     this.code = code
     this.traceId = traceId
+    this.data = data
   }
 
   get requestId(): string | undefined {
@@ -151,8 +153,23 @@ export async function apiRequest<T>(
   }
 
   if (json.code !== "SUCCESS") {
-    throw new ApiBusinessError(json.code, json.message ?? json.code, json.traceId ?? json.requestId)
+    throw new ApiBusinessError(
+      json.code,
+      json.message ?? json.code,
+      json.traceId ?? json.requestId,
+      parseCreditInsufficientDetail(json.data),
+    )
   }
 
   return json.data as T
+}
+
+function parseCreditInsufficientDetail(data: unknown): CreditInsufficientDetail | undefined {
+  if (!data || typeof data !== "object") return undefined
+  const record = data as Record<string, unknown>
+  const availableCredits = Number(record.availableCredits)
+  const requiredCredits = Number(record.requiredCredits)
+  if (!Number.isFinite(availableCredits) || !Number.isFinite(requiredCredits)) return undefined
+  const toolCode = typeof record.toolCode === "string" ? record.toolCode : null
+  return { availableCredits, requiredCredits, toolCode }
 }

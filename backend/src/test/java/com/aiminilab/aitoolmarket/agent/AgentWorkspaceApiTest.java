@@ -90,8 +90,8 @@ class AgentWorkspaceApiTest {
         String token = login("workspace_memory_user");
         long workspaceId = defaultWorkspaceId(token);
 
-        long firstMemoryId = createMemory(token, workspaceId, "PREFERENCE", "Tone", "Prefer concise Chinese answers.");
-        long secondMemoryId = createMemory(token, workspaceId, "PROJECT", "Billing", "Project uses prepaid credits.");
+        long firstMemoryId = createMemory(token, workspaceId, "preference", "Tone", "Prefer concise Chinese answers.");
+        long secondMemoryId = createMemory(token, workspaceId, "PROJECT", "Billing", "Project uses prepaid credits.", "workspace_fact");
 
         mockMvc.perform(get("/api/v1/agent/workspaces/{workspaceId}/memory", workspaceId)
                         .header("Authorization", "Bearer " + token))
@@ -99,7 +99,7 @@ class AgentWorkspaceApiTest {
                 .andExpect(jsonPath("$.data.total").value(2))
                 .andExpect(jsonPath("$.data.list[0].id").value(secondMemoryId))
                 .andExpect(jsonPath("$.data.list[0].title").value("Billing"))
-                .andExpect(jsonPath("$.data.list[0].memoryType").value("PROJECT"))
+                .andExpect(jsonPath("$.data.list[0].memoryType").value("workspace_fact"))
                 .andExpect(jsonPath("$.data.list[1].id").value(firstMemoryId));
 
         mockMvc.perform(put("/api/v1/agent/workspaces/{workspaceId}/memory/{memoryId}", workspaceId, firstMemoryId)
@@ -107,7 +107,7 @@ class AgentWorkspaceApiTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
-                                  "memoryType": "PREFERENCE",
+                                  "memoryType": "preference",
                                   "title": "Tone updated",
                                   "content": "Prefer concise Chinese answers with concrete next steps."
                                 }
@@ -148,7 +148,7 @@ class AgentWorkspaceApiTest {
         register("workspace_memory_owner");
         String ownerToken = login("workspace_memory_owner");
         long ownerWorkspaceId = defaultWorkspaceId(ownerToken);
-        long memoryId = createMemory(ownerToken, ownerWorkspaceId, "PROJECT", "Roadmap", "Workspace memory is private.");
+        long memoryId = createMemory(ownerToken, ownerWorkspaceId, "PROJECT", "Roadmap", "Workspace memory is private.", "workspace_fact");
 
         register("workspace_memory_intruder");
         String intruderToken = login("workspace_memory_intruder");
@@ -163,7 +163,7 @@ class AgentWorkspaceApiTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
-                                  "memoryType": "PROJECT",
+                                  "memoryType": "workspace_fact",
                                   "title": "Stolen",
                                   "content": "Should not update."
                                 }
@@ -192,13 +192,13 @@ class AgentWorkspaceApiTest {
         register("workspace_memory_retrieve_user");
         String token = login("workspace_memory_retrieve_user");
         long workspaceId = defaultWorkspaceId(token);
-        long titleMatchId = createMemory(token, workspaceId, "PROJECT", "Pricing policy", "Use prepaid credits.");
-        long contentMatchId = createMemory(token, workspaceId, "PROJECT", "Billing notes", "Enterprise pricing uses annual invoices.");
+        long titleMatchId = createMemory(token, workspaceId, "PROJECT", "Pricing policy", "Use prepaid credits.", "workspace_fact");
+        long contentMatchId = createMemory(token, workspaceId, "PROJECT", "Billing notes", "Enterprise pricing uses annual invoices.", "workspace_fact");
 
         register("workspace_memory_other_user");
         String otherToken = login("workspace_memory_other_user");
         long otherWorkspaceId = defaultWorkspaceId(otherToken);
-        createMemory(otherToken, otherWorkspaceId, "PROJECT", "Pricing policy", "This belongs to another workspace.");
+        createMemory(otherToken, otherWorkspaceId, "PROJECT", "Pricing policy", "This belongs to another workspace.", "workspace_fact");
 
         String body = """
                 {
@@ -336,6 +336,10 @@ class AgentWorkspaceApiTest {
     }
 
     private long createMemory(String token, long workspaceId, String memoryType, String title, String content) throws Exception {
+        return createMemory(token, workspaceId, memoryType, title, content, memoryType);
+    }
+
+    private long createMemory(String token, long workspaceId, String memoryType, String title, String content, String expectedMemoryType) throws Exception {
         String response = mockMvc.perform(post("/api/v1/agent/workspaces/{workspaceId}/memory", workspaceId)
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -349,7 +353,7 @@ class AgentWorkspaceApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.id").isNumber())
                 .andExpect(jsonPath("$.data.workspaceId").value(workspaceId))
-                .andExpect(jsonPath("$.data.memoryType").value(memoryType))
+                .andExpect(jsonPath("$.data.memoryType").value(expectedMemoryType))
                 .andExpect(jsonPath("$.data.title").value(title))
                 .andExpect(jsonPath("$.data.content").value(content))
                 .andExpect(jsonPath("$.data.status").value("ACTIVE"))

@@ -3,6 +3,7 @@ import inspect
 import json
 import logging
 import re
+from contextvars import ContextVar
 from collections.abc import Callable
 from dataclasses import dataclass
 from types import ModuleType
@@ -26,6 +27,7 @@ from app.core.event_types import (
     MESSAGE_COMPLETED,
     MESSAGE_DELTA,
     RUN_STARTED,
+    RUNTIME_SETTINGS_APPLIED,
     SUBAGENT_COMPLETED,
     SUBAGENT_FAILED,
     SUBAGENT_STARTED,
@@ -52,6 +54,7 @@ from app.core.schemas import (
 )
 from app.runtime.followup_task_resolver import FollowupTaskResolver, FollowupResolution
 from app.runtime.memory_curator import MemoryCuratorService, build_memory_metadata
+from app.runtime.product_tool_call_loop import ProductToolCallLoopExecutor
 from app.runtime.subagent_profiles import default_subagent_profiles, profiles_to_deepagents_subagents
 from app.runtime.agent_router_service import AgentRouterService
 from app.runtime.tool_call_loop import AgentToolCallLoopExecutor
@@ -69,6 +72,7 @@ from app.tools.registry import ToolRegistry, infer_output_modality, requested_ou
 from langchain_core.callbacks import AsyncCallbackHandler
 
 LOGGER = logging.getLogger(__name__)
+_CURRENT_BUDGET_GUARD: ContextVar[BudgetGuard | None] = ContextVar("agent_budget_guard", default=None)
 
 DEEP_AGENTS_INTENT = "deep_agents"
 DEFAULT_AGENT_SYSTEM_PROMPT = (
@@ -120,9 +124,108 @@ class DeepAgentsRuntimeEngine:
         self.followup_resolver = FollowupTaskResolver()
         self.tool_decision_validator = ToolDecisionValidator()
         self.memory_curator = MemoryCuratorService()
+        self.product_tool_loop = ProductToolCallLoopExecutor(
+            backend=backend_client,
+            model=model_client,
+            max_tool_calls=settings.agent_product_tool_loop_max_calls,
+        )
         self._memory_tool_executed_runs: set[int] = set()
 
+    def _runtime_budget_guard_for_context(self, context: RunContext) -> BudgetGuard:
+        base = self.budget_guard
+        runtime = context.runtimeSettings
+        return BudgetGuard(
+            max_model_calls=(
+                base.max_model_calls
+                if runtime is None or runtime.maxModelCalls is None
+                else _runtime_int(context, "maxModelCalls", base.max_model_calls, 1, 50)
+            ),
+            max_tool_calls=(
+                base.max_tool_calls
+                if runtime is None or runtime.maxToolCalls is None
+                else _runtime_int(context, "maxToolCalls", base.max_tool_calls, 1, 50)
+            ),
+            model_call_cost=base.model_call_cost,
+            default_consumed_credits=base.default_consumed_credits,
+        )
+
+    def _budget_guard(self) -> BudgetGuard:
+        return _CURRENT_BUDGET_GUARD.get() or self.budget_guard
+
+    async def _emit_runtime_settings_event(self, context: RunContext) -> None:
+        guard = self._budget_guard()
+        runtime = context.runtimeSettings
+        await self.backend.append_event(
+            context.runId,
+            RunEventCreate(
+                eventType=RUNTIME_SETTINGS_APPLIED,
+                eventText="Agent runtime settings applied",
+                eventJson={
+                    "maxModelCalls": guard.max_model_calls,
+                    "maxToolCalls": guard.max_tool_calls,
+                    "toolExecutionTimeoutSeconds": _runtime_int(
+                        context,
+                        "toolExecutionTimeoutSeconds",
+                        self.tool_bridge.timeout_seconds,
+                        1,
+                        3600,
+                    ),
+                    "imageToolExecutionTimeoutSeconds": _runtime_int(
+                        context,
+                        "imageToolExecutionTimeoutSeconds",
+                        settings.agent_image_tool_execution_timeout_seconds,
+                        1,
+                        3600,
+                    ),
+                    "videoToolExecutionTimeoutSeconds": _runtime_int(
+                        context,
+                        "videoToolExecutionTimeoutSeconds",
+                        settings.agent_video_tool_execution_timeout_seconds,
+                        1,
+                        7200,
+                    ),
+                    "toolPollIntervalSeconds": _runtime_float(
+                        context,
+                        "toolPollIntervalSeconds",
+                        self.tool_bridge.poll_interval_seconds,
+                        0.2,
+                        30.0,
+                    ),
+                    "toolStreamRelayEnabled": _runtime_bool(
+                        context,
+                        "toolStreamRelayEnabled",
+                        settings.agent_tool_stream_relay_enabled,
+                    ),
+                    "productToolLoopEnabled": _runtime_bool(
+                        context,
+                        "productToolLoopEnabled",
+                        settings.agent_product_tool_loop_enabled,
+                    ),
+                    "productToolLoopMaxCalls": _runtime_int(
+                        context,
+                        "productToolLoopMaxCalls",
+                        self.product_tool_loop.max_tool_calls,
+                        1,
+                        20,
+                    ),
+                    "productToolLoopFallbackToRouter": _runtime_bool(
+                        context,
+                        "productToolLoopFallbackToRouter",
+                        settings.agent_product_tool_loop_fallback_to_router,
+                    ),
+                    "source": "backend" if runtime is not None else "environment",
+                },
+            ),
+        )
+
     async def run(self, context: RunContext) -> None:
+        token = _CURRENT_BUDGET_GUARD.set(self._runtime_budget_guard_for_context(context))
+        try:
+            await self._run(context)
+        finally:
+            _CURRENT_BUDGET_GUARD.reset(token)
+
+    async def _run(self, context: RunContext) -> None:
         if self._explicit_deep_agents_flag and not self.deep_agents_enabled:
             await self._fail_run(context.runId, "DEEP_AGENTS_DISABLED", "Deep Agents runtime is disabled")
             return
@@ -133,6 +236,7 @@ class DeepAgentsRuntimeEngine:
             "budget": BudgetState(credit_budget=context.creditBudget),
         }
         if not self.deep_agents_enabled:
+            await self._emit_runtime_settings_event(context)
             await self.backend.append_event(
                 context.runId,
                 RunEventCreate(eventType=RUN_STARTED, eventText="Agent 已开始处理", eventJson={"runId": context.runId}),
@@ -148,8 +252,10 @@ class DeepAgentsRuntimeEngine:
             await self._run_deep_agents_or_chat(context, None)
             return
 
-        # 1. Classify intent
-        intent = await self._classify_intent(context)
+        # 1. Classify intent. Product tool calls are attempted before the legacy
+        # LLM router, after hard chat/file/security prechecks have had a chance
+        # to keep meta questions and unsupported paths out of tool execution.
+        intent = await self._classify_intent_tool_first(context)
         LOGGER.info(
             "agent route selected runId=%s intent=%s confidence=%.2f selectedTool=%s candidates=%s reason=%s",
             context.runId,
@@ -228,6 +334,14 @@ class DeepAgentsRuntimeEngine:
         await self._run_deep_agents_or_chat(context, intent)
 
     async def run_confirmed_tool(self, context: RunContext, tool_code: str) -> None:
+        token = _CURRENT_BUDGET_GUARD.set(self._runtime_budget_guard_for_context(context))
+        try:
+            await self._emit_runtime_settings_event(context)
+            await self._run_confirmed_tool(context, tool_code)
+        finally:
+            _CURRENT_BUDGET_GUARD.reset(token)
+
+    async def _run_confirmed_tool(self, context: RunContext, tool_code: str) -> None:
         tool = ToolRegistry(context).get(tool_code)
         if tool is None:
             intent = self.intent_router.classify(context)
@@ -272,7 +386,7 @@ class DeepAgentsRuntimeEngine:
         await self._curate_memory_after_run(context, answer, tool_result=result)
 
     async def debug_route(self, context: RunContext) -> AgentRouteDebugResponse:
-        intent = await self._classify_intent(context)
+        intent = await self._classify_intent_tool_first(context)
         requested_modality = requested_output_modality(context.message)
         return AgentRouteDebugResponse(
             intent=intent.intent.value,
@@ -323,6 +437,78 @@ class DeepAgentsRuntimeEngine:
         if not message:
             return False
         return self.intent_router._looks_like_copywriting_generation(message) or self.intent_router._looks_like_tool_request(message)
+
+    async def _classify_intent_tool_first(self, context: RunContext):
+        conversation_guard = self.decision_service._conversation_guard(context)
+        if conversation_guard is not None:
+            conversation_guard.signals = [{
+                "source": "conversation_guard",
+                "verdict": conversation_guard.intent.value,
+                "confidence": conversation_guard.confidence,
+                "reason": conversation_guard.reason,
+            }]
+            return conversation_guard
+
+        rule_intent = self.intent_router.classify(context)
+        if self._is_hard_rule_intent(rule_intent):
+            rule_intent.signals = [{
+                "source": "rule_router",
+                "verdict": rule_intent.intent.value,
+                "confidence": rule_intent.confidence,
+                "reason": rule_intent.reason,
+            }]
+            return rule_intent
+
+        if self._product_tool_loop_enabled(context):
+            try:
+                product_result = await self.product_tool_loop.run(
+                    context,
+                    max_tool_calls=_runtime_int(
+                        context,
+                        "productToolLoopMaxCalls",
+                        self.product_tool_loop.max_tool_calls,
+                        1,
+                        20,
+                    ),
+                )
+            except Exception as exc:
+                LOGGER.info("product tool loop fallback runId=%s error=%s", context.runId, exc)
+            else:
+                if product_result.intent is not None:
+                    product_result.intent.signals = [
+                        {
+                            "source": "rule_router",
+                            "verdict": rule_intent.intent.value,
+                            "confidence": rule_intent.confidence,
+                            "reason": rule_intent.reason,
+                        },
+                        {
+                            "source": "tool_call_loop",
+                            "verdict": product_result.intent.intent.value,
+                            "confidence": product_result.intent.confidence,
+                            "reason": product_result.intent.reason,
+                        },
+                    ]
+                    return product_result.intent
+                if product_result.rejected and not _runtime_bool(context, "productToolLoopFallbackToRouter", settings.agent_product_tool_loop_fallback_to_router):
+                    return IntentResult(
+                        intent=Intent.GENERAL_CHAT,
+                        confidence=0.65,
+                        decisionSource="tool_call_loop",
+                        reason=product_result.rejection_reason or "product_tool_call_rejected",
+                    )
+
+        return await self._classify_intent(context)
+
+    @staticmethod
+    def _product_tool_loop_enabled(context: RunContext) -> bool:
+        if not _runtime_bool(context, "productToolLoopEnabled", settings.agent_product_tool_loop_enabled):
+            return False
+        if not context.availableTools:
+            return False
+        if context.routerSettings is not None and context.routerSettings.enabled is False:
+            return False
+        return True
 
     @staticmethod
     def _is_hard_rule_intent(rule_intent) -> bool:
@@ -461,8 +647,10 @@ class DeepAgentsRuntimeEngine:
 
         budget = BudgetState(credit_budget=context.creditBudget)
         seed_args = dict(intent.arguments or {})
-        missing_args = self._missing_user_arguments(seed_args, tool) if seed_args else self.tool_bridge.missing_required_arguments(context, tool)
-        extracted_args = seed_args or None
+        base_args = self.tool_bridge.build_arguments(context, tool, apply_placeholder_defaults=True)
+        base_args.update({key: value for key, value in seed_args.items() if value not in (None, "")})
+        missing_args = self._missing_user_arguments(base_args, tool)
+        extracted_args = base_args
         LOGGER.info(
             "agent tool arguments check runId=%s tool=%s missing=%s",
             context.runId,
@@ -471,11 +659,12 @@ class DeepAgentsRuntimeEngine:
         )
 
         if missing_args:
-            base_args = self.tool_bridge.build_arguments(context, tool, apply_placeholder_defaults=False)
-            base_args.update({key: value for key, value in seed_args.items() if value not in (None, "")})
             enriched = await self.tool_bridge.enrich_arguments(
                 self.tool_bridge.conversation_argument_text(context), tool, existing_args=base_args,
             )
+            prepared_enriched = self.tool_bridge.build_arguments(context, tool, apply_placeholder_defaults=True)
+            prepared_enriched.update({key: value for key, value in enriched.items() if value not in (None, "")})
+            enriched = prepared_enriched
             still_missing = self._missing_user_arguments(enriched, tool)
             extracted_args = enriched
             auto_call = self._should_auto_call(context, tool, followup, intent)
@@ -517,11 +706,8 @@ class DeepAgentsRuntimeEngine:
                 return
 
         auto_call = self._should_auto_call(context, tool, followup, intent)
-        if not extracted_args:
-            extracted_args = self.tool_bridge.build_arguments(context, tool, apply_placeholder_defaults=False)
-        else:
-            current_args = self.tool_bridge.build_arguments(context, tool, apply_placeholder_defaults=False)
-            extracted_args = self._merge_tool_arguments(current_args, extracted_args, {}, user_request=context.message)
+        current_args = self.tool_bridge.build_arguments(context, tool, apply_placeholder_defaults=True)
+        extracted_args = self._merge_tool_arguments(current_args, extracted_args, {}, user_request=context.message)
         await self._emit_arguments_preview(context, tool, extracted_args, [], not auto_call)
         await self._emit_arguments_merged(context, tool, intent, extracted_args)
 
@@ -577,7 +763,7 @@ class DeepAgentsRuntimeEngine:
                 return {"missing_tool_arguments": missing}
 
         assert_task_dispatch_credits(context, tool)
-        self.budget_guard.reserve_tool_call(budget, tool.estimatedCreditCost)
+        self._budget_guard().reserve_tool_call(budget, tool.estimatedCreditCost)
         result = await self.tool_bridge.execute_with_args(context, tool, arguments)
         return result
 
@@ -1045,8 +1231,8 @@ class DeepAgentsRuntimeEngine:
                     model=self.model,
                     run_id=run_id,
                     memory_tool=memory_tool,
-                    reserve_model_call=lambda: self.budget_guard.reserve_model_call(budget) if budget is not None else None,
-                    max_iterations=settings.agent_max_tool_calls,
+                    reserve_model_call=lambda: self._budget_guard().reserve_model_call(budget) if budget is not None else None,
+                    max_iterations=self._budget_guard().max_tool_calls,
                     max_tool_calls_per_turn=4,
                 )
                 result = await loop.run(messages_list)
@@ -1061,7 +1247,7 @@ class DeepAgentsRuntimeEngine:
             except Exception as exc:
                 LOGGER.debug("memory tool-call loop skipped runId=%s error=%s", run_id, exc)
         if budget is not None:
-            self.budget_guard.reserve_model_call(budget)
+            self._budget_guard().reserve_model_call(budget)
         if stream is None:
             try:
                 answer = await self.model.chat(messages_list)
@@ -1139,7 +1325,7 @@ class DeepAgentsRuntimeEngine:
         normalized_answer = (final_answer or "").strip()
         if not normalized_answer:
             normalized_answer = "抱歉，本次未能生成有效回复，请换个说法或补充更多信息后再试。"
-        consumed_credits = self.budget_guard.default_consumed_credits
+        consumed_credits = self._budget_guard().default_consumed_credits
         model_name = getattr(self.model, "model_name", settings.model_name)
         usage = self._model_usage_or_estimate(context, normalized_answer)
         await self.backend.complete_run(
@@ -1165,7 +1351,7 @@ class DeepAgentsRuntimeEngine:
         usage = self._model_usage()
         consumed_credits = budget.consumed_credits if budget and budget.consumed_credits > 0 else None
         if consumed_credits is None and (usage["promptTokens"] > 0 or usage["completionTokens"] > 0):
-            consumed_credits = self.budget_guard.default_consumed_credits
+            consumed_credits = self._budget_guard().default_consumed_credits
         await self.backend.fail_run(
             run_id,
             RunFail(
@@ -2104,6 +2290,36 @@ def _memory_tool_prompt(context: RunContext) -> str:
     if enabled_types:
         prompt = f"{prompt}\nAllowed memory types: {', '.join(enabled_types)}"
     return prompt
+
+
+def _runtime_int(context: RunContext, field: str, fallback: int, min_value: int, max_value: int) -> int:
+    runtime = context.runtimeSettings
+    value = getattr(runtime, field, None) if runtime is not None else None
+    if value is None:
+        value = fallback
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = int(fallback)
+    return max(min_value, min(parsed, max_value))
+
+
+def _runtime_float(context: RunContext, field: str, fallback: float, min_value: float, max_value: float) -> float:
+    runtime = context.runtimeSettings
+    value = getattr(runtime, field, None) if runtime is not None else None
+    if value is None:
+        value = fallback
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        parsed = float(fallback)
+    return max(min_value, min(parsed, max_value))
+
+
+def _runtime_bool(context: RunContext, field: str, fallback: bool) -> bool:
+    runtime = context.runtimeSettings
+    value = getattr(runtime, field, None) if runtime is not None else None
+    return fallback if value is None else bool(value)
 
 
 def _safe_memory_text(value: str, limit: int) -> str:

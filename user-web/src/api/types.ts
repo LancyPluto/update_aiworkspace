@@ -374,6 +374,13 @@ export interface ListTasksQuery {
 
 /* ========== 算力相关 ========== */
 
+/** 算力不足时 API 错误响应 data */
+export interface CreditInsufficientDetail {
+  availableCredits: number
+  requiredCredits: number
+  toolCode?: string | null
+}
+
 /** GET /api/v1/credits/account —— 契约 CreditAccount */
 export interface CreditAccount {
   accountId: number

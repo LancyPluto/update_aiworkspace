@@ -14,6 +14,11 @@ public record ApiResponse<T>(
     }
 
     public static <T> ApiResponse<T> fail(ErrorCode errorCode, String message) {
-        return new ApiResponse<>(errorCode.name(), message, null, MDC.get("traceId"));
+        return fail(errorCode, message, null);
+    }
+
+    @SuppressWarnings("unchecked")
+    public static <T> ApiResponse<T> fail(ErrorCode errorCode, String message, Object data) {
+        return new ApiResponse<>(errorCode.name(), message, (T) data, MDC.get("traceId"));
     }
 }

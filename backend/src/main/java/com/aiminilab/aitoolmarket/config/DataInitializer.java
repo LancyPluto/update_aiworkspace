@@ -4,6 +4,8 @@ import com.aiminilab.aitoolmarket.admin.mapper.SystemSettingMapper;
 import com.aiminilab.aitoolmarket.admin.mapper.SystemSettingVersionMapper;
 import com.aiminilab.aitoolmarket.agent.config.AgentPromptSettings;
 import com.aiminilab.aitoolmarket.agent.config.AgentRouterSettings;
+import com.aiminilab.aitoolmarket.agent.config.AgentMemorySettings;
+import com.aiminilab.aitoolmarket.agent.config.AgentRuntimeSettings;
 import com.aiminilab.aitoolmarket.common.enums.UserStatus;
 import com.aiminilab.aitoolmarket.common.enums.UserType;
 import com.aiminilab.aitoolmarket.user.entity.User;
@@ -57,42 +59,14 @@ public class DataInitializer implements CommandLineRunner {
     }
 
     private void seedAgentPromptSettings() {
-        systemSettingMapper.insertIfAbsent(
-                AgentPromptSettings.SYSTEM_PROMPT_KEY,
-                AgentPromptSettings.DEFAULT_SYSTEM_PROMPT,
-                "agent",
-                "Agent normal chat system prompt"
-        );
-        systemSettingMapper.insertIfAbsent(
-                AgentPromptSettings.DEEP_AGENTS_SYSTEM_PROMPT_KEY,
-                AgentPromptSettings.DEFAULT_DEEP_AGENTS_SYSTEM_PROMPT,
-                "agent",
-                "Agent deep-agents runtime system prompt"
-        );
-        systemSettingMapper.insertIfAbsent(
-                AgentRouterSettings.ENABLED_KEY,
-                String.valueOf(AgentRouterSettings.DEFAULT_ENABLED),
-                "agent",
-                "Agent LLM router enabled"
-        );
-        systemSettingMapper.insertIfAbsent(
-                AgentRouterSettings.PROMPT_KEY,
-                AgentRouterSettings.DEFAULT_PROMPT,
-                "agent",
-                "Agent LLM router prompt"
-        );
-        systemSettingMapper.insertIfAbsent(
-                AgentRouterSettings.MIN_CONFIDENCE_KEY,
-                AgentRouterSettings.DEFAULT_MIN_CONFIDENCE,
-                "agent",
-                "Agent LLM router minimum confidence"
-        );
-        systemSettingMapper.insertIfAbsent(
-                AgentRouterSettings.FALLBACK_TO_RULES_KEY,
-                String.valueOf(AgentRouterSettings.DEFAULT_FALLBACK_TO_RULES),
-                "agent",
-                "Agent LLM router fallback to rules"
-        );
+        seedSettingDefaults(AgentPromptSettings.defaults(), "agent", "Agent prompt setting");
+        seedSettingDefaults(AgentRouterSettings.defaults(), "agent", "Agent router setting");
+        seedSettingDefaults(AgentMemorySettings.defaults(), "agent", "Agent memory setting");
+        seedSettingDefaults(AgentRuntimeSettings.defaults(), "agent", "Agent runtime setting");
+    }
+
+    private void seedSettingDefaults(java.util.Map<String, String> defaults, String group, String description) {
+        defaults.forEach((key, value) -> systemSettingMapper.insertIfAbsent(key, value, group, description));
     }
 
     private void ensureSchemaCompatibility() {
@@ -272,6 +246,7 @@ public class DataInitializer implements CommandLineRunner {
         ensureColumn("agent_workspace_memory_items", "expires_at", "ALTER TABLE agent_workspace_memory_items ADD COLUMN expires_at DATETIME NULL");
         ensureIndex("agent_workspace_memory_items", "idx_agent_memory_context_pack", "CREATE INDEX idx_agent_memory_context_pack ON agent_workspace_memory_items(workspace_id, status, pinned, importance, updated_at)");
         ensureIndex("agent_workspace_memory_items", "idx_agent_memory_user_type", "CREATE INDEX idx_agent_memory_user_type ON agent_workspace_memory_items(workspace_id, user_id, memory_type, status)");
+        ensureFulltextMemoryIndex();
         ensureTable("agent_tool_descriptor_extension", """
                 CREATE TABLE agent_tool_descriptor_extension (
                   id BIGINT PRIMARY KEY AUTO_INCREMENT,
@@ -543,6 +518,16 @@ public class DataInitializer implements CommandLineRunner {
             }
         } catch (SQLException exception) {
             throw new IllegalStateException("Failed to ensure database index " + tableName + "." + indexName, exception);
+        }
+    }
+
+    private void ensureFulltextMemoryIndex() {
+        try (Connection connection = dataSource.getConnection()) {
+            if (!indexExists(connection, "agent_workspace_memory_items", "ft_memory_search")) {
+                connection.createStatement().execute("ALTER TABLE agent_workspace_memory_items ADD FULLTEXT INDEX ft_memory_search (title, content) WITH PARSER ngram");
+            }
+        } catch (SQLException ignored) {
+            // H2 and some MySQL variants may not support ngram fulltext in local tests; runtime retrieval has fallback search.
         }
     }
 

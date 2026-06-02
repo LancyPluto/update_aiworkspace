@@ -10,7 +10,7 @@ AI Tool Market 是一个面向中文用户的 AI 工具市场与管理后台项�
 | `worker` | Python | Redis 任务消费、模型调用、图片落盘、任务结果回写 |
 | `user-web` | Vue 3 / Vite | 用户端工具列表、动态表单、任务结果展示 |
 | `admin-frontend` | Next.js / React | 管理后台、工具配置、模型配置、计费日志、用户管理 |
-| `agent-service` | FastAPI | 实验性 Agent 服务；当前不作为稳定主链路依赖 |
+| `agent-service` | FastAPI | Agent 编排、受控工具调用、工作区记忆和上下文运行时 |
 | `deploy` | Docker Compose | MySQL、Redis、后端、前端、worker 本地编排 |
 
 ## 快速启动
@@ -21,7 +21,7 @@ AI Tool Market 是一个面向中文用户的 AI 工具市场与管理后台项�
 .\start-dev.bat
 ```
 
-首次安装依赖：
+首次启动会自动创建仓库根目录 `.venv`（合并 agent-service + worker 依赖）并执行 `npm install`；若要强制重装依赖：
 
 ```powershell
 .\scripts\start-dev.ps1 -InstallDeps
@@ -109,15 +109,15 @@ python -c "import yaml, pathlib; yaml.safe_load(pathlib.Path('docs/api/openapi.y
 
 ## 文档入口
 
-- [docs/README.md](docs/README.md)：文档索引。
-- [docs/系统架构与边界.md](docs/系统架构与边界.md)：当前系统架构与模块边界。
-- [docs/开发建议与路线规划.md](docs/开发建议与路线规划.md)：后续开发建议，包括前端合并规划和 Agent 边界控制。
+- [docs/Agent参数化与记忆管理落地记录-2026-06-01.md](docs/Agent参数化与记忆管理落地记录-2026-06-01.md)：Agent 后台参数、记忆管理、运行事件和验证记录。
+- [docs/Agent记忆与ToolCall落地记录-2026-05-31.md](docs/Agent记忆与ToolCall落地记录-2026-05-31.md)：Agent 记忆读取/写入与 tool-call loop 落地记录。
+- [docs/agent-tool-health-and-memory-plan.md](docs/agent-tool-health-and-memory-plan.md)：Agent 工具健康与长期记忆规划。
+- [docs/文档上传分支变更记录.md](docs/文档上传分支变更记录.md)：分支变更记录。
 - [docs/api/openapi.yml](docs/api/openapi.yml)：接口契约。
-- [docs/近期变更记录.md](docs/近期变更记录.md)：近期关键变更。
 
 ## 开发原则
 
 - 稳定主链路优先：工具配置、任务队列、worker 执行、结果展示、计费日志要先闭环。
-- Agent 暂时控制边界：不要让实验性 agent-service 影响工具任务主链路。
+- Agent 控制边界：模型只做理解、路由和编排，工具执行、额度、权限、任务状态仍以后端为事实源。
 - 多模态工具按类型配置：文案、文生图、视频、数字人应有不同字段模板和结果渲染。
 - 数据库变更必须同步 `DataInitializer`、`sql/*.sql` 和测试 schema。

@@ -1,0 +1,3 @@
+# Repo-root dev venv: agent-service + worker (see scripts/start-dev.ps1)
+-r agent-service/requirements.txt
+-r worker/requirements.txt

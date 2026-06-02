@@ -34,10 +34,21 @@ CREATE TABLE IF NOT EXISTS agent_workspace_memory_items (
   title VARCHAR(160) NOT NULL,
   content MEDIUMTEXT NOT NULL,
   source_run_id BIGINT NULL,
+  source_message_id BIGINT NULL,
+  source_tool_call_id BIGINT NULL,
+  importance INT NOT NULL DEFAULT 5,
+  confidence DOUBLE NOT NULL DEFAULT 0.7,
+  pinned TINYINT NOT NULL DEFAULT 0,
+  tags_json JSON NULL,
+  metadata_json JSON NULL,
+  last_accessed_at DATETIME NULL,
+  access_count INT NOT NULL DEFAULT 0,
+  expires_at DATETIME NULL,
   status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   KEY idx_agent_workspace_memory_workspace (workspace_id, updated_at),
   KEY idx_agent_workspace_memory_user (user_id, id),
-  KEY idx_agent_workspace_memory_status (status)
+  KEY idx_agent_workspace_memory_status (status),
+  KEY idx_agent_memory_context_pack (workspace_id, status, pinned, importance, updated_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

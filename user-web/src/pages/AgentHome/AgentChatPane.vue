@@ -51,6 +51,7 @@ import {
   updateAgentWorkspaceMemory,
   uploadAgentFile,
 } from "@/api"
+import { formatCreditInsufficientError, isCreditInsufficientCode } from "@/api/creditErrorMessage"
 import type {
   AgentFile,
   AgentMessage,
@@ -905,6 +906,9 @@ function formatAgentError(error: unknown) {
   if (error instanceof ApiBusinessError && error.code === "AGENT_RATE_LIMITED") {
     return "Agent 请求过于频繁，请稍后重试。"
   }
+  if (error instanceof ApiBusinessError && isCreditInsufficientCode(error.code)) {
+    return formatCreditInsufficientError(error)
+  }
   if (error instanceof ApiBusinessError) {
     return error.message || error.code
   }
@@ -1331,6 +1335,10 @@ function appendRunEvent(event: AgentRunEvent) {
     }
     if (errorCode === "AGENT_SERVICE_NOTIFY_FAILED") {
       agentError.value = errorMessage || "Agent 服务暂时不可用，请稍后重试。"
+      return
+    }
+    if (isCreditInsufficientCode(errorCode)) {
+      agentError.value = errorMessage || "可用算力不足，请前往「会员与算力」充值后再试。"
       return
     }
     if (errorCode === "MODEL_RISK_CONTROL_REJECTED") {

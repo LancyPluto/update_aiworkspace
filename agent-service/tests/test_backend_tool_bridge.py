@@ -104,6 +104,88 @@ def test_defaultable_execution_required_field_does_not_trigger_clarification():
     assert bridge.build_arguments(ctx, tool)["aspectRatio"] == "3:4"
 
 
+def test_generation_tool_timeout_uses_modality_specific_floor():
+    bridge = BackendToolBridge(backend_client=None, timeout_seconds=120)  # type: ignore[arg-type]
+
+    assert bridge._timeout_for_tool("ofox_gpt_image2") == 600
+    assert bridge._timeout_for_tool("kling_image_to_video") == 900
+    assert bridge._timeout_for_tool("xiaohongshu_copywriting") == 120
+
+
+def test_generation_prompt_field_is_derived_from_short_user_request():
+    bridge = BackendToolBridge(backend_client=None)  # type: ignore[arg-type]
+    tool = ToolDescriptor(
+        toolCode="image_generation",
+        toolName="图片生成",
+        description="根据提示词生成图片",
+        autoCallable=True,
+        inputSchema={
+            "type": "object",
+            "required": ["prompt", "aspectRatio", "count"],
+            "properties": {
+                "userRequest": {"type": "string"},
+                "prompt": {
+                    "type": "string",
+                    "title": "提示词",
+                    "description": "图片生成提示词",
+                    "x-user-required": False,
+                    "x-agent-fill-strategy": "derive",
+                },
+                "aspectRatio": {
+                    "type": "string",
+                    "title": "画面比例",
+                    "enum": ["1:1", "3:4", "16:9"],
+                    "x-user-required": False,
+                    "x-agent-fill-strategy": "default",
+                },
+                "count": {
+                    "type": "integer",
+                    "title": "生成张数",
+                    "x-user-required": False,
+                    "x-agent-fill-strategy": "default",
+                },
+            },
+        },
+        fields=[
+            {
+                "fieldKey": "prompt",
+                "fieldName": "提示词",
+                "required": True,
+                "executionRequired": True,
+                "userRequired": False,
+                "agentFillStrategy": "derive",
+                "riskLevel": "LOW",
+            },
+            {
+                "fieldKey": "aspectRatio",
+                "fieldName": "画面比例",
+                "required": True,
+                "executionRequired": True,
+                "userRequired": False,
+                "agentFillStrategy": "default",
+                "riskLevel": "LOW",
+            },
+            {
+                "fieldKey": "count",
+                "fieldName": "生成张数",
+                "required": True,
+                "executionRequired": True,
+                "userRequired": False,
+                "agentFillStrategy": "default",
+                "riskLevel": "LOW",
+            },
+        ],
+    )
+    ctx = RunContext(runId=1, sessionId=1, userId=1, message="生成美女")
+
+    assert bridge.missing_required_arguments(ctx, tool) == []
+    args = bridge.build_arguments(ctx, tool, apply_placeholder_defaults=True)
+    assert "生成美女" in args["prompt"]
+    assert len(args["prompt"]) > len("生成美女")
+    assert args["aspectRatio"] == "1:1"
+    assert args["count"] == 1
+
+
 def test_user_required_field_still_triggers_clarification():
     bridge = BackendToolBridge(backend_client=None)  # type: ignore[arg-type]
     tool = ToolDescriptor(
@@ -265,6 +347,28 @@ async def test_wait_for_task_reports_task_failure_before_run_abort():
     detail = await bridge._wait_for_task(context, "ofox_gpt_image2", 84)
 
     assert detail.status == "FAILED"
+    assert detail.errorCode == "MODEL_TIMEOUT"
+
+
+@pytest.mark.asyncio
+async def test_wait_for_task_returns_timeout_task_as_terminal():
+    class Backend:
+        async def get_task_detail(self, user_id: int, task_id: int) -> TaskDetailResponse:
+            return TaskDetailResponse(
+                taskId=task_id,
+                status="TIMEOUT",
+                progress=100,
+                progressMessage="model timed out",
+                errorCode="MODEL_TIMEOUT",
+                errorMessage="model timed out",
+            )
+
+    bridge = BackendToolBridge(backend_client=Backend(), timeout_seconds=1, poll_interval_seconds=0.01)  # type: ignore[arg-type]
+    context = RunContext(runId=70, sessionId=1, userId=1, message="generate image", status="RUNNING")
+
+    detail = await bridge._wait_for_task(context, "ofox_gpt_image2", 84)
+
+    assert detail.status == "TIMEOUT"
     assert detail.errorCode == "MODEL_TIMEOUT"
 
 

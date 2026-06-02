@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react"
 import { AdminLayout } from "@/components/admin/admin-layout"
 import { AgentModelSettings } from "@/components/admin/agent-model-settings"
+import { AgentMemoryManagement } from "@/components/admin/agent-memory-management"
+import { AgentRuntimeSettings } from "@/components/admin/agent-runtime-settings"
 import { EngineApiSettings } from "@/components/admin/engine-api-settings"
 import { AdminHeader } from "@/components/admin/header"
 import { Button } from "@/components/ui/button"
@@ -17,7 +19,7 @@ import { downloadConfigBundle, exportConfigBundle, importConfigBundle, readConfi
 import { getBaseUrl } from "@/lib/api/http"
 import { fetchSettings, updateSettings, uploadCustomerServiceQr } from "@/lib/api/settings"
 import { cn } from "@/lib/utils"
-import { CheckCircle, Database, Download, Headphones, KeyRound, RefreshCw, Save, Server, Settings2, Shield, Upload } from "lucide-react"
+import { Bot, Brain, CheckCircle, Database, Download, Headphones, KeyRound, RefreshCw, Save, Server, Settings2, Shield, Upload } from "lucide-react"
 
 interface SettingsForm {
   platformName: string
@@ -223,6 +225,14 @@ export default function SettingsPage() {
               <KeyRound className="h-4 w-4" />
               引擎 API
             </TabsTrigger>
+            <TabsTrigger value="agent-runtime" className="gap-2">
+              <Bot className="h-4 w-4" />
+              Agent 参数
+            </TabsTrigger>
+            <TabsTrigger value="agent-memory" className="gap-2">
+              <Brain className="h-4 w-4" />
+              记忆管理
+            </TabsTrigger>
             <TabsTrigger value="system" className="gap-2">
               <Server className="h-4 w-4" />
               基础设置
@@ -247,6 +257,14 @@ export default function SettingsPage() {
 
           <TabsContent value="engine-api">
             <EngineApiSettings refreshKey={modelRefreshKey} />
+          </TabsContent>
+
+          <TabsContent value="agent-runtime">
+            <AgentRuntimeSettings />
+          </TabsContent>
+
+          <TabsContent value="agent-memory">
+            <AgentMemoryManagement />
           </TabsContent>
 
           <TabsContent value="system" className="space-y-5">
