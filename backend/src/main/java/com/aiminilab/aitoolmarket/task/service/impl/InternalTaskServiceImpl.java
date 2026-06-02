@@ -2,6 +2,7 @@ package com.aiminilab.aitoolmarket.task.service.impl;
 
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentModelConfigMapper;
+import com.aiminilab.aitoolmarket.agent.service.AgentModelConfigService;
 import com.aiminilab.aitoolmarket.agent.service.AgentToolDescriptorService;
 import com.aiminilab.aitoolmarket.agent.service.ModelCapabilityService;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolMapper;
@@ -45,6 +46,7 @@ public class InternalTaskServiceImpl implements InternalTaskService {
     private final ToolMapper toolMapper;
     private final AgentModelConfigMapper agentModelConfigMapper;
     private final AgentToolDescriptorService agentToolDescriptorService;
+    private final AgentModelConfigService agentModelConfigService;
     private final ModelCapabilityService modelCapabilityService;
     private final ToolFieldItemMapper toolFieldItemMapper;
     private final ObjectMapper objectMapper;
@@ -56,6 +58,7 @@ public class InternalTaskServiceImpl implements InternalTaskService {
     public InternalTaskServiceImpl(TaskMapper taskMapper, ToolMapper toolMapper,
                                    AgentModelConfigMapper agentModelConfigMapper,
                                    AgentToolDescriptorService agentToolDescriptorService,
+                                   AgentModelConfigService agentModelConfigService,
                                    ModelCapabilityService modelCapabilityService,
                                    ToolFieldItemMapper toolFieldItemMapper, ObjectMapper objectMapper,
                                    CreditService creditService, BillingService billingService,
@@ -64,6 +67,7 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         this.toolMapper = toolMapper;
         this.agentModelConfigMapper = agentModelConfigMapper;
         this.agentToolDescriptorService = agentToolDescriptorService;
+        this.agentModelConfigService = agentModelConfigService;
         this.modelCapabilityService = modelCapabilityService;
         this.toolFieldItemMapper = toolFieldItemMapper;
         this.objectMapper = objectMapper;
@@ -84,8 +88,9 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         AgentModelConfig modelConfig = modelCapabilityService.resolveModelConfigForTool(tool);
         modelCapabilityService.validateExecution(tool, modelConfig);
         List<String> caps = modelCapabilityService.resolveCapabilities(modelConfig);
+        AgentModelConfig executionConfig = agentModelConfigService.resolveForExecution(modelConfig);
         return ExecutionContextResponse.of(task, parseParams(task.getParamsJson()),
-                ExecutionModelConfigResponse.from(modelConfig, caps), fields);
+                ExecutionModelConfigResponse.from(executionConfig, caps), fields);
     }
 
     @Override

@@ -1,0 +1,185 @@
+package com.aiminilab.aitoolmarket.agent.service.impl;
+
+import com.aiminilab.aitoolmarket.agent.config.ModelProviderDefinition;
+import com.aiminilab.aitoolmarket.agent.config.ModelProviderRegistry;
+import com.aiminilab.aitoolmarket.agent.dto.ModelVendorAccountResponse;
+import com.aiminilab.aitoolmarket.agent.dto.UnifiedApiModelItemResponse;
+import com.aiminilab.aitoolmarket.agent.dto.UnifiedApiOverviewResponse;
+import com.aiminilab.aitoolmarket.agent.dto.UnifiedApiSummaryResponse;
+import com.aiminilab.aitoolmarket.agent.dto.UnifiedApiUnconfiguredVendorResponse;
+import com.aiminilab.aitoolmarket.agent.dto.UnifiedApiVendorGroupResponse;
+import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
+import com.aiminilab.aitoolmarket.agent.entity.ModelVendorAccount;
+import com.aiminilab.aitoolmarket.agent.mapper.AgentModelConfigMapper;
+import com.aiminilab.aitoolmarket.agent.mapper.ModelVendorAccountMapper;
+import com.aiminilab.aitoolmarket.agent.service.ModelVendorAccountMigrationService;
+import com.aiminilab.aitoolmarket.agent.service.UnifiedApiOverviewService;
+import com.aiminilab.aitoolmarket.agent.support.ModelCapabilitiesCodec;
+import com.aiminilab.aitoolmarket.agent.support.VendorCodeResolver;
+import org.springframework.stereotype.Service;
+
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
+
+@Service
+public class UnifiedApiOverviewServiceImpl implements UnifiedApiOverviewService {
+
+    private final ModelVendorAccountMigrationService migrationService;
+    private final ModelVendorAccountMapper vendorAccountMapper;
+    private final AgentModelConfigMapper agentModelConfigMapper;
+    private final VendorCodeResolver vendorCodeResolver;
+    private final ModelProviderRegistry providerRegistry;
+    private final ModelCapabilitiesCodec capabilitiesCodec;
+
+    public UnifiedApiOverviewServiceImpl(ModelVendorAccountMigrationService migrationService,
+                                         ModelVendorAccountMapper vendorAccountMapper,
+                                         AgentModelConfigMapper agentModelConfigMapper,
+                                         VendorCodeResolver vendorCodeResolver,
+                                         ModelProviderRegistry providerRegistry,
+                                         ModelCapabilitiesCodec capabilitiesCodec) {
+        this.migrationService = migrationService;
+        this.vendorAccountMapper = vendorAccountMapper;
+        this.agentModelConfigMapper = agentModelConfigMapper;
+        this.vendorCodeResolver = vendorCodeResolver;
+        this.providerRegistry = providerRegistry;
+        this.capabilitiesCodec = capabilitiesCodec;
+    }
+
+    @Override
+    public UnifiedApiOverviewResponse overview() {
+        migrationService.migrateIfNeeded();
+
+        List<ModelVendorAccount> accounts = vendorAccountMapper.findAllActive();
+        List<AgentModelConfig> configs = agentModelConfigMapper.findAllActive();
+
+        Map<Long, ModelVendorAccount> accountById = accounts.stream()
+                .collect(Collectors.toMap(ModelVendorAccount::getId, account -> account, (a, b) -> a));
+
+        Map<String, List<ModelVendorAccountResponse>> accountsByVendor = new LinkedHashMap<>();
+        for (ModelVendorAccount account : accounts) {
+            String vendorCode = account.getVendorCode();
+            accountsByVendor.computeIfAbsent(vendorCode, key -> new ArrayList<>())
+                    .add(ModelVendorAccountResponse.from(
+                            account,
+                            vendorCodeResolver.vendorLabel(vendorCode),
+                            vendorAccountMapper.countActiveModelsByAccountId(account.getId())));
+        }
+
+        Map<String, List<UnifiedApiModelItemResponse>> modelsByVendor = new LinkedHashMap<>();
+        for (AgentModelConfig config : configs) {
+            String vendorCode = resolveConfigVendorCode(config, accountById);
+            String accountName = null;
+            if (config.getVendorAccountId() != null) {
+                ModelVendorAccount account = accountById.get(config.getVendorAccountId());
+                if (account != null) {
+                    accountName = account.getAccountName();
+                }
+            }
+            modelsByVendor.computeIfAbsent(vendorCode, key -> new ArrayList<>())
+                    .add(UnifiedApiModelItemResponse.from(config, accountName, capabilitiesCodec));
+        }
+
+        Set<String> configuredVendors = new HashSet<>();
+        configuredVendors.addAll(accountsByVendor.keySet());
+        configuredVendors.addAll(modelsByVendor.keySet());
+
+        List<UnifiedApiVendorGroupResponse> vendorGroups = configuredVendors.stream()
+                .sorted(Comparator.comparing(vendorCodeResolver::vendorLabel))
+                .map(vendorCode -> new UnifiedApiVendorGroupResponse(
+                        vendorCode,
+                        vendorCodeResolver.vendorLabel(vendorCode),
+                        iconAsset(vendorCode),
+                        sortAccounts(accountsByVendor.getOrDefault(vendorCode, List.of())),
+                        sortModels(modelsByVendor.getOrDefault(vendorCode, List.of()))
+                ))
+                .toList();
+
+        List<UnifiedApiUnconfiguredVendorResponse> unconfigured = vendorCodeResolver.vendorCatalog().entrySet().stream()
+                .filter(entry -> !configuredVendors.contains(entry.getKey()))
+                .filter(entry -> !"mock".equals(entry.getKey()))
+                .sorted(Map.Entry.comparingByValue())
+                .map(entry -> new UnifiedApiUnconfiguredVendorResponse(
+                        entry.getKey(),
+                        entry.getValue(),
+                        iconAsset(entry.getKey()),
+                        providersForVendor(entry.getKey())
+                ))
+                .toList();
+
+        int lowBalance = (int) accounts.stream()
+                .filter(account -> "LOW".equalsIgnoreCase(account.getBalanceStatus())
+                        || "SUSPECTED_INSUFFICIENT".equalsIgnoreCase(account.getBalanceStatus()))
+                .count();
+        int unhealthy = (int) accounts.stream()
+                .filter(account -> "ERROR".equalsIgnoreCase(account.getHealthStatus()))
+                .count();
+        int enabledModels = (int) configs.stream().filter(config -> Boolean.TRUE.equals(config.getEnabled())).count();
+
+        UnifiedApiSummaryResponse summary = new UnifiedApiSummaryResponse(
+                vendorGroups.size() + unconfigured.size(),
+                accounts.size(),
+                configs.size(),
+                enabledModels,
+                lowBalance,
+                unhealthy
+        );
+
+        return new UnifiedApiOverviewResponse(summary, vendorGroups, unconfigured);
+    }
+
+    private String resolveConfigVendorCode(AgentModelConfig config, Map<Long, ModelVendorAccount> accountById) {
+        if (config.getVendorAccountId() != null) {
+            ModelVendorAccount account = accountById.get(config.getVendorAccountId());
+            if (account != null && account.getVendorCode() != null) {
+                return account.getVendorCode();
+            }
+        }
+        return vendorCodeResolver.resolveVendorCode(config);
+    }
+
+    private List<String> providersForVendor(String vendorCode) {
+        return providerRegistry.listAll().stream()
+                .filter(definition -> vendorCode.equals(vendorCodeResolver.resolveVendorCode(
+                        definition.code(),
+                        definition.defaultBaseUrl(),
+                        definition.label(),
+                        definition.defaultModel())))
+                .map(ModelProviderDefinition::code)
+                .sorted()
+                .toList();
+    }
+
+    private static List<ModelVendorAccountResponse> sortAccounts(List<ModelVendorAccountResponse> accounts) {
+        return accounts.stream()
+                .sorted(Comparator
+                        .comparingInt(ModelVendorAccountResponse::modelCount).reversed()
+                        .thenComparing(account -> account.apiKeyMasked() == null || account.apiKeyMasked().isBlank())
+                        .thenComparing(ModelVendorAccountResponse::id))
+                .toList();
+    }
+
+    private static List<UnifiedApiModelItemResponse> sortModels(List<UnifiedApiModelItemResponse> models) {
+        return models.stream()
+                .sorted(Comparator
+                        .comparing((UnifiedApiModelItemResponse model) -> !Boolean.TRUE.equals(model.isDefault()))
+                        .thenComparing(model -> model.displayName() == null ? "" : model.displayName()))
+                .toList();
+    }
+
+    private static String iconAsset(String vendorCode) {
+        if (vendorCode == null) {
+            return "api";
+        }
+        return switch (vendorCode) {
+            case "openai_gateway" -> "openrouter";
+            case "volcengine" -> "doubao";
+            default -> vendorCode;
+        };
+    }
+}

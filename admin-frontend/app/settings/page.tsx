@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { AdminLayout } from "@/components/admin/admin-layout"
-import { AgentModelSettings } from "@/components/admin/agent-model-settings"
+import { UnifiedApiSettings } from "@/components/admin/unified-api-settings"
 import { EngineApiSettings } from "@/components/admin/engine-api-settings"
 import { AdminHeader } from "@/components/admin/header"
 import { Button } from "@/components/ui/button"
@@ -191,7 +191,9 @@ export default function SettingsPage() {
       setModelRefreshKey((key) => key + 1)
       setSaved(true)
       const warningText = result.warnings?.length ? `，提示：${result.warnings.join("；")}` : ""
-      setNotice(`导入完成：模型 ${result.modelConfigs}、分类 ${result.categories}、工具 ${result.tools}、字段 ${result.fields}${warningText}`)
+      setNotice(
+        `导入完成：厂商账户 ${result.vendorAccounts ?? 0}、模型 ${result.modelConfigs}、分类 ${result.categories}、工具 ${result.tools}、字段 ${result.fields}${warningText}`,
+      )
       setTimeout(() => setSaved(false), 1800)
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "导入配置包失败，请确认 JSON 格式正确")
@@ -217,7 +219,7 @@ export default function SettingsPage() {
           <TabsList className="flex h-auto flex-wrap justify-start gap-2 bg-transparent p-0">
             <TabsTrigger value="model" className="gap-2">
               <Settings2 className="h-4 w-4" />
-              大模型接入
+              统一 API
             </TabsTrigger>
             <TabsTrigger value="engine-api" className="gap-2">
               <KeyRound className="h-4 w-4" />
@@ -242,7 +244,7 @@ export default function SettingsPage() {
           </TabsList>
 
           <TabsContent value="model">
-            <AgentModelSettings refreshKey={modelRefreshKey} />
+            <UnifiedApiSettings refreshKey={modelRefreshKey} />
           </TabsContent>
 
           <TabsContent value="engine-api">
