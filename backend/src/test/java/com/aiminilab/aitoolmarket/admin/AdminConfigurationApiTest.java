@@ -32,6 +32,16 @@ class AdminConfigurationApiTest {
     private MockMvc mockMvc;
 
     @Test
+    void adminCanLoadUnifiedApiOverview() throws Exception {
+        String adminToken = loginAdmin();
+        mockMvc.perform(get("/api/admin/v1/unified-api/overview")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.summary").exists())
+                .andExpect(jsonPath("$.data.vendors").isArray());
+    }
+
+    @Test
     void adminCanCreateUpdateDisableCategoriesAndPersistSettings() throws Exception {
         String adminToken = loginAdmin();
 

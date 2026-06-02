@@ -13,13 +13,33 @@ public record ConfigBundleDto(
         String exportedBy,
         Boolean secretsRedacted,
         Map<String, String> settings,
+        List<VendorAccount> vendorAccounts,
         List<ModelConfig> modelConfigs,
         List<Category> categories,
         List<Tool> tools
 ) {
+    public record VendorAccount(
+            String vendorCode,
+            String accountName,
+            String accountRef,
+            String baseUrl,
+            String apiKey,
+            String extraAuthJson,
+            Boolean secretsRedacted,
+            String consoleUrl,
+            String balanceUrl,
+            String balanceQueryMode,
+            BigDecimal balanceAmount,
+            String balanceCurrency,
+            BigDecimal balanceLowThreshold,
+            Boolean enabled
+    ) {
+    }
+
     public record ModelConfig(
             String displayName,
             String configCode,
+            String vendorAccountRef,
             String provider,
             String modelName,
             String baseUrl,

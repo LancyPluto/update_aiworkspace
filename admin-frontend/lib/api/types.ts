@@ -326,6 +326,8 @@ export interface ModelProviderDescriptor {
 
 export interface AgentModelConfig {
   id: number
+  vendorAccountId?: number | null
+  vendorAccountName?: string | null
   displayName?: string | null
   configCode?: string | null
   provider: string
@@ -399,7 +401,103 @@ export interface UpsertFieldSchemaPayload {
   items: ToolFieldPayload[]
 }
 
+export interface ModelVendorAccount {
+  id: number
+  vendorCode: string
+  vendorLabel: string
+  accountName: string
+  baseUrl?: string | null
+  apiKeyMasked?: string | null
+  extraAuthJsonMasked?: string | null
+  consoleUrl?: string | null
+  balanceUrl?: string | null
+  balanceQueryMode: string
+  balanceAmount?: number | null
+  balanceCurrency?: string | null
+  balanceStatus: string
+  balanceLowThreshold?: number | null
+  balanceUpdatedAt?: string | null
+  balanceErrorMessage?: string | null
+  healthStatus: string
+  enabled: boolean
+  modelCount: number
+  createdAt?: string | null
+  updatedAt?: string | null
+}
+
+export interface ModelVendorAccountTestResult {
+  success: boolean
+  message: string
+  latencyMs?: number | null
+  provider?: string | null
+  modelName?: string | null
+  account: ModelVendorAccount
+}
+
+export interface ModelVendorAccountPayload {
+  vendorCode: string
+  accountName: string
+  baseUrl?: string
+  apiKey?: string
+  clearApiKey?: boolean
+  extraAuthJson?: string
+  clearExtraAuthJson?: boolean
+  consoleUrl?: string
+  balanceUrl?: string
+  balanceQueryMode?: string
+  balanceAmount?: number
+  balanceCurrency?: string
+  balanceLowThreshold?: number
+  enabled?: boolean
+}
+
+export interface UnifiedApiModelItem {
+  id: number
+  vendorAccountId?: number | null
+  vendorAccountName?: string | null
+  displayName?: string | null
+  configCode?: string | null
+  provider: string
+  modelName: string
+  capabilities?: string[] | null
+  enabled: boolean
+  agentEnabled?: boolean | null
+  isDefault?: boolean | null
+  healthStatus: string
+}
+
+export interface UnifiedApiVendorGroup {
+  vendorCode: string
+  label: string
+  iconAsset: string
+  accounts: ModelVendorAccount[]
+  models: UnifiedApiModelItem[]
+}
+
+export interface UnifiedApiUnconfiguredVendor {
+  vendorCode: string
+  label: string
+  iconAsset: string
+  supportedProviders: string[]
+}
+
+export interface UnifiedApiSummary {
+  vendorCount: number
+  accountCount: number
+  modelCount: number
+  enabledModelCount: number
+  lowBalanceCount: number
+  unhealthyAccountCount: number
+}
+
+export interface UnifiedApiOverview {
+  summary: UnifiedApiSummary
+  vendors: UnifiedApiVendorGroup[]
+  unconfiguredVendors: UnifiedApiUnconfiguredVendor[]
+}
+
 export interface AgentModelConfigPayload {
+  vendorAccountId?: number
   displayName?: string
   configCode?: string
   provider: string
@@ -436,6 +534,23 @@ export interface AgentModelConfigTestResult {
   sample: string
 }
 
+export interface ConfigBundleVendorAccount {
+  vendorCode: string
+  accountName: string
+  accountRef?: string
+  baseUrl?: string
+  apiKey?: string
+  extraAuthJson?: string
+  secretsRedacted?: boolean
+  consoleUrl?: string
+  balanceUrl?: string
+  balanceQueryMode?: string
+  balanceAmount?: number
+  balanceCurrency?: string
+  balanceLowThreshold?: number
+  enabled?: boolean
+}
+
 export interface ConfigBundle {
   format: "ai-tool-market-config-bundle" | string
   version: number
@@ -443,6 +558,7 @@ export interface ConfigBundle {
   exportedBy?: string | null
   secretsRedacted?: boolean
   settings?: Record<string, string>
+  vendorAccounts?: ConfigBundleVendorAccount[]
   modelConfigs?: Array<Record<string, unknown>>
   categories?: Array<Record<string, unknown>>
   tools?: Array<Record<string, unknown>>
@@ -450,6 +566,7 @@ export interface ConfigBundle {
 
 export interface ConfigBundleImportResult {
   settings: number
+  vendorAccounts: number
   modelConfigs: number
   categories: number
   tools: number

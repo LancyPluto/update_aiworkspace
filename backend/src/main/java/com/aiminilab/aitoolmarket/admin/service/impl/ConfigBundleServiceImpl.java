@@ -7,11 +7,16 @@ import com.aiminilab.aitoolmarket.admin.service.SystemSettingService;
 import com.aiminilab.aitoolmarket.agent.config.ModelProviderRegistry;
 import com.aiminilab.aitoolmarket.agent.dto.AgentModelConfigRequest;
 import com.aiminilab.aitoolmarket.agent.dto.AgentModelConfigResponse;
+import com.aiminilab.aitoolmarket.agent.dto.ModelVendorAccountRequest;
+import com.aiminilab.aitoolmarket.agent.dto.ModelVendorAccountResponse;
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
 import com.aiminilab.aitoolmarket.agent.entity.AgentToolDescriptorExtension;
+import com.aiminilab.aitoolmarket.agent.entity.ModelVendorAccount;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentModelConfigMapper;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentToolDescriptorExtensionMapper;
+import com.aiminilab.aitoolmarket.agent.mapper.ModelVendorAccountMapper;
 import com.aiminilab.aitoolmarket.agent.service.AgentModelConfigService;
+import com.aiminilab.aitoolmarket.agent.service.ModelVendorAccountService;
 import com.aiminilab.aitoolmarket.common.dto.PageResponse;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
@@ -70,6 +75,8 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
     private final ToolCategoryMapper toolCategoryMapper;
     private final ToolPromptVersionMapper toolPromptVersionMapper;
     private final ModelProviderRegistry modelProviderRegistry;
+    private final ModelVendorAccountMapper vendorAccountMapper;
+    private final ModelVendorAccountService modelVendorAccountService;
 
     public ConfigBundleServiceImpl(SystemSettingService systemSettingService,
                                    AgentModelConfigService agentModelConfigService,
@@ -80,7 +87,9 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                                    ToolMapper toolMapper,
                                    ToolCategoryMapper toolCategoryMapper,
                                    ToolPromptVersionMapper toolPromptVersionMapper,
-                                   ModelProviderRegistry modelProviderRegistry) {
+                                   ModelProviderRegistry modelProviderRegistry,
+                                   ModelVendorAccountMapper vendorAccountMapper,
+                                   ModelVendorAccountService modelVendorAccountService) {
         this.systemSettingService = systemSettingService;
         this.agentModelConfigService = agentModelConfigService;
         this.agentModelConfigMapper = agentModelConfigMapper;
@@ -91,6 +100,8 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
         this.toolCategoryMapper = toolCategoryMapper;
         this.toolPromptVersionMapper = toolPromptVersionMapper;
         this.modelProviderRegistry = modelProviderRegistry;
+        this.vendorAccountMapper = vendorAccountMapper;
+        this.modelVendorAccountService = modelVendorAccountService;
     }
 
     @Override
@@ -105,6 +116,12 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                 .map(tool -> exportTool(tool, categoryCodesById, modelCodesById))
                 .toList();
 
+        List<ModelVendorAccount> vendorAccounts = vendorAccountMapper.findAllActive();
+        Map<Long, String> accountRefById = vendorAccounts.stream()
+                .collect(Collectors.toMap(ModelVendorAccount::getId,
+                        account -> accountRef(account.getVendorCode(), account.getAccountName()),
+                        (a, b) -> a));
+
         return new ConfigBundleDto(
                 FORMAT,
                 VERSION,
@@ -112,8 +129,11 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                 operatorId == null ? null : String.valueOf(operatorId),
                 !includeSecrets,
                 redactSettings(systemSettingService.settings()),
+                vendorAccounts.stream()
+                        .map(account -> exportVendorAccount(account, includeSecrets))
+                        .toList(),
                 agentModelConfigService.adminList().stream()
-                        .map(config -> exportModelConfig(config, includeSecrets))
+                        .map(config -> exportModelConfig(config, includeSecrets, accountRefById))
                         .toList(),
                 toolService.adminCategories().stream().map(this::exportCategory).toList(),
                 exportedTools
@@ -129,7 +149,10 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
 
         List<String> warnings = new ArrayList<>();
         int settings = importSettings(bundle.settings());
-        ImportModelResult modelResult = importModelConfigs(safeList(bundle.modelConfigs()), warnings, bundle.secretsRedacted());
+        Map<String, Long> accountIdsByRef = importVendorAccounts(
+                safeList(bundle.vendorAccounts()), warnings, bundle.secretsRedacted());
+        ImportModelResult modelResult = importModelConfigs(
+                safeList(bundle.modelConfigs()), accountIdsByRef, warnings, bundle.secretsRedacted());
         int categories = importCategories(safeList(bundle.categories()));
 
         Map<String, Long> modelIdsByCode = agentModelConfigService.adminList().stream()
@@ -139,13 +162,14 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
         Map<String, Long> categoryIdsByCode = toolService.adminCategories().stream()
                 .collect(Collectors.toMap(ToolCategoryResponse::categoryCode, ToolCategoryResponse::id, (a, b) -> a));
 
-        ImportCounter counter = new ImportCounter(settings, modelResult.changed, categories);
+        ImportCounter counter = new ImportCounter(settings, accountIdsByRef.size(), modelResult.changed, categories);
         for (ConfigBundleDto.Tool tool : safeList(bundle.tools())) {
             importTool(tool, operatorId, modelIdsByCode, categoryIdsByCode, counter, warnings);
         }
 
         return new ConfigBundleImportResult(
                 counter.settings,
+                counter.vendorAccounts,
                 counter.modelConfigs,
                 counter.categories,
                 counter.tools,
@@ -205,18 +229,61 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
         }
     }
 
-    private ConfigBundleDto.ModelConfig exportModelConfig(AgentModelConfigResponse config, boolean includeSecrets) {
+    private ConfigBundleDto.VendorAccount exportVendorAccount(ModelVendorAccount account, boolean includeSecrets) {
+        String ref = accountRef(account.getVendorCode(), account.getAccountName());
+        return new ConfigBundleDto.VendorAccount(
+                account.getVendorCode(),
+                account.getAccountName(),
+                ref,
+                account.getBaseUrl(),
+                includeSecrets ? nullToEmpty(account.getApiKey()) : "",
+                includeSecrets ? nullToEmpty(account.getExtraAuthJson()) : "",
+                !includeSecrets,
+                account.getConsoleUrl(),
+                account.getBalanceUrl(),
+                account.getBalanceQueryMode(),
+                account.getBalanceAmount(),
+                account.getBalanceCurrency(),
+                account.getBalanceLowThreshold(),
+                account.getEnabled()
+        );
+    }
+
+    private ConfigBundleDto.ModelConfig exportModelConfig(AgentModelConfigResponse config,
+                                                          boolean includeSecrets,
+                                                          Map<Long, String> accountRefById) {
         AgentModelConfig secretSource = includeSecrets && config.id() != null
                 ? agentModelConfigMapper.findActiveById(config.id())
                 : null;
+        String vendorAccountRef = config.vendorAccountId() == null
+                ? null
+                : accountRefById.get(config.vendorAccountId());
+        String modelApiKey = "";
+        String modelExtraAuth = "";
+        if (includeSecrets && secretSource != null) {
+            if (vendorAccountRef != null && config.vendorAccountId() != null) {
+                ModelVendorAccount account = vendorAccountMapper.findActiveById(config.vendorAccountId());
+                if (account != null) {
+                    modelApiKey = "";
+                    modelExtraAuth = "";
+                } else {
+                    modelApiKey = nullToEmpty(secretSource.getApiKey());
+                    modelExtraAuth = nullToEmpty(secretSource.getExtraAuthJson());
+                }
+            } else {
+                modelApiKey = nullToEmpty(secretSource.getApiKey());
+                modelExtraAuth = nullToEmpty(secretSource.getExtraAuthJson());
+            }
+        }
         return new ConfigBundleDto.ModelConfig(
                 config.displayName(),
                 stableModelConfigCode(config),
+                vendorAccountRef,
                 config.provider(),
                 config.modelName(),
                 config.baseUrl(),
-                secretSource == null ? "" : nullToEmpty(secretSource.getApiKey()),
-                secretSource == null ? "" : nullToEmpty(secretSource.getExtraAuthJson()),
+                modelApiKey,
+                modelExtraAuth,
                 !includeSecrets,
                 config.minimaxGroupId(),
                 config.consoleUrl(),
@@ -320,7 +387,48 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
         return clean.size();
     }
 
+    private Map<String, Long> importVendorAccounts(List<ConfigBundleDto.VendorAccount> accounts,
+                                                   List<String> warnings,
+                                                   Boolean bundleSecretsRedacted) {
+        Map<String, Long> accountIdsByRef = new LinkedHashMap<>();
+        for (ConfigBundleDto.VendorAccount item : accounts) {
+            if (isBlank(item.vendorCode()) || isBlank(item.accountName())) {
+                warnings.add("Skipped vendor account with missing vendorCode/accountName");
+                continue;
+            }
+            String vendorCode = item.vendorCode().trim().toLowerCase(Locale.ROOT);
+            String accountName = item.accountName().trim();
+            String ref = isBlank(item.accountRef()) ? accountRef(vendorCode, accountName) : item.accountRef().trim();
+            boolean secretsRedacted = item.secretsRedacted() != null
+                    ? item.secretsRedacted()
+                    : bundleSecretsRedacted == null || bundleSecretsRedacted;
+            ModelVendorAccountRequest request = new ModelVendorAccountRequest(
+                    vendorCode,
+                    accountName,
+                    item.baseUrl(),
+                    secretsRedacted ? "" : nullToEmpty(item.apiKey()),
+                    null,
+                    secretsRedacted ? "" : nullToEmpty(item.extraAuthJson()),
+                    null,
+                    item.consoleUrl(),
+                    item.balanceUrl(),
+                    item.balanceQueryMode(),
+                    item.balanceAmount(),
+                    item.balanceCurrency(),
+                    item.balanceLowThreshold(),
+                    item.enabled()
+            );
+            ModelVendorAccount existing = vendorAccountMapper.findActiveByVendorCodeAndAccountName(vendorCode, accountName);
+            ModelVendorAccountResponse saved = existing == null
+                    ? modelVendorAccountService.adminCreate(request)
+                    : modelVendorAccountService.adminUpdate(existing.getId(), request);
+            accountIdsByRef.put(ref, saved.id());
+        }
+        return accountIdsByRef;
+    }
+
     private ImportModelResult importModelConfigs(List<ConfigBundleDto.ModelConfig> configs,
+                                                 Map<String, Long> accountIdsByRef,
                                                  List<String> warnings,
                                                  Boolean bundleSecretsRedacted) {
         int count = 0;
@@ -338,7 +446,16 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
             boolean secretsRedacted = config.secretsRedacted() != null
                     ? config.secretsRedacted()
                     : bundleSecretsRedacted == null || bundleSecretsRedacted;
+            Long vendorAccountId = null;
+            if (!isBlank(config.vendorAccountRef())) {
+                vendorAccountId = accountIdsByRef.get(config.vendorAccountRef().trim());
+                if (vendorAccountId == null) {
+                    warnings.add("Model config " + config.configCode()
+                            + ": vendorAccountRef not found -> " + config.vendorAccountRef());
+                }
+            }
             AgentModelConfigRequest request = new AgentModelConfigRequest(
+                    vendorAccountId,
                     config.displayName(),
                     config.configCode(),
                     config.provider(),
@@ -642,8 +759,13 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
         return list == null ? List.of() : list;
     }
 
+    private static String accountRef(String vendorCode, String accountName) {
+        return vendorCode.trim().toLowerCase(Locale.ROOT) + "::" + accountName.trim();
+    }
+
     private static final class ImportCounter {
         private final int settings;
+        private final int vendorAccounts;
         private final int modelConfigs;
         private final int categories;
         private int tools;
@@ -652,8 +774,9 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
         private int promptVersions;
         private int workflows;
 
-        private ImportCounter(int settings, int modelConfigs, int categories) {
+        private ImportCounter(int settings, int vendorAccounts, int modelConfigs, int categories) {
             this.settings = settings;
+            this.vendorAccounts = vendorAccounts;
             this.modelConfigs = modelConfigs;
             this.categories = categories;
         }

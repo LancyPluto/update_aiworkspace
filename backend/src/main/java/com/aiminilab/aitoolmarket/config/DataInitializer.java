@@ -6,6 +6,7 @@ import com.aiminilab.aitoolmarket.agent.config.AgentPromptSettings;
 import com.aiminilab.aitoolmarket.agent.config.AgentRouterSettings;
 import com.aiminilab.aitoolmarket.agent.config.AgentMemorySettings;
 import com.aiminilab.aitoolmarket.agent.config.AgentRuntimeSettings;
+import com.aiminilab.aitoolmarket.agent.service.ModelVendorAccountMigrationService;
 import com.aiminilab.aitoolmarket.common.enums.UserStatus;
 import com.aiminilab.aitoolmarket.common.enums.UserType;
 import com.aiminilab.aitoolmarket.user.entity.User;
@@ -32,11 +33,13 @@ public class DataInitializer implements CommandLineRunner {
     private final PasswordEncoder passwordEncoder;
     private final DataSource dataSource;
     private final ToolTemplateBootstrap toolTemplateBootstrap;
+    private final ModelVendorAccountMigrationService modelVendorAccountMigrationService;
 
     public DataInitializer(UserMapper userMapper, ToolCategoryMapper toolCategoryMapper,
                            SystemSettingMapper systemSettingMapper, SystemSettingVersionMapper systemSettingVersionMapper,
                            PasswordEncoder passwordEncoder,
-                           JdbcTemplate jdbcTemplate, ToolTemplateBootstrap toolTemplateBootstrap) {
+                           JdbcTemplate jdbcTemplate, ToolTemplateBootstrap toolTemplateBootstrap,
+                           ModelVendorAccountMigrationService modelVendorAccountMigrationService) {
         this.userMapper = userMapper;
         this.toolCategoryMapper = toolCategoryMapper;
         this.systemSettingMapper = systemSettingMapper;
@@ -44,11 +47,13 @@ public class DataInitializer implements CommandLineRunner {
         this.passwordEncoder = passwordEncoder;
         this.dataSource = jdbcTemplate.getDataSource();
         this.toolTemplateBootstrap = toolTemplateBootstrap;
+        this.modelVendorAccountMigrationService = modelVendorAccountMigrationService;
     }
 
     @Override
     public void run(String... args) {
         ensureSchemaCompatibility();
+        modelVendorAccountMigrationService.migrateIfNeeded();
         toolTemplateBootstrap.ensureSchemaAndSeed();
         createUserIfAbsent("admin", "123456", "Admin", UserType.ADMIN);
         createUserIfAbsent("user1", "123456", "User One", UserType.USER);
@@ -125,6 +130,37 @@ public class DataInitializer implements CommandLineRunner {
                 """);
         ensureColumn("agent_model_configs", "is_default", "ALTER TABLE agent_model_configs ADD COLUMN is_default TINYINT NOT NULL DEFAULT 0");
         ensureColumn("agent_model_configs", "is_deleted", "ALTER TABLE agent_model_configs ADD COLUMN is_deleted TINYINT NOT NULL DEFAULT 0");
+        ensureColumn("agent_model_configs", "vendor_account_id",
+                "ALTER TABLE agent_model_configs ADD COLUMN vendor_account_id BIGINT NULL COMMENT '所属厂商账户' AFTER id");
+        ensureIndex(
+                "agent_model_configs",
+                "idx_agent_model_configs_vendor_account",
+                "CREATE INDEX idx_agent_model_configs_vendor_account ON agent_model_configs(vendor_account_id, enabled, is_deleted)"
+        );
+        ensureTable("model_vendor_accounts", """
+                CREATE TABLE model_vendor_accounts (
+                  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                  vendor_code VARCHAR(64) NOT NULL,
+                  account_name VARCHAR(128) NOT NULL DEFAULT '默认账户',
+                  base_url VARCHAR(512) NULL,
+                  api_key VARCHAR(1024) NULL,
+                  extra_auth_json TEXT NULL,
+                  console_url VARCHAR(512) NULL,
+                  balance_url VARCHAR(512) NULL,
+                  balance_query_mode VARCHAR(32) NOT NULL DEFAULT 'MANUAL',
+                  balance_amount DECIMAL(18,4) NULL,
+                  balance_currency VARCHAR(8) NULL DEFAULT 'CNY',
+                  balance_status VARCHAR(32) NOT NULL DEFAULT 'UNKNOWN',
+                  balance_low_threshold DECIMAL(18,4) NULL,
+                  balance_updated_at DATETIME NULL,
+                  balance_error_message VARCHAR(512) NULL,
+                  health_status VARCHAR(32) NOT NULL DEFAULT 'UNKNOWN',
+                  enabled TINYINT NOT NULL DEFAULT 1,
+                  is_deleted TINYINT NOT NULL DEFAULT 0,
+                  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """);
         ensureTable("credit_recharge_packages", """
                 CREATE TABLE credit_recharge_packages (
                   id BIGINT PRIMARY KEY AUTO_INCREMENT,
