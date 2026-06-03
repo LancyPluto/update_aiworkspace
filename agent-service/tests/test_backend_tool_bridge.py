@@ -2,7 +2,7 @@
 
 import pytest
 
-from app.core.schemas import ChatMessage, RunContext, TaskDetailResponse, ToolDescriptor
+from app.core.schemas import ChatMessage, RunContext, RuntimeSettings, TaskDetailResponse, ToolDescriptor
 from app.tools.backend_tool import BackendToolBridge, ToolExecutionError
 
 
@@ -110,6 +110,28 @@ def test_generation_tool_timeout_uses_modality_specific_floor():
     assert bridge._timeout_for_tool("ofox_gpt_image2") == 600
     assert bridge._timeout_for_tool("kling_image_to_video") == 900
     assert bridge._timeout_for_tool("xiaohongshu_copywriting") == 120
+
+
+def test_generation_tool_timeout_uses_run_level_runtime_settings_without_mutation():
+    bridge = BackendToolBridge(backend_client=None, timeout_seconds=120, poll_interval_seconds=2.0)  # type: ignore[arg-type]
+    context = RunContext(
+        runId=1,
+        sessionId=1,
+        userId=1,
+        message="生成一张图片",
+        runtimeSettings=RuntimeSettings(
+            toolExecutionTimeoutSeconds=10,
+            imageToolExecutionTimeoutSeconds=700,
+            videoToolExecutionTimeoutSeconds=1200,
+            toolPollIntervalSeconds=0.01,
+        ),
+    )
+
+    assert bridge._timeout_for_tool("ofox_gpt_image2", context) == 700
+    assert bridge._timeout_for_tool("kling_image_to_video", context) == 1200
+    assert bridge._timeout_for_tool("xiaohongshu_copywriting", context) == 10
+    assert bridge.timeout_seconds == 120
+    assert bridge.poll_interval_seconds == 2.0
 
 
 def test_generation_prompt_field_is_derived_from_short_user_request():

@@ -15,3 +15,7 @@ class LangGraphRuntimeEngine:
     async def run_confirmed_tool(self, context: RunContext, tool_code: str) -> None:
         graph = self.graph_factory(self.backend_client, self.model_client)
         await graph.run_confirmed_tool(context, tool_code)
+
+    async def debug_route(self, context: RunContext):
+        graph = self.graph_factory(self.backend_client, self.model_client)
+        return await graph.debug_route(context)

@@ -456,6 +456,38 @@ async def test_product_tool_loop_rejects_modality_mismatch_before_task_dispatch(
 
 
 @pytest.mark.asyncio
+async def test_product_tool_loop_unknown_tool_does_not_fake_success_or_dispatch_task():
+    backend = FakeBackend()
+    engine = DeepAgentsRuntimeEngine(
+        backend,
+        FakeProductToolModel(tool_name="agent_tool__missing_tool", arguments={"userRequest": "帮我处理"}, response="fallback chat"),
+    )
+    context = RunContext(
+        runId=28,
+        sessionId=1,
+        userId=1,
+        message="帮我处理这个需求",
+        creditBudget=20,
+        runtimeSettings=RuntimeSettings(productToolLoopFallbackToRouter=False),
+        availableTools=[
+            ToolDescriptor(
+                toolCode="known_tool",
+                toolName="可用工具",
+                description="普通工具",
+                estimatedCreditCost=1,
+                autoCallable=True,
+            ),
+        ],
+    )
+
+    await engine.run(context)
+
+    assert not any(call[0] == "task" for call in backend.tool_calls)
+    assert any(event[1] == "tool_call.rejected" and event[3]["reason"] == "tool_not_available" for event in backend.events)
+    assert backend.completed[-1][2] == "general_chat"
+
+
+@pytest.mark.asyncio
 async def test_visual_cosplay_shoot_request_prefers_image_tool_over_text_tool():
     backend = FakeBackend()
     engine = DeepAgentsRuntimeEngine(backend, FakeModel(response=""))
@@ -652,6 +684,24 @@ async def test_graph_fails_when_model_call_limit_is_exceeded():
 
     assert backend.completed == []
     assert backend.failed == [(8, "AGENT_MODEL_CALL_LIMIT")]
+
+
+@pytest.mark.asyncio
+async def test_unsupported_rule_can_fallback_to_chat_without_copywriting_helper():
+    backend = FakeBackend()
+    engine = DeepAgentsRuntimeEngine(backend, FakeModel("可以，我先给你一版工作流文案。"))
+    context = RunContext(
+        runId=29,
+        sessionId=1,
+        userId=1,
+        message="帮我写一个工作流介绍文案",
+        creditBudget=20,
+    )
+
+    await engine.run(context)
+
+    assert backend.completed == [(29, "可以，我先给你一版工作流文案。", "general_chat")]
+    assert not any(call[0] == "task" for call in backend.tool_calls)
 
 
 @pytest.mark.asyncio
