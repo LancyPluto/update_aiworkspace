@@ -22,6 +22,7 @@ public record TaskDetailResponse(
         JsonNode params,
         TaskResultResponse result,
         AgentTaskSourceResponse agentSource,
+        Long communityPostId,
         Integer consumedCredits,
         LocalDateTime createdAt,
         LocalDateTime queuedAt,
@@ -35,6 +36,11 @@ public record TaskDetailResponse(
 
     public static TaskDetailResponse of(AiTask task, JsonNode params, TaskResultResponse result,
                            AgentTaskSourceResponse agentSource, Integer consumedCredits) {
+        return of(task, params, result, agentSource, null, consumedCredits);
+    }
+
+    public static TaskDetailResponse of(AiTask task, JsonNode params, TaskResultResponse result,
+                           AgentTaskSourceResponse agentSource, Long communityPostId, Integer consumedCredits) {
         return new TaskDetailResponse(
                 task.getId(),
                 task.getTaskNo(),
@@ -52,6 +58,7 @@ public record TaskDetailResponse(
                 params,
                 result,
                 agentSource,
+                communityPostId,
                 consumedCredits,
                 task.getCreatedAt(),
                 task.getQueuedAt(),

@@ -143,6 +143,33 @@ class AgentApiTest {
     }
 
     @Test
+    void streamingAnswerSnapshotIsPublishedAsRenderableEvent() throws Exception {
+        mockExternalAuthDependencies();
+        register("agent_stream_snapshot_user");
+        String token = login("agent_stream_snapshot_user");
+        Long sessionId = createSession(token, "Agent Stream Snapshot");
+        Long runId = sendMessage(token, sessionId, "Stream a reply.").runId();
+
+        String body = """
+                {
+                  "contentText": "第一段内容，第二段内容"
+                }
+                """;
+        mockMvc.perform(signed(put("/api/internal/v1/agent/runs/{runId}/streaming-answer", runId), "PUT",
+                        "/api/internal/v1/agent/runs/%d/streaming-answer".formatted(runId), body)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/v1/agent/runs/{runId}/events", runId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[1].eventType").value("message.completed"))
+                .andExpect(jsonPath("$.data.list[1].eventText").value("第一段内容，第二段内容"))
+                .andExpect(jsonPath("$.data.list[1].eventJson").value(org.hamcrest.Matchers.containsString("第一段内容，第二段内容")));
+    }
+
+    @Test
     void sessionMessagesReturnNewestPageInChronologicalOrder() throws Exception {
         mockExternalAuthDependencies();
         register("agent_message_page_user");

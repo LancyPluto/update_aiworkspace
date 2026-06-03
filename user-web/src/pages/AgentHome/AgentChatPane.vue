@@ -1212,11 +1212,13 @@ async function waitForRunComplete(runId: number) {
   startRunStatusWatchdog(runId)
   const controller = new AbortController()
   runStreamAbort = controller
+  const cachedEvents = runEventsByRunId.value[runId] ?? []
+  const afterEventId = cachedEvents.length ? cachedEvents.at(-1)!.id : undefined
   try {
     await streamAgentRunEvents(runId, {
       token: props.token,
       signal: controller.signal,
-      afterEventId: events.value.length ? events.value.at(-1)!.id : undefined,
+      afterEventId,
       onEvent: (event) => handleStreamedRunEvent(runId, event),
     })
   } catch (error) {
@@ -2215,7 +2217,7 @@ defineExpose({
   border: none;
   outline: none;
   background: transparent;
-  font-size: 14px;
+  font-size: 18px;
   line-height: 1.6;
   min-height: 48px;
   max-height: 160px;
@@ -2492,7 +2494,7 @@ defineExpose({
 .message-meta {
   margin-top: 2px;
   color: rgb(255 255 255 / 0.34);
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.4;
 }
 
@@ -2592,6 +2594,7 @@ defineExpose({
   border-radius: 10px 24px 24px 24px;
   background: rgb(255 255 255 / 0.045);
   padding: 16px 18px;
+  font-size: 17px;
   line-height: 1.75;
   color: rgb(255 255 255 / 0.86);
   box-shadow: 0 18px 44px rgb(0 0 0 / 0.16), inset 0 1px 0 rgb(255 255 255 / 0.035);
@@ -2652,7 +2655,7 @@ defineExpose({
 .assistant-name-row strong {
   margin: 0;
   color: var(--agent-text-primary);
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 700;
 }
 
@@ -2661,7 +2664,7 @@ defineExpose({
   align-items: center;
   gap: 9px;
   color: rgb(255 255 255 / 0.48);
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .typing-dots {

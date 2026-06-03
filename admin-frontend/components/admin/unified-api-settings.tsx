@@ -17,13 +17,11 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Switch } from "@/components/ui/switch"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
 import {
   createAgentModelConfig,
   deleteAgentModelConfig,
-  setDefaultAgentModelConfig,
   testAgentModelConfigById,
   updateAgentModelConfig,
 } from "@/lib/api/agent-model"
@@ -74,16 +72,24 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 
+const adminBasePath = (process.env.NEXT_PUBLIC_ADMIN_BASE_PATH || "").replace(/\/$/, "")
+
 function VendorIcon({ iconAsset, label }: { iconAsset: string; label: string }) {
+  const [failed, setFailed] = useState(false)
+  const src = `${adminBasePath}/assets/vendor-icons/${iconAsset || "api"}.svg`
   return (
-    <img
-      src={`/assets/vendor-icons/${iconAsset}.svg`}
-      alt={label}
-      className="h-8 w-8 rounded-md border bg-white object-contain p-1"
-      onError={(event) => {
-        event.currentTarget.style.display = "none"
-      }}
-    />
+    <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border bg-white p-1 text-xs font-semibold text-slate-600">
+      {failed ? (
+        <span>{label.slice(0, 1).toUpperCase()}</span>
+      ) : (
+        <img
+          src={src}
+          alt={label}
+          className="h-full w-full object-contain"
+          onError={() => setFailed(true)}
+        />
+      )}
+    </span>
   )
 }
 
@@ -267,6 +273,62 @@ const vendorSortOptions: Array<{ value: VendorSort; label: string }> = [
   { value: "NAME", label: "名称排序" },
 ]
 
+const billingUnitOptions: Array<{ value: NonNullable<AgentModelConfigPayload["billingUnit"]>; label: string; description: string }> = [
+  { value: "TOKEN_PER_M", label: "按量计费", description: "按输入/输出 Token 百万单位填写成本" },
+  { value: "PER_CALL", label: "按次计费", description: "每次调用固定成本，适合图片、语音等任务" },
+  { value: "IMAGE_TOKEN", label: "图片 Token", description: "同时记录图片基础价和 Token 成本" },
+]
+
+function numberOrZero(value: unknown) {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+function EmbeddedOnOffSwitch({
+  checked,
+  disabled,
+  label,
+  onCheckedChange,
+}: {
+  checked: boolean
+  disabled?: boolean
+  label: string
+  onCheckedChange: (checked: boolean) => void
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      disabled={disabled}
+      onClick={() => onCheckedChange(!checked)}
+      className={[
+        "relative inline-flex h-7 w-[62px] shrink-0 items-center overflow-hidden rounded-full border px-1 text-[10px] font-black tracking-wide shadow-sm transition-all duration-300 ease-out",
+        checked
+          ? "border-blue-500 bg-blue-500 text-slate-950 shadow-blue-200"
+          : "border-slate-200 bg-slate-100 text-slate-400 shadow-slate-100",
+        disabled ? "cursor-not-allowed opacity-60" : "cursor-pointer hover:shadow-md",
+      ].join(" ")}
+    >
+      <span
+        className={[
+          "absolute left-0.5 top-0.5 h-6 w-6 rounded-full bg-white shadow-[0_2px_6px_rgba(15,23,42,0.22)] ring-1 ring-slate-200 transition-transform duration-300 ease-out",
+          checked ? "translate-x-[34px]" : "translate-x-0",
+        ].join(" ")}
+      />
+      <span
+        className={[
+          "z-10 w-full text-center transition-all duration-200",
+          checked ? "pr-7" : "pl-7",
+        ].join(" ")}
+      >
+        {checked ? "ON" : "OFF"}
+      </span>
+    </button>
+  )
+}
+
 export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) {
   const [overview, setOverview] = useState<UnifiedApiOverview | null>(null)
   const [providers, setProviders] = useState<ModelProviderDescriptor[]>([])
@@ -285,6 +347,8 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
 
   const [openVendors, setOpenVendors] = useState<Record<string, boolean>>({})
   const [togglingModelId, setTogglingModelId] = useState<number | null>(null)
+  const [togglingAgentModelId, setTogglingAgentModelId] = useState<number | null>(null)
+  const [togglingAccountId, setTogglingAccountId] = useState<number | null>(null)
   const [testingModelId, setTestingModelId] = useState<number | null>(null)
   const [testingAccountId, setTestingAccountId] = useState<number | null>(null)
   const [vendorFilter, setVendorFilter] = useState<VendorFilter>("ALL")
@@ -314,12 +378,9 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
       setProviders(catalog)
       const initialOpen: Record<string, boolean> = {}
       data.vendors.forEach((vendor) => {
-        const hasIssue = vendor.accounts.some(
-          (a) => a.balanceStatus === "LOW" || a.healthStatus === "ERROR",
-        )
-        initialOpen[vendor.vendorCode] = hasIssue || vendor.models.length > 0
+        initialOpen[vendor.vendorCode] = false
       })
-      setOpenVendors((prev) => ({ ...initialOpen, ...prev }))
+      setOpenVendors(initialOpen)
     } catch (err) {
       if (err instanceof ApiError && err.status === 404) {
         setError(
@@ -359,6 +420,19 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
     })
   }, [])
 
+  const patchModelAgentEnabled = useCallback((modelId: number, agentEnabled: boolean) => {
+    setOverview((prev) => {
+      if (!prev) return prev
+      return {
+        ...prev,
+        vendors: prev.vendors.map((vendor) => ({
+          ...vendor,
+          models: vendor.models.map((item) => (item.id === modelId ? { ...item, agentEnabled } : item)),
+        })),
+      }
+    })
+  }, [])
+
   const patchVendorAccount = useCallback((updated?: ModelVendorAccount | null) => {
     if (!updated?.id) return
     setOverview((prev) => {
@@ -370,6 +444,19 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
           accounts: vendor.accounts.map((account) =>
             account?.id === updated.id ? updated : account,
           ),
+        })),
+      }
+    })
+  }, [])
+
+  const patchAccountEnabled = useCallback((accountId: number, enabled: boolean) => {
+    setOverview((prev) => {
+      if (!prev) return prev
+      return {
+        ...prev,
+        vendors: prev.vendors.map((vendor) => ({
+          ...vendor,
+          accounts: vendor.accounts.map((account) => (account.id === accountId ? { ...account, enabled } : account)),
         })),
       }
     })
@@ -489,15 +576,22 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
           configCode: model.configCode || "",
           provider: model.provider,
           modelName: model.modelName,
+          baseUrl: model.baseUrl || undefined,
+          minimaxGroupId: model.minimaxGroupId || undefined,
+          consoleUrl: model.consoleUrl || undefined,
+          balanceUrl: model.balanceUrl || undefined,
+          docsUrl: model.docsUrl || undefined,
           enabled,
           agentEnabled: model.agentEnabled ?? true,
           isDefault: model.isDefault ?? false,
           capabilities: model.capabilities ? [...model.capabilities] : [],
-          timeoutSeconds: 60,
-          inputTokenPricePer1m: 0,
-          outputTokenPricePer1m: 0,
-          billingUnit: "TOKEN_PER_M",
-          unitPrice: 0,
+          timeoutSeconds: model.timeoutSeconds ?? 60,
+          connectTimeoutSeconds: model.connectTimeoutSeconds ?? undefined,
+          readTimeoutSeconds: model.readTimeoutSeconds ?? undefined,
+          inputTokenPricePer1m: model.inputTokenPricePer1m ?? 0,
+          outputTokenPricePer1m: model.outputTokenPricePer1m ?? 0,
+          billingUnit: (model.billingUnit as AgentModelConfigPayload["billingUnit"]) || "TOKEN_PER_M",
+          unitPrice: model.unitPrice ?? 0,
         })
       } catch (err) {
         patchModelEnabled(model.id, previous)
@@ -509,14 +603,81 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
     [patchModelEnabled],
   )
 
+  const toggleModelAgentEnabled = useCallback(
+    async (model: UnifiedApiModelItem, agentEnabled: boolean) => {
+      const previous = model.agentEnabled ?? true
+      patchModelAgentEnabled(model.id, agentEnabled)
+      setTogglingAgentModelId(model.id)
+      setError(null)
+      try {
+        await updateAgentModelConfig(model.id, {
+          vendorAccountId: model.vendorAccountId ?? undefined,
+          displayName: model.displayName || "",
+          configCode: model.configCode || "",
+          provider: model.provider,
+          modelName: model.modelName,
+          baseUrl: model.baseUrl || undefined,
+          minimaxGroupId: model.minimaxGroupId || undefined,
+          consoleUrl: model.consoleUrl || undefined,
+          balanceUrl: model.balanceUrl || undefined,
+          docsUrl: model.docsUrl || undefined,
+          enabled: model.enabled,
+          agentEnabled,
+          isDefault: model.isDefault ?? false,
+          capabilities: model.capabilities ? [...model.capabilities] : [],
+          timeoutSeconds: model.timeoutSeconds ?? 60,
+          connectTimeoutSeconds: model.connectTimeoutSeconds ?? undefined,
+          readTimeoutSeconds: model.readTimeoutSeconds ?? undefined,
+          inputTokenPricePer1m: model.inputTokenPricePer1m ?? 0,
+          outputTokenPricePer1m: model.outputTokenPricePer1m ?? 0,
+          billingUnit: (model.billingUnit as AgentModelConfigPayload["billingUnit"]) || "TOKEN_PER_M",
+          unitPrice: model.unitPrice ?? 0,
+        })
+      } catch (err) {
+        patchModelAgentEnabled(model.id, previous)
+        setError(err instanceof ApiError ? err.message : "Agent 可选更新失败")
+      } finally {
+        setTogglingAgentModelId(null)
+      }
+    },
+    [patchModelAgentEnabled],
+  )
+
+  const toggleAccountEnabled = useCallback(
+    async (account: ModelVendorAccount, enabled: boolean) => {
+      const previous = account.enabled
+      patchAccountEnabled(account.id, enabled)
+      setTogglingAccountId(account.id)
+      setError(null)
+      try {
+        const updated = await updateModelVendorAccount(account.id, {
+          vendorCode: account.vendorCode,
+          accountName: account.accountName,
+          baseUrl: account.baseUrl || "",
+          apiKey: account.apiKey || "",
+          extraAuthJson: account.extraAuthJson || "",
+          consoleUrl: account.consoleUrl || "",
+          balanceUrl: account.balanceUrl || "",
+          balanceQueryMode: account.balanceQueryMode,
+          balanceAmount: account.balanceAmount ?? undefined,
+          balanceCurrency: account.balanceCurrency || "CNY",
+          balanceLowThreshold: account.balanceLowThreshold ?? undefined,
+          enabled,
+        })
+        patchVendorAccount(updated)
+      } catch (err) {
+        patchAccountEnabled(account.id, previous)
+        setError(err instanceof ApiError ? err.message : "账户启用状态更新失败")
+      } finally {
+        setTogglingAccountId(null)
+      }
+    },
+    [patchAccountEnabled, patchVendorAccount],
+  )
+
   useEffect(() => {
     load()
   }, [load, refreshKey])
-
-  const providerOptions = useMemo(() => {
-    if (!modelVendorCode) return providers
-    return providers
-  }, [providers, modelVendorCode])
 
   const filteredVendors = useMemo(() => {
     if (!overview) return []
@@ -605,8 +766,9 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
       vendorCode: account.vendorCode,
       accountName: account.accountName,
       baseUrl: account.baseUrl || "",
+      apiKey: account.apiKey || "",
       apiKeyMasked: account.apiKeyMasked || "",
-      extraAuthJson: "",
+      extraAuthJson: account.extraAuthJson || "",
       consoleUrl: account.consoleUrl || "",
       balanceUrl: account.balanceUrl || "",
       balanceQueryMode: account.balanceQueryMode || "MANUAL",
@@ -683,10 +845,10 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
       isDefault: model.isDefault ?? false,
       capabilities: model.capabilities ? [...model.capabilities] : [],
       timeoutSeconds: 60,
-      inputTokenPricePer1m: 0,
-      outputTokenPricePer1m: 0,
-      billingUnit: "TOKEN_PER_M",
-      unitPrice: 0,
+      inputTokenPricePer1m: model.inputTokenPricePer1m ?? 0,
+      outputTokenPricePer1m: model.outputTokenPricePer1m ?? 0,
+      billingUnit: (model.billingUnit as AgentModelConfigPayload["billingUnit"]) || "TOKEN_PER_M",
+      unitPrice: model.unitPrice ?? 0,
     })
     setModelDialogOpen(true)
   }
@@ -699,10 +861,14 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
     setModelSaving(true)
     setError(null)
     try {
+      const scrollY = typeof window === "undefined" ? 0 : window.scrollY
       const payload: AgentModelConfigPayload = {
         ...modelForm,
         apiKey: "",
         extraAuthJson: "",
+        inputTokenPricePer1m: numberOrZero(modelForm.inputTokenPricePer1m),
+        outputTokenPricePer1m: numberOrZero(modelForm.outputTokenPricePer1m),
+        unitPrice: numberOrZero(modelForm.unitPrice),
       }
       if (modelForm.id) {
         await updateAgentModelConfig(modelForm.id, payload)
@@ -710,7 +876,10 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
         await createAgentModelConfig(payload)
       }
       setModelDialogOpen(false)
-      await load()
+      await refreshOverviewSilently()
+      if (typeof window !== "undefined") {
+        window.requestAnimationFrame(() => window.scrollTo({ top: scrollY, behavior: "auto" }))
+      }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "保存模型失败")
     } finally {
@@ -765,7 +934,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
 
   function renderVendorSection(vendor: UnifiedApiVendorGroup) {
     const primaryAccount = pickPrimaryAccount(vendor.accounts)
-    const isOpen = openVendors[vendor.vendorCode] ?? true
+    const isOpen = openVendors[vendor.vendorCode] ?? false
     const accountIdForNewModel = primaryAccount?.id
     const lowBalanceCount = vendor.accounts.filter((account) => account.balanceStatus === "LOW" || account.balanceStatus === "SUSPECTED_INSUFFICIENT").length
     const unhealthyCount = vendor.accounts.filter((account) => account.healthStatus === "ERROR").length
@@ -813,6 +982,12 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                     {primaryAccount.balanceErrorMessage}
                   </span>
                 ) : null}
+                <EmbeddedOnOffSwitch
+                  checked={primaryAccount.enabled}
+                  disabled={togglingAccountId === primaryAccount.id}
+                  label={`启用账户 ${primaryAccount.accountName}`}
+                  onCheckedChange={(enabled) => toggleAccountEnabled(primaryAccount, enabled)}
+                />
                 {renderVendorAccountMenu(primaryAccount, vendor.label)}
               </div>
             ) : (
@@ -830,7 +1005,15 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                 <div key={account.id} className="rounded-lg border bg-muted/20 p-3">
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-medium">{account.accountName}</p>
+                      <div className="flex min-w-0 items-center gap-2">
+                        <p className="truncate text-sm font-medium">{account.accountName}</p>
+                        <EmbeddedOnOffSwitch
+                          checked={account.enabled}
+                          disabled={togglingAccountId === account.id}
+                          label={`启用账户 ${account.accountName}`}
+                          onCheckedChange={(enabled) => toggleAccountEnabled(account, enabled)}
+                        />
+                      </div>
                       <p className="truncate text-xs text-muted-foreground">{account.baseUrl || "未配置 Base URL"}</p>
                     </div>
                     {renderVendorAccountMenu(account, vendor.label)}
@@ -866,33 +1049,39 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
             </div>
           ) : (
             <>
-              <Table>
+              <Table className="table-fixed text-center">
                 <TableHeader>
                   <TableRow>
-                    <TableHead>模型名称</TableHead>
-                    <TableHead>能力</TableHead>
-                    <TableHead>成本</TableHead>
-                    <TableHead className="w-[72px]">启用</TableHead>
-                    <TableHead className="w-[200px] text-right">操作</TableHead>
+                    <TableHead className="w-[260px] text-center">模型名称</TableHead>
+                    <TableHead className="w-[180px] text-center">能力</TableHead>
+                    <TableHead className="w-[150px] text-center">成本</TableHead>
+                    <TableHead className="w-[112px] text-center">Agent 可选</TableHead>
+                    <TableHead className="w-[112px] text-center">启用</TableHead>
+                    <TableHead className="w-[180px] text-center">操作</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {vendor.models.map((model) => (
                     <TableRow key={model.id}>
-                      <TableCell>
-                        <div className="font-medium">
-                          {model.displayName || model.modelName}
-                          {model.isDefault ? <Star className="ml-1 inline h-3 w-3 text-amber-500" /> : null}
+                      <TableCell className="align-middle">
+                        <div className="mx-auto flex max-w-[240px] min-w-0 items-center justify-center gap-2 text-left">
+                          <VendorIcon iconAsset={vendor.iconAsset} label={vendor.label} />
+                          <div className="min-w-0">
+                            <div className="truncate font-medium">
+                              {model.displayName || model.modelName}
+                              {model.isDefault ? <Star className="ml-1 inline h-3 w-3 text-amber-500" /> : null}
+                            </div>
+                            <p className="truncate font-mono text-xs text-muted-foreground">{model.modelName}</p>
+                          </div>
                         </div>
-                        <p className="font-mono text-xs text-muted-foreground">{model.modelName}</p>
                         {!model.vendorAccountId ? (
                           <Badge variant="outline" className="mt-1 text-xs text-amber-700">
                             未绑定账户
                           </Badge>
                         ) : null}
                       </TableCell>
-                      <TableCell>
-                        <div className="flex flex-wrap gap-1">
+                      <TableCell className="align-middle">
+                        <div className="flex flex-wrap justify-center gap-1">
                           {(model.capabilities || []).map((cap) => (
                             <Badge key={cap} variant="secondary" className="text-xs">
                               {capabilityLabel(cap)}
@@ -900,20 +1089,29 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                           ))}
                         </div>
                       </TableCell>
-                      <TableCell>
-                        <div className="space-y-1 text-xs text-muted-foreground">
+                      <TableCell className="align-middle">
+                        <div className="space-y-1 text-center text-xs text-muted-foreground">
                           {renderModelCost(model)}
                         </div>
                       </TableCell>
-                      <TableCell>
-                        <Switch
+                      <TableCell className="align-middle">
+                        <EmbeddedOnOffSwitch
+                          checked={model.agentEnabled !== false}
+                          disabled={togglingAgentModelId === model.id}
+                          label={`Agent 可选 ${model.displayName || model.modelName}`}
+                          onCheckedChange={(agentEnabled) => toggleModelAgentEnabled(model, agentEnabled)}
+                        />
+                      </TableCell>
+                      <TableCell className="align-middle">
+                        <EmbeddedOnOffSwitch
                           checked={model.enabled}
                           disabled={togglingModelId === model.id}
+                          label={`启用 ${model.displayName || model.modelName}`}
                           onCheckedChange={(enabled) => toggleModelEnabled(model, enabled)}
                         />
                       </TableCell>
-                      <TableCell className="text-right">
-                        <div className="inline-flex items-center justify-end gap-1">
+                      <TableCell className="align-middle text-center">
+                        <div className="inline-flex items-center justify-center gap-1">
                           <Button
                             type="button"
                             variant="ghost"
@@ -932,30 +1130,11 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                           <Button type="button" variant="ghost" size="sm" className="h-8" onClick={() => openEditModel(model, vendor.vendorCode)}>
                             编辑
                           </Button>
-                        {!model.isDefault ? (
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            className="h-8"
-                            onClick={async () => {
-                              try {
-                                await setDefaultAgentModelConfig(model.id)
-                                await refreshOverviewSilently()
-                              } catch (err) {
-                                setError(err instanceof ApiError ? err.message : "设置默认失败")
-                              }
-                            }}
-                          >
-                            默认
-                          </Button>
-                        ) : null}
                         <Button
                           type="button"
                           variant="ghost"
                           size="icon"
-                          className="h-8 w-8"
-                          className="text-destructive"
+                          className="h-8 w-8 text-destructive"
                           onClick={async () => {
                             if (!window.confirm("确认删除该模型配置？")) return
                             try {
@@ -992,6 +1171,11 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
       </Collapsible>
     )
   }
+
+  const unconfiguredVendors = overview?.unconfiguredVendors.filter((vendor) => {
+    const code = vendor.vendorCode.toLowerCase()
+    return code !== "infinite_talk" && code !== "infinitetalk"
+  }) ?? []
 
   return (
     <div className="space-y-6">
@@ -1097,11 +1281,11 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
           ) : (
             <>
               {filteredVendors.map(renderVendorSection)}
-              {overview && overview.unconfiguredVendors.length > 0 ? (
+              {unconfiguredVendors.length > 0 ? (
                 <div className="rounded-xl border border-dashed p-4">
                   <p className="mb-3 font-medium">可接入厂商</p>
                   <div className="flex flex-wrap gap-2">
-                    {overview.unconfiguredVendors.map((vendor) => (
+                    {unconfiguredVendors.map((vendor) => (
                       <Button
                         key={vendor.vendorCode}
                         type="button"
@@ -1141,6 +1325,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
               <Label>API Key {accountForm.apiKeyMasked ? `(已配置 ${accountForm.apiKeyMasked})` : ""}</Label>
               <Input
                 type="password"
+                value={accountForm.apiKey || ""}
                 placeholder={accountForm.apiKeyMasked ? "留空则不修改" : "必填"}
                 onChange={(e) => setAccountForm((f) => ({ ...f, apiKey: e.target.value }))}
               />
@@ -1149,6 +1334,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
               <Label>额外鉴权 JSON（可灵 AK/SK 等）</Label>
               <Textarea
                 rows={3}
+                value={accountForm.extraAuthJson || ""}
                 placeholder="留空则不修改"
                 onChange={(e) => setAccountForm((f) => ({ ...f, extraAuthJson: e.target.value }))}
               />
@@ -1205,10 +1391,6 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
               <Label>余额页链接</Label>
               <Input value={accountForm.balanceUrl || ""} onChange={(e) => setAccountForm((f) => ({ ...f, balanceUrl: e.target.value }))} />
             </div>
-            <div className="flex items-center gap-2">
-              <Switch checked={accountForm.enabled !== false} onCheckedChange={(v) => setAccountForm((f) => ({ ...f, enabled: v }))} />
-              <Label>启用账户</Label>
-            </div>
           </div>
           <DialogFooter className="gap-2 sm:justify-between">
             {accountForm.id ? (
@@ -1259,45 +1441,79 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
               <Input value={modelForm.configCode || ""} onChange={(e) => setModelForm((f) => ({ ...f, configCode: e.target.value }))} />
             </div>
             <div className="space-y-2">
-              <Label>协议 Provider</Label>
-              <Select value={modelForm.provider} onValueChange={(v) => {
-                const meta = providers.find((p) => p.code === v)
-                setModelForm((f) => ({
-                  ...f,
-                  provider: v,
-                  modelName: meta?.defaultModel || f.modelName,
-                  capabilities: meta ? [...meta.capabilities] : f.capabilities,
-                  billingUnit: (meta?.billingDefault as AgentModelConfigPayload["billingUnit"]) || f.billingUnit,
-                }))
-              }}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {providerOptions.map((p) => (
-                    <SelectItem key={p.code} value={p.code}>
-                      {p.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
               <Label>Upstream 模型名</Label>
               <Input value={modelForm.modelName} onChange={(e) => setModelForm((f) => ({ ...f, modelName: e.target.value }))} />
             </div>
-            <div className="flex flex-wrap gap-4">
-              <div className="flex items-center gap-2">
-                <Switch checked={modelForm.enabled !== false} onCheckedChange={(v) => setModelForm((f) => ({ ...f, enabled: v }))} />
-                <Label>启用</Label>
+            <div className="grid gap-3 rounded-md border p-3 md:grid-cols-[180px_minmax(0,1fr)]">
+              <div className="space-y-2">
+                <Label>计费规则</Label>
+                <Select
+                  value={modelForm.billingUnit || "TOKEN_PER_M"}
+                  onValueChange={(v) => setModelForm((f) => ({ ...f, billingUnit: v as AgentModelConfigPayload["billingUnit"] }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {billingUnitOptions.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  {billingUnitOptions.find((option) => option.value === modelForm.billingUnit)?.description || "维护该模型的成本口径"}
+                </p>
               </div>
-              <div className="flex items-center gap-2">
-                <Switch checked={modelForm.agentEnabled !== false} onCheckedChange={(v) => setModelForm((f) => ({ ...f, agentEnabled: v }))} />
-                <Label>Agent 可选</Label>
-              </div>
-              <div className="flex items-center gap-2">
-                <Switch checked={Boolean(modelForm.isDefault)} onCheckedChange={(v) => setModelForm((f) => ({ ...f, isDefault: v }))} />
-                <Label>默认模型</Label>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {modelForm.billingUnit === "PER_CALL" ? (
+                  <div className="space-y-2 sm:col-span-2">
+                    <Label>单次调用成本</Label>
+                    <Input
+                      type="number"
+                      min="0"
+                      step="0.000001"
+                      value={modelForm.unitPrice ?? 0}
+                      onChange={(e) => setModelForm((f) => ({ ...f, unitPrice: numberOrZero(e.target.value) }))}
+                    />
+                  </div>
+                ) : (
+                  <>
+                    <div className="space-y-2">
+                      <Label>输入成本 / 百万 Token</Label>
+                      <Input
+                        type="number"
+                        min="0"
+                        step="0.000001"
+                        value={modelForm.inputTokenPricePer1m ?? 0}
+                        onChange={(e) => setModelForm((f) => ({ ...f, inputTokenPricePer1m: numberOrZero(e.target.value) }))}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>输出成本 / 百万 Token</Label>
+                      <Input
+                        type="number"
+                        min="0"
+                        step="0.000001"
+                        value={modelForm.outputTokenPricePer1m ?? 0}
+                        onChange={(e) => setModelForm((f) => ({ ...f, outputTokenPricePer1m: numberOrZero(e.target.value) }))}
+                      />
+                    </div>
+                    {modelForm.billingUnit === "IMAGE_TOKEN" ? (
+                      <div className="space-y-2 sm:col-span-2">
+                        <Label>图片基础成本</Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          step="0.000001"
+                          value={modelForm.unitPrice ?? 0}
+                          onChange={(e) => setModelForm((f) => ({ ...f, unitPrice: numberOrZero(e.target.value) }))}
+                        />
+                      </div>
+                    ) : null}
+                  </>
+                )}
               </div>
             </div>
           </div>

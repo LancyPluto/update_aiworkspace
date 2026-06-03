@@ -4,7 +4,6 @@ import com.aiminilab.aitoolmarket.credit.entity.CreditRechargeOrder;
 import com.aiminilab.aitoolmarket.credit.mapper.CreditRechargeOrderMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -24,7 +23,6 @@ public class CreditRechargeCreditDispatcher {
         this.creditingService = creditingService;
     }
 
-    @Async
     public void dispatchOrderNo(String orderNo) {
         try {
             creditingService.creditPaidOrderIfNeeded(orderNo, "async recharge credit dispatch");

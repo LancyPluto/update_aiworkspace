@@ -20,6 +20,9 @@ public record ConfigBundleDto(
 ) {
     public record VendorAccount(
             String vendorCode,
+            String channelCode,
+            String channelLabel,
+            String channelIconAsset,
             String accountName,
             String accountRef,
             String baseUrl,
@@ -40,6 +43,9 @@ public record ConfigBundleDto(
             String displayName,
             String configCode,
             String vendorAccountRef,
+            String channelCode,
+            String channelLabel,
+            String channelIconAsset,
             String provider,
             String modelName,
             String baseUrl,

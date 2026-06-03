@@ -229,7 +229,7 @@ watch(
   position: relative;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, "PingFang SC", "Hiragino Sans GB",
     "Microsoft YaHei", "Noto Sans", sans-serif;
-  font-size: 15px;
+  font-size: 16px;
   letter-spacing: 0.1px;
 }
 

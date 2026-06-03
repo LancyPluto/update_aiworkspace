@@ -53,10 +53,6 @@ const BRAND_RULES: Array<{ patterns: string[]; brand: ModelBrand }> = [
     brand: { name: "SiliconFlow", iconUrl: "https://siliconflow.cn/favicon.ico", color: "#111827" },
   },
   {
-    patterns: ["infinitetalk", "meigen"],
-    brand: { name: "InfiniteTalk", iconUrl: "https://github.com/MeiGen-AI.png", color: "#111827" },
-  },
-  {
     patterns: ["yi-lightning", "01.ai", "lingyi"],
     brand: { name: "Yi", iconUrl: "https://www.lingyiwanwu.com/favicon.ico", color: "#111827" },
   },

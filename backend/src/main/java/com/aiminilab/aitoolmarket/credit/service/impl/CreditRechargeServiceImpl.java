@@ -554,18 +554,9 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
         if (("WECHAT_NATIVE".equals(order.getPaymentChannel()) || "ALIPAY_PAGE".equals(order.getPaymentChannel()))
                 && order.getPayUrl() != null
                 && !order.getPayUrl().isBlank()
-                && shouldRenderQrCode(order)
                 && (order.getQrCodeUrl() == null || order.getQrCodeUrl().isBlank())) {
             order.setQrCodeUrl(qrCodeDataUriGenerator.generate(order.getPayUrl()));
         }
         return RechargeOrderResponse.from(order);
-    }
-
-    private boolean shouldRenderQrCode(CreditRechargeOrder order) {
-        if (!"ALIPAY_PAGE".equals(order.getPaymentChannel())) {
-            return true;
-        }
-        String payUrl = order.getPayUrl();
-        return payUrl != null && !payUrl.contains("openapi.alipay.com/gateway.do");
     }
 }

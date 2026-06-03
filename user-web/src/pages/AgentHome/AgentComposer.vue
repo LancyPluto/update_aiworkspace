@@ -715,7 +715,7 @@ defineExpose({ adjustComposerTextareaHeight })
   border: none;
   outline: none;
   background: transparent;
-  font-size: 14px;
+  font-size: 16px;
   line-height: 1.6;
   min-height: 48px;
   max-height: 160px;

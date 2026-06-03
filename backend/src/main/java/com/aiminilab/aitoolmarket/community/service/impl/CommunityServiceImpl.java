@@ -69,18 +69,8 @@ public class CommunityServiceImpl implements CommunityService {
     @Override
     @Transactional
     public void autoPublishTask(AiTask task, String resourceType, String contentText) {
-        if (task == null || task.getId() == null || task.getUserId() == null) {
-            return;
-        }
-        User user = userMapper.findById(task.getUserId()).orElse(null);
-        if (user == null || !Boolean.TRUE.equals(user.getAutoPublishAssets())) {
-            return;
-        }
-        if (postMapper.findByTaskId(task.getId()).isPresent()) {
-            return;
-        }
-        createPost(task, resourceType, contentText, task.getToolName(), null,
-                Boolean.TRUE.equals(user.getPromptPublicByDefault()), "PUBLISHED");
+        // Community discovery is driven by explicit publishing from the user's material library.
+        // Keep this hook as a no-op so older worker callbacks remain compatible without auto-publication.
     }
 
     @Override

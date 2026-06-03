@@ -351,6 +351,9 @@ export interface AgentModelConfig {
   enabled: boolean
   agentEnabled?: boolean | null
   isDefault?: boolean | null
+  channelCode?: string | null
+  channelLabel?: string | null
+  channelIconAsset?: string | null
   /** 该凭证可用于的执行能力（与 executionHandler / toolType 对齐） */
   capabilities?: string[] | null
   createdAt?: string | null
@@ -407,7 +410,9 @@ export interface ModelVendorAccount {
   vendorLabel: string
   accountName: string
   baseUrl?: string | null
+  apiKey?: string | null
   apiKeyMasked?: string | null
+  extraAuthJson?: string | null
   extraAuthJsonMasked?: string | null
   consoleUrl?: string | null
   balanceUrl?: string | null
@@ -459,6 +464,14 @@ export interface UnifiedApiModelItem {
   configCode?: string | null
   provider: string
   modelName: string
+  baseUrl?: string | null
+  minimaxGroupId?: string | null
+  consoleUrl?: string | null
+  balanceUrl?: string | null
+  docsUrl?: string | null
+  timeoutSeconds?: number | null
+  connectTimeoutSeconds?: number | null
+  readTimeoutSeconds?: number | null
   capabilities?: string[] | null
   billingUnit?: string | null
   unitPrice?: number | null

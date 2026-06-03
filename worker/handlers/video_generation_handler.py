@@ -204,7 +204,7 @@ def _resolve_image_size(params: dict[str, Any]) -> str:
     explicit = params.get("imageSize") or params.get("image_size") or params.get("size")
     if isinstance(explicit, str) and explicit.strip():
         return explicit.strip()
-    aspect_ratio = str(params.get("aspectRatio") or params.get("aspect_ratio") or "16:9").strip()
+    aspect_ratio = str(params.get("aspectRatio") or params.get("aspect_ratio") or params.get("imageRatio") or "16:9").strip()
     return {
         "1:1": "960x960",
         "16:9": "1280x720",

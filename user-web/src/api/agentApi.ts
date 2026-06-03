@@ -32,6 +32,7 @@ export function fetchAgentWorkspaces(options?: { token?: string | null }) {
 export function fetchAgentModelConfigs(options?: { token?: string | null }) {
   return apiRequest<AgentModelConfig[]>("GET", "/api/v1/agent/model-configs", {
     token: options?.token,
+    query: { t: Date.now() },
   })
 }
 

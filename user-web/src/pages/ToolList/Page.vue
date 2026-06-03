@@ -24,6 +24,9 @@ import {
 
 const auth = useAuthStore()
 const route = useRoute()
+const props = withDefaults(defineProps<{ mode?: "models" | "agents" }>(), {
+  mode: "models",
+})
 const tools = ref<AITool[]>([])
 const tasks = ref<TaskDetail[]>([])
 const loading = ref(false)
@@ -93,9 +96,22 @@ function modelBrand(tool: AITool) {
 
 const sortedTools = computed(() => [...tools.value].sort((a, b) => a.order - b.order))
 
+function isAgentTool(tool: AITool): boolean {
+  const type = (tool.toolType || "").trim().toUpperCase()
+  const categoryCode = (tool.categoryCode || "").trim().toLowerCase()
+  const text = [tool.id, tool.name, tool.categoryName].filter(Boolean).join(" ").toLowerCase()
+  return type === "AGENT" || categoryCode === "agent" || text.includes("agent") || text.includes("智能体")
+}
+
+const visibleTools = computed(() =>
+  props.mode === "agents"
+    ? sortedTools.value.filter(isAgentTool)
+    : sortedTools.value.filter((tool) => !isAgentTool(tool)),
+)
+
 const outputFilters = computed(() => {
   const counts = new Map<string, number>()
-  for (const tool of tools.value) {
+  for (const tool of visibleTools.value) {
     const key = normalizeModality(tool.outputModality)
     counts.set(key, (counts.get(key) || 0) + 1)
   }
@@ -109,11 +125,22 @@ const outputFilters = computed(() => {
 })
 
 const filteredTools = computed(() => {
-  if (!selectedOutputModality.value) return sortedTools.value
-  return sortedTools.value.filter((tool) => normalizeModality(tool.outputModality) === selectedOutputModality.value)
+  if (!selectedOutputModality.value) return visibleTools.value
+  return visibleTools.value.filter((tool) => normalizeModality(tool.outputModality) === selectedOutputModality.value)
 })
 
-const toolsByCode = computed(() => new Map(tools.value.map((tool) => [tool.id, tool])))
+const toolsByCode = computed(() => new Map(visibleTools.value.map((tool) => [tool.id, tool])))
+
+const pageTitle = computed(() => (props.mode === "agents" ? "智能体工具" : "AI 工具市场"))
+const pageDescription = computed(() =>
+  props.mode === "agents"
+    ? "浏览后台上线的智能体工作流工具"
+    : "发现模型和内容生成工具",
+)
+const sectionTitle = computed(() => (props.mode === "agents" ? "智能体专区" : "智能创作区"))
+const emptyText = computed(() =>
+  props.mode === "agents" ? "暂无上线智能体，请在管理侧智能体管理中启用" : "暂无可用工具，请联系管理员",
+)
 
 const tasksByRecency = computed(() =>
   [...tasks.value].sort(
@@ -154,7 +181,7 @@ const recentUsedEntries = computed(() => {
     if (list.length >= 5) break
   }
   if (list.length < 5) {
-    for (const tool of sortedTools.value) {
+    for (const tool of visibleTools.value) {
       if (seen.has(tool.id)) continue
       const previewUrl = normalizeMediaUrl(tool.iconUrl)
       list.push({
@@ -170,7 +197,7 @@ const recentUsedEntries = computed(() => {
 
 function topToolForModality(modality: string): AITool | null {
   const key = normalizeModality(modality)
-  const candidates = tools.value.filter((tool) => normalizeModality(tool.outputModality) === key)
+  const candidates = visibleTools.value.filter((tool) => normalizeModality(tool.outputModality) === key)
   if (candidates.length === 0) return null
   return [...candidates].sort((a, b) => {
     const used = (usageCounts.value.get(b.id) || 0) - (usageCounts.value.get(a.id) || 0)
@@ -213,7 +240,7 @@ watch(
 </script>
 
 <template>
-  <AppShell title="AI 工具市场" description="发现模型、智能体和内容生成工具">
+  <AppShell :title="pageTitle" :description="pageDescription">
     <div class="mx-auto w-full max-w-[1540px] px-5 py-7">
       <div
         v-if="offlineNotice"
@@ -284,7 +311,7 @@ watch(
           </div>
         </RouterLink>
         <RouterLink
-          :to="userRoutes.agent"
+          :to="userRoutes.agentTools"
           class="group overflow-hidden rounded-3xl border border-white/8 bg-white/[0.05] p-6 transition hover:-translate-y-1 hover:border-primary/50"
         >
           <h2 class="text-xl font-semibold">人工智能</h2>
@@ -339,7 +366,7 @@ watch(
         </div>
       </section>
 
-      <h2 class="mb-4 text-xl font-semibold">智能创作区</h2>
+      <h2 class="mb-4 text-xl font-semibold">{{ sectionTitle }}</h2>
 
       <div class="mb-6 flex flex-wrap items-center gap-2">
         <button
@@ -389,7 +416,7 @@ watch(
 
       <div v-else-if="filteredTools.length === 0" class="flex flex-col items-center justify-center py-20 text-center">
         <Sparkles class="mb-4 h-12 w-12 text-muted-foreground/50" />
-        <p class="text-sm text-muted-foreground">暂无可用工具，请联系管理员</p>
+        <p class="text-sm text-muted-foreground">{{ emptyText }}</p>
       </div>
 
       <div v-else class="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5">

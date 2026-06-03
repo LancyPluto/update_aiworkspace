@@ -185,6 +185,10 @@ async function createOrder(channel: PaymentChannel) {
       },
       { token: auth.token },
     )
+    if (channel !== "MOCK" && !order.qrCodeUrl) {
+      loadError.value = "支付二维码生成失败，请检查支付宝/微信支付配置或接口权限"
+      return
+    }
     activeOrder.value = order
     showChannelModal.value = false
     showPayModal.value = true
@@ -334,15 +338,6 @@ onUnmounted(clearPolling)
                 alt="支付二维码"
                 class="h-full w-full object-contain"
               />
-              <a
-                v-else-if="activeOrder?.paymentChannel === 'ALIPAY_PAGE' && activeOrder.payUrl"
-                :href="activeOrder.payUrl"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="credit-cashier-link"
-              >
-                打开支付宝收银台
-              </a>
               <QrCode v-else class="h-20 w-20 text-slate-900" />
             </div>
             <p class="mt-4 flex items-center justify-center gap-2 text-sm text-white/60">
@@ -604,20 +599,6 @@ onUnmounted(clearPolling)
   padding: 8px;
   background: #fff;
   border-radius: 12px;
-}
-
-.credit-cashier-link {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  min-height: 44px;
-  border-radius: 999px;
-  background: #1677ff;
-  color: #fff;
-  font-size: 14px;
-  font-weight: 700;
-  text-decoration: none;
 }
 
 .credit-mock-pay {

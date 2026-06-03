@@ -89,10 +89,10 @@ function capabilitiesFromTool(tool: ToolSummary): Capability[] {
   const output = (tool.outputModality || "").toUpperCase()
   const type = (tool.toolType || "").toUpperCase()
 
-  if (output === "IMAGE" || type.includes("IMAGE")) {
+  if (output === "IMAGE" || output === "VIDEO" || type.includes("IMAGE") || type.includes("VIDEO")) {
     capabilities.push({
       type: "imageGeneration",
-      config: { aspectRatios: ["1:1", "16:9", "9:16"], defaultRatio: "1:1", maxImagesPerRequest: 1 },
+      config: { aspectRatios: ["16:9", "9:16"], defaultRatio: "16:9", maxImagesPerRequest: 1 },
     })
   }
   if (input === "FILE" || input === "MULTIMODAL") {
@@ -126,6 +126,9 @@ function mapToolSummaryToAITool(tool: ToolSummary | ToolDetail): AITool {
     capabilities: capabilitiesFromTool(tool),
     inputModality: tool.inputModality,
     outputModality: tool.outputModality,
+    toolType: tool.toolType,
+    categoryCode: tool.categoryCode,
+    categoryName: tool.categoryName,
     fields: "fields" in tool ? tool.fields : undefined,
     estimatedCreditCost: tool.estimatedCreditCost,
     modelConfigName: tool.modelConfigName,

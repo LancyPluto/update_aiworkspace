@@ -2,7 +2,7 @@ import pytest
 
 from app.core.agent_decision import AgentDecisionService
 from app.core.intent_router import Intent
-from app.core.schemas import RunContext, ToolDescriptor
+from app.core.schemas import RecentToolCallContext, RunContext, ToolDescriptor
 
 
 def _context(message: str) -> RunContext:
@@ -152,6 +152,63 @@ async def test_schema_fallback_routes_colloquial_image_request_when_llm_router_f
     assert decision.selectedToolCode == "ofox_gpt_image2"
     assert decision.reason == "schema_image_tool_fallback"
     assert decision.signals[-1]["source"] == "fallback"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("message", ["跟我聊天", "聊聊天", "我们正常聊会儿"])
+async def test_explicit_chat_intent_is_not_polluted_by_previous_insufficient_balance_tool_call(message):
+    service = AgentDecisionService()
+    context = _context(message)
+    context.creditBudget = 0
+    context.recentToolCalls = [
+        RecentToolCallContext(
+            id=9,
+            runId=8,
+            toolCode="ofox_gpt_image2",
+            resultJson={"status": "FAILED"},
+            errorCode="INSUFFICIENT_CREDITS",
+            errorMessage="余额不足",
+        )
+    ]
+
+    async def llm_router(context, rule_intent):
+        return rule_intent.model_copy(
+            update={
+                "intent": Intent.TOOL_USE,
+                "confidence": 0.94,
+                "selectedToolCode": "ofox_gpt_image2",
+                "candidateToolCodes": ["ofox_gpt_image2"],
+                "decisionSource": "llm_router",
+                "reason": "polluted_by_previous_tool_context",
+            }
+        )
+
+    decision = await service.decide(context, hard_rule=_hard_rule, llm_router=llm_router)
+
+    assert decision.intent == Intent.GENERAL_CHAT
+    assert decision.selectedToolCode is None
+    assert decision.reason == "explicit_chat_intent"
+    assert decision.signals[0]["source"] == "conversation_guard"
+
+
+@pytest.mark.asyncio
+async def test_generation_followup_after_previous_tool_call_still_routes_to_tool():
+    service = AgentDecisionService()
+    context = _context("再来一张")
+    context.recentToolCalls = [
+        RecentToolCallContext(
+            id=10,
+            runId=9,
+            toolCode="ofox_gpt_image2",
+            argumentsJson={"prompt": "生成图片"},
+            resultJson={"status": "SUCCESS"},
+        )
+    ]
+
+    decision = await service.decide(context, hard_rule=_hard_rule, llm_router=None)
+
+    assert decision.intent == Intent.TOOL_USE
+    assert decision.selectedToolCode == "ofox_gpt_image2"
 
 
 @pytest.mark.asyncio

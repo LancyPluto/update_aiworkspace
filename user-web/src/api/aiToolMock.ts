@@ -13,7 +13,7 @@ const MOCK_TOOLS: AITool[] = [
     capabilities: [
       {
         type: "imageGeneration",
-        config: { aspectRatios: ["1:1", "16:9", "9:16"], defaultRatio: "1:1", maxImagesPerRequest: 1 },
+        config: { aspectRatios: ["16:9", "9:16"], defaultRatio: "16:9", maxImagesPerRequest: 1 },
       },
       { type: "fileReading", config: { supportedFileTypes: ["pdf", "txt", "png"], maxSizeMB: 20 } },
     ],

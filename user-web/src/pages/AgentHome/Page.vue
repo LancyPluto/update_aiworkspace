@@ -1,5 +1,5 @@
 <script setup lang="ts">
-  import { computed, nextTick, onMounted, ref, watch } from "vue"
+  import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue"
   import { ChevronLeft, ChevronRight, Loader2, Plus, Sparkles, Trash2 } from "lucide-vue-next"
   import AppShell from "@/components/AppShell.vue"
   import AgentChatPane from "./AgentChatPane.vue"
@@ -24,6 +24,7 @@
   const sessionsLoading = ref(false)
   const modelsLoading = ref(false)
   const chatPaneRef = ref<InstanceType<typeof AgentChatPane> | null>(null)
+  let modelRefreshTimer: number | null = null
 
   const AGENT_SESSION_SIDEBAR_KEY = "ai_tool_market_agent_session_sidebar_open"
   const AGENT_LAST_SESSION_KEY = "ai_tool_market_agent_last_session_id"
@@ -107,7 +108,9 @@
       }
       const savedRaw = localStorage.getItem(AGENT_SELECTED_MODEL_KEY)
       const savedId = savedRaw ? Number(savedRaw) : NaN
+      const currentId = selectedModelConfigId.value
       const target =
+        list.find((model) => model.id === currentId) ??
         list.find((model) => model.id === savedId) ??
         list.find((model) => model.isDefault) ??
         list[0]
@@ -116,6 +119,11 @@
     } finally {
       modelsLoading.value = false
     }
+  }
+
+  function refreshAgentModelsInBackground() {
+    if (modelsLoading.value) return
+    void loadAgentModels()
   }
 
   async function loadSessions() {
@@ -190,6 +198,18 @@
     void nextTick(() => applyStoredAgentTheme())
     void loadAgentModels()
     void loadSessions()
+    modelRefreshTimer = window.setInterval(refreshAgentModelsInBackground, 15000)
+    window.addEventListener("focus", refreshAgentModelsInBackground)
+    document.addEventListener("visibilitychange", refreshAgentModelsInBackground)
+  })
+
+  onUnmounted(() => {
+    if (modelRefreshTimer != null) {
+      window.clearInterval(modelRefreshTimer)
+      modelRefreshTimer = null
+    }
+    window.removeEventListener("focus", refreshAgentModelsInBackground)
+    document.removeEventListener("visibilitychange", refreshAgentModelsInBackground)
   })
 </script>
 

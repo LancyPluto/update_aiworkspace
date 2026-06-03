@@ -15,6 +15,8 @@ public class AiTool {
     private Long categoryId;
     @TableField(exist = false)
     private String categoryName;
+    @TableField(exist = false)
+    private String categoryCode;
     private String description;
     private String coverUrl;
     private String toolType;
@@ -74,6 +76,14 @@ public class AiTool {
 
     public void setCategoryName(String categoryName) {
         this.categoryName = categoryName;
+    }
+
+    public String getCategoryCode() {
+        return categoryCode;
+    }
+
+    public void setCategoryCode(String categoryCode) {
+        this.categoryCode = categoryCode;
     }
 
     public String getDescription() {

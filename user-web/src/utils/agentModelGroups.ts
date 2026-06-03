@@ -185,6 +185,17 @@ function relayMetaFromHost(hostname: string): AgentModelGroupMeta {
 }
 
 export function resolveAgentModelGroup(model: AgentModelConfig): AgentModelGroupMeta {
+  if (model.channelCode?.trim() || model.channelLabel?.trim() || model.channelIconAsset?.trim()) {
+    const key = model.channelCode?.trim() || model.channelIconAsset?.trim() || "channel"
+    const iconAsset = model.channelIconAsset?.trim() || key
+    return {
+      key: `vendor:${key}`,
+      label: model.channelLabel?.trim() || key,
+      mark: (model.channelLabel?.trim() || key).slice(0, 1).toUpperCase(),
+      iconUrl: catalogIconUrl(iconAsset),
+      kind: "vendor",
+    }
+  }
   const allText = modelSearchText(model)
   const baseText = baseSearchText(model)
   const hostname = parseHostname(model.baseUrl)
@@ -234,6 +245,17 @@ export function groupKeyForModel(model: AgentModelConfig) {
 
 /** 模型条目上展示的真实厂商（不受中转站分组影响） */
 export function resolveAgentModelVendor(model: AgentModelConfig): AgentModelGroupMeta {
+  if (model.channelCode?.trim() || model.channelLabel?.trim() || model.channelIconAsset?.trim()) {
+    const key = model.channelCode?.trim() || model.channelIconAsset?.trim() || "channel"
+    const iconAsset = model.channelIconAsset?.trim() || key
+    return {
+      key: `vendor:${key}`,
+      label: model.channelLabel?.trim() || key,
+      mark: (model.channelLabel?.trim() || key).slice(0, 1).toUpperCase(),
+      iconUrl: catalogIconUrl(iconAsset),
+      kind: "vendor",
+    }
+  }
   const allText = modelSearchText(model)
   const baseText = baseSearchText(model)
   const vendorFromModel = findCatalogMatch(allText, vendorCatalog)

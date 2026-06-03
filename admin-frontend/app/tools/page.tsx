@@ -31,7 +31,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import {
   AlertCircle,
@@ -93,6 +92,8 @@ import { fetchModelProviders } from "@/lib/api/model-providers"
 import { ApiError, getBaseUrl } from "@/lib/api/http"
 import { downloadConfigBundle, exportConfigBundle, importConfigBundle, readConfigBundleFile } from "@/lib/api/config-bundles"
 import type { AgentModelConfig, ModelProviderDescriptor, ToolCategory, ToolField, ToolFieldPayload, ToolSummary } from "@/lib/api/types"
+
+const adminBasePath = (process.env.NEXT_PUBLIC_ADMIN_BASE_PATH || "").replace(/\/$/, "")
 
 interface ToolRow {
   id: string
@@ -320,6 +321,103 @@ function safePreviewFields(json: string): EditableField[] {
   }
 }
 
+function EmbeddedOnOffSwitch({
+  checked,
+  disabled,
+  label,
+  onCheckedChange,
+}: {
+  checked: boolean
+  disabled?: boolean
+  label: string
+  onCheckedChange: (checked: boolean) => void
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      disabled={disabled}
+      onClick={() => onCheckedChange(!checked)}
+      className={cn(
+        "relative inline-flex h-7 w-[62px] shrink-0 items-center overflow-hidden rounded-full border px-1 text-[10px] font-black shadow-sm transition-all duration-300",
+        checked
+          ? "border-blue-500 bg-blue-500 text-slate-950 shadow-blue-200"
+          : "border-slate-200 bg-slate-100 text-slate-400 shadow-slate-100",
+        disabled ? "cursor-not-allowed opacity-60" : "cursor-pointer hover:shadow-md",
+      )}
+    >
+      <span
+        className={cn(
+          "absolute left-0.5 top-0.5 h-6 w-6 rounded-full bg-white shadow-[0_2px_6px_rgba(15,23,42,0.22)] ring-1 ring-slate-200 transition-transform duration-300",
+          checked ? "translate-x-[34px]" : "translate-x-0",
+        )}
+      />
+      <span className={cn("z-10 w-full text-center tracking-wide transition-all duration-300", checked ? "pr-7" : "pl-7")}>
+        {checked ? "ON" : "OFF"}
+      </span>
+    </button>
+  )
+}
+
+function vendorIconAssetForKey(key: string, config?: AgentModelConfig | null) {
+  if (config?.channelIconAsset?.trim()) return config.channelIconAsset.trim()
+  const icons: Record<string, string> = {
+    aliyun: "qwen",
+    anthropic: "anthropic",
+    deepseek: "deepseek",
+    google: "gemini",
+    kling: "kling",
+    minimax: "minimax",
+    moonshot: "moonshot",
+    openai: "openai",
+    qwen: "qwen",
+    siliconflow: "siliconflow",
+    volcengine: "doubao",
+    zhipu: "zhipu",
+  }
+  return icons[key] || "api"
+}
+
+function VendorIconBadge({ iconAsset, label, className }: { iconAsset: string; label: string; className?: string }) {
+  const [failed, setFailed] = useState(false)
+  return (
+    <span className={cn("inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border bg-white p-1 text-xs font-semibold text-slate-600", className)}>
+      {failed ? (
+        <span>{label.slice(0, 1).toUpperCase()}</span>
+      ) : (
+        <img
+          src={`${adminBasePath}/assets/vendor-icons/${iconAsset || "api"}.svg`}
+          alt={label}
+          className="h-full w-full object-contain"
+          onError={() => setFailed(true)}
+        />
+      )}
+    </span>
+  )
+}
+
+function displayCategoryForTool(tool: Pick<ToolRow, "toolType" | "inputModality" | "outputModality" | "category">) {
+  if ((tool.toolType || "").toUpperCase() === "AGENT") return "智能体"
+  const input = (tool.inputModality || "").toUpperCase()
+  const output = (tool.outputModality || "").toUpperCase()
+  if (input === "TEXT" && output === "IMAGE") return "文生图"
+  if ((input === "TEXT" || input === "IMAGE" || input === "MULTIMODAL") && output === "VIDEO") return input === "TEXT" ? "文生视频" : "图生视频"
+  if (input === "TEXT" && output === "TEXT") return "文案生成"
+  if (output === "AUDIO") return "文生音频"
+  if (input === "AUDIO" && output === "TEXT") return "语音转文字"
+  if (tool.category && tool.category.toLowerCase() !== "copywriting") return tool.category
+  return optionLabel(modalityOptions, output) || "工具"
+}
+
+function shouldShowToolCredits(tool: Pick<ToolRow, "toolType" | "outputModality" | "credits">) {
+  if (!tool.credits || tool.credits <= 0) return false
+  const output = (tool.outputModality || "").toUpperCase()
+  const type = (tool.toolType || "").toUpperCase()
+  return output !== "TEXT" && type !== "TEXT_GENERATION"
+}
+
 function mapTool(tool: ToolSummary): ToolRow {
   const { note, style } = extractFrontendStyle(tool.configNote)
   return {
@@ -364,6 +462,7 @@ function isAgentTool(tool: Pick<ToolRow, "toolCode" | "toolType" | "executionHan
 
 function modelVendorKey(config?: AgentModelConfig | null) {
   if (!config) return "unbound"
+  if (config.channelCode?.trim()) return config.channelCode.trim()
   const text = [config.provider, config.displayName, config.modelName, config.baseUrl].filter(Boolean).join(" ").toLowerCase()
   if (text.includes("deepseek")) return "deepseek"
   if (text.includes("doubao") || text.includes("volc") || text.includes("ark.cn")) return "volcengine"
@@ -375,7 +474,8 @@ function modelVendorKey(config?: AgentModelConfig | null) {
   return config.provider || "other"
 }
 
-function modelVendorLabel(key: string) {
+function modelVendorLabel(key: string, config?: AgentModelConfig | null) {
+  if (config?.channelLabel?.trim()) return config.channelLabel.trim()
   const labels: Record<string, string> = {
     deepseek: "DeepSeek",
     volcengine: "火山引擎 / 豆包",
@@ -384,6 +484,11 @@ function modelVendorLabel(key: string) {
     kling: "可灵",
     minimax: "MiniMax",
     openai: "OpenAI",
+    google: "Google Gemini",
+    qwen: "通义千问",
+    zhipu: "智谱 GLM",
+    moonshot: "Moonshot / Kimi",
+    anthropic: "Anthropic Claude",
     unbound: "未绑定模型",
     other: "其他厂商",
   }
@@ -525,20 +630,22 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
   )
 
   const groupedModelTools = useMemo(() => {
-    const groups = new Map<string, ToolRow[]>()
+    const groups = new Map<string, { label: string; iconAsset: string; tools: ToolRow[] }>()
     for (const tool of filteredTools) {
-      const key = mode === "agents"
-        ? "agent-workflow"
-        : modelVendorKey(tool.modelConfigId ? modelConfigById.get(tool.modelConfigId) : null)
-      groups.set(key, [...(groups.get(key) || []), tool])
+      const config = tool.modelConfigId ? modelConfigById.get(tool.modelConfigId) : null
+      const key = mode === "agents" ? "agent-workflow" : modelVendorKey(config)
+      const label = mode === "agents" ? "智能体工作流" : modelVendorLabel(key, config)
+      const iconAsset = mode === "agents" ? "api" : vendorIconAssetForKey(key, config)
+      const existing = groups.get(key)
+      groups.set(key, { label: existing?.label || label, iconAsset: existing?.iconAsset || iconAsset, tools: [...(existing?.tools || []), tool] })
     }
     return [...groups.entries()]
-      .sort(([a], [b]) => groupLabel(a).localeCompare(groupLabel(b), "zh-CN"))
-      .map(([key, tools]) => ({
+      .sort(([, a], [, b]) => a.label.localeCompare(b.label, "zh-CN"))
+      .map(([key, group]) => ({
         key,
-        label: groupLabel(key),
-        tools,
-        modalityGroups: groupToolsByOutputModality(tools),
+        label: group.label,
+        iconAsset: group.iconAsset,
+        tools: group.tools,
       }))
   }, [filteredTools, modelConfigById, mode])
 
@@ -561,30 +668,20 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
       .map(([key, count]) => ({ key, label: optionLabel(modalityOptions, key), count }))
   }, [toolList, mode])
 
-  function groupLabel(key: string) {
-    if (key === "agent-workflow") return "智能体工作流"
-    return modelVendorLabel(key)
-  }
-
-  function groupToolsByOutputModality(tools: ToolRow[]) {
-    const order = ["TEXT", "IMAGE", "AUDIO", "VIDEO", "JSON", "FILE", "MULTIMODAL"]
-    const groups = new Map<string, ToolRow[]>()
-    for (const tool of tools) {
-      const key = (tool.outputModality || "TEXT").trim().toUpperCase()
-      groups.set(key, [...(groups.get(key) || []), tool])
-    }
-    return [...groups.entries()]
-      .sort(([a], [b]) => {
-        const ia = order.indexOf(a)
-        const ib = order.indexOf(b)
-        return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib)
-      })
-      .map(([key, groupedTools]) => ({
-        key,
-        label: optionLabel(modalityOptions, key),
-        tools: groupedTools,
-      }))
-  }
+  const statusFilterOptions = useMemo(() => {
+    const scoped = toolList.filter((tool) => {
+      const agent = isAgentTool(tool)
+      if (mode === "models" && agent) return false
+      if (mode === "agents" && !agent) return false
+      return true
+    })
+    const online = scoped.filter((tool) => tool.status).length
+    return [
+      { value: "ALL" as const, label: "全部状态", count: scoped.length },
+      { value: "ONLINE" as const, label: "已上线", count: online },
+      { value: "OFFLINE" as const, label: "未上线", count: scoped.length - online },
+    ]
+  }, [toolList, mode])
 
   const requiredModelCapability = useMemo(() => {
     const code = editingTool?.toolCode ?? form.toolCode ?? ""
@@ -1035,43 +1132,38 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          {([
-            ["ALL", "全部状态"],
-            ["ONLINE", "已上线"],
-            ["OFFLINE", "未上线"],
-          ] as const).map(([value, label]) => (
-            <Button
-              key={value}
-              type="button"
-              size="sm"
-              variant={statusFilter === value ? "default" : "outline"}
-              onClick={() => setStatusFilter(value)}
-            >
-              {label}
-            </Button>
-          ))}
-          <Button
-            type="button"
-            size="sm"
-            variant={selectedOutputModality === null ? "default" : "outline"}
-            onClick={() => setSelectedOutputModality(null)}
-          >
-            全部
-            <span className="ml-1 opacity-70">{filteredTools.length}</span>
-          </Button>
-          {outputModalityFilters.map((item) => (
-            <Button
-              key={item.key}
-              type="button"
-              size="sm"
-              variant={selectedOutputModality === item.key ? "default" : "outline"}
-              onClick={() => setSelectedOutputModality(item.key)}
-            >
-              {item.label}
-              <span className="ml-1 opacity-70">{item.count}</span>
-            </Button>
-          ))}
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="min-w-[160px] space-y-1">
+            <Label className="text-xs text-muted-foreground">上线状态</Label>
+            <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as ToolStatusFilter)}>
+              <SelectTrigger className="h-9 bg-background">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {statusFilterOptions.map((item) => (
+                  <SelectItem key={item.value} value={item.value}>
+                    {item.label} {item.count}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="min-w-[180px] space-y-1">
+            <Label className="text-xs text-muted-foreground">输出模态</Label>
+            <Select value={selectedOutputModality ?? "ALL"} onValueChange={(value) => setSelectedOutputModality(value === "ALL" ? null : value)}>
+              <SelectTrigger className="h-9 bg-background">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ALL">全部 {statusFilterOptions[0]?.count ?? toolList.length}</SelectItem>
+                {outputModalityFilters.map((item) => (
+                  <SelectItem key={item.key} value={item.key}>
+                    {item.label} {item.count}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
 
           <Dialog
@@ -1531,137 +1623,87 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
           ) : groupedModelTools.map((group) => (
             <section key={group.key} className="rounded-lg border border-border bg-card/40 p-4">
               <div className="mb-4 flex items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-base font-semibold text-card-foreground">{group.label}</h2>
-                  <p className="text-xs text-muted-foreground">
-                    {mode === "agents" ? "仅展示智能体工具，工作流画布入口在这里维护。" : "按模型厂商归类展示，不包含智能体工具。"}
-                  </p>
+                <div className="flex min-w-0 items-center gap-3">
+                  <VendorIconBadge iconAsset={group.iconAsset} label={group.label} />
+                  <div className="min-w-0">
+                    <h2 className="truncate text-base font-semibold text-card-foreground">{group.label}</h2>
+                    <p className="text-xs text-muted-foreground">
+                      {mode === "agents" ? "仅展示智能体工具，工作流画布入口在这里维护。" : "按模型厂商归类展示，不包含智能体工具。"}
+                    </p>
+                  </div>
                 </div>
                 <Badge variant="secondary">{group.tools.length} 个工具</Badge>
               </div>
               <div className="space-y-5">
-                {(mode === "agents"
-                  ? [{ key: "ALL", label: "全部", tools: group.tools }]
-                  : group.modalityGroups
-                ).map((modalityGroup) => (
+                {[{ key: "ALL", label: "全部", tools: group.tools }].map((modalityGroup) => (
                   <div key={`${group.key}-${modalityGroup.key}`} className="space-y-3">
-                    {mode === "agents" ? null : (
-                      <div className="flex items-center justify-between gap-3 border-t border-border/70 pt-4 first:border-t-0 first:pt-0">
-                        <div className="flex items-center gap-2">
-                          <Badge variant="outline">{modalityGroup.label}</Badge>
-                          <span className="text-xs text-muted-foreground">输出模态</span>
-                        </div>
-                        <span className="text-xs text-muted-foreground">{modalityGroup.tools.length} 个工具</span>
-                      </div>
-                    )}
                     <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 md:grid-cols-3">
           {modalityGroup.tools.map((tool) => (
             <div
               key={tool.id}
               className={cn(
-                "group relative overflow-hidden rounded-2xl border border-border bg-card p-6 transition-all duration-300 hover:border-primary/30 hover:shadow-lg hover:shadow-primary/5",
+                "group relative overflow-hidden rounded-xl border border-border bg-card p-6 transition-all duration-300 hover:border-primary/30 hover:shadow-lg hover:shadow-primary/5",
                 !tool.status && "opacity-60",
               )}
             >
-              {tool.coverUrl ? (
-                <div className="-mx-6 -mt-6 mb-5 overflow-hidden border-b border-border bg-muted">
-                  {isVideoPreviewUrl(tool.coverUrl) ? (
-                    <video
-                      src={normalizeToolMediaUrl(tool.coverUrl)}
-                      className="aspect-video w-full object-cover"
-                      muted
-                      loop
-                      playsInline
-                      preload="metadata"
-                    />
-                  ) : (
-                    <img src={normalizeToolMediaUrl(tool.coverUrl)} alt={tool.name} className="aspect-video w-full object-cover" />
-                  )}
-                </div>
-              ) : null}
               <div className="flex items-start justify-between gap-4">
                 <div className="flex min-w-0 items-center gap-3">
-                  <div
-                    className="flex h-10 w-10 items-center justify-center rounded-xl"
-                    style={{ backgroundColor: `${tool.primaryColor || "#3b82f6"}18` }}
-                  >
-                    <tool.icon className="h-5 w-5" style={{ color: tool.primaryColor || "hsl(var(--primary))" }} />
-                  </div>
                   <div className="min-w-0">
                     <h3 className="truncate font-semibold text-card-foreground">{tool.name}</h3>
                     <div className="mt-1 flex flex-wrap gap-1.5">
-                      <Badge variant="secondary" className="text-xs font-normal">{tool.category}</Badge>
-                      <Badge variant={tool.status ? "outline" : "destructive"} className="text-xs font-normal">
-                        {tool.status ? "已上线" : "已下线"}
-                      </Badge>
+                      <Badge variant="secondary" className="text-xs font-normal">{displayCategoryForTool(tool)}</Badge>
                     </div>
                   </div>
                 </div>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="icon" className="h-8 w-8 opacity-0 transition-opacity group-hover:opacity-100">
-                      <MoreHorizontal className="h-4 w-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="bg-card border-border">
-                    <DropdownMenuItem className="gap-2" onClick={() => openEditDialog(tool)}>
-                      <Pencil className="h-4 w-4" /> 编辑
-                    </DropdownMenuItem>
-                    {mode === "agents" ? (
-                      <DropdownMenuItem asChild className="gap-2">
-                        <Link href={`/tools/${tool.rawId}/workflow`}>
-                          <Workflow className="h-4 w-4" /> 工作流画布
-                        </Link>
+                <div className="flex shrink-0 items-center gap-2">
+                  {shouldShowToolCredits(tool) ? (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-primary/20 bg-primary/5 px-2 py-1 text-xs font-medium text-card-foreground">
+                    {tool.credits} 算力
+                  </span>
+                  ) : null}
+                  <EmbeddedOnOffSwitch
+                    checked={tool.status}
+                    disabled={togglingId === tool.rawId}
+                    label={`${tool.name} 上线状态`}
+                    onCheckedChange={() => toggleToolStatus(tool.id)}
+                  />
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="ghost" size="icon" className="h-8 w-8 opacity-0 transition-opacity group-hover:opacity-100">
+                        <MoreHorizontal className="h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="bg-card border-border">
+                      <DropdownMenuItem className="gap-2" onClick={() => openEditDialog(tool)}>
+                        <Pencil className="h-4 w-4" /> 编辑
                       </DropdownMenuItem>
-                    ) : null}
-                    <DropdownMenuItem className="gap-2" onClick={() => openFieldDialog(tool)}>
-                      <FileText className="h-4 w-4" /> 字段配置
-                    </DropdownMenuItem>
-                    <DropdownMenuItem className="gap-2" disabled>
-                      <Copy className="h-4 w-4" /> 复制
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      className="gap-2 text-destructive"
-                      disabled={deletingId === tool.rawId}
-                      onClick={() => handleDeleteTool(tool)}
-                    >
-                      <Trash2 className="h-4 w-4" /> {deletingId === tool.rawId ? "删除中..." : "删除"}
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                      {mode === "agents" ? (
+                        <DropdownMenuItem asChild className="gap-2">
+                          <Link href={`/tools/${tool.rawId}/workflow`}>
+                            <Workflow className="h-4 w-4" /> 工作流画布
+                          </Link>
+                        </DropdownMenuItem>
+                      ) : null}
+                      <DropdownMenuItem className="gap-2" onClick={() => openFieldDialog(tool)}>
+                        <FileText className="h-4 w-4" /> 字段配置
+                      </DropdownMenuItem>
+                      <DropdownMenuItem className="gap-2" disabled>
+                        <Copy className="h-4 w-4" /> 复制
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        className="gap-2 text-destructive"
+                        disabled={deletingId === tool.rawId}
+                        onClick={() => handleDeleteTool(tool)}
+                      >
+                        <Trash2 className="h-4 w-4" /> {deletingId === tool.rawId ? "删除中..." : "删除"}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
               </div>
 
               <p className="mt-3 line-clamp-2 text-sm text-muted-foreground">{tool.description}</p>
 
-              <div className="mt-4 grid gap-2 border-t border-border pt-4 text-xs">
-                <div className="flex items-center justify-between gap-3 rounded-lg bg-muted/40 px-3 py-2">
-                  <span className="text-muted-foreground">工作流类型</span>
-                  <span className="truncate font-medium text-card-foreground">{optionLabel(toolTypeOptions, tool.toolType)}</span>
-                </div>
-                <div className="flex items-center justify-between gap-3 rounded-lg bg-muted/40 px-3 py-2">
-                  <span className="text-muted-foreground">输入 / 输出</span>
-                  <span className="truncate font-medium text-card-foreground">
-                    {optionLabel(modalityOptions, tool.inputModality)} {"->"} {optionLabel(modalityOptions, tool.outputModality)}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between gap-3 rounded-lg bg-muted/40 px-3 py-2">
-                  <span className="text-muted-foreground">执行器</span>
-                  <span className="truncate font-mono text-card-foreground">{tool.executionHandler || "MODEL"}</span>
-                </div>
-                <div className="flex items-center justify-between gap-3 rounded-lg bg-muted/40 px-3 py-2">
-                  <span className="text-muted-foreground">绑定模型</span>
-                  <span className="max-w-[180px] truncate text-right font-medium text-card-foreground">
-                    {tool.modelConfigName || tool.modelName || "默认模型配置"}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between gap-3 rounded-lg bg-muted/40 px-3 py-2">
-                  <span className="text-muted-foreground">消耗算力</span>
-                  <span className="flex items-center gap-1 font-medium text-card-foreground">
-                    <Sparkles className="h-3.5 w-3.5 text-primary" />
-                    {tool.credits}
-                  </span>
-                </div>
-              </div>
               {mode === "agents" ? (
                 <Button asChild variant="outline" size="sm" className="mt-4 w-full gap-2">
                   <Link href={`/tools/${tool.rawId}/workflow`}>
@@ -1670,22 +1712,6 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
                   </Link>
                 </Button>
               ) : null}
-
-              <div className="mt-4 flex items-center justify-between border-t border-border pt-4">
-                <div className="text-sm">
-                  <p className="font-medium text-card-foreground">
-                    {tool.status ? "已上线" : "已下线"}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {tool.status ? "用户端可见并可使用" : "用户端暂不可见"}
-                  </p>
-                </div>
-                <Switch
-                  checked={tool.status}
-                  disabled={togglingId === tool.rawId}
-                  onCheckedChange={() => toggleToolStatus(tool.id)}
-                />
-              </div>
 
               {tool.welcomeMessage ? (
                 <div className="mt-2 rounded-lg bg-secondary/40 px-3 py-2 text-xs text-muted-foreground">

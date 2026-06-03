@@ -15,7 +15,10 @@ export const userRoutes = {
     return { name: "ToolList" }
   },
   get agentPlaceholder() {
-    return { name: "AgentPlaceholder" }
+    return { name: "AgentTools" }
+  },
+  get agentTools() {
+    return { name: "AgentTools" }
   },
   toolDetail(id: string) {
     return { name: "ToolDetail", params: { id } }

@@ -63,7 +63,7 @@ public class UnifiedApiOverviewServiceImpl implements UnifiedApiOverviewService 
 
         Map<String, List<ModelVendorAccountResponse>> accountsByVendor = new LinkedHashMap<>();
         for (ModelVendorAccount account : accounts) {
-            String vendorCode = account.getVendorCode();
+            String vendorCode = canonicalVendorCode(account.getVendorCode());
             accountsByVendor.computeIfAbsent(vendorCode, key -> new ArrayList<>())
                     .add(ModelVendorAccountResponse.from(
                             account,
@@ -73,7 +73,7 @@ public class UnifiedApiOverviewServiceImpl implements UnifiedApiOverviewService 
 
         Map<String, List<UnifiedApiModelItemResponse>> modelsByVendor = new LinkedHashMap<>();
         for (AgentModelConfig config : configs) {
-            String vendorCode = resolveConfigVendorCode(config, accountById);
+            String vendorCode = canonicalVendorCode(resolveConfigVendorCode(config, accountById));
             String accountName = null;
             if (config.getVendorAccountId() != null) {
                 ModelVendorAccount account = accountById.get(config.getVendorAccountId());
@@ -101,7 +101,10 @@ public class UnifiedApiOverviewServiceImpl implements UnifiedApiOverviewService 
                 .toList();
 
         List<UnifiedApiUnconfiguredVendorResponse> unconfigured = vendorCodeResolver.vendorCatalog().entrySet().stream()
-                .filter(entry -> !configuredVendors.contains(entry.getKey()))
+                .filter(entry -> !"openai_gateway".equals(entry.getKey()))
+                .filter(entry -> !"infinite_talk".equalsIgnoreCase(entry.getKey()))
+                .filter(entry -> !"infinitetalk".equalsIgnoreCase(entry.getKey()))
+                .filter(entry -> !configuredVendors.contains(canonicalVendorCode(entry.getKey())))
                 .filter(entry -> !"mock".equals(entry.getKey()))
                 .sorted(Map.Entry.comparingByValue())
                 .map(entry -> new UnifiedApiUnconfiguredVendorResponse(
@@ -134,13 +137,25 @@ public class UnifiedApiOverviewServiceImpl implements UnifiedApiOverviewService 
     }
 
     private String resolveConfigVendorCode(AgentModelConfig config, Map<Long, ModelVendorAccount> accountById) {
+        String inferred = vendorCodeResolver.resolveVendorCode(config);
+        if (inferred != null && !inferred.isBlank() && !"other".equals(inferred)
+                && !"openai".equals(inferred) && !"openai_gateway".equals(inferred)) {
+            return inferred;
+        }
         if (config.getVendorAccountId() != null) {
             ModelVendorAccount account = accountById.get(config.getVendorAccountId());
             if (account != null && account.getVendorCode() != null) {
                 return account.getVendorCode();
             }
         }
-        return vendorCodeResolver.resolveVendorCode(config);
+        return inferred;
+    }
+
+    private static String canonicalVendorCode(String vendorCode) {
+        if ("openai_gateway".equalsIgnoreCase(vendorCode)) {
+            return "openai";
+        }
+        return vendorCode;
     }
 
     private List<String> providersForVendor(String vendorCode) {

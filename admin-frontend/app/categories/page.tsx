@@ -3,9 +3,9 @@
 import { useEffect, useMemo, useState } from "react"
 import { AdminLayout } from "@/components/admin/admin-layout"
 import { AdminHeader } from "@/components/admin/header"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
@@ -18,7 +18,7 @@ import {
   updateToolCategoryStatus,
 } from "@/lib/api/tools"
 import type { ToolCategory, ToolSummary } from "@/lib/api/types"
-import { Edit3, FileText, Plus, RefreshCw, Search, Tags } from "lucide-react"
+import { Edit3, MoreHorizontal, Plus, RefreshCw, Search, Tags, Wrench } from "lucide-react"
 
 interface CategoryForm {
   categoryCode: string
@@ -44,6 +44,46 @@ function statusLabel(status?: string | null) {
 
 function statusVariant(status?: string | null) {
   return normalizeStatus(status) === "ACTIVE" ? "default" : "secondary"
+}
+
+function EmbeddedOnOffSwitch({
+  checked,
+  disabled,
+  label,
+  onCheckedChange,
+}: {
+  checked: boolean
+  disabled?: boolean
+  label: string
+  onCheckedChange: (checked: boolean) => void
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      disabled={disabled}
+      onClick={() => onCheckedChange(!checked)}
+      className={[
+        "relative inline-flex h-7 w-[62px] shrink-0 items-center overflow-hidden rounded-full border px-1 text-[10px] font-black tracking-wide shadow-sm transition-all duration-300 ease-out",
+        checked
+          ? "border-blue-500 bg-blue-500 text-slate-950 shadow-blue-200"
+          : "border-slate-200 bg-slate-100 text-slate-400 shadow-slate-100",
+        disabled ? "cursor-not-allowed opacity-60" : "cursor-pointer hover:shadow-md",
+      ].join(" ")}
+    >
+      <span
+        className={[
+          "absolute left-0.5 top-0.5 h-6 w-6 rounded-full bg-white shadow-[0_2px_6px_rgba(15,23,42,0.22)] ring-1 ring-slate-200 transition-transform duration-300 ease-out",
+          checked ? "translate-x-[34px]" : "translate-x-0",
+        ].join(" ")}
+      />
+      <span className={["z-10 w-full text-center transition-all duration-200", checked ? "pr-7" : "pl-7"].join(" ")}>
+        {checked ? "ON" : "OFF"}
+      </span>
+    </button>
+  )
 }
 
 export default function CategoriesPage() {
@@ -221,43 +261,36 @@ export default function CategoriesPage() {
                       <Tags className="h-5 w-5" />
                     </div>
                     <div>
-                      <h2 className="font-semibold">{category.categoryName}</h2>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h2 className="font-semibold">{category.categoryName}</h2>
+                        <span className="inline-flex items-center gap-1 rounded-full bg-secondary px-2 py-0.5 text-xs text-muted-foreground">
+                          <Wrench className="h-3 w-3" />
+                          {toolCounts[category.id] ?? 0}
+                        </span>
+                      </div>
                       <p className="text-xs text-muted-foreground">{category.categoryCode}</p>
                     </div>
                   </div>
-                  <Badge variant={statusVariant(category.status)}>{statusLabel(category.status)}</Badge>
-                </div>
-
-                <div className="mt-5 grid grid-cols-3 gap-3 text-sm">
-                  <div>
-                    <p className="text-muted-foreground">工具数</p>
-                    <p className="mt-1 font-medium">{toolCounts[category.id] ?? 0}</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground">排序</p>
-                    <p className="mt-1 font-medium">{category.sortOrder ?? 0}</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground">ID</p>
-                    <p className="mt-1 font-medium">{category.id}</p>
-                  </div>
-                </div>
-
-                <div className="mt-5 flex items-center justify-between border-t border-border pt-4">
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <FileText className="h-4 w-4" />
-                    <span>工具分类</span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <Switch
+                  <div className="flex items-center gap-2">
+                    <EmbeddedOnOffSwitch
                       checked={active}
                       disabled={statusUpdatingId === category.id}
+                      label={`Toggle ${category.categoryName}`}
                       onCheckedChange={(checked) => handleStatusChange(category, checked)}
                     />
-                    <Button variant="outline" size="sm" className="gap-2" onClick={() => openEditDialog(category)}>
-                      <Edit3 className="h-4 w-4" />
-                      编辑
-                    </Button>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={`Edit ${category.categoryName}`}>
+                          <MoreHorizontal className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => openEditDialog(category)}>
+                          <Edit3 className="h-4 w-4" />
+                          编辑
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </div>
                 </div>
               </article>

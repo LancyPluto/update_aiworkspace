@@ -15,6 +15,7 @@ import com.aiminilab.aitoolmarket.agent.service.AgentModelConfigService;
 import com.aiminilab.aitoolmarket.agent.service.ModelCapabilityService;
 import com.aiminilab.aitoolmarket.agent.support.ModelCapabilitiesCodec;
 import com.aiminilab.aitoolmarket.agent.support.ModelConfigCredentialResolver;
+import com.aiminilab.aitoolmarket.agent.support.VendorCodeResolver;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -44,6 +45,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
     private final ModelCapabilityService modelCapabilityService;
     private final ModelCapabilitiesCodec capabilitiesCodec;
     private final ModelConfigCredentialResolver credentialResolver;
+    private final VendorCodeResolver vendorCodeResolver;
     private final ObjectMapper objectMapper;
 
     public AgentModelConfigServiceImpl(AgentModelConfigMapper agentModelConfigMapper,
@@ -53,6 +55,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                                        ModelCapabilityService modelCapabilityService,
                                        ModelCapabilitiesCodec capabilitiesCodec,
                                        ModelConfigCredentialResolver credentialResolver,
+                                       VendorCodeResolver vendorCodeResolver,
                                        ObjectMapper objectMapper) {
         this.agentModelConfigMapper = agentModelConfigMapper;
         this.vendorAccountMapper = vendorAccountMapper;
@@ -61,6 +64,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         this.modelCapabilityService = modelCapabilityService;
         this.capabilitiesCodec = capabilitiesCodec;
         this.credentialResolver = credentialResolver;
+        this.vendorCodeResolver = vendorCodeResolver;
         this.objectMapper = objectMapper;
     }
 
@@ -393,7 +397,15 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                 vendorAccountName = account.getAccountName();
             }
         }
-        return AgentModelConfigResponse.from(config, capabilitiesCodec, vendorAccountName);
+        String channelCode = vendorCodeResolver.resolveVendorCode(config);
+        return AgentModelConfigResponse.from(
+                config,
+                capabilitiesCodec,
+                vendorAccountName,
+                channelCode,
+                vendorCodeResolver.vendorLabel(channelCode),
+                vendorCodeResolver.vendorIconAsset(channelCode)
+        );
     }
 
     private List<AgentModelConfig> executableAgentConfigs() {
@@ -412,7 +424,32 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         if ("mock".equals(provider)) {
             return true;
         }
-        return config.getApiKey() != null && !config.getApiKey().isBlank();
+        if (!capabilitiesCodec.parse(config.getCapabilities()).contains("TEXT_GENERATION")) {
+            return false;
+        }
+        if (isKnownNonChatEndpoint(config.getBaseUrl(), config.getProvider(), config.getModelName())) {
+            return false;
+        }
+        return hasExecutableSecret(config.getApiKey()) || hasKlingAccessSecretPair(config.getExtraAuthJson());
+    }
+
+    private boolean isKnownNonChatEndpoint(String baseUrl, String provider, String modelName) {
+        String text = String.join(" ",
+                baseUrl == null ? "" : baseUrl,
+                provider == null ? "" : provider,
+                modelName == null ? "" : modelName).toLowerCase();
+        return text.contains("mineru.net")
+                || text.contains("mineru")
+                || text.contains("pdf")
+                || text.contains("ocr");
+    }
+
+    private boolean hasExecutableSecret(String value) {
+        if (value == null || value.isBlank()) {
+            return false;
+        }
+        String trimmed = value.trim();
+        return !trimmed.startsWith("replace-with-");
     }
 
     @Override

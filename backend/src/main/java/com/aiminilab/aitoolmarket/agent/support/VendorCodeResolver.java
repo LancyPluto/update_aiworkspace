@@ -5,6 +5,7 @@ import com.aiminilab.aitoolmarket.agent.config.ModelProviderRegistry;
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
 import com.aiminilab.aitoolmarket.agent.entity.ModelVendor;
 import com.aiminilab.aitoolmarket.agent.mapper.ModelVendorMapper;
+import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Component;
 
 import java.util.LinkedHashMap;
@@ -30,7 +31,6 @@ public class VendorCodeResolver {
             Map.entry("kling_video", "kling"),
             Map.entry("ofox_openai_images", "openai_gateway"),
             Map.entry("openai_images_gateway", "openai_gateway"),
-            Map.entry("infinitetalk", "infinitetalk"),
             Map.entry("worker_video", "siliconflow"),
             Map.entry("mock", "mock")
     );
@@ -41,11 +41,15 @@ public class VendorCodeResolver {
         VENDOR_LABELS.put("deepseek", "DeepSeek");
         VENDOR_LABELS.put("openai", "OpenAI");
         VENDOR_LABELS.put("openai_gateway", "OpenAI 兼容网关");
+        VENDOR_LABELS.put("google", "Google Gemini");
+        VENDOR_LABELS.put("qwen", "通义千问");
+        VENDOR_LABELS.put("zhipu", "智谱 GLM");
+        VENDOR_LABELS.put("moonshot", "Moonshot / Kimi");
+        VENDOR_LABELS.put("anthropic", "Anthropic Claude");
         VENDOR_LABELS.put("minimax", "MiniMax");
         VENDOR_LABELS.put("siliconflow", "SiliconFlow");
         VENDOR_LABELS.put("volcengine", "火山引擎 / 豆包");
         VENDOR_LABELS.put("kling", "可灵");
-        VENDOR_LABELS.put("infinitetalk", "InfiniteTalk");
         VENDOR_LABELS.put("mock", "Mock");
     }
 
@@ -64,11 +68,14 @@ public class VendorCodeResolver {
     public String resolveVendorCode(String provider, String baseUrl, String displayName, String modelName) {
         String normalizedProvider = provider == null ? "" : provider.trim().toLowerCase(Locale.ROOT);
         String mapped = PROVIDER_TO_VENDOR.get(normalizedProvider);
-        if (mapped != null && !"openai".equals(mapped)) {
-            return mapped;
-        }
         if ("openai_compatible".equals(normalizedProvider)) {
             return inferFromText(baseUrl, displayName, modelName, "openai");
+        }
+        if ("anthropic_compatible".equals(normalizedProvider)) {
+            return inferFromText(baseUrl, displayName, modelName, mapped == null ? "minimax" : mapped);
+        }
+        if (mapped != null && !"openai".equals(mapped)) {
+            return mapped;
         }
         if ("ofox_openai_images".equals(normalizedProvider) || "openai_images_gateway".equals(normalizedProvider)) {
             return "openai_gateway";
@@ -87,7 +94,7 @@ public class VendorCodeResolver {
         if (vendorCode == null || vendorCode.isBlank()) {
             return "其他";
         }
-        ModelVendor vendor = modelVendorMapper.findByCode(vendorCode);
+        ModelVendor vendor = findVendorByCode(vendorCode);
         if (vendor != null && Boolean.TRUE.equals(vendor.getEnabled())
                 && vendor.getVendorLabel() != null && !vendor.getVendorLabel().isBlank()) {
             return vendor.getVendorLabel();
@@ -106,7 +113,7 @@ public class VendorCodeResolver {
 
     public Map<String, String> vendorCatalog() {
         LinkedHashMap<String, String> catalog = new LinkedHashMap<>();
-        for (ModelVendor vendor : modelVendorMapper.findAllEnabled()) {
+        for (ModelVendor vendor : findAllEnabledVendors()) {
             if (vendor.getVendorCode() == null || vendor.getVendorCode().isBlank()) {
                 continue;
             }
@@ -123,7 +130,7 @@ public class VendorCodeResolver {
         if (vendorCode == null || vendorCode.isBlank()) {
             return "api";
         }
-        ModelVendor vendor = modelVendorMapper.findByCode(vendorCode);
+        ModelVendor vendor = findVendorByCode(vendorCode);
         if (vendor != null && Boolean.TRUE.equals(vendor.getEnabled())
                 && vendor.getIconAsset() != null && !vendor.getIconAsset().isBlank()) {
             return vendor.getIconAsset();
@@ -134,7 +141,26 @@ public class VendorCodeResolver {
         if ("volcengine".equalsIgnoreCase(vendorCode)) {
             return "doubao";
         }
+        if ("google".equalsIgnoreCase(vendorCode)) {
+            return "gemini";
+        }
         return vendorCode;
+    }
+
+    private ModelVendor findVendorByCode(String vendorCode) {
+        try {
+            return modelVendorMapper.findByCode(vendorCode);
+        } catch (DataAccessException exception) {
+            return null;
+        }
+    }
+
+    private java.util.List<ModelVendor> findAllEnabledVendors() {
+        try {
+            return modelVendorMapper.findAllEnabled();
+        } catch (DataAccessException exception) {
+            return java.util.List.of();
+        }
     }
 
     private static String inferFromBaseUrl(String baseUrl) {
@@ -147,6 +173,11 @@ public class VendorCodeResolver {
         if (text.contains("volces.com") || text.contains("volcengine")) return "volcengine";
         if (text.contains("klingai.com") || text.contains("kling")) return "kling";
         if (text.contains("minimaxi.com") || text.contains("minimax")) return "minimax";
+        if (text.contains("generativelanguage.googleapis.com") || text.contains("googleapis.com")) return "google";
+        if (text.contains("dashscope.aliyuncs.com") || text.contains("aliyuncs.com")) return "qwen";
+        if (text.contains("bigmodel.cn") || text.contains("zhipu")) return "zhipu";
+        if (text.contains("moonshot.cn") || text.contains("kimi")) return "moonshot";
+        if (text.contains("anthropic.com") || text.contains("claude")) return "anthropic";
         if (text.contains("openai.com")) return "openai";
         if (text.contains("ofox.ai")) return "openai_gateway";
         return null;
@@ -162,6 +193,11 @@ public class VendorCodeResolver {
         if (combined.contains("kling")) return "kling";
         if (combined.contains("doubao") || combined.contains("seed") || combined.contains("volc")) return "volcengine";
         if (combined.contains("minimax")) return "minimax";
+        if (combined.contains("gemini") || combined.contains("google")) return "google";
+        if (combined.contains("qwen") || combined.contains("tongyi") || combined.contains("通义")) return "qwen";
+        if (combined.contains("zhipu") || combined.contains("glm") || combined.contains("chatglm") || combined.contains("智谱")) return "zhipu";
+        if (combined.contains("moonshot") || combined.contains("kimi")) return "moonshot";
+        if (combined.contains("anthropic") || combined.contains("claude")) return "anthropic";
         String fromUrl = inferFromBaseUrl(baseUrl);
         return fromUrl != null ? fromUrl : fallback;
     }

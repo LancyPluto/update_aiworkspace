@@ -58,6 +58,7 @@ public class DataInitializer implements CommandLineRunner {
         createUserIfAbsent("admin", "123456", "Admin", UserType.ADMIN);
         createUserIfAbsent("user1", "123456", "User One", UserType.USER);
         toolCategoryMapper.ensureDefaultCategory();
+        toolCategoryMapper.retireLegacyCategories();
         systemSettingMapper.ensureTable();
         systemSettingVersionMapper.ensureTable();
         seedAgentPromptSettings();

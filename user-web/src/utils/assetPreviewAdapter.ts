@@ -50,6 +50,7 @@ export function assetFromTask(
       taskNo: task.taskNo,
       toolName: task.toolName,
       toolCode: task.toolCode,
+      communityPostId: task.communityPostId ?? undefined,
       modality: options.modality || task.outputModality || task.result?.resourceType || "TEXT",
       createdAt: task.createdAt,
       url: fallbackUrl,
@@ -65,6 +66,7 @@ export function assetFromTask(
     taskNo: task.taskNo,
     toolName: task.toolName,
     toolCode: task.toolCode,
+    communityPostId: task.communityPostId ?? undefined,
     modality: options.modality || task.outputModality || task.result?.resourceType || "TEXT",
     createdAt: task.createdAt,
   } satisfies Partial<AssetPreviewItem>
