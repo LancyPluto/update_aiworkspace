@@ -10,6 +10,7 @@ from app.config import settings
 from app.credit_messages import credit_message_from_backend_error
 from app.core.event_types import MESSAGE_DELTA, TOOL_TASK_DISPATCHED, TOOL_TASK_PROGRESS
 from app.core.schemas import ChatMessage, RunContext, RunEventCreate, TaskCreate, TaskDetailResponse, ToolCallComplete, ToolCallCreate, ToolCallFail, ToolDescriptor
+from app.runtime.runtime_settings import runtime_bool, runtime_float, runtime_int
 from app.tools.registry import infer_output_modality
 from app.tools.stream_preview import extract_stream_preview
 
@@ -486,33 +487,15 @@ def _looks_like_video_tool(tool_code: str) -> bool:
 
 
 def _runtime_int(context: RunContext | None, field: str, fallback: int, min_value: int, max_value: int) -> int:
-    runtime = getattr(context, "runtimeSettings", None)
-    value = getattr(runtime, field, None) if runtime is not None else None
-    if value is None:
-        value = fallback
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        parsed = int(fallback)
-    return max(min_value, min(parsed, max_value))
+    return runtime_int(context, field, fallback, min_value, max_value)
 
 
 def _runtime_bool(context: RunContext | None, field: str, fallback: bool) -> bool:
-    runtime = getattr(context, "runtimeSettings", None)
-    value = getattr(runtime, field, None) if runtime is not None else None
-    return fallback if value is None else bool(value)
+    return runtime_bool(context, field, fallback)
 
 
 def _runtime_float(context: RunContext | None, field: str, fallback: float, min_value: float, max_value: float) -> float:
-    runtime = getattr(context, "runtimeSettings", None)
-    value = getattr(runtime, field, None) if runtime is not None else None
-    if value is None:
-        value = fallback
-    try:
-        parsed = float(value)
-    except (TypeError, ValueError):
-        parsed = float(fallback)
-    return max(min_value, min(parsed, max_value))
+    return runtime_float(context, field, fallback, min_value, max_value)
 
 
 def _infer_prompt_field(tool: ToolDescriptor) -> str | None:

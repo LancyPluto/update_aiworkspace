@@ -20,12 +20,17 @@ class FakeEngine:
     def __init__(self):
         self.run_contexts = []
         self.confirmed_tool_calls = []
+        self.debug_contexts = []
 
     async def run(self, context):
         self.run_contexts.append(context)
 
     async def run_confirmed_tool(self, context, tool_code):
         self.confirmed_tool_calls.append((context, tool_code))
+
+    async def debug_route(self, context):
+        self.debug_contexts.append(context)
+        return {"ok": True}
 
 
 class FakeRuntimeRouter:
@@ -82,3 +87,22 @@ async def test_agent_runtime_uses_selected_engine_for_confirmed_tools():
     router = FakeRuntimeRouter.instances[0]
     assert router.select_calls == [("route me", None)]
     assert router.engine.confirmed_tool_calls == [(backend.context, "xiaohongshu_copywriting")]
+
+
+@pytest.mark.asyncio
+async def test_agent_runtime_uses_selected_engine_for_debug_route():
+    FakeRuntimeRouter.instances = []
+    backend = FakeBackend()
+    model_client = object()
+    runtime = AgentRuntime(
+        backend,
+        model_client=model_client,
+        runtime_router_factory=FakeRuntimeRouter,
+    )
+
+    result = await runtime.debug_route(backend.context)
+
+    router = FakeRuntimeRouter.instances[0]
+    assert router.select_calls == [("route me", None)]
+    assert router.engine.debug_contexts == [backend.context]
+    assert result == {"ok": True}

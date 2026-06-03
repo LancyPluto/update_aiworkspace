@@ -20,3 +20,19 @@ def test_runtime_router_requires_feature_flag_for_deep_agents():
 
     assert isinstance(disabled_engine, LangGraphRuntimeEngine)
     assert isinstance(enabled_engine, DeepAgentsRuntimeEngine)
+
+
+def test_runtime_router_normalizes_default_and_deep_agents_aliases():
+    router = RuntimeRouter(backend_client=object(), model_client=object(), deep_agents_enabled=True)
+
+    assert isinstance(router.select_engine(message="hello", requested_runtime="langgraph"), LangGraphRuntimeEngine)
+    assert isinstance(router.select_engine(message="hello", requested_runtime="default"), LangGraphRuntimeEngine)
+    assert isinstance(router.select_engine(message="hello", requested_runtime="deep-agents"), DeepAgentsRuntimeEngine)
+
+
+def test_runtime_router_debug_selection_uses_same_engine_path():
+    router = RuntimeRouter(backend_client=object(), model_client=object(), deep_agents_enabled=True)
+
+    engine = router.select_debug_engine(message="hello", requested_runtime="deep_agents")
+
+    assert isinstance(engine, DeepAgentsRuntimeEngine)
