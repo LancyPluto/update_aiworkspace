@@ -6,7 +6,7 @@ const steps = [
     number: '01',
     icon: Target,
     title: '智能匹配，用对模型',
-    description: '不是所有 AI 都适合干同一件事。我们为每个工具精心挑选了最擅长该任务的模型——生图用 Midjourney，视频用 Runway，音频用 Suno。你只管提需求，剩下的交给我们。',
+    description: '不是所有 AI 都适合干同一件事。我们为每个工具精心挑选了最擅长该任务的模型——生图用 可灵生图，视频用 可灵生视频，音频用 MiniMax。你只管提需求，剩下的交给我们。',
   },
   {
     number: '02',
