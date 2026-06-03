@@ -22,4 +22,13 @@ public final class AgentRouterSettings {
 
     private AgentRouterSettings() {
     }
+
+    public static java.util.Map<String, String> defaults() {
+        java.util.Map<String, String> defaults = new java.util.LinkedHashMap<>();
+        defaults.put(ENABLED_KEY, String.valueOf(DEFAULT_ENABLED));
+        defaults.put(PROMPT_KEY, DEFAULT_PROMPT);
+        defaults.put(MIN_CONFIDENCE_KEY, DEFAULT_MIN_CONFIDENCE);
+        defaults.put(FALLBACK_TO_RULES_KEY, String.valueOf(DEFAULT_FALLBACK_TO_RULES));
+        return defaults;
+    }
 }

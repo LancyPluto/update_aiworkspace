@@ -12,8 +12,6 @@ import {
   Trash2,
   X,
 } from "lucide-vue-next"
-import RunTimeline from "./RunTimeline.vue"
-import { filterUserFacingRunEvents } from "./runTimelineEvents"
 import AgentComposer from "./AgentComposer.vue"
 import AgentMessageRow from "./AgentMessageRow.vue"
 import AgentAvatar from "./AgentAvatar.vue"
@@ -50,6 +48,7 @@ import {
   updateAgentWorkspaceMemory,
   uploadAgentFile,
 } from "@/api"
+import { formatCreditInsufficientError, isCreditInsufficientCode } from "@/api/creditErrorMessage"
 import type {
   AgentFile,
   AgentMessage,
@@ -87,6 +86,8 @@ const emit = defineEmits<{
 const messages = ref<AgentMessage[]>([])
 const files = ref<AgentFile[]>([])
 const events = ref<AgentRunEvent[]>([])
+const runEventsByRunId = ref<Record<number, AgentRunEvent[]>>({})
+const submittedAttachmentJsonByRunId = ref<Record<number, string>>({})
 const previewTools = ref<ToolSummary[]>([])
 const previewAsset = ref<AssetPreviewItem | null>(null)
 const memoryPanelOpen = ref(false)
@@ -136,6 +137,7 @@ const navLayoutTick = ref(0)
 const messagesKey = computed(() => `agent_messages_${props.sessionId}`)
 let runStreamAbort: AbortController | null = null
 let runStatusWatchdog: number | null = null
+let streamingAnimationTimer: number | null = null
 const terminalEventFinalizingRunIds = new Set<number>()
 
 const input = computed({
@@ -157,16 +159,6 @@ const confirmationEvents = computed(() =>
     .map((event) => ({ event, payload: parseEventJson(event.eventJson) })),
 )
 
-const visibleRunTimelineEvents = computed(() => filterUserFacingRunEvents(events.value, true))
-
-const runStatusText = computed(() => {
-  if (runConnectionStatus.value === "running") return "Agent 正在运行"
-  if (runConnectionStatus.value === "awaiting_confirmation") return "等待你确认工具调用"
-  if (runConnectionStatus.value === "completed") return "Agent 已完成"
-  if (runConnectionStatus.value === "failed") return "Agent 运行失败"
-  return ""
-})
-
 const hasActiveRun = computed(() => {
   if (!activeRunId.value) return false
   return (
@@ -176,10 +168,7 @@ const hasActiveRun = computed(() => {
 })
 
 const showRunRecoveryBanner = computed(
-  () => recoveryRunId.value != null && (showActiveRunLimitHint.value || hasActiveRun.value),
-)
-const selectedAgentModel = computed(() =>
-  props.agentModels.find((model) => model.id === props.modelConfigId) ?? props.agentModels[0] ?? null,
+  () => recoveryRunId.value != null && showActiveRunLimitHint.value,
 )
 const hasStreamingAssistantContent = computed(() =>
   streamingAssistantMessageId.value != null &&
@@ -249,19 +238,35 @@ function resolveAssistantAvatarState(message: AgentMessage): AgentAvatarState {
   return "idle"
 }
 
-function modelLabel(model: AgentModelConfig) {
-  return model.displayName || model.modelName || model.configCode || `Model ${model.id}`
-}
-
-function modelMeta(model: AgentModelConfig) {
-  return `${model.provider} · ${model.modelName}`
-}
-
 function messageTime(value?: string | null) {
   if (!value) return ""
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return ""
-  return date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })
+  return date.toLocaleTimeString("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    hour: "2-digit",
+    minute: "2-digit",
+  })
+}
+
+function messageContentJsonForFiles(items: AgentFile[]) {
+  if (items.length === 0) return undefined
+  return JSON.stringify({
+    attachments: items.map((file) => ({
+      id: file.id,
+      name: file.originalFilename,
+      contentType: file.contentType,
+      size: file.fileSize,
+      status: file.status,
+    })),
+  })
+}
+
+function runEventsForMessage(message: AgentMessage) {
+  if (message.role !== "ASSISTANT" || message.runId == null) return []
+  const cachedEvents = runEventsByRunId.value[message.runId] ?? []
+  if (cachedEvents.length > 0) return cachedEvents
+  return activeRunId.value === message.runId ? events.value : []
 }
 
 function messageDividerTime(value?: string | null) {
@@ -269,13 +274,16 @@ function messageDividerTime(value?: string | null) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return ""
   const now = new Date()
-  const sameDay =
-    date.getFullYear() === now.getFullYear() &&
-    date.getMonth() === now.getMonth() &&
-    date.getDate() === now.getDate()
+  const shanghaiDate = date.toLocaleDateString("zh-CN", { timeZone: "Asia/Shanghai" })
+  const shanghaiToday = now.toLocaleDateString("zh-CN", { timeZone: "Asia/Shanghai" })
+  const sameDay = shanghaiDate === shanghaiToday
   const datePart = sameDay
     ? "今天"
-    : date.toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" })
+    : date.toLocaleDateString("zh-CN", {
+        timeZone: "Asia/Shanghai",
+        month: "2-digit",
+        day: "2-digit",
+      })
   return `${datePart} ${messageTime(value)}`
 }
 
@@ -610,14 +618,22 @@ async function submitMessage(content = input.value) {
   runConnectionStatus.value = "running"
   try {
     input.value = ""
+    const submittedFiles = [...files.value]
+    const submittedAttachmentJson = messageContentJsonForFiles(submittedFiles)
+    const optimisticMessageId = Date.now()
+    files.value = []
     messages.value.push({
-      id: Date.now(),
+      id: optimisticMessageId,
       sessionId: props.sessionId,
       role: "USER",
       contentText: text,
+      contentJson: submittedAttachmentJson,
       editedAt: null,
       createdAt: new Date().toISOString(),
     })
+    // 发送后立即滚动到底部，避免用户输入后仍停留在当前视图。
+    // 流式过程中若仍处于贴底状态，也会在 messages 更新时继续保持贴底。
+    await scrollBottom(true)
     events.value = []
     const res = await sendAgentMessage(
       props.sessionId,
@@ -625,13 +641,25 @@ async function submitMessage(content = input.value) {
         content: text,
         clientRequestId: randomUUID(),
         modelConfigId: props.modelConfigId ?? null,
-        fileIds: files.value.map((item) => item.id),
+        fileIds: submittedFiles.map((item) => item.id),
       },
       { token: props.token },
     )
     activeRunId.value = res.runId
+    if (submittedAttachmentJson) {
+      submittedAttachmentJsonByRunId.value = {
+        ...submittedAttachmentJsonByRunId.value,
+        [res.runId]: submittedAttachmentJson,
+      }
+    }
+    messages.value = messages.value.map((message) =>
+      message.id === optimisticMessageId
+        ? { ...message, id: res.messageId, runId: res.runId }
+        : message,
+    )
     await waitForRunComplete(res.runId)
   } catch (error) {
+    await loadFiles()
     runConnectionStatus.value = "failed"
     activeRunId.value = null
     if (error instanceof ApiBusinessError && error.code === "AGENT_ACTIVE_RUN_LIMIT") {
@@ -877,8 +905,8 @@ function formatAgentError(error: unknown) {
   if (error instanceof ApiBusinessError && error.code === "AGENT_RATE_LIMITED") {
     return "Agent 请求过于频繁，请稍后重试。"
   }
-  if (error instanceof ApiBusinessError && error.code === "AGENT_CREDIT_NOT_ENOUGH") {
-    return "可用算力不足，暂时无法启动 Agent。请先补充或释放算力。"
+  if (error instanceof ApiBusinessError && isCreditInsufficientCode(error.code)) {
+    return formatCreditInsufficientError(error)
   }
   if (error instanceof ApiBusinessError) {
     return error.message || error.code
@@ -908,6 +936,26 @@ function stopRunStatusWatchdog() {
   if (runStatusWatchdog == null) return
   window.clearInterval(runStatusWatchdog)
   runStatusWatchdog = null
+}
+
+function stopStreamingAnimationTimer() {
+  if (streamingAnimationTimer == null) return
+  window.clearTimeout(streamingAnimationTimer)
+  streamingAnimationTimer = null
+}
+
+function animateCompletedAssistantMessage(runId: number) {
+  const assistant = messages.value.find((message) => message.role === "ASSISTANT" && message.runId === runId)
+  if (!assistant?.contentText?.trim() || isStructuredMediaContent(assistant.contentText)) return
+  stopStreamingAnimationTimer()
+  streamingAssistantMessageId.value = assistant.id
+  const duration = Math.min(Math.max(assistant.contentText.length * 4 + 240, 600), 3200)
+  streamingAnimationTimer = window.setTimeout(() => {
+    if (streamingAssistantMessageId.value === assistant.id) {
+      streamingAssistantMessageId.value = null
+    }
+    streamingAnimationTimer = null
+  }, duration)
 }
 
 function startRunStatusWatchdog(runId: number) {
@@ -957,6 +1005,7 @@ function ensureStreamingAssistantMessage(runId: number) {
   const existing = streamingMessageForRun(runId)
   if (existing) return existing
   const tempId = streamingMessageId(runId)
+  stopStreamingAnimationTimer()
   const message: AgentMessage = {
     id: tempId,
     sessionId: props.sessionId,
@@ -973,7 +1022,9 @@ function ensureStreamingAssistantMessage(runId: number) {
 function clearStreamingAssistantMessage(runId: number, options?: { preserveReadableText?: boolean }) {
   const tempId = streamingMessageId(runId)
   const tempMessage = streamingMessageForRun(runId)
-  streamingAssistantMessageId.value = null
+  if (streamingAssistantMessageId.value === tempId) {
+    streamingAssistantMessageId.value = null
+  }
   if (options?.preserveReadableText && tempMessage?.contentText?.trim() && !isStructuredMediaContent(tempMessage.contentText)) {
     return
   }
@@ -1001,7 +1052,8 @@ function completeStreamingAssistantMessage(runId: number, content: string) {
 
 async function syncRunEvents(runId: number, options?: { replayRenderableEvents?: boolean }) {
   if (!props.token) return
-  const afterEventId = events.value.length ? events.value.at(-1)!.id : undefined
+  const cachedEvents = runEventsByRunId.value[runId] ?? []
+  const afterEventId = cachedEvents.length ? cachedEvents.at(-1)!.id : undefined
   const res = await fetchAgentRunEvents(runId, { token: props.token, afterEventId })
   res.list.forEach((event) => {
     if (options?.replayRenderableEvents) {
@@ -1122,6 +1174,9 @@ async function settleTerminalRun(runId: number, run: AgentRun) {
   }
   await refreshMessages({ preserveStreamingRunId: run.status === "FAILED" || run.status === "TIMEOUT" ? runId : undefined })
   clearStreamingAssistantMessage(runId, { preserveReadableText: run.status === "FAILED" || run.status === "TIMEOUT" })
+  if (run.status === "SUCCESS") {
+    animateCompletedAssistantMessage(runId)
+  }
   stopRunStatusWatchdog()
   await scrollBottom()
 }
@@ -1197,18 +1252,31 @@ async function refreshMessages(options?: { preserveStreamingRunId?: number }) {
   if (!props.token) return
   const preserved = options?.preserveStreamingRunId != null ? streamingMessageForRun(options.preserveStreamingRunId) : undefined
   const messageRes = await fetchAgentMessages(props.sessionId, { token: props.token })
+  const mergedMessages = messageRes.list.map((message) => {
+    if (message.role !== "USER" || message.runId == null || message.contentJson) return message
+    const cachedJson = submittedAttachmentJsonByRunId.value[message.runId]
+    return cachedJson ? { ...message, contentJson: cachedJson } : message
+  })
   if (
     preserved?.contentText?.trim() &&
     !isStructuredMediaContent(preserved.contentText) &&
-    !messageRes.list.some((message) => message.runId === preserved.runId && message.role === "ASSISTANT")
+    !mergedMessages.some((message) => message.runId === preserved.runId && message.role === "ASSISTANT")
   ) {
-    messages.value = [...messageRes.list, preserved]
+    messages.value = [...mergedMessages, preserved]
     return
   }
-  messages.value = messageRes.list
+  messages.value = mergedMessages
 }
 
 function appendRunEvent(event: AgentRunEvent) {
+  const cached = runEventsByRunId.value[event.runId] ?? []
+  const alreadyCached = cached.some((item) => item.id === event.id)
+  if (!alreadyCached) {
+    runEventsByRunId.value = {
+      ...runEventsByRunId.value,
+      [event.runId]: [...cached, event],
+    }
+  }
   if (events.value.some((item) => item.id === event.id)) return
   events.value.push(event)
   if (event.eventType === "run.started") {
@@ -1238,6 +1306,10 @@ function appendRunEvent(event: AgentRunEvent) {
     }
     if (errorCode === "AGENT_SERVICE_NOTIFY_FAILED") {
       agentError.value = errorMessage || "Agent 服务暂时不可用，请稍后重试。"
+      return
+    }
+    if (isCreditInsufficientCode(errorCode)) {
+      agentError.value = errorMessage || "可用算力不足，请前往「会员与算力」充值后再试。"
       return
     }
     if (errorCode === "MODEL_RISK_CONTROL_REJECTED") {
@@ -1425,7 +1497,14 @@ watch(input, () => {
 })
 
 watch(messages, () => {
-  void nextTick(() => scheduleNavLayoutUpdate())
+  void nextTick(() => {
+    scheduleNavLayoutUpdate()
+    // 对话在流式生成时会不断更新 messages（包括同一条 assistant 消息内容增长）。
+    // 若用户当前仍在贴底范围，则持续保持滚动到底部。
+    if (stickToBottom.value && (sending.value || hasActiveRun.value || runConnectionStatus.value === "running")) {
+      void scrollBottom()
+    }
+  })
 })
 
 watch(
@@ -1445,6 +1524,7 @@ onMounted(() => {
 onUnmounted(() => {
   stopRunEventStream()
   stopRunStatusWatchdog()
+  stopStreamingAnimationTimer()
 })
 
 defineExpose({
@@ -1491,6 +1571,7 @@ defineExpose({
           <AgentMessageRow
             :message="message"
             :index="index"
+            :run-events="runEventsForMessage(message)"
             :user-avatar-url="auth.user?.avatarUrl"
             :user-display-name="auth.user?.nickname || auth.user?.username || '我'"
             :editing-message-id="editingMessageId"
@@ -1498,13 +1579,12 @@ defineExpose({
             :editing-regenerating="editingRegenerating"
             :copied-message-id="copiedMessageId"
             :regenerating-message-id="regeneratingMessageId"
-            :streaming-message-id="streamingAssistantMessageId"
             :has-active-run="hasActiveRun"
             :sending="sending"
             :models-loading="modelsLoading"
             :model-config-id="modelConfigId"
             :avatar-state="message.role === 'ASSISTANT' ? resolveAssistantAvatarState(message) : undefined"
-            :is-streaming="message.id === streamingAssistantMessageId && hasActiveRun"
+            :is-streaming="message.id === streamingAssistantMessageId"
             @copy="copyMessage"
             @start-edit="startEditMessage"
             @cancel-edit="cancelEditMessage"
@@ -1515,39 +1595,20 @@ defineExpose({
         </template>
 
         <article v-if="showGenerationLoading" class="agent-message assistant generating-message">
-          <AgentAvatar state="thinking" />
-          <div class="bubble generating-bubble">
-            <div class="generating-orbit">
-              <Sparkles class="h-4 w-4" />
+          <div class="generating-main">
+            <div class="assistant-name-row">
+              <AgentAvatar state="thinking" />
+              <strong>科创点AI</strong>
             </div>
-            <div class="generating-copy">
-              <p>模型生成中</p>
-              <span v-if="selectedAgentModel">{{ modelLabel(selectedAgentModel) }} · {{ selectedAgentModel.modelName }}</span>
-              <span v-else>正在准备 Agent 模型</span>
-            </div>
-            <div class="typing-dots" aria-hidden="true">
-              <i></i>
-              <i></i>
-              <i></i>
+            <div class="thinking-line">
+              <span>思考中</span>
+              <div class="typing-dots typing-dots--under-avatar" aria-hidden="true">
+                <i></i>
+                <i></i>
+                <i></i>
+              </div>
             </div>
           </div>
-        </article>
-
-        <article v-if="visibleRunTimelineEvents.length" class="agent-message assistant run-progress">
-          <AgentAvatar state="thinking" />
-          <div class="bubble">
-            <RunTimeline :events="events" :inline-mode="true" />
-          </div>
-        </article>
-
-        <article v-if="runStatusText" class="run-status-card" :class="runConnectionStatus">
-          <Loader2
-            v-if="runConnectionStatus === 'running' || runConnectionStatus === 'awaiting_confirmation'"
-            class="h-4 w-4 animate-spin"
-          />
-          <Check v-else-if="runConnectionStatus === 'completed'" class="h-4 w-4" />
-          <AlertTriangle v-else-if="runConnectionStatus === 'failed'" class="h-4 w-4" />
-          <span>{{ runStatusText }}</span>
         </article>
 
         <article v-if="showRunRecoveryBanner" class="agent-recovery-card">
@@ -1815,8 +1876,8 @@ defineExpose({
 
 .chat-floating-actions {
   position: absolute;
-  right: max(20px, calc((100% - min(760px, calc(100% - 96px))) / 2 + 8px));
-  bottom: 118px;
+  right: max(14px, calc((100% - min(760px, calc(100% - 96px))) / 2 - 52px));
+  bottom: 38px;
   z-index: 5;
   display: flex;
   flex-direction: column;
@@ -2162,10 +2223,8 @@ defineExpose({
 }
 
 .agent-message {
-  display: grid;
-  grid-template-columns: 42px minmax(0, 650px);
+  display: flex;
   justify-content: start;
-  gap: 14px;
   margin: 30px auto;
   width: min(100%, 980px);
   max-width: 980px;
@@ -2398,43 +2457,45 @@ defineExpose({
   animation: message-rise 0.18s ease-out;
 }
 
-.generating-bubble {
-  display: inline-flex;
-  align-items: center;
-  gap: 12px;
-  border-color: var(--agent-accent-soft);
-  background: linear-gradient(180deg, var(--agent-accent-soft), rgb(255 255 255 / 0.045));
-  box-shadow: 0 18px 56px var(--agent-accent-glow), 0 16px 40px rgb(0 0 0 / 0.34);
-  animation: breathe-panel 2.2s ease-in-out infinite;
-}
-
-.generating-orbit {
-  width: 34px;
-  height: 34px;
-  display: grid;
-  place-items: center;
-  border-radius: 12px;
-  border: 1px solid var(--agent-accent-soft);
-  color: var(--agent-accent);
-  animation: pulse-ring 1.4s ease-in-out infinite;
-}
-
-.generating-copy {
+.generating-main {
   min-width: 0;
+  padding-top: 2px;
+  margin-left: -4px;
 }
 
-.generating-copy p {
+.assistant-name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 50px;
+  margin-bottom: 6px;
+}
+
+.assistant-name-row :deep(.agent-avatar) {
+  margin-right: 2px;
+}
+
+.assistant-name-row :deep(.agent-avatar--md) {
+  width: 50px;
+  height: 50px;
+}
+
+.assistant-name-row :deep(.agent-avatar__logo) {
+  width: 28px;
+  height: 28px;
+}
+
+.assistant-name-row strong {
   margin: 0;
-  color: #fff;
+  color: var(--agent-text-primary);
+  font-size: 14px;
   font-weight: 700;
 }
 
-.generating-copy span {
-  display: block;
-  max-width: min(420px, 52vw);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.thinking-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
   color: rgb(255 255 255 / 0.48);
   font-size: 12px;
 }
@@ -2451,6 +2512,12 @@ defineExpose({
   border-radius: 999px;
   background: rgb(210 170 255);
   animation: typing-dot 1s ease-in-out infinite;
+}
+
+.typing-dots--under-avatar i {
+  width: 4px;
+  height: 4px;
+  background: var(--agent-accent);
 }
 
 .typing-dots i:nth-child(2) {
@@ -2812,8 +2879,8 @@ defineExpose({
 
 @media (max-width: 900px) {
   .chat-floating-actions {
-    right: 16px;
-    bottom: 108px;
+    right: 12px;
+    bottom: 94px;
   }
   .message-container {
     padding: 36px 14px 24px;

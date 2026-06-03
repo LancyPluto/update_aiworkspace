@@ -39,7 +39,7 @@ class OpenAIImagesClient:
         self.ssl_eof_retries = self._resolve_ssl_eof_retries()
         self.last_usage: dict[str, int] = {}
         self.session = requests.Session()
-        self.session.trust_env = _as_bool(self.extra_auth.get("trustEnv"), True)
+        self.session.trust_env = _as_bool(self.extra_auth.get("trustEnv"), False)
         self.session.headers.update(
             {
                 "Content-Type": "application/json",
@@ -167,8 +167,8 @@ class OpenAIImagesClient:
         except ProxyError as exc:
             raise OpenAIImagesError(
                 "openai images proxy connection failed. "
-                "The request is using an environment or configured proxy; set extraAuthJson trustEnv=false to bypass it, "
-                "or configure proxyUrl explicitly. "
+                "The request is using a configured proxy or extraAuthJson trustEnv=true; "
+                "disable trustEnv or configure proxyUrl explicitly. "
                 f"detail={exc}"
             ) from exc
         except RequestException as exc:
@@ -269,9 +269,9 @@ class OpenAIImagesClient:
         connect_timeout = _as_float(self.extra_auth.get("connectTimeoutSeconds"), 10)
         read_timeout = _as_float(
             self.extra_auth.get("readTimeoutSeconds") or self.extra_auth.get("timeoutSeconds") or timeout_seconds,
-            300,
+            600,
         )
-        return (max(1.0, connect_timeout), max(60.0, read_timeout))
+        return (max(1.0, connect_timeout), max(600.0, read_timeout))
 
     def _resolve_ssl_eof_retries(self) -> int:
         value = self.extra_auth.get("sslEofRetries")

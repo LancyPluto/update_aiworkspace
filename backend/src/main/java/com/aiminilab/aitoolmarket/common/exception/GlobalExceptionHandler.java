@@ -22,10 +22,10 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(BusinessException.class)
     @ResponseStatus(HttpStatus.BAD_REQUEST)
-    public ApiResponse<Void> handleBusinessException(BusinessException exception) {
+    public ApiResponse<Object> handleBusinessException(BusinessException exception) {
         log.warn("Business exception: code={}, traceId={}, message={}",
                 exception.getErrorCode(), traceId(), exception.getMessage());
-        return ApiResponse.fail(exception.getErrorCode(), exception.getMessage());
+        return ApiResponse.fail(exception.getErrorCode(), exception.getMessage(), exception.getData());
     }
 
     @ExceptionHandler({MethodArgumentNotValidException.class, ConstraintViolationException.class})

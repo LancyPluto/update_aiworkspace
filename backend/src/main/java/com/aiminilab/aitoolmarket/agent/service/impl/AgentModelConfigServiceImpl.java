@@ -8,10 +8,13 @@ import com.aiminilab.aitoolmarket.agent.dto.AgentModelConfigTestResponse;
 import com.aiminilab.aitoolmarket.agent.client.AgentServiceClient;
 import com.aiminilab.aitoolmarket.agent.dto.InternalAgentModelConfigResponse;
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
+import com.aiminilab.aitoolmarket.agent.entity.ModelVendorAccount;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentModelConfigMapper;
+import com.aiminilab.aitoolmarket.agent.mapper.ModelVendorAccountMapper;
 import com.aiminilab.aitoolmarket.agent.service.AgentModelConfigService;
 import com.aiminilab.aitoolmarket.agent.service.ModelCapabilityService;
 import com.aiminilab.aitoolmarket.agent.support.ModelCapabilitiesCodec;
+import com.aiminilab.aitoolmarket.agent.support.ModelConfigCredentialResolver;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -35,23 +38,29 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
     private static final String TEST_STRATEGY_ACCEPT_ONLY = "accept_only";
 
     private final AgentModelConfigMapper agentModelConfigMapper;
+    private final ModelVendorAccountMapper vendorAccountMapper;
     private final AgentServiceClient agentServiceClient;
     private final ModelProviderRegistry providerRegistry;
     private final ModelCapabilityService modelCapabilityService;
     private final ModelCapabilitiesCodec capabilitiesCodec;
+    private final ModelConfigCredentialResolver credentialResolver;
     private final ObjectMapper objectMapper;
 
     public AgentModelConfigServiceImpl(AgentModelConfigMapper agentModelConfigMapper,
+                                       ModelVendorAccountMapper vendorAccountMapper,
                                        AgentServiceClient agentServiceClient,
                                        ModelProviderRegistry providerRegistry,
                                        ModelCapabilityService modelCapabilityService,
                                        ModelCapabilitiesCodec capabilitiesCodec,
+                                       ModelConfigCredentialResolver credentialResolver,
                                        ObjectMapper objectMapper) {
         this.agentModelConfigMapper = agentModelConfigMapper;
+        this.vendorAccountMapper = vendorAccountMapper;
         this.agentServiceClient = agentServiceClient;
         this.providerRegistry = providerRegistry;
         this.modelCapabilityService = modelCapabilityService;
         this.capabilitiesCodec = capabilitiesCodec;
+        this.credentialResolver = credentialResolver;
         this.objectMapper = objectMapper;
     }
 
@@ -151,6 +160,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                                           AgentModelConfig existing,
                                           LocalDateTime now) {
         String previousProvider = existing != null ? existing.getProvider() : null;
+        config.setVendorAccountId(request.vendorAccountId());
         config.setDisplayName(blankToNull(request.displayName()));
         config.setConfigCode(blankToNull(request.configCode()));
         String providerTrimmed = request.provider().trim();
@@ -205,7 +215,8 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
     @Override
     public InternalAgentModelConfigResponse internalGet() {
         List<AgentModelConfig> agentConfigs = agentModelConfigMapper.findAgentEnabled();
-        return InternalAgentModelConfigResponse.from(agentConfigs.isEmpty() ? findOrDefault() : agentConfigs.get(0));
+        AgentModelConfig config = agentConfigs.isEmpty() ? findOrDefault() : agentConfigs.get(0);
+        return InternalAgentModelConfigResponse.from(credentialResolver.resolveForExecution(config));
     }
 
     @Override
@@ -217,7 +228,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         if (config == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "Agent model config not found or not enabled for Agent");
         }
-        return InternalAgentModelConfigResponse.from(config);
+        return InternalAgentModelConfigResponse.from(credentialResolver.resolveForExecution(config));
     }
 
     @Override
@@ -333,7 +344,19 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
     }
 
     private AgentModelConfigResponse toResponse(AgentModelConfig config) {
-        return AgentModelConfigResponse.from(config, capabilitiesCodec);
+        String vendorAccountName = null;
+        if (config.getVendorAccountId() != null) {
+            ModelVendorAccount account = vendorAccountMapper.findActiveById(config.getVendorAccountId());
+            if (account != null) {
+                vendorAccountName = account.getAccountName();
+            }
+        }
+        return AgentModelConfigResponse.from(config, capabilitiesCodec, vendorAccountName);
+    }
+
+    @Override
+    public AgentModelConfig resolveForExecution(AgentModelConfig config) {
+        return credentialResolver.resolveForExecution(config);
     }
 
     private void validate(AgentModelConfigRequest request) {
@@ -358,6 +381,12 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                 objectMapper.readTree(request.extraAuthJson());
             } catch (com.fasterxml.jackson.core.JsonProcessingException exception) {
                 throw new BusinessException(ErrorCode.PARAM_ERROR, "extraAuthJson must be valid JSON");
+            }
+        }
+        if (request.vendorAccountId() != null) {
+            ModelVendorAccount account = vendorAccountMapper.findActiveById(request.vendorAccountId());
+            if (account == null) {
+                throw new BusinessException(ErrorCode.PARAM_ERROR, "vendor account not found");
             }
         }
     }
@@ -395,9 +424,10 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         boolean hasApiKey = request.apiKey() != null && !request.apiKey().isBlank();
         boolean hasExtraAuth = request.extraAuthJson() != null && !request.extraAuthJson().isBlank();
         if (existing == null || hasApiKey && hasExtraAuth) {
-            return request;
+            return mergeFromVendorAccount(request, existing);
         }
-        return new AgentModelConfigRequest(
+        AgentModelConfigRequest merged = new AgentModelConfigRequest(
+                request.vendorAccountId() != null ? request.vendorAccountId() : (existing == null ? null : existing.getVendorAccountId()),
                 request.displayName(),
                 request.configCode(),
                 request.provider(),
@@ -406,6 +436,55 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                 hasApiKey ? request.apiKey() : existing.getApiKey(),
                 request.clearApiKey(),
                 hasExtraAuth ? request.extraAuthJson() : existing.getExtraAuthJson(),
+                request.minimaxGroupId(),
+                request.consoleUrl(),
+                request.balanceUrl(),
+                request.docsUrl(),
+                request.timeoutSeconds(),
+                request.connectTimeoutSeconds(),
+                request.readTimeoutSeconds(),
+                request.inputTokenPricePer1k(),
+                request.outputTokenPricePer1k(),
+                request.inputTokenPricePer1m(),
+                request.outputTokenPricePer1m(),
+                request.billingUnit(),
+                request.unitPrice(),
+                request.enabled(),
+                request.agentEnabled(),
+                request.isDefault(),
+                request.capabilities()
+        );
+        return mergeFromVendorAccount(merged, existing);
+    }
+
+    private AgentModelConfigRequest mergeFromVendorAccount(AgentModelConfigRequest request, AgentModelConfig existing) {
+        Long accountId = request.vendorAccountId();
+        if (accountId == null && existing != null) {
+            accountId = existing.getVendorAccountId();
+        }
+        if (accountId == null) {
+            return request;
+        }
+        ModelVendorAccount account = vendorAccountMapper.findActiveById(accountId);
+        if (account == null) {
+            return request;
+        }
+        boolean hasApiKey = request.apiKey() != null && !request.apiKey().isBlank();
+        boolean hasExtraAuth = request.extraAuthJson() != null && !request.extraAuthJson().isBlank();
+        boolean hasBaseUrl = request.baseUrl() != null && !request.baseUrl().isBlank();
+        return new AgentModelConfigRequest(
+                accountId,
+                request.displayName(),
+                request.configCode(),
+                request.provider(),
+                request.modelName(),
+                hasBaseUrl ? request.baseUrl() : (existing != null && existing.getBaseUrl() != null && !existing.getBaseUrl().isBlank()
+                        ? existing.getBaseUrl() : account.getBaseUrl()),
+                hasApiKey ? request.apiKey() : (existing != null && existing.getApiKey() != null && !existing.getApiKey().isBlank()
+                        ? existing.getApiKey() : account.getApiKey()),
+                request.clearApiKey(),
+                hasExtraAuth ? request.extraAuthJson() : (existing != null && existing.getExtraAuthJson() != null && !existing.getExtraAuthJson().isBlank()
+                        ? existing.getExtraAuthJson() : account.getExtraAuthJson()),
                 request.minimaxGroupId(),
                 request.consoleUrl(),
                 request.balanceUrl(),

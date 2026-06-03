@@ -1,15 +1,18 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue"
-import { Camera, Check, ExternalLink, Loader2, Shield, Sparkles, ToggleLeft, Wallet } from "lucide-vue-next"
+import { Camera, Check, ExternalLink, Loader2, Shield, Sparkles, ToggleLeft, Trash2, Wallet, X } from "lucide-vue-next"
+import { useRouter } from "vue-router"
 import AppShell from "@/components/AppShell.vue"
 import UserAvatar from "@/components/UserAvatar.vue"
 import ProfileThemePicker from "@/pages/PublicProfile/ProfileThemePicker.vue"
 import { fetchCreditAccount } from "@/api/creditApi"
 import { fetchTasks } from "@/api/taskApi"
+import { cancelCurrentUserAccount, sendCancelAccountSmsCode } from "@/api/userApi"
 import type { CreditAccount } from "@/api/types"
 import { useAuthStore } from "@/store/authStore"
 
 const auth = useAuthStore()
+const router = useRouter()
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const nickname = ref("")
 const bio = ref("")
@@ -19,6 +22,13 @@ const saving = ref(false)
 const savingCommunity = ref(false)
 const uploading = ref(false)
 const loadingStats = ref(false)
+const cancelDialogOpen = ref(false)
+const sendingCancelCode = ref(false)
+const cancellingAccount = ref(false)
+const cancelSmsCode = ref("")
+const cancelConfirmText = ref("")
+const cancelCooldown = ref(0)
+const cancelDebugCode = ref<string | null>(null)
 const error = ref("")
 const success = ref("")
 const credit = ref<CreditAccount | null>(null)
@@ -29,6 +39,14 @@ const displayName = computed(() => auth.user?.nickname || auth.user?.username ||
 const joinedLabel = computed(() => `UID ${auth.user?.id ?? "--"}`)
 const accountLabel = computed(() => auth.user?.phone || auth.user?.email || auth.user?.username || "--")
 const publicProfileUrl = computed(() => (auth.user?.id ? `/u/${auth.user.id}` : "/profile"))
+const cancelConfirmPhrase = computed(() => `确认注销我的账号`)
+const canSubmitCancel = computed(
+  () => cancelSmsCode.value.trim().length >= 4 && cancelConfirmText.value.trim() === cancelConfirmPhrase.value,
+)
+const maskedPhone = computed(() => {
+  const phone = auth.user?.phone || ""
+  return phone.length === 11 ? `${phone.slice(0, 3)}****${phone.slice(7)}` : phone || "--"
+})
 
 async function loadProfileStats() {
   if (!auth.token) return
@@ -102,6 +120,54 @@ async function saveCommunitySettings() {
     error.value = err instanceof Error ? err.message : "社区设置保存失败"
   } finally {
     savingCommunity.value = false
+  }
+}
+
+function startCancelCooldown(seconds: number) {
+  cancelCooldown.value = seconds
+  const tick = window.setInterval(() => {
+    cancelCooldown.value -= 1
+    if (cancelCooldown.value <= 0) {
+      cancelCooldown.value = 0
+      window.clearInterval(tick)
+    }
+  }, 1000)
+}
+
+async function requestCancelSmsCode() {
+  if (!auth.token) return
+  error.value = ""
+  success.value = ""
+  sendingCancelCode.value = true
+  try {
+    const res = await sendCancelAccountSmsCode({ token: auth.token })
+    cancelDebugCode.value = res.debugCode ?? null
+    startCancelCooldown(res.cooldownSeconds || 60)
+    success.value = cancelDebugCode.value ? `注销验证码已发送：${cancelDebugCode.value}` : "注销验证码已发送"
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : "验证码发送失败"
+  } finally {
+    sendingCancelCode.value = false
+  }
+}
+
+async function submitCancelAccount() {
+  if (!auth.token) return
+  if (cancelConfirmText.value.trim() !== cancelConfirmPhrase.value) {
+    error.value = `请在确认框输入“${cancelConfirmPhrase.value}”`
+    return
+  }
+  error.value = ""
+  success.value = ""
+  cancellingAccount.value = true
+  try {
+    await cancelCurrentUserAccount({ smsCode: cancelSmsCode.value.trim() }, { token: auth.token })
+    await auth.logout()
+    await router.replace({ name: "Login" })
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : "账号注销失败"
+  } finally {
+    cancellingAccount.value = false
   }
 }
 
@@ -231,6 +297,90 @@ onMounted(async () => {
           <p class="profile-note">{{ joinedLabel }} · 成功生成的新作品会按上方设置进入公开主页。</p>
         </div>
       </section>
+
+      <section class="danger-zone">
+        <div>
+          <p class="panel-kicker">Account closure</p>
+          <h2>注销账号</h2>
+          <p>注销需要通过绑定手机号 {{ maskedPhone }} 完成身份验证。注销后将清理你的持久化记忆、会话、上下文快照和文件索引，账号余额不会退款。</p>
+        </div>
+        <button type="button" class="danger-action" @click="cancelDialogOpen = true">
+          <Trash2 class="h-4 w-4" />
+          注销
+        </button>
+      </section>
+
+      <div v-if="cancelDialogOpen" class="modal-backdrop" @click.self="cancelDialogOpen = false">
+        <section class="cancel-dialog" role="dialog" aria-modal="true" aria-labelledby="cancel-account-title">
+          <button type="button" class="icon-action" aria-label="关闭" @click="cancelDialogOpen = false">
+            <X class="h-4 w-4" />
+          </button>
+          <h2 id="cancel-account-title">注销账号</h2>
+          <div class="cancel-warning-card">
+            <section>
+              <h3>服务将无法访问</h3>
+              <p>账号一经注销，将无法访问本系统的所有用户侧服务，包括对话服务、创作任务和开放平台能力。</p>
+            </section>
+            <section>
+              <h3>历史对话将被删除</h3>
+              <p>当前账号的 agent 会话、消息、运行记录、上下文快照和持久化记忆会被清理，无法找回。</p>
+            </section>
+            <section>
+              <h3>充值余额不会退款</h3>
+              <p>注销不会要求余额为 0，但当前账号剩余余额和冻结算力会随账号关闭失效，系统不会自动退款。</p>
+            </section>
+            <section>
+              <h3>请勿频繁重复注销</h3>
+              <p>频繁注销和重新注册可能会被系统判定为异常行为，导致账号受限或封禁。</p>
+            </section>
+          </div>
+
+          <div class="cancel-checks">
+            <div>
+              <span>余额</span>
+              <strong>{{ credit?.balance ?? "--" }}</strong>
+            </div>
+            <div>
+              <span>冻结算力</span>
+              <strong>{{ credit?.frozen ?? "--" }}</strong>
+            </div>
+          </div>
+
+          <label class="sms-field">
+            <span>绑定手机号 {{ maskedPhone }}</span>
+            <div>
+              <input v-model="cancelSmsCode" inputmode="numeric" maxlength="6" placeholder="6 位验证码" />
+              <button
+                type="button"
+                class="secondary-action"
+                :disabled="sendingCancelCode || cancelCooldown > 0"
+                @click="requestCancelSmsCode"
+              >
+                <Loader2 v-if="sendingCancelCode" class="h-4 w-4 animate-spin" />
+                {{ cancelCooldown > 0 ? `${cancelCooldown}s` : "获取验证码" }}
+              </button>
+            </div>
+          </label>
+
+          <label class="confirm-field">
+            <span>请在输入框中输入“{{ cancelConfirmPhrase }}”</span>
+            <input v-model="cancelConfirmText" :placeholder="cancelConfirmPhrase" />
+          </label>
+
+          <div class="cancel-dialog-actions">
+            <button type="button" class="cancel-text-action" @click="cancelDialogOpen = false">取消</button>
+            <button
+              type="button"
+              class="danger-action confirm"
+              :disabled="cancellingAccount || !canSubmitCancel"
+              @click="submitCancelAccount"
+            >
+              <Loader2 v-if="cancellingAccount" class="h-4 w-4 animate-spin" />
+              确认注销
+            </button>
+          </div>
+        </section>
+      </div>
     </div>
   </AppShell>
 </template>
@@ -536,6 +686,215 @@ onMounted(async () => {
   gap: 10px;
 }
 
+.danger-zone {
+  margin-top: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  border-top: 1px solid rgb(248 113 113 / 0.2);
+  padding-top: 24px;
+}
+
+.danger-zone h2 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.danger-zone p {
+  margin: 10px 0 0;
+  max-width: 720px;
+  color: rgb(255 255 255 / 0.52);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.danger-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 42px;
+  border: 1px solid rgb(248 113 113 / 0.42);
+  border-radius: 999px;
+  background: rgb(127 29 29 / 0.22);
+  color: rgb(254 202 202);
+  padding: 0 16px;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.danger-action:hover:not(:disabled) {
+  background: rgb(185 28 28 / 0.28);
+}
+
+.danger-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.54;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgb(0 0 0 / 0.68);
+  backdrop-filter: blur(12px);
+}
+
+.cancel-dialog {
+  position: relative;
+  width: min(520px, 100%);
+  border: 1px solid rgb(15 23 42 / 0.08);
+  border-radius: 0;
+  background: #fff;
+  box-shadow: 0 30px 90px rgb(0 0 0 / 0.28);
+  color: #111827;
+  padding: 18px;
+}
+
+.cancel-dialog h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 900;
+}
+
+.icon-action {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  display: inline-flex;
+  width: 34px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgb(15 23 42 / 0.08);
+  border-radius: 50%;
+  background: #fff;
+  color: #475569;
+}
+
+.cancel-warning-card {
+  display: grid;
+  gap: 14px;
+  margin-top: 14px;
+  border-radius: 10px;
+  background: #f5f6f8;
+  padding: 16px 14px;
+}
+
+.cancel-warning-card section {
+  display: grid;
+  gap: 5px;
+}
+
+.cancel-warning-card h3 {
+  margin: 0;
+  color: #111827;
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.cancel-warning-card p {
+  margin: 0;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.cancel-checks {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.cancel-checks div {
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #fff;
+  padding: 12px;
+}
+
+.cancel-checks span,
+.sms-field span,
+.confirm-field span {
+  display: block;
+  color: #111827;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.cancel-checks strong {
+  display: block;
+  margin-top: 6px;
+  color: #111827;
+  font-size: 22px;
+}
+
+.sms-field,
+.confirm-field {
+  display: grid;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.sms-field div {
+  display: flex;
+  gap: 10px;
+}
+
+.cancel-dialog .secondary-action {
+  border-color: #e5e7eb;
+  background: #f8fafc;
+  color: #111827;
+}
+
+.sms-field input,
+.confirm-field input {
+  min-width: 0;
+  flex: 1;
+  height: 44px;
+  border: 1px solid #111827;
+  border-radius: 999px;
+  background: #fff;
+  color: #111827;
+  outline: none;
+  padding: 0 13px;
+}
+
+.confirm-field input {
+  width: 100%;
+}
+
+.cancel-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 18px;
+  margin-top: 20px;
+}
+
+.cancel-text-action {
+  border: 0;
+  background: transparent;
+  color: #111827;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.danger-action.confirm {
+  min-width: 84px;
+  border: 0;
+  background: #fb9ca5;
+  color: #fff;
+}
+
+.danger-action.confirm:hover:not(:disabled) {
+  background: #f8717d;
+}
+
 @media (max-width: 900px) {
   .profile-page {
     padding: 22px;
@@ -552,6 +911,17 @@ onMounted(async () => {
 
   .hero-avatar {
     justify-items: start;
+  }
+
+  .danger-zone,
+  .sms-field div,
+  .cancel-dialog-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .danger-action {
+    width: 100%;
   }
 }
 </style>

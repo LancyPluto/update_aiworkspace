@@ -4,6 +4,9 @@ import com.aiminilab.aitoolmarket.admin.mapper.SystemSettingMapper;
 import com.aiminilab.aitoolmarket.admin.mapper.SystemSettingVersionMapper;
 import com.aiminilab.aitoolmarket.agent.config.AgentPromptSettings;
 import com.aiminilab.aitoolmarket.agent.config.AgentRouterSettings;
+import com.aiminilab.aitoolmarket.agent.config.AgentMemorySettings;
+import com.aiminilab.aitoolmarket.agent.config.AgentRuntimeSettings;
+import com.aiminilab.aitoolmarket.agent.service.ModelVendorAccountMigrationService;
 import com.aiminilab.aitoolmarket.common.enums.UserStatus;
 import com.aiminilab.aitoolmarket.common.enums.UserType;
 import com.aiminilab.aitoolmarket.user.entity.User;
@@ -30,11 +33,13 @@ public class DataInitializer implements CommandLineRunner {
     private final PasswordEncoder passwordEncoder;
     private final DataSource dataSource;
     private final ToolTemplateBootstrap toolTemplateBootstrap;
+    private final ModelVendorAccountMigrationService modelVendorAccountMigrationService;
 
     public DataInitializer(UserMapper userMapper, ToolCategoryMapper toolCategoryMapper,
                            SystemSettingMapper systemSettingMapper, SystemSettingVersionMapper systemSettingVersionMapper,
                            PasswordEncoder passwordEncoder,
-                           JdbcTemplate jdbcTemplate, ToolTemplateBootstrap toolTemplateBootstrap) {
+                           JdbcTemplate jdbcTemplate, ToolTemplateBootstrap toolTemplateBootstrap,
+                           ModelVendorAccountMigrationService modelVendorAccountMigrationService) {
         this.userMapper = userMapper;
         this.toolCategoryMapper = toolCategoryMapper;
         this.systemSettingMapper = systemSettingMapper;
@@ -42,11 +47,13 @@ public class DataInitializer implements CommandLineRunner {
         this.passwordEncoder = passwordEncoder;
         this.dataSource = jdbcTemplate.getDataSource();
         this.toolTemplateBootstrap = toolTemplateBootstrap;
+        this.modelVendorAccountMigrationService = modelVendorAccountMigrationService;
     }
 
     @Override
     public void run(String... args) {
         ensureSchemaCompatibility();
+        modelVendorAccountMigrationService.migrateIfNeeded();
         toolTemplateBootstrap.ensureSchemaAndSeed();
         createUserIfAbsent("admin", "123456", "Admin", UserType.ADMIN);
         createUserIfAbsent("user1", "123456", "User One", UserType.USER);
@@ -57,42 +64,14 @@ public class DataInitializer implements CommandLineRunner {
     }
 
     private void seedAgentPromptSettings() {
-        systemSettingMapper.insertIfAbsent(
-                AgentPromptSettings.SYSTEM_PROMPT_KEY,
-                AgentPromptSettings.DEFAULT_SYSTEM_PROMPT,
-                "agent",
-                "Agent normal chat system prompt"
-        );
-        systemSettingMapper.insertIfAbsent(
-                AgentPromptSettings.DEEP_AGENTS_SYSTEM_PROMPT_KEY,
-                AgentPromptSettings.DEFAULT_DEEP_AGENTS_SYSTEM_PROMPT,
-                "agent",
-                "Agent deep-agents runtime system prompt"
-        );
-        systemSettingMapper.insertIfAbsent(
-                AgentRouterSettings.ENABLED_KEY,
-                String.valueOf(AgentRouterSettings.DEFAULT_ENABLED),
-                "agent",
-                "Agent LLM router enabled"
-        );
-        systemSettingMapper.insertIfAbsent(
-                AgentRouterSettings.PROMPT_KEY,
-                AgentRouterSettings.DEFAULT_PROMPT,
-                "agent",
-                "Agent LLM router prompt"
-        );
-        systemSettingMapper.insertIfAbsent(
-                AgentRouterSettings.MIN_CONFIDENCE_KEY,
-                AgentRouterSettings.DEFAULT_MIN_CONFIDENCE,
-                "agent",
-                "Agent LLM router minimum confidence"
-        );
-        systemSettingMapper.insertIfAbsent(
-                AgentRouterSettings.FALLBACK_TO_RULES_KEY,
-                String.valueOf(AgentRouterSettings.DEFAULT_FALLBACK_TO_RULES),
-                "agent",
-                "Agent LLM router fallback to rules"
-        );
+        seedSettingDefaults(AgentPromptSettings.defaults(), "agent", "Agent prompt setting");
+        seedSettingDefaults(AgentRouterSettings.defaults(), "agent", "Agent router setting");
+        seedSettingDefaults(AgentMemorySettings.defaults(), "agent", "Agent memory setting");
+        seedSettingDefaults(AgentRuntimeSettings.defaults(), "agent", "Agent runtime setting");
+    }
+
+    private void seedSettingDefaults(java.util.Map<String, String> defaults, String group, String description) {
+        defaults.forEach((key, value) -> systemSettingMapper.insertIfAbsent(key, value, group, description));
     }
 
     private void ensureSchemaCompatibility() {
@@ -151,6 +130,37 @@ public class DataInitializer implements CommandLineRunner {
                 """);
         ensureColumn("agent_model_configs", "is_default", "ALTER TABLE agent_model_configs ADD COLUMN is_default TINYINT NOT NULL DEFAULT 0");
         ensureColumn("agent_model_configs", "is_deleted", "ALTER TABLE agent_model_configs ADD COLUMN is_deleted TINYINT NOT NULL DEFAULT 0");
+        ensureColumn("agent_model_configs", "vendor_account_id",
+                "ALTER TABLE agent_model_configs ADD COLUMN vendor_account_id BIGINT NULL COMMENT '所属厂商账户' AFTER id");
+        ensureIndex(
+                "agent_model_configs",
+                "idx_agent_model_configs_vendor_account",
+                "CREATE INDEX idx_agent_model_configs_vendor_account ON agent_model_configs(vendor_account_id, enabled, is_deleted)"
+        );
+        ensureTable("model_vendor_accounts", """
+                CREATE TABLE model_vendor_accounts (
+                  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                  vendor_code VARCHAR(64) NOT NULL,
+                  account_name VARCHAR(128) NOT NULL DEFAULT '默认账户',
+                  base_url VARCHAR(512) NULL,
+                  api_key VARCHAR(1024) NULL,
+                  extra_auth_json TEXT NULL,
+                  console_url VARCHAR(512) NULL,
+                  balance_url VARCHAR(512) NULL,
+                  balance_query_mode VARCHAR(32) NOT NULL DEFAULT 'MANUAL',
+                  balance_amount DECIMAL(18,4) NULL,
+                  balance_currency VARCHAR(8) NULL DEFAULT 'CNY',
+                  balance_status VARCHAR(32) NOT NULL DEFAULT 'UNKNOWN',
+                  balance_low_threshold DECIMAL(18,4) NULL,
+                  balance_updated_at DATETIME NULL,
+                  balance_error_message VARCHAR(512) NULL,
+                  health_status VARCHAR(32) NOT NULL DEFAULT 'UNKNOWN',
+                  enabled TINYINT NOT NULL DEFAULT 1,
+                  is_deleted TINYINT NOT NULL DEFAULT 0,
+                  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """);
         ensureTable("credit_recharge_packages", """
                 CREATE TABLE credit_recharge_packages (
                   id BIGINT PRIMARY KEY AUTO_INCREMENT,
@@ -272,6 +282,7 @@ public class DataInitializer implements CommandLineRunner {
         ensureColumn("agent_workspace_memory_items", "expires_at", "ALTER TABLE agent_workspace_memory_items ADD COLUMN expires_at DATETIME NULL");
         ensureIndex("agent_workspace_memory_items", "idx_agent_memory_context_pack", "CREATE INDEX idx_agent_memory_context_pack ON agent_workspace_memory_items(workspace_id, status, pinned, importance, updated_at)");
         ensureIndex("agent_workspace_memory_items", "idx_agent_memory_user_type", "CREATE INDEX idx_agent_memory_user_type ON agent_workspace_memory_items(workspace_id, user_id, memory_type, status)");
+        ensureFulltextMemoryIndex();
         ensureTable("agent_tool_descriptor_extension", """
                 CREATE TABLE agent_tool_descriptor_extension (
                   id BIGINT PRIMARY KEY AUTO_INCREMENT,
@@ -543,6 +554,16 @@ public class DataInitializer implements CommandLineRunner {
             }
         } catch (SQLException exception) {
             throw new IllegalStateException("Failed to ensure database index " + tableName + "." + indexName, exception);
+        }
+    }
+
+    private void ensureFulltextMemoryIndex() {
+        try (Connection connection = dataSource.getConnection()) {
+            if (!indexExists(connection, "agent_workspace_memory_items", "ft_memory_search")) {
+                connection.createStatement().execute("ALTER TABLE agent_workspace_memory_items ADD FULLTEXT INDEX ft_memory_search (title, content) WITH PARSER ngram");
+            }
+        } catch (SQLException ignored) {
+            // H2 and some MySQL variants may not support ngram fulltext in local tests; runtime retrieval has fallback search.
         }
     }
 

@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from "react"
 import { AdminLayout } from "@/components/admin/admin-layout"
-import { AgentModelSettings } from "@/components/admin/agent-model-settings"
+import { AgentMemoryManagement } from "@/components/admin/agent-memory-management"
+import { AgentRuntimeSettings } from "@/components/admin/agent-runtime-settings"
+import { UnifiedApiSettings } from "@/components/admin/unified-api-settings"
 import { EngineApiSettings } from "@/components/admin/engine-api-settings"
 import { AdminHeader } from "@/components/admin/header"
 import { Button } from "@/components/ui/button"
@@ -17,7 +19,7 @@ import { downloadConfigBundle, exportConfigBundle, importConfigBundle, readConfi
 import { getBaseUrl } from "@/lib/api/http"
 import { fetchSettings, updateSettings, uploadCustomerServiceQr } from "@/lib/api/settings"
 import { cn } from "@/lib/utils"
-import { CheckCircle, Database, Download, Headphones, KeyRound, RefreshCw, Save, Server, Settings2, Shield, Upload } from "lucide-react"
+import { Bot, Brain, CheckCircle, Database, Download, Headphones, KeyRound, RefreshCw, Save, Server, Settings2, Shield, Upload } from "lucide-react"
 
 interface SettingsForm {
   platformName: string
@@ -191,7 +193,9 @@ export default function SettingsPage() {
       setModelRefreshKey((key) => key + 1)
       setSaved(true)
       const warningText = result.warnings?.length ? `，提示：${result.warnings.join("；")}` : ""
-      setNotice(`导入完成：模型 ${result.modelConfigs}、分类 ${result.categories}、工具 ${result.tools}、字段 ${result.fields}${warningText}`)
+      setNotice(
+        `导入完成：厂商账户 ${result.vendorAccounts ?? 0}、模型 ${result.modelConfigs}、分类 ${result.categories}、工具 ${result.tools}、字段 ${result.fields}${warningText}`,
+      )
       setTimeout(() => setSaved(false), 1800)
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "导入配置包失败，请确认 JSON 格式正确")
@@ -217,11 +221,19 @@ export default function SettingsPage() {
           <TabsList className="flex h-auto flex-wrap justify-start gap-2 bg-transparent p-0">
             <TabsTrigger value="model" className="gap-2">
               <Settings2 className="h-4 w-4" />
-              大模型接入
+              统一 API
             </TabsTrigger>
             <TabsTrigger value="engine-api" className="gap-2">
               <KeyRound className="h-4 w-4" />
               引擎 API
+            </TabsTrigger>
+            <TabsTrigger value="agent-runtime" className="gap-2">
+              <Bot className="h-4 w-4" />
+              Agent 参数
+            </TabsTrigger>
+            <TabsTrigger value="agent-memory" className="gap-2">
+              <Brain className="h-4 w-4" />
+              记忆管理
             </TabsTrigger>
             <TabsTrigger value="system" className="gap-2">
               <Server className="h-4 w-4" />
@@ -242,11 +254,19 @@ export default function SettingsPage() {
           </TabsList>
 
           <TabsContent value="model">
-            <AgentModelSettings refreshKey={modelRefreshKey} />
+            <UnifiedApiSettings refreshKey={modelRefreshKey} />
           </TabsContent>
 
           <TabsContent value="engine-api">
             <EngineApiSettings refreshKey={modelRefreshKey} />
+          </TabsContent>
+
+          <TabsContent value="agent-runtime">
+            <AgentRuntimeSettings />
+          </TabsContent>
+
+          <TabsContent value="agent-memory">
+            <AgentMemoryManagement />
           </TabsContent>
 
           <TabsContent value="system" className="space-y-5">

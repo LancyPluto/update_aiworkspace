@@ -124,7 +124,10 @@ class TaskCreditApiTest {
                                 }
                                 """))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("CREDIT_NOT_ENOUGH"));
+                .andExpect(jsonPath("$.code").value("CREDIT_NOT_ENOUGH"))
+                .andExpect(jsonPath("$.data.availableCredits").value(100))
+                .andExpect(jsonPath("$.data.requiredCredits").value(101))
+                .andExpect(jsonPath("$.data.toolCode").value("expensive_tool"));
     }
 
     @Test

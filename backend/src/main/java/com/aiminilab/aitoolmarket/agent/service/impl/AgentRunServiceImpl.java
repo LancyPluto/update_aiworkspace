@@ -4,6 +4,7 @@ import com.aiminilab.aitoolmarket.agent.client.AgentServiceClient;
 import com.aiminilab.aitoolmarket.agent.config.AgentMemorySettings;
 import com.aiminilab.aitoolmarket.agent.config.AgentPromptSettings;
 import com.aiminilab.aitoolmarket.agent.config.AgentRouterSettings;
+import com.aiminilab.aitoolmarket.agent.config.AgentRuntimeSettings;
 import com.aiminilab.aitoolmarket.agent.dto.AgentRunEventResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AgentRunResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AgentRouterSettingsResponse;
@@ -66,6 +67,7 @@ import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.config.AppProperties;
 import com.aiminilab.aitoolmarket.credit.service.CreditService;
+import com.aiminilab.aitoolmarket.credit.support.CreditInsufficientSupport;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -210,9 +212,8 @@ public class AgentRunServiceImpl implements AgentRunService {
         agentRateLimitService.checkRunRate(userId);
         agentRateLimitService.checkActiveRunLimit(userId);
         int creditBudget = Math.max(0, appProperties.getAgent().getDefaultCreditBudget());
-        if (creditService.account(userId).available() < creditBudget) {
-            throw new BusinessException(ErrorCode.AGENT_CREDIT_NOT_ENOUGH, "Agent 可用算力不足");
-        }
+        CreditInsufficientSupport.ensureAvailable(
+                creditService, userId, creditBudget, ErrorCode.AGENT_CREDIT_NOT_ENOUGH, null);
 
         LocalDateTime now = LocalDateTime.now();
         String trimmed = request.content().trim();
@@ -257,9 +258,8 @@ public class AgentRunServiceImpl implements AgentRunService {
         agentRateLimitService.checkRunRate(userId);
         agentRateLimitService.checkActiveRunLimit(userId);
         int creditBudget = Math.max(0, appProperties.getAgent().getDefaultCreditBudget());
-        if (creditService.account(userId).available() < creditBudget) {
-            throw new BusinessException(ErrorCode.AGENT_CREDIT_NOT_ENOUGH, "Agent 可用算力不足");
-        }
+        CreditInsufficientSupport.ensureAvailable(
+                creditService, userId, creditBudget, ErrorCode.AGENT_CREDIT_NOT_ENOUGH, null);
 
         LocalDateTime now = LocalDateTime.now();
         agentMessageMapper.supersedeMessagesAfter(sourceRun.getSessionId(), userMessage.getId(), now);
@@ -301,9 +301,8 @@ public class AgentRunServiceImpl implements AgentRunService {
         agentRateLimitService.checkRunRate(userId);
         agentRateLimitService.checkActiveRunLimit(userId);
         int creditBudget = Math.max(0, appProperties.getAgent().getDefaultCreditBudget());
-        if (creditService.account(userId).available() < creditBudget) {
-            throw new BusinessException(ErrorCode.AGENT_CREDIT_NOT_ENOUGH, "Agent 可用算力不足");
-        }
+        CreditInsufficientSupport.ensureAvailable(
+                creditService, userId, creditBudget, ErrorCode.AGENT_CREDIT_NOT_ENOUGH, null);
 
         LocalDateTime now = LocalDateTime.now();
         userMessage.setContentText(trimmed);
@@ -465,6 +464,19 @@ public class AgentRunServiceImpl implements AgentRunService {
                 .map(com.aiminilab.aitoolmarket.agent.dto.AgentToolPreferenceResponse::from)
                 .toList();
         Map<String, String> settings = systemSettingService.settings();
+        var runtimeSettings = new com.aiminilab.aitoolmarket.agent.dto.AgentRuntimeSettingsResponse(
+                parseIntSetting(settings.get(AgentRuntimeSettings.MAX_MODEL_CALLS_KEY), AgentRuntimeSettings.DEFAULT_MAX_MODEL_CALLS, 1, 50),
+                parseIntSetting(settings.get(AgentRuntimeSettings.MAX_TOOL_CALLS_KEY), AgentRuntimeSettings.DEFAULT_MAX_TOOL_CALLS, 1, 50),
+                parseIntSetting(settings.get(AgentRuntimeSettings.MAX_HISTORY_MESSAGES_KEY), AgentRuntimeSettings.DEFAULT_MAX_HISTORY_MESSAGES, 1, 100),
+                parseIntSetting(settings.get(AgentRuntimeSettings.TOOL_EXECUTION_TIMEOUT_SECONDS_KEY), AgentRuntimeSettings.DEFAULT_TOOL_EXECUTION_TIMEOUT_SECONDS, 10, 3600),
+                parseIntSetting(settings.get(AgentRuntimeSettings.IMAGE_TOOL_EXECUTION_TIMEOUT_SECONDS_KEY), AgentRuntimeSettings.DEFAULT_IMAGE_TOOL_EXECUTION_TIMEOUT_SECONDS, 10, 3600),
+                parseIntSetting(settings.get(AgentRuntimeSettings.VIDEO_TOOL_EXECUTION_TIMEOUT_SECONDS_KEY), AgentRuntimeSettings.DEFAULT_VIDEO_TOOL_EXECUTION_TIMEOUT_SECONDS, 10, 7200),
+                parseDoubleSetting(settings.get(AgentRuntimeSettings.TOOL_POLL_INTERVAL_SECONDS_KEY), AgentRuntimeSettings.DEFAULT_TOOL_POLL_INTERVAL_SECONDS, 0.2D, 30D),
+                parseBooleanSetting(settings.get(AgentRuntimeSettings.TOOL_STREAM_RELAY_ENABLED_KEY), AgentRuntimeSettings.DEFAULT_TOOL_STREAM_RELAY_ENABLED),
+                parseBooleanSetting(settings.get(AgentRuntimeSettings.PRODUCT_TOOL_LOOP_ENABLED_KEY), AgentRuntimeSettings.DEFAULT_PRODUCT_TOOL_LOOP_ENABLED),
+                parseIntSetting(settings.get(AgentRuntimeSettings.PRODUCT_TOOL_LOOP_MAX_CALLS_KEY), AgentRuntimeSettings.DEFAULT_PRODUCT_TOOL_LOOP_MAX_CALLS, 1, 20),
+                parseBooleanSetting(settings.get(AgentRuntimeSettings.PRODUCT_TOOL_LOOP_FALLBACK_TO_ROUTER_KEY), AgentRuntimeSettings.DEFAULT_PRODUCT_TOOL_LOOP_FALLBACK_TO_ROUTER)
+        );
         String agentSystemPrompt = nonBlankOrDefault(
                 settings.get(AgentPromptSettings.SYSTEM_PROMPT_KEY),
                 AgentPromptSettings.DEFAULT_SYSTEM_PROMPT
@@ -530,6 +542,7 @@ public class AgentRunServiceImpl implements AgentRunService {
                 deepAgentsSystemPrompt,
                 memorySettings,
                 routerSettings,
+                runtimeSettings,
                 recentToolCallContext(run),
                 pendingToolContextResponse
         );
@@ -981,6 +994,7 @@ public class AgentRunServiceImpl implements AgentRunService {
         } else {
             agentFileService.attachPendingFilesToRun(userId, sessionId, run.getId(), fileIds);
         }
+        persistUserMessageAttachments(userMessage, userId, sessionId, run.getId());
 
         ModelConnectivityCheck connectivity = checkModelConnectivity(requestedModelConfigId);
         run.setModelConfigId(connectivity.config().id());
@@ -1028,6 +1042,26 @@ public class AgentRunServiceImpl implements AgentRunService {
         Long executeRunId = run.getId();
         runAfterCommit(() -> notifyAgentService(executeRunId, () -> agentServiceClient.executeRun(executeRunId)));
         return new CreateAgentMessageResponse(sessionId, userMessage.getId(), run.getId(), "RUNNING");
+    }
+
+    private void persistUserMessageAttachments(AgentMessage userMessage, Long userId, Long sessionId, Long runId) {
+        List<AgentFile> attachedFiles = agentFileMapper.findByRun(userId, sessionId, runId, FILE_CONTEXT_LIMIT);
+        if (attachedFiles.isEmpty()) {
+            return;
+        }
+        List<Map<String, Object>> attachments = attachedFiles.stream()
+                .map(file -> {
+                    Map<String, Object> item = new LinkedHashMap<>();
+                    item.put("id", file.getId());
+                    item.put("name", file.getOriginalFilename());
+                    item.put("contentType", file.getContentType());
+                    item.put("size", file.getFileSize());
+                    item.put("status", file.getStatus());
+                    return item;
+                })
+                .toList();
+        userMessage.setContentJson(toJson(Map.of("attachments", attachments)));
+        agentMessageMapper.updateById(userMessage);
     }
 
     private AgentContextSnapshot createContextSnapshot(AgentRun run,
@@ -1126,7 +1160,12 @@ public class AgentRunServiceImpl implements AgentRunService {
     }
 
     private int contextHistoryLimit() {
-        return Math.max(1, appProperties.getAgent().getMaxHistoryMessages());
+        return parseIntSetting(
+                systemSettingService.settings().get(AgentRuntimeSettings.MAX_HISTORY_MESSAGES_KEY),
+                Math.max(1, appProperties.getAgent().getMaxHistoryMessages()),
+                1,
+                100
+        );
     }
 
     private InternalAgentModelConfigResponse resolveModelConfigForRun(AgentRun run) {

@@ -12,6 +12,8 @@ import java.util.List;
 
 public record AgentModelConfigResponse(
         Long id,
+        Long vendorAccountId,
+        String vendorAccountName,
         String displayName,
         String configCode,
         String provider,
@@ -44,8 +46,16 @@ public record AgentModelConfigResponse(
     }
 
     public static AgentModelConfigResponse from(AgentModelConfig config, ModelCapabilitiesCodec codec) {
+        return from(config, codec, null);
+    }
+
+    public static AgentModelConfigResponse from(AgentModelConfig config,
+                                                ModelCapabilitiesCodec codec,
+                                                String vendorAccountName) {
         return new AgentModelConfigResponse(
                 config.getId(),
+                config.getVendorAccountId(),
+                vendorAccountName,
                 config.getDisplayName(),
                 config.getConfigCode(),
                 config.getProvider(),

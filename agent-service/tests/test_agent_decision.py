@@ -136,6 +136,25 @@ async def test_llm_tool_call_is_blocked_when_message_is_follow_up():
 
 
 @pytest.mark.asyncio
+async def test_schema_fallback_routes_colloquial_image_request_when_llm_router_fails():
+    service = AgentDecisionService()
+
+    async def llm_router(context, rule_intent):
+        return None
+
+    decision = await service.decide(
+        _context("给科比来一张一样的"),
+        hard_rule=_hard_rule,
+        llm_router=llm_router,
+    )
+
+    assert decision.intent == Intent.TOOL_USE
+    assert decision.selectedToolCode == "ofox_gpt_image2"
+    assert decision.reason == "schema_image_tool_fallback"
+    assert decision.signals[-1]["source"] == "fallback"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("message", "expected_intent", "expected_tool", "expected_reason"),
     [

@@ -2,18 +2,55 @@
 import { computed, ref } from "vue"
 import { AlertTriangle, Bot, CheckCircle2, ChevronDown, Database, FileText, Hammer, Loader2, Sparkles, Store } from "lucide-vue-next"
 import type { AgentRunEvent } from "@/api/types"
-import { filterUserFacingRunEvents } from "./runTimelineEvents"
+import { filterToolProcessEvents, filterUserFacingRunEvents } from "./runTimelineEvents"
 
 const props = defineProps<{
   events: AgentRunEvent[]
   inlineMode?: boolean
+  processMode?: boolean
 }>()
 
 type TimelineTone = "info" | "success" | "warning" | "error"
 
 const expandedEventIds = ref<Set<number>>(new Set())
 
-const visibleEvents = computed(() => filterUserFacingRunEvents(props.events, props.inlineMode).slice(-14))
+const processExpanded = ref(true)
+const toolEvents = computed(() => filterToolProcessEvents(props.events))
+const hasToolProcess = computed(() => toolEvents.value.length > 0)
+const processEvents = computed(() =>
+  props.processMode && hasToolProcess.value ? toolEvents.value : filterUserFacingRunEvents(props.events, props.inlineMode),
+)
+const visibleEvents = computed(() =>
+  processEvents.value.slice(-14),
+)
+const latestEvent = computed(() => visibleEvents.value.at(-1) ?? null)
+const processFinishedEvent = computed(() =>
+  [...processEvents.value].reverse().find((event) =>
+    hasToolProcess.value ? event.eventType === "tool.finished" : event.eventType === "run.completed" || event.eventType === "message.completed" || event.eventType === "run.failed",
+  ) ?? null,
+)
+const hasRunningTool = computed(() => {
+  const lastEvent = latestEvent.value
+  if (!lastEvent) return false
+  return hasToolProcess.value
+    ? lastEvent.eventType !== "tool.finished"
+    : lastEvent.eventType !== "run.completed" && lastEvent.eventType !== "message.completed" && lastEvent.eventType !== "run.failed"
+})
+const processElapsedSeconds = computed(() => {
+  const startedAt = processEvents.value[0]?.createdAt
+  const endedAt = processFinishedEvent.value?.createdAt ?? latestEvent.value?.createdAt
+  if (!startedAt || !endedAt) return null
+  const start = new Date(startedAt).getTime()
+  const end = new Date(endedAt).getTime()
+  if (Number.isNaN(start) || Number.isNaN(end) || end < start) return null
+  return Math.max(1, Math.round((end - start) / 1000))
+})
+const processSummaryText = computed(() => {
+  if (!processFinishedEvent.value) return hasToolProcess.value ? "调用中" : "思考中"
+  const elapsed = processElapsedSeconds.value
+  const label = hasToolProcess.value ? "调用完成" : "思考完成"
+  return elapsed == null ? label : `${label}（用时 ${elapsed} 秒）`
+})
 
 function parseEventJson(value?: string | null | Record<string, unknown>) {
   if (value == null || value === "") return {} as Record<string, unknown>
@@ -157,6 +194,20 @@ function toggleExpanded(eventId: number) {
     :class="{ inline: inlineMode }"
     aria-label="Agent run timeline"
   >
+    <button v-if="processMode" class="process-summary" :class="{ thinking: !hasToolProcess }" type="button" @click="processExpanded = !processExpanded">
+      <span class="process-icon" :class="{ running: hasRunningTool }">
+        <Loader2 v-if="hasRunningTool" class="h-3.5 w-3.5 animate-spin" />
+        <Hammer v-else-if="hasToolProcess" class="h-3.5 w-3.5" />
+        <Sparkles v-else class="h-3.5 w-3.5" />
+      </span>
+      <span>
+        <strong>{{ processSummaryText }}</strong>
+        <small>{{ latestEvent ? titleFor(latestEvent) : "等待工具事件" }}</small>
+      </span>
+      <ChevronDown class="h-4 w-4 process-chevron" :class="{ open: processExpanded }" />
+    </button>
+    <div v-if="processMode && !processExpanded" class="process-collapsed-spacer" />
+    <template v-if="!processMode || processExpanded">
     <article v-for="event in visibleEvents" :key="event.id" class="timeline-row" :class="toneFor(event)">
       <div class="timeline-icon">
         <component :is="iconFor(event)" class="h-4 w-4" />
@@ -171,6 +222,7 @@ function toggleExpanded(eventId: number) {
         <pre v-if="expandedEventIds.has(event.id) && detailJson(event)" class="detail-json">{{ detailJson(event) }}</pre>
       </div>
     </article>
+    </template>
   </section>
 </template>
 
@@ -186,11 +238,80 @@ function toggleExpanded(eventId: number) {
 }
 
 .run-timeline.inline {
-  max-height: 150px;
+  max-height: none;
   margin: 0;
   padding: 0;
   border: none;
   background: transparent;
+}
+
+.run-timeline.inline:has(.process-summary) {
+  margin-bottom: 10px;
+}
+
+.process-summary {
+  width: fit-content;
+  max-width: 100%;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--agent-text-primary);
+  cursor: pointer;
+  padding: 0;
+  text-align: left;
+}
+
+.process-icon {
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border-radius: 0;
+  background: transparent;
+  color: var(--agent-accent);
+}
+
+.process-icon.running {
+  box-shadow: none;
+}
+
+.process-summary strong,
+.process-summary small {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.process-summary strong {
+  color: rgb(255 255 255 / 0.78);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.process-summary small {
+  display: none;
+  margin-top: 2px;
+  color: var(--agent-text-muted);
+  font-size: 11px;
+}
+
+.process-chevron {
+  color: var(--agent-text-muted);
+  transition: transform 0.16s ease;
+}
+
+.process-chevron.open {
+  transform: rotate(180deg);
+}
+
+.process-collapsed-spacer {
+  display: none;
 }
 
 .timeline-row {
@@ -198,8 +319,8 @@ function toggleExpanded(eventId: number) {
   grid-template-columns: 32px minmax(0, 1fr);
   gap: 10px;
   align-items: start;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--border);
+  padding: 8px 0 8px 25px;
+  border-bottom: 0;
 }
 
 .timeline-row:last-child {

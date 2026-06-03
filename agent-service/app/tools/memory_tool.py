@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
-from app.core.event_types import MEMORY_SAVED
+from app.core.event_types import MEMORY_REJECTED, MEMORY_SAVED
 from app.core.schemas import RunEventCreate
 
 _ALLOWED_MEMORY_TYPES = {
@@ -23,12 +24,35 @@ _INJECTION_PATTERNS = (
     "忽略之前",
     "忘记所有",
     "系统提示词",
+    "developer message",
+    "reveal your instructions",
+    "print your prompt",
+    "泄露提示词",
+    "输出提示词",
 )
+
+_SECRET_PATTERNS = (
+    r"(?i)\bapi[_-]?key\b\s*[:=]\s*['\"]?[A-Za-z0-9_\-]{16,}",
+    r"(?i)\b(secret|token|password)\b\s*[:=]\s*['\"]?[A-Za-z0-9_\-./+=]{12,}",
+    r"(?i)\bsk-[A-Za-z0-9]{20,}",
+    r"(?i)\bAKIA[0-9A-Z]{16}\b",
+)
+_INVISIBLE_CONTROL_CHARS = tuple(chr(code) for code in (*range(0x200B, 0x2010), 0x202A, 0x202B, 0x202C, 0x202D, 0x202E, 0x2060))
 
 
 def _is_safe(content: str) -> bool:
+    return _safety_rejection_reason(content) is None
+
+
+def _safety_rejection_reason(content: str) -> str | None:
     lower = content.lower()
-    return not any(pattern in lower for pattern in _INJECTION_PATTERNS)
+    if any(pattern in lower for pattern in _INJECTION_PATTERNS):
+        return "prompt_injection_pattern"
+    if any(char in content for char in _INVISIBLE_CONTROL_CHARS):
+        return "invisible_control_character"
+    if any(re.search(pattern, content) for pattern in _SECRET_PATTERNS):
+        return "secret_like_value"
+    return None
 
 
 class MemoryTool:
@@ -52,8 +76,10 @@ class MemoryTool:
         content = _trim(content, 2000)
         if not title or not content:
             return {"success": False, "error": "title and content are required"}
-        if not _is_safe(content) or not _is_safe(title):
-            return {"success": False, "error": "content rejected by security scan"}
+        rejection_reason = _safety_rejection_reason(content) or _safety_rejection_reason(title)
+        if rejection_reason:
+            await self._emit_rejected_event("add", memory_type, title, rejection_reason)
+            return {"success": False, "error": f"content rejected by security scan: {rejection_reason}"}
         result = await self.backend.create_workspace_memory(
             workspace_id=self.workspace_id,
             user_id=self.user_id,
@@ -74,8 +100,10 @@ class MemoryTool:
         new_content = _trim(new_content, 2000)
         if not new_title or not new_content:
             return {"success": False, "error": "new_title and new_content are required"}
-        if not _is_safe(new_content) or not _is_safe(new_title):
-            return {"success": False, "error": "content rejected by security scan"}
+        rejection_reason = _safety_rejection_reason(new_content) or _safety_rejection_reason(new_title)
+        if rejection_reason:
+            await self._emit_rejected_event("replace", memory_type, new_title, rejection_reason)
+            return {"success": False, "error": f"content rejected by security scan: {rejection_reason}"}
         try:
             items = await self.backend.retrieve_workspace_memory(
                 workspace_id=self.workspace_id,
@@ -124,6 +152,26 @@ class MemoryTool:
                         "memory_id": memory_id,
                         "memory_type": memory_type,
                         "title": title,
+                    },
+                ),
+            )
+        except Exception:
+            pass
+
+    async def _emit_rejected_event(self, action: str, memory_type: str, title: str, reason: str) -> None:
+        if self.run_id is None:
+            return
+        try:
+            await self.backend.append_event(
+                self.run_id,
+                RunEventCreate(
+                    eventType=MEMORY_REJECTED,
+                    eventText=reason,
+                    eventJson={
+                        "action": action,
+                        "memory_type": memory_type,
+                        "title": title,
+                        "reason": reason,
                     },
                 ),
             )

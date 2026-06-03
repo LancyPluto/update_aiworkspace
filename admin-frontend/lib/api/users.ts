@@ -13,8 +13,8 @@ export function memberAccountBalance(user: AdminMember): number {
   return user.creditAccount?.balance ?? 0
 }
 
-export function fetchAdminUsers() {
-  return http.get<PageResponse<AdminMember>>('/api/admin/v1/users')
+export function fetchAdminUsers(query?: Record<string, string | number | boolean | undefined>) {
+  return http.get<PageResponse<AdminMember>>('/api/admin/v1/users', query)
 }
 
 export function updateUserStatus(userId: number, payload: UpdateUserStatusPayload) {
@@ -39,9 +39,9 @@ export function fetchUserCreditAccount(userId: number) {
   return http.get<CreditAccount>(`/api/admin/v1/users/${userId}/credits/account`)
 }
 
-export function fetchUserCreditLogs(userId: number) {
+export function fetchUserCreditLogs(userId: number, pageSize = 200) {
   return http.get<PageResponse<CreditLogItem>>(
     `/api/admin/v1/users/${userId}/credits/logs`,
-    { pageNo: 1, pageSize: 20 },
+    { pageNo: 1, pageSize },
   )
 }

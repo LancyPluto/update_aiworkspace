@@ -40,4 +40,20 @@ public final class AgentMemorySettings {
 
     private AgentMemorySettings() {
     }
+
+    public static java.util.Map<String, String> defaults() {
+        java.util.Map<String, String> defaults = new java.util.LinkedHashMap<>();
+        defaults.put(AUTO_SAVE_ENABLED_KEY, String.valueOf(DEFAULT_AUTO_SAVE_ENABLED));
+        defaults.put(RETRIEVAL_LIMIT_KEY, String.valueOf(DEFAULT_RETRIEVAL_LIMIT));
+        defaults.put(ENABLED_TYPES_KEY, DEFAULT_ENABLED_TYPES);
+        defaults.put(WRITE_PROMPT_KEY, DEFAULT_WRITE_PROMPT);
+        defaults.put(RETRIEVAL_PROMPT_KEY, DEFAULT_RETRIEVAL_PROMPT);
+        defaults.put(TOOL_LOOP_ENABLED_KEY, String.valueOf(DEFAULT_TOOL_LOOP_ENABLED));
+        defaults.put(CONSOLIDATION_ENABLED_KEY, String.valueOf(DEFAULT_CONSOLIDATION_ENABLED));
+        defaults.put(CONSOLIDATION_TURN_INTERVAL_KEY, String.valueOf(DEFAULT_CONSOLIDATION_TURN_INTERVAL));
+        defaults.put(CONSOLIDATION_CHAR_THRESHOLD_KEY, String.valueOf(DEFAULT_CONSOLIDATION_CHAR_THRESHOLD));
+        defaults.put(CONSOLIDATION_MIN_CONFIDENCE_KEY, String.valueOf(DEFAULT_CONSOLIDATION_MIN_CONFIDENCE));
+        defaults.put(CANDIDATE_CONFIDENCE_THRESHOLD_KEY, String.valueOf(DEFAULT_CANDIDATE_CONFIDENCE_THRESHOLD));
+        return defaults;
+    }
 }

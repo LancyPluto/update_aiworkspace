@@ -8,6 +8,7 @@ import java.math.BigDecimal;
 import java.util.List;
 
 public record AgentModelConfigRequest(
+        Long vendorAccountId,
         String displayName,
         String configCode,
         @NotBlank String provider,

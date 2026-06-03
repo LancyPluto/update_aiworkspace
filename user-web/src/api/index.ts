@@ -1,6 +1,13 @@
 export { apiRequest, ApiBusinessError } from "./client"
 export { login, logout, register, resetPassword, sendSmsCode, smsLogin, smsRegister } from "./authApi"
-export { getCurrentUser, updateCurrentUserProfile, uploadCurrentUserAvatar, updateCommunitySettings } from "./userApi"
+export {
+  cancelCurrentUserAccount,
+  getCurrentUser,
+  sendCancelAccountSmsCode,
+  updateCurrentUserProfile,
+  uploadCurrentUserAvatar,
+  updateCommunitySettings,
+} from "./userApi"
 export * from "./communityApi"
 export { fetchToolCategories, fetchTools, searchTools, fetchToolByCode } from "./toolApi"
 export * from "./pptApi"
@@ -45,6 +52,7 @@ export {
   createRechargeOrder,
   fetchCreditAccount,
   fetchCreditLogs,
+  fetchCreditUsageLogs,
   fetchRechargeOrder,
   fetchRechargePackages,
   mockPayRechargeOrder,
