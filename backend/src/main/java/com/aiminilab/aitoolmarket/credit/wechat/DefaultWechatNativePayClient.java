@@ -25,6 +25,7 @@ import java.security.PublicKey;
 import java.security.Signature;
 import java.security.spec.PKCS8EncodedKeySpec;
 import java.security.spec.X509EncodedKeySpec;
+import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.Base64;
@@ -39,6 +40,7 @@ public class DefaultWechatNativePayClient implements WechatNativePayClient {
     private static final String NATIVE_PREPAY_PATH = "/v3/pay/transactions/native";
     private static final String ORDER_QUERY_PATH_PREFIX = "/v3/pay/transactions/out-trade-no/";
     private static final DateTimeFormatter RFC3339 = DateTimeFormatter.ISO_OFFSET_DATE_TIME;
+    private static final long CALLBACK_MAX_SKEW_SECONDS = 300;
 
     private final AppProperties.WechatNative properties;
     private final ObjectMapper objectMapper;
@@ -73,10 +75,10 @@ public class DefaultWechatNativePayClient implements WechatNativePayClient {
             }
             return new NativePrepayResponse(codeUrl);
         } catch (IOException exception) {
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "WeChat Native prepay request failed");
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "WeChat Native prepay request failed: " + exception.getMessage());
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "WeChat Native prepay request interrupted");
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "WeChat Native prepay request interrupted: " + exception.getMessage());
         }
     }
 
@@ -178,6 +180,16 @@ public class DefaultWechatNativePayClient implements WechatNativePayClient {
         }
         if (!headers.serial().equals(properties.getWechatPayPublicKeyId())) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "WeChat payment callback public key mismatch");
+        }
+        long now = Instant.now().getEpochSecond();
+        long callbackTs;
+        try {
+            callbackTs = Long.parseLong(headers.timestamp());
+        } catch (NumberFormatException exception) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "WeChat payment callback timestamp invalid");
+        }
+        if (Math.abs(now - callbackTs) > CALLBACK_MAX_SKEW_SECONDS) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "WeChat payment callback timestamp expired");
         }
         String message = headers.timestamp() + "\n" + headers.nonce() + "\n" + body + "\n";
         try {

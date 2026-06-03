@@ -42,7 +42,7 @@ class ToolApiTest {
         mockMvc.perform(get("/api/v1/tool-categories"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
-                .andExpect(jsonPath("$.data[0].categoryCode").value("copywriting"));
+                .andExpect(jsonPath("$.data[0].categoryCode").value("text-to-image"));
 
         String createResponse = mockMvc.perform(post("/api/admin/v1/tools")
                         .header("Authorization", "Bearer " + adminToken)
@@ -51,7 +51,7 @@ class ToolApiTest {
                                 {
                                   "toolCode": "xiaohongshu_copywriting",
                                   "toolName": "小红书文案生成",
-                                  "categoryId": 1,
+                                  "categoryId": 4,
                                   "description": "根据产品信息生成小红书文案",
                                   "coverUrl": "https://cdn.example.com/tools/xiaohongshu-cover.webp",
                                   "estimatedCreditCost": 10

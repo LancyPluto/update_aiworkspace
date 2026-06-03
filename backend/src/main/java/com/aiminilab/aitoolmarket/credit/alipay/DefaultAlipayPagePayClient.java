@@ -3,12 +3,17 @@ package com.aiminilab.aitoolmarket.credit.alipay;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.config.AppProperties;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
+import java.net.URI;
 import java.net.URLEncoder;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyFactory;
 import java.security.PrivateKey;
@@ -28,6 +33,7 @@ public class DefaultAlipayPagePayClient implements AlipayPagePayClient {
 
     private final AppProperties.AlipayPage properties;
     private final ObjectMapper objectMapper;
+    private final HttpClient httpClient = HttpClient.newHttpClient();
 
     public DefaultAlipayPagePayClient(AppProperties appProperties, ObjectMapper objectMapper) {
         this.properties = appProperties.getPayment().getAlipayPage();
@@ -42,30 +48,39 @@ public class DefaultAlipayPagePayClient implements AlipayPagePayClient {
             bizContent.put("out_trade_no", request.outTradeNo());
             bizContent.put("total_amount", request.totalAmount().setScale(2).toPlainString());
             bizContent.put("subject", request.subject());
-            bizContent.put("product_code", "FAST_INSTANT_TRADE_PAY");
             if (request.expiresAt() != null) {
                 bizContent.put("time_expire", EXPIRE_FORMAT.format(request.expiresAt()));
             }
 
             Map<String, String> params = new TreeMap<>();
             params.put("app_id", properties.getAppId());
-            params.put("method", "alipay.trade.page.pay");
+            // QR-code based pay: alipay.trade.precreate
+            params.put("method", "alipay.trade.precreate");
             params.put("format", "JSON");
             params.put("charset", "UTF-8");
             params.put("sign_type", "RSA2");
             params.put("timestamp", EXPIRE_FORMAT.format(java.time.LocalDateTime.now()));
             params.put("version", "1.0");
             params.put("notify_url", properties.getNotifyUrl());
-            if (StringUtils.hasText(properties.getReturnUrl())) {
-                params.put("return_url", properties.getReturnUrl());
-            }
             params.put("biz_content", objectMapper.writeValueAsString(bizContent));
             params.put("sign", sign(canonicalPayload(params), privateKey()));
-            return new AlipayPagePayResponse(properties.getGatewayUrl() + "?" + encode(params));
+            String responseBody = postForm(properties.getGatewayUrl(), encode(params));
+            JsonNode json = objectMapper.readTree(responseBody);
+            JsonNode precreate = json.path("alipay_trade_precreate_response");
+            String code = precreate.path("code").asText("");
+            if (!"10000".equals(code)) {
+                String msg = precreate.path("sub_msg").asText(precreate.path("msg").asText("Alipay precreate failed"));
+                throw new BusinessException(ErrorCode.PARAM_ERROR, "create Alipay QR pay order failed: " + normalizeAlipayError(msg));
+            }
+            String qrCode = precreate.path("qr_code").asText("");
+            if (qrCode.isBlank()) {
+                throw new BusinessException(ErrorCode.PARAM_ERROR, "create Alipay QR pay order failed: missing qr_code");
+            }
+            return new AlipayPagePayResponse(qrCode);
         } catch (BusinessException exception) {
             throw exception;
         } catch (Exception exception) {
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "create Alipay page pay order failed: " + exception.getMessage());
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "create Alipay QR pay order failed: " + exception.getMessage());
         }
     }
 
@@ -129,7 +144,7 @@ public class DefaultAlipayPagePayClient implements AlipayPagePayClient {
     private String canonicalPayload(Map<String, String> params) {
         return params.entrySet().stream()
                 .filter(entry -> entry.getValue() != null)
-                .filter(entry -> !"sign".equals(entry.getKey()) && !"sign_type".equals(entry.getKey()))
+                .filter(entry -> !"sign".equals(entry.getKey()))
                 .sorted(Map.Entry.comparingByKey())
                 .map(entry -> entry.getKey() + "=" + entry.getValue())
                 .collect(Collectors.joining("&"));
@@ -139,6 +154,30 @@ public class DefaultAlipayPagePayClient implements AlipayPagePayClient {
         return params.entrySet().stream()
                 .map(entry -> url(entry.getKey()) + "=" + url(entry.getValue()))
                 .collect(Collectors.joining("&"));
+    }
+
+    private String postForm(String url, String formBody) throws Exception {
+        HttpRequest httpRequest = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .header("Content-Type", "application/x-www-form-urlencoded;charset=UTF-8")
+                .header("Accept", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(formBody, StandardCharsets.UTF_8))
+                .build();
+        HttpResponse<String> response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "Alipay gateway request failed: " + response.body());
+        }
+        return response.body();
+    }
+
+    private String normalizeAlipayError(String message) {
+        if (message == null || message.isBlank()) {
+            return "Alipay precreate failed";
+        }
+        if (message.contains("接口调用权限不足")) {
+            return "支付宝应用缺少 alipay.trade.precreate（扫码预下单/当面付）接口权限，请在支付宝开放平台开通后重试";
+        }
+        return message;
     }
 
     private String url(String value) {

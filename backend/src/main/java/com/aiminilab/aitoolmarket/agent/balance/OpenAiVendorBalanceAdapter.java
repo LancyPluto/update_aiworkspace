@@ -10,7 +10,7 @@ import java.util.Set;
 public class OpenAiVendorBalanceAdapter implements VendorBalanceAdapter {
 
     private static final String DEFAULT_ORIGIN = "https://api.openai.com";
-    private static final Set<String> SUPPORTED = Set.of("openai", "openai_gateway", "infinitetalk");
+    private static final Set<String> SUPPORTED = Set.of("openai", "openai_gateway");
 
     private final OpenAiCompatibleBalanceProbe probe;
 

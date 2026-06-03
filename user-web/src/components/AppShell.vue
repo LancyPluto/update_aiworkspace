@@ -11,11 +11,9 @@ import {
   FolderHeart,
   Images,
   ChevronDown,
-  Moon,
   PanelLeft,
   PanelLeftClose,
   Sparkles,
-  Sun,
   Search,
   Plus,
   Bell,
@@ -32,7 +30,7 @@ import { userRoutes } from "@/router/userRoutes"
 import { useAuthStore } from "@/store/authStore"
 import MemberBadge from "@/components/MemberBadge/MemberBadge.vue"
 import UserAvatar from "@/components/UserAvatar.vue"
-import { applyAppTheme, getStoredTheme, storeAppTheme, type AppTheme } from "@/utils/theme"
+import { applyAppTheme } from "@/utils/theme"
 
 withDefaults(
   defineProps<{
@@ -64,7 +62,6 @@ const SIDEBAR_OPEN_KEY = "ai_tool_market_sidebar_open"
 const EXPANDED_GROUPS_KEY = "ai_tool_market_nav_expanded_groups"
 
 const credit = ref<CreditAccount | null>(null)
-const theme = ref<AppTheme>("light")
 const sidebarOpen = ref(true)
 const expandedGroups = ref<Set<string>>(new Set())
 const customerServiceOpen = ref(false)
@@ -107,17 +104,8 @@ function toggleSidebar() {
   sidebarOpen.value = !sidebarOpen.value
 }
 
-function toggleTheme() {
-  theme.value = theme.value === "dark" ? "light" : "dark"
-}
-
 watch(sidebarOpen, (open) => {
   localStorage.setItem(SIDEBAR_OPEN_KEY, open ? "1" : "0")
-})
-
-watch(theme, (next) => {
-  applyAppTheme(next)
-  storeAppTheme(next)
 })
 
 function saveExpandedGroups() {
@@ -251,8 +239,7 @@ watch(
 )
 
 onMounted(async () => {
-  theme.value = getStoredTheme()
-  applyAppTheme(theme.value)
+  applyAppTheme("dark")
 
   const saved = localStorage.getItem(SIDEBAR_OPEN_KEY)
   if (saved === "0") sidebarOpen.value = false
@@ -457,17 +444,6 @@ onUnmounted(() => {
           联系客服
         </button>
         <div class="flex items-center gap-3">
-          <button
-            type="button"
-            class="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.04] text-white/60 transition hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-            :aria-label="theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'"
-            :title="theme === 'dark' ? 'Light mode' : 'Dark mode'"
-            :aria-pressed="theme === 'dark'"
-            @click="toggleTheme"
-          >
-            <Sun v-if="theme === 'dark'" class="h-4 w-4" aria-hidden="true" />
-            <Moon v-else class="h-4 w-4" aria-hidden="true" />
-          </button>
           <template v-if="auth.isLoggedIn">
             <RouterLink
               :to="userRoutes.profile"

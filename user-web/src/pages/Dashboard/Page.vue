@@ -64,6 +64,7 @@ const selectedChatTool = ref<AITool | null>(null)
 const selectedToolDetailLoading = ref(false)
 const capabilityRef = ref<InstanceType<typeof CapabilityControls> | null>(null)
 const composerOpen = ref(false)
+const workbenchScrollRef = ref<HTMLElement | null>(null)
 const replayParams = ref<Record<string, unknown> | null>(null)
 const submitting = ref(false)
 const submitError = ref("")
@@ -77,6 +78,7 @@ const retryingTaskIds = ref<Set<number>>(new Set())
 const deletingTaskIds = ref<Set<number>>(new Set())
 const previewAsset = ref<AssetPreviewItem | null>(null)
 const pendingAssetReplay = ref<AssetPreviewItem | null>(null)
+let lastWorkbenchScrollTop = 0
 
 const modalityLabels: Record<string, string> = {
   IMAGE: "图像",
@@ -267,7 +269,7 @@ async function loadDashboard() {
       promptText.value = pendingAsset.prompt || promptText.value
     }
     if (rawRouteTool) selectToolByCode(rawRouteTool, true)
-    else if (pendingAsset) composerOpen.value = true
+    else if (pendingAsset) expandComposer()
     await reloadTasksForCurrentModality()
     startPollingVisibleTasks()
   } finally {
@@ -305,7 +307,7 @@ function selectModality(key: string) {
 function selectTool(tool: ToolSummary) {
   selectedToolCode.value = tool.toolCode
   modelPickerOpen.value = false
-  composerOpen.value = true
+  expandComposer()
   replayParams.value = null
   submitError.value = ""
   submitNotice.value = ""
@@ -316,7 +318,25 @@ function selectToolByCode(toolCode: string, openComposer = false) {
   if (!tool) return
   selectedModality.value = normalizeModality(tool.outputModality)
   selectedToolCode.value = tool.toolCode
-  if (openComposer) composerOpen.value = true
+  if (openComposer) expandComposer()
+}
+
+function expandComposer() {
+  composerOpen.value = true
+}
+
+function collapseComposerForPreview() {
+  if (!composerOpen.value || submitting.value) return
+  composerOpen.value = false
+  modelPickerOpen.value = false
+}
+
+function handleWorkbenchScroll(event: Event) {
+  const target = event.currentTarget as HTMLElement
+  const nextTop = target.scrollTop
+  const scrollingDown = nextTop > lastWorkbenchScrollTop + 18
+  lastWorkbenchScrollTop = nextTop
+  if (scrollingDown && nextTop > 120) collapseComposerForPreview()
 }
 
 async function createWithSelectedTool() {
@@ -711,7 +731,7 @@ function useAssetWithTool(tool: AssetPreviewRecommendation, asset: AssetPreviewI
   pendingAssetReplay.value = asset
   replayParams.value = buildAssetReplayParams(selectedChatTool.value?.fields || [], asset)
   previewAsset.value = null
-  composerOpen.value = true
+  expandComposer()
 }
 
 function materialKindForField(field: ToolField): AssetPreviewItem["kind"] | "file" {
@@ -801,7 +821,7 @@ function replayTask(task: TaskDetail) {
   selectedToolCode.value = task.toolCode
   promptText.value = taskPrompt(task)
   replayParams.value = { ...(task.params || {}) }
-  composerOpen.value = true
+  expandComposer()
 }
 
 async function loadSelectedToolDetail(toolCode: string) {
@@ -947,7 +967,11 @@ onUnmounted(() => {
           </RouterLink>
         </div>
 
-        <main class="min-h-0 flex-1 overflow-y-auto px-5 pb-40 pt-6 lg:pl-[132px] xl:px-10 xl:pl-[132px]">
+        <main
+          ref="workbenchScrollRef"
+          class="min-h-0 flex-1 overflow-y-auto px-5 pb-40 pt-6 lg:pl-[132px] xl:px-10 xl:pl-[132px]"
+          @scroll="handleWorkbenchScroll"
+        >
           <div class="mx-auto w-full max-w-[1380px]">
             <div class="sticky top-0 z-20 -mx-5 mb-8 border-b border-transparent bg-transparent px-5 py-4 backdrop-blur-0 xl:-mx-10 xl:px-10">
               <div class="flex flex-wrap items-center justify-between gap-4">
@@ -1002,7 +1026,7 @@ onUnmounted(() => {
                     <button
                       type="button"
                       class="absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-black/24 text-white/74 opacity-0 backdrop-blur transition group-hover:opacity-100 hover:bg-white/10 hover:text-white"
-                      @click="promptText = seed.prompt; composerOpen = true"
+                      @click="promptText = seed.prompt; expandComposer()"
                     >
                       <WandSparkles class="h-4 w-4" />
                     </button>
@@ -1239,7 +1263,7 @@ onUnmounted(() => {
             v-if="!composerOpen"
             type="button"
             class="pointer-events-auto flex h-16 w-[min(720px,calc(100vw-2rem))] items-center gap-4 rounded-full border border-white/10 bg-[#1e1e24]/0.5 px-5 text-left text-white shadow-[0_24px_90px_rgb(0_0_0_/_0.3)] backdrop-blur-2xl transition hover:border-primary/45 hover:bg-[#252631]/0.7"
-            @click="composerOpen = true"
+            @click="expandComposer"
           >
             <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-black/30 text-primary">
               <MessageSquareText class="h-5 w-5" />
@@ -1269,7 +1293,7 @@ onUnmounted(() => {
                 type="button"
                 class="absolute right-3 top-3 inline-flex h-8 w-8 items-center justify-center rounded-full text-white/45 transition hover:bg-white/8 hover:text-white"
                 aria-label="收起创作窗"
-                @click="composerOpen = false; modelPickerOpen = false"
+                @click="collapseComposerForPreview"
               >
                 <X class="h-4 w-4" />
               </button>
@@ -1280,6 +1304,7 @@ onUnmounted(() => {
                   rows="2"
                   class="min-h-[72px] flex-1 resize-none bg-transparent text-base leading-7 text-white outline-none placeholder:text-white/28"
                   :placeholder="`你想创作什么${modalityLabel(selectedModality)}内容？`"
+                  @focus="expandComposer"
                 />
               </div>
 

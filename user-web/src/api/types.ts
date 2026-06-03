@@ -242,6 +242,7 @@ export interface ToolSummary {
   toolCode: string
   toolName: string
   categoryId: number
+  categoryCode?: string | null
   categoryName: string
   description?: string | null
   coverUrl?: string | null
@@ -287,6 +288,7 @@ export interface ToolDetail {
   toolCode: string
   toolName: string
   categoryId: number
+  categoryCode?: string | null
   categoryName: string
   description?: string | null
   coverUrl?: string | null
@@ -360,6 +362,7 @@ export interface TaskDetail {
   outputModality?: string
   params?: Record<string, unknown>
   result?: TaskResult | null
+  communityPostId?: number | null
   createdAt: string
   finishedAt?: string | null
 }
@@ -542,9 +545,18 @@ export interface AgentModelConfig {
   baseUrl?: string | null
   apiKeyMasked?: string | null
   extraAuthJsonMasked?: string | null
+  inputTokenPricePer1k?: number | null
+  outputTokenPricePer1k?: number | null
+  inputTokenPricePer1m?: number | null
+  outputTokenPricePer1m?: number | null
+  billingUnit?: string | null
+  unitPrice?: number | null
   enabled: boolean
   agentEnabled?: boolean | null
   isDefault?: boolean | null
+  channelCode?: string | null
+  channelLabel?: string | null
+  channelIconAsset?: string | null
   capabilities?: string[] | null
 }
 
@@ -575,6 +587,7 @@ export interface AgentFile {
   originalFilename: string
   contentType?: string | null
   fileSize: number
+  downloadUrl?: string | null
   status: "PARSING" | "READY" | "FAILED"
   extractedText?: string | null
   errorMessage?: string | null

@@ -53,6 +53,9 @@ export function formatAgentRunFailure(errorCode?: string, errorMessage?: string)
   if (errorCode === "MODEL_CALL_FAILED") {
     return errorMessage || "模型调用失败，请稍后重试。"
   }
+  if (errorCode === "CREDIT_NOT_ENOUGH" || errorCode === "AGENT_CREDIT_NOT_ENOUGH") {
+    return "可用算力不足，无法完成本次操作。请先充值。"
+  }
   if (errorCode === "TOOL_CALL_FAILED" || errorCode === "TOOL_TASK_FAILED" || errorCode === "TOOL_TASK_TIMEOUT") {
     return errorMessage || "工具执行失败，请稍后再试，或换一种更明确的描述。"
   }

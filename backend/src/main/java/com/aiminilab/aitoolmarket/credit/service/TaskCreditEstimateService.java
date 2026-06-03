@@ -34,8 +34,7 @@ public class TaskCreditEstimateService {
         }
         String billingUnit = modelConfig.getBillingUnit();
         if ("PER_CALL".equals(billingUnit) && modelConfig.getUnitPrice() != null) {
-            BigDecimal cost = modelConfig.getUnitPrice().multiply(new BigDecimal("1.20"));
-            int calculated = cost.divide(new BigDecimal("0.01"), 0, RoundingMode.CEILING).intValue();
+            int calculated = modelConfig.getUnitPrice().divide(new BigDecimal("0.01"), 0, RoundingMode.CEILING).intValue();
             return calculated > 0 ? calculated : toolEstimate;
         }
         return toolEstimate;

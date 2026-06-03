@@ -180,7 +180,14 @@ public class ToolServiceImpl implements ToolService {
     }
 
     private ToolSummaryResponse toUserFacingSummary(AiTool tool) {
-        return ToolSummaryResponse.from(tool, taskCreditEstimateService.estimateForTool(tool));
+        return ToolSummaryResponse.from(tool, userFacingCreditCost(taskCreditEstimateService.estimateForTool(tool)));
+    }
+
+    private int userFacingCreditCost(int baseCredits) {
+        if (baseCredits <= 0) {
+            return 0;
+        }
+        return (int) Math.ceil(baseCredits * 1.2D);
     }
 
     private ToolIntegrationView resolveIntegrationView(AiTool tool) {

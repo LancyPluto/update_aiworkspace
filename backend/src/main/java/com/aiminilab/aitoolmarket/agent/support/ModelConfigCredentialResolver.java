@@ -5,6 +5,8 @@ import com.aiminilab.aitoolmarket.agent.config.ModelProviderRegistry;
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
 import com.aiminilab.aitoolmarket.agent.entity.ModelVendorAccount;
 import com.aiminilab.aitoolmarket.agent.mapper.ModelVendorAccountMapper;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -12,11 +14,14 @@ public class ModelConfigCredentialResolver {
 
     private final ModelVendorAccountMapper vendorAccountMapper;
     private final ModelProviderRegistry providerRegistry;
+    private final ObjectMapper objectMapper;
 
     public ModelConfigCredentialResolver(ModelVendorAccountMapper vendorAccountMapper,
-                                         ModelProviderRegistry providerRegistry) {
+                                         ModelProviderRegistry providerRegistry,
+                                         ObjectMapper objectMapper) {
         this.vendorAccountMapper = vendorAccountMapper;
         this.providerRegistry = providerRegistry;
+        this.objectMapper = objectMapper;
     }
 
     public AgentModelConfig resolveForExecution(AgentModelConfig config) {
@@ -36,6 +41,12 @@ public class ModelConfigCredentialResolver {
         }
         if (isBlank(merged.getExtraAuthJson()) && !isBlank(account.getExtraAuthJson())) {
             merged.setExtraAuthJson(account.getExtraAuthJson());
+        }
+        if (isBlank(merged.getApiKey()) && !isBlank(merged.getExtraAuthJson())) {
+            String apiKey = extractApiKeyFromExtraAuth(merged.getExtraAuthJson());
+            if (!isBlank(apiKey)) {
+                merged.setApiKey(apiKey);
+            }
         }
         if (isBlank(merged.getConsoleUrl()) && !isBlank(account.getConsoleUrl())) {
             merged.setConsoleUrl(account.getConsoleUrl());
@@ -81,6 +92,21 @@ public class ModelConfigCredentialResolver {
         copy.setCreatedAt(source.getCreatedAt());
         copy.setUpdatedAt(source.getUpdatedAt());
         return copy;
+    }
+
+    private String extractApiKeyFromExtraAuth(String extraAuthJson) {
+        try {
+            JsonNode root = objectMapper.readTree(extraAuthJson);
+            for (String field : new String[]{"apiKey", "api_key", "key", "token", "accessToken", "access_token"}) {
+                JsonNode value = root.path(field);
+                if (value.isTextual() && !value.asText().isBlank()) {
+                    return value.asText().trim();
+                }
+            }
+        } catch (Exception ignored) {
+            return "";
+        }
+        return "";
     }
 
     private static boolean isBlank(String value) {

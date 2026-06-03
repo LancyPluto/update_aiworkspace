@@ -19,6 +19,9 @@ import AgentAmbientBackground from "./AgentAmbientBackground.vue"
 import ConversationScrollNav from "./ConversationScrollNav.vue"
 import ConversationPhaseTimeline from "./ConversationPhaseTimeline.vue"
 import AssetPreviewModal from "@/components/AssetPreviewModal.vue"
+import CreditRechargeModal from "@/components/CreditRechargeModal.vue"
+import { formatAgentRunFailure } from "@/api/errorMapping"
+import { isCreditInsufficient } from "@/utils/creditInsufficient"
 import {
   buildConversationPhases,
   buildScrollNavNodes,
@@ -109,6 +112,7 @@ const sending = ref(false)
 const uploading = ref(false)
 const removingFileId = ref<number | null>(null)
 const agentError = ref<string | null>(null)
+const creditModalOpen = ref(false)
 const rememberTool = ref(true)
 const activeRunId = ref<number | null>(null)
 const streamingAssistantMessageId = ref<number | null>(null)
@@ -119,6 +123,59 @@ const confirmingEventIds = ref<Set<number>>(new Set())
 const confirmationError = ref<string | null>(null)
 const dismissedConfirmationIds = ref<Set<number>>(new Set())
 const recoveryRunId = ref<number | null>(null)
+
+const AGENT_RUN_EVENT_CACHE_KEY = "ai_tool_market_agent_run_event_cache_v1"
+
+type PersistedRunEventCache = {
+  sessionId: number
+  runEventsByRunId: Record<string, AgentRunEvent[]>
+  submittedAttachmentJsonByRunId: Record<string, string>
+  dismissedConfirmationIds: number[]
+}
+
+function loadPersistedRunEventCache() {
+  try {
+    const raw = localStorage.getItem(AGENT_RUN_EVENT_CACHE_KEY)
+    if (!raw) return
+    const parsed = JSON.parse(raw) as PersistedRunEventCache
+    if (!parsed || parsed.sessionId !== props.sessionId) return
+    const restoredEvents: Record<number, AgentRunEvent[]> = {}
+    for (const [runId, list] of Object.entries(parsed.runEventsByRunId || {})) {
+      const id = Number(runId)
+      if (!Number.isFinite(id)) continue
+      restoredEvents[id] = Array.isArray(list) ? list.slice(-120) : []
+    }
+    runEventsByRunId.value = restoredEvents
+    const restoredJson: Record<number, string> = {}
+    for (const [runId, value] of Object.entries(parsed.submittedAttachmentJsonByRunId || {})) {
+      const id = Number(runId)
+      if (!Number.isFinite(id) || typeof value !== "string") continue
+      restoredJson[id] = value
+    }
+    submittedAttachmentJsonByRunId.value = restoredJson
+    dismissedConfirmationIds.value = new Set((parsed.dismissedConfirmationIds || []).filter((id) => Number.isFinite(id)))
+  } catch {
+    // ignore corrupted cache
+  }
+}
+
+function persistRunEventCache() {
+  try {
+    const payload: PersistedRunEventCache = {
+      sessionId: props.sessionId,
+      runEventsByRunId: Object.fromEntries(
+        Object.entries(runEventsByRunId.value).map(([runId, list]) => [runId, (list || []).slice(-120)]),
+      ),
+      submittedAttachmentJsonByRunId: Object.fromEntries(
+        Object.entries(submittedAttachmentJsonByRunId.value).map(([runId, value]) => [runId, value]),
+      ),
+      dismissedConfirmationIds: Array.from(dismissedConfirmationIds.value),
+    }
+    localStorage.setItem(AGENT_RUN_EVENT_CACHE_KEY, JSON.stringify(payload))
+  } catch {
+    // ignore quota
+  }
+}
 const lastFailedRunId = ref<number | null>(null)
 const showActiveRunLimitHint = ref(false)
 const cancellingRun = ref(false)
@@ -139,6 +196,59 @@ let runStreamAbort: AbortController | null = null
 let runStatusWatchdog: number | null = null
 let streamingAnimationTimer: number | null = null
 const terminalEventFinalizingRunIds = new Set<number>()
+const CHAT_SCROLL_KEY_PREFIX = "ai_tool_market_agent_chat_scroll_v1:"
+
+type PersistedChatScroll = {
+  scrollTop: number
+  stickToBottom: boolean
+  updatedAt: number
+}
+
+function scrollStorageKey(sessionId: number) {
+  return `${CHAT_SCROLL_KEY_PREFIX}${sessionId}`
+}
+
+function persistChatScroll() {
+  const container = messageContainerRef.value
+  if (!container) return
+  const payload: PersistedChatScroll = {
+    scrollTop: container.scrollTop,
+    stickToBottom: stickToBottom.value,
+    updatedAt: Date.now(),
+  }
+  try {
+    window.sessionStorage.setItem(scrollStorageKey(props.sessionId), JSON.stringify(payload))
+  } catch {
+    // ignore quota
+  }
+}
+
+function loadPersistedChatScroll(sessionId: number): PersistedChatScroll | null {
+  try {
+    const raw = window.sessionStorage.getItem(scrollStorageKey(sessionId))
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as PersistedChatScroll
+    if (!parsed || !Number.isFinite(parsed.scrollTop)) return null
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+async function withAutoScrollBehavior(fn: () => void | Promise<void>) {
+  const container = messageContainerRef.value
+  if (!container) {
+    await fn()
+    return
+  }
+  const previous = container.style.scrollBehavior
+  container.style.scrollBehavior = "auto"
+  try {
+    await fn()
+  } finally {
+    container.style.scrollBehavior = previous
+  }
+}
 
 const input = computed({
   get: () => props.draft,
@@ -257,6 +367,7 @@ function messageContentJsonForFiles(items: AgentFile[]) {
       name: file.originalFilename,
       contentType: file.contentType,
       size: file.fileSize,
+      url: file.downloadUrl,
       status: file.status,
     })),
   })
@@ -363,8 +474,20 @@ async function loadPane() {
     await resumePendingRunForSession()
   } finally {
     paneLoading.value = false
-    stickToBottom.value = true
-    await scrollBottom(true)
+    await nextTick()
+    const persisted = loadPersistedChatScroll(props.sessionId)
+    if (persisted && messageContainerRef.value) {
+      stickToBottom.value = persisted.stickToBottom
+      scrollOffset.value = persisted.scrollTop
+      await withAutoScrollBehavior(async () => {
+        await nextTick()
+        messageContainerRef.value!.scrollTop = persisted.scrollTop
+      })
+      scheduleNavLayoutUpdate()
+    } else {
+      stickToBottom.value = true
+      await withAutoScrollBehavior(() => scrollBottom(true))
+    }
   }
 }
 
@@ -404,7 +527,7 @@ async function cancelRecoveryRun() {
     dismissedConfirmationIds.value = new Set()
     await refreshMessages()
   } catch (error) {
-    agentError.value = formatAgentError(error)
+    applyAgentFailure(error)
   } finally {
     cancellingRun.value = false
     await scrollBottom()
@@ -435,7 +558,7 @@ async function cancelCurrentRun() {
       showActiveRunLimitHint.value = false
       await refreshMessages()
     } catch (error) {
-      agentError.value = formatAgentError(error)
+      applyAgentFailure(error)
     } finally {
       cancellingRun.value = false
       sending.value = false
@@ -592,7 +715,7 @@ async function removeFile(file: AgentFile) {
     await deleteAgentFile(props.sessionId, file.id, { token: props.token })
     files.value = files.value.filter((item) => item.id !== file.id)
   } catch (error) {
-    agentError.value = formatAgentError(error)
+    applyAgentFailure(error)
   } finally {
     removingFileId.value = null
   }
@@ -667,7 +790,7 @@ async function submitMessage(content = input.value) {
       const runId = await discoverActiveRunId(props.sessionId)
       if (runId != null) recoveryRunId.value = runId
     }
-    agentError.value = formatAgentError(error)
+    applyAgentFailure(error)
   } finally {
     sending.value = false
     await scrollBottom()
@@ -714,7 +837,7 @@ async function retryFailedRun() {
     await waitForRunComplete(res.runId)
   } catch (error) {
     runConnectionStatus.value = "failed"
-    agentError.value = formatAgentError(error)
+    applyAgentFailure(error)
   } finally {
     retryingRun.value = false
     await scrollBottom()
@@ -753,7 +876,7 @@ async function regenerateAssistantMessage(message: AgentMessage) {
     await waitForRunComplete(res.runId)
   } catch (error) {
     runConnectionStatus.value = "failed"
-    agentError.value = formatAgentError(error)
+    applyAgentFailure(error)
     await refreshMessages()
   } finally {
     regeneratingMessageId.value = null
@@ -843,7 +966,7 @@ async function submitEditedMessage(message: AgentMessage) {
     } catch (error) {
       runConnectionStatus.value = "failed"
       activeRunId.value = null
-      agentError.value = formatAgentError(error)
+      applyAgentFailure(error)
       await refreshMessages()
     } finally {
       editingRegenerating.value = false
@@ -883,7 +1006,7 @@ async function submitEditedMessage(message: AgentMessage) {
     message.editedAt = previousEditedAt
     runConnectionStatus.value = "failed"
     activeRunId.value = null
-    agentError.value = formatAgentError(error)
+    applyAgentFailure(error)
     await refreshMessages()
   } finally {
     editingRegenerating.value = false
@@ -912,6 +1035,30 @@ function formatAgentError(error: unknown) {
     return error.message || error.code
   }
   return error instanceof Error ? error.message : "Agent 请求失败，请稍后重试"
+}
+
+function applyAgentFailure(
+  error: unknown,
+  options?: { errorCode?: string; errorMessage?: string },
+) {
+  const errorCode = options?.errorCode
+  const errorMessage =
+    options?.errorMessage ??
+    (error instanceof ApiBusinessError ? error.message : error instanceof Error ? error.message : undefined)
+  if (isCreditInsufficient(error, errorCode, errorMessage)) {
+    agentError.value = null
+    creditModalOpen.value = true
+    return
+  }
+  if (error instanceof ApiBusinessError) {
+    applyAgentFailure(error)
+    return
+  }
+  if (errorCode || errorMessage) {
+    agentError.value = formatAgentRunFailure(errorCode, errorMessage)
+    return
+  }
+  agentError.value = error instanceof Error ? error.message : "Agent 请求失败，请稍后重试"
 }
 
 function isTerminalRunStatus(status: AgentRunStatus) {
@@ -961,7 +1108,7 @@ function animateCompletedAssistantMessage(runId: number) {
 function startRunStatusWatchdog(runId: number) {
   stopRunStatusWatchdog()
   runStatusWatchdog = window.setInterval(() => {
-    if (!props.token || activeRunId.value !== runId) {
+    if (activeRunId.value !== runId) {
       stopRunStatusWatchdog()
       return
     }
@@ -1041,17 +1188,12 @@ function appendStreamingAssistantDelta(runId: number, delta: string) {
 
 function completeStreamingAssistantMessage(runId: number, content: string) {
   if (!content) return
-  if (isStructuredMediaContent(content)) {
-    clearStreamingAssistantMessage(runId)
-    return
-  }
   const message = ensureStreamingAssistantMessage(runId)
   message.contentText = content
   void scrollBottom()
 }
 
 async function syncRunEvents(runId: number, options?: { replayRenderableEvents?: boolean }) {
-  if (!props.token) return
   const cachedEvents = runEventsByRunId.value[runId] ?? []
   const afterEventId = cachedEvents.length ? cachedEvents.at(-1)!.id : undefined
   const res = await fetchAgentRunEvents(runId, { token: props.token, afterEventId })
@@ -1070,11 +1212,13 @@ async function waitForRunComplete(runId: number) {
   startRunStatusWatchdog(runId)
   const controller = new AbortController()
   runStreamAbort = controller
+  const cachedEvents = runEventsByRunId.value[runId] ?? []
+  const afterEventId = cachedEvents.length ? cachedEvents.at(-1)!.id : undefined
   try {
     await streamAgentRunEvents(runId, {
       token: props.token,
       signal: controller.signal,
-      afterEventId: events.value.length ? events.value.at(-1)!.id : undefined,
+      afterEventId,
       onEvent: (event) => handleStreamedRunEvent(runId, event),
     })
   } catch (error) {
@@ -1099,7 +1243,7 @@ async function waitForRunComplete(runId: number) {
     }
   } catch (error) {
     runConnectionStatus.value = "failed"
-    agentError.value = formatAgentError(error)
+    applyAgentFailure(error)
     recoveryRunId.value = runId
     lastFailedRunId.value = runId
     activeRunId.value = null
@@ -1116,7 +1260,7 @@ function handleStreamedRunEvent(runId: number, event: AgentRunEvent, options?: {
 
   if (isTerminalRunEvent(event)) {
     settleRunStatus()
-    clearStreamingAssistantMessage(runId, { preserveReadableText: event.eventType === "run.failed" })
+    clearStreamingAssistantMessage(runId, { preserveReadableText: true })
     stopRunStatusWatchdog()
     if (!options?.fromSync) stopRunEventStream()
     void finalizeTerminalRunFromEvent(runId, event)
@@ -1159,7 +1303,7 @@ async function finalizeTerminalRunFromEvent(runId: number, event: AgentRunEvent)
     }
     await refreshMessages({ preserveStreamingRunId: event.eventType === "run.failed" ? runId : undefined })
   } finally {
-    clearStreamingAssistantMessage(runId, { preserveReadableText: event.eventType === "run.failed" })
+    clearStreamingAssistantMessage(runId, { preserveReadableText: true })
     stopRunStatusWatchdog()
     terminalEventFinalizingRunIds.delete(runId)
     await scrollBottom()
@@ -1173,7 +1317,7 @@ async function settleTerminalRun(runId: number, run: AgentRun) {
     lastFailedRunId.value = run.id
   }
   await refreshMessages({ preserveStreamingRunId: run.status === "FAILED" || run.status === "TIMEOUT" ? runId : undefined })
-  clearStreamingAssistantMessage(runId, { preserveReadableText: run.status === "FAILED" || run.status === "TIMEOUT" })
+  clearStreamingAssistantMessage(runId, { preserveReadableText: true })
   if (run.status === "SUCCESS") {
     animateCompletedAssistantMessage(runId)
   }
@@ -1208,7 +1352,7 @@ async function pollRunUntilComplete(runId: number) {
     activeRunId.value = null
   } catch (error) {
     runConnectionStatus.value = "failed"
-    agentError.value = formatAgentError(error)
+    applyAgentFailure(error)
     recoveryRunId.value = runId
     lastFailedRunId.value = runId
     activeRunId.value = null
@@ -1292,6 +1436,10 @@ function appendRunEvent(event: AgentRunEvent) {
     const payload = parseEventJson(event.eventJson)
     const errorCode = typeof payload.errorCode === "string" ? payload.errorCode : ""
     const errorMessage = typeof payload.errorMessage === "string" ? payload.errorMessage : event.eventText
+    if (isCreditInsufficient(null, errorCode, errorMessage)) {
+      applyAgentFailure(null, { errorCode, errorMessage })
+      return
+    }
     if (errorCode === "AGENT_SECURITY_REJECTED") {
       agentError.value = errorMessage || "这条请求包含敏感指令，Agent 已拒绝执行。"
       return
@@ -1468,6 +1616,7 @@ function onMessageContainerScroll() {
   if (!el) return
   scrollOffset.value = el.scrollTop
   stickToBottom.value = isNearBottom()
+  persistChatScroll()
 }
 
 function scheduleNavLayoutUpdate() {
@@ -1510,18 +1659,29 @@ watch(messages, () => {
 watch(
   () => props.sessionId,
   () => {
+    persistChatScroll()
     stickToBottom.value = true
     scrollOffset.value = 0
   },
 )
 
+watch(
+  [runEventsByRunId, submittedAttachmentJsonByRunId, dismissedConfirmationIds],
+  () => {
+    persistRunEventCache()
+  },
+  { deep: true },
+)
+
 onMounted(() => {
+  loadPersistedRunEventCache()
   void loadPane()
   void loadPreviewTools()
   void nextTick(() => adjustComposerTextareaHeight())
 })
 
 onUnmounted(() => {
+  persistChatScroll()
   stopRunEventStream()
   stopRunStatusWatchdog()
   stopStreamingAnimationTimer()
@@ -1627,6 +1787,12 @@ defineExpose({
             </div>
           </div>
         </article>
+
+        <CreditRechargeModal
+          v-if="creditModalOpen"
+          @close="creditModalOpen = false"
+          @credits-updated="creditModalOpen = false"
+        />
 
         <article v-if="agentError" class="agent-error-card">
           <div class="card-icon error"><AlertTriangle class="h-4 w-4" /></div>
@@ -2051,7 +2217,7 @@ defineExpose({
   border: none;
   outline: none;
   background: transparent;
-  font-size: 14px;
+  font-size: 18px;
   line-height: 1.6;
   min-height: 48px;
   max-height: 160px;
@@ -2328,7 +2494,7 @@ defineExpose({
 .message-meta {
   margin-top: 2px;
   color: rgb(255 255 255 / 0.34);
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.4;
 }
 
@@ -2428,6 +2594,7 @@ defineExpose({
   border-radius: 10px 24px 24px 24px;
   background: rgb(255 255 255 / 0.045);
   padding: 16px 18px;
+  font-size: 17px;
   line-height: 1.75;
   color: rgb(255 255 255 / 0.86);
   box-shadow: 0 18px 44px rgb(0 0 0 / 0.16), inset 0 1px 0 rgb(255 255 255 / 0.035);
@@ -2488,7 +2655,7 @@ defineExpose({
 .assistant-name-row strong {
   margin: 0;
   color: var(--agent-text-primary);
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 700;
 }
 
@@ -2497,7 +2664,7 @@ defineExpose({
   align-items: center;
   gap: 9px;
   color: rgb(255 255 255 / 0.48);
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .typing-dots {

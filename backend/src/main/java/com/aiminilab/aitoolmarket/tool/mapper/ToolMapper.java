@@ -14,7 +14,7 @@ public interface ToolMapper extends BaseMapper<AiTool> {
 
     @Select("""
             <script>
-            SELECT t.*, c.category_name,
+            SELECT t.*, c.category_name, c.category_code,
                    COALESCE(m.display_name, m.model_name) AS model_config_name,
                    m.model_name
             FROM ai_tools t
@@ -78,7 +78,7 @@ public interface ToolMapper extends BaseMapper<AiTool> {
                     @Param("status") String status);
 
     @Select("""
-            SELECT t.*, c.category_name,
+            SELECT t.*, c.category_name, c.category_code,
                    COALESCE(m.display_name, m.model_name) AS model_config_name,
                    m.model_name
             FROM ai_tools t
@@ -94,7 +94,7 @@ public interface ToolMapper extends BaseMapper<AiTool> {
     }
 
     @Select("""
-            SELECT t.*, c.category_name,
+            SELECT t.*, c.category_name, c.category_code,
                    COALESCE(m.display_name, m.model_name) AS model_config_name,
                    m.model_name
             FROM ai_tools t

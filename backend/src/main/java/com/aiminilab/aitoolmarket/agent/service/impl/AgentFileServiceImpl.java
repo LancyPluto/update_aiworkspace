@@ -23,6 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
@@ -155,6 +156,35 @@ public class AgentFileServiceImpl implements AgentFileService {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "Agent file not found");
         }
         deleteStoredFile(file.getStoragePath());
+    }
+
+    @Override
+    public InputStream openFileStream(Long userId, Long sessionId, Long fileId) {
+        findActiveSession(userId, sessionId);
+        AgentFile file = agentFileMapper.findByIdSessionAndUser(fileId, sessionId, userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.PARAM_ERROR, "Agent file not found"));
+        String storagePath = file.getStoragePath();
+        if (storagePath == null || storagePath.isBlank()) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "Agent file not stored");
+        }
+        try {
+            Path stored = Path.of(storagePath).toAbsolutePath().normalize();
+            Path root = Path.of(appProperties.getAgent().getFileStorageDir()).toAbsolutePath().normalize();
+            if (!stored.startsWith(root)) {
+                throw new BusinessException(ErrorCode.PARAM_ERROR, "invalid storage path");
+            }
+            return Files.newInputStream(stored);
+        } catch (IOException exception) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "could not read stored file");
+        }
+    }
+
+    @Override
+    public AgentFileResponse getMeta(Long userId, Long sessionId, Long fileId) {
+        findActiveSession(userId, sessionId);
+        AgentFile file = agentFileMapper.findByIdSessionAndUser(fileId, sessionId, userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.PARAM_ERROR, "Agent file not found"));
+        return AgentFileResponse.from(file);
     }
 
     @Override

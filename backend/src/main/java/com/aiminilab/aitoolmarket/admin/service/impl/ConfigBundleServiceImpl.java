@@ -233,6 +233,9 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
         String ref = accountRef(account.getVendorCode(), account.getAccountName());
         return new ConfigBundleDto.VendorAccount(
                 account.getVendorCode(),
+                account.getVendorCode(),
+                null,
+                null,
                 account.getAccountName(),
                 ref,
                 account.getBaseUrl(),
@@ -279,6 +282,9 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                 config.displayName(),
                 stableModelConfigCode(config),
                 vendorAccountRef,
+                null,
+                null,
+                null,
                 config.provider(),
                 config.modelName(),
                 config.baseUrl(),

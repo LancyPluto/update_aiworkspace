@@ -222,7 +222,7 @@ class CreditRechargeApiTest {
     @Test
     void alipayPageRechargeUsesNotifyToCreditIdempotently() throws Exception {
         when(alipayPagePayClient.createPagePayOrder(any(AlipayPagePayRequest.class)))
-                .thenReturn(new AlipayPagePayResponse("https://openapi.alipay.com/gateway.do?pay=test"));
+                .thenReturn(new AlipayPagePayResponse("https://qr.alipay.com/bax-test"));
         String userToken = register("alipay_recharge_user");
 
         String orderResponse = mockMvc.perform(post("/api/v1/credits/recharge-orders")
@@ -237,7 +237,7 @@ class CreditRechargeApiTest {
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.paymentChannel").value("ALIPAY_PAGE"))
-                .andExpect(jsonPath("$.data.payUrl").value("https://openapi.alipay.com/gateway.do?pay=test"))
+                .andExpect(jsonPath("$.data.payUrl").value("https://qr.alipay.com/bax-test"))
                 .andExpect(jsonPath("$.data.qrCodeUrl").isNotEmpty())
                 .andReturn()
                 .getResponse()
@@ -264,6 +264,28 @@ class CreditRechargeApiTest {
                         .header("Authorization", "Bearer " + userToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.total").value(1));
+    }
+
+    @Test
+    void alipayPageRechargeAlwaysReturnsQrCodeForScannerPayment() throws Exception {
+        when(alipayPagePayClient.createPagePayOrder(any(AlipayPagePayRequest.class)))
+                .thenReturn(new AlipayPagePayResponse("https://qr.alipay.com/bax-scanner-only"));
+        String userToken = register("alipay_scanner_user");
+
+        mockMvc.perform(post("/api/v1/credits/recharge-orders")
+                        .header("Authorization", "Bearer " + userToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "packageId": 1,
+                                  "paymentChannel": "ALIPAY_PAGE",
+                                  "clientRequestId": "alipay-page-scanner-001"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.paymentChannel").value("ALIPAY_PAGE"))
+                .andExpect(jsonPath("$.data.payUrl").value("https://qr.alipay.com/bax-scanner-only"))
+                .andExpect(jsonPath("$.data.qrCodeUrl").value(org.hamcrest.Matchers.startsWith("data:image/svg+xml")));
     }
 
     private void postWechatNotify() throws Exception {

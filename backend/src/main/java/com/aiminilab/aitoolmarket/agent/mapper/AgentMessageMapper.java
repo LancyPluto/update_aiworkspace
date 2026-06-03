@@ -23,13 +23,17 @@ public interface AgentMessageMapper extends BaseMapper<AgentMessage> {
     void insertMessage(@Param("message") AgentMessage message);
 
     @Select("""
-            SELECT m.*
-            FROM agent_messages m
-            JOIN agent_sessions s ON s.id = m.session_id
-            WHERE m.session_id = #{sessionId} AND s.user_id = #{userId}
-              AND m.status = 'ACTIVE'
-            ORDER BY m.id ASC
-            LIMIT #{limit} OFFSET #{offset}
+            SELECT page.*
+            FROM (
+                SELECT m.*
+                FROM agent_messages m
+                JOIN agent_sessions s ON s.id = m.session_id
+                WHERE m.session_id = #{sessionId} AND s.user_id = #{userId}
+                  AND m.status = 'ACTIVE'
+                ORDER BY m.id DESC
+                LIMIT #{limit} OFFSET #{offset}
+            ) page
+            ORDER BY page.id ASC
             """)
     List<AgentMessage> findBySession(@Param("userId") Long userId,
                                      @Param("sessionId") Long sessionId,

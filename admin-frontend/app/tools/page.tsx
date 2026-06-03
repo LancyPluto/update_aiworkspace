@@ -31,7 +31,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import {
   AlertCircle,
@@ -93,6 +92,8 @@ import { fetchModelProviders } from "@/lib/api/model-providers"
 import { ApiError, getBaseUrl } from "@/lib/api/http"
 import { downloadConfigBundle, exportConfigBundle, importConfigBundle, readConfigBundleFile } from "@/lib/api/config-bundles"
 import type { AgentModelConfig, ModelProviderDescriptor, ToolCategory, ToolField, ToolFieldPayload, ToolSummary } from "@/lib/api/types"
+
+const adminBasePath = (process.env.NEXT_PUBLIC_ADMIN_BASE_PATH || "").replace(/\/$/, "")
 
 interface ToolRow {
   id: string
@@ -320,6 +321,103 @@ function safePreviewFields(json: string): EditableField[] {
   }
 }
 
+function EmbeddedOnOffSwitch({
+  checked,
+  disabled,
+  label,
+  onCheckedChange,
+}: {
+  checked: boolean
+  disabled?: boolean
+  label: string
+  onCheckedChange: (checked: boolean) => void
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      disabled={disabled}
+      onClick={() => onCheckedChange(!checked)}
+      className={cn(
+        "relative inline-flex h-7 w-[62px] shrink-0 items-center overflow-hidden rounded-full border px-1 text-[10px] font-black shadow-sm transition-all duration-300",
+        checked
+          ? "border-blue-500 bg-blue-500 text-slate-950 shadow-blue-200"
+          : "border-slate-200 bg-slate-100 text-slate-400 shadow-slate-100",
+        disabled ? "cursor-not-allowed opacity-60" : "cursor-pointer hover:shadow-md",
+      )}
+    >
+      <span
+        className={cn(
+          "absolute left-0.5 top-0.5 h-6 w-6 rounded-full bg-white shadow-[0_2px_6px_rgba(15,23,42,0.22)] ring-1 ring-slate-200 transition-transform duration-300",
+          checked ? "translate-x-[34px]" : "translate-x-0",
+        )}
+      />
+      <span className={cn("z-10 w-full text-center tracking-wide transition-all duration-300", checked ? "pr-7" : "pl-7")}>
+        {checked ? "ON" : "OFF"}
+      </span>
+    </button>
+  )
+}
+
+function vendorIconAssetForKey(key: string, config?: AgentModelConfig | null) {
+  if (config?.channelIconAsset?.trim()) return config.channelIconAsset.trim()
+  const icons: Record<string, string> = {
+    aliyun: "qwen",
+    anthropic: "anthropic",
+    deepseek: "deepseek",
+    google: "gemini",
+    kling: "kling",
+    minimax: "minimax",
+    moonshot: "moonshot",
+    openai: "openai",
+    qwen: "qwen",
+    siliconflow: "siliconflow",
+    volcengine: "doubao",
+    zhipu: "zhipu",
+  }
+  return icons[key] || "api"
+}
+
+function VendorIconBadge({ iconAsset, label, className }: { iconAsset: string; label: string; className?: string }) {
+  const [failed, setFailed] = useState(false)
+  return (
+    <span className={cn("inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border bg-white p-1 text-xs font-semibold text-slate-600", className)}>
+      {failed ? (
+        <span>{label.slice(0, 1).toUpperCase()}</span>
+      ) : (
+        <img
+          src={`${adminBasePath}/assets/vendor-icons/${iconAsset || "api"}.svg`}
+          alt={label}
+          className="h-full w-full object-contain"
+          onError={() => setFailed(true)}
+        />
+      )}
+    </span>
+  )
+}
+
+function displayCategoryForTool(tool: Pick<ToolRow, "toolType" | "inputModality" | "outputModality" | "category">) {
+  if ((tool.toolType || "").toUpperCase() === "AGENT") return "智能体"
+  const input = (tool.inputModality || "").toUpperCase()
+  const output = (tool.outputModality || "").toUpperCase()
+  if (input === "TEXT" && output === "IMAGE") return "文生图"
+  if ((input === "TEXT" || input === "IMAGE" || input === "MULTIMODAL") && output === "VIDEO") return input === "TEXT" ? "文生视频" : "图生视频"
+  if (input === "TEXT" && output === "TEXT") return "文案生成"
+  if (output === "AUDIO") return "文生音频"
+  if (input === "AUDIO" && output === "TEXT") return "语音转文字"
+  if (tool.category && tool.category.toLowerCase() !== "copywriting") return tool.category
+  return optionLabel(modalityOptions, output) || "工具"
+}
+
+function shouldShowToolCredits(tool: Pick<ToolRow, "toolType" | "outputModality" | "credits">) {
+  if (!tool.credits || tool.credits <= 0) return false
+  const output = (tool.outputModality || "").toUpperCase()
+  const type = (tool.toolType || "").toUpperCase()
+  return output !== "TEXT" && type !== "TEXT_GENERATION"
+}
+
 function mapTool(tool: ToolSummary): ToolRow {
   const { note, style } = extractFrontendStyle(tool.configNote)
   return {
@@ -352,9 +450,57 @@ function mapTool(tool: ToolSummary): ToolRow {
   }
 }
 
-export default function ToolsPage() {
+type ToolStatusFilter = "ALL" | "ONLINE" | "OFFLINE"
+
+function isAgentTool(tool: Pick<ToolRow, "toolCode" | "toolType" | "executionHandler" | "category" | "name">) {
+  const text = [tool.toolCode, tool.toolType, tool.executionHandler, tool.category, tool.name]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase()
+  return text.includes("agent") || text.includes("智能体")
+}
+
+function modelVendorKey(config?: AgentModelConfig | null) {
+  if (!config) return "unbound"
+  if (config.channelCode?.trim()) return config.channelCode.trim()
+  const text = [config.provider, config.displayName, config.modelName, config.baseUrl].filter(Boolean).join(" ").toLowerCase()
+  if (text.includes("deepseek")) return "deepseek"
+  if (text.includes("doubao") || text.includes("volc") || text.includes("ark.cn")) return "volcengine"
+  if (text.includes("siliconflow")) return "siliconflow"
+  if (text.includes("qwen") || text.includes("dashscope") || text.includes("aliyun")) return "aliyun"
+  if (text.includes("kling")) return "kling"
+  if (text.includes("minimax")) return "minimax"
+  if (text.includes("openai")) return "openai"
+  return config.provider || "other"
+}
+
+function modelVendorLabel(key: string, config?: AgentModelConfig | null) {
+  if (config?.channelLabel?.trim()) return config.channelLabel.trim()
+  const labels: Record<string, string> = {
+    deepseek: "DeepSeek",
+    volcengine: "火山引擎 / 豆包",
+    siliconflow: "SiliconFlow",
+    aliyun: "阿里云 / 通义千问",
+    kling: "可灵",
+    minimax: "MiniMax",
+    openai: "OpenAI",
+    google: "Google Gemini",
+    qwen: "通义千问",
+    zhipu: "智谱 GLM",
+    moonshot: "Moonshot / Kimi",
+    anthropic: "Anthropic Claude",
+    unbound: "未绑定模型",
+    other: "其他厂商",
+  }
+  return labels[key] || key
+}
+
+type ToolManagementMode = "models" | "agents"
+
+export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementMode } = {}) {
   const [searchQuery, setSearchQuery] = useState("")
   const [selectedOutputModality, setSelectedOutputModality] = useState<string | null>(null)
+  const [statusFilter, setStatusFilter] = useState<ToolStatusFilter>("ALL")
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [editingTool, setEditingTool] = useState<ToolRow | null>(null)
   const [toolList, setToolList] = useState<ToolRow[]>([])
@@ -460,6 +606,9 @@ export default function ToolsPage() {
   const filteredTools = useMemo(() => {
     const keyword = searchQuery.trim().toLowerCase()
     return toolList.filter((tool) => {
+      const agent = isAgentTool(tool)
+      if (mode === "models" && agent) return false
+      if (mode === "agents" && !agent) return false
       const matchesKeyword =
         !keyword ||
         [tool.name, tool.description, tool.category, tool.toolCode, tool.modelConfigName, tool.modelName].some(
@@ -468,13 +617,44 @@ export default function ToolsPage() {
       const matchesOutput =
         !selectedOutputModality ||
         (tool.outputModality || "").trim().toUpperCase() === selectedOutputModality
-      return matchesKeyword && matchesOutput
+      const matchesStatus =
+        statusFilter === "ALL" ||
+        (statusFilter === "ONLINE" ? tool.status : !tool.status)
+      return matchesKeyword && matchesOutput && matchesStatus
     })
-  }, [toolList, searchQuery, selectedOutputModality])
+  }, [toolList, searchQuery, selectedOutputModality, statusFilter, mode])
+
+  const modelConfigById = useMemo(
+    () => new Map(modelConfigs.map((config) => [config.id, config])),
+    [modelConfigs],
+  )
+
+  const groupedModelTools = useMemo(() => {
+    const groups = new Map<string, { label: string; iconAsset: string; tools: ToolRow[] }>()
+    for (const tool of filteredTools) {
+      const config = tool.modelConfigId ? modelConfigById.get(tool.modelConfigId) : null
+      const key = mode === "agents" ? "agent-workflow" : modelVendorKey(config)
+      const label = mode === "agents" ? "智能体工作流" : modelVendorLabel(key, config)
+      const iconAsset = mode === "agents" ? "api" : vendorIconAssetForKey(key, config)
+      const existing = groups.get(key)
+      groups.set(key, { label: existing?.label || label, iconAsset: existing?.iconAsset || iconAsset, tools: [...(existing?.tools || []), tool] })
+    }
+    return [...groups.entries()]
+      .sort(([, a], [, b]) => a.label.localeCompare(b.label, "zh-CN"))
+      .map(([key, group]) => ({
+        key,
+        label: group.label,
+        iconAsset: group.iconAsset,
+        tools: group.tools,
+      }))
+  }, [filteredTools, modelConfigById, mode])
 
   const outputModalityFilters = useMemo(() => {
     const counts = new Map<string, number>()
     for (const tool of toolList) {
+      const agent = isAgentTool(tool)
+      if (mode === "models" && agent) continue
+      if (mode === "agents" && !agent) continue
       const key = (tool.outputModality || "TEXT").trim().toUpperCase()
       counts.set(key, (counts.get(key) || 0) + 1)
     }
@@ -486,7 +666,22 @@ export default function ToolsPage() {
         return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib)
       })
       .map(([key, count]) => ({ key, label: optionLabel(modalityOptions, key), count }))
-  }, [toolList])
+  }, [toolList, mode])
+
+  const statusFilterOptions = useMemo(() => {
+    const scoped = toolList.filter((tool) => {
+      const agent = isAgentTool(tool)
+      if (mode === "models" && agent) return false
+      if (mode === "agents" && !agent) return false
+      return true
+    })
+    const online = scoped.filter((tool) => tool.status).length
+    return [
+      { value: "ALL" as const, label: "全部状态", count: scoped.length },
+      { value: "ONLINE" as const, label: "已上线", count: online },
+      { value: "OFFLINE" as const, label: "未上线", count: scoped.length - online },
+    ]
+  }, [toolList, mode])
 
   const requiredModelCapability = useMemo(() => {
     const code = editingTool?.toolCode ?? form.toolCode ?? ""
@@ -871,11 +1066,13 @@ export default function ToolsPage() {
       ? notice
     : loading
       ? "正在加载工具列表..."
-      : "管理 AI 工具工作流入口和画布配置。"
+      : mode === "agents"
+        ? "管理智能体工具、上线状态和工作流画布。"
+        : "按模型厂商管理大模型工具，不包含智能体工作流。"
 
   return (
     <AdminLayout>
-      <AdminHeader title="大模型管理" description={headerDescription} />
+      <AdminHeader title={mode === "agents" ? "智能体管理" : "大模型管理"} description={headerDescription} />
 
       <div className="space-y-6 p-6">
         {saveFeedback ? (
@@ -935,28 +1132,38 @@ export default function ToolsPage() {
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            type="button"
-            size="sm"
-            variant={selectedOutputModality === null ? "default" : "outline"}
-            onClick={() => setSelectedOutputModality(null)}
-          >
-            全部
-            <span className="ml-1 opacity-70">{toolList.length}</span>
-          </Button>
-          {outputModalityFilters.map((item) => (
-            <Button
-              key={item.key}
-              type="button"
-              size="sm"
-              variant={selectedOutputModality === item.key ? "default" : "outline"}
-              onClick={() => setSelectedOutputModality(item.key)}
-            >
-              {item.label}
-              <span className="ml-1 opacity-70">{item.count}</span>
-            </Button>
-          ))}
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="min-w-[160px] space-y-1">
+            <Label className="text-xs text-muted-foreground">上线状态</Label>
+            <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as ToolStatusFilter)}>
+              <SelectTrigger className="h-9 bg-background">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {statusFilterOptions.map((item) => (
+                  <SelectItem key={item.value} value={item.value}>
+                    {item.label} {item.count}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="min-w-[180px] space-y-1">
+            <Label className="text-xs text-muted-foreground">输出模态</Label>
+            <Select value={selectedOutputModality ?? "ALL"} onValueChange={(value) => setSelectedOutputModality(value === "ALL" ? null : value)}>
+              <SelectTrigger className="h-9 bg-background">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ALL">全部 {statusFilterOptions[0]?.count ?? toolList.length}</SelectItem>
+                {outputModalityFilters.map((item) => (
+                  <SelectItem key={item.key} value={item.key}>
+                    {item.label} {item.count}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
 
           <Dialog
@@ -1342,7 +1549,7 @@ export default function ToolsPage() {
                 </div>
                 <div className="space-y-2">
                   <Label>模型配置</Label>
-                  {integrationPluginId ? (
+                  {integrationPluginId && editingTool ? (
                     <div className="space-y-3 rounded-lg border border-border p-3">
                       <p className="text-xs text-amber-700">
                         工作台类工具的大模型绑定保存在下方「保存配置」中；仅点对话框底部「保存工具」不会写入文本/文生图模型。
@@ -1408,206 +1615,116 @@ export default function ToolsPage() {
             </DialogContent>
           </Dialog>
 
-        {false ? (
-        <div className="rounded-2xl border border-border bg-card p-5">
-          <div className="mb-4 flex items-center justify-between gap-4">
-            <div>
-              <h2 className="text-base font-semibold text-card-foreground">已配置模型能力</h2>
-              <p className="text-sm text-muted-foreground">确认当前后台可绑定到不同模态工具的模型配置。</p>
+        <div className="space-y-5">
+          {groupedModelTools.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-border bg-card px-6 py-12 text-center text-sm text-muted-foreground">
+              {mode === "agents" ? "暂无匹配的智能体工具。" : "暂无匹配的大模型工具。"}
             </div>
-            <Badge variant="secondary">{configuredModelRows.length} 个模型</Badge>
-          </div>
-          {configuredModelRows.length === 0 ? (
-            <p className="text-sm text-muted-foreground">暂无可用模型配置。</p>
-          ) : (
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-              {configuredModelRows.map(({ config, capabilities }) => (
-                <div key={config.id} className="rounded-xl border border-border/70 bg-secondary/40 p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="truncate font-medium text-card-foreground">{config.displayName || config.modelName}</p>
-                      <p className="truncate text-xs text-muted-foreground">{config.provider} · {config.modelName}</p>
-                    </div>
-                    {config.isDefault ? <Badge variant="outline">默认</Badge> : null}
-                  </div>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {capabilities.length > 0 ? capabilities.map((capability) => (
-                      <Badge key={capability} variant="secondary" className="text-xs">
-                        {capabilityLabel(capability)}
-                      </Badge>
-                    )) : (
-                      <Badge variant="destructive" className="text-xs">未识别能力</Badge>
-                    )}
+          ) : groupedModelTools.map((group) => (
+            <section key={group.key} className="rounded-lg border border-border bg-card/40 p-4">
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-3">
+                  <VendorIconBadge iconAsset={group.iconAsset} label={group.label} />
+                  <div className="min-w-0">
+                    <h2 className="truncate text-base font-semibold text-card-foreground">{group.label}</h2>
+                    <p className="text-xs text-muted-foreground">
+                      {mode === "agents" ? "仅展示智能体工具，工作流画布入口在这里维护。" : "按模型厂商归类展示，不包含智能体工具。"}
+                    </p>
                   </div>
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
-        ) : null}
-
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {filteredTools.map((tool) => (
+                <Badge variant="secondary">{group.tools.length} 个工具</Badge>
+              </div>
+              <div className="space-y-5">
+                {[{ key: "ALL", label: "全部", tools: group.tools }].map((modalityGroup) => (
+                  <div key={`${group.key}-${modalityGroup.key}`} className="space-y-3">
+                    <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 md:grid-cols-3">
+          {modalityGroup.tools.map((tool) => (
             <div
               key={tool.id}
               className={cn(
-                "group relative overflow-hidden rounded-2xl border border-border bg-card p-6 transition-all duration-300 hover:border-primary/30 hover:shadow-lg hover:shadow-primary/5",
+                "group relative overflow-hidden rounded-xl border border-border bg-card p-6 transition-all duration-300 hover:border-primary/30 hover:shadow-lg hover:shadow-primary/5",
                 !tool.status && "opacity-60",
               )}
             >
-              {tool.coverUrl ? (
-                <div className="-mx-6 -mt-6 mb-5 overflow-hidden border-b border-border bg-muted">
-                  {isVideoPreviewUrl(tool.coverUrl) ? (
-                    <video
-                      src={normalizeToolMediaUrl(tool.coverUrl)}
-                      className="aspect-video w-full object-cover"
-                      muted
-                      loop
-                      playsInline
-                      preload="metadata"
-                    />
-                  ) : (
-                    <img src={normalizeToolMediaUrl(tool.coverUrl)} alt={tool.name} className="aspect-video w-full object-cover" />
-                  )}
-                </div>
-              ) : null}
               <div className="flex items-start justify-between gap-4">
                 <div className="flex min-w-0 items-center gap-3">
-                  <div
-                    className="flex h-10 w-10 items-center justify-center rounded-xl"
-                    style={{ backgroundColor: `${tool.primaryColor || "#3b82f6"}18` }}
-                  >
-                    <tool.icon className="h-5 w-5" style={{ color: tool.primaryColor || "hsl(var(--primary))" }} />
-                  </div>
                   <div className="min-w-0">
                     <h3 className="truncate font-semibold text-card-foreground">{tool.name}</h3>
                     <div className="mt-1 flex flex-wrap gap-1.5">
-                      <Badge variant="secondary" className="text-xs font-normal">{tool.category}</Badge>
-                      <Badge variant={tool.status ? "outline" : "destructive"} className="text-xs font-normal">
-                        {tool.status ? "已上线" : "已下线"}
-                      </Badge>
+                      <Badge variant="secondary" className="text-xs font-normal">{displayCategoryForTool(tool)}</Badge>
                     </div>
                   </div>
                 </div>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="icon" className="h-8 w-8 opacity-0 transition-opacity group-hover:opacity-100">
-                      <MoreHorizontal className="h-4 w-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="bg-card border-border">
-                    <DropdownMenuItem className="gap-2" onClick={() => openEditDialog(tool)}>
-                      <Pencil className="h-4 w-4" /> 编辑
-                    </DropdownMenuItem>
-                    <DropdownMenuItem asChild className="gap-2">
-                      <Link href={`/tools/${tool.rawId}/workflow`}>
-                        <Workflow className="h-4 w-4" /> 工作流画布
-                      </Link>
-                    </DropdownMenuItem>
-                    <DropdownMenuItem className="gap-2" onClick={() => openFieldDialog(tool)}>
-                      <FileText className="h-4 w-4" /> 字段配置
-                    </DropdownMenuItem>
-                    <DropdownMenuItem className="gap-2" disabled>
-                      <Copy className="h-4 w-4" /> 复制
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      className="gap-2 text-destructive"
-                      disabled={deletingId === tool.rawId}
-                      onClick={() => handleDeleteTool(tool)}
-                    >
-                      <Trash2 className="h-4 w-4" /> {deletingId === tool.rawId ? "删除中..." : "删除"}
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                <div className="flex shrink-0 items-center gap-2">
+                  {shouldShowToolCredits(tool) ? (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-primary/20 bg-primary/5 px-2 py-1 text-xs font-medium text-card-foreground">
+                    {tool.credits} 算力
+                  </span>
+                  ) : null}
+                  <EmbeddedOnOffSwitch
+                    checked={tool.status}
+                    disabled={togglingId === tool.rawId}
+                    label={`${tool.name} 上线状态`}
+                    onCheckedChange={() => toggleToolStatus(tool.id)}
+                  />
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="ghost" size="icon" className="h-8 w-8 opacity-0 transition-opacity group-hover:opacity-100">
+                        <MoreHorizontal className="h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="bg-card border-border">
+                      <DropdownMenuItem className="gap-2" onClick={() => openEditDialog(tool)}>
+                        <Pencil className="h-4 w-4" /> 编辑
+                      </DropdownMenuItem>
+                      {mode === "agents" ? (
+                        <DropdownMenuItem asChild className="gap-2">
+                          <Link href={`/tools/${tool.rawId}/workflow`}>
+                            <Workflow className="h-4 w-4" /> 工作流画布
+                          </Link>
+                        </DropdownMenuItem>
+                      ) : null}
+                      <DropdownMenuItem className="gap-2" onClick={() => openFieldDialog(tool)}>
+                        <FileText className="h-4 w-4" /> 字段配置
+                      </DropdownMenuItem>
+                      <DropdownMenuItem className="gap-2" disabled>
+                        <Copy className="h-4 w-4" /> 复制
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        className="gap-2 text-destructive"
+                        disabled={deletingId === tool.rawId}
+                        onClick={() => handleDeleteTool(tool)}
+                      >
+                        <Trash2 className="h-4 w-4" /> {deletingId === tool.rawId ? "删除中..." : "删除"}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
               </div>
 
               <p className="mt-3 line-clamp-2 text-sm text-muted-foreground">{tool.description}</p>
 
-              <div className="mt-4 grid gap-2 border-t border-border pt-4 text-xs">
-                <div className="flex items-center justify-between gap-3 rounded-lg bg-muted/40 px-3 py-2">
-                  <span className="text-muted-foreground">工作流类型</span>
-                  <span className="truncate font-medium text-card-foreground">{optionLabel(toolTypeOptions, tool.toolType)}</span>
-                </div>
-                <div className="flex items-center justify-between gap-3 rounded-lg bg-muted/40 px-3 py-2">
-                  <span className="text-muted-foreground">输入 / 输出</span>
-                  <span className="truncate font-medium text-card-foreground">
-                    {optionLabel(modalityOptions, tool.inputModality)} {"->"} {optionLabel(modalityOptions, tool.outputModality)}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between gap-3 rounded-lg bg-muted/40 px-3 py-2">
-                  <span className="text-muted-foreground">执行器</span>
-                  <span className="truncate font-mono text-card-foreground">{tool.executionHandler || "MODEL"}</span>
-                </div>
-                <div className="flex items-center justify-between gap-3 rounded-lg bg-muted/40 px-3 py-2">
-                  <span className="text-muted-foreground">绑定模型</span>
-                  <span className="max-w-[180px] truncate text-right font-medium text-card-foreground">
-                    {tool.modelConfigName || tool.modelName || "默认模型配置"}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between gap-3 rounded-lg bg-muted/40 px-3 py-2">
-                  <span className="text-muted-foreground">消耗算力</span>
-                  <span className="flex items-center gap-1 font-medium text-card-foreground">
-                    <Sparkles className="h-3.5 w-3.5 text-primary" />
-                    {tool.credits}
-                  </span>
-                </div>
-              </div>
-              <Button asChild variant="outline" size="sm" className="mt-4 w-full gap-2">
-                <Link href={`/tools/${tool.rawId}/workflow`}>
-                  <Workflow className="h-4 w-4" />
-                  编辑工作流
-                </Link>
-              </Button>
+              {mode === "agents" ? (
+                <Button asChild variant="outline" size="sm" className="mt-4 w-full gap-2">
+                  <Link href={`/tools/${tool.rawId}/workflow`}>
+                    <Workflow className="h-4 w-4" />
+                    编辑工作流
+                  </Link>
+                </Button>
+              ) : null}
 
-              <div className="mt-4 flex items-center justify-between border-t border-border pt-4">
-                <div className="text-sm">
-                  <p className="font-medium text-card-foreground">
-                    {tool.status ? "已上线" : "已下线"}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {tool.status ? "用户端可见并可使用" : "用户端暂不可见"}
-                  </p>
-                </div>
-                <Switch
-                  checked={tool.status}
-                  disabled={togglingId === tool.rawId}
-                  onCheckedChange={() => toggleToolStatus(tool.id)}
-                />
-              </div>
-
-              {false ? (<>
-              <div className="mt-4 flex items-center justify-between border-t border-border pt-4">
-                <div className="flex items-center gap-4 text-sm">
-                  <div className="flex items-center gap-1 text-muted-foreground">
-                    <Sparkles className="h-4 w-4" />
-                    <span>{tool.credits} 算力</span>
-                  </div>
-                  <div className="text-muted-foreground">{tool.rawStatus}</div>
-                </div>
-                {false ? <Switch checked={tool.status} disabled={togglingId === tool.rawId} onCheckedChange={() => toggleToolStatus(tool.id)} /> : null}
-              </div>
-              <div className="mt-3 flex flex-wrap gap-2 text-xs">
-                <Badge variant="outline">{optionLabel(toolTypeOptions, tool.toolType)}</Badge>
-                <Badge variant="secondary">
-                  {optionLabel(modalityOptions, tool.inputModality)} → {optionLabel(modalityOptions, tool.outputModality)}
-                </Badge>
-              </div>
-              <div className="mt-3 rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
-                模型：{tool.modelConfigName || tool.modelName || "默认模型配置"}
-              </div>
-              <Button asChild variant="outline" size="sm" className="mt-4 w-full gap-2">
-                <Link href={`/tools/${tool.rawId}/workflow`}>
-                  <Workflow className="h-4 w-4" />
-                  打开工作流画布
-                </Link>
-              </Button>
-              </>) : null}
               {tool.welcomeMessage ? (
                 <div className="mt-2 rounded-lg bg-secondary/40 px-3 py-2 text-xs text-muted-foreground">
                   欢迎语：{tool.welcomeMessage}
                 </div>
               ) : null}
             </div>
+          ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
           ))}
         </div>
       </div>
@@ -1738,4 +1855,8 @@ export default function ToolsPage() {
       </Dialog>
     </AdminLayout>
   )
+}
+
+export default function ToolsPage() {
+  return <ToolManagementPage mode="models" />
 }

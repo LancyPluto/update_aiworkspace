@@ -15,11 +15,9 @@ const account = ref<CreditAccount | null>(null)
 type BillingRow = {
   id: string
   createdAt: string
-  type: string
   reason: string
   changeText: string
   negative: boolean
-  balanceText: string
 }
 
 const logs = ref<BillingRow[]>([])
@@ -48,16 +46,49 @@ function usageSourceKey(log: BillingUsageLog) {
   return `${log.sourceType}:${log.sourceId}`
 }
 
-function usageTitle(log: BillingUsageLog) {
-  if (log.sourceType === "AGENT_RUN") return `Agent运行 #${log.sourceId}`
-  return log.taskNo || `任务 #${log.sourceId}`
+function parseShanghaiDate(value?: string | null) {
+  if (!value) return null
+  const normalized = value.trim()
+  if (!normalized) return null
+  if (/[zZ]$|[+-]\d{2}:?\d{2}$/.test(normalized)) return new Date(normalized)
+  return new Date(`${normalized.replace(" ", "T")}+08:00`)
+}
+
+function formatShanghaiTime(value?: string | null) {
+  const date = parseShanghaiDate(value)
+  if (!date || Number.isNaN(date.getTime())) return "-"
+  const parts = new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(date)
+  const pick = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value || ""
+  return `${pick("year")}-${pick("month")}-${pick("day")} ${pick("hour")}:${pick("minute")}:${pick("second")}`
 }
 
 function usageReason(log: BillingUsageLog) {
-  const model = log.modelName || log.provider || "模型调用"
-  const tokens = log.totalTokens > 0 ? `，${log.promptTokens.toLocaleString()} / ${log.completionTokens.toLocaleString()} tokens` : ""
-  const units = (log.billableUnits ?? 0) > 0 ? `，${log.billableUnits} 次` : ""
-  return `${model}${tokens}${units}`
+  const source = log.sourceType === "AGENT_RUN" ? `Agent \u4f1a\u8bdd #${log.sourceId}` : `\u4efb\u52a1 ${log.taskNo || `#${log.sourceId}`}`
+  const model = log.modelName || log.provider || "\u6a21\u578b"
+  const tokens = log.totalTokens > 0
+    ? `\uff0c\u6d88\u8017 ${log.promptTokens.toLocaleString()} \u8f93\u5165 / ${log.completionTokens.toLocaleString()} \u8f93\u51fa tokens`
+    : ""
+  const units = (log.billableUnits ?? 0) > 0 ? `\uff0c\u8ba1\u8d39 ${log.billableUnits} \u6b21` : ""
+  return `${source} \u8c03\u7528 ${model}${tokens}${units}`
+}
+
+function creditReason(log: CreditLog, negative: boolean) {
+  const raw = (log.reason || "").trim()
+  if (log.logType === "RECHARGE") return raw && raw !== "async recharge credit dispatch" ? raw : "\u5145\u503c\u5230\u8d26"
+  if (log.logType === "MANUAL_ADD") return raw ? `\u540e\u53f0\u589e\u52a0\u7b97\u529b\uff1a${raw}` : "\u540e\u53f0\u589e\u52a0\u7b97\u529b"
+  if (log.logType === "MANUAL_DEDUCT") return raw ? `\u540e\u53f0\u6263\u51cf\u7b97\u529b\uff1a${raw}` : "\u540e\u53f0\u6263\u51cf\u7b97\u529b"
+  if (log.agentRunId != null) return raw ? `Agent \u4f1a\u8bdd #${log.agentRunId}\uff1a${raw}` : `Agent \u4f1a\u8bdd #${log.agentRunId} \u6263\u8d39`
+  if (log.taskId != null) return raw ? `\u4efb\u52a1 #${log.taskId}\uff1a${raw}` : `\u4efb\u52a1 #${log.taskId} \u6263\u8d39`
+  return raw || (negative ? "\u7b97\u529b\u6263\u8d39" : "\u7b97\u529b\u5165\u8d26")
 }
 
 function mergeBillingRows(creditLogs: CreditLog[], usageLogs: BillingUsageLog[]) {
@@ -70,11 +101,9 @@ function mergeBillingRows(creditLogs: CreditLog[], usageLogs: BillingUsageLog[])
       return {
         id: `credit-${log.id}`,
         createdAt: log.createdAt,
-        type: log.logType,
-        reason: log.reason || "-",
+        reason: creditReason(log, negative),
         changeText: `${negative ? "-" : "+"}${log.amount}`,
         negative,
-        balanceText: String(log.balanceAfter),
       }
     })
   const usageRows = usageLogs
@@ -82,14 +111,12 @@ function mergeBillingRows(creditLogs: CreditLog[], usageLogs: BillingUsageLog[])
     .map((log): BillingRow => ({
       id: `usage-${log.id}`,
       createdAt: log.createdAt,
-      type: usageTitle(log),
       reason: usageReason(log),
       changeText: `-${log.chargedCredits}`,
       negative: true,
-      balanceText: "-",
     }))
   return [...creditRows, ...usageRows].sort((a, b) => {
-    const diff = new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    const diff = (parseShanghaiDate(b.createdAt)?.getTime() ?? 0) - (parseShanghaiDate(a.createdAt)?.getTime() ?? 0)
     return Number.isNaN(diff) || diff === 0 ? b.id.localeCompare(a.id) : diff
   })
 }
@@ -154,22 +181,19 @@ onMounted(loadBilling)
         </div>
         <div v-if="loading" class="px-5 py-8 text-center text-sm text-muted-foreground">加载中...</div>
         <div v-else class="overflow-x-auto">
-          <table class="w-full min-w-[720px] text-sm">
+          <table class="w-full min-w-[560px] text-sm">
             <thead class="bg-secondary/70 text-xs text-muted-foreground">
               <tr>
-                <th class="px-4 py-3 text-left font-medium">时间</th>
-                <th class="px-4 py-3 text-left font-medium">类型</th>
+                <th class="px-4 py-3 text-left font-medium">{{ "\u65f6\u95f4" }}</th>
                 <th class="px-4 py-3 text-left font-medium">原因</th>
-                <th class="px-4 py-3 text-right font-medium">变动</th>
-                <th class="px-4 py-3 text-right font-medium">余额</th>
+                <th class="px-4 py-3 text-right font-medium">{{ "\u53d8\u52a8" }}</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-border">
               <tr v-for="log in pagedLogs" :key="log.id">
                 <td class="px-4 py-3 text-muted-foreground">
-                  {{ new Date(log.createdAt).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false }) }}
+                  {{ formatShanghaiTime(log.createdAt) }}
                 </td>
-                <td class="px-4 py-3">{{ log.type }}</td>
                 <td class="px-4 py-3">{{ log.reason || "-" }}</td>
                 <td
                   class="px-4 py-3 text-right"
@@ -177,7 +201,6 @@ onMounted(loadBilling)
                 >
                   {{ log.changeText }}
                 </td>
-                <td class="px-4 py-3 text-right">{{ log.balanceText }}</td>
               </tr>
             </tbody>
           </table>

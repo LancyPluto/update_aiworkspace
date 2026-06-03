@@ -105,6 +105,15 @@ class AgentDecisionService:
 
     def _conversation_guard(self, context: RunContext) -> IntentResult | None:
         message = context.message or ""
+        if _looks_like_explicit_chat_intent(message):
+            return IntentResult(
+                intent=Intent.GENERAL_CHAT,
+                confidence=0.95,
+                selectedToolCode=None,
+                candidateToolCodes=[],
+                decisionSource="decision_layer",
+                reason="explicit_chat_intent",
+            )
         if _looks_like_session_recap_question(message):
             return IntentResult(
                 intent=Intent.GENERAL_CHAT,
@@ -135,7 +144,37 @@ class AgentDecisionService:
         return None
 
     def _llm_overcalled_tool_for_follow_up(self, context: RunContext, llm_intent: IntentResult) -> bool:
-        return llm_intent.intent == Intent.TOOL_USE and _looks_like_follow_up_or_meta_question(context.message or "")
+        return llm_intent.intent == Intent.TOOL_USE and (
+            _looks_like_explicit_chat_intent(context.message or "")
+            or _looks_like_follow_up_or_meta_question(context.message or "")
+        )
+
+
+def _looks_like_explicit_chat_intent(message: str) -> bool:
+    compact = re.sub(r"\s+", "", message)
+    if not compact:
+        return False
+    if requested_output_modality(compact):
+        return False
+    return _contains_any(
+        compact,
+        (
+            "跟我聊天",
+            "陪我聊天",
+            "和我聊天",
+            "聊聊天",
+            "闲聊",
+            "随便聊",
+            "正常聊",
+            "我们聊会",
+            "我们正常聊会",
+            "跟我聊会",
+            "陪我聊会",
+            "只聊天",
+            "不要调用工具",
+            "别调用工具",
+        ),
+    )
 
 
 def _looks_like_follow_up_or_meta_question(message: str) -> bool:

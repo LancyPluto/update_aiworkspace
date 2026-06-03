@@ -60,20 +60,30 @@ const materialLoading = ref(false)
 const materialError = ref("")
 const materialAssets = ref<MaterialAsset[]>([])
 
-const configuredFields = computed(() => (props.fields || []).filter((field) => field.fieldKey !== props.coreFieldKey))
+function isAspectRatioField(field: ToolField): boolean {
+  return field.fieldKey === "aspectRatio" || field.fieldKey === "aspect_ratio" || field.fieldKey === "imageRatio"
+}
+
+const configuredFields = computed(() =>
+  (props.fields || []).filter((field) => field.fieldKey !== props.coreFieldKey && !isAspectRatioField(field)),
+)
 const imageCapability = computed(() => props.capabilities.find((c) => c.type === "imageGeneration"))
 const fileCapability = computed(() => props.capabilities.find((c) => c.type === "fileReading"))
 const webSearchCapability = computed(() => props.capabilities.find((c) => c.type === "webSearch"))
 const codeCapability = computed(() => props.capabilities.find((c) => c.type === "codeExecution"))
 const voiceCapability = computed(() => props.capabilities.find((c) => c.type === "voiceInput"))
 const activeMaterialKind = computed(() => (materialPickerField.value ? materialKindForField(materialPickerField.value) : "file"))
+const ratioField = computed(() => (props.fields || []).find(isAspectRatioField))
+const hasAspectRatioControl = computed(() => Boolean(imageCapability.value || ratioField.value))
 
 const aspectRatios = computed(() => {
   const config = imageCapability.value?.config
-  if (Array.isArray(config?.aspectRatios) && config.aspectRatios.length > 0) {
-    return config.aspectRatios.map(String)
-  }
-  return ["1:1", "16:9", "9:16"]
+  const configured = Array.isArray(config?.aspectRatios) ? config.aspectRatios.map(String) : []
+  const fieldOptionsValues = ratioField.value ? fieldOptions(ratioField.value).map(optionValue) : []
+  const source = [...configured, ...fieldOptionsValues, "16:9", "9:16"]
+  const allowed = new Set(["16:9", "9:16"])
+  const values = source.filter((value) => allowed.has(value))
+  return [...new Set(values)].length ? [...new Set(values)] : ["16:9", "9:16"]
 })
 
 const codeLanguages = computed(() => {
@@ -120,11 +130,12 @@ function defaultFieldValue(field: ToolField): unknown {
 
 function buildDefaultState(): CapabilityState {
   const next: CapabilityState = { attachments: [], fields: {} }
-  if (imageCapability.value) {
+  if (hasAspectRatioControl.value) {
     next.imageRatio =
-      typeof imageCapability.value.config.defaultRatio === "string"
-        ? imageCapability.value.config.defaultRatio
+      typeof imageCapability.value?.config.defaultRatio === "string"
+        ? String(imageCapability.value.config.defaultRatio)
         : aspectRatios.value[0]
+    if (!aspectRatios.value.includes(next.imageRatio)) next.imageRatio = aspectRatios.value[0]
   }
   if (webSearchCapability.value) next.webSearch = webSearchCapability.value.config.defaultEnabled === true
   if (codeCapability.value) next.language = codeLanguages.value[0] || "python"
@@ -133,6 +144,9 @@ function buildDefaultState(): CapabilityState {
     next.fields[field.fieldKey] = initial !== undefined && initial !== null ? initial : defaultFieldValue(field)
   }
   if (typeof props.initialParams?.imageRatio === "string") next.imageRatio = props.initialParams.imageRatio
+  if (typeof props.initialParams?.aspectRatio === "string") next.imageRatio = props.initialParams.aspectRatio
+  if (typeof props.initialParams?.aspect_ratio === "string") next.imageRatio = props.initialParams.aspect_ratio
+  if (next.imageRatio && !aspectRatios.value.includes(next.imageRatio)) next.imageRatio = aspectRatios.value[0]
   if (typeof props.initialParams?.webSearch === "boolean") next.webSearch = props.initialParams.webSearch
   if (typeof props.initialParams?.language === "string") next.language = props.initialParams.language
   return next
@@ -342,7 +356,10 @@ function validate(): { valid: boolean; message?: string } {
 
 function getRequestParams(): Record<string, unknown> {
   const params: Record<string, unknown> = {}
-  if (imageCapability.value && state.value.imageRatio) params.imageRatio = state.value.imageRatio
+  if (hasAspectRatioControl.value && state.value.imageRatio) {
+    params.aspectRatio = state.value.imageRatio
+    params.imageRatio = state.value.imageRatio
+  }
   if (webSearchCapability.value && showWebSearch.value) params.webSearch = state.value.webSearch === true
   if (codeCapability.value && state.value.language) params.language = state.value.language
 
@@ -503,7 +520,7 @@ defineExpose({
 
     <div class="flex flex-wrap items-center gap-1.5">
       <select
-        v-if="imageCapability && configuredFields.length === 0"
+        v-if="hasAspectRatioControl"
         v-model="state.imageRatio"
         class="h-7 rounded-lg border border-border/60 bg-background px-2 text-xs"
         title="图片比例"

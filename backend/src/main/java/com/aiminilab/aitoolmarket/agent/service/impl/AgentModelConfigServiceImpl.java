@@ -15,6 +15,7 @@ import com.aiminilab.aitoolmarket.agent.service.AgentModelConfigService;
 import com.aiminilab.aitoolmarket.agent.service.ModelCapabilityService;
 import com.aiminilab.aitoolmarket.agent.support.ModelCapabilitiesCodec;
 import com.aiminilab.aitoolmarket.agent.support.ModelConfigCredentialResolver;
+import com.aiminilab.aitoolmarket.agent.support.VendorCodeResolver;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -44,6 +45,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
     private final ModelCapabilityService modelCapabilityService;
     private final ModelCapabilitiesCodec capabilitiesCodec;
     private final ModelConfigCredentialResolver credentialResolver;
+    private final VendorCodeResolver vendorCodeResolver;
     private final ObjectMapper objectMapper;
 
     public AgentModelConfigServiceImpl(AgentModelConfigMapper agentModelConfigMapper,
@@ -53,6 +55,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                                        ModelCapabilityService modelCapabilityService,
                                        ModelCapabilitiesCodec capabilitiesCodec,
                                        ModelConfigCredentialResolver credentialResolver,
+                                       VendorCodeResolver vendorCodeResolver,
                                        ObjectMapper objectMapper) {
         this.agentModelConfigMapper = agentModelConfigMapper;
         this.vendorAccountMapper = vendorAccountMapper;
@@ -61,6 +64,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         this.modelCapabilityService = modelCapabilityService;
         this.capabilitiesCodec = capabilitiesCodec;
         this.credentialResolver = credentialResolver;
+        this.vendorCodeResolver = vendorCodeResolver;
         this.objectMapper = objectMapper;
     }
 
@@ -80,11 +84,11 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
 
     @Override
     public List<AgentModelConfigResponse> agentSelectableList() {
-        List<AgentModelConfig> configs = agentModelConfigMapper.findAgentEnabled();
+        List<AgentModelConfig> configs = executableAgentConfigs();
         if (!configs.isEmpty()) {
             return configs.stream().map(this::toResponse).toList();
         }
-        AgentModelConfig fallback = findOrDefault();
+        AgentModelConfig fallback = credentialResolver.resolveForExecution(findOrDefault());
         if (Boolean.FALSE.equals(fallback.getEnabled()) || Boolean.FALSE.equals(fallback.getAgentEnabled())) {
             return List.of();
         }
@@ -214,7 +218,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
 
     @Override
     public InternalAgentModelConfigResponse internalGet() {
-        List<AgentModelConfig> agentConfigs = agentModelConfigMapper.findAgentEnabled();
+        List<AgentModelConfig> agentConfigs = executableAgentConfigs();
         AgentModelConfig config = agentConfigs.isEmpty() ? findOrDefault() : agentConfigs.get(0);
         return InternalAgentModelConfigResponse.from(credentialResolver.resolveForExecution(config));
     }
@@ -228,7 +232,17 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         if (config == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "Agent model config not found or not enabled for Agent");
         }
-        return InternalAgentModelConfigResponse.from(credentialResolver.resolveForExecution(config));
+        AgentModelConfig executable = credentialResolver.resolveForExecution(config);
+        if (!isExecutableForAgent(executable)) {
+            return internalGet();
+        }
+        return InternalAgentModelConfigResponse.from(executable);
+    }
+
+    @Override
+    public AgentModelConfigTestResponse adminTestById(Long id) {
+        AgentModelConfig existing = findActiveOrThrow(id);
+        return adminTest(toTestRequest(existing));
     }
 
     @Override
@@ -255,6 +269,38 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         } catch (IllegalStateException exception) {
             throw new BusinessException(ErrorCode.MODEL_CALL_FAILED, modelConfigTestFailureMessage(exception));
         }
+    }
+
+    private AgentModelConfigRequest toTestRequest(AgentModelConfig config) {
+        List<String> capabilities = capabilitiesCodec.parse(config.getCapabilities());
+        return new AgentModelConfigRequest(
+                config.getVendorAccountId(),
+                config.getDisplayName(),
+                config.getConfigCode(),
+                config.getProvider(),
+                config.getModelName(),
+                config.getBaseUrl(),
+                null,
+                false,
+                null,
+                config.getMinimaxGroupId(),
+                config.getConsoleUrl(),
+                config.getBalanceUrl(),
+                config.getDocsUrl(),
+                config.getTimeoutSeconds(),
+                null,
+                null,
+                config.getInputTokenPricePer1k(),
+                config.getOutputTokenPricePer1k(),
+                config.getInputTokenPricePer1m(),
+                config.getOutputTokenPricePer1m(),
+                config.getBillingUnit(),
+                config.getUnitPrice(),
+                config.getEnabled(),
+                config.getAgentEnabled(),
+                config.getDefault(),
+                capabilities.isEmpty() ? null : capabilities
+        );
     }
 
     private AgentModelConfig findExistingForTest(AgentModelConfigRequest request) {
@@ -351,7 +397,59 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                 vendorAccountName = account.getAccountName();
             }
         }
-        return AgentModelConfigResponse.from(config, capabilitiesCodec, vendorAccountName);
+        String channelCode = vendorCodeResolver.resolveVendorCode(config);
+        return AgentModelConfigResponse.from(
+                config,
+                capabilitiesCodec,
+                vendorAccountName,
+                channelCode,
+                vendorCodeResolver.vendorLabel(channelCode),
+                vendorCodeResolver.vendorIconAsset(channelCode)
+        );
+    }
+
+    private List<AgentModelConfig> executableAgentConfigs() {
+        return agentModelConfigMapper.findAgentEnabled()
+                .stream()
+                .map(credentialResolver::resolveForExecution)
+                .filter(this::isExecutableForAgent)
+                .toList();
+    }
+
+    private boolean isExecutableForAgent(AgentModelConfig config) {
+        if (config == null || Boolean.FALSE.equals(config.getEnabled()) || Boolean.FALSE.equals(config.getAgentEnabled())) {
+            return false;
+        }
+        String provider = config.getProvider() == null ? "" : config.getProvider().trim().toLowerCase();
+        if ("mock".equals(provider)) {
+            return true;
+        }
+        if (!capabilitiesCodec.parse(config.getCapabilities()).contains("TEXT_GENERATION")) {
+            return false;
+        }
+        if (isKnownNonChatEndpoint(config.getBaseUrl(), config.getProvider(), config.getModelName())) {
+            return false;
+        }
+        return hasExecutableSecret(config.getApiKey()) || hasKlingAccessSecretPair(config.getExtraAuthJson());
+    }
+
+    private boolean isKnownNonChatEndpoint(String baseUrl, String provider, String modelName) {
+        String text = String.join(" ",
+                baseUrl == null ? "" : baseUrl,
+                provider == null ? "" : provider,
+                modelName == null ? "" : modelName).toLowerCase();
+        return text.contains("mineru.net")
+                || text.contains("mineru")
+                || text.contains("pdf")
+                || text.contains("ocr");
+    }
+
+    private boolean hasExecutableSecret(String value) {
+        if (value == null || value.isBlank()) {
+            return false;
+        }
+        String trimmed = value.trim();
+        return !trimmed.startsWith("replace-with-");
     }
 
     @Override

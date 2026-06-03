@@ -57,7 +57,7 @@ const paymentOptions: Array<{
   {
     channel: "ALIPAY_PAGE",
     title: "支付宝扫码支付",
-    description: "使用支付宝扫码或打开收银台",
+    description: "使用手机支付宝扫一扫完成付款",
     icon: CreditCard,
   },
   {
@@ -220,7 +220,7 @@ async function submitCustomRecharge(channel: PaymentChannel) {
 }
 
 function openPayModalForOrder(order: RechargeOrder, channel: PaymentChannel): boolean {
-  if (channel !== "MOCK" && !order.qrCodeUrl && !order.payUrl) {
+  if (channel !== "MOCK" && !order.qrCodeUrl) {
     error.value = "支付二维码生成失败，请检查支付配置或稍后重试"
     return false
   }
@@ -514,9 +514,6 @@ onUnmounted(clearPolling)
                 :alt="`${activePaymentName}支付二维码`"
                 class="h-full w-full object-contain"
               />
-              <p v-else-if="activeOrder?.payUrl && !activeOrder?.qrCodeUrl" class="px-2 text-xs text-muted-foreground">
-                二维码生成中，请稍候…
-              </p>
               <QrCode v-else class="h-24 w-24 text-slate-900" aria-hidden="true" />
             </div>
 
@@ -539,16 +536,6 @@ onUnmounted(clearPolling)
                 {{ activeOrder?.paymentChannel === "ALIPAY_PAGE" ? "支" : "微" }}
               </span>
             </p>
-
-            <a
-              v-if="activeOrder?.paymentChannel === 'ALIPAY_PAGE' && activeOrder.payUrl"
-              :href="activeOrder.payUrl"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="mt-3 inline-flex text-xs font-medium text-primary hover:underline"
-            >
-              打开支付宝收银台
-            </a>
 
             <div class="mt-8 flex items-center justify-center gap-2 rounded-full border border-border bg-secondary/45 px-4 py-2.5 text-xs text-muted-foreground">
               <Loader2 class="h-4 w-4 animate-spin text-primary" aria-hidden="true" />

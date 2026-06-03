@@ -361,7 +361,7 @@ class WorkerInternalApiTest {
                 .andExpect(jsonPath("$.data.list[0].billableUnits").value(2))
                 .andExpect(jsonPath("$.data.list[0].unitPrice").value(0.03))
                 .andExpect(jsonPath("$.data.list[0].costAmount").value(0.06))
-                .andExpect(jsonPath("$.data.list[0].chargedCredits").value(5));
+                .andExpect(jsonPath("$.data.list[0].chargedCredits").value(6));
 
         mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put("/api/admin/v1/agent/model-config")
                         .header("Authorization", "Bearer " + adminToken)

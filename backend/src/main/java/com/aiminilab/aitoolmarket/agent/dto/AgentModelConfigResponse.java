@@ -37,6 +37,9 @@ public record AgentModelConfigResponse(
         Boolean enabled,
         Boolean agentEnabled,
         Boolean isDefault,
+        String channelCode,
+        String channelLabel,
+        String channelIconAsset,
         List<String> capabilities,
         LocalDateTime createdAt,
         LocalDateTime updatedAt
@@ -52,6 +55,15 @@ public record AgentModelConfigResponse(
     public static AgentModelConfigResponse from(AgentModelConfig config,
                                                 ModelCapabilitiesCodec codec,
                                                 String vendorAccountName) {
+        return from(config, codec, vendorAccountName, null, null, null);
+    }
+
+    public static AgentModelConfigResponse from(AgentModelConfig config,
+                                                ModelCapabilitiesCodec codec,
+                                                String vendorAccountName,
+                                                String channelCode,
+                                                String channelLabel,
+                                                String channelIconAsset) {
         return new AgentModelConfigResponse(
                 config.getId(),
                 config.getVendorAccountId(),
@@ -79,6 +91,9 @@ public record AgentModelConfigResponse(
                 config.getEnabled(),
                 config.getAgentEnabled(),
                 config.getDefault(),
+                channelCode,
+                channelLabel,
+                channelIconAsset,
                 codec.parse(config.getCapabilities()),
                 config.getCreatedAt(),
                 config.getUpdatedAt()

@@ -133,18 +133,6 @@ providers:
     workerReady: true
     description: Seedance image-to-video generation used by digital-human and comic-drama pipelines.
 
-  - code: infinitetalk
-    label: InfiniteTalk digital human
-    capabilities:
-      - VIDEO_GENERATION
-      - DIGITAL_HUMAN
-    defaultBaseUrl: http://host.docker.internal:7860
-    defaultModel: MeiGen-AI/InfiniteTalk
-    billingDefault: PER_CALL
-    testStrategy: accept_only
-    workerReady: true
-    description: MeiGen-AI InfiniteTalk audio-driven avatar/video dubbing service. Configure a deployed HTTP endpoint as base URL.
-
   - code: kling_video
     label: Kling video/images
     capabilities:

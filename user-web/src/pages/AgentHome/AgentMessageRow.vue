@@ -42,6 +42,7 @@ interface MessageAttachment {
   name: string
   contentType?: string | null
   size?: number | null
+  url?: string | null
   status?: string | null
 }
 
@@ -132,7 +133,14 @@ function isImageAttachment(file: MessageAttachment) {
           <div v-if="message.role === 'USER' && attachments.length" class="message-attachments">
             <article v-for="file in attachments" :key="file.id" class="message-attachment-card">
               <span class="attachment-icon">
-                <Image v-if="isImageAttachment(file)" class="h-5 w-5" />
+                <img
+                  v-if="isImageAttachment(file) && file.url"
+                  :src="file.url"
+                  :alt="file.name"
+                  class="attachment-thumb"
+                  loading="lazy"
+                />
+                <Image v-else-if="isImageAttachment(file)" class="h-5 w-5" />
                 <FileText v-else class="h-5 w-5" />
               </span>
               <span class="attachment-copy">
@@ -301,6 +309,13 @@ function isImageAttachment(file: MessageAttachment) {
   border-radius: 10px;
   background: rgb(96 165 250 / 0.18);
   color: rgb(147 197 253);
+}
+
+.attachment-thumb {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  object-fit: cover;
 }
 
 .attachment-copy {

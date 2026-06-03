@@ -817,6 +817,14 @@ public class AgentRunServiceImpl implements AgentRunService {
             agentMessageMapper.updateContentText(assistant.getId(), contentText, null);
         }
         agentSessionMapper.touch(run.getSessionId(), now);
+        appendEventInternal(
+                runId,
+                run.getUserId(),
+                "message.completed",
+                contentText,
+                toJson(Map.of("content", contentText, "source", "streaming_answer_snapshot")),
+                now
+        );
         return AgentRunResponse.from(findRun(runId));
     }
 
@@ -1171,7 +1179,7 @@ public class AgentRunServiceImpl implements AgentRunService {
     private InternalAgentModelConfigResponse resolveModelConfigForRun(AgentRun run) {
         AgentModelConfig config = resolveModelConfigEntityForRun(run);
         if (config != null) {
-            return InternalAgentModelConfigResponse.from(config);
+            return InternalAgentModelConfigResponse.from(agentModelConfigService.resolveForExecution(config));
         }
         return agentModelConfigService.internalGet();
     }

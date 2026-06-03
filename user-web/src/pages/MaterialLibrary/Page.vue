@@ -148,6 +148,12 @@ function openAssetPreview(item: MaterialAssetItem) {
   previewAsset.value = item.asset
 }
 
+function patchTaskCommunityPost(taskId: number, communityPostId?: number | null) {
+  tasks.value = tasks.value.map((task) =>
+    task.taskId === taskId ? { ...task, communityPostId: communityPostId ?? null } : task,
+  )
+}
+
 function normalizeModality(value?: string | null) {
   return (value || "TEXT").trim().toUpperCase()
 }
@@ -189,6 +195,7 @@ async function publishPreviewAsset(asset: AssetPreviewItem) {
       { token: auth.token },
     )
     previewAsset.value = { ...asset, communityPostId: post.id, promptVisible: post.promptVisible }
+    patchTaskCommunityPost(asset.taskId, post.id)
   } catch (err) {
     const message = err instanceof Error ? err.message : "发布失败"
     window.alert(message)
@@ -200,6 +207,7 @@ async function unpublishPreviewAsset(asset: AssetPreviewItem) {
   try {
     await unpublishCommunityPost(asset.communityPostId, { token: auth.token })
     previewAsset.value = { ...asset, communityPostId: undefined }
+    if (asset.taskId) patchTaskCommunityPost(asset.taskId, null)
   } catch (err) {
     const message = err instanceof Error ? err.message : "撤回失败"
     window.alert(message)

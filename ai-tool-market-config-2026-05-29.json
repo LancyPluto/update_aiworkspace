@@ -57,7 +57,10 @@
       "capabilities": [
         "VIDEO_GENERATION",
         "IMAGE_GENERATION"
-      ]
+      ],
+      "channelCode": "kling",
+      "channelLabel": "可灵 Kling",
+      "channelIconAsset": "kling"
     },
     {
       "displayName": "可灵 V1 图生视频",
@@ -87,7 +90,10 @@
       "capabilities": [
         "VIDEO_GENERATION",
         "IMAGE_GENERATION"
-      ]
+      ],
+      "channelCode": "kling",
+      "channelLabel": "可灵 Kling",
+      "channelIconAsset": "kling"
     },
     {
       "displayName": "可灵 V1.5 图生视频",
@@ -117,7 +123,10 @@
       "capabilities": [
         "VIDEO_GENERATION",
         "IMAGE_GENERATION"
-      ]
+      ],
+      "channelCode": "kling",
+      "channelLabel": "可灵 Kling",
+      "channelIconAsset": "kling"
     },
     {
       "displayName": "可灵 V1.6 图生视频",
@@ -147,7 +156,10 @@
       "capabilities": [
         "VIDEO_GENERATION",
         "IMAGE_GENERATION"
-      ]
+      ],
+      "channelCode": "kling",
+      "channelLabel": "可灵 Kling",
+      "channelIconAsset": "kling"
     },
     {
       "displayName": "可灵 V2 Master 图生视频",
@@ -177,7 +189,10 @@
       "capabilities": [
         "VIDEO_GENERATION",
         "IMAGE_GENERATION"
-      ]
+      ],
+      "channelCode": "kling",
+      "channelLabel": "可灵 Kling",
+      "channelIconAsset": "kling"
     },
     {
       "displayName": "可灵 V2.1 图生视频",
@@ -207,7 +222,10 @@
       "capabilities": [
         "VIDEO_GENERATION",
         "IMAGE_GENERATION"
-      ]
+      ],
+      "channelCode": "kling",
+      "channelLabel": "可灵 Kling",
+      "channelIconAsset": "kling"
     },
     {
       "displayName": "可灵 V2.1 Master 图生视频",
@@ -237,7 +255,10 @@
       "capabilities": [
         "VIDEO_GENERATION",
         "IMAGE_GENERATION"
-      ]
+      ],
+      "channelCode": "kling",
+      "channelLabel": "可灵 Kling",
+      "channelIconAsset": "kling"
     },
     {
       "displayName": "可灵 V2.5 Turbo 图生视频",
@@ -267,7 +288,10 @@
       "capabilities": [
         "VIDEO_GENERATION",
         "IMAGE_GENERATION"
-      ]
+      ],
+      "channelCode": "kling",
+      "channelLabel": "可灵 Kling",
+      "channelIconAsset": "kling"
     },
     {
       "displayName": "可灵 V2.6 动作控制",
@@ -296,7 +320,10 @@
       "isDefault": false,
       "capabilities": [
         "VIDEO_GENERATION"
-      ]
+      ],
+      "channelCode": "kling",
+      "channelLabel": "可灵 Kling",
+      "channelIconAsset": "kling"
     },
     {
       "displayName": "可灵 V2.6 图生视频",
@@ -326,7 +353,10 @@
       "capabilities": [
         "VIDEO_GENERATION",
         "IMAGE_GENERATION"
-      ]
+      ],
+      "channelCode": "kling",
+      "channelLabel": "可灵 Kling",
+      "channelIconAsset": "kling"
     },
     {
       "displayName": "可灵 V3 动作控制",
@@ -355,7 +385,10 @@
       "isDefault": false,
       "capabilities": [
         "VIDEO_GENERATION"
-      ]
+      ],
+      "channelCode": "kling",
+      "channelLabel": "可灵 Kling",
+      "channelIconAsset": "kling"
     },
     {
       "displayName": "可灵 V3 图生视频",
@@ -385,7 +418,10 @@
       "capabilities": [
         "VIDEO_GENERATION",
         "IMAGE_GENERATION"
-      ]
+      ],
+      "channelCode": "kling",
+      "channelLabel": "可灵 Kling",
+      "channelIconAsset": "kling"
     },
     {
       "displayName": "可灵 V3 文生视频",
@@ -414,7 +450,10 @@
       "isDefault": false,
       "capabilities": [
         "VIDEO_GENERATION"
-      ]
+      ],
+      "channelCode": "kling",
+      "channelLabel": "可灵 Kling",
+      "channelIconAsset": "kling"
     },
     {
       "displayName": "可灵 Video O1 Omni",
@@ -444,7 +483,10 @@
       "capabilities": [
         "VIDEO_GENERATION",
         "IMAGE_GENERATION"
-      ]
+      ],
+      "channelCode": "kling",
+      "channelLabel": "可灵 Kling",
+      "channelIconAsset": "kling"
     },
     {
       "displayName": "可灵图生视频 v2-6",
@@ -473,7 +515,10 @@
       "isDefault": false,
       "capabilities": [
         "VIDEO_GENERATION"
-      ]
+      ],
+      "channelCode": "kling",
+      "channelLabel": "可灵 Kling",
+      "channelIconAsset": "kling"
     },
     {
       "displayName": "可灵生图 v2-1",
@@ -502,7 +547,10 @@
       "isDefault": false,
       "capabilities": [
         "IMAGE_GENERATION"
-      ]
+      ],
+      "channelCode": "kling",
+      "channelLabel": "可灵 Kling",
+      "channelIconAsset": "kling"
     },
     {
       "displayName": "GPT-image2.0",
@@ -531,7 +579,10 @@
       "isDefault": false,
       "capabilities": [
         "IMAGE_GENERATION"
-      ]
+      ],
+      "channelCode": "openai",
+      "channelLabel": "OpenAI",
+      "channelIconAsset": "openai"
     },
     {
       "displayName": "gpt-image-2_SY",
@@ -560,7 +611,10 @@
       "isDefault": false,
       "capabilities": [
         "IMAGE_GENERATION"
-      ]
+      ],
+      "channelCode": "openai",
+      "channelLabel": "OpenAI",
+      "channelIconAsset": "openai"
     },
     {
       "displayName": "DeepSeek-v4-pro",
@@ -589,7 +643,10 @@
       "isDefault": false,
       "capabilities": [
         "TEXT_GENERATION"
-      ]
+      ],
+      "channelCode": "deepseek",
+      "channelLabel": "DeepSeek",
+      "channelIconAsset": "deepseek"
     },
     {
       "displayName": "mineru",
@@ -618,7 +675,10 @@
       "isDefault": false,
       "capabilities": [
         "TEXT_GENERATION"
-      ]
+      ],
+      "channelCode": "openai",
+      "channelLabel": "OpenAI",
+      "channelIconAsset": "openai"
     },
     {
       "displayName": "SF Z-Image Turbo",
@@ -648,7 +708,10 @@
       "capabilities": [
         "IMAGE_GENERATION",
         "DIGITAL_HUMAN"
-      ]
+      ],
+      "channelCode": "qwen",
+      "channelLabel": "通义千问",
+      "channelIconAsset": "qwen"
     },
     {
       "displayName": "Seedream 4.5",
@@ -677,7 +740,10 @@
       "isDefault": false,
       "capabilities": [
         "IMAGE_GENERATION"
-      ]
+      ],
+      "channelCode": "other",
+      "channelLabel": "其他模型",
+      "channelIconAsset": "api"
     },
     {
       "displayName": "Seedance 1.5 Pro",
@@ -707,7 +773,10 @@
       "capabilities": [
         "VIDEO_GENERATION",
         "DIGITAL_HUMAN"
-      ]
+      ],
+      "channelCode": "other",
+      "channelLabel": "其他模型",
+      "channelIconAsset": "api"
     },
     {
       "displayName": "DeepSeek V4 Flash",
@@ -736,7 +805,10 @@
       "isDefault": false,
       "capabilities": [
         "TEXT_GENERATION"
-      ]
+      ],
+      "channelCode": "deepseek",
+      "channelLabel": "DeepSeek",
+      "channelIconAsset": "deepseek"
     },
     {
       "displayName": "豆包 Seed 2.0 Lite",
@@ -765,7 +837,10 @@
       "isDefault": false,
       "capabilities": [
         "TEXT_GENERATION"
-      ]
+      ],
+      "channelCode": "volcengine",
+      "channelLabel": "火山引擎 / 豆包",
+      "channelIconAsset": "doubao"
     },
     {
       "displayName": "豆包 Seed 2.0 Pro",
@@ -794,7 +869,10 @@
       "isDefault": false,
       "capabilities": [
         "TEXT_GENERATION"
-      ]
+      ],
+      "channelCode": "volcengine",
+      "channelLabel": "火山引擎 / 豆包",
+      "channelIconAsset": "doubao"
     },
     {
       "displayName": "Kimi K2.6",
@@ -823,7 +901,10 @@
       "isDefault": false,
       "capabilities": [
         "TEXT_GENERATION"
-      ]
+      ],
+      "channelCode": "moonshot",
+      "channelLabel": "Moonshot / Kimi",
+      "channelIconAsset": "moonshot"
     },
     {
       "displayName": "智谱 GLM-5",
@@ -852,7 +933,10 @@
       "isDefault": false,
       "capabilities": [
         "TEXT_GENERATION"
-      ]
+      ],
+      "channelCode": "zhipu",
+      "channelLabel": "智谱 GLM",
+      "channelIconAsset": "zhipu"
     },
     {
       "displayName": "通义千问 3.5 Flash",
@@ -881,7 +965,10 @@
       "isDefault": false,
       "capabilities": [
         "TEXT_GENERATION"
-      ]
+      ],
+      "channelCode": "qwen",
+      "channelLabel": "通义千问",
+      "channelIconAsset": "qwen"
     },
     {
       "displayName": "通义千问 3.7 Max",
@@ -910,7 +997,10 @@
       "isDefault": false,
       "capabilities": [
         "TEXT_GENERATION"
-      ]
+      ],
+      "channelCode": "qwen",
+      "channelLabel": "通义千问",
+      "channelIconAsset": "qwen"
     },
     {
       "displayName": "Google Gemini 2.5 Pro",
@@ -939,7 +1029,10 @@
       "isDefault": false,
       "capabilities": [
         "TEXT_GENERATION"
-      ]
+      ],
+      "channelCode": "google",
+      "channelLabel": "Google Gemini",
+      "channelIconAsset": "gemini"
     },
     {
       "displayName": "Google Gemini 2.5 Flash",
@@ -968,7 +1061,10 @@
       "isDefault": false,
       "capabilities": [
         "TEXT_GENERATION"
-      ]
+      ],
+      "channelCode": "google",
+      "channelLabel": "Google Gemini",
+      "channelIconAsset": "gemini"
     },
     {
       "displayName": "Anthropic Claude Sonnet 4.6",
@@ -997,7 +1093,10 @@
       "isDefault": false,
       "capabilities": [
         "TEXT_GENERATION"
-      ]
+      ],
+      "channelCode": "anthropic",
+      "channelLabel": "Anthropic Claude",
+      "channelIconAsset": "anthropic"
     },
     {
       "displayName": "OpenAI GPT-5.5",
@@ -1026,7 +1125,10 @@
       "isDefault": false,
       "capabilities": [
         "TEXT_GENERATION"
-      ]
+      ],
+      "channelCode": "openai",
+      "channelLabel": "OpenAI",
+      "channelIconAsset": "openai"
     },
     {
       "displayName": "DeepSeek Chat",
@@ -1055,7 +1157,10 @@
       "isDefault": false,
       "capabilities": [
         "TEXT_GENERATION"
-      ]
+      ],
+      "channelCode": "deepseek",
+      "channelLabel": "DeepSeek",
+      "channelIconAsset": "deepseek"
     }
   ],
   "categories": [
@@ -5933,7 +6038,7 @@
       "configNote": "MVP 使用管理侧配置的大模型进行公开信息检索与评论洞察总结；遇到平台登录、反爬或不可访问评论时会明确标注限制。",
       "status": "OFFLINE",
       "estimatedCreditCost": 3,
-      "modelConfigCode": null,
+      "modelConfigCode": "aliyun-qwen3-7-max",
       "executionHandler": "TEXT_GENERATION",
       "agentEnabled": true,
       "fields": [
@@ -6085,7 +6190,7 @@
       "configNote": null,
       "status": "OFFLINE",
       "estimatedCreditCost": 3,
-      "modelConfigCode": null,
+      "modelConfigCode": "aliyun-qwen3-7-max",
       "executionHandler": "TEXT_GENERATION",
       "agentEnabled": true,
       "fields": [
@@ -6136,7 +6241,7 @@
       "configNote": null,
       "status": "OFFLINE",
       "estimatedCreditCost": 3,
-      "modelConfigCode": null,
+      "modelConfigCode": "aliyun-qwen3-7-max",
       "executionHandler": "DIGITAL_HUMAN",
       "agentEnabled": true,
       "fields": [

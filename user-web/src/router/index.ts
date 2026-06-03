@@ -8,7 +8,6 @@ import ToolListPage from "@/pages/ToolList/Page.vue"
 import MyTasksPage from "@/pages/MyTasks/Page.vue"
 import MaterialLibraryPage from "@/pages/MaterialLibrary/Page.vue"
 import BillingPage from "@/pages/Billing/Page.vue"
-import AgentPlaceholderPage from "@/pages/AgentPlaceholder/Page.vue"
 import ProfilePage from "@/pages/Profile/Page.vue"
 import PublicProfilePage from "@/pages/PublicProfile/Page.vue"
 import CommunityDiscoverPage from "@/pages/CommunityDiscover/Page.vue"
@@ -47,9 +46,10 @@ const router = createRouter({
     },
     {
       path: "/agents",
-      name: "AgentPlaceholder",
+      name: "AgentTools",
       meta: { requiresAuth: false },
-      component: AgentPlaceholderPage,
+      component: ToolListPage,
+      props: { mode: "agents" },
     },
     {
       path: "/chat/:toolId",

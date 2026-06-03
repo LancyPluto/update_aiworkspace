@@ -18,7 +18,6 @@ import java.time.LocalDateTime;
 public class BillingServiceImpl implements BillingService {
     private static final String BILLING_UNIT_PER_CALL = "PER_CALL";
     private static final BigDecimal CREDIT_PRICE_CNY = new BigDecimal("0.01");
-    private static final BigDecimal PLATFORM_MARKUP = new BigDecimal("1.20");
 
     private final BillingUsageLogMapper billingUsageLogMapper;
 
@@ -142,8 +141,7 @@ public class BillingServiceImpl implements BillingService {
         if (costAmount == null || costAmount.compareTo(BigDecimal.ZERO) <= 0) {
             return 0;
         }
-        BigDecimal customerCharge = costAmount.multiply(PLATFORM_MARKUP);
-        return customerCharge.divide(CREDIT_PRICE_CNY, 0, RoundingMode.CEILING).intValue();
+        return costAmount.divide(CREDIT_PRICE_CNY, 0, RoundingMode.CEILING).intValue();
     }
 
     private String clean(String value) {

@@ -3,7 +3,6 @@ package com.aiminilab.aitoolmarket.credit.controller;
 import com.aiminilab.aitoolmarket.credit.service.CreditRechargeService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -37,8 +36,8 @@ public class WechatPayNotifyController {
             return ResponseEntity.ok(Map.of("code", "SUCCESS", "message", "OK"));
         } catch (Exception exception) {
             log.warn("WeChat Native payment notification failed, serial={}, message={}", serial, exception.getMessage(), exception);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Map.of("code", "FAIL", "message", "FAILED"));
+            // WeChat Pay v3: returning FAIL (HTTP 200) will trigger retries from platform.
+            return ResponseEntity.ok(Map.of("code", "FAIL", "message", "FAILED"));
         }
     }
 }

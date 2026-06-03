@@ -151,7 +151,8 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   if ((response.status === 401 || response.status === 403) && !options.skipAuthRedirect) {
     clearSession()
     if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
-      window.location.href = '/login'
+      const basePath = (process.env.NEXT_PUBLIC_ADMIN_BASE_PATH || '').replace(/\/$/, '')
+      window.location.href = `${basePath}/login`
     }
     throw new ApiError('登录已过期，请重新登录', 'UNAUTHORIZED', 401)
   }

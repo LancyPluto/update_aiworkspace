@@ -6,6 +6,7 @@ import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.enums.TaskStatus;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.community.mapper.CommunityEventMapper;
+import com.aiminilab.aitoolmarket.community.mapper.CommunityPostMapper;
 import com.aiminilab.aitoolmarket.credit.service.CreditService;
 import com.aiminilab.aitoolmarket.credit.service.TaskCreditEstimateService;
 import com.aiminilab.aitoolmarket.task.dto.CreateTaskRequest;
@@ -30,6 +31,7 @@ import com.aiminilab.aitoolmarket.tool.entity.AiTool;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolMapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -55,6 +57,7 @@ public class TaskServiceImpl implements TaskService {
     private final TaskCreditEstimateService taskCreditEstimateService;
     private final TaskCreditDispatchService taskCreditDispatchService;
     private final CommunityEventMapper communityEventMapper;
+    private final CommunityPostMapper communityPostMapper;
 
     public TaskServiceImpl(
             TaskMapper taskMapper,
@@ -68,7 +71,8 @@ public class TaskServiceImpl implements TaskService {
             TaskMetrics taskMetrics,
             TaskCreditEstimateService taskCreditEstimateService,
             TaskCreditDispatchService taskCreditDispatchService,
-            CommunityEventMapper communityEventMapper
+            CommunityEventMapper communityEventMapper,
+            CommunityPostMapper communityPostMapper
     ) {
         this.taskMapper = taskMapper;
         this.toolMapper = toolMapper;
@@ -82,6 +86,7 @@ public class TaskServiceImpl implements TaskService {
         this.taskCreditEstimateService = taskCreditEstimateService;
         this.taskCreditDispatchService = taskCreditDispatchService;
         this.communityEventMapper = communityEventMapper;
+        this.communityPostMapper = communityPostMapper;
     }
 
     @Override
@@ -230,11 +235,12 @@ public class TaskServiceImpl implements TaskService {
             taskCreditDispatchService.ensureDispatchAllowed(userId, tool, modelConfig);
         }
 
+        JsonNode normalizedParams = normalizeTaskParams(params);
         AiTask task = new AiTask();
         task.setTaskNo(generateTaskNo());
         task.setUserId(userId);
         task.setToolId(tool.getId());
-        task.setParamsJson(params.toString());
+        task.setParamsJson(normalizedParams.toString());
         task.setIdempotencyKey(clientRequestId);
         int estimatedCredits = chargeTaskCredits ? taskCreditEstimateService.estimateTaskCredits(tool, modelConfig) : 0;
         task.setEstimatedCreditCost(estimatedCredits);
@@ -256,7 +262,12 @@ public class TaskServiceImpl implements TaskService {
         AgentTaskSourceResponse agentSource = agentToolCallMapper.findByTaskId(task.getId())
                 .map(this::toAgentTaskSource)
                 .orElse(null);
-        return TaskDetailResponse.of(task, parseParams(task.getParamsJson()), result, agentSource, consumedCredits);
+        Long communityPostId = communityPostMapper.findByTaskId(task.getId())
+                .filter(post -> "PUBLISHED".equalsIgnoreCase(post.getStatus()))
+                .filter(post -> post.getAuditStatus() == null || "APPROVED".equalsIgnoreCase(post.getAuditStatus()))
+                .map(post -> post.getId())
+                .orElse(null);
+        return TaskDetailResponse.of(task, parseParams(task.getParamsJson()), result, agentSource, communityPostId, consumedCredits);
     }
 
     private AgentTaskSourceResponse toAgentTaskSource(AgentToolCall call) {
@@ -283,6 +294,27 @@ public class TaskServiceImpl implements TaskService {
         } catch (Exception exception) {
             return objectMapper.createObjectNode();
         }
+    }
+
+    private JsonNode normalizeTaskParams(JsonNode params) {
+        if (params == null || !params.isObject()) {
+            return params == null ? objectMapper.createObjectNode() : params;
+        }
+        ObjectNode normalized = ((ObjectNode) params).deepCopy();
+        JsonNode aspectRatio = firstTextual(normalized.get("aspectRatio"), normalized.get("aspect_ratio"), normalized.get("imageRatio"));
+        if (aspectRatio != null && !normalized.hasNonNull("aspectRatio")) {
+            normalized.set("aspectRatio", aspectRatio);
+        }
+        return normalized;
+    }
+
+    private JsonNode firstTextual(JsonNode... nodes) {
+        for (JsonNode node : nodes) {
+            if (node != null && node.isTextual() && !node.asText().isBlank()) {
+                return node;
+            }
+        }
+        return null;
     }
 
     private String generateTaskNo() {

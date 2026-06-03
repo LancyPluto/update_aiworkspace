@@ -274,6 +274,64 @@ class AdminAgentApiTest {
     }
 
     @Test
+    void adminAgentModelToggleControlsUserSelectableModelsWithKlingCredentials() throws Exception {
+        mockExternalAuthDependencies();
+        String adminToken = login("/api/admin/v1/auth/login", "admin");
+        String userToken = login("/api/v1/auth/login", "user1");
+
+        String createBody = """
+                {
+                  "displayName": "Kling Agent Selectable",
+                  "configCode": "kling-agent-selectable",
+                  "provider": "kling_video",
+                  "modelName": "kling-v3",
+                  "baseUrl": "https://api-beijing.klingai.com",
+                  "extraAuthJson": "{\\"accessKey\\":\\"test-access-key\\",\\"secretKey\\":\\"test-secret-key\\"}",
+                  "timeoutSeconds": 60,
+                  "billingUnit": "PER_CALL",
+                  "unitPrice": 3,
+                  "enabled": true,
+                  "agentEnabled": true,
+                  "isDefault": false
+                }
+                """;
+        String created = mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/admin/v1/agent/model-config")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.agentEnabled").value(true))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        String id = created.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1");
+
+        String enabledList = mockMvc.perform(get("/api/v1/agent/model-configs")
+                        .header("Authorization", "Bearer " + userToken))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        assertThat(enabledList).contains("\"configCode\":\"kling-agent-selectable\"");
+
+        String disableBody = createBody.replace("\"agentEnabled\": true", "\"agentEnabled\": false");
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put("/api/admin/v1/agent/model-config/{id}", id)
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(disableBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.agentEnabled").value(false));
+
+        String disabledList = mockMvc.perform(get("/api/v1/agent/model-configs")
+                        .header("Authorization", "Bearer " + userToken))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        assertThat(disabledList).doesNotContain("\"configCode\":\"kling-agent-selectable\"");
+    }
+
+    @Test
     void adminCanBulkUpdateAgentToolAccessAndDebugRoute() throws Exception {
         mockExternalAuthDependencies();
         String adminToken = login("/api/admin/v1/auth/login", "admin");

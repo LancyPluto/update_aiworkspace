@@ -213,6 +213,23 @@ class IntentRouter:
         return any(keyword in lowered for keyword in self.tool_action_keywords)
 
     @staticmethod
+    def _looks_like_copywriting_generation(message: str) -> bool:
+        """
+        Some runtimes (deep_agents_engine) call this helper to decide whether to fall back from
+        "unsupported" to normal tool routing. Keep it conservative and stable.
+        """
+        compact = re.sub(r"\s+", "", message or "")
+        if not compact:
+            return False
+        # "文案/标题/笔记/朋友圈/公众号" are explicit copywriting intents.
+        if _contains_any(compact, ("文案", "标题", "笔记", "种草", "朋友圈", "公众号", "广告语", "slogan")):
+            return True
+        # Common phrases: "生成一份文案/写一份文案/帮我写文案"
+        if ("生成" in compact or "写" in compact or "帮我" in compact) and "文案" in compact:
+            return True
+        return False
+
+    @staticmethod
     def _looks_like_generation_followup(message: str) -> bool:
         compact = re.sub(r"\s+", "", message)
         if not compact:
