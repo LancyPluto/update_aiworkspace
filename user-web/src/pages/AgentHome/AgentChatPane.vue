@@ -8,7 +8,6 @@ import {
   Plus,
   RefreshCw,
   Sparkles,
-  Store,
   Trash2,
   X,
 } from "lucide-vue-next"
@@ -18,6 +17,7 @@ import AgentAvatar from "./AgentAvatar.vue"
 import AgentAmbientBackground from "./AgentAmbientBackground.vue"
 import ConversationScrollNav from "./ConversationScrollNav.vue"
 import ConversationPhaseTimeline from "./ConversationPhaseTimeline.vue"
+import AgentToolConfirmationList from "./AgentToolConfirmationList.vue"
 import AssetPreviewModal from "@/components/AssetPreviewModal.vue"
 import CreditRechargeModal from "@/components/CreditRechargeModal.vue"
 import { formatAgentRunFailure } from "@/api/errorMapping"
@@ -1822,43 +1822,12 @@ defineExpose({
           </div>
         </article>
 
-        <article
-          v-for="{ event, payload } in confirmationEvents"
-          :key="event.id"
-          class="confirmation-card"
-        >
-          <div class="card-icon"><Store class="h-4 w-4" /></div>
-          <div class="card-body">
-            <p class="card-title">建议调用 {{ payload.toolName || payload.toolCode || event.eventText }}</p>
-            <p class="card-desc">{{ payload.description || "确认后 Agent 会继续执行该工具并生成结果。" }}</p>
-            <label class="remember-row">
-              <input v-model="rememberTool" type="checkbox" />
-              以后类似需求自动调用这个工具
-            </label>
-            <div class="card-actions">
-              <button
-                type="button"
-                class="ghost-btn"
-                :disabled="confirmingEventIds.has(event.id)"
-                @click="confirmTool(event.id, String(payload.toolCode || event.eventText), false)"
-              >
-                <Loader2 v-if="confirmingEventIds.has(event.id)" class="h-4 w-4 animate-spin" />
-                <X v-else class="h-4 w-4" />
-                取消
-              </button>
-              <button
-                type="button"
-                class="primary-btn"
-                :disabled="confirmingEventIds.has(event.id)"
-                @click="confirmTool(event.id, String(payload.toolCode || event.eventText), true)"
-              >
-                <Loader2 v-if="confirmingEventIds.has(event.id)" class="h-4 w-4 animate-spin" />
-                <Check v-else class="h-4 w-4" />
-                确认调用
-              </button>
-            </div>
-          </div>
-        </article>
+        <AgentToolConfirmationList
+          v-model:remember-tool="rememberTool"
+          :items="confirmationEvents"
+          :confirming-event-ids="confirmingEventIds"
+          @confirm="confirmTool($event.eventId, $event.toolCode, $event.approved)"
+        />
 
         <div ref="bottomRef" />
       </template>
@@ -1880,29 +1849,31 @@ defineExpose({
       </button>
     </div>
 
-    <AgentComposer
-      ref="composerRef"
-      :model-config-id="modelConfigId"
-      :agent-models="agentModels"
-      :models-loading="modelsLoading"
-      :draft="input"
-      :files="files"
-      :uploading="uploading"
-      :removing-file-id="removingFileId"
-      :has-active-run="hasActiveRun"
-      :sending="sending"
-      :editing-regenerating="editingRegenerating"
-      :regenerating-message-id="regeneratingMessageId"
-      :cancelling-run="cancellingRun"
-      :memory-panel-open="memoryPanelOpen"
-      @update:draft="emit('update:draft', $event)"
-      @change-model="emit('change-model', $event)"
-      @submit="submitMessage()"
-      @cancel-run="cancelCurrentRun()"
-      @file-selected="handleFileSelected"
-      @remove-file="removeFile"
-      @open-memory="openMemoryPanel"
-    />
+    <div class="composer-dock">
+      <AgentComposer
+        ref="composerRef"
+        :model-config-id="modelConfigId"
+        :agent-models="agentModels"
+        :models-loading="modelsLoading"
+        :draft="input"
+        :files="files"
+        :uploading="uploading"
+        :removing-file-id="removingFileId"
+        :has-active-run="hasActiveRun"
+        :sending="sending"
+        :editing-regenerating="editingRegenerating"
+        :regenerating-message-id="regeneratingMessageId"
+        :cancelling-run="cancellingRun"
+        :memory-panel-open="memoryPanelOpen"
+        @update:draft="emit('update:draft', $event)"
+        @change-model="emit('change-model', $event)"
+        @submit="submitMessage()"
+        @cancel-run="cancelCurrentRun()"
+        @file-selected="handleFileSelected"
+        @remove-file="removeFile"
+        @open-memory="openMemoryPanel"
+      />
+    </div>
     <AssetPreviewModal
       :asset="previewAsset"
       :recommendations="previewRecommendations"
@@ -2017,7 +1988,9 @@ defineExpose({
   flex-direction: column;
   overflow: hidden !important;
   position: relative;
-  background: #000;
+  background:
+    radial-gradient(circle at 50% 100%, rgb(176 92 255 / 0.045), transparent 34%),
+    #0a0a0d;
 }
 
 .scroll-to-bottom {
@@ -2043,7 +2016,7 @@ defineExpose({
 .chat-floating-actions {
   position: absolute;
   right: max(14px, calc((100% - min(760px, calc(100% - 96px))) / 2 - 52px));
-  bottom: 38px;
+  bottom: 122px;
   z-index: 5;
   display: flex;
   flex-direction: column;
@@ -2064,11 +2037,35 @@ defineExpose({
   z-index: 1;
   height: 100%;
   max-height: none;
-  padding: 64px clamp(40px, 7vw, 128px) 34px;
+  padding: 64px clamp(40px, 7vw, 128px) 210px;
   scroll-behavior: smooth;
   scrollbar-gutter: stable both-edges;
   scrollbar-width: thin;
   scrollbar-color: rgb(255 255 255 / 0.14) transparent;
+}
+
+.composer-dock {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 4;
+  padding: 18px 0 max(18px, env(safe-area-inset-bottom));
+  background: transparent;
+  pointer-events: none;
+}
+
+.composer-dock::before {
+  content: "";
+  position: absolute;
+  inset: -80px 0 0;
+  z-index: -1;
+  background: linear-gradient(180deg, transparent, rgb(10 10 13 / 0.24) 54%, rgb(10 10 13 / 0.36));
+  pointer-events: none;
+}
+
+.composer-dock :deep(.composer) {
+  pointer-events: auto;
 }
 
 .message-container::-webkit-scrollbar {
@@ -2085,15 +2082,12 @@ defineExpose({
 }
 
 .composer {
-  width: min(760px, calc(100% - 96px));
-  margin: 0 auto 22px;
-  border: 0;
-  border-radius: 24px;
-  background:
-    radial-gradient(circle at 12% 0%, rgb(176 92 255 / 0.10), transparent 34%),
-    linear-gradient(180deg, rgb(255 255 255 / 0.055), rgb(255 255 255 / 0.025)),
-    rgb(31 31 36 / 0.76);
-  padding: 10px 12px;
+  width: min(720px, calc(100% - 112px));
+  margin: 0 auto;
+  border: 1px solid rgb(255 255 255 / 0.105);
+  border-radius: 28px;
+  background: var(--agent-composer-bg);
+  padding: 10px 12px 11px;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -2101,11 +2095,11 @@ defineExpose({
   position: relative;
   z-index: 2;
   box-shadow:
-    0 -18px 58px rgb(176 92 255 / 0.08),
-    0 24px 80px rgb(0 0 0 / 0.48),
-    inset 0 1px 0 rgb(255 255 255 / 0.07),
-    inset 0 0 0 1px rgb(255 255 255 / 0.045);
-  backdrop-filter: blur(20px) saturate(135%);
+    0 -18px 56px var(--agent-accent-glow, rgb(176 92 255 / 0.10)),
+    0 24px 72px rgb(0 0 0 / 0.52),
+    0 0 0 1px color-mix(in srgb, var(--theme-color), transparent 86%),
+    inset 0 1px 0 rgb(255 255 255 / 0.08);
+  backdrop-filter: blur(24px) saturate(145%);
 }
 
 .composer-model-row {
@@ -3047,15 +3041,17 @@ defineExpose({
 @media (max-width: 900px) {
   .chat-floating-actions {
     right: 12px;
-    bottom: 94px;
+    bottom: 128px;
   }
   .message-container {
-    padding: 36px 14px 24px;
+    padding: 36px 14px 196px;
   }
   .composer {
     width: calc(100% - 24px);
-    margin-bottom: 16px;
-    border-radius: 22px;
+    border-radius: 24px;
+  }
+  .composer-dock {
+    padding: 14px 0 max(14px, env(safe-area-inset-bottom));
   }
   .suggestions {
     grid-template-columns: 1fr;

@@ -14,7 +14,7 @@ type TimelineTone = "info" | "success" | "warning" | "error"
 
 const expandedEventIds = ref<Set<number>>(new Set())
 
-const processExpanded = ref(true)
+const processExpanded = ref(false)
 const toolEvents = computed(() => filterToolProcessEvents(props.events))
 const hasToolProcess = computed(() => toolEvents.value.length > 0)
 const processEvents = computed(() =>

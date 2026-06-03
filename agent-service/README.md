@@ -40,12 +40,26 @@ intervals, stream relay, and product tool loop limits do not mutate shared
 runtime instances. The runtime emits `runtime_settings.applied` so backend/admin
 views can audit the effective settings for a run.
 
+Intent routing uses the LLM router as the primary decision path. Configure router
+behavior from the admin Prompts page (`agent.router.*`), including:
+
+- `agent.router.history_turns` — how many prior user turns are sent to the router (default 4)
+- `agent.router.recent_tool_calls` — how many recent successful tool calls are included (default 5)
+
+Routing order:
+
+1. Infrastructure rules (file / pending tool context)
+2. LLM Router (primary)
+3. Product Tool Call Loop fallback when router rejects the model output (optional, default on via `agent.runtime.product_tool_loop_enabled`)
+4. Safe `general_chat` if both fail
+
+When routing falls back to chat, check run event `router.fallback` for `validationFailure` (for example `confidence_below_min`, `tool_not_available`, `output_modality_mismatch`).
+
 Useful local switches:
 
 ```powershell
+AGENT_LLM_ROUTER_ENABLED=true
 AGENT_PRODUCT_TOOL_LOOP_ENABLED=true
-AGENT_PRODUCT_TOOL_LOOP_MAX_CALLS=1
-AGENT_PRODUCT_TOOL_LOOP_FALLBACK_TO_ROUTER=true
 ```
 
 ## Memory

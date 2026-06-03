@@ -172,15 +172,9 @@ function toggleComposerExpanded() {
 function adjustComposerTextareaHeight() {
   const el = composerTextareaRef.value
   if (!el) return
-  const minH = composerExpanded.value ? 120 : 28
-  const maxH = composerExpanded.value ? Math.min(window.innerHeight * 0.5, 420) : 150
-  el.style.overflowY = "hidden"
-  el.style.height = "0px"
-  void el.offsetHeight
-  const scrollH = el.scrollHeight
-  const target = Math.min(Math.max(scrollH, minH), maxH)
+  const target = composerExpanded.value ? Math.min(window.innerHeight * 0.44, 360) : 52
   el.style.height = `${target}px`
-  el.style.overflowY = scrollH > maxH ? "auto" : "hidden"
+  el.style.overflowY = el.scrollHeight > target ? "auto" : "hidden"
 }
 
 function onSubmit() {
@@ -436,12 +430,12 @@ defineExpose({ adjustComposerTextareaHeight })
 
 <style scoped>
 .composer {
-  width: min(760px, calc(100% - 96px));
-  margin: 0 auto 22px;
-  border: 0;
-  border-radius: 24px;
+  width: min(720px, calc(100% - 112px));
+  margin: 0 auto;
+  border: 1px solid rgb(255 255 255 / 0.105);
+  border-radius: 28px;
   background: var(--agent-composer-bg);
-  padding: 8px 12px;
+  padding: 10px 12px 11px;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -449,11 +443,26 @@ defineExpose({ adjustComposerTextareaHeight })
   position: relative;
   z-index: 2;
   box-shadow:
-    0 -12px 40px var(--agent-accent-glow, rgb(176 92 255 / 0.06)),
-    0 20px 60px rgb(0 0 0 / 0.38),
-    inset 0 1px 0 rgb(255 255 255 / 0.06),
-    inset 0 0 0 1px rgb(255 255 255 / 0.04);
-  backdrop-filter: blur(20px) saturate(135%);
+    0 -18px 56px var(--agent-accent-glow, rgb(176 92 255 / 0.10)),
+    0 24px 72px rgb(0 0 0 / 0.52),
+    0 0 0 1px color-mix(in srgb, var(--theme-color), transparent 86%),
+    inset 0 1px 0 rgb(255 255 255 / 0.08);
+  backdrop-filter: blur(24px) saturate(145%);
+}
+
+.composer::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, transparent 8%, color-mix(in srgb, var(--theme-color), transparent 76%), transparent 44%),
+    radial-gradient(circle at 92% 16%, var(--agent-bg-mesh-2), transparent 24%);
+  opacity: 0.72;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  padding: 1px;
 }
 
 .composer-model-picker {
@@ -471,11 +480,11 @@ defineExpose({ adjustComposerTextareaHeight })
   align-items: center;
   gap: 8px;
   max-width: min(240px, 72vw);
-  min-height: 32px;
+  min-height: 30px;
   padding: 4px 12px 4px 6px;
-  border: 1px solid rgb(255 255 255 / 0.06);
-  border-radius: 10px;
-  background: rgb(43 45 49 / 0.92);
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.055);
   color: rgb(255 255 255 / 0.9);
   font-size: 13px;
   font-weight: 500;
@@ -485,8 +494,9 @@ defineExpose({ adjustComposerTextareaHeight })
 
 .composer-model-pill:hover:not(:disabled),
 .composer-model-pill.open {
-  background: rgb(52 55 60 / 0.96);
-  border-color: rgb(255 255 255 / 0.1);
+  background: rgb(255 255 255 / 0.085);
+  border-color: color-mix(in srgb, var(--theme-color), transparent 62%);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--theme-color), transparent 86%);
 }
 
 .composer-model-pill:disabled {
@@ -708,6 +718,7 @@ defineExpose({ adjustComposerTextareaHeight })
 
 .input-wrap {
   position: relative;
+  min-height: 52px;
 }
 
 .chat-input {
@@ -717,10 +728,11 @@ defineExpose({ adjustComposerTextareaHeight })
   background: transparent;
   font-size: 16px;
   line-height: 1.6;
-  min-height: 48px;
-  max-height: 160px;
+  height: 52px;
+  min-height: 52px;
+  max-height: 52px;
   resize: none;
-  padding: 6px 36px 6px 2px;
+  padding: 8px 40px 6px 4px;
   color: var(--agent-text-primary);
 }
 
@@ -739,8 +751,9 @@ defineExpose({ adjustComposerTextareaHeight })
 }
 
 .chat-input.input-expand {
-  min-height: 110px;
-  max-height: 40vh;
+  height: min(360px, 44vh);
+  min-height: 118px;
+  max-height: min(360px, 44vh);
 }
 
 .chat-input:disabled {
@@ -772,13 +785,13 @@ defineExpose({ adjustComposerTextareaHeight })
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
-  gap: 10px;
+  gap: 12px;
 }
 
 .left-tools {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 6px;
   align-items: center;
 }
 
@@ -787,7 +800,7 @@ defineExpose({ adjustComposerTextareaHeight })
   align-items: center;
   gap: 5px;
   font-size: 12px;
-  padding: 6px 8px;
+  padding: 6px 9px;
   border-radius: 999px;
   border: 0;
   background: transparent;
@@ -805,7 +818,7 @@ defineExpose({ adjustComposerTextareaHeight })
 }
 
 .tool-btn--active {
-  color: var(--agent-accent) !important;
+  color: var(--theme-color) !important;
   text-shadow: 0 0 12px var(--agent-accent-glow);
 }
 
@@ -886,7 +899,17 @@ defineExpose({ adjustComposerTextareaHeight })
 @media (max-width: 720px) {
   .composer {
     width: calc(100% - 24px);
-    margin-bottom: max(14px, env(safe-area-inset-bottom));
+    border-radius: 24px;
+  }
+
+  .tool-btn {
+    min-width: 34px;
+    padding: 7px;
+  }
+
+  .tool-btn:not(.tool-btn--active) {
+    font-size: 0;
+    gap: 0;
   }
 }
 </style>

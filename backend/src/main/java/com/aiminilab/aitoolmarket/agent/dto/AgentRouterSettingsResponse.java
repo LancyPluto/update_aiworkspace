@@ -4,6 +4,8 @@ public record AgentRouterSettingsResponse(
         Boolean enabled,
         String prompt,
         Double minConfidence,
-        Boolean fallbackToRules
+        Boolean fallbackToRules,
+        Integer historyTurns,
+        Integer recentToolCallLimit
 ) {
 }

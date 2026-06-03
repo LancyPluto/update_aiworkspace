@@ -66,6 +66,42 @@ def test_followup_inherits_image_arguments_and_replaces_subject():
     assert result.inherited_from_tool_call_id == 11
     assert result.patched_arguments["aspectRatio"] == "3:4"
     assert "科比" in result.patched_arguments["prompt"]
+    assert result.patched_arguments["prompt"].startswith("本轮用户改写要求优先：")
+    assert "上一轮提示词仅作风格参考" in result.patched_arguments["prompt"]
+
+
+def test_followup_rewrite_keeps_full_user_request_as_priority():
+    context = RunContext(
+        runId=4,
+        sessionId=1,
+        userId=1,
+        message="改成代言《全面战争：战锤3》，cos基斯里夫的女沙皇",
+        recentToolCalls=[
+            RecentToolCallContext(
+                id=13,
+                runId=3,
+                toolCode="kling_image_v21",
+                taskId=73,
+                argumentsJson={
+                    "prompt": "斋藤飞鸟日常风杂志封面，白衬衫，咖啡厅街道",
+                    "aspectRatio": "3:4",
+                    "quality": "low",
+                },
+                resultJson={},
+                resourceType="IMAGE",
+                mediaUrls=["/generated/images/73/image-1.png"],
+            )
+        ],
+    )
+
+    result = FollowupTaskResolver().resolve(context, image_tool())
+
+    prompt = result.patched_arguments["prompt"]
+    assert result.accepted
+    assert result.patched_arguments["quality"] == "low"
+    assert "改成代言《全面战争：战锤3》，cos基斯里夫的女沙皇" in prompt
+    assert "不要保留与本轮要求冲突" in prompt
+    assert "斋藤飞鸟日常风杂志封面" in prompt
 
 
 def test_followup_can_switch_from_image_result_to_video_tool():

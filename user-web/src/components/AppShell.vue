@@ -495,7 +495,13 @@ watch(
           <PanelLeft v-else class="h-4 w-4" aria-hidden="true" />
         </button>
         <div class="min-w-0 flex-1 lg:max-w-[360px]">
-          <h1 v-if="title" class="text-base font-semibold truncate">{{ title }}</h1>
+          <h1
+            v-if="title"
+            class="truncate text-base font-semibold"
+            :class="isAgentRoute ? 'app-shell-agent-brand' : ''"
+          >
+            {{ title }}
+          </h1>
           <p v-if="description" class="text-xs text-white/45 truncate">{{ description }}</p>
         </div>
         <div ref="searchRootRef" class="relative hidden min-w-0 flex-1 lg:block lg:max-w-[520px] xl:max-w-[620px]">
@@ -684,3 +690,15 @@ watch(
   </div>
 </template>
 
+<style scoped>
+.app-shell-agent-brand {
+  width: fit-content;
+  max-width: 100%;
+  background: linear-gradient(120deg, #ffffff 0%, #bfe8ff 34%, #9cf2ca 66%, #caa8ff 100%);
+  background-clip: text;
+  color: transparent;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-shadow: 0 0 28px rgb(100 210 255 / 0.18);
+}
+</style>

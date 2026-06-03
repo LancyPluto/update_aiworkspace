@@ -59,6 +59,8 @@ const AGENT_ROUTER_ENABLED_KEY = "agent.router.enabled"
 const AGENT_ROUTER_PROMPT_KEY = "agent.router.prompt"
 const AGENT_ROUTER_MIN_CONFIDENCE_KEY = "agent.router.min_confidence"
 const AGENT_ROUTER_FALLBACK_TO_RULES_KEY = "agent.router.fallback_to_rules"
+const AGENT_ROUTER_HISTORY_TURNS_KEY = "agent.router.history_turns"
+const AGENT_ROUTER_RECENT_TOOL_CALLS_KEY = "agent.router.recent_tool_calls"
 
 const DEFAULT_AGENT_SYSTEM_PROMPT = `你是 AI 工具市场的云代理。你的任务是理解用户需求，基于平台中可用的 AI 工具进行推荐、参数收集和必要时调用工具。
 
@@ -169,6 +171,8 @@ export default function PromptsPage() {
   const [routerPrompt, setRouterPrompt] = useState(DEFAULT_ROUTER_PROMPT)
   const [routerMinConfidence, setRouterMinConfidence] = useState("0.7")
   const [routerFallbackToRules, setRouterFallbackToRules] = useState(true)
+  const [routerHistoryTurns, setRouterHistoryTurns] = useState("4")
+  const [routerRecentToolCalls, setRouterRecentToolCalls] = useState("5")
   const [originalMemoryConfig, setOriginalMemoryConfig] = useState({
     autoSaveEnabled: true,
     retrievalLimit: "6",
@@ -181,6 +185,8 @@ export default function PromptsPage() {
     prompt: DEFAULT_ROUTER_PROMPT,
     minConfidence: "0.7",
     fallbackToRules: true,
+    historyTurns: "4",
+    recentToolCalls: "5",
   })
   const [agentVersions, setAgentVersions] = useState<SettingVersion[]>([])
   const [deepAgentVersions, setDeepAgentVersions] = useState<SettingVersion[]>([])
@@ -210,7 +216,9 @@ export default function PromptsPage() {
     routerEnabled !== originalRouterConfig.enabled ||
     routerPrompt !== originalRouterConfig.prompt ||
     routerMinConfidence !== originalRouterConfig.minConfidence ||
-    routerFallbackToRules !== originalRouterConfig.fallbackToRules,
+    routerFallbackToRules !== originalRouterConfig.fallbackToRules ||
+    routerHistoryTurns !== originalRouterConfig.historyTurns ||
+    routerRecentToolCalls !== originalRouterConfig.recentToolCalls,
   )
   const dirtyPrompts = Number(agentPrompt !== originalAgentPrompt) + Number(deepAgentsPrompt !== originalDeepAgentsPrompt) + dirtyMemoryConfig + dirtyRouterConfig
 
@@ -256,11 +264,15 @@ export default function PromptsPage() {
         prompt: settings[AGENT_ROUTER_PROMPT_KEY] || DEFAULT_ROUTER_PROMPT,
         minConfidence: settings[AGENT_ROUTER_MIN_CONFIDENCE_KEY] || "0.7",
         fallbackToRules: (settings[AGENT_ROUTER_FALLBACK_TO_RULES_KEY] ?? "true") !== "false",
+        historyTurns: settings[AGENT_ROUTER_HISTORY_TURNS_KEY] || "4",
+        recentToolCalls: settings[AGENT_ROUTER_RECENT_TOOL_CALLS_KEY] || "5",
       }
       setRouterEnabled(nextRouterConfig.enabled)
       setRouterPrompt(nextRouterConfig.prompt)
       setRouterMinConfidence(nextRouterConfig.minConfidence)
       setRouterFallbackToRules(nextRouterConfig.fallbackToRules)
+      setRouterHistoryTurns(nextRouterConfig.historyTurns)
+      setRouterRecentToolCalls(nextRouterConfig.recentToolCalls)
       setOriginalRouterConfig(nextRouterConfig)
     } catch (err) {
       setError(errorMessage(err, "加载 Agent 配置失败"))
@@ -382,28 +394,38 @@ export default function PromptsPage() {
     const toastId = toast.loading("正在保存 Agent 路由配置...")
     try {
       const confidence = String(Math.max(0, Math.min(1, Number(routerMinConfidence) || 0.7)))
+      const historyTurns = String(Math.max(0, Math.min(20, Number(routerHistoryTurns) || 4)))
+      const recentToolCalls = String(Math.max(0, Math.min(10, Number(routerRecentToolCalls) || 5)))
       const savedConfig = {
         enabled: routerEnabled,
         prompt: routerPrompt.trim() || DEFAULT_ROUTER_PROMPT,
         minConfidence: confidence,
         fallbackToRules: routerFallbackToRules,
+        historyTurns,
+        recentToolCalls,
       }
       const settings = await updateSettings({
         [AGENT_ROUTER_ENABLED_KEY]: String(savedConfig.enabled),
         [AGENT_ROUTER_PROMPT_KEY]: savedConfig.prompt,
         [AGENT_ROUTER_MIN_CONFIDENCE_KEY]: savedConfig.minConfidence,
         [AGENT_ROUTER_FALLBACK_TO_RULES_KEY]: String(savedConfig.fallbackToRules),
+        [AGENT_ROUTER_HISTORY_TURNS_KEY]: savedConfig.historyTurns,
+        [AGENT_ROUTER_RECENT_TOOL_CALLS_KEY]: savedConfig.recentToolCalls,
       })
       const nextConfig = {
         enabled: (settings[AGENT_ROUTER_ENABLED_KEY] ?? String(savedConfig.enabled)) !== "false",
         prompt: settings[AGENT_ROUTER_PROMPT_KEY] || savedConfig.prompt,
         minConfidence: settings[AGENT_ROUTER_MIN_CONFIDENCE_KEY] || savedConfig.minConfidence,
         fallbackToRules: (settings[AGENT_ROUTER_FALLBACK_TO_RULES_KEY] ?? String(savedConfig.fallbackToRules)) !== "false",
+        historyTurns: settings[AGENT_ROUTER_HISTORY_TURNS_KEY] || savedConfig.historyTurns,
+        recentToolCalls: settings[AGENT_ROUTER_RECENT_TOOL_CALLS_KEY] || savedConfig.recentToolCalls,
       }
       setRouterEnabled(nextConfig.enabled)
       setRouterPrompt(nextConfig.prompt)
       setRouterMinConfidence(nextConfig.minConfidence)
       setRouterFallbackToRules(nextConfig.fallbackToRules)
+      setRouterHistoryTurns(nextConfig.historyTurns)
+      setRouterRecentToolCalls(nextConfig.recentToolCalls)
       setOriginalRouterConfig(nextConfig)
       setLastSavedAt(new Date().toLocaleTimeString())
       toast.success("Agent 路由配置已保存", { id: toastId })
@@ -657,11 +679,15 @@ export default function PromptsPage() {
               prompt={routerPrompt}
               minConfidence={routerMinConfidence}
               fallbackToRules={routerFallbackToRules}
+              historyTurns={routerHistoryTurns}
+              recentToolCalls={routerRecentToolCalls}
               dirty={Boolean(dirtyRouterConfig)}
               onEnabledChange={setRouterEnabled}
               onPromptChange={setRouterPrompt}
               onMinConfidenceChange={setRouterMinConfidence}
               onFallbackToRulesChange={setRouterFallbackToRules}
+              onHistoryTurnsChange={setRouterHistoryTurns}
+              onRecentToolCallsChange={setRouterRecentToolCalls}
               onSave={saveRouterConfig}
             />
           </TabsContent>
@@ -906,11 +932,15 @@ function RouterConfigCard({
   prompt,
   minConfidence,
   fallbackToRules,
+  historyTurns,
+  recentToolCalls,
   dirty,
   onEnabledChange,
   onPromptChange,
   onMinConfidenceChange,
   onFallbackToRulesChange,
+  onHistoryTurnsChange,
+  onRecentToolCallsChange,
   onSave,
 }: {
   loading: boolean
@@ -919,11 +949,15 @@ function RouterConfigCard({
   prompt: string
   minConfidence: string
   fallbackToRules: boolean
+  historyTurns: string
+  recentToolCalls: string
   dirty: boolean
   onEnabledChange: (value: boolean) => void
   onPromptChange: (value: string) => void
   onMinConfidenceChange: (value: string) => void
   onFallbackToRulesChange: (value: boolean) => void
+  onHistoryTurnsChange: (value: string) => void
+  onRecentToolCallsChange: (value: string) => void
   onSave: () => void
 }) {
   return (
@@ -932,7 +966,7 @@ function RouterConfigCard({
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <CardTitle className="flex items-center gap-2"><Route className="h-5 w-5" />Agent Router</CardTitle>
-            <CardDescription>控制 Agent 是否使用 LLM Router、最低置信度，以及失败时是否回退规则路由。</CardDescription>
+            <CardDescription>控制 LLM Router 开关、意图识别上下文轮数、近期工具记录条数、最低置信度与 Prompt。</CardDescription>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="secondary">agent.router.*</Badge>
@@ -941,23 +975,14 @@ function RouterConfigCard({
         </div>
       </CardHeader>
       <CardContent className="space-y-5">
-        <div className="grid gap-4 lg:grid-cols-3">
+        <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
           <div className="rounded-lg border p-4">
             <div className="flex items-center justify-between gap-3">
               <div>
                 <Label>启用 LLM Router</Label>
-                <p className="mt-1 text-xs text-muted-foreground">关闭后只使用规则路由。</p>
+                <p className="mt-1 text-xs text-muted-foreground">关闭后意图识别回退为普通聊天。</p>
               </div>
               <Switch checked={enabled} disabled={loading || saving} onCheckedChange={onEnabledChange} />
-            </div>
-          </div>
-          <div className="rounded-lg border p-4">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <Label>规则兜底</Label>
-                <p className="mt-1 text-xs text-muted-foreground">模型低置信度、返回非法工具或异常时回退。</p>
-              </div>
-              <Switch checked={fallbackToRules} disabled={loading || saving} onCheckedChange={onFallbackToRulesChange} />
             </div>
           </div>
           <div className="space-y-2">
@@ -972,6 +997,41 @@ function RouterConfigCard({
               onChange={(event) => onMinConfidenceChange(event.target.value)}
             />
             <p className="text-xs text-muted-foreground">低于该值会写入 router.fallback。</p>
+          </div>
+          <div className="space-y-2">
+            <Label>意图识别历史轮数</Label>
+            <Input
+              type="number"
+              min={0}
+              max={20}
+              step={1}
+              value={historyTurns}
+              disabled={loading || saving}
+              onChange={(event) => onHistoryTurnsChange(event.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">按用户发言轮数截取会话历史（不含当前句）。建议不超过 agent.runtime.max_history_messages 的一半。</p>
+          </div>
+          <div className="space-y-2">
+            <Label>近期工具调用条数</Label>
+            <Input
+              type="number"
+              min={0}
+              max={10}
+              step={1}
+              value={recentToolCalls}
+              disabled={loading || saving}
+              onChange={(event) => onRecentToolCallsChange(event.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">送入 Router 的 recentToolCalls 条数，用于续接同款/改图等追问。</p>
+          </div>
+          <div className="rounded-lg border p-4 lg:col-span-2 xl:col-span-1">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <Label>规则兜底（已废弃）</Label>
+                <p className="mt-1 text-xs text-muted-foreground">保留配置兼容；主链路已不再用规则选工具。</p>
+              </div>
+              <Switch checked={fallbackToRules} disabled={loading || saving} onCheckedChange={onFallbackToRulesChange} />
+            </div>
           </div>
         </div>
         <div className="space-y-2">

@@ -214,7 +214,7 @@
 </script>
 
 <template>
-  <AppShell title="Agent" description="用自然语言让系统推荐、确认并调用工具">
+  <AppShell title="科创点AI" description="用自然语言让系统推荐、确认并调用工具">
     <div class="agent-page" :class="{ 'agent-page--session-collapsed': !sessionSidebarOpen }">
       <button class="sidebar-toggle-btn" type="button" @click="toggleSessionSidebar">
         <ChevronRight v-if="!sessionSidebarOpen" class="h-4 w-4" />
@@ -301,7 +301,7 @@
     min-height: 0;
     overflow: hidden;
     position: relative;
-    background: #000;
+    background: #0a0a0d;
   }
 
   .agent-page--session-collapsed {
@@ -522,7 +522,7 @@
     min-height: 0;
     height: 100%;
     overflow: hidden;
-    background: #000;
+    background: #0a0a0d;
   }
 
   .chat-pane-empty {
