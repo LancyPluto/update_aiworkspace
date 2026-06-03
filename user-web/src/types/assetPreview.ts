@@ -17,6 +17,7 @@ export interface AssetPreviewItem {
   toolName?: string
   toolCode?: string
   communityPostId?: number
+  sourcePostId?: number
   promptVisible?: boolean
   modality?: string
   topic?: string | null

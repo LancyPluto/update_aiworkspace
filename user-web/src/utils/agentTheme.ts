@@ -181,7 +181,10 @@ export function getAgentTheme(id?: AgentAmbientThemeId): AgentAmbientTheme {
 export function applyAgentThemeToElement(el: HTMLElement, id?: AgentAmbientThemeId) {
   const theme = getAgentTheme(id)
   el.dataset.agentTheme = theme.id
+  document.documentElement.style.setProperty("--theme-color", theme.accent)
+  document.documentElement.style.setProperty("--agent-accent", theme.accent)
   el.style.setProperty("--agent-accent", theme.accent)
+  el.style.setProperty("--theme-color", theme.accent)
   el.style.setProperty("--agent-accent-light", theme.accentLight)
   el.style.setProperty("--agent-accent-dark", theme.accentDark)
   el.style.setProperty("--agent-accent-soft", theme.accentSoft)
@@ -198,7 +201,7 @@ export function applyAgentThemeToElement(el: HTMLElement, id?: AgentAmbientTheme
   )
   el.style.setProperty(
     "--agent-composer-bg",
-    `radial-gradient(circle at 12% 0%, ${theme.composerTint}, transparent 34%), linear-gradient(180deg, rgb(255 255 255 / 0.05), rgb(255 255 255 / 0.022)), rgb(31 31 36 / 0.76)`,
+    `radial-gradient(circle at 14% 0%, ${theme.composerTint}, transparent 34%), radial-gradient(circle at 88% 100%, ${theme.mesh2}, transparent 28%), linear-gradient(180deg, rgb(255 255 255 / 0.07), rgb(255 255 255 / 0.026)), rgb(28 28 33 / 0.68)`,
   )
 }
 

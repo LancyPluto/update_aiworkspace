@@ -140,8 +140,13 @@ class MemorySettings(BaseModel):
     retrievalPrompt: str | None = None
     toolLoopEnabled: bool | None = None
     consolidationEnabled: bool | None = None
+    consolidationLlmEnabled: bool | None = None
     consolidationTurnInterval: int | None = None
     consolidationCharThreshold: int | None = None
+    consolidationTokenThreshold: int | None = None
+    consolidationRecentToolThreshold: int | None = None
+    consolidationMaxContextMessages: int | None = None
+    consolidationPrompt: str | None = None
     consolidationMinConfidence: float | None = None
     candidateConfidenceThreshold: float | None = None
 
@@ -151,6 +156,8 @@ class AgentRouterSettings(BaseModel):
     prompt: str | None = None
     minConfidence: float = 0.7
     fallbackToRules: bool = True
+    historyTurns: int = 4
+    recentToolCallLimit: int = 5
 
 
 class RuntimeSettings(BaseModel):

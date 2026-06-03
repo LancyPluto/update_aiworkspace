@@ -30,7 +30,6 @@ def runtime_settings_event_payload(
     guard: BudgetGuard,
     tool_timeout_seconds: int,
     tool_poll_interval_seconds: float,
-    product_tool_loop_max_calls: int,
 ) -> dict:
     runtime = context.runtimeSettings
     return {
@@ -77,14 +76,9 @@ def runtime_settings_event_payload(
         "productToolLoopMaxCalls": runtime_int(
             context,
             "productToolLoopMaxCalls",
-            product_tool_loop_max_calls,
+            settings.agent_product_tool_loop_max_calls,
             1,
             20,
-        ),
-        "productToolLoopFallbackToRouter": runtime_bool(
-            context,
-            "productToolLoopFallbackToRouter",
-            settings.agent_product_tool_loop_fallback_to_router,
         ),
         "source": "backend" if runtime is not None else "environment",
     }

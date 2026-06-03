@@ -23,12 +23,12 @@ import { getApiOrigin } from "@/api/client"
 import {
   createChatSession,
   deleteChatSession,
-  fetchAIToolById,
   fetchChatMessages,
   fetchChatSessions,
   isMarketplaceMockToolId,
   sendChatMessage,
 } from "@/api/aiToolApi"
+import { fetchAIToolById } from "@/api/toolApi"
 import { createTask, fetchTaskById, fetchTasks, fetchTaskStatus } from "@/api/taskApi"
 import type { AITool, ChatMessage, ChatSession } from "@/api/aiToolTypes"
 import type { TaskDetail, TaskStatus } from "@/api/types"

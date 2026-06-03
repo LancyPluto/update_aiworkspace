@@ -117,7 +117,9 @@ public class AdminAgentToolAccessController {
                         parseBooleanSetting(settings.get(AgentRouterSettings.ENABLED_KEY), AgentRouterSettings.DEFAULT_ENABLED),
                         nonBlankOrDefault(settings.get(AgentRouterSettings.PROMPT_KEY), AgentRouterSettings.DEFAULT_PROMPT),
                         parseDoubleSetting(settings.get(AgentRouterSettings.MIN_CONFIDENCE_KEY), 0.7D, 0D, 1D),
-                        parseBooleanSetting(settings.get(AgentRouterSettings.FALLBACK_TO_RULES_KEY), AgentRouterSettings.DEFAULT_FALLBACK_TO_RULES)
+                        parseBooleanSetting(settings.get(AgentRouterSettings.FALLBACK_TO_RULES_KEY), AgentRouterSettings.DEFAULT_FALLBACK_TO_RULES),
+                        parseIntSetting(settings.get(AgentRouterSettings.HISTORY_TURNS_KEY), AgentRouterSettings.DEFAULT_HISTORY_TURNS, 0, 20),
+                        parseIntSetting(settings.get(AgentRouterSettings.RECENT_TOOL_CALLS_KEY), AgentRouterSettings.DEFAULT_RECENT_TOOL_CALLS, 0, 10)
                 ),
                 null,
                 List.of(),
@@ -204,6 +206,18 @@ public class AdminAgentToolAccessController {
         }
         try {
             double parsed = Double.parseDouble(value.trim());
+            return Math.max(min, Math.min(max, parsed));
+        } catch (NumberFormatException ignored) {
+            return fallback;
+        }
+    }
+
+    private int parseIntSetting(String value, int fallback, int min, int max) {
+        if (value == null || value.isBlank()) {
+            return fallback;
+        }
+        try {
+            int parsed = Integer.parseInt(value.trim());
             return Math.max(min, Math.min(max, parsed));
         } catch (NumberFormatException ignored) {
             return fallback;

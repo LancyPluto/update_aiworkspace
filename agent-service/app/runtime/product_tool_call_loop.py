@@ -48,7 +48,13 @@ class ProductToolCallLoopExecutor:
     model: Any
     max_tool_calls: int = 1
 
-    async def run(self, context: RunContext, *, max_tool_calls: int | None = None) -> ProductToolCallLoopResult:
+    async def run(
+        self,
+        context: RunContext,
+        *,
+        max_tool_calls: int | None = None,
+        workspace_memory_context: str = "",
+    ) -> ProductToolCallLoopResult:
         chat_turn = getattr(self.model, "chat_turn", None)
         if not callable(chat_turn):
             raise TypeError("model does not support chat_turn")
@@ -66,7 +72,7 @@ class ProductToolCallLoopExecutor:
                 "toolCodes": [alias.tool.toolCode for alias in aliases.values()],
             },
         )
-        messages = self._messages(context)
+        messages = self._messages(context, workspace_memory_context=workspace_memory_context)
         turn = await chat_turn(messages, tools=tool_defs, tool_choice="auto")
         call_limit = max(1, int(max_tool_calls if max_tool_calls is not None else self.max_tool_calls))
         calls = list(getattr(turn, "tool_calls", []) or [])[:call_limit]
@@ -168,8 +174,20 @@ class ProductToolCallLoopExecutor:
         )
         return ProductToolCallLoopResult(rejected=True, rejection_reason=reason)
 
-    def _messages(self, context: RunContext) -> list[ChatMessage]:
+    def _messages(self, context: RunContext, *, workspace_memory_context: str = "") -> list[ChatMessage]:
         messages = [ChatMessage(role="system", content=PRODUCT_TOOL_LOOP_SYSTEM_PROMPT)]
+        if workspace_memory_context.strip():
+            messages.append(
+                ChatMessage(
+                    role="system",
+                    content=(
+                        "Workspace long-term memory for this run. Use it when choosing product tools and "
+                        "when filling low-risk tool arguments such as quality, aspect ratio, count, style, "
+                        "or other user preferences. Current user instruction still has highest priority.\n\n"
+                        f"{workspace_memory_context.strip()}"
+                    ),
+                )
+            )
         if context.recentToolCalls:
             messages.append(
                 ChatMessage(

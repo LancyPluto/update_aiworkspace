@@ -9,12 +9,10 @@ export {
   updateCommunitySettings,
 } from "./userApi"
 export * from "./communityApi"
-export { fetchToolCategories, fetchTools, searchTools, fetchToolByCode } from "./toolApi"
+export { fetchToolCategories, fetchTools, searchTools, fetchToolByCode, fetchEnabledAITools, fetchAIToolById } from "./toolApi"
 export * from "./pptApi"
 export {
   fetchMarketplaceAITools,
-  fetchEnabledAITools,
-  fetchAIToolById,
   isMarketplaceMockToolId,
   fetchChatSessions,
   createChatSession,

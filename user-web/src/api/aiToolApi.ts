@@ -141,7 +141,7 @@ export async function fetchMarketplaceAITools(): Promise<AITool[]> {
   return mockFetchEnabledAITools()
 }
 
-/** GET /api/v1/ai-tools — 已上架列表，按 order 排序 */
+/** GET /api/v1/tools — 已上架列表，按 order 排序 */
 export async function fetchEnabledAITools(options?: { token?: string | null }): Promise<AITool[]> {
   return withMockFallback(
     async () => {
@@ -158,7 +158,7 @@ export async function fetchEnabledAITools(options?: { token?: string | null }): 
   )
 }
 
-/** GET /api/v1/ai-tools/{toolId} */
+/** GET /api/v1/tools/{toolCode} */
 export async function fetchAIToolById(
   toolId: string,
   options?: { token?: string | null },

@@ -125,6 +125,48 @@ async def test_product_tool_call_loop_selects_tool_by_alias():
 
 
 @pytest.mark.asyncio
+async def test_product_tool_call_loop_includes_workspace_memory_in_model_messages():
+    backend = FakeToolLoopBackend()
+    model = FakeProductToolModel(
+        ChatTurnResult(
+            tool_calls=[
+                ChatToolCall(
+                    id="call_product_1",
+                    name="agent_tool__ofox_gpt_image2",
+                    arguments={"userRequest": "生成一张图", "quality": "low"},
+                )
+            ],
+            finish_reason="tool_calls",
+        )
+    )
+    loop = ProductToolCallLoopExecutor(backend=backend, model=model)
+    context = RunContext(
+        runId=44,
+        sessionId=1,
+        userId=2,
+        message="生成一张图",
+        availableTools=[
+            ToolDescriptor(
+                toolCode="ofox_gpt_image2",
+                toolName="GPT-image2.0",
+                description="图片生成，文生图",
+                autoCallable=True,
+            )
+        ],
+    )
+
+    result = await loop.run(
+        context,
+        workspace_memory_context="Frozen workspace memory snapshot\n- GPT生图默认选最低质量 low quality",
+    )
+
+    system_messages = [message.content for message in model.calls[0][0] if message.role == "system"]
+    assert any("GPT生图默认选最低质量" in content for content in system_messages)
+    assert result.intent is not None
+    assert result.intent.arguments["quality"] == "low"
+
+
+@pytest.mark.asyncio
 async def test_product_tool_call_loop_rejects_unknown_tool_call():
     backend = FakeToolLoopBackend()
     model = FakeProductToolModel(

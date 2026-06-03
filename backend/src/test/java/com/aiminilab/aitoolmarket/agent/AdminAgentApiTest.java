@@ -138,7 +138,12 @@ class AdminAgentApiTest {
                                     "agent.runtime.max_model_calls": "9",
                                     "agent.runtime.max_tool_calls": "4",
                                     "agent.runtime.max_history_messages": "7",
-                                    "agent.memory.retrieval_limit": "3"
+                                    "agent.memory.retrieval_limit": "3",
+                                    "agent.memory.consolidation_llm_enabled": "false",
+                                    "agent.memory.consolidation_token_threshold": "1234",
+                                    "agent.memory.consolidation_recent_tool_threshold": "2",
+                                    "agent.memory.consolidation_max_context_messages": "18",
+                                    "agent.memory.consolidation_prompt": "只输出 JSON"
                                   }
                                 }
                                 """))
@@ -151,7 +156,12 @@ class AdminAgentApiTest {
                 .andExpect(jsonPath("$.data.runtimeSettings.maxModelCalls").value(9))
                 .andExpect(jsonPath("$.data.runtimeSettings.maxToolCalls").value(4))
                 .andExpect(jsonPath("$.data.runtimeSettings.maxHistoryMessages").value(7))
-                .andExpect(jsonPath("$.data.memorySettings.retrievalLimit").value(3));
+                .andExpect(jsonPath("$.data.memorySettings.retrievalLimit").value(3))
+                .andExpect(jsonPath("$.data.memorySettings.consolidationLlmEnabled").value(false))
+                .andExpect(jsonPath("$.data.memorySettings.consolidationTokenThreshold").value(1234))
+                .andExpect(jsonPath("$.data.memorySettings.consolidationRecentToolThreshold").value(2))
+                .andExpect(jsonPath("$.data.memorySettings.consolidationMaxContextMessages").value(18))
+                .andExpect(jsonPath("$.data.memorySettings.consolidationPrompt").value("只输出 JSON"));
         mockMvc.perform(post("/api/admin/v1/agent/runs/{runId}/cancel", runId)
                         .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isOk());

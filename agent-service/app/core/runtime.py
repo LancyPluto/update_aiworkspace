@@ -84,7 +84,7 @@ class AgentRuntime:
         except ModelClientError as exc:
             logger.warning("Route debug falls back to mock model because model config is unavailable: %s", exc)
             model_client = self.model_client_factory(Settings(model_provider="mock", model_name="mock"))
-        engine = DeepAgentsRuntimeEngine(
+        router = self.runtime_router_factory(
             self.backend,
             model_client,
             deep_agents_enabled=self.default_settings.agent_deep_agents_enabled,

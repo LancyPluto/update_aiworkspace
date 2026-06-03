@@ -25,9 +25,10 @@ export function dashboardReplayUrl(
   const query = new URLSearchParams()
   const toolCode = typeof tool === "string" ? tool : tool?.toolCode
   const modality = options.modality || (typeof tool === "string" ? undefined : tool?.outputModality) || "IMAGE"
+  const sourcePost = options.sourcePost
   query.set("modality", modality)
   if (toolCode) query.set("tool", toolCode)
-  if (options.sourcePost) query.set("sourcePost", String(options.sourcePost))
+  if (sourcePost) query.set("sourcePost", String(sourcePost))
   return `/dashboard?${query.toString()}`
 }
 
@@ -36,6 +37,7 @@ export function openDashboardWithAsset(
   tool: Pick<AssetPreviewRecommendation, "toolCode" | "outputModality"> | string | null | undefined,
   options: { modality?: string | null; sourcePost?: number | string | null } = {},
 ) {
-  storeDashboardPendingAsset(asset)
-  window.location.href = dashboardReplayUrl(tool, options)
+  const sourcePost = options.sourcePost ?? asset.sourcePostId ?? asset.communityPostId
+  storeDashboardPendingAsset(sourcePost ? { ...asset, sourcePostId: Number(sourcePost) } : asset)
+  window.location.href = dashboardReplayUrl(tool, { ...options, sourcePost })
 }

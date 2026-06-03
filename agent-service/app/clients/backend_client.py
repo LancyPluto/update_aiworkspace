@@ -158,16 +158,16 @@ class BackendClient:
     async def update_workspace_memory(
         self, workspace_id: int, memory_id: int,
         memory_type: str, title: str, content: str,
+        metadata_json: str | None = None,
     ) -> dict[str, Any]:
-        return await self._request(
-            "PUT",
-            f"/api/internal/v1/agent/workspaces/{workspace_id}/memory/{memory_id}",
-            {
-                "memoryType": memory_type,
-                "title": title,
-                "content": content,
-            },
-        )
+        payload: dict[str, Any] = {
+            "memoryType": memory_type,
+            "title": title,
+            "content": content,
+        }
+        if metadata_json is not None:
+            payload["metadataJson"] = metadata_json
+        return await self._request("PUT", f"/api/internal/v1/agent/workspaces/{workspace_id}/memory/{memory_id}", payload)
 
     async def delete_workspace_memory(
         self, workspace_id: int, memory_id: int,

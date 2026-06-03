@@ -88,13 +88,11 @@ function isImageAttachment(file: MessageAttachment) {
     :data-message-id="message.id"
   >
     <div class="message-main">
-      <div v-if="message.role !== 'USER'" class="assistant-name-row">
-        <AgentAvatar :state="avatarState ?? 'idle'" />
-        <div>
+      <div class="bubble" :class="{ 'bubble--streaming': isStreaming }">
+        <div v-if="message.role !== 'USER'" class="assistant-name-row">
+          <AgentAvatar :state="avatarState ?? 'idle'" size="sm" />
           <strong>科创点AI</strong>
         </div>
-      </div>
-      <div class="bubble" :class="{ 'bubble--streaming': isStreaming }">
         <div v-if="editingMessageId === message.id" class="message-edit-box">
           <textarea
             :value="editingMessageDraft"
@@ -245,40 +243,49 @@ function isImageAttachment(file: MessageAttachment) {
 .assistant-name-row {
   display: flex;
   align-items: center;
-  gap: 10px;
-  min-height: 50px;
-  margin-bottom: 10px;
+  gap: 9px;
+  width: fit-content;
+  min-height: 28px;
+  margin-bottom: 12px;
+  border-radius: 999px;
+  border: 1px solid rgb(255 255 255 / 0.07);
+  background: linear-gradient(135deg, rgb(255 255 255 / 0.08), rgb(255 255 255 / 0.025));
+  padding: 3px 10px 3px 5px;
 }
 
-.assistant-name-row :deep(.agent-avatar--md) {
-  width: 50px;
-  height: 50px;
+.assistant-name-row :deep(.agent-avatar--sm) {
+  width: 24px;
+  height: 24px;
 }
 
 .assistant-name-row :deep(.agent-avatar__logo) {
-  width: 28px;
-  height: 28px;
+  width: 16px;
+  height: 16px;
 }
 
 .assistant-name-row strong {
   display: block;
-  color: var(--agent-text-primary);
-  font-size: 14px;
-  font-weight: 700;
+  background: linear-gradient(120deg, rgb(255 255 255 / 0.96), rgb(154 232 255), rgb(180 255 209));
+  background-clip: text;
+  color: transparent;
+  font-size: 13px;
+  font-weight: 800;
   line-height: 1.2;
 }
 
 .bubble {
   width: fit-content;
   max-width: 100%;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  padding: 0;
+  border: 1px solid rgb(255 255 255 / 0.075);
+  border-radius: 24px 24px 24px 10px;
+  background:
+    radial-gradient(circle at 8% 0%, var(--agent-bubble-assistant-tint), transparent 34%),
+    linear-gradient(180deg, rgb(255 255 255 / 0.045), rgb(255 255 255 / 0.022));
+  padding: 14px 16px;
   line-height: 1.75;
   color: var(--agent-text-primary);
-  box-shadow: none;
-  backdrop-filter: none;
+  box-shadow: 0 18px 50px rgb(0 0 0 / 0.22), inset 0 1px 0 rgb(255 255 255 / 0.04);
+  backdrop-filter: blur(10px);
   position: relative;
   overflow: hidden;
 }
@@ -355,18 +362,24 @@ function isImageAttachment(file: MessageAttachment) {
 }
 
 .agent-message-row.user .bubble {
-  border: 1px solid rgb(255 255 255 / 0.08);
-  background: rgb(255 255 255 / 0.06);
-  border-radius: 16px 6px 16px 16px;
-  padding: 10px 13px;
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.04);
+  border: 1px solid rgb(255 255 255 / 0.11);
+  background:
+    radial-gradient(circle at 18% 10%, rgb(255 255 255 / 0.08), transparent 44%),
+    rgb(255 255 255 / 0.105);
+  border-radius: 24px 10px 24px 24px;
+  padding: 11px 15px;
+  color: rgb(255 255 255 / 0.94);
+  box-shadow: 0 16px 42px rgb(0 0 0 / 0.20), inset 0 1px 0 rgb(255 255 255 / 0.055);
+  backdrop-filter: blur(12px);
 }
 
 .agent-message-row.assistant .bubble:has(.agent-result-renderer) {
   width: min(820px, 100%);
-  border-radius: 12px;
-  padding: 8px;
-  background: rgb(255 255 255 / 0.025);
+  border-radius: 24px 24px 24px 10px;
+  padding: 10px;
+  background:
+    radial-gradient(circle at 8% 0%, var(--agent-bubble-assistant-tint), transparent 34%),
+    linear-gradient(180deg, rgb(255 255 255 / 0.045), rgb(255 255 255 / 0.022));
 }
 
 .message-actions {

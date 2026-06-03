@@ -186,6 +186,36 @@ async def test_router_prompt_includes_schema_history_and_recent_tool_calls():
 
 
 @pytest.mark.asyncio
+async def test_router_respects_history_turns_in_prompt():
+    backend = FakeBackend()
+    model = FakeModel({
+        "intent": "general_chat",
+        "selectedToolCode": None,
+        "candidateToolCodes": [],
+        "confidence": 0.9,
+        "reason": "chat",
+    })
+    service = AgentRouterService(backend, model)
+    context = _context(router_settings=AgentRouterSettings(historyTurns=1))
+    context.history = [
+        ChatMessage(role="user", content="old-user-1"),
+        ChatMessage(role="assistant", content="old-assistant-1"),
+        ChatMessage(role="user", content="recent-user"),
+        ChatMessage(role="assistant", content="recent-assistant"),
+    ]
+
+    await service.classify(
+        context,
+        IntentResult(intent=Intent.GENERAL_CHAT, confidence=0.6, reason="default_general_chat"),
+    )
+
+    prompt = model.messages[0][0].content
+    assert "old-user-1" not in prompt
+    assert "recent-user" in prompt
+    assert "recent-assistant" in prompt
+
+
+@pytest.mark.asyncio
 async def test_router_rejects_output_modality_mismatch():
     backend = FakeBackend()
     model = FakeModel({
@@ -218,3 +248,51 @@ async def test_router_rejects_output_modality_mismatch():
 
     assert result is None
     assert any(event.eventType == ROUTER_FALLBACK for _, event in backend.events)
+
+
+@pytest.mark.asyncio
+async def test_router_accepts_tool_call_intent_alias():
+    backend = FakeBackend()
+    model = FakeModel({
+        "intent": "tool_call",
+        "selectedToolCode": "kling_image_v21",
+        "candidateToolCodes": ["kling_image_v21"],
+        "confidence": 0.95,
+        "reason": "image generation request",
+        "arguments": {"prompt": "poster"},
+    })
+    service = AgentRouterService(backend, model)
+
+    result = await service.classify(
+        _context(),
+        IntentResult(intent=Intent.GENERAL_CHAT, confidence=0.6, reason="default_general_chat"),
+    )
+
+    assert result is not None
+    assert result.intent == Intent.TOOL_USE
+    assert result.selectedToolCode == "kling_image_v21"
+    assert any(event.eventType == ROUTER_SELECTED for _, event in backend.events)
+
+
+@pytest.mark.asyncio
+async def test_router_accepts_tool_call_intent_alias():
+    backend = FakeBackend()
+    model = FakeModel({
+        "intent": "tool_call",
+        "selectedToolCode": "kling_image_v21",
+        "candidateToolCodes": ["kling_image_v21"],
+        "confidence": 0.95,
+        "reason": "image generation request",
+        "arguments": {"prompt": "poster"},
+    })
+    service = AgentRouterService(backend, model)
+
+    result = await service.classify(
+        _context(),
+        IntentResult(intent=Intent.GENERAL_CHAT, confidence=0.6, reason="default_general_chat"),
+    )
+
+    assert result is not None
+    assert result.intent == Intent.TOOL_USE
+    assert result.selectedToolCode == "kling_image_v21"
+    assert any(event.eventType == ROUTER_SELECTED for _, event in backend.events)

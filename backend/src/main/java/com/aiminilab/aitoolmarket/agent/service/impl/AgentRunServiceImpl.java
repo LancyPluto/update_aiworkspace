@@ -493,8 +493,13 @@ public class AgentRunServiceImpl implements AgentRunService {
                 nonBlankOrDefault(settings.get(AgentMemorySettings.RETRIEVAL_PROMPT_KEY), AgentMemorySettings.DEFAULT_RETRIEVAL_PROMPT),
                 parseBooleanSetting(settings.get(AgentMemorySettings.TOOL_LOOP_ENABLED_KEY), AgentMemorySettings.DEFAULT_TOOL_LOOP_ENABLED),
                 parseBooleanSetting(settings.get(AgentMemorySettings.CONSOLIDATION_ENABLED_KEY), AgentMemorySettings.DEFAULT_CONSOLIDATION_ENABLED),
+                parseBooleanSetting(settings.get(AgentMemorySettings.CONSOLIDATION_LLM_ENABLED_KEY), AgentMemorySettings.DEFAULT_CONSOLIDATION_LLM_ENABLED),
                 parseIntSetting(settings.get(AgentMemorySettings.CONSOLIDATION_TURN_INTERVAL_KEY), AgentMemorySettings.DEFAULT_CONSOLIDATION_TURN_INTERVAL, 2, 50),
                 parseIntSetting(settings.get(AgentMemorySettings.CONSOLIDATION_CHAR_THRESHOLD_KEY), AgentMemorySettings.DEFAULT_CONSOLIDATION_CHAR_THRESHOLD, 500, 50000),
+                parseIntSetting(settings.get(AgentMemorySettings.CONSOLIDATION_TOKEN_THRESHOLD_KEY), AgentMemorySettings.DEFAULT_CONSOLIDATION_TOKEN_THRESHOLD, 0, 200000),
+                parseIntSetting(settings.get(AgentMemorySettings.CONSOLIDATION_RECENT_TOOL_THRESHOLD_KEY), AgentMemorySettings.DEFAULT_CONSOLIDATION_RECENT_TOOL_THRESHOLD, 0, 50),
+                parseIntSetting(settings.get(AgentMemorySettings.CONSOLIDATION_MAX_CONTEXT_MESSAGES_KEY), AgentMemorySettings.DEFAULT_CONSOLIDATION_MAX_CONTEXT_MESSAGES, 4, 100),
+                nonBlankOrDefault(settings.get(AgentMemorySettings.CONSOLIDATION_PROMPT_KEY), AgentMemorySettings.DEFAULT_CONSOLIDATION_PROMPT),
                 parseDoubleSetting(settings.get(AgentMemorySettings.CONSOLIDATION_MIN_CONFIDENCE_KEY), AgentMemorySettings.DEFAULT_CONSOLIDATION_MIN_CONFIDENCE, 0D, 1D),
                 parseDoubleSetting(settings.get(AgentMemorySettings.CANDIDATE_CONFIDENCE_THRESHOLD_KEY), AgentMemorySettings.DEFAULT_CANDIDATE_CONFIDENCE_THRESHOLD, 0D, 1D)
         );
@@ -502,7 +507,9 @@ public class AgentRunServiceImpl implements AgentRunService {
                 parseBooleanSetting(settings.get(AgentRouterSettings.ENABLED_KEY), AgentRouterSettings.DEFAULT_ENABLED),
                 nonBlankOrDefault(settings.get(AgentRouterSettings.PROMPT_KEY), AgentRouterSettings.DEFAULT_PROMPT),
                 parseDoubleSetting(settings.get(AgentRouterSettings.MIN_CONFIDENCE_KEY), 0.7D, 0D, 1D),
-                parseBooleanSetting(settings.get(AgentRouterSettings.FALLBACK_TO_RULES_KEY), AgentRouterSettings.DEFAULT_FALLBACK_TO_RULES)
+                parseBooleanSetting(settings.get(AgentRouterSettings.FALLBACK_TO_RULES_KEY), AgentRouterSettings.DEFAULT_FALLBACK_TO_RULES),
+                parseIntSetting(settings.get(AgentRouterSettings.HISTORY_TURNS_KEY), AgentRouterSettings.DEFAULT_HISTORY_TURNS, 0, 20),
+                parseIntSetting(settings.get(AgentRouterSettings.RECENT_TOOL_CALLS_KEY), AgentRouterSettings.DEFAULT_RECENT_TOOL_CALLS, 0, 10)
         );
         InternalPendingToolContextResponse pendingToolContextResponse = null;
         AgentPendingToolContext pendingCtx = agentPendingToolContextMapper.findActiveByRunId(runId);
