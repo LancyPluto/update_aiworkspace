@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -35,9 +35,11 @@ import {
   updateModelVendorAccount,
 } from "@/lib/api/model-vendor-account"
 import { fetchModelProviders } from "@/lib/api/model-providers"
+import { upsertModelVendor } from "@/lib/api/model-vendors"
 import { fetchUnifiedApiOverview } from "@/lib/api/unified-api"
 import type {
   AgentModelConfigPayload,
+  ModelVendorPayload,
   ModelProviderDescriptor,
   ModelVendorAccount,
   ModelVendorAccountPayload,
@@ -96,45 +98,45 @@ function VendorIcon({ iconAsset, label }: { iconAsset: string; label: string }) 
 function balanceStatusBadge(account: ModelVendorAccount) {
   const status = account.balanceStatus
   if (status === "OK") {
-    return <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100">正常</Badge>
+    return <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100">姝ｅ父</Badge>
   }
   if (status === "LOW") {
-    return <Badge variant="destructive">低余额</Badge>
+    return <Badge variant="destructive">浣庝綑棰?/Badge>
   }
   if (status === "SUSPECTED_INSUFFICIENT") {
-    return <Badge variant="destructive">疑似欠费</Badge>
+    return <Badge variant="destructive">鐤戜技娆犺垂</Badge>
   }
   if (status === "ERROR") {
-    return <Badge variant="destructive">查询失败</Badge>
+    return <Badge variant="destructive">鏌ヨ澶辫触</Badge>
   }
   if (account.balanceQueryMode === "NONE") {
-    return <Badge variant="outline">仅外链</Badge>
+    return <Badge variant="outline">浠呭閾?/Badge>
   }
   if (account.balanceQueryMode === "MANUAL" && account.balanceAmount == null) {
-    return <Badge variant="outline">待手填</Badge>
+    return <Badge variant="outline">寰呮墜濉?/Badge>
   }
-  return <Badge variant="outline">未知</Badge>
+  return <Badge variant="outline">鏈煡</Badge>
 }
 
 function formatBalance(account: ModelVendorAccount) {
   if (account.balanceAmount != null) {
-    const currency = account.balanceCurrency === "USD" ? "$" : "¥"
-    return `余额 ${currency}${account.balanceAmount}`
+    const currency = account.balanceCurrency === "USD" ? "$" : "楼"
+    return `浣欓 ${currency}${account.balanceAmount}`
   }
   if (account.balanceQueryMode === "NONE") {
-    return "余额（控制台查看）"
+    return "浣欓锛堟帶鍒跺彴鏌ョ湅锛?
   }
   if (account.balanceQueryMode === "MANUAL") {
-    return "余额（手填）"
+    return "浣欓锛堟墜濉級"
   }
-  return "余额 --"
+  return "浣欓 --"
 }
 
 function formatBalanceUpdatedAt(value?: string | null) {
   if (!value) return ""
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return ""
-  return `更新于 ${date.toLocaleString("zh-CN", { hour12: false })}`
+  return `鏇存柊浜?${date.toLocaleString("zh-CN", { hour12: false })}`
 }
 
 function pickPrimaryAccount(accounts: ModelVendorAccount[]): ModelVendorAccount | undefined {
@@ -146,6 +148,38 @@ function pickPrimaryAccount(accounts: ModelVendorAccount[]): ModelVendorAccount 
     if (keyDiff !== 0) return keyDiff
     return a.id - b.id
   })[0]
+}
+
+function isHealthyStatus(value?: string | null) {
+  return (value || "").trim().toUpperCase() === "OK"
+}
+
+function modelAccountHealth(model: UnifiedApiModelItem, vendor: UnifiedApiVendorGroup) {
+  if (!model.vendorAccountId) return "UNKNOWN"
+  const account = vendor.accounts.find((item) => item.id === model.vendorAccountId)
+  if (!account) return "UNKNOWN"
+  return account.healthStatus || "UNKNOWN"
+}
+
+function canEnableAgentForModel(model: UnifiedApiModelItem, vendor: UnifiedApiVendorGroup) {
+  if (!model.enabled) return false
+  if (!model.vendorAccountId) return true
+  return isHealthyStatus(modelAccountHealth(model, vendor))
+}
+
+function modelRowTone(model: UnifiedApiModelItem, vendor: UnifiedApiVendorGroup) {
+  if (!model.enabled) return ""
+  const health = modelAccountHealth(model, vendor)
+  if (isHealthyStatus(health)) return "bg-emerald-50/70 hover:bg-emerald-50"
+  if (health === "ERROR") return "bg-rose-50/75 hover:bg-rose-50"
+  return ""
+}
+
+function accountCardTone(account: ModelVendorAccount) {
+  if (!account.enabled) return ""
+  if (isHealthyStatus(account.healthStatus)) return "border-emerald-200 bg-emerald-50/60"
+  if ((account.healthStatus || "").trim().toUpperCase() === "ERROR") return "border-rose-200 bg-rose-50/70"
+  return "bg-muted/20"
 }
 
 function defaultBalanceModeForVendor(vendorCode: string) {
@@ -166,14 +200,14 @@ function defaultBalanceModeForVendor(vendorCode: string) {
 
 function capabilityLabel(cap: string) {
   const map: Record<string, string> = {
-    TEXT_GENERATION: "文本",
-    IMAGE_GENERATION: "图片",
-    VIDEO_GENERATION: "视频",
-    TEXT_TO_SPEECH: "语音",
-    SPEECH_TO_TEXT: "语音识别",
-    MUSIC_GENERATION: "音乐",
-    DIGITAL_HUMAN: "数字人",
-    MULTIMODAL: "多模态",
+    TEXT_GENERATION: "鏂囨鐢熸垚",
+    IMAGE_GENERATION: "鏂囩敓鍥?,
+    VIDEO_GENERATION: "鏂囩敓瑙嗛",
+    TEXT_TO_SPEECH: "鏂囩敓闊抽",
+    SPEECH_TO_TEXT: "璇煶杞枃瀛?,
+    MUSIC_GENERATION: "鏂囩敓闊充箰",
+    DIGITAL_HUMAN: "鏁板瓧浜鸿棰?,
+    MULTIMODAL: "澶氭ā鎬佽緭鍏?,
   }
   return map[cap] || cap
 }
@@ -181,14 +215,14 @@ function capabilityLabel(cap: string) {
 function renderModelCost(model: UnifiedApiModelItem) {
   const billingUnit = (model.billingUnit || "").toString().trim().toUpperCase()
   if (!billingUnit) {
-    return <span>—</span>
+    return <span>鈥?/span>
   }
   if (billingUnit === "PER_CALL") {
     const price = model.unitPrice
     return (
       <>
-        <div>按次计费</div>
-        <div className="font-medium text-foreground">{price != null ? `¥${price}` : "¥—"}/次</div>
+        <div>鎸夋璁¤垂</div>
+        <div className="font-medium text-foreground">{price != null ? `楼${price}` : "楼鈥?}/娆?/div>
       </>
     )
   }
@@ -197,22 +231,21 @@ function renderModelCost(model: UnifiedApiModelItem) {
     const output = model.outputTokenPricePer1m
     return (
       <>
-        <div>按 Token 计费</div>
+        <div>鎸?Token 璁¤垂</div>
         <div className="font-medium text-foreground">
-          输入 {input != null ? `¥${input}` : "¥—"}/百万 · 输出 {output != null ? `¥${output}` : "¥—"}/百万
+          杈撳叆 {input != null ? `楼${input}` : "楼鈥?}/鐧句竾 路 杈撳嚭 {output != null ? `楼${output}` : "楼鈥?}/鐧句竾
         </div>
       </>
     )
   }
   if (billingUnit === "IMAGE_TOKEN") {
-    const unit = model.unitPrice
     const input = model.inputTokenPricePer1m
     const output = model.outputTokenPricePer1m
     return (
       <>
-        <div>图片 Token</div>
+        <div>鍥剧墖 Token</div>
         <div className="font-medium text-foreground">
-          {unit != null ? `¥${unit}` : "¥—"} · 输入 {input ?? "—"}/百万 · 输出 {output ?? "—"}/百万
+          杈撳叆 {input != null ? `楼${input}` : "楼鈥?}/鐧句竾锛岃緭鍑?{output != null ? `楼${output}` : "楼鈥?}/鐧句竾
         </div>
       </>
     )
@@ -220,14 +253,14 @@ function renderModelCost(model: UnifiedApiModelItem) {
   return (
     <>
       <div>{billingUnit}</div>
-      <div className="font-medium text-foreground">—</div>
+      <div className="font-medium text-foreground">鈥?/div>
     </>
   )
 }
 
 const emptyAccountForm = (): ModelVendorAccountPayload & { id?: number; apiKeyMasked?: string } => ({
   vendorCode: "deepseek",
-  accountName: "默认账户",
+  accountName: "榛樿璐︽埛",
   baseUrl: "",
   balanceQueryMode: "MANUAL",
   balanceCurrency: "CNY",
@@ -252,6 +285,14 @@ const emptyModelForm = (): AgentModelConfigPayload & { id?: number } => ({
   capabilities: ["TEXT_GENERATION"],
 })
 
+const emptyVendorForm = (): ModelVendorPayload => ({
+  vendorCode: "",
+  vendorLabel: "",
+  iconAsset: "api",
+  sortOrder: 0,
+  enabled: true,
+})
+
 interface UnifiedApiSettingsProps {
   refreshKey?: number
 }
@@ -260,23 +301,23 @@ type VendorFilter = "ALL" | "ISSUES" | "LOW_BALANCE" | "UNHEALTHY" | "DISABLED"
 type VendorSort = "ISSUE_FIRST" | "MODEL_COUNT" | "NAME"
 
 const vendorFilterOptions: Array<{ value: VendorFilter; label: string }> = [
-  { value: "ALL", label: "全部渠道" },
-  { value: "ISSUES", label: "只看异常" },
-  { value: "LOW_BALANCE", label: "低余额" },
-  { value: "UNHEALTHY", label: "连通异常" },
-  { value: "DISABLED", label: "停用账户" },
+  { value: "ALL", label: "鍏ㄩ儴娓犻亾" },
+  { value: "ISSUES", label: "鍙湅寮傚父" },
+  { value: "LOW_BALANCE", label: "浣庝綑棰? },
+  { value: "UNHEALTHY", label: "杩為€氬紓甯? },
+  { value: "DISABLED", label: "鍋滅敤璐︽埛" },
 ]
 
 const vendorSortOptions: Array<{ value: VendorSort; label: string }> = [
-  { value: "ISSUE_FIRST", label: "异常优先" },
-  { value: "MODEL_COUNT", label: "模型数优先" },
-  { value: "NAME", label: "名称排序" },
+  { value: "ISSUE_FIRST", label: "寮傚父浼樺厛" },
+  { value: "MODEL_COUNT", label: "妯″瀷鏁颁紭鍏? },
+  { value: "NAME", label: "鍚嶇О鎺掑簭" },
 ]
 
 const billingUnitOptions: Array<{ value: NonNullable<AgentModelConfigPayload["billingUnit"]>; label: string; description: string }> = [
-  { value: "TOKEN_PER_M", label: "按量计费", description: "按输入/输出 Token 百万单位填写成本" },
-  { value: "PER_CALL", label: "按次计费", description: "每次调用固定成本，适合图片、语音等任务" },
-  { value: "IMAGE_TOKEN", label: "图片 Token", description: "同时记录图片基础价和 Token 成本" },
+  { value: "TOKEN_PER_M", label: "鎸夐噺璁¤垂", description: "鎸夎緭鍏?杈撳嚭 Token 鐧句竾鍗曚綅濉啓鎴愭湰" },
+  { value: "PER_CALL", label: "鎸夋璁¤垂", description: "姣忔璋冪敤鍥哄畾鎴愭湰锛岄€傚悎鍥剧墖銆佽闊崇瓑浠诲姟" },
+  { value: "IMAGE_TOKEN", label: "鍥剧墖 Token", description: "鍚屾椂璁板綍鍥剧墖鍩虹浠峰拰 Token 鎴愭湰" },
 ]
 
 function numberOrZero(value: unknown) {
@@ -345,6 +386,10 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
   const [modelSaving, setModelSaving] = useState(false)
   const [modelVendorCode, setModelVendorCode] = useState("")
 
+  const [vendorDialogOpen, setVendorDialogOpen] = useState(false)
+  const [vendorForm, setVendorForm] = useState(emptyVendorForm())
+  const [vendorSaving, setVendorSaving] = useState(false)
+
   const [openVendors, setOpenVendors] = useState<Record<string, boolean>>({})
   const [togglingModelId, setTogglingModelId] = useState<number | null>(null)
   const [togglingAgentModelId, setTogglingAgentModelId] = useState<number | null>(null)
@@ -384,11 +429,11 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
     } catch (err) {
       if (err instanceof ApiError && err.status === 404) {
         setError(
-          "统一 API 接口未找到，请重新编译并重启后端（本地：在 backend 目录执行 mvn spring-boot:run；Docker：docker compose build backend && docker compose up -d backend）。"
+          "缁熶竴 API 鎺ュ彛鏈壘鍒帮紝璇烽噸鏂扮紪璇戝苟閲嶅惎鍚庣锛堟湰鍦帮細鍦?backend 鐩綍鎵ц mvn spring-boot:run锛汥ocker锛歞ocker compose build backend && docker compose up -d backend锛夈€?
             + (err.traceId ? ` traceId=${err.traceId}` : ""),
         )
       } else {
-        setError(err instanceof ApiError ? err.message : "加载统一 API 概览失败")
+        setError(err instanceof ApiError ? err.message : "鍔犺浇缁熶竴 API 姒傝澶辫触")
       }
     } finally {
       setLoading(false)
@@ -462,37 +507,73 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
     })
   }, [])
 
+  function displayAccountName(account: ModelVendorAccount, index?: number) {
+    const name = (account.accountName || "").trim()
+    if (!name || name === "榛樿璐︽埛") {
+      return `璐︽埛${typeof index === "number" && index >= 0 ? index + 1 : account.id}`
+    }
+    return name
+  }
+
+  function openCreateVendor() {
+    setVendorForm(emptyVendorForm())
+    setVendorDialogOpen(true)
+  }
+
+  async function saveVendor() {
+    setVendorSaving(true)
+    setError(null)
+    try {
+      const code = vendorForm.vendorCode.trim().toLowerCase()
+      const label = vendorForm.vendorLabel.trim()
+      await upsertModelVendor({
+        vendorCode: code,
+        vendorLabel: label,
+        iconAsset: (vendorForm.iconAsset || code || "api").trim(),
+        sortOrder: Number(vendorForm.sortOrder ?? 0),
+        enabled: vendorForm.enabled !== false,
+      })
+      setVendorDialogOpen(false)
+      await refreshOverviewSilently()
+      toast.success("鍘傚晢宸叉坊鍔?, { description: label })
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "娣诲姞鍘傚晢澶辫触")
+    } finally {
+      setVendorSaving(false)
+    }
+  }
+
   const runRefreshBalance = useCallback(
     async (account: ModelVendorAccount, vendorLabel: string) => {
       setError(null)
-      const toastId = toast.loading(`${vendorLabel}：正在刷新余额…`)
+      const toastId = toast.loading(`${vendorLabel}锛氭鍦ㄥ埛鏂颁綑棰濃€)
       try {
         const updated = await refreshModelVendorAccountBalance(account.id)
         patchVendorAccount(updated)
         if (updated.balanceAmount != null) {
-          toast.success(`${vendorLabel}：余额已更新`, {
+          toast.success(`${vendorLabel}锛氫綑棰濆凡鏇存柊`, {
             id: toastId,
             description: formatBalance(updated),
           })
         } else if (updated.balanceQueryMode === "NONE") {
-          toast.info(`${vendorLabel}：不支持自动查余额`, {
+          toast.info(`${vendorLabel}锛氫笉鏀寔鑷姩鏌ヤ綑棰漙, {
             id: toastId,
-            description: updated.balanceErrorMessage || "请打开控制台或手填余额",
+            description: updated.balanceErrorMessage || "璇锋墦寮€鎺у埗鍙版垨鎵嬪～浣欓",
           })
         } else if (updated.balanceErrorMessage) {
-          toast.warning(`${vendorLabel}：未能获取余额`, {
+          toast.warning(`${vendorLabel}锛氭湭鑳借幏鍙栦綑棰漙, {
             id: toastId,
             description: updated.balanceErrorMessage,
           })
         } else {
-          toast.info(`${vendorLabel}：暂无余额数据`, {
+          toast.info(`${vendorLabel}锛氭殏鏃犱綑棰濇暟鎹甡, {
             id: toastId,
-            description: "可在账户设置中手填余额金额",
+            description: "鍙湪璐︽埛璁剧疆涓墜濉綑棰濋噾棰?,
           })
         }
       } catch (err) {
-        const message = err instanceof ApiError ? err.message : "刷新失败"
-        toast.error(`${vendorLabel}：刷新失败`, { id: toastId, description: message })
+        const message = err instanceof ApiError ? err.message : "鍒锋柊澶辫触"
+        toast.error(`${vendorLabel}锛氬埛鏂板け璐, { id: toastId, description: message })
         setError(message)
       }
     },
@@ -503,28 +584,28 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
     async (account: ModelVendorAccount, vendorLabel: string) => {
       setTestingAccountId(account.id)
       setError(null)
-      const toastId = toast.loading(`${vendorLabel}：正在测试连通性…`)
+      const toastId = toast.loading(`${vendorLabel}锛氭鍦ㄦ祴璇曡繛閫氭€р€)
       try {
         const result = await testModelVendorAccount(account.id)
         patchVendorAccount(result.account ?? account)
         const latencyText =
-          result.latencyMs != null && result.latencyMs >= 0 ? `（${result.latencyMs} ms）` : ""
+          result.latencyMs != null && result.latencyMs >= 0 ? `锛?{result.latencyMs} ms锛塦 : ""
         const modelHint =
-          result.provider && result.modelName ? ` · ${result.provider} / ${result.modelName}` : ""
+          result.provider && result.modelName ? ` 路 ${result.provider} / ${result.modelName}` : ""
         if (result.success) {
-          toast.success(`${vendorLabel}：连通正常${latencyText}`, {
+          toast.success(`${vendorLabel}锛氳繛閫氭甯?{latencyText}`, {
             id: toastId,
-            description: `${result.message || "连接成功"}${modelHint}`,
+            description: `${result.message || "杩炴帴鎴愬姛"}${modelHint}`,
           })
         } else {
-          toast.error(`${vendorLabel}：连通失败`, {
+          toast.error(`${vendorLabel}锛氳繛閫氬け璐, {
             id: toastId,
-            description: result.message || "连接失败",
+            description: result.message || "杩炴帴澶辫触",
           })
         }
       } catch (err) {
-        const message = err instanceof ApiError ? err.message : "测试失败"
-        toast.error(`${vendorLabel}：测试失败`, { id: toastId, description: message })
+        const message = err instanceof ApiError ? err.message : "娴嬭瘯澶辫触"
+        toast.error(`${vendorLabel}锛氭祴璇曞け璐, { id: toastId, description: message })
         setError(message)
       } finally {
         setTestingAccountId(null)
@@ -537,36 +618,43 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
     setTestingModelId(model.id)
     setError(null)
     const label = model.displayName || model.modelName
-    const toastId = toast.loading(`${label}：正在测试连接…`)
+    const toastId = toast.loading(`${label}锛氭鍦ㄦ祴璇曡繛鎺モ€)
     try {
       const result = await testAgentModelConfigById(model.id)
       const latencyText =
-        result.latencyMs != null && result.latencyMs >= 0 ? `（${result.latencyMs} ms）` : ""
-      const sampleText = result.sample?.trim() ? ` · 响应：${result.sample.trim().slice(0, 80)}` : ""
+        result.latencyMs != null && result.latencyMs >= 0 ? `锛?{result.latencyMs} ms锛塦 : ""
+      const sampleText = result.sample?.trim() ? ` 路 鍝嶅簲锛?{result.sample.trim().slice(0, 80)}` : ""
       if (result.success) {
-        toast.success(`${label}：连接成功${latencyText}`, {
+        await refreshOverviewSilently()
+        toast.success(`${label}锛氳繛鎺ユ垚鍔?{latencyText}`, {
           id: toastId,
-          description: `${result.message || "测试通过"}${sampleText}`,
+          description: `${result.message || "娴嬭瘯閫氳繃"}${sampleText}`,
         })
       } else {
-        toast.error(`${label}：连接失败`, {
+        await refreshOverviewSilently()
+        toast.error(`${label}锛氳繛鎺ュけ璐, {
           id: toastId,
-          description: result.message || "测试未通过",
+          description: result.message || "娴嬭瘯鏈€氳繃",
         })
       }
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : "测试失败"
-      toast.error(`${vendorLabel}：${label} 测试失败`, { id: toastId, description: message })
+      const message = err instanceof ApiError ? err.message : "娴嬭瘯澶辫触"
+      toast.error(`${vendorLabel}锛?{label} 娴嬭瘯澶辫触`, { id: toastId, description: message })
       setError(message)
+      await refreshOverviewSilently()
     } finally {
       setTestingModelId(null)
     }
-  }, [])
+  }, [refreshOverviewSilently])
 
   const toggleModelEnabled = useCallback(
     async (model: UnifiedApiModelItem, enabled: boolean) => {
       const previous = model.enabled
+      const previousAgentEnabled = model.agentEnabled ?? true
       patchModelEnabled(model.id, enabled)
+      if (!enabled) {
+        patchModelAgentEnabled(model.id, false)
+      }
       setTogglingModelId(model.id)
       setError(null)
       try {
@@ -582,7 +670,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
           balanceUrl: model.balanceUrl || undefined,
           docsUrl: model.docsUrl || undefined,
           enabled,
-          agentEnabled: model.agentEnabled ?? true,
+          agentEnabled: enabled ? model.agentEnabled ?? true : false,
           isDefault: model.isDefault ?? false,
           capabilities: model.capabilities ? [...model.capabilities] : [],
           timeoutSeconds: model.timeoutSeconds ?? 60,
@@ -595,16 +683,21 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
         })
       } catch (err) {
         patchModelEnabled(model.id, previous)
-        setError(err instanceof ApiError ? err.message : "更新失败")
+        patchModelAgentEnabled(model.id, previousAgentEnabled)
+        setError(err instanceof ApiError ? err.message : "鏇存柊澶辫触")
       } finally {
         setTogglingModelId(null)
       }
     },
-    [patchModelEnabled],
+    [patchModelEnabled, patchModelAgentEnabled],
   )
 
   const toggleModelAgentEnabled = useCallback(
     async (model: UnifiedApiModelItem, agentEnabled: boolean) => {
+      if (agentEnabled && !model.enabled) {
+        setError("请先启用模型，再开启 Agent 可选")
+        return
+      }
       const previous = model.agentEnabled ?? true
       patchModelAgentEnabled(model.id, agentEnabled)
       setTogglingAgentModelId(model.id)
@@ -635,7 +728,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
         })
       } catch (err) {
         patchModelAgentEnabled(model.id, previous)
-        setError(err instanceof ApiError ? err.message : "Agent 可选更新失败")
+        setError(err instanceof ApiError ? err.message : "Agent 鍙€夋洿鏂板け璐?)
       } finally {
         setTogglingAgentModelId(null)
       }
@@ -667,7 +760,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
         patchVendorAccount(updated)
       } catch (err) {
         patchAccountEnabled(account.id, previous)
-        setError(err instanceof ApiError ? err.message : "账户启用状态更新失败")
+        setError(err instanceof ApiError ? err.message : "璐︽埛鍚敤鐘舵€佹洿鏂板け璐?)
       } finally {
         setTogglingAccountId(null)
       }
@@ -742,7 +835,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
       await refreshAllModelVendorAccountBalances()
       await load()
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "刷新余额失败")
+      setError(err instanceof ApiError ? err.message : "鍒锋柊浣欓澶辫触")
     } finally {
       setRefreshingBalance(false)
     }
@@ -750,10 +843,11 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
 
   function openCreateAccount(vendorCode: string, label: string) {
     const meta = providers.find((p) => p.code.includes(vendorCode)) || providers[0]
+    const existingCount = overview?.vendors.find((vendor) => vendor.vendorCode === vendorCode)?.accounts.length ?? 0
     setAccountForm({
       ...emptyAccountForm(),
       vendorCode,
-      accountName: `${label} 账户`,
+      accountName: `璐︽埛${existingCount + 1}`,
       baseUrl: meta?.defaultBaseUrl || "",
       balanceQueryMode: defaultBalanceModeForVendor(vendorCode),
     })
@@ -808,7 +902,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
       setAccountDialogOpen(false)
       await load()
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "保存账户失败")
+      setError(err instanceof ApiError ? err.message : "淇濆瓨璐︽埛澶辫触")
     } finally {
       setAccountSaving(false)
     }
@@ -855,7 +949,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
 
   async function saveModel() {
     if (!modelForm.vendorAccountId) {
-      setError("请选择厂商账户")
+      setError("璇烽€夋嫨鍘傚晢璐︽埛")
       return
     }
     setModelSaving(true)
@@ -881,50 +975,36 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
         window.requestAnimationFrame(() => window.scrollTo({ top: scrollY, behavior: "auto" }))
       }
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "保存模型失败")
+      setError(err instanceof ApiError ? err.message : "淇濆瓨妯″瀷澶辫触")
     } finally {
       setModelSaving(false)
     }
   }
 
   function renderVendorAccountMenu(account: ModelVendorAccount, vendorLabel: string) {
-    const testing = testingAccountId === account.id
     return (
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button type="button" variant="ghost" size="icon" className="h-8 w-8 shrink-0" aria-label="厂商账户操作">
+          <Button type="button" variant="ghost" size="icon" className="h-8 w-8 shrink-0" aria-label="鍘傚晢璐︽埛鎿嶄綔">
             <MoreHorizontal className="h-4 w-4" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-44">
           <DropdownMenuItem onClick={() => openEditAccount(account)}>
             <Settings2 className="mr-2 h-4 w-4" />
-            API 与密钥
-          </DropdownMenuItem>
-          <DropdownMenuItem disabled={testing} onClick={() => runConnectivityTest(account, vendorLabel)}>
-            {testing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Zap className="mr-2 h-4 w-4" />}
-            {testing ? "测试中…" : "测试连通"}
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            onClick={() => runRefreshBalance(account, vendorLabel)}
-          >
-            <RefreshCw className="mr-2 h-4 w-4" />
-            刷新余额
-          </DropdownMenuItem>
+            API 涓庡瘑閽?          </DropdownMenuItem>
           {account.consoleUrl ? (
             <DropdownMenuItem asChild>
               <a href={account.consoleUrl} target="_blank" rel="noreferrer">
                 <ExternalLink className="mr-2 h-4 w-4" />
-                打开控制台
-              </a>
+                鎵撳紑鎺у埗鍙?              </a>
             </DropdownMenuItem>
           ) : null}
           {account.balanceUrl ? (
             <DropdownMenuItem asChild>
               <a href={account.balanceUrl} target="_blank" rel="noreferrer">
                 <ExternalLink className="mr-2 h-4 w-4" />
-                打开余额页
-              </a>
+                鎵撳紑浣欓椤?              </a>
             </DropdownMenuItem>
           ) : null}
         </DropdownMenuContent>
@@ -953,10 +1033,10 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <p className="font-semibold">{vendor.label}</p>
-                {lowBalanceCount > 0 ? <Badge variant="destructive" className="text-xs">低余额 {lowBalanceCount}</Badge> : null}
-                {unhealthyCount > 0 ? <Badge variant="destructive" className="text-xs">异常 {unhealthyCount}</Badge> : null}
+                {lowBalanceCount > 0 ? <Badge variant="destructive" className="text-xs">浣庝綑棰?{lowBalanceCount}</Badge> : null}
+                {unhealthyCount > 0 ? <Badge variant="destructive" className="text-xs">寮傚父 {unhealthyCount}</Badge> : null}
               </div>
-              <p className="text-xs text-muted-foreground">{vendor.accounts.length} 个账户 · {vendor.models.length} 个模型</p>
+              <p className="text-xs text-muted-foreground">{vendor.accounts.length} 涓处鎴?路 {vendor.models.length} 涓ā鍨?/p>
             </div>
           </CollapsibleTrigger>
           <div className="flex flex-wrap items-center gap-2">
@@ -967,12 +1047,10 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                 {primaryAccount.healthStatus === "OK" ? (
                   <Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-xs text-emerald-700">
                     <CheckCircle2 className="mr-1 h-3 w-3" />
-                    连通正常
-                  </Badge>
+                    杩為€氭甯?                  </Badge>
                 ) : primaryAccount.healthStatus === "ERROR" ? (
                   <Badge variant="destructive" className="text-xs">
-                    连通异常
-                  </Badge>
+                    杩為€氬紓甯?                  </Badge>
                 ) : null}
                 {formatBalanceUpdatedAt(primaryAccount.balanceUpdatedAt) ? (
                   <span className="text-xs text-muted-foreground">{formatBalanceUpdatedAt(primaryAccount.balanceUpdatedAt)}</span>
@@ -985,15 +1063,20 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                 <EmbeddedOnOffSwitch
                   checked={primaryAccount.enabled}
                   disabled={togglingAccountId === primaryAccount.id}
-                  label={`启用账户 ${primaryAccount.accountName}`}
+                  label={`鍚敤璐︽埛 ${primaryAccount.accountName}`}
                   onCheckedChange={(enabled) => toggleAccountEnabled(primaryAccount, enabled)}
                 />
-                {renderVendorAccountMenu(primaryAccount, vendor.label)}
+                <Button type="button" variant="outline" size="icon" className="h-8 w-8" title="鍒锋柊璇ュ巶鍟嗕綑棰? onClick={() => runRefreshBalance(primaryAccount, vendor.label)}>
+                  <RefreshCw className="h-4 w-4" />
+                </Button>
+                <Button type="button" variant="outline" size="icon" className="h-8 w-8" title={"娣诲姞 API 璐︽埛"} onClick={() => openCreateAccount(vendor.vendorCode, vendor.label)}>
+                  <Plus className="h-4 w-4" />
+                </Button>
               </div>
             ) : (
               <Button type="button" variant="outline" size="sm" onClick={() => openCreateAccount(vendor.vendorCode, vendor.label)}>
                 <Plus className="mr-1 h-3 w-3" />
-                接入 API
+                鎺ュ叆 API
               </Button>
             )}
           </div>
@@ -1001,27 +1084,40 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
         <CollapsibleContent className="px-4 py-3">
           {vendor.accounts.length > 0 ? (
             <div className="mb-4 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-              {vendor.accounts.map((account) => (
-                <div key={account.id} className="rounded-lg border bg-muted/20 p-3">
+              {vendor.accounts.map((account, accountIndex) => (
+                <div key={account.id} className={`rounded-lg border p-3 ${accountCardTone(account)}`}>
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <div className="flex min-w-0 items-center gap-2">
-                        <p className="truncate text-sm font-medium">{account.accountName}</p>
+                        <p className="truncate text-sm font-medium">{displayAccountName(account, accountIndex)}</p>
                         <EmbeddedOnOffSwitch
                           checked={account.enabled}
                           disabled={togglingAccountId === account.id}
-                          label={`启用账户 ${account.accountName}`}
+                          label={`鍚敤璐︽埛 ${displayAccountName(account, accountIndex)}`}
                           onCheckedChange={(enabled) => toggleAccountEnabled(account, enabled)}
                         />
                       </div>
-                      <p className="truncate text-xs text-muted-foreground">{account.baseUrl || "未配置 Base URL"}</p>
+                      <p className="truncate text-xs text-muted-foreground">{account.baseUrl || "鏈厤缃?Base URL"}</p>
                     </div>
-                    {renderVendorAccountMenu(account, vendor.label)}
+                    <div className="flex shrink-0 items-center gap-1">
+                      <Button
+                        type="button"
+                        variant={testingAccountId === account.id ? "secondary" : "ghost"}
+                        size="icon"
+                        className="h-8 w-8"
+                        disabled={testingAccountId === account.id}
+                        title="娴嬭瘯杩炴帴"
+                        onClick={() => runConnectivityTest(account, vendor.label)}
+                      >
+                        {testingAccountId === account.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
+                      </Button>
+                      {renderVendorAccountMenu(account, vendor.label)}
+                    </div>
                   </div>
                   <div className="mt-3 flex flex-wrap items-center gap-2">
                     {balanceStatusBadge(account)}
-                    <Badge variant={account.enabled ? "outline" : "destructive"}>{account.enabled ? "已启用" : "已停用"}</Badge>
-                    <span className="text-xs text-muted-foreground">{account.modelCount} 个模型</span>
+                    <Badge variant={account.enabled ? "outline" : "destructive"}>{account.enabled ? "宸插惎鐢? : "宸插仠鐢?}</Badge>
+                    <span className="text-xs text-muted-foreground">{account.modelCount} 涓ā鍨?/span>
                   </div>
                   <p className="mt-2 text-xs font-medium tabular-nums">{formatBalance(account)}</p>
                   {account.apiKeyMasked ? <p className="mt-1 text-xs text-muted-foreground">Key {account.apiKeyMasked}</p> : null}
@@ -1030,10 +1126,10 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
             </div>
           ) : null}
           {vendor.accounts.length === 0 ? (
-            <p className="py-4 text-center text-sm text-muted-foreground">请先接入 API 密钥，再添加模型。</p>
+            <p className="py-4 text-center text-sm text-muted-foreground">璇峰厛鎺ュ叆 API 瀵嗛挜锛屽啀娣诲姞妯″瀷銆?/p>
           ) : vendor.models.length === 0 ? (
             <div className="space-y-3 py-2">
-              <p className="text-center text-sm text-muted-foreground">暂无模型</p>
+              <p className="text-center text-sm text-muted-foreground">鏆傛棤妯″瀷</p>
               <div className="flex justify-center">
                 <Button
                   type="button"
@@ -1043,7 +1139,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                   onClick={() => accountIdForNewModel && openCreateModel(vendor, accountIdForNewModel)}
                 >
                   <Plus className="mr-1 h-3 w-3" />
-                  添加模型
+                  娣诲姞妯″瀷
                 </Button>
               </div>
             </div>
@@ -1052,17 +1148,18 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
               <Table className="table-fixed text-center">
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-[260px] text-center">模型名称</TableHead>
-                    <TableHead className="w-[180px] text-center">能力</TableHead>
-                    <TableHead className="w-[150px] text-center">成本</TableHead>
-                    <TableHead className="w-[112px] text-center">Agent 可选</TableHead>
-                    <TableHead className="w-[112px] text-center">启用</TableHead>
-                    <TableHead className="w-[180px] text-center">操作</TableHead>
+                    <TableHead className="w-[220px] text-center">妯″瀷鍚嶇О</TableHead>
+                    <TableHead className="w-[150px] text-center">{"API \u8d26\u6237"}</TableHead>
+                    <TableHead className="w-[180px] text-center">鑳藉姏</TableHead>
+                    <TableHead className="w-[150px] text-center">鎴愭湰</TableHead>
+                    <TableHead className="w-[112px] text-center">Agent 鍙€?/TableHead>
+                    <TableHead className="w-[112px] text-center">鍚敤</TableHead>
+                    <TableHead className="w-[180px] text-center">鎿嶄綔</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {vendor.models.map((model) => (
-                    <TableRow key={model.id}>
+                    <TableRow key={model.id} className={modelRowTone(model, vendor)}>
                       <TableCell className="align-middle">
                         <div className="mx-auto flex max-w-[240px] min-w-0 items-center justify-center gap-2 text-left">
                           <VendorIcon iconAsset={vendor.iconAsset} label={vendor.label} />
@@ -1076,9 +1173,29 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                         </div>
                         {!model.vendorAccountId ? (
                           <Badge variant="outline" className="mt-1 text-xs text-amber-700">
-                            未绑定账户
-                          </Badge>
+                            鏈粦瀹氳处鎴?                          </Badge>
                         ) : null}
+                      </TableCell>
+                      <TableCell className="align-middle text-center">
+                        {model.vendorAccountId ? (
+                          <Badge variant="outline" className="max-w-[140px] truncate text-xs">
+                            {displayAccountName(
+                              vendor.accounts.find((account) => account.id === model.vendorAccountId) || {
+                                id: model.vendorAccountId,
+                                accountName: model.vendorAccountName || "",
+                              } as ModelVendorAccount,
+                              vendor.accounts.findIndex((account) => account.id === model.vendorAccountId),
+                            )}
+                          </Badge>
+                        ) : vendor.accounts.length > 0 ? (
+                          <Badge
+                            variant="outline"
+                            className="max-w-[150px] truncate text-xs text-amber-700"
+                            title={vendor.accounts.map((account, index) => displayAccountName(account, index)).join("\u3001")}
+                          >{"\u53ef\u5339\u914d\uff1a"}{vendor.accounts.map((account, index) => displayAccountName(account, index)).slice(0, 3).join("\u3001")}</Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-xs text-amber-700">{"\u672a\u7ed1\u5b9a\u8d26\u6237"}</Badge>
+                        )}
                       </TableCell>
                       <TableCell className="align-middle">
                         <div className="flex flex-wrap justify-center gap-1">
@@ -1097,8 +1214,8 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                       <TableCell className="align-middle">
                         <EmbeddedOnOffSwitch
                           checked={model.agentEnabled !== false}
-                          disabled={togglingAgentModelId === model.id}
-                          label={`Agent 可选 ${model.displayName || model.modelName}`}
+                          disabled={togglingAgentModelId === model.id || !canEnableAgentForModel(model, vendor)}
+                          label={`Agent 鍙€?${model.displayName || model.modelName}`}
                           onCheckedChange={(agentEnabled) => toggleModelAgentEnabled(model, agentEnabled)}
                         />
                       </TableCell>
@@ -1106,7 +1223,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                         <EmbeddedOnOffSwitch
                           checked={model.enabled}
                           disabled={togglingModelId === model.id}
-                          label={`启用 ${model.displayName || model.modelName}`}
+                          label={`鍚敤 ${model.displayName || model.modelName}`}
                           onCheckedChange={(enabled) => toggleModelEnabled(model, enabled)}
                         />
                       </TableCell>
@@ -1118,7 +1235,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                             size="icon"
                             className="h-8 w-8"
                             disabled={testingModelId === model.id || !model.vendorAccountId}
-                            title={!model.vendorAccountId ? "请先绑定厂商账户" : "测试连接"}
+                            title={!model.vendorAccountId ? "璇峰厛缁戝畾鍘傚晢璐︽埛" : "娴嬭瘯杩炴帴"}
                             onClick={() => runModelTest(model, vendor.label)}
                           >
                             {testingModelId === model.id ? (
@@ -1128,7 +1245,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                             )}
                           </Button>
                           <Button type="button" variant="ghost" size="sm" className="h-8" onClick={() => openEditModel(model, vendor.vendorCode)}>
-                            编辑
+                            缂栬緫
                           </Button>
                         <Button
                           type="button"
@@ -1136,12 +1253,12 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                           size="icon"
                           className="h-8 w-8 text-destructive"
                           onClick={async () => {
-                            if (!window.confirm("确认删除该模型配置？")) return
+                            if (!window.confirm("纭鍒犻櫎璇ユā鍨嬮厤缃紵")) return
                             try {
                               await deleteAgentModelConfig(model.id)
                               await refreshOverviewSilently()
                             } catch (err) {
-                              setError(err instanceof ApiError ? err.message : "删除失败")
+                              setError(err instanceof ApiError ? err.message : "鍒犻櫎澶辫触")
                             }
                           }}
                         >
@@ -1162,7 +1279,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                   onClick={() => accountIdForNewModel && openCreateModel(vendor, accountIdForNewModel)}
                 >
                   <Plus className="mr-1 h-3 w-3" />
-                  添加模型
+                  娣诲姞妯″瀷
                 </Button>
               </div>
             </>
@@ -1182,38 +1299,38 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
       <div className="grid gap-3 md:grid-cols-4">
         <Card className="border-primary/20 bg-primary/5">
           <CardHeader className="space-y-0 pb-2">
-            <CardDescription className="flex items-center gap-2"><Layers className="h-4 w-4" />渠道账户</CardDescription>
+            <CardDescription className="flex items-center gap-2"><Layers className="h-4 w-4" />娓犻亾璐︽埛</CardDescription>
             <CardTitle className="text-2xl">{overview?.summary.accountCount ?? "--"}</CardTitle>
           </CardHeader>
-          <CardContent className="text-xs text-muted-foreground">{overview?.summary.vendorCount ?? "--"} 个厂商已接入</CardContent>
+          <CardContent className="text-xs text-muted-foreground">{overview?.summary.vendorCount ?? "--"} 涓巶鍟嗗凡鎺ュ叆</CardContent>
         </Card>
         <Card>
           <CardHeader className="space-y-0 pb-2">
-            <CardDescription className="flex items-center gap-2"><ServerCog className="h-4 w-4" />模型池</CardDescription>
+            <CardDescription className="flex items-center gap-2"><ServerCog className="h-4 w-4" />妯″瀷姹?/CardDescription>
             <CardTitle className="text-2xl">{overview?.summary.modelCount ?? "--"}</CardTitle>
           </CardHeader>
-          <CardContent className="text-xs text-muted-foreground">启用 {overview?.summary.enabledModelCount ?? "--"} 个，启用率 {gatewayHealth.enabledRate}%</CardContent>
+          <CardContent className="text-xs text-muted-foreground">鍚敤 {overview?.summary.enabledModelCount ?? "--"} 涓紝鍚敤鐜?{gatewayHealth.enabledRate}%</CardContent>
         </Card>
         <Card>
           <CardHeader className="space-y-0 pb-2">
-            <CardDescription className="flex items-center gap-2"><Wallet className="h-4 w-4" />余额预警</CardDescription>
+            <CardDescription className="flex items-center gap-2"><Wallet className="h-4 w-4" />浣欓棰勮</CardDescription>
             <CardTitle className="text-2xl">{overview?.summary.lowBalanceCount ?? "--"}</CardTitle>
           </CardHeader>
-          <CardContent className="text-xs text-muted-foreground">支持自动余额探测与手动额度登记</CardContent>
+          <CardContent className="text-xs text-muted-foreground">鏀寔鑷姩浣欓鎺㈡祴涓庢墜鍔ㄩ搴︾櫥璁?/CardContent>
         </Card>
         <Card className={gatewayHealth.issueCount > 0 ? "border-destructive/25 bg-destructive/5" : ""}>
           <CardHeader className="space-y-0 pb-2">
-            <CardDescription className="flex items-center gap-2"><Activity className="h-4 w-4" />运行健康</CardDescription>
+            <CardDescription className="flex items-center gap-2"><Activity className="h-4 w-4" />杩愯鍋ュ悍</CardDescription>
             <CardTitle className="text-2xl">{overview?.summary.unhealthyAccountCount ?? "--"}</CardTitle>
           </CardHeader>
-          <CardContent className="text-xs text-muted-foreground">异常账户会优先展示，便于快速处理</CardContent>
+          <CardContent className="text-xs text-muted-foreground">寮傚父璐︽埛浼氫紭鍏堝睍绀猴紝渚夸簬蹇€熷鐞?/CardContent>
         </Card>
       </div>
 
       {error ? (
         <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />
-          <AlertTitle>操作失败</AlertTitle>
+          <AlertTitle>鎿嶄綔澶辫触</AlertTitle>
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       ) : null}
@@ -1221,20 +1338,24 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
       <Card>
         <CardHeader className="flex flex-row items-start justify-between gap-3">
           <div>
-            <CardTitle>模型 API 中心</CardTitle>
+            <CardTitle>妯″瀷 API 涓績</CardTitle>
             <CardDescription>
               {overview
-                ? `${overview.summary.vendorCount} 个厂商 · ${overview.summary.modelCount} 个模型 · ${overview.summary.lowBalanceCount} 个低余额 · ${overview.summary.unhealthyAccountCount} 个账户异常`
-                : "加载概览中..."}
+                ? `${overview.summary.vendorCount} 涓巶鍟?路 ${overview.summary.modelCount} 涓ā鍨?路 ${overview.summary.lowBalanceCount} 涓綆浣欓 路 ${overview.summary.unhealthyAccountCount} 涓处鎴峰紓甯竊
+                : "鍔犺浇姒傝涓?.."}
             </CardDescription>
           </div>
           <div className="flex gap-2">
+            <Button type="button" variant="outline" size="sm" disabled={loading} onClick={openCreateVendor}>
+              <Plus className="mr-1 h-4 w-4" />
+              娣诲姞鍘傚晢
+            </Button>
             <Button type="button" variant="outline" size="sm" disabled={refreshingBalance || loading} onClick={handleRefreshAllBalances}>
               <RefreshCw className={`mr-1 h-4 w-4 ${refreshingBalance ? "animate-spin" : ""}`} />
-              刷新余额
+              鍒锋柊浣欓
             </Button>
             <Button type="button" variant="outline" size="sm" disabled={loading} onClick={load}>
-              重新加载
+              閲嶆柊鍔犺浇
             </Button>
           </div>
         </CardHeader>
@@ -1245,7 +1366,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
               <Input
                 value={modelKeyword}
                 onChange={(event) => setModelKeyword(event.target.value)}
-                placeholder="搜索模型、configCode、能力或账户"
+                placeholder="鎼滅储妯″瀷銆乧onfigCode銆佽兘鍔涙垨璐︽埛"
                 className="pl-9"
               />
             </div>
@@ -1273,17 +1394,17 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
             </div>
           </div>
           {loading ? (
-            <p className="text-sm text-muted-foreground">加载中...</p>
+            <p className="text-sm text-muted-foreground">鍔犺浇涓?..</p>
           ) : overview && overview.vendors.length === 0 && overview.unconfiguredVendors.length === 0 ? (
-            <p className="text-sm text-muted-foreground">暂无配置，请先接入厂商账户。</p>
+            <p className="text-sm text-muted-foreground">鏆傛棤閰嶇疆锛岃鍏堟帴鍏ュ巶鍟嗚处鎴枫€?/p>
           ) : filteredVendors.length === 0 ? (
-            <p className="rounded-lg border border-dashed py-8 text-center text-sm text-muted-foreground">没有匹配的模型渠道</p>
+            <p className="rounded-lg border border-dashed py-8 text-center text-sm text-muted-foreground">娌℃湁鍖归厤鐨勬ā鍨嬫笭閬?/p>
           ) : (
             <>
               {filteredVendors.map(renderVendorSection)}
               {unconfiguredVendors.length > 0 ? (
                 <div className="rounded-xl border border-dashed p-4">
-                  <p className="mb-3 font-medium">可接入厂商</p>
+                  <p className="mb-3 font-medium">鍙帴鍏ュ巶鍟?/p>
                   <div className="flex flex-wrap gap-2">
                     {unconfiguredVendors.map((vendor) => (
                       <Button
@@ -1306,15 +1427,86 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
         </CardContent>
       </Card>
 
-      <Dialog open={accountDialogOpen} onOpenChange={setAccountDialogOpen}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+      <Dialog open={vendorDialogOpen} onOpenChange={setVendorDialogOpen}>
+        <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>{accountForm.id ? "编辑厂商账户" : "接入厂商账户"}</DialogTitle>
-            <DialogDescription>API Key 与 Base URL 在此维护，下属模型将自动继承。</DialogDescription>
+            <DialogTitle>娣诲姞鍘傚晢/娓犻亾</DialogTitle>
+            <DialogDescription>鍘傚晢 code 鐢ㄤ簬鍒嗙粍鍜屽浘鏍囪鍙栵紝鍥炬爣璧勪骇鍚嶅搴?vendor-icons 鐩綍涓殑 SVG 鏂囦欢鍚嶃€?/DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-2">
             <div className="space-y-2">
-              <Label>账户名称</Label>
+              <Label>鍘傚晢 code</Label>
+              <Input
+                value={vendorForm.vendorCode}
+                placeholder="渚嬪 openai銆乿olcengine"
+                onChange={(event) => {
+                  const vendorCode = event.target.value
+                  setVendorForm((form) => ({
+                    ...form,
+                    vendorCode,
+                    iconAsset: form.iconAsset === "api" || !form.iconAsset ? vendorCode.trim().toLowerCase() : form.iconAsset,
+                  }))
+                }}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>鏄剧ず鍚嶇О</Label>
+              <Input
+                value={vendorForm.vendorLabel}
+                placeholder="渚嬪 OpenAI銆佺伀灞卞紩鎿?/ 璞嗗寘"
+                onChange={(event) => setVendorForm((form) => ({ ...form, vendorLabel: event.target.value }))}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label>鍥炬爣璧勪骇鍚?/Label>
+                <Input
+                  value={vendorForm.iconAsset}
+                  placeholder="openai"
+                  onChange={(event) => setVendorForm((form) => ({ ...form, iconAsset: event.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>鎺掑簭</Label>
+                <Input
+                  type="number"
+                  value={vendorForm.sortOrder ?? 0}
+                  onChange={(event) => setVendorForm((form) => ({ ...form, sortOrder: numberOrZero(event.target.value) }))}
+                />
+              </div>
+            </div>
+            <div className="flex items-center justify-between rounded-lg border px-3 py-2">
+              <Label>鍚敤鍘傚晢</Label>
+              <EmbeddedOnOffSwitch
+                checked={vendorForm.enabled !== false}
+                label="鍚敤鍘傚晢"
+                onCheckedChange={(enabled) => setVendorForm((form) => ({ ...form, enabled }))}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setVendorDialogOpen(false)}>鍙栨秷</Button>
+            <Button
+              type="button"
+              disabled={vendorSaving || !vendorForm.vendorCode.trim() || !vendorForm.vendorLabel.trim()}
+              onClick={saveVendor}
+            >
+              {vendorSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              淇濆瓨
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={accountDialogOpen} onOpenChange={setAccountDialogOpen}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{accountForm.id ? "缂栬緫鍘傚晢璐︽埛" : "鎺ュ叆鍘傚晢璐︽埛"}</DialogTitle>
+            <DialogDescription>API Key 涓?Base URL 鍦ㄦ缁存姢锛屼笅灞炴ā鍨嬪皢鑷姩缁ф壙銆?/DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-2">
+            <div className="space-y-2">
+              <Label>璐︽埛鍚嶇О</Label>
               <Input value={accountForm.accountName} onChange={(e) => setAccountForm((f) => ({ ...f, accountName: e.target.value }))} />
             </div>
             <div className="space-y-2">
@@ -1322,26 +1514,26 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
               <Input value={accountForm.baseUrl || ""} onChange={(e) => setAccountForm((f) => ({ ...f, baseUrl: e.target.value }))} />
             </div>
             <div className="space-y-2">
-              <Label>API Key {accountForm.apiKeyMasked ? `(已配置 ${accountForm.apiKeyMasked})` : ""}</Label>
+              <Label>API Key {accountForm.apiKeyMasked ? `(宸查厤缃?${accountForm.apiKeyMasked})` : ""}</Label>
               <Input
                 type="password"
                 value={accountForm.apiKey || ""}
-                placeholder={accountForm.apiKeyMasked ? "留空则不修改" : "必填"}
+                placeholder={accountForm.apiKeyMasked ? "鐣欑┖鍒欎笉淇敼" : "蹇呭～"}
                 onChange={(e) => setAccountForm((f) => ({ ...f, apiKey: e.target.value }))}
               />
             </div>
             <div className="space-y-2">
-              <Label>额外鉴权 JSON（可灵 AK/SK 等）</Label>
+              <Label>棰濆閴存潈 JSON锛堝彲鐏?AK/SK 绛夛級</Label>
               <Textarea
                 rows={3}
                 value={accountForm.extraAuthJson || ""}
-                placeholder="留空则不修改"
+                placeholder="鐣欑┖鍒欎笉淇敼"
                 onChange={(e) => setAccountForm((f) => ({ ...f, extraAuthJson: e.target.value }))}
               />
             </div>
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
-                <Label>余额查询模式</Label>
+                <Label>浣欓鏌ヨ妯″紡</Label>
                 <Select
                   value={accountForm.balanceQueryMode || "MANUAL"}
                   onValueChange={(v) => setAccountForm((f) => ({ ...f, balanceQueryMode: v }))}
@@ -1350,14 +1542,14 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="REST_API">API 自动查询（DeepSeek / SiliconFlow）</SelectItem>
-                    <SelectItem value="MANUAL">手填余额</SelectItem>
-                    <SelectItem value="NONE">仅外链</SelectItem>
+                    <SelectItem value="REST_API">API 鑷姩鏌ヨ锛圖eepSeek / SiliconFlow锛?/SelectItem>
+                    <SelectItem value="MANUAL">鎵嬪～浣欓</SelectItem>
+                    <SelectItem value="NONE">浠呭閾?/SelectItem>
                   </SelectContent>
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label>余额金额（手填）</Label>
+                <Label>浣欓閲戦锛堟墜濉級</Label>
                 <Input
                   type="number"
                   value={accountForm.balanceAmount ?? ""}
@@ -1371,7 +1563,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
               </div>
             </div>
             <div className="space-y-2">
-              <Label>低余额阈值</Label>
+              <Label>浣庝綑棰濋槇鍊?/Label>
               <Input
                 type="number"
                 value={accountForm.balanceLowThreshold ?? ""}
@@ -1384,11 +1576,11 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
               />
             </div>
             <div className="space-y-2">
-              <Label>控制台链接</Label>
+              <Label>鎺у埗鍙伴摼鎺?/Label>
               <Input value={accountForm.consoleUrl || ""} onChange={(e) => setAccountForm((f) => ({ ...f, consoleUrl: e.target.value }))} />
             </div>
             <div className="space-y-2">
-              <Label>余额页链接</Label>
+              <Label>浣欓椤甸摼鎺?/Label>
               <Input value={accountForm.balanceUrl || ""} onChange={(e) => setAccountForm((f) => ({ ...f, balanceUrl: e.target.value }))} />
             </div>
           </div>
@@ -1398,27 +1590,27 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                 type="button"
                 variant="destructive"
                 onClick={async () => {
-                  if (!accountForm.id || !window.confirm("确认删除该账户？")) return
+                  if (!accountForm.id || !window.confirm("纭鍒犻櫎璇ヨ处鎴凤紵")) return
                   try {
                     await deleteModelVendorAccount(accountForm.id)
                     setAccountDialogOpen(false)
                     await load()
                   } catch (err) {
-                    setError(err instanceof ApiError ? err.message : "删除失败")
+                    setError(err instanceof ApiError ? err.message : "鍒犻櫎澶辫触")
                   }
                 }}
               >
-                删除账户
+                鍒犻櫎璐︽埛
               </Button>
             ) : (
               <span />
             )}
             <div className="flex gap-2">
               <Button type="button" variant="outline" onClick={() => setAccountDialogOpen(false)}>
-                取消
+                鍙栨秷
               </Button>
               <Button type="button" disabled={accountSaving} onClick={saveAccount}>
-                保存
+                淇濆瓨
               </Button>
             </div>
           </DialogFooter>
@@ -1428,12 +1620,12 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
       <Dialog open={modelDialogOpen} onOpenChange={setModelDialogOpen}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{modelForm.id ? "编辑模型" : "添加模型"}</DialogTitle>
-            <DialogDescription>使用所属账户的 API 密钥，无需在此重复填写 Key。</DialogDescription>
+            <DialogTitle>{modelForm.id ? "缂栬緫妯″瀷" : "娣诲姞妯″瀷"}</DialogTitle>
+            <DialogDescription>浣跨敤鎵€灞炶处鎴风殑 API 瀵嗛挜锛屾棤闇€鍦ㄦ閲嶅濉啓 Key銆?/DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-2">
             <div className="space-y-2">
-              <Label>显示名称</Label>
+              <Label>鏄剧ず鍚嶇О</Label>
               <Input value={modelForm.displayName || ""} onChange={(e) => setModelForm((f) => ({ ...f, displayName: e.target.value }))} />
             </div>
             <div className="space-y-2">
@@ -1441,12 +1633,12 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
               <Input value={modelForm.configCode || ""} onChange={(e) => setModelForm((f) => ({ ...f, configCode: e.target.value }))} />
             </div>
             <div className="space-y-2">
-              <Label>Upstream 模型名</Label>
+              <Label>Upstream 妯″瀷鍚?/Label>
               <Input value={modelForm.modelName} onChange={(e) => setModelForm((f) => ({ ...f, modelName: e.target.value }))} />
             </div>
             <div className="grid gap-3 rounded-md border p-3 md:grid-cols-[180px_minmax(0,1fr)]">
               <div className="space-y-2">
-                <Label>计费规则</Label>
+                <Label>璁¤垂瑙勫垯</Label>
                 <Select
                   value={modelForm.billingUnit || "TOKEN_PER_M"}
                   onValueChange={(v) => setModelForm((f) => ({ ...f, billingUnit: v as AgentModelConfigPayload["billingUnit"] }))}
@@ -1463,13 +1655,13 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">
-                  {billingUnitOptions.find((option) => option.value === modelForm.billingUnit)?.description || "维护该模型的成本口径"}
+                  {billingUnitOptions.find((option) => option.value === modelForm.billingUnit)?.description || "缁存姢璇ユā鍨嬬殑鎴愭湰鍙ｅ緞"}
                 </p>
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
                 {modelForm.billingUnit === "PER_CALL" ? (
                   <div className="space-y-2 sm:col-span-2">
-                    <Label>单次调用成本</Label>
+                    <Label>鍗曟璋冪敤鎴愭湰</Label>
                     <Input
                       type="number"
                       min="0"
@@ -1481,7 +1673,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                 ) : (
                   <>
                     <div className="space-y-2">
-                      <Label>输入成本 / 百万 Token</Label>
+                      <Label>杈撳叆鎴愭湰 / 鐧句竾 Token</Label>
                       <Input
                         type="number"
                         min="0"
@@ -1491,7 +1683,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label>输出成本 / 百万 Token</Label>
+                      <Label>杈撳嚭鎴愭湰 / 鐧句竾 Token</Label>
                       <Input
                         type="number"
                         min="0"
@@ -1502,7 +1694,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                     </div>
                     {modelForm.billingUnit === "IMAGE_TOKEN" ? (
                       <div className="space-y-2 sm:col-span-2">
-                        <Label>图片基础成本</Label>
+                        <Label>鍥剧墖鍩虹鎴愭湰</Label>
                         <Input
                           type="number"
                           min="0"
@@ -1546,14 +1738,14 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
               ) : (
                 <Zap className="mr-2 h-4 w-4" />
               )}
-              测试连接
+              娴嬭瘯杩炴帴
             </Button>
             <div className="flex gap-2">
               <Button type="button" variant="outline" onClick={() => setModelDialogOpen(false)}>
-                取消
+                鍙栨秷
               </Button>
               <Button type="button" disabled={modelSaving} onClick={saveModel}>
-                保存
+                淇濆瓨
               </Button>
             </div>
           </DialogFooter>
@@ -1562,3 +1754,4 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
     </div>
   )
 }
+

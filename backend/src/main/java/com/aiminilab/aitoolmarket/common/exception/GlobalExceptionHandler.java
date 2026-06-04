@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
+import jakarta.servlet.ServletException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -60,12 +61,32 @@ public class GlobalExceptionHandler {
         return ApiResponse.fail(ErrorCode.PARAM_ERROR, hint + traceHint());
     }
 
+    @ExceptionHandler(ServletException.class)
+    @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
+    public ApiResponse<Void> handleServletException(ServletException exception) {
+        Throwable root = rootCause(exception);
+        log.error("Servlet exception: traceId={}, type={}, rootType={}, rootMessage={}",
+                traceId(),
+                exception.getClass().getName(),
+                root.getClass().getName(),
+                root.getMessage(),
+                exception);
+        return ApiResponse.fail(ErrorCode.SYSTEM_ERROR,
+                "系统异常：" + safeMessage(root) + traceHint());
+    }
+
     @ExceptionHandler(Exception.class)
     @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
     public ApiResponse<Void> handleException(Exception exception) {
-        log.error("Unhandled exception: traceId={}", traceId(), exception);
+        Throwable root = rootCause(exception);
+        log.error("Unhandled exception: traceId={}, type={}, rootType={}, rootMessage={}",
+                traceId(),
+                exception.getClass().getName(),
+                root.getClass().getName(),
+                root.getMessage(),
+                exception);
         return ApiResponse.fail(ErrorCode.SYSTEM_ERROR,
-                "系统异常：" + exception.getClass().getSimpleName() + traceHint());
+                "系统异常：" + safeMessage(root) + traceHint());
     }
 
     private String traceId() {

@@ -22,10 +22,10 @@ import {
   Video,
   WandSparkles,
   X,
-  Zap,
 } from "lucide-vue-next"
 import AppShell from "@/components/AppShell.vue"
 import AssetPreviewModal from "@/components/AssetPreviewModal.vue"
+import CreditCostBadge from "@/components/CreditCostBadge/CreditCostBadge.vue"
 import CapabilityControls from "@/pages/Chat/CapabilityControls.vue"
 import DashboardModalityDock from "./DashboardModalityDock.vue"
 import { fetchCreditAccount } from "@/api/creditApi"
@@ -1082,9 +1082,7 @@ onUnmounted(() => {
                     </p>
                     <div class="mt-auto flex items-center justify-between pt-5">
                       <span class="text-xs text-white/45">{{ tool.modelConfigName || tool.modelName || tool.toolCode }}</span>
-                      <span class="inline-flex items-center gap-1 text-sm text-amber-300">
-                        <Zap class="h-4 w-4" /> {{ tool.estimatedCreditCost }} 算力/次
-                      </span>
+                      <CreditCostBadge :cost="tool.estimatedCreditCost" size="md" class="text-amber-300" />
                     </div>
                   </div>
                 </article>
@@ -1498,7 +1496,7 @@ onUnmounted(() => {
                             <h4 class="line-clamp-2 font-semibold text-white">{{ tool.toolName }}</h4>
                             <p class="mt-2 line-clamp-2 text-xs text-white/45">{{ toolDisplayDescription(tool, "模型工具") }}</p>
                             <p class="mt-3 inline-flex items-center gap-1 text-xs text-amber-300">
-                              <Zap class="h-3.5 w-3.5" /> {{ tool.estimatedCreditCost }} 算力/次
+                              <CreditCostBadge :cost="tool.estimatedCreditCost" />
                             </p>
                           </div>
                         </button>

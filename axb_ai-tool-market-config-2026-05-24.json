@@ -1,0 +1,1017 @@
+{
+  "format": "ai-tool-market-config-bundle",
+  "version": 1,
+  "exportedAt": "2026-05-24T23:47:16.009529+08:00",
+  "exportedBy": "1",
+  "secretsRedacted": true,
+  "settings": {
+    "credits.deductEnabled": "true",
+    "credits.signupGrant": "100",
+    "platform.description": "一站式 AI 运营助手，帮助企业提升内容生产与运营效率。",
+    "platform.name": "AI 工具超市",
+    "security.allowedCors": "http://127.0.0.1:5173\nhttp://127.0.0.1:5174",
+    "security.jwtHours": "24",
+    "system.maintenanceMode": "false",
+    "tasks.maxRetry": "3",
+    "tasks.queueEnabled": "true"
+  },
+  "modelConfigs": [
+    {
+      "displayName": "DeepSeek-v4-pro",
+      "configCode": "1",
+      "provider": "openai_compatible",
+      "modelName": "deepseek-v4-pro",
+      "baseUrl": "https://api.deepseek.com",
+      "apiKey": "",
+      "extraAuthJson": "",
+      "secretsRedacted": true,
+      "minimaxGroupId": null,
+      "consoleUrl": "https://platform.deepseek.com",
+      "balanceUrl": "https://platform.deepseek.com/usage",
+      "docsUrl": "https://api-docs.deepseek.com/zh-cn/",
+      "timeoutSeconds": 60,
+      "inputTokenPricePer1k": 0.002,
+      "outputTokenPricePer1k": 0.006,
+      "inputTokenPricePer1m": 2,
+      "outputTokenPricePer1m": 6,
+      "billingUnit": "TOKEN_PER_M",
+      "unitPrice": 0,
+      "enabled": true,
+      "isDefault": true,
+      "capabilities": [
+        "TEXT_GENERATION"
+      ]
+    },
+    {
+      "displayName": "gpt-image-2_SY",
+      "configCode": "10",
+      "provider": "openai_images_gateway",
+      "modelName": "gpt-image-2",
+      "baseUrl": "https://shiyunapi.com/v1",
+      "apiKey": "",
+      "extraAuthJson": "",
+      "secretsRedacted": true,
+      "minimaxGroupId": null,
+      "consoleUrl": "https://shiyunapi.com/console/token",
+      "balanceUrl": "https://shiyunapi.com/console/topup",
+      "docsUrl": "admin",
+      "timeoutSeconds": 300,
+      "inputTokenPricePer1k": 0,
+      "outputTokenPricePer1k": 0,
+      "inputTokenPricePer1m": 0,
+      "outputTokenPricePer1m": 0,
+      "billingUnit": "IMAGE_TOKEN",
+      "unitPrice": 0,
+      "enabled": true,
+      "isDefault": false,
+      "capabilities": [
+        "IMAGE_GENERATION"
+      ]
+    },
+    {
+      "displayName": "GPT-image2.0",
+      "configCode": "9",
+      "provider": "ofox_openai_images",
+      "modelName": "openai/gpt-image-2",
+      "baseUrl": "https://api.ofox.ai/v1",
+      "apiKey": "",
+      "extraAuthJson": "",
+      "secretsRedacted": true,
+      "minimaxGroupId": null,
+      "consoleUrl": "https://app.ofox.ai/manage/api-keys",
+      "balanceUrl": "https://app.ofox.ai/manage/wallet",
+      "docsUrl": "admin",
+      "timeoutSeconds": 120,
+      "inputTokenPricePer1k": 0,
+      "outputTokenPricePer1k": 0,
+      "inputTokenPricePer1m": 0,
+      "outputTokenPricePer1m": 0,
+      "billingUnit": "IMAGE_TOKEN",
+      "unitPrice": 0,
+      "enabled": true,
+      "isDefault": false,
+      "capabilities": [
+        "IMAGE_GENERATION"
+      ]
+    },
+    {
+      "displayName": "可灵生图 v2-1",
+      "configCode": "8",
+      "provider": "kling_video",
+      "modelName": "kling-v2-1",
+      "baseUrl": "https://api-beijing.klingai.com",
+      "apiKey": "",
+      "extraAuthJson": "",
+      "secretsRedacted": true,
+      "minimaxGroupId": null,
+      "consoleUrl": "https://klingai.com/dev/usage-billing",
+      "balanceUrl": "https://klingai.com/dev/resource-pack-manage",
+      "docsUrl": "https://klingai.com/document-api/apiReference/model/imageModels",
+      "timeoutSeconds": 60,
+      "inputTokenPricePer1k": 0,
+      "outputTokenPricePer1k": 0,
+      "inputTokenPricePer1m": 0,
+      "outputTokenPricePer1m": 0,
+      "billingUnit": "PER_CALL",
+      "unitPrice": 0.019998,
+      "enabled": true,
+      "isDefault": false,
+      "capabilities": [
+        "IMAGE_GENERATION"
+      ]
+    },
+    {
+      "displayName": "可灵图生视频 v2-6",
+      "configCode": "kling_image_to_video",
+      "provider": "kling_video",
+      "modelName": "kling-v2-6",
+      "baseUrl": "https://api-beijing.klingai.com",
+      "apiKey": "",
+      "extraAuthJson": "",
+      "secretsRedacted": true,
+      "minimaxGroupId": null,
+      "consoleUrl": "https://klingai.com/dev/api-key",
+      "balanceUrl": "https://klingai.com/dev/usage-billing",
+      "docsUrl": "https://klingai.com/document-api/apiReference/model/imageToVideo",
+      "timeoutSeconds": 299,
+      "inputTokenPricePer1k": 0,
+      "outputTokenPricePer1k": 0,
+      "inputTokenPricePer1m": 0,
+      "outputTokenPricePer1m": 0,
+      "billingUnit": "PER_CALL",
+      "unitPrice": 2,
+      "enabled": true,
+      "isDefault": false,
+      "capabilities": [
+        "VIDEO_GENERATION"
+      ]
+    },
+    {
+      "displayName": "doubao-seedream-4-5",
+      "configCode": "4",
+      "provider": "volcengine_images",
+      "modelName": "doubao-seedream-4-5-251128",
+      "baseUrl": "https://ark.cn-beijing.volces.com",
+      "apiKey": "",
+      "extraAuthJson": "",
+      "secretsRedacted": true,
+      "minimaxGroupId": null,
+      "consoleUrl": "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey?apikey=%7B%7D",
+      "balanceUrl": null,
+      "docsUrl": "admin",
+      "timeoutSeconds": 60,
+      "inputTokenPricePer1k": 0,
+      "outputTokenPricePer1k": 0,
+      "inputTokenPricePer1m": 0,
+      "outputTokenPricePer1m": 0,
+      "billingUnit": "PER_CALL",
+      "unitPrice": 0.25,
+      "enabled": true,
+      "isDefault": false,
+      "capabilities": [
+        "IMAGE_GENERATION"
+      ]
+    },
+    {
+      "displayName": "MiniMax speech",
+      "configCode": "3",
+      "provider": "minimax_speech",
+      "modelName": "speech-2.8-hd",
+      "baseUrl": "https://api.minimaxi.com",
+      "apiKey": "",
+      "extraAuthJson": "",
+      "secretsRedacted": true,
+      "minimaxGroupId": null,
+      "consoleUrl": "https://platform.minimaxi.com/user-center/basic-information/interface-key",
+      "balanceUrl": "https://platform.minimaxi.com/user-center/payment/balance",
+      "docsUrl": "https://platform.minimaxi.com/docs/guides/speech-t2a-async",
+      "timeoutSeconds": 60,
+      "inputTokenPricePer1k": 0,
+      "outputTokenPricePer1k": 0.35,
+      "inputTokenPricePer1m": 0,
+      "outputTokenPricePer1m": 350,
+      "billingUnit": "PER_CALL",
+      "unitPrice": 0.01,
+      "enabled": true,
+      "isDefault": false,
+      "capabilities": [
+        "TEXT_TO_SPEECH"
+      ]
+    },
+    {
+      "displayName": "Z-Image-Turbo",
+      "configCode": "2",
+      "provider": "siliconflow_images",
+      "modelName": "Tongyi-MAI/Z-Image-Turbo",
+      "baseUrl": "https://api.siliconflow.cn",
+      "apiKey": "",
+      "extraAuthJson": "",
+      "secretsRedacted": true,
+      "minimaxGroupId": null,
+      "consoleUrl": "https://cloud.siliconflow.cn/me/account/ak",
+      "balanceUrl": "https://cloud.siliconflow.cn/me/expensebill",
+      "docsUrl": "admin",
+      "timeoutSeconds": 60,
+      "inputTokenPricePer1k": 0,
+      "outputTokenPricePer1k": 0,
+      "inputTokenPricePer1m": 0,
+      "outputTokenPricePer1m": 0,
+      "billingUnit": "PER_CALL",
+      "unitPrice": 0.05,
+      "enabled": true,
+      "isDefault": false,
+      "capabilities": [
+        "IMAGE_GENERATION"
+      ]
+    }
+  ],
+  "categories": [
+    {
+      "categoryCode": "copywriting",
+      "categoryName": "Copywriting",
+      "sortOrder": 1,
+      "status": "ACTIVE"
+    }
+  ],
+  "tools": [
+    {
+      "toolCode": "ofox_gpt_image2",
+      "toolName": "GPT-image2.0",
+      "categoryCode": "copywriting",
+      "description": null,
+      "coverUrl": "/generated/tool-covers/GPT-image2.0-ofox_gpt_image2-gpt-image-2_SY-20260524204105.png",
+      "toolType": "IMAGE_GENERATION",
+      "inputModality": "TEXT",
+      "outputModality": "IMAGE",
+      "configNote": "需要配置画面描述、比例、风格、生成数量与反向提示词。\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"effect\"} -->",
+      "status": "ONLINE",
+      "estimatedCreditCost": 5,
+      "modelConfigCode": "10",
+      "fields": [
+        {
+          "fieldKey": "prompt",
+          "fieldName": "画面描述",
+          "fieldType": "textarea",
+          "placeholder": "描述主体、场景、光线、构图和细节",
+          "options": {
+            "core": true
+          },
+          "optionsJson": "{\"core\": true}",
+          "required": true,
+          "sortOrder": 1
+        },
+        {
+          "fieldKey": "aspectRatio",
+          "fieldName": "画面比例",
+          "fieldType": "radio",
+          "placeholder": null,
+          "options": [
+            {
+              "label": "1:1",
+              "value": "1:1"
+            },
+            {
+              "label": "4:3",
+              "value": "4:3"
+            },
+            {
+              "label": "3:4",
+              "value": "3:4"
+            },
+            {
+              "label": "16:9",
+              "value": "16:9"
+            },
+            {
+              "label": "9:16",
+              "value": "9:16"
+            }
+          ],
+          "optionsJson": "[{\"label\": \"1:1\", \"value\": \"1:1\"}, {\"label\": \"4:3\", \"value\": \"4:3\"}, {\"label\": \"3:4\", \"value\": \"3:4\"}, {\"label\": \"16:9\", \"value\": \"16:9\"}, {\"label\": \"9:16\", \"value\": \"9:16\"}]",
+          "required": true,
+          "sortOrder": 2
+        },
+        {
+          "fieldKey": "count",
+          "fieldName": "生成数量",
+          "fieldType": "number",
+          "placeholder": "例如 1",
+          "options": null,
+          "optionsJson": null,
+          "required": false,
+          "sortOrder": 3
+        },
+        {
+          "fieldKey": "image",
+          "fieldName": "参考图",
+          "fieldType": "image",
+          "placeholder": null,
+          "options": null,
+          "optionsJson": null,
+          "required": false,
+          "sortOrder": 4
+        },
+        {
+          "fieldKey": "quality",
+          "fieldName": "质量",
+          "fieldType": "select",
+          "placeholder": null,
+          "options": [
+            {
+              "label": "低",
+              "value": "low"
+            },
+            {
+              "label": "中",
+              "value": "medium"
+            },
+            {
+              "label": "高",
+              "value": "high"
+            },
+            {
+              "label": "自动",
+              "value": "auto"
+            }
+          ],
+          "optionsJson": "[{\"label\": \"低\", \"value\": \"low\"}, {\"label\": \"中\", \"value\": \"medium\"}, {\"label\": \"高\", \"value\": \"high\"}, {\"label\": \"自动\", \"value\": \"auto\"}]",
+          "required": true,
+          "sortOrder": 5
+        }
+      ],
+      "prompts": [
+        {
+          "promptCode": "default",
+          "promptName": "默认 Prompt",
+          "status": "ACTIVE",
+          "activeVersionNo": "tpl-1779531308470",
+          "versions": [
+            {
+              "versionNo": "tpl-1779531308470",
+              "systemPrompt": null,
+              "userPromptTemplate": "画面描述：{{prompt}}\n画面比例：{{aspectRatio}}\n风格：{{style}}\n生成数量：{{count}}\n反向提示词：{{negativePrompt}}",
+              "outputFormat": "MARKDOWN",
+              "status": "ACTIVE"
+            }
+          ]
+        }
+      ],
+      "workflow": null
+    },
+    {
+      "toolCode": "v2_1",
+      "toolName": "可灵生图 V2.1",
+      "categoryCode": "copywriting",
+      "description": null,
+      "coverUrl": null,
+      "toolType": "IMAGE_GENERATION",
+      "inputModality": "TEXT",
+      "outputModality": "IMAGE",
+      "configNote": "需要配置画面描述、比例、风格、生成数量与反向提示词。",
+      "status": "ONLINE",
+      "estimatedCreditCost": 5,
+      "modelConfigCode": "8",
+      "fields": [
+        {
+          "fieldKey": "prompt",
+          "fieldName": "画面描述",
+          "fieldType": "textarea",
+          "placeholder": "描述主体、场景、光线、构图和细节",
+          "options": {
+            "core": true
+          },
+          "optionsJson": "{\"core\": true}",
+          "required": true,
+          "sortOrder": 1
+        },
+        {
+          "fieldKey": "aspectRatio",
+          "fieldName": "画面比例",
+          "fieldType": "radio",
+          "placeholder": null,
+          "options": [
+            {
+              "label": "1:1",
+              "value": "1:1"
+            },
+            {
+              "label": "4:3",
+              "value": "4:3"
+            },
+            {
+              "label": "3:4",
+              "value": "3:4"
+            },
+            {
+              "label": "16:9",
+              "value": "16:9"
+            },
+            {
+              "label": "9:16",
+              "value": "9:16"
+            }
+          ],
+          "optionsJson": "[{\"label\": \"1:1\", \"value\": \"1:1\"}, {\"label\": \"4:3\", \"value\": \"4:3\"}, {\"label\": \"3:4\", \"value\": \"3:4\"}, {\"label\": \"16:9\", \"value\": \"16:9\"}, {\"label\": \"9:16\", \"value\": \"9:16\"}]",
+          "required": true,
+          "sortOrder": 2
+        },
+        {
+          "fieldKey": "image",
+          "fieldName": "参考图",
+          "fieldType": "image",
+          "placeholder": null,
+          "options": null,
+          "optionsJson": null,
+          "required": false,
+          "sortOrder": 3
+        },
+        {
+          "fieldKey": "image_reference",
+          "fieldName": "参考图类型",
+          "fieldType": "select",
+          "placeholder": null,
+          "options": [
+            {
+              "label": "角色特征",
+              "value": "subject"
+            },
+            {
+              "label": "面部特征",
+              "value": "face"
+            }
+          ],
+          "optionsJson": "[{\"label\": \"角色特征\", \"value\": \"subject\"}, {\"label\": \"面部特征\", \"value\": \"face\"}]",
+          "required": false,
+          "sortOrder": 4
+        },
+        {
+          "fieldKey": "count",
+          "fieldName": "生成数量",
+          "fieldType": "number",
+          "placeholder": "例如 1",
+          "options": null,
+          "optionsJson": null,
+          "required": false,
+          "sortOrder": 5
+        }
+      ],
+      "prompts": [
+        {
+          "promptCode": "default",
+          "promptName": "默认 Prompt",
+          "status": "ACTIVE",
+          "activeVersionNo": "tpl-1779520445192",
+          "versions": [
+            {
+              "versionNo": "tpl-1779520445192",
+              "systemPrompt": null,
+              "userPromptTemplate": "画面描述：{{prompt}}\n画面比例：{{aspectRatio}}\n风格：{{style}}\n生成数量：{{count}}\n反向提示词：{{negativePrompt}}",
+              "outputFormat": "MARKDOWN",
+              "status": "ACTIVE"
+            }
+          ]
+        }
+      ],
+      "workflow": null
+    },
+    {
+      "toolCode": "kling_image_to_video",
+      "toolName": "可灵生视频V2.6",
+      "categoryCode": "copywriting",
+      "description": null,
+      "coverUrl": "/generated/tool-covers/可灵生视频V2.6-kling_image_to_video-可灵图生视频-v2-6-20260524150249.mp4",
+      "toolType": "VIDEO_GENERATION",
+      "inputModality": "TEXT",
+      "outputModality": "VIDEO",
+      "configNote": "描述镜头、比例与时长，由视频生成 Handler 处理。\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"effect\"} -->",
+      "status": "ONLINE",
+      "estimatedCreditCost": 6,
+      "modelConfigCode": "kling_image_to_video",
+      "fields": [
+        {
+          "fieldKey": "prompt",
+          "fieldName": "视频描述",
+          "fieldType": "textarea",
+          "placeholder": "描述镜头、主体、动作、风格和时长",
+          "options": {
+            "core": true
+          },
+          "optionsJson": "{\"core\": true}",
+          "required": true,
+          "sortOrder": 1
+        },
+        {
+          "fieldKey": "imageUrl",
+          "fieldName": "视频首帧",
+          "fieldType": "image",
+          "placeholder": null,
+          "options": null,
+          "optionsJson": null,
+          "required": true,
+          "sortOrder": 2
+        },
+        {
+          "fieldKey": "image_tail",
+          "fieldName": "视频尾帧",
+          "fieldType": "image",
+          "placeholder": null,
+          "options": null,
+          "optionsJson": null,
+          "required": false,
+          "sortOrder": 3
+        },
+        {
+          "fieldKey": "aspectRatio",
+          "fieldName": "视频比例",
+          "fieldType": "radio",
+          "placeholder": null,
+          "options": [
+            {
+              "label": "16:9",
+              "value": "16:9"
+            },
+            {
+              "label": "9:16",
+              "value": "9:16"
+            },
+            {
+              "label": "1:1",
+              "value": "1:1"
+            }
+          ],
+          "optionsJson": "[{\"label\": \"16:9\", \"value\": \"16:9\"}, {\"label\": \"9:16\", \"value\": \"9:16\"}, {\"label\": \"1:1\", \"value\": \"1:1\"}]",
+          "required": true,
+          "sortOrder": 4
+        },
+        {
+          "fieldKey": "duration",
+          "fieldName": "时长秒数",
+          "fieldType": "radio",
+          "placeholder": "例如 5",
+          "options": [
+            {
+              "label": "5 秒",
+              "value": "5"
+            },
+            {
+              "label": "10 秒",
+              "value": "10"
+            }
+          ],
+          "optionsJson": "[{\"label\": \"5 秒\", \"value\": \"5\"}, {\"label\": \"10 秒\", \"value\": \"10\"}]",
+          "required": true,
+          "sortOrder": 5
+        }
+      ],
+      "prompts": [
+        {
+          "promptCode": "default",
+          "promptName": "默认 Prompt",
+          "status": "ACTIVE",
+          "activeVersionNo": "tpl-1779377698165",
+          "versions": [
+            {
+              "versionNo": "tpl-1779377698165",
+              "systemPrompt": null,
+              "userPromptTemplate": "视频描述：{{prompt}}\n视频比例：{{aspectRatio}}\n时长秒数：{{duration}}",
+              "outputFormat": "MARKDOWN",
+              "status": "ACTIVE"
+            },
+            {
+              "versionNo": "tpl-1779372458981",
+              "systemPrompt": null,
+              "userPromptTemplate": "视频描述：{{prompt}}\n视频比例：{{aspectRatio}}\n时长秒数：{{duration}}",
+              "outputFormat": "MARKDOWN",
+              "status": "INACTIVE"
+            }
+          ]
+        }
+      ],
+      "workflow": null
+    },
+    {
+      "toolCode": "tool_1",
+      "toolName": "图片生成-Z-image-Turbo",
+      "categoryCode": "copywriting",
+      "description": "此工具…………",
+      "coverUrl": "/generated/tool-covers/演示-tool_1-Z-Image-Turbo-20260519212534.png",
+      "toolType": "IMAGE_GENERATION",
+      "inputModality": "TEXT",
+      "outputModality": "IMAGE",
+      "configNote": "需要配置画面描述、比例、风格、生成数量与反向提示词。\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\"} -->",
+      "status": "ONLINE",
+      "estimatedCreditCost": 5,
+      "modelConfigCode": "2",
+      "fields": [
+        {
+          "fieldKey": "prompt",
+          "fieldName": "画面描述",
+          "fieldType": "textarea",
+          "placeholder": "描述主体、场景、光线、构图和细节",
+          "options": null,
+          "optionsJson": null,
+          "required": true,
+          "sortOrder": 1
+        },
+        {
+          "fieldKey": "aspectRatio",
+          "fieldName": "画面比例",
+          "fieldType": "radio",
+          "placeholder": null,
+          "options": [
+            {
+              "label": "1:1",
+              "value": "1:1"
+            },
+            {
+              "label": "4:3",
+              "value": "4:3"
+            },
+            {
+              "label": "3:4",
+              "value": "3:4"
+            },
+            {
+              "label": "16:9",
+              "value": "16:9"
+            },
+            {
+              "label": "9:16",
+              "value": "9:16"
+            }
+          ],
+          "optionsJson": "[{\"label\": \"1:1\", \"value\": \"1:1\"}, {\"label\": \"4:3\", \"value\": \"4:3\"}, {\"label\": \"3:4\", \"value\": \"3:4\"}, {\"label\": \"16:9\", \"value\": \"16:9\"}, {\"label\": \"9:16\", \"value\": \"9:16\"}]",
+          "required": true,
+          "sortOrder": 2
+        },
+        {
+          "fieldKey": "style",
+          "fieldName": "风格",
+          "fieldType": "select",
+          "placeholder": null,
+          "options": [
+            {
+              "label": "写实",
+              "value": "写实"
+            },
+            {
+              "label": "电商",
+              "value": "电商"
+            },
+            {
+              "label": "插画",
+              "value": "插画"
+            },
+            {
+              "label": "动漫",
+              "value": "动漫"
+            },
+            {
+              "label": "极简",
+              "value": "极简"
+            },
+            {
+              "label": "国潮",
+              "value": "国潮"
+            }
+          ],
+          "optionsJson": "[{\"label\": \"写实\", \"value\": \"写实\"}, {\"label\": \"电商\", \"value\": \"电商\"}, {\"label\": \"插画\", \"value\": \"插画\"}, {\"label\": \"动漫\", \"value\": \"动漫\"}, {\"label\": \"极简\", \"value\": \"极简\"}, {\"label\": \"国潮\", \"value\": \"国潮\"}]",
+          "required": false,
+          "sortOrder": 3
+        },
+        {
+          "fieldKey": "count",
+          "fieldName": "生成数量",
+          "fieldType": "select",
+          "placeholder": "选择输出数量",
+          "options": [
+            {
+              "label": "1张",
+              "value": "1"
+            },
+            {
+              "label": "2张",
+              "value": "2"
+            }
+          ],
+          "optionsJson": "[{\"label\": \"1张\", \"value\": \"1\"}, {\"label\": \"2张\", \"value\": \"2\"}]",
+          "required": true,
+          "sortOrder": 4
+        },
+        {
+          "fieldKey": "negativePrompt",
+          "fieldName": "反向提示词",
+          "fieldType": "textarea",
+          "placeholder": "不希望出现的元素",
+          "options": null,
+          "optionsJson": null,
+          "required": false,
+          "sortOrder": 5
+        }
+      ],
+      "prompts": [
+        {
+          "promptCode": "default",
+          "promptName": "默认 Prompt",
+          "status": "ACTIVE",
+          "activeVersionNo": "tpl-1779168620040",
+          "versions": [
+            {
+              "versionNo": "tpl-1779168620040",
+              "systemPrompt": null,
+              "userPromptTemplate": "画面描述：{{prompt}}\n画面比例：{{aspectRatio}}\n风格：{{style}}\n生成数量：{{count}}\n反向提示词：{{negativePrompt}}",
+              "outputFormat": "MARKDOWN",
+              "status": "ACTIVE"
+            }
+          ]
+        }
+      ],
+      "workflow": null
+    },
+    {
+      "toolCode": "518",
+      "toolName": "Z-image-Turbo(硅基流动)",
+      "categoryCode": "copywriting",
+      "description": null,
+      "coverUrl": "/generated/tool-covers/518-518-doubao-seedream-4-5-20260520222257.png",
+      "toolType": "IMAGE_GENERATION",
+      "inputModality": "TEXT",
+      "outputModality": "IMAGE",
+      "configNote": "需要配置画面描述、比例、风格、生成数量与反向提示词。\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"哈哈\"} -->",
+      "status": "ONLINE",
+      "estimatedCreditCost": 5,
+      "modelConfigCode": "2",
+      "fields": [
+        {
+          "fieldKey": "prompt",
+          "fieldName": "画面描述",
+          "fieldType": "textarea",
+          "placeholder": "描述主体、场景、光线、构图和细节",
+          "options": null,
+          "optionsJson": null,
+          "required": true,
+          "sortOrder": 1
+        },
+        {
+          "fieldKey": "aspectRatio",
+          "fieldName": "画面比例",
+          "fieldType": "radio",
+          "placeholder": null,
+          "options": [
+            {
+              "label": "1:1",
+              "value": "1:1"
+            },
+            {
+              "label": "4:3",
+              "value": "4:3"
+            },
+            {
+              "label": "3:4",
+              "value": "3:4"
+            },
+            {
+              "label": "16:9",
+              "value": "16:9"
+            },
+            {
+              "label": "9:16",
+              "value": "9:16"
+            }
+          ],
+          "optionsJson": "[{\"label\": \"1:1\", \"value\": \"1:1\"}, {\"label\": \"4:3\", \"value\": \"4:3\"}, {\"label\": \"3:4\", \"value\": \"3:4\"}, {\"label\": \"16:9\", \"value\": \"16:9\"}, {\"label\": \"9:16\", \"value\": \"9:16\"}]",
+          "required": true,
+          "sortOrder": 2
+        },
+        {
+          "fieldKey": "style",
+          "fieldName": "风格",
+          "fieldType": "select",
+          "placeholder": null,
+          "options": [
+            {
+              "label": "写实",
+              "value": "写实"
+            },
+            {
+              "label": "电商",
+              "value": "电商"
+            },
+            {
+              "label": "插画",
+              "value": "插画"
+            },
+            {
+              "label": "动漫",
+              "value": "动漫"
+            },
+            {
+              "label": "极简",
+              "value": "极简"
+            },
+            {
+              "label": "国潮",
+              "value": "国潮"
+            }
+          ],
+          "optionsJson": "[{\"label\": \"写实\", \"value\": \"写实\"}, {\"label\": \"电商\", \"value\": \"电商\"}, {\"label\": \"插画\", \"value\": \"插画\"}, {\"label\": \"动漫\", \"value\": \"动漫\"}, {\"label\": \"极简\", \"value\": \"极简\"}, {\"label\": \"国潮\", \"value\": \"国潮\"}]",
+          "required": false,
+          "sortOrder": 3
+        },
+        {
+          "fieldKey": "count",
+          "fieldName": "生成数量",
+          "fieldType": "number",
+          "placeholder": "例如 1",
+          "options": null,
+          "optionsJson": null,
+          "required": false,
+          "sortOrder": 4
+        },
+        {
+          "fieldKey": "negativePrompt",
+          "fieldName": "反向提示词",
+          "fieldType": "textarea",
+          "placeholder": "不希望出现的元素",
+          "options": null,
+          "optionsJson": null,
+          "required": false,
+          "sortOrder": 5
+        }
+      ],
+      "prompts": [
+        {
+          "promptCode": "default",
+          "promptName": "默认 Prompt",
+          "status": "ACTIVE",
+          "activeVersionNo": "tpl-1779108875385",
+          "versions": [
+            {
+              "versionNo": "tpl-1779108875385",
+              "systemPrompt": null,
+              "userPromptTemplate": "画面描述：{{prompt}}\n画面比例：{{aspectRatio}}\n风格：{{style}}\n生成数量：{{count}}\n反向提示词：{{negativePrompt}}",
+              "outputFormat": "MARKDOWN",
+              "status": "ACTIVE"
+            }
+          ]
+        }
+      ],
+      "workflow": null
+    },
+    {
+      "toolCode": "tts_mm",
+      "toolName": "MiniMax-TTS",
+      "categoryCode": "copywriting",
+      "description": null,
+      "coverUrl": null,
+      "toolType": "TEXT_TO_SPEECH",
+      "inputModality": "TEXT",
+      "outputModality": "AUDIO",
+      "configNote": "TTS tool: input text, voice, speed, audio format, and optional language boost settings.\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\"} -->",
+      "status": "ONLINE",
+      "estimatedCreditCost": 5,
+      "modelConfigCode": "3",
+      "fields": [
+        {
+          "fieldKey": "text",
+          "fieldName": "Text",
+          "fieldType": "textarea",
+          "placeholder": "输入要演讲的台词",
+          "options": {
+            "core": true
+          },
+          "optionsJson": "{\"core\": true}",
+          "required": true,
+          "sortOrder": 1
+        },
+        {
+          "fieldKey": "voice",
+          "fieldName": "Voice",
+          "fieldType": "radio",
+          "placeholder": "Provider voice id, for example English_expressive_narrator",
+          "options": [
+            {
+              "label": "中文-男性",
+              "value": "Chinese (Mandarin)_Lyrical_Voice"
+            }
+          ],
+          "optionsJson": "[{\"label\": \"中文-男性\", \"value\": \"Chinese (Mandarin)_Lyrical_Voice\"}]",
+          "required": false,
+          "sortOrder": 2
+        },
+        {
+          "fieldKey": "speed",
+          "fieldName": "Speed",
+          "fieldType": "number",
+          "placeholder": "1.0",
+          "options": null,
+          "optionsJson": null,
+          "required": false,
+          "sortOrder": 3
+        },
+        {
+          "fieldKey": "format",
+          "fieldName": "Audio format",
+          "fieldType": "select",
+          "placeholder": null,
+          "options": [
+            {
+              "label": "mp3",
+              "value": "mp3"
+            },
+            {
+              "label": "wav",
+              "value": "wav"
+            },
+            {
+              "label": "flac",
+              "value": "flac"
+            }
+          ],
+          "optionsJson": "[{\"label\": \"mp3\", \"value\": \"mp3\"}, {\"label\": \"wav\", \"value\": \"wav\"}, {\"label\": \"flac\", \"value\": \"flac\"}]",
+          "required": false,
+          "sortOrder": 4
+        },
+        {
+          "fieldKey": "languageBoost",
+          "fieldName": "Language boost",
+          "fieldType": "select",
+          "placeholder": null,
+          "options": [
+            {
+              "label": "auto",
+              "value": "auto"
+            },
+            {
+              "label": "Chinese",
+              "value": "Chinese"
+            },
+            {
+              "label": "English",
+              "value": "English"
+            },
+            {
+              "label": "Japanese",
+              "value": "Japanese"
+            },
+            {
+              "label": "Korean",
+              "value": "Korean"
+            }
+          ],
+          "optionsJson": "[{\"label\": \"auto\", \"value\": \"auto\"}, {\"label\": \"Chinese\", \"value\": \"Chinese\"}, {\"label\": \"English\", \"value\": \"English\"}, {\"label\": \"Japanese\", \"value\": \"Japanese\"}, {\"label\": \"Korean\", \"value\": \"Korean\"}]",
+          "required": false,
+          "sortOrder": 5
+        }
+      ],
+      "prompts": [],
+      "workflow": null
+    },
+    {
+      "toolCode": "11",
+      "toolName": "文本生成-DeepSeek-V4-flash",
+      "categoryCode": "copywriting",
+      "description": null,
+      "coverUrl": null,
+      "toolType": "TEXT_GENERATION",
+      "inputModality": "TEXT",
+      "outputModality": "TEXT",
+      "configNote": "<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\"} -->",
+      "status": "ONLINE",
+      "estimatedCreditCost": 5,
+      "modelConfigCode": "1",
+      "fields": [
+        {
+          "fieldKey": "prompt",
+          "fieldName": "聊天框",
+          "fieldType": "textarea",
+          "placeholder": null,
+          "options": {
+            "core": true
+          },
+          "optionsJson": "{\"core\": true}",
+          "required": true,
+          "sortOrder": 1
+        }
+      ],
+      "prompts": [
+        {
+          "promptCode": "default",
+          "promptName": "默认 Prompt",
+          "status": "ACTIVE",
+          "activeVersionNo": "tpl-1779523726928",
+          "versions": [
+            {
+              "versionNo": "tpl-1779523726928",
+              "systemPrompt": "你是一名专业的中文内容创作助手。",
+              "userPromptTemplate": "主题：{{topic}}\n语气风格：{{tone}}\n字数：{{length}}\n补充要求：{{requirements}}",
+              "outputFormat": "MARKDOWN",
+              "status": "ACTIVE"
+            }
+          ]
+        }
+      ],
+      "workflow": null
+    }
+  ]
+}

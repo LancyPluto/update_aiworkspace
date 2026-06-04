@@ -63,7 +63,7 @@ public class UnifiedApiOverviewServiceImpl implements UnifiedApiOverviewService 
 
         Map<String, List<ModelVendorAccountResponse>> accountsByVendor = new LinkedHashMap<>();
         for (ModelVendorAccount account : accounts) {
-            String vendorCode = canonicalVendorCode(account.getVendorCode());
+            String vendorCode = canonicalVendorCode(resolveAccountVendorCode(account));
             accountsByVendor.computeIfAbsent(vendorCode, key -> new ArrayList<>())
                     .add(ModelVendorAccountResponse.from(
                             account,
@@ -75,14 +75,16 @@ public class UnifiedApiOverviewServiceImpl implements UnifiedApiOverviewService 
         for (AgentModelConfig config : configs) {
             String vendorCode = canonicalVendorCode(resolveConfigVendorCode(config, accountById));
             String accountName = null;
+            String accountHealthStatus = null;
             if (config.getVendorAccountId() != null) {
                 ModelVendorAccount account = accountById.get(config.getVendorAccountId());
                 if (account != null) {
                     accountName = account.getAccountName();
+                    accountHealthStatus = account.getHealthStatus();
                 }
             }
             modelsByVendor.computeIfAbsent(vendorCode, key -> new ArrayList<>())
-                    .add(UnifiedApiModelItemResponse.from(config, accountName, capabilitiesCodec));
+                    .add(UnifiedApiModelItemResponse.from(config, accountName, capabilitiesCodec, accountHealthStatus));
         }
 
         Set<String> configuredVendors = new HashSet<>();
@@ -137,18 +139,32 @@ public class UnifiedApiOverviewServiceImpl implements UnifiedApiOverviewService 
     }
 
     private String resolveConfigVendorCode(AgentModelConfig config, Map<Long, ModelVendorAccount> accountById) {
+        if (config.getVendorAccountId() != null) {
+            ModelVendorAccount account = accountById.get(config.getVendorAccountId());
+            if (account != null && account.getVendorCode() != null) {
+                return resolveAccountVendorCode(account);
+            }
+        }
         String inferred = vendorCodeResolver.resolveVendorCode(config);
         if (inferred != null && !inferred.isBlank() && !"other".equals(inferred)
                 && !"openai".equals(inferred) && !"openai_gateway".equals(inferred)) {
             return inferred;
         }
-        if (config.getVendorAccountId() != null) {
-            ModelVendorAccount account = accountById.get(config.getVendorAccountId());
-            if (account != null && account.getVendorCode() != null) {
-                return account.getVendorCode();
-            }
-        }
         return inferred;
+    }
+
+    private String resolveAccountVendorCode(ModelVendorAccount account) {
+        String declared = account.getVendorCode() == null ? "" : account.getVendorCode().trim();
+        String inferred = vendorCodeResolver.resolveVendorCode(
+                "openai_compatible",
+                account.getBaseUrl(),
+                account.getAccountName(),
+                null
+        );
+        if (!inferred.isBlank() && !"openai".equalsIgnoreCase(inferred) && !"other".equalsIgnoreCase(inferred)) {
+            return inferred;
+        }
+        return declared.isBlank() ? inferred : declared;
     }
 
     private static String canonicalVendorCode(String vendorCode) {

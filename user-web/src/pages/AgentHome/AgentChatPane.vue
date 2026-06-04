@@ -26,6 +26,7 @@ import {
   buildConversationPhases,
   buildScrollNavNodes,
 } from "@/utils/conversationPhases"
+import { fetchAgentFilePreviewUrl, isImageAttachment, resolveAgentFileUrl, revokeAgentFilePreviewUrl } from "@/utils/agentAttachment"
 import type { AgentAvatarState } from "./AgentAvatar.vue"
 import { useAuthStore } from "@/store/authStore"
 import {
@@ -88,6 +89,8 @@ const emit = defineEmits<{
 
 const messages = ref<AgentMessage[]>([])
 const files = ref<AgentFile[]>([])
+const filePreviewUrls = ref<Record<number, string>>({})
+const pendingUploadPreview = ref<{ name: string; url: string } | null>(null)
 const events = ref<AgentRunEvent[]>([])
 const runEventsByRunId = ref<Record<number, AgentRunEvent[]>>({})
 const submittedAttachmentJsonByRunId = ref<Record<number, string>>({})
@@ -187,7 +190,10 @@ const editingRegenerating = ref(false)
 const copiedMessageId = ref<number | null>(null)
 const bottomRef = ref<HTMLElement | null>(null)
 const messageContainerRef = ref<HTMLElement | null>(null)
+const composerDockRef = ref<HTMLElement | null>(null)
 const composerRef = ref<InstanceType<typeof AgentComposer> | null>(null)
+const composerScrollInset = ref(210)
+let composerResizeObserver: ResizeObserver | null = null
 const scrollOffset = ref(0)
 const stickToBottom = ref(true)
 const navLayoutTick = ref(0)
@@ -567,10 +573,27 @@ async function cancelCurrentRun() {
   }
 }
 
+async function hydrateFilePreviews() {
+  if (!props.token) return
+  const next: Record<number, string> = {}
+  await Promise.all(
+    files.value.map(async (file) => {
+      if (!isImageAttachment(file.contentType, file.originalFilename)) return
+      const url = await fetchAgentFilePreviewUrl(file.downloadUrl, props.token)
+      if (url) next[file.id] = url
+    }),
+  )
+  for (const file of files.value) {
+    if (!next[file.id]) revokeAgentFilePreviewUrl(file.downloadUrl)
+  }
+  filePreviewUrls.value = next
+}
+
 async function loadFiles() {
   if (!props.token) return
   const res = await fetchAgentFiles(props.sessionId, { token: props.token })
   files.value = res.list
+  await hydrateFilePreviews()
 }
 
 async function openMemoryPanel() {
@@ -694,18 +717,42 @@ async function removeMemory(item: AgentWorkspaceMemoryItem) {
   }
 }
 
+function clearPendingUploadPreview() {
+  const preview = pendingUploadPreview.value
+  if (preview?.url.startsWith("blob:")) {
+    URL.revokeObjectURL(preview.url)
+  }
+  pendingUploadPreview.value = null
+}
+
 async function handleFileSelected(event: Event) {
   const target = event.target as HTMLInputElement
   const selected = target.files?.[0]
   target.value = ""
   if (!selected || !props.token || uploading.value) return
+  clearPendingUploadPreview()
+  if (isImageAttachment(selected.type, selected.name)) {
+    pendingUploadPreview.value = { name: selected.name, url: URL.createObjectURL(selected) }
+  }
   uploading.value = true
   try {
     const uploaded = await uploadAgentFile(props.sessionId, selected, { token: props.token })
     files.value = [uploaded, ...files.value.filter((item) => item.id !== uploaded.id)]
   } finally {
+    clearPendingUploadPreview()
     uploading.value = false
   }
+}
+
+function openAttachmentPreview(payload: { name: string; url: string; contentType?: string | null }) {
+  const url = resolveAgentFileUrl(payload.url)
+  if (!url) return
+  openAssetPreview({
+    id: `attachment-${payload.name}`,
+    kind: "image",
+    title: "图片附件",
+    url,
+  })
 }
 
 async function removeFile(file: AgentFile) {
@@ -1183,14 +1230,16 @@ function appendStreamingAssistantDelta(runId: number, delta: string) {
   if (isStructuredMediaContent(delta)) return
   const message = ensureStreamingAssistantMessage(runId)
   message.contentText += delta
-  void scrollBottom()
+  stickToBottom.value = true
+  void scrollBottom(true)
 }
 
 function completeStreamingAssistantMessage(runId: number, content: string) {
   if (!content) return
   const message = ensureStreamingAssistantMessage(runId)
   message.contentText = content
-  void scrollBottom()
+  stickToBottom.value = true
+  void scrollBottom(true)
 }
 
 async function syncRunEvents(runId: number, options?: { replayRenderableEvents?: boolean }) {
@@ -1605,10 +1654,17 @@ function adjustComposerTextareaHeight() {
   composerRef.value?.adjustComposerTextareaHeight()
 }
 
+function updateComposerScrollInset() {
+  const dock = composerDockRef.value
+  if (!dock) return
+  composerScrollInset.value = Math.ceil(dock.getBoundingClientRect().height) + 20
+}
+
 function isNearBottom(threshold = 120) {
   const el = messageContainerRef.value
   if (!el) return true
-  return el.scrollHeight - el.scrollTop - el.clientHeight <= threshold
+  const inset = Math.max(threshold, composerScrollInset.value * 0.35)
+  return el.scrollHeight - el.scrollTop - el.clientHeight <= inset
 }
 
 function onMessageContainerScroll() {
@@ -1633,7 +1689,16 @@ function navigateToMessage(messageId: number) {
 async function scrollBottom(force = false) {
   if (!force && !stickToBottom.value) return
   await nextTick()
-  bottomRef.value?.scrollIntoView({ block: "end" })
+  updateComposerScrollInset()
+  await nextTick()
+  const container = messageContainerRef.value
+  if (!container) return
+  const behavior = force ? "auto" : "smooth"
+  if (typeof container.scrollTo === "function") {
+    container.scrollTo({ top: container.scrollHeight, behavior })
+  } else {
+    container.scrollTop = container.scrollHeight
+  }
   scheduleNavLayoutUpdate()
 }
 
@@ -1642,7 +1707,10 @@ function showError(message: string) {
 }
 
 watch(input, () => {
-  void nextTick(() => adjustComposerTextareaHeight())
+  void nextTick(() => {
+    adjustComposerTextareaHeight()
+    updateComposerScrollInset()
+  })
 })
 
 watch(messages, () => {
@@ -1654,7 +1722,7 @@ watch(messages, () => {
       void scrollBottom()
     }
   })
-})
+}, { deep: true })
 
 watch(
   () => props.sessionId,
@@ -1677,10 +1745,26 @@ onMounted(() => {
   loadPersistedRunEventCache()
   void loadPane()
   void loadPreviewTools()
-  void nextTick(() => adjustComposerTextareaHeight())
+  void nextTick(() => {
+    adjustComposerTextareaHeight()
+    updateComposerScrollInset()
+    const dock = composerDockRef.value
+    if (typeof ResizeObserver !== "undefined" && dock) {
+      composerResizeObserver = new ResizeObserver(() => {
+        updateComposerScrollInset()
+        if (stickToBottom.value) {
+          void scrollBottom(true)
+        }
+      })
+      composerResizeObserver.observe(dock)
+    }
+  })
 })
 
 onUnmounted(() => {
+  clearPendingUploadPreview()
+  composerResizeObserver?.disconnect()
+  composerResizeObserver = null
   persistChatScroll()
   stopRunEventStream()
   stopRunStatusWatchdog()
@@ -1694,7 +1778,10 @@ defineExpose({
 </script>
 
 <template>
-  <div class="agent-chat-pane">
+  <div
+    class="agent-chat-pane"
+    :style="{ '--chat-composer-inset': `${composerScrollInset}px` }"
+  >
     <AgentAmbientBackground :ambient-state="ambientState" :scroll-offset="scrollOffset" />
 
     <div
@@ -1829,7 +1916,12 @@ defineExpose({
           @confirm="confirmTool($event.eventId, $event.toolCode, $event.approved)"
         />
 
-        <div ref="bottomRef" />
+        <div
+          ref="bottomRef"
+          class="chat-scroll-anchor"
+          :style="{ height: `${composerScrollInset}px` }"
+          aria-hidden="true"
+        />
       </template>
     </div>
 
@@ -1849,7 +1941,7 @@ defineExpose({
       </button>
     </div>
 
-    <div class="composer-dock">
+    <div ref="composerDockRef" class="composer-dock">
       <AgentComposer
         ref="composerRef"
         :model-config-id="modelConfigId"
@@ -1857,6 +1949,8 @@ defineExpose({
         :models-loading="modelsLoading"
         :draft="input"
         :files="files"
+        :file-preview-urls="filePreviewUrls"
+        :pending-upload-preview="pendingUploadPreview"
         :uploading="uploading"
         :removing-file-id="removingFileId"
         :has-active-run="hasActiveRun"
@@ -1870,6 +1964,7 @@ defineExpose({
         @submit="submitMessage()"
         @cancel-run="cancelCurrentRun()"
         @file-selected="handleFileSelected"
+        @preview-attachment="openAttachmentPreview"
         @remove-file="removeFile"
         @open-memory="openMemoryPanel"
       />
@@ -2013,10 +2108,16 @@ defineExpose({
   color: #fff;
 }
 
+.chat-scroll-anchor {
+  flex-shrink: 0;
+  width: 100%;
+  pointer-events: none;
+}
+
 .chat-floating-actions {
   position: absolute;
   right: max(14px, calc((100% - min(760px, calc(100% - 96px))) / 2 - 52px));
-  bottom: 122px;
+  bottom: calc(var(--chat-composer-inset, 210px) + 16px);
   z-index: 5;
   display: flex;
   flex-direction: column;
@@ -2037,7 +2138,7 @@ defineExpose({
   z-index: 1;
   height: 100%;
   max-height: none;
-  padding: 64px clamp(40px, 7vw, 128px) 210px;
+  padding: 64px clamp(40px, 7vw, 128px) 24px;
   scroll-behavior: smooth;
   scrollbar-gutter: stable both-edges;
   scrollbar-width: thin;
@@ -2628,22 +2729,23 @@ defineExpose({
   display: flex;
   align-items: center;
   gap: 8px;
-  min-height: 50px;
+  min-height: 0;
   margin-bottom: 6px;
 }
 
 .assistant-name-row :deep(.agent-avatar) {
-  margin-right: 2px;
+  width: auto;
+  height: auto;
 }
 
 .assistant-name-row :deep(.agent-avatar--md) {
-  width: 50px;
-  height: 50px;
+  width: 28px;
+  height: 28px;
 }
 
 .assistant-name-row :deep(.agent-avatar__logo) {
-  width: 28px;
-  height: 28px;
+  width: 22px;
+  height: 22px;
 }
 
 .assistant-name-row strong {
@@ -3041,10 +3143,10 @@ defineExpose({
 @media (max-width: 900px) {
   .chat-floating-actions {
     right: 12px;
-    bottom: 128px;
+    bottom: calc(var(--chat-composer-inset, 196px) + 12px);
   }
   .message-container {
-    padding: 36px 14px 196px;
+    padding: 36px 14px 16px;
   }
   .composer {
     width: calc(100% - 24px);

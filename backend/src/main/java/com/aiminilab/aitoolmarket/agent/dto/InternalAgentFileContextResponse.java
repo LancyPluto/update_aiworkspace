@@ -7,7 +7,8 @@ public record InternalAgentFileContextResponse(
         String originalFilename,
         String contentType,
         String status,
-        String extractedText
+        String extractedText,
+        String downloadUrl
 ) {
     private static final int CONTEXT_TEXT_LIMIT = 12_000;
 
@@ -16,12 +17,14 @@ public record InternalAgentFileContextResponse(
         if (text != null && text.length() > CONTEXT_TEXT_LIMIT) {
             text = text.substring(0, CONTEXT_TEXT_LIMIT);
         }
+        String downloadUrl = "/api/v1/agent/sessions/" + file.getSessionId() + "/files/" + file.getId() + "/content";
         return new InternalAgentFileContextResponse(
                 file.getId(),
                 file.getOriginalFilename(),
                 file.getContentType(),
                 file.getStatus(),
-                text
+                text,
+                downloadUrl
         );
     }
 }

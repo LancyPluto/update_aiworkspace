@@ -188,7 +188,11 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         if (costAmount.compareTo(BigDecimal.ZERO) <= 0) {
             return fallbackCredits;
         }
-        return costAmount.divide(new BigDecimal("0.01"), 0, RoundingMode.CEILING).intValue();
+        int baseCredits = costAmount.divide(new BigDecimal("0.01"), 0, RoundingMode.CEILING).intValue();
+        return BigDecimal.valueOf(baseCredits)
+                .multiply(new BigDecimal("1.2"))
+                .setScale(0, RoundingMode.CEILING)
+                .intValue();
     }
 
     @Override

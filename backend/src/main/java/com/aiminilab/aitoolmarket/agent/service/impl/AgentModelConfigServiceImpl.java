@@ -84,15 +84,17 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
 
     @Override
     public List<AgentModelConfigResponse> agentSelectableList() {
-        List<AgentModelConfig> configs = executableAgentConfigs();
+        List<AgentModelConfig> configs = agentVisibleConfigs();
         if (!configs.isEmpty()) {
-            return configs.stream().map(this::toResponse).toList();
+            return configs.stream()
+                    .map(config -> toResponse(config, isChatSelectableForAgent(config)))
+                    .toList();
         }
         AgentModelConfig fallback = credentialResolver.resolveForExecution(findOrDefault());
         if (Boolean.FALSE.equals(fallback.getEnabled()) || Boolean.FALSE.equals(fallback.getAgentEnabled())) {
             return List.of();
         }
-        return List.of(toResponse(fallback));
+        return List.of(toResponse(fallback, isChatSelectableForAgent(fallback)));
     }
 
     @Override
@@ -100,6 +102,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
     public AgentModelConfigResponse adminCreate(AgentModelConfigRequest request) {
         validate(request);
         ensureConfigCodeAvailable(request.configCode(), null);
+        validateEnabledModelAccount(request);
         LocalDateTime now = LocalDateTime.now();
         AgentModelConfig config = applyRequest(new AgentModelConfig(), request, null, now);
         config.setCreatedAt(now);
@@ -116,6 +119,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         validate(request);
         AgentModelConfig existing = findActiveOrThrow(id);
         ensureConfigCodeAvailable(request.configCode(), existing.getId());
+        validateEnabledModelAccount(request);
         AgentModelConfig config = applyRequest(existing, request, existing, LocalDateTime.now());
         agentModelConfigMapper.updateConfig(config);
         if (Boolean.TRUE.equals(config.getDefault())) {
@@ -209,8 +213,9 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
             capabilities = modelCapabilityService.normalizeCapabilities(providerTrimmed, List.of());
         }
         config.setCapabilities(capabilitiesCodec.serialize(capabilities));
-        config.setEnabled(request.enabled() == null || request.enabled());
-        config.setAgentEnabled(request.agentEnabled() == null ? Boolean.TRUE : request.agentEnabled());
+        boolean enabled = request.enabled() == null || request.enabled();
+        config.setEnabled(enabled);
+        config.setAgentEnabled(enabled && (request.agentEnabled() == null ? Boolean.TRUE : request.agentEnabled()));
         config.setDefault(request.isDefault() != null && request.isDefault());
         config.setUpdatedAt(now);
         return config;
@@ -242,7 +247,53 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
     @Override
     public AgentModelConfigTestResponse adminTestById(Long id) {
         AgentModelConfig existing = findActiveOrThrow(id);
-        return adminTest(toTestRequest(existing));
+        try {
+            AgentModelConfigTestResponse response = adminTest(toTestRequest(existing));
+            recordModelConnectivityTest(existing, response);
+            if (!Boolean.TRUE.equals(response.success())) {
+                disableModelForFailedConnectivity(existing);
+            } else {
+                markVendorAccountHealthy(existing);
+            }
+            return response;
+        } catch (RuntimeException exception) {
+            disableModelForFailedConnectivity(existing);
+            throw exception;
+        }
+    }
+
+    private void disableModelForFailedConnectivity(AgentModelConfig config) {
+        config.setEnabled(false);
+        config.setAgentEnabled(false);
+        config.setDefault(false);
+        config.setUpdatedAt(LocalDateTime.now());
+        agentModelConfigMapper.updateConfig(config);
+    }
+
+    private void recordModelConnectivityTest(AgentModelConfig config, AgentModelConfigTestResponse response) {
+        config.setLastTestSuccess(Boolean.TRUE.equals(response.success()));
+        String message = response.message() == null ? "" : response.message();
+        if (message.length() > 500) {
+            message = message.substring(0, 500);
+        }
+        config.setLastTestMessage(message);
+        config.setLastTestAt(LocalDateTime.now());
+        config.setUpdatedAt(LocalDateTime.now());
+        agentModelConfigMapper.updateConnectivityTest(config);
+    }
+
+    private void markVendorAccountHealthy(AgentModelConfig config) {
+        if (config.getVendorAccountId() == null) {
+            return;
+        }
+        ModelVendorAccount account = vendorAccountMapper.findActiveById(config.getVendorAccountId());
+        if (account == null) {
+            return;
+        }
+        account.setHealthStatus("OK");
+        account.setBalanceErrorMessage(null);
+        account.setUpdatedAt(LocalDateTime.now());
+        vendorAccountMapper.updateAccount(account);
     }
 
     @Override
@@ -390,6 +441,10 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
     }
 
     private AgentModelConfigResponse toResponse(AgentModelConfig config) {
+        return toResponse(config, isChatSelectableForAgent(config));
+    }
+
+    private AgentModelConfigResponse toResponse(AgentModelConfig config, boolean chatSelectable) {
         String vendorAccountName = null;
         if (config.getVendorAccountId() != null) {
             ModelVendorAccount account = vendorAccountMapper.findActiveById(config.getVendorAccountId());
@@ -404,7 +459,8 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                 vendorAccountName,
                 channelCode,
                 vendorCodeResolver.vendorLabel(channelCode),
-                vendorCodeResolver.vendorIconAsset(channelCode)
+                vendorCodeResolver.vendorIconAsset(channelCode),
+                chatSelectable
         );
     }
 
@@ -414,6 +470,31 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                 .map(credentialResolver::resolveForExecution)
                 .filter(this::isExecutableForAgent)
                 .toList();
+    }
+
+    private List<AgentModelConfig> agentVisibleConfigs() {
+        return agentModelConfigMapper.findAgentEnabled()
+                .stream()
+                .map(credentialResolver::resolveForExecution)
+                .filter(this::isVisibleInAgentPicker)
+                .toList();
+    }
+
+    private boolean isVisibleInAgentPicker(AgentModelConfig config) {
+        if (config == null || Boolean.FALSE.equals(config.getEnabled()) || Boolean.FALSE.equals(config.getAgentEnabled())) {
+            return false;
+        }
+        if (isKnownNonChatEndpoint(config.getBaseUrl(), config.getProvider(), config.getModelName())) {
+            return false;
+        }
+        if (!hasHealthyEnabledAccount(config)) {
+            return false;
+        }
+        return hasExecutableSecret(config.getApiKey()) || hasKlingAccessSecretPair(config.getExtraAuthJson());
+    }
+
+    private boolean isChatSelectableForAgent(AgentModelConfig config) {
+        return isExecutableForAgent(config);
     }
 
     private boolean isExecutableForAgent(AgentModelConfig config) {
@@ -430,7 +511,22 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         if (isKnownNonChatEndpoint(config.getBaseUrl(), config.getProvider(), config.getModelName())) {
             return false;
         }
+        if (!hasHealthyEnabledAccount(config)) {
+            return false;
+        }
         return hasExecutableSecret(config.getApiKey()) || hasKlingAccessSecretPair(config.getExtraAuthJson());
+    }
+
+    private boolean hasHealthyEnabledAccount(AgentModelConfig config) {
+        if (config.getVendorAccountId() == null) {
+            return true;
+        }
+        ModelVendorAccount account = vendorAccountMapper.findActiveById(config.getVendorAccountId());
+        if (account == null || Boolean.FALSE.equals(account.getEnabled())) {
+            return false;
+        }
+        String health = account.getHealthStatus() == null ? "" : account.getHealthStatus().trim();
+        return "OK".equalsIgnoreCase(health);
     }
 
     private boolean isKnownNonChatEndpoint(String baseUrl, String provider, String modelName) {
@@ -486,6 +582,31 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
             if (account == null) {
                 throw new BusinessException(ErrorCode.PARAM_ERROR, "vendor account not found");
             }
+        }
+    }
+
+    private void validateEnabledModelAccount(AgentModelConfigRequest request) {
+        boolean enabled = request.enabled() == null || request.enabled();
+        boolean agentEnabled = request.agentEnabled() == null || request.agentEnabled();
+        if (!enabled && !agentEnabled) {
+            return;
+        }
+        if (request.vendorAccountId() == null) {
+            return;
+        }
+        ModelVendorAccount account = vendorAccountMapper.findActiveById(request.vendorAccountId());
+        if (account != null) {
+            validateAccountReadyForEnabledModel(account);
+        }
+    }
+
+    private void validateAccountReadyForEnabledModel(ModelVendorAccount account) {
+        if (Boolean.FALSE.equals(account.getEnabled())) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "vendor account must be enabled before enabling this model");
+        }
+        String health = account.getHealthStatus() == null ? "" : account.getHealthStatus().trim();
+        if (!"OK".equalsIgnoreCase(health)) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "vendor account connectivity test must pass before enabling this model");
         }
     }
 

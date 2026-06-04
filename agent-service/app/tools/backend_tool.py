@@ -1,4 +1,4 @@
-import asyncio
+﻿import asyncio
 import json
 import logging
 import re
@@ -60,6 +60,7 @@ class BackendToolBridge:
         if apply_placeholder_defaults:
             arguments = _with_generation_argument_defaults(context, tool, arguments)
             arguments = _with_field_strategy_defaults(tool, arguments)
+        arguments = _with_attached_file_defaults(context, tool, arguments)
         return arguments
 
     def missing_required_arguments(self, context: RunContext, tool: ToolDescriptor) -> list[str]:
@@ -448,6 +449,68 @@ def _with_field_strategy_defaults(tool: ToolDescriptor, arguments: dict[str, Any
         if strategy in {"default", "derive"} and field.defaultValue not in (None, ""):
             normalized[field.fieldKey] = field.defaultValue
     return normalized
+
+
+def _with_attached_file_defaults(context: RunContext, tool: ToolDescriptor, arguments: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(arguments)
+    properties = tool.inputSchema.get("properties", {})
+    if not isinstance(properties, dict):
+        properties = {}
+
+    image_urls = _ready_image_download_urls(context)
+    if image_urls:
+        for key in (
+            "image",
+            "imageUrl",
+            "image_url",
+            "referenceImageUrl",
+            "reference_image_url",
+            "initImage",
+            "inputImage",
+            "firstFrameImage",
+            "firstFrameUrl",
+            "first_frame_image",
+            "first_frame_url",
+        ):
+            if key in properties and not normalized.get(key):
+                normalized[key] = image_urls[0]
+
+    duration_match = re.search(r"(\d+)\s*秒", context.message or "")
+    if duration_match:
+        for key in ("duration", "videoDuration", "video_duration", "length", "seconds"):
+            if key in properties and not normalized.get(key):
+                normalized[key] = duration_match.group(1)
+                break
+
+    return normalized
+
+
+def _ready_image_download_urls(context: RunContext) -> list[str]:
+    urls: list[str] = []
+    for file in context.agentFiles:
+        if file.status != "READY":
+            continue
+        content_type = (file.contentType or "").lower()
+        filename = (file.originalFilename or "").lower()
+        if not content_type.startswith("image/") and not filename.endswith(
+            (".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".heic", ".heif", ".avif")
+        ):
+            continue
+        url = _absolute_backend_url(file.downloadUrl)
+        if url and url not in urls:
+            urls.append(url)
+    return urls
+
+
+def _absolute_backend_url(url: str | None) -> str:
+    raw = (url or "").strip()
+    if not raw:
+        return ""
+    if raw.startswith(("http://", "https://", "data:")):
+        return raw
+    base = settings.backend_internal_base_url.rstrip("/")
+    path = raw if raw.startswith("/") else f"/{raw}"
+    return f"{base}{path}"
 
 
 def _with_generation_argument_defaults(context: RunContext, tool: ToolDescriptor, arguments: dict[str, Any]) -> dict[str, Any]:

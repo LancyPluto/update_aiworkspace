@@ -1,4 +1,4 @@
-import type { AgentModelConfig } from "@/api/types"
+﻿import type { AgentModelConfig } from "@/api/types"
 
 export type AgentModelGroupKind = "vendor" | "relay"
 
@@ -22,12 +22,12 @@ type CatalogEntry = {
   patterns: string[]
 }
 
-/** Vite publicDir=asset，静态资源路径为 /assets/vendor-icons */
+/** Vite publicDir=asset锛岄潤鎬佽祫婧愯矾寰勪负 /assets/vendor-icons */
 export const VENDOR_ICON_BASE = "/assets/vendor-icons"
 
-/** 中转站：优先按 baseUrl 域名匹配 */
+/** 涓浆绔欙細浼樺厛鎸?baseUrl 鍩熷悕鍖归厤 */
 const relayCatalog: CatalogEntry[] = [
-  { key: "relay:siliconflow", label: "硅基流动", mark: "SF", iconAsset: "siliconflow", patterns: ["siliconflow"] },
+  { key: "relay:siliconflow", label: "纭呭熀娴佸姩", mark: "SF", iconAsset: "siliconflow", patterns: ["siliconflow"] },
   { key: "relay:openrouter", label: "OpenRouter", mark: "OR", iconAsset: "openrouter", patterns: ["openrouter"] },
   { key: "relay:ofox", label: "oFox", mark: "OX", iconAsset: "ofox", patterns: ["ofox.ai", "ofox"] },
   { key: "relay:api2d", label: "API2D", mark: "2D", iconAsset: "api2d", patterns: ["api2d", "openai.api2d"] },
@@ -40,43 +40,44 @@ const relayCatalog: CatalogEntry[] = [
   { key: "relay:azure", label: "Azure OpenAI", mark: "Az", iconAsset: "azure", patterns: ["openai.azure.com", ".azure.com/openai"] },
 ]
 
-/** 模型厂商：按模型名 / 官方 API 域名识别 */
+/** 妯″瀷鍘傚晢锛氭寜妯″瀷鍚?/ 瀹樻柟 API 鍩熷悕璇嗗埆 */
 const vendorCatalog: CatalogEntry[] = [
   { key: "vendor:openai", label: "OpenAI", mark: "OA", iconAsset: "openai", patterns: ["api.openai.com", "openai.com/v1", "gpt-", "o1-", "o3-", "chatgpt"] },
   { key: "vendor:deepseek", label: "DeepSeek", mark: "DS", iconAsset: "deepseek", patterns: ["deepseek"] },
   {
     key: "vendor:doubao",
-    label: "豆包",
+    label: "璞嗗寘",
     mark: "DB",
     iconAsset: "doubao",
     patterns: ["doubao", "seedance", "seedream", "bytedance"],
   },
   {
     key: "vendor:volcengine",
-    label: "火山引擎",
+    label: "鐏北寮曟搸",
     mark: "VE",
     iconAsset: "volcengine",
     patterns: ["volc", "volces.com", "volcengine", "ark.cn-beijing"],
   },
   {
     key: "vendor:qwen",
-    label: "通义千问",
+    label: "閫氫箟鍗冮棶",
     mark: "QW",
     iconAsset: "qwen",
     patterns: ["qwen", "tongyi", "dashscope", "aliyuncs.com"],
   },
-  { key: "vendor:zhipu", label: "智谱 GLM", mark: "Z", iconAsset: "zhipu", patterns: ["zhipu", "glm", "chatglm", "bigmodel.cn"] },
+  { key: "vendor:zhipu", label: "鏅鸿氨 GLM", mark: "Z", iconAsset: "zhipu", patterns: ["zhipu", "glm", "chatglm", "bigmodel.cn"] },
   { key: "vendor:moonshot", label: "Moonshot / Kimi", mark: "K", iconAsset: "moonshot", patterns: ["moonshot", "kimi"] },
   { key: "vendor:minimax", label: "MiniMax", mark: "MM", iconAsset: "minimax", patterns: ["minimax"] },
-  { key: "vendor:baidu", label: "文心 ERNIE", mark: "BD", iconAsset: "baidu", patterns: ["ernie", "wenxin", "baidu"] },
+  { key: "vendor:baidu", label: "鏂囧績 ERNIE", mark: "BD", iconAsset: "baidu", patterns: ["ernie", "wenxin", "baidu"] },
   { key: "vendor:google", label: "Google Gemini", mark: "G", iconAsset: "gemini", patterns: ["gemini", "generativelanguage.googleapis", "google.ai"] },
   { key: "vendor:claude", label: "Claude", mark: "C", iconAsset: "claude", patterns: ["claude"] },
   { key: "vendor:anthropic", label: "Anthropic", mark: "A", iconAsset: "anthropic", patterns: ["anthropic"] },
   { key: "vendor:alibabacloud", label: "阿里云", mark: "ALI", iconAsset: "alibabacloud", patterns: ["alibabacloud", "alibaba cloud"] },
-  { key: "vendor:tencent", label: "腾讯混元", mark: "HY", iconAsset: "tencent", patterns: ["hunyuan", "tencent"] },
-  { key: "vendor:kling", label: "可灵 Kling", mark: "KL", iconAsset: "kling", patterns: ["kling"] },
+  { key: "vendor:tencent", label: "鑵捐娣峰厓", mark: "HY", iconAsset: "tencent", patterns: ["hunyuan", "tencent"] },
+  { key: "vendor:kling", label: "鍙伒 Kling", mark: "KL", iconAsset: "kling", patterns: ["kling"] },
+  { key: "vendor:mineru", label: "MinerU", mark: "M", iconAsset: "mineru", patterns: ["mineru"] },
   { key: "vendor:stepfun", label: "阶跃 StepFun", mark: "SF", iconAsset: "stepfun", patterns: ["stepfun", "step-"] },
-  { key: "vendor:yi", label: "零一万物 Yi", mark: "Y", iconAsset: "yi", patterns: ["yi-lightning", "01.ai", "lingyi"] },
+  { key: "vendor:yi", label: "闆朵竴涓囩墿 Yi", mark: "Y", iconAsset: "yi", patterns: ["yi-lightning", "01.ai", "lingyi"] },
   { key: "vendor:mistral", label: "Mistral", mark: "M", iconAsset: "mistral", patterns: ["mistral"] },
   { key: "vendor:xai", label: "xAI Grok", mark: "X", iconAsset: "xai", patterns: ["grok", "x.ai", "xai"] },
   { key: "vendor:meta", label: "Meta Llama", mark: "Ll", iconAsset: "meta", patterns: ["llama", "meta-llama"] },
@@ -85,7 +86,7 @@ const vendorCatalog: CatalogEntry[] = [
 
 const vendorFallback: AgentModelGroupMeta = {
   key: "vendor:other",
-  label: "其他模型",
+  label: "鍏朵粬妯″瀷",
   mark: "AI",
   iconUrl: `${VENDOR_ICON_BASE}/api.svg`,
   kind: "vendor",
@@ -167,7 +168,7 @@ function relayLabelFromHost(hostname: string): string {
   const short = hostname.replace(/^www\./, "")
   const parts = short.split(".")
   const brand = parts.length >= 2 ? parts[parts.length - 2] : short
-  return `中转站 · ${brand}`
+  return `涓浆绔?路 ${brand}`
 }
 
 function relayMetaFromHost(hostname: string): AgentModelGroupMeta {
@@ -243,7 +244,7 @@ export function groupKeyForModel(model: AgentModelConfig) {
   return resolveAgentModelGroup(model).key
 }
 
-/** 模型条目上展示的真实厂商（不受中转站分组影响） */
+/** 妯″瀷鏉＄洰涓婂睍绀虹殑鐪熷疄鍘傚晢锛堜笉鍙椾腑杞珯鍒嗙粍褰卞搷锛?*/
 export function resolveAgentModelVendor(model: AgentModelConfig): AgentModelGroupMeta {
   if (model.channelCode?.trim() || model.channelLabel?.trim() || model.channelIconAsset?.trim()) {
     const key = model.channelCode?.trim() || model.channelIconAsset?.trim() || "channel"

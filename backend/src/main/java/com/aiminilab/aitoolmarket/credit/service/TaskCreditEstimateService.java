@@ -27,6 +27,14 @@ public class TaskCreditEstimateService {
         return estimateTaskCredits(tool, modelCapabilityService.resolveModelConfigForTool(tool));
     }
 
+    public int estimateUserFacingTaskCredits(AiTool tool) {
+        return userFacingCredits(estimateForTool(tool));
+    }
+
+    public int estimateUserFacingTaskCredits(AiTool tool, AgentModelConfig modelConfig) {
+        return userFacingCredits(estimateTaskCredits(tool, modelConfig));
+    }
+
     public int estimateTaskCredits(AiTool tool, AgentModelConfig modelConfig) {
         int toolEstimate = tool.getEstimatedCreditCost() == null ? 0 : Math.max(0, tool.getEstimatedCreditCost());
         if (modelConfig == null) {
@@ -38,5 +46,15 @@ public class TaskCreditEstimateService {
             return calculated > 0 ? calculated : toolEstimate;
         }
         return toolEstimate;
+    }
+
+    private int userFacingCredits(int baseCredits) {
+        if (baseCredits <= 0) {
+            return 0;
+        }
+        return BigDecimal.valueOf(baseCredits)
+                .multiply(new BigDecimal("1.2"))
+                .setScale(0, RoundingMode.CEILING)
+                .intValue();
     }
 }

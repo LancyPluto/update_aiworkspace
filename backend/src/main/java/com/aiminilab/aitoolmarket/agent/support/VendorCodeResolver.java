@@ -32,6 +32,7 @@ public class VendorCodeResolver {
             Map.entry("ofox_openai_images", "openai_gateway"),
             Map.entry("openai_images_gateway", "openai_gateway"),
             Map.entry("worker_video", "siliconflow"),
+            Map.entry("mineru", "mineru"),
             Map.entry("mock", "mock")
     );
 
@@ -50,6 +51,7 @@ public class VendorCodeResolver {
         VENDOR_LABELS.put("siliconflow", "SiliconFlow");
         VENDOR_LABELS.put("volcengine", "火山引擎 / 豆包");
         VENDOR_LABELS.put("kling", "可灵");
+        VENDOR_LABELS.put("mineru", "MinerU");
         VENDOR_LABELS.put("mock", "Mock");
     }
 
@@ -178,6 +180,7 @@ public class VendorCodeResolver {
         if (text.contains("bigmodel.cn") || text.contains("zhipu")) return "zhipu";
         if (text.contains("moonshot.cn") || text.contains("kimi")) return "moonshot";
         if (text.contains("anthropic.com") || text.contains("claude")) return "anthropic";
+        if (text.contains("mineru.net") || text.contains("mineru")) return "mineru";
         if (text.contains("openai.com")) return "openai";
         if (text.contains("ofox.ai")) return "openai_gateway";
         return null;
@@ -198,6 +201,7 @@ public class VendorCodeResolver {
         if (combined.contains("zhipu") || combined.contains("glm") || combined.contains("chatglm") || combined.contains("智谱")) return "zhipu";
         if (combined.contains("moonshot") || combined.contains("kimi")) return "moonshot";
         if (combined.contains("anthropic") || combined.contains("claude")) return "anthropic";
+        if (combined.contains("mineru")) return "mineru";
         String fromUrl = inferFromBaseUrl(baseUrl);
         return fromUrl != null ? fromUrl : fallback;
     }

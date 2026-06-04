@@ -2,7 +2,7 @@
 
 import pytest
 
-from app.core.schemas import ChatMessage, RunContext, RuntimeSettings, TaskDetailResponse, ToolDescriptor
+from app.core.schemas import AgentFileContext, ChatMessage, RunContext, RuntimeSettings, TaskDetailResponse, ToolDescriptor
 from app.tools.backend_tool import BackendToolBridge, ToolExecutionError
 
 
@@ -317,6 +317,42 @@ def test_extract_strips_example_prefix_from_chinese_labels():
     assert args["targetCustomer"] == "年轻女性、宝妈"
     assert args["style"] == "种草"
     assert args["sellingPoints"] == "价格划算、效果明显"
+
+
+def test_build_arguments_injects_uploaded_image_and_duration():
+    bridge = BackendToolBridge(backend_client=None)  # type: ignore[arg-type]
+    tool = ToolDescriptor(
+        toolCode="kling_image_to_video_v3",
+        toolName="可灵 V3 图生视频",
+        autoCallable=True,
+        inputSchema={
+            "type": "object",
+            "required": ["image", "duration"],
+            "properties": {
+                "image": {"type": "string", "title": "首帧图片"},
+                "duration": {"type": "string", "title": "时长"},
+            },
+        },
+    )
+    ctx = RunContext(
+        runId=1,
+        sessionId=9,
+        userId=1,
+        message="请用这张图片生成 5 秒视频",
+        agentFiles=[
+            AgentFileContext(
+                id=12,
+                originalFilename="frame.png",
+                contentType="image/png",
+                status="READY",
+                extractedText="[用户已上传图片：frame.png]",
+                downloadUrl="/api/v1/agent/sessions/9/files/12/content",
+            )
+        ],
+    )
+    args = bridge.build_arguments(ctx, tool, apply_placeholder_defaults=True)
+    assert args["image"] == "http://127.0.0.1:8080/api/v1/agent/sessions/9/files/12/content"
+    assert args["duration"] == "5"
 
 
 @pytest.mark.asyncio

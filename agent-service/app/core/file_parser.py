@@ -29,6 +29,13 @@ def parse_file_content(filename: str, content_type: str | None, content_base64: 
         return _parse_json(content)
     if lowered_name.endswith(".pdf") or lowered_type == "application/pdf":
         return _parse_pdf(content)
+    if _is_image_file(lowered_name, lowered_type):
+        label = filename.strip() if filename and filename.strip() else "image"
+        return (
+            f"[用户已上传图片：{label}]\n"
+            "该图片已随当前消息提交，可作为图生视频/图像工具的首帧或参考图输入；"
+            "请勿再要求用户重新上传或提供图片链接。"
+        )
     raise FileParseError("unsupported file type")
 
 
@@ -58,6 +65,11 @@ def chunk_text(filename: str, text: str, chunk_size: int = 1200, chunk_overlap: 
         for index, document in enumerate(documents)
         if document.page_content.strip()
     ]
+
+
+def _is_image_file(filename: str, content_type: str) -> bool:
+    image_suffixes = (".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".heic", ".heif", ".avif")
+    return filename.endswith(image_suffixes) or content_type.startswith("image/")
 
 
 def _is_text_file(filename: str, content_type: str) -> bool:

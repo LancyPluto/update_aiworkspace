@@ -153,6 +153,7 @@ services:
     working_dir: /app
     restart: unless-stopped
     environment:
+      APP_PRODUCTION_MODE: ${APP_PRODUCTION_MODE:-false}
       NEXT_PUBLIC_API_PROXY_TARGET: ${ADMIN_NEXT_PUBLIC_API_PROXY_TARGET:-http://backend:8080}
       NEXT_PUBLIC_API_BASE_URL: ${ADMIN_NEXT_PUBLIC_API_BASE_URL:-}
       NEXT_PUBLIC_ADMIN_BASE_PATH: ${NEXT_PUBLIC_ADMIN_BASE_PATH:-/admin}
@@ -164,7 +165,12 @@ services:
       - ../admin-frontend:/app
       - admin_frontend_next:/app/.next
       - /app/node_modules            
-    command: sh -c "npm config set registry https://registry.npmmirror.com && npm install && npm run dev:docker"
+    command: >-
+      sh -c "npm config set registry https://registry.npmmirror.com && npm install &&
+      if [ \"$${APP_PRODUCTION_MODE}\" = 'true' ]; then npm run build && npm run start -- -H 0.0.0.0 -p 5174;
+      else npm run dev:docker; fi"
+    env_file:
+      - ../.env
 
   user-web:
     image: ${DOCKER_REGISTRY:-docker.1ms.run/}node:22-alpine

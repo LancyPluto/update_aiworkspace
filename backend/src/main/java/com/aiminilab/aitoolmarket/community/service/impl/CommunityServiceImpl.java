@@ -841,10 +841,25 @@ public class CommunityServiceImpl implements CommunityService {
 
     private String normalizeTitle(String value, String fallback) {
         String normalized = value == null ? "" : value.trim();
-        if (normalized.isBlank()) {
+        if (normalized.isBlank() || isBrokenCommunityText(normalized)) {
             normalized = fallback == null || fallback.isBlank() ? "AI creation" : fallback.trim();
         }
+        if (isBrokenCommunityText(normalized)) {
+            normalized = "AI creation";
+        }
         return limit(normalized, MAX_TITLE_LENGTH);
+    }
+
+    private boolean isBrokenCommunityText(String value) {
+        if (value == null) {
+            return true;
+        }
+        String compact = value.replaceAll("\\s+", "");
+        if (compact.isBlank()) {
+            return true;
+        }
+        long questionCount = compact.chars().filter(ch -> ch == '?').count();
+        return compact.matches("[?\\uFFFD]+\\d*") || questionCount >= 3 && questionCount * 2 >= compact.length();
     }
 
     private String normalizeDescription(String value) {

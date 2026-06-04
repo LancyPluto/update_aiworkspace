@@ -558,6 +558,7 @@ export interface AgentModelConfig {
   channelLabel?: string | null
   channelIconAsset?: string | null
   capabilities?: string[] | null
+  chatSelectable?: boolean | null
 }
 
 export interface AgentRun {

@@ -1760,14 +1760,22 @@ def _format_file_context(context: RunContext) -> str:
         for chunk in ready_chunks:
             sections.append(f"\n[File: {chunk.originalFilename}, chunk {chunk.chunkIndex}]\n{chunk.contentText[:4000]}")
         return "\n".join(sections)
-    ready_files = [file for file in context.agentFiles if file.status == "READY" and file.extractedText.strip()]
+    ready_files = [
+        file
+        for file in context.agentFiles
+        if file.status == "READY" and (file.extractedText.strip() or (file.downloadUrl or "").strip())
+    ]
     if not ready_files:
         return ""
     sections = [
         "The user has uploaded files. Use this file context when it is relevant, and cite filenames in your answer."
     ]
     for file in ready_files:
-        sections.append(f"\n[File: {file.originalFilename}]\n{file.extractedText[:12000]}")
+        excerpt = file.extractedText.strip()[:12000]
+        download_url = (file.downloadUrl or "").strip()
+        if download_url:
+            excerpt = f"{excerpt}\n图片访问地址：{download_url}" if excerpt else f"[用户已上传图片：{file.originalFilename}]\n图片访问地址：{download_url}"
+        sections.append(f"\n[File: {file.originalFilename}]\n{excerpt}")
     return "\n".join(sections)
 
 

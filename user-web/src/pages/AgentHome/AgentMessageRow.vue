@@ -7,6 +7,7 @@ import RunTimeline from "./RunTimeline.vue"
 import type { AgentAvatarState } from "./AgentAvatar.vue"
 import type { AgentMessage, AgentRunEvent } from "@/api/types"
 import type { AssetPreviewItem } from "@/types/assetPreview"
+import { isImageAttachment, resolveAgentFileUrl } from "@/utils/agentAttachment"
 
 const props = defineProps<{
   message: AgentMessage
@@ -77,8 +78,23 @@ function formatFileSize(size?: number | null) {
   return `${(size / 1024 / 1024).toFixed(1)}MB`
 }
 
-function isImageAttachment(file: MessageAttachment) {
-  return (file.contentType || "").toLowerCase().startsWith("image/")
+function isImageMessageAttachment(file: MessageAttachment) {
+  return isImageAttachment(file.contentType, file.name)
+}
+
+function attachmentPreviewUrl(file: MessageAttachment) {
+  return resolveAgentFileUrl(file.url)
+}
+
+function openAttachmentPreview(file: MessageAttachment) {
+  const url = attachmentPreviewUrl(file)
+  if (!url) return
+  emit("preview", {
+    id: `attachment-${file.id}`,
+    kind: "image",
+    title: "图片附件",
+    url,
+  })
 }
 </script>
 
@@ -129,22 +145,36 @@ function isImageAttachment(file: MessageAttachment) {
         </div>
         <template v-else>
           <div v-if="message.role === 'USER' && attachments.length" class="message-attachments">
-            <article v-for="file in attachments" :key="file.id" class="message-attachment-card">
-              <span class="attachment-icon">
+            <article
+              v-for="file in attachments"
+              :key="file.id"
+              class="message-attachment-card"
+              :class="{ 'message-attachment-card--image': isImageMessageAttachment(file) }"
+            >
+              <button
+                v-if="isImageMessageAttachment(file) && attachmentPreviewUrl(file)"
+                type="button"
+                class="attachment-thumb-btn"
+                aria-label="预览图片"
+                @click="openAttachmentPreview(file)"
+              >
                 <img
-                  v-if="isImageAttachment(file) && file.url"
-                  :src="file.url"
+                  :src="attachmentPreviewUrl(file)"
                   :alt="file.name"
                   class="attachment-thumb"
                   loading="lazy"
                 />
-                <Image v-else-if="isImageAttachment(file)" class="h-5 w-5" />
-                <FileText v-else class="h-5 w-5" />
-              </span>
-              <span class="attachment-copy">
-                <strong>{{ file.name }}</strong>
-                <small>{{ file.contentType || "FILE" }} {{ formatFileSize(file.size) }}</small>
-              </span>
+              </button>
+              <template v-else>
+                <span class="attachment-icon">
+                  <Image v-if="isImageMessageAttachment(file)" class="h-5 w-5" />
+                  <FileText v-else class="h-5 w-5" />
+                </span>
+                <span class="attachment-copy">
+                  <strong>{{ file.name }}</strong>
+                  <small>{{ file.contentType || "FILE" }} {{ formatFileSize(file.size) }}</small>
+                </span>
+              </template>
             </article>
           </div>
           <RunTimeline
@@ -243,14 +273,10 @@ function isImageAttachment(file: MessageAttachment) {
 .assistant-name-row {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 8px;
   width: fit-content;
-  min-height: 28px;
-  margin-bottom: 12px;
-  border-radius: 999px;
-  border: 1px solid rgb(255 255 255 / 0.07);
-  background: linear-gradient(135deg, rgb(255 255 255 / 0.08), rgb(255 255 255 / 0.025));
-  padding: 3px 10px 3px 5px;
+  min-height: 0;
+  margin-bottom: 6px;
 }
 
 .assistant-name-row :deep(.agent-avatar--sm) {
@@ -292,7 +318,8 @@ function isImageAttachment(file: MessageAttachment) {
 }
 
 .message-attachments {
-  display: grid;
+  display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   margin-top: 10px;
 }
@@ -308,6 +335,23 @@ function isImageAttachment(file: MessageAttachment) {
   padding: 9px 11px;
 }
 
+.message-attachment-card--image {
+  min-width: 0;
+  padding: 6px;
+  border: 0;
+  background: transparent;
+}
+
+.attachment-thumb-btn {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: zoom-in;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
 .attachment-icon {
   width: 32px;
   height: 32px;
@@ -320,10 +364,11 @@ function isImageAttachment(file: MessageAttachment) {
 }
 
 .attachment-thumb {
-  width: 32px;
-  height: 32px;
-  border-radius: 10px;
+  width: 56px;
+  height: 56px;
+  border-radius: 12px;
   object-fit: cover;
+  display: block;
 }
 
 .attachment-copy {

@@ -456,6 +456,22 @@ export interface ModelVendorAccountPayload {
   enabled?: boolean
 }
 
+export interface ModelVendorPayload {
+  vendorCode: string
+  vendorLabel: string
+  iconAsset: string
+  sortOrder?: number
+  enabled: boolean
+}
+
+export interface ModelVendor {
+  vendorCode: string
+  vendorLabel: string
+  iconAsset: string
+  sortOrder: number
+  enabled: boolean
+}
+
 export interface UnifiedApiModelItem {
   id: number
   vendorAccountId?: number | null

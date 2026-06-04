@@ -35,6 +35,13 @@ public record UnifiedApiModelItemResponse(
     public static UnifiedApiModelItemResponse from(AgentModelConfig config,
                                                    String vendorAccountName,
                                                    ModelCapabilitiesCodec codec) {
+        return from(config, vendorAccountName, codec, null);
+    }
+
+    public static UnifiedApiModelItemResponse from(AgentModelConfig config,
+                                                   String vendorAccountName,
+                                                   ModelCapabilitiesCodec codec,
+                                                   String accountHealthStatus) {
         return new UnifiedApiModelItemResponse(
                 config.getId(),
                 config.getVendorAccountId(),
@@ -59,7 +66,20 @@ public record UnifiedApiModelItemResponse(
                 config.getEnabled(),
                 config.getAgentEnabled(),
                 config.getDefault(),
-                Boolean.FALSE.equals(config.getEnabled()) ? "DISABLED" : "OK"
+                resolveModelHealthStatus(config, accountHealthStatus)
         );
+    }
+
+    private static String resolveModelHealthStatus(AgentModelConfig config, String accountHealthStatus) {
+        if (Boolean.FALSE.equals(config.getEnabled())) {
+            return "DISABLED";
+        }
+        if (config.getLastTestSuccess() != null) {
+            return Boolean.TRUE.equals(config.getLastTestSuccess()) ? "OK" : "ERROR";
+        }
+        if (accountHealthStatus != null && !accountHealthStatus.isBlank()) {
+            return accountHealthStatus.trim().toUpperCase();
+        }
+        return "UNKNOWN";
     }
 }

@@ -94,8 +94,19 @@ public class AgentFileServiceImpl implements AgentFileService {
             file.setErrorMessage(null);
             writeChunks(file, parseResult);
         } catch (RuntimeException exception) {
-            file.setStatus("FAILED");
-            file.setErrorMessage(exception.getMessage());
+            if (isImageFile(file.getOriginalFilename(), file.getContentType())) {
+                String label = file.getOriginalFilename() == null ? "image" : file.getOriginalFilename();
+                String fallbackText = "[用户已上传图片：" + label + "]\n"
+                        + "该图片已随当前消息提交，可作为图生视频/图像工具的首帧或参考图输入；"
+                        + "请勿再要求用户重新上传或提供图片链接。";
+                file.setStatus("READY");
+                file.setExtractedText(fallbackText);
+                file.setErrorMessage(null);
+                writeChunks(file, AgentFileParseResult.fromText(label, fallbackText));
+            } else {
+                file.setStatus("FAILED");
+                file.setErrorMessage(exception.getMessage());
+            }
         }
         file.setUpdatedAt(LocalDateTime.now());
         agentFileMapper.updateParseResult(file.getId(), file.getStatus(), file.getExtractedText(), file.getErrorMessage(), file.getUpdatedAt());
@@ -261,6 +272,23 @@ public class AgentFileServiceImpl implements AgentFileService {
     private String safeFilename(String filename) {
         String value = filename == null || filename.isBlank() ? "upload.bin" : Path.of(filename).getFileName().toString();
         return value.replaceAll("[\\\\/:*?\"<>|]", "_");
+    }
+
+    private boolean isImageFile(String filename, String contentType) {
+        String lowerName = filename == null ? "" : filename.toLowerCase();
+        String lowerType = contentType == null ? "" : contentType.toLowerCase();
+        if (lowerType.startsWith("image/")) {
+            return true;
+        }
+        return lowerName.endsWith(".png")
+                || lowerName.endsWith(".jpg")
+                || lowerName.endsWith(".jpeg")
+                || lowerName.endsWith(".webp")
+                || lowerName.endsWith(".gif")
+                || lowerName.endsWith(".bmp")
+                || lowerName.endsWith(".heic")
+                || lowerName.endsWith(".heif")
+                || lowerName.endsWith(".avif");
     }
 
     private void writeChunks(AgentFile file, AgentFileParseResult parseResult) {

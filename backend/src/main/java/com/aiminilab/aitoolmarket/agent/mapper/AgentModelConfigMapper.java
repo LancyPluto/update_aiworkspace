@@ -194,4 +194,14 @@ public interface AgentModelConfigMapper extends BaseMapper<AgentModelConfig> {
             WHERE id = #{id}
             """)
     void softDelete(@Param("id") Long id);
+
+    @Update("""
+            UPDATE agent_model_configs
+            SET last_test_success = #{config.lastTestSuccess},
+                last_test_message = #{config.lastTestMessage},
+                last_test_at = #{config.lastTestAt},
+                updated_at = #{config.updatedAt}
+            WHERE id = #{config.id}
+            """)
+    void updateConnectivityTest(@Param("config") AgentModelConfig config);
 }

@@ -155,7 +155,7 @@ providers:
     providerProtocol: openai_images
     vendorKind: gateway
     upstreamVendor: openai
-    testStrategy: accept_only
+    testStrategy: agent_service
     workerReady: true
     description: oFox gateway for OpenAI-compatible image generation models. Change Base URL/API Key to switch compatible gateways.
 

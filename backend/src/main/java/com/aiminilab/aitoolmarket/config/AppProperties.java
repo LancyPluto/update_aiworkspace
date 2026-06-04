@@ -444,6 +444,8 @@ public class AppProperties {
         private int defaultCreditBudget = 20;
         private int maxHistoryMessages = 20;
         private String fileStorageDir = "data/agent-files";
+        /** Base URL workers use to fetch /generated/* assets (e.g. http://backend:8080). */
+        private String workerMediaBaseUrl = "http://127.0.0.1:8080";
 
         public boolean isEnabled() {
             return enabled;
@@ -507,6 +509,16 @@ public class AppProperties {
 
         public void setFileStorageDir(String fileStorageDir) {
             this.fileStorageDir = fileStorageDir == null || fileStorageDir.isBlank() ? "data/agent-files" : fileStorageDir;
+        }
+
+        public String getWorkerMediaBaseUrl() {
+            return workerMediaBaseUrl;
+        }
+
+        public void setWorkerMediaBaseUrl(String workerMediaBaseUrl) {
+            this.workerMediaBaseUrl = workerMediaBaseUrl == null || workerMediaBaseUrl.isBlank()
+                    ? "http://127.0.0.1:8080"
+                    : workerMediaBaseUrl;
         }
     }
 

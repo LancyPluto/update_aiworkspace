@@ -50,6 +50,7 @@ class AgentFileContext(BaseModel):
     contentType: str | None = None
     status: str
     extractedText: str = ""
+    downloadUrl: str | None = None
 
 
 class AgentFileChunkContext(BaseModel):

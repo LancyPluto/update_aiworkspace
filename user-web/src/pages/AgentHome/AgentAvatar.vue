@@ -54,12 +54,8 @@ defineProps<{
   height: 18px;
 }
 
-.agent-avatar--thinking {
-  animation: avatar-pulse 2s ease-in-out infinite;
-}
-
-.agent-avatar--streaming {
-  animation: avatar-pulse 1.6s ease-in-out infinite;
+.agent-avatar--thinking .agent-avatar__logo {
+  animation: avatar-logo-breathe 2s ease-in-out infinite;
 }
 
 .agent-avatar--streaming .agent-avatar__logo {
@@ -67,20 +63,9 @@ defineProps<{
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .agent-avatar--thinking,
-  .agent-avatar--streaming,
+  .agent-avatar--thinking .agent-avatar__logo,
   .agent-avatar--streaming .agent-avatar__logo {
     animation: none;
-  }
-}
-
-@keyframes avatar-pulse {
-  0%,
-  100% {
-    box-shadow: 0 0 0 0 var(--agent-accent-soft, rgb(176 92 255 / 0.2));
-  }
-  50% {
-    box-shadow: 0 0 0 6px transparent;
   }
 }
 

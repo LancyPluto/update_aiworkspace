@@ -37,6 +37,7 @@ class ModelClient:
         self.settings = settings
         self.prompt_tokens = 0
         self.completion_tokens = 0
+        self._uses_injected_chat_model = chat_model is not None
         try:
             self._chat_model = chat_model or ChatModelFactory(settings).create()
         except ChatModelProviderError as exception:
@@ -104,6 +105,10 @@ class ModelClient:
         return _langchain_turn_result(result)
 
     async def chat_stream(self, messages: list[ChatMessage], tools: list[dict[str, Any]] | None = None) -> AsyncIterator[str]:
+        if not self._uses_injected_chat_model and self._should_use_direct_openai_stream():
+            async for chunk in self._chat_openai_compatible_stream_direct(messages, tools=tools):
+                yield chunk
+            return
         if self._should_stream_locally():
             for chunk in _chunk_text(await self.chat(messages, tools=tools)):
                 yield chunk
@@ -135,6 +140,24 @@ class ModelClient:
         provider = self.settings.model_provider.strip().lower()
         base_url = self.settings.model_api_base_url.strip().lower()
         return provider == "openai_compatible" and "api-inference.modelscope.cn" in base_url
+
+    def _should_use_direct_openai_stream(self) -> bool:
+        provider = self.settings.model_provider.strip().lower()
+        base_url = self.settings.model_api_base_url.strip().lower()
+        if provider in {"deepseek", "deepseek_compatible"}:
+            return True
+        if provider == "openai_compatible":
+            return bool(base_url) and not any(
+                marker in base_url
+                for marker in (
+                    "anthropic",
+                    "mineru.net",
+                    "mineru",
+                )
+            )
+        if provider == "minimax" and "chatcompletion_v2" not in base_url:
+            return True
+        return False
 
     async def _chat_openai_compatible_direct(
         self,
@@ -190,6 +213,56 @@ class ModelClient:
             raise ModelClientError(f"model request failed: {exception}") from exception
         self._record_openai_usage(data)
         return _openai_compatible_turn_result(data)
+
+    async def _chat_openai_compatible_stream_direct(
+        self,
+        messages: list[ChatMessage],
+        tools: list[dict[str, Any]] | None = None,
+    ) -> AsyncIterator[str]:
+        base_url = self.settings.model_api_base_url.rstrip("/")
+        if not base_url and self.settings.model_provider.strip().lower() in {"deepseek", "deepseek_compatible"}:
+            base_url = "https://api.deepseek.com"
+        payload: dict[str, Any] = {
+            "model": resolve_volcengine_model_name(self.settings.model_name, base_url),
+            "messages": [_to_openai_message(message) for message in messages],
+            "stream": True,
+        }
+        safe_tools = _prepare_tools_for_provider(tools, self.settings.model_provider)
+        if safe_tools:
+            payload["tools"] = safe_tools
+        headers = {
+            "Authorization": f"Bearer {self.settings.model_api_key}",
+            "Accept": "text/event-stream",
+        }
+        try:
+            async with httpx.AsyncClient(timeout=self.settings.model_timeout_seconds) as client:
+                async with client.stream("POST", f"{base_url}/chat/completions", headers=headers, json=payload) as response:
+                    if response.status_code >= 400:
+                        body = (await response.aread()).decode("utf-8", errors="replace")
+                        raise ModelClientError(
+                            f"model stream failed: status={response.status_code}, body={body[:300]}"
+                        )
+                    async for line in response.aiter_lines():
+                        if not line:
+                            continue
+                        line = line.strip()
+                        if not line.startswith("data:"):
+                            continue
+                        data_text = line[5:].strip()
+                        if data_text == "[DONE]":
+                            break
+                        try:
+                            data = json.loads(data_text)
+                        except ValueError:
+                            continue
+                        self._record_openai_usage(data)
+                        delta = _openai_compatible_stream_delta(data)
+                        if delta:
+                            yield delta
+        except ModelClientError:
+            raise
+        except Exception as exception:
+            raise ModelClientError(f"model stream failed: {_format_exception(exception)}") from exception
 
     def _record_usage(self, result: Any) -> None:
         usage = getattr(result, "usage_metadata", None)
@@ -364,6 +437,28 @@ def _openai_compatible_turn_result(data: Any) -> ChatTurnResult:
         finish_reason=first.get("finish_reason") if isinstance(first.get("finish_reason"), str) else None,
         raw=data,
     )
+
+
+def _openai_compatible_stream_delta(data: Any) -> str:
+    if not isinstance(data, dict):
+        return ""
+    choices = data.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return ""
+    first = choices[0]
+    if not isinstance(first, dict):
+        return ""
+    delta = first.get("delta")
+    if isinstance(delta, dict):
+        content = delta.get("content")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            return _flatten_content(content, allow_empty=True)
+    text = first.get("text")
+    if isinstance(text, str):
+        return text
+    return ""
 
 
 def _langchain_turn_result(result: Any) -> ChatTurnResult:

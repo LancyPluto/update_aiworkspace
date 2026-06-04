@@ -194,13 +194,17 @@ function toggleExpanded(eventId: number) {
     :class="{ inline: inlineMode }"
     aria-label="Agent run timeline"
   >
-    <button v-if="processMode" class="process-summary" :class="{ thinking: !hasToolProcess }" type="button" @click="processExpanded = !processExpanded">
-      <span class="process-icon" :class="{ running: hasRunningTool }">
-        <Loader2 v-if="hasRunningTool" class="h-3.5 w-3.5 animate-spin" />
-        <Hammer v-else-if="hasToolProcess" class="h-3.5 w-3.5" />
-        <Sparkles v-else class="h-3.5 w-3.5" />
+    <button
+      v-if="processMode"
+      class="process-summary"
+      :class="{ thinking: !hasToolProcess, running: hasRunningTool }"
+      type="button"
+      @click="processExpanded = !processExpanded"
+    >
+      <span v-if="hasRunningTool" class="process-icon running">
+        <Loader2 class="h-3.5 w-3.5 animate-spin" />
       </span>
-      <span>
+      <span class="process-copy">
         <strong>{{ processSummaryText }}</strong>
         <small>{{ latestEvent ? titleFor(latestEvent) : "等待工具事件" }}</small>
       </span>
@@ -253,7 +257,7 @@ function toggleExpanded(eventId: number) {
   width: fit-content;
   max-width: 100%;
   display: grid;
-  grid-template-columns: 18px minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 7px;
   border: 0;
@@ -263,6 +267,14 @@ function toggleExpanded(eventId: number) {
   cursor: pointer;
   padding: 0;
   text-align: left;
+}
+
+.process-summary.running {
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+}
+
+.process-copy {
+  min-width: 0;
 }
 
 .process-icon {
@@ -279,8 +291,8 @@ function toggleExpanded(eventId: number) {
   box-shadow: none;
 }
 
-.process-summary strong,
-.process-summary small {
+.process-copy strong,
+.process-copy small {
   display: block;
   min-width: 0;
   overflow: hidden;
@@ -288,13 +300,13 @@ function toggleExpanded(eventId: number) {
   white-space: nowrap;
 }
 
-.process-summary strong {
+.process-copy strong {
   color: rgb(255 255 255 / 0.78);
   font-size: 13px;
   font-weight: 600;
 }
 
-.process-summary small {
+.process-copy small {
   display: none;
   margin-top: 2px;
   color: var(--agent-text-muted);

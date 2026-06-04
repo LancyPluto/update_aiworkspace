@@ -20,7 +20,7 @@ public class TaskCreditDispatchService {
     }
 
     public void ensureDispatchAllowed(Long userId, AiTool tool, AgentModelConfig modelConfig) {
-        int estimatedCredits = taskCreditEstimateService.estimateTaskCredits(tool, modelConfig);
+        int estimatedCredits = taskCreditEstimateService.estimateUserFacingTaskCredits(tool, modelConfig);
         CreditInsufficientSupport.ensureAvailable(
                 creditService,
                 userId,

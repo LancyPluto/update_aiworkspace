@@ -25,3 +25,22 @@ def test_parse_file_returns_chunks():
     assert body["chunks"][0]["chunkIndex"] == 0
     assert "Pricing" in body["chunks"][0]["content"]
     assert body["chunks"][0]["metadata"]["source"] == "product.txt"
+
+
+def test_parse_image_returns_context_text():
+    app = create_app(runtime=FakeRuntime(), execution_mode="sync", verify_signature=False)
+    client = TestClient(app)
+
+    response = client.post(
+        "/internal/v1/files/parse",
+        json={
+            "filename": "frame.png",
+            "contentType": "image/png",
+            "contentBase64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert "用户已上传图片" in body["text"]
+    assert body["chunks"]

@@ -41,6 +41,7 @@ public record AgentModelConfigResponse(
         String channelLabel,
         String channelIconAsset,
         List<String> capabilities,
+        Boolean chatSelectable,
         LocalDateTime createdAt,
         LocalDateTime updatedAt
 ) {
@@ -55,7 +56,7 @@ public record AgentModelConfigResponse(
     public static AgentModelConfigResponse from(AgentModelConfig config,
                                                 ModelCapabilitiesCodec codec,
                                                 String vendorAccountName) {
-        return from(config, codec, vendorAccountName, null, null, null);
+        return from(config, codec, vendorAccountName, null, null, null, true);
     }
 
     public static AgentModelConfigResponse from(AgentModelConfig config,
@@ -64,6 +65,16 @@ public record AgentModelConfigResponse(
                                                 String channelCode,
                                                 String channelLabel,
                                                 String channelIconAsset) {
+        return from(config, codec, vendorAccountName, channelCode, channelLabel, channelIconAsset, true);
+    }
+
+    public static AgentModelConfigResponse from(AgentModelConfig config,
+                                                ModelCapabilitiesCodec codec,
+                                                String vendorAccountName,
+                                                String channelCode,
+                                                String channelLabel,
+                                                String channelIconAsset,
+                                                boolean chatSelectable) {
         return new AgentModelConfigResponse(
                 config.getId(),
                 config.getVendorAccountId(),
@@ -95,6 +106,7 @@ public record AgentModelConfigResponse(
                 channelLabel,
                 channelIconAsset,
                 codec.parse(config.getCapabilities()),
+                chatSelectable,
                 config.getCreatedAt(),
                 config.getUpdatedAt()
         );

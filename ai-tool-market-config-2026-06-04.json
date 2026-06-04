@@ -1,7 +1,7 @@
 {
   "format": "ai-tool-market-config-bundle",
   "version": 1,
-  "exportedAt": "2026-05-29T07:22:14.471011765Z",
+  "exportedAt": "2026-06-04T00:00:00+08:00",
   "exportedBy": "1",
   "secretsRedacted": false,
   "settings": {
@@ -17,7 +17,7 @@
     "platform.description": "一站式 AI 运营助手，帮助企业提升内容生产与运营效率。",
     "platform.name": "AI 工具超市",
     "pricingDisclaimer": "价格与可用模型以可灵官方控制台与账单为准。含密钥时勿提交 Git。",
-    "pricingVerifiedAt": "2026-05-28",
+    "pricingVerifiedAt": "2026-06-04",
     "scope": "可灵视频模型全集（Omni + 文生视频 + 图生视频 + 多图参考 + 动作控制）",
     "security.allowedCors": "http://127.0.0.1:5173\nhttp://127.0.0.1:5174",
     "security.jwtHours": "24",
@@ -26,7 +26,9 @@
     "sourceVariant": "tools-unbound-model-config",
     "system.maintenanceMode": "false",
     "tasks.maxRetry": "3",
-    "tasks.queueEnabled": "true"
+    "tasks.queueEnabled": "true",
+    "openaiGptImage2PricingSource": "https://openai.com/api/pricing/",
+    "openaiGptImage2PricingNote": "GPT-Image-2: image input $8/1M tokens, cached image input $2/1M tokens, image output $30/1M tokens; text input $5/1M tokens, cached text input $1.25/1M tokens. Balance is checked in OpenAI dashboard/billing; no public automatic balance endpoint is configured."
   },
   "modelConfigs": [
     {
@@ -559,7 +561,7 @@
       "modelName": "openai/gpt-image-2",
       "baseUrl": "https://api.ofox.ai/v1",
       "apiKey": "",
-      "extraAuthJson": "",
+      "extraAuthJson": "{\"pricingVerifiedAt\":\"2026-06-04\",\"pricingSource\":\"https://openai.com/api/pricing/\",\"billingDetail\":\"IMAGE_TOKEN: image input $8/1M, cached image input $2/1M, image output $30/1M; text input $5/1M, cached text input $1.25/1M\",\"balanceQueryMode\":\"MANUAL\",\"balanceNote\":\"OpenAI billing balance/usage is viewed in the platform billing dashboard.\"}",
       "secretsRedacted": false,
       "minimaxGroupId": null,
       "consoleUrl": "https://app.ofox.ai/manage/api-keys",
@@ -568,10 +570,10 @@
       "timeoutSeconds": 120,
       "connectTimeoutSeconds": null,
       "readTimeoutSeconds": null,
-      "inputTokenPricePer1k": 0,
-      "outputTokenPricePer1k": 0,
-      "inputTokenPricePer1m": 0,
-      "outputTokenPricePer1m": 0,
+      "inputTokenPricePer1k": 0.008,
+      "outputTokenPricePer1k": 0.03,
+      "inputTokenPricePer1m": 8,
+      "outputTokenPricePer1m": 30,
       "billingUnit": "IMAGE_TOKEN",
       "unitPrice": 0,
       "enabled": false,
@@ -591,7 +593,7 @@
       "modelName": "gpt-image-2",
       "baseUrl": "https://shiyunapi.com/v1",
       "apiKey": "",
-      "extraAuthJson": "",
+      "extraAuthJson": "{\"pricingVerifiedAt\":\"2026-06-04\",\"pricingSource\":\"https://openai.com/api/pricing/\",\"billingDetail\":\"IMAGE_TOKEN: image input $8/1M, cached image input $2/1M, image output $30/1M; text input $5/1M, cached text input $1.25/1M\",\"balanceQueryMode\":\"MANUAL\",\"balanceNote\":\"OpenAI billing balance/usage is viewed in the platform billing dashboard.\"}",
       "secretsRedacted": false,
       "minimaxGroupId": null,
       "consoleUrl": "https://shiyunapi.com/console/token",
@@ -600,10 +602,10 @@
       "timeoutSeconds": 300,
       "connectTimeoutSeconds": null,
       "readTimeoutSeconds": null,
-      "inputTokenPricePer1k": 0,
-      "outputTokenPricePer1k": 0,
-      "inputTokenPricePer1m": 0,
-      "outputTokenPricePer1m": 0,
+      "inputTokenPricePer1k": 0.008,
+      "outputTokenPricePer1k": 0.03,
+      "inputTokenPricePer1m": 8,
+      "outputTokenPricePer1m": 30,
       "billingUnit": "IMAGE_TOKEN",
       "unitPrice": 0,
       "enabled": false,
@@ -714,7 +716,7 @@
       "channelIconAsset": "qwen"
     },
     {
-      "displayName": "Seedream 4.5",
+      "displayName": "豆包 Seedream 生图",
       "configCode": "volcengine-seedream",
       "provider": "volcengine_images",
       "modelName": "doubao-seedream-4-5-251128",
@@ -736,14 +738,16 @@
       "billingUnit": "PER_CALL",
       "unitPrice": 0.25,
       "enabled": true,
-      "agentEnabled": false,
+      "agentEnabled": true,
       "isDefault": false,
       "capabilities": [
         "IMAGE_GENERATION"
       ],
-      "channelCode": "other",
-      "channelLabel": "其他模型",
-      "channelIconAsset": "api"
+      "channelCode": "volcengine",
+      "channelLabel": "火山引擎 / 豆包",
+      "channelIconAsset": "doubao",
+      "category": "IMAGE_GENERATION",
+      "defaultModel": false
     },
     {
       "displayName": "Seedance 1.5 Pro",
@@ -1165,21 +1169,51 @@
   ],
   "categories": [
     {
-      "categoryCode": "copywriting",
-      "categoryName": "Copywriting",
-      "sortOrder": 1,
+      "categoryCode": "text-to-image",
+      "categoryName": "文生图",
+      "sortOrder": 10,
+      "status": "ACTIVE"
+    },
+    {
+      "categoryCode": "text-to-video",
+      "categoryName": "文生视频",
+      "sortOrder": 20,
+      "status": "ACTIVE"
+    },
+    {
+      "categoryCode": "image-to-video",
+      "categoryName": "图生视频",
+      "sortOrder": 30,
+      "status": "ACTIVE"
+    },
+    {
+      "categoryCode": "copy-generation",
+      "categoryName": "文案生成",
+      "sortOrder": 40,
       "status": "ACTIVE"
     },
     {
       "categoryCode": "agent",
       "categoryName": "智能体",
-      "sortOrder": 2,
+      "sortOrder": 50,
       "status": "ACTIVE"
     },
     {
-      "categoryCode": "ai-image",
-      "categoryName": "AI 生图",
-      "sortOrder": 30,
+      "categoryCode": "audio-generation",
+      "categoryName": "文生音频",
+      "sortOrder": 60,
+      "status": "ACTIVE"
+    },
+    {
+      "categoryCode": "speech-to-text",
+      "categoryName": "语音转文字",
+      "sortOrder": 70,
+      "status": "ACTIVE"
+    },
+    {
+      "categoryCode": "other",
+      "categoryName": "其他工具",
+      "sortOrder": 90,
       "status": "ACTIVE"
     }
   ],
@@ -1187,7 +1221,7 @@
     {
       "toolCode": "kling-image-generation-v1",
       "toolName": "可灵生图 V1",
-      "categoryCode": "ai-image",
+      "categoryCode": "text-to-image",
       "description": "可灵生图工具，支持文本生图与可选参考图。",
       "coverUrl": null,
       "toolType": "IMAGE_GENERATION",
@@ -1195,7 +1229,7 @@
       "outputModality": "IMAGE",
       "configNote": "可灵生图（可灵生图 V1）\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"icon\",\"modelIconUrl\":\"\"} -->",
       "status": "OFFLINE",
-      "estimatedCreditCost": 2,
+      "estimatedCreditCost": 300,
       "modelConfigCode": "kling-v1-image-to-video",
       "executionHandler": "IMAGE_GENERATION",
       "agentEnabled": true,
@@ -1328,7 +1362,7 @@
     {
       "toolCode": "kling-image-generation-v2-1",
       "toolName": "可灵生图 V2.1",
-      "categoryCode": "ai-image",
+      "categoryCode": "text-to-image",
       "description": "可灵生图工具，支持文本生图与可选参考图。",
       "coverUrl": null,
       "toolType": "IMAGE_GENERATION",
@@ -1336,7 +1370,7 @@
       "outputModality": "IMAGE",
       "configNote": "可灵生图（可灵生图 V2.1）\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"effect\",\"modelIconUrl\":\"\"} -->",
       "status": "OFFLINE",
-      "estimatedCreditCost": 2,
+      "estimatedCreditCost": 300,
       "modelConfigCode": "8",
       "executionHandler": "IMAGE_GENERATION",
       "agentEnabled": true,
@@ -1469,7 +1503,7 @@
     {
       "toolCode": "kling-image-generation-v3",
       "toolName": "可灵生图 V3",
-      "categoryCode": "ai-image",
+      "categoryCode": "text-to-image",
       "description": "可灵生图工具，支持文本生图与可选参考图。",
       "coverUrl": "/generated/tool-covers/可灵生图-V3-kling-image-generation-v3-可灵-V3-Omni-20260529031906.png",
       "toolType": "IMAGE_GENERATION",
@@ -1477,7 +1511,7 @@
       "outputModality": "IMAGE",
       "configNote": "可灵生图（可灵生图 V3）\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"effect\",\"modelIconUrl\":\"\"} -->",
       "status": "ONLINE",
-      "estimatedCreditCost": 2,
+      "estimatedCreditCost": 300,
       "modelConfigCode": "kling-v3-omni",
       "executionHandler": "IMAGE_GENERATION",
       "agentEnabled": true,
@@ -1608,9 +1642,95 @@
       "workflow": null
     },
     {
+      "toolCode": "doubao-seedream-image-generation",
+      "toolName": "豆包 Seedream 生图",
+      "categoryCode": "text-to-image",
+      "description": "使用火山引擎豆包 Seedream 模型，根据中文提示词生成图片。",
+      "coverUrl": null,
+      "toolType": "IMAGE_GENERATION",
+      "inputModality": "TEXT",
+      "outputModality": "IMAGE",
+      "configNote": "豆包 Seedream 文生图工具，适合海报、插画、产品图和创意视觉生成。\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#2563eb\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"icon\",\"modelIconUrl\":\"\"} -->",
+      "status": "ONLINE",
+      "estimatedCreditCost": 25,
+      "modelConfigCode": "volcengine-seedream",
+      "executionHandler": "IMAGE_GENERATION",
+      "agentEnabled": true,
+      "fields": [
+        {
+          "fieldKey": "prompt",
+          "fieldName": "画面描述",
+          "fieldType": "TEXTAREA",
+          "required": true,
+          "placeholder": "描述主体、场景、风格、构图、光线与细节",
+          "sortOrder": 1
+        },
+        {
+          "fieldKey": "size",
+          "fieldName": "图片尺寸",
+          "fieldType": "SELECT",
+          "required": false,
+          "defaultValue": "1024x1024",
+          "optionsJson": "[{\"label\":\"1:1 1024x1024\",\"value\":\"1024x1024\"},{\"label\":\"3:4 864x1152\",\"value\":\"864x1152\"},{\"label\":\"4:3 1152x864\",\"value\":\"1152x864\"},{\"label\":\"16:9 1280x720\",\"value\":\"1280x720\"},{\"label\":\"9:16 720x1280\",\"value\":\"720x1280\"}]",
+          "sortOrder": 2
+        },
+        {
+          "fieldKey": "count",
+          "fieldName": "生成数量",
+          "fieldType": "NUMBER",
+          "required": false,
+          "defaultValue": "1",
+          "placeholder": "1-4，默认 1",
+          "sortOrder": 3
+        },
+        {
+          "fieldKey": "negativePrompt",
+          "fieldName": "反向提示词",
+          "fieldType": "TEXTAREA",
+          "required": false,
+          "placeholder": "不希望出现在画面中的元素（可选）",
+          "sortOrder": 4
+        },
+        {
+          "fieldKey": "seed",
+          "fieldName": "随机种子",
+          "fieldType": "NUMBER",
+          "required": false,
+          "placeholder": "留空则随机",
+          "sortOrder": 5
+        }
+      ],
+      "prompts": [
+        {
+          "promptCode": "default",
+          "promptName": "豆包 Seedream 生图提示词",
+          "status": "ACTIVE",
+          "activeVersionNo": "tpl-db-seedream-v1",
+          "versions": [
+            {
+              "versionNo": "tpl-db-seedream-v1",
+              "systemPrompt": null,
+              "userPromptTemplate": "画面描述：{{prompt}}\n图片尺寸：{{size}}\n生成数量：{{count}}\n反向提示词：{{negativePrompt}}\n随机种子：{{seed}}",
+              "outputFormat": "MARKDOWN",
+              "status": "ACTIVE",
+              "versionName": "v1",
+              "enabled": true
+            }
+          ]
+        }
+      ],
+      "workflow": null,
+      "inputModalities": [
+        "TEXT"
+      ],
+      "outputModalities": [
+        "IMAGE"
+      ]
+    },
+    {
       "toolCode": "kling-v1-image-to-video",
       "toolName": "可灵 V1 图生视频",
-      "categoryCode": "copywriting",
+      "categoryCode": "image-to-video",
       "description": null,
       "coverUrl": null,
       "toolType": "VIDEO_GENERATION",
@@ -1618,7 +1738,7 @@
       "outputModality": "VIDEO",
       "configNote": "可灵 可灵 V1 图生视频\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"icon\",\"modelIconUrl\":\"\"} -->",
       "status": "OFFLINE",
-      "estimatedCreditCost": 6,
+      "estimatedCreditCost": 300,
       "modelConfigCode": "kling-v1-image-to-video",
       "executionHandler": "VIDEO_GENERATION",
       "agentEnabled": true,
@@ -1812,7 +1932,7 @@
     {
       "toolCode": "kling-v1-5-image-to-video",
       "toolName": "可灵 V1.5 图生视频",
-      "categoryCode": "copywriting",
+      "categoryCode": "image-to-video",
       "description": null,
       "coverUrl": null,
       "toolType": "VIDEO_GENERATION",
@@ -1820,7 +1940,7 @@
       "outputModality": "VIDEO",
       "configNote": "可灵 可灵 V1.5 图生视频\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"icon\",\"modelIconUrl\":\"\"} -->",
       "status": "OFFLINE",
-      "estimatedCreditCost": 6,
+      "estimatedCreditCost": 300,
       "modelConfigCode": "kling-v1-5-image-to-video",
       "executionHandler": "VIDEO_GENERATION",
       "agentEnabled": true,
@@ -2014,7 +2134,7 @@
     {
       "toolCode": "kling-v1-6-image-to-video",
       "toolName": "可灵 V1.6 图生视频",
-      "categoryCode": "copywriting",
+      "categoryCode": "text-to-video",
       "description": null,
       "coverUrl": null,
       "toolType": "VIDEO_GENERATION",
@@ -2022,7 +2142,7 @@
       "outputModality": "VIDEO",
       "configNote": "可灵 可灵 V1.6 图生视频\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"icon\",\"modelIconUrl\":\"\"} -->",
       "status": "OFFLINE",
-      "estimatedCreditCost": 6,
+      "estimatedCreditCost": 300,
       "modelConfigCode": "kling-v1-6-image-to-video",
       "executionHandler": "VIDEO_GENERATION",
       "agentEnabled": true,
@@ -2216,7 +2336,7 @@
     {
       "toolCode": "kling-v2-master-image-to-video",
       "toolName": "可灵 V2 Master 图生视频",
-      "categoryCode": "copywriting",
+      "categoryCode": "image-to-video",
       "description": null,
       "coverUrl": null,
       "toolType": "VIDEO_GENERATION",
@@ -2224,7 +2344,7 @@
       "outputModality": "VIDEO",
       "configNote": "可灵 可灵 V2 Master 图生视频\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"icon\",\"modelIconUrl\":\"\"} -->",
       "status": "OFFLINE",
-      "estimatedCreditCost": 6,
+      "estimatedCreditCost": 300,
       "modelConfigCode": "kling-v2-master-image-to-video",
       "executionHandler": "VIDEO_GENERATION",
       "agentEnabled": true,
@@ -2418,7 +2538,7 @@
     {
       "toolCode": "kling-v2-1-image-to-video",
       "toolName": "可灵 V2.1 图生视频",
-      "categoryCode": "copywriting",
+      "categoryCode": "image-to-video",
       "description": null,
       "coverUrl": null,
       "toolType": "VIDEO_GENERATION",
@@ -2426,7 +2546,7 @@
       "outputModality": "VIDEO",
       "configNote": "可灵 可灵 V2.1 图生视频\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"icon\",\"modelIconUrl\":\"\"} -->",
       "status": "OFFLINE",
-      "estimatedCreditCost": 6,
+      "estimatedCreditCost": 300,
       "modelConfigCode": "kling-v2-1-master-image-to-video",
       "executionHandler": "VIDEO_GENERATION",
       "agentEnabled": true,
@@ -2620,7 +2740,7 @@
     {
       "toolCode": "kling-v2-1-master-image-to-video",
       "toolName": "可灵 V2.1 Master 图生视频",
-      "categoryCode": "copywriting",
+      "categoryCode": "image-to-video",
       "description": null,
       "coverUrl": null,
       "toolType": "VIDEO_GENERATION",
@@ -2628,7 +2748,7 @@
       "outputModality": "VIDEO",
       "configNote": "可灵 可灵 V2.1 Master 图生视频\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"icon\",\"modelIconUrl\":\"\"} -->",
       "status": "OFFLINE",
-      "estimatedCreditCost": 6,
+      "estimatedCreditCost": 300,
       "modelConfigCode": "kling-v2-1-master-image-to-video",
       "executionHandler": "VIDEO_GENERATION",
       "agentEnabled": true,
@@ -2822,7 +2942,7 @@
     {
       "toolCode": "kling-v2-5-turbo-image-to-video",
       "toolName": "可灵 V2.5 Turbo 图生视频",
-      "categoryCode": "copywriting",
+      "categoryCode": "image-to-video",
       "description": null,
       "coverUrl": null,
       "toolType": "VIDEO_GENERATION",
@@ -2830,7 +2950,7 @@
       "outputModality": "VIDEO",
       "configNote": "可灵 可灵 V2.5 Turbo 图生视频\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"icon\",\"modelIconUrl\":\"\"} -->",
       "status": "OFFLINE",
-      "estimatedCreditCost": 6,
+      "estimatedCreditCost": 300,
       "modelConfigCode": "kling-v2-5-turbo-image-to-video",
       "executionHandler": "VIDEO_GENERATION",
       "agentEnabled": true,
@@ -3024,7 +3144,7 @@
     {
       "toolCode": "kling-v2-6-motion-control",
       "toolName": "可灵 V2.6 动作控制",
-      "categoryCode": "copywriting",
+      "categoryCode": "image-to-video",
       "description": null,
       "coverUrl": null,
       "toolType": "VIDEO_GENERATION",
@@ -3032,7 +3152,7 @@
       "outputModality": "VIDEO",
       "configNote": "可灵 可灵 V2.6 动作控制\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"icon\",\"modelIconUrl\":\"\"} -->",
       "status": "OFFLINE",
-      "estimatedCreditCost": 6,
+      "estimatedCreditCost": 300,
       "modelConfigCode": "kling-v2-6-motion-control",
       "executionHandler": "VIDEO_GENERATION",
       "agentEnabled": true,
@@ -3237,7 +3357,7 @@
     {
       "toolCode": "kling-v2-6-image-to-video",
       "toolName": "可灵 V2.6 图生视频",
-      "categoryCode": "copywriting",
+      "categoryCode": "image-to-video",
       "description": null,
       "coverUrl": null,
       "toolType": "VIDEO_GENERATION",
@@ -3245,7 +3365,7 @@
       "outputModality": "VIDEO",
       "configNote": "可灵 可灵 V2.6 图生视频\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"icon\",\"modelIconUrl\":\"\"} -->",
       "status": "OFFLINE",
-      "estimatedCreditCost": 6,
+      "estimatedCreditCost": 300,
       "modelConfigCode": "kling-v2-6-motion-control",
       "executionHandler": "VIDEO_GENERATION",
       "agentEnabled": true,
@@ -3439,7 +3559,7 @@
     {
       "toolCode": "kling-v3-motion-control",
       "toolName": "可灵 V3 动作控制",
-      "categoryCode": "copywriting",
+      "categoryCode": "image-to-video",
       "description": null,
       "coverUrl": null,
       "toolType": "VIDEO_GENERATION",
@@ -3447,7 +3567,7 @@
       "outputModality": "VIDEO",
       "configNote": "可灵 可灵 V3 动作控制\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"icon\",\"modelIconUrl\":\"\"} -->",
       "status": "ONLINE",
-      "estimatedCreditCost": 6,
+      "estimatedCreditCost": 300,
       "modelConfigCode": "kling-v3-motion-control",
       "executionHandler": "VIDEO_GENERATION",
       "agentEnabled": true,
@@ -3652,7 +3772,7 @@
     {
       "toolCode": "kling-v3-multi-image-reference",
       "toolName": "可灵 V3 多图参考生视频",
-      "categoryCode": "copywriting",
+      "categoryCode": "image-to-video",
       "description": null,
       "coverUrl": "/generated/tool-covers/可灵-V3-多图参考生视频-kling-v3-multi-image-reference-可灵-V3-图生视频-20260529033234.mp4",
       "toolType": "VIDEO_GENERATION",
@@ -3660,7 +3780,7 @@
       "outputModality": "VIDEO",
       "configNote": "可灵 可灵 V3 多图参考生视频\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"effect\",\"modelIconUrl\":\"\"} -->",
       "status": "ONLINE",
-      "estimatedCreditCost": 6,
+      "estimatedCreditCost": 300,
       "modelConfigCode": "kling-v3-image-to-video",
       "executionHandler": "VIDEO_GENERATION",
       "agentEnabled": true,
@@ -3893,7 +4013,7 @@
     {
       "toolCode": "kling-v3-image-to-video",
       "toolName": "可灵 V3 图生视频",
-      "categoryCode": "copywriting",
+      "categoryCode": "image-to-video",
       "description": null,
       "coverUrl": "/generated/tool-covers/可灵-V3-图生视频-kling-v3-image-to-video-可灵-V3-图生视频-20260529031934.mp4",
       "toolType": "VIDEO_GENERATION",
@@ -3901,7 +4021,7 @@
       "outputModality": "VIDEO",
       "configNote": "可灵 可灵 V3 图生视频\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"effect\",\"modelIconUrl\":\"\"} -->",
       "status": "ONLINE",
-      "estimatedCreditCost": 6,
+      "estimatedCreditCost": 300,
       "modelConfigCode": "kling-v3-image-to-video",
       "executionHandler": "VIDEO_GENERATION",
       "agentEnabled": true,
@@ -4095,7 +4215,7 @@
     {
       "toolCode": "kling-v3-text-to-video",
       "toolName": "可灵 V3 文生视频",
-      "categoryCode": "copywriting",
+      "categoryCode": "text-to-video",
       "description": null,
       "coverUrl": "/generated/tool-covers/可灵-V3-文生视频-kling-v3-text-to-video-可灵-V3-文生视频-20260529032045.mp4",
       "toolType": "VIDEO_GENERATION",
@@ -4103,7 +4223,7 @@
       "outputModality": "VIDEO",
       "configNote": "可灵 可灵 V3 文生视频\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"effect\",\"modelIconUrl\":\"\"} -->",
       "status": "ONLINE",
-      "estimatedCreditCost": 6,
+      "estimatedCreditCost": 300,
       "modelConfigCode": "kling-v3-text-to-video",
       "executionHandler": "VIDEO_GENERATION",
       "agentEnabled": true,
@@ -4271,7 +4391,7 @@
     {
       "toolCode": "kling-video-o1-omni",
       "toolName": "可灵 Video O1 Omni",
-      "categoryCode": "copywriting",
+      "categoryCode": "text-to-video",
       "description": null,
       "coverUrl": "/generated/tool-covers/可灵-Video-O1-Omni-kling-video-o1-omni-可灵-Video-O1-Omni-20260529031958.mp4",
       "toolType": "VIDEO_GENERATION",
@@ -4279,7 +4399,7 @@
       "outputModality": "VIDEO",
       "configNote": "可灵 可灵 Video O1 Omni\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"effect\",\"modelIconUrl\":\"\"} -->",
       "status": "ONLINE",
-      "estimatedCreditCost": 6,
+      "estimatedCreditCost": 300,
       "modelConfigCode": "kling-video-o1-omni",
       "executionHandler": "VIDEO_GENERATION",
       "agentEnabled": true,
@@ -4551,7 +4671,7 @@
     {
       "toolCode": "kling-v3-omni",
       "toolName": "可灵 V3 Omni",
-      "categoryCode": "copywriting",
+      "categoryCode": "text-to-video",
       "description": null,
       "coverUrl": "/generated/tool-covers/可灵-V3-Omni-kling-v3-omni-可灵-V3-Omni-20260528094612.mp4",
       "toolType": "VIDEO_GENERATION",
@@ -4559,7 +4679,7 @@
       "outputModality": "VIDEO",
       "configNote": "可灵 可灵 V3 Omni\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"effect\",\"modelIconUrl\":\"\"} -->",
       "status": "OFFLINE",
-      "estimatedCreditCost": 6,
+      "estimatedCreditCost": 300,
       "modelConfigCode": "kling-v3-omni",
       "executionHandler": "VIDEO_GENERATION",
       "agentEnabled": true,
@@ -4831,7 +4951,7 @@
     {
       "toolCode": "11",
       "toolName": "文本生成-DeepSeek-V4-flash",
-      "categoryCode": "copywriting",
+      "categoryCode": "copy-generation",
       "description": null,
       "coverUrl": null,
       "toolType": "TEXT_GENERATION",
@@ -4884,7 +5004,7 @@
     {
       "toolCode": "tts_mm",
       "toolName": "MiniMax-TTS",
-      "categoryCode": "copywriting",
+      "categoryCode": "audio-generation",
       "description": null,
       "coverUrl": null,
       "toolType": "TEXT_TO_SPEECH",
@@ -5020,7 +5140,7 @@
     {
       "toolCode": "518",
       "toolName": "Z-image-Turbo(硅基流动)",
-      "categoryCode": "copywriting",
+      "categoryCode": "text-to-image",
       "description": null,
       "coverUrl": "/generated/tool-covers/518-518-doubao-seedream-4-5-20260520222257.png",
       "toolType": "IMAGE_GENERATION",
@@ -5028,7 +5148,7 @@
       "outputModality": "IMAGE",
       "configNote": "需要配置画面描述、比例、风格、生成数量与反向提示词。\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"哈哈\"} -->",
       "status": "OFFLINE",
-      "estimatedCreditCost": 5,
+      "estimatedCreditCost": 300,
       "modelConfigCode": "siliconflow-z-image-turbo",
       "executionHandler": "IMAGE_GENERATION",
       "agentEnabled": true,
@@ -5184,7 +5304,7 @@
     {
       "toolCode": "tool_1",
       "toolName": "图片生成-Z-image-Turbo",
-      "categoryCode": "copywriting",
+      "categoryCode": "text-to-image",
       "description": "此工具…………",
       "coverUrl": "/generated/tool-covers/演示-tool_1-Z-Image-Turbo-20260519212534.png",
       "toolType": "IMAGE_GENERATION",
@@ -5192,7 +5312,7 @@
       "outputModality": "IMAGE",
       "configNote": "需要配置画面描述、比例、风格、生成数量与反向提示词。\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\"} -->",
       "status": "OFFLINE",
-      "estimatedCreditCost": 5,
+      "estimatedCreditCost": 300,
       "modelConfigCode": "siliconflow-z-image-turbo",
       "executionHandler": "IMAGE_GENERATION",
       "agentEnabled": true,
@@ -5350,7 +5470,7 @@
     {
       "toolCode": "kling_image_to_video",
       "toolName": "可灵生视频V2.6",
-      "categoryCode": "copywriting",
+      "categoryCode": "text-to-video",
       "description": null,
       "coverUrl": "/generated/tool-covers/可灵生视频V2.6-kling_image_to_video-可灵图生视频-v2-6-20260524150249.mp4",
       "toolType": "VIDEO_GENERATION",
@@ -5358,7 +5478,7 @@
       "outputModality": "VIDEO",
       "configNote": "描述镜头、比例与时长，由视频生成 Handler 处理。\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"effect\"} -->",
       "status": "OFFLINE",
-      "estimatedCreditCost": 6,
+      "estimatedCreditCost": 300,
       "modelConfigCode": "kling_image_to_video",
       "executionHandler": "VIDEO_GENERATION",
       "agentEnabled": true,
@@ -5492,7 +5612,7 @@
     {
       "toolCode": "v2_1",
       "toolName": "可灵生图 V2.1",
-      "categoryCode": "copywriting",
+      "categoryCode": "text-to-image",
       "description": null,
       "coverUrl": null,
       "toolType": "IMAGE_GENERATION",
@@ -5500,7 +5620,7 @@
       "outputModality": "IMAGE",
       "configNote": "需要配置画面描述、比例、风格、生成数量与反向提示词。",
       "status": "OFFLINE",
-      "estimatedCreditCost": 5,
+      "estimatedCreditCost": 300,
       "modelConfigCode": "8",
       "executionHandler": "IMAGE_GENERATION",
       "agentEnabled": true,
@@ -5634,25 +5754,25 @@
     },
     {
       "toolCode": "ofox_gpt_image2",
-      "toolName": "GPT-image2.0",
-      "categoryCode": "copywriting",
-      "description": null,
+      "toolName": "GPT-Image-2 生图",
+      "categoryCode": "text-to-image",
+      "description": "使用 OpenAI GPT-Image-2 生成高质量图片，支持参考图、比例、质量和图片 token 计费。",
       "coverUrl": "/generated/tool-covers/GPT-image2.0-ofox_gpt_image2-gpt-image-2_SY-20260524204105.png",
       "toolType": "IMAGE_GENERATION",
       "inputModality": "TEXT",
       "outputModality": "IMAGE",
-      "configNote": "需要配置画面描述、比例、风格、生成数量与反向提示词。\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"effect\"} -->",
-      "status": "OFFLINE",
-      "estimatedCreditCost": 5,
+      "configNote": "使用 GPT-Image-2 模型根据提示词生成图片，支持文本生图和参考图生图。\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"effect\"} -->",
+      "status": "ONLINE",
+      "estimatedCreditCost": 300,
       "modelConfigCode": "10",
       "executionHandler": "IMAGE_GENERATION",
       "agentEnabled": true,
       "fields": [
         {
           "fieldKey": "prompt",
-          "fieldName": "画面描述",
+          "fieldName": "提示词",
           "fieldType": "textarea",
-          "placeholder": "描述主体、场景、光线、构图和细节",
+          "placeholder": "请输入需要生成的图片内容",
           "options": {
             "core": true
           },
@@ -5669,7 +5789,7 @@
           "fieldKey": "aspectRatio",
           "fieldName": "画面比例",
           "fieldType": "radio",
-          "placeholder": null,
+          "placeholder": "请选择图片比例",
           "options": [
             {
               "label": "1:1",
@@ -5696,7 +5816,7 @@
           "required": true,
           "executionRequired": false,
           "userRequired": false,
-          "defaultValue": null,
+          "defaultValue": "1:1",
           "agentFillStrategy": "default",
           "riskLevel": "LOW",
           "sortOrder": 2
@@ -5705,13 +5825,13 @@
           "fieldKey": "count",
           "fieldName": "生成数量",
           "fieldType": "number",
-          "placeholder": "例如 1",
+          "placeholder": "请输入生成数量",
           "options": null,
           "optionsJson": null,
           "required": false,
           "executionRequired": false,
           "userRequired": false,
-          "defaultValue": null,
+          "defaultValue": "1",
           "agentFillStrategy": "default",
           "riskLevel": "LOW",
           "sortOrder": 3
@@ -5774,7 +5894,7 @@
             {
               "versionNo": "tpl-1779531308470",
               "systemPrompt": null,
-              "userPromptTemplate": "画面描述：{{prompt}}\n画面比例：{{aspectRatio}}\n风格：{{style}}\n生成数量：{{count}}\n反向提示词：{{negativePrompt}}",
+              "userPromptTemplate": "图片描述：{{prompt}}\n画面比例：{{aspectRatio}}\n风格：{{style}}\n生成数量：{{count}}\n负面提示：{{negativePrompt}}",
               "outputFormat": "MARKDOWN",
               "status": "ACTIVE"
             }
@@ -5813,7 +5933,7 @@
       "outputModality": "VIDEO",
       "configNote": "<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"icon\",\"modelIconUrl\":\"\"} -->",
       "status": "OFFLINE",
-      "estimatedCreditCost": 3,
+      "estimatedCreditCost": 300,
       "modelConfigCode": "volcengine-seedance",
       "executionHandler": "DIGITAL_HUMAN",
       "agentEnabled": true,
@@ -6240,8 +6360,8 @@
       "outputModality": "VIDEO",
       "configNote": null,
       "status": "OFFLINE",
-      "estimatedCreditCost": 3,
-      "modelConfigCode": "aliyun-qwen3-7-max",
+      "estimatedCreditCost": 300,
+      "modelConfigCode": "volcengine-seedance",
       "executionHandler": "DIGITAL_HUMAN",
       "agentEnabled": true,
       "fields": [

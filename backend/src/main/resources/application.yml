@@ -79,6 +79,7 @@ app:
     default-credit-budget: ${AGENT_DEFAULT_CREDIT_BUDGET:20}
     max-history-messages: ${AGENT_MAX_HISTORY_MESSAGES:20}
     file-storage-dir: ${AGENT_FILE_STORAGE_DIR:data/agent-files}
+    worker-media-base-url: ${WORKER_MEDIA_BASE_URL:http://backend:8080}
   payment:
     wechat-native:
       enabled: ${WECHAT_NATIVE_PAY_ENABLED:false}

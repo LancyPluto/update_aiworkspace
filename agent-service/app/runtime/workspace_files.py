@@ -20,7 +20,11 @@ def build_workspace_file_context(context: RunContext) -> WorkspaceFileContext:
     if chunk_entries:
         return _build_context(chunk_entries)
 
-    file_entries = [_entry_from_file(file) for file in context.agentFiles if file.status == "READY" and file.extractedText.strip()]
+    file_entries = [
+        _entry_from_file(file)
+        for file in context.agentFiles
+        if file.status == "READY" and (file.extractedText.strip() or (file.downloadUrl or "").strip())
+    ]
     if file_entries:
         return _build_context(file_entries)
 
@@ -39,11 +43,15 @@ def _entry_from_chunk(chunk: AgentFileChunkContext) -> dict[str, object]:
 
 def _entry_from_file(file: AgentFileContext) -> dict[str, object]:
     filename = _safe_filename(file.originalFilename, file.id)
+    content = file.extractedText.strip()[:12000]
+    download_url = (file.downloadUrl or "").strip()
+    if download_url:
+        content = f"{content}\n图片访问地址：{download_url}" if content else f"[用户已上传图片：{filename}]\n图片访问地址：{download_url}"
     return {
         "file_id": file.id,
         "filename": filename,
         "label": f"[workspace_file:{file.id}] {filename}",
-        "content": file.extractedText.strip()[:12000],
+        "content": content,
     }
 
 

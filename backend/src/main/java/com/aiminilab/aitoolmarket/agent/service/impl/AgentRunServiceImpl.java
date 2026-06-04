@@ -1072,6 +1072,7 @@ public class AgentRunServiceImpl implements AgentRunService {
                     item.put("contentType", file.getContentType());
                     item.put("size", file.getFileSize());
                     item.put("status", file.getStatus());
+                    item.put("url", "/api/v1/agent/sessions/" + sessionId + "/files/" + file.getId() + "/content");
                     return item;
                 })
                 .toList();

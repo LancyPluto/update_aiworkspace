@@ -15,6 +15,7 @@ import {
   X,
 } from "lucide-vue-next"
 import type { AgentFile, AgentModelConfig } from "@/api/types"
+import { isImageAttachment, resolveAgentFileUrl } from "@/utils/agentAttachment"
 import { useReducedMotion } from "@/composables/useReducedMotion"
 import ModelProviderIcon from "@/components/ModelProviderIcon.vue"
 import {
@@ -32,6 +33,8 @@ const props = defineProps<{
   modelsLoading: boolean
   draft: string
   files: AgentFile[]
+  filePreviewUrls?: Record<number, string>
+  pendingUploadPreview?: { name: string; url: string } | null
   uploading: boolean
   removingFileId: number | null
   hasActiveRun: boolean
@@ -51,6 +54,7 @@ const emit = defineEmits<{
   "remove-file": [file: AgentFile]
   "open-memory": []
   "file-selected": [event: Event]
+  "preview-attachment": [payload: { name: string; url: string; contentType?: string | null }]
 }>()
 
 const { reducedMotion } = useReducedMotion()
@@ -108,7 +112,8 @@ const sendDisabled = computed(
 )
 
 function modelLabel(model: AgentModelConfig) {
-  return model.displayName || model.modelName || model.configCode || `Model ${model.id}`
+  const base = model.displayName || model.modelName || model.configCode || `Model ${model.id}`
+  return model.chatSelectable === false ? `${base}（工具）` : base
 }
 
 function modelVendorMeta(model: AgentModelConfig) {
@@ -321,13 +326,52 @@ defineExpose({ adjustComposerTextareaHeight })
       </select>
     </div>
 
-    <div v-if="files.length > 0" class="inner-file-list">
-      <div v-for="file in files" :key="file.id" class="inner-file-item">
-        <FileText class="h-4 w-4" />
-        <div class="inner-file-info">
+    <div v-if="files.length > 0 || pendingUploadPreview || uploading" class="inner-file-list">
+      <div v-if="pendingUploadPreview && !files.length" class="inner-file-item inner-file-item--image">
+        <button
+          type="button"
+          class="inner-file-thumb-btn"
+          :disabled="uploading"
+          aria-label="预览图片"
+          @click="emit('preview-attachment', { name: pendingUploadPreview.name, url: pendingUploadPreview.url })"
+        >
+          <img :src="pendingUploadPreview.url" :alt="pendingUploadPreview.name" class="inner-file-thumb" />
+        </button>
+        <span class="inner-file-tag">图片</span>
+        <Loader2 v-if="uploading" class="h-3.5 w-3.5 animate-spin inner-file-uploading" />
+      </div>
+      <div
+        v-for="file in files"
+        :key="file.id"
+        class="inner-file-item"
+        :class="{ 'inner-file-item--image': isImageAttachment(file.contentType, file.originalFilename) }"
+      >
+        <button
+          v-if="isImageAttachment(file.contentType, file.originalFilename) && (props.filePreviewUrls?.[file.id] || resolveAgentFileUrl(file.downloadUrl))"
+          type="button"
+          class="inner-file-thumb-btn"
+          aria-label="预览图片"
+          @click="
+            emit('preview-attachment', {
+              name: file.originalFilename,
+              url: props.filePreviewUrls?.[file.id] || resolveAgentFileUrl(file.downloadUrl),
+              contentType: file.contentType,
+            })
+          "
+        >
+          <img
+            :src="props.filePreviewUrls?.[file.id] || resolveAgentFileUrl(file.downloadUrl)"
+            :alt="file.originalFilename"
+            class="inner-file-thumb"
+            loading="lazy"
+          />
+        </button>
+        <FileText v-else class="h-4 w-4 shrink-0" />
+        <span v-if="isImageAttachment(file.contentType, file.originalFilename)" class="inner-file-tag">图片</span>
+        <template v-else>
           <span class="inner-file-name">{{ file.originalFilename }}</span>
           <span class="inner-file-size">{{ formatFileSize(file.fileSize) }}</span>
-        </div>
+        </template>
         <button
           type="button"
           class="inner-file-close"
@@ -669,34 +713,63 @@ defineExpose({ adjustComposerTextareaHeight })
 
 .inner-file-list {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
-  max-height: 120px;
-  overflow-y: auto;
-  padding-right: 4px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  max-height: none;
+  overflow: visible;
+  padding-right: 0;
 }
 
 .inner-file-item {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 7px 10px;
+  padding: 6px 8px;
   background: rgb(255 255 255 / 0.045);
   border: 1px solid rgb(255 255 255 / 0.06);
   border-radius: 14px;
   font-size: 12px;
 }
 
-.inner-file-info {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.inner-file-item--image {
+  padding: 6px 10px 6px 6px;
+}
+
+.inner-file-thumb-btn {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: zoom-in;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.inner-file-thumb {
+  width: 52px;
+  height: 52px;
+  object-fit: cover;
+  border-radius: 10px;
+  display: block;
+}
+
+.inner-file-tag {
+  color: rgb(255 255 255 / 0.62);
+  font-size: 12px;
+}
+
+.inner-file-uploading {
+  color: var(--agent-accent);
 }
 
 .inner-file-name {
   color: rgb(255 255 255 / 0.84);
   font-weight: 500;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .inner-file-size {

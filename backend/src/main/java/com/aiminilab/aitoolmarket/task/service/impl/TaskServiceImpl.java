@@ -27,11 +27,14 @@ import com.aiminilab.aitoolmarket.task.service.TaskStateMachine;
 import com.aiminilab.aitoolmarket.task.metrics.TaskMetrics;
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
 import com.aiminilab.aitoolmarket.agent.entity.AgentToolCall;
+import com.aiminilab.aitoolmarket.agent.service.AgentAttachmentUrlResolver;
 import com.aiminilab.aitoolmarket.tool.entity.AiTool;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolMapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.databind.node.TextNode;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -58,6 +61,7 @@ public class TaskServiceImpl implements TaskService {
     private final TaskCreditDispatchService taskCreditDispatchService;
     private final CommunityEventMapper communityEventMapper;
     private final CommunityPostMapper communityPostMapper;
+    private final AgentAttachmentUrlResolver agentAttachmentUrlResolver;
 
     public TaskServiceImpl(
             TaskMapper taskMapper,
@@ -72,7 +76,8 @@ public class TaskServiceImpl implements TaskService {
             TaskCreditEstimateService taskCreditEstimateService,
             TaskCreditDispatchService taskCreditDispatchService,
             CommunityEventMapper communityEventMapper,
-            CommunityPostMapper communityPostMapper
+            CommunityPostMapper communityPostMapper,
+            AgentAttachmentUrlResolver agentAttachmentUrlResolver
     ) {
         this.taskMapper = taskMapper;
         this.toolMapper = toolMapper;
@@ -87,6 +92,7 @@ public class TaskServiceImpl implements TaskService {
         this.taskCreditDispatchService = taskCreditDispatchService;
         this.communityEventMapper = communityEventMapper;
         this.communityPostMapper = communityPostMapper;
+        this.agentAttachmentUrlResolver = agentAttachmentUrlResolver;
     }
 
     @Override
@@ -235,14 +241,14 @@ public class TaskServiceImpl implements TaskService {
             taskCreditDispatchService.ensureDispatchAllowed(userId, tool, modelConfig);
         }
 
-        JsonNode normalizedParams = normalizeTaskParams(params);
+        JsonNode normalizedParams = normalizeTaskParams(userId, params);
         AiTask task = new AiTask();
         task.setTaskNo(generateTaskNo());
         task.setUserId(userId);
         task.setToolId(tool.getId());
         task.setParamsJson(normalizedParams.toString());
         task.setIdempotencyKey(clientRequestId);
-        int estimatedCredits = chargeTaskCredits ? taskCreditEstimateService.estimateTaskCredits(tool, modelConfig) : 0;
+        int estimatedCredits = chargeTaskCredits ? taskCreditEstimateService.estimateUserFacingTaskCredits(tool, modelConfig) : 0;
         task.setEstimatedCreditCost(estimatedCredits);
 
         Long taskId = taskMapper.insertTask(task);
@@ -296,7 +302,7 @@ public class TaskServiceImpl implements TaskService {
         }
     }
 
-    private JsonNode normalizeTaskParams(JsonNode params) {
+    private JsonNode normalizeTaskParams(Long userId, JsonNode params) {
         if (params == null || !params.isObject()) {
             return params == null ? objectMapper.createObjectNode() : params;
         }
@@ -305,7 +311,50 @@ public class TaskServiceImpl implements TaskService {
         if (aspectRatio != null && !normalized.hasNonNull("aspectRatio")) {
             normalized.set("aspectRatio", aspectRatio);
         }
+        rewriteAttachmentUrls(userId, normalized);
         return normalized;
+    }
+
+    private void rewriteAttachmentUrls(Long userId, ObjectNode node) {
+        node.fields().forEachRemaining(entry -> {
+            String key = entry.getKey();
+            JsonNode value = entry.getValue();
+            if (value == null || value.isNull()) {
+                return;
+            }
+            if (value.isTextual() && looksLikeMediaField(key)) {
+                String resolved = agentAttachmentUrlResolver.resolveForWorker(userId, value.asText());
+                node.set(key, TextNode.valueOf(resolved));
+                return;
+            }
+            if (value.isObject()) {
+                rewriteAttachmentUrls(userId, (ObjectNode) value);
+                return;
+            }
+            if (value.isArray()) {
+                ArrayNode array = (ArrayNode) value;
+                for (int i = 0; i < array.size(); i++) {
+                    JsonNode item = array.get(i);
+                    if (item != null && item.isTextual() && looksLikeMediaField(key)) {
+                        array.set(i, TextNode.valueOf(agentAttachmentUrlResolver.resolveForWorker(userId, item.asText())));
+                    } else if (item != null && item.isObject()) {
+                        rewriteAttachmentUrls(userId, (ObjectNode) item);
+                    }
+                }
+            }
+        });
+    }
+
+    private boolean looksLikeMediaField(String key) {
+        if (key == null || key.isBlank()) {
+            return false;
+        }
+        String lowered = key.toLowerCase();
+        return lowered.contains("image")
+                || lowered.contains("frame")
+                || lowered.contains("url")
+                || lowered.contains("video")
+                || lowered.contains("reference");
     }
 
     private JsonNode firstTextual(JsonNode... nodes) {

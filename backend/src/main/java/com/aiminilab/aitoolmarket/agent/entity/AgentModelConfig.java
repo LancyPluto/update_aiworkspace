@@ -33,6 +33,9 @@ public class AgentModelConfig {
     private Boolean enabled;
     private Boolean agentEnabled;
     private Boolean isDefault;
+    private Boolean lastTestSuccess;
+    private String lastTestMessage;
+    private LocalDateTime lastTestAt;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 
@@ -84,6 +87,12 @@ public class AgentModelConfig {
     public void setAgentEnabled(Boolean agentEnabled) { this.agentEnabled = agentEnabled; }
     public Boolean getDefault() { return isDefault; }
     public void setDefault(Boolean isDefault) { this.isDefault = isDefault; }
+    public Boolean getLastTestSuccess() { return lastTestSuccess; }
+    public void setLastTestSuccess(Boolean lastTestSuccess) { this.lastTestSuccess = lastTestSuccess; }
+    public String getLastTestMessage() { return lastTestMessage; }
+    public void setLastTestMessage(String lastTestMessage) { this.lastTestMessage = lastTestMessage; }
+    public LocalDateTime getLastTestAt() { return lastTestAt; }
+    public void setLastTestAt(LocalDateTime lastTestAt) { this.lastTestAt = lastTestAt; }
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }
