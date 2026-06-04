@@ -79,6 +79,7 @@ const deletingTaskIds = ref<Set<number>>(new Set())
 const previewAsset = ref<AssetPreviewItem | null>(null)
 const pendingAssetReplay = ref<AssetPreviewItem | null>(null)
 let lastWorkbenchScrollTop = 0
+let lastWindowScrollTop = 0
 
 const modalityLabels: Record<string, string> = {
   IMAGE: "图像",
@@ -333,10 +334,22 @@ function collapseComposerForPreview() {
 
 function handleWorkbenchScroll(event: Event) {
   const target = event.currentTarget as HTMLElement
-  const nextTop = target.scrollTop
-  const scrollingDown = nextTop > lastWorkbenchScrollTop + 18
-  lastWorkbenchScrollTop = nextTop
+  lastWorkbenchScrollTop = collapseComposerOnDownScroll(target.scrollTop, lastWorkbenchScrollTop)
+}
+
+function handleWindowWorkbenchScroll() {
+  const nextTop = window.scrollY || document.documentElement.scrollTop || 0
+  lastWindowScrollTop = collapseComposerOnDownScroll(nextTop, lastWindowScrollTop)
+}
+
+function collapseComposerOnDownScroll(nextTop: number, previousTop: number) {
+  const scrollingDown = nextTop > previousTop + 18
   if (scrollingDown && nextTop > 120) collapseComposerForPreview()
+  return nextTop
+}
+
+function handleWorkbenchWheel(event: WheelEvent) {
+  if (event.deltaY > 12) collapseComposerForPreview()
 }
 
 async function createWithSelectedTool() {
@@ -878,9 +891,13 @@ function modalityLabel(value?: string | null) {
 onMounted(async () => {
   await loadDashboard()
   setupHistoryObserver()
+  window.addEventListener("scroll", handleWindowWorkbenchScroll, { passive: true })
+  window.addEventListener("wheel", handleWorkbenchWheel, { passive: true })
 })
 
 onUnmounted(() => {
+  window.removeEventListener("scroll", handleWindowWorkbenchScroll)
+  window.removeEventListener("wheel", handleWorkbenchWheel)
   historyObserver?.disconnect()
   for (const timer of taskPollTimers.values()) window.clearInterval(timer)
   taskPollTimers.clear()
@@ -971,6 +988,7 @@ onUnmounted(() => {
           ref="workbenchScrollRef"
           class="min-h-0 flex-1 overflow-y-auto px-5 pb-40 pt-6 lg:pl-[132px] xl:px-10 xl:pl-[132px]"
           @scroll="handleWorkbenchScroll"
+          @wheel.passive="handleWorkbenchWheel"
         >
           <div class="mx-auto w-full max-w-[1380px]">
             <div class="sticky top-0 z-20 -mx-5 mb-8 border-b border-transparent bg-transparent px-5 py-4 backdrop-blur-0 xl:-mx-10 xl:px-10">

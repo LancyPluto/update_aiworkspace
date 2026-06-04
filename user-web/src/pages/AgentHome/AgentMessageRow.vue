@@ -263,7 +263,7 @@ function isImageAttachment(file: MessageAttachment) {
 .assistant-name-row strong {
   display: block;
   color: var(--agent-text-primary);
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 700;
   line-height: 1.2;
 }
@@ -275,6 +275,7 @@ function isImageAttachment(file: MessageAttachment) {
   border-radius: 0;
   background: transparent;
   padding: 0;
+  font-size: 18px;
   line-height: 1.75;
   color: var(--agent-text-primary);
   box-shadow: none;
