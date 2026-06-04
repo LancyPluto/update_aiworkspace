@@ -1,3 +1,8 @@
+import httpx
+import requests
+from openai import APIStatusError
+from requests import Request
+
 from client.openai_images_client import OpenAIImagesClient
 
 
@@ -29,3 +34,135 @@ def test_openai_images_allows_explicit_trust_env_override():
 
     assert client.session.trust_env is True
     assert client.timeout == (10, 900)
+
+
+def test_openai_images_multipart_request_uses_form_data_content_type() -> None:
+    client = OpenAIImagesClient(base_url="https://api.ofox.ai/v1", api_key="fake-key")
+    multipart = [
+        ("model", (None, "openai/gpt-image-2")),
+        ("image", ("ref.png", b"fake", "image/png")),
+    ]
+    prepared = client.session.prepare_request(
+        Request(
+            "POST",
+            "https://api.ofox.ai/v1/images/edits",
+            files=multipart,
+            headers=client._multipart_headers(),
+        )
+    )
+
+    content_type = prepared.headers.get("Content-Type", "")
+    assert content_type.startswith("multipart/form-data"), content_type
+
+
+def test_openai_images_with_reference_uses_requests_multipart_by_default() -> None:
+    class FakeResponse:
+        status_code = 200
+        text = "{}"
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {"data": [{"url": "https://example.com/openai-image.png"}]}
+
+    client = OpenAIImagesClient(base_url="https://api.ofox.ai/v1", api_key="fake-key")
+    posted: dict = {}
+
+    def fake_post(url, json=None, data=None, files=None, timeout=None, headers=None):
+        posted["url"] = url
+        posted["files"] = dict(files or [])
+        return FakeResponse()
+
+    client.session.post = fake_post
+    urls = client.generate_images(
+        prompt="edit this",
+        model="openai/gpt-image-2",
+        image_size="1536x1024",
+        batch_size=1,
+        quality="low",
+        image="data:image/png;base64,ZmFrZQ==",
+    )
+
+    assert urls == ["https://example.com/openai-image.png"], urls
+    assert posted["url"] == "https://api.ofox.ai/v1/images/edits", posted
+    assert posted["files"]["model"] == (None, "openai/gpt-image-2"), posted
+    assert posted["files"]["size"] == (None, "auto"), posted
+    assert posted["files"]["image"][1] == b"fake", posted
+
+
+def test_openai_images_edit_retries_with_prefixed_model_when_gateway_requires_it() -> None:
+    class FakeResponse:
+        status_code = 200
+        text = "{}"
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {"data": [{"b64_json": "ZmFrZQ=="}]}
+
+    client = OpenAIImagesClient(base_url="https://gateway.example.com/v1", api_key="fake-key")
+    calls: list[str] = []
+
+    def fake_post(url, json=None, data=None, files=None, timeout=None, headers=None):
+        files_map = dict(files or [])
+        model_field = files_map.get("model")
+        model_name = model_field[1] if isinstance(model_field, tuple) else ""
+        calls.append(model_name)
+        if model_name == "openai/gpt-image-2":
+            response = FakeResponse()
+            response.status_code = 400
+            response.text = '{"error":{"message":"You must provide a model parameter."}}'
+
+            def raise_for_status():
+                raise requests.HTTPError(response=response)
+
+            response.raise_for_status = raise_for_status
+            return response
+        return FakeResponse()
+
+    client.session.post = fake_post
+    urls = client.generate_images(
+        prompt="edit this",
+        model="openai/gpt-image-2",
+        image="data:image/png;base64,ZmFrZQ==",
+    )
+
+    assert urls[0].startswith("data:image/png;base64,"), urls
+    assert calls == ["openai/gpt-image-2", "gpt-image-2"], calls
+
+
+def test_openai_images_edit_can_use_sdk_when_configured(monkeypatch) -> None:
+    calls: list[dict] = []
+
+    class FakeImages:
+        def edit(self, **kwargs):
+            calls.append(kwargs)
+
+            class FakeResult:
+                def model_dump(self) -> dict:
+                    return {"data": [{"b64_json": "ZmFrZQ=="}]}
+
+            return FakeResult()
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.images = FakeImages()
+
+    monkeypatch.setattr("openai.OpenAI", FakeOpenAI)
+
+    client = OpenAIImagesClient(
+        base_url="https://api.ofox.ai/v1",
+        api_key="fake-key",
+        extra_auth_json='{"preferSdkEdit": true}',
+    )
+    urls = client.generate_images(
+        prompt="edit this",
+        model="openai/gpt-image-2",
+        image="data:image/png;base64,ZmFrZQ==",
+    )
+
+    assert urls[0].startswith("data:image/png;base64,"), urls
+    assert calls[0]["model"] == "openai/gpt-image-2", calls
+

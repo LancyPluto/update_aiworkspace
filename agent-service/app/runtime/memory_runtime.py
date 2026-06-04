@@ -51,6 +51,7 @@ class WorkspaceMemoryRuntime:
                             "view": view,
                             "memoryIds": [item.id for item in items],
                             "types": [item.memoryType for item in items],
+                            "items": memory_trace_items(items),
                         },
                     ),
                 )
@@ -389,6 +390,45 @@ def format_workspace_memory_context(items: list[WorkspaceMemoryItem]) -> str:
             sections.append(f"  {memory_label(item)} {safe_memory_text(item.title, 120)}\n  {safe_memory_text(item.content, 1200)}")
 
     return "\n".join(sections).strip()
+
+
+def memory_trace_items(items: list[WorkspaceMemoryItem], *, limit: int = 8) -> list[dict[str, Any]]:
+    trace_items: list[dict[str, Any]] = []
+    for item in items[:limit]:
+        preview_source = item.content or item.title
+        trace_items.append(
+            {
+                "id": item.id,
+                "type": item.memoryType,
+                "title": safe_memory_text(item.title, 120),
+                "preview": safe_memory_text(preview_source, 240),
+                "score": item.score,
+                "importance": item.importance,
+                "confidence": item.confidence,
+                "pinned": item.pinned,
+                "reason": safe_memory_text(item.reason or "", 160),
+            }
+        )
+    return trace_items
+
+
+def memory_context_trace_payload(
+    workspace_memory_context: str,
+    *,
+    source: str,
+    items: list[WorkspaceMemoryItem] | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "frozen": bool(workspace_memory_context),
+        "count": len(items) if items is not None else (len(workspace_memory_context) if workspace_memory_context else 0),
+        "source": source,
+        "snapshotPreview": safe_memory_text(workspace_memory_context, 800),
+    }
+    if items is not None:
+        payload["items"] = memory_trace_items(items)
+        payload["memoryIds"] = [item.id for item in items]
+        payload["types"] = [item.memoryType for item in items]
+    return payload
 
 
 def format_workspace_memory_items(items: list[WorkspaceMemoryItem]) -> list[str]:
