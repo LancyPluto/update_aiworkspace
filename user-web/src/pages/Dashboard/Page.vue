@@ -606,10 +606,28 @@ function taskStatusLabel(status?: TaskStatus): string {
   return status ? labels[status] : "任务状态"
 }
 
+function toolSummaryForRetry(task: TaskDetail): ToolSummary {
+  const matched = tools.value.find((item) => item.toolCode === task.toolCode)
+  if (matched) return matched
+  return {
+    id: 0,
+    toolCode: task.toolCode,
+    toolName: task.toolName,
+    categoryId: 0,
+    categoryName: "",
+    status: "ONLINE",
+    estimatedCreditCost: 0,
+    toolType: task.toolType,
+    inputModality: task.inputModality,
+    outputModality: task.outputModality,
+  }
+}
+
 async function retryTask(task: TaskDetail) {
   if (retryingTaskIds.value.has(task.taskId)) return
   retryingTaskIds.value = new Set([...retryingTaskIds.value, task.taskId])
   submitError.value = ""
+  const previousTaskId = task.taskId
   try {
     const response = await regenerateTask(
       task.taskId,
@@ -619,34 +637,26 @@ async function retryTask(task: TaskDetail) {
       },
       { token: auth.token },
     )
-    const tool = tools.value.find((item) => item.toolCode === task.toolCode)
-    const optimisticTask = buildOptimisticTask(
-      response.taskId,
-      response.taskNo,
-      response.status,
-      tool || {
-        id: 0,
-        toolCode: task.toolCode,
-        toolName: task.toolName,
-        categoryId: 0,
-        categoryName: "",
-        status: "ONLINE",
-        estimatedCreditCost: 0,
-        toolType: task.toolType,
-        inputModality: task.inputModality,
-        outputModality: task.outputModality,
-      },
-      { ...(task.params || {}) },
-    )
-    upsertTask(optimisticTask, true)
-    if (response.taskId !== task.taskId) {
-      stopTaskPolling(task.taskId)
-      tasks.value = tasks.value.filter((item) => item.taskId !== task.taskId)
+    const optimisticTask = buildOptimisticDashboardTask({
+      taskId: response.taskId,
+      taskNo: response.taskNo,
+      status: response.status,
+      tool: toolSummaryForRetry(task),
+      params: { ...(task.params || {}) },
+      selectedModality: normalizeModality(task.outputModality) || selectedModality.value,
+      userId: auth.user?.id ?? task.userId,
+    })
+    stopTaskPolling(previousTaskId)
+    if (response.taskId !== previousTaskId) {
+      tasks.value = tasks.value.filter((item) => item.taskId !== previousTaskId)
+      upsertTask(optimisticTask, true)
       try {
-        await deleteTask(task.taskId, { token: auth.token })
+        await deleteTask(previousTaskId, { token: auth.token })
       } catch {
         // The replacement task is already visible; keep the workspace clear even if cleanup is retried later.
       }
+    } else {
+      upsertTask(optimisticTask)
     }
     activePanel.value = "tasks"
     startTaskPolling(response.taskId)
@@ -654,7 +664,7 @@ async function retryTask(task: TaskDetail) {
     submitError.value = (e as Error).message || "重试任务失败"
   } finally {
     const next = new Set(retryingTaskIds.value)
-    next.delete(task.taskId)
+    next.delete(previousTaskId)
     retryingTaskIds.value = next
   }
 }

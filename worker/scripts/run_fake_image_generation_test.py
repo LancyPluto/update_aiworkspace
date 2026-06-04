@@ -217,6 +217,39 @@ def test_terminal_task_is_skipped_before_handler() -> None:
     assert backend.failed_payload is None, backend.failed_payload
 
 
+def test_openai_images_gateway_handler_passes_reference_image() -> None:
+    class FakeOpenAIImagesClient:
+        def __init__(self) -> None:
+            self.last_usage = {"promptTokens": 8, "completionTokens": 2112, "totalTokens": 2120}
+            self.calls = []
+            self.session = None
+
+        def generate_images(self, **kwargs):
+            self.calls.append(kwargs)
+            return ["data:image/png;base64,ZmFrZQ=="]
+
+    backend = FakeBackendClient()
+    context = backend.get_execution_context(99125)
+    context["modelConfig"] = {
+        "provider": "ofox_openai_images",
+        "modelName": "openai/gpt-image-2",
+        "baseUrl": "https://api.ofox.ai/v1",
+        "apiKey": "fake-ofox-key",
+    }
+    context["params"]["image"] = "data:image/png;base64,ZmFrZQ=="
+    client = FakeOpenAIImagesClient()
+    image_handler = ImageGenerationHandler(
+        backend_client=backend,
+        image_client=client,
+        image_persister=FakeImagePersister(),
+    )
+
+    result = image_handler.handle({"taskId": 99125, "traceId": "fake-openai-images-reference-test", "__executionContext": context})
+
+    assert result["status"] == "SUCCESS", result
+    assert client.calls[0]["image"].startswith("data:image/png;base64,"), client.calls
+
+
 def test_openai_images_gateway_handler_reports_image_tokens() -> None:
     class FakeOpenAIImagesClient:
         def __init__(self) -> None:
@@ -367,6 +400,7 @@ if __name__ == "__main__":
     test_failure_is_marked_processing_before_failed()
     test_model_auth_failure_error_code_is_specific()
     test_data_url_image_is_persisted()
+    test_openai_images_gateway_handler_passes_reference_image()
     test_openai_images_gateway_handler_reports_image_tokens()
     test_openai_images_client_parses_url_and_usage()
     test_openai_images_client_timeout_can_be_configured()
