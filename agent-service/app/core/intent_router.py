@@ -60,13 +60,6 @@ class IntentRouter:
         if not message:
             return IntentResult(intent=Intent.NEEDS_CLARIFICATION, confidence=0.8, reason="empty_request")
 
-        if self._looks_like_session_recap_question(message):
-            return IntentResult(intent=Intent.GENERAL_CHAT, confidence=0.92, reason="session_recap_question")
-
-        # Substring match for short/greeting chats (broader than exact match)
-        if self._is_short_chat(message_lower):
-            return IntentResult(intent=Intent.GENERAL_CHAT, confidence=0.95, reason="short_general_chat")
-
         continued = self._tool_use_from_pending_tool_context(context)
         if continued is not None:
             return continued
@@ -78,116 +71,6 @@ class IntentRouter:
         continued = self._tool_use_from_structured_params(context)
         if continued is not None:
             return continued
-
-        registry = ToolRegistry(context)
-        candidates = registry.rank_by_intent(message)
-        requested_modality = requested_output_modality(message)
-        if candidates or requested_modality:
-            LOGGER.info(
-                "agent intent route candidates runId=%s requestedModality=%s message=%s candidates=%s",
-                context.runId,
-                requested_modality or "-",
-                _clip(message),
-                [
-                    {
-                        "toolCode": candidate.tool.toolCode,
-                        "toolName": candidate.tool.toolName,
-                        "score": candidate.score,
-                        "matchedTerms": list(candidate.matched_terms),
-                    }
-                    for candidate in candidates[:8]
-                ],
-            )
-        if candidates:
-            if context.recentToolCalls and self._looks_like_generation_followup(message):
-                followup_candidates = self._filter_by_requested_output_modality(candidates, requested_modality)
-                if followup_candidates:
-                    top = followup_candidates[0]
-                    return IntentResult(
-                        intent=Intent.TOOL_USE,
-                        confidence=0.9,
-                        selectedToolCode=top.tool.toolCode,
-                        candidateToolCodes=[candidate.tool.toolCode for candidate in followup_candidates[:3]],
-                        decisionSource="rules",
-                        reason="recent_tool_followup",
-                        isFollowUp=True,
-                    )
-            if requested_modality and self._looks_like_tool_request(message):
-                modality_candidates = [
-                    candidate for candidate in candidates
-                    if tool_supports_modality(candidate.tool, requested_modality)
-                ]
-                if modality_candidates:
-                    top = modality_candidates[0]
-                    return IntentResult(
-                        intent=Intent.TOOL_USE,
-                        confidence=0.88,
-                        selectedToolCode=top.tool.toolCode,
-                        candidateToolCodes=[candidate.tool.toolCode for candidate in modality_candidates[:3]],
-                        reason=f"{requested_modality}_modality_tool_match",
-                    )
-            top = candidates[0]
-            second_score = candidates[1].score if len(candidates) > 1 else 0
-            candidate_codes = [candidate.tool.toolCode for candidate in candidates[:3]]
-            if top.score >= 10 and (len(candidates) == 1 or top.score - second_score >= 3):
-                return IntentResult(
-                    intent=Intent.TOOL_USE,
-                    confidence=0.9,
-                    selectedToolCode=top.tool.toolCode,
-                    candidateToolCodes=candidate_codes,
-                    reason="high_confidence_tool_match",
-                )
-            if len(candidates) > 1 and top.score >= 4 and top.score - second_score <= 2 and self._looks_like_tool_request(message):
-                names = []
-                for c in candidates[:3]:
-                    names.append(c.tool.toolName or c.tool.toolCode)
-                clarifying = (
-                    f"我识别到多个可能适合的工具：{'、'.join(names)}。\n"
-                    f"请告诉我你想用哪个工具，以及具体需求是什么？"
-                )
-                return IntentResult(
-                    intent=Intent.NEEDS_CLARIFICATION,
-                    confidence=0.7,
-                    candidateToolCodes=candidate_codes,
-                    clarifyingQuestion=clarifying,
-                    reason="ambiguous_tool_candidates",
-                )
-            if top.score >= 4 and self._looks_like_tool_request(message):
-                return IntentResult(
-                    intent=Intent.TOOL_USE,
-                    confidence=0.75,
-                    selectedToolCode=top.tool.toolCode,
-                    candidateToolCodes=candidate_codes,
-                    reason="scored_tool_match",
-                )
-            if self._looks_like_tool_request(message):
-                # 给出候选工具的提示，避免第一次提示太过笼统
-                top_tool = candidates[0].tool
-                top_name = top_tool.toolName or top_tool.toolCode
-                required_params = top_tool.inputSchema.get("required", [])
-                props = top_tool.inputSchema.get("properties", {})
-                if required_params and isinstance(required_params, list) and isinstance(props, dict):
-                    param_hints = []
-                    for p in required_params[:5]:
-                        prop = props.get(p, {})
-                        title = prop.get("title", p) if isinstance(prop, dict) else p
-                        param_hints.append(f"「{title}」")
-                    clarifying = (
-                        f"看起来你想使用「{top_name}」工具。\n"
-                        f"这个工具需要补充以下信息：{'、'.join(param_hints)}。\n"
-                        f"请告诉我具体内容，我会帮你完成。"
-                    )
-                else:
-                    clarifying = (
-                        f"看起来你想使用「{top_name}」工具，请告诉我具体需求（包括产品/服务、目标场景等），我来帮你完成。"
-                    )
-                return IntentResult(
-                    intent=Intent.NEEDS_CLARIFICATION,
-                    confidence=0.65,
-                    candidateToolCodes=candidate_codes,
-                    clarifyingQuestion=clarifying,
-                    reason="weak_tool_signal",
-                )
 
         if message in self.vague_messages:
             return IntentResult(intent=Intent.NEEDS_CLARIFICATION, confidence=0.6, reason="vague_request")

@@ -6,6 +6,11 @@ from app.config import settings
 from app.core.event_types import ROUTER_CANDIDATES, ROUTER_FALLBACK, ROUTER_SELECTED, ROUTER_STARTED
 from app.core.intent_router import Intent, IntentResult, IntentRouter
 from app.core.schemas import ChatMessage, RunContext, RunEventCreate
+from app.runtime.router_context import (
+    router_history_turns,
+    router_recent_tool_call_limit,
+    slice_history_by_turns,
+)
 from app.tools.registry import ToolRegistry, infer_output_modality, requested_output_modality
 
 LOGGER = logging.getLogger(__name__)
@@ -18,6 +23,7 @@ DEFAULT_ROUTER_PROMPT = (
     "\"selectedToolCode\":string|null,\"candidateToolCodes\":string[],"
     "\"confidence\":number,\"reason\":string,\"arguments\":object,\"missingFields\":string[],"
     "\"followupPatch\":object,\"requiresConfirmation\":boolean|null,\"clarifyingQuestion\":string|null}. "
+    "Use intent value tool_use (not tool_call) when a tool should run. "
     "Use the available tool metadata as source of truth. "
     "Prefer the tool that directly produces the requested output modality: image/photo/poster/cos/visual requests use image tools; "
     "video/short-video/image-to-video requests use video tools; copywriting/title/article requests use text tools. "
@@ -50,15 +56,32 @@ class AgentRouterService:
             return None
 
         candidates = self._candidate_payload(context)
-        await self._emit_started(context, rule_intent)
+        history_slice = slice_history_by_turns(context.history, router_history_turns(context))
+        await self._emit_started(context, rule_intent, history_slice=history_slice)
         await self._emit_candidates(context, candidates, rule_intent)
 
         try:
-            raw = await self.model.chat([ChatMessage(role="user", content=self._build_prompt(context, rule_intent, candidates))])
+            raw = await self.model.chat([ChatMessage(role="user", content=self._build_prompt(context, rule_intent, candidates, history_slice))])
             parsed = _parse_json_object(raw)
-            result = self._validate(context, parsed)
+            result, validation_failure = self._validate(context, parsed)
             if result is None:
-                await self._emit_fallback(context, "invalid_or_low_confidence", rule_intent, raw=raw, parsed=parsed)
+                LOGGER.warning(
+                    "agent router rejected runId=%s failure=%s minConfidence=%.2f parsedIntent=%s parsedTool=%s raw=%s",
+                    context.runId,
+                    validation_failure or "unknown",
+                    self._min_confidence(context),
+                    parsed.get("intent") if isinstance(parsed, dict) else type(parsed).__name__,
+                    parsed.get("selectedToolCode") if isinstance(parsed, dict) else "-",
+                    _clip(raw, 300),
+                )
+                await self._emit_fallback(
+                    context,
+                    "invalid_or_low_confidence",
+                    rule_intent,
+                    raw=raw,
+                    parsed=parsed,
+                    validation_failure=validation_failure,
+                )
                 return None
             await self._emit_selected(context, result, parsed)
             LOGGER.info(
@@ -136,7 +159,14 @@ class AgentRouterService:
             for tool in tools
         ]
 
-    def _build_prompt(self, context: RunContext, rule_intent: IntentResult, candidates: list[dict[str, Any]]) -> str:
+    def _build_prompt(
+        self,
+        context: RunContext,
+        rule_intent: IntentResult,
+        candidates: list[dict[str, Any]],
+        history_slice: list[ChatMessage],
+    ) -> str:
+        tool_limit = router_recent_tool_call_limit(context)
         payload = {
             "userMessage": context.message,
             "requestedOutputModality": requested_output_modality(context.message),
@@ -145,7 +175,7 @@ class AgentRouterService:
                     "role": message.role,
                     "content": _clip(message.content, 500),
                 }
-                for message in context.history[-8:]
+                for message in history_slice
             ],
             "recentToolCalls": [
                 {
@@ -157,7 +187,7 @@ class AgentRouterService:
                     "mediaUrls": call.mediaUrls,
                     "createdAt": call.createdAt,
                 }
-                for call in context.recentToolCalls[:5]
+                for call in context.recentToolCalls[:tool_limit]
             ],
             "ruleFallback": {
                 "intent": rule_intent.intent.value,
@@ -170,37 +200,41 @@ class AgentRouterService:
         }
         return f"{self._prompt_template(context)}\n\nRouting input:\n{json.dumps(payload, ensure_ascii=False)}"
 
-    def _validate(self, context: RunContext, parsed: Any) -> IntentResult | None:
+    def _validate(self, context: RunContext, parsed: Any) -> tuple[IntentResult | None, str | None]:
         if not isinstance(parsed, dict):
-            return None
-        raw_intent = str(parsed.get("intent") or "").strip()
+            return None, "parsed_not_object"
+        raw_intent = _normalize_router_intent(parsed.get("intent"))
+        if raw_intent is None:
+            return None, "invalid_intent"
         try:
             intent = Intent(raw_intent)
         except ValueError:
-            return None
+            return None, "invalid_intent"
         confidence = _safe_float(parsed.get("confidence"), 0)
-        if confidence < self._min_confidence(context):
-            return None
+        min_confidence = self._min_confidence(context)
+        if confidence < min_confidence:
+            return None, f"confidence_below_min:{confidence:.2f}<{min_confidence:.2f}"
 
         available = {tool.toolCode for tool in context.availableTools}
-        selected_tool = parsed.get("selectedToolCode")
-        selected_tool = selected_tool.strip() if isinstance(selected_tool, str) and selected_tool.strip() else None
+        selected_tool = _resolve_selected_tool_code(parsed.get("selectedToolCode"), context.availableTools)
+        raw_candidates = parsed.get("candidateToolCodes")
+        candidate_codes = _resolve_candidate_tool_codes(raw_candidates, context.availableTools)
+
         if intent == Intent.TOOL_USE:
-            if not selected_tool or selected_tool not in available:
-                return None
+            if not selected_tool and candidate_codes:
+                selected_tool = candidate_codes[0]
+            if not selected_tool:
+                return None, "tool_use_missing_selected_tool"
+            if selected_tool not in available:
+                return None, f"tool_not_available:{selected_tool}"
             selected_descriptor = next((tool for tool in context.availableTools if tool.toolCode == selected_tool), None)
             requested_modality = requested_output_modality(context.message)
             selected_modality = infer_output_modality(selected_descriptor) if selected_descriptor else None
             if requested_modality and selected_modality and requested_modality != selected_modality:
-                return None
+                return None, f"output_modality_mismatch:{requested_modality}!={selected_modality}"
         elif selected_tool and selected_tool not in available:
             selected_tool = None
 
-        raw_candidates = parsed.get("candidateToolCodes")
-        candidate_codes = [
-            code for code in raw_candidates
-            if isinstance(code, str) and code in available
-        ] if isinstance(raw_candidates, list) else []
         if selected_tool and selected_tool not in candidate_codes:
             candidate_codes.insert(0, selected_tool)
 
@@ -221,9 +255,16 @@ class AgentRouterService:
             ] if isinstance(parsed.get("missingFields"), list) else [],
             followupPatch=parsed.get("followupPatch") if isinstance(parsed.get("followupPatch"), dict) else {},
             requiresConfirmation=parsed.get("requiresConfirmation") if isinstance(parsed.get("requiresConfirmation"), bool) else None,
-        )
+        ), None
 
-    async def _emit_started(self, context: RunContext, rule_intent: IntentResult) -> None:
+    async def _emit_started(
+        self,
+        context: RunContext,
+        rule_intent: IntentResult,
+        *,
+        history_slice: list[ChatMessage],
+    ) -> None:
+        configured_turns = router_history_turns(context)
         await self.backend.append_event(
             context.runId,
             RunEventCreate(
@@ -233,6 +274,9 @@ class AgentRouterService:
                     "enabled": True,
                     "minConfidence": self._min_confidence(context),
                     "fallbackToRules": self._fallback_to_rules(context),
+                    "historyTurns": configured_turns,
+                    "recentToolCallLimit": router_recent_tool_call_limit(context),
+                    "includedHistoryMessageCount": len(history_slice),
                     "ruleIntent": rule_intent.intent.value,
                     "ruleSelectedToolCode": rule_intent.selectedToolCode,
                     "ruleReason": rule_intent.reason,
@@ -285,6 +329,7 @@ class AgentRouterService:
         raw: str | None = None,
         parsed: Any | None = None,
         error: str | None = None,
+        validation_failure: str | None = None,
     ) -> None:
         await self.backend.append_event(
             context.runId,
@@ -293,6 +338,7 @@ class AgentRouterService:
                 eventText=reason,
                 eventJson={
                     "reason": reason,
+                    "validationFailure": validation_failure,
                     "fallbackToRules": self._fallback_to_rules(context),
                     "ruleIntent": rule_intent.intent.value,
                     "ruleSelectedToolCode": rule_intent.selectedToolCode,
@@ -305,6 +351,61 @@ class AgentRouterService:
                 },
             ),
         )
+
+
+def _normalize_router_intent(raw: Any) -> str | None:
+    if raw is None:
+        return None
+    normalized = str(raw).strip().lower().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "tool": "tool_use",
+        "tooluse": "tool_use",
+        "tool_use": "tool_use",
+        "tool_call": "tool_use",
+        "call_tool": "tool_use",
+        "use_tool": "tool_use",
+        "chat": "general_chat",
+        "general": "general_chat",
+        "general_chat": "general_chat",
+        "clarify": "needs_clarification",
+        "needs_clarification": "needs_clarification",
+        "unsupported": "unsupported",
+    }
+    return aliases.get(normalized, normalized if normalized in {item.value for item in Intent} else None)
+
+
+def _resolve_selected_tool_code(raw: Any, tools: list) -> str | None:
+    if raw is None:
+        return None
+    token = str(raw).strip()
+    if not token:
+        return None
+    available = {tool.toolCode: tool for tool in tools}
+    if token in available:
+        return token
+    lowered = token.lower()
+    for tool in tools:
+        code = tool.toolCode
+        name = (tool.toolName or "").strip()
+        if code.lower() == lowered:
+            return code
+        if name and (name == token or name.lower() == lowered):
+            return code
+        if lowered in code.lower() or (name and lowered in name.lower()):
+            return code
+    return None
+
+
+def _resolve_candidate_tool_codes(raw: Any, tools: list) -> list[str]:
+    if not isinstance(raw, list):
+        return []
+    available = {tool.toolCode for tool in tools}
+    resolved: list[str] = []
+    for item in raw:
+        code = _resolve_selected_tool_code(item, tools)
+        if code and code in available and code not in resolved:
+            resolved.append(code)
+    return resolved
 
 
 def _parse_json_object(raw: str) -> Any:

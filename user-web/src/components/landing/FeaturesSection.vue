@@ -5,22 +5,22 @@ const features = [
   {
     icon: Image,
     title: 'AI 生图',
-    description: '基于 Midjourney + DALL·E 能力，输入描述即可生成高品质图片，无需提示词工程。',
+    description: '基于可灵AI生成引擎，轻松输入描述即可生成高品质图片。'
   },
   {
     icon: Film,
     title: '图生视频',
-    description: '接入 Runway + Pika，让静态图片动起来，支持风格迁移和运动控制。',
+    description: '依托可灵视频生成能力，让静态图片动起来，支持风格与运动控制。'
   },
   {
     icon: Music,
     title: '音频生成',
-    description: '集成 Suno + 火山引擎 TTS，文字转语音、AI 作曲、声音克隆一站式完成。',
+    description: '集成 MiniMax 与 SF CosyVoice，语音合成、AI 作曲、声音克隆一键搞定。'
   },
   {
     icon: FileText,
     title: 'PPT 生成',
-    description: '基于 GPT-4o + Claude，输入主题即可生成结构清晰、设计精美的演示文稿。',
+    description: '基于 GPT-4o + Claude，一键生成结构清晰、设计精美的演示文稿。'
   },
   {
     icon: Cpu,

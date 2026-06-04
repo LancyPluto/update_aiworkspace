@@ -27,12 +27,20 @@ import {
 import AppShell from "@/components/AppShell.vue"
 import AssetPreviewModal from "@/components/AssetPreviewModal.vue"
 import CapabilityControls from "@/pages/Chat/CapabilityControls.vue"
+import DashboardModalityDock from "./DashboardModalityDock.vue"
 import { fetchCreditAccount } from "@/api/creditApi"
 import { ApiBusinessError, getApiOrigin } from "@/api/client"
-import { fetchAIToolById } from "@/api/aiToolApi"
-import { createTask, deleteTask, fetchTaskById, fetchTasks, fetchTaskStatus, regenerateTask } from "@/api/taskApi"
+import {
+  cancelTask,
+  createTask,
+  deleteTask,
+  fetchTaskById,
+  fetchTasks,
+  fetchTaskStatus,
+  regenerateTask,
+} from "@/api/taskApi"
 import { publishCommunityPost, unpublishCommunityPost } from "@/api/communityApi"
-import { fetchTools } from "@/api/toolApi"
+import { fetchAIToolById, fetchTools } from "@/api/toolApi"
 import type { AITool } from "@/api/aiToolTypes"
 import type { CreditAccount, TaskDetail, TaskStatus, ToolField, ToolSummary } from "@/api/types"
 import type { AssetPreviewItem, AssetPreviewRecommendation } from "@/types/assetPreview"
@@ -43,6 +51,12 @@ import { buildTaskResultBlocks } from "@/utils/taskResultBlocks"
 import { consumeDashboardPendingAsset } from "@/utils/assetReplay"
 import { cleanToolDisplayText, toolDisplayDescription } from "@/utils/toolDisplayText"
 import { randomUUID } from "@/utils/randomUUID"
+import {
+  dashboardAttributionFromRoute,
+  mergePendingAssetAttribution,
+  type DashboardAttributionContext,
+} from "./dashboardAttribution"
+import { buildDashboardTaskParams, buildOptimisticDashboardTask } from "./dashboardTaskFactory"
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -76,8 +90,10 @@ let historyObserver: IntersectionObserver | null = null
 const taskPollTimers = new Map<number, number>()
 const retryingTaskIds = ref<Set<number>>(new Set())
 const deletingTaskIds = ref<Set<number>>(new Set())
+const cancellingTaskIds = ref<Set<number>>(new Set())
 const previewAsset = ref<AssetPreviewItem | null>(null)
 const pendingAssetReplay = ref<AssetPreviewItem | null>(null)
+const attribution = ref<DashboardAttributionContext>(dashboardAttributionFromRoute(route))
 let lastWorkbenchScrollTop = 0
 let lastWindowScrollTop = 0
 
@@ -232,6 +248,13 @@ watch(
   },
 )
 
+watch(
+  () => route.query.sourcePost,
+  () => {
+    attribution.value = mergePendingAssetAttribution(dashboardAttributionFromRoute(route), pendingAssetReplay.value)
+  },
+)
+
 watch(activePanel, async (panel) => {
   if (panel !== "tasks") return
   await nextTick()
@@ -266,6 +289,7 @@ async function loadDashboard() {
     const rawRouteTool = Array.isArray(route.query.tool) ? route.query.tool[0] : route.query.tool
     const pendingAsset = consumePendingAssetFromStorage()
     if (pendingAsset) {
+      attribution.value = mergePendingAssetAttribution(attribution.value, pendingAsset)
       pendingAssetReplay.value = pendingAsset
       promptText.value = pendingAsset.prompt || promptText.value
     }
@@ -370,16 +394,15 @@ async function createWithSelectedTool() {
 
   const content = promptText.value.trim()
   const params = capabilityRef.value?.getRequestParams() || {}
-  if (coreField.value && content) params[coreField.value.fieldKey] = content
   const attachments = capabilityRef.value?.getAttachmentIds() || []
-  const taskParams = {
-    ...params,
+  const taskParams = buildDashboardTaskParams({
     prompt: content,
-    text: content,
+    params,
+    coreFieldKey: coreField.value?.fieldKey,
     attachments,
-  }
-  const rawSourcePost = Array.isArray(route.query.sourcePost) ? route.query.sourcePost[0] : route.query.sourcePost
-  const sourcePostId = rawSourcePost && !Number.isNaN(Number(rawSourcePost)) ? Number(rawSourcePost) : undefined
+  })
+  attribution.value = mergePendingAssetAttribution(dashboardAttributionFromRoute(route), pendingAssetReplay.value)
+  const sourcePostId = attribution.value.sourcePostId
 
   submitting.value = true
   try {
@@ -392,7 +415,15 @@ async function createWithSelectedTool() {
       },
       { token: auth.token },
     )
-    const optimisticTask = buildOptimisticTask(response.taskId, response.taskNo, response.status, tool, taskParams)
+    const optimisticTask = buildOptimisticDashboardTask({
+      taskId: response.taskId,
+      taskNo: response.taskNo,
+      status: response.status,
+      tool,
+      params: taskParams,
+      selectedModality: selectedModality.value,
+      userId: auth.user?.id ?? 0,
+    })
     upsertTask(optimisticTask, true)
     activePanel.value = "tasks"
     submitNotice.value = `已进入工作历史：${response.taskNo}`
@@ -410,32 +441,6 @@ async function createWithSelectedTool() {
     }
   } finally {
     submitting.value = false
-  }
-}
-
-function buildOptimisticTask(
-  taskId: number,
-  taskNo: string,
-  status: TaskStatus,
-  tool: ToolSummary,
-  params: Record<string, unknown>,
-): TaskDetail {
-  return {
-    taskId,
-    taskNo,
-    status,
-    progress: status === "CREATED" || status === "QUEUED" ? 5 : 0,
-    progressMessage: "任务已创建，正在排队生成",
-    userId: auth.user?.id ?? 0,
-    toolCode: tool.toolCode,
-    toolName: tool.toolName,
-    toolType: tool.toolType || undefined,
-    inputModality: tool.inputModality || undefined,
-    outputModality: tool.outputModality || selectedModality.value,
-    params,
-    result: null,
-    createdAt: new Date().toISOString(),
-    finishedAt: null,
   }
 }
 
@@ -583,6 +588,10 @@ function canDeleteTask(status?: TaskStatus): boolean {
   return status === "FAILED" || status === "TIMEOUT" || status === "CANCELLED"
 }
 
+function canCancelTask(status?: TaskStatus): boolean {
+  return status === "QUEUED"
+}
+
 function taskStatusLabel(status?: TaskStatus): string {
   const labels: Record<TaskStatus, string> = {
     CREATED: "已创建",
@@ -647,6 +656,32 @@ async function retryTask(task: TaskDetail) {
     const next = new Set(retryingTaskIds.value)
     next.delete(task.taskId)
     retryingTaskIds.value = next
+  }
+}
+
+async function cancelQueuedTask(task: TaskDetail) {
+  if (!canCancelTask(task.status) || cancellingTaskIds.value.has(task.taskId)) return
+  cancellingTaskIds.value = new Set([...cancellingTaskIds.value, task.taskId])
+  submitError.value = ""
+  try {
+    const response = await cancelTask(task.taskId, { token: auth.token })
+    stopTaskPolling(task.taskId)
+    const current = tasks.value.find((item) => item.taskId === task.taskId)
+    if (current) {
+      upsertTask({
+        ...current,
+        status: response.status,
+        progress: response.progress ?? current.progress,
+        progressMessage: response.progressMessage ?? current.progressMessage,
+        finishedAt: new Date().toISOString(),
+      })
+    }
+  } catch (e) {
+    submitError.value = (e as Error).message || "取消任务失败"
+  } finally {
+    const next = new Set(cancellingTaskIds.value)
+    next.delete(task.taskId)
+    cancellingTaskIds.value = next
   }
 }
 
@@ -907,62 +942,16 @@ onUnmounted(() => {
 <template>
   <AppShell title="工作台" description="像 SeaArt 一样选择模态、模型，然后开始创作">
     <div class="flex min-h-[calc(100vh-5rem)] bg-black text-white">
-      <aside
-        class="fixed bottom-6 left-[calc(var(--app-sidebar-width,268px)+1.25rem)] top-[calc(5rem+1.25rem)] z-40 hidden w-[92px] flex-col rounded-3xl border border-white/10 bg-black/80 shadow-[0_24px_80px_rgb(0_0_0_/_0.45)] backdrop-blur-xl transition-[left,width,height] lg:flex"
-        :class="modalityDockOpen ? '' : 'top-auto h-16 w-auto'"
-      >
-        <button
-          type="button"
-          class="absolute -right-3 top-4 flex h-7 w-7 items-center justify-center rounded-full border border-white/10 bg-[#202128] text-white/55 hover:text-white"
-          @click="modalityDockOpen = !modalityDockOpen"
-        >
-          <ChevronDown class="h-4 w-4 transition" :class="modalityDockOpen ? 'rotate-90' : '-rotate-90'" />
-        </button>
-
-        <template v-if="modalityDockOpen">
-        <div class="flex flex-1 flex-col items-center gap-3 overflow-y-auto py-6">
-          <button
-            v-for="tab in modalityTabs"
-            :key="tab.key"
-            type="button"
-            class="group flex w-full flex-col items-center gap-1.5 px-2 py-3 text-[11px] transition"
-            :class="selectedModality === tab.key ? 'text-white' : 'text-white/45 hover:text-white'"
-            @click="selectModality(tab.key)"
-          >
-            <span
-              class="flex h-11 w-11 items-center justify-center rounded-2xl border transition"
-              :class="
-                selectedModality === tab.key
-                  ? 'border-primary/70 bg-primary/20 shadow-[0_0_28px_rgb(176_92_255_/_0.28)]'
-                  : 'border-white/8 bg-white/[0.04] group-hover:bg-white/8'
-              "
-            >
-              <component :is="tab.icon" class="h-5 w-5" />
-            </span>
-            <span>{{ tab.label }}</span>
-          </button>
-        </div>
-        <div class="space-y-3 border-t border-white/8 px-3 py-5 text-center text-[11px] text-white/45">
-          <div>
-            <Zap class="mx-auto mb-1 h-4 w-4 text-amber-300" />
-            {{ credit?.available ?? "--" }}
-          </div>
-          <div>
-            <Clock class="mx-auto mb-1 h-4 w-4 text-primary" />
-            {{ runningCount }}
-          </div>
-        </div>
-        </template>
-        <button
-          v-else
-          type="button"
-          class="flex h-16 items-center gap-2 rounded-3xl px-5 text-sm font-semibold text-white"
-          @click="modalityDockOpen = true"
-        >
-          <component :is="modalityIcons[selectedModality as keyof typeof modalityIcons] || Sparkles" class="h-5 w-5 text-primary" />
-          {{ modalityLabel(selectedModality) }}
-        </button>
-      </aside>
+      <DashboardModalityDock
+        v-model:open="modalityDockOpen"
+        :tabs="modalityTabs"
+        :selected-modality="selectedModality"
+        :selected-label="modalityLabel(selectedModality)"
+        :selected-icon="modalityIcons[selectedModality as keyof typeof modalityIcons] || Sparkles"
+        :available-credits="credit?.available"
+        :running-count="runningCount"
+        @select="selectModality"
+      />
 
       <section class="relative flex min-w-0 flex-1 flex-col">
         <div
@@ -1109,11 +1098,11 @@ onUnmounted(() => {
                 <div v-else-if="recentTasks.length === 0" class="rounded-2xl border border-dashed border-white/10 py-10 text-center text-sm text-white/45">
                   暂无任务，选择模型后开始第一条创作。
                 </div>
-                <div v-else class="columns-1 gap-5 sm:columns-2 xl:columns-3 2xl:columns-4">
+                <div v-else class="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
                   <article
                     v-for="item in taskMaterials"
                     :key="item.task.taskId"
-                    class="group mb-5 inline-block w-full break-inside-avoid overflow-hidden rounded-3xl border border-white/8 bg-[#191919] shadow-[0_18px_42px_rgb(0_0_0_/_0.24)] transition hover:-translate-y-1 hover:border-primary/50"
+                    class="group w-full overflow-hidden rounded-3xl border border-white/8 bg-[#191919] shadow-[0_18px_42px_rgb(0_0_0_/_0.24)] transition hover:-translate-y-1 hover:border-primary/50"
                     :class="item.task.status === 'SUCCESS' ? 'cursor-zoom-in' : ''"
                     @click="openAssetPreview(item)"
                   >
@@ -1125,7 +1114,7 @@ onUnmounted(() => {
                         >
                           <div class="absolute inset-0 bg-gradient-to-t from-black/75 via-transparent to-transparent" />
                           <div class="relative z-10 flex h-full min-h-[260px] flex-col">
-                            <div class="flex items-center justify-between">
+                            <div class="flex items-center justify-between gap-2">
                               <span
                                 class="inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-medium"
                                 :class="
@@ -1139,7 +1128,27 @@ onUnmounted(() => {
                                 <Clock v-else class="h-3.5 w-3.5" />
                                 {{ taskStatusLabel(item.task.status) }}
                               </span>
-                              <span class="text-xs text-white/35">{{ item.task.progress ?? 0 }}%</span>
+                              <div class="flex items-center gap-2">
+                                <button
+                                  v-if="canCancelTask(item.task.status)"
+                                  type="button"
+                                  class="inline-flex items-center gap-1 rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-white/75 transition hover:bg-white/18 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+                                  :disabled="
+                                    cancellingTaskIds.has(item.task.taskId) ||
+                                    deletingTaskIds.has(item.task.taskId) ||
+                                    retryingTaskIds.has(item.task.taskId)
+                                  "
+                                  @click.stop="cancelQueuedTask(item.task)"
+                                >
+                                  <Loader2
+                                    v-if="cancellingTaskIds.has(item.task.taskId)"
+                                    class="h-3 w-3 animate-spin"
+                                  />
+                                  <X v-else class="h-3 w-3" />
+                                  {{ cancellingTaskIds.has(item.task.taskId) ? "取消中" : "取消" }}
+                                </button>
+                                <span class="text-xs text-white/35">{{ item.task.progress ?? 0 }}%</span>
+                              </div>
                             </div>
 
                             <div class="mt-auto">
@@ -1219,16 +1228,38 @@ onUnmounted(() => {
                       <div class="flex items-center justify-between gap-3">
                         <div class="flex flex-wrap items-center gap-2">
                           <button
+                            v-if="canCancelTask(item.task.status)"
+                            type="button"
+                            class="inline-flex items-center gap-1 rounded-full bg-white/8 px-3 py-1.5 text-xs font-medium text-white/70 transition hover:bg-white/14 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+                            :disabled="
+                              cancellingTaskIds.has(item.task.taskId) ||
+                              deletingTaskIds.has(item.task.taskId) ||
+                              retryingTaskIds.has(item.task.taskId)
+                            "
+                            @click.stop="cancelQueuedTask(item.task)"
+                          >
+                            <Loader2
+                              v-if="cancellingTaskIds.has(item.task.taskId)"
+                              class="h-3.5 w-3.5 animate-spin"
+                            />
+                            <X v-else class="h-3.5 w-3.5" />
+                            {{ cancellingTaskIds.has(item.task.taskId) ? "取消中" : "取消任务" }}
+                          </button>
+                          <button
                             v-if="canRetryTask(item.task.status)"
                             type="button"
                             class="rounded-full bg-red-500/15 px-3 py-1.5 text-xs font-medium text-red-100 transition hover:bg-red-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
-                            :disabled="retryingTaskIds.has(item.task.taskId) || deletingTaskIds.has(item.task.taskId)"
+                            :disabled="
+                              retryingTaskIds.has(item.task.taskId) ||
+                              deletingTaskIds.has(item.task.taskId) ||
+                              cancellingTaskIds.has(item.task.taskId)
+                            "
                             @click.stop="retryTask(item.task)"
                           >
                             {{ retryingTaskIds.has(item.task.taskId) ? "重试中" : "重试" }}
                           </button>
                           <button
-                            v-else
+                            v-else-if="!canCancelTask(item.task.status)"
                             type="button"
                             class="rounded-full bg-primary/15 px-3 py-1.5 text-xs font-medium text-primary transition hover:bg-primary hover:text-white"
                             @click.stop="replayTask(item.task)"
@@ -1239,7 +1270,11 @@ onUnmounted(() => {
                             v-if="canDeleteTask(item.task.status)"
                             type="button"
                             class="inline-flex items-center gap-1 rounded-full bg-white/8 px-3 py-1.5 text-xs font-medium text-white/55 transition hover:bg-white/14 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
-                            :disabled="deletingTaskIds.has(item.task.taskId) || retryingTaskIds.has(item.task.taskId)"
+                            :disabled="
+                              deletingTaskIds.has(item.task.taskId) ||
+                              retryingTaskIds.has(item.task.taskId) ||
+                              cancellingTaskIds.has(item.task.taskId)
+                            "
                             @click.stop="removeTask(item.task)"
                           >
                             <Loader2 v-if="deletingTaskIds.has(item.task.taskId)" class="h-3.5 w-3.5 animate-spin" />

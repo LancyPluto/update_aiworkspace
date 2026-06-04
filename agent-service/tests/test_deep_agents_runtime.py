@@ -347,6 +347,41 @@ async def test_memory_consolidation_updates_existing_profile_after_enough_turns(
 
 
 @pytest.mark.asyncio
+async def test_memory_consolidation_does_not_replace_explicit_preference_memory():
+    from app.runtime.deep_agents_engine import DeepAgentsRuntimeEngine
+
+    backend = FakeBackend()
+    backend.memory_items = [
+        WorkspaceMemoryItem(
+            id=92,
+            workspaceId=7,
+            title="GPT 生图质量偏好",
+            content="GPT生图默认选最低质量 low quality，省钱省算力。",
+            memoryType="preference",
+            score=3,
+        )
+    ]
+    engine = DeepAgentsRuntimeEngine(backend, object())
+    context = RunContext(
+        runId=33,
+        sessionId=4,
+        userId=5,
+        workspaceId=7,
+        message="以后继续保持这种二次元梗图风格",
+        history=[ChatMessage(role="user", content=f"我喜欢第{i}种二次元梗图风格") for i in range(7)],
+    )
+    engine._memory_tool_executed_runs.add(33)
+
+    await engine._curate_memory_after_run(context, "好的，继续保持。")
+
+    assert backend.updated_memories == []
+    assert backend.created_memories
+    assert backend.created_memories[0]["memory_type"] == "user_profile"
+    assert backend.created_memories[0]["title"] == "用户画像与偏好摘要"
+    assert "二次元" in backend.created_memories[0]["content"]
+
+
+@pytest.mark.asyncio
 async def test_deep_agents_engine_fails_cleanly_when_model_is_not_supported():
     from app.runtime.deep_agents_engine import DeepAgentsRuntimeEngine
 

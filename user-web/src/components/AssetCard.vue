@@ -180,9 +180,9 @@ function openAuthorProfile() {
 
 <style scoped>
 .asset-card {
-  display: inline-block;
+  display: flex;
   width: 100%;
-  break-inside: avoid;
+  flex-direction: column;
   overflow: hidden;
   border: 1px solid rgb(255 255 255 / 0.08);
   border-radius: 24px;

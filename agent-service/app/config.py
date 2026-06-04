@@ -53,8 +53,13 @@ class Settings:
     agent_memory_auto_save_enabled: bool = _bool("AGENT_MEMORY_AUTO_SAVE", True)
     agent_memory_tool_loop_enabled: bool = _bool("AGENT_MEMORY_TOOL_LOOP_ENABLED", True)
     agent_memory_consolidation_enabled: bool = _bool("AGENT_MEMORY_CONSOLIDATION_ENABLED", True)
+    agent_memory_consolidation_llm_enabled: bool = _bool("AGENT_MEMORY_CONSOLIDATION_LLM_ENABLED", True)
     agent_memory_consolidation_turn_interval: int = int(os.getenv("AGENT_MEMORY_CONSOLIDATION_TURN_INTERVAL", "8"))
     agent_memory_consolidation_char_threshold: int = int(os.getenv("AGENT_MEMORY_CONSOLIDATION_CHAR_THRESHOLD", "4000"))
+    agent_memory_consolidation_token_threshold: int = int(os.getenv("AGENT_MEMORY_CONSOLIDATION_TOKEN_THRESHOLD", "3000"))
+    agent_memory_consolidation_recent_tool_threshold: int = int(os.getenv("AGENT_MEMORY_CONSOLIDATION_RECENT_TOOL_THRESHOLD", "3"))
+    agent_memory_consolidation_max_context_messages: int = int(os.getenv("AGENT_MEMORY_CONSOLIDATION_MAX_CONTEXT_MESSAGES", "24"))
+    agent_memory_consolidation_prompt: str = os.getenv("AGENT_MEMORY_CONSOLIDATION_PROMPT", "")
     agent_memory_consolidation_min_confidence: float = float(os.getenv("AGENT_MEMORY_CONSOLIDATION_MIN_CONFIDENCE", "0.72"))
     agent_memory_candidate_confidence_threshold: float = float(os.getenv("AGENT_MEMORY_CANDIDATE_CONFIDENCE_THRESHOLD", "0.55"))
 

@@ -176,7 +176,8 @@ public class SystemSettingServiceImpl implements SystemSettingService {
                 || AgentPromptSettings.DEEP_AGENTS_SYSTEM_PROMPT_KEY.equals(key)
                 || AgentRouterSettings.PROMPT_KEY.equals(key)
                 || AgentMemorySettings.WRITE_PROMPT_KEY.equals(key)
-                || AgentMemorySettings.RETRIEVAL_PROMPT_KEY.equals(key);
+                || AgentMemorySettings.RETRIEVAL_PROMPT_KEY.equals(key)
+                || AgentMemorySettings.CONSOLIDATION_PROMPT_KEY.equals(key);
     }
 
     private String defaultValueFor(String key) {

@@ -50,6 +50,7 @@ from app.runtime.followup_task_resolver import FollowupTaskResolver, FollowupRes
 from app.runtime.memory_curator import MemoryCuratorService
 from app.runtime.memory_runtime import (
     WorkspaceMemoryRuntime,
+    build_consolidated_memory_summary,
     format_workspace_memory_context,
     format_workspace_memory_items,
     memory_auto_save_enabled,
@@ -132,7 +133,7 @@ class DeepAgentsRuntimeEngine:
         self.followup_resolver = FollowupTaskResolver()
         self.tool_decision_validator = ToolDecisionValidator()
         self.memory_curator = MemoryCuratorService()
-        self.memory_runtime = WorkspaceMemoryRuntime(backend_client, self.memory_curator)
+        self.memory_runtime = WorkspaceMemoryRuntime(backend_client, self.memory_curator, model_client=model_client)
         self.file_runtime = WorkspaceFileRuntime(backend_client)
         self.product_tool_loop = ProductToolCallLoopExecutor(
             backend=backend_client,
@@ -161,7 +162,6 @@ class DeepAgentsRuntimeEngine:
                     guard=guard,
                     tool_timeout_seconds=self.tool_bridge.timeout_seconds,
                     tool_poll_interval_seconds=self.tool_bridge.poll_interval_seconds,
-                    product_tool_loop_max_calls=self.product_tool_loop.max_tool_calls,
                 ),
             ),
         )
@@ -200,10 +200,8 @@ class DeepAgentsRuntimeEngine:
             await self._run_deep_agents_or_chat(context, None)
             return
 
-        # 1. Classify intent. Product tool calls are attempted before the legacy
-        # LLM router, after hard chat/file/security prechecks have had a chance
-        # to keep meta questions and unsupported paths out of tool execution.
-        intent = await self._classify_intent_tool_first(context)
+        # 1. Classify intent via LLM router (infrastructure rules short-circuit first).
+        intent = await self._classify_intent(context)
         LOGGER.info(
             "agent route selected runId=%s intent=%s confidence=%.2f selectedTool=%s candidates=%s reason=%s",
             context.runId,
@@ -334,7 +332,7 @@ class DeepAgentsRuntimeEngine:
         await self._curate_memory_after_run(context, answer, tool_result=result)
 
     async def debug_route(self, context: RunContext) -> AgentRouteDebugResponse:
-        intent = await self._classify_intent_tool_first(context)
+        intent = await self._classify_intent(context)
         requested_modality = requested_output_modality(context.message)
         return AgentRouteDebugResponse(
             intent=intent.intent.value,
@@ -374,79 +372,16 @@ class DeepAgentsRuntimeEngine:
     # --- Intent helpers ---
 
     async def _classify_intent(self, context: RunContext):
-        return await self.decision_service.decide(
+        intent = await self.decision_service.decide(
             context,
-            hard_rule=self._is_hard_rule_intent,
             llm_router=self.router_service.classify,
         )
-
-    def _should_fallback_from_unsupported(self, context: RunContext) -> bool:
-        message = (context.message or "").strip()
-        if not message:
-            return False
-        return self.intent_router._looks_like_tool_request(message)
-
-    async def _classify_intent_tool_first(self, context: RunContext):
-        conversation_guard = self.decision_service._conversation_guard(context)
-        if conversation_guard is not None:
-            conversation_guard.signals = [{
-                "source": "conversation_guard",
-                "verdict": conversation_guard.intent.value,
-                "confidence": conversation_guard.confidence,
-                "reason": conversation_guard.reason,
-            }]
-            return conversation_guard
-
-        rule_intent = self.intent_router.classify(context)
-        if self._is_hard_rule_intent(rule_intent):
-            rule_intent.signals = [{
-                "source": "rule_router",
-                "verdict": rule_intent.intent.value,
-                "confidence": rule_intent.confidence,
-                "reason": rule_intent.reason,
-            }]
-            return rule_intent
-
-        if self._product_tool_loop_enabled(context):
-            try:
-                product_result = await self.product_tool_loop.run(
-                    context,
-                    max_tool_calls=_runtime_int(
-                        context,
-                        "productToolLoopMaxCalls",
-                        self.product_tool_loop.max_tool_calls,
-                        1,
-                        20,
-                    ),
-                )
-            except Exception as exc:
-                LOGGER.info("product tool loop fallback runId=%s error=%s", context.runId, exc)
-            else:
-                if product_result.intent is not None:
-                    product_result.intent.signals = [
-                        {
-                            "source": "rule_router",
-                            "verdict": rule_intent.intent.value,
-                            "confidence": rule_intent.confidence,
-                            "reason": rule_intent.reason,
-                        },
-                        {
-                            "source": "tool_call_loop",
-                            "verdict": product_result.intent.intent.value,
-                            "confidence": product_result.intent.confidence,
-                            "reason": product_result.intent.reason,
-                        },
-                    ]
-                    return product_result.intent
-                if product_result.rejected and not _runtime_bool(context, "productToolLoopFallbackToRouter", settings.agent_product_tool_loop_fallback_to_router):
-                    return IntentResult(
-                        intent=Intent.GENERAL_CHAT,
-                        confidence=0.65,
-                        decisionSource="tool_call_loop",
-                        reason=product_result.rejection_reason or "product_tool_call_rejected",
-                    )
-
-        return await self._classify_intent(context)
+        if intent.reason != "router_fallback_general_chat":
+            return intent
+        if not self._product_tool_loop_enabled(context):
+            return intent
+        product_intent = await self._try_product_tool_loop_fallback(context)
+        return product_intent or intent
 
     @staticmethod
     def _product_tool_loop_enabled(context: RunContext) -> bool:
@@ -458,20 +393,67 @@ class DeepAgentsRuntimeEngine:
             return False
         return True
 
-    @staticmethod
-    def _is_hard_rule_intent(rule_intent) -> bool:
-        hard_rule_reasons = {
-            "ready_file_context_available",
-            "file_analysis_request",
-            "phase_unsupported_capability",
-            "empty_request",
-            "session_recap_question",
-            "short_general_chat",
-            "restored_from_pending_tool_context",
-            "continuing_pending_tool_prompt",
-            "structured_tool_arguments",
-        }
-        return rule_intent.reason in hard_rule_reasons
+    async def _try_product_tool_loop_fallback(self, context: RunContext):
+        try:
+            workspace_memory_context = await self._fetch_workspace_memory_context(context)
+            if workspace_memory_context:
+                await self._emit_memory_context_frozen(context, workspace_memory_context, source="product_tool_loop")
+            product_result = await self.product_tool_loop.run(
+                context,
+                max_tool_calls=_runtime_int(
+                    context,
+                    "productToolLoopMaxCalls",
+                    self.product_tool_loop.max_tool_calls,
+                    1,
+                    20,
+                ),
+                workspace_memory_context=workspace_memory_context,
+            )
+        except Exception as exc:
+            LOGGER.info("product tool loop fallback skipped runId=%s error=%s", context.runId, exc)
+            return None
+        if product_result.intent is None:
+            return None
+        product_result.intent.signals = [
+            {
+                "source": "llm_router",
+                "verdict": "general_chat",
+                "confidence": 0.55,
+                "reason": "router_fallback_general_chat",
+            },
+            {
+                "source": "tool_call_loop",
+                "verdict": product_result.intent.intent.value,
+                "confidence": product_result.intent.confidence,
+                "reason": product_result.intent.reason,
+            },
+        ]
+        LOGGER.info(
+            "product tool loop fallback selected runId=%s intent=%s tool=%s",
+            context.runId,
+            product_result.intent.intent.value,
+            product_result.intent.selectedToolCode or "-",
+        )
+        return product_result.intent
+
+    def _should_fallback_from_unsupported(self, context: RunContext) -> bool:
+        message = (context.message or "").strip()
+        if not message:
+            return False
+        return self.intent_router._looks_like_tool_request(message)
+
+    async def _emit_memory_context_frozen(self, context: RunContext, workspace_memory_context: str, *, source: str) -> None:
+        await self.backend.append_event(
+            context.runId,
+            RunEventCreate(
+                eventType=MEMORY_CONTEXT_FROZEN,
+                eventJson={
+                    "frozen": bool(workspace_memory_context),
+                    "count": len(workspace_memory_context) if workspace_memory_context else 0,
+                    "source": source,
+                },
+            ),
+        )
 
     async def _emit_intent_event(self, context: RunContext, intent) -> None:
         await self.backend.append_event(
@@ -520,7 +502,7 @@ class DeepAgentsRuntimeEngine:
         registry = ToolRegistry(context)
         tool = registry.get(intent.selectedToolCode or "") if intent.selectedToolCode else None
         followup = self._resolve_router_followup(context, intent, tool)
-        if not followup.accepted and intent.decisionSource != "llm_router":
+        if not followup.accepted:
             followup = self.followup_resolver.resolve(context, tool)
         await self._emit_followup_event(context, followup)
         if followup.accepted and followup.tool_code:
@@ -1951,30 +1933,7 @@ def _successful_recent_tool_count(context: RunContext) -> int:
 
 
 def _build_consolidated_memory_summary(context: RunContext, answer: str) -> str:
-    user_turns = [message.content.strip() for message in context.history if message.role.lower() == "user" and message.content.strip()]
-    assistant_turns = [message.content.strip() for message in context.history if message.role.lower() in {"assistant", "ai"} and message.content.strip()]
-    user_turns.append((context.message or "").strip())
-    clues: list[str] = []
-    for text in user_turns[-12:]:
-        if _looks_like_large_media_payload(text):
-            continue
-        if any(token in text for token in ("喜欢", "偏好", "习惯", "以后", "记住", "二次元", "梗", "风格", "默认", "配置")):
-            clues.append(text)
-    if answer and any(token in context.message for token in ("我是什么样的人", "用户画像", "个人画像")):
-        clues.append(answer)
-    for call in (context.recentToolCalls or [])[:5]:
-        if call.toolCode:
-            clues.append(f"常用工具倾向：{call.toolCode}")
-    if not clues and len(user_turns) < settings.agent_memory_consolidation_turn_interval:
-        return ""
-    summary_lines = [
-        "根据近期对话整理出的用户画像与偏好。若与用户当前明确指令冲突，以当前指令为准。",
-    ]
-    for clue in clues[:8]:
-        summary_lines.append(f"- {_safe_memory_text(clue, 240)}")
-    if not clues and assistant_turns:
-        summary_lines.append(f"- 近期对话主题：{_safe_memory_text(user_turns[-1], 240)}")
-    return "\n".join(summary_lines)[:1600]
+    return build_consolidated_memory_summary(context, answer)
 
 
 def _memory_tool_prompt(context: RunContext) -> str:

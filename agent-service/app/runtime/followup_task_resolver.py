@@ -123,7 +123,7 @@ class FollowupTaskResolver:
         current_prompt = str(patched.get(prompt_key) or patched.get("userRequest") or "")
         changed_subject = self._extract_replacement_subject(message)
         if changed_subject:
-            patched[prompt_key] = self._replace_subject_prompt(current_prompt, changed_subject)
+            patched[prompt_key] = self._build_rewrite_prompt(current_prompt, message)
         elif any(pattern in message for pattern in ("按刚才", "按上次", "沿用", "同样", "一样", "再来", "也来")):
             patched[prompt_key] = current_prompt or message
         else:
@@ -147,10 +147,17 @@ class FollowupTaskResolver:
         return "prompt"
 
     @staticmethod
-    def _replace_subject_prompt(prompt: str, subject: str) -> str:
-        if not prompt:
-            return subject
-        return f"{prompt}\n\n本次续写要求：沿用上一轮画面风格、构图和质量设定，将主体替换/改写为：{subject}。"
+    def _build_rewrite_prompt(previous_prompt: str, user_request: str) -> str:
+        request = user_request.strip()
+        if not previous_prompt:
+            return request
+        return (
+            "本轮用户改写要求优先："
+            f"{request}\n\n"
+            "参考上一轮的画面风格、构图、比例和质量设定，但不要保留与本轮要求冲突的主体、服装、场景、IP 或文案元素。\n"
+            "上一轮提示词仅作风格参考：\n"
+            f"{previous_prompt}"
+        )
 
     @staticmethod
     def _extract_replacement_subject(message: str) -> str | None:

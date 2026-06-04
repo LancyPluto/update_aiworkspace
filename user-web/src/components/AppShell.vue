@@ -1,5 +1,5 @@
 ﻿<script setup lang="ts">
-import { RouterLink, useRoute } from "vue-router"
+import { RouterLink, useRoute, useRouter } from "vue-router"
 import type { Component } from "vue"
 import {
   Bot,
@@ -20,8 +20,10 @@ import {
   Headphones,
   X,
   Menu,
+  Loader2,
 } from "lucide-vue-next"
 import { ref, onMounted, onUnmounted, computed, watch } from "vue"
+import { useGlobalSearch, type GlobalSearchResultItem, type GlobalSearchScope } from "@/composables/useGlobalSearch"
 import { fetchCreditAccount } from "@/api/creditApi"
 import { fetchCustomerServiceSettings } from "@/api/settingsApi"
 import type { CustomerServiceSettings } from "@/api/settingsApi"
@@ -56,7 +58,37 @@ type NavGroup = {
 }
 
 const route = useRoute()
+const router = useRouter()
 const auth = useAuthStore()
+
+const searchRootRef = ref<HTMLElement | null>(null)
+const scopeMenuOpen = ref(false)
+const {
+  keyword: searchKeyword,
+  scope: searchScope,
+  scopeLabels,
+  panelOpen: searchPanelOpen,
+  loading: searchLoading,
+  error: searchError,
+  results: searchResults,
+  openPanel: openSearchPanel,
+  closePanel: closeSearchPanel,
+  submitSearch,
+  setScope: setSearchScope,
+  clearDebounce: clearSearchDebounce,
+} = useGlobalSearch()
+
+const searchScopeOptions: GlobalSearchScope[] = ["all", "models", "agents", "materials"]
+
+const searchKindMeta: Record<
+  GlobalSearchResultItem["kind"],
+  { label: string; icon: Component }
+> = {
+  model: { label: "模型", icon: Sparkles },
+  agent: { label: "智能体", icon: Bot },
+  material: { label: "我的素材", icon: FolderHeart },
+  community: { label: "社区素材", icon: Images },
+}
 
 const SIDEBAR_OPEN_KEY = "ai_tool_market_sidebar_open"
 const EXPANDED_GROUPS_KEY = "ai_tool_market_nav_expanded_groups"
@@ -203,6 +235,51 @@ function onCustomerServiceQrError() {
   customerServiceQrBroken.value = true
 }
 
+function toggleSearchScopeMenu() {
+  scopeMenuOpen.value = !scopeMenuOpen.value
+}
+
+function selectSearchScope(next: GlobalSearchScope) {
+  setSearchScope(next)
+  scopeMenuOpen.value = false
+  if (searchKeyword.value.trim()) openSearchPanel()
+}
+
+function onSearchFocus() {
+  openSearchPanel()
+  if (searchKeyword.value.trim()) submitSearch()
+}
+
+function onSearchKeydown(event: KeyboardEvent) {
+  if (event.key === "Escape") {
+    closeSearchPanel()
+    scopeMenuOpen.value = false
+    return
+  }
+  if (event.key === "Enter") {
+    event.preventDefault()
+    if (searchResults.value.length > 0) {
+      void navigateSearchResult(searchResults.value[0])
+      return
+    }
+    submitSearch()
+  }
+}
+
+async function navigateSearchResult(item: GlobalSearchResultItem) {
+  closeSearchPanel()
+  scopeMenuOpen.value = false
+  clearSearchDebounce()
+  await router.push(item.href)
+}
+
+function onDocumentPointerDown(event: MouseEvent) {
+  const root = searchRootRef.value
+  if (!root || root.contains(event.target as Node)) return
+  closeSearchPanel()
+  scopeMenuOpen.value = false
+}
+
 watch(customerServiceQrSrc, () => {
   customerServiceQrBroken.value = false
 })
@@ -259,12 +336,23 @@ onMounted(async () => {
 
   ensureActiveGroupExpanded()
   window.addEventListener("credits:updated", handleCreditsUpdated)
+  document.addEventListener("mousedown", onDocumentPointerDown)
   await Promise.all([loadCreditAccount(), loadCustomerServiceSettings()])
 })
 
 onUnmounted(() => {
   window.removeEventListener("credits:updated", handleCreditsUpdated)
+  document.removeEventListener("mousedown", onDocumentPointerDown)
+  clearSearchDebounce()
 })
+
+watch(
+  () => route.fullPath,
+  () => {
+    closeSearchPanel()
+    scopeMenuOpen.value = false
+  },
+)
 </script>
 
 <template>
@@ -407,17 +495,99 @@ onUnmounted(() => {
           <PanelLeft v-else class="h-4 w-4" aria-hidden="true" />
         </button>
         <div class="min-w-0 flex-1 lg:max-w-[360px]">
-          <h1 v-if="title" class="text-base font-semibold truncate">{{ title }}</h1>
+          <h1
+            v-if="title"
+            class="truncate text-base font-semibold"
+            :class="isAgentRoute ? 'app-shell-agent-brand' : ''"
+          >
+            {{ title }}
+          </h1>
           <p v-if="description" class="text-xs text-white/45 truncate">{{ description }}</p>
         </div>
-        <div class="hidden h-12 min-w-0 flex-1 items-center rounded-full bg-white/[0.07] px-4 ring-1 ring-white/8 xl:flex">
-          <span class="pr-4 text-sm text-white/70">全部</span>
-          <span class="h-5 w-px bg-white/10" />
-          <Search class="ml-4 h-5 w-5 text-white/35" />
-          <input
-            class="h-full min-w-0 flex-1 bg-transparent px-3 text-sm text-white outline-none placeholder:text-white/35"
-            placeholder="搜索模型、智能体和素材"
-          />
+        <div ref="searchRootRef" class="relative hidden min-w-0 flex-1 lg:block lg:max-w-[520px] xl:max-w-[620px]">
+          <form
+            class="flex h-12 items-center rounded-full bg-white/[0.07] px-4 ring-1 ring-white/8 transition focus-within:ring-primary/35"
+            @submit.prevent="submitSearch"
+          >
+            <div class="relative shrink-0">
+              <button
+                type="button"
+                class="inline-flex items-center gap-1 pr-3 text-sm text-white/70 transition hover:text-white"
+                aria-haspopup="listbox"
+                :aria-expanded="scopeMenuOpen"
+                @click="toggleSearchScopeMenu"
+              >
+                {{ scopeLabels[searchScope] }}
+                <ChevronDown class="h-3.5 w-3.5 text-white/40" />
+              </button>
+              <div
+                v-if="scopeMenuOpen"
+                class="absolute left-0 top-[calc(100%+10px)] z-50 min-w-[112px] overflow-hidden rounded-2xl border border-white/10 bg-[#1b1b20] p-1 shadow-[0_18px_48px_rgb(0_0_0_/_0.45)]"
+              >
+                <button
+                  v-for="option in searchScopeOptions"
+                  :key="option"
+                  type="button"
+                  class="flex w-full rounded-xl px-3 py-2 text-left text-sm transition"
+                  :class="searchScope === option ? 'bg-primary/15 text-white' : 'text-white/65 hover:bg-white/8 hover:text-white'"
+                  @click="selectSearchScope(option)"
+                >
+                  {{ scopeLabels[option] }}
+                </button>
+              </div>
+            </div>
+            <span class="h-5 w-px bg-white/10" />
+            <Search class="ml-3 h-5 w-5 shrink-0 text-white/35" />
+            <input
+              v-model="searchKeyword"
+              class="h-full min-w-0 flex-1 bg-transparent px-3 text-sm text-white outline-none placeholder:text-white/35"
+              placeholder="搜索模型、智能体和素材"
+              autocomplete="off"
+              @focus="onSearchFocus"
+              @keydown="onSearchKeydown"
+            />
+            <Loader2 v-if="searchLoading" class="h-4 w-4 shrink-0 animate-spin text-white/45" />
+          </form>
+
+          <div
+            v-if="searchPanelOpen && (searchKeyword.trim() || searchLoading || searchError || searchResults.length)"
+            class="absolute left-0 right-0 top-[calc(100%+10px)] z-50 overflow-hidden rounded-[24px] border border-white/10 bg-[#17171c]/98 shadow-[0_24px_80px_rgb(0_0_0_/_0.55)] backdrop-blur-xl"
+          >
+            <div v-if="searchLoading && searchResults.length === 0" class="flex items-center gap-2 px-4 py-5 text-sm text-white/50">
+              <Loader2 class="h-4 w-4 animate-spin" />
+              正在搜索...
+            </div>
+            <p v-else-if="searchError" class="px-4 py-5 text-sm text-red-300">{{ searchError }}</p>
+            <p v-else-if="!searchLoading && searchKeyword.trim() && searchResults.length === 0" class="px-4 py-5 text-sm text-white/45">
+              没有找到「{{ searchKeyword.trim() }}」相关内容
+            </p>
+            <ul v-else class="max-h-[420px] overflow-y-auto py-2">
+              <li v-for="item in searchResults" :key="item.id">
+                <button
+                  type="button"
+                  class="flex w-full items-center gap-3 px-4 py-3 text-left transition hover:bg-white/[0.05]"
+                  @click="navigateSearchResult(item)"
+                >
+                  <span class="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-white/[0.06] text-primary">
+                    <img
+                      v-if="item.coverUrl"
+                      :src="item.coverUrl"
+                      :alt="item.title"
+                      class="h-full w-full object-cover"
+                    />
+                    <component :is="searchKindMeta[item.kind].icon" v-else class="h-4 w-4" />
+                  </span>
+                  <span class="min-w-0 flex-1">
+                    <span class="block truncate text-sm font-medium text-white">{{ item.title }}</span>
+                    <span v-if="item.subtitle" class="mt-0.5 block truncate text-xs text-white/42">{{ item.subtitle }}</span>
+                  </span>
+                  <span class="shrink-0 rounded-full bg-white/[0.06] px-2 py-1 text-[11px] text-white/45">
+                    {{ searchKindMeta[item.kind].label }}
+                  </span>
+                </button>
+              </li>
+            </ul>
+          </div>
         </div>
         <RouterLink
           v-if="!isAgentRoute"
@@ -520,3 +690,15 @@ onUnmounted(() => {
   </div>
 </template>
 
+<style scoped>
+.app-shell-agent-brand {
+  width: fit-content;
+  max-width: 100%;
+  background: linear-gradient(120deg, #ffffff 0%, #bfe8ff 34%, #9cf2ca 66%, #caa8ff 100%);
+  background-clip: text;
+  color: transparent;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-shadow: 0 0 28px rgb(100 210 255 / 0.18);
+}
+</style>

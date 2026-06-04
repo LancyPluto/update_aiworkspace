@@ -10,8 +10,13 @@ public record AgentMemorySettingsResponse(
         String retrievalPrompt,
         Boolean toolLoopEnabled,
         Boolean consolidationEnabled,
+        Boolean consolidationLlmEnabled,
         Integer consolidationTurnInterval,
         Integer consolidationCharThreshold,
+        Integer consolidationTokenThreshold,
+        Integer consolidationRecentToolThreshold,
+        Integer consolidationMaxContextMessages,
+        String consolidationPrompt,
         Double consolidationMinConfidence,
         Double candidateConfidenceThreshold
 ) {
