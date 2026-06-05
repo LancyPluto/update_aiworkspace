@@ -4,6 +4,7 @@ import com.aiminilab.aitoolmarket.agent.config.ModelProviderRegistry;
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentModelConfigMapper;
 import com.aiminilab.aitoolmarket.agent.support.ModelCapabilitiesCodec;
+import com.aiminilab.aitoolmarket.agent.support.ModelConfigCredentialResolver;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.tool.entity.AiTool;
@@ -19,12 +20,16 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.lenient;
 
 @ExtendWith(MockitoExtension.class)
 class ModelCapabilityServiceTest {
 
     @Mock
     private AgentModelConfigMapper agentModelConfigMapper;
+
+    @Mock
+    private ModelConfigCredentialResolver credentialResolver;
 
     private ModelCapabilityService modelCapabilityService;
 
@@ -34,8 +39,11 @@ class ModelCapabilityServiceTest {
         modelCapabilityService = new ModelCapabilityService(
                 new ModelProviderRegistry(),
                 codec,
-                agentModelConfigMapper
+                agentModelConfigMapper,
+                credentialResolver
         );
+        lenient().when(credentialResolver.resolveForExecution(org.mockito.ArgumentMatchers.any()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
     }
 
     @Test

@@ -153,11 +153,11 @@ services:
     working_dir: /app
     restart: unless-stopped
     environment:
-      APP_PRODUCTION_MODE: ${APP_PRODUCTION_MODE:-false}
+      # Deploy stack defaults to production; set false only for local docker dev.
+      APP_PRODUCTION_MODE: ${APP_PRODUCTION_MODE:-true}
       NEXT_PUBLIC_API_PROXY_TARGET: ${ADMIN_NEXT_PUBLIC_API_PROXY_TARGET:-http://backend:8080}
       NEXT_PUBLIC_API_BASE_URL: ${ADMIN_NEXT_PUBLIC_API_BASE_URL:-}
       NEXT_PUBLIC_ADMIN_BASE_PATH: ${NEXT_PUBLIC_ADMIN_BASE_PATH:-/admin}
-      CHOKIDAR_USEPOLLING: "true"
       NPM_CONFIG_REGISTRY: https://registry.npmmirror.com
     ports:
       - "127.0.0.1:${ADMIN_FRONTEND_PORT:-5174}:5174"
@@ -167,8 +167,8 @@ services:
       - /app/node_modules            
     command: >-
       sh -c "npm config set registry https://registry.npmmirror.com && npm install &&
-      if [ \"$${APP_PRODUCTION_MODE}\" = 'true' ]; then npm run build && npm run start -- -H 0.0.0.0 -p 5174;
-      else npm run dev:docker; fi"
+      if [ \"$${APP_PRODUCTION_MODE}\" = 'true' ]; then export NODE_ENV=production && npm run build && npm run start -- -H 0.0.0.0 -p 5174;
+      else export CHOKIDAR_USEPOLLING=true && npm run dev:docker; fi"
     env_file:
       - ../.env
 
@@ -180,6 +180,7 @@ services:
     env_file:
       - ../.env
     environment:
+      APP_PRODUCTION_MODE: ${APP_PRODUCTION_MODE:-true}
       # 留空：浏览器请求走当前页面的 /api，由 Vite 代理到后端（避免 localhost vs 127.0.0.1 跨域导致 Failed to fetch）
       VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
       VITE_ALIYUN_CAPTCHA_ENABLED: ${VITE_ALIYUN_CAPTCHA_ENABLED:-false}
@@ -195,7 +196,10 @@ services:
     volumes:
       - ../user-web:/app
       - /app/node_modules     
-    command: sh -c "npm config set registry https://registry.npmmirror.com && npm install && npm run dev -- --host 0.0.0.0 --port 5173"
+    command: >-
+      sh -c "npm config set registry https://registry.npmmirror.com && npm install &&
+      if [ \"$${APP_PRODUCTION_MODE}\" = 'true' ]; then npm run build && npm run preview -- --host 0.0.0.0 --port 5173;
+      else npm run dev -- --host 0.0.0.0 --port 5173; fi"
 
   worker:
     build:

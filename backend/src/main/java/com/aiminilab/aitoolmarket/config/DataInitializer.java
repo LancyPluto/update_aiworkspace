@@ -114,6 +114,9 @@ public class DataInitializer implements CommandLineRunner {
         ensureColumn("agent_model_configs", "unit_price", "ALTER TABLE agent_model_configs ADD COLUMN unit_price DECIMAL(18,8) NOT NULL DEFAULT 0");
         ensureColumn("agent_model_configs", "capabilities", "ALTER TABLE agent_model_configs ADD COLUMN capabilities TEXT NULL");
         ensureColumn("agent_model_configs", "agent_enabled", "ALTER TABLE agent_model_configs ADD COLUMN agent_enabled TINYINT NOT NULL DEFAULT 1");
+        ensureColumn("agent_model_configs", "last_test_success", "ALTER TABLE agent_model_configs ADD COLUMN last_test_success TINYINT NULL");
+        ensureColumn("agent_model_configs", "last_test_message", "ALTER TABLE agent_model_configs ADD COLUMN last_test_message VARCHAR(512) NULL");
+        ensureColumn("agent_model_configs", "last_test_at", "ALTER TABLE agent_model_configs ADD COLUMN last_test_at DATETIME NULL");
         ensureIndex(
                 "agent_model_configs",
                 "idx_agent_model_configs_agent_enabled",
@@ -128,6 +131,37 @@ public class DataInitializer implements CommandLineRunner {
                 UPDATE agent_model_configs
                 SET output_token_price_per_1m = output_token_price_per_1k * 1000
                 WHERE output_token_price_per_1m = 0 AND output_token_price_per_1k > 0
+                """);
+        executeSql("""
+                UPDATE agent_model_configs
+                SET billing_unit = 'IMAGE_TOKEN',
+                    input_token_price_per_1m = CASE WHEN input_token_price_per_1m > 0 THEN input_token_price_per_1m ELSE 8 END,
+                    output_token_price_per_1m = CASE WHEN output_token_price_per_1m > 0 THEN output_token_price_per_1m ELSE 30 END
+                WHERE is_deleted = 0
+                  AND (
+                    LOWER(model_name) LIKE '%gpt-image%'
+                    OR LOWER(display_name) LIKE '%image2%'
+                    OR LOWER(display_name) LIKE '%gpt-image%'
+                  )
+                  AND (
+                    billing_unit IS NULL OR billing_unit = '' OR billing_unit = 'TOKEN_PER_M'
+                    OR (billing_unit = 'IMAGE_TOKEN' AND input_token_price_per_1m = 0 AND output_token_price_per_1m = 0)
+                  )
+                """);
+        executeSql("""
+                UPDATE agent_model_configs
+                SET enabled = 1
+                WHERE is_deleted = 0
+                  AND enabled = 0
+                  AND EXISTS (
+                    SELECT 1 FROM ai_tools t
+                    WHERE t.model_config_id = agent_model_configs.id AND t.status = 'ONLINE'
+                  )
+                  AND (
+                    LOWER(model_name) LIKE '%gpt-image%'
+                    OR LOWER(display_name) LIKE '%image2%'
+                    OR LOWER(display_name) LIKE '%gpt-image%'
+                  )
                 """);
         ensureColumn("agent_model_configs", "is_default", "ALTER TABLE agent_model_configs ADD COLUMN is_default TINYINT NOT NULL DEFAULT 0");
         ensureColumn("agent_model_configs", "is_deleted", "ALTER TABLE agent_model_configs ADD COLUMN is_deleted TINYINT NOT NULL DEFAULT 0");

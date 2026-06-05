@@ -125,18 +125,7 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
         ModelProviderDefinition provider = providerRegistry.findByCode(providerCode)
                 .orElseThrow(() -> new BusinessException(ErrorCode.PARAM_ERROR, "unsupported model provider for test"));
         if ("accept_only".equalsIgnoreCase(provider.testStrategy())) {
-            account.setHealthStatus("OK");
-            account.setBalanceErrorMessage(null);
-            account.setUpdatedAt(LocalDateTime.now());
-            vendorAccountMapper.updateAccount(account);
-            return new ModelVendorAccountTestResponse(
-                    true,
-                    "该协议仅校验凭证已保存（未发起真实调用）",
-                    null,
-                    providerCode,
-                    provider.defaultModel(),
-                    toResponse(account)
-            );
+            return testAcceptOnlyVendorAccount(account, providerCode, provider);
         }
         AgentModelConfigRequest testRequest = new AgentModelConfigRequest(
                 account.getId(),
@@ -197,6 +186,81 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
                 provider.defaultModel(),
                 toResponse(account)
         );
+    }
+
+    private ModelVendorAccountTestResponse testAcceptOnlyVendorAccount(ModelVendorAccount account,
+                                                                       String providerCode,
+                                                                       ModelProviderDefinition provider) {
+        if (account.getApiKey() == null || account.getApiKey().isBlank()) {
+            account.setHealthStatus("ERROR");
+            account.setBalanceErrorMessage("API Key 未配置");
+            account.setUpdatedAt(LocalDateTime.now());
+            vendorAccountMapper.updateAccount(account);
+            return new ModelVendorAccountTestResponse(
+                    false,
+                    "API Key 未配置",
+                    null,
+                    providerCode,
+                    provider.defaultModel(),
+                    toResponse(account)
+            );
+        }
+        long started = System.currentTimeMillis();
+        String baseUrl = account.getBaseUrl() == null || account.getBaseUrl().isBlank()
+                ? provider.defaultBaseUrl()
+                : account.getBaseUrl().trim();
+        String message;
+        boolean success;
+        if (baseUrl == null || baseUrl.isBlank()) {
+            success = true;
+            message = "凭证已保存（该协议无固定 Base URL，未发起网络探测）";
+        } else {
+            VendorEndpointProbeResult probe = probeVendorEndpoint(baseUrl);
+            success = probe.reachable();
+            message = probe.message();
+        }
+        Long latencyMs = success ? Math.max(0L, System.currentTimeMillis() - started) : null;
+        account.setHealthStatus(success ? "OK" : "ERROR");
+        account.setBalanceErrorMessage(success ? null : message);
+        account.setUpdatedAt(LocalDateTime.now());
+        vendorAccountMapper.updateAccount(account);
+        return new ModelVendorAccountTestResponse(
+                success,
+                message,
+                latencyMs,
+                providerCode,
+                provider.defaultModel(),
+                toResponse(account)
+        );
+    }
+
+    private VendorEndpointProbeResult probeVendorEndpoint(String baseUrl) {
+        String normalized = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
+        String probeUrl = normalized.endsWith("/v1") ? normalized + "/models" : normalized;
+        try {
+            java.net.http.HttpClient client = java.net.http.HttpClient.newBuilder()
+                    .connectTimeout(java.time.Duration.ofSeconds(8))
+                    .followRedirects(java.net.http.HttpClient.Redirect.NORMAL)
+                    .build();
+            java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create(probeUrl))
+                    .timeout(java.time.Duration.ofSeconds(10))
+                    .header("Accept", "application/json")
+                    .GET()
+                    .build();
+            java.net.http.HttpResponse<Void> response = client.send(request, java.net.http.HttpResponse.BodyHandlers.discarding());
+            int status = response.statusCode();
+            if (status >= 200 && status < 500) {
+                return new VendorEndpointProbeResult(true, "网关可达（HTTP " + status + "）");
+            }
+            return new VendorEndpointProbeResult(false, "网关不可达（HTTP " + status + "）");
+        } catch (Exception exception) {
+            String detail = exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
+            return new VendorEndpointProbeResult(false, "网关连接失败：" + detail);
+        }
+    }
+
+    private record VendorEndpointProbeResult(boolean reachable, String message) {
     }
 
     private void refreshBalance(ModelVendorAccount account) {

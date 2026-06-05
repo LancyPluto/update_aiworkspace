@@ -2,7 +2,6 @@
 
 import { useState } from "react"
 import { useRouter } from "next/navigation"
-import Link from "next/link"
 import { Eye, EyeOff, ArrowRight, Shield, Zap, Lock } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -30,11 +29,16 @@ export default function LoginPage() {
     setIsLoading(true)
     try {
       await adminLogin(email.trim(), password)
+      const adminBasePath = (process.env.NEXT_PUBLIC_ADMIN_BASE_PATH || "").replace(/\/$/, "")
+      const defaultTarget = adminBasePath ? `${adminBasePath}/` : "/"
       const redirect =
         typeof window !== "undefined"
           ? new URLSearchParams(window.location.search).get("redirect")
           : null
-      const target = redirect || "/"
+      const target =
+        redirect && (!adminBasePath || redirect.startsWith(adminBasePath))
+          ? redirect
+          : defaultTarget
       if (typeof window !== "undefined") {
         window.location.replace(target)
         return
@@ -160,12 +164,9 @@ export default function LoginPage() {
                 <Label htmlFor="password" className="text-sm font-medium">
                   密码
                 </Label>
-                <Link 
-                  href="/forgot-password" 
-                  className="text-sm text-primary hover:text-primary/80 transition-colors"
-                >
-                  忘记密码？
-                </Link>
+                <span className="text-sm text-muted-foreground">
+                  忘记密码请联系系统管理员
+                </span>
               </div>
               <div className="relative">
                 <Input
@@ -273,13 +274,7 @@ export default function LoginPage() {
 
           {/* Footer */}
           <p className="mt-8 text-center text-sm text-muted-foreground">
-            没有账户？
-            <Link 
-              href="/register" 
-              className="text-primary hover:text-primary/80 ml-1 font-medium transition-colors"
-            >
-              联系管理员
-            </Link>
+            没有账户？请联系系统管理员开通
           </p>
 
           {/* Security Notice */}

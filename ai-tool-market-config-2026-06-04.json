@@ -576,7 +576,7 @@
       "outputTokenPricePer1m": 30,
       "billingUnit": "IMAGE_TOKEN",
       "unitPrice": 0,
-      "enabled": false,
+      "enabled": true,
       "agentEnabled": true,
       "isDefault": false,
       "capabilities": [
@@ -608,7 +608,7 @@
       "outputTokenPricePer1m": 30,
       "billingUnit": "IMAGE_TOKEN",
       "unitPrice": 0,
-      "enabled": false,
+      "enabled": true,
       "agentEnabled": true,
       "isDefault": false,
       "capabilities": [

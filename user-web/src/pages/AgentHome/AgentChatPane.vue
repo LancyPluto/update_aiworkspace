@@ -17,6 +17,8 @@ import AgentAvatar from "./AgentAvatar.vue"
 import AgentAmbientBackground from "./AgentAmbientBackground.vue"
 import ConversationScrollNav from "./ConversationScrollNav.vue"
 import ConversationPhaseTimeline from "./ConversationPhaseTimeline.vue"
+import RunTimeline from "./RunTimeline.vue"
+import { filterUserFacingRunEvents } from "./runTimelineEvents"
 import AgentToolConfirmationList from "./AgentToolConfirmationList.vue"
 import AssetPreviewModal from "@/components/AssetPreviewModal.vue"
 import CreditRechargeModal from "@/components/CreditRechargeModal.vue"
@@ -300,6 +302,10 @@ const showGenerationLoading = computed(() =>
     runConnectionStatus.value === "awaiting_confirmation"
   ),
 )
+const visibleRunTimelineEvents = computed(() => filterUserFacingRunEvents(events.value, true))
+const showInlineRunTimeline = computed(
+  () => hasActiveRun.value && visibleRunTimelineEvents.value.length > 0,
+)
 const previewRecommendations = computed<AssetPreviewRecommendation[]>(() =>
   previewAsset.value ? recommendToolsForAsset(previewAsset.value) : [],
 )
@@ -381,6 +387,7 @@ function messageContentJsonForFiles(items: AgentFile[]) {
 
 function runEventsForMessage(message: AgentMessage) {
   if (message.role !== "ASSISTANT" || message.runId == null) return []
+  if (hasActiveRun.value && activeRunId.value === message.runId) return []
   const cachedEvents = runEventsByRunId.value[message.runId] ?? []
   if (cachedEvents.length > 0) return cachedEvents
   return activeRunId.value === message.runId ? events.value : []
@@ -477,6 +484,7 @@ async function loadPane() {
     const res = await fetchAgentMessages(props.sessionId, { token: props.token })
     messages.value = res.list
     await loadFiles()
+    await hydrateHistoricalRunEvents()
     await resumePendingRunForSession()
   } finally {
     paneLoading.value = false
@@ -495,6 +503,22 @@ async function loadPane() {
       await withAutoScrollBehavior(() => scrollBottom(true))
     }
   }
+}
+
+async function hydrateHistoricalRunEvents() {
+  if (!props.token) return
+  const runIds = [...new Set(
+    messages.value
+      .filter((message) => message.role === "ASSISTANT" && message.runId != null)
+      .map((message) => message.runId as number),
+  )]
+  await Promise.all(
+    runIds.map(async (runId) => {
+      const cached = runEventsByRunId.value[runId] ?? []
+      if (cached.length > 0) return
+      await syncRunEvents(runId)
+    }),
+  )
 }
 
 async function resumePendingRunForSession() {
@@ -1309,7 +1333,7 @@ function handleStreamedRunEvent(runId: number, event: AgentRunEvent, options?: {
 
   if (isTerminalRunEvent(event)) {
     settleRunStatus()
-    clearStreamingAssistantMessage(runId, { preserveReadableText: true })
+    clearStreamingAssistantMessage(runId, { preserveReadableText: event.eventType === "run.failed" })
     stopRunStatusWatchdog()
     if (!options?.fromSync) stopRunEventStream()
     void finalizeTerminalRunFromEvent(runId, event)
@@ -1727,9 +1751,10 @@ watch(messages, () => {
 watch(
   () => props.sessionId,
   () => {
-    persistChatScroll()
+    loadPersistedRunEventCache()
     stickToBottom.value = true
     scrollOffset.value = 0
+    void loadPane()
   },
 )
 
@@ -1855,6 +1880,15 @@ defineExpose({
                 <i></i>
               </div>
             </div>
+          </div>
+        </article>
+
+        <article v-if="showInlineRunTimeline" class="agent-message assistant run-progress">
+          <div class="avatar">
+            <img src="/logo.svg" alt="AI" />
+          </div>
+          <div class="bubble">
+            <RunTimeline :events="events" :inline-mode="true" />
           </div>
         </article>
 
@@ -2116,14 +2150,23 @@ defineExpose({
 
 .chat-floating-actions {
   position: absolute;
-  right: max(14px, calc((100% - min(760px, calc(100% - 96px))) / 2 - 52px));
-  bottom: calc(var(--chat-composer-inset, 210px) + 16px);
+  left: calc(50% + min(360px, calc(50vw - 56px)) + 12px);
+  right: auto;
+  top: calc(100% - var(--chat-composer-inset, 210px));
+  bottom: auto;
   z-index: 5;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 8px;
   pointer-events: none;
+}
+
+@media (max-width: 900px) {
+  .chat-floating-actions {
+    left: auto;
+    right: 18px;
+  }
 }
 
 .chat-floating-actions > * {
@@ -3143,7 +3186,9 @@ defineExpose({
 @media (max-width: 900px) {
   .chat-floating-actions {
     right: 12px;
-    bottom: calc(var(--chat-composer-inset, 196px) + 12px);
+    left: auto;
+    top: calc(100% - var(--chat-composer-inset, 196px));
+    bottom: auto;
   }
   .message-container {
     padding: 36px 14px 16px;

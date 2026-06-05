@@ -4,6 +4,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 @ConfigurationProperties(prefix = "app")
 public class AppProperties {
@@ -551,6 +552,8 @@ public class AppProperties {
         private String notifyUrl = "";
         private String returnUrl = "";
         private String gatewayUrl = "https://openapi.alipay.com/gateway.do";
+        /** PAGE = 电脑网站支付(alipay.trade.page.pay); PRECREATE = 当面付扫码(alipay.trade.precreate) */
+        private String payMode = "PAGE";
 
         public boolean isEnabled() {
             return enabled;
@@ -608,6 +611,14 @@ public class AppProperties {
             this.gatewayUrl = gatewayUrl == null || gatewayUrl.isBlank()
                     ? "https://openapi.alipay.com/gateway.do"
                     : gatewayUrl;
+        }
+
+        public String getPayMode() {
+            return payMode;
+        }
+
+        public void setPayMode(String payMode) {
+            this.payMode = payMode == null || payMode.isBlank() ? "PAGE" : payMode.trim().toUpperCase(Locale.ROOT);
         }
     }
 
