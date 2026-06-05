@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue"
+import { computed, ref, watch } from "vue"
 import { AlertTriangle, Bot, CheckCircle2, ChevronDown, Database, FileText, Hammer, Loader2, Sparkles, Store } from "lucide-vue-next"
 import type { AgentRunEvent } from "@/api/types"
 import { filterToolProcessEvents, filterUserFacingRunEvents } from "./runTimelineEvents"
@@ -36,6 +36,11 @@ const hasRunningTool = computed(() => {
     ? lastEvent.eventType !== "tool.finished"
     : lastEvent.eventType !== "run.completed" && lastEvent.eventType !== "message.completed" && lastEvent.eventType !== "run.failed"
 })
+
+watch(hasRunningTool, (running) => {
+  if (running) processExpanded.value = true
+})
+
 const processElapsedSeconds = computed(() => {
   const startedAt = processEvents.value[0]?.createdAt
   const endedAt = processFinishedEvent.value?.createdAt ?? latestEvent.value?.createdAt
@@ -201,9 +206,6 @@ function toggleExpanded(eventId: number) {
       type="button"
       @click="processExpanded = !processExpanded"
     >
-      <span v-if="hasRunningTool" class="process-icon running">
-        <Loader2 class="h-3.5 w-3.5 animate-spin" />
-      </span>
       <span class="process-copy">
         <strong>{{ processSummaryText }}</strong>
         <small>{{ latestEvent ? titleFor(latestEvent) : "等待工具事件" }}</small>
@@ -270,7 +272,7 @@ function toggleExpanded(eventId: number) {
 }
 
 .process-summary.running {
-  grid-template-columns: 18px minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
 }
 
 .process-copy {
@@ -311,6 +313,12 @@ function toggleExpanded(eventId: number) {
   margin-top: 2px;
   color: var(--agent-text-muted);
   font-size: 11px;
+}
+
+.process-summary.running .process-copy small,
+.process-summary.thinking.running .process-copy small {
+  display: block;
+  white-space: normal;
 }
 
 .process-chevron {

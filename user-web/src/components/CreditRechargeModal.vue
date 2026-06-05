@@ -4,8 +4,14 @@ import { Check, CreditCard, Loader2, MessageCircle, QrCode, Sparkles, X } from "
 import type { RechargeOrder, RechargePackage } from "@/api/types"
 import { createRechargeOrder, fetchRechargeOrder, fetchRechargePackages, mockPayRechargeOrder } from "@/api/creditApi"
 import { useAuthStore } from "@/store/authStore"
+import {
+  isAlipayPageRedirectOrder,
+  rechargePaymentFailureMessage,
+  resolveAlipayLaunchUrl,
+  type RechargePaymentChannel,
+} from "@/utils/rechargePayment"
 
-type PaymentChannel = "WECHAT_NATIVE" | "ALIPAY_PAGE" | "MOCK"
+type PaymentChannel = RechargePaymentChannel
 
 const emit = defineEmits<{
   close: []
@@ -185,16 +191,24 @@ async function createOrder(channel: PaymentChannel) {
       },
       { token: auth.token },
     )
-    if (channel !== "MOCK" && !order.qrCodeUrl) {
-      loadError.value = "支付二维码生成失败，请检查支付宝/微信支付配置或接口权限"
+    const hasAlipayLaunch = isAlipayPageRedirectOrder(order, channel)
+    if (channel !== "MOCK" && !order.qrCodeUrl && !hasAlipayLaunch) {
+      loadError.value = rechargePaymentFailureMessage(order, channel)
       return
     }
     activeOrder.value = order
     showChannelModal.value = false
-    showPayModal.value = true
     paymentResult.value = null
-    if (channel === "MOCK") return
+    if (channel === "MOCK") {
+      showPayModal.value = true
+      return
+    }
     startPolling(order.id)
+    if (hasAlipayLaunch && order.payUrl) {
+      window.location.assign(resolveAlipayLaunchUrl(order.payUrl))
+      return
+    }
+    showPayModal.value = true
   } catch (err) {
     loadError.value = err instanceof Error ? err.message : "创建充值订单失败"
   } finally {

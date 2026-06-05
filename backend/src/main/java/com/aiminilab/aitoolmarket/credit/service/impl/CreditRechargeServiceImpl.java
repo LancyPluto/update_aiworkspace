@@ -145,8 +145,11 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
                         rechargePackage.getPriceAmount(),
                         expiresAt
                 ));
-                if (orderMapper.bindPayUrl(order.getId(), prepay.qrCode(), "Alipay QR pay precreate created", LocalDateTime.now()) != 1) {
-                    throw new BusinessException(ErrorCode.PARAM_ERROR, "recharge order status changed before Alipay qr code binding");
+                String payBinding = prepay.redirectPath() != null && !prepay.redirectPath().isBlank()
+                        ? prepay.redirectPath()
+                        : prepay.qrCode();
+                if (orderMapper.bindPayUrl(order.getId(), payBinding, "Alipay pay order created", LocalDateTime.now()) != 1) {
+                    throw new BusinessException(ErrorCode.PARAM_ERROR, "recharge order status changed before Alipay pay binding");
                 }
             } catch (BusinessException exception) {
                 orderMapper.transit(order.getId(), RechargeOrderStatus.WAITING_PAYMENT.name(), RechargeOrderStatus.FAILED.name(),
@@ -222,8 +225,11 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
                         amount,
                         expiresAt
                 ));
-                if (orderMapper.bindPayUrl(order.getId(), payResponse.qrCode(), "Alipay QR pay precreate created", LocalDateTime.now()) != 1) {
-                    throw new BusinessException(ErrorCode.PARAM_ERROR, "recharge order status changed before Alipay qr code binding");
+                String payBinding = payResponse.redirectPath() != null && !payResponse.redirectPath().isBlank()
+                        ? payResponse.redirectPath()
+                        : payResponse.qrCode();
+                if (orderMapper.bindPayUrl(order.getId(), payBinding, "Alipay pay order created", LocalDateTime.now()) != 1) {
+                    throw new BusinessException(ErrorCode.PARAM_ERROR, "recharge order status changed before Alipay pay binding");
                 }
             } catch (BusinessException exception) {
                 orderMapper.transit(order.getId(), RechargeOrderStatus.WAITING_PAYMENT.name(), RechargeOrderStatus.FAILED.name(),
@@ -551,10 +557,15 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
     }
 
     private RechargeOrderResponse responseFrom(CreditRechargeOrder order) {
-        if (("WECHAT_NATIVE".equals(order.getPaymentChannel()) || "ALIPAY_PAGE".equals(order.getPaymentChannel()))
+        boolean alipayPageLaunch = "ALIPAY_PAGE".equals(order.getPaymentChannel())
                 && order.getPayUrl() != null
+                && order.getPayUrl().contains("/pay/alipay/page/launch");
+        if (alipayPageLaunch) {
+            order.setQrCodeUrl(null);
+        } else if (order.getPayUrl() != null
                 && !order.getPayUrl().isBlank()
-                && (order.getQrCodeUrl() == null || order.getQrCodeUrl().isBlank())) {
+                && (order.getQrCodeUrl() == null || order.getQrCodeUrl().isBlank())
+                && ("WECHAT_NATIVE".equals(order.getPaymentChannel()) || "ALIPAY_PAGE".equals(order.getPaymentChannel()))) {
             order.setQrCodeUrl(qrCodeDataUriGenerator.generate(order.getPayUrl()));
         }
         return RechargeOrderResponse.from(order);

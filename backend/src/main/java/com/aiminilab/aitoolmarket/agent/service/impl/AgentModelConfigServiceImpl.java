@@ -247,27 +247,9 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
     @Override
     public AgentModelConfigTestResponse adminTestById(Long id) {
         AgentModelConfig existing = findActiveOrThrow(id);
-        try {
-            AgentModelConfigTestResponse response = adminTest(toTestRequest(existing));
-            recordModelConnectivityTest(existing, response);
-            if (!Boolean.TRUE.equals(response.success())) {
-                disableModelForFailedConnectivity(existing);
-            } else {
-                markVendorAccountHealthy(existing);
-            }
-            return response;
-        } catch (RuntimeException exception) {
-            disableModelForFailedConnectivity(existing);
-            throw exception;
-        }
-    }
-
-    private void disableModelForFailedConnectivity(AgentModelConfig config) {
-        config.setEnabled(false);
-        config.setAgentEnabled(false);
-        config.setDefault(false);
-        config.setUpdatedAt(LocalDateTime.now());
-        agentModelConfigMapper.updateConfig(config);
+        AgentModelConfigTestResponse response = adminTest(toTestRequest(existing));
+        recordModelConnectivityTest(existing, response);
+        return response;
     }
 
     private void recordModelConnectivityTest(AgentModelConfig config, AgentModelConfigTestResponse response) {
@@ -282,28 +264,30 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         agentModelConfigMapper.updateConnectivityTest(config);
     }
 
-    private void markVendorAccountHealthy(AgentModelConfig config) {
-        if (config.getVendorAccountId() == null) {
-            return;
-        }
-        ModelVendorAccount account = vendorAccountMapper.findActiveById(config.getVendorAccountId());
-        if (account == null) {
-            return;
-        }
-        account.setHealthStatus("OK");
-        account.setBalanceErrorMessage(null);
-        account.setUpdatedAt(LocalDateTime.now());
-        vendorAccountMapper.updateAccount(account);
-    }
-
     @Override
     public AgentModelConfigTestResponse adminTest(AgentModelConfigRequest request) {
         validate(request);
         AgentModelConfig existing = findExistingForTest(request);
         AgentModelConfigRequest merged = mergeSecretFields(request, existing);
+        if (requiresMediaGatewayTest(merged)) {
+            return testMediaGatewayConnectivity(merged, existing);
+        }
         ModelProviderDefinition provider = providerRegistry.findByCode(merged.provider())
                 .orElseThrow(() -> new BusinessException(ErrorCode.PARAM_ERROR, "unsupported model provider"));
-        if (TEST_STRATEGY_ACCEPT_ONLY.equalsIgnoreCase(provider.testStrategy())) {
+        if (shouldUseAcceptOnlyShortcut(merged, provider)) {
+            AgentModelConfig testConfig = applyRequest(new AgentModelConfig(), merged, existing, LocalDateTime.now());
+            AgentModelConfig executable = credentialResolver.resolveForExecution(testConfig);
+            if (requiresExecutableApiKey(executable)
+                    && (executable.getApiKey() == null || executable.getApiKey().isBlank())) {
+                return new AgentModelConfigTestResponse(
+                        false,
+                        merged.provider(),
+                        merged.modelName(),
+                        0L,
+                        "API key is not configured for this model or its vendor account",
+                        ""
+                );
+            }
             return new AgentModelConfigTestResponse(
                     true,
                     merged.provider(),
@@ -320,6 +304,112 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         } catch (IllegalStateException exception) {
             throw new BusinessException(ErrorCode.MODEL_CALL_FAILED, modelConfigTestFailureMessage(exception));
         }
+    }
+
+    private boolean shouldUseAcceptOnlyShortcut(AgentModelConfigRequest merged, ModelProviderDefinition provider) {
+        if (!TEST_STRATEGY_ACCEPT_ONLY.equalsIgnoreCase(provider.testStrategy())) {
+            return false;
+        }
+        List<String> capabilities = merged.capabilities() == null ? List.of() : merged.capabilities();
+        return capabilities.stream().noneMatch(this::requiresRealConnectivityTest);
+    }
+
+    private boolean requiresMediaGatewayTest(AgentModelConfigRequest merged) {
+        List<String> capabilities = merged.capabilities() == null ? List.of() : merged.capabilities();
+        return capabilities.stream().anyMatch(capability ->
+                "IMAGE_GENERATION".equalsIgnoreCase(capability)
+                        || "VIDEO_GENERATION".equalsIgnoreCase(capability)
+                        || "MUSIC_GENERATION".equalsIgnoreCase(capability));
+    }
+
+    private boolean requiresRealConnectivityTest(String capability) {
+        return "TEXT_GENERATION".equalsIgnoreCase(capability)
+                || "IMAGE_GENERATION".equalsIgnoreCase(capability)
+                || "VIDEO_GENERATION".equalsIgnoreCase(capability)
+                || "MUSIC_GENERATION".equalsIgnoreCase(capability);
+    }
+
+    private AgentModelConfigTestResponse testMediaGatewayConnectivity(AgentModelConfigRequest merged,
+                                                                    AgentModelConfig existing) {
+        long startedAt = System.currentTimeMillis();
+        AgentModelConfig testConfig = applyRequest(new AgentModelConfig(), merged, existing, LocalDateTime.now());
+        AgentModelConfig executable = credentialResolver.resolveForExecution(testConfig);
+        if (executable.getApiKey() == null || executable.getApiKey().isBlank()) {
+            return new AgentModelConfigTestResponse(
+                    false,
+                    merged.provider(),
+                    merged.modelName(),
+                    0L,
+                    "API key is not configured for this model or its vendor account",
+                    ""
+            );
+        }
+        ModelProviderDefinition provider = providerRegistry.findByCode(merged.provider())
+                .orElseThrow(() -> new BusinessException(ErrorCode.PARAM_ERROR, "unsupported model provider"));
+        String baseUrl = blankToNull(executable.getBaseUrl());
+        if (baseUrl == null || baseUrl.isBlank()) {
+            baseUrl = provider.defaultBaseUrl();
+        }
+        MediaGatewayProbeResult probe = probeMediaGateway(baseUrl, executable.getApiKey());
+        long latencyMs = Math.max(0L, System.currentTimeMillis() - startedAt);
+        return new AgentModelConfigTestResponse(
+                probe.success(),
+                merged.provider(),
+                merged.modelName(),
+                latencyMs,
+                probe.message(),
+                ""
+        );
+    }
+
+    private MediaGatewayProbeResult probeMediaGateway(String baseUrl, String apiKey) {
+        String normalized = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
+        String probeUrl = normalized.endsWith("/v1") ? normalized + "/models" : normalized + "/v1/models";
+        try {
+            java.net.http.HttpClient client = java.net.http.HttpClient.newBuilder()
+                    .connectTimeout(java.time.Duration.ofSeconds(8))
+                    .followRedirects(java.net.http.HttpClient.Redirect.NORMAL)
+                    .build();
+            java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create(probeUrl))
+                    .timeout(java.time.Duration.ofSeconds(12))
+                    .header("Accept", "application/json")
+                    .header("Authorization", "Bearer " + apiKey.trim())
+                    .GET()
+                    .build();
+            java.net.http.HttpResponse<String> response = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+            int status = response.statusCode();
+            if (status == 401 || status == 403) {
+                return new MediaGatewayProbeResult(false, "API Key 无效或权限不足（HTTP " + status + "）");
+            }
+            if (status >= 200 && status < 500) {
+                return new MediaGatewayProbeResult(true, "网关鉴权通过（HTTP " + status + "）");
+            }
+            return new MediaGatewayProbeResult(false, "网关不可达（HTTP " + status + "）");
+        } catch (Exception exception) {
+            String detail = exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
+            return new MediaGatewayProbeResult(false, "网关连接失败：" + detail);
+        }
+    }
+
+    private record MediaGatewayProbeResult(boolean success, String message) {
+    }
+
+    private boolean requiresExecutableApiKey(AgentModelConfig config) {
+        if (config == null) {
+            return true;
+        }
+        if ("mock".equalsIgnoreCase(config.getProvider())) {
+            return false;
+        }
+        List<String> capabilities = capabilitiesCodec.parse(config.getCapabilities());
+        return capabilities.stream().anyMatch(capability ->
+                "IMAGE_GENERATION".equalsIgnoreCase(capability)
+                        || "VIDEO_GENERATION".equalsIgnoreCase(capability)
+                        || "TEXT_TO_SPEECH".equalsIgnoreCase(capability)
+                        || "SPEECH_TO_TEXT".equalsIgnoreCase(capability)
+                        || "MUSIC_GENERATION".equalsIgnoreCase(capability)
+                        || "DIGITAL_HUMAN".equalsIgnoreCase(capability));
     }
 
     private AgentModelConfigRequest toTestRequest(AgentModelConfig config) {

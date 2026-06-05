@@ -43,45 +43,97 @@ public class DefaultAlipayPagePayClient implements AlipayPagePayClient {
     @Override
     public AlipayPagePayResponse createPagePayOrder(AlipayPagePayRequest request) {
         requireEnabled();
+        if (isPagePayMode()) {
+            String launchPath = "/api/v1/pay/alipay/page/launch?orderNo=" + url(request.outTradeNo());
+            return AlipayPagePayResponse.pageRedirect(launchPath);
+        }
         try {
-            Map<String, String> bizContent = new TreeMap<>();
-            bizContent.put("out_trade_no", request.outTradeNo());
-            bizContent.put("total_amount", request.totalAmount().setScale(2).toPlainString());
-            bizContent.put("subject", request.subject());
-            if (request.expiresAt() != null) {
-                bizContent.put("time_expire", EXPIRE_FORMAT.format(request.expiresAt()));
-            }
-
-            Map<String, String> params = new TreeMap<>();
-            params.put("app_id", properties.getAppId());
-            // QR-code based pay: alipay.trade.precreate
-            params.put("method", "alipay.trade.precreate");
-            params.put("format", "JSON");
-            params.put("charset", "UTF-8");
-            params.put("sign_type", "RSA2");
-            params.put("timestamp", EXPIRE_FORMAT.format(java.time.LocalDateTime.now()));
-            params.put("version", "1.0");
-            params.put("notify_url", properties.getNotifyUrl());
-            params.put("biz_content", objectMapper.writeValueAsString(bizContent));
-            params.put("sign", sign(canonicalPayload(params), privateKey()));
-            String responseBody = postForm(properties.getGatewayUrl(), encode(params));
-            JsonNode json = objectMapper.readTree(responseBody);
-            JsonNode precreate = json.path("alipay_trade_precreate_response");
-            String code = precreate.path("code").asText("");
-            if (!"10000".equals(code)) {
-                String msg = precreate.path("sub_msg").asText(precreate.path("msg").asText("Alipay precreate failed"));
-                throw new BusinessException(ErrorCode.PARAM_ERROR, "create Alipay QR pay order failed: " + normalizeAlipayError(msg));
-            }
-            String qrCode = precreate.path("qr_code").asText("");
-            if (qrCode.isBlank()) {
-                throw new BusinessException(ErrorCode.PARAM_ERROR, "create Alipay QR pay order failed: missing qr_code");
-            }
-            return new AlipayPagePayResponse(qrCode);
+            String qrCode = createPrecreateQrCode(request);
+            return AlipayPagePayResponse.qr(qrCode);
         } catch (BusinessException exception) {
             throw exception;
         } catch (Exception exception) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "create Alipay QR pay order failed: " + exception.getMessage());
         }
+    }
+
+    @Override
+    public String buildPagePayHtml(AlipayPagePayRequest request) {
+        requireEnabled();
+        try {
+            return buildAutoSubmitForm(request);
+        } catch (BusinessException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "build Alipay page pay form failed: " + exception.getMessage());
+        }
+    }
+
+    private String createPrecreateQrCode(AlipayPagePayRequest request) throws Exception {
+        Map<String, String> params = buildSignedParams(request, "alipay.trade.precreate", false);
+        String responseBody = postForm(properties.getGatewayUrl(), encode(params));
+        JsonNode json = objectMapper.readTree(responseBody);
+        JsonNode precreate = json.path("alipay_trade_precreate_response");
+        String code = precreate.path("code").asText("");
+        if (!"10000".equals(code)) {
+            String msg = precreate.path("sub_msg").asText(precreate.path("msg").asText("Alipay precreate failed"));
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "create Alipay QR pay order failed: " + normalizeAlipayError(msg));
+        }
+        String qrCode = precreate.path("qr_code").asText("");
+        if (qrCode.isBlank()) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "create Alipay QR pay order failed: missing qr_code");
+        }
+        return qrCode;
+    }
+
+    private String buildAutoSubmitForm(AlipayPagePayRequest request) throws Exception {
+        Map<String, String> params = buildSignedParams(request, "alipay.trade.page.pay", true);
+        StringBuilder html = new StringBuilder();
+        html.append("<!DOCTYPE html><html><head><meta charset=\"UTF-8\"><title>跳转支付宝</title></head><body>");
+        html.append("<form id=\"alipaySubmit\" name=\"alipaySubmit\" action=\"")
+                .append(escapeHtml(properties.getGatewayUrl()))
+                .append("\" method=\"POST\">");
+        for (Map.Entry<String, String> entry : params.entrySet()) {
+            html.append("<input type=\"hidden\" name=\"")
+                    .append(escapeHtml(entry.getKey()))
+                    .append("\" value=\"")
+                    .append(escapeHtml(entry.getValue()))
+                    .append("\"/>");
+        }
+        html.append("</form><script>document.getElementById('alipaySubmit').submit();</script></body></html>");
+        return html.toString();
+    }
+
+    private Map<String, String> buildSignedParams(AlipayPagePayRequest request, String method, boolean pagePay) throws Exception {
+        Map<String, String> bizContent = new TreeMap<>();
+        bizContent.put("out_trade_no", request.outTradeNo());
+        bizContent.put("total_amount", request.totalAmount().setScale(2).toPlainString());
+        bizContent.put("subject", request.subject());
+        if (pagePay) {
+            bizContent.put("product_code", "FAST_INSTANT_TRADE_PAY");
+        }
+        if (request.expiresAt() != null) {
+            bizContent.put("time_expire", EXPIRE_FORMAT.format(request.expiresAt()));
+        }
+        Map<String, String> params = new TreeMap<>();
+        params.put("app_id", properties.getAppId());
+        params.put("method", method);
+        params.put("format", pagePay ? "JSON" : "JSON");
+        params.put("charset", "UTF-8");
+        params.put("sign_type", "RSA2");
+        params.put("timestamp", EXPIRE_FORMAT.format(java.time.LocalDateTime.now()));
+        params.put("version", "1.0");
+        params.put("notify_url", properties.getNotifyUrl());
+        if (pagePay && StringUtils.hasText(properties.getReturnUrl())) {
+            params.put("return_url", properties.getReturnUrl());
+        }
+        params.put("biz_content", objectMapper.writeValueAsString(bizContent));
+        params.put("sign", sign(canonicalPayload(params), privateKey()));
+        return params;
+    }
+
+    private boolean isPagePayMode() {
+        return "PAGE".equalsIgnoreCase(properties.getPayMode());
     }
 
     @Override
@@ -175,9 +227,24 @@ public class DefaultAlipayPagePayClient implements AlipayPagePayClient {
             return "Alipay precreate failed";
         }
         if (message.contains("接口调用权限不足")) {
-            return "支付宝应用缺少 alipay.trade.precreate（扫码预下单/当面付）接口权限，请在支付宝开放平台开通后重试";
+            if (isPagePayMode()) {
+                return "支付宝应用缺少 alipay.trade.page.pay（电脑网站支付）接口权限，请在开放平台确认电脑支付已签约并添加到本应用";
+            }
+            return "支付宝应用缺少 alipay.trade.precreate（扫码预下单/当面付）接口权限。"
+                    + " 若你已开通的是「电脑网站支付」，请将 ALIPAY_PAY_MODE 设为 PAGE；若需扫码支付，请额外开通「当面付」产品";
         }
         return message;
+    }
+
+    private String escapeHtml(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value
+                .replace("&", "&amp;")
+                .replace("\"", "&quot;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;");
     }
 
     private String url(String value) {

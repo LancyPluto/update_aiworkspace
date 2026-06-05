@@ -4,6 +4,7 @@ import com.aiminilab.aitoolmarket.agent.config.ModelProviderRegistry;
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentModelConfigMapper;
 import com.aiminilab.aitoolmarket.agent.support.ModelCapabilitiesCodec;
+import com.aiminilab.aitoolmarket.agent.support.ModelConfigCredentialResolver;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.tool.entity.AiTool;
@@ -19,13 +20,16 @@ public class ModelCapabilityService {
     private final ModelProviderRegistry providerRegistry;
     private final ModelCapabilitiesCodec capabilitiesCodec;
     private final AgentModelConfigMapper agentModelConfigMapper;
+    private final ModelConfigCredentialResolver credentialResolver;
 
     public ModelCapabilityService(ModelProviderRegistry providerRegistry,
                                   ModelCapabilitiesCodec capabilitiesCodec,
-                                  AgentModelConfigMapper agentModelConfigMapper) {
+                                  AgentModelConfigMapper agentModelConfigMapper,
+                                  ModelConfigCredentialResolver credentialResolver) {
         this.providerRegistry = providerRegistry;
         this.capabilitiesCodec = capabilitiesCodec;
         this.agentModelConfigMapper = agentModelConfigMapper;
+        this.credentialResolver = credentialResolver;
     }
 
     public List<String> resolveCapabilities(AgentModelConfig config) {
@@ -96,6 +100,10 @@ public class ModelCapabilityService {
             throw new BusinessException(ErrorCode.PARAM_ERROR,
                     "no enabled model config supports " + resolveRequiredCapability(tool));
         }
+        if (Boolean.FALSE.equals(modelConfig.getEnabled())) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR,
+                    "bound model config is disabled: " + displayModelName(modelConfig));
+        }
         String requiredCapability = resolveRequiredCapability(tool);
         List<String> configCapabilities = resolveCapabilities(modelConfig);
         boolean matched = configCapabilities.stream()
@@ -105,6 +113,11 @@ public class ModelCapabilityService {
                     "model config does not support execution handler " + requiredCapability);
         }
         providerRegistry.requireWorkerReady(modelConfig.getProvider());
+        AgentModelConfig executionConfig = credentialResolver.resolveForExecution(modelConfig);
+        if (requiresApiKey(requiredCapability, executionConfig) && !hasExecutableSecret(executionConfig.getApiKey())) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR,
+                    "bound model config has no API key: " + displayModelName(modelConfig));
+        }
     }
 
     public String resolveRequiredCapability(AiTool tool) {
@@ -115,5 +128,44 @@ public class ModelCapabilityService {
             return tool.getToolType().trim().toUpperCase(Locale.ROOT);
         }
         return "TEXT_GENERATION";
+    }
+
+    private boolean requiresApiKey(String capability, AgentModelConfig config) {
+        if (config == null) {
+            return true;
+        }
+        String provider = config.getProvider() == null ? "" : config.getProvider().trim().toLowerCase(Locale.ROOT);
+        if ("mock".equals(provider)) {
+            return false;
+        }
+        if ("kling_video".equals(provider) && hasKlingAccessSecretPair(config.getExtraAuthJson())) {
+            return false;
+        }
+        return "IMAGE_GENERATION".equalsIgnoreCase(capability)
+                || "VIDEO_GENERATION".equalsIgnoreCase(capability)
+                || "TEXT_TO_SPEECH".equalsIgnoreCase(capability)
+                || "SPEECH_TO_TEXT".equalsIgnoreCase(capability)
+                || "MUSIC_GENERATION".equalsIgnoreCase(capability)
+                || "DIGITAL_HUMAN".equalsIgnoreCase(capability);
+    }
+
+    private boolean hasExecutableSecret(String value) {
+        return value != null && !value.isBlank() && !value.trim().startsWith("replace-with-");
+    }
+
+    private boolean hasKlingAccessSecretPair(String extraAuthJson) {
+        return extraAuthJson != null
+                && extraAuthJson.contains("access")
+                && extraAuthJson.contains("secret");
+    }
+
+    private String displayModelName(AgentModelConfig config) {
+        if (config == null) {
+            return "unknown";
+        }
+        if (config.getDisplayName() != null && !config.getDisplayName().isBlank()) {
+            return config.getDisplayName();
+        }
+        return config.getModelName() == null ? "unknown" : config.getModelName();
     }
 }

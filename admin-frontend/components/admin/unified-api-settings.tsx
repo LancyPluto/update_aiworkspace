@@ -48,12 +48,6 @@ import type {
   UnifiedApiVendorGroup,
 } from "@/lib/api/types"
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
-import {
   AlertCircle,
   Activity,
   CheckCircle2,
@@ -61,7 +55,6 @@ import {
   ExternalLink,
   Layers,
   Loader2,
-  MoreHorizontal,
   Plus,
   RefreshCw,
   Search,
@@ -168,10 +161,10 @@ function canEnableAgentForModel(model: UnifiedApiModelItem, vendor: UnifiedApiVe
 }
 
 function modelRowTone(model: UnifiedApiModelItem, vendor: UnifiedApiVendorGroup) {
-  if (!model.enabled) return ""
   const health = modelAccountHealth(model, vendor)
-  if (isHealthyStatus(health)) return "bg-emerald-50/70 hover:bg-emerald-50"
-  if (health === "ERROR") return "bg-rose-50/75 hover:bg-rose-50"
+  const disabledTone = model.enabled ? "" : " opacity-75"
+  if (isHealthyStatus(health)) return `bg-emerald-50/70 hover:bg-emerald-50${disabledTone}`
+  if ((health || "").trim().toUpperCase() === "ERROR") return `bg-rose-50/75 hover:bg-rose-50${disabledTone}`
   return ""
 }
 
@@ -231,10 +224,8 @@ function renderModelCost(model: UnifiedApiModelItem) {
     const output = model.outputTokenPricePer1m
     return (
       <>
-        <div>按 Token 计费</div>
-        <div className="font-medium text-foreground">
-          输入 {input != null ? `¥${input}` : "¥—"}/百万 · 输出 {output != null ? `¥${output}` : "¥—"}/百万
-        </div>
+        <div className="font-medium text-foreground">输入 {input != null ? `¥${input}` : "¥—"}/百万</div>
+        <div className="font-medium text-foreground">输出 {output != null ? `¥${output}` : "¥—"}/百万</div>
       </>
     )
   }
@@ -243,10 +234,8 @@ function renderModelCost(model: UnifiedApiModelItem) {
     const output = model.outputTokenPricePer1m
     return (
       <>
-        <div>图片 Token</div>
-        <div className="font-medium text-foreground">
-          输入 {input != null ? `¥${input}` : "¥—"}/百万，输出 {output != null ? `¥${output}` : "¥—"}/百万
-        </div>
+        <div className="font-medium text-foreground">输入 {input != null ? `¥${input}` : "¥—"}/百万</div>
+        <div className="font-medium text-foreground">输出 {output != null ? `¥${output}` : "¥—"}/百万</div>
       </>
     )
   }
@@ -684,7 +673,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
       } catch (err) {
         patchModelEnabled(model.id, previous)
         patchModelAgentEnabled(model.id, previousAgentEnabled)
-        setError(err instanceof ApiError ? err.message : "鏇存柊澶辫触")
+        setError(err instanceof ApiError ? err.message : "更新失败")
       } finally {
         setTogglingModelId(null)
       }
@@ -983,32 +972,33 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
 
   function renderVendorAccountMenu(account: ModelVendorAccount, vendorLabel: string) {
     return (
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button type="button" variant="ghost" size="icon" className="h-8 w-8 shrink-0" aria-label="厂商账户操作">
-            <MoreHorizontal className="h-4 w-4" />
+      <div className="inline-flex items-center gap-1">
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 shrink-0"
+          aria-label={`${vendorLabel} API 与密钥`}
+          title="API 与密钥"
+          onClick={() => openEditAccount(account)}
+        >
+          <Settings2 className="h-4 w-4" />
+        </Button>
+        {account.consoleUrl ? (
+          <Button type="button" variant="ghost" size="icon" className="h-8 w-8" asChild title="打开控制台">
+            <a href={account.consoleUrl} target="_blank" rel="noreferrer" aria-label={`${vendorLabel} 控制台`}>
+              <ExternalLink className="h-4 w-4" />
+            </a>
           </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-44">
-          <DropdownMenuItem onClick={() => openEditAccount(account)}>
-            <Settings2 className="mr-2 h-4 w-4" />
-            API 与密钥          </DropdownMenuItem>
-          {account.consoleUrl ? (
-            <DropdownMenuItem asChild>
-              <a href={account.consoleUrl} target="_blank" rel="noreferrer">
-                <ExternalLink className="mr-2 h-4 w-4" />
-                打开控制台              </a>
-            </DropdownMenuItem>
-          ) : null}
-          {account.balanceUrl ? (
-            <DropdownMenuItem asChild>
-              <a href={account.balanceUrl} target="_blank" rel="noreferrer">
-                <ExternalLink className="mr-2 h-4 w-4" />
-                打开余额页              </a>
-            </DropdownMenuItem>
-          ) : null}
-        </DropdownMenuContent>
-      </DropdownMenu>
+        ) : null}
+        {account.balanceUrl ? (
+          <Button type="button" variant="ghost" size="icon" className="h-8 w-8" asChild title="打开余额页">
+            <a href={account.balanceUrl} target="_blank" rel="noreferrer" aria-label={`${vendorLabel} 余额页`}>
+              <Wallet className="h-4 w-4" />
+            </a>
+          </Button>
+        ) : null}
+      </div>
     )
   }
 
@@ -1153,7 +1143,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                     <TableHead className="w-[220px] text-center">模型名称</TableHead>
                     <TableHead className="w-[150px] text-center">{"API \u8d26\u6237"}</TableHead>
                     <TableHead className="w-[180px] text-center">能力</TableHead>
-                    <TableHead className="w-[150px] text-center">鎴愭湰</TableHead>
+                    <TableHead className="w-[150px] text-center">成本</TableHead>
                     <TableHead className="w-[112px] text-center">Agent 可选</TableHead>
                     <TableHead className="w-[112px] text-center">启用</TableHead>
                     <TableHead className="w-[180px] text-center">操作</TableHead>
@@ -1216,7 +1206,10 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                       <TableCell className="align-middle">
                         <EmbeddedOnOffSwitch
                           checked={model.agentEnabled !== false}
-                          disabled={togglingAgentModelId === model.id || !canEnableAgentForModel(model, vendor)}
+                          disabled={
+                            togglingAgentModelId === model.id
+                            || (model.agentEnabled === false && !canEnableAgentForModel(model, vendor))
+                          }
                           label={`Agent 可选 ${model.displayName || model.modelName}`}
                           onCheckedChange={(agentEnabled) => toggleModelAgentEnabled(model, agentEnabled)}
                         />

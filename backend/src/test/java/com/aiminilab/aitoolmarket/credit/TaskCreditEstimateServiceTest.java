@@ -25,7 +25,7 @@ class TaskCreditEstimateServiceTest {
     private TaskCreditEstimateService taskCreditEstimateService;
 
     @Test
-    void perCallBilling_usesUnitPriceWithMarkup() {
+    void perCallBilling_usesUnitPrice() {
         AiTool tool = new AiTool();
         tool.setEstimatedCreditCost(5);
 
@@ -33,7 +33,8 @@ class TaskCreditEstimateServiceTest {
         modelConfig.setBillingUnit("PER_CALL");
         modelConfig.setUnitPrice(new BigDecimal("0.03"));
 
-        assertThat(taskCreditEstimateService.estimateTaskCredits(tool, modelConfig)).isEqualTo(4);
+        assertThat(taskCreditEstimateService.estimateTaskCredits(tool, modelConfig)).isEqualTo(3);
+        assertThat(taskCreditEstimateService.estimateUserFacingTaskCredits(tool, modelConfig)).isEqualTo(4);
     }
 
     @Test
@@ -60,6 +61,20 @@ class TaskCreditEstimateServiceTest {
     }
 
     @Test
+    void imageTokenBilling_usesTokenPriceUpperEstimateInsteadOfFixedToolEstimate() {
+        AiTool tool = new AiTool();
+        tool.setEstimatedCreditCost(300);
+
+        AgentModelConfig modelConfig = new AgentModelConfig();
+        modelConfig.setBillingUnit("IMAGE_TOKEN");
+        modelConfig.setInputTokenPricePer1m(new BigDecimal("8"));
+        modelConfig.setOutputTokenPricePer1m(new BigDecimal("30"));
+
+        assertThat(taskCreditEstimateService.estimateTaskCredits(tool, modelConfig)).isEqualTo(31);
+        assertThat(taskCreditEstimateService.estimateUserFacingTaskCredits(tool, modelConfig)).isEqualTo(38);
+    }
+
+    @Test
     void estimateForTool_resolvesModelConfig() {
         AiTool tool = new AiTool();
         tool.setEstimatedCreditCost(1);
@@ -70,6 +85,7 @@ class TaskCreditEstimateServiceTest {
 
         when(modelCapabilityService.resolveModelConfigForTool(tool)).thenReturn(modelConfig);
 
-        assertThat(taskCreditEstimateService.estimateForTool(tool)).isEqualTo(12);
+        assertThat(taskCreditEstimateService.estimateForTool(tool)).isEqualTo(10);
+        assertThat(taskCreditEstimateService.estimateUserFacingTaskCredits(tool)).isEqualTo(12);
     }
 }

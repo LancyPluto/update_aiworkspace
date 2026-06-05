@@ -4,6 +4,12 @@ import { Check, Crown, CreditCard, Loader2, MessageCircle, QrCode, Sparkles, X }
 import type { CreditAccount, RechargeOrder, RechargePackage } from "@/api/types"
 import { createCustomRechargeOrder, createRechargeOrder, fetchRechargeOrder, fetchRechargePackages, mockPayRechargeOrder } from "@/api/creditApi"
 import { useAuthStore } from "@/store/authStore"
+import {
+  isAlipayPageRedirectOrder,
+  rechargePaymentFailureMessage,
+  resolveAlipayLaunchUrl,
+  type RechargePaymentChannel,
+} from "@/utils/rechargePayment"
 
 const props = defineProps<{
   account: CreditAccount | null
@@ -13,7 +19,7 @@ const emit = defineEmits<{
   creditsUpdated: []
 }>()
 
-type PaymentChannel = "WECHAT_NATIVE" | "ALIPAY_PAGE" | "MOCK"
+type PaymentChannel = RechargePaymentChannel
 
 const auth = useAuthStore()
 const packages = ref<RechargePackage[]>([])
@@ -56,8 +62,8 @@ const paymentOptions: Array<{
   },
   {
     channel: "ALIPAY_PAGE",
-    title: "支付宝扫码支付",
-    description: "使用手机支付宝扫一扫完成付款",
+    title: "支付宝电脑支付",
+    description: "跳转支付宝官方收银台完成付款",
     icon: CreditCard,
   },
   {
@@ -80,6 +86,16 @@ const activePaymentName = computed(() => {
   if (activeOrder.value?.paymentChannel === "WECHAT_NATIVE") return "微信"
   return "模拟支付"
 })
+
+const isAlipayPageRedirect = computed(() =>
+  activeOrder.value ? isAlipayPageRedirectOrder(activeOrder.value) : false,
+)
+
+function redirectToAlipayCheckout(order: RechargeOrder) {
+  if (!isAlipayPageRedirectOrder(order) || !order.payUrl) return false
+  window.location.assign(resolveAlipayLaunchUrl(order.payUrl))
+  return true
+}
 
 function formatMoney(value: number | string | undefined | null) {
   const amount = Number(value ?? 0)
@@ -220,13 +236,19 @@ async function submitCustomRecharge(channel: PaymentChannel) {
 }
 
 function openPayModalForOrder(order: RechargeOrder, channel: PaymentChannel): boolean {
-  if (channel !== "MOCK" && !order.qrCodeUrl) {
-    error.value = "支付二维码生成失败，请检查支付配置或稍后重试"
+  const hasAlipayLaunch = isAlipayPageRedirectOrder(order, channel)
+  if (channel !== "MOCK" && !order.qrCodeUrl && !hasAlipayLaunch) {
+    error.value = rechargePaymentFailureMessage(order, channel)
     return false
   }
   activeOrder.value = order
   paymentResult.value = null
   showChannelModal.value = false
+  if (hasAlipayLaunch) {
+    startPolling(order.id)
+    redirectToAlipayCheckout(order)
+    return true
+  }
   showPayModal.value = true
   startPolling(order.id)
   return true
@@ -505,7 +527,21 @@ onUnmounted(clearPolling)
             </h3>
 
             <div
-              v-if="activeOrder?.paymentChannel !== 'MOCK'"
+              v-if="activeOrder?.paymentChannel !== 'MOCK' && isAlipayPageRedirect"
+              class="mx-auto mt-10 max-w-sm rounded-2xl border border-border bg-secondary/35 p-5"
+            >
+              <p class="text-sm text-muted-foreground">当前为电脑网站支付模式，将在新窗口打开支付宝收银台。</p>
+              <button
+                type="button"
+                class="mt-4 w-full rounded-full bg-primary py-2.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90"
+                @click="activeOrder && redirectToAlipayCheckout(activeOrder)"
+              >
+                打开支付宝收银台
+              </button>
+            </div>
+
+            <div
+              v-else-if="activeOrder?.paymentChannel !== 'MOCK'"
               class="mx-auto mt-14 flex h-40 w-40 items-center justify-center bg-white p-1"
             >
               <img
@@ -530,7 +566,7 @@ onUnmounted(clearPolling)
               </button>
             </div>
 
-            <p v-if="activeOrder?.paymentChannel !== 'MOCK'" class="mt-7 flex items-center justify-center gap-1.5 text-sm text-muted-foreground">
+            <p v-if="activeOrder?.paymentChannel !== 'MOCK' && !isAlipayPageRedirect" class="mt-7 flex items-center justify-center gap-1.5 text-sm text-muted-foreground">
               请扫码完成支付
               <span class="inline-flex h-4 w-4 items-center justify-center rounded bg-sky-500 text-[10px] font-bold text-white">
                 {{ activeOrder?.paymentChannel === "ALIPAY_PAGE" ? "支" : "微" }}

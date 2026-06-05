@@ -2,6 +2,7 @@ package com.aiminilab.aitoolmarket.task;
 
 import com.aiminilab.aitoolmarket.auth.security.AuthTestTokens;
 import com.aiminilab.aitoolmarket.credit.service.CreditService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -35,6 +36,9 @@ class WorkerInternalApiTest {
 
     @Autowired
     private CreditService creditService;
+
+    @Autowired
+    private ObjectMapper objectMapper;
 
     @Test
     void workerCanReadContextMarkProcessingAndWriteSuccessResult() throws Exception {
@@ -104,7 +108,7 @@ class WorkerInternalApiTest {
                 .andExpect(jsonPath("$.data.list[0].promptTokens").value(120))
                 .andExpect(jsonPath("$.data.list[0].completionTokens").value(35))
                 .andExpect(jsonPath("$.data.list[0].totalTokens").value(155))
-                .andExpect(jsonPath("$.data.list[0].chargedCredits").value(10));
+                .andExpect(jsonPath("$.data.list[0].chargedCredits").value(12));
 
         mockMvc.perform(get("/api/admin/v1/billing/overview")
                         .header("Authorization", "Bearer " + adminToken)
@@ -113,7 +117,7 @@ class WorkerInternalApiTest {
                         .param("sourceId", taskId.toString()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.todayTotalTokens").value(155))
-                .andExpect(jsonPath("$.data.todayChargedCredits").value(10))
+                .andExpect(jsonPath("$.data.todayChargedCredits").value(12))
                 .andExpect(jsonPath("$.data.modelCosts[0].modelName").isNotEmpty())
                 .andExpect(jsonPath("$.data.userCosts[0].userId").value(2))
                 .andExpect(jsonPath("$.data.userCosts[0].usageCount").value(1))
@@ -294,7 +298,7 @@ class WorkerInternalApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.list[0].sourceId").value(taskId.intValue()))
                 .andExpect(jsonPath("$.data.list[0].taskNo", not(blankOrNullString())))
-                .andExpect(jsonPath("$.data.list[0].chargedCredits").value(10));
+                .andExpect(jsonPath("$.data.list[0].chargedCredits").value(12));
     }
 
     @Test
@@ -380,6 +384,53 @@ class WorkerInternalApiTest {
     }
 
     @Test
+    void adminRejectsToolBindingToDisabledImageModelBeforeWorkerDispatch() throws Exception {
+        String adminToken = login("/api/admin/v1/auth/login", "admin");
+        String modelResponse = mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/admin/v1/agent/model-config")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "displayName": "Disabled GPT Image",
+                                  "configCode": "disabled_gpt_image",
+                                  "provider": "openai_images_gateway",
+                                  "modelName": "gpt-image-2",
+                                  "baseUrl": "https://shiyunapi.com/v1",
+                                  "apiKey": "",
+                                  "timeoutSeconds": 60,
+                                  "billingUnit": "IMAGE_TOKEN",
+                                  "unitPrice": 0.01,
+                                  "enabled": false,
+                                  "agentEnabled": false,
+                                  "capabilities": ["IMAGE_GENERATION"]
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        Long modelConfigId = objectMapper.readTree(modelResponse).path("data").path("id").asLong();
+
+        mockMvc.perform(post("/api/admin/v1/tools")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "toolCode": "worker_disabled_image_tool",
+                                  "toolName": "worker_disabled_image_tool",
+                                  "categoryId": 1,
+                                  "description": "Worker test tool",
+                                  "coverUrl": "",
+                                  "estimatedCreditCost": 5,
+                                  "toolType": "IMAGE_GENERATION",
+                                  "modelConfigId": %d
+                                }
+                                """.formatted(modelConfigId)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("bound model config is disabled: Disabled GPT Image"));
+    }
+
+    @Test
     void agentServiceCanCreateAndReadTaskThroughInternalApi() throws Exception {
         String adminToken = login("/api/admin/v1/auth/login", "admin");
         Long toolId = createTool(adminToken, "agent_internal_task_tool", 1);
@@ -457,7 +508,12 @@ class WorkerInternalApiTest {
     }
 
     private Long createTool(String adminToken, String toolCode, int estimatedCreditCost, String toolType) throws Exception {
+        return createTool(adminToken, toolCode, estimatedCreditCost, toolType, null);
+    }
+
+    private Long createTool(String adminToken, String toolCode, int estimatedCreditCost, String toolType, Long modelConfigId) throws Exception {
         String typeFragment = toolType == null || toolType.isBlank() ? "" : ",\n                                  \"toolType\": \"" + toolType + "\"";
+        String modelFragment = modelConfigId == null ? "" : ",\n                                  \"modelConfigId\": " + modelConfigId;
         String response = mockMvc.perform(post("/api/admin/v1/tools")
                         .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -468,9 +524,9 @@ class WorkerInternalApiTest {
                                   "categoryId": 1,
                                   "description": "Worker test tool",
                                   "coverUrl": "",
-                                  "estimatedCreditCost": %d%s
+                                  "estimatedCreditCost": %d%s%s
                                 }
-                                """.formatted(toolCode, toolCode, estimatedCreditCost, typeFragment)))
+                                """.formatted(toolCode, toolCode, estimatedCreditCost, typeFragment, modelFragment)))
                 .andExpect(status().isOk())
                 .andReturn()
                 .getResponse()

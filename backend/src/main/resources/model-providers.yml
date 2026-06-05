@@ -169,7 +169,7 @@ providers:
     providerProtocol: openai_images
     vendorKind: gateway
     upstreamVendor: openai
-    testStrategy: accept_only
+    testStrategy: agent_service
     workerReady: true
     description: Generic gateway slot for OpenAI-compatible image generation APIs. Use this when only Base URL/API Key changes.
 
