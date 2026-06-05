@@ -463,7 +463,7 @@ onUnmounted(() => {
       <p v-if="copyHint" class="inline-hint">{{ copyHint }}</p>
       <div v-if="error" class="state-panel error">{{ error }}</div>
 
-      <div v-else-if="loading" class="post-grid">
+      <div v-else-if="loading" class="content-masonry">
         <article v-for="index in 6" :key="index" class="insp-card skeleton">
           <div class="thumb skeleton-block" />
           <div class="card-body">
@@ -482,7 +482,7 @@ onUnmounted(() => {
         </button>
       </div>
 
-      <section v-else class="post-grid">
+      <section v-else class="content-masonry">
         <article v-for="post in visiblePosts" :key="post.id" class="insp-card group">
           <label class="select-box" :class="{ checked: isSelected(post.id) }" @click.stop>
             <input type="checkbox" :checked="isSelected(post.id)" @change="toggleSelect(post.id)" />
@@ -491,7 +491,22 @@ onUnmounted(() => {
 
           <button type="button" class="card-link" @click="openPost(post)">
             <div class="thumb">
-              <img v-if="hasCover(post)" :src="mediaUrl(post.coverUrl)" :alt="postTitle(post)" loading="lazy" />
+              <img
+                v-if="hasCover(post) && postKind(post) === 'image'"
+                :src="mediaUrl(post.coverUrl)"
+                :alt="postTitle(post)"
+                loading="lazy"
+                decoding="async"
+              />
+              <video
+                v-else-if="hasCover(post) && postKind(post) === 'video'"
+                :src="mediaUrl(post.coverUrl)"
+                class="thumb-video"
+                muted
+                loop
+                playsinline
+                preload="metadata"
+              />
               <div v-else class="thumb-placeholder">
                 <ImageIcon class="h-8 w-8" />
               </div>
@@ -881,12 +896,6 @@ onUnmounted(() => {
   font-size: 13px;
 }
 
-.post-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: clamp(16px, 2vw, 22px);
-}
-
 .insp-card {
   position: relative;
   overflow: hidden;
@@ -949,21 +958,24 @@ onUnmounted(() => {
 }
 
 .thumb {
-  aspect-ratio: 16 / 9;
   overflow: hidden;
+  border-radius: 16px 16px 0 0;
   background: rgb(255 255 255 / 0.03);
 }
 
-.thumb img {
+.thumb img,
+.thumb video,
+.thumb .thumb-video {
+  display: block;
   width: 100%;
-  height: 100%;
-  object-fit: cover;
+  height: auto;
+  vertical-align: top;
 }
 
 .thumb-placeholder {
   display: flex;
+  min-height: 140px;
   width: 100%;
-  height: 100%;
   align-items: center;
   justify-content: center;
   background: linear-gradient(135deg, rgb(124 58 237 / 0.16), rgb(59 130 246 / 0.1));
@@ -971,14 +983,15 @@ onUnmounted(() => {
 }
 
 .card-body {
-  padding: 14px 14px 10px;
+  padding: 10px 12px 4px;
 }
 
 .card-body h3 {
   margin: 0;
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 700;
   line-height: 1.45;
+  color: rgb(255 255 255 / 0.92);
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -987,15 +1000,20 @@ onUnmounted(() => {
 
 .source {
   margin: 6px 0 0;
-  color: rgb(255 255 255 / 0.48);
+  color: rgb(255 255 255 / 0.42);
   font-size: 12px;
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .tag-row {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin-top: 10px;
+  margin-top: 8px;
 }
 
 .tag-row span {
@@ -1009,9 +1027,10 @@ onUnmounted(() => {
 .stats-row {
   display: flex;
   gap: 12px;
-  margin-top: 10px;
-  color: rgb(255 255 255 / 0.48);
+  margin-top: 8px;
+  color: rgb(255 255 255 / 0.38);
   font-size: 12px;
+  font-weight: 500;
 }
 
 .stats-row span {
@@ -1289,10 +1308,6 @@ onUnmounted(() => {
 
   .sidebar.open {
     transform: translateX(0);
-  }
-
-  .post-grid {
-    grid-template-columns: 1fr;
   }
 
   .batch-bar {

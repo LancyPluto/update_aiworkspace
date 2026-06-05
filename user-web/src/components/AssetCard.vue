@@ -12,11 +12,13 @@ const props = withDefaults(
     source?: "private" | "community"
     compact?: boolean
     gallery?: boolean
+    masonry?: boolean
   }>(),
   {
     source: "private",
     compact: false,
     gallery: false,
+    masonry: false,
   },
 )
 
@@ -70,7 +72,7 @@ function openAuthorProfile() {
 <template>
   <article
     class="asset-card group"
-    :class="{ compact, gallery: gallery || (source === 'community' && compact) }"
+    :class="{ compact, masonry, gallery: gallery || (source === 'community' && compact) }"
     @click="emit('open', asset)"
   >
     <div class="media-frame">
@@ -223,6 +225,52 @@ function openAuthorProfile() {
   box-shadow:
     var(--profile-card-hover-shadow, 0 36px 88px rgb(0 0 0 / 0.48)),
     inset 0 1px 0 rgb(255 255 255 / 0.06);
+}
+
+.asset-card.masonry {
+  border-radius: 16px;
+  box-shadow: 0 16px 36px rgb(0 0 0 / 0.22);
+}
+
+.asset-card.masonry:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 16px 36px rgb(0 0 0 / 0.28);
+}
+
+.asset-card.masonry .media-frame {
+  border-radius: 16px 16px 0 0;
+}
+
+.asset-card.masonry .media {
+  height: auto;
+  max-height: none;
+  object-fit: contain;
+  vertical-align: top;
+}
+
+.asset-card.masonry:hover .media {
+  transform: none;
+}
+
+.asset-card.masonry .body {
+  gap: 8px;
+  padding: 10px 12px 12px;
+}
+
+.asset-card.masonry h3 {
+  font-size: 13px;
+  font-weight: 700;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  white-space: normal;
+}
+
+.asset-card.masonry .subtitle {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  white-space: normal;
 }
 
 .media-frame {

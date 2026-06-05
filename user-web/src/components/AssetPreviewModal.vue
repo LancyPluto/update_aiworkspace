@@ -1,7 +1,9 @@
 <script setup lang="ts">
+import { computed, ref, watch } from "vue"
 import {
-  ArrowRight,
   CalendarDays,
+  Check,
+  Copy,
   Download,
   FileText,
   Globe2,
@@ -29,6 +31,14 @@ const emit = defineEmits<{
   "publish": [asset: AssetPreviewItem]
   "unpublish": [asset: AssetPreviewItem]
 }>()
+
+const copyHint = ref("")
+
+const promptText = computed(() => props.asset?.prompt || props.asset?.rawText || "")
+
+const downloadUrl = computed(() => normalizeMediaUrl(props.asset?.url))
+
+const canDownload = computed(() => Boolean(downloadUrl.value))
 
 function formatTime(value?: string | null) {
   if (!value) return ""
@@ -82,6 +92,30 @@ function normalizeMediaUrl(value?: string | null) {
   const path = raw.startsWith("/") ? raw : `/${raw}`
   const apiOrigin = getApiOrigin()
   return apiOrigin ? `${apiOrigin}${path}` : path
+}
+
+watch(
+  () => props.asset?.id,
+  () => {
+    copyHint.value = ""
+  },
+)
+
+async function copyPrompt() {
+  const text = promptText.value.trim()
+  if (!text) return
+  try {
+    await navigator.clipboard.writeText(text)
+    copyHint.value = "已复制"
+    window.setTimeout(() => {
+      copyHint.value = ""
+    }, 1800)
+  } catch {
+    copyHint.value = "复制失败"
+    window.setTimeout(() => {
+      copyHint.value = ""
+    }, 1800)
+  }
 }
 </script>
 
@@ -161,9 +195,21 @@ function normalizeMediaUrl(value?: string | null) {
             <aside class="grid content-start gap-0 max-2xl:grid-cols-3 max-lg:grid-cols-1">
               <div class="border-white/10 py-4 max-2xl:border-r max-2xl:pr-5 max-lg:border-b max-lg:border-r-0 max-lg:pr-0">
                 <p class="text-[11px] font-semibold uppercase tracking-[0.22em] text-white/30">提示词</p>
-                <p class="mt-3 line-clamp-7 text-sm font-light leading-7 text-white/76">
-                  {{ asset.prompt || asset.rawText || "暂无提示词记录" }}
-                </p>
+                <div class="relative mt-3 min-h-[5.5rem]">
+                  <p class="line-clamp-7 pr-2 text-sm font-light leading-7 text-white/76">
+                    {{ promptText || "暂无提示词记录" }}
+                  </p>
+                  <button
+                    v-if="promptText"
+                    type="button"
+                    class="absolute bottom-0 right-0 inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.06] px-3 py-1.5 text-xs font-semibold text-white/72 shadow-[inset_0_1px_0_rgb(255_255_255_/_0.06)] transition hover:border-primary/35 hover:bg-primary/12 hover:text-white"
+                    @click="copyPrompt"
+                  >
+                    <Check v-if="copyHint" class="h-3.5 w-3.5 text-emerald-300" />
+                    <Copy v-else class="h-3.5 w-3.5" />
+                    {{ copyHint || "复制" }}
+                  </button>
+                </div>
               </div>
               <div class="border-t border-white/10 py-4 max-2xl:border-l max-2xl:border-t-0 max-2xl:px-5 max-lg:border-b max-lg:border-l-0 max-lg:border-t max-lg:px-0">
                 <p class="text-[11px] font-semibold uppercase tracking-[0.22em] text-white/30">来源</p>
@@ -176,33 +222,21 @@ function normalizeMediaUrl(value?: string | null) {
                   <CalendarDays class="h-4 w-4 text-white/35" />
                   {{ formatTime(asset.createdAt) || "未知" }}
                 </p>
+                <a
+                  v-if="canDownload"
+                  :href="downloadUrl"
+                  download
+                  class="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-[linear-gradient(135deg,rgb(255_255_255_/_0.08),rgb(176_92_255_/_0.12))] px-4 py-2.5 text-sm font-semibold text-white/82 shadow-[inset_0_1px_0_rgb(255_255_255_/_0.08)] transition hover:border-primary/40 hover:text-white"
+                >
+                  <Download class="h-4 w-4" />
+                  下载作品
+                </a>
               </div>
             </aside>
           </section>
         </main>
 
         <aside class="min-h-0 border-l border-white/8 bg-[#0d0e13]/88 px-6 py-8 backdrop-blur-2xl max-xl:max-h-[48vh] max-xl:border-l-0 max-xl:border-t">
-          <div class="mb-7 flex items-center gap-3">
-            <a
-              v-if="asset.url"
-              :href="asset.url"
-              download
-              class="grid h-12 w-12 place-items-center rounded-2xl border border-white/10 bg-white/[0.06] text-white/75 transition hover:bg-white/12 hover:text-white"
-              title="下载"
-            >
-              <Download class="h-5 w-5" />
-            </a>
-            <button
-              v-if="asset.taskId"
-              type="button"
-              class="inline-flex h-12 flex-1 items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-4 text-sm font-semibold text-white/75 transition hover:bg-white/12 hover:text-white"
-              @click="emit('open-task', asset)"
-            >
-              记录
-              <ArrowRight class="h-4 w-4" />
-            </button>
-          </div>
-
           <div v-if="asset.taskId" class="mb-5 rounded-[24px] border border-white/8 bg-white/[0.035] p-4">
             <p class="text-xs font-semibold text-white/35">公开主页</p>
             <p class="mt-2 text-sm leading-6 text-white/52">

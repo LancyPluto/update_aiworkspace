@@ -1,10 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue"
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue"
 import { useRoute, useRouter } from "vue-router"
 import {
   Heart,
   Loader2,
-  MessageCircle,
   RefreshCcw,
   Search,
   Sparkles,
@@ -14,13 +13,31 @@ import {
   X,
 } from "lucide-vue-next"
 import { ApiBusinessError, getApiOrigin } from "@/api/client"
-import { fetchCommunityTopics, markCommunityPostSameStyle, searchCommunityPosts, trackCommunityEvent } from "@/api/communityApi"
+import {
+  addCommunityCollectionItem,
+  favoriteCommunityPost,
+  fetchCommunityCollections,
+  fetchCommunityTopics,
+  likeCommunityPost,
+  markCommunityPostSameStyle,
+  removeCommunityCollectionItem,
+  searchCommunityPosts,
+  trackCommunityEvent,
+  unfavoriteCommunityPost,
+  unlikeCommunityPost,
+} from "@/api/communityApi"
 import type { CommunityPost, CommunityTopic } from "@/api/types"
+import {
+  COMMUNITY_POST_UNPUBLISHED_EVENT,
+  type CommunityPostUnpublishedDetail,
+} from "@/utils/communitySync"
+import UserAvatar from "@/components/UserAvatar.vue"
 import { userRoutes } from "@/router/userRoutes"
 import { useAuthStore } from "@/store/authStore"
 import { assetFromCommunityPost } from "@/utils/assetPreviewAdapter"
 import { openDashboardWithAsset } from "@/utils/assetReplay"
 import { communityDisplayTitle, promptExcerpt } from "@/utils/communityDisplay"
+import { resolveCommunityAuthorAvatar, resolveCommunityAuthorName, resolveCommunityPrompt } from "@/utils/communityPostNormalize"
 
 const router = useRouter()
 const route = useRoute()
@@ -43,6 +60,10 @@ const keyword = ref("")
 const topic = ref("")
 const searchOpen = ref(false)
 const sameStyleLoadingId = ref<number | null>(null)
+const actingPostId = ref<number | null>(null)
+const defaultCollectionId = ref<number | null>(null)
+const loadSentinelRef = ref<HTMLElement | null>(null)
+let loadObserver: IntersectionObserver | null = null
 
 const modalityFilters = [
   { label: "全部", value: "" },
@@ -64,16 +85,6 @@ const extendedSorts = [
 ]
 
 const inlineTopics = computed(() => topics.value.length > 0 && topics.value.length < 5)
-
-function displayTags(post: CommunityPost) {
-  const tags: string[] = []
-  if (post.topic) tags.push(post.topic)
-  for (const tag of post.tags || []) {
-    const normalized = tag.startsWith("#") ? tag.slice(1) : tag
-    if (normalized && !tags.includes(normalized)) tags.push(normalized)
-  }
-  return tags.slice(0, 2)
-}
 
 function mediaUrl(value?: string | null) {
   const raw = value?.trim()
@@ -105,13 +116,37 @@ function postTitle(post: CommunityPost) {
   })
 }
 
-function textPreview(post: CommunityPost) {
-  const raw = post.promptPreview || post.prompt || post.description || post.title || ""
-  return promptExcerpt(raw, 40)
+function cardDescription(post: CommunityPost) {
+  const raw = resolveCommunityPrompt(post) || post.description || ""
+  if (!raw) return ""
+  return promptExcerpt(raw, 72)
+}
+
+function authorName(post: CommunityPost) {
+  return resolveCommunityAuthorName(post)
+}
+
+function authorAvatar(post: CommunityPost) {
+  return resolveCommunityAuthorAvatar(post)
+}
+
+function patchPost(updated: CommunityPost) {
+  const index = posts.value.findIndex((item) => item.id === updated.id)
+  if (index >= 0) posts.value[index] = updated
 }
 
 function hasMediaCover(post: CommunityPost) {
   return Boolean(mediaUrl(post.coverUrl)) && postKind(post) !== "text"
+}
+
+function findScrollRoot(el: HTMLElement | null): Element | null {
+  let node = el?.parentElement ?? null
+  while (node) {
+    const { overflowY } = getComputedStyle(node)
+    if (overflowY === "auto" || overflowY === "scroll") return node
+    node = node.parentElement
+  }
+  return null
 }
 
 async function trackImpressions(list: CommunityPost[]) {
@@ -131,6 +166,69 @@ function openPost(post: CommunityPost) {
     { token: auth.token },
   ).catch(() => undefined)
   router.push(`/community/posts/${post.id}`)
+}
+
+function openAuthorProfile(post: CommunityPost, event: Event) {
+  event.stopPropagation()
+  if (!post.userId) return
+  router.push(`/u/${post.userId}`)
+}
+
+async function toggleLike(post: CommunityPost, event: Event) {
+  event.stopPropagation()
+  if (!auth.token) return router.push({ name: "Login", query: { redirect: route.fullPath } })
+  actingPostId.value = post.id
+  try {
+    const updated = post.liked
+      ? await unlikeCommunityPost(post.id, { token: auth.token })
+      : await likeCommunityPost(post.id, { token: auth.token })
+    patchPost(updated)
+  } finally {
+    actingPostId.value = null
+  }
+}
+
+async function resolveDefaultCollectionId() {
+  if (!auth.token) return null
+  if (defaultCollectionId.value) return defaultCollectionId.value
+  try {
+    const result = await fetchCommunityCollections({ token: auth.token })
+    if (!result.supported || !result.collections.length) return null
+    const target = result.collections.find((item) => item.defaultCollection) || result.collections[0]
+    defaultCollectionId.value = target?.id ?? null
+    return defaultCollectionId.value
+  } catch {
+    return null
+  }
+}
+
+async function syncFavoriteToInspiration(postId: number, favorited: boolean) {
+  const collectionId = await resolveDefaultCollectionId()
+  if (!collectionId) return
+  if (favorited) {
+    await addCommunityCollectionItem(collectionId, postId, { token: auth.token })
+  } else {
+    await removeCommunityCollectionItem(collectionId, postId, { token: auth.token })
+  }
+}
+
+async function toggleFavorite(post: CommunityPost, event: Event) {
+  event.stopPropagation()
+  if (!auth.token) return router.push({ name: "Login", query: { redirect: route.fullPath } })
+  actingPostId.value = post.id
+  try {
+    const updated = post.favorited
+      ? await unfavoriteCommunityPost(post.id, { token: auth.token })
+      : await favoriteCommunityPost(post.id, { token: auth.token })
+    try {
+      await syncFavoriteToInspiration(post.id, !post.favorited)
+    } catch {
+      // 作品收藏状态已更新；同步灵感收藏夹失败时不阻断主流程
+    }
+    patchPost(updated)
+  } finally {
+    actingPostId.value = null
+  }
 }
 
 function selectTopic(nextTopic: string) {
@@ -236,10 +334,60 @@ function refreshAll() {
   void load(true)
 }
 
+function setupLoadObserver() {
+  loadObserver?.disconnect()
+  if (!loadSentinelRef.value || !hasNext.value) return
+  const root = findScrollRoot(loadSentinelRef.value)
+  loadObserver = new IntersectionObserver(
+    (entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return
+      if (loading.value || loadingMore.value || !hasNext.value) return
+      void load(false)
+    },
+    { root, rootMargin: "320px" },
+  )
+  loadObserver.observe(loadSentinelRef.value)
+}
+
 watch([modality, sort, featuredOnly, topic], () => void load(true))
+watch(
+  () => auth.token,
+  (token) => {
+    defaultCollectionId.value = null
+    if (token) void resolveDefaultCollectionId()
+  },
+)
+watch([posts, hasNext, loading, loadingMore], async () => {
+  await nextTick()
+  setupLoadObserver()
+})
+
+function handleCommunityPostUnpublished(event: Event) {
+  const detail = (event as CustomEvent<CommunityPostUnpublishedDetail>).detail
+  if (!detail?.postId && !detail?.taskId) return
+  const before = posts.value.length
+  posts.value = posts.value.filter((post) => {
+    if (detail.postId && post.id === detail.postId) return false
+    if (detail.taskId && post.taskId === detail.taskId) return false
+    return true
+  })
+  const removed = before - posts.value.length
+  if (removed > 0) {
+    total.value = Math.max(0, total.value - removed)
+  }
+}
+
 onMounted(() => {
   void loadTopics()
   void load(true)
+  if (auth.token) void resolveDefaultCollectionId()
+  window.addEventListener(COMMUNITY_POST_UNPUBLISHED_EVENT, handleCommunityPostUnpublished)
+})
+
+onUnmounted(() => {
+  loadObserver?.disconnect()
+  loadObserver = null
+  window.removeEventListener(COMMUNITY_POST_UNPUBLISHED_EVENT, handleCommunityPostUnpublished)
 })
 </script>
 
@@ -352,89 +500,118 @@ onMounted(() => {
 
     <p v-if="sameStyleError" class="inline-alert" role="alert">{{ sameStyleError }}</p>
 
-    <div v-if="loading" class="post-grid" aria-busy="true" aria-label="加载中">
-      <article v-for="index in 8" :key="index" class="post-card skeleton">
+    <div v-if="loading" class="content-masonry" aria-busy="true" aria-label="加载中">
+      <article v-for="index in 8" :key="index" class="post-card skeleton" :style="{ '--skeleton-h': `${120 + (index % 4) * 48}px` }">
         <div class="thumb skeleton-block" />
         <div class="card-body">
           <div class="skeleton-line wide" />
           <div class="skeleton-line" />
-          <div class="skeleton-line short" />
         </div>
+        <div class="card-footer skeleton-footer" />
       </article>
     </div>
 
     <div v-else-if="error" class="state-panel error">{{ error }}</div>
     <div v-else-if="!posts.length" class="state-panel">暂时没有匹配的公开作品，换个筛选条件再试试。</div>
 
-    <section v-else class="post-grid">
-      <article v-for="post in posts" :key="post.id" class="post-card group">
-        <button type="button" class="card-clickable" @click="openPost(post)">
-          <div class="thumb">
-            <img
-              v-if="hasMediaCover(post) && postKind(post) === 'image'"
-              :src="mediaUrl(post.coverUrl)"
-              :alt="postTitle(post)"
-              class="thumb-media"
-              loading="lazy"
-            />
-            <video
-              v-else-if="hasMediaCover(post) && postKind(post) === 'video'"
-              :src="mediaUrl(post.coverUrl)"
-              class="thumb-media"
-              muted
-              loop
-              playsinline
-              preload="metadata"
-            />
-            <div v-else class="thumb-text">
-              <p>{{ textPreview(post) }}</p>
-            </div>
-            <span v-if="post.featured" class="featured-badge">
-              <Sparkles class="h-3 w-3" />
-              精选
-            </span>
+    <template v-else>
+      <section class="content-masonry">
+        <article v-for="post in posts" :key="post.id" class="post-card group">
+          <div class="card-main">
+            <button type="button" class="card-clickable" @click="openPost(post)">
+              <div class="thumb">
+                <img
+                  v-if="hasMediaCover(post) && postKind(post) === 'image'"
+                  :src="mediaUrl(post.coverUrl)"
+                  :alt="postTitle(post)"
+                  class="thumb-media"
+                  loading="lazy"
+                  decoding="async"
+                />
+                <video
+                  v-else-if="hasMediaCover(post) && postKind(post) === 'video'"
+                  :src="mediaUrl(post.coverUrl)"
+                  class="thumb-media"
+                  muted
+                  loop
+                  playsinline
+                  preload="metadata"
+                  loading="lazy"
+                />
+                <div v-else class="thumb-text">
+                  <p>{{ cardDescription(post) || postTitle(post) }}</p>
+                </div>
+
+                <span v-if="post.featured" class="featured-badge">
+                  <Sparkles class="h-3 w-3" />
+                  精选
+                </span>
+              </div>
+
+              <div class="card-body">
+                <h3 class="card-title">{{ postTitle(post) }}</h3>
+                <p
+                  v-if="cardDescription(post) && cardDescription(post) !== postTitle(post)"
+                  class="card-desc"
+                >
+                  {{ cardDescription(post) }}
+                </p>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              class="same-style-btn"
+              :disabled="sameStyleLoadingId === post.id || !post.toolCode"
+              :title="post.toolCode ? '同款创作' : '未关联工具'"
+              @click="createSameStyle(post, $event)"
+            >
+              <Loader2 v-if="sameStyleLoadingId === post.id" class="h-3.5 w-3.5 animate-spin" />
+              <Wand2 v-else class="h-3.5 w-3.5" />
+              <span class="same-style-label">同款创作</span>
+            </button>
           </div>
 
-          <div class="card-body">
-            <h3>{{ postTitle(post) }}</h3>
-            <div v-if="displayTags(post).length" class="tag-row">
-              <span v-for="tag in displayTags(post)" :key="tag">{{ tag }}</span>
-            </div>
+          <div class="card-footer">
+            <button type="button" class="creator-chip" @click="openAuthorProfile(post, $event)">
+              <UserAvatar :src="authorAvatar(post)" :name="authorName(post)" size="sm" />
+              <span class="creator-name">{{ authorName(post) }}</span>
+            </button>
+
             <div class="stats-row">
-              <span class="stat-item stat-likes" title="点赞">
-                <Heart class="h-3.5 w-3.5" />
+              <button
+                type="button"
+                class="stat-item stat-likes"
+                :class="{ active: post.liked }"
+                :disabled="actingPostId === post.id"
+                title="点赞"
+                @click="toggleLike(post, $event)"
+              >
+                <Heart class="h-3.5 w-3.5" :class="{ 'icon-filled': post.liked }" />
                 {{ post.likeCount }}
-              </span>
-              <span class="stat-item stat-shares" title="分享">
-                <MessageCircle class="h-3.5 w-3.5" />
-                {{ post.shareCount || 0 }}
-              </span>
-              <span class="stat-item stat-favorites" title="收藏">
-                <Star class="h-3.5 w-3.5" />
+              </button>
+              <button
+                type="button"
+                class="stat-item stat-favorites"
+                :class="{ active: post.favorited }"
+                :disabled="actingPostId === post.id"
+                title="收藏"
+                @click="toggleFavorite(post, $event)"
+              >
+                <Star class="h-3.5 w-3.5" :class="{ 'icon-filled': post.favorited }" />
                 {{ post.favoriteCount }}
-              </span>
+              </button>
             </div>
           </div>
-        </button>
+        </article>
+      </section>
 
-        <button
-          type="button"
-          class="same-style-btn"
-          :disabled="sameStyleLoadingId === post.id || !post.toolCode"
-          :title="post.toolCode ? '同款创作' : '未关联工具'"
-          @click="createSameStyle(post, $event)"
-        >
-          <Loader2 v-if="sameStyleLoadingId === post.id" class="h-3.5 w-3.5 animate-spin" />
-          <Wand2 v-else class="h-3.5 w-3.5" />
-          <span class="same-style-label">同款创作</span>
-        </button>
-      </article>
-    </section>
-
-    <button v-if="hasNext && !loading" class="load-more" type="button" :disabled="loadingMore" @click="load(false)">
-      <Loader2 v-if="loadingMore" class="h-4 w-4 animate-spin" />
-      加载更多
-    </button>
+      <div ref="loadSentinelRef" class="load-sentinel" aria-hidden="true" />
+      <div v-if="loadingMore" class="loading-more" aria-live="polite">
+        <Loader2 class="h-4 w-4 animate-spin" />
+        正在加载更多作品
+      </div>
+    </template>
   </div>
 </template>
 
@@ -527,8 +704,7 @@ onMounted(() => {
 .filter-chip,
 .topic-chip,
 .sort-tab,
-.icon-button,
-.load-more {
+.icon-button {
   border: 0;
   border-radius: 999px;
   background: rgb(255 255 255 / 0.07);
@@ -655,12 +831,6 @@ onMounted(() => {
   font-size: 13px;
 }
 
-.post-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: clamp(16px, 2vw, 24px);
-}
-
 .post-card {
   position: relative;
   overflow: hidden;
@@ -676,6 +846,10 @@ onMounted(() => {
   box-shadow: 0 16px 36px rgb(0 0 0 / 0.28);
 }
 
+.card-main {
+  position: relative;
+}
+
 .card-clickable {
   display: block;
   width: 100%;
@@ -689,42 +863,106 @@ onMounted(() => {
 
 .thumb {
   position: relative;
-  height: 160px;
   overflow: hidden;
   border-radius: 16px 16px 0 0;
   background: rgb(255 255 255 / 0.03);
 }
 
 .thumb-media {
+  display: block;
   width: 100%;
-  height: 100%;
-  object-fit: cover;
+  height: auto;
+  max-width: 100%;
+  vertical-align: top;
 }
 
 .thumb-text {
   display: flex;
-  height: 100%;
+  min-height: 160px;
   align-items: center;
   justify-content: center;
-  padding: 16px;
+  padding: 24px 16px;
   background: linear-gradient(135deg, rgb(124 58 237 / 0.18), rgb(59 130 246 / 0.12));
 }
 
 .thumb-text p {
   margin: 0;
   color: rgb(255 255 255 / 0.82);
-  font-size: 14px;
+  font-size: 13px;
   line-height: 1.6;
   display: -webkit-box;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 4;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+.card-body {
+  padding: 10px 12px 4px;
+}
+
+.card-title {
+  margin: 0;
+  color: rgb(255 255 255 / 0.92);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.card-desc {
+  margin: 6px 0 0;
+  color: rgb(255 255 255 / 0.42);
+  font-size: 12px;
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px 12px;
+}
+
+.creator-chip {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 58%;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: transparent;
+  color: rgb(255 255 255 / 0.68);
+  padding: 0;
+  cursor: pointer;
+  transition: color 0.18s ease;
+}
+
+.creator-chip:hover {
+  color: rgb(255 255 255 / 0.92);
+}
+
+.creator-name {
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .featured-badge {
   position: absolute;
   top: 10px;
   left: 10px;
+  z-index: 1;
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -737,55 +975,50 @@ onMounted(() => {
   font-weight: 700;
 }
 
-.card-body {
-  padding: 16px;
-}
-
-.card-body h3 {
-  margin: 0;
-  font-size: 15px;
-  font-weight: 700;
-  line-height: 1.45;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.tag-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 10px;
-}
-
-.tag-row span {
-  border-radius: 999px;
-  background: rgb(255 255 255 / 0.08);
-  color: rgb(255 255 255 / 0.68);
-  padding: 3px 10px;
-  font-size: 11px;
-}
-
 .stats-row {
   display: flex;
+  flex-shrink: 0;
   align-items: center;
-  gap: 14px;
-  margin-top: 12px;
-  color: rgb(255 255 255 / 0.56);
-  font-size: 12px;
+  gap: 12px;
 }
 
 .stat-item {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  border: 0;
+  background: transparent;
+  color: rgb(255 255 255 / 0.38);
+  padding: 0;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 0.18s ease;
+}
+
+.stat-item:disabled {
+  opacity: 0.7;
+  cursor: wait;
+}
+
+.stat-likes.active {
+  color: #fb7185;
+}
+
+.stat-favorites.active {
+  color: #fbbf24;
+}
+
+.icon-filled {
+  fill: currentColor;
+  stroke: currentColor;
 }
 
 .same-style-btn {
   position: absolute;
-  right: 12px;
-  bottom: 12px;
+  top: 10px;
+  right: 10px;
+  z-index: 2;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -796,8 +1029,9 @@ onMounted(() => {
   padding: 8px 12px;
   font-size: 12px;
   font-weight: 700;
+  box-shadow: 0 8px 20px rgb(0 0 0 / 0.35);
   opacity: 0;
-  transform: translateY(4px);
+  transform: translateY(-4px);
   transition: opacity 0.18s ease, transform 0.18s ease;
   cursor: pointer;
 }
@@ -817,25 +1051,43 @@ onMounted(() => {
   pointer-events: none;
 }
 
-.skeleton-block,
-.skeleton-line {
+.skeleton .thumb {
+  min-height: var(--skeleton-h, 180px);
+}
+
+.skeleton-block {
+  width: 100%;
+  min-height: var(--skeleton-h, 180px);
   background: linear-gradient(90deg, rgb(255 255 255 / 0.04), rgb(255 255 255 / 0.1), rgb(255 255 255 / 0.04));
   background-size: 200% 100%;
   animation: shimmer 1.4s infinite;
 }
 
 .skeleton-line {
-  height: 12px;
+  height: 10px;
   border-radius: 999px;
-  margin-top: 10px;
+  margin-top: 8px;
+  background: linear-gradient(90deg, rgb(255 255 255 / 0.04), rgb(255 255 255 / 0.08), rgb(255 255 255 / 0.04));
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite;
 }
 
 .skeleton-line.wide {
   width: 88%;
+  margin-top: 0;
 }
 
-.skeleton-line.short {
-  width: 42%;
+.skeleton-line:not(.wide) {
+  width: 62%;
+}
+
+.skeleton-footer {
+  min-height: 28px;
+  margin: 4px 12px 12px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgb(255 255 255 / 0.03), rgb(255 255 255 / 0.07), rgb(255 255 255 / 0.03));
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite;
 }
 
 @keyframes shimmer {
@@ -862,11 +1114,19 @@ onMounted(() => {
   color: rgb(254 202 202);
 }
 
-.load-more {
+.load-sentinel {
+  width: 100%;
+  height: 1px;
+}
+
+.loading-more {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
-  margin: 36px auto 0;
+  margin: 8px 0 24px;
+  color: rgb(255 255 255 / 0.52);
+  font-size: 13px;
 }
 
 @media (max-width: 860px) {
@@ -886,16 +1146,6 @@ onMounted(() => {
 }
 
 @media (max-width: 767px) {
-  .thumb {
-    height: 120px;
-  }
-
-  .tag-row,
-  .stat-shares,
-  .stat-favorites {
-    display: none;
-  }
-
   .same-style-label {
     display: none;
   }

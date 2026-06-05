@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from "vue"
 import { RouterLink } from "vue-router"
 import {
   Filter,
+  Globe2,
   LoaderCircle,
   Sparkles,
   Trash2,
@@ -12,7 +13,12 @@ import AssetCard from "@/components/AssetCard.vue"
 import AssetPreviewModal from "@/components/AssetPreviewModal.vue"
 import { confirmDelete } from "@/composables/useConfirmDelete"
 import { deleteTask, fetchTasks } from "@/api/taskApi"
-import { publishCommunityPost, unpublishCommunityPost } from "@/api/communityApi"
+import {
+  publishCommunityPost,
+  resolvePublishedCommunityPostId,
+  unpublishCommunityPost,
+} from "@/api/communityApi"
+import { emitCommunityPostUnpublished } from "@/utils/communitySync"
 import { fetchTools } from "@/api/toolApi"
 import type { TaskDetail, ToolSummary } from "@/api/types"
 import type { AssetPreviewItem, AssetPreviewRecommendation } from "@/types/assetPreview"
@@ -44,6 +50,7 @@ const selectedModality = ref<MaterialModality>("all")
 const selectTool = ref("all")
 const sortType = ref("desc")
 const deletingTaskId = ref<number | null>(null)
+const communityActionTaskId = ref<number | null>(null)
 const previewAsset = ref<AssetPreviewItem | null>(null)
 
 const modalityOptions: Array<{ value: MaterialModality; label: string }> = [
@@ -182,8 +189,15 @@ function openPreviewTask(asset: AssetPreviewItem) {
   window.location.href = `/tasks/${asset.taskId}/result`
 }
 
-async function publishPreviewAsset(asset: AssetPreviewItem) {
-  if (!auth.token || !asset.taskId) return
+function syncPreviewAssetCommunityState(asset: AssetPreviewItem) {
+  if (previewAsset.value?.taskId === asset.taskId) {
+    previewAsset.value = asset
+  }
+}
+
+async function publishMaterialAsset(asset: AssetPreviewItem) {
+  if (!auth.token || !asset.taskId || communityActionTaskId.value) return
+  communityActionTaskId.value = asset.taskId
   try {
     const post = await publishCommunityPost(
       {
@@ -194,23 +208,35 @@ async function publishPreviewAsset(asset: AssetPreviewItem) {
       },
       { token: auth.token },
     )
-    previewAsset.value = { ...asset, communityPostId: post.id, promptVisible: post.promptVisible }
     patchTaskCommunityPost(asset.taskId, post.id)
+    syncPreviewAssetCommunityState({ ...asset, communityPostId: post.id, promptVisible: post.promptVisible })
   } catch (err) {
     const message = err instanceof Error ? err.message : "发布失败"
     window.alert(message)
+  } finally {
+    communityActionTaskId.value = null
   }
 }
 
-async function unpublishPreviewAsset(asset: AssetPreviewItem) {
-  if (!auth.token || !asset.communityPostId) return
+async function unpublishMaterialAsset(asset: AssetPreviewItem) {
+  if (!auth.token || !asset.taskId || communityActionTaskId.value) return
+  communityActionTaskId.value = asset.taskId
   try {
-    await unpublishCommunityPost(asset.communityPostId, { token: auth.token })
-    previewAsset.value = { ...asset, communityPostId: undefined }
-    if (asset.taskId) patchTaskCommunityPost(asset.taskId, null)
+    const postId = await resolvePublishedCommunityPostId(asset.taskId, {
+      token: auth.token,
+      userId: auth.user?.id ?? tasks.value.find((task) => task.taskId === asset.taskId)?.userId,
+      hint: asset.communityPostId,
+    })
+    if (!postId) return
+    await unpublishCommunityPost(postId, { token: auth.token })
+    emitCommunityPostUnpublished({ postId, taskId: asset.taskId })
+    patchTaskCommunityPost(asset.taskId, null)
+    syncPreviewAssetCommunityState({ ...asset, communityPostId: undefined })
   } catch (err) {
     const message = err instanceof Error ? err.message : "撤回失败"
     window.alert(message)
+  } finally {
+    communityActionTaskId.value = null
   }
 }
 
@@ -219,14 +245,28 @@ async function removeMaterial(item: MaterialItem) {
   const name = taskPromptPreview(item.task) || item.task.toolName || item.task.taskNo
   const confirmed = await confirmDelete({
     title: "删除素材",
-    description: `确定删除「${name}」这个素材吗？删除后素材库和任务历史中将不再显示。`,
+    description: `确定删除「${name}」这个素材吗？删除后素材库和任务历史中将不再显示，若已发布到社区也会一并下架。`,
   })
   if (!confirmed) return
   deletingTaskId.value = item.task.taskId
   error.value = ""
   try {
+    const communityPostId = auth.token
+      ? await resolvePublishedCommunityPostId(item.task.taskId, {
+          token: auth.token,
+          userId: auth.user?.id ?? item.task.userId,
+          hint: item.task.communityPostId,
+        })
+      : null
+    if (auth.token && communityPostId) {
+      await unpublishCommunityPost(communityPostId, { token: auth.token })
+      emitCommunityPostUnpublished({ postId: communityPostId, taskId: item.task.taskId })
+    }
     await deleteTask(item.task.taskId, { token: auth.token })
     tasks.value = tasks.value.filter((task) => task.taskId !== item.task.taskId)
+    if (previewAsset.value?.taskId === item.task.taskId) {
+      previewAsset.value = null
+    }
   } catch (err) {
     error.value = err instanceof Error ? err.message : "删除素材失败"
   } finally {
@@ -314,12 +354,13 @@ onMounted(loadMaterials)
         </RouterLink>
       </div>
 
-      <div v-else class="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+      <div v-else class="content-masonry">
         <AssetCard
           v-for="item in materialAssets"
           :key="item.task.taskId"
           :asset="item.asset"
           source="private"
+          masonry
           @open="openAssetPreview(item)"
         >
           <template #media-actions>
@@ -336,13 +377,29 @@ onMounted(loadMaterials)
           </template>
           <template #footer>
             <span class="truncate text-xs text-white/35">{{ item.task.toolCode }}</span>
-            <RouterLink
-              :to="userRoutes.taskResult(String(item.task.taskId))"
-              class="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-primary transition hover:text-white"
-              @click.stop
+            <button
+              v-if="!(item.asset.communityPostId ?? item.task.communityPostId)"
+              type="button"
+              class="inline-flex shrink-0 items-center gap-1 rounded-full border border-primary/35 bg-primary/15 px-2.5 py-1 text-xs font-semibold text-primary transition hover:bg-primary/25 disabled:cursor-not-allowed disabled:opacity-60"
+              :disabled="communityActionTaskId === item.task.taskId || deletingTaskId === item.task.taskId"
+              @click.stop="publishMaterialAsset(item.asset)"
             >
-              查看完整内容
-            </RouterLink>
+              <LoaderCircle v-if="communityActionTaskId === item.task.taskId" class="h-3 w-3 animate-spin" />
+              <template v-else>
+                <Globe2 class="h-3 w-3" />
+                发布
+              </template>
+            </button>
+            <button
+              v-else
+              type="button"
+              class="inline-flex shrink-0 items-center rounded-full border border-white/10 bg-white/[0.06] px-2.5 py-1 text-xs font-semibold text-white/55 transition hover:bg-white/10 hover:text-white/75 disabled:cursor-not-allowed disabled:opacity-60"
+              :disabled="communityActionTaskId === item.task.taskId || deletingTaskId === item.task.taskId"
+              @click.stop="unpublishMaterialAsset(item.asset)"
+            >
+              <LoaderCircle v-if="communityActionTaskId === item.task.taskId" class="h-3 w-3 animate-spin" />
+              <span v-else>撤销</span>
+            </button>
           </template>
         </AssetCard>
       </div>
@@ -353,8 +410,8 @@ onMounted(loadMaterials)
       @close="previewAsset = null"
       @use-tool="useAssetWithTool"
       @open-task="openPreviewTask"
-      @publish="publishPreviewAsset"
-      @unpublish="unpublishPreviewAsset"
+      @publish="publishMaterialAsset"
+      @unpublish="unpublishMaterialAsset"
     />
   </AppShell>
 </template>

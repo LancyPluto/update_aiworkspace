@@ -12,6 +12,10 @@ import ProfileStatsRow from "@/pages/PublicProfile/ProfileStatsRow.vue"
 import ProfileStickyHeader from "@/pages/PublicProfile/ProfileStickyHeader.vue"
 import { useAuthStore } from "@/store/authStore"
 import { applyProfileThemeToElement, resolveProfileThemeId } from "@/utils/profileTheme"
+import {
+  COMMUNITY_POST_UNPUBLISHED_EVENT,
+  type CommunityPostUnpublishedDetail,
+} from "@/utils/communitySync"
 
 const route = useRoute()
 const router = useRouter()
@@ -107,15 +111,27 @@ watch(userId, () => {
   void load(true)
 })
 
+function handleCommunityPostUnpublished(event: Event) {
+  const detail = (event as CustomEvent<CommunityPostUnpublishedDetail>).detail
+  if (!detail?.postId && !detail?.taskId) return
+  posts.value = posts.value.filter((post) => {
+    if (detail.postId && post.id === detail.postId) return false
+    if (detail.taskId && post.taskId === detail.taskId) return false
+    return true
+  })
+}
+
 onMounted(() => {
   applyTheme()
   void load(true)
   window.addEventListener("scroll", onScroll, { passive: true })
+  window.addEventListener(COMMUNITY_POST_UNPUBLISHED_EVENT, handleCommunityPostUnpublished)
   void nextTick(setupHeroObserver)
 })
 
 onUnmounted(() => {
   window.removeEventListener("scroll", onScroll)
+  window.removeEventListener(COMMUNITY_POST_UNPUBLISHED_EVENT, handleCommunityPostUnpublished)
   heroObserver?.disconnect()
 })
 </script>

@@ -1106,11 +1106,11 @@ onUnmounted(() => {
                 <div v-else-if="recentTasks.length === 0" class="rounded-2xl border border-dashed border-white/10 py-10 text-center text-sm text-white/45">
                   暂无任务，选择模型后开始第一条创作。
                 </div>
-                <div v-else class="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+                <div v-else class="content-masonry">
                   <article
                     v-for="item in taskMaterials"
                     :key="item.task.taskId"
-                    class="group w-full overflow-hidden rounded-3xl border border-white/8 bg-[#191919] shadow-[0_18px_42px_rgb(0_0_0_/_0.24)] transition hover:-translate-y-1 hover:border-primary/50"
+                    class="group overflow-hidden rounded-2xl border border-white/8 bg-[#191919] shadow-[0_16px_36px_rgb(0_0_0_/_0.24)] transition hover:-translate-y-0.5 hover:border-primary/50"
                     :class="item.task.status === 'SUCCESS' ? 'cursor-zoom-in' : ''"
                     @click="openAssetPreview(item)"
                   >
@@ -1179,12 +1179,13 @@ onUnmounted(() => {
                         <img
                           :src="primaryBlock(item.blocks)?.images[0]?.url"
                           :alt="item.task.toolName"
-                          class="max-h-[520px] w-full object-cover"
+                          class="block h-auto w-full"
                           loading="lazy"
+                          decoding="async"
                         />
                       </template>
                       <template v-else-if="primaryBlock(item.blocks)?.type === 'video'">
-                        <video :src="primaryBlock(item.blocks)?.url" controls playsinline preload="metadata" class="w-full bg-black" />
+                        <video :src="primaryBlock(item.blocks)?.url" controls playsinline preload="metadata" class="block h-auto w-full bg-black" />
                       </template>
                       <template v-else-if="primaryBlock(item.blocks)?.type === 'audio'">
                         <div class="space-y-5 bg-white/[0.05] p-5 pt-12">
