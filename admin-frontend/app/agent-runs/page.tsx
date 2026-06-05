@@ -105,6 +105,121 @@ function textValue(value: unknown) {
   return typeof value === "string" || typeof value === "number" ? String(value) : ""
 }
 
+function numberValue(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null
+}
+
+function objectList(value: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(value)) return []
+  return value.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && !Array.isArray(item))
+}
+
+function stringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value.map((item) => textValue(item)).filter(Boolean)
+}
+
+function percentValue(value: unknown) {
+  const number = numberValue(value)
+  return number == null ? "" : `${(number * 100).toFixed(0)}%`
+}
+
+function eventLabel(type: string) {
+  const labels: Record<string, string> = {
+    "runtime_settings.applied": "运行参数已应用",
+    "router.started": "路由开始",
+    "router.candidates": "候选工具",
+    "router.selected": "路由选中",
+    "router.fallback": "路由回退",
+    "intent.detected": "意图决策",
+    "followup.detected": "识别为续写",
+    "followup.inherited": "继承上轮参数",
+    "followup.rejected": "拒绝继承参数",
+    "memory.retrieved": "检索长期记忆",
+    "memory.context_frozen": "冻结记忆快照",
+    "memory.curator_started": "记忆整理开始",
+    "memory.consolidated": "记忆已整理",
+    "memory.candidate_created": "生成记忆候选",
+    "memory.saved": "保存长期记忆",
+    "memory.rejected": "拒绝写入记忆",
+    "tool_call.loop_started": "工具调用循环开始",
+    "tool_call.requested": "模型请求工具",
+    "tool_call.executed": "工具调用已执行",
+    "tool_call.rejected": "工具调用被拒绝",
+    "tool_call.loop_completed": "工具调用循环完成",
+    "tool.selected": "选择工具",
+    "tool.arguments_preview": "工具参数预览",
+    "arguments.merged": "参数合并",
+    "tool.started": "工具开始",
+    "tool.task_dispatched": "任务下发",
+    "tool.task_progress": "任务进度",
+    "tool.finished": "工具完成",
+  }
+  return labels[type] || type
+}
+
+function triggerReasonLabel(reason: string) {
+  const labels: Record<string, string> = {
+    turn_interval: "对话轮次达到阈值",
+    char_threshold: "上下文字符数达到阈值",
+    token_threshold: "上下文 token 达到阈值",
+    recent_tool_threshold: "近期成功工具次数达到阈值",
+  }
+  return labels[reason] || reason
+}
+
+function compactJson(value: unknown, limit = 320) {
+  if (value == null || value === "") return ""
+  const text = typeof value === "string" ? value : JSON.stringify(value, null, 2)
+  return text.length > limit ? `${text.slice(0, limit)}...` : text
+}
+
+function readableArgs(payload: Record<string, unknown>) {
+  const raw = payload.arguments || payload.args || payload.argumentsJson || payload.mergedArguments || payload.params
+  if (raw && typeof raw === "object") return raw
+  const preview = textValue(payload.preview || payload.argumentsPreview || payload.eventText)
+  return preview ? { preview } : null
+}
+
+function TraceMeta({ label, value }: { label: string; value?: unknown }) {
+  const text = textValue(value)
+  if (!text) return null
+  return (
+    <span className="rounded bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+      {label}: {text}
+    </span>
+  )
+}
+
+function MemoryItemCards({ items }: { items: Record<string, unknown>[] }) {
+  if (!items.length) return null
+  return (
+    <div className="mt-3 grid gap-2">
+      {items.map((item, index) => (
+        <div key={`${textValue(item.id) || index}`} className="rounded-md border bg-background/60 p-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="outline">#{textValue(item.id) || "-"}</Badge>
+            <Badge variant="secondary">{textValue(item.type || item.memoryType) || "memory"}</Badge>
+            {item.pinned ? <Badge variant="outline">pinned</Badge> : null}
+            {item.confidence != null ? <span className="text-xs text-muted-foreground">confidence {textValue(item.confidence)}</span> : null}
+          </div>
+          <p className="mt-2 font-medium">{textValue(item.title) || "未命名记忆"}</p>
+          {textValue(item.preview || item.content) ? (
+            <p className="mt-1 whitespace-pre-wrap text-xs text-muted-foreground">{textValue(item.preview || item.content)}</p>
+          ) : null}
+          {textValue(item.reason) ? <p className="mt-1 text-xs text-muted-foreground">命中原因：{textValue(item.reason)}</p> : null}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function ArgumentPreview({ value }: { value: unknown }) {
+  const text = compactJson(value)
+  if (!text) return null
+  return <pre className="mt-2 max-h-36 overflow-auto rounded bg-muted p-2 text-xs whitespace-pre-wrap">{text}</pre>
+}
+
 function taskIdFromCall(call: AgentToolCall) {
   if (call.taskId != null) return String(call.taskId)
   const payload = objectPayload(call.resultJson)
@@ -135,6 +250,11 @@ function runDuration(startedAt?: string | null, finishedAt?: string | null) {
   return `${Math.floor(seconds / 60)}m ${seconds % 60}s`
 }
 
+function latestIntentPayload(events: AgentRunEvent[]) {
+  const event = [...events].reverse().find((item) => item.eventType === "intent.detected")
+  return event ? objectPayload(event.eventJson) : {}
+}
+
 function decisionSignalsFromEvent(event: AgentRunEvent): DecisionSignalView[] {
   const payload = objectPayload(event.eventJson)
   const rawSignals = payload.decisionSignals
@@ -151,16 +271,6 @@ function decisionSignalsFromEvent(event: AgentRunEvent): DecisionSignalView[] {
       return { source, verdict, confidence, reason }
     })
     .filter((item): item is DecisionSignalView => item != null)
-}
-
-function decisionSignalGroups(events: AgentRunEvent[]) {
-  return events
-    .map((event) => ({
-      event,
-      payload: objectPayload(event.eventJson),
-      signals: decisionSignalsFromEvent(event),
-    }))
-    .filter((item) => item.signals.length > 0)
 }
 
 function eventTone(event: AgentRunEvent) {
@@ -212,11 +322,27 @@ function DecisionSignals({ signals }: { signals: DecisionSignalView[] }) {
 }
 
 function DecisionSignalPanel({ events }: { events: AgentRunEvent[] }) {
-  const groups = decisionSignalGroups(events)
+  const decisionTypes = new Set([
+    "router.started",
+    "router.candidates",
+    "router.selected",
+    "router.fallback",
+    "intent.detected",
+    "followup.detected",
+    "followup.inherited",
+    "followup.rejected",
+  ])
+  const groups = events
+    .filter((event) => decisionTypes.has(event.eventType) || decisionSignalsFromEvent(event).length > 0)
+    .map((event) => ({
+      event,
+      payload: objectPayload(event.eventJson),
+      signals: decisionSignalsFromEvent(event),
+    }))
   if (!groups.length) {
     return (
       <section className="space-y-2">
-        <h3 className="font-semibold">决策轨迹</h3>
+        <h3 className="font-semibold">决策链路</h3>
         <p className="text-sm text-muted-foreground">暂无决策信号。旧运行可能没有写入 decisionSignals。</p>
       </section>
     )
@@ -224,20 +350,36 @@ function DecisionSignalPanel({ events }: { events: AgentRunEvent[] }) {
 
   return (
     <section className="space-y-2">
-      <h3 className="font-semibold">决策轨迹</h3>
+      <h3 className="font-semibold">决策链路</h3>
       {groups.map(({ event, payload, signals }) => (
         <div key={event.id} className="rounded-lg border p-3 text-sm">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <Badge variant="outline">{event.eventType}</Badge>
-              <span className="font-medium">{textValue(payload.intent) || "unknown"}</span>
+              <Badge variant="outline">{eventLabel(event.eventType)}</Badge>
+              <span className="font-medium">{textValue(payload.intent || event.eventText) || "unknown"}</span>
               {textValue(payload.selectedToolCode) ? (
                 <span className="text-muted-foreground">tool {textValue(payload.selectedToolCode)}</span>
               ) : null}
+              {percentValue(payload.confidence) ? <span className="text-xs text-muted-foreground">confidence {percentValue(payload.confidence)}</span> : null}
             </div>
             <span className="text-xs text-muted-foreground">{formatDateTime(event.createdAt)}</span>
           </div>
           {textValue(payload.reason) ? <p className="mt-2 text-muted-foreground">{textValue(payload.reason)}</p> : null}
+          <div className="mt-2 flex flex-wrap gap-2">
+            <TraceMeta label="source" value={payload.decisionSource || payload.source} />
+            <TraceMeta label="historyTurns" value={payload.historyTurns} />
+            <TraceMeta label="recentTools" value={payload.recentToolCallLimit} />
+            <TraceMeta label="fallback" value={payload.fallbackReason || payload.reasonCode} />
+          </div>
+          {stringList(payload.candidateToolCodes || payload.candidates).length ? (
+            <div className="mt-2 flex flex-wrap gap-2">
+              <span className="text-xs text-muted-foreground">候选工具</span>
+              {stringList(payload.candidateToolCodes || payload.candidates).map((tool) => (
+                <Badge key={tool} variant="secondary">{tool}</Badge>
+              ))}
+            </div>
+          ) : null}
+          {payload.arguments ? <ArgumentPreview value={payload.arguments} /> : null}
           <DecisionSignals signals={signals} />
         </div>
       ))}
@@ -256,18 +398,52 @@ function MemoryTracePanel({ events }: { events: AgentRunEvent[] }) {
       <div className="grid gap-2">
         {memoryEvents.map((event) => {
           const payload = objectPayload(event.eventJson)
+          const items = objectList(payload.items)
+          const triggerReasons = stringList(payload.triggerReasons)
           return (
             <div key={event.id} className="rounded-lg border bg-muted/20 p-3 text-sm">
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge variant="outline">{event.eventType}</Badge>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant={event.eventType === "memory.rejected" ? "destructive" : "outline"}>{eventLabel(event.eventType)}</Badge>
+                  <span className="font-medium">{textValue(payload.title || payload.reason || event.eventText)}</span>
+                </div>
                 <span className="text-muted-foreground">{formatDateTime(event.createdAt)}</span>
               </div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <TraceMeta label="source" value={payload.source} />
+                <TraceMeta label="view" value={payload.view} />
+                <TraceMeta label="mode" value={payload.mode} />
+                <TraceMeta label="stage" value={payload.stage} />
+                <TraceMeta label="action" value={payload.action} />
+                <TraceMeta label="count" value={payload.count || payload.existingCount} />
+                <TraceMeta label="confidence" value={payload.confidence} />
+              </div>
+              {triggerReasons.length ? (
+                <div className="mt-2 grid gap-1 rounded-md border bg-background/60 p-2 text-xs">
+                  <p className="font-medium">触发原因</p>
+                  <div className="flex flex-wrap gap-2">
+                    {triggerReasons.map((reason) => (
+                      <Badge key={reason} variant="secondary">{triggerReasonLabel(reason)}</Badge>
+                    ))}
+                  </div>
+                  <div className="flex flex-wrap gap-2 text-muted-foreground">
+                    <TraceMeta label="turns" value={payload.turnCount} />
+                    <TraceMeta label="chars" value={payload.charCount} />
+                    <TraceMeta label="tokens" value={payload.estimatedInputTokens} />
+                    <TraceMeta label="tools" value={payload.recentToolCount} />
+                  </div>
+                </div>
+              ) : null}
+              <MemoryItemCards items={items} />
+              {textValue(payload.snapshotPreview) ? (
+                <pre className="mt-3 max-h-44 overflow-auto rounded bg-muted p-2 text-xs whitespace-pre-wrap">{textValue(payload.snapshotPreview)}</pre>
+              ) : null}
+              {!items.length && !textValue(payload.snapshotPreview) && !triggerReasons.length ? (
+                <p className="mt-2 text-xs text-muted-foreground">旧运行未记录记忆明细，可展开原始 JSON 查看。</p>
+              ) : null}
               <div className="mt-2 grid gap-1 text-muted-foreground">
-                {payload.action ? <div>动作：{textValue(payload.action)}</div> : null}
-                {payload.memory_id ? <div>记忆 ID：{textValue(payload.memory_id)}</div> : null}
-                {payload.memory_type ? <div>类型：{textValue(payload.memory_type)}</div> : null}
-                {payload.count ? <div>注入数量：{textValue(payload.count)}</div> : null}
-                {payload.title ? <div className="text-foreground">标题：{textValue(payload.title)}</div> : null}
+                {payload.memory_id || payload.memoryId ? <div>记忆 ID：{textValue(payload.memory_id || payload.memoryId)}</div> : null}
+                {payload.memory_type || payload.memoryType ? <div>类型：{textValue(payload.memory_type || payload.memoryType)}</div> : null}
               </div>
             </div>
           )
@@ -278,29 +454,47 @@ function MemoryTracePanel({ events }: { events: AgentRunEvent[] }) {
 }
 
 function ToolCallTracePanel({ events }: { events: AgentRunEvent[] }) {
-  const toolCallEvents = events.filter((event) => event.eventType.startsWith("tool_call."))
+  const toolCallEvents = events.filter(
+    (event) =>
+      event.eventType.startsWith("tool_call.") ||
+      event.eventType.startsWith("tool.") ||
+      event.eventType === "arguments.merged" ||
+      event.eventType.startsWith("followup."),
+  )
   if (!toolCallEvents.length) {
     return null
   }
   return (
     <section className="space-y-2">
-      <h3 className="flex items-center gap-2 font-semibold"><Wrench className="h-4 w-4" />Tool-call loop</h3>
+      <h3 className="flex items-center gap-2 font-semibold"><Wrench className="h-4 w-4" />工具链路</h3>
       <div className="grid gap-2">
         {toolCallEvents.map((event) => {
           const payload = objectPayload(event.eventJson)
+          const args = readableArgs(payload)
           return (
             <div key={event.id} className="rounded-lg border bg-muted/20 p-3 text-sm">
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge variant={event.eventType === "tool_call.rejected" ? "destructive" : "outline"}>{event.eventType}</Badge>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant={event.eventType === "tool_call.rejected" ? "destructive" : "outline"}>{eventLabel(event.eventType)}</Badge>
+                  <span className="font-medium">{textValue(payload.toolCode || payload.name || event.eventText)}</span>
+                </div>
                 <span className="text-muted-foreground">{formatDateTime(event.createdAt)}</span>
               </div>
-              <div className="mt-2 grid gap-1 text-muted-foreground">
+              <div className="mt-2 flex flex-wrap gap-2 text-muted-foreground">
                 {payload.name ? <div>Tool: {textValue(payload.name)}</div> : null}
                 {payload.id ? <div>Call ID: {textValue(payload.id)}</div> : null}
-                {payload.reason ? <div>Reason: {textValue(payload.reason)}</div> : null}
+                {payload.taskId ? <div>Task: #{textValue(payload.taskId)}</div> : null}
+                {payload.status ? <div>Status: {textValue(payload.status)}</div> : null}
                 {payload.executedToolCalls ? <div>Executed: {textValue(payload.executedToolCalls)}</div> : null}
                 {payload.iterations ? <div>Iterations: {textValue(payload.iterations)}</div> : null}
               </div>
+              {textValue(payload.reason) ? <p className="mt-2 text-xs text-muted-foreground">原因：{textValue(payload.reason)}</p> : null}
+              {textValue(payload.progressMessage || payload.taskDescription || payload.errorMessage) ? (
+                <p className="mt-2 whitespace-pre-wrap text-xs text-muted-foreground">
+                  {textValue(payload.progressMessage || payload.taskDescription || payload.errorMessage)}
+                </p>
+              ) : null}
+              <ArgumentPreview value={args} />
             </div>
           )
         })}
@@ -401,6 +595,50 @@ function ToolCallCard({ call }: { call: AgentToolCall }) {
           </div>
         </div>
       ) : null}
+    </div>
+  )
+}
+
+function RunOverview({ detail }: { detail: AdminAgentRunDetail }) {
+  const intentPayload = latestIntentPayload(detail.events)
+  const selectedTool = textValue(intentPayload.selectedToolCode)
+  const intent = textValue(intentPayload.intent || detail.run.intent)
+  const decisionSource = textValue(intentPayload.decisionSource)
+  const confidence = percentValue(intentPayload.confidence)
+  return (
+    <div className="grid gap-3 rounded-lg border p-4 md:grid-cols-4">
+      <div>
+        <p className="text-xs text-muted-foreground">状态</p>
+        <Badge variant={statusVariant(detail.run.status)}>{detail.run.status}</Badge>
+      </div>
+      <div>
+        <p className="text-xs text-muted-foreground">模型</p>
+        <p className="font-medium">{detail.run.modelName || detail.run.modelProviderCode || "-"}</p>
+      </div>
+      <div>
+        <p className="text-xs text-muted-foreground">耗时</p>
+        <p className="font-medium">{runDuration(detail.run.startedAt || detail.run.createdAt, detail.run.finishedAt)}</p>
+      </div>
+      <div>
+        <p className="text-xs text-muted-foreground">算力</p>
+        <p className="font-medium">{detail.run.consumedCredits ?? 0} / {detail.run.estimatedCredits ?? "-"}</p>
+      </div>
+      <div>
+        <p className="text-xs text-muted-foreground">最终意图</p>
+        <p className="font-medium">{intent || "-"}</p>
+      </div>
+      <div>
+        <p className="text-xs text-muted-foreground">选中工具</p>
+        <p className="font-medium">{selectedTool || "-"}</p>
+      </div>
+      <div>
+        <p className="text-xs text-muted-foreground">决策来源</p>
+        <p className="font-medium">{decisionSource || "-"}</p>
+      </div>
+      <div>
+        <p className="text-xs text-muted-foreground">置信度</p>
+        <p className="font-medium">{confidence || "-"}</p>
+      </div>
     </div>
   )
 }
@@ -592,24 +830,7 @@ export function AgentRunsContent() {
           {detailLoading ? <p className="text-sm text-muted-foreground">加载中...</p> : null}
           {detail ? (
             <div className="space-y-5">
-              <div className="grid gap-3 rounded-lg border p-4 md:grid-cols-4">
-                <div>
-                  <p className="text-xs text-muted-foreground">状态</p>
-                  <Badge variant={statusVariant(detail.run.status)}>{detail.run.status}</Badge>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">模型</p>
-                  <p className="font-medium">{detail.run.modelName || detail.run.modelProviderCode || "-"}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">耗时</p>
-                  <p className="font-medium">{runDuration(detail.run.startedAt || detail.run.createdAt, detail.run.finishedAt)}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">算力</p>
-                  <p className="font-medium">{detail.run.consumedCredits ?? 0} / {detail.run.estimatedCredits ?? "-"}</p>
-                </div>
-              </div>
+              <RunOverview detail={detail} />
 
               {detail.run.errorMessage ? (
                 <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">

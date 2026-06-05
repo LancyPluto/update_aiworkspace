@@ -53,6 +53,7 @@ from app.runtime.memory_runtime import (
     build_consolidated_memory_summary,
     format_workspace_memory_context,
     format_workspace_memory_items,
+    memory_context_trace_payload,
     memory_auto_save_enabled,
     memory_tool_loop_enabled,
 )
@@ -447,11 +448,7 @@ class DeepAgentsRuntimeEngine:
             context.runId,
             RunEventCreate(
                 eventType=MEMORY_CONTEXT_FROZEN,
-                eventJson={
-                    "frozen": bool(workspace_memory_context),
-                    "count": len(workspace_memory_context) if workspace_memory_context else 0,
-                    "source": source,
-                },
+                eventJson=memory_context_trace_payload(workspace_memory_context, source=source),
             ),
         )
 
@@ -917,7 +914,14 @@ class DeepAgentsRuntimeEngine:
         )
 
         messages = [ChatMessage(role="system", content=system_prompt)]
-        workspace_memory_context = await self._fetch_workspace_memory_context(context)
+        workspace_memory_items = await self._fetch_workspace_memory_items(context)
+        workspace_memory_context = format_workspace_memory_context(workspace_memory_items)
+        session_context = await self._fetch_session_search_context(context)
+        if session_context:
+            workspace_memory_context = f"{workspace_memory_context}\n\n{session_context}".strip()
+        retrieval_prompt = context.memorySettings.retrievalPrompt if context.memorySettings is not None else None
+        if workspace_memory_context and retrieval_prompt and retrieval_prompt.strip():
+            workspace_memory_context = f"{retrieval_prompt.strip()}\n\n{workspace_memory_context}"
         if workspace_memory_context:
             messages.append(ChatMessage(
                 role="system",
@@ -929,10 +933,11 @@ class DeepAgentsRuntimeEngine:
             context.runId,
             RunEventCreate(
                 eventType=MEMORY_CONTEXT_FROZEN,
-                eventJson={
-                    "frozen": bool(workspace_memory_context),
-                    "count": len(workspace_memory_context) if workspace_memory_context else 0,
-                },
+                eventJson=memory_context_trace_payload(
+                    workspace_memory_context,
+                    source="chat",
+                    items=workspace_memory_items,
+                ),
             ),
         )
 
@@ -1034,10 +1039,11 @@ class DeepAgentsRuntimeEngine:
                 context.runId,
                 RunEventCreate(
                     eventType=MEMORY_CONTEXT_FROZEN,
-                    eventJson={
-                        "frozen": True,
-                        "count": len(workspace_memory_items),
-                    },
+                    eventJson=memory_context_trace_payload(
+                        workspace_memory_context,
+                        source="deep_agents_native",
+                        items=workspace_memory_items,
+                    ),
                 ),
             )
 

@@ -8,6 +8,7 @@ from app.runtime.memory_runtime import (
     AUTO_PROFILE_TITLE,
     WorkspaceMemoryRuntime,
     build_consolidated_memory_summary,
+    memory_trace_items,
     memory_consolidation_trigger,
     parse_consolidation_json,
 )
@@ -162,6 +163,35 @@ def test_parse_consolidation_json_accepts_fenced_json():
     assert "低质量" in parsed["profileContent"]
 
 
+def test_memory_trace_items_are_safe_and_compact():
+    items = [
+        WorkspaceMemoryItem(
+            id=1,
+            title="图片偏好",
+            content="用户偏好 GPT 生图默认 low quality。" * 40,
+            memoryType="preference",
+            score=3,
+            confidence=0.9,
+            pinned=True,
+        ),
+        WorkspaceMemoryItem(
+            id=2,
+            title="大 payload",
+            content='{"resourceUrl": "/generated/images/1.png", "imageUrl": "/generated/images/2.png"}' * 80,
+            memoryType="custom",
+            score=1,
+        ),
+    ]
+
+    trace = memory_trace_items(items)
+
+    assert trace[0]["id"] == 1
+    assert trace[0]["type"] == "preference"
+    assert trace[0]["pinned"] is True
+    assert len(trace[0]["preview"]) <= 240
+    assert trace[1]["preview"] == "[omitted large media payload]"
+
+
 class FakeMemoryBackend:
     def __init__(self):
         self.events = []
@@ -173,7 +203,7 @@ class FakeMemoryBackend:
         self.events.append((run_id, event))
 
     async def retrieve_workspace_memory(self, workspace_id, query, limit, view=None):
-        return []
+        return getattr(self, "memory_items", [])
 
     async def create_workspace_memory(self, **kwargs):
         self.created_memories.append(kwargs)
@@ -269,3 +299,28 @@ async def test_llm_consolidation_invalid_json_falls_back_without_failing():
 
     assert backend.created_memories
     assert any(event.eventType == "memory.rejected" and event.eventText == "llm_invalid_json" for _, event in backend.events)
+
+
+@pytest.mark.asyncio
+async def test_memory_retrieved_event_contains_trace_items():
+    backend = FakeMemoryBackend()
+    backend.memory_items = [
+        WorkspaceMemoryItem(
+            id=31,
+            title="GPT 生图质量",
+            content="用户偏好 GPT 生图默认 low quality。",
+            memoryType="preference",
+            score=4,
+            confidence=0.88,
+        )
+    ]
+    runtime = WorkspaceMemoryRuntime(backend)
+    context = RunContext(runId=44, sessionId=2, userId=3, workspaceId=1, message="生成图片")
+
+    items = await runtime.fetch_items(context)
+
+    assert items
+    event = next(event for _, event in backend.events if event.eventType == "memory.retrieved")
+    assert event.eventJson["items"][0]["id"] == 31
+    assert event.eventJson["items"][0]["title"] == "GPT 生图质量"
+    assert "low quality" in event.eventJson["items"][0]["preview"]

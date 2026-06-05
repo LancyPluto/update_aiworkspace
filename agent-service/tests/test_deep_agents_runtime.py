@@ -6,6 +6,7 @@ import pytest
 from app.config import Settings
 from app.core.event_types import (
     MEMORY_CANDIDATE_CREATED,
+    MEMORY_CONTEXT_FROZEN,
     MESSAGE_COMPLETED,
     MESSAGE_DELTA,
     SUBAGENT_COMPLETED,
@@ -221,6 +222,11 @@ async def test_deep_agents_engine_injects_workspace_memory_into_messages():
     assert "memory:11" in native_memory
     assert "Pricing policy" in native_memory
     assert "Use prepaid credits before invoicing." in native_memory
+    frozen_events = [event for _, event in backend.events if event.eventType == MEMORY_CONTEXT_FROZEN]
+    assert frozen_events[0].eventJson["source"] == "deep_agents_native"
+    assert frozen_events[0].eventJson["items"][0]["id"] == 11
+    assert frozen_events[0].eventJson["items"][0]["title"] == "Pricing policy"
+    assert "Use prepaid credits" in frozen_events[0].eventJson["snapshotPreview"]
 
 
 @pytest.mark.asyncio

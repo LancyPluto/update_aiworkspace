@@ -109,11 +109,14 @@ python -c "import yaml, pathlib; yaml.safe_load(pathlib.Path('docs/api/openapi.y
 
 ## 文档入口
 
-- [docs/Agent参数化与记忆管理落地记录-2026-06-01.md](docs/Agent参数化与记忆管理落地记录-2026-06-01.md)：Agent 后台参数、记忆管理、运行事件和验证记录。
-- [docs/Agent记忆与ToolCall落地记录-2026-05-31.md](docs/Agent记忆与ToolCall落地记录-2026-05-31.md)：Agent 记忆读取/写入与 tool-call loop 落地记录。
-- [docs/agent-tool-health-and-memory-plan.md](docs/agent-tool-health-and-memory-plan.md)：Agent 工具健康与长期记忆规划。
-- [docs/文档上传分支变更记录.md](docs/文档上传分支变更记录.md)：分支变更记录。
-- [docs/api/openapi.yml](docs/api/openapi.yml)：接口契约。
+| 文档 | 说明 |
+| --- | --- |
+| [docs/工作区整理与上传-2026-06-05.md](docs/工作区整理与上传-2026-06-05.md) | 最新分支变更：oFox 参考图、工作台重试、上传范围 |
+| [docs/Agent优化与工作区整理-2026-06-04.md](docs/Agent优化与工作区整理-2026-06-04.md) | Agent 记忆、User Web、后台参数整理 |
+| [docs/优化清单-2026-06-02.md](docs/优化清单-2026-06-02.md) | 分阶段优化勾选清单 |
+| [docs/统一API管理-开发文档.md](docs/统一API管理-开发文档.md) | 统一 API 与协议映射 |
+| [docs/archive/2026-06-cleanup/文档上传分支变更记录.md](docs/archive/2026-06-cleanup/文档上传分支变更记录.md) | 历史分支变更记录 |
+| [docs/api/openapi.yml](docs/api/openapi.yml) | 接口契约 |
 
 ## 开发原则
 

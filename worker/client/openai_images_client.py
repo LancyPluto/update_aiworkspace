@@ -1,12 +1,16 @@
 import json
 import logging
 import math
+import mimetypes
 import socket
 import time
+from io import BytesIO
 from typing import Any
 from urllib.parse import urlparse
 
 import requests
+
+from utils.input_image import InputImageError, decode_reference_image_data_url
 from requests.exceptions import ConnectTimeout, ProxyError, ReadTimeout, RequestException, SSLError, Timeout
 
 
@@ -36,13 +40,15 @@ class OpenAIImagesClient:
         self.extra_auth = self._parse_json(extra_auth_json)
         self.timeout = self._resolve_timeout(timeout_seconds)
         self.endpoint_path = str(endpoint_path or self.extra_auth.get("endpointPath") or "/images/generations")
+        self.edit_endpoint_path = str(self.extra_auth.get("editEndpointPath") or "/images/edits")
         self.ssl_eof_retries = self._resolve_ssl_eof_retries()
         self.last_usage: dict[str, int] = {}
         self.session = requests.Session()
         self.session.trust_env = _as_bool(self.extra_auth.get("trustEnv"), False)
+        # Do not set Content-Type on the session: multipart edits need requests to
+        # inject multipart/form-data; a session-level application/json leaks through.
         self.session.headers.update(
             {
-                "Content-Type": "application/json",
                 "Authorization": f"Bearer {self.api_key}",
                 "Connection": "close",
             }
@@ -62,6 +68,7 @@ class OpenAIImagesClient:
         style: str | None = None,
         output_format: str | None = None,
         response_format: str | None = None,
+        image: str | None = None,
         **_: Any,
     ) -> list[str]:
         if not self.base_url:
@@ -71,6 +78,76 @@ class OpenAIImagesClient:
         if not model:
             raise OpenAIImagesError("openai images modelName is required")
 
+        reference_image = (image or "").strip()
+        if reference_image:
+            form_fields, image_file = self._build_edit_multipart(
+                prompt=prompt,
+                model=model,
+                image_size=image_size,
+                batch_size=batch_size,
+                quality=quality,
+                output_format=output_format,
+                reference_image=reference_image,
+            )
+            endpoint = self.edit_endpoint_path
+            transport = "openai-sdk" if _as_bool(self.extra_auth.get("preferSdkEdit"), False) else "requests-multipart"
+            LOGGER.info(
+                "openai images edit request endpoint=%s model=%s candidates=%s n=%s size=%s quality=%s output_format=%s transport=%s referenceImage=<resolved>",
+                endpoint,
+                form_fields.get("model"),
+                ",".join(self._edit_model_candidates(model or "")),
+                form_fields.get("n"),
+                form_fields.get("size"),
+                form_fields.get("quality"),
+                form_fields.get("output_format"),
+                transport,
+            )
+            response = self._edit_reference_image(
+                endpoint,
+                form_fields,
+                image_file,
+                source_model=model,
+            )
+            payload = {**form_fields, "images": [f"<{transport}>"]}
+        else:
+            payload = self._build_generation_payload(
+                prompt=prompt,
+                model=model,
+                image_size=image_size,
+                batch_size=batch_size,
+                quality=quality,
+                style=style,
+                output_format=output_format,
+                response_format=response_format,
+            )
+            LOGGER.info(
+                "openai images request endpoint=%s model=%s n=%s size=%s quality=%s style=%s output_format=%s response_format=%s",
+                self.endpoint_path,
+                payload.get("model"),
+                payload.get("n"),
+                payload.get("size"),
+                payload.get("quality"),
+                payload.get("style"),
+                payload.get("output_format"),
+                payload.get("response_format"),
+            )
+            response = self._post(self.endpoint_path, payload)
+        urls = self._extract_image_urls(response)
+        self.last_usage = self._resolve_usage(response, payload, len(urls))
+        return urls
+
+    def _build_generation_payload(
+        self,
+        *,
+        prompt: str,
+        model: str,
+        image_size: str,
+        batch_size: int,
+        quality: str | None,
+        style: str | None,
+        output_format: str | None,
+        response_format: str | None,
+    ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "model": model,
             "prompt": prompt,
@@ -89,22 +166,37 @@ class OpenAIImagesClient:
         resolved_response_format = (response_format or self.extra_auth.get("responseFormat") or "").strip()
         if resolved_response_format:
             payload["response_format"] = resolved_response_format
+        return payload
 
-        LOGGER.info(
-            "openai images request endpoint=%s model=%s n=%s size=%s quality=%s style=%s output_format=%s response_format=%s",
-            self.endpoint_path,
-            payload.get("model"),
-            payload.get("n"),
-            payload.get("size"),
-            payload.get("quality"),
-            payload.get("style"),
-            payload.get("output_format"),
-            payload.get("response_format"),
-        )
-        response = self._post(self.endpoint_path, payload)
-        urls = self._extract_image_urls(response)
-        self.last_usage = self._resolve_usage(response, payload, len(urls))
-        return urls
+    def _build_edit_multipart(
+        self,
+        *,
+        prompt: str,
+        model: str,
+        image_size: str,
+        batch_size: int,
+        quality: str | None,
+        output_format: str | None,
+        reference_image: str,
+    ) -> tuple[dict[str, str], tuple[str, bytes, str]]:
+        try:
+            image_bytes, mime = decode_reference_image_data_url(reference_image)
+        except InputImageError as exc:
+            raise OpenAIImagesError(str(exc)) from exc
+        extension = mimetypes.guess_extension(mime) or ".png"
+        filename = f"reference{extension}"
+        resolved_quality = (quality or self.extra_auth.get("quality") or "low").strip()
+        form_fields: dict[str, str] = {
+            "model": self._resolve_edit_model(model),
+            "prompt": prompt,
+            "n": str(max(1, min(10, int(batch_size or 1)))),
+            "size": self._resolve_edit_size(image_size),
+            "quality": resolved_quality,
+        }
+        resolved_output_format = (output_format or self.extra_auth.get("outputFormat") or "").strip()
+        if resolved_output_format:
+            form_fields["output_format"] = resolved_output_format
+        return form_fields, (filename, image_bytes, mime)
 
     def _post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
         url = f"{self.base_url}{_ensure_leading_slash(path)}"
@@ -121,6 +213,346 @@ class OpenAIImagesClient:
                     ) from exc
                 time.sleep(min(2, attempt))
         raise OpenAIImagesError("openai images request failed")
+
+    def _resolve_edit_model(self, model: str) -> str:
+        override = str(self.extra_auth.get("editModel") or "").strip()
+        if override:
+            return override
+        candidates = self._edit_model_candidates(model)
+        return candidates[0]
+
+    def _edit_reference_image(
+        self,
+        endpoint: str,
+        form_fields: dict[str, str],
+        image_file: tuple[str, bytes, str],
+        *,
+        source_model: str,
+    ) -> dict[str, Any]:
+        """Reference edits default to requests (same TLS stack as text-to-image). SDK is opt-in."""
+        if _as_bool(self.extra_auth.get("preferSdkEdit"), False):
+            try:
+                return self._edit_via_openai_sdk(form_fields, image_file, source_model=source_model)
+            except OpenAIImagesError as exc:
+                if not _should_fallback_to_requests_edit(str(exc)):
+                    raise
+                LOGGER.warning(
+                    "openai images sdk edit failed, falling back to requests multipart: %s",
+                    exc,
+                )
+        return self._post_multipart(endpoint, form_fields, image_file, source_model=source_model)
+
+    def _create_httpx_client(self) -> Any:
+        import httpx
+
+        proxy_url = str(self.extra_auth.get("proxyUrl") or "").strip() or None
+        return httpx.Client(
+            trust_env=self.session.trust_env,
+            timeout=httpx.Timeout(
+                connect=self.timeout[0],
+                read=self.timeout[1],
+                write=self.timeout[1],
+                pool=self.timeout[0],
+            ),
+            proxy=proxy_url,
+        )
+
+    def _edit_via_openai_sdk(
+        self,
+        form_fields: dict[str, str],
+        image_file: tuple[str, bytes, str],
+        *,
+        source_model: str,
+    ) -> dict[str, Any]:
+        try:
+            from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAI
+        except ImportError as exc:
+            raise OpenAIImagesError(
+                "openai SDK is required for reference-image edits; install worker requirements (openai, httpx)"
+            ) from exc
+
+        try:
+            return self._edit_via_openai_sdk_once(
+                form_fields,
+                image_file,
+                source_model=source_model,
+                APIConnectionError=APIConnectionError,
+                APIStatusError=APIStatusError,
+                APITimeoutError=APITimeoutError,
+                OpenAI=OpenAI,
+            )
+        except APIConnectionError as exc:
+            raise OpenAIImagesError(
+                "openai images SSL connection failed before an HTTP response was received. "
+                "Check gateway URL, proxy/VPN, and local TLS interception. "
+                f"detail={exc}"
+            ) from exc
+
+    def _edit_via_openai_sdk_once(
+        self,
+        form_fields: dict[str, str],
+        image_file: tuple[str, bytes, str],
+        *,
+        source_model: str,
+        APIConnectionError: Any,
+        APIStatusError: Any,
+        APITimeoutError: Any,
+        OpenAI: Any,
+    ) -> dict[str, Any]:
+        filename, image_bytes, mime = image_file
+        candidates = self._edit_model_candidates(source_model)
+        last_error: OpenAIImagesError | None = None
+        connection_failed = False
+
+        for index, model_name in enumerate(candidates):
+            attempt_fields = {**form_fields, "model": model_name}
+            edit_kwargs: dict[str, Any] = {
+                "model": model_name,
+                "prompt": attempt_fields["prompt"],
+                "size": attempt_fields.get("size") or "auto",
+                "quality": attempt_fields.get("quality") or "low",
+            }
+            batch_count = int(attempt_fields.get("n") or 1)
+            if batch_count > 1:
+                edit_kwargs["n"] = batch_count
+            output_format = attempt_fields.get("output_format")
+            if output_format:
+                edit_kwargs["output_format"] = output_format
+
+            ssl_attempts = self.ssl_eof_retries + 1
+            for ssl_attempt in range(1, ssl_attempts + 1):
+                http_client = self._create_httpx_client()
+                try:
+                    client = OpenAI(
+                        api_key=self.api_key,
+                        base_url=self.base_url,
+                        http_client=http_client,
+                        max_retries=0,
+                    )
+                    image_io = BytesIO(image_bytes)
+                    edit_kwargs["image"] = (filename, image_io, mime)
+                    LOGGER.info(
+                        "openai images sdk edit model=%s size=%s quality=%s bytes=%s sslAttempt=%s/%s",
+                        model_name,
+                        edit_kwargs.get("size"),
+                        edit_kwargs.get("quality"),
+                        len(image_bytes),
+                        ssl_attempt,
+                        ssl_attempts,
+                    )
+                    result = client.images.edit(**edit_kwargs)
+                    return result.model_dump()
+                except APITimeoutError as exc:
+                    raise OpenAIImagesTimeoutError(f"openai images edit timed out: {exc}") from exc
+                except APIConnectionError as exc:
+                    connection_failed = True
+                    if _is_ssl_eof_error(exc) and ssl_attempt < ssl_attempts:
+                        LOGGER.warning(
+                            "openai images sdk SSL handshake failed, retrying edit model=%s attempt=%s/%s",
+                            model_name,
+                            ssl_attempt,
+                            ssl_attempts,
+                        )
+                        time.sleep(min(2, ssl_attempt))
+                        continue
+                    last_error = OpenAIImagesError(
+                        "openai images SSL connection failed before an HTTP response was received. "
+                        "Check gateway URL, proxy/VPN, and local TLS interception. "
+                        f"detail={exc}"
+                    )
+                    break
+                except APIStatusError as exc:
+                    body = exc.message or str(exc)
+                    last_error = OpenAIImagesError(
+                        _format_openai_images_http_error(exc.status_code, body, model_name)
+                    )
+                    if _is_missing_model_error(body) and index < len(candidates) - 1:
+                        LOGGER.warning(
+                            "openai images sdk edit rejected model=%s, retrying with model=%s",
+                            model_name,
+                            candidates[index + 1],
+                        )
+                        break
+                    raise last_error from exc
+                finally:
+                    http_client.close()
+
+            if last_error and not _is_missing_model_error(str(last_error)):
+                break
+
+        if connection_failed and not _as_bool(self.extra_auth.get("disableRequestsEditFallback"), False):
+            LOGGER.warning(
+                "openai images sdk connection failed, falling back to requests multipart transport"
+            )
+            return self._post_multipart(
+                self.edit_endpoint_path,
+                form_fields,
+                image_file,
+                source_model=source_model,
+            )
+
+        if last_error:
+            raise last_error
+        raise OpenAIImagesError("openai images edit failed")
+
+    def _resolve_edit_size(self, image_size: str) -> str:
+        override = str(self.extra_auth.get("editSize") or "").strip()
+        if override:
+            return override
+        if "ofox.ai" in self.base_url.lower():
+            return "auto"
+        return _normalize_size(image_size)
+
+    def _edit_model_candidates(self, model: str) -> list[str]:
+        override = str(self.extra_auth.get("editModel") or "").strip()
+        if override:
+            return [override]
+
+        normalized = (model or "").strip()
+        if not normalized:
+            return []
+
+        candidates = [normalized]
+        if "/" in normalized:
+            short_name = normalized.rsplit("/", 1)[-1].strip()
+            if short_name and short_name not in candidates:
+                candidates.append(short_name)
+        return candidates
+
+    def _post_multipart(
+        self,
+        path: str,
+        form_fields: dict[str, str],
+        image_file: tuple[str, bytes, str],
+        *,
+        source_model: str,
+    ) -> dict[str, Any]:
+        url = f"{self.base_url}{_ensure_leading_slash(path)}"
+        candidates = self._edit_model_candidates(source_model)
+        last_error: OpenAIImagesError | None = None
+        for index, model_name in enumerate(candidates):
+            attempt_fields = {**form_fields, "model": model_name}
+            try:
+                return self._post_multipart_with_ssl_retries(url, attempt_fields, image_file)
+            except OpenAIImagesError as exc:
+                last_error = exc
+                if _is_missing_model_error(str(exc)) and index < len(candidates) - 1:
+                    LOGGER.warning(
+                        "openai images edit rejected model=%s, retrying with model=%s",
+                        model_name,
+                        candidates[index + 1],
+                    )
+                    continue
+                raise
+        if last_error:
+            raise last_error
+        raise OpenAIImagesError("openai images request failed")
+
+    def _post_multipart_with_ssl_retries(
+        self,
+        url: str,
+        form_fields: dict[str, str],
+        image_file: tuple[str, bytes, str],
+    ) -> dict[str, Any]:
+        attempts = self.ssl_eof_retries + 1
+        for attempt in range(1, attempts + 1):
+            try:
+                return self._post_multipart_once(url, form_fields, image_file)
+            except SSLError as exc:
+                if not _is_ssl_eof_error(exc) or attempt >= attempts:
+                    raise OpenAIImagesError(
+                        "openai images SSL connection failed before an HTTP response was received. "
+                        "Check the gateway URL, local requests/urllib3 versions, proxy/VPN, and TLS interception. "
+                        f"detail={exc}"
+                    ) from exc
+                time.sleep(min(2, attempt))
+        raise OpenAIImagesError("openai images request failed")
+
+    def _multipart_headers(self) -> dict[str, str]:
+        return {
+            "Authorization": self.session.headers.get("Authorization", ""),
+            "Connection": self.session.headers.get("Connection", "close"),
+        }
+
+    def _post_multipart_once(
+        self,
+        url: str,
+        form_fields: dict[str, str],
+        image_file: tuple[str, bytes, str],
+    ) -> dict[str, Any]:
+        started_at = time.perf_counter()
+        diagnostics = self._connection_diagnostics(url)
+        LOGGER.info(
+            "openai images transport start url=%s timeout=%s transport=multipart diagnostics=%s",
+            _redact_url(url),
+            self.timeout,
+            diagnostics,
+        )
+        filename, image_bytes, mime = image_file
+        multipart_body: list[tuple[str, Any]] = []
+        for key in ("model", "prompt", "n", "size", "quality", "output_format"):
+            value = form_fields.get(key)
+            if value:
+                multipart_body.append((key, (None, value)))
+        multipart_body.append(("image", (filename, image_bytes, mime)))
+        try:
+            response = self.session.post(
+                url,
+                files=multipart_body,
+                headers=self._multipart_headers(),
+                timeout=self.timeout,
+            )
+            LOGGER.info(
+                "openai images transport completed url=%s status=%s elapsed=%.3fs transport=multipart diagnostics=%s",
+                _redact_url(url),
+                response.status_code,
+                time.perf_counter() - started_at,
+                diagnostics,
+            )
+        except Timeout as exc:
+            elapsed = time.perf_counter() - started_at
+            timeout_kind = _timeout_kind(exc)
+            LOGGER.warning(
+                "openai images transport timeout url=%s kind=%s elapsed=%.3fs timeout=%s transport=multipart diagnostics=%s error=%s",
+                _redact_url(url),
+                timeout_kind,
+                elapsed,
+                self.timeout,
+                diagnostics,
+                exc,
+            )
+            raise OpenAIImagesTimeoutError(
+                "openai images request timed out: "
+                f"kind={timeout_kind}; elapsed={elapsed:.3f}s; "
+                f"connectTimeout={self.timeout[0]}s; readTimeout={self.timeout[1]}s; "
+                f"diagnostics={diagnostics}"
+            ) from exc
+        except SSLError:
+            raise
+        except ProxyError as exc:
+            raise OpenAIImagesError(
+                "openai images proxy connection failed. "
+                "The request is using a configured proxy or extraAuthJson trustEnv=true; "
+                "disable trustEnv or configure proxyUrl explicitly. "
+                f"detail={exc}"
+            ) from exc
+        except RequestException as exc:
+            raise OpenAIImagesError(f"openai images request failed: {exc}") from exc
+
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as exc:
+            raise OpenAIImagesError(
+                _format_openai_images_http_error(response.status_code, response.text, form_fields.get("model"))
+            ) from exc
+
+        try:
+            data = response.json()
+        except ValueError as exc:
+            raise OpenAIImagesError("openai images returned non-json response") from exc
+        if not isinstance(data, dict):
+            raise OpenAIImagesError("openai images returned invalid response")
+        return data
 
     def _post_once(self, url: str, payload: dict[str, Any]) -> dict[str, Any]:
         started_at = time.perf_counter()
@@ -288,6 +720,35 @@ class OpenAIImagesClient:
         except json.JSONDecodeError:
             return {}
         return parsed if isinstance(parsed, dict) else {}
+
+
+def _format_openai_images_http_error(status_code: int, body: str, model: str | None) -> str:
+    message = f"openai images request failed: status={status_code}, body={body}"
+    if _is_missing_model_error(body):
+        message += (
+            f"; editModel={model or '-'}. "
+            "Image edits require multipart/form-data with text fields in `data` and the "
+            "reference file in `image`. For oFox use model 'openai/gpt-image-2' and size 'auto' "
+            "(see https://ofox.ai/zh/docs/api/openai/images)."
+        )
+    return message
+
+
+def _is_missing_model_error(message: str) -> bool:
+    lowered = message.lower()
+    return "model parameter" in lowered or (
+        "invalid_request_error" in lowered and "model" in lowered and "provide" in lowered
+    )
+
+
+def _should_fallback_to_requests_edit(message: str) -> bool:
+    lowered = message.lower()
+    return (
+        "ssl connection failed" in lowered
+        or "connection error" in lowered
+        or "eof occurred in violation of protocol" in lowered
+        or _is_missing_model_error(lowered)
+    )
 
 
 def _normalize_size(value: str) -> str:

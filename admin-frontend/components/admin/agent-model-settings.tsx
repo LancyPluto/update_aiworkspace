@@ -235,7 +235,7 @@ function pickMeta(catalog: ModelProviderDescriptor[], code: string): ModelProvid
 }
 
 const vendorFallback: VendorMeta = {
-  label: "妯″瀷 API",
+  label: "模型 API",
   shortName: "API",
   mark: "AI",
   iconAsset: "api",
@@ -769,7 +769,7 @@ export function AgentModelSettings({ refreshKey = 0 }: AgentModelSettingsProps) 
     try {
       setTestResult(await testAgentModelConfig(toPayload(form)))
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "杩炴帴娴嬭瘯澶辫触")
+      setError(err instanceof ApiError ? err.message : "连接测试失败")
     } finally {
       setTesting(false)
     }

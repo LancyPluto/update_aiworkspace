@@ -14,6 +14,7 @@ from config import resolve_kling_api_key, resolve_kling_credentials, resolve_sil
 from handlers.generated_image_persister import GeneratedImagePersistError, GeneratedImagePersister
 from providers import registry as provider_registry
 from providers.registry import ProviderRegistryError
+from utils.input_image import InputImageError, resolve_reference_image_data_url
 
 
 LOGGER = logging.getLogger(__name__)
@@ -103,6 +104,12 @@ class ImageGenerationHandler:
                 image_request["output_format"] = _first_text(params, "outputFormat", "output_format")
                 image_request["response_format"] = _first_text(params, "responseFormat", "response_format")
                 image_request["image_size"] = _resolve_openai_image_size(params)
+                reference_image = _resolve_reference_image_source(params)
+                if reference_image:
+                    image_request["image"] = resolve_reference_image_data_url(
+                        reference_image,
+                        session=client.session if isinstance(client, OpenAIImagesClient) else None,
+                    )
             LOGGER.info(
                 "image generation request built taskId=%s traceId=%s provider=%s protocol=%s model=%s params=%s request=%s",
                 task_id,
@@ -148,6 +155,8 @@ class ImageGenerationHandler:
             return self._mark_failed(task_id, "MODEL_TIMEOUT", str(exc), trace_id)
         except ProviderRegistryError as exc:
             return self._mark_failed(task_id, "MODEL_PROVIDER_UNAVAILABLE", str(exc), trace_id)
+        except InputImageError as exc:
+            return self._mark_failed(task_id, "INVALID_TASK_PARAMS", str(exc), trace_id)
         except (SiliconFlowVideoError, KlingVideoError, OpenAIImagesError) as exc:
             return self._mark_failed(task_id, _model_call_error_code(str(exc)), str(exc), trace_id)
         except GeneratedImagePersistError as exc:
@@ -220,6 +229,28 @@ def _first_text(params: dict[str, Any], *keys: str) -> str:
         value = params.get(key)
         if isinstance(value, str) and value.strip():
             return value.strip()
+    return ""
+
+
+def _resolve_reference_image_source(params: dict[str, Any]) -> str:
+    direct = _first_text(
+        params,
+        "image",
+        "imageUrl",
+        "image_url",
+        "referenceImage",
+        "referenceImageUrl",
+        "reference_image_url",
+        "baseImage",
+        "baseImageUrl",
+    )
+    if direct:
+        return direct
+    attachments = params.get("attachments")
+    if isinstance(attachments, list):
+        for item in attachments:
+            if isinstance(item, str) and item.strip():
+                return item.strip()
     return ""
 
 
@@ -406,7 +437,11 @@ def _sanitize_for_log(value: Any) -> Any:
                 sanitized[key_text] = "***"
                 continue
             if key_text in {"image", "image_tail"} and isinstance(nested, str) and len(nested) > 120:
-                sanitized[key_text] = f"<image-bytes:{len(nested)} chars>"
+                sanitized[key_text] = (
+                    "<reference-image-resolved>"
+                    if nested.startswith("data:image/")
+                    else f"<image-bytes:{len(nested)} chars>"
+                )
                 continue
             sanitized[key_text] = _sanitize_for_log(nested)
         return sanitized
