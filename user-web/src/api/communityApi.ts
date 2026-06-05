@@ -1,4 +1,5 @@
 import { ApiBusinessError, apiRequest } from "./client"
+import { fetchTaskById } from "./taskApi"
 import type { CommunityCollection, CommunityCreator, CommunityPost, CommunityTopic, PageResult, PublicUserProfile } from "./types"
 import {
   collectMissingAuthorUserIds,
@@ -275,6 +276,37 @@ export function unpublishCommunityPost(postId: number | string, options?: { toke
   return apiRequest<void>("DELETE", `/api/v1/community/posts/${encodeURIComponent(String(postId))}`, {
     token: options?.token,
   })
+}
+
+export async function resolvePublishedCommunityPostId(
+  taskId: number,
+  options?: { token?: string | null; userId?: number | null; hint?: number | null },
+): Promise<number | null> {
+  if (options?.hint) return options.hint
+
+  if (options?.token) {
+    try {
+      const detail = await fetchTaskById(taskId, { token: options.token })
+      if (detail.communityPostId) return detail.communityPostId
+    } catch {
+      // Fall back to the user's public portfolio when task detail is unavailable.
+    }
+  }
+
+  if (options?.token && options.userId) {
+    try {
+      const page = await fetchPublicUserPosts(options.userId, {
+        token: options.token,
+        query: { pageNo: 1, pageSize: 200 },
+      })
+      const match = page.list.find((post) => post.taskId === taskId)
+      if (match?.id) return match.id
+    } catch {
+      // ignore
+    }
+  }
+
+  return null
 }
 
 export function likeCommunityPost(postId: number | string, options?: { token?: string | null }) {

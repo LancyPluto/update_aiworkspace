@@ -27,6 +27,10 @@ import {
   unlikeCommunityPost,
 } from "@/api/communityApi"
 import type { CommunityPost, CommunityTopic } from "@/api/types"
+import {
+  COMMUNITY_POST_UNPUBLISHED_EVENT,
+  type CommunityPostUnpublishedDetail,
+} from "@/utils/communitySync"
 import UserAvatar from "@/components/UserAvatar.vue"
 import { userRoutes } from "@/router/userRoutes"
 import { useAuthStore } from "@/store/authStore"
@@ -358,15 +362,32 @@ watch([posts, hasNext, loading, loadingMore], async () => {
   setupLoadObserver()
 })
 
+function handleCommunityPostUnpublished(event: Event) {
+  const detail = (event as CustomEvent<CommunityPostUnpublishedDetail>).detail
+  if (!detail?.postId && !detail?.taskId) return
+  const before = posts.value.length
+  posts.value = posts.value.filter((post) => {
+    if (detail.postId && post.id === detail.postId) return false
+    if (detail.taskId && post.taskId === detail.taskId) return false
+    return true
+  })
+  const removed = before - posts.value.length
+  if (removed > 0) {
+    total.value = Math.max(0, total.value - removed)
+  }
+}
+
 onMounted(() => {
   void loadTopics()
   void load(true)
   if (auth.token) void resolveDefaultCollectionId()
+  window.addEventListener(COMMUNITY_POST_UNPUBLISHED_EVENT, handleCommunityPostUnpublished)
 })
 
 onUnmounted(() => {
   loadObserver?.disconnect()
   loadObserver = null
+  window.removeEventListener(COMMUNITY_POST_UNPUBLISHED_EVENT, handleCommunityPostUnpublished)
 })
 </script>
 
