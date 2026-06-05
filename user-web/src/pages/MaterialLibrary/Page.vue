@@ -314,12 +314,13 @@ onMounted(loadMaterials)
         </RouterLink>
       </div>
 
-      <div v-else class="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+      <div v-else class="content-masonry">
         <AssetCard
           v-for="item in materialAssets"
           :key="item.task.taskId"
           :asset="item.asset"
           source="private"
+          masonry
           @open="openAssetPreview(item)"
         >
           <template #media-actions>

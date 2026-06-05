@@ -1,0 +1,19 @@
+.content-masonry {
+  column-width: 280px;
+  column-gap: clamp(16px, 2vw, 24px);
+}
+
+.content-masonry > :not(.content-masonry-break) {
+  display: inline-block;
+  width: 100%;
+  margin: 0 0 clamp(16px, 2vw, 24px);
+  break-inside: avoid;
+  -webkit-column-break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+@media (max-width: 767px) {
+  .content-masonry {
+    column-width: 160px;
+  }
+}
