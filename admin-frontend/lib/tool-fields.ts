@@ -1,4 +1,9 @@
 import type { ToolField, ToolFieldPayload } from "@/lib/api/types"
+import {
+  buildFieldOptionsJson as buildMetaOptionsJson,
+  parseFieldOptionsJson,
+  type FieldUiMeta,
+} from "@/lib/field-ui-meta"
 
 export type FieldTypeValue =
   | "text"
@@ -31,6 +36,11 @@ export type OptionPresetKey =
   | "duration_video"
   | "avatar_style"
   | "scene_digital_human"
+  | "suno_model"
+  | "suno_vocal_gender"
+  | "suno_persona_model"
+  | "suno_create_mode"
+  | "suno_generation_type"
 
 export const OPTION_PRESETS: Record<
   OptionPresetKey,
@@ -73,6 +83,46 @@ export const OPTION_PRESETS: Record<
     label: "数字人场景",
     options: ["直播间", "产品展示台", "办公室", "纯色演播室"].map((v) => ({ label: v, value: v })),
   },
+  suno_create_mode: {
+    label: "Suno 创作模式",
+    options: [
+      { label: "常规", value: "false" },
+      { label: "高级", value: "true" },
+    ],
+  },
+  suno_generation_type: {
+    label: "Suno 任务类型",
+    options: [
+      { label: "文生音乐", value: "generate" },
+      { label: "上传翻唱", value: "upload_cover" },
+    ],
+  },
+  suno_model: {
+    label: "Suno 模型",
+    options: [
+      { label: "V5.5（推荐）", value: "V5_5" },
+      { label: "V5", value: "V5" },
+      { label: "V4.5+", value: "V4_5PLUS" },
+      { label: "V4.5-all", value: "V4_5ALL" },
+      { label: "V4.5", value: "V4_5" },
+      { label: "V4", value: "V4" },
+    ],
+  },
+  suno_vocal_gender: {
+    label: "Suno 人声性别",
+    options: [
+      { label: "自动", value: "auto" },
+      { label: "男声", value: "m" },
+      { label: "女声", value: "f" },
+    ],
+  },
+  suno_persona_model: {
+    label: "Suno Persona 类型",
+    options: [
+      { label: "风格 Persona", value: "style_persona" },
+      { label: "Voice Persona（V5/V5.5）", value: "voice_persona" },
+    ],
+  },
 }
 
 export type FieldOptionRow = { label: string; value: string; promptPrefix?: string }
@@ -91,6 +141,7 @@ export interface EditableField {
   sortOrder: number
   options: FieldOptionRow[]
   isCore: boolean
+  uiMeta: FieldUiMeta
 }
 
 export function supportsOptions(fieldType: string): boolean {
@@ -98,46 +149,15 @@ export function supportsOptions(fieldType: string): boolean {
 }
 
 export function parseOptionsJson(raw?: string | null): FieldOptionRow[] {
-  if (!raw || !raw.trim()) return []
-  try {
-    const parsed = JSON.parse(raw) as unknown
-    const rows = Array.isArray(parsed)
-      ? parsed
-      : parsed && typeof parsed === "object" && Array.isArray((parsed as { options?: unknown }).options)
-        ? (parsed as { options: unknown[] }).options
-        : []
-    return rows.map((item) => {
-      if (typeof item === "string") return { label: item, value: item }
-      if (item && typeof item === "object") {
-        const row = item as { label?: string; value?: string; promptPrefix?: string }
-        const value = String(row.value ?? row.label ?? "").trim()
-        const label = String(row.label ?? row.value ?? "").trim()
-        return {
-          label: label || value,
-          value: value || label,
-          promptPrefix: row.promptPrefix ? String(row.promptPrefix).trim() : undefined,
-        }
-      }
-      return { label: "", value: "" }
-    }).filter((row) => row.value)
-  } catch {
-    return []
-  }
+  return parseFieldOptionsJson(raw).options
+}
+
+export function parseFieldUiMeta(raw?: string | null): FieldUiMeta {
+  return parseFieldOptionsJson(raw).meta
 }
 
 export function isCoreOptionsJson(raw?: string | null): boolean {
-  if (!raw || !raw.trim()) return false
-  try {
-    const parsed = JSON.parse(raw) as unknown
-    return Boolean(
-      parsed &&
-      typeof parsed === "object" &&
-      !Array.isArray(parsed) &&
-      ((parsed as { core?: unknown }).core === true || (parsed as { isCore?: unknown }).isCore === true),
-    )
-  } catch {
-    return false
-  }
+  return parseFieldOptionsJson(raw).meta.core === true
 }
 
 export function optionsFromToolField(field: ToolField): FieldOptionRow[] {
@@ -173,14 +193,36 @@ export function buildOptionsJson(options: FieldOptionRow[]): string | undefined 
 }
 
 function buildFieldOptionsJson(field: EditableField): string | undefined {
-  const optionsJson = supportsOptions(field.fieldType) ? buildOptionsJson(field.options) : undefined
-  if (!field.isCore) return optionsJson
-  const options = optionsJson ? JSON.parse(optionsJson) as unknown[] : undefined
-  return JSON.stringify(options ? { core: true, options } : { core: true })
+  const meta: FieldUiMeta = {
+    ...field.uiMeta,
+    defaultValue: field.defaultValue.trim()
+      ? field.fieldType === "checkbox"
+        ? field.defaultValue === "true"
+        : field.fieldType === "slider" || field.fieldType === "number"
+          ? Number(field.defaultValue)
+          : field.defaultValue
+      : field.uiMeta.defaultValue,
+  }
+  if (field.fieldType === "slider" && field.uiMeta.slider) {
+    meta.slider = field.uiMeta.slider
+  }
+  return buildMetaOptionsJson(
+    supportsOptions(field.fieldType) ? field.options : [],
+    meta,
+    field.isCore,
+  )
+}
+
+function uiMetaFromToolField(field: ToolField): FieldUiMeta {
+  if (field.options && typeof field.options === "object" && !Array.isArray(field.options)) {
+    return parseFieldOptionsJson(JSON.stringify(field.options)).meta
+  }
+  return parseFieldUiMeta(field.optionsJson)
 }
 
 export function editableFromToolField(field: ToolField, index: number): EditableField {
   const fieldType = (field.fieldType || "text").toLowerCase() as FieldTypeValue
+  const uiMeta = uiMetaFromToolField(field)
   return {
     fieldKey: field.fieldKey,
     fieldName: field.fieldName,
@@ -189,22 +231,19 @@ export function editableFromToolField(field: ToolField, index: number): Editable
     required: field.required !== false,
     executionRequired: field.executionRequired ?? field.required !== false,
     userRequired: field.userRequired ?? field.required !== false,
-    defaultValue: field.defaultValue || "",
+    defaultValue: field.defaultValue || (uiMeta.defaultValue !== undefined ? String(uiMeta.defaultValue) : ""),
     agentFillStrategy: normalizeFillStrategy(field.agentFillStrategy, field.userRequired ?? field.required !== false),
     riskLevel: normalizeRiskLevel(field.riskLevel),
     sortOrder: field.sortOrder ?? index + 1,
     options: supportsOptions(fieldType) ? optionsFromToolField(field) : [],
-    isCore: isCoreOptionsJson(field.optionsJson) || Boolean(
-      field.options &&
-      typeof field.options === "object" &&
-      !Array.isArray(field.options) &&
-      ((field.options as { core?: unknown }).core === true || (field.options as { isCore?: unknown }).isCore === true),
-    ),
+    isCore: uiMeta.core === true || isCoreOptionsJson(field.optionsJson),
+    uiMeta,
   }
 }
 
 export function editableFromPayload(field: Partial<ToolFieldPayload>, index: number): EditableField {
   const fieldType = (field.fieldType || "text").toLowerCase() as FieldTypeValue
+  const uiMeta = parseFieldUiMeta(field.optionsJson)
   return {
     fieldKey: String(field.fieldKey || "").trim(),
     fieldName: String(field.fieldName || "").trim(),
@@ -219,6 +258,7 @@ export function editableFromPayload(field: Partial<ToolFieldPayload>, index: num
     sortOrder: Number(field.sortOrder ?? index + 1),
     options: supportsOptions(fieldType) ? parseOptionsJson(field.optionsJson) : [],
     isCore: isCoreOptionsJson(field.optionsJson),
+    uiMeta,
   }
 }
 
@@ -268,6 +308,7 @@ export function createEmptyField(sortOrder: number): EditableField {
     sortOrder,
     options: [],
     isCore: false,
+    uiMeta: {},
   }
 }
 

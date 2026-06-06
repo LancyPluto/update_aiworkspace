@@ -14,6 +14,11 @@ public record ModelProviderDefinition(
         String upstreamVendor,
         String testStrategy,
         boolean workerReady,
+        boolean adapterInstalled,
+        String adapterKey,
+        String metadataVersion,
+        String authSchemaJson,
+        String modelParamSchemaJson,
         String description
 ) {
 }

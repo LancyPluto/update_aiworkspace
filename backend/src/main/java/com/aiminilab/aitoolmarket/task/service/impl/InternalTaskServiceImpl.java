@@ -1,10 +1,12 @@
 package com.aiminilab.aitoolmarket.task.service.impl;
 
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
+import com.aiminilab.aitoolmarket.agent.dto.ModelExecutionSnapshot;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentModelConfigMapper;
 import com.aiminilab.aitoolmarket.agent.service.AgentModelConfigService;
 import com.aiminilab.aitoolmarket.agent.service.AgentToolDescriptorService;
 import com.aiminilab.aitoolmarket.agent.service.ModelCapabilityService;
+import com.aiminilab.aitoolmarket.agent.service.ModelExecutionSnapshotService;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolMapper;
 import com.aiminilab.aitoolmarket.tool.entity.AiTool;
 import com.aiminilab.aitoolmarket.admin.service.BillingService;
@@ -14,6 +16,7 @@ import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.enums.TaskStatus;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.credit.service.CreditService;
+import com.aiminilab.aitoolmarket.credit.service.TaskCreditEstimateService;
 import com.aiminilab.aitoolmarket.task.dto.ExecutionContextResponse;
 import com.aiminilab.aitoolmarket.task.dto.ExecutionModelConfigResponse;
 import com.aiminilab.aitoolmarket.task.dto.TaskStatusResponse;
@@ -48,9 +51,11 @@ public class InternalTaskServiceImpl implements InternalTaskService {
     private final AgentToolDescriptorService agentToolDescriptorService;
     private final AgentModelConfigService agentModelConfigService;
     private final ModelCapabilityService modelCapabilityService;
+    private final ModelExecutionSnapshotService modelExecutionSnapshotService;
     private final ToolFieldItemMapper toolFieldItemMapper;
     private final ObjectMapper objectMapper;
     private final CreditService creditService;
+    private final TaskCreditEstimateService taskCreditEstimateService;
     private final BillingService billingService;
     private final TaskMetrics taskMetrics;
     private final CommunityService communityService;
@@ -60,8 +65,9 @@ public class InternalTaskServiceImpl implements InternalTaskService {
                                    AgentToolDescriptorService agentToolDescriptorService,
                                    AgentModelConfigService agentModelConfigService,
                                    ModelCapabilityService modelCapabilityService,
+                                   ModelExecutionSnapshotService modelExecutionSnapshotService,
                                    ToolFieldItemMapper toolFieldItemMapper, ObjectMapper objectMapper,
-                                   CreditService creditService, BillingService billingService,
+                                   CreditService creditService, TaskCreditEstimateService taskCreditEstimateService, BillingService billingService,
                                    TaskMetrics taskMetrics, CommunityService communityService) {
         this.taskMapper = taskMapper;
         this.toolMapper = toolMapper;
@@ -69,9 +75,11 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         this.agentToolDescriptorService = agentToolDescriptorService;
         this.agentModelConfigService = agentModelConfigService;
         this.modelCapabilityService = modelCapabilityService;
+        this.modelExecutionSnapshotService = modelExecutionSnapshotService;
         this.toolFieldItemMapper = toolFieldItemMapper;
         this.objectMapper = objectMapper;
         this.creditService = creditService;
+        this.taskCreditEstimateService = taskCreditEstimateService;
         this.billingService = billingService;
         this.taskMetrics = taskMetrics;
         this.communityService = communityService;
@@ -85,6 +93,11 @@ public class InternalTaskServiceImpl implements InternalTaskService {
                 .toList();
         AiTool tool = toolMapper.findById(task.getToolId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在"));
+        ModelExecutionSnapshot snapshot = modelExecutionSnapshotService.parse(task.getModelSnapshotJson());
+        if (snapshot != null) {
+            return ExecutionContextResponse.of(task, parseParams(task.getParamsJson()),
+                    ExecutionModelConfigResponse.from(snapshot), snapshot, fields);
+        }
         AgentModelConfig modelConfig = modelCapabilityService.resolveModelConfigForTool(tool);
         modelCapabilityService.validateExecution(tool, modelConfig);
         List<String> caps = modelCapabilityService.resolveCapabilities(modelConfig);
@@ -130,9 +143,13 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         }
         AiTool billingTool = toolMapper.findById(task.getToolId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在"));
-        AgentModelConfig modelConfig = modelCapabilityService.resolveModelConfigForTool(billingTool);
+        ModelExecutionSnapshot snapshot = modelExecutionSnapshotService.parse(task.getModelSnapshotJson());
+        AgentModelConfig modelConfig = snapshot != null
+                ? snapshot.toModelConfig()
+                : modelCapabilityService.resolveModelConfigForTool(billingTool);
         int actualCredits = calculateActualTaskCredits(request, modelConfig, task.getEstimatedCreditCost());
         int chargedCredits = creditService.settleCompleted(task.getUserId(), CreditSourceType.TASK, taskId, actualCredits);
+        int billingCredits = Math.max(chargedCredits, taskCreditEstimateService.estimateUserFacingTaskCredits(billingTool, modelConfig));
         int estimated = task.getEstimatedCreditCost() == null ? 0 : task.getEstimatedCreditCost();
         if (actualCredits < estimated) {
             creditService.release(task.getUserId(), CreditSourceType.TASK, taskId, estimated - actualCredits);
@@ -144,7 +161,7 @@ public class InternalTaskServiceImpl implements InternalTaskService {
             );
         }
         billingService.recordUsage("TASK", taskId, task.getUserId(), modelConfig,
-                request.promptTokens(), request.completionTokens(), request.billableUnits(), chargedCredits);
+                request.promptTokens(), request.completionTokens(), request.billableUnits(), billingCredits);
         taskMapper.insertResult(taskId, task.getUserId(), request.resourceType(), request.contentText());
         try {
             communityService.autoPublishTask(findTask(taskId), request.resourceType(), request.contentText());

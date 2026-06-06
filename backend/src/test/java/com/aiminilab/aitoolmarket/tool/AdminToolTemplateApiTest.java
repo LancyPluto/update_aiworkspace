@@ -37,7 +37,8 @@ class AdminToolTemplateApiTest {
                         .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data[?(@.templateCode=='image_generation_default')]").exists())
-                .andExpect(jsonPath("$.data[?(@.templateCode=='text_to_speech_default')]").exists());
+                .andExpect(jsonPath("$.data[?(@.templateCode=='text_to_speech_default')]").exists())
+                .andExpect(jsonPath("$.data[?(@.templateCode=='music_generation_default')]").exists());
 
         mockMvc.perform(get("/api/admin/v1/tool-templates/image_generation_default")
                         .header("Authorization", "Bearer " + adminToken))
@@ -51,6 +52,18 @@ class AdminToolTemplateApiTest {
                 .andExpect(jsonPath("$.data.executionHandler").value("TEXT_TO_SPEECH"))
                 .andExpect(jsonPath("$.data.outputModality").value("AUDIO"))
                 .andExpect(jsonPath("$.data.fields[0].fieldKey").value("text"));
+
+        mockMvc.perform(get("/api/admin/v1/tool-templates/music_generation_default")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.toolType").value("MUSIC_GENERATION"))
+                .andExpect(jsonPath("$.data.executionHandler").value("MUSIC_GENERATION"))
+                .andExpect(jsonPath("$.data.outputModality").value("AUDIO"))
+                .andExpect(jsonPath("$.data.fields[?(@.fieldKey=='prompt')]").exists())
+                .andExpect(jsonPath("$.data.fields[?(@.fieldKey=='customMode')]").exists())
+                .andExpect(jsonPath("$.data.fields[?(@.fieldKey=='generationType')]").exists())
+                .andExpect(jsonPath("$.data.fields[?(@.fieldKey=='referenceAudio')]").exists())
+                .andExpect(jsonPath("$.data.fields[?(@.fieldKey=='personaId')]").exists());
 
         Long toolId = createToolWithTemplate(adminToken, "tpl_image_tool", "image_generation_default");
 

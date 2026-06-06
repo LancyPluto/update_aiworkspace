@@ -111,8 +111,12 @@ public class UserUploadController {
             case "video/mp4" -> "mp4";
             case "video/webm" -> "webm";
             case "video/quicktime" -> "mov";
-            case "audio/mpeg" -> "mp3";
+            case "audio/mpeg", "audio/mp3" -> "mp3";
             case "audio/wav", "audio/x-wav" -> "wav";
+            case "audio/mp4", "audio/x-m4a" -> "m4a";
+            case "audio/flac", "audio/x-flac" -> "flac";
+            case "audio/ogg" -> "ogg";
+            case "audio/aac", "audio/x-aac" -> "aac";
             case "application/pdf" -> "pdf";
             default -> "";
         };

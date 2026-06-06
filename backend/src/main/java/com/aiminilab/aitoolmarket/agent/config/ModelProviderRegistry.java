@@ -133,6 +133,11 @@ public class ModelProviderRegistry {
                 stringValue(raw.get("upstreamVendor")),
                 stringValue(raw.get("testStrategy")),
                 booleanValue(raw.get("workerReady"), true),
+                booleanValue(raw.get("adapterInstalled"), true),
+                stringValue(raw.get("adapterKey")),
+                stringValue(raw.get("metadataVersion")).isBlank() ? "manifest" : stringValue(raw.get("metadataVersion")),
+                stringValue(raw.get("authSchemaJson")),
+                stringValue(raw.get("modelParamSchemaJson")),
                 stringValue(raw.get("description"))
         );
     }

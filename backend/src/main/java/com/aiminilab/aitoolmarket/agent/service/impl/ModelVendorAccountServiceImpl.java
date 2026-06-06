@@ -17,6 +17,8 @@ import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -28,6 +30,8 @@ import java.util.Set;
 
 @Service
 public class ModelVendorAccountServiceImpl implements ModelVendorAccountService {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(ModelVendorAccountServiceImpl.class);
 
     private static final Set<String> BALANCE_MODES = Set.of("MANUAL", "REST_API", "NONE", "INFERRED");
     private final ModelVendorAccountMapper vendorAccountMapper;
@@ -167,6 +171,16 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
             latencyMs = result.latencyMs();
             account.setHealthStatus(success ? "OK" : "ERROR");
             account.setBalanceErrorMessage(success ? null : message);
+            if (!success) {
+                LOGGER.warn(
+                        "Vendor account connectivity test failed: accountId={}, vendorCode={}, providerCode={}, modelName={}, stage=agent_service_test, message={}",
+                        account.getId(),
+                        account.getVendorCode(),
+                        providerCode,
+                        provider.defaultModel(),
+                        message
+                );
+            }
         } catch (IllegalStateException exception) {
             success = false;
             message = exception.getMessage() == null || exception.getMessage().isBlank()
@@ -175,6 +189,15 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
             latencyMs = null;
             account.setHealthStatus("ERROR");
             account.setBalanceErrorMessage(message);
+            LOGGER.warn(
+                    "Vendor account connectivity test error: accountId={}, vendorCode={}, providerCode={}, modelName={}, stage=agent_service_test, message={}",
+                    account.getId(),
+                    account.getVendorCode(),
+                    providerCode,
+                    provider.defaultModel(),
+                    message,
+                    exception
+            );
         }
         account.setUpdatedAt(LocalDateTime.now());
         vendorAccountMapper.updateAccount(account);
@@ -206,26 +229,14 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
             );
         }
         long started = System.currentTimeMillis();
-        String baseUrl = account.getBaseUrl() == null || account.getBaseUrl().isBlank()
-                ? provider.defaultBaseUrl()
-                : account.getBaseUrl().trim();
-        String message;
-        boolean success;
-        if (baseUrl == null || baseUrl.isBlank()) {
-            success = true;
-            message = "凭证已保存（该协议无固定 Base URL，未发起网络探测）";
-        } else {
-            VendorEndpointProbeResult probe = probeVendorEndpoint(baseUrl);
-            success = probe.reachable();
-            message = probe.message();
-        }
-        Long latencyMs = success ? Math.max(0L, System.currentTimeMillis() - started) : null;
-        account.setHealthStatus(success ? "OK" : "ERROR");
-        account.setBalanceErrorMessage(success ? null : message);
+        String message = "凭证已保存（accept-only 策略不发起网络探测）";
+        Long latencyMs = Math.max(0L, System.currentTimeMillis() - started);
+        account.setHealthStatus("OK");
+        account.setBalanceErrorMessage(null);
         account.setUpdatedAt(LocalDateTime.now());
         vendorAccountMapper.updateAccount(account);
         return new ModelVendorAccountTestResponse(
-                success,
+                true,
                 message,
                 latencyMs,
                 providerCode,
@@ -378,7 +389,11 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
     }
 
     private String resolveTestProvider(String vendorCode) {
-        return switch (vendorCode) {
+        String normalized = vendorCode == null ? "" : vendorCode.trim().toLowerCase(Locale.ROOT);
+        if (providerRegistry.isSupported(normalized)) {
+            return normalized;
+        }
+        return switch (normalized) {
             case "deepseek" -> "deepseek";
             case "siliconflow" -> "siliconflow_images";
             case "volcengine" -> "volcengine_images";

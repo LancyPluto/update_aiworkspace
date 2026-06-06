@@ -5,6 +5,7 @@ import java.util.Arrays;
 public enum ExecutionHandler {
     TEXT_GENERATION,
     IMAGE_GENERATION,
+    MUSIC_GENERATION,
     TEXT_TO_SPEECH,
     VIDEO_GENERATION,
     DIGITAL_HUMAN;

@@ -51,6 +51,7 @@ const toolTypeLabels: Record<string, string> = {
   IMAGE_UNDERSTANDING: "图片理解",
   SPEECH_TO_TEXT: "语音转文字",
   TEXT_TO_SPEECH: "文字转语音",
+  MUSIC_GENERATION: "音乐生成",
   VIDEO_GENERATION: "视频生成",
   EMBEDDING: "Embedding",
   RERANK: "Rerank",

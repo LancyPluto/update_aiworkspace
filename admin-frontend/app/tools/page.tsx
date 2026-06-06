@@ -35,6 +35,7 @@ import { Textarea } from "@/components/ui/textarea"
 import {
   AlertCircle,
   CheckCircle2,
+  ChevronDown,
   Copy,
   Download,
   FileText,
@@ -56,6 +57,8 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import { ToolUserPreviewCard } from "@/components/admin/tool-user-preview-card"
 import { ToolIntegrationApiSection } from "@/components/admin/tool-integration-api-section"
 import { resolveIntegrationPluginId } from "@/lib/model-capabilities"
 import {
@@ -173,6 +176,7 @@ const toolTypeOptions = [
   { value: "IMAGE_UNDERSTANDING", label: "图片理解", hint: "输入图片，输出识别/分析文本" },
   { value: "SPEECH_TO_TEXT", label: "语音转文字", hint: "输入音频，输出文本" },
   { value: "TEXT_TO_SPEECH", label: "文字转语音", hint: "输入文本，输出音频" },
+  { value: "MUSIC_GENERATION", label: "音乐生成", hint: "输入提示词，输出歌曲/音频" },
   { value: "VIDEO_GENERATION", label: "视频生成", hint: "输入文本/素材，输出视频" },
   { value: "EMBEDDING", label: "Embedding", hint: "向量化，输出结构化 JSON" },
   { value: "RERANK", label: "Rerank", hint: "重排序，输出结构化 JSON" },
@@ -196,6 +200,7 @@ const defaultModalitiesByType: Record<string, { input: string; output: string }>
   IMAGE_UNDERSTANDING: { input: "IMAGE", output: "TEXT" },
   SPEECH_TO_TEXT: { input: "AUDIO", output: "TEXT" },
   TEXT_TO_SPEECH: { input: "TEXT", output: "AUDIO" },
+  MUSIC_GENERATION: { input: "TEXT", output: "AUDIO" },
   VIDEO_GENERATION: { input: "TEXT", output: "VIDEO" },
   EMBEDDING: { input: "TEXT", output: "JSON" },
   RERANK: { input: "TEXT", output: "JSON" },
@@ -213,6 +218,8 @@ function executionCapabilityForTool(
   if (eh) return eh.toUpperCase()
   const code = (toolCode || "").trim()
   if (code === "digital_human_agent") return "DIGITAL_HUMAN"
+  const normalizedType = (toolType || "").trim().toUpperCase()
+  if (normalizedType === "MUSIC_GENERATION") return "MUSIC_GENERATION"
   const input = (inputModality || "").trim().toUpperCase()
   const output = (outputModality || "").trim().toUpperCase()
   if (input === "TEXT" && output === "AUDIO") return "TEXT_TO_SPEECH"
@@ -221,9 +228,9 @@ function executionCapabilityForTool(
   if (input === "IMAGE" && output === "IMAGE") return "IMAGE_TO_IMAGE"
   if (input === "IMAGE" && output === "TEXT") return "IMAGE_UNDERSTANDING"
   if (output === "VIDEO") return "VIDEO_GENERATION"
-  if (output === "JSON" && (toolType || "").trim().toUpperCase() === "EMBEDDING") return "EMBEDDING"
-  if (output === "JSON" && (toolType || "").trim().toUpperCase() === "RERANK") return "RERANK"
-  return (toolType || "TEXT_GENERATION").toUpperCase()
+  if (output === "JSON" && normalizedType === "EMBEDDING") return "EMBEDDING"
+  if (output === "JSON" && normalizedType === "RERANK") return "RERANK"
+  return normalizedType || "TEXT_GENERATION"
 }
 
 const fallbackProviderCapabilities: Record<string, string[]> = {
@@ -244,7 +251,7 @@ const fallbackProviderCapabilities: Record<string, string[]> = {
 function modelConfigSupportsCapability(
   config: AgentModelConfig,
   capability: string,
-  providerCapabilities: Record<string, string[]> = fallbackProviderCapabilities,
+  providerCapabilities?: Record<string, string[]>,
 ): boolean {
   const caps = resolvedModelCapabilities(config, providerCapabilities)
   if (caps.length === 0) return false
@@ -254,7 +261,7 @@ function modelConfigSupportsCapability(
 
 function resolvedModelCapabilities(
   config: AgentModelConfig,
-  providerCapabilities: Record<string, string[]> = fallbackProviderCapabilities,
+  providerCapabilities?: Record<string, string[]>,
 ): string[] {
   if (config.capabilities && config.capabilities.length > 0) {
     return config.capabilities
@@ -262,7 +269,8 @@ function resolvedModelCapabilities(
       .map((capability) => capability.trim().toUpperCase())
   }
   const provider = (config.provider || "").trim().toLowerCase()
-  return (providerCapabilities[provider] || fallbackProviderCapabilities[provider] || [])
+  const catalog = providerCapabilities ?? fallbackProviderCapabilities
+  return (catalog[provider] || [])
     .filter((capability) => capability && capability.trim())
     .map((capability) => capability.trim().toUpperCase())
 }
@@ -280,6 +288,7 @@ const templateCodeByToolType: Record<string, string> = {
   TEXT_GENERATION: "text_generation_default",
   IMAGE_GENERATION: "image_generation_default",
   TEXT_TO_SPEECH: "text_to_speech_default",
+  MUSIC_GENERATION: "music_generation_default",
   VIDEO_GENERATION: "video_generation_default",
   AGENT: "digital_human_default",
 }
@@ -506,7 +515,7 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
   const [toolList, setToolList] = useState<ToolRow[]>([])
   const [categories, setCategories] = useState<ToolCategory[]>([])
   const [modelConfigs, setModelConfigs] = useState<AgentModelConfig[]>([])
-  const [providerCapabilities, setProviderCapabilities] = useState<Record<string, string[]>>(fallbackProviderCapabilities)
+  const [providerCapabilities, setProviderCapabilities] = useState<Record<string, string[]>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -529,6 +538,7 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
   const [fieldEditorMode, setFieldEditorMode] = useState<"visual" | "json">("visual")
   const [editableFields, setEditableFields] = useState<EditableField[]>([])
   const [toolTemplates, setToolTemplates] = useState<ToolTemplateSummary[]>([])
+  const [openVendorGroups, setOpenVendorGroups] = useState<Record<string, boolean>>({})
 
   async function loadAll() {
     setLoading(true)
@@ -537,18 +547,16 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
       const [toolsResp, cats, providers] = await Promise.all([
         fetchAllAdminTools(),
         fetchAdminToolCategories().catch(() => [] as ToolCategory[]),
-        fetchModelProviders().catch(() => [] as ModelProviderDescriptor[]),
+        fetchModelProviders(),
       ])
       setToolList(toolsResp.list.map(mapTool))
       setCategories(cats)
-      if (providers.length > 0) {
-        setProviderCapabilities(
-          providers.reduce<Record<string, string[]>>((acc, provider) => {
-            acc[provider.code.trim().toLowerCase()] = provider.capabilities || []
-            return acc
-          }, { ...fallbackProviderCapabilities }),
-        )
-      }
+      setProviderCapabilities(
+        providers.reduce<Record<string, string[]>>((acc, provider) => {
+          acc[provider.code.trim().toLowerCase()] = provider.capabilities || []
+          return acc
+        }, {}),
+      )
       const configs = await fetchAgentModelConfigs().catch(() => [] as AgentModelConfig[])
       setModelConfigs(configs.filter((config) => config.enabled !== false))
       const templates = await fetchToolTemplates().catch(() => [] as ToolTemplateSummary[])
@@ -1068,7 +1076,7 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
       ? "正在加载工具列表..."
       : mode === "agents"
         ? "管理智能体工具、上线状态和工作流画布。"
-        : "按模型厂商管理大模型工具，不包含智能体工作流。"
+        : "按模型厂商管理大模型工具，卡片预览为用户端实际展示效果。"
 
   return (
     <AdminLayout>
@@ -1615,117 +1623,131 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
             </DialogContent>
           </Dialog>
 
-        <div className="space-y-5">
+        <div className="space-y-4">
           {groupedModelTools.length === 0 ? (
             <div className="rounded-lg border border-dashed border-border bg-card px-6 py-12 text-center text-sm text-muted-foreground">
               {mode === "agents" ? "暂无匹配的智能体工具。" : "暂无匹配的大模型工具。"}
             </div>
-          ) : groupedModelTools.map((group) => (
-            <section key={group.key} className="rounded-lg border border-border bg-card/40 p-4">
-              <div className="mb-4 flex items-center justify-between gap-3">
-                <div className="flex min-w-0 items-center gap-3">
-                  <VendorIconBadge iconAsset={group.iconAsset} label={group.label} />
-                  <div className="min-w-0">
-                    <h2 className="truncate text-base font-semibold text-card-foreground">{group.label}</h2>
-                    <p className="text-xs text-muted-foreground">
-                      {mode === "agents" ? "仅展示智能体工具，工作流画布入口在这里维护。" : "按模型厂商归类展示，不包含智能体工具。"}
-                    </p>
-                  </div>
-                </div>
-                <Badge variant="secondary">{group.tools.length} 个工具</Badge>
-              </div>
-              <div className="space-y-5">
-                {[{ key: "ALL", label: "全部", tools: group.tools }].map((modalityGroup) => (
-                  <div key={`${group.key}-${modalityGroup.key}`} className="space-y-3">
-                    <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 md:grid-cols-3">
-          {modalityGroup.tools.map((tool) => (
-            <div
-              key={tool.id}
-              className={cn(
-                "group relative overflow-hidden rounded-xl border border-border bg-card p-6 transition-all duration-300 hover:border-primary/30 hover:shadow-lg hover:shadow-primary/5",
-                !tool.status && "opacity-60",
-              )}
-            >
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex min-w-0 items-center gap-3">
-                  <div className="min-w-0">
-                    <h3 className="truncate font-semibold text-card-foreground">{tool.name}</h3>
-                    <div className="mt-1 flex flex-wrap gap-1.5">
-                      <Badge variant="secondary" className="text-xs font-normal">{displayCategoryForTool(tool)}</Badge>
+          ) : groupedModelTools.map((group) => {
+            const isOpen = openVendorGroups[group.key] ?? true
+            return (
+              <Collapsible
+                key={group.key}
+                open={isOpen}
+                onOpenChange={(open) => setOpenVendorGroups((prev) => ({ ...prev, [group.key]: open }))}
+                className="overflow-hidden rounded-xl border border-border bg-card"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
+                  <CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-3 text-left">
+                    <ChevronDown className={cn("h-4 w-4 shrink-0 transition-transform", !isOpen && "-rotate-90")} />
+                    <VendorIconBadge iconAsset={group.iconAsset} label={group.label} />
+                    <div className="min-w-0">
+                      <h2 className="truncate text-base font-semibold text-card-foreground">{group.label}</h2>
+                      <p className="text-xs text-muted-foreground">
+                        {mode === "agents"
+                          ? "智能体工具 · 点击展开或收起"
+                          : `${group.tools.length} 个模型 · 卡片预览为用户端实际展示效果`}
+                      </p>
                     </div>
+                  </CollapsibleTrigger>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="secondary">{group.tools.length} 个工具</Badge>
+                    <Badge variant="outline" className="text-xs">
+                      {group.tools.filter((tool) => tool.status).length} 已上线
+                    </Badge>
                   </div>
                 </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  {shouldShowToolCredits(tool) ? (
-                  <span className="inline-flex items-center gap-1 rounded-full border border-primary/20 bg-primary/5 px-2 py-1 text-xs font-medium text-card-foreground">
-                    {tool.credits} 算力
-                  </span>
-                  ) : null}
-                  <EmbeddedOnOffSwitch
-                    checked={tool.status}
-                    disabled={togglingId === tool.rawId}
-                    label={`${tool.name} 上线状态`}
-                    onCheckedChange={() => toggleToolStatus(tool.id)}
-                  />
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="icon" className="h-8 w-8 opacity-0 transition-opacity group-hover:opacity-100">
-                        <MoreHorizontal className="h-4 w-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="bg-card border-border">
-                      <DropdownMenuItem className="gap-2" onClick={() => openEditDialog(tool)}>
-                        <Pencil className="h-4 w-4" /> 编辑
-                      </DropdownMenuItem>
-                      {mode === "agents" ? (
-                        <DropdownMenuItem asChild className="gap-2">
-                          <Link href={`/tools/${tool.rawId}/workflow`}>
-                            <Workflow className="h-4 w-4" /> 工作流画布
-                          </Link>
-                        </DropdownMenuItem>
-                      ) : null}
-                      <DropdownMenuItem className="gap-2" onClick={() => openFieldDialog(tool)}>
-                        <FileText className="h-4 w-4" /> 字段配置
-                      </DropdownMenuItem>
-                      <DropdownMenuItem className="gap-2" disabled>
-                        <Copy className="h-4 w-4" /> 复制
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        className="gap-2 text-destructive"
-                        disabled={deletingId === tool.rawId}
-                        onClick={() => handleDeleteTool(tool)}
+                <CollapsibleContent className="px-4 py-4">
+                  <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-4">
+                    {group.tools.map((tool) => (
+                      <div
+                        key={tool.id}
+                        className={cn(
+                          "group overflow-hidden rounded-xl border border-border bg-card transition-all duration-300 hover:border-primary/30 hover:shadow-lg hover:shadow-primary/5",
+                          !tool.status && "opacity-70",
+                        )}
                       >
-                        <Trash2 className="h-4 w-4" /> {deletingId === tool.rawId ? "删除中..." : "删除"}
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-              </div>
-
-              <p className="mt-3 line-clamp-2 text-sm text-muted-foreground">{tool.description}</p>
-
-              {mode === "agents" ? (
-                <Button asChild variant="outline" size="sm" className="mt-4 w-full gap-2">
-                  <Link href={`/tools/${tool.rawId}/workflow`}>
-                    <Workflow className="h-4 w-4" />
-                    编辑工作流
-                  </Link>
-                </Button>
-              ) : null}
-
-              {tool.welcomeMessage ? (
-                <div className="mt-2 rounded-lg bg-secondary/40 px-3 py-2 text-xs text-muted-foreground">
-                  欢迎语：{tool.welcomeMessage}
-                </div>
-              ) : null}
-            </div>
-          ))}
-                    </div>
+                        <ToolUserPreviewCard tool={tool} className="rounded-none border-0 shadow-none" />
+                        <div className="space-y-3 border-t border-border p-3">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-medium">{tool.name}</p>
+                              <div className="mt-1 flex flex-wrap gap-1.5">
+                                <Badge variant="secondary" className="text-[10px] font-normal">
+                                  {displayCategoryForTool(tool)}
+                                </Badge>
+                                {!tool.status ? (
+                                  <Badge variant="outline" className="text-[10px] font-normal text-muted-foreground">
+                                    未上线
+                                  </Badge>
+                                ) : null}
+                              </div>
+                            </div>
+                            <div className="flex shrink-0 items-center gap-1.5">
+                              {shouldShowToolCredits(tool) ? (
+                                <span className="inline-flex items-center rounded-full border border-primary/20 bg-primary/5 px-2 py-0.5 text-[10px] font-medium">
+                                  {tool.credits} 算力
+                                </span>
+                              ) : null}
+                              <EmbeddedOnOffSwitch
+                                checked={tool.status}
+                                disabled={togglingId === tool.rawId}
+                                label={`${tool.name} 上线状态`}
+                                onCheckedChange={() => toggleToolStatus(tool.id)}
+                              />
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button variant="ghost" size="icon" className="h-8 w-8">
+                                    <MoreHorizontal className="h-4 w-4" />
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end" className="border-border bg-card">
+                                  <DropdownMenuItem className="gap-2" onClick={() => openEditDialog(tool)}>
+                                    <Pencil className="h-4 w-4" /> 编辑
+                                  </DropdownMenuItem>
+                                  {mode === "agents" ? (
+                                    <DropdownMenuItem asChild className="gap-2">
+                                      <Link href={`/tools/${tool.rawId}/workflow`}>
+                                        <Workflow className="h-4 w-4" /> 工作流画布
+                                      </Link>
+                                    </DropdownMenuItem>
+                                  ) : null}
+                                  <DropdownMenuItem className="gap-2" onClick={() => openFieldDialog(tool)}>
+                                    <FileText className="h-4 w-4" /> 字段配置
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem className="gap-2" disabled>
+                                    <Copy className="h-4 w-4" /> 复制
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    className="gap-2 text-destructive"
+                                    disabled={deletingId === tool.rawId}
+                                    onClick={() => handleDeleteTool(tool)}
+                                  >
+                                    <Trash2 className="h-4 w-4" /> {deletingId === tool.rawId ? "删除中..." : "删除"}
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </div>
+                          </div>
+                          {tool.welcomeMessage ? (
+                            <p className="line-clamp-1 text-xs text-muted-foreground">欢迎语：{tool.welcomeMessage}</p>
+                          ) : null}
+                          {mode === "agents" ? (
+                            <Button asChild variant="outline" size="sm" className="w-full gap-2">
+                              <Link href={`/tools/${tool.rawId}/workflow`}>
+                                <Workflow className="h-4 w-4" />
+                                编辑工作流
+                              </Link>
+                            </Button>
+                          ) : null}
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-            </section>
-          ))}
+                </CollapsibleContent>
+              </Collapsible>
+            )
+          })}
         </div>
       </div>
 

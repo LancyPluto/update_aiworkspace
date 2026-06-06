@@ -12,6 +12,7 @@ import java.util.Set;
 public final class FileReadingPolicy {
 
     private static final Set<String> DEFAULT_TYPES = Set.of("pdf", "txt", "png", "jpg", "jpeg");
+    private static final Set<String> AUDIO_TYPES = Set.of("mp3", "wav", "m4a", "flac", "ogg", "aac");
     private static final int DEFAULT_MAX_MB = 20;
 
     private FileReadingPolicy() {
@@ -19,6 +20,10 @@ public final class FileReadingPolicy {
 
     public static Set<String> defaultExtensions() {
         return DEFAULT_TYPES;
+    }
+
+    public static Set<String> audioExtensions() {
+        return AUDIO_TYPES;
     }
 
     public static int defaultMaxMb() {
@@ -52,9 +57,21 @@ public final class FileReadingPolicy {
             if (types.isEmpty()) {
                 types.addAll(DEFAULT_TYPES);
             }
+            if (containsAudioType(types)) {
+                types.addAll(AUDIO_TYPES);
+            }
             return new Policy(types, maxMb);
         }
         return new Policy(DEFAULT_TYPES, DEFAULT_MAX_MB);
+    }
+
+    private static boolean containsAudioType(Set<String> types) {
+        for (String type : types) {
+            if (AUDIO_TYPES.contains(type) || "audio/*".equals(type) || type.startsWith("audio/")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public record Policy(Set<String> supportedExtensions, int maxSizeMb) {

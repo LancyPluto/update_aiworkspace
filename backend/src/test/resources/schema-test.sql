@@ -144,6 +144,7 @@ CREATE TABLE ai_tasks (
   progress TINYINT NOT NULL DEFAULT 0,
   progress_message TEXT,
   params_json JSON NOT NULL,
+  model_snapshot_json TEXT,
   params_hash VARCHAR(128),
   idempotency_key VARCHAR(128),
   estimated_credit_cost INT NOT NULL DEFAULT 0,
@@ -450,6 +451,7 @@ CREATE TABLE community_posts (
   task_id BIGINT NOT NULL UNIQUE,
   modality VARCHAR(32) NOT NULL,
   cover_url VARCHAR(1024),
+  media_url VARCHAR(1024),
   title VARCHAR(160) NOT NULL,
   description VARCHAR(500),
   prompt_visible TINYINT NOT NULL DEFAULT 0,
@@ -671,6 +673,30 @@ CREATE TABLE agent_model_configs (
   agent_enabled TINYINT NOT NULL DEFAULT 1,
   is_default TINYINT NOT NULL DEFAULT 0,
   is_deleted TINYINT NOT NULL DEFAULT 0,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE model_provider_metadata (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  provider_code VARCHAR(64) NOT NULL UNIQUE,
+  label VARCHAR(128) NOT NULL,
+  capabilities_json TEXT NOT NULL,
+  default_base_url VARCHAR(512),
+  default_model VARCHAR(128),
+  billing_default VARCHAR(32) NOT NULL DEFAULT 'TOKEN_PER_M',
+  provider_protocol VARCHAR(64),
+  vendor_kind VARCHAR(64),
+  upstream_vendor VARCHAR(64),
+  test_strategy VARCHAR(32) NOT NULL DEFAULT 'accept_only',
+  worker_ready TINYINT NOT NULL DEFAULT 0,
+  adapter_installed TINYINT NOT NULL DEFAULT 0,
+  adapter_key VARCHAR(64),
+  metadata_version VARCHAR(64) NOT NULL DEFAULT 'db',
+  auth_schema_json TEXT,
+  model_param_schema_json TEXT,
+  description TEXT,
+  enabled TINYINT NOT NULL DEFAULT 1,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

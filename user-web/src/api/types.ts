@@ -176,6 +176,7 @@ export interface CommunityPost {
   taskId: number
   modality: string
   coverUrl?: string | null
+  mediaUrl?: string | null
   title: string
   description?: string | null
   promptVisible: boolean

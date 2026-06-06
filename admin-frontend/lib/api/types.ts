@@ -321,6 +321,11 @@ export interface ModelProviderDescriptor {
   upstreamVendor?: string | null
   testStrategy: string
   workerReady: boolean
+  adapterInstalled?: boolean
+  adapterKey?: string | null
+  metadataVersion?: string | null
+  authSchemaJson?: string | null
+  modelParamSchemaJson?: string | null
   description: string
 }
 
@@ -356,6 +361,9 @@ export interface AgentModelConfig {
   channelIconAsset?: string | null
   /** 该凭证可用于的执行能力（与 executionHandler / toolType 对齐） */
   capabilities?: string[] | null
+  providerMetadataVersion?: string | null
+  pricingPreview?: string | null
+  effectiveCredentialsStatus?: string | null
   createdAt?: string | null
   updatedAt?: string | null
 }

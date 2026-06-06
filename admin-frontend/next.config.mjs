@@ -23,6 +23,11 @@ const nextConfig = {
         destination: `${apiTarget}/api/:path*`,
         basePath: false,
       },
+      {
+        source: '/generated/:path*',
+        destination: `${apiTarget}/generated/:path*`,
+        basePath: false,
+      },
     ]
   },
   async redirects() {

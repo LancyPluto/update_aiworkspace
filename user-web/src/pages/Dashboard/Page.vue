@@ -8,18 +8,23 @@ import {
   Braces,
   ChevronDown,
   Clock,
+  Download,
   FileText,
   Files,
   Image as ImageIcon,
   Loader2,
   MessageSquareText,
+  MoreHorizontal,
   Music,
+  Pause,
+  Play,
   Search,
   Send,
   Sparkles,
   Store,
   Trash2,
   Video,
+  Volume2,
   WandSparkles,
   X,
 } from "lucide-vue-next"
@@ -44,10 +49,11 @@ import { fetchAIToolById, fetchTools } from "@/api/toolApi"
 import type { AITool } from "@/api/aiToolTypes"
 import type { CreditAccount, TaskDetail, TaskStatus, ToolField, ToolSummary } from "@/api/types"
 import type { AssetPreviewItem, AssetPreviewRecommendation } from "@/types/assetPreview"
-import type { ResultBlock } from "@/types/result"
+import type { AudioTrackItem, ResultBlock } from "@/types/result"
 import { userRoutes } from "@/router/userRoutes"
 import { useAuthStore } from "@/store/authStore"
-import { buildTaskResultBlocks } from "@/utils/taskResultBlocks"
+import { buildTaskResultBlocks, formatAudioDuration, resolveAudioTracks } from "@/utils/taskResultBlocks"
+import { isCoreField } from "@/utils/fieldUiMeta"
 import { consumeDashboardPendingAsset } from "@/utils/assetReplay"
 import { cleanToolDisplayText, toolDisplayDescription } from "@/utils/toolDisplayText"
 import { randomUUID } from "@/utils/randomUUID"
@@ -94,8 +100,26 @@ const cancellingTaskIds = ref<Set<number>>(new Set())
 const previewAsset = ref<AssetPreviewItem | null>(null)
 const pendingAssetReplay = ref<AssetPreviewItem | null>(null)
 const attribution = ref<DashboardAttributionContext>(dashboardAttributionFromRoute(route))
+const audioElementRef = ref<HTMLAudioElement | null>(null)
+const activeAudioId = ref("")
+const audioPlaying = ref(false)
+const audioCurrentTime = ref(0)
+const audioDuration = ref(0)
+const audioVolume = ref(0.8)
+const lyricsExpanded = ref(false)
 let lastWorkbenchScrollTop = 0
 let lastWindowScrollTop = 0
+
+type DashboardAudioTrack = AudioTrackItem & {
+  id: string
+  taskId: number
+  taskNo: string
+  task: TaskDetail
+  version: number
+  totalVersions: number
+  blockTitle: string
+  createdAt?: string | null
+}
 
 const modalityLabels: Record<string, string> = {
   IMAGE: "图像",
@@ -201,6 +225,12 @@ const coreField = computed(() => {
   return fields.find((field) => isCoreField(field)) || null
 })
 
+const coreFieldPlaceholder = computed(() => {
+  const field = coreField.value
+  if (!field?.placeholder?.trim()) return `你想创作什么${modalityLabel(selectedModality.value)}内容？`
+  return field.placeholder
+})
+
 const featuredTools = computed(() => {
   const list = currentTools.value.length > 0 ? currentTools.value : tools.value
   return list.slice(0, 6)
@@ -224,6 +254,40 @@ const previewRecommendations = computed<AssetPreviewRecommendation[]>(() =>
 const runningCount = computed(() =>
   tasks.value.filter((task) => ["CREATED", "QUEUED", "PROCESSING", "RETRYING"].includes(task.status)).length,
 )
+const audioTaskMaterials = computed(() =>
+  taskMaterials.value.filter((item) => item.task.status === "SUCCESS" && primaryBlock(item.blocks)?.type === "audio"),
+)
+const audioStatusMaterials = computed(() =>
+  taskMaterials.value.filter((item) => item.task.status !== "SUCCESS" || primaryBlock(item.blocks)?.type !== "audio"),
+)
+const audioWorkbenchVisible = computed(() => selectedModality.value === "AUDIO" && recentTasks.value.length > 0)
+const primaryAudioStatusItem = computed(() => audioStatusMaterials.value.find((item) => isTaskRunning(item.task.status)) || audioStatusMaterials.value[0] || null)
+const audioRows = computed<DashboardAudioTrack[]>(() =>
+  audioTaskMaterials.value.flatMap((item) => {
+    const block = primaryBlock(item.blocks)
+    if (block?.type !== "audio") return []
+    const tracks = resolveAudioTracks(block)
+    return tracks.map((track, index) => ({
+      ...track,
+      id: `${item.task.taskId}:${index}:${track.url}`,
+      taskId: item.task.taskId,
+      taskNo: item.task.taskNo,
+      task: item.task,
+      version: index + 1,
+      totalVersions: tracks.length,
+      blockTitle: block.title,
+      createdAt: item.task.createdAt,
+    }))
+  }),
+)
+const activeAudioTrack = computed(() => {
+  if (!audioRows.value.length) return null
+  return audioRows.value.find((track) => track.id === activeAudioId.value) || audioRows.value[0]
+})
+const activeAudioProgress = computed(() => {
+  const total = normalizedAudioDuration(activeAudioTrack.value)
+  return total > 0 ? Math.min(1, Math.max(0, audioCurrentTime.value / total)) : 0
+})
 
 watch(selectedTool, (tool) => {
   if (tool && selectedToolCode.value !== tool.toolCode) selectedToolCode.value = tool.toolCode
@@ -259,6 +323,36 @@ watch(activePanel, async (panel) => {
   if (panel !== "tasks") return
   await nextTick()
   setupHistoryObserver()
+})
+
+watch(audioRows, (rows) => {
+  if (!rows.length) {
+    activeAudioId.value = ""
+    stopDashboardAudio()
+    return
+  }
+  if (!rows.some((track) => track.id === activeAudioId.value)) activeAudioId.value = rows[0].id
+})
+
+watch(activeAudioTrack, (track, previous) => {
+  if (!track || track.id === previous?.id) return
+  audioCurrentTime.value = 0
+  audioDuration.value = track.duration || 0
+  lyricsExpanded.value = false
+  const audio = audioElementRef.value
+  if (audio) {
+    audio.src = normalizeMediaUrl(track.url)
+    audio.volume = audioVolume.value
+    audio.load()
+    if (audioPlaying.value) void audio.play().catch(() => {
+      audioPlaying.value = false
+    })
+  }
+})
+
+watch(audioVolume, (value) => {
+  const audio = audioElementRef.value
+  if (audio) audio.volume = value
 })
 
 watch(
@@ -731,6 +825,112 @@ function primaryBlock(blocks: ResultBlock[]): ResultBlock | null {
   return blocks.find((block) => block.type === "image" || block.type === "video" || block.type === "audio") || blocks[0] || null
 }
 
+function audioTracksForItem(blocks: ResultBlock[]) {
+  const block = primaryBlock(blocks)
+  return block?.type === "audio" ? resolveAudioTracks(block) : []
+}
+
+function audioTaskTitle(track?: DashboardAudioTrack | null): string {
+  if (!track) return "未选择音频"
+  return track.title || taskPrompt(track.task) || track.blockTitle || track.task.toolName || `版本 ${track.version}`
+}
+
+function audioTaskSubtitle(track?: DashboardAudioTrack | null): string {
+  if (!track) return ""
+  return track.totalVersions > 1
+    ? `${track.task.toolName} · 版本 ${track.version}/${track.totalVersions}`
+    : track.task.toolName
+}
+
+function normalizedAudioDuration(track?: DashboardAudioTrack | null): number {
+  return audioDuration.value || track?.duration || 0
+}
+
+function activeAudioTimeLabel(track?: DashboardAudioTrack | null): string {
+  const total = normalizedAudioDuration(track)
+  return `${formatAudioDuration(audioCurrentTime.value) || "0:00"} / ${formatAudioDuration(total) || "--:--"}`
+}
+
+function waveformBars(track?: DashboardAudioTrack | null, count = 64): number[] {
+  const seed = `${track?.id || "audio"}-${track?.title || ""}`
+  let hash = 0
+  for (let i = 0; i < seed.length; i += 1) hash = (hash * 31 + seed.charCodeAt(i)) >>> 0
+  return Array.from({ length: count }, (_, index) => {
+    hash = (hash * 1664525 + 1013904223) >>> 0
+    const wave = Math.sin(index * 0.42) * 0.22 + Math.sin(index * 0.13 + 1.8) * 0.16
+    const noise = (hash % 100) / 100
+    return Math.max(14, Math.min(100, Math.round((0.28 + noise * 0.52 + wave) * 100)))
+  })
+}
+
+function setActiveAudio(track: DashboardAudioTrack, play = false) {
+  const sameTrack = activeAudioId.value === track.id
+  activeAudioId.value = track.id
+  if (play) {
+    void nextTick(() => toggleDashboardAudio(sameTrack ? undefined : true))
+  }
+}
+
+function toggleDashboardAudio(forcePlay?: boolean) {
+  const track = activeAudioTrack.value
+  const audio = audioElementRef.value
+  if (!track || !audio) return
+  if (audio.src !== normalizeMediaUrl(track.url)) {
+    audio.src = normalizeMediaUrl(track.url)
+    audio.volume = audioVolume.value
+    audio.load()
+  }
+  const shouldPlay = forcePlay ?? !audioPlaying.value
+  if (!shouldPlay) {
+    audio.pause()
+    audioPlaying.value = false
+    return
+  }
+  void audio.play().then(() => {
+    audioPlaying.value = true
+  }).catch(() => {
+    audioPlaying.value = false
+  })
+}
+
+function stopDashboardAudio() {
+  const audio = audioElementRef.value
+  if (audio) audio.pause()
+  audioPlaying.value = false
+  audioCurrentTime.value = 0
+}
+
+function seekDashboardAudio(event: MouseEvent, track = activeAudioTrack.value) {
+  if (!track) return
+  setActiveAudio(track)
+  const target = event.currentTarget as HTMLElement
+  const rect = target.getBoundingClientRect()
+  const ratio = rect.width > 0 ? Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width)) : 0
+  const total = normalizedAudioDuration(track)
+  if (total <= 0) return
+  audioCurrentTime.value = total * ratio
+  const audio = audioElementRef.value
+  if (audio) audio.currentTime = audioCurrentTime.value
+}
+
+function onDashboardAudioLoaded() {
+  const audio = audioElementRef.value
+  if (!audio) return
+  audio.volume = audioVolume.value
+  audioDuration.value = Number.isFinite(audio.duration) ? audio.duration : activeAudioTrack.value?.duration || 0
+}
+
+function onDashboardAudioTimeUpdate() {
+  const audio = audioElementRef.value
+  if (!audio) return
+  audioCurrentTime.value = audio.currentTime || 0
+}
+
+function onDashboardAudioEnded() {
+  audioPlaying.value = false
+  audioCurrentTime.value = normalizedAudioDuration(activeAudioTrack.value)
+}
+
 function assetFromTask(item: { task: TaskDetail; blocks: ResultBlock[]; modality: string }): AssetPreviewItem | null {
   const block = primaryBlock(item.blocks)
   if (!block) return null
@@ -755,7 +955,18 @@ function assetFromTask(item: { task: TaskDetail; blocks: ResultBlock[]; modality
     }
   }
   if (block.type === "video") return { ...base, kind: "video", url: block.url, title: block.title || base.title }
-  if (block.type === "audio") return { ...base, kind: "audio", url: block.url, title: block.title || base.title }
+  if (block.type === "audio") {
+    const tracks = resolveAudioTracks(block)
+    const first = tracks[0]
+    return {
+      ...base,
+      kind: "audio",
+      url: first?.url || block.url,
+      urls: tracks.map((track) => track.url),
+      coverUrl: tracks.find((track) => track.coverUrl)?.coverUrl,
+      title: first?.title || block.title || base.title,
+    }
+  }
   if (block.type === "text" || block.type === "json" || block.type === "report") {
     return { ...base, kind: "text", rawText: block.content, title: block.title || base.title }
   }
@@ -892,25 +1103,6 @@ async function loadSelectedToolDetail(toolCode: string) {
     }
   } finally {
     selectedToolDetailLoading.value = false
-  }
-}
-
-function isCoreField(field: { options?: unknown; optionsJson?: string | null }): boolean {
-  if (field.options && typeof field.options === "object" && !Array.isArray(field.options)) {
-    const options = field.options as { core?: unknown; isCore?: unknown }
-    if (options.core === true || options.isCore === true) return true
-  }
-  if (!field.optionsJson) return false
-  try {
-    const parsed = JSON.parse(field.optionsJson) as unknown
-    return Boolean(
-      parsed &&
-        typeof parsed === "object" &&
-        !Array.isArray(parsed) &&
-        ((parsed as { core?: unknown }).core === true || (parsed as { isCore?: unknown }).isCore === true),
-    )
-  } catch {
-    return false
   }
 }
 
@@ -1106,6 +1298,406 @@ onUnmounted(() => {
                 <div v-else-if="recentTasks.length === 0" class="rounded-2xl border border-dashed border-white/10 py-10 text-center text-sm text-white/45">
                   暂无任务，选择模型后开始第一条创作。
                 </div>
+                <div v-else-if="audioWorkbenchVisible" class="grid gap-4 xl:grid-cols-[minmax(420px,0.9fr)_minmax(0,1.35fr)]">
+                  <audio
+                    ref="audioElementRef"
+                    class="hidden"
+                    preload="metadata"
+                    @loadedmetadata="onDashboardAudioLoaded"
+                    @timeupdate="onDashboardAudioTimeUpdate"
+                    @play="audioPlaying = true"
+                    @pause="audioPlaying = false"
+                    @ended="onDashboardAudioEnded"
+                  />
+                  <div class="overflow-hidden rounded-2xl border border-white/8 bg-[#151515]">
+                    <div class="flex items-center justify-between border-b border-white/8 px-4 py-3">
+                      <div>
+                        <p class="text-sm font-semibold text-white">音乐任务</p>
+                        <p class="text-xs text-white/40">{{ audioStatusMaterials.length }} 个任务处理中 · {{ audioRows.length }} 个版本可试听</p>
+                      </div>
+                      <span class="rounded-full bg-primary/12 px-2.5 py-1 text-xs text-primary">List</span>
+                    </div>
+                    <div class="max-h-[640px] divide-y divide-white/[0.06] overflow-y-auto">
+                      <div
+                        v-for="item in audioStatusMaterials"
+                        :key="`audio-task-${item.task.taskId}`"
+                        class="group px-3 py-3 transition hover:bg-white/[0.045]"
+                      >
+                        <div class="grid grid-cols-[40px_minmax(0,1fr)_auto] items-center gap-3">
+                          <div
+                            class="flex h-10 w-10 items-center justify-center rounded-lg"
+                            :class="canRetryTask(item.task.status) ? 'bg-red-500/12 text-red-200' : 'bg-primary/12 text-primary'"
+                          >
+                            <Loader2 v-if="isTaskRunning(item.task.status)" class="h-4 w-4 animate-spin" />
+                            <X v-else-if="canRetryTask(item.task.status)" class="h-4 w-4" />
+                            <Clock v-else class="h-4 w-4" />
+                          </div>
+                          <div class="min-w-0">
+                            <div class="flex items-center gap-2">
+                              <p class="truncate text-sm font-medium text-white">{{ item.task.toolName }}</p>
+                              <span
+                                class="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium"
+                                :class="canRetryTask(item.task.status) ? 'bg-red-500/15 text-red-100' : 'bg-primary/15 text-primary'"
+                              >
+                                {{ taskStatusLabel(item.task.status) }}
+                              </span>
+                            </div>
+                            <p class="mt-0.5 truncate text-xs text-white/38">
+                              {{ item.task.progressMessage || (canRetryTask(item.task.status) ? "任务生成失败，可以重试。" : "任务正在生成，完成后自动展开版本。") }}
+                            </p>
+                          </div>
+                          <span class="text-xs tabular-nums text-white/40">{{ item.task.progress ?? 0 }}%</span>
+                        </div>
+                        <div class="mt-3 h-1.5 overflow-hidden rounded-full bg-white/10">
+                          <div
+                            class="h-full rounded-full transition-all"
+                            :class="canRetryTask(item.task.status) ? 'bg-red-400' : 'bg-primary'"
+                            :style="{ width: `${Math.max(6, Math.min(item.task.progress ?? (isTaskRunning(item.task.status) ? 12 : 100), 100))}%` }"
+                          />
+                        </div>
+                        <div class="mt-3 flex items-center justify-between gap-2">
+                          <p class="truncate text-xs text-white/30">{{ item.task.taskNo }}</p>
+                          <div class="flex shrink-0 items-center gap-1 opacity-0 transition group-hover:opacity-100">
+                            <button
+                              v-if="canCancelTask(item.task.status)"
+                              type="button"
+                              class="rounded-full bg-white/8 px-2.5 py-1 text-xs font-medium text-white/60 transition hover:bg-white/14 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+                              :disabled="
+                                cancellingTaskIds.has(item.task.taskId) ||
+                                deletingTaskIds.has(item.task.taskId) ||
+                                retryingTaskIds.has(item.task.taskId)
+                              "
+                              @click.stop="cancelQueuedTask(item.task)"
+                            >
+                              {{ cancellingTaskIds.has(item.task.taskId) ? "取消中" : "取消" }}
+                            </button>
+                            <button
+                              v-if="canRetryTask(item.task.status)"
+                              type="button"
+                              class="rounded-full bg-red-500/15 px-2.5 py-1 text-xs font-medium text-red-100 transition hover:bg-red-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+                              :disabled="
+                                retryingTaskIds.has(item.task.taskId) ||
+                                deletingTaskIds.has(item.task.taskId) ||
+                                cancellingTaskIds.has(item.task.taskId)
+                              "
+                              @click.stop="retryTask(item.task)"
+                            >
+                              {{ retryingTaskIds.has(item.task.taskId) ? "重试中" : "重试" }}
+                            </button>
+                            <button
+                              v-else-if="!canCancelTask(item.task.status)"
+                              type="button"
+                              class="rounded-full bg-primary/15 px-2.5 py-1 text-xs font-medium text-primary transition hover:bg-primary hover:text-white"
+                              @click.stop="replayTask(item.task)"
+                            >
+                              再次生成
+                            </button>
+                            <button
+                              v-if="canDeleteTask(item.task.status)"
+                              type="button"
+                              class="inline-flex h-7 w-7 items-center justify-center rounded-full bg-white/8 text-white/45 transition hover:bg-white/14 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+                              :disabled="
+                                deletingTaskIds.has(item.task.taskId) ||
+                                retryingTaskIds.has(item.task.taskId) ||
+                                cancellingTaskIds.has(item.task.taskId)
+                              "
+                              @click.stop="removeTask(item.task)"
+                            >
+                              <Loader2 v-if="deletingTaskIds.has(item.task.taskId)" class="h-3.5 w-3.5 animate-spin" />
+                              <Trash2 v-else class="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                      <button
+                        v-for="track in audioRows"
+                        :key="track.id"
+                        type="button"
+                        class="group grid w-full grid-cols-[auto_40px_minmax(110px,1fr)_minmax(130px,0.85fr)_auto_auto] items-center gap-3 px-3 py-3 text-left transition hover:bg-white/[0.045]"
+                        :class="activeAudioTrack?.id === track.id ? 'bg-primary/[0.08] ring-1 ring-inset ring-primary/25' : ''"
+                        @click="setActiveAudio(track)"
+                      >
+                        <span
+                          class="flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-black/35 text-white transition group-hover:border-primary/40 group-hover:text-primary"
+                          @click.stop="setActiveAudio(track, true)"
+                        >
+                          <Pause v-if="activeAudioTrack?.id === track.id && audioPlaying" class="h-4 w-4" />
+                          <Play v-else class="h-4 w-4 translate-x-px" />
+                        </span>
+                        <span class="relative h-10 w-10 overflow-hidden rounded-lg bg-white/8">
+                          <img
+                            v-if="track.coverUrl"
+                            :src="track.coverUrl"
+                            :alt="audioTaskTitle(track)"
+                            class="h-full w-full object-cover"
+                            loading="lazy"
+                          />
+                          <span v-else class="flex h-full w-full items-center justify-center bg-primary/15 text-primary">
+                            <Music class="h-4 w-4" />
+                          </span>
+                          <span
+                            v-if="activeAudioTrack?.id === track.id && audioPlaying"
+                            class="absolute inset-x-1 bottom-1 flex h-3 items-end justify-center gap-0.5 rounded bg-black/45 px-1"
+                          >
+                            <i v-for="bar in 4" :key="bar" class="audio-viz-bar" />
+                          </span>
+                        </span>
+                        <span class="min-w-0">
+                          <span class="block truncate text-sm font-medium text-white">{{ audioTaskTitle(track) }}</span>
+                          <span class="mt-0.5 block truncate text-xs text-white/38">
+                            {{ track.totalVersions > 1 ? `Version ${track.version}` : "Suno-Music" }} · {{ formatTaskTime(track.createdAt) }}
+                          </span>
+                        </span>
+                        <span
+                          class="audio-wave-hit flex h-8 items-center gap-0.5"
+                          @click.stop="seekDashboardAudio($event, track)"
+                        >
+                          <i
+                            v-for="(bar, index) in waveformBars(track, 28)"
+                            :key="`${track.id}-row-${index}`"
+                            class="audio-wave-bar"
+                            :class="activeAudioTrack?.id === track.id && index / 28 <= activeAudioProgress ? 'is-played' : ''"
+                            :style="{ height: `${bar}%` }"
+                          />
+                        </span>
+                        <span class="whitespace-nowrap text-xs tabular-nums text-white/45">
+                          {{ activeAudioTrack?.id === track.id ? activeAudioTimeLabel(track) : `0:00 / ${formatAudioDuration(track.duration) || "--:--"}` }}
+                        </span>
+                        <span class="flex items-center justify-end gap-1 opacity-0 transition group-hover:opacity-100">
+                          <a
+                            :href="normalizeMediaUrl(track.url)"
+                            :download="track.downloadName || `audio-${track.version}`"
+                            class="inline-flex h-8 w-8 items-center justify-center rounded-full text-white/45 transition hover:bg-white/10 hover:text-white"
+                            title="下载"
+                            @click.stop
+                          >
+                            <Download class="h-4 w-4" />
+                          </a>
+                          <span
+                            class="inline-flex h-8 w-8 items-center justify-center rounded-full text-white/45 transition hover:bg-white/10 hover:text-white"
+                            title="更多"
+                          >
+                            <MoreHorizontal class="h-4 w-4" />
+                          </span>
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <section class="min-h-[640px] overflow-hidden rounded-2xl border border-white/8 bg-[#111]">
+                    <div class="grid min-h-[640px] grid-rows-[auto_1fr_auto]">
+                      <div class="flex items-start justify-between gap-4 border-b border-white/8 p-5">
+                        <div class="min-w-0">
+                          <p class="text-xs font-medium uppercase tracking-[0.18em] text-primary/80">Audio Stage</p>
+                          <h3 class="mt-2 truncate text-2xl font-semibold text-white">
+                            {{ activeAudioTrack ? audioTaskTitle(activeAudioTrack) : (primaryAudioStatusItem?.task.toolName || "音乐生成") }}
+                          </h3>
+                          <p class="mt-1 text-sm text-white/45">
+                            {{ activeAudioTrack ? audioTaskSubtitle(activeAudioTrack) : (primaryAudioStatusItem?.task.progressMessage || "任务正在生成，完成后会自动出现在左侧列表。") }}
+                          </p>
+                        </div>
+                        <div v-if="activeAudioTrack" class="flex shrink-0 gap-2">
+                          <button
+                            type="button"
+                            class="rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm font-medium text-white/70 transition hover:border-primary/40 hover:text-white"
+                            @click="activeAudioTrack && replayTask(activeAudioTrack.task)"
+                          >
+                            Remix
+                          </button>
+                          <button
+                            type="button"
+                            class="rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-white transition hover:brightness-110"
+                            @click="activeAudioTrack && replayTask(activeAudioTrack.task)"
+                          >
+                            Extend
+                          </button>
+                        </div>
+                      </div>
+
+                      <template v-if="activeAudioTrack">
+                      <div class="grid gap-5 p-5 lg:grid-cols-[280px_minmax(0,1fr)]">
+                        <div class="space-y-4">
+                          <div class="relative aspect-square overflow-hidden rounded-2xl bg-white/8">
+                            <img
+                              v-if="activeAudioTrack?.coverUrl"
+                              :src="activeAudioTrack.coverUrl"
+                              :alt="audioTaskTitle(activeAudioTrack)"
+                              class="h-full w-full object-cover"
+                            />
+                            <div v-else class="flex h-full w-full items-center justify-center bg-[radial-gradient(circle_at_30%_20%,rgb(176_92_255_/_0.35),transparent_38%),linear-gradient(145deg,rgb(34_34_42),rgb(8_8_10))]">
+                              <Music class="h-16 w-16 text-primary" />
+                            </div>
+                            <div class="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
+                            <button
+                              type="button"
+                              class="absolute bottom-4 left-4 flex h-14 w-14 items-center justify-center rounded-full bg-white text-black shadow-[0_18px_36px_rgb(0_0_0_/_0.35)] transition hover:scale-105"
+                              @click="toggleDashboardAudio()"
+                            >
+                              <Pause v-if="audioPlaying" class="h-6 w-6" />
+                              <Play v-else class="h-6 w-6 translate-x-0.5" />
+                            </button>
+                          </div>
+                          <div class="grid grid-cols-2 gap-2 text-xs text-white/45">
+                            <div class="rounded-xl bg-white/[0.04] p-3">
+                              <p>生成时间</p>
+                              <p class="mt-1 font-medium text-white/80">{{ formatTaskTime(activeAudioTrack?.createdAt) || "-" }}</p>
+                            </div>
+                            <div class="rounded-xl bg-white/[0.04] p-3">
+                              <p>版本</p>
+                              <p class="mt-1 font-medium text-white/80">{{ activeAudioTrack ? `${activeAudioTrack.version}/${activeAudioTrack.totalVersions}` : "-" }}</p>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div class="flex min-w-0 flex-col gap-5">
+                          <div class="rounded-2xl border border-white/8 bg-black/22 p-5">
+                            <div
+                              class="audio-wave-hit flex h-28 items-center gap-1"
+                              @click="seekDashboardAudio($event)"
+                            >
+                              <i
+                                v-for="(bar, index) in waveformBars(activeAudioTrack, 96)"
+                                :key="`stage-${activeAudioTrack?.id || 'empty'}-${index}`"
+                                class="audio-wave-bar stage"
+                                :class="index / 96 <= activeAudioProgress ? 'is-played' : ''"
+                                :style="{ height: `${bar}%` }"
+                              />
+                            </div>
+                            <div class="mt-3 flex items-center justify-between text-xs tabular-nums text-white/45">
+                              <span>{{ formatAudioDuration(audioCurrentTime) || "0:00" }}</span>
+                              <span>{{ formatAudioDuration(normalizedAudioDuration(activeAudioTrack)) || "--:--" }}</span>
+                            </div>
+                            <div class="mt-4 flex items-center gap-3 border-t border-white/8 pt-4">
+                              <Volume2 class="h-4 w-4 shrink-0 text-white/45" />
+                              <input
+                                v-model.number="audioVolume"
+                                type="range"
+                                min="0"
+                                max="1"
+                                step="0.01"
+                                class="audio-volume-slider"
+                                aria-label="音量"
+                              />
+                              <span class="w-10 text-right text-xs tabular-nums text-white/45">{{ Math.round(audioVolume * 100) }}%</span>
+                            </div>
+                          </div>
+                          <div class="rounded-2xl border border-white/8 bg-white/[0.035] p-5">
+                            <div class="flex items-center justify-between gap-3">
+                              <p class="text-sm font-semibold text-white">歌词面板</p>
+                              <button
+                                type="button"
+                                class="rounded-lg bg-white/[0.06] px-2.5 py-1 text-xs font-medium text-white/55 transition hover:bg-white/10 hover:text-white"
+                                @click="lyricsExpanded = !lyricsExpanded"
+                              >
+                                {{ lyricsExpanded ? "收起" : "展开" }}
+                              </button>
+                            </div>
+                            <p
+                              class="mt-3 whitespace-pre-line text-sm leading-7 text-white/48 transition-all"
+                              :class="lyricsExpanded ? 'max-h-72 overflow-y-auto pr-2' : 'line-clamp-2'"
+                            >
+                                {{ taskPrompt(activeAudioTrack?.task || ({} as TaskDetail)) || "当前任务没有返回歌词文本。" }}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div class="flex flex-wrap items-center justify-between gap-3 border-t border-white/8 p-5">
+                        <div class="text-xs text-white/38">{{ activeAudioTrack?.taskNo }}</div>
+                        <div class="flex gap-2">
+                          <button
+                            type="button"
+                            class="rounded-xl bg-white/[0.06] px-3 py-2 text-sm font-medium text-white/65 transition hover:bg-white/10 hover:text-white"
+                            @click="activeAudioTrack && openAssetPreview({ task: activeAudioTrack.task, blocks: buildTaskResultBlocks(activeAudioTrack.task.result?.contentText || '', activeAudioTrack.task), modality: '音频' })"
+                          >
+                            资产操作
+                          </button>
+                          <RouterLink
+                            v-if="activeAudioTrack"
+                            :to="userRoutes.taskResult(String(activeAudioTrack.taskId))"
+                            class="inline-flex items-center gap-1 rounded-xl bg-white/[0.06] px-3 py-2 text-sm font-medium text-white/65 transition hover:bg-white/10 hover:text-white"
+                          >
+                            完整内容
+                            <ArrowRight class="h-4 w-4" />
+                          </RouterLink>
+                        </div>
+                      </div>
+                      </template>
+                      <div v-else class="flex flex-col justify-center p-8">
+                        <div class="rounded-2xl border border-white/8 bg-black/22 p-6">
+                          <div class="flex items-center gap-4">
+                            <div
+                              class="flex h-14 w-14 items-center justify-center rounded-2xl"
+                              :class="canRetryTask(primaryAudioStatusItem?.task.status) ? 'bg-red-500/12 text-red-200' : 'bg-primary/12 text-primary'"
+                            >
+                              <Loader2 v-if="isTaskRunning(primaryAudioStatusItem?.task.status)" class="h-6 w-6 animate-spin" />
+                              <X v-else-if="canRetryTask(primaryAudioStatusItem?.task.status)" class="h-6 w-6" />
+                              <Clock v-else class="h-6 w-6" />
+                            </div>
+                            <div class="min-w-0 flex-1">
+                              <p class="text-lg font-semibold text-white">{{ primaryAudioStatusItem?.task.toolName || "音乐生成任务" }}</p>
+                              <p class="mt-1 text-sm text-white/45">
+                                {{ primaryAudioStatusItem?.task.progressMessage || (canRetryTask(primaryAudioStatusItem?.task.status) ? "任务生成失败，可以复用参数重试。" : "音乐生成中，完成后会展示版本列表和波形播放器。") }}
+                              </p>
+                            </div>
+                            <span
+                              class="shrink-0 rounded-full px-3 py-1 text-xs font-medium"
+                              :class="canRetryTask(primaryAudioStatusItem?.task.status) ? 'bg-red-500/15 text-red-100' : 'bg-primary/15 text-primary'"
+                            >
+                              {{ taskStatusLabel(primaryAudioStatusItem?.task.status) }}
+                            </span>
+                          </div>
+                          <div class="mt-6 h-2 overflow-hidden rounded-full bg-white/10">
+                            <div
+                              class="h-full rounded-full transition-all"
+                              :class="canRetryTask(primaryAudioStatusItem?.task.status) ? 'bg-red-400' : 'bg-primary'"
+                              :style="{ width: `${Math.max(6, Math.min(primaryAudioStatusItem?.task.progress ?? (isTaskRunning(primaryAudioStatusItem?.task.status) ? 12 : 100), 100))}%` }"
+                            />
+                          </div>
+                          <div class="mt-4 flex flex-wrap items-center justify-between gap-3">
+                            <p class="text-xs text-white/35">{{ primaryAudioStatusItem?.task.taskNo }}</p>
+                            <div v-if="primaryAudioStatusItem" class="flex gap-2">
+                              <button
+                                v-if="canCancelTask(primaryAudioStatusItem.task.status)"
+                                type="button"
+                                class="rounded-xl bg-white/8 px-3 py-2 text-sm font-medium text-white/70 transition hover:bg-white/14 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+                                :disabled="
+                                  cancellingTaskIds.has(primaryAudioStatusItem.task.taskId) ||
+                                  deletingTaskIds.has(primaryAudioStatusItem.task.taskId) ||
+                                  retryingTaskIds.has(primaryAudioStatusItem.task.taskId)
+                                "
+                                @click.stop="cancelQueuedTask(primaryAudioStatusItem.task)"
+                              >
+                                {{ cancellingTaskIds.has(primaryAudioStatusItem.task.taskId) ? "取消中" : "取消任务" }}
+                              </button>
+                              <button
+                                v-if="canRetryTask(primaryAudioStatusItem.task.status)"
+                                type="button"
+                                class="rounded-xl bg-red-500/15 px-3 py-2 text-sm font-medium text-red-100 transition hover:bg-red-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+                                :disabled="
+                                  retryingTaskIds.has(primaryAudioStatusItem.task.taskId) ||
+                                  deletingTaskIds.has(primaryAudioStatusItem.task.taskId) ||
+                                  cancellingTaskIds.has(primaryAudioStatusItem.task.taskId)
+                                "
+                                @click.stop="retryTask(primaryAudioStatusItem.task)"
+                              >
+                                {{ retryingTaskIds.has(primaryAudioStatusItem.task.taskId) ? "重试中" : "重试" }}
+                              </button>
+                              <button
+                                v-else-if="!canCancelTask(primaryAudioStatusItem.task.status)"
+                                type="button"
+                                class="rounded-xl bg-primary/15 px-3 py-2 text-sm font-medium text-primary transition hover:bg-primary hover:text-white"
+                                @click.stop="replayTask(primaryAudioStatusItem.task)"
+                              >
+                                再次生成
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </section>
+                </div>
                 <div v-else class="content-masonry">
                   <article
                     v-for="item in taskMaterials"
@@ -1188,17 +1780,41 @@ onUnmounted(() => {
                         <video :src="primaryBlock(item.blocks)?.url" controls playsinline preload="metadata" class="block h-auto w-full bg-black" />
                       </template>
                       <template v-else-if="primaryBlock(item.blocks)?.type === 'audio'">
-                        <div class="space-y-5 bg-white/[0.05] p-5 pt-12">
-                          <div class="flex items-center gap-3">
-                            <div class="flex h-12 w-12 items-center justify-center rounded-full bg-white/10 text-primary">
-                              <Music class="h-6 w-6" />
+                        <div class="space-y-4 bg-white/[0.05] p-4 pt-12">
+                          <div
+                            v-for="(track, trackIndex) in audioTracksForItem(item.blocks)"
+                            :key="`${track.url}-${trackIndex}`"
+                            class="overflow-hidden rounded-2xl border border-white/8 bg-black/20"
+                          >
+                            <div class="relative aspect-[16/10] overflow-hidden">
+                              <img
+                                v-if="track.coverUrl"
+                                :src="track.coverUrl"
+                                :alt="track.title || item.task.toolName"
+                                class="h-full w-full object-cover"
+                                loading="lazy"
+                              />
+                              <div
+                                v-else
+                                class="flex h-full w-full items-center justify-center bg-gradient-to-br from-primary/25 via-black/40 to-black/70"
+                              >
+                                <Music class="h-10 w-10 text-primary" />
+                              </div>
+                              <span
+                                v-if="formatAudioDuration(track.duration)"
+                                class="absolute bottom-3 right-3 rounded-full bg-black/60 px-2 py-0.5 text-[11px] text-white/85"
+                              >
+                                {{ formatAudioDuration(track.duration) }}
+                              </span>
                             </div>
-                            <div class="min-w-0">
-                              <p class="truncate text-sm font-medium text-white">{{ primaryBlock(item.blocks)?.title || item.task.toolName }}</p>
-                              <p class="text-xs text-white/45">音频作品</p>
+                            <div class="space-y-3 p-4">
+                              <div class="min-w-0">
+                                <p class="truncate text-sm font-medium text-white">{{ track.title || `版本 ${trackIndex + 1}` }}</p>
+                                <p class="text-xs text-white/45">{{ item.task.toolName }}</p>
+                              </div>
+                              <audio :src="track.url" controls preload="metadata" class="w-full" />
                             </div>
                           </div>
-                          <audio :src="primaryBlock(item.blocks)?.url" controls preload="metadata" class="w-full" />
                         </div>
                       </template>
                       <template v-else>
@@ -1365,7 +1981,7 @@ onUnmounted(() => {
                   v-model="promptText"
                   rows="2"
                   class="min-h-[72px] flex-1 resize-none bg-transparent text-base leading-7 text-white outline-none placeholder:text-white/28"
-                  :placeholder="`你想创作什么${modalityLabel(selectedModality)}内容？`"
+                  :placeholder="coreFieldPlaceholder"
                   @focus="expandComposer"
                 />
               </div>
@@ -1550,3 +2166,108 @@ onUnmounted(() => {
     </div>
   </AppShell>
 </template>
+
+<style scoped>
+.audio-wave-hit {
+  min-height: 32px;
+  cursor: pointer;
+}
+
+.audio-wave-bar {
+  display: block;
+  width: 3px;
+  min-height: 18%;
+  flex: 1 1 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.22);
+  transition: background-color 160ms ease, transform 160ms ease;
+}
+
+.audio-wave-hit:hover .audio-wave-bar {
+  background: rgba(255, 255, 255, 0.34);
+}
+
+.audio-wave-bar.is-played {
+  background: rgb(176, 92, 255);
+}
+
+.audio-wave-bar.stage {
+  width: 5px;
+  min-height: 12%;
+  box-shadow: 0 0 18px rgba(176, 92, 255, 0.08);
+}
+
+.audio-viz-bar {
+  display: block;
+  width: 2px;
+  min-height: 3px;
+  border-radius: 999px;
+  background: rgb(255, 255, 255);
+  animation: audio-viz 760ms ease-in-out infinite;
+}
+
+.audio-viz-bar:nth-child(2) {
+  animation-delay: 120ms;
+}
+
+.audio-viz-bar:nth-child(3) {
+  animation-delay: 240ms;
+}
+
+.audio-viz-bar:nth-child(4) {
+  animation-delay: 360ms;
+}
+
+.audio-volume-slider {
+  min-width: 120px;
+  height: 24px;
+  flex: 1 1 auto;
+  cursor: pointer;
+  appearance: none;
+  background: transparent;
+}
+
+.audio-volume-slider::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.audio-volume-slider::-webkit-slider-thumb {
+  width: 14px;
+  height: 14px;
+  margin-top: -5px;
+  appearance: none;
+  border-radius: 999px;
+  background: rgb(176, 92, 255);
+  box-shadow: 0 0 0 4px rgba(176, 92, 255, 0.16);
+}
+
+.audio-volume-slider::-moz-range-track {
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.audio-volume-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: 0;
+  border-radius: 999px;
+  background: rgb(176, 92, 255);
+  box-shadow: 0 0 0 4px rgba(176, 92, 255, 0.16);
+}
+
+@keyframes audio-viz {
+  0%,
+  100% {
+    height: 3px;
+    opacity: 0.55;
+  }
+
+  50% {
+    height: 10px;
+    opacity: 1;
+  }
+}
+</style>

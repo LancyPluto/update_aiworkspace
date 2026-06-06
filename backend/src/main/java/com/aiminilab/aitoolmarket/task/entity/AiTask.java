@@ -29,6 +29,7 @@ public class AiTask {
     private Integer progress;
     private String progressMessage;
     private String paramsJson;
+    private String modelSnapshotJson;
     private String idempotencyKey;
     private Integer estimatedCreditCost;
     private String errorCode;
@@ -148,6 +149,14 @@ public class AiTask {
 
     public void setParamsJson(String paramsJson) {
         this.paramsJson = paramsJson;
+    }
+
+    public String getModelSnapshotJson() {
+        return modelSnapshotJson;
+    }
+
+    public void setModelSnapshotJson(String modelSnapshotJson) {
+        this.modelSnapshotJson = modelSnapshotJson;
     }
 
     public String getIdempotencyKey() {

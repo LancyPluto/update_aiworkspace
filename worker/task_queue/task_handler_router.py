@@ -4,6 +4,7 @@ from typing import Any
 from client.backend_client import BackendClient
 from handlers.digital_human_video_handler import DigitalHumanVideoHandler
 from handlers.image_generation_handler import ImageGenerationHandler
+from handlers.music_generation_handler import MusicGenerationHandler
 from handlers.text_task_handler import TextTaskHandler
 from handlers.text_to_speech_handler import TextToSpeechHandler
 from handlers.video_generation_handler import VideoGenerationHandler
@@ -19,6 +20,7 @@ class TaskHandlerRouter:
         text_handler: TextTaskHandler | None = None,
         digital_human_handler: DigitalHumanVideoHandler | None = None,
         image_generation_handler: ImageGenerationHandler | None = None,
+        music_generation_handler: MusicGenerationHandler | None = None,
         text_to_speech_handler: TextToSpeechHandler | None = None,
         video_generation_handler: VideoGenerationHandler | None = None,
         backend_client: BackendClient | None = None,
@@ -26,6 +28,7 @@ class TaskHandlerRouter:
         self.text_handler = text_handler or TextTaskHandler()
         self.digital_human_handler = digital_human_handler or DigitalHumanVideoHandler()
         self.image_generation_handler = image_generation_handler or ImageGenerationHandler()
+        self.music_generation_handler = music_generation_handler or MusicGenerationHandler()
         self.text_to_speech_handler = text_to_speech_handler or TextToSpeechHandler()
         self.video_generation_handler = video_generation_handler or VideoGenerationHandler()
         self.backend_client = backend_client or BackendClient()
@@ -42,6 +45,8 @@ class TaskHandlerRouter:
             return self.digital_human_handler.handle(routed_message)
         if handler == "IMAGE_GENERATION":
             return self.image_generation_handler.handle(routed_message)
+        if handler == "MUSIC_GENERATION":
+            return self.music_generation_handler.handle(routed_message)
         if handler == "TEXT_TO_SPEECH":
             return self.text_to_speech_handler.handle(routed_message)
         if handler == "VIDEO_GENERATION":
@@ -50,6 +55,8 @@ class TaskHandlerRouter:
             return self.digital_human_handler.handle(routed_message)
         if str(context.get("toolType") or "").upper() == "IMAGE_GENERATION":
             return self.image_generation_handler.handle(routed_message)
+        if str(context.get("toolType") or "").upper() == "MUSIC_GENERATION":
+            return self.music_generation_handler.handle(routed_message)
         if str(context.get("toolType") or "").upper() == "TEXT_TO_SPEECH":
             return self.text_to_speech_handler.handle(routed_message)
         if str(context.get("toolType") or "").upper() == "VIDEO_GENERATION":

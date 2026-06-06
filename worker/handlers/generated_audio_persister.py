@@ -59,6 +59,7 @@ class GeneratedAudioPersister:
         content_type: str | None = None,
         extension: str | None = None,
         source_url: str = "generated",
+        index: int = 1,
     ) -> dict[str, str]:
         if not audio_bytes:
             raise GeneratedAudioPersistError("generated audio is empty")
@@ -66,7 +67,8 @@ class GeneratedAudioPersister:
         task_dir = self.output_dir / "audio" / str(task_id)
         task_dir.mkdir(parents=True, exist_ok=True)
         resolved_extension = self._normalize_extension(extension) or self._resolve_extension(source_url, content_type)
-        path = task_dir / f"audio-1{resolved_extension}"
+        safe_index = max(int(index or 1), 1)
+        path = task_dir / f"audio-{safe_index}{resolved_extension}"
         try:
             path.write_bytes(audio_bytes)
         except OSError as exc:
@@ -78,13 +80,14 @@ class GeneratedAudioPersister:
             content_type=content_type,
         ).to_result_item()
 
-    def persist_audio_url(self, *, task_id: int, source_url: str) -> dict[str, str]:
+    def persist_audio_url(self, *, task_id: int, source_url: str, index: int = 1) -> dict[str, str]:
         audio_bytes, content_type = self._read_audio(source_url)
         return self.persist_audio_bytes(
             task_id=task_id,
             audio_bytes=audio_bytes,
             content_type=content_type,
             source_url=source_url,
+            index=index,
         )
 
     def _read_audio(self, source_url: str) -> tuple[bytes, str | None]:

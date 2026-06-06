@@ -3,7 +3,6 @@ package com.aiminilab.aitoolmarket.task.service;
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.credit.service.CreditService;
-import com.aiminilab.aitoolmarket.credit.service.TaskCreditEstimateService;
 import com.aiminilab.aitoolmarket.credit.support.CreditInsufficientSupport;
 import com.aiminilab.aitoolmarket.tool.entity.AiTool;
 import org.springframework.stereotype.Service;
@@ -12,15 +11,15 @@ import org.springframework.stereotype.Service;
 public class TaskCreditDispatchService {
 
     private final CreditService creditService;
-    private final TaskCreditEstimateService taskCreditEstimateService;
 
-    public TaskCreditDispatchService(CreditService creditService, TaskCreditEstimateService taskCreditEstimateService) {
+    public TaskCreditDispatchService(CreditService creditService) {
         this.creditService = creditService;
-        this.taskCreditEstimateService = taskCreditEstimateService;
     }
 
     public void ensureDispatchAllowed(Long userId, AiTool tool, AgentModelConfig modelConfig) {
-        int estimatedCredits = taskCreditEstimateService.estimateUserFacingTaskCredits(tool, modelConfig);
+        int estimatedCredits = tool == null || tool.getEstimatedCreditCost() == null
+                ? 0
+                : Math.max(0, tool.getEstimatedCreditCost());
         CreditInsufficientSupport.ensureAvailable(
                 creditService,
                 userId,

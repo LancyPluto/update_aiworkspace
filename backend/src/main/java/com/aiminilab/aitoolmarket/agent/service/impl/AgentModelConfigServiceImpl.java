@@ -13,6 +13,7 @@ import com.aiminilab.aitoolmarket.agent.mapper.AgentModelConfigMapper;
 import com.aiminilab.aitoolmarket.agent.mapper.ModelVendorAccountMapper;
 import com.aiminilab.aitoolmarket.agent.service.AgentModelConfigService;
 import com.aiminilab.aitoolmarket.agent.service.ModelCapabilityService;
+import com.aiminilab.aitoolmarket.agent.service.ModelProviderMetadataService;
 import com.aiminilab.aitoolmarket.agent.support.ModelCapabilitiesCodec;
 import com.aiminilab.aitoolmarket.agent.support.ModelConfigCredentialResolver;
 import com.aiminilab.aitoolmarket.agent.support.VendorCodeResolver;
@@ -42,6 +43,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
     private final ModelVendorAccountMapper vendorAccountMapper;
     private final AgentServiceClient agentServiceClient;
     private final ModelProviderRegistry providerRegistry;
+    private final ModelProviderMetadataService providerMetadataService;
     private final ModelCapabilityService modelCapabilityService;
     private final ModelCapabilitiesCodec capabilitiesCodec;
     private final ModelConfigCredentialResolver credentialResolver;
@@ -52,6 +54,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                                        ModelVendorAccountMapper vendorAccountMapper,
                                        AgentServiceClient agentServiceClient,
                                        ModelProviderRegistry providerRegistry,
+                                       ModelProviderMetadataService providerMetadataService,
                                        ModelCapabilityService modelCapabilityService,
                                        ModelCapabilitiesCodec capabilitiesCodec,
                                        ModelConfigCredentialResolver credentialResolver,
@@ -61,6 +64,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         this.vendorAccountMapper = vendorAccountMapper;
         this.agentServiceClient = agentServiceClient;
         this.providerRegistry = providerRegistry;
+        this.providerMetadataService = providerMetadataService;
         this.modelCapabilityService = modelCapabilityService;
         this.capabilitiesCodec = capabilitiesCodec;
         this.credentialResolver = credentialResolver;
@@ -223,8 +227,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
 
     @Override
     public InternalAgentModelConfigResponse internalGet() {
-        List<AgentModelConfig> agentConfigs = executableAgentConfigs();
-        AgentModelConfig config = agentConfigs.isEmpty() ? findOrDefault() : agentConfigs.get(0);
+        AgentModelConfig config = findOrDefault();
         return InternalAgentModelConfigResponse.from(credentialResolver.resolveForExecution(config));
     }
 
@@ -269,9 +272,6 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         validate(request);
         AgentModelConfig existing = findExistingForTest(request);
         AgentModelConfigRequest merged = mergeSecretFields(request, existing);
-        if (requiresMediaGatewayTest(merged)) {
-            return testMediaGatewayConnectivity(merged, existing);
-        }
         ModelProviderDefinition provider = providerRegistry.findByCode(merged.provider())
                 .orElseThrow(() -> new BusinessException(ErrorCode.PARAM_ERROR, "unsupported model provider"));
         if (shouldUseAcceptOnlyShortcut(merged, provider)) {
@@ -288,16 +288,10 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                         ""
                 );
             }
-            return new AgentModelConfigTestResponse(
-                    true,
-                    merged.provider(),
-                    merged.modelName(),
-                    0L,
-                    provider.description().isBlank()
-                            ? "provider config accepted; worker will validate at runtime"
-                            : provider.description(),
-                    ""
-            );
+            return providerMetadataService.acceptOnlyTest(merged);
+        }
+        if (requiresMediaGatewayTest(merged)) {
+            return testMediaGatewayConnectivity(merged, existing);
         }
         try {
             return agentServiceClient.testModelConfig(merged);
@@ -550,7 +544,8 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                 channelCode,
                 vendorCodeResolver.vendorLabel(channelCode),
                 vendorCodeResolver.vendorIconAsset(channelCode),
-                chatSelectable
+                chatSelectable,
+                providerMetadataService.metadataVersion(config.getProvider())
         );
     }
 
@@ -645,9 +640,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
 
     private void validate(AgentModelConfigRequest request) {
         String provider = request.provider() == null ? "" : request.provider().trim();
-        if (!providerRegistry.isSupported(provider)) {
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "unsupported model provider");
-        }
+        providerMetadataService.get(provider);
         if (request.modelName() == null || request.modelName().isBlank()) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "modelName is required");
         }
@@ -686,17 +679,34 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         }
         ModelVendorAccount account = vendorAccountMapper.findActiveById(request.vendorAccountId());
         if (account != null) {
-            validateAccountReadyForEnabledModel(account);
+            validateAccountReadyForEnabledModel(account, request.provider());
         }
     }
 
-    private void validateAccountReadyForEnabledModel(ModelVendorAccount account) {
+    private void validateAccountReadyForEnabledModel(ModelVendorAccount account, String providerCode) {
         if (Boolean.FALSE.equals(account.getEnabled())) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "vendor account must be enabled before enabling this model");
+        }
+        if (usesAcceptOnlyTestStrategy(providerCode)) {
+            if (!hasExecutableSecret(account.getApiKey()) && !hasExecutableSecret(account.getExtraAuthJson())) {
+                throw new BusinessException(ErrorCode.PARAM_ERROR, "vendor account credential must be configured before enabling this model");
+            }
+            return;
         }
         String health = account.getHealthStatus() == null ? "" : account.getHealthStatus().trim();
         if (!"OK".equalsIgnoreCase(health)) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "vendor account connectivity test must pass before enabling this model");
+        }
+    }
+
+    private boolean usesAcceptOnlyTestStrategy(String providerCode) {
+        if (providerCode == null || providerCode.isBlank()) {
+            return false;
+        }
+        try {
+            return TEST_STRATEGY_ACCEPT_ONLY.equalsIgnoreCase(providerMetadataService.get(providerCode.trim()).testStrategy());
+        } catch (BusinessException exception) {
+            return false;
         }
     }
 
@@ -825,7 +835,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         if (billingUnit != null && !billingUnit.isBlank()) {
             return billingUnit.trim().toUpperCase();
         }
-        String defaultUnit = providerRegistry.defaultBillingUnit(provider);
+        String defaultUnit = providerMetadataService.get(provider).billingDefault();
         if (BILLING_UNIT_PER_CALL.equalsIgnoreCase(defaultUnit)) {
             return BILLING_UNIT_PER_CALL;
         }

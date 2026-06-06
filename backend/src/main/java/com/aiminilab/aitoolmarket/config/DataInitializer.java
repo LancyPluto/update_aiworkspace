@@ -6,6 +6,7 @@ import com.aiminilab.aitoolmarket.agent.config.AgentPromptSettings;
 import com.aiminilab.aitoolmarket.agent.config.AgentRouterSettings;
 import com.aiminilab.aitoolmarket.agent.config.AgentMemorySettings;
 import com.aiminilab.aitoolmarket.agent.config.AgentRuntimeSettings;
+import com.aiminilab.aitoolmarket.agent.config.ModelProviderRegistry;
 import com.aiminilab.aitoolmarket.agent.service.ModelVendorAccountMigrationService;
 import com.aiminilab.aitoolmarket.common.enums.UserStatus;
 import com.aiminilab.aitoolmarket.common.enums.UserType;
@@ -32,27 +33,33 @@ public class DataInitializer implements CommandLineRunner {
     private final SystemSettingVersionMapper systemSettingVersionMapper;
     private final PasswordEncoder passwordEncoder;
     private final DataSource dataSource;
+    private final JdbcTemplate jdbcTemplate;
     private final ToolTemplateBootstrap toolTemplateBootstrap;
     private final ModelVendorAccountMigrationService modelVendorAccountMigrationService;
+    private final ModelProviderRegistry modelProviderRegistry;
 
     public DataInitializer(UserMapper userMapper, ToolCategoryMapper toolCategoryMapper,
                            SystemSettingMapper systemSettingMapper, SystemSettingVersionMapper systemSettingVersionMapper,
                            PasswordEncoder passwordEncoder,
                            JdbcTemplate jdbcTemplate, ToolTemplateBootstrap toolTemplateBootstrap,
-                           ModelVendorAccountMigrationService modelVendorAccountMigrationService) {
+                           ModelVendorAccountMigrationService modelVendorAccountMigrationService,
+                           ModelProviderRegistry modelProviderRegistry) {
         this.userMapper = userMapper;
         this.toolCategoryMapper = toolCategoryMapper;
         this.systemSettingMapper = systemSettingMapper;
         this.systemSettingVersionMapper = systemSettingVersionMapper;
         this.passwordEncoder = passwordEncoder;
+        this.jdbcTemplate = jdbcTemplate;
         this.dataSource = jdbcTemplate.getDataSource();
         this.toolTemplateBootstrap = toolTemplateBootstrap;
         this.modelVendorAccountMigrationService = modelVendorAccountMigrationService;
+        this.modelProviderRegistry = modelProviderRegistry;
     }
 
     @Override
     public void run(String... args) {
         ensureSchemaCompatibility();
+        seedModelProviderMetadata();
         modelVendorAccountMigrationService.migrateIfNeeded();
         toolTemplateBootstrap.ensureSchemaAndSeed();
         createUserIfAbsent("admin", "123456", "Admin", UserType.ADMIN);
@@ -73,6 +80,53 @@ public class DataInitializer implements CommandLineRunner {
 
     private void seedSettingDefaults(java.util.Map<String, String> defaults, String group, String description) {
         defaults.forEach((key, value) -> systemSettingMapper.insertIfAbsent(key, value, group, description));
+    }
+
+    private void seedModelProviderMetadata() {
+        modelProviderRegistry.listAll().forEach(provider -> {
+            Integer count = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(1) FROM model_provider_metadata WHERE provider_code = ?",
+                    Integer.class,
+                    provider.code()
+            );
+            if (count != null && count > 0) {
+                return;
+            }
+            jdbcTemplate.update("""
+                    INSERT INTO model_provider_metadata(provider_code, label, capabilities_json, default_base_url, default_model,
+                                                        billing_default, provider_protocol, vendor_kind, upstream_vendor,
+                                                        test_strategy, worker_ready, adapter_installed, adapter_key,
+                                                        metadata_version, auth_schema_json, model_param_schema_json,
+                                                        description, enabled)
+                    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                    """,
+                    provider.code(),
+                    provider.label(),
+                    toJson(provider.capabilities()),
+                    provider.defaultBaseUrl(),
+                    provider.defaultModel(),
+                    provider.billingDefault(),
+                    provider.providerProtocol(),
+                    provider.vendorKind(),
+                    provider.upstreamVendor(),
+                    provider.testStrategy(),
+                    provider.workerReady() ? 1 : 0,
+                    provider.adapterInstalled() ? 1 : 0,
+                    provider.adapterKey() == null || provider.adapterKey().isBlank() ? provider.code() : provider.adapterKey(),
+                    provider.metadataVersion() == null || provider.metadataVersion().isBlank() ? "manifest" : provider.metadataVersion(),
+                    provider.authSchemaJson(),
+                    provider.modelParamSchemaJson(),
+                    provider.description()
+            );
+        });
+    }
+
+    private String toJson(Object value) {
+        try {
+            return new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(value);
+        } catch (Exception exception) {
+            return "[]";
+        }
     }
 
     private void ensureSchemaCompatibility() {
@@ -100,6 +154,7 @@ public class DataInitializer implements CommandLineRunner {
                 """);
         ensureColumn("ai_tasks", "user_deleted", "ALTER TABLE ai_tasks ADD COLUMN user_deleted TINYINT NOT NULL DEFAULT 0");
         ensureColumn("ai_tasks", "user_deleted_at", "ALTER TABLE ai_tasks ADD COLUMN user_deleted_at DATETIME NULL");
+        ensureColumn("ai_tasks", "model_snapshot_json", "ALTER TABLE ai_tasks ADD COLUMN model_snapshot_json TEXT NULL");
         ensureColumn("agent_model_configs", "display_name", "ALTER TABLE agent_model_configs ADD COLUMN display_name VARCHAR(128) NULL");
         ensureColumn("agent_model_configs", "config_code", "ALTER TABLE agent_model_configs ADD COLUMN config_code VARCHAR(64) NULL");
         ensureColumn("agent_model_configs", "console_url", "ALTER TABLE agent_model_configs ADD COLUMN console_url VARCHAR(512) NULL");
@@ -192,6 +247,31 @@ public class DataInitializer implements CommandLineRunner {
                   health_status VARCHAR(32) NOT NULL DEFAULT 'UNKNOWN',
                   enabled TINYINT NOT NULL DEFAULT 1,
                   is_deleted TINYINT NOT NULL DEFAULT 0,
+                  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """);
+        ensureTable("model_provider_metadata", """
+                CREATE TABLE model_provider_metadata (
+                  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                  provider_code VARCHAR(64) NOT NULL UNIQUE,
+                  label VARCHAR(128) NOT NULL,
+                  capabilities_json TEXT NOT NULL,
+                  default_base_url VARCHAR(512) NULL,
+                  default_model VARCHAR(128) NULL,
+                  billing_default VARCHAR(32) NOT NULL DEFAULT 'TOKEN_PER_M',
+                  provider_protocol VARCHAR(64) NULL,
+                  vendor_kind VARCHAR(64) NULL,
+                  upstream_vendor VARCHAR(64) NULL,
+                  test_strategy VARCHAR(32) NOT NULL DEFAULT 'accept_only',
+                  worker_ready TINYINT NOT NULL DEFAULT 0,
+                  adapter_installed TINYINT NOT NULL DEFAULT 0,
+                  adapter_key VARCHAR(64) NULL,
+                  metadata_version VARCHAR(64) NOT NULL DEFAULT 'db',
+                  auth_schema_json TEXT NULL,
+                  model_param_schema_json TEXT NULL,
+                  description TEXT NULL,
+                  enabled TINYINT NOT NULL DEFAULT 1,
                   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )
@@ -502,6 +582,7 @@ public class DataInitializer implements CommandLineRunner {
         ensureColumn("community_posts", "share_count", "ALTER TABLE community_posts ADD COLUMN share_count BIGINT NOT NULL DEFAULT 0");
         ensureColumn("community_posts", "quality_score", "ALTER TABLE community_posts ADD COLUMN quality_score BIGINT NOT NULL DEFAULT 0");
         ensureColumn("community_posts", "last_featured_at", "ALTER TABLE community_posts ADD COLUMN last_featured_at DATETIME NULL");
+        ensureColumn("community_posts", "media_url", "ALTER TABLE community_posts ADD COLUMN media_url VARCHAR(1024) NULL");
         ensureIndex("community_posts", "idx_community_posts_status_topic_id", "CREATE INDEX idx_community_posts_status_topic_id ON community_posts(status, topic, id)");
         ensureIndex("community_posts", "idx_community_posts_status_modality_id", "CREATE INDEX idx_community_posts_status_modality_id ON community_posts(status, modality, id)");
         ensureIndex("community_posts", "idx_community_posts_quality", "CREATE INDEX idx_community_posts_quality ON community_posts(status, audit_status, pinned, featured, quality_score, id)");
