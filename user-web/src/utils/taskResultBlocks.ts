@@ -1,8 +1,8 @@
 import { getRequestBaseUrl } from "@/api/client"
 import type { TaskDetail } from "@/api/types"
-import type { ResultBlock } from "@/types/result"
+import type { AudioTrackItem, ResultBlock } from "@/types/result"
 
-/** 任务卡片封面：优先用生成结果中的视频/图片 URL */
+/** 任务卡片封面：优先用生成结果中的视频/图片/音乐封面 URL */
 export function extractTaskPreviewUrl(detail?: TaskDetail | null): string {
   const content = detail?.result?.contentText?.trim()
   if (!content) return ""
@@ -10,8 +10,27 @@ export function extractTaskPreviewUrl(detail?: TaskDetail | null): string {
   for (const block of blocks) {
     if (block.type === "video" && block.url) return block.url
     if (block.type === "image" && block.images.length > 0) return block.images[0]!.url
+    if (block.type === "audio") {
+      const tracks = resolveAudioTracks(block)
+      const cover = tracks.find((track) => track.coverUrl)?.coverUrl
+      if (cover) return cover
+      if (tracks[0]?.url) return tracks[0].url
+    }
   }
   return ""
+}
+
+export function resolveAudioTracks(block: Extract<ResultBlock, { type: "audio" }>): AudioTrackItem[] {
+  if (block.tracks?.length) return block.tracks
+  return [{ url: block.url, title: block.title, downloadName: block.downloadName }]
+}
+
+export function formatAudioDuration(seconds?: number): string {
+  if (seconds === undefined || seconds === null || Number.isNaN(seconds)) return ""
+  const total = Math.max(0, Math.floor(seconds))
+  const minutes = Math.floor(total / 60)
+  const remain = total % 60
+  return `${minutes}:${String(remain).padStart(2, "0")}`
 }
 
 export function buildTaskResultBlocks(content: string, detail?: TaskDetail): ResultBlock[] {
@@ -61,14 +80,25 @@ export function buildTaskResultBlocks(content: string, detail?: TaskDetail): Res
   }
 
   if (outputModality === "AUDIO") {
-    const audioUrl = collectUrls(parsed ?? content)[0]
-    if (audioUrl) {
+    const tracks = collectAudioTracks(parsed, detail?.taskNo)
+    if (tracks.length === 0) {
+      const fallback = collectAudioUrls(parsed ?? content)[0]
+      if (fallback) {
+        tracks.push({
+          url: normalizeMediaUrl(fallback),
+          title: "生成音频",
+          downloadName: `${detail?.taskNo ?? "audio"}-1`,
+        })
+      }
+    }
+    if (tracks.length > 0) {
       return [
         {
           type: "audio",
-          title: "生成音频",
-          url: normalizeMediaUrl(audioUrl),
-          downloadName: `${detail?.taskNo ?? "audio"}-result`,
+          title: tracks.length > 1 ? "生成音乐" : tracks[0]?.title || "生成音频",
+          url: tracks[0]!.url,
+          downloadName: tracks[0]?.downloadName,
+          tracks,
         },
       ]
     }
@@ -78,6 +108,30 @@ export function buildTaskResultBlocks(content: string, detail?: TaskDetail): Res
     return [{ type: "json", title: "结构化结果", content: JSON.stringify(parsed, null, 2) }]
   }
   return [{ type: "text", title: "生成结果", content }]
+}
+
+function collectAudioTracks(parsed: unknown | null, taskNo?: string | null): AudioTrackItem[] {
+  if (!parsed || typeof parsed !== "object") return []
+  const root = parsed as Record<string, unknown>
+  const audios = root.audios
+  if (!Array.isArray(audios)) return []
+
+  const tracks: AudioTrackItem[] = []
+  audios.forEach((item, index) => {
+    if (!item || typeof item !== "object") return
+    const row = item as Record<string, unknown>
+    const url = firstString(row.url, row.audioUrl, row.audio_url)
+    if (!url) return
+    const coverRaw = firstString(row.imageUrl, row.image_url, row.coverUrl, row.cover_url)
+    tracks.push({
+      url: normalizeMediaUrl(url),
+      title: firstString(row.title) || `版本 ${index + 1}`,
+      coverUrl: coverRaw ? normalizeMediaUrl(coverRaw) : undefined,
+      duration: typeof row.duration === "number" ? row.duration : undefined,
+      downloadName: `${taskNo ?? "audio"}-${index + 1}`,
+    })
+  })
+  return tracks
 }
 
 function inferOutputModality(parsed: unknown | null, content: string, finalVideoUrl: string): string {
@@ -128,6 +182,10 @@ function collectUrls(value: unknown): string[] {
   return Array.from(urls)
 }
 
+function collectAudioUrls(value: unknown): string[] {
+  return collectUrls(value).filter((url) => /\/generated\/.*\.(mp3|wav|m4a|flac|ogg|aac|webm)(?:\?|$)|data:audio\//i.test(url))
+}
+
 function collectImageUrls(value: unknown): string[] {
   if (value && typeof value === "object" && !Array.isArray(value)) {
     const root = value as Record<string, unknown>
@@ -146,7 +204,7 @@ function collectImageUrls(value: unknown): string[] {
       if (urls.length > 0) return uniqueUrls(urls)
     }
   }
-  return uniqueUrls(collectUrls(value))
+  return uniqueUrls(collectUrls(value).filter((url) => /\.(png|jpe?g|webp|gif)(\?|$)/i.test(url)))
 }
 
 function firstString(...values: unknown[]): string {

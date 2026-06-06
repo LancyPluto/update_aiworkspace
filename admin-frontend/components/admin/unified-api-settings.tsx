@@ -125,6 +125,37 @@ function formatBalance(account: ModelVendorAccount) {
   return "余额 --"
 }
 
+function diagnoseProviderIssue(
+  message: string | null | undefined,
+  stage: "balance" | "connectivity" | "model",
+  account?: Pick<ModelVendorAccount, "vendorCode" | "balanceQueryMode"> | null,
+) {
+  const raw = (message || "").trim()
+  const lower = raw.toLowerCase()
+  const stageLabel =
+    stage === "balance" ? "余额查询" : stage === "connectivity" ? "账户连通测试" : "模型连通测试"
+  const vendor = account?.vendorCode ? `厂商 ${account.vendorCode}` : "当前厂商"
+  if (!raw) {
+    return `${stageLabel}未返回具体错误。请检查该账号的 API Key、Base URL、测试策略和后端日志。`
+  }
+  if (lower.includes("your request was blocked") || lower.includes("request was blocked")) {
+    return `${stageLabel}被上游网关或风控拦截：${raw}。这通常是探测/余额接口被拦，不一定代表 API Key 不可用；${vendor} 若是 accept-only 策略，请使用“测试连通性”刷新账号状态，余额可改为手填或外链。`
+  }
+  if (lower.includes("unsupported model provider")) {
+    return `${stageLabel}失败：后端没有识别该 provider。请检查 providerCode 是否已在供应商元数据/adapter manifest 中注册。原始错误：${raw}`
+  }
+  if (lower.includes("invalid token") || lower.includes("unauthorized") || lower.includes("401")) {
+    return `${stageLabel}鉴权失败：请检查 API Key 是否正确、是否填在厂商账户而非前端、Base URL 是否属于该供应商。原始错误：${raw}`
+  }
+  if (lower.includes("404")) {
+    return `${stageLabel}接口不存在：Base URL 或余额/模型探测路径可能不适配该供应商。原始错误：${raw}`
+  }
+  if (stage === "balance" && account?.balanceQueryMode === "REST_API") {
+    return `余额查询失败：${raw}。如果该供应商没有稳定余额接口，请把余额查询方式改成“手填”或“仅外链”，不要让余额探测承担连通性判断。`
+  }
+  return `${stageLabel}失败：${raw}`
+}
+
 function formatBalanceUpdatedAt(value?: string | null) {
   if (!value) return ""
   const date = new Date(value)
@@ -205,6 +236,33 @@ function capabilityLabel(cap: string) {
   return map[cap] || cap
 }
 
+function providerForVendor(providers: ModelProviderDescriptor[], vendorCode: string, fallbackProvider?: string) {
+  const normalizedVendor = (vendorCode || "").trim().toLowerCase()
+  const normalizedFallback = (fallbackProvider || "").trim().toLowerCase()
+  return (
+    providers.find((provider) => provider.code.toLowerCase() === normalizedVendor) ||
+    providers.find((provider) => provider.code.toLowerCase() === normalizedFallback) ||
+    providers.find((provider) => provider.code.toLowerCase().includes(normalizedVendor)) ||
+    providers[0]
+  )
+}
+
+function modelCapabilitiesForProvider(
+  capabilities: string[] | null | undefined,
+  provider?: ModelProviderDescriptor,
+) {
+  const defaults = provider?.capabilities && provider.capabilities.length > 0 ? provider.capabilities : ["TEXT_GENERATION"]
+  if (!capabilities || capabilities.length === 0) {
+    return [...defaults]
+  }
+  if (!provider?.capabilities?.length) {
+    return [...capabilities]
+  }
+  const allowed = new Set(provider.capabilities.map((capability) => capability.toUpperCase()))
+  const compatible = capabilities.filter((capability) => allowed.has(capability.toUpperCase()))
+  return compatible.length > 0 ? compatible : [...defaults]
+}
+
 function renderModelCost(model: UnifiedApiModelItem) {
   const billingUnit = (model.billingUnit || "").toString().trim().toUpperCase()
   if (!billingUnit) {
@@ -263,6 +321,7 @@ const emptyModelForm = (): AgentModelConfigPayload & { id?: number } => ({
   provider: "deepseek",
   modelName: "",
   baseUrl: "",
+  docsUrl: "",
   timeoutSeconds: 60,
   inputTokenPricePer1m: 0,
   outputTokenPricePer1m: 0,
@@ -388,6 +447,11 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
   const [vendorFilter, setVendorFilter] = useState<VendorFilter>("ALL")
   const [vendorSort, setVendorSort] = useState<VendorSort>("ISSUE_FIRST")
   const [modelKeyword, setModelKeyword] = useState("")
+
+  const currentModelProviderMeta = useMemo(
+    () => providers.find((provider) => provider.code === modelForm.provider) || null,
+    [providers, modelForm.provider],
+  )
 
   const fetchOverviewData = useCallback(async () => {
     const [data, catalog] = await Promise.all([
@@ -552,7 +616,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
         } else if (updated.balanceErrorMessage) {
           toast.warning(`${vendorLabel}：未能获取余额`, {
             id: toastId,
-            description: updated.balanceErrorMessage,
+            description: diagnoseProviderIssue(updated.balanceErrorMessage, "balance", updated),
           })
         } else {
           toast.info(`${vendorLabel}：暂无余额数据`, {
@@ -562,7 +626,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
         }
       } catch (err) {
         const message = err instanceof ApiError ? err.message : "刷新失败"
-        toast.error(`${vendorLabel}：刷新失败`, { id: toastId, description: message })
+        toast.error(`${vendorLabel}：刷新失败`, { id: toastId, description: diagnoseProviderIssue(message, "balance", account) })
         setError(message)
       }
     },
@@ -589,12 +653,12 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
         } else {
           toast.error(`${vendorLabel}：连通失败`, {
             id: toastId,
-            description: result.message || "连接失败",
+            description: diagnoseProviderIssue(result.message || "连接失败", "connectivity", result.account ?? account),
           })
         }
       } catch (err) {
         const message = err instanceof ApiError ? err.message : "测试失败"
-        toast.error(`${vendorLabel}：测试失败`, { id: toastId, description: message })
+        toast.error(`${vendorLabel}：测试失败`, { id: toastId, description: diagnoseProviderIssue(message, "connectivity", account) })
         setError(message)
       } finally {
         setTestingAccountId(null)
@@ -623,12 +687,12 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
         await refreshOverviewSilently()
         toast.error(`${label}：连接失败`, {
           id: toastId,
-          description: result.message || "测试未通过",
+          description: diagnoseProviderIssue(result.message || "测试未通过", "model"),
         })
       }
     } catch (err) {
       const message = err instanceof ApiError ? err.message : "测试失败"
-      toast.error(`${vendorLabel}：${label} 测试失败`, { id: toastId, description: message })
+      toast.error(`${vendorLabel}：${label} 测试失败`, { id: toastId, description: diagnoseProviderIssue(message, "model") })
       setError(message)
       await refreshOverviewSilently()
     } finally {
@@ -831,7 +895,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
   }
 
   function openCreateAccount(vendorCode: string, label: string) {
-    const meta = providers.find((p) => p.code.includes(vendorCode)) || providers[0]
+    const meta = providerForVendor(providers, vendorCode)
     const existingCount = overview?.vendors.find((vendor) => vendor.vendorCode === vendorCode)?.accounts.length ?? 0
     setAccountForm({
       ...emptyAccountForm(),
@@ -899,8 +963,8 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
 
   function openCreateModel(vendor: UnifiedApiVendorGroup, accountId: number) {
     const account = vendor.accounts.find((a) => a.id === accountId) || vendor.accounts[0]
-    const defaultProvider = vendor.models[0]?.provider || providers[0]?.code || "openai_compatible"
-    const meta = providers.find((p) => p.code === defaultProvider) || providers[0]
+    const meta = providerForVendor(providers, vendor.vendorCode, vendor.models[0]?.provider)
+    const defaultProvider = meta?.code || vendor.models[0]?.provider || "openai_compatible"
     setModelVendorCode(vendor.vendorCode)
     setModelForm({
       ...emptyModelForm(),
@@ -908,13 +972,15 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
       provider: defaultProvider,
       modelName: meta?.defaultModel || "",
       baseUrl: "",
-      capabilities: meta ? [...meta.capabilities] : ["TEXT_GENERATION"],
+      docsUrl: "",
+      capabilities: modelCapabilitiesForProvider(undefined, meta),
       billingUnit: (meta?.billingDefault as AgentModelConfigPayload["billingUnit"]) || "TOKEN_PER_M",
     })
     setModelDialogOpen(true)
   }
 
   function openEditModel(model: UnifiedApiModelItem, vendorCode: string) {
+    const meta = providerForVendor(providers, vendorCode, model.provider)
     setModelVendorCode(vendorCode)
     setModelForm({
       id: model.id,
@@ -923,10 +989,11 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
       configCode: model.configCode || "",
       provider: model.provider,
       modelName: model.modelName,
+      docsUrl: model.docsUrl || "",
       enabled: model.enabled,
       agentEnabled: model.agentEnabled ?? true,
       isDefault: model.isDefault ?? false,
-      capabilities: model.capabilities ? [...model.capabilities] : [],
+      capabilities: modelCapabilitiesForProvider(model.capabilities, meta),
       timeoutSeconds: 60,
       inputTokenPricePer1m: model.inputTokenPricePer1m ?? 0,
       outputTokenPricePer1m: model.outputTokenPricePer1m ?? 0,
@@ -936,10 +1003,38 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
     setModelDialogOpen(true)
   }
 
+  function toggleModelCapability(capability: string) {
+    setModelForm((current) => {
+      const allowed = currentModelProviderMeta?.capabilities?.length
+        ? new Set(currentModelProviderMeta.capabilities.map((item) => item.toUpperCase()))
+        : null
+      const base = allowed
+        ? (current.capabilities || []).filter((item) => allowed.has(item.toUpperCase()))
+        : current.capabilities || []
+      const exists = base.some((item) => item.toUpperCase() === capability.toUpperCase())
+      const next = exists
+        ? base.filter((item) => item.toUpperCase() !== capability.toUpperCase())
+        : [...base, capability]
+      return { ...current, capabilities: next }
+    })
+  }
+
   async function saveModel() {
     if (!modelForm.vendorAccountId) {
       setError("请选择厂商账户")
       return
+    }
+    if (!modelForm.capabilities || modelForm.capabilities.length === 0) {
+      setError("请至少选择一种模型能力")
+      return
+    }
+    if (currentModelProviderMeta) {
+      const allowed = new Set(currentModelProviderMeta.capabilities.map((capability) => capability.toUpperCase()))
+      const invalid = modelForm.capabilities.find((capability) => !allowed.has(capability.toUpperCase()))
+      if (invalid) {
+        setError(`能力 ${capabilityLabel(invalid)} 不适用于当前供应商 ${currentModelProviderMeta.label}`)
+        return
+      }
     }
     setModelSaving(true)
     setError(null)
@@ -1048,8 +1143,11 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                   <span className="text-xs text-muted-foreground">{formatBalanceUpdatedAt(primaryAccount.balanceUpdatedAt)}</span>
                 ) : null}
                 {primaryAccount.balanceErrorMessage ? (
-                  <span className="max-w-[200px] truncate text-xs text-destructive" title={primaryAccount.balanceErrorMessage}>
-                    {primaryAccount.balanceErrorMessage}
+                  <span
+                    className="max-w-[260px] truncate text-xs text-destructive"
+                    title={diagnoseProviderIssue(primaryAccount.balanceErrorMessage, "balance", primaryAccount)}
+                  >
+                    {diagnoseProviderIssue(primaryAccount.balanceErrorMessage, "balance", primaryAccount)}
                   </span>
                 ) : null}
                 <EmbeddedOnOffSwitch
@@ -1143,6 +1241,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                     <TableHead className="w-[220px] text-center">模型名称</TableHead>
                     <TableHead className="w-[150px] text-center">{"API \u8d26\u6237"}</TableHead>
                     <TableHead className="w-[180px] text-center">能力</TableHead>
+                    <TableHead className="w-[120px] text-center">文档</TableHead>
                     <TableHead className="w-[150px] text-center">成本</TableHead>
                     <TableHead className="w-[112px] text-center">Agent 可选</TableHead>
                     <TableHead className="w-[112px] text-center">启用</TableHead>
@@ -1197,6 +1296,24 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                             </Badge>
                           ))}
                         </div>
+                      </TableCell>
+                      <TableCell className="align-middle text-center">
+                        {model.docsUrl ? (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 px-2 text-xs"
+                            asChild
+                          >
+                            <a href={model.docsUrl} target="_blank" rel="noreferrer" title={model.docsUrl}>
+                              <ExternalLink className="mr-1 h-3 w-3" />
+                              API 文档
+                            </a>
+                          </Button>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">未配置</span>
+                        )}
                       </TableCell>
                       <TableCell className="align-middle">
                         <div className="space-y-1 text-center text-xs text-muted-foreground">
@@ -1630,6 +1747,72 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
             <div className="space-y-2">
               <Label>Upstream 模型名</Label>
               <Input value={modelForm.modelName} onChange={(e) => setModelForm((f) => ({ ...f, modelName: e.target.value }))} />
+            </div>
+            <div className="space-y-3 rounded-md border p-3">
+              <div className="flex items-center justify-between gap-3">
+                <Label>模型能力</Label>
+                <span className="text-xs text-muted-foreground">
+                  {currentModelProviderMeta?.label || modelForm.provider}
+                </span>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {(currentModelProviderMeta?.capabilities?.length
+                  ? currentModelProviderMeta.capabilities
+                  : modelForm.capabilities || ["TEXT_GENERATION"]
+                ).map((capability) => {
+                  const checked = (modelForm.capabilities || []).some((item) => item.toUpperCase() === capability.toUpperCase())
+                  return (
+                    <button
+                      key={capability}
+                      type="button"
+                      onClick={() => toggleModelCapability(capability)}
+                      className={[
+                        "flex items-center justify-between rounded-md border px-3 py-2 text-left text-sm transition",
+                        checked
+                          ? "border-blue-500 bg-blue-500/10 text-blue-100"
+                          : "border-border bg-muted/20 text-muted-foreground hover:border-blue-400/60 hover:text-foreground",
+                      ].join(" ")}
+                    >
+                      <span>{capabilityLabel(capability)}</span>
+                      <span className="text-[11px] font-mono opacity-70">{capability}</span>
+                    </button>
+                  )
+                })}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                能力决定工具页可绑定范围和 Worker 执行路由；音乐模型请选择“文生音乐”。
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label>API 文档页</Label>
+              <div className="flex gap-2">
+                <Input
+                  value={modelForm.docsUrl || ""}
+                  placeholder="https://docs.example.com/model-api"
+                  onChange={(e) => setModelForm((f) => ({ ...f, docsUrl: e.target.value }))}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={!modelForm.docsUrl}
+                  asChild={Boolean(modelForm.docsUrl)}
+                >
+                  {modelForm.docsUrl ? (
+                    <a href={modelForm.docsUrl} target="_blank" rel="noreferrer">
+                      <ExternalLink className="mr-2 h-4 w-4" />
+                      打开
+                    </a>
+                  ) : (
+                    <span>
+                      <ExternalLink className="mr-2 h-4 w-4" />
+                      打开
+                    </span>
+                  )}
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                用于记录该模型的官方 API 文档，方便按文档调整参数表单、计费和限制。
+              </p>
             </div>
             <div className="grid gap-3 rounded-md border p-3 md:grid-cols-[180px_minmax(0,1fr)]">
               <div className="space-y-2">

@@ -428,6 +428,43 @@ class AdminAgentApiTest {
     }
 
     @Test
+    void sunoVendorAccountTestUsesSunoProviderAcceptOnlyStrategy() throws Exception {
+        mockExternalAuthDependencies();
+        String adminToken = login("/api/admin/v1/auth/login", "admin");
+
+        String response = mockMvc.perform(post("/api/admin/v1/model-vendor-accounts")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "vendorCode": "suno_music",
+                                  "accountName": "Suno test",
+                                  "baseUrl": "https://api.sunoapi.org",
+                                  "apiKey": "suno-secret",
+                                  "balanceQueryMode": "MANUAL",
+                                  "balanceAmount": 50,
+                                  "enabled": true
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        Long accountId = Long.parseLong(response.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
+
+        mockMvc.perform(post("/api/admin/v1/model-vendor-accounts/{id}/test", accountId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.success").value(true))
+                .andExpect(jsonPath("$.data.provider").value("suno_music"))
+                .andExpect(jsonPath("$.data.modelName").value("V5"))
+                .andExpect(jsonPath("$.data.account.healthStatus").value("OK"));
+
+        Mockito.verify(agentServiceClient, Mockito.never()).testModelConfig(argThat(request ->
+                request != null && "openai_compatible".equals(request.provider())));
+    }
+
+    @Test
     void emptyApiKeyUpdateKeepsExistingModelSecret() throws Exception {
         mockExternalAuthDependencies();
         String adminToken = login("/api/admin/v1/auth/login", "admin");

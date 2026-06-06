@@ -88,6 +88,22 @@ providers:
     workerReady: false
     description: MiniMax /v1/music_generation (worker handler pending).
 
+  - code: suno_music
+    label: Suno music
+    capabilities:
+      - MUSIC_GENERATION
+    defaultBaseUrl: https://api.sunoapi.org
+    defaultModel: V5
+    billingDefault: PER_CALL
+    testStrategy: accept_only
+    workerReady: true
+    adapterInstalled: true
+    adapterKey: suno_music
+    metadataVersion: suno_music.v1
+    authSchemaJson: '{"fields":[{"key":"apiKey","label":"API Key","type":"password","required":true},{"key":"baseUrl","label":"Base URL","type":"url","required":false}]}'
+    modelParamSchemaJson: '{"models":["V5_5","V5","V4_5PLUS","V4_5ALL","V4_5","V4"],"fields":[{"key":"modelName","label":"模型名","type":"text","required":true},{"key":"billingUnit","label":"计费单位","type":"select","options":["PER_CALL"],"required":true}]}'
+    description: SunoAPI /api/v1/generate music generation with worker polling and local audio persistence.
+
   - code: minimax_speech
     label: MiniMax speech
     capabilities:

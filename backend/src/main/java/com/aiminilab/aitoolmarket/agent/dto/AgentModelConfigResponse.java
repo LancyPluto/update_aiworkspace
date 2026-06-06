@@ -42,6 +42,9 @@ public record AgentModelConfigResponse(
         String channelIconAsset,
         List<String> capabilities,
         Boolean chatSelectable,
+        String providerMetadataVersion,
+        String pricingPreview,
+        String effectiveCredentialsStatus,
         LocalDateTime createdAt,
         LocalDateTime updatedAt
 ) {
@@ -75,6 +78,17 @@ public record AgentModelConfigResponse(
                                                 String channelLabel,
                                                 String channelIconAsset,
                                                 boolean chatSelectable) {
+        return from(config, codec, vendorAccountName, channelCode, channelLabel, channelIconAsset, chatSelectable, "manifest");
+    }
+
+    public static AgentModelConfigResponse from(AgentModelConfig config,
+                                                ModelCapabilitiesCodec codec,
+                                                String vendorAccountName,
+                                                String channelCode,
+                                                String channelLabel,
+                                                String channelIconAsset,
+                                                boolean chatSelectable,
+                                                String providerMetadataVersion) {
         return new AgentModelConfigResponse(
                 config.getId(),
                 config.getVendorAccountId(),
@@ -107,9 +121,44 @@ public record AgentModelConfigResponse(
                 channelIconAsset,
                 codec.parse(config.getCapabilities()),
                 chatSelectable,
+                providerMetadataVersion == null || providerMetadataVersion.isBlank() ? "manifest" : providerMetadataVersion,
+                pricingPreview(config),
+                credentialsStatus(config),
                 config.getCreatedAt(),
                 config.getUpdatedAt()
         );
+    }
+
+    private static String pricingPreview(AgentModelConfig config) {
+        String unit = config.getBillingUnit() == null ? "TOKEN_PER_M" : config.getBillingUnit();
+        if ("PER_CALL".equalsIgnoreCase(unit)) {
+            return "PER_CALL " + (config.getUnitPrice() == null ? "0" : config.getUnitPrice().toPlainString());
+        }
+        if ("IMAGE_TOKEN".equalsIgnoreCase(unit)) {
+            return "IMAGE_TOKEN input="
+                    + (config.getInputTokenPricePer1m() == null ? "0" : config.getInputTokenPricePer1m().toPlainString())
+                    + "/M output="
+                    + (config.getOutputTokenPricePer1m() == null ? "0" : config.getOutputTokenPricePer1m().toPlainString())
+                    + "/M";
+        }
+        return "TOKEN_PER_M input="
+                + (config.getInputTokenPricePer1m() == null ? "0" : config.getInputTokenPricePer1m().toPlainString())
+                + "/M output="
+                + (config.getOutputTokenPricePer1m() == null ? "0" : config.getOutputTokenPricePer1m().toPlainString())
+                + "/M";
+    }
+
+    private static String credentialsStatus(AgentModelConfig config) {
+        if (config.getApiKey() != null && !config.getApiKey().isBlank() && !config.getApiKey().trim().startsWith("replace-with-")) {
+            return "CONFIGURED";
+        }
+        if (config.getExtraAuthJson() != null && !config.getExtraAuthJson().isBlank()) {
+            return "EXTRA_AUTH_CONFIGURED";
+        }
+        if (config.getVendorAccountId() != null) {
+            return "INHERITED_OR_MISSING";
+        }
+        return "MISSING";
     }
 
     private static String mask(String value) {

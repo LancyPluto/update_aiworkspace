@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue"
+import { computed, onMounted, onUnmounted, ref, watch } from "vue"
 import { useRoute, useRouter } from "vue-router"
 import { ArrowLeft, Copy, Download, Heart, Loader2, Send, Star } from "lucide-vue-next"
+import CommunityAudioMedia from "@/components/community/CommunityAudioMedia.vue"
 import UserAvatar from "@/components/UserAvatar.vue"
 import {
   addCommunityCollectionItem,
@@ -21,6 +22,7 @@ import { assetFromCommunityPost } from "@/utils/assetPreviewAdapter"
 import { communityDisplayTitle } from "@/utils/communityDisplay"
 import { resolveCommunityAuthorAvatar, resolveCommunityAuthorName, resolveCommunityPrompt } from "@/utils/communityPostNormalize"
 import { openDashboardWithAsset } from "@/utils/assetReplay"
+import { resolveCommunityAudioMedia } from "@/utils/communityAudioMedia"
 
 const route = useRoute()
 const router = useRouter()
@@ -31,6 +33,8 @@ const acting = ref(false)
 const sameStyleLoading = ref(false)
 const collecting = ref(false)
 const error = ref("")
+const audioPlaying = ref(false)
+const detailAudioRef = ref<HTMLAudioElement | null>(null)
 
 const postId = computed(() => String(route.params.postId || ""))
 const kind = computed(() => {
@@ -42,6 +46,15 @@ const kind = computed(() => {
 })
 
 const authorName = computed(() => (post.value ? resolveCommunityAuthorName(post.value) : ""))
+
+const audioMedia = computed(() => {
+  if (!post.value) return { coverUrl: "", audioUrl: "" }
+  const resolved = resolveCommunityAudioMedia(post.value)
+  return {
+    coverUrl: mediaUrl(resolved.coverUrl),
+    audioUrl: mediaUrl(resolved.audioUrl),
+  }
+})
 
 const displayTitle = computed(() => {
   if (!post.value) return ""
@@ -160,7 +173,43 @@ async function copyPrompt() {
   if (post.value?.prompt) await navigator.clipboard?.writeText(post.value.prompt)
 }
 
+function toggleDetailAudio() {
+  const audio = detailAudioRef.value
+  const source = audioMedia.value.audioUrl
+  if (!audio || !source) return
+  if (!audio.src) audio.src = source
+  if (audio.paused) {
+    void audio.play().catch(() => {
+      audioPlaying.value = false
+    })
+  } else {
+    audio.pause()
+  }
+}
+
+function onDetailAudioPlay() {
+  audioPlaying.value = true
+}
+
+function onDetailAudioPause() {
+  audioPlaying.value = false
+}
+
+watch(() => auth.token, () => void load())
+
+watch(postId, () => {
+  audioPlaying.value = false
+  if (detailAudioRef.value) {
+    detailAudioRef.value.pause()
+    detailAudioRef.value.removeAttribute("src")
+  }
+})
+
 onMounted(() => void load())
+
+onUnmounted(() => {
+  detailAudioRef.value?.pause()
+})
 </script>
 
 <template>
@@ -186,7 +235,29 @@ onMounted(() => void load())
           playsinline
           preload="metadata"
         />
-        <audio v-else-if="kind === 'audio' && mediaUrl(post.coverUrl)" :src="mediaUrl(post.coverUrl)" controls />
+        <div v-else-if="kind === 'audio'" class="audio-stage">
+          <CommunityAudioMedia
+            :cover-url="audioMedia.coverUrl"
+            :audio-url="audioMedia.audioUrl"
+            :title="displayTitle"
+            :playing="audioPlaying"
+            variant="detail"
+            @toggle-play="toggleDetailAudio"
+          />
+          <div v-if="audioMedia.audioUrl" class="audio-controls">
+            <audio
+              ref="detailAudioRef"
+              :src="audioMedia.audioUrl"
+              controls
+              preload="metadata"
+              class="audio-player"
+              @play="onDetailAudioPlay"
+              @pause="onDetailAudioPause"
+              @ended="onDetailAudioPause"
+            />
+          </div>
+          <p v-else class="audio-empty">暂无可播放的音频资源</p>
+        </div>
         <article v-else class="text-result">{{ post.prompt || post.description || displayTitle }}</article>
       </div>
 
@@ -196,12 +267,24 @@ onMounted(() => void load())
         <p v-if="post.description" class="description">{{ post.description }}</p>
 
         <div class="action-row">
-          <button type="button" :disabled="acting" :class="{ active: post.liked }" @click="toggleLike">
-            <Heart class="h-4 w-4" />
+          <button
+            type="button"
+            class="action-likes"
+            :disabled="acting"
+            :class="{ active: post.liked }"
+            @click="toggleLike"
+          >
+            <Heart class="h-4 w-4" :class="{ 'icon-filled': post.liked }" />
             {{ post.likeCount }}
           </button>
-          <button type="button" :disabled="acting" :class="{ active: post.favorited }" @click="toggleFavorite">
-            <Star class="h-4 w-4" />
+          <button
+            type="button"
+            class="action-favorites"
+            :disabled="acting"
+            :class="{ active: post.favorited }"
+            @click="toggleFavorite"
+          >
+            <Star class="h-4 w-4" :class="{ 'icon-filled': post.favorited }" />
             {{ post.favoriteCount }}
           </button>
           <button type="button" :disabled="collecting" @click="addToInspiration">
@@ -212,7 +295,12 @@ onMounted(() => void load())
             <Send class="h-4 w-4" />
             分享
           </button>
-          <a v-if="mediaUrl(post.coverUrl)" :href="mediaUrl(post.coverUrl)" download aria-label="下载作品">
+          <a
+            v-if="kind === 'audio' ? audioMedia.audioUrl : mediaUrl(post.coverUrl)"
+            :href="kind === 'audio' ? audioMedia.audioUrl : mediaUrl(post.coverUrl)"
+            download
+            aria-label="下载作品"
+          >
             <Download class="h-4 w-4" />
           </a>
         </div>
@@ -311,6 +399,31 @@ onMounted(() => void load())
   box-shadow: 0 30px 100px rgb(0 0 0 / 0.68);
 }
 
+.audio-stage {
+  display: grid;
+  gap: 20px;
+  width: min(100%, 520px);
+  justify-items: center;
+}
+
+.audio-controls {
+  width: min(100%, 520px);
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 18px;
+  background: rgb(255 255 255 / 0.04);
+  padding: 14px 16px;
+}
+
+.audio-player {
+  width: 100%;
+}
+
+.audio-empty {
+  margin: 0;
+  color: rgb(255 255 255 / 0.45);
+  font-size: 14px;
+}
+
 .text-result {
   max-width: 760px;
   border: 1px solid rgb(255 255 255 / 0.08);
@@ -354,10 +467,21 @@ onMounted(() => void load())
   margin: 22px 0;
 }
 
-.action-row .active {
-  border-color: rgb(176 92 255 / 0.46);
-  color: #fff;
-  background: rgb(176 92 255 / 0.16);
+.action-likes.active {
+  border-color: rgb(251 113 133 / 0.46);
+  color: #fb7185;
+  background: rgb(251 113 133 / 0.12);
+}
+
+.action-favorites.active {
+  border-color: rgb(251 191 36 / 0.46);
+  color: #fbbf24;
+  background: rgb(251 191 36 / 0.12);
+}
+
+.icon-filled {
+  fill: currentColor;
+  stroke: currentColor;
 }
 
 .metadata {

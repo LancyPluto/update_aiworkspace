@@ -23,6 +23,7 @@ public class VendorCodeResolver {
             Map.entry("minimax", "minimax"),
             Map.entry("minimax_speech", "minimax"),
             Map.entry("minimax_music", "minimax"),
+            Map.entry("suno_music", "suno_music"),
             Map.entry("siliconflow_images", "siliconflow"),
             Map.entry("siliconflow_speech", "siliconflow"),
             Map.entry("siliconflow_asr", "siliconflow"),
@@ -48,6 +49,7 @@ public class VendorCodeResolver {
         VENDOR_LABELS.put("moonshot", "Moonshot / Kimi");
         VENDOR_LABELS.put("anthropic", "Anthropic Claude");
         VENDOR_LABELS.put("minimax", "MiniMax");
+        VENDOR_LABELS.put("suno_music", "Suno music");
         VENDOR_LABELS.put("siliconflow", "SiliconFlow");
         VENDOR_LABELS.put("volcengine", "火山引擎 / 豆包");
         VENDOR_LABELS.put("kling", "可灵");

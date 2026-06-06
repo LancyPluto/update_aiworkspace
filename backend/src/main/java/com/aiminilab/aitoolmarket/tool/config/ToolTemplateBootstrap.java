@@ -78,6 +78,7 @@ public class ToolTemplateBootstrap {
             seedSystemTemplates();
         }
         ensureTextToSpeechTemplate();
+        ensureMusicGenerationTemplate();
     }
 
     private void backfillExecutionHandlers() {
@@ -103,6 +104,12 @@ public class ToolTemplateBootstrap {
                 UPDATE ai_tools
                 SET execution_handler = 'TEXT_TO_SPEECH'
                 WHERE tool_type = 'TEXT_TO_SPEECH'
+                  AND (execution_handler IS NULL OR execution_handler = '')
+                """);
+        executeSql("""
+                UPDATE ai_tools
+                SET execution_handler = 'MUSIC_GENERATION'
+                WHERE tool_type = 'MUSIC_GENERATION'
                   AND (execution_handler IS NULL OR execution_handler = '')
                 """);
         executeSql("""
@@ -209,6 +216,7 @@ public class ToolTemplateBootstrap {
                 )
         );
         insertTextToSpeechTemplate();
+        insertMusicGenerationTemplate();
     }
 
     private void ensureTextToSpeechTemplate() {
@@ -239,6 +247,108 @@ public class ToolTemplateBootstrap {
                         field("languageBoost", "Language boost", "select", null,
                                 options("auto", "Chinese", "English", "Japanese", "Korean"), false, 5)
                 )
+        );
+    }
+
+    private void ensureMusicGenerationTemplate() {
+        var existing = toolTemplateMapper.findByCode("music_generation_default");
+        if (existing.isEmpty()) {
+            insertMusicGenerationTemplate();
+            return;
+        }
+        upgradeMusicGenerationTemplateFields(existing.get().getId());
+    }
+
+    private void upgradeMusicGenerationTemplateFields(Long templateId) {
+        var existingKeys = toolTemplateFieldMapper.findByTemplateId(templateId).stream()
+                .map(ToolTemplateField::getFieldKey)
+                .collect(java.util.stream.Collectors.toSet());
+        if (existingKeys.contains("personaId") && existingKeys.contains("generationType")) {
+            return;
+        }
+        toolTemplateFieldMapper.deleteByTemplateId(templateId);
+        insertMusicGenerationTemplateFields(templateId);
+    }
+
+    private void insertMusicGenerationTemplate() {
+        insertTemplate(
+                "music_generation_default",
+                "Music generation",
+                ToolType.MUSIC_GENERATION,
+                ExecutionHandler.MUSIC_GENERATION,
+                ToolModality.TEXT,
+                ToolModality.AUDIO,
+                "Music generation tool: text prompt to two generated songs via a polling worker provider.",
+                null,
+                null,
+                6,
+                musicGenerationTemplateFields()
+        );
+    }
+
+    private void insertMusicGenerationTemplateFields(Long templateId) {
+        for (TemplateFieldSeed seed : musicGenerationTemplateFields()) {
+            ToolTemplateField field = new ToolTemplateField();
+            field.setTemplateId(templateId);
+            field.setFieldKey(seed.fieldKey());
+            field.setFieldName(seed.fieldName());
+            field.setFieldType(seed.fieldType());
+            field.setPlaceholder(seed.placeholder());
+            field.setOptionsJson(seed.optionsJson());
+            field.setRequired(seed.required());
+            field.setSortOrder(seed.sortOrder());
+            field.setStatus("ACTIVE");
+            toolTemplateFieldMapper.insert(field);
+        }
+    }
+
+    private List<TemplateFieldSeed> musicGenerationTemplateFields() {
+        return List.of(
+                field("generationType", "任务类型", "radio", "文生音乐或上传音频翻唱",
+                        "{\"uiTier\":\"all\",\"options\":[{\"label\":\"文生音乐\",\"value\":\"generate\"},{\"label\":\"上传翻唱\",\"value\":\"upload_cover\"}],\"defaultValue\":\"generate\"}",
+                        false, 1),
+                field("referenceAudio", "参考音频", "file", "上传 mp3/wav 等，时长 ≤8 分钟（V4_5ALL ≤1 分钟）",
+                        "{\"uiTier\":\"all\",\"uiGroup\":\"reference\",\"uiGroupLabel\":\"参考音频\",\"visibleWhen\":{\"generationType\":[\"upload_cover\"]},\"accept\":\"audio/*\"}",
+                        false, 2),
+                field("customMode", "创作模式", "radio", "常规：仅描述想法；高级：自定义歌词、风格与标题",
+                        "{\"options\":[{\"label\":\"常规\",\"value\":\"false\"},{\"label\":\"高级\",\"value\":\"true\"}],\"defaultValue\":\"false\"}",
+                        false, 3),
+                field("prompt", "音乐描述 / 歌词", "textarea", "常规：描述主题、情绪（≤500字）；高级+非纯音乐：作为歌词（≤5000字）",
+                        "{\"core\":true,\"uiTier\":\"all\",\"uiGroup\":\"lyrics\",\"uiGroupLabel\":\"歌词\",\"maxLength\":500,\"maxLengthByModel\":{\"V4\":3000,\"default\":5000},\"visibleWhen\":{\"instrumental\":[\"false\"]}}",
+                        true, 4),
+                field("instrumental", "纯音乐（无人声）", "checkbox", null,
+                        "{\"uiTier\":\"all\",\"uiGroup\":\"lyrics\",\"defaultValue\":false}",
+                        false, 5),
+                field("style", "风格 / 标签", "textarea", "例如：cinematic pop, warm piano, Mandarin ballad",
+                        "{\"uiTier\":\"advanced\",\"uiGroup\":\"styles\",\"uiGroupLabel\":\"风格\",\"visibleWhen\":{\"customMode\":[\"true\"]},\"maxLength\":1000,\"maxLengthByModel\":{\"V4\":200,\"default\":1000}}",
+                        false, 6),
+                field("title", "歌曲标题", "text", "高级模式下必填",
+                        "{\"uiTier\":\"advanced\",\"uiGroup\":\"meta\",\"uiGroupLabel\":\"基本信息\",\"visibleWhen\":{\"customMode\":[\"true\"]},\"maxLength\":100,\"maxLengthByModel\":{\"V4\":80,\"V4_5ALL\":80,\"default\":100}}",
+                        false, 7),
+                field("model", "Suno 模型", "select", null,
+                        "{\"uiTier\":\"all\",\"uiGroup\":\"meta\",\"options\":[{\"label\":\"V5.5（推荐）\",\"value\":\"V5_5\"},{\"label\":\"V5\",\"value\":\"V5\"},{\"label\":\"V4.5+\",\"value\":\"V4_5PLUS\"},{\"label\":\"V4.5-all\",\"value\":\"V4_5ALL\"},{\"label\":\"V4.5\",\"value\":\"V4_5\"},{\"label\":\"V4\",\"value\":\"V4\"}],\"defaultValue\":\"V5_5\"}",
+                        false, 8),
+                field("negativeTags", "负面标签", "text", "例如：noise, low quality, distorted vocal",
+                        "{\"uiTier\":\"advanced\",\"uiGroup\":\"more\",\"uiGroupLabel\":\"更多选项\",\"visibleWhen\":{\"customMode\":[\"true\"]}}",
+                        false, 9),
+                field("vocalGender", "人声性别", "radio", null,
+                        "{\"uiTier\":\"advanced\",\"uiGroup\":\"more\",\"options\":[{\"label\":\"自动\",\"value\":\"auto\"},{\"label\":\"男声\",\"value\":\"m\"},{\"label\":\"女声\",\"value\":\"f\"}],\"defaultValue\":\"auto\",\"visibleWhen\":{\"customMode\":[\"true\"],\"instrumental\":[\"false\"]}}",
+                        false, 10),
+                field("styleWeight", "风格权重", "slider", "0.65",
+                        "{\"uiTier\":\"advanced\",\"uiGroup\":\"more\",\"slider\":{\"min\":0,\"max\":1,\"step\":0.01},\"defaultValue\":0.65,\"visibleWhen\":{\"customMode\":[\"true\"]}}",
+                        false, 11),
+                field("weirdnessConstraint", "创意发散", "slider", "0.65",
+                        "{\"uiTier\":\"advanced\",\"uiGroup\":\"more\",\"slider\":{\"min\":0,\"max\":1,\"step\":0.01},\"defaultValue\":0.65,\"visibleWhen\":{\"customMode\":[\"true\"]}}",
+                        false, 12),
+                field("audioWeight", "音频权重", "slider", "翻唱时控制原曲保留程度；0.65",
+                        "{\"uiTier\":\"advanced\",\"uiGroup\":\"more\",\"slider\":{\"min\":0,\"max\":1,\"step\":0.01},\"defaultValue\":0.65,\"visibleWhen\":{\"customMode\":[\"true\"]}}",
+                        false, 13),
+                field("personaId", "Persona / 声线 ID", "text", "Generate Persona 或 Suno Voice 返回的 ID",
+                        "{\"uiTier\":\"advanced\",\"uiGroup\":\"more\",\"visibleWhen\":{\"customMode\":[\"true\"]}}",
+                        false, 14),
+                field("personaModel", "Persona 类型", "select", null,
+                        "{\"uiTier\":\"advanced\",\"uiGroup\":\"more\",\"options\":[{\"label\":\"风格 Persona\",\"value\":\"style_persona\"},{\"label\":\"Voice Persona（V5/V5.5）\",\"value\":\"voice_persona\"}],\"defaultValue\":\"style_persona\",\"visibleWhen\":{\"customMode\":[\"true\"]}}",
+                        false, 15)
         );
     }
 

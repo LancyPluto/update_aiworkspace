@@ -256,7 +256,7 @@ public class ToolTemplateServiceImpl implements ToolTemplateService {
     private ToolModality defaultOutput(ToolType toolType) {
         return switch (toolType) {
             case IMAGE_GENERATION, IMAGE_TO_IMAGE -> ToolModality.IMAGE;
-            case TEXT_TO_SPEECH -> ToolModality.AUDIO;
+            case TEXT_TO_SPEECH, MUSIC_GENERATION -> ToolModality.AUDIO;
             case VIDEO_GENERATION -> ToolModality.VIDEO;
             case EMBEDDING, RERANK -> ToolModality.JSON;
             default -> ToolModality.TEXT;

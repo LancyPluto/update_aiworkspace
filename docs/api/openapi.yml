@@ -2362,7 +2362,7 @@ components:
           nullable: true
         toolType:
           type: string
-          enum: [TEXT_GENERATION, IMAGE_GENERATION, VIDEO_GENERATION, AUDIO_GENERATION, DIGITAL_HUMAN]
+          enum: [TEXT_GENERATION, IMAGE_GENERATION, MUSIC_GENERATION, VIDEO_GENERATION, AUDIO_GENERATION, DIGITAL_HUMAN]
           example: TEXT_GENERATION
         inputModality:
           type: string
@@ -2486,7 +2486,7 @@ components:
           nullable: true
         toolType:
           type: string
-          enum: [TEXT_GENERATION, IMAGE_GENERATION, VIDEO_GENERATION, AUDIO_GENERATION, DIGITAL_HUMAN]
+          enum: [TEXT_GENERATION, IMAGE_GENERATION, MUSIC_GENERATION, VIDEO_GENERATION, AUDIO_GENERATION, DIGITAL_HUMAN]
         inputModality:
           type: string
           enum: [TEXT, IMAGE, AUDIO, VIDEO, FILE, MULTIMODAL]
@@ -3313,7 +3313,7 @@ components:
           type: string
         toolType:
           type: string
-          enum: [TEXT_GENERATION, IMAGE_GENERATION, VIDEO_GENERATION, AUDIO_GENERATION, DIGITAL_HUMAN]
+          enum: [TEXT_GENERATION, IMAGE_GENERATION, MUSIC_GENERATION, VIDEO_GENERATION, AUDIO_GENERATION, DIGITAL_HUMAN]
         inputModality:
           type: string
           enum: [TEXT, IMAGE, AUDIO, VIDEO, FILE, MULTIMODAL]

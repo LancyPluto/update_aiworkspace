@@ -4,6 +4,7 @@ import { useRoute, useRouter } from "vue-router"
 import {
   Heart,
   Loader2,
+  Music,
   RefreshCcw,
   Search,
   Sparkles,
@@ -12,6 +13,7 @@ import {
   Wand2,
   X,
 } from "lucide-vue-next"
+import CommunityAudioMedia from "@/components/community/CommunityAudioMedia.vue"
 import { ApiBusinessError, getApiOrigin } from "@/api/client"
 import {
   addCommunityCollectionItem,
@@ -37,6 +39,7 @@ import { useAuthStore } from "@/store/authStore"
 import { assetFromCommunityPost } from "@/utils/assetPreviewAdapter"
 import { openDashboardWithAsset } from "@/utils/assetReplay"
 import { communityDisplayTitle, promptExcerpt } from "@/utils/communityDisplay"
+import { hasCommunityAudioMedia, resolveCommunityAudioMedia } from "@/utils/communityAudioMedia"
 import { resolveCommunityAuthorAvatar, resolveCommunityAuthorName, resolveCommunityPrompt } from "@/utils/communityPostNormalize"
 
 const router = useRouter()
@@ -63,6 +66,9 @@ const sameStyleLoadingId = ref<number | null>(null)
 const actingPostId = ref<number | null>(null)
 const defaultCollectionId = ref<number | null>(null)
 const loadSentinelRef = ref<HTMLElement | null>(null)
+const playingPostId = ref<number | null>(null)
+const galleryAudioPlaying = ref(false)
+const galleryAudioRef = ref<HTMLAudioElement | null>(null)
 let loadObserver: IntersectionObserver | null = null
 
 const modalityFilters = [
@@ -136,7 +142,49 @@ function patchPost(updated: CommunityPost) {
 }
 
 function hasMediaCover(post: CommunityPost) {
+  if (postKind(post) === "audio") return hasCommunityAudioMedia(post)
   return Boolean(mediaUrl(post.coverUrl)) && postKind(post) !== "text"
+}
+
+function audioMedia(post: CommunityPost) {
+  const resolved = resolveCommunityAudioMedia(post)
+  return {
+    coverUrl: mediaUrl(resolved.coverUrl),
+    audioUrl: mediaUrl(resolved.audioUrl),
+  }
+}
+
+function toggleCardAudio(post: CommunityPost, event: Event) {
+  event.stopPropagation()
+  const { audioUrl } = audioMedia(post)
+  if (!audioUrl) return
+
+  if (playingPostId.value === post.id && galleryAudioPlaying.value) {
+    galleryAudioRef.value?.pause()
+    return
+  }
+
+  playingPostId.value = post.id
+  const audio = galleryAudioRef.value
+  if (!audio) return
+  audio.src = audioUrl
+  void audio.play().catch(() => {
+    playingPostId.value = null
+    galleryAudioPlaying.value = false
+  })
+}
+
+function onGalleryAudioPlay() {
+  galleryAudioPlaying.value = true
+}
+
+function onGalleryAudioEnded() {
+  playingPostId.value = null
+  galleryAudioPlaying.value = false
+}
+
+function onGalleryAudioPause() {
+  galleryAudioPlaying.value = false
 }
 
 function findScrollRoot(el: HTMLElement | null): Element | null {
@@ -352,9 +400,10 @@ function setupLoadObserver() {
 watch([modality, sort, featuredOnly, topic], () => void load(true))
 watch(
   () => auth.token,
-  (token) => {
+  (token, prev) => {
     defaultCollectionId.value = null
     if (token) void resolveDefaultCollectionId()
+    if (token !== prev) void load(true)
   },
 )
 watch([posts, hasNext, loading, loadingMore], async () => {
@@ -538,6 +587,15 @@ onUnmounted(() => {
                   preload="metadata"
                   loading="lazy"
                 />
+                <div v-else-if="hasMediaCover(post) && postKind(post) === 'audio'" class="thumb-audio">
+                  <CommunityAudioMedia
+                    :cover-url="audioMedia(post).coverUrl"
+                    :audio-url="audioMedia(post).audioUrl"
+                    :playing="playingPostId === post.id && galleryAudioPlaying"
+                    variant="card"
+                    @toggle-play="toggleCardAudio(post, $event)"
+                  />
+                </div>
                 <div v-else class="thumb-text">
                   <p>{{ cardDescription(post) || postTitle(post) }}</p>
                 </div>
@@ -545,6 +603,10 @@ onUnmounted(() => {
                 <span v-if="post.featured" class="featured-badge">
                   <Sparkles class="h-3 w-3" />
                   精选
+                </span>
+                <span v-if="postKind(post) === 'audio'" class="modality-badge">
+                  <Music class="h-3 w-3" />
+                  音乐
                 </span>
               </div>
 
@@ -612,6 +674,15 @@ onUnmounted(() => {
         正在加载更多作品
       </div>
     </template>
+
+    <audio
+      ref="galleryAudioRef"
+      class="gallery-audio-player"
+      preload="metadata"
+      @play="onGalleryAudioPlay"
+      @ended="onGalleryAudioEnded"
+      @pause="onGalleryAudioPause"
+    />
   </div>
 </template>
 
@@ -874,6 +945,32 @@ onUnmounted(() => {
   height: auto;
   max-width: 100%;
   vertical-align: top;
+}
+
+.thumb-audio {
+  display: block;
+  width: 100%;
+}
+
+.gallery-audio-player {
+  display: none;
+}
+
+.modality-badge {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 999px;
+  background: rgb(0 0 0 / 0.52);
+  color: rgb(255 255 255 / 0.88);
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  backdrop-filter: blur(8px);
 }
 
 .thumb-text {

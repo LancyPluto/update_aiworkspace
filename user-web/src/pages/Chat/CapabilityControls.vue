@@ -2,11 +2,18 @@
 import { computed, ref, watch } from "vue"
 import type { Capability } from "@/api/aiToolTypes"
 import type { TaskDetail, ToolField } from "@/api/types"
-import { uploadChatFile } from "@/api/aiToolApi"
+import { uploadToolFile } from "@/api/toolApi"
 import { getApiOrigin } from "@/api/client"
 import { fetchTasks } from "@/api/taskApi"
 import { useAuthStore } from "@/store/authStore"
-import { buildTaskResultBlocks } from "@/utils/taskResultBlocks"
+import { buildTaskResultBlocks, resolveAudioTracks } from "@/utils/taskResultBlocks"
+import {
+  defaultFieldValue as resolveDefaultFieldValue,
+  fieldOptionsFromMeta,
+  filterFieldsForUi,
+  parseFieldMeta,
+  resolveMaxLength,
+} from "@/utils/fieldUiMeta"
 import { FileAudio, FileVideo, ImageIcon, ImageUp, Library, Loader2, Mic, Paperclip, UploadCloud, X } from "lucide-vue-next"
 import { BookOpen } from 'lucide-vue-next'
 
@@ -41,6 +48,17 @@ interface MaterialAsset {
   previewUrl?: string
 }
 
+interface UploadHistoryItem {
+  id: string
+  kind: MaterialKind
+  url: string
+  name: string
+  size?: number
+  type?: string
+  uploadedAt: string
+  toolId?: string | null
+}
+
 const props = defineProps<{
   capabilities: Capability[]
   fields?: ToolField[]
@@ -60,13 +78,22 @@ const materialPickerField = ref<ToolField | null>(null)
 const materialLoading = ref(false)
 const materialError = ref("")
 const materialAssets = ref<MaterialAsset[]>([])
+const uploadHistoryOpen = ref(false)
+const uploadHistoryField = ref<ToolField | null>(null)
+const uploadHistoryItems = ref<UploadHistoryItem[]>([])
+const uploadHistoryUploading = ref(false)
+
+const UPLOAD_HISTORY_LIMIT = 60
 
 function isAspectRatioField(field: ToolField): boolean {
   return field.fieldKey === "aspectRatio" || field.fieldKey === "aspect_ratio" || field.fieldKey === "imageRatio"
 }
 
 const configuredFields = computed(() =>
-  (props.fields || []).filter((field) => field.fieldKey !== props.coreFieldKey && !isAspectRatioField(field)),
+  filterFieldsForUi(props.fields || [], state.value.fields, {
+    excludeCore: true,
+    coreFieldKey: props.coreFieldKey,
+  }).filter((field) => !isAspectRatioField(field)),
 )
 const imageCapability = computed(() => props.capabilities.find((c) => c.type === "imageGeneration"))
 const fileCapability = computed(() => props.capabilities.find((c) => c.type === "fileReading"))
@@ -74,6 +101,7 @@ const webSearchCapability = computed(() => props.capabilities.find((c) => c.type
 const codeCapability = computed(() => props.capabilities.find((c) => c.type === "codeExecution"))
 const voiceCapability = computed(() => props.capabilities.find((c) => c.type === "voiceInput"))
 const activeMaterialKind = computed(() => (materialPickerField.value ? materialKindForField(materialPickerField.value) : "file"))
+const activeUploadKind = computed(() => (uploadHistoryField.value ? materialKindForField(uploadHistoryField.value) : "file"))
 const ratioField = computed(() => (props.fields || []).find(isAspectRatioField))
 const hasAspectRatioControl = computed(() => Boolean(imageCapability.value || ratioField.value))
 
@@ -106,27 +134,11 @@ function optionValue(option: FieldOption): string {
 }
 
 function fieldOptions(field: ToolField): FieldOption[] {
-  if (Array.isArray(field.options)) return field.options
-  if (!field.optionsJson) return []
-  try {
-    const parsed = JSON.parse(field.optionsJson) as unknown
-    const rows = Array.isArray(parsed)
-      ? parsed
-      : parsed && typeof parsed === "object" && Array.isArray((parsed as { options?: unknown }).options)
-        ? (parsed as { options: unknown[] }).options
-        : []
-    return rows.filter((item): item is FieldOption => typeof item === "string" || Boolean(item && typeof item === "object"))
-  } catch {
-    return []
-  }
+  return fieldOptionsFromMeta(field)
 }
 
 function defaultFieldValue(field: ToolField): unknown {
-  const options = fieldOptions(field)
-  if ((field.fieldType === "select" || field.fieldType === "radio") && options.length) return optionValue(options[0])
-  if (field.fieldType === "checkbox") return false
-  if (field.fieldType === "slider") return 50
-  return ""
+  return resolveDefaultFieldValue(field)
 }
 
 function buildDefaultState(): CapabilityState {
@@ -162,6 +174,22 @@ watch(
   () => [props.capabilities, props.fields, props.coreFieldKey, props.initialParams],
   () => resetState(),
   { immediate: true, deep: true },
+)
+
+watch(
+  configuredFields,
+  (fields) => {
+    const next = { ...state.value.fields }
+    let changed = false
+    for (const field of fields) {
+      if (!(field.fieldKey in next)) {
+        next[field.fieldKey] = defaultFieldValue(field)
+        changed = true
+      }
+    }
+    if (changed) state.value.fields = next
+  },
+  { deep: true },
 )
 
 function strField(key: string): string {
@@ -204,6 +232,79 @@ function materialKindLabel(kind: MaterialKind): string {
   if (kind === "video") return "视频"
   if (kind === "audio") return "音频"
   return "素材"
+}
+
+function formatUploadSize(size?: number): string {
+  if (!size || !Number.isFinite(size)) return ""
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
+  return `${(size / 1024 / 1024).toFixed(1)} MB`
+}
+
+function uploadHistoryStorageKey(kind: MaterialKind): string {
+  const userId = auth.user?.id ?? "guest"
+  return `ai_tool_market_upload_history:${userId}:${kind}`
+}
+
+function readUploadHistory(kind: MaterialKind): UploadHistoryItem[] {
+  if (typeof window === "undefined") return []
+  try {
+    const raw = window.localStorage.getItem(uploadHistoryStorageKey(kind))
+    if (!raw) return []
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .filter((item): item is UploadHistoryItem => Boolean(item && typeof item === "object" && typeof (item as UploadHistoryItem).url === "string"))
+      .slice(0, UPLOAD_HISTORY_LIMIT)
+  } catch {
+    return []
+  }
+}
+
+function writeUploadHistory(kind: MaterialKind, items: UploadHistoryItem[]) {
+  if (typeof window === "undefined") return
+  window.localStorage.setItem(uploadHistoryStorageKey(kind), JSON.stringify(items.slice(0, UPLOAD_HISTORY_LIMIT)))
+}
+
+function rememberUploadHistoryItem(field: ToolField, item: UploadHistoryItem) {
+  const kind = materialKindForField(field)
+  const existing = readUploadHistory(kind).filter((entry) => entry.url !== item.url)
+  writeUploadHistory(kind, [{ ...item, kind }, ...existing])
+  if (uploadHistoryOpen.value && uploadHistoryField.value?.fieldKey === field.fieldKey) {
+    uploadHistoryItems.value = readUploadHistory(kind)
+  }
+}
+
+function openUploadHistoryPicker(field: ToolField) {
+  uploadHistoryField.value = field
+  uploadHistoryItems.value = readUploadHistory(materialKindForField(field))
+  uploadHistoryOpen.value = true
+}
+
+function closeUploadHistoryPicker() {
+  uploadHistoryOpen.value = false
+  uploadHistoryField.value = null
+  uploadHistoryUploading.value = false
+}
+
+function selectUploadHistoryItem(item: UploadHistoryItem) {
+  const field = uploadHistoryField.value
+  if (!field) return
+  setField(field.fieldKey, item.url)
+  fieldUploads.value = {
+    ...fieldUploads.value,
+    [field.fieldKey]: { uploading: false, fileName: item.name },
+  }
+  closeUploadHistoryPicker()
+}
+
+function deleteUploadHistoryItem(item: UploadHistoryItem) {
+  const field = uploadHistoryField.value
+  const kind = field ? materialKindForField(field) : item.kind
+  const next = readUploadHistory(kind).filter((entry) => entry.id !== item.id && entry.url !== item.url)
+  writeUploadHistory(kind, next)
+  uploadHistoryItems.value = next
+  if (field && strField(field.fieldKey) === item.url) clearUploadedField(field)
 }
 
 function uploadAccept(field: ToolField): string | undefined {
@@ -250,12 +351,15 @@ function createMaterialAssets(task: TaskDetail, targetKind: MaterialKind): Mater
         subtitle,
       })
     } else if (block.type === "audio" && (targetKind === "audio" || targetKind === "file")) {
-      assets.push({
-        id: `${task.taskId}-audio`,
-        kind: "audio",
-        url: block.url,
-        title: block.title || taskTitle,
-        subtitle,
+      resolveAudioTracks(block).forEach((track, index) => {
+        assets.push({
+          id: `${task.taskId}-audio-${index}`,
+          kind: "audio",
+          url: track.url,
+          previewUrl: track.coverUrl || track.url,
+          title: track.title || block.title || taskTitle,
+          subtitle,
+        })
       })
     }
   }
@@ -306,20 +410,35 @@ function selectMaterialAsset(asset: MaterialAsset) {
   closeMaterialPicker()
 }
 
-async function handleFieldUpload(field: ToolField, files: FileList | File[] | null) {
-  const file = files?.[0]
-  if (!file) return
+async function uploadFieldFile(field: ToolField, file: File, options: { closeHistoryAfterUpload?: boolean } = {}) {
+  if (uploadHistoryOpen.value && uploadHistoryField.value?.fieldKey === field.fieldKey) {
+    uploadHistoryUploading.value = true
+  }
+  const kind = materialKindForField(field)
+  const startedAt = new Date().toISOString()
+  const fallbackId = `${Date.now()}-${Math.random().toString(16).slice(2)}`
   fieldUploads.value = {
     ...fieldUploads.value,
     [field.fieldKey]: { uploading: true, fileName: file.name },
   }
   try {
-    const result = await uploadChatFile(file, { token: auth.token, toolId: props.toolId })
+    const result = await uploadToolFile(file, { token: auth.token })
     setField(field.fieldKey, result.url)
+    rememberUploadHistoryItem(field, {
+      id: result.fileId || fallbackId,
+      kind,
+      url: result.url,
+      name: file.name,
+      size: file.size,
+      type: file.type,
+      uploadedAt: startedAt,
+      toolId: props.toolId,
+    })
     fieldUploads.value = {
       ...fieldUploads.value,
       [field.fieldKey]: { uploading: false, fileName: file.name },
     }
+    if (options.closeHistoryAfterUpload) closeUploadHistoryPicker()
   } catch (err) {
     fieldUploads.value = {
       ...fieldUploads.value,
@@ -329,7 +448,28 @@ async function handleFieldUpload(field: ToolField, files: FileList | File[] | nu
         error: (err as Error).message || "上传失败",
       },
     }
+  } finally {
+    uploadHistoryUploading.value = false
   }
+}
+
+async function handleFieldUpload(field: ToolField, files: FileList | File[] | null) {
+  const file = files?.[0]
+  if (!file) return
+  await uploadFieldFile(field, file)
+}
+
+async function handleUploadHistoryFile(files: FileList | File[] | null) {
+  const field = uploadHistoryField.value
+  const file = files?.[0]
+  if (!field || !file) return
+  await uploadFieldFile(field, file, { closeHistoryAfterUpload: true })
+}
+
+function onUploadHistoryFileChange(event: Event) {
+  const input = event.target as HTMLInputElement
+  void handleUploadHistoryFile(input.files)
+  input.value = ""
 }
 
 function clearUploadedField(field: ToolField) {
@@ -339,6 +479,15 @@ function clearUploadedField(field: ToolField) {
   fieldUploads.value = next
 }
 
+function sliderConfig(field: ToolField) {
+  return parseFieldMeta(field).slider || { min: 0, max: 1, step: 0.01 }
+}
+
+function onSliderInput(field: ToolField, event: Event) {
+  const value = Number((event.target as HTMLInputElement).value)
+  setField(field.fieldKey, value)
+}
+
 function onNumberInput(key: string, event: Event) {
   const value = (event.target as HTMLInputElement).value
   setField(key, value === "" ? "" : Number(value))
@@ -346,8 +495,13 @@ function onNumberInput(key: string, event: Event) {
 
 function validate(): { valid: boolean; message?: string } {
   for (const field of configuredFields.value) {
-    if (!field.required) continue
     const value = state.value.fields[field.fieldKey]
+    const maxLength = resolveMaxLength(field, state.value.fields)
+    if (maxLength !== undefined && typeof value === "string" && value.length > maxLength) {
+      return { valid: false, message: `${field.fieldName} 超出 ${maxLength} 字限制` }
+    }
+    if (!field.required) continue
+    if (field.fieldType === "checkbox") continue
     if (value === undefined || value === null || String(value).trim() === "") {
       return { valid: false, message: `请填写：${field.fieldName}` }
     }
@@ -423,8 +577,28 @@ defineExpose({
           {{ field.fieldName }}<span v-if="field.required" class="text-destructive"> *</span>
         </label>
 
+        <div
+          v-if="(field.fieldType === 'select' || field.fieldType === 'radio') && fieldOptions(field).length && field.fieldType === 'radio'"
+          class="flex flex-wrap gap-1"
+        >
+          <button
+            v-for="option in fieldOptions(field)"
+            :key="optionValue(option)"
+            type="button"
+            class="rounded-lg border px-2 py-1 text-[11px] transition"
+            :class="
+              strField(field.fieldKey) === optionValue(option)
+                ? 'border-primary bg-primary/10 text-primary'
+                : 'border-border/60 bg-background text-muted-foreground hover:text-foreground'
+            "
+            @click="setField(field.fieldKey, optionValue(option))"
+          >
+            {{ optionLabel(option) }}
+          </button>
+        </div>
+
         <select
-          v-if="(field.fieldType === 'select' || field.fieldType === 'radio') && fieldOptions(field).length"
+          v-else-if="(field.fieldType === 'select' || field.fieldType === 'radio') && fieldOptions(field).length"
           :value="strField(field.fieldKey)"
           class="h-7 w-full rounded-lg border border-border/60 bg-background px-2 text-xs"
           @change="setField(field.fieldKey, ($event.target as HTMLSelectElement).value)"
@@ -434,8 +608,21 @@ defineExpose({
           </option>
         </select>
 
+        <div v-else-if="field.fieldType === 'slider'" class="space-y-1">
+          <input
+            type="range"
+            :min="sliderConfig(field).min"
+            :max="sliderConfig(field).max"
+            :step="sliderConfig(field).step"
+            :value="Number(state.fields[field.fieldKey] ?? sliderConfig(field).min)"
+            class="w-full accent-primary"
+            @input="onSliderInput(field, $event)"
+          />
+          <span class="text-[10px] text-muted-foreground">{{ state.fields[field.fieldKey] ?? sliderConfig(field).min }}</span>
+        </div>
+
         <input
-          v-else-if="field.fieldType === 'number' || field.fieldType === 'slider'"
+          v-else-if="field.fieldType === 'number'"
           type="number"
           :value="strField(field.fieldKey)"
           :placeholder="field.placeholder || ''"
@@ -462,25 +649,19 @@ defineExpose({
             @dragover.prevent
             @drop.prevent="handleFieldUpload(field, ($event as DragEvent).dataTransfer?.files || null)"
           >
-<label
+<div
   class="flex h-8 min-w-0 flex-1 items-center justify-between rounded-lg border border-border/60 bg-background px-3 text-xs text-muted-foreground transition"
 >
-  <!-- 左侧：本地上传 → 只在这里加 hover 文字 + 鼠标小手 -->
-  <div
-    class="cursor-pointer flex items-center"
-    title="从本地文件上传"
+  <button
+    type="button"
+    class="flex cursor-pointer items-center rounded-md px-1 py-1 transition hover:text-primary"
+    :title="`选择或上传${materialKindLabel(materialKindForField(field))}`"
+    @click="openUploadHistoryPicker(field)"
   >
-    <input
-      type="file"
-      class="hidden"
-      :accept="uploadAccept(field)"
-      @change="handleFieldUpload(field, ($event.target as HTMLInputElement).files)"
-    />
-
     <Loader2 v-if="uploadState(field.fieldKey).uploading" class="h-3.5 w-3.5 animate-spin text-primary" />
     <ImageUp v-else-if="materialKindForField(field) === 'image'" class="h-3.5 w-3.5" />
     <UploadCloud v-else class="h-3.5 w-3.5" />
-  </div>
+  </button>
 
   <span class="text-muted-foreground"> | </span>
 
@@ -493,7 +674,7 @@ defineExpose({
   >
     <BookOpen class="h-3.5 w-3.5" />
   </button>
-</label>
+</div>
            
           </div>
           <div v-if="strField(field.fieldKey)" class="flex items-center gap-1">
@@ -572,6 +753,92 @@ defineExpose({
     </div>
 
     <Teleport to="body">
+      <div
+        v-if="uploadHistoryOpen"
+        class="fixed inset-0 z-[125] flex items-start justify-center bg-black/65 px-4 pb-8 pt-[9vh] backdrop-blur-sm"
+        @click.self="closeUploadHistoryPicker"
+      >
+        <div class="flex max-h-[82vh] w-full max-w-4xl flex-col overflow-hidden rounded-3xl border border-white/10 bg-[#111217] text-white shadow-[0_28px_100px_rgb(0_0_0_/_0.72)]">
+          <div class="flex flex-wrap items-center justify-between gap-4 border-b border-white/10 px-6 py-5">
+            <div>
+              <h3 class="text-lg font-semibold text-white">
+                上传{{ materialKindLabel(activeUploadKind) }}
+              </h3>
+              <p class="mt-1 text-sm text-white/45">
+                先选择上传历史，或上传新的参考{{ materialKindLabel(activeUploadKind) }}。
+              </p>
+            </div>
+            <div class="flex items-center gap-2">
+              <label
+                class="inline-flex h-10 cursor-pointer items-center gap-2 rounded-full bg-primary px-4 text-sm font-semibold text-white shadow-[0_12px_32px_rgb(176_92_255_/_0.28)] transition hover:brightness-110"
+              >
+                <Loader2 v-if="uploadHistoryUploading" class="h-4 w-4 animate-spin" />
+                <UploadCloud v-else class="h-4 w-4" />
+                上传新文件
+                <input
+                  type="file"
+                  class="hidden"
+                  :accept="uploadHistoryField ? uploadAccept(uploadHistoryField) : undefined"
+                  :disabled="uploadHistoryUploading"
+                  @change="onUploadHistoryFileChange"
+                />
+              </label>
+              <button
+                type="button"
+                class="rounded-full p-2 text-white/45 transition hover:bg-white/10 hover:text-white"
+                @click="closeUploadHistoryPicker"
+              >
+                <X class="h-5 w-5" />
+              </button>
+            </div>
+          </div>
+
+          <div class="min-h-[260px] overflow-y-auto p-6">
+            <div v-if="uploadHistoryItems.length === 0" class="flex h-56 flex-col items-center justify-center text-center text-sm text-white/45">
+              <UploadCloud class="mb-3 h-8 w-8 text-white/25" />
+              <p>还没有上传历史</p>
+              <p class="mt-1 text-xs text-white/32">上传一次后，下次可以直接复用同一张参考图。</p>
+            </div>
+            <div v-else class="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-4">
+              <article
+                v-for="item in uploadHistoryItems"
+                :key="item.id"
+                class="group overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04] transition hover:-translate-y-0.5 hover:border-primary/60 hover:bg-white/[0.07]"
+              >
+                <button type="button" class="block w-full text-left" @click="selectUploadHistoryItem(item)">
+                  <div class="flex aspect-[4/3] items-center justify-center bg-white/[0.04]">
+                    <img
+                      v-if="item.kind === 'image'"
+                      :src="normalizeResourceUrl(item.url)"
+                      alt=""
+                      class="h-full w-full object-cover"
+                    />
+                    <FileVideo v-else-if="item.kind === 'video'" class="h-9 w-9 text-white/35 group-hover:text-primary" />
+                    <FileAudio v-else-if="item.kind === 'audio'" class="h-9 w-9 text-white/35 group-hover:text-primary" />
+                    <ImageIcon v-else class="h-9 w-9 text-white/35 group-hover:text-primary" />
+                  </div>
+                  <div class="space-y-1.5 p-4">
+                    <p class="truncate text-sm font-semibold text-white">{{ item.name }}</p>
+                    <p class="truncate text-xs text-white/40">
+                      {{ formatUploadSize(item.size) || item.type || "已上传" }}
+                    </p>
+                  </div>
+                </button>
+                <div class="border-t border-white/8 px-4 py-2">
+                  <button
+                    type="button"
+                    class="text-xs text-white/40 transition hover:text-red-300"
+                    @click="deleteUploadHistoryItem(item)"
+                  >
+                    删除历史
+                  </button>
+                </div>
+              </article>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div
         v-if="materialPickerOpen"
         class="fixed inset-0 z-[120] flex items-start justify-center bg-black/65 px-4 pb-8 pt-[9vh] backdrop-blur-sm"

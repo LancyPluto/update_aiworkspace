@@ -28,6 +28,7 @@ const emit = defineEmits<{
 
 const router = useRouter()
 const mediaUrl = computed(() => normalizeMediaUrl(props.asset.url))
+const coverUrl = computed(() => normalizeMediaUrl(props.asset.coverUrl))
 const showFeaturedBadge = computed(() => Boolean(props.asset.featured || props.asset.pinned))
 const featuredBadgeText = computed(() => (props.asset.pinned ? "置顶" : "精选"))
 const showCreator = computed(() => Boolean(props.gallery && props.source === "community" && props.asset.authorUserId))
@@ -93,11 +94,21 @@ function openAuthorProfile() {
         playsinline
         preload="metadata"
       />
-      <div v-else-if="asset.kind === 'audio'" class="audio-cover">
-        <div class="icon-bubble">
-          <Music class="h-6 w-6" />
+      <div v-else-if="asset.kind === 'audio'" class="audio-cover" :class="{ 'has-cover': Boolean(coverUrl) }">
+        <img
+          v-if="coverUrl"
+          :src="coverUrl"
+          :alt="asset.title"
+          class="audio-cover-image"
+          loading="lazy"
+        />
+        <div class="audio-cover-body">
+          <div v-if="!coverUrl" class="icon-bubble">
+            <Music class="h-6 w-6" />
+          </div>
+          <p v-if="coverUrl" class="audio-cover-title">{{ asset.title }}</p>
+          <audio v-if="mediaUrl" :src="mediaUrl" controls preload="metadata" class="w-full" @click.stop />
         </div>
-        <audio v-if="mediaUrl" :src="mediaUrl" controls preload="metadata" class="w-full" @click.stop />
       </div>
       <div v-else class="text-cover">
         <FileText class="h-6 w-6 text-white/35" />
@@ -322,12 +333,53 @@ function openAuthorProfile() {
 
 .audio-cover,
 .text-cover {
+  position: relative;
   display: grid;
   gap: 16px;
   min-height: 230px;
-  align-content: center;
+  align-content: end;
   padding: 48px 20px 22px;
   color: rgb(255 255 255 / 0.72);
+}
+
+.audio-cover.has-cover {
+  min-height: 280px;
+  padding: 0;
+  align-content: stretch;
+}
+
+.audio-cover-image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.audio-cover-body {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 12px;
+  margin-top: auto;
+  padding: 16px;
+  background: linear-gradient(180deg, rgb(0 0 0 / 0) 0%, rgb(0 0 0 / 0.72) 58%, rgb(0 0 0 / 0.88) 100%);
+}
+
+.audio-cover-title {
+  margin: 0;
+  overflow: hidden;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compact .audio-cover.has-cover,
+.gallery .audio-cover.has-cover {
+  min-height: 100%;
 }
 
 .text-cover p {

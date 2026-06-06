@@ -26,6 +26,8 @@ import com.aiminilab.aitoolmarket.user.entity.User;
 import com.aiminilab.aitoolmarket.user.mapper.UserMapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -64,6 +66,30 @@ public class CommunityServiceImpl implements CommunityService {
         this.taskMapper = taskMapper;
         this.userMapper = userMapper;
         this.objectMapper = objectMapper;
+    }
+
+    @EventListener(ApplicationReadyEvent.class)
+    public void backfillAudioMediaUrls() {
+        for (CommunityPost post : postMapper.findAudioPostsNeedingMediaBackfill()) {
+            if (post.getTaskId() == null) {
+                continue;
+            }
+            String resultText = taskMapper.findFirstResult(post.getTaskId())
+                    .map(result -> result.contentText())
+                    .orElse(null);
+            if (resultText == null || resultText.isBlank()) {
+                continue;
+            }
+            AudioMediaRefs media = extractAudioMedia(resultText);
+            if (media.mediaUrl() == null && media.coverUrl() == null) {
+                continue;
+            }
+            String coverUrl = media.coverUrl() != null ? media.coverUrl() : post.getCoverUrl();
+            if (coverUrl == null || coverUrl.isBlank()) {
+                coverUrl = media.mediaUrl();
+            }
+            postMapper.updateAudioMedia(post.getId(), coverUrl, media.mediaUrl());
+        }
     }
 
     @Override
@@ -513,8 +539,16 @@ public class CommunityServiceImpl implements CommunityService {
         CommunityPost post = new CommunityPost();
         post.setUserId(task.getUserId());
         post.setTaskId(task.getId());
-        post.setModality(resolveModality(task, resultType));
-        post.setCoverUrl(extractCoverUrl(resultText));
+        String modality = resolveModality(task, resultType);
+        post.setModality(modality);
+        if ("AUDIO".equalsIgnoreCase(modality)) {
+            AudioMediaRefs audioMedia = extractAudioMedia(resultText);
+            post.setCoverUrl(audioMedia.coverUrl() != null ? audioMedia.coverUrl() : audioMedia.mediaUrl());
+            post.setMediaUrl(audioMedia.mediaUrl());
+        } else {
+            post.setCoverUrl(extractCoverUrl(resultText));
+            post.setMediaUrl(null);
+        }
         post.setTitle(normalizeTitle(title, task.getToolName()));
         post.setDescription(normalizeDescription(description));
         post.setPromptVisible(promptVisible);
@@ -1031,6 +1065,63 @@ public class CommunityServiceImpl implements CommunityService {
         return out;
     }
 
+    private record AudioMediaRefs(String coverUrl, String mediaUrl) {}
+
+    private AudioMediaRefs extractAudioMedia(String contentText) {
+        if (contentText == null || contentText.isBlank()) {
+            return new AudioMediaRefs(null, null);
+        }
+        try {
+            JsonNode root = objectMapper.readTree(contentText);
+            JsonNode audios = root.path("audios");
+            if (audios.isArray()) {
+                for (JsonNode track : audios) {
+                    String audioUrl = firstMediaUrl(track, "url", "audioUrl", "audio_url");
+                    String coverUrl = firstMediaUrl(track, "coverUrl", "cover_url", "imageUrl", "image_url");
+                    if (audioUrl != null || coverUrl != null) {
+                        return new AudioMediaRefs(coverUrl, audioUrl);
+                    }
+                }
+            }
+            String audioUrl = firstMediaUrl(root, "audioUrl", "audio_url", "url");
+            String coverUrl = firstMediaUrl(root, "coverUrl", "cover_url", "imageUrl", "image_url");
+            if (audioUrl != null || coverUrl != null) {
+                return new AudioMediaRefs(coverUrl, audioUrl);
+            }
+        } catch (Exception ignored) {
+            // Fall back to regex extraction below.
+        }
+        String audioUrl = findFirstUrlByPredicate(contentText, this::looksLikeAudioUrl);
+        String coverUrl = findFirstUrlByPredicate(contentText, this::looksLikeImageUrl);
+        return new AudioMediaRefs(coverUrl, audioUrl);
+    }
+
+    private String firstMediaUrl(JsonNode node, String... keys) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return null;
+        }
+        for (String key : keys) {
+            JsonNode child = node.path(key);
+            if (child.isTextual() && looksLikeMediaUrl(child.asText())) {
+                return trimUrl(child.asText());
+            }
+        }
+        return null;
+    }
+
+    private String findFirstUrlByPredicate(String contentText, java.util.function.Predicate<String> predicate) {
+        java.util.regex.Matcher matcher = java.util.regex.Pattern
+                .compile("(https?://\\S+|/generated/\\S+)")
+                .matcher(contentText);
+        while (matcher.find()) {
+            String candidate = trimUrl(matcher.group(1));
+            if (candidate != null && predicate.test(candidate)) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
     private String extractCoverUrl(String contentText) {
         if (contentText == null || contentText.isBlank()) {
             return null;
@@ -1083,12 +1174,30 @@ public class CommunityServiceImpl implements CommunityService {
     }
 
     private boolean looksLikeMediaUrl(String value) {
+        return looksLikeImageUrl(value) || looksLikeVideoUrl(value) || looksLikeAudioUrl(value);
+    }
+
+    private boolean looksLikeImageUrl(String value) {
         if (value == null) return false;
         String normalized = value.trim().toLowerCase(Locale.ROOT);
         return (normalized.startsWith("http://") || normalized.startsWith("https://") || normalized.startsWith("/generated/"))
                 && (normalized.contains(".png") || normalized.contains(".jpg") || normalized.contains(".jpeg")
-                || normalized.contains(".webp") || normalized.contains(".gif") || normalized.contains(".mp4")
-                || normalized.contains(".webm") || normalized.contains(".mp3") || normalized.contains(".wav"));
+                || normalized.contains(".webp") || normalized.contains(".gif"));
+    }
+
+    private boolean looksLikeVideoUrl(String value) {
+        if (value == null) return false;
+        String normalized = value.trim().toLowerCase(Locale.ROOT);
+        return (normalized.startsWith("http://") || normalized.startsWith("https://") || normalized.startsWith("/generated/"))
+                && (normalized.contains(".mp4") || normalized.contains(".webm"));
+    }
+
+    private boolean looksLikeAudioUrl(String value) {
+        if (value == null) return false;
+        String normalized = value.trim().toLowerCase(Locale.ROOT);
+        return (normalized.startsWith("http://") || normalized.startsWith("https://") || normalized.startsWith("/generated/"))
+                && (normalized.contains(".mp3") || normalized.contains(".wav") || normalized.contains(".m4a")
+                || normalized.contains(".flac") || normalized.contains(".ogg") || normalized.contains(".aac"));
     }
 
     private String trimUrl(String value) {

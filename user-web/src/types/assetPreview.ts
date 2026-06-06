@@ -34,6 +34,7 @@ export interface AssetPreviewItem {
     sameStyle?: number
   }
   createdAt?: string | null
+  coverUrl?: string
 }
 
 export type AssetPreviewRecommendation = ToolSummary

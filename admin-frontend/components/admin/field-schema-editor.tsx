@@ -1,5 +1,6 @@
 "use client"
 
+import { useMemo, useState } from "react"
 import { FileUp, ImageUp, Plus, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -12,6 +13,14 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import {
+  filterFieldsByTier,
+  groupFields,
+  isCustomModeAdvanced,
+  isFieldVisible,
+  type FieldUiMeta,
+} from "@/lib/field-ui-meta"
 import {
   FIELD_TYPE_OPTIONS,
   OPTION_PRESETS,
@@ -88,6 +97,40 @@ export function FieldSchemaEditor({ fields, onChange, disabled }: FieldSchemaEdi
     const [item] = next.splice(index, 1)
     next.splice(target, 0, item)
     onChange(next.map((field, i) => ({ ...field, sortOrder: i + 1 })))
+  }
+
+  function updateUiMeta(index: number, patch: Partial<FieldUiMeta>) {
+    const field = fields[index]
+    updateField(index, { uiMeta: { ...field.uiMeta, ...patch } })
+  }
+
+  function addVisibleWhenRule(index: number) {
+    const field = fields[index]
+    const visibleWhen = { ...(field.uiMeta.visibleWhen || {}), "": [""] }
+    updateUiMeta(index, { visibleWhen })
+  }
+
+  function updateVisibleWhenKey(index: number, oldKey: string, newKey: string) {
+    const field = fields[index]
+    const visibleWhen = { ...(field.uiMeta.visibleWhen || {}) }
+    const values = visibleWhen[oldKey] || [""]
+    delete visibleWhen[oldKey]
+    if (newKey.trim()) visibleWhen[newKey.trim()] = values
+    updateUiMeta(index, { visibleWhen: Object.keys(visibleWhen).length ? visibleWhen : undefined })
+  }
+
+  function updateVisibleWhenValues(index: number, key: string, raw: string) {
+    const field = fields[index]
+    const visibleWhen = { ...(field.uiMeta.visibleWhen || {}) }
+    visibleWhen[key] = raw.split(",").map((item) => item.trim()).filter(Boolean)
+    updateUiMeta(index, { visibleWhen })
+  }
+
+  function removeVisibleWhenRule(index: number, key: string) {
+    const field = fields[index]
+    const visibleWhen = { ...(field.uiMeta.visibleWhen || {}) }
+    delete visibleWhen[key]
+    updateUiMeta(index, { visibleWhen: Object.keys(visibleWhen).length ? visibleWhen : undefined })
   }
 
   return (
@@ -372,6 +415,150 @@ export function FieldSchemaEditor({ fields, onChange, disabled }: FieldSchemaEdi
                   )}
                 </div>
               ) : null}
+
+              <div className="space-y-3 rounded-md border border-border/80 bg-background/50 p-3">
+                <div>
+                  <p className="text-sm font-medium">用户端展示元数据</p>
+                  <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
+                    控制常规/高级分层、分组折叠与条件显隐；写入 optionsJson，与用户端 DynamicForm 共用。
+                  </p>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label>展示分层 uiTier</Label>
+                    <Select
+                      value={field.uiMeta.uiTier || "all"}
+                      disabled={disabled}
+                      onValueChange={(value) =>
+                        updateUiMeta(index, { uiTier: value === "all" ? undefined : (value as FieldUiMeta["uiTier"]) })
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">全部模式</SelectItem>
+                        <SelectItem value="simple">仅常规</SelectItem>
+                        <SelectItem value="advanced">仅高级</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>分组键 uiGroup</Label>
+                    <Input
+                      value={field.uiMeta.uiGroup || ""}
+                      disabled={disabled}
+                      placeholder="如 lyrics / styles / more"
+                      onChange={(e) => updateUiMeta(index, { uiGroup: e.target.value.trim() || undefined })}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>分组标题 uiGroupLabel</Label>
+                    <Input
+                      value={field.uiMeta.uiGroupLabel || ""}
+                      disabled={disabled}
+                      placeholder="如 歌词 / 风格 / 更多选项"
+                      onChange={(e) => updateUiMeta(index, { uiGroupLabel: e.target.value.trim() || undefined })}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>最大字数 maxLength</Label>
+                    <Input
+                      type="number"
+                      value={field.uiMeta.maxLength ?? ""}
+                      disabled={disabled}
+                      placeholder="如 500"
+                      onChange={(e) =>
+                        updateUiMeta(index, {
+                          maxLength: e.target.value.trim() ? Number(e.target.value) : undefined,
+                        })
+                      }
+                    />
+                  </div>
+                </div>
+                {field.fieldType === "slider" ? (
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <div className="space-y-1.5">
+                      <Label>滑块最小值</Label>
+                      <Input
+                        type="number"
+                        value={field.uiMeta.slider?.min ?? 0}
+                        disabled={disabled}
+                        onChange={(e) =>
+                          updateUiMeta(index, {
+                            slider: {
+                              min: Number(e.target.value),
+                              max: field.uiMeta.slider?.max ?? 1,
+                              step: field.uiMeta.slider?.step ?? 0.01,
+                            },
+                          })
+                        }
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>滑块最大值</Label>
+                      <Input
+                        type="number"
+                        value={field.uiMeta.slider?.max ?? 1}
+                        disabled={disabled}
+                        onChange={(e) =>
+                          updateUiMeta(index, {
+                            slider: {
+                              min: field.uiMeta.slider?.min ?? 0,
+                              max: Number(e.target.value),
+                              step: field.uiMeta.slider?.step ?? 0.01,
+                            },
+                          })
+                        }
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>步进 step</Label>
+                      <Input
+                        type="number"
+                        value={field.uiMeta.slider?.step ?? 0.01}
+                        disabled={disabled}
+                        onChange={(e) =>
+                          updateUiMeta(index, {
+                            slider: {
+                              min: field.uiMeta.slider?.min ?? 0,
+                              max: field.uiMeta.slider?.max ?? 1,
+                              step: Number(e.target.value),
+                            },
+                          })
+                        }
+                      />
+                    </div>
+                  </div>
+                ) : null}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label>条件显隐 visibleWhen</Label>
+                    <Button type="button" variant="outline" size="sm" disabled={disabled} onClick={() => addVisibleWhenRule(index)}>
+                      添加条件
+                    </Button>
+                  </div>
+                  {Object.entries(field.uiMeta.visibleWhen || {}).map(([depKey, values]) => (
+                    <div key={`${depKey}-${index}`} className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+                      <Input
+                        value={depKey}
+                        disabled={disabled}
+                        placeholder="依赖字段，如 customMode"
+                        onChange={(e) => updateVisibleWhenKey(index, depKey, e.target.value)}
+                      />
+                      <Input
+                        value={values.join(", ")}
+                        disabled={disabled}
+                        placeholder="允许值，逗号分隔，如 true 或 false"
+                        onChange={(e) => updateVisibleWhenValues(index, depKey, e.target.value)}
+                      />
+                      <Button type="button" variant="ghost" size="icon" disabled={disabled} onClick={() => removeVisibleWhenRule(index, depKey)}>
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
           )
         })}
@@ -391,32 +578,110 @@ export function FieldSchemaEditor({ fields, onChange, disabled }: FieldSchemaEdi
 }
 
 export function FieldSchemaPreview({ fields }: { fields: EditableField[] }) {
+  const [previewMode, setPreviewMode] = useState<"simple" | "advanced">("simple")
+  const previewValues = useMemo(() => buildPreviewValues(fields), [fields])
+  const values = useMemo(
+    () => ({
+      ...previewValues,
+      customMode: previewMode === "advanced" ? "true" : "false",
+    }),
+    [previewMode, previewValues],
+  )
+
+  const visibleFields = useMemo(() => {
+    const advanced = isCustomModeAdvanced(values)
+    const tierFiltered = filterFieldsByTier(
+      fields.map((field) => ({ fieldKey: field.fieldKey, meta: field.uiMeta })),
+      advanced,
+    )
+    const tierKeys = new Set(tierFiltered.map((item) => item.fieldKey))
+    return fields.filter(
+      (field) =>
+        tierKeys.has(field.fieldKey) &&
+        !field.isCore &&
+        isFieldVisible(field.fieldKey, field.uiMeta, values),
+    )
+  }, [fields, values])
+
+  const grouped = useMemo(
+    () =>
+      groupFields(
+        visibleFields.map((field) => ({
+          fieldKey: field.fieldKey,
+          meta: field.uiMeta,
+          field,
+        })),
+      ),
+    [visibleFields],
+  )
+
   return (
     <div>
-      <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
-        <div className="mb-5 flex items-center justify-between">
-          <div>
-            <h3 className="text-base font-semibold">参数填写</h3>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              标 <span className="text-destructive">*</span> 为必填项
-            </p>
-          </div>
+      <Tabs value={previewMode} onValueChange={(value) => setPreviewMode(value as "simple" | "advanced")}>
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <TabsList>
+            <TabsTrigger value="simple">常规模式</TabsTrigger>
+            <TabsTrigger value="advanced">高级模式</TabsTrigger>
+          </TabsList>
           <span className="rounded-md bg-primary/10 px-2 py-1 text-xs font-medium text-primary">预览</span>
         </div>
 
-        {fields.length === 0 ? (
-          <div className="py-8 text-center text-sm text-muted-foreground">暂无参数配置</div>
-        ) : (
-          <div className="space-y-5">
-            {fields.map((field, index) => (
-              <PreviewField field={field} key={`${field.fieldKey || "field"}-${index}`} index={index} />
-            ))}
+        <TabsContent value={previewMode} className="mt-0">
+          <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
+            <div className="mb-5">
+              <h3 className="text-base font-semibold">参数填写</h3>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                标 <span className="text-destructive">*</span> 为必填项；当前模拟
+                {previewMode === "simple" ? "常规（customMode=false）" : "高级（customMode=true）"} 下的可见字段。
+              </p>
+            </div>
+
+            {visibleFields.length === 0 ? (
+              <div className="py-8 text-center text-sm text-muted-foreground">当前模式下无可见字段</div>
+            ) : previewMode === "advanced" && grouped.length > 1 ? (
+              <div className="space-y-6">
+                {grouped.map((group) => (
+                  <div key={group.key} className="space-y-4">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{group.label}</p>
+                    {group.fields.map((item, index) => (
+                      <PreviewField field={item.field} key={`${item.fieldKey}-${index}`} index={index} />
+                    ))}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="space-y-5">
+                {visibleFields.map((field, index) => (
+                  <PreviewField field={field} key={`${field.fieldKey || "field"}-${index}`} index={index} />
+                ))}
+              </div>
+            )}
           </div>
-        )}
-      </div>
-      <p className="mt-2 text-xs text-muted-foreground">预览会随左侧配置实时更新，用于快速判断用户端表单的大致样式。</p>
+        </TabsContent>
+      </Tabs>
+      <p className="mt-2 text-xs text-muted-foreground">预览会随左侧配置实时更新，可切换常规/高级查看分层与显隐效果。</p>
     </div>
   )
+}
+
+function buildPreviewValues(fields: EditableField[]): Record<string, unknown> {
+  const values: Record<string, unknown> = {
+    customMode: "false",
+    instrumental: false,
+    model: "V5_5",
+  }
+  for (const field of fields) {
+    if (field.defaultValue.trim()) {
+      if (field.fieldType === "checkbox") values[field.fieldKey] = field.defaultValue === "true"
+      else if (field.fieldType === "slider" || field.fieldType === "number") values[field.fieldKey] = Number(field.defaultValue)
+      else values[field.fieldKey] = field.defaultValue
+    } else if (field.uiMeta.defaultValue !== undefined) {
+      values[field.fieldKey] = field.uiMeta.defaultValue
+    } else if (field.fieldType === "checkbox") {
+      values[field.fieldKey] = false
+    }
+  }
+  return values
 }
 
 function PreviewField({ field, index }: { field: EditableField; index: number }) {
@@ -465,9 +730,16 @@ function PreviewField({ field, index }: { field: EditableField; index: number })
           {field.fieldType === "image" ? <ImageUp className="h-4 w-4" /> : <FileUp className="h-4 w-4" />}
           <span className="truncate">{placeholder}</span>
         </div>
+      ) : field.fieldType === "slider" ? (
+        <div className="space-y-2">
+          <div className="h-2 rounded-full bg-muted">
+            <div className="h-2 w-2/3 rounded-full bg-primary" />
+          </div>
+          <p className="text-xs text-muted-foreground">{field.defaultValue.trim() || field.uiMeta.defaultValue || "0.65"}</p>
+        </div>
       ) : (
         <div className="flex h-10 items-center rounded-md border border-border bg-background px-3 py-2 text-sm text-muted-foreground">
-          {field.fieldType === "slider" ? "50" : placeholder}
+          {placeholder}
         </div>
       )}
 

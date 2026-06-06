@@ -610,4 +610,24 @@ public interface CommunityPostMapper extends BaseMapper<CommunityPost> {
             ORDER BY id ASC
             """)
     List<String> findTags(@Param("postId") Long postId);
+
+    @Select("""
+            SELECT *
+            FROM community_posts
+            WHERE UPPER(modality) = 'AUDIO'
+              AND (media_url IS NULL OR media_url = '')
+            ORDER BY id ASC
+            LIMIT 200
+            """)
+    List<CommunityPost> findAudioPostsNeedingMediaBackfill();
+
+    @Update("""
+            UPDATE community_posts
+            SET cover_url = #{coverUrl},
+                media_url = #{mediaUrl}
+            WHERE id = #{postId}
+            """)
+    int updateAudioMedia(@Param("postId") Long postId,
+                         @Param("coverUrl") String coverUrl,
+                         @Param("mediaUrl") String mediaUrl);
 }

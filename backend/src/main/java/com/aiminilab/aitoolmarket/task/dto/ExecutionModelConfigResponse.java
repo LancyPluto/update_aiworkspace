@@ -1,6 +1,7 @@
 package com.aiminilab.aitoolmarket.task.dto;
 
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
+import com.aiminilab.aitoolmarket.agent.dto.ModelExecutionSnapshot;
 
 import java.util.List;
 
@@ -33,6 +34,25 @@ public record ExecutionModelConfigResponse(
                 config.getMinimaxGroupId(),
                 config.getTimeoutSeconds(),
                 capabilities == null ? List.of() : capabilities
+        );
+    }
+
+    public static ExecutionModelConfigResponse from(ModelExecutionSnapshot snapshot) {
+        if (snapshot == null) {
+            return null;
+        }
+        return new ExecutionModelConfigResponse(
+                snapshot.id(),
+                snapshot.displayName(),
+                snapshot.configCode(),
+                snapshot.provider(),
+                snapshot.modelName(),
+                snapshot.baseUrl(),
+                snapshot.apiKey(),
+                snapshot.extraAuthJson(),
+                snapshot.minimaxGroupId(),
+                snapshot.timeoutSeconds(),
+                snapshot.capabilities() == null ? List.of() : snapshot.capabilities()
         );
     }
 }

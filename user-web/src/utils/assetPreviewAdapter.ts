@@ -2,8 +2,9 @@ import type { CommunityPost, TaskDetail } from "@/api/types"
 import type { AssetPreviewItem } from "@/types/assetPreview"
 import type { ResultBlock } from "@/types/result"
 import { communityDisplaySubtitle, communityDisplayTitle } from "@/utils/communityDisplay"
+import { resolveCommunityAudioMedia } from "@/utils/communityAudioMedia"
 import { resolveCommunityAuthorName, resolveCommunityAuthorAvatar, resolveCommunityPrompt } from "@/utils/communityPostNormalize"
-import { buildTaskResultBlocks } from "@/utils/taskResultBlocks"
+import { buildTaskResultBlocks, resolveAudioTracks } from "@/utils/taskResultBlocks"
 
 export function primaryResultBlock(blocks: ResultBlock[]): ResultBlock | null {
   return blocks.find((block) => block.type === "image" || block.type === "video" || block.type === "audio") || blocks[0] || null
@@ -82,7 +83,18 @@ export function assetFromTask(
     } as AssetPreviewItem
   }
   if (block.type === "video") return { ...base, kind: "video", url: block.url, title: block.title || base.title } as AssetPreviewItem
-  if (block.type === "audio") return { ...base, kind: "audio", url: block.url, title: block.title || base.title } as AssetPreviewItem
+  if (block.type === "audio") {
+    const tracks = resolveAudioTracks(block)
+    const first = tracks[0]
+    return {
+      ...base,
+      kind: "audio",
+      url: first?.url || block.url,
+      urls: tracks.map((track) => track.url),
+      coverUrl: tracks.find((track) => track.coverUrl)?.coverUrl,
+      title: first?.title || block.title || base.title,
+    } as AssetPreviewItem
+  }
   if (block.type === "text" || block.type === "json" || block.type === "report") {
     return { ...base, kind: "text", rawText: block.content, title: block.title || base.title } as AssetPreviewItem
   }
@@ -125,13 +137,15 @@ export function assetFromCommunityPost(post: CommunityPost, url?: string): Asset
     kind,
   }
   const authorName = resolveCommunityAuthorName(post)
+  const audioMedia = kind === "audio" ? resolveCommunityAudioMedia(post) : null
   return {
     id: `community-${post.id}`,
     source: "community",
     kind,
     title: communityDisplayTitle(displayInput),
     subtitle: communityDisplaySubtitle({ ...displayInput, authorName: undefined }) || undefined,
-    url: url || post.coverUrl || undefined,
+    url: url || audioMedia?.audioUrl || post.mediaUrl || post.coverUrl || undefined,
+    coverUrl: audioMedia?.coverUrl || undefined,
     prompt: resolvedPrompt || undefined,
     rawText: kind === "text" ? resolvedPrompt || post.description || post.title : undefined,
     taskId: post.taskId,

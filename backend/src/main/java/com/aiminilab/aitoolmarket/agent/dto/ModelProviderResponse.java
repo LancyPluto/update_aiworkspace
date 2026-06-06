@@ -16,6 +16,11 @@ public record ModelProviderResponse(
         String upstreamVendor,
         String testStrategy,
         boolean workerReady,
+        boolean adapterInstalled,
+        String adapterKey,
+        String metadataVersion,
+        String authSchemaJson,
+        String modelParamSchemaJson,
         String description
 ) {
     public static ModelProviderResponse from(ModelProviderDefinition definition) {
@@ -31,6 +36,11 @@ public record ModelProviderResponse(
                 definition.upstreamVendor(),
                 definition.testStrategy(),
                 definition.workerReady(),
+                definition.adapterInstalled(),
+                definition.adapterKey(),
+                definition.metadataVersion(),
+                definition.authSchemaJson(),
+                definition.modelParamSchemaJson(),
                 definition.description()
         );
     }

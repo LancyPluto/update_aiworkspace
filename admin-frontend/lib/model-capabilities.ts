@@ -39,7 +39,7 @@ export function capabilityLabel(capability: string): string {
 
 export function resolvedModelCapabilities(
   config: AgentModelConfig,
-  providerCapabilities: Record<string, string[]> = fallbackProviderCapabilities,
+  providerCapabilities?: Record<string, string[]>,
 ): string[] {
   if (config.capabilities && config.capabilities.length > 0) {
     return config.capabilities
@@ -47,7 +47,8 @@ export function resolvedModelCapabilities(
       .map((capability) => capability.trim().toUpperCase())
   }
   const provider = (config.provider || "").trim().toLowerCase()
-  return (providerCapabilities[provider] || fallbackProviderCapabilities[provider] || [])
+  const catalog = providerCapabilities ?? fallbackProviderCapabilities
+  return (catalog[provider] || [])
     .filter((capability) => capability && capability.trim())
     .map((capability) => capability.trim().toUpperCase())
 }
@@ -55,7 +56,7 @@ export function resolvedModelCapabilities(
 export function modelConfigSupportsCapability(
   config: AgentModelConfig,
   capability: string,
-  providerCapabilities: Record<string, string[]> = fallbackProviderCapabilities,
+  providerCapabilities?: Record<string, string[]>,
 ): boolean {
   const caps = resolvedModelCapabilities(config, providerCapabilities)
   if (caps.length === 0) return false

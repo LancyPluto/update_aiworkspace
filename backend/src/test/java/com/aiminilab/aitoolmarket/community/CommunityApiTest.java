@@ -124,6 +124,42 @@ class CommunityApiTest {
     }
 
     @Test
+    void publicPostDetailReturnsViewerInteractionFlagsWhenAuthenticated() throws Exception {
+        String userToken = loginUser();
+        long postId = insertPost("PUBLISHED", "APPROVED", "互动状态", true);
+
+        mockMvc.perform(get("/api/v1/community/posts/{postId}", postId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.liked").value(false))
+                .andExpect(jsonPath("$.data.favorited").value(false));
+
+        mockMvc.perform(post("/api/v1/community/posts/{postId}/like", postId)
+                        .header("Authorization", "Bearer " + userToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.liked").value(true));
+
+        mockMvc.perform(post("/api/v1/community/posts/{postId}/favorite", postId)
+                        .header("Authorization", "Bearer " + userToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.favorited").value(true));
+
+        mockMvc.perform(get("/api/v1/community/posts/{postId}", postId)
+                        .header("Authorization", "Bearer " + userToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.liked").value(true))
+                .andExpect(jsonPath("$.data.favorited").value(true));
+
+        mockMvc.perform(get("/api/v1/community/search")
+                        .param("keyword", "互动状态")
+                        .param("pageSize", "20")
+                        .header("Authorization", "Bearer " + userToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].id").value((int) postId))
+                .andExpect(jsonPath("$.data.list[0].liked").value(true))
+                .andExpect(jsonPath("$.data.list[0].favorited").value(true));
+    }
+
+    @Test
     void topicEntriesOnlyComeFromVisibleApprovedPosts() throws Exception {
         long visibleId = insertPost("PUBLISHED", "APPROVED", "Visible topic post", true);
         long hiddenId = insertPost("HIDDEN", "APPROVED", "Hidden topic post", true);

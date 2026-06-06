@@ -8,6 +8,7 @@ import com.aiminilab.aitoolmarket.agent.support.ModelConfigCredentialResolver;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.tool.entity.AiTool;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.Comparator;
@@ -18,18 +19,35 @@ import java.util.Locale;
 public class ModelCapabilityService {
 
     private final ModelProviderRegistry providerRegistry;
+    private final ModelProviderMetadataService providerMetadataService;
     private final ModelCapabilitiesCodec capabilitiesCodec;
     private final AgentModelConfigMapper agentModelConfigMapper;
     private final ModelConfigCredentialResolver credentialResolver;
+
+    @Autowired
+    public ModelCapabilityService(ModelProviderRegistry providerRegistry,
+                                  ModelProviderMetadataService providerMetadataService,
+                                  ModelCapabilitiesCodec capabilitiesCodec,
+                                  AgentModelConfigMapper agentModelConfigMapper,
+                                  ModelConfigCredentialResolver credentialResolver) {
+        this.providerRegistry = providerRegistry;
+        this.providerMetadataService = providerMetadataService;
+        this.capabilitiesCodec = capabilitiesCodec;
+        this.agentModelConfigMapper = agentModelConfigMapper;
+        this.credentialResolver = credentialResolver;
+    }
 
     public ModelCapabilityService(ModelProviderRegistry providerRegistry,
                                   ModelCapabilitiesCodec capabilitiesCodec,
                                   AgentModelConfigMapper agentModelConfigMapper,
                                   ModelConfigCredentialResolver credentialResolver) {
-        this.providerRegistry = providerRegistry;
-        this.capabilitiesCodec = capabilitiesCodec;
-        this.agentModelConfigMapper = agentModelConfigMapper;
-        this.credentialResolver = credentialResolver;
+        this(
+                providerRegistry,
+                new ModelProviderMetadataService(null, providerRegistry, new com.fasterxml.jackson.databind.ObjectMapper()),
+                capabilitiesCodec,
+                agentModelConfigMapper,
+                credentialResolver
+        );
     }
 
     public List<String> resolveCapabilities(AgentModelConfig config) {
@@ -40,12 +58,12 @@ public class ModelCapabilityService {
         if (!stored.isEmpty()) {
             return stored;
         }
-        return providerRegistry.defaultCapabilities(config.getProvider());
+        return providerMetadataService.get(config.getProvider()).capabilities();
     }
 
     public List<String> normalizeCapabilities(String provider, List<String> requested) {
         List<String> capabilities = requested == null || requested.isEmpty()
-                ? providerRegistry.defaultCapabilities(provider)
+                ? providerMetadataService.get(provider).capabilities()
                 : requested.stream()
                 .filter(value -> value != null && !value.isBlank())
                 .map(value -> value.trim().toUpperCase(Locale.ROOT))
@@ -55,7 +73,12 @@ public class ModelCapabilityService {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "capabilities cannot be empty");
         }
         for (String capability : capabilities) {
-            providerRegistry.requireCapability(provider, capability);
+            boolean supported = providerMetadataService.get(provider).capabilities().stream()
+                    .anyMatch(item -> item.equalsIgnoreCase(capability));
+            if (!supported) {
+                throw new BusinessException(ErrorCode.PARAM_ERROR,
+                        "provider " + provider + " does not support capability " + capability);
+            }
         }
         return capabilities;
     }
@@ -89,7 +112,15 @@ public class ModelCapabilityService {
         if (config == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "model config not found");
         }
-        validateExecution(tool, config);
+        if (Boolean.FALSE.equals(config.getEnabled())) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR,
+                    "bound model config is disabled: " + displayModelName(config));
+        }
+        String requiredCapability = resolveRequiredCapability(tool);
+        if (resolveCapabilities(config).stream().noneMatch(capability -> capability.equalsIgnoreCase(requiredCapability))) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR,
+                    "model config does not support execution handler " + requiredCapability);
+        }
     }
 
     public void validateExecution(AiTool tool, AgentModelConfig modelConfig) {
@@ -112,7 +143,10 @@ public class ModelCapabilityService {
             throw new BusinessException(ErrorCode.PARAM_ERROR,
                     "model config does not support execution handler " + requiredCapability);
         }
-        providerRegistry.requireWorkerReady(modelConfig.getProvider());
+        if (!providerMetadataService.get(modelConfig.getProvider()).workerReady()) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR,
+                    "provider " + modelConfig.getProvider() + " is configured but worker executor is not ready yet");
+        }
         AgentModelConfig executionConfig = credentialResolver.resolveForExecution(modelConfig);
         if (requiresApiKey(requiredCapability, executionConfig) && !hasExecutableSecret(executionConfig.getApiKey())) {
             throw new BusinessException(ErrorCode.PARAM_ERROR,

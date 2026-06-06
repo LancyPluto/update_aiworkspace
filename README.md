@@ -111,7 +111,8 @@ python -c "import yaml, pathlib; yaml.safe_load(pathlib.Path('docs/api/openapi.y
 
 | 文档 | 说明 |
 | --- | --- |
-| [docs/工作区整理与上传-2026-06-05.md](docs/工作区整理与上传-2026-06-05.md) | 最新分支变更：oFox 参考图、工作台重试、上传范围 |
+| [docs/工作区整理与上传-2026-06-06.md](docs/工作区整理与上传-2026-06-06.md) | 最新分支变更：Suno 音乐生成、字段 UI 分层、供应商元数据 |
+| [docs/工作区整理与上传-2026-06-05.md](docs/工作区整理与上传-2026-06-05.md) | oFox 参考图 multipart 修复、工作台重试 |
 | [docs/Agent优化与工作区整理-2026-06-04.md](docs/Agent优化与工作区整理-2026-06-04.md) | Agent 记忆、User Web、后台参数整理 |
 | [docs/优化清单-2026-06-02.md](docs/优化清单-2026-06-02.md) | 分阶段优化勾选清单 |
 | [docs/统一API管理-开发文档.md](docs/统一API管理-开发文档.md) | 统一 API 与协议映射 |

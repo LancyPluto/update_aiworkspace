@@ -1,5 +1,6 @@
 package com.aiminilab.aitoolmarket.task.dto;
 
+import com.aiminilab.aitoolmarket.agent.dto.ModelExecutionSnapshot;
 import com.aiminilab.aitoolmarket.task.entity.AiTask;
 import com.aiminilab.aitoolmarket.tool.dto.ToolFieldResponse;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -22,12 +23,18 @@ public record ExecutionContextResponse(
         String traceId,
         JsonNode params,
         ExecutionModelConfigResponse modelConfig,
+        ModelExecutionSnapshot modelSnapshot,
         String modelProviderCode,
         String modelName,
         List<ToolFieldResponse> fields
 ) {
     public static ExecutionContextResponse of(AiTask task, JsonNode params, ExecutionModelConfigResponse modelConfig,
                                               List<ToolFieldResponse> fields) {
+        return of(task, params, modelConfig, null, fields);
+    }
+
+    public static ExecutionContextResponse of(AiTask task, JsonNode params, ExecutionModelConfigResponse modelConfig,
+                                              ModelExecutionSnapshot modelSnapshot, List<ToolFieldResponse> fields) {
         return new ExecutionContextResponse(
                 task.getId(),
                 task.getTaskNo(),
@@ -43,6 +50,7 @@ public record ExecutionContextResponse(
                 MDC.get("traceId"),
                 params,
                 modelConfig,
+                modelSnapshot,
                 modelConfig == null ? null : modelConfig.provider(),
                 modelConfig == null ? null : modelConfig.modelName(),
                 fields

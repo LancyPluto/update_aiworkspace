@@ -2,6 +2,8 @@ package com.aiminilab.aitoolmarket.agent.balance;
 
 import com.aiminilab.aitoolmarket.agent.entity.ModelVendorAccount;
 import com.aiminilab.aitoolmarket.agent.mapper.ModelVendorAccountMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -9,6 +11,8 @@ import java.util.Locale;
 
 @Service
 public class VendorBalanceRefreshService {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(VendorBalanceRefreshService.class);
 
     private final ModelVendorAccountMapper vendorAccountMapper;
     private final VendorBalanceAdapterRegistry adapterRegistry;
@@ -73,6 +77,14 @@ public class VendorBalanceRefreshService {
             account.setBalanceErrorMessage(result.errorMessage());
             String status = result.balanceStatus() != null ? result.balanceStatus() : "ERROR";
             account.setBalanceStatus(status);
+            LOGGER.warn(
+                    "Vendor balance refresh failed: accountId={}, vendorCode={}, mode={}, status={}, message={}",
+                    account.getId(),
+                    account.getVendorCode(),
+                    normalizeMode(account.getBalanceQueryMode()),
+                    status,
+                    result.errorMessage()
+            );
             if ("UNKNOWN".equals(status)) {
                 account.setBalanceAmount(null);
             }

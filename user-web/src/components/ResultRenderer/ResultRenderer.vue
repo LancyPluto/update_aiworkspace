@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { Download, FileDown, Printer } from "lucide-vue-next"
+import { Download, FileDown, Music, Printer } from "lucide-vue-next"
 import type { AssetPreviewItem } from "@/types/assetPreview"
-import type { ResultBlock } from "@/types/result"
+import type { AudioTrackItem, ResultBlock } from "@/types/result"
+import { formatAudioDuration, resolveAudioTracks } from "@/utils/taskResultBlocks"
 
 const props = withDefaults(defineProps<{
   blocks: ResultBlock[]
@@ -106,13 +107,18 @@ function previewVideo(block: Extract<ResultBlock, { type: "video" }>) {
   })
 }
 
-function previewAudio(block: Extract<ResultBlock, { type: "audio" }>) {
+function previewAudio(block: Extract<ResultBlock, { type: "audio" }>, track: AudioTrackItem) {
   emit("preview", {
-    id: `result-audio-${block.url}`,
+    id: `result-audio-${track.url}`,
     kind: "audio",
-    title: block.title || "生成音频",
-    url: block.url,
+    title: track.title || block.title || "生成音频",
+    url: track.url,
+    coverUrl: track.coverUrl,
   })
+}
+
+function audioTracks(block: Extract<ResultBlock, { type: "audio" }>) {
+  return resolveAudioTracks(block)
 }
 
 function downloadReportDocx(block: Extract<ResultBlock, { type: "report" }>) {
@@ -374,39 +380,68 @@ function escapeXml(value: string): string {
           <div>
             <p class="text-xs text-muted-foreground">音频结果</p>
             <h2 class="text-base font-semibold text-foreground">{{ b.title }}</h2>
+            <p v-if="audioTracks(b).length > 1" class="mt-1 text-xs text-muted-foreground">
+              Suno 单次生成通常返回 {{ audioTracks(b).length }} 个版本，可分别试听与下载。
+            </p>
           </div>
-          <a
-            :href="b.url"
-            :download="b.downloadName ?? 'audio-result'"
-            class="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-border bg-background px-3 text-sm font-medium hover:bg-secondary"
-            @click.stop
-          >
-            <Download class="h-4 w-4" />
-            下载音频
-          </a>
         </div>
-        <div v-else class="flex items-center justify-end p-2">
-          <a
-            :href="b.url"
-            :download="b.downloadName ?? 'audio-result'"
-            :class="mediaActionClass()"
-            @click.stop
+        <div :class="mediaGridClass(audioTracks(b).length)">
+          <article
+            v-for="(track, trackIndex) in audioTracks(b)"
+            :key="`${track.url}-${trackIndex}`"
+            class="overflow-hidden rounded-xl border border-border bg-background/80"
           >
-            <Download class="h-4 w-4" />
-            下载
-          </a>
+            <div class="relative aspect-[4/3] overflow-hidden bg-secondary/40">
+              <img
+                v-if="track.coverUrl"
+                :src="track.coverUrl"
+                :alt="track.title || b.title"
+                class="h-full w-full object-cover"
+                loading="lazy"
+              />
+              <div
+                v-else
+                class="flex h-full w-full items-center justify-center bg-gradient-to-br from-primary/20 via-background to-secondary/60 text-primary"
+              >
+                <Music class="h-10 w-10 opacity-80" />
+              </div>
+              <span
+                v-if="formatAudioDuration(track.duration)"
+                class="absolute bottom-3 right-3 rounded-full bg-black/55 px-2 py-0.5 text-[11px] text-white/90"
+              >
+                {{ formatAudioDuration(track.duration) }}
+              </span>
+            </div>
+            <div class="space-y-3 p-4">
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <p class="truncate text-sm font-semibold text-foreground">{{ track.title || `版本 ${trackIndex + 1}` }}</p>
+                  <p class="text-xs text-muted-foreground">{{ b.title }}</p>
+                </div>
+                <a
+                  :href="track.url"
+                  :download="track.downloadName ?? `audio-${trackIndex + 1}`"
+                  class="inline-flex h-8 shrink-0 items-center gap-1 rounded-md border border-border px-2.5 text-xs hover:bg-secondary"
+                  @click.stop
+                >
+                  <Download class="h-3.5 w-3.5" />
+                  下载
+                </a>
+              </div>
+              <audio :src="track.url" controls preload="metadata" class="w-full">
+                当前浏览器不支持音频播放。
+              </audio>
+              <button
+                v-if="props.mode === 'compact'"
+                type="button"
+                class="text-xs text-white/45 transition hover:text-white"
+                @click="previewAudio(b, track)"
+              >
+                打开资产卡片
+              </button>
+            </div>
+          </article>
         </div>
-        <audio :src="b.url" controls preload="metadata" :class="audioClass()">
-          当前浏览器不支持音频播放。
-        </audio>
-        <button
-          v-if="props.mode === 'compact'"
-          type="button"
-          class="mt-2 inline-flex rounded-full px-3 py-1 text-xs text-white/45 transition hover:bg-white/8 hover:text-white"
-          @click="previewAudio(b)"
-        >
-          打开资产卡片
-        </button>
       </template>
       <template v-else-if="b.type === 'video'">
         <div

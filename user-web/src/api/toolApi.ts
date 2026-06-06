@@ -56,6 +56,12 @@ function capabilitiesFromTool(tool: ToolSummary): Capability[] {
       config: { supportedFileTypes: ["pdf", "txt", "png", "jpg", "jpeg", "webp"], maxSizeMB: 20 },
     })
   }
+  if (type === "MUSIC_GENERATION") {
+    capabilities.push({
+      type: "fileReading",
+      config: { supportedFileTypes: ["mp3", "wav", "m4a", "flac", "ogg", "aac"], maxSizeMB: 100 },
+    })
+  }
 
   return capabilities
 }
@@ -143,4 +149,17 @@ export async function fetchAIToolById(
   if (isMockMode() || isMarketplaceMockToolId(toolId)) return mockFetchAIToolById(toolId)
   const tool = await fetchToolByCode(toolId, options)
   return mapToolToAITool(tool)
+}
+
+/** POST /api/v1/tool-upload — 工具表单文件上传（支持 mp3/wav 等音频） */
+export async function uploadToolFile(
+  file: File,
+  options?: { token?: string | null },
+): Promise<{ fileId: string; url: string }> {
+  const formData = new FormData()
+  formData.append("file", file)
+  return apiRequest<{ fileId: string; url: string }>("POST", "/api/v1/tool-upload", {
+    token: options?.token,
+    body: formData,
+  })
 }

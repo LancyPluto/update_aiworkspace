@@ -13,6 +13,7 @@ public class CommunityPost {
     private Long taskId;
     private String modality;
     private String coverUrl;
+    private String mediaUrl;
     private String title;
     private String description;
     private Boolean promptVisible;
@@ -46,6 +47,8 @@ public class CommunityPost {
     public void setModality(String modality) { this.modality = modality; }
     public String getCoverUrl() { return coverUrl; }
     public void setCoverUrl(String coverUrl) { this.coverUrl = coverUrl; }
+    public String getMediaUrl() { return mediaUrl; }
+    public void setMediaUrl(String mediaUrl) { this.mediaUrl = mediaUrl; }
     public String getTitle() { return title; }
     public void setTitle(String title) { this.title = title; }
     public String getDescription() { return description; }

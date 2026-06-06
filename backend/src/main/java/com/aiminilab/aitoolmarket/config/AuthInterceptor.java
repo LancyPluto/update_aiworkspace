@@ -85,7 +85,11 @@ public class AuthInterceptor implements HandlerInterceptor, Filter {
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
         String path = request.getRequestURI();
-        if ("OPTIONS".equalsIgnoreCase(request.getMethod()) || isPublicPath(request.getMethod(), path)) {
+        if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
+            return true;
+        }
+        if (isPublicPath(request.getMethod(), path)) {
+            trySetAuthContext(request);
             return true;
         }
 
@@ -123,6 +127,12 @@ public class AuthInterceptor implements HandlerInterceptor, Filter {
                 .filter(user -> user.getDeleted() == null || !user.getDeleted())
                 .filter(user -> UserStatus.ACTIVE.name().equals(user.getStatus()))
                 .isPresent();
+    }
+
+    private void trySetAuthContext(HttpServletRequest request) {
+        extractAuthUser(request)
+                .filter(this::isActiveUser)
+                .ifPresent(AuthContext::set);
     }
 
     @Override

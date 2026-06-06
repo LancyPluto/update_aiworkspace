@@ -19,7 +19,9 @@ import com.aiminilab.aitoolmarket.task.entity.AiTask;
 import com.aiminilab.aitoolmarket.task.mapper.TaskMapper;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentModelConfigMapper;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentToolCallMapper;
+import com.aiminilab.aitoolmarket.agent.dto.ModelExecutionSnapshot;
 import com.aiminilab.aitoolmarket.agent.service.ModelCapabilityService;
+import com.aiminilab.aitoolmarket.agent.service.ModelExecutionSnapshotService;
 import com.aiminilab.aitoolmarket.task.service.TaskCreditDispatchService;
 import com.aiminilab.aitoolmarket.task.service.TaskOutboxService;
 import com.aiminilab.aitoolmarket.task.service.TaskService;
@@ -53,6 +55,7 @@ public class TaskServiceImpl implements TaskService {
     private final AgentModelConfigMapper agentModelConfigMapper;
     private final AgentToolCallMapper agentToolCallMapper;
     private final ModelCapabilityService modelCapabilityService;
+    private final ModelExecutionSnapshotService modelExecutionSnapshotService;
     private final CreditService creditService;
     private final ObjectMapper objectMapper;
     private final TaskOutboxService taskOutboxService;
@@ -69,6 +72,7 @@ public class TaskServiceImpl implements TaskService {
             AgentModelConfigMapper agentModelConfigMapper,
             AgentToolCallMapper agentToolCallMapper,
             ModelCapabilityService modelCapabilityService,
+            ModelExecutionSnapshotService modelExecutionSnapshotService,
             CreditService creditService,
             ObjectMapper objectMapper,
             TaskOutboxService taskOutboxService,
@@ -84,6 +88,7 @@ public class TaskServiceImpl implements TaskService {
         this.agentModelConfigMapper = agentModelConfigMapper;
         this.agentToolCallMapper = agentToolCallMapper;
         this.modelCapabilityService = modelCapabilityService;
+        this.modelExecutionSnapshotService = modelExecutionSnapshotService;
         this.creditService = creditService;
         this.objectMapper = objectMapper;
         this.taskOutboxService = taskOutboxService;
@@ -237,6 +242,7 @@ public class TaskServiceImpl implements TaskService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在或未上线"));
         AgentModelConfig modelConfig = modelCapabilityService.resolveModelConfigForTool(tool);
         modelCapabilityService.validateExecution(tool, modelConfig);
+        ModelExecutionSnapshot modelSnapshot = modelExecutionSnapshotService.create(modelConfig);
         if (chargeTaskCredits) {
             taskCreditDispatchService.ensureDispatchAllowed(userId, tool, modelConfig);
         }
@@ -247,8 +253,9 @@ public class TaskServiceImpl implements TaskService {
         task.setUserId(userId);
         task.setToolId(tool.getId());
         task.setParamsJson(normalizedParams.toString());
+        task.setModelSnapshotJson(modelExecutionSnapshotService.serialize(modelSnapshot));
         task.setIdempotencyKey(clientRequestId);
-        int estimatedCredits = chargeTaskCredits ? taskCreditEstimateService.estimateUserFacingTaskCredits(tool, modelConfig) : 0;
+        int estimatedCredits = chargeTaskCredits ? configuredToolCredits(tool) : 0;
         task.setEstimatedCreditCost(estimatedCredits);
 
         Long taskId = taskMapper.insertTask(task);
@@ -260,6 +267,12 @@ public class TaskServiceImpl implements TaskService {
         }
         taskOutboxService.enqueueTaskCreated(taskId);
         return TaskStatusResponse.from(findTask(taskId, userId));
+    }
+
+    private int configuredToolCredits(AiTool tool) {
+        return tool == null || tool.getEstimatedCreditCost() == null
+                ? 0
+                : Math.max(0, tool.getEstimatedCreditCost());
     }
 
     private TaskDetailResponse toDetail(AiTask task) {

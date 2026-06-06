@@ -265,6 +265,7 @@ export async function uploadChatFile(
     () => {
       const formData = new FormData()
       formData.append("file", file)
+      if (options?.toolId) formData.append("toolId", options.toolId)
       return apiRequest<FileUploadResult>("POST", "/api/v1/upload", {
         token: options?.token,
         body: formData,
