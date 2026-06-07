@@ -6,7 +6,9 @@ import type {
   AgentRunEvent,
   AgentSession,
   AgentFile,
+  AgentUrlAttachment,
   AgentModelConfig,
+  AgentToolPickerItem,
   AgentToolPreference,
   AgentWorkspace,
   AgentWorkspaceMemoryItem,
@@ -36,6 +38,12 @@ export function fetchAgentModelConfigs(options?: { token?: string | null }) {
   })
 }
 
+export function fetchAgentTools(options?: { token?: string | null }) {
+  return apiRequest<AgentToolPickerItem[]>("GET", "/api/v1/agent/tools", {
+    token: options?.token,
+  })
+}
+
 export function createAgentSession(body: { title?: string }, options?: { token?: string | null }) {
   return apiRequest<AgentSession>("POST", "/api/v1/agent/sessions", {
     token: options?.token,
@@ -59,7 +67,14 @@ export function fetchAgentMessages(sessionId: number, options?: { token?: string
 
 export function sendAgentMessage(
   sessionId: number,
-  body: { content: string; clientRequestId?: string; modelConfigId?: number | null; fileIds?: number[] },
+  body: {
+    content: string
+    clientRequestId?: string
+    modelConfigId?: number | null
+    preferredToolCode?: string | null
+    fileIds?: number[]
+    urlAttachments?: AgentUrlAttachment[]
+  },
   options?: { token?: string | null },
 ) {
   return apiRequest<CreateAgentMessageResponse>("POST", `/api/v1/agent/sessions/${sessionId}/messages`, {

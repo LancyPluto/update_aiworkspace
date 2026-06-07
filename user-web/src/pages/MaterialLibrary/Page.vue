@@ -204,7 +204,7 @@ async function publishMaterialAsset(asset: AssetPreviewItem) {
         taskId: asset.taskId,
         title: asset.title,
         description: asset.subtitle || null,
-        promptVisible: asset.promptVisible ?? false,
+        promptVisible: asset.promptVisible ?? auth.user?.promptPublicByDefault ?? false,
       },
       { token: auth.token },
     )

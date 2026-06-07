@@ -5,6 +5,12 @@ from typing import Any
 from app.config import settings
 from app.core.event_types import ROUTER_CANDIDATES, ROUTER_FALLBACK, ROUTER_SELECTED, ROUTER_STARTED
 from app.core.intent_router import Intent, IntentResult, IntentRouter
+from app.core.preferred_tool_bias import (
+    apply_preferred_tool_override,
+    preferred_tool_code,
+    resolve_preferred_tool,
+    sort_tools_with_preferred,
+)
 from app.core.schemas import ChatMessage, RunContext, RunEventCreate
 from app.runtime.router_context import (
     router_history_turns,
@@ -28,6 +34,7 @@ DEFAULT_ROUTER_PROMPT = (
     "Prefer the tool that directly produces the requested output modality: image/photo/poster/cos/visual requests use image tools; "
     "video/short-video/image-to-video requests use video tools; copywriting/title/article requests use text tools. "
     "Use recentToolCalls to detect follow-up requests, inherit prior arguments, and return only the user's changes in followupPatch. "
+    "Uploaded media attachments may be reference material for generation tools; do not classify them as file analysis unless the user asks to analyze/read/summarize the attachment. "
     "Only ask for missing information when it changes intent, cost, authorization, safety, or the core subject. "
     "Do not ask for low-risk defaults such as aspect ratio, count, quality, or style strength."
 )
@@ -64,6 +71,8 @@ class AgentRouterService:
             raw = await self.model.chat([ChatMessage(role="user", content=self._build_prompt(context, rule_intent, candidates, history_slice))])
             parsed = _parse_json_object(raw)
             result, validation_failure = self._validate(context, parsed)
+            if result is not None:
+                result = apply_preferred_tool_override(context, result)
             if result is None:
                 LOGGER.warning(
                     "agent router rejected runId=%s failure=%s minConfidence=%.2f parsedIntent=%s parsedTool=%s raw=%s",
@@ -127,8 +136,11 @@ class AgentRouterService:
     def _candidate_payload(self, context: RunContext) -> list[dict[str, Any]]:
         registry = ToolRegistry(context)
         ranked_codes = [candidate.tool.toolCode for candidate in registry.rank_by_intent(context.message)[:10]]
+        preferred = preferred_tool_code(context)
+        if preferred and preferred not in ranked_codes:
+            ranked_codes.insert(0, preferred)
         ranked = {code: index for index, code in enumerate(ranked_codes)}
-        tools = sorted(registry.list_tools(), key=lambda tool: ranked.get(tool.toolCode, 999))[:30]
+        tools = sort_tools_with_preferred(context, sorted(registry.list_tools(), key=lambda tool: ranked.get(tool.toolCode, 999))[:30])
         return [
             {
                 "toolCode": tool.toolCode,
@@ -167,9 +179,13 @@ class AgentRouterService:
         history_slice: list[ChatMessage],
     ) -> str:
         tool_limit = router_recent_tool_call_limit(context)
+        preferred = resolve_preferred_tool(context)
         payload = {
             "userMessage": context.message,
             "requestedOutputModality": requested_output_modality(context.message),
+            "preferredToolCode": preferred.toolCode if preferred else None,
+            "preferredToolName": preferred.toolName if preferred else None,
+            "attachments": _attachment_payload(context),
             "recentHistory": [
                 {
                     "role": message.role,
@@ -364,6 +380,11 @@ def _normalize_router_intent(raw: Any) -> str | None:
         "tool_call": "tool_use",
         "call_tool": "tool_use",
         "use_tool": "tool_use",
+        "image_generation": "tool_use",
+        "video_generation": "tool_use",
+        "audio_generation": "tool_use",
+        "music_generation": "tool_use",
+        "text_generation": "tool_use",
         "chat": "general_chat",
         "general": "general_chat",
         "general_chat": "general_chat",
@@ -435,3 +456,33 @@ def _clip(value: str | None, limit: int) -> str:
     if not value:
         return ""
     return value if len(value) <= limit else value[:limit] + "..."
+
+
+def _attachment_payload(context: RunContext) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for file in context.agentFiles[:8]:
+        content_type = file.contentType or ""
+        filename = file.originalFilename or ""
+        items.append(
+            {
+                "id": file.id,
+                "name": filename,
+                "contentType": content_type,
+                "status": file.status,
+                "downloadUrl": file.downloadUrl,
+                "kind": _attachment_kind(content_type, filename),
+            }
+        )
+    return items
+
+
+def _attachment_kind(content_type: str, filename: str) -> str:
+    lowered_type = (content_type or "").lower()
+    lowered_name = (filename or "").lower()
+    if lowered_type.startswith("image/") or lowered_name.endswith((".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".heic", ".heif", ".avif")):
+        return "image"
+    if lowered_type.startswith("video/") or lowered_name.endswith((".mp4", ".mov", ".webm", ".mkv")):
+        return "video"
+    if lowered_type.startswith("audio/") or lowered_name.endswith((".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac")):
+        return "audio"
+    return "file"

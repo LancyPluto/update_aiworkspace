@@ -56,6 +56,13 @@ def runtime_settings_event_payload(
             1,
             7200,
         ),
+        "musicToolExecutionTimeoutSeconds": runtime_int(
+            context,
+            "musicToolExecutionTimeoutSeconds",
+            settings.agent_music_tool_execution_timeout_seconds,
+            1,
+            7200,
+        ),
         "toolPollIntervalSeconds": runtime_float(
             context,
             "toolPollIntervalSeconds",

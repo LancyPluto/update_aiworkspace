@@ -1,19 +1,56 @@
 <script setup lang="ts">
+import { onBeforeUnmount, ref } from "vue"
 import { Download, FileDown, Music, Printer } from "lucide-vue-next"
 import type { AssetPreviewItem } from "@/types/assetPreview"
 import type { AudioTrackItem, ResultBlock } from "@/types/result"
 import { formatAudioDuration, resolveAudioTracks } from "@/utils/taskResultBlocks"
+import type { ChatAssetRef } from "@/utils/agentChatAssetRefs"
+import { bindLongPressReference, writeAssetDragData } from "@/utils/agentChatAssetRefs"
 
 const props = withDefaults(defineProps<{
   blocks: ResultBlock[]
   mode?: "default" | "compact"
+  resolveChatAsset?: (url: string) => ChatAssetRef | undefined
+  enableAssetDrag?: boolean
 }>(), {
   mode: "default",
+  enableAssetDrag: false,
 })
 
 const emit = defineEmits<{
   preview: [asset: AssetPreviewItem]
+  reference: [payload: import("@/utils/agentChatAssetRefs").ChatAssetDragPayload]
 }>()
+
+const longPressCleanups = ref<Array<() => void>>([])
+
+function cleanupLongPressBindings() {
+  for (const cleanup of longPressCleanups.value) cleanup()
+  longPressCleanups.value = []
+}
+
+function registerDraggableAsset(element: HTMLElement | null, url: string) {
+  if (!element || !props.enableAssetDrag) return
+  const asset = props.resolveChatAsset?.(url)
+  if (!asset) return
+  const cleanup = bindLongPressReference(element, asset, (payload) => emit("reference", payload))
+  longPressCleanups.value.push(cleanup)
+}
+
+function setDraggableAssetRef(element: Element | null, url: string) {
+  registerDraggableAsset(element as HTMLElement | null, url)
+}
+
+function onAssetDragStart(event: DragEvent, url: string) {
+  if (!props.enableAssetDrag) return
+  const asset = props.resolveChatAsset?.(url)
+  if (!asset) return
+  writeAssetDragData(event, asset)
+}
+
+onBeforeUnmount(() => {
+  cleanupLongPressBindings()
+})
 
 function isMediaBlock(block: ResultBlock) {
   return block.type === "image" || block.type === "audio" || block.type === "video"
@@ -341,8 +378,11 @@ function escapeXml(value: string): string {
           <figure
             v-for="(image, imageIndex) in b.images"
             :key="image.url"
-            :class="figureClass()"
+            :ref="(el) => setDraggableAssetRef(el as Element | null, image.url)"
+            :class="[figureClass(), resolveChatAsset?.(image.url) && enableAssetDrag ? 'chat-asset-draggable' : '']"
             class="cursor-zoom-in"
+            :draggable="enableAssetDrag && !!resolveChatAsset?.(image.url)"
+            @dragstart="onAssetDragStart($event, image.url)"
             @click="previewImage(b, image, imageIndex)"
           >
             <div :class="imageFrameClass()">
@@ -389,7 +429,13 @@ function escapeXml(value: string): string {
           <article
             v-for="(track, trackIndex) in audioTracks(b)"
             :key="`${track.url}-${trackIndex}`"
-            class="overflow-hidden rounded-xl border border-border bg-background/80"
+            :ref="(el) => setDraggableAssetRef(el as Element | null, track.url)"
+            :class="[
+              'overflow-hidden rounded-xl border border-border bg-background/80',
+              resolveChatAsset?.(track.url) && enableAssetDrag ? 'chat-asset-draggable' : '',
+            ]"
+            :draggable="enableAssetDrag && !!resolveChatAsset?.(track.url)"
+            @dragstart="onAssetDragStart($event, track.url)"
           >
             <div class="relative aspect-[4/3] overflow-hidden bg-secondary/40">
               <img
@@ -462,17 +508,24 @@ function escapeXml(value: string): string {
             下载视频
           </a>
         </div>
-        <video
-          :src="b.url"
-          controls
-          playsinline
-          preload="metadata"
-          :class="videoClass()"
-          class="cursor-zoom-in"
-          @click="previewVideo(b)"
+        <div
+          :ref="(el) => setDraggableAssetRef(el as Element | null, b.url)"
+          :class="resolveChatAsset?.(b.url) && enableAssetDrag ? 'chat-asset-draggable' : ''"
+          :draggable="enableAssetDrag && !!resolveChatAsset?.(b.url)"
+          @dragstart="onAssetDragStart($event, b.url)"
         >
-          当前浏览器不支持视频播放。
-        </video>
+          <video
+            :src="b.url"
+            controls
+            playsinline
+            preload="metadata"
+            :class="videoClass()"
+            class="cursor-zoom-in"
+            @click="previewVideo(b)"
+          >
+            当前浏览器不支持视频播放。
+          </video>
+        </div>
         <div v-if="props.mode === 'compact'" class="flex justify-end px-2 pb-2 pt-2">
           <a
             :href="b.url"
@@ -523,3 +576,14 @@ function escapeXml(value: string): string {
     </div>
   </div>
 </template>
+
+<style scoped>
+.chat-asset-draggable {
+  cursor: grab;
+}
+
+.chat-asset-draggable:active {
+  cursor: grabbing;
+  opacity: 0.88;
+}
+</style>

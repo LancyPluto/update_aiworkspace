@@ -386,6 +386,7 @@ CREATE TABLE agent_runs (
   source_user_message_id BIGINT,
   context_snapshot_id BIGINT,
   client_request_id VARCHAR(64),
+  preferred_tool_code VARCHAR(64),
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

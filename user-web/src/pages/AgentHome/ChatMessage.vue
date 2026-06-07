@@ -7,15 +7,24 @@ import { buildTaskResultBlocks } from "@/utils/taskResultBlocks"
 import { renderMarkdown } from "@/utils/markdownRender"
 import type { AssetPreviewItem } from "@/types/assetPreview"
 import type { ResultBlock } from "@/types/result"
+import type { ChatAssetRef } from "@/utils/agentChatAssetRefs"
 
-const props = defineProps({
-  message: { type: String, default: "" },
-  isUser: { type: Boolean, default: false },
-  streaming: { type: Boolean, default: false },
+const props = withDefaults(defineProps<{
+  message?: string
+  isUser?: boolean
+  streaming?: boolean
+  resolveChatAsset?: (url: string) => ChatAssetRef | undefined
+  enableAssetDrag?: boolean
+}>(), {
+  message: "",
+  isUser: false,
+  streaming: false,
+  enableAssetDrag: false,
 })
 
 const emit = defineEmits<{
   preview: [asset: AssetPreviewItem]
+  reference: [payload: import("@/utils/agentChatAssetRefs").ChatAssetDragPayload]
 }>()
 
 const displayed = ref("")
@@ -216,7 +225,10 @@ watch(
       class="agent-result-renderer"
       :blocks="resultBlocks"
       mode="compact"
+      :resolve-chat-asset="resolveChatAsset"
+      :enable-asset-drag="enableAssetDrag"
       @preview="openStructuredPreview"
+      @reference="(payload) => emit('reference', payload)"
     />
     <span v-if="streaming && !renderedHtml && !resultBlocks.length" class="stream-placeholder" />
     <span v-if="streaming" class="stream-cursor" />

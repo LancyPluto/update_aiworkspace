@@ -275,15 +275,15 @@ async def test_router_accepts_tool_call_intent_alias():
 
 
 @pytest.mark.asyncio
-async def test_router_accepts_tool_call_intent_alias():
+async def test_router_accepts_image_generation_intent_alias():
     backend = FakeBackend()
     model = FakeModel({
-        "intent": "tool_call",
+        "intent": "image_generation",
         "selectedToolCode": "kling_image_v21",
         "candidateToolCodes": ["kling_image_v21"],
-        "confidence": 0.95,
-        "reason": "image generation request",
-        "arguments": {"prompt": "poster"},
+        "confidence": 0.98,
+        "reason": "image edit request",
+        "arguments": {"prompt": "换装", "image": "/generated/images/301/image-1.png"},
     })
     service = AgentRouterService(backend, model)
 

@@ -1,4 +1,4 @@
-from app.core.schemas import RecentToolCallContext, RunContext, ToolDescriptor
+from app.core.schemas import AgentFileContext, RecentToolCallContext, RunContext, ToolDescriptor
 from app.runtime.followup_task_resolver import FollowupTaskResolver
 
 
@@ -165,3 +165,55 @@ def test_non_followup_is_ignored():
 
     assert not result.accepted
     assert result.reason == "not_followup"
+
+
+def gpt_image_tool() -> ToolDescriptor:
+    return ToolDescriptor(
+        toolCode="gpt_image2",
+        toolName="GPT-image2",
+        description="图片编辑",
+        autoCallable=True,
+        inputSchema={
+            "type": "object",
+            "required": ["prompt", "image"],
+            "properties": {
+                "prompt": {"type": "string", "title": "提示词"},
+                "image": {"type": "string", "title": "参考图"},
+            },
+        },
+    )
+
+
+def test_followup_prefers_user_dragged_image_over_recent_tool_media():
+    context = RunContext(
+        runId=5,
+        sessionId=1,
+        userId=1,
+        message="让飞鸟换成狛枝凪斗的服装",
+        agentFiles=[
+            AgentFileContext(
+                id=-1,
+                originalFilename="@图片1-飞鸟",
+                contentType="image/png",
+                status="READY",
+                downloadUrl="/generated/images/217/user-selected.png",
+            )
+        ],
+        recentToolCalls=[
+            RecentToolCallContext(
+                id=11,
+                runId=1,
+                toolCode="gpt_image2",
+                taskId=71,
+                argumentsJson={"prompt": "previous"},
+                resultJson={},
+                resourceType="IMAGE",
+                mediaUrls=["/generated/images/301/image-1.png"],
+            )
+        ],
+    )
+
+    result = FollowupTaskResolver().resolve(context, gpt_image_tool())
+
+    assert result.accepted
+    assert result.patched_arguments["image"].endswith("/generated/images/217/user-selected.png")

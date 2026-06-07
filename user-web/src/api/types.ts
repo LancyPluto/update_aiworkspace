@@ -530,6 +530,25 @@ export interface AgentMessage {
   createdAt: string
 }
 
+export interface AgentUrlAttachment {
+  id?: string | number
+  name: string
+  contentType?: string | null
+  size?: number | null
+  url: string
+  refLabel?: string | null
+  source?: "url" | "chat_reference" | string
+}
+
+export interface AgentToolPickerItem {
+  toolCode: string
+  toolName: string
+  description?: string | null
+  outputModality?: string | null
+  coverUrl?: string | null
+  estimatedCreditCost?: number | null
+}
+
 export interface CreateAgentMessageResponse {
   sessionId: number
   messageId: number

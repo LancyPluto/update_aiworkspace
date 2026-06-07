@@ -123,6 +123,7 @@ public class AdminAgentToolAccessController {
                 ),
                 null,
                 List.of(),
+                null,
                 null
         );
         AdminAgentRouteDebugResponse response;

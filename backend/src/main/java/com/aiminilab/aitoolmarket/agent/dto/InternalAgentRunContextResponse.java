@@ -23,6 +23,7 @@ public record InternalAgentRunContextResponse(
         AgentRouterSettingsResponse routerSettings,
         AgentRuntimeSettingsResponse runtimeSettings,
         List<InternalRecentToolCallContextResponse> recentToolCalls,
-        InternalPendingToolContextResponse pendingToolContext
+        InternalPendingToolContextResponse pendingToolContext,
+        String preferredToolCode
 ) {
 }

@@ -3,7 +3,9 @@ param(
     [string]$StartInfra = $(if ($env:START_INFRA) { $env:START_INFRA } else { "auto" }),
     [ValidateSet("check", "auto", "0", "1")]
     [string]$ApplySql = $(if ($env:APPLY_SQL) { $env:APPLY_SQL } else { "check" }),
-    [switch]$InstallDeps
+    [switch]$InstallDeps,
+    [ValidateRange(1, 16)]
+    [int]$WorkerCount = $(if ($env:WORKER_PROCESS_COUNT) { [int]$env:WORKER_PROCESS_COUNT } else { 2 })
 )
 
 $ErrorActionPreference = "Stop"
@@ -418,14 +420,16 @@ function Start-InfraIfNeeded {
         if ($StartInfra -eq "1") {
             throw "START_INFRA=1 but Docker was not found."
         }
-        Write-Host "[SKIP] Docker not found. Assuming local MySQL/Redis are already running."
+        Write-Host "[SKIP] Docker not found. Assuming local MySQL/RabbitMQ are already running."
         return
     }
 
     $UseRabbitMq = $env:TASK_QUEUE_BACKEND -and $env:TASK_QUEUE_BACKEND.Trim().ToLowerInvariant() -eq "rabbitmq"
-    $InfraServices = @("mysql", "redis")
+    $InfraServices = @("mysql")
     if ($UseRabbitMq) {
         $InfraServices += "rabbitmq"
+    } else {
+        $InfraServices += "redis"
     }
 
     Write-Section ("Starting infra: " + ($InfraServices -join " + "))
@@ -452,8 +456,11 @@ function Start-InfraIfNeeded {
     while ((Get-Date) -lt $Deadline) {
         cmd /c "docker exec ai-supermarket-mysql mysqladmin ping -uroot -proot123456 --silent >nul 2>nul"
         $MysqlReady = $LASTEXITCODE -eq 0
-        cmd /c "docker exec ai-supermarket-redis redis-cli ping >nul 2>nul"
-        $RedisReady = $LASTEXITCODE -eq 0
+        $RedisReady = $UseRabbitMq
+        if (-not $UseRabbitMq) {
+            cmd /c "docker exec ai-supermarket-redis redis-cli ping >nul 2>nul"
+            $RedisReady = $LASTEXITCODE -eq 0
+        }
         $RabbitReady = -not $UseRabbitMq
         if ($UseRabbitMq) {
             cmd /c "docker exec ai-supermarket-rabbitmq rabbitmq-diagnostics -q ping >nul 2>nul"
@@ -484,6 +491,8 @@ Set-DefaultEnv "REDIS_HOST" "127.0.0.1"
 Set-DefaultEnv "REDIS_PORT" "6379"
 Set-DefaultEnv "AI_TASK_QUEUE" "ai:task:queue"
 Set-DefaultEnv "TASK_QUEUE_BACKEND" "rabbitmq"
+# Local dev now uses RabbitMQ as the task queue source of truth.
+[Environment]::SetEnvironmentVariable("TASK_QUEUE_BACKEND", "rabbitmq", "Process")
 Set-DefaultEnv "RABBITMQ_HOST" "127.0.0.1"
 Set-DefaultEnv "RABBITMQ_PORT" "5672"
 Set-DefaultEnv "RABBITMQ_USERNAME" "guest"
@@ -501,7 +510,7 @@ Write-Host "Agent Service: http://localhost:8090"
 Write-Host "User Web:      http://localhost:5173"
 Write-Host "Admin Web:     http://localhost:5174"
 Write-Host "Queue backend: $env:TASK_QUEUE_BACKEND"
-Write-Host "Worker:        $env:TASK_QUEUE_BACKEND queue consumer"
+Write-Host "Worker:        $WorkerCount x $env:TASK_QUEUE_BACKEND queue consumers"
 
 Require-Command "java" "JDK 17+"
 Require-Command "mvn" "Maven 3.8+"
@@ -534,7 +543,9 @@ if (Test-HttpReady "http://localhost:8090/health" 40) {
     Write-Host "[WARN] Agent Service did not answer health check yet. Check the Agent Service window."
 }
 
-Start-DevWindow "Worker Queue" "worker" "& '$($VenvPython.Replace("'", "''"))' main.py"
+for ($WorkerIndex = 1; $WorkerIndex -le $WorkerCount; $WorkerIndex++) {
+    Start-DevWindow "Worker Queue #$WorkerIndex" "worker" "& '$($VenvPython.Replace("'", "''"))' main.py"
+}
 Start-DevWindow "User Web :5173" "user-web" "npm run dev"
 Start-DevWindow "Admin Web :5174" "admin-frontend" "npm run dev"
 

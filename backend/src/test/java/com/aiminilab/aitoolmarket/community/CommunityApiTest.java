@@ -1,6 +1,9 @@
 package com.aiminilab.aitoolmarket.community;
 
 import com.aiminilab.aitoolmarket.auth.security.AuthTestTokens;
+import com.aiminilab.aitoolmarket.community.service.CommunityService;
+import com.aiminilab.aitoolmarket.task.entity.AiTask;
+import com.aiminilab.aitoolmarket.task.mapper.TaskMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -37,6 +40,61 @@ class CommunityApiTest {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private CommunityService communityService;
+
+    @Autowired
+    private TaskMapper taskMapper;
+
+    @Test
+    void autoPublishCreatesPostWhenUserPreferenceEnabled() {
+        jdbcTemplate.update("UPDATE users SET auto_publish_assets = 1, prompt_public_by_default = 0 WHERE id = 2");
+        long taskId = insertSuccessImageTask(2L, "auto_publish_on");
+        AiTask task = taskMapper.findById(taskId).orElseThrow();
+
+        communityService.autoPublishTask(task, "IMAGE", "{\"images\":[{\"url\":\"/generated/community-auto.png\"}]}");
+
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM community_posts WHERE task_id = ? AND status = 'PUBLISHED'",
+                Integer.class,
+                taskId);
+        org.junit.jupiter.api.Assertions.assertEquals(1, count);
+    }
+
+    @Test
+    void autoPublishSkipsWhenUserPreferenceDisabled() {
+        jdbcTemplate.update("UPDATE users SET auto_publish_assets = 0 WHERE id = 2");
+        long taskId = insertSuccessImageTask(2L, "auto_publish_off");
+        AiTask task = taskMapper.findById(taskId).orElseThrow();
+
+        communityService.autoPublishTask(task, "IMAGE", "{\"images\":[{\"url\":\"/generated/community-skip.png\"}]}");
+
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM community_posts WHERE task_id = ?",
+                Integer.class,
+                taskId);
+        org.junit.jupiter.api.Assertions.assertEquals(0, count);
+    }
+
+    @Test
+    void manualPublishUsesPromptPublicByDefaultWhenRequestOmitsPromptVisible() throws Exception {
+        jdbcTemplate.update("UPDATE users SET prompt_public_by_default = 1 WHERE id = 2");
+        String userToken = loginUser();
+        long taskId = insertSuccessImageTask(2L, "prompt_default_on");
+
+        mockMvc.perform(post("/api/v1/community/posts")
+                        .header("Authorization", "Bearer " + userToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "taskId": %d,
+                                  "title": "默认公开提示词作品"
+                                }
+                                """.formatted(taskId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.promptVisible").value(true));
+    }
 
     @Test
     void hiddenRejectedAndPendingPostsAreNotVisibleInPublicEntrances() throws Exception {
@@ -187,6 +245,45 @@ class CommunityApiTest {
                 .andExpect(status().isOk())
                 .andReturn();
         return AuthTestTokens.userJwtFrom(result);
+    }
+
+    private long insertSuccessImageTask(long userId, String suffix) {
+        Long toolId = jdbcTemplate.query(
+                "SELECT id FROM ai_tools WHERE output_modality = 'IMAGE' ORDER BY id LIMIT 1",
+                rs -> rs.next() ? rs.getLong(1) : null);
+        if (toolId == null) {
+            Long categoryId = jdbcTemplate.query(
+                    "SELECT id FROM tool_categories ORDER BY id LIMIT 1",
+                    rs -> rs.next() ? rs.getLong(1) : null);
+            if (categoryId == null) {
+                jdbcTemplate.update("""
+                        INSERT INTO tool_categories (category_code, category_name, sort_order, status)
+                        VALUES ('community_test', '测试分类', 1, 'ACTIVE')
+                        """);
+                categoryId = jdbcTemplate.queryForObject("SELECT MAX(id) FROM tool_categories", Long.class);
+            }
+            jdbcTemplate.update("""
+                    INSERT INTO ai_tools (
+                      tool_code, tool_name, category_id, status, tool_type, execution_handler,
+                      input_modality, output_modality, estimated_credit_cost
+                    )
+                    VALUES (?, '图片工具', ?, 'ONLINE', 'IMAGE_GENERATION', 'IMAGE_GENERATION', 'TEXT', 'IMAGE', 10)
+                    """, "community_image_" + suffix, categoryId);
+            toolId = jdbcTemplate.queryForObject("SELECT MAX(id) FROM ai_tools", Long.class);
+        }
+        String taskNo = "COMM-" + suffix + "-" + System.nanoTime();
+        jdbcTemplate.update("""
+                INSERT INTO ai_tasks (
+                  task_no, user_id, tool_id, status, progress, params_json, estimated_credit_cost, finished_at
+                )
+                VALUES (?, ?, ?, 'SUCCESS', 100, '{"prompt":"公开 prompt 测试"}', 10, CURRENT_TIMESTAMP)
+                """, taskNo, userId, toolId);
+        long taskId = jdbcTemplate.queryForObject("SELECT MAX(id) FROM ai_tasks", Long.class);
+        jdbcTemplate.update("""
+                INSERT INTO ai_result_resources (task_id, user_id, resource_type, content_text)
+                VALUES (?, ?, 'IMAGE', ?)
+                """, taskId, userId, "{\"images\":[{\"url\":\"/generated/community-task.png\"}]}");
+        return taskId;
     }
 
     private long insertPost(String status, String auditStatus, String title, boolean promptVisible) {

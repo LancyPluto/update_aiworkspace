@@ -1,4 +1,5 @@
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -8,7 +9,7 @@ WORKER_ROOT = Path(__file__).resolve().parents[1]
 if str(WORKER_ROOT) not in sys.path:
     sys.path.insert(0, str(WORKER_ROOT))
 
-from client.suno_music_client import SunoMusicClient, SunoMusicError, _extract_tracks
+from client.suno_music_client import SunoMusicClient, SunoMusicError, _extract_tracks, _read_audio_bytes
 
 
 class FakeCreateResponse:
@@ -247,6 +248,18 @@ class SunoMusicClientTest(unittest.TestCase):
                 params={"generationType": "upload_cover"},
             )
         self.assertIn("reference audio", str(raised.exception).lower())
+
+    def test_read_audio_bytes_maps_backend_generated_url_to_local_file(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            audio_path = Path(temp_dir) / "uploads" / "20260606" / "ref.mp3"
+            audio_path.parent.mkdir(parents=True)
+            audio_path.write_bytes(b"fake mp3")
+
+            with patch("client.suno_music_client.settings.generated_media_dir", temp_dir):
+                content, content_type = _read_audio_bytes("http://backend:8080/generated/uploads/20260606/ref.mp3")
+
+        self.assertEqual(content, b"fake mp3")
+        self.assertEqual(content_type, "audio/mpeg")
 
 
 if __name__ == "__main__":

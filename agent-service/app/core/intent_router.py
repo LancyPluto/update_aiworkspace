@@ -5,6 +5,7 @@ from enum import StrEnum
 from pydantic import BaseModel, Field
 
 from app.core.schemas import RunContext
+from app.core.preferred_tool_bias import inject_preferred_tool_hint
 from app.tools.registry import ToolRegistry, requested_output_modality, tool_supports_modality
 
 
@@ -51,11 +52,14 @@ class IntentRouter:
     def classify(self, context: RunContext) -> IntentResult:
         message = context.message.strip()
         message_lower = message.lower()
-        if context.agentFiles:
-            return IntentResult(intent=Intent.FILE_ANALYSIS, confidence=0.9, reason="ready_file_context_available")
-        if "文件" in message or "上传" in message:
+        if self._should_route_file_analysis(context):
+            return IntentResult(intent=Intent.FILE_ANALYSIS, confidence=0.9, reason="file_analysis_request")
+        if ("文件" in message or "上传" in message) and not self._has_ready_media_attachment(context):
             return IntentResult(intent=Intent.FILE_ANALYSIS, confidence=0.75, reason="file_analysis_request")
-        if any(keyword.lower() in message_lower for keyword in self.unsupported_keywords):
+        if (
+            any(keyword.lower() in message_lower for keyword in self.unsupported_keywords)
+            and not (self._has_ready_media_attachment(context) and self._looks_like_attachment_material_request(message))
+        ):
             return IntentResult(intent=Intent.UNSUPPORTED, confidence=0.9, reason="phase_unsupported_capability")
         if not message:
             return IntentResult(intent=Intent.NEEDS_CLARIFICATION, confidence=0.8, reason="empty_request")
@@ -75,8 +79,53 @@ class IntentRouter:
         if message in self.vague_messages:
             return IntentResult(intent=Intent.NEEDS_CLARIFICATION, confidence=0.6, reason="vague_request")
         if len(message) <= 5:
-            return IntentResult(intent=Intent.GENERAL_CHAT, confidence=0.6, reason="short_vague_message")
-        return IntentResult(intent=Intent.GENERAL_CHAT, confidence=0.6, reason="default_general_chat")
+            return inject_preferred_tool_hint(context, IntentResult(intent=Intent.GENERAL_CHAT, confidence=0.6, reason="short_vague_message"))
+        return inject_preferred_tool_hint(context, IntentResult(intent=Intent.GENERAL_CHAT, confidence=0.6, reason="default_general_chat"))
+
+    def _should_route_file_analysis(self, context: RunContext) -> bool:
+        if not context.agentFiles:
+            return False
+        message = context.message.strip()
+        compact = re.sub(r"\s+", "", message)
+        if self._looks_like_attachment_material_request(message):
+            return False
+        analysis_needles = (
+            "分析文件", "分析附件", "分析这张", "分析图片", "分析照片", "总结文件", "总结附件", "总结这份",
+            "读取文件", "读取附件", "阅读文件", "阅读附件", "提取内容", "识别内容", "识别文字", "看一下里面",
+            "这张图里有什么", "图片里有什么", "文件内容", "附件内容", "pdf", "文档",
+        )
+        if any(needle in compact.lower() for needle in analysis_needles):
+            return True
+        return not self._has_ready_media_attachment(context)
+
+    def _looks_like_attachment_material_request(self, message: str) -> bool:
+        compact = re.sub(r"\s+", "", message or "").lower()
+        if not compact:
+            return False
+        material_needles = (
+            "作为参考", "当参考", "参考图", "参考图片", "参考这张", "按这张", "照这张", "用这张",
+            "基于这张", "拿这张", "作为素材", "作为首帧", "用附件生成", "上传的图生成", "以这张图",
+        )
+        if any(needle in compact for needle in material_needles):
+            return True
+        return self._looks_like_tool_request(message) and self._has_generation_or_transform_hint(compact)
+
+    @staticmethod
+    def _has_generation_or_transform_hint(compact: str) -> bool:
+        return _contains_any(compact, ("生成", "生图", "出图", "画", "改图", "重绘", "换成", "做成", "变成", "生成视频", "图生视频"))
+
+    @staticmethod
+    def _has_ready_media_attachment(context: RunContext) -> bool:
+        for file in context.agentFiles:
+            if file.status != "READY":
+                continue
+            content_type = (file.contentType or "").lower()
+            filename = (file.originalFilename or "").lower()
+            if content_type.startswith(("image/", "video/", "audio/")):
+                return True
+            if filename.endswith((".png", ".jpg", ".jpeg", ".webp", ".gif", ".mp4", ".mov", ".mp3", ".wav", ".m4a")):
+                return True
+        return False
 
     def _is_short_chat(self, message_lower: str) -> bool:
         """Check if the message matches known short chat/greeting patterns."""

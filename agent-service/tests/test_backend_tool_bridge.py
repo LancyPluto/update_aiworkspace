@@ -3,7 +3,7 @@
 import pytest
 
 from app.core.schemas import AgentFileContext, ChatMessage, RunContext, RuntimeSettings, TaskDetailResponse, ToolDescriptor
-from app.tools.backend_tool import BackendToolBridge, ToolExecutionError
+from app.tools.backend_tool import BackendToolBridge, ToolExecutionError, _with_attached_file_defaults
 
 
 def _xiaohongshu_like_schema() -> dict:
@@ -109,6 +109,7 @@ def test_generation_tool_timeout_uses_modality_specific_floor():
 
     assert bridge._timeout_for_tool("ofox_gpt_image2") == 600
     assert bridge._timeout_for_tool("kling_image_to_video") == 900
+    assert bridge._timeout_for_tool("suno_music") == 900
     assert bridge._timeout_for_tool("xiaohongshu_copywriting") == 120
 
 
@@ -123,12 +124,14 @@ def test_generation_tool_timeout_uses_run_level_runtime_settings_without_mutatio
             toolExecutionTimeoutSeconds=10,
             imageToolExecutionTimeoutSeconds=700,
             videoToolExecutionTimeoutSeconds=1200,
+            musicToolExecutionTimeoutSeconds=1500,
             toolPollIntervalSeconds=0.01,
         ),
     )
 
     assert bridge._timeout_for_tool("ofox_gpt_image2", context) == 700
     assert bridge._timeout_for_tool("kling_image_to_video", context) == 1200
+    assert bridge._timeout_for_tool("suno_music", context) == 1500
     assert bridge._timeout_for_tool("xiaohongshu_copywriting", context) == 10
     assert bridge.timeout_seconds == 120
     assert bridge.poll_interval_seconds == 2.0
@@ -206,6 +209,40 @@ def test_generation_prompt_field_is_derived_from_short_user_request():
     assert len(args["prompt"]) > len("生成美女")
     assert args["aspectRatio"] == "1:1"
     assert args["count"] == 1
+
+
+def test_attached_ready_image_fills_reference_image_field():
+    tool = ToolDescriptor(
+        toolCode="ofox_gpt_image2",
+        toolName="GPT-image2.0",
+        autoCallable=True,
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "prompt": {"type": "string"},
+                "referenceImageUrl": {"type": "string"},
+            },
+        },
+    )
+    ctx = RunContext(
+        runId=1,
+        sessionId=1,
+        userId=1,
+        message="把这张作为参考图生成 Suno 吉祥物",
+        agentFiles=[
+            AgentFileContext(
+                id=1,
+                originalFilename="ref.jpg",
+                contentType="image/jpeg",
+                status="READY",
+                downloadUrl="/api/v1/agent/sessions/1/files/1/content",
+            )
+        ],
+    )
+
+    args = _with_attached_file_defaults(ctx, tool, {"prompt": "Suno 吉祥物"})
+
+    assert args["referenceImageUrl"].endswith("/api/v1/agent/sessions/1/files/1/content")
 
 
 def test_user_required_field_still_triggers_clarification():

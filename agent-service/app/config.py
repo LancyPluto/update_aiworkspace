@@ -43,6 +43,7 @@ class Settings:
     agent_tool_execution_timeout_seconds: int = int(os.getenv("AGENT_TOOL_EXECUTION_TIMEOUT_SECONDS", "120"))
     agent_image_tool_execution_timeout_seconds: int = int(os.getenv("AGENT_IMAGE_TOOL_EXECUTION_TIMEOUT_SECONDS", "600"))
     agent_video_tool_execution_timeout_seconds: int = int(os.getenv("AGENT_VIDEO_TOOL_EXECUTION_TIMEOUT_SECONDS", "900"))
+    agent_music_tool_execution_timeout_seconds: int = int(os.getenv("AGENT_MUSIC_TOOL_EXECUTION_TIMEOUT_SECONDS", "900"))
     agent_tool_poll_interval_seconds: float = float(os.getenv("AGENT_TOOL_POLL_INTERVAL_SECONDS", "1"))
     agent_tool_stream_relay_enabled: bool = _bool("AGENT_TOOL_STREAM_RELAY_ENABLED", True)
     agent_llm_router_enabled: bool = _bool("AGENT_LLM_ROUTER_ENABLED", True)

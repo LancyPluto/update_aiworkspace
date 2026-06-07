@@ -287,12 +287,18 @@ def _read_audio_bytes(source: str) -> tuple[bytes, str | None]:
         except ValueError as exc:
             raise SunoMusicError("reference audio data url decode failed") from exc
 
+    local_path = _local_generated_media_path(source)
+    if local_path is not None:
+        return _read_local_audio_bytes(local_path)
+
     fetch_url = source
     if source.startswith("/"):
         backend = (settings.backend_internal_base_url or "").rstrip("/")
         if not backend:
             raise SunoMusicError("reference audio relative URL requires BACKEND_INTERNAL_BASE_URL")
         fetch_url = f"{backend}{source}"
+    else:
+        fetch_url = _rewrite_backend_generated_url(source)
 
     try:
         response = requests.get(fetch_url, timeout=(10, 120))
@@ -303,6 +309,48 @@ def _read_audio_bytes(source: str) -> tuple[bytes, str | None]:
     if not response.content:
         raise SunoMusicError("reference audio file is empty")
     return response.content, content_type
+
+
+def _local_generated_media_path(value: str) -> Path | None:
+    parsed_path = value
+    if value.startswith(("http://", "https://")):
+        parsed_path = urlparse(value).path
+    configured_base = settings.generated_media_public_base_url.rstrip("/") or "/generated"
+    public_base = urlparse(configured_base).path.rstrip("/") if configured_base.startswith(("http://", "https://")) else configured_base
+    public_base = public_base or "/generated"
+    if not parsed_path.startswith(public_base + "/"):
+        return None
+    relative = parsed_path.removeprefix(public_base + "/")
+    media_root = Path(settings.generated_media_dir).resolve()
+    candidate = media_root.joinpath(relative).resolve()
+    if candidate.is_file() and candidate.is_relative_to(media_root):
+        return candidate
+    return None
+
+
+def _read_local_audio_bytes(path: Path) -> tuple[bytes, str | None]:
+    try:
+        data = path.read_bytes()
+    except OSError as exc:
+        raise SunoMusicError(f"could not read reference audio: {path}") from exc
+    if not data:
+        raise SunoMusicError("reference audio file is empty")
+    content_type, _ = mimetypes.guess_type(path.name)
+    return data, content_type
+
+
+def _rewrite_backend_generated_url(value: str) -> str:
+    parsed = urlparse(value)
+    if parsed.scheme not in {"http", "https"}:
+        return value
+    if parsed.hostname != "backend":
+        return value
+    backend = (settings.backend_internal_base_url or "").rstrip("/")
+    if not backend:
+        return value
+    path = parsed.path or ""
+    query = f"?{parsed.query}" if parsed.query else ""
+    return f"{backend}{path}{query}"
 
 
 def _guess_audio_extension(source: str, content_type: str | None) -> str:

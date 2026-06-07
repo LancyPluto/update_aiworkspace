@@ -27,4 +27,18 @@ public record InternalAgentFileContextResponse(
                 downloadUrl
         );
     }
+
+    public static InternalAgentFileContextResponse urlAttachment(Long id,
+                                                                 String name,
+                                                                 String contentType,
+                                                                 String downloadUrl) {
+        return new InternalAgentFileContextResponse(
+                id,
+                name == null || name.isBlank() ? "素材附件" : name,
+                contentType == null ? "" : contentType,
+                "READY",
+                "",
+                downloadUrl
+        );
+    }
 }

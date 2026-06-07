@@ -1,4 +1,4 @@
-import type { CommunityPost, TaskDetail } from "@/api/types"
+import type { AgentRunEvent, CommunityPost, TaskDetail } from "@/api/types"
 import type { AssetPreviewItem } from "@/types/assetPreview"
 import type { ResultBlock } from "@/types/result"
 import { communityDisplaySubtitle, communityDisplayTitle } from "@/utils/communityDisplay"
@@ -32,7 +32,13 @@ export function textFromResultBlock(block: ResultBlock | null, fallback = "") {
 
 export function assetFromTask(
   task: TaskDetail,
-  options: { blocks?: ResultBlock[]; idPrefix?: string; source?: "private" | "community"; modality?: string } = {},
+  options: {
+    blocks?: ResultBlock[]
+    idPrefix?: string
+    source?: "private" | "community"
+    modality?: string
+    defaultPromptVisible?: boolean
+  } = {},
 ): AssetPreviewItem | null {
   const blocks = options.blocks || buildTaskResultBlocks(task.result?.contentText || "", task)
   const block = primaryResultBlock(blocks)
@@ -53,7 +59,8 @@ export function assetFromTask(
       toolCode: task.toolCode,
       communityPostId: task.communityPostId ?? undefined,
       modality: options.modality || task.outputModality || task.result?.resourceType || "TEXT",
-      createdAt: task.createdAt,
+      promptVisible: options.defaultPromptVisible,
+      createdAt: task.finishedAt || task.createdAt,
       url: fallbackUrl,
     } as AssetPreviewItem
   }
@@ -68,8 +75,9 @@ export function assetFromTask(
     toolName: task.toolName,
     toolCode: task.toolCode,
     communityPostId: task.communityPostId ?? undefined,
+    promptVisible: options.defaultPromptVisible,
     modality: options.modality || task.outputModality || task.result?.resourceType || "TEXT",
-    createdAt: task.createdAt,
+    createdAt: task.finishedAt || task.createdAt,
   } satisfies Partial<AssetPreviewItem>
 
   if (block.type === "image") {
@@ -111,6 +119,114 @@ function extractPrimaryMediaUrl(text: string): string {
     /(https?:\/\/\S+?\.(?:png|jpe?g|webp|gif|mp4|mp3|wav)(?:\?\S*)?)|(\/generated\/\S+?\.(?:png|jpe?g|webp|gif|mp4|mp3|wav)(?:\?\S*)?)/i,
   )
   return (matches?.[1] || matches?.[2] || "").replace(/[)\]，。,.、；;]+$/g, "")
+}
+
+function parseRunEventPayload(eventJson?: string | null): Record<string, unknown> {
+  if (!eventJson) return {}
+  try {
+    const parsed = JSON.parse(eventJson) as unknown
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {}
+  } catch {
+    return {}
+  }
+}
+
+function normalizeComparableUrl(value?: string | null): string {
+  return (value || "").trim().replace(/\/+$/, "")
+}
+
+function urlsMatch(left?: string | null, right?: string | null): boolean {
+  const a = normalizeComparableUrl(left)
+  const b = normalizeComparableUrl(right)
+  if (!a || !b) return false
+  return a === b || a.endsWith(b) || b.endsWith(a)
+}
+
+function extractToolFinishedContent(payload: Record<string, unknown>): string {
+  const data = payload.data
+  if (data && typeof data === "object") {
+    const contentText = (data as Record<string, unknown>).contentText
+    if (typeof contentText === "string") return contentText
+  }
+  if (typeof payload.contentText === "string") return payload.contentText
+  if (typeof payload.resultSummary === "string") return payload.resultSummary
+  return ""
+}
+
+function contentContainsUrl(contentText: string, assetUrl: string): boolean {
+  if (!contentText || !assetUrl) return false
+  const normalized = normalizeComparableUrl(assetUrl)
+  return contentText.includes(normalized) || contentText.includes(assetUrl)
+}
+
+export function promptFromToolEventPayload(payload: Record<string, unknown>): string {
+  const argumentsValue = payload.arguments
+  if (argumentsValue && typeof argumentsValue === "object") {
+    const args = argumentsValue as Record<string, unknown>
+    const value = args.prompt || args.text || args.description || args.videoTopic || args.productName
+    if (typeof value === "string" && value.trim()) return value.trim()
+  }
+  if (typeof argumentsValue === "string") {
+    try {
+      const parsed = JSON.parse(argumentsValue) as Record<string, unknown>
+      return promptFromToolEventPayload({ arguments: parsed })
+    } catch {
+      return ""
+    }
+  }
+  return ""
+}
+
+export function resolveTaskIdFromRunEvents(events: AgentRunEvent[], assetUrl?: string | null): number | null {
+  const finished = events
+    .filter((event) => event.eventType === "tool.finished")
+    .map((event) => parseRunEventPayload(event.eventJson))
+    .filter((payload) => !payload.errorCode)
+
+  for (let index = finished.length - 1; index >= 0; index -= 1) {
+    const payload = finished[index]
+    const taskId = Number(payload.taskId)
+    if (!Number.isFinite(taskId) || taskId <= 0) continue
+    if (!assetUrl) return taskId
+    const contentText = extractToolFinishedContent(payload)
+    if (urlsMatch(assetUrl, contentText) || contentContainsUrl(contentText, assetUrl)) {
+      return taskId
+    }
+  }
+
+  const fallbackTaskId = Number(finished[finished.length - 1]?.taskId)
+  return Number.isFinite(fallbackTaskId) && fallbackTaskId > 0 ? fallbackTaskId : null
+}
+
+export function mergeAssetWithTask(
+  asset: AssetPreviewItem,
+  task: TaskDetail,
+  options: { defaultPromptVisible?: boolean } = {},
+): AssetPreviewItem {
+  const fromTask = assetFromTask(task, {
+    defaultPromptVisible: options.defaultPromptVisible,
+  })
+  if (!fromTask) return asset
+  return {
+    ...fromTask,
+    ...asset,
+    id: asset.id || fromTask.id,
+    kind: asset.kind || fromTask.kind,
+    url: asset.url || fromTask.url,
+    urls: asset.urls?.length ? asset.urls : fromTask.urls,
+    coverUrl: asset.coverUrl || fromTask.coverUrl,
+    title: asset.title || fromTask.title,
+    prompt: asset.prompt || fromTask.prompt,
+    rawText: asset.rawText || fromTask.rawText,
+    toolName: fromTask.toolName || asset.toolName,
+    toolCode: fromTask.toolCode || asset.toolCode,
+    taskNo: fromTask.taskNo || asset.taskNo,
+    taskId: fromTask.taskId || asset.taskId,
+    createdAt: fromTask.createdAt || asset.createdAt,
+    communityPostId: fromTask.communityPostId ?? asset.communityPostId,
+    promptVisible: asset.promptVisible ?? fromTask.promptVisible ?? options.defaultPromptVisible,
+    source: asset.source || fromTask.source || "private",
+  }
 }
 
 function inferKindFromUrl(url: string): AssetPreviewItem["kind"] {

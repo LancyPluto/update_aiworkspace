@@ -7,6 +7,7 @@ public record AgentRuntimeSettingsResponse(
         Integer toolExecutionTimeoutSeconds,
         Integer imageToolExecutionTimeoutSeconds,
         Integer videoToolExecutionTimeoutSeconds,
+        Integer musicToolExecutionTimeoutSeconds,
         Double toolPollIntervalSeconds,
         Boolean toolStreamRelayEnabled,
         Boolean productToolLoopEnabled,
