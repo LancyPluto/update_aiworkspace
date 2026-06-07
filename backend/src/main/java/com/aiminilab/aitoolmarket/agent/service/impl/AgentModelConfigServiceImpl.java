@@ -180,7 +180,9 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         config.setModelName(request.modelName().trim());
         config.setBaseUrl(blankToNull(request.baseUrl()));
         config.setExtraAuthJson(mergeExtraAuthJson(request, existing));
-        if (request.apiKey() != null && !request.apiKey().isBlank()) {
+        if (request.vendorAccountId() != null) {
+            config.setApiKey("");
+        } else if (request.apiKey() != null && !request.apiKey().isBlank()) {
             config.setApiKey(request.apiKey().trim());
         } else if (Boolean.TRUE.equals(request.clearApiKey())
                 || ("kling_video".equalsIgnoreCase(providerTrimmed) && shouldClearKlingApiKey(config.getExtraAuthJson(), existing))) {
@@ -277,14 +279,13 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         if (shouldUseAcceptOnlyShortcut(merged, provider)) {
             AgentModelConfig testConfig = applyRequest(new AgentModelConfig(), merged, existing, LocalDateTime.now());
             AgentModelConfig executable = credentialResolver.resolveForExecution(testConfig);
-            if (requiresExecutableApiKey(executable)
-                    && (executable.getApiKey() == null || executable.getApiKey().isBlank())) {
+            if (requiresExecutableCredential(executable) && !hasExecutableCredential(executable)) {
                 return new AgentModelConfigTestResponse(
                         false,
                         merged.provider(),
                         merged.modelName(),
                         0L,
-                        "API key is not configured for this model or its vendor account",
+                        "Credential is not configured for this model or its vendor account",
                         ""
                 );
             }
@@ -328,13 +329,24 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         long startedAt = System.currentTimeMillis();
         AgentModelConfig testConfig = applyRequest(new AgentModelConfig(), merged, existing, LocalDateTime.now());
         AgentModelConfig executable = credentialResolver.resolveForExecution(testConfig);
-        if (executable.getApiKey() == null || executable.getApiKey().isBlank()) {
+        if (isKlingProvider(executable) && hasKlingAccessSecretPair(executable.getExtraAuthJson())) {
+            long latencyMs = Math.max(0L, System.currentTimeMillis() - startedAt);
+            return new AgentModelConfigTestResponse(
+                    true,
+                    merged.provider(),
+                    merged.modelName(),
+                    latencyMs,
+                    "可灵 AK/SK 已配置；连通测试不消耗视频/图片资源包，实际额度以可灵控制台资源包为准。",
+                    ""
+            );
+        }
+        if (!hasExecutableSecret(executable.getApiKey())) {
             return new AgentModelConfigTestResponse(
                     false,
                     merged.provider(),
                     merged.modelName(),
                     0L,
-                    "API key is not configured for this model or its vendor account",
+                    "Credential is not configured for this model or its vendor account",
                     ""
             );
         }
@@ -389,7 +401,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
     private record MediaGatewayProbeResult(boolean success, String message) {
     }
 
-    private boolean requiresExecutableApiKey(AgentModelConfig config) {
+    private boolean requiresExecutableCredential(AgentModelConfig config) {
         if (config == null) {
             return true;
         }
@@ -404,6 +416,14 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                         || "SPEECH_TO_TEXT".equalsIgnoreCase(capability)
                         || "MUSIC_GENERATION".equalsIgnoreCase(capability)
                         || "DIGITAL_HUMAN".equalsIgnoreCase(capability));
+    }
+
+    private boolean hasExecutableCredential(AgentModelConfig config) {
+        return config != null && (hasExecutableSecret(config.getApiKey()) || hasKlingAccessSecretPair(config.getExtraAuthJson()));
+    }
+
+    private boolean isKlingProvider(AgentModelConfig config) {
+        return config != null && "kling_video".equalsIgnoreCase(config.getProvider());
     }
 
     private AgentModelConfigRequest toTestRequest(AgentModelConfig config) {
@@ -799,11 +819,9 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                 request.modelName(),
                 hasBaseUrl ? request.baseUrl() : (existing != null && existing.getBaseUrl() != null && !existing.getBaseUrl().isBlank()
                         ? existing.getBaseUrl() : account.getBaseUrl()),
-                hasApiKey ? request.apiKey() : (existing != null && existing.getApiKey() != null && !existing.getApiKey().isBlank()
-                        ? existing.getApiKey() : account.getApiKey()),
+                hasApiKey ? request.apiKey() : "",
                 request.clearApiKey(),
-                hasExtraAuth ? request.extraAuthJson() : (existing != null && existing.getExtraAuthJson() != null && !existing.getExtraAuthJson().isBlank()
-                        ? existing.getExtraAuthJson() : account.getExtraAuthJson()),
+                hasExtraAuth ? request.extraAuthJson() : "",
                 request.minimaxGroupId(),
                 request.consoleUrl(),
                 request.balanceUrl(),
@@ -847,10 +865,11 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
 
     private String mergeExtraAuthJson(AgentModelConfigRequest request, AgentModelConfig existing) {
         ObjectNode node = objectMapper.createObjectNode();
-        if (existing != null && existing.getExtraAuthJson() != null && !existing.getExtraAuthJson().isBlank()) {
+        boolean boundVendorAccount = request.vendorAccountId() != null;
+        if (!boundVendorAccount && existing != null && existing.getExtraAuthJson() != null && !existing.getExtraAuthJson().isBlank()) {
             mergeObject(node, existing.getExtraAuthJson());
         }
-        if (request.extraAuthJson() != null && !request.extraAuthJson().isBlank()) {
+        if (!boundVendorAccount && request.extraAuthJson() != null && !request.extraAuthJson().isBlank()) {
             mergeObject(node, request.extraAuthJson());
         }
         if (request.connectTimeoutSeconds() != null) {

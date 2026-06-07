@@ -168,10 +168,27 @@ function pickPrimaryAccount(accounts: ModelVendorAccount[]): ModelVendorAccount 
   return [...accounts].sort((a, b) => {
     const modelDiff = (b.modelCount ?? 0) - (a.modelCount ?? 0)
     if (modelDiff !== 0) return modelDiff
-    const keyDiff = (b.apiKeyMasked ? 1 : 0) - (a.apiKeyMasked ? 1 : 0)
+    const keyDiff = (hasAccountCredential(b) ? 1 : 0) - (hasAccountCredential(a) ? 1 : 0)
     if (keyDiff !== 0) return keyDiff
     return a.id - b.id
   })[0]
+}
+
+function hasAccountCredential(account?: Pick<ModelVendorAccount, "apiKeyMasked" | "extraAuthJsonMasked" | "apiKey" | "extraAuthJson"> | null) {
+  return Boolean(
+    account
+      && ((account.apiKeyMasked && account.apiKeyMasked.trim())
+        || (account.extraAuthJsonMasked && account.extraAuthJsonMasked.trim())
+        || (account.apiKey && account.apiKey.trim())
+        || (account.extraAuthJson && account.extraAuthJson.trim())),
+  )
+}
+
+function accountCredentialLabel(account: Pick<ModelVendorAccount, "apiKeyMasked" | "extraAuthJsonMasked">) {
+  const parts: string[] = []
+  if (account.apiKeyMasked) parts.push(`API Key ${account.apiKeyMasked}`)
+  if (account.extraAuthJsonMasked) parts.push(`额外鉴权 ${account.extraAuthJsonMasked}`)
+  return parts.length ? parts.join(" · ") : "未配置凭据"
 }
 
 function isHealthyStatus(value?: string | null) {
@@ -305,7 +322,7 @@ function renderModelCost(model: UnifiedApiModelItem) {
   )
 }
 
-const emptyAccountForm = (): ModelVendorAccountPayload & { id?: number; apiKeyMasked?: string } => ({
+const emptyAccountForm = (): ModelVendorAccountPayload & { id?: number; apiKeyMasked?: string; extraAuthJsonMasked?: string } => ({
   vendorCode: "deepseek",
   accountName: "默认账户",
   baseUrl: "",
@@ -916,6 +933,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
       apiKey: account.apiKey || "",
       apiKeyMasked: account.apiKeyMasked || "",
       extraAuthJson: account.extraAuthJson || "",
+      extraAuthJsonMasked: account.extraAuthJsonMasked || "",
       consoleUrl: account.consoleUrl || "",
       balanceUrl: account.balanceUrl || "",
       balanceQueryMode: account.balanceQueryMode || "MANUAL",
@@ -1210,13 +1228,15 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                     <span className="text-xs text-muted-foreground">{account.modelCount} 个模型</span>
                   </div>
                   <p className="mt-2 text-xs font-medium tabular-nums">{formatBalance(account)}</p>
-                  {account.apiKeyMasked ? <p className="mt-1 text-xs text-muted-foreground">Key {account.apiKeyMasked}</p> : null}
+                  <p className={`mt-1 text-xs ${hasAccountCredential(account) ? "text-muted-foreground" : "text-amber-700"}`}>
+                    {accountCredentialLabel(account)}
+                  </p>
                 </div>
               ))}
             </div>
           ) : null}
           {vendor.accounts.length === 0 ? (
-            <p className="py-4 text-center text-sm text-muted-foreground">请先接入 API 密钥，再添加模型。</p>
+            <p className="py-4 text-center text-sm text-muted-foreground">请先接入厂商账户并配置凭据，再添加模型。</p>
           ) : vendor.models.length === 0 ? (
             <div className="space-y-3 py-2">
               <p className="text-center text-sm text-muted-foreground">暂无模型</p>
@@ -1268,17 +1288,31 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                         ) : null}
                       </TableCell>
                       <TableCell className="align-middle text-center">
-                        {model.vendorAccountId ? (
-                          <Badge variant="outline" className="max-w-[140px] truncate text-xs">
-                            {displayAccountName(
-                              vendor.accounts.find((account) => account.id === model.vendorAccountId) || {
-                                id: model.vendorAccountId,
-                                accountName: model.vendorAccountName || "",
-                              } as ModelVendorAccount,
-                              vendor.accounts.findIndex((account) => account.id === model.vendorAccountId),
-                            )}
-                          </Badge>
-                        ) : vendor.accounts.length > 0 ? (
+                        {model.vendorAccountId ? (() => {
+                          const boundAccount = vendor.accounts.find((account) => account.id === model.vendorAccountId)
+                          const accountIndex = vendor.accounts.findIndex((account) => account.id === model.vendorAccountId)
+                          const fallbackAccount = {
+                            id: model.vendorAccountId,
+                            accountName: model.vendorAccountName || "",
+                            apiKeyMasked: null,
+                            extraAuthJsonMasked: null,
+                          } as ModelVendorAccount
+                          const account = boundAccount || fallbackAccount
+                          return (
+                            <div className="mx-auto grid max-w-[170px] gap-1 text-left">
+                              <Badge
+                                variant="outline"
+                                className="w-fit max-w-[170px] truncate text-xs"
+                                title={`模型 ${model.displayName || model.modelName} 使用账号 #${model.vendorAccountId}：${displayAccountName(account, accountIndex)}`}
+                              >
+                                #{model.vendorAccountId} {displayAccountName(account, accountIndex)}
+                              </Badge>
+                              <span className={`truncate text-[11px] ${hasAccountCredential(account) ? "text-muted-foreground" : "text-amber-700"}`}>
+                                {boundAccount ? accountCredentialLabel(boundAccount) : "账号详情未加载"}
+                              </span>
+                            </div>
+                          )
+                        })() : vendor.accounts.length > 0 ? (
                           <Badge
                             variant="outline"
                             className="max-w-[150px] truncate text-xs text-amber-700"
@@ -1614,7 +1648,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{accountForm.id ? "编辑厂商账户" : "接入厂商账户"}</DialogTitle>
-            <DialogDescription>API Key 与 Base URL 在此维护，下属模型将自动继承。</DialogDescription>
+            <DialogDescription>凭据只在厂商账户维护，下属模型通过绑定账号自动继承。API Key 与额外鉴权 JSON 二选一即可。</DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-2">
             <div className="space-y-2">
@@ -1630,18 +1664,20 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
               <Input
                 type="password"
                 value={accountForm.apiKey || ""}
-                placeholder={accountForm.apiKeyMasked ? "留空则不修改" : "必填"}
+                placeholder={accountForm.apiKeyMasked ? "留空则不修改" : "可选；Bearer Key / Token 类厂商填写"}
                 onChange={(e) => setAccountForm((f) => ({ ...f, apiKey: e.target.value }))}
               />
+              <p className="text-xs text-muted-foreground">可灵等 AK/SK 厂商可留空，改填下方额外鉴权 JSON。</p>
             </div>
             <div className="space-y-2">
-              <Label>额外鉴权 JSON（可填 AK/SK 等）</Label>
+              <Label>额外鉴权 JSON {accountForm.extraAuthJsonMasked ? `(已配置 ${accountForm.extraAuthJsonMasked})` : ""}</Label>
               <Textarea
                 rows={3}
                 value={accountForm.extraAuthJson || ""}
-                placeholder="留空则不修改"
+                placeholder={accountForm.extraAuthJsonMasked ? "留空则不修改" : '{"accessKey":"...","secretKey":"..."}'}
                 onChange={(e) => setAccountForm((f) => ({ ...f, extraAuthJson: e.target.value }))}
               />
+              <p className="text-xs text-muted-foreground">用于可灵 Access Key / Secret Key、代理、超时等账号级扩展配置。</p>
             </div>
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">

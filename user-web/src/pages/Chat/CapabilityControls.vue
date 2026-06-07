@@ -14,7 +14,7 @@ import {
   parseFieldMeta,
   resolveMaxLength,
 } from "@/utils/fieldUiMeta"
-import { FileAudio, FileVideo, ImageIcon, ImageUp, Library, Loader2, Mic, Paperclip, UploadCloud, X } from "lucide-vue-next"
+import { Check, FileAudio, FileVideo, ImageIcon, ImageUp, Loader2, Mic, Paperclip, Plus, UploadCloud, X } from "lucide-vue-next"
 import { BookOpen } from 'lucide-vue-next'
 
 export interface PendingAttachment {
@@ -82,8 +82,10 @@ const uploadHistoryOpen = ref(false)
 const uploadHistoryField = ref<ToolField | null>(null)
 const uploadHistoryItems = ref<UploadHistoryItem[]>([])
 const uploadHistoryUploading = ref(false)
+const pickerSelectedUrls = ref<string[]>([])
 
 const UPLOAD_HISTORY_LIMIT = 60
+const MULTI_IMAGE_LIMIT = 8
 
 function isAspectRatioField(field: ToolField): boolean {
   return field.fieldKey === "aspectRatio" || field.fieldKey === "aspect_ratio" || field.fieldKey === "imageRatio"
@@ -197,6 +199,59 @@ function strField(key: string): string {
   return value === undefined || value === null ? "" : String(value)
 }
 
+function isMultiImageField(field: ToolField): boolean {
+  return field.fieldType === "multi_image"
+}
+
+function multiImageValues(field: ToolField): string[] {
+  const value = state.value.fields[field.fieldKey]
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item).trim()).filter(Boolean).slice(0, MULTI_IMAGE_LIMIT)
+  }
+  if (typeof value === "string" && value.trim()) {
+    try {
+      const parsed = JSON.parse(value) as unknown
+      if (Array.isArray(parsed)) {
+        return parsed.map((item) => String(item).trim()).filter(Boolean).slice(0, MULTI_IMAGE_LIMIT)
+      }
+    } catch {
+      return value.split(",").map((item) => item.trim()).filter(Boolean).slice(0, MULTI_IMAGE_LIMIT)
+    }
+  }
+  return []
+}
+
+function setMultiImageValues(field: ToolField, urls: string[]) {
+  const seen = new Set<string>()
+  const next = urls
+    .map((url) => url.trim())
+    .filter((url) => {
+      if (!url || seen.has(url)) return false
+      seen.add(url)
+      return true
+    })
+    .slice(0, MULTI_IMAGE_LIMIT)
+  setField(field.fieldKey, next)
+}
+
+function addMultiImageUrls(field: ToolField, urls: string[]) {
+  setMultiImageValues(field, [...multiImageValues(field), ...urls])
+}
+
+function removeMultiImageUrl(field: ToolField, url: string) {
+  setMultiImageValues(field, multiImageValues(field).filter((item) => item !== url))
+}
+
+function togglePickerUrl(url: string) {
+  pickerSelectedUrls.value = pickerSelectedUrls.value.includes(url)
+    ? pickerSelectedUrls.value.filter((item) => item !== url)
+    : [...pickerSelectedUrls.value, url].slice(0, MULTI_IMAGE_LIMIT)
+}
+
+function pickerIsSelected(url: string) {
+  return pickerSelectedUrls.value.includes(url)
+}
+
 function setField(key: string, value: unknown) {
   state.value.fields = { ...state.value.fields, [key]: value }
 }
@@ -219,7 +274,7 @@ function imagePreviewUrl(field: ToolField): string {
 }
 
 function materialKindForField(field: ToolField): MaterialKind {
-  if (field.fieldType === "image") return "image"
+  if (field.fieldType === "image" || field.fieldType === "multi_image") return "image"
   const text = `${field.fieldKey} ${field.fieldName} ${field.placeholder || ""}`.toLowerCase()
   if (/image|img|picture|photo|frame|cover|avatar|poster|图片|图像|照片|帧|封面|首图/.test(text)) return "image"
   if (/audio|voice|sound|speech|music|音频|语音|声音|音乐/.test(text)) return "audio"
@@ -278,6 +333,7 @@ function rememberUploadHistoryItem(field: ToolField, item: UploadHistoryItem) {
 function openUploadHistoryPicker(field: ToolField) {
   uploadHistoryField.value = field
   uploadHistoryItems.value = readUploadHistory(materialKindForField(field))
+  pickerSelectedUrls.value = isMultiImageField(field) ? multiImageValues(field) : []
   uploadHistoryOpen.value = true
 }
 
@@ -285,11 +341,16 @@ function closeUploadHistoryPicker() {
   uploadHistoryOpen.value = false
   uploadHistoryField.value = null
   uploadHistoryUploading.value = false
+  pickerSelectedUrls.value = []
 }
 
 function selectUploadHistoryItem(item: UploadHistoryItem) {
   const field = uploadHistoryField.value
   if (!field) return
+  if (isMultiImageField(field)) {
+    togglePickerUrl(item.url)
+    return
+  }
   setField(field.fieldKey, item.url)
   fieldUploads.value = {
     ...fieldUploads.value,
@@ -304,7 +365,8 @@ function deleteUploadHistoryItem(item: UploadHistoryItem) {
   const next = readUploadHistory(kind).filter((entry) => entry.id !== item.id && entry.url !== item.url)
   writeUploadHistory(kind, next)
   uploadHistoryItems.value = next
-  if (field && strField(field.fieldKey) === item.url) clearUploadedField(field)
+  if (field && isMultiImageField(field)) removeMultiImageUrl(field, item.url)
+  else if (field && strField(field.fieldKey) === item.url) clearUploadedField(field)
 }
 
 function uploadAccept(field: ToolField): string | undefined {
@@ -370,6 +432,7 @@ function createMaterialAssets(task: TaskDetail, targetKind: MaterialKind): Mater
 async function openMaterialPicker(field: ToolField) {
   materialPickerField.value = field
   materialPickerOpen.value = true
+  pickerSelectedUrls.value = isMultiImageField(field) ? multiImageValues(field) : []
   materialLoading.value = true
   materialError.value = ""
   materialAssets.value = []
@@ -397,17 +460,34 @@ async function openMaterialPicker(field: ToolField) {
 function closeMaterialPicker() {
   materialPickerOpen.value = false
   materialPickerField.value = null
+  pickerSelectedUrls.value = []
 }
 
 function selectMaterialAsset(asset: MaterialAsset) {
   const field = materialPickerField.value
   if (!field) return
+  if (isMultiImageField(field)) {
+    togglePickerUrl(asset.url)
+    return
+  }
   setField(field.fieldKey, asset.url)
   fieldUploads.value = {
     ...fieldUploads.value,
     [field.fieldKey]: { uploading: false, fileName: asset.title },
   }
   closeMaterialPicker()
+}
+
+function confirmPickerSelection() {
+  const field = uploadHistoryOpen.value ? uploadHistoryField.value : materialPickerField.value
+  if (!field || !isMultiImageField(field)) return
+  setMultiImageValues(field, pickerSelectedUrls.value)
+  fieldUploads.value = {
+    ...fieldUploads.value,
+    [field.fieldKey]: { uploading: false, fileName: `${pickerSelectedUrls.value.length} 张参考图` },
+  }
+  if (uploadHistoryOpen.value) closeUploadHistoryPicker()
+  if (materialPickerOpen.value) closeMaterialPicker()
 }
 
 async function uploadFieldFile(field: ToolField, file: File, options: { closeHistoryAfterUpload?: boolean } = {}) {
@@ -423,7 +503,14 @@ async function uploadFieldFile(field: ToolField, file: File, options: { closeHis
   }
   try {
     const result = await uploadToolFile(file, { token: auth.token })
-    setField(field.fieldKey, result.url)
+    if (isMultiImageField(field)) {
+      addMultiImageUrls(field, [result.url])
+      if (uploadHistoryOpen.value && uploadHistoryField.value?.fieldKey === field.fieldKey) {
+        pickerSelectedUrls.value = multiImageValues(field)
+      }
+    } else {
+      setField(field.fieldKey, result.url)
+    }
     rememberUploadHistoryItem(field, {
       id: result.fileId || fallbackId,
       kind,
@@ -454,16 +541,28 @@ async function uploadFieldFile(field: ToolField, file: File, options: { closeHis
 }
 
 async function handleFieldUpload(field: ToolField, files: FileList | File[] | null) {
-  const file = files?.[0]
-  if (!file) return
-  await uploadFieldFile(field, file)
+  const selected = Array.from(files || [])
+  if (selected.length === 0) return
+  if (!isMultiImageField(field)) {
+    await uploadFieldFile(field, selected[0]!)
+    return
+  }
+  for (const file of selected.slice(0, MULTI_IMAGE_LIMIT - multiImageValues(field).length)) {
+    await uploadFieldFile(field, file)
+  }
 }
 
 async function handleUploadHistoryFile(files: FileList | File[] | null) {
   const field = uploadHistoryField.value
-  const file = files?.[0]
-  if (!field || !file) return
-  await uploadFieldFile(field, file, { closeHistoryAfterUpload: true })
+  const selected = Array.from(files || [])
+  if (!field || selected.length === 0) return
+  if (!isMultiImageField(field)) {
+    await uploadFieldFile(field, selected[0]!, { closeHistoryAfterUpload: true })
+    return
+  }
+  for (const file of selected.slice(0, MULTI_IMAGE_LIMIT - multiImageValues(field).length)) {
+    await uploadFieldFile(field, file)
+  }
 }
 
 function onUploadHistoryFileChange(event: Event) {
@@ -473,7 +572,7 @@ function onUploadHistoryFileChange(event: Event) {
 }
 
 function clearUploadedField(field: ToolField) {
-  setField(field.fieldKey, "")
+  setField(field.fieldKey, isMultiImageField(field) ? [] : "")
   const next = { ...fieldUploads.value }
   delete next[field.fieldKey]
   fieldUploads.value = next
@@ -502,6 +601,12 @@ function validate(): { valid: boolean; message?: string } {
     }
     if (!field.required) continue
     if (field.fieldType === "checkbox") continue
+    if (isMultiImageField(field)) {
+      if (multiImageValues(field).length === 0) {
+        return { valid: false, message: `请填写：${field.fieldName}` }
+      }
+      continue
+    }
     if (value === undefined || value === null || String(value).trim() === "") {
       return { valid: false, message: `请填写：${field.fieldName}` }
     }
@@ -522,6 +627,9 @@ function getRequestParams(): Record<string, unknown> {
     const value = state.value.fields[field.fieldKey]
     if (field.fieldType === "checkbox") {
       params[field.fieldKey] = Boolean(value)
+    } else if (isMultiImageField(field)) {
+      const urls = multiImageValues(field)
+      if (urls.length > 0) params[field.fieldKey] = urls
     } else if (field.fieldType === "number" || field.fieldType === "slider") {
       if (value !== "" && value !== undefined && value !== null && !Number.isNaN(Number(value))) {
         params[field.fieldKey] = Number(value)
@@ -572,7 +680,11 @@ defineExpose({
 <template>
   <div v-if="configuredFields.length > 0 || capabilities.length > 0" class="mt-2 space-y-2">
     <div class="flex flex-wrap items-center gap-1.5">
-      <div v-for="field in configuredFields" :key="field.fieldKey" class="min-w-[100px] max-w-[180px]">
+      <div
+        v-for="field in configuredFields"
+        :key="field.fieldKey"
+        :class="isMultiImageField(field) ? 'min-w-[220px] max-w-[360px]' : 'min-w-[100px] max-w-[180px]'"
+      >
         <label class="mb-1 block text-[11px] font-medium text-muted-foreground">
           {{ field.fieldName }}<span v-if="field.required" class="text-destructive"> *</span>
         </label>
@@ -642,6 +754,54 @@ defineExpose({
           />
           {{ field.placeholder || "启用" }}
         </label>
+
+        <div v-else-if="isMultiImageField(field)" class="space-y-2">
+          <div
+            class="flex flex-wrap gap-2"
+            @dragover.prevent
+            @drop.prevent="handleFieldUpload(field, ($event as DragEvent).dataTransfer?.files || null)"
+          >
+            <button
+              type="button"
+              class="flex h-16 w-16 shrink-0 items-center justify-center rounded-xl border border-dashed border-border/70 bg-background text-muted-foreground transition hover:border-primary hover:text-primary"
+              :title="`选择或上传${materialKindLabel(materialKindForField(field))}`"
+              @click="openUploadHistoryPicker(field)"
+            >
+              <Loader2 v-if="uploadState(field.fieldKey).uploading" class="h-5 w-5 animate-spin text-primary" />
+              <Plus v-else class="h-5 w-5" />
+            </button>
+            <div
+              v-for="url in multiImageValues(field)"
+              :key="url"
+              class="group relative h-16 w-16 overflow-hidden rounded-xl border border-border bg-muted"
+            >
+              <img :src="normalizeResourceUrl(url)" alt="" class="h-full w-full object-cover" />
+              <button
+                type="button"
+                class="absolute right-1 top-1 rounded-full bg-black/60 p-1 text-white opacity-0 transition group-hover:opacity-100"
+                aria-label="移除参考图"
+                @click="removeMultiImageUrl(field, url)"
+              >
+                <X class="h-3 w-3" />
+              </button>
+            </div>
+            <button
+              type="button"
+              class="flex h-16 min-w-16 items-center gap-1 rounded-xl border border-border/60 bg-background px-3 text-xs text-muted-foreground transition hover:text-primary"
+              :title="`从历史${materialKindLabel(materialKindForField(field))}素材中选择`"
+              @click="openMaterialPicker(field)"
+            >
+              <BookOpen class="h-3.5 w-3.5" />
+              素材库
+            </button>
+          </div>
+          <p class="text-[11px] text-muted-foreground">
+            已选 {{ multiImageValues(field).length }}/{{ MULTI_IMAGE_LIMIT }} 张参考图
+          </p>
+          <p v-if="uploadState(field.fieldKey).error" class="text-[11px] text-destructive">
+            {{ uploadState(field.fieldKey).error }}
+          </p>
+        </div>
 
         <div v-else-if="field.fieldType === 'image' || field.fieldType === 'file'" class="space-y-1">
           <div
@@ -780,6 +940,7 @@ defineExpose({
                   class="hidden"
                   :accept="uploadHistoryField ? uploadAccept(uploadHistoryField) : undefined"
                   :disabled="uploadHistoryUploading"
+                  :multiple="uploadHistoryField ? isMultiImageField(uploadHistoryField) : false"
                   @change="onUploadHistoryFileChange"
                 />
               </label>
@@ -805,8 +966,13 @@ defineExpose({
                 :key="item.id"
                 class="group overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04] transition hover:-translate-y-0.5 hover:border-primary/60 hover:bg-white/[0.07]"
               >
-                <button type="button" class="block w-full text-left" @click="selectUploadHistoryItem(item)">
-                  <div class="flex aspect-[4/3] items-center justify-center bg-white/[0.04]">
+                <button
+                  type="button"
+                  class="block w-full text-left"
+                  :class="{ 'ring-2 ring-primary': uploadHistoryField && isMultiImageField(uploadHistoryField) && pickerIsSelected(item.url) }"
+                  @click="selectUploadHistoryItem(item)"
+                >
+                  <div class="relative flex aspect-[4/3] items-center justify-center bg-white/[0.04]">
                     <img
                       v-if="item.kind === 'image'"
                       :src="normalizeResourceUrl(item.url)"
@@ -816,6 +982,12 @@ defineExpose({
                     <FileVideo v-else-if="item.kind === 'video'" class="h-9 w-9 text-white/35 group-hover:text-primary" />
                     <FileAudio v-else-if="item.kind === 'audio'" class="h-9 w-9 text-white/35 group-hover:text-primary" />
                     <ImageIcon v-else class="h-9 w-9 text-white/35 group-hover:text-primary" />
+                    <span
+                      v-if="uploadHistoryField && isMultiImageField(uploadHistoryField) && pickerIsSelected(item.url)"
+                      class="absolute right-3 top-3 rounded-full bg-primary p-1 text-white"
+                    >
+                      <Check class="h-3.5 w-3.5" />
+                    </span>
                   </div>
                   <div class="space-y-1.5 p-4">
                     <p class="truncate text-sm font-semibold text-white">{{ item.name }}</p>
@@ -835,6 +1007,19 @@ defineExpose({
                 </div>
               </article>
             </div>
+          </div>
+          <div
+            v-if="uploadHistoryField && isMultiImageField(uploadHistoryField)"
+            class="flex items-center justify-between border-t border-white/10 px-6 py-4"
+          >
+            <span class="text-sm text-white/45">已选 {{ pickerSelectedUrls.length }}/{{ MULTI_IMAGE_LIMIT }} 张</span>
+            <button
+              type="button"
+              class="rounded-full bg-primary px-4 py-2 text-sm font-semibold text-white transition hover:brightness-110"
+              @click="confirmPickerSelection"
+            >
+              确认选择
+            </button>
           </div>
         </div>
       </div>
@@ -880,9 +1065,10 @@ defineExpose({
                 :key="asset.id"
                 type="button"
                 class="group overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04] text-left transition hover:-translate-y-0.5 hover:border-primary/60 hover:bg-white/[0.07]"
+                :class="{ 'ring-2 ring-primary': materialPickerField && isMultiImageField(materialPickerField) && pickerIsSelected(asset.url) }"
                 @click="selectMaterialAsset(asset)"
               >
-                <div class="flex aspect-[4/3] items-center justify-center bg-white/[0.04]">
+                <div class="relative flex aspect-[4/3] items-center justify-center bg-white/[0.04]">
                   <img
                     v-if="asset.kind === 'image' && asset.previewUrl"
                     :src="asset.previewUrl"
@@ -892,6 +1078,12 @@ defineExpose({
                   <FileVideo v-else-if="asset.kind === 'video'" class="h-9 w-9 text-white/35 group-hover:text-primary" />
                   <FileAudio v-else-if="asset.kind === 'audio'" class="h-9 w-9 text-white/35 group-hover:text-primary" />
                   <ImageIcon v-else class="h-9 w-9 text-white/35 group-hover:text-primary" />
+                  <span
+                    v-if="materialPickerField && isMultiImageField(materialPickerField) && pickerIsSelected(asset.url)"
+                    class="absolute right-3 top-3 rounded-full bg-primary p-1 text-white"
+                  >
+                    <Check class="h-3.5 w-3.5" />
+                  </span>
                 </div>
                 <div class="space-y-1.5 p-4">
                   <p class="truncate text-sm font-semibold text-white">{{ asset.title }}</p>
@@ -899,6 +1091,19 @@ defineExpose({
                 </div>
               </button>
             </div>
+          </div>
+          <div
+            v-if="materialPickerField && isMultiImageField(materialPickerField)"
+            class="flex items-center justify-between border-t border-white/10 px-6 py-4"
+          >
+            <span class="text-sm text-white/45">已选 {{ pickerSelectedUrls.length }}/{{ MULTI_IMAGE_LIMIT }} 张</span>
+            <button
+              type="button"
+              class="rounded-full bg-primary px-4 py-2 text-sm font-semibold text-white transition hover:brightness-110"
+              @click="confirmPickerSelection"
+            >
+              确认选择
+            </button>
           </div>
         </div>
               </div>

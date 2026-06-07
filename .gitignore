@@ -31,6 +31,12 @@ venv/
 .idea/
 .vscode/
 
+# 数据
+data/
+data/**
+backend/data/*
+backend/data/**
+
 # OS
 .DS_Store
 Thumbs.db

@@ -91,6 +91,43 @@ def test_openai_images_with_reference_uses_requests_multipart_by_default() -> No
     assert posted["files"]["image"][1] == b"fake", posted
 
 
+def test_openai_images_with_multiple_references_uses_edit_multipart() -> None:
+    class FakeResponse:
+        status_code = 200
+        text = "{}"
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {"data": [{"url": "https://example.com/openai-image.png"}]}
+
+    client = OpenAIImagesClient(base_url="https://api.ofox.ai/v1", api_key="fake-key")
+    posted: dict = {}
+
+    def fake_post(url, json=None, data=None, files=None, timeout=None, headers=None):
+        posted["url"] = url
+        posted["files"] = files or []
+        return FakeResponse()
+
+    client.session.post = fake_post
+    urls = client.generate_images(
+        prompt="edit this",
+        model="openai/gpt-image-2",
+        image=[
+            "data:image/png;base64,ZmFrZTE=",
+            "data:image/png;base64,ZmFrZTI=",
+        ],
+    )
+
+    image_parts = [part for part in posted["files"] if part[0] == "image"]
+    assert urls == ["https://example.com/openai-image.png"], urls
+    assert posted["url"] == "https://api.ofox.ai/v1/images/edits", posted
+    assert len(image_parts) == 2, posted
+    assert image_parts[0][1][1] == b"fake1", posted
+    assert image_parts[1][1][1] == b"fake2", posted
+
+
 def test_openai_images_edit_retries_with_prefixed_model_when_gateway_requires_it() -> None:
     class FakeResponse:
         status_code = 200

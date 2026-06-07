@@ -27,9 +27,16 @@ class ChatToolCall:
 @dataclass(slots=True)
 class ChatTurnResult:
     content: str = ""
+    reasoning: str = ""
     tool_calls: list[ChatToolCall] = field(default_factory=list)
     finish_reason: str | None = None
     raw: Any | None = None
+
+
+@dataclass(slots=True)
+class StreamPart:
+    kind: str
+    text: str
 
 
 class ModelClient:
@@ -103,6 +110,19 @@ class ModelClient:
             raise ModelClientError(f"model request failed: {exception}") from exception
         self._record_usage(result)
         return _langchain_turn_result(result)
+
+    async def chat_stream_parts(
+        self,
+        messages: list[ChatMessage],
+        tools: list[dict[str, Any]] | None = None,
+    ) -> AsyncIterator[StreamPart]:
+        if not self._uses_injected_chat_model and self._should_use_direct_openai_stream():
+            async for part in self._chat_openai_compatible_stream_parts_direct(messages, tools=tools):
+                yield part
+            return
+        async for chunk in self.chat_stream(messages, tools=tools):
+            if chunk:
+                yield StreamPart(kind="text", text=chunk)
 
     async def chat_stream(self, messages: list[ChatMessage], tools: list[dict[str, Any]] | None = None) -> AsyncIterator[str]:
         if not self._uses_injected_chat_model and self._should_use_direct_openai_stream():
@@ -214,11 +234,22 @@ class ModelClient:
         self._record_openai_usage(data)
         return _openai_compatible_turn_result(data)
 
+    async def _chat_openai_compatible_stream_parts_direct(
+        self,
+        messages: list[ChatMessage],
+        tools: list[dict[str, Any]] | None = None,
+    ) -> AsyncIterator[StreamPart]:
+        async for chunk in self._chat_openai_compatible_stream_direct(messages, tools=tools, emit_parts=True):
+            if isinstance(chunk, StreamPart):
+                yield chunk
+
     async def _chat_openai_compatible_stream_direct(
         self,
         messages: list[ChatMessage],
         tools: list[dict[str, Any]] | None = None,
-    ) -> AsyncIterator[str]:
+        *,
+        emit_parts: bool = False,
+    ) -> AsyncIterator[str | StreamPart]:
         base_url = self.settings.model_api_base_url.rstrip("/")
         if not base_url and self.settings.model_provider.strip().lower() in {"deepseek", "deepseek_compatible"}:
             base_url = "https://api.deepseek.com"
@@ -256,9 +287,14 @@ class ModelClient:
                         except ValueError:
                             continue
                         self._record_openai_usage(data)
-                        delta = _openai_compatible_stream_delta(data)
-                        if delta:
-                            yield delta
+                        if emit_parts:
+                            for part in _openai_compatible_stream_parts(data):
+                                if part.text:
+                                    yield part
+                        else:
+                            delta = _openai_compatible_stream_delta(data)
+                            if delta:
+                                yield delta
         except ModelClientError:
             raise
         except Exception as exception:
@@ -430,13 +466,43 @@ def _openai_compatible_turn_result(data: Any) -> ChatTurnResult:
     if not isinstance(message, dict):
         raise ModelClientError("model returned invalid chat completion message")
     content = _extract_content(message.get("content")) if message.get("content") is not None else ""
+    reasoning = _extract_reasoning_content(message)
     tool_calls = _extract_openai_tool_calls(message.get("tool_calls"))
     return ChatTurnResult(
         content=content,
+        reasoning=reasoning,
         tool_calls=tool_calls,
         finish_reason=first.get("finish_reason") if isinstance(first.get("finish_reason"), str) else None,
         raw=data,
     )
+
+
+def _openai_compatible_stream_parts(data: Any) -> list[StreamPart]:
+    if not isinstance(data, dict):
+        return []
+    choices = data.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return []
+    first = choices[0]
+    if not isinstance(first, dict):
+        return []
+    delta = first.get("delta")
+    if not isinstance(delta, dict):
+        return []
+    parts: list[StreamPart] = []
+    reasoning = delta.get("reasoning_content") or delta.get("reasoning")
+    if isinstance(reasoning, str) and reasoning:
+        parts.append(StreamPart(kind="reasoning", text=reasoning))
+    content = delta.get("content")
+    if isinstance(content, str) and content:
+        parts.append(StreamPart(kind="text", text=content))
+    elif isinstance(content, list):
+        text, reasoning_text = _split_content_blocks(content)
+        if reasoning_text:
+            parts.append(StreamPart(kind="reasoning", text=reasoning_text))
+        if text:
+            parts.append(StreamPart(kind="text", text=text))
+    return parts
 
 
 def _openai_compatible_stream_delta(data: Any) -> str:
@@ -571,21 +637,44 @@ def _message_content(message, *, allow_empty: bool = False) -> str:
     raise ModelClientError("model returned invalid chat completion response")
 
 
-def _flatten_content(content: list[Any], *, allow_empty: bool = False) -> str:
-    parts: list[str] = []
+def _split_content_blocks(content: list[Any]) -> tuple[str, str]:
+    text_parts: list[str] = []
+    reasoning_parts: list[str] = []
     for item in content:
         if isinstance(item, str):
-            parts.append(item)
-        elif isinstance(item, dict):
-            if isinstance(item.get("text"), str):
-                parts.append(item["text"])
-            elif item.get("type") in ("thinking", "reasoning") or "thinking" in item or "reasoning" in item:
-                continue
-    if not parts:
+            text_parts.append(item)
+            continue
+        if not isinstance(item, dict):
+            continue
+        block_type = str(item.get("type") or "").lower()
+        if block_type in {"thinking", "reasoning"} or "thinking" in item or "reasoning" in item:
+            value = item.get("text") or item.get("thinking") or item.get("reasoning")
+            if isinstance(value, str) and value:
+                reasoning_parts.append(value)
+            continue
+        if isinstance(item.get("text"), str):
+            text_parts.append(item["text"])
+    return "".join(text_parts), "".join(reasoning_parts)
+
+
+def _flatten_content(content: list[Any], *, allow_empty: bool = False) -> str:
+    text, _ = _split_content_blocks(content)
+    if not text:
         if allow_empty:
             return ""
         raise ModelClientError("model returned invalid chat completion response")
-    return "".join(parts)
+    return text
+
+
+def _extract_reasoning_content(message: dict[str, Any]) -> str:
+    reasoning = message.get("reasoning_content") or message.get("reasoning")
+    if isinstance(reasoning, str):
+        return reasoning
+    content = message.get("content")
+    if isinstance(content, list):
+        _, reasoning_text = _split_content_blocks(content)
+        return reasoning_text
+    return ""
 
 
 def _has_only_non_text_blocks(content: list[Any]) -> bool:

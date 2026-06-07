@@ -261,6 +261,9 @@ MEMORY_TOOL_SYSTEM_PROMPT = (
     "Do not save one-off image prompts, generated media URLs, large JSON, temporary jokes, or data that looks sensitive or uncertain.\n"
     "If the user explicitly says to remember/write/save something, call a memory tool before saying it has been recorded.\n"
     "If the user asks you to infer their profile and write it to memory, first answer naturally, then save your concise final profile summary as user_profile or preference.\n"
+    "If the user asks to summarize the conversation and write it to memory, save distilled stable preferences and profile facts only; do not copy one-off generation prompts.\n"
+    "Never call platform image/video/music/product tools from this loop; only memory_add, memory_replace, and memory_remove are available.\n"
+    "Never output tool-call code, DSML, XML, or JSON tool invocation blocks in your final natural-language reply.\n"
     "Current user instruction has highest priority; memory is helpful context, not absolute truth."
 )
 

@@ -5,7 +5,12 @@ from app.core.event_types import MEMORY_SAVED, TOOL_CALL_EXECUTED, TOOL_CALL_LOO
 from app.core.intent_router import Intent
 from app.core.schemas import ChatMessage, RunContext, ToolDescriptor
 from app.runtime.product_tool_call_loop import ProductToolCallLoopExecutor
-from app.runtime.tool_call_loop import AgentToolCallLoopExecutor
+from app.runtime.tool_call_loop import (
+    AgentToolCallLoopExecutor,
+    contains_pseudo_tool_call,
+    finalize_loop_answer,
+    strip_pseudo_tool_calls,
+)
 from app.tools.memory_tool import MemoryTool
 
 
@@ -81,6 +86,112 @@ async def test_tool_call_loop_executes_memory_add_before_final_answer():
     assert TOOL_CALL_EXECUTED in event_types
     assert TOOL_CALL_LOOP_COMPLETED in event_types
     assert model.calls[1][0][-1].role == "tool"
+
+
+class RejectThenDsmlModel:
+    def __init__(self):
+        self.calls = []
+
+    async def chat_turn(self, messages, tools=None, tool_choice=None):
+        self.calls.append((messages, tools, tool_choice))
+        if len(self.calls) == 1:
+            return ChatTurnResult(
+                content="",
+                tool_calls=[
+                    ChatToolCall(
+                        id="call_mem",
+                        name="memory_add",
+                        arguments={
+                            "memory_type": "user_profile",
+                            "title": "会话摘要",
+                            "content": "用户偏好写实高中校园场景与多语言翻唱。",
+                        },
+                    )
+                ],
+                finish_reason="tool_calls",
+            )
+        if tool_choice == "none":
+            return ChatTurnResult(
+                content=(
+                    '<｜｜DSML｜｜tool_calls><｜｜DSML｜｜invoke name="ofox_gpt_image2">'
+                    '<｜｜DSML｜｜parameter name="prompt" string="true">A poster</｜｜DSML｜｜parameter>'
+                    "</｜｜DSML｜｜invoke></｜｜DSML｜｜tool_calls>"
+                ),
+                finish_reason="stop",
+            )
+        return ChatTurnResult(
+            content="",
+            tool_calls=[ChatToolCall(id="call_img", name="ofox_gpt_image2", arguments={"prompt": "poster"})],
+            finish_reason="tool_calls",
+        )
+
+
+@pytest.mark.asyncio
+async def test_tool_call_loop_early_stops_after_explicit_memory_request():
+    backend = FakeToolLoopBackend()
+    model = RejectThenDsmlModel()
+    memory_tool = MemoryTool(backend, workspace_id=1, user_id=2, run_id=10)
+    loop = AgentToolCallLoopExecutor(
+        backend=backend,
+        model=model,
+        run_id=10,
+        memory_tool=memory_tool,
+        reserve_model_call=lambda: None,
+        max_iterations=3,
+    )
+
+    result = await loop.run(
+        [ChatMessage(role="user", content="总结我们的对话内容，写入你的记忆")],
+        explicit_memory_request=True,
+    )
+
+    assert backend.memories
+    assert len(model.calls) == 2
+    assert model.calls[1][2] == "none"
+    assert not contains_pseudo_tool_call(result.answer)
+    assert result.answer == "已根据你的要求更新长期记忆。"
+    rejected = [event for _, event in backend.events if event.eventType == TOOL_CALL_REJECTED]
+    assert rejected == []
+
+
+@pytest.mark.asyncio
+async def test_tool_call_loop_rejects_product_tool_and_strips_dsml_answer():
+    backend = FakeToolLoopBackend()
+    model = RejectThenDsmlModel()
+    memory_tool = MemoryTool(backend, workspace_id=1, user_id=2, run_id=11)
+    loop = AgentToolCallLoopExecutor(
+        backend=backend,
+        model=model,
+        run_id=11,
+        memory_tool=memory_tool,
+        reserve_model_call=lambda: None,
+        max_iterations=3,
+    )
+
+    result = await loop.run(
+        [ChatMessage(role="user", content="记住我喜欢写实风格")],
+        explicit_memory_request=False,
+    )
+
+    assert backend.memories
+    rejected = [event for _, event in backend.events if event.eventType == TOOL_CALL_REJECTED]
+    assert rejected
+    assert rejected[0].eventJson["reason"] == "tool_not_allowed"
+    guidance = [message.content for message in model.calls[-1][0] if message.role == "system"]
+    assert any("仅允许 memory 工具" in content for content in guidance)
+    assert not contains_pseudo_tool_call(result.answer)
+
+
+def test_strip_pseudo_tool_calls_removes_dsml_blocks():
+    raw = (
+        '思考完成\n<｜｜DSML｜｜tool_calls><｜｜DSML｜｜invoke name="ofox_gpt_image2">'
+        '<｜｜DSML｜｜parameter name="prompt" string="true">poster</｜｜DSML｜｜parameter>'
+        "</｜｜DSML｜｜invoke></｜｜DSML｜｜tool_calls>"
+    )
+    cleaned = strip_pseudo_tool_calls(raw)
+    assert "dsml" not in cleaned.lower()
+    assert "invoke name=" not in cleaned.lower()
+    assert finalize_loop_answer(raw, explicit_memory_request=True) == "已根据你的要求更新长期记忆。"
 
 
 @pytest.mark.asyncio

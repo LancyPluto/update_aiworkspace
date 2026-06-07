@@ -6,6 +6,7 @@ import {
   Database,
   FileText,
   Image,
+  Images,
   Loader2,
   Maximize2,
   Minimize2,
@@ -78,6 +79,7 @@ const emit = defineEmits<{
   "open-file-picker": []
   "remove-file": [file: AgentFile]
   "select-url-attachment": [file: AgentUrlAttachment]
+  "sync-uploaded-files": [fileIds: number[]]
   "remove-url-attachment": [file: AgentUrlAttachment]
   "remove-recent-attachment": [file: AgentMaterialAttachment]
   "refresh-material-assets": []
@@ -86,6 +88,7 @@ const emit = defineEmits<{
   "refresh-agent-tools": []
   "add-reference-attachment": [payload: import("@/utils/agentChatAssetRefs").ChatAssetDragPayload]
   "file-selected": [event: Event]
+  "files-dropped": [files: File[], options?: { autoSelect?: boolean }]
   "preview-attachment": [payload: { name: string; url: string; contentType?: string | null }]
 }>()
 
@@ -95,8 +98,10 @@ const composerExpanded = ref(false)
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const modelDropdownOpen = ref(false)
 const modelPickerRef = ref<HTMLElement | null>(null)
-const attachmentMenuOpen = ref(false)
-const attachmentMenuRef = ref<HTMLElement | null>(null)
+const attachmentDialogOpen = ref(false)
+const attachmentDialogTab = ref<"upload" | "material">("upload")
+const pickerSelectedUrls = ref<Set<string>>(new Set())
+const materialUploadDropActive = ref(false)
 const toolMenuOpen = ref(false)
 const toolMenuRef = ref<HTMLElement | null>(null)
 const toolSearch = ref("")
@@ -238,8 +243,23 @@ function onComposerDrop(event: DragEvent) {
   }
 }
 
-function attachmentChipLabel(file: AgentUrlAttachment) {
-  return file.refLabel || (isImageAttachment(file.contentType, file.name) ? "图片" : file.name)
+function shortAttachmentName(name?: string | null) {
+  const cleaned = (name || "图片").replace(/^@[^-]+-/, "").trim() || "图片"
+  return cleaned.length > 14 ? `${cleaned.slice(0, 14)}…` : cleaned
+}
+
+function imageReferenceLabel(index: number, name?: string | null) {
+  return `@图片${index + 1}-${shortAttachmentName(name)}`
+}
+
+function selectedUrlAttachmentLabel(file: AgentUrlAttachment, index: number) {
+  return isImageAttachment(file.contentType, file.name) ? imageReferenceLabel(index, file.name) : file.name
+}
+
+function selectedFileAttachmentLabel(file: AgentFile, index: number) {
+  return isImageAttachment(file.contentType, file.originalFilename)
+    ? imageReferenceLabel(index, file.originalFilename)
+    : file.originalFilename
 }
 
 function modelLabel(model: AgentModelConfig) {
@@ -282,10 +302,6 @@ function onDocumentPointerDown(event: PointerEvent) {
   const modelRoot = modelPickerRef.value
   if (modelDropdownOpen.value && modelRoot && !modelRoot.contains(target)) {
     modelDropdownOpen.value = false
-  }
-  const attachmentRoot = attachmentMenuRef.value
-  if (attachmentMenuOpen.value && attachmentRoot && !attachmentRoot.contains(target)) {
-    attachmentMenuOpen.value = false
   }
   const toolRoot = toolMenuRef.value
   if (toolMenuOpen.value && toolRoot && !toolRoot.contains(target)) {
@@ -332,21 +348,106 @@ function onSubmit() {
 }
 
 function openFilePicker() {
-  attachmentMenuOpen.value = false
   fileInputRef.value?.click()
 }
 
-function toggleAttachmentMenu() {
+function onMaterialUploadDragOver(event: DragEvent) {
+  if (props.uploading) return
+  event.preventDefault()
+  materialUploadDropActive.value = true
+}
+
+function onMaterialUploadDragLeave(event: DragEvent) {
+  const related = event.relatedTarget as Node | null
+  const current = event.currentTarget as HTMLElement | null
+  if (current && related && current.contains(related)) return
+  materialUploadDropActive.value = false
+}
+
+function onMaterialUploadDrop(event: DragEvent) {
+  event.preventDefault()
+  materialUploadDropActive.value = false
+  if (props.uploading) return
+  const droppedFiles = Array.from(event.dataTransfer?.files || [])
+  if (droppedFiles.length === 0) return
+  emit("files-dropped", droppedFiles, { autoSelect: false })
+  lightTap()
+}
+
+function openAttachmentDialog(tab: "upload" | "material" = "upload") {
   if (props.uploading || props.sending || props.editingRegenerating || props.regeneratingMessageId != null || props.hasActiveRun) return
-  attachmentMenuOpen.value = !attachmentMenuOpen.value
-  if (attachmentMenuOpen.value && libraryMaterialAttachments.value.length === 0) {
+  attachmentDialogTab.value = tab
+  const selected = new Set(selectedMaterialAttachments.value.map((item) => item.url))
+  for (const file of props.files) {
+    if (file.downloadUrl) selected.add(file.downloadUrl)
+  }
+  pickerSelectedUrls.value = selected
+  attachmentDialogOpen.value = true
+  if (libraryMaterialAttachments.value.length === 0) {
     emit("refresh-material-assets")
   }
 }
 
-function chooseUrlAttachment(item: AgentUrlAttachment) {
-  emit("select-url-attachment", item)
-  attachmentMenuOpen.value = false
+function closeAttachmentDialog() {
+  attachmentDialogOpen.value = false
+}
+
+const pickerMaterials = computed(() => {
+  const seen = new Set<string>()
+  const items: AgentMaterialAttachment[] = []
+  for (const item of [...recentMaterialAttachments.value, ...libraryMaterialAttachments.value]) {
+    if (!item.url || seen.has(item.url)) continue
+    seen.add(item.url)
+    items.push(item)
+  }
+  return items
+})
+
+const materialSelectedCount = computed(() => pickerSelectedUrls.value.size)
+
+function isPickerSelected(item: AgentMaterialAttachment) {
+  return pickerSelectedUrls.value.has(item.url)
+}
+
+function togglePickerMaterial(item: AgentMaterialAttachment) {
+  const next = new Set(pickerSelectedUrls.value)
+  if (next.has(item.url)) {
+    next.delete(item.url)
+  } else {
+    if (next.size + props.files.length >= 8) return
+    next.add(item.url)
+  }
+  pickerSelectedUrls.value = next
+}
+
+function resolveAgentUploadedFileId(item: AgentMaterialAttachment): number | null {
+  const parsed = Number(item.id)
+  if (!Number.isFinite(parsed) || parsed <= 0) return null
+  const url = item.url || ""
+  return url.includes("/api/v1/agent/sessions/") ? parsed : null
+}
+
+function confirmPickerMaterials() {
+  const selectedUrls = pickerSelectedUrls.value
+  const selectedAgentFileIds: number[] = []
+  for (const item of pickerMaterials.value) {
+    if (!selectedUrls.has(item.url)) continue
+    const agentFileId = resolveAgentUploadedFileId(item)
+    if (agentFileId != null) selectedAgentFileIds.push(agentFileId)
+  }
+  emit("sync-uploaded-files", selectedAgentFileIds)
+  for (const item of selectedMaterialAttachments.value) {
+    if (!selectedUrls.has(item.url)) emit("remove-url-attachment", item)
+  }
+  for (const item of pickerMaterials.value) {
+    if (!selectedUrls.has(item.url)) continue
+    if (resolveAgentUploadedFileId(item) != null) continue
+    if (!selectedMaterialAttachments.value.some((current) => current.url === item.url)) {
+      emit("select-url-attachment", item)
+    }
+  }
+  closeAttachmentDialog()
+  lightTap()
 }
 
 function materialKindLabel(kind?: string) {
@@ -361,9 +462,16 @@ function urlAttachmentPreviewUrl(file: AgentUrlAttachment) {
 }
 
 function onFileChange(event: Event) {
-  emit("file-selected", event)
   const inputEl = event.target as HTMLInputElement
+  const selectedFiles = Array.from(inputEl.files || [])
   inputEl.value = ""
+  if (attachmentDialogOpen.value) {
+    if (selectedFiles.length > 0) {
+      emit("files-dropped", selectedFiles, { autoSelect: false })
+    }
+    return
+  }
+  emit("file-selected", event)
 }
 
 watch(input, () => {
@@ -400,6 +508,7 @@ defineExpose({ adjustComposerTextareaHeight })
     <input
       ref="fileInputRef"
       type="file"
+      multiple
       class="sr-only"
       @change="onFileChange"
     />
@@ -512,7 +621,7 @@ defineExpose({ adjustComposerTextareaHeight })
         <Loader2 v-if="uploading" class="h-3.5 w-3.5 animate-spin inner-file-uploading" />
       </div>
       <div
-        v-for="file in selectedMaterialAttachments"
+        v-for="(file, index) in selectedMaterialAttachments"
         :key="`url-${file.id ?? file.url}`"
         class="inner-file-item"
         :class="{ 'inner-file-item--image': isImageAttachment(file.contentType, file.name) }"
@@ -538,7 +647,7 @@ defineExpose({ adjustComposerTextareaHeight })
           />
         </button>
         <Paperclip v-else class="h-4 w-4 shrink-0" />
-        <span v-if="file.refLabel || isImageAttachment(file.contentType, file.name)" class="inner-file-tag">{{ attachmentChipLabel(file) }}</span>
+        <span v-if="file.refLabel || isImageAttachment(file.contentType, file.name)" class="inner-file-tag">{{ selectedUrlAttachmentLabel(file, index) }}</span>
         <template v-else>
           <span class="inner-file-name">{{ file.name }}</span>
           <span v-if="file.size" class="inner-file-size">{{ formatFileSize(file.size) }}</span>
@@ -553,7 +662,7 @@ defineExpose({ adjustComposerTextareaHeight })
         </button>
       </div>
       <div
-        v-for="file in files"
+        v-for="(file, index) in files"
         :key="file.id"
         class="inner-file-item"
         :class="{ 'inner-file-item--image': isImageAttachment(file.contentType, file.originalFilename) }"
@@ -579,7 +688,7 @@ defineExpose({ adjustComposerTextareaHeight })
           />
         </button>
         <FileText v-else class="h-4 w-4 shrink-0" />
-        <span v-if="isImageAttachment(file.contentType, file.originalFilename)" class="inner-file-tag">图片</span>
+        <span v-if="isImageAttachment(file.contentType, file.originalFilename)" class="inner-file-tag">{{ selectedFileAttachmentLabel(file, selectedMaterialAttachments.length + index) }}</span>
         <template v-else>
           <span class="inner-file-name">{{ file.originalFilename }}</span>
           <span class="inner-file-size">{{ formatFileSize(file.fileSize) }}</span>
@@ -626,100 +735,17 @@ defineExpose({ adjustComposerTextareaHeight })
 
     <div class="toolbar-row">
       <div class="left-tools">
-        <div ref="attachmentMenuRef" class="attachment-menu-host">
+        <div class="attachment-menu-host">
           <button
             type="button"
             class="tool-btn"
-            :class="{ 'tool-btn--active': files.length > 0 || selectedMaterialAttachments.length > 0 || attachmentMenuOpen }"
+            :class="{ 'tool-btn--active': files.length > 0 || selectedMaterialAttachments.length > 0 || attachmentDialogOpen }"
             :disabled="uploading || sending || editingRegenerating || regeneratingMessageId != null || hasActiveRun"
-            @click.stop="toggleAttachmentMenu"
+            @click.stop="openAttachmentDialog()"
           >
             <Paperclip class="h-4 w-4 tool-icon" />
             素材
           </button>
-          <Transition :name="reducedMotion ? '' : 'model-picker-fade'">
-            <div v-if="attachmentMenuOpen" class="attachment-menu-card" @click.stop>
-              <button type="button" class="attachment-action" @click="openFilePicker">
-                <Upload class="h-4 w-4" />
-                <span>上传新附件</span>
-              </button>
-
-              <section class="attachment-section">
-                <div class="attachment-section-title">
-                  <Clock class="h-3.5 w-3.5" />
-                  <span>最近上传</span>
-                </div>
-                <div v-if="recentMaterialAttachments.length === 0" class="attachment-empty">暂无最近素材</div>
-                <div
-                  v-for="item in recentMaterialAttachments.slice(0, 8)"
-                  :key="`recent-${item.id}`"
-                  class="attachment-choice"
-                  role="button"
-                  tabindex="0"
-                  @click="chooseUrlAttachment(item)"
-                  @keydown.enter.prevent="chooseUrlAttachment(item)"
-                  @keydown.space.prevent="chooseUrlAttachment(item)"
-                >
-                  <img
-                    v-if="item.kind === 'image' && item.previewUrl"
-                    :src="item.previewUrl"
-                    :alt="item.name"
-                    class="attachment-choice-thumb"
-                    loading="lazy"
-                  />
-                  <Image v-else-if="item.kind === 'image'" class="h-4 w-4 shrink-0" />
-                  <Paperclip v-else class="h-4 w-4 shrink-0" />
-                  <span class="attachment-choice-copy">
-                    <strong>{{ item.name }}</strong>
-                    <small>{{ materialKindLabel(item.kind) }}</small>
-                  </span>
-                  <button
-                    type="button"
-                    class="attachment-choice-delete"
-                    aria-label="移除最近素材"
-                    @click.stop="emit('remove-recent-attachment', item)"
-                  >
-                    <Trash2 class="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              </section>
-
-              <section class="attachment-section">
-                <div class="attachment-section-title">
-                  <Store class="h-3.5 w-3.5" />
-                  <span>素材库</span>
-                  <button type="button" class="attachment-refresh" @click.stop="emit('refresh-material-assets')">刷新</button>
-                </div>
-                <div v-if="materialAssetsLoading" class="attachment-empty">
-                  <Loader2 class="h-3.5 w-3.5 animate-spin" />
-                  加载中
-                </div>
-                <div v-else-if="libraryMaterialAttachments.length === 0" class="attachment-empty">暂无可复用素材</div>
-                <button
-                  v-for="item in libraryMaterialAttachments.slice(0, 10)"
-                  v-else
-                  :key="`library-${item.id}`"
-                  type="button"
-                  class="attachment-choice"
-                  @click="chooseUrlAttachment(item)"
-                >
-                  <img
-                    v-if="item.kind === 'image' && item.previewUrl"
-                    :src="item.previewUrl"
-                    :alt="item.name"
-                    class="attachment-choice-thumb"
-                    loading="lazy"
-                  />
-                  <Image v-else-if="item.kind === 'image'" class="h-4 w-4 shrink-0" />
-                  <Paperclip v-else class="h-4 w-4 shrink-0" />
-                  <span class="attachment-choice-copy">
-                    <strong>{{ item.name }}</strong>
-                    <small>{{ item.subtitle || materialKindLabel(item.kind) }}</small>
-                  </span>
-                </button>
-              </section>
-            </div>
-          </Transition>
         </div>
         <button
           type="button"
@@ -819,6 +845,150 @@ defineExpose({ adjustComposerTextareaHeight })
         <Send v-else class="h-4 w-4" />
       </button>
     </div>
+
+    <Teleport to="body">
+      <Transition :name="reducedMotion ? '' : 'model-picker-fade'">
+        <div
+          v-if="attachmentDialogOpen"
+          class="material-dialog-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-label="选择素材"
+          @click.self="closeAttachmentDialog"
+        >
+          <section class="material-dialog">
+            <header class="material-dialog-header">
+              <div class="material-dialog-tabs" role="tablist" aria-label="素材来源">
+                <button
+                  type="button"
+                  class="material-dialog-tab"
+                  :class="{ active: attachmentDialogTab === 'upload' }"
+                  @click="attachmentDialogTab = 'upload'"
+                >
+                  上传
+                </button>
+                <button
+                  type="button"
+                  class="material-dialog-tab"
+                  :class="{ active: attachmentDialogTab === 'material' }"
+                  @click="attachmentDialogTab = 'material'"
+                >
+                  素材
+                </button>
+              </div>
+              <button type="button" class="material-dialog-close" aria-label="关闭" @click="closeAttachmentDialog">
+                <X class="h-4 w-4" />
+              </button>
+            </header>
+
+            <div v-if="attachmentDialogTab === 'upload'" class="material-dialog-body">
+              <button
+                type="button"
+                class="material-upload-card"
+                :class="{ 'material-upload-card--drop': materialUploadDropActive }"
+                :disabled="uploading"
+                @click="openFilePicker"
+                @dragover.prevent="onMaterialUploadDragOver"
+                @dragleave="onMaterialUploadDragLeave"
+                @drop.prevent="onMaterialUploadDrop"
+              >
+                <Loader2 v-if="uploading" class="h-5 w-5 animate-spin" />
+                <Upload v-else class="h-5 w-5" />
+                <span>{{ uploading ? "上传中" : (materialUploadDropActive ? "松开上传素材" : "上传或拖拽图片/文件") }}</span>
+              </button>
+
+              <section class="material-section">
+                <div class="material-section-title">
+                  <Clock class="h-3.5 w-3.5" />
+                  <span>最近上传</span>
+                </div>
+                <div v-if="recentMaterialAttachments.length === 0" class="attachment-empty">暂无最近素材</div>
+                <div v-else class="material-grid">
+                  <div
+                    v-for="item in recentMaterialAttachments.slice(0, 12)"
+                    :key="`recent-${item.id}`"
+                    role="button"
+                    tabindex="0"
+                    class="material-tile"
+                    :class="{ selected: isPickerSelected(item) }"
+                    @click="togglePickerMaterial(item)"
+                    @keydown.enter.prevent="togglePickerMaterial(item)"
+                    @keydown.space.prevent="togglePickerMaterial(item)"
+                  >
+                    <img
+                      v-if="item.kind === 'image' && item.previewUrl"
+                      :src="item.previewUrl"
+                      :alt="item.name"
+                      class="material-tile-thumb"
+                      loading="lazy"
+                    />
+                    <Image v-else-if="item.kind === 'image'" class="h-5 w-5" />
+                    <Paperclip v-else class="h-5 w-5" />
+                    <span class="material-tile-name">{{ item.name }}</span>
+                    <span v-if="isPickerSelected(item)" class="material-tile-check">
+                      <Check class="h-3.5 w-3.5" />
+                    </span>
+                    <button
+                      type="button"
+                      class="material-tile-delete"
+                      aria-label="删除上传历史"
+                      @click.stop="emit('remove-recent-attachment', item)"
+                    >
+                      <Trash2 class="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </section>
+            </div>
+
+            <div v-else class="material-dialog-body">
+              <div class="material-section-title">
+                <Images class="h-3.5 w-3.5" />
+                <span>素材库</span>
+                <button type="button" class="attachment-refresh" @click.stop="emit('refresh-material-assets')">刷新</button>
+              </div>
+              <div v-if="materialAssetsLoading" class="attachment-empty">
+                <Loader2 class="h-3.5 w-3.5 animate-spin" />
+                加载中
+              </div>
+              <div v-else-if="libraryMaterialAttachments.length === 0" class="attachment-empty">暂无可复用素材</div>
+              <div v-else class="material-grid material-grid--library">
+                <button
+                  v-for="item in libraryMaterialAttachments.slice(0, 30)"
+                  :key="`library-${item.id}`"
+                  type="button"
+                  class="material-tile"
+                  :class="{ selected: isPickerSelected(item) }"
+                  @click="togglePickerMaterial(item)"
+                >
+                  <img
+                    v-if="item.kind === 'image' && item.previewUrl"
+                    :src="item.previewUrl"
+                    :alt="item.name"
+                    class="material-tile-thumb"
+                    loading="lazy"
+                  />
+                  <Image v-else-if="item.kind === 'image'" class="h-5 w-5" />
+                  <Paperclip v-else class="h-5 w-5" />
+                  <span class="material-tile-name">{{ item.name }}</span>
+                  <small class="material-tile-subtitle">{{ item.subtitle || materialKindLabel(item.kind) }}</small>
+                  <span v-if="isPickerSelected(item)" class="material-tile-check">
+                    <Check class="h-3.5 w-3.5" />
+                  </span>
+                </button>
+              </div>
+            </div>
+
+            <footer class="material-dialog-footer">
+              <span>{{ materialSelectedCount }} 个素材已选择</span>
+              <button type="button" class="material-confirm-btn" @click="confirmPickerMaterials">
+                确认选择
+              </button>
+            </footer>
+          </section>
+        </div>
+      </Transition>
+    </Teleport>
   </form>
 </template>
 
@@ -1472,6 +1642,261 @@ defineExpose({ adjustComposerTextareaHeight })
   color: #fff;
 }
 
+.material-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(0 0 0 / 0.62);
+  padding: 18px;
+  backdrop-filter: blur(8px);
+}
+
+.material-dialog {
+  width: min(640px, 100%);
+  max-height: min(720px, calc(100vh - 36px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid rgb(255 255 255 / 0.10);
+  border-radius: 20px;
+  background: rgb(25 26 31 / 0.98);
+  box-shadow: 0 24px 90px rgb(0 0 0 / 0.58);
+}
+
+.material-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 14px 10px;
+  border-bottom: 1px solid rgb(255 255 255 / 0.07);
+}
+
+.material-dialog-tabs {
+  position: relative;
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.055);
+}
+
+.material-dialog-tab {
+  min-width: 84px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: rgb(255 255 255 / 0.54);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 16px;
+  cursor: pointer;
+  transition: background 0.16s ease, color 0.16s ease;
+}
+
+.material-dialog-tab.active {
+  background: color-mix(in srgb, var(--theme-color) 22%, rgb(255 255 255 / 0.10));
+  color: #fff;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--theme-color), transparent 58%);
+}
+
+.material-dialog-close {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 0.06);
+  color: rgb(255 255 255 / 0.56);
+  cursor: pointer;
+}
+
+.material-dialog-close:hover {
+  background: rgb(255 255 255 / 0.10);
+  color: #fff;
+}
+
+.material-dialog-body {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px;
+}
+
+.material-upload-card {
+  width: 100%;
+  min-height: 108px;
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  border: 1px dashed rgb(255 255 255 / 0.18);
+  border-radius: 14px;
+  background: rgb(255 255 255 / 0.045);
+  color: rgb(255 255 255 / 0.78);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.material-upload-card:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--theme-color), transparent 45%);
+  background: color-mix(in srgb, var(--theme-color) 12%, rgb(255 255 255 / 0.05));
+}
+
+.material-upload-card--drop {
+  border-color: color-mix(in srgb, var(--theme-color), transparent 18%);
+  background: color-mix(in srgb, var(--theme-color) 18%, rgb(255 255 255 / 0.06));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--theme-color), transparent 82%);
+}
+
+.material-section {
+  margin-top: 16px;
+}
+
+.material-section-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 30px;
+  color: rgb(255 255 255 / 0.62);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.material-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.material-grid--library {
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+}
+
+.material-tile {
+  position: relative;
+  min-width: 0;
+  min-height: 130px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 7px;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 12px;
+  background: rgb(255 255 255 / 0.045);
+  color: rgb(255 255 255 / 0.72);
+  padding: 8px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.material-tile:hover,
+.material-tile.selected {
+  border-color: color-mix(in srgb, var(--theme-color), transparent 42%);
+  background: color-mix(in srgb, var(--theme-color) 13%, rgb(255 255 255 / 0.05));
+}
+
+.material-tile-thumb {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  border-radius: 9px;
+  background: rgb(0 0 0 / 0.22);
+}
+
+.material-tile-name,
+.material-tile-subtitle {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.material-tile-name {
+  color: rgb(255 255 255 / 0.82);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.material-tile-subtitle {
+  color: rgb(255 255 255 / 0.42);
+  font-size: 11px;
+}
+
+.material-tile-check {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--theme-color);
+  color: #fff;
+  box-shadow: 0 8px 22px var(--agent-accent-glow);
+}
+
+.material-tile-delete {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: rgb(0 0 0 / 0.48);
+  color: rgb(255 255 255 / 0.70);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.16s ease, background 0.16s ease, color 0.16s ease;
+}
+
+.material-tile:hover .material-tile-delete,
+.material-tile:focus-within .material-tile-delete {
+  opacity: 1;
+}
+
+.material-tile.selected .material-tile-delete {
+  right: 36px;
+}
+
+.material-tile-delete:hover {
+  background: rgb(239 68 68 / 0.82);
+  color: #fff;
+}
+
+.material-dialog-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-top: 1px solid rgb(255 255 255 / 0.08);
+  color: rgb(255 255 255 / 0.52);
+  font-size: 12px;
+}
+
+.material-confirm-btn {
+  border: 0;
+  border-radius: 999px;
+  background: var(--theme-color);
+  color: #fff;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 12px 30px var(--agent-accent-glow);
+}
+
 .tool-btn {
   display: inline-flex;
   align-items: center;
@@ -1587,6 +2012,30 @@ defineExpose({ adjustComposerTextareaHeight })
   .tool-btn:not(.tool-btn--active) {
     font-size: 0;
     gap: 0;
+  }
+
+  .material-dialog-backdrop {
+    align-items: flex-end;
+    padding: 12px;
+  }
+
+  .material-dialog {
+    max-height: min(82vh, 680px);
+    border-radius: 18px;
+  }
+
+  .material-dialog-tab {
+    min-width: 72px;
+    padding: 7px 13px;
+  }
+
+  .material-grid,
+  .material-grid--library {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .material-tile-delete {
+    opacity: 1;
   }
 }
 </style>

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -15,6 +16,14 @@ from app.core.event_types import (
 )
 from app.core.schemas import ChatMessage, RunEventCreate
 from app.tools.memory_tool import MemoryTool, _format_memory_tool_definitions
+
+
+MEMORY_TASK_COMPLETE_FALLBACK = "已根据你的要求更新长期记忆。"
+
+TOOL_REJECTION_GUIDANCE = (
+    "你刚才请求的工具不可用。本回合仅允许 memory 工具。"
+    "请用自然语言回复用户，不要输出任何工具调用格式。"
+)
 
 
 @dataclass(slots=True)
@@ -56,7 +65,12 @@ class AgentToolCallLoopExecutor:
             "memory_remove": self._execute_memory_remove,
         }
 
-    async def run(self, messages: list[ChatMessage]) -> ToolCallLoopResult:
+    async def run(
+        self,
+        messages: list[ChatMessage],
+        *,
+        explicit_memory_request: bool = False,
+    ) -> ToolCallLoopResult:
         chat_turn = getattr(self.model, "chat_turn", None)
         if not callable(chat_turn):
             raise TypeError("model does not support chat_turn")
@@ -65,16 +79,20 @@ class AgentToolCallLoopExecutor:
         tools = _format_memory_tool_definitions()
         await self._event(TOOL_CALL_LOOP_STARTED, {"tools": sorted(self.allowed_tools)})
         executed = 0
+        memory_task_completed = False
 
         for iteration in range(self.max_iterations):
+            if memory_task_completed:
+                break
             self._reserve_model_call()
             turn = await chat_turn(working, tools=tools, tool_choice="auto")
             if not turn.tool_calls:
+                answer = finalize_loop_answer(turn.content or "", explicit_memory_request=explicit_memory_request)
                 await self._event(
                     TOOL_CALL_LOOP_COMPLETED,
                     {"iterations": iteration + 1, "executedToolCalls": executed, "finishReason": turn.finish_reason},
                 )
-                return ToolCallLoopResult(answer=turn.content or "", messages=working, executed_tool_calls=executed)
+                return ToolCallLoopResult(answer=answer, messages=working, executed_tool_calls=executed)
 
             selected_calls = turn.tool_calls[: self.max_tool_calls_per_turn]
             working.append(
@@ -85,6 +103,7 @@ class AgentToolCallLoopExecutor:
                 )
             )
 
+            rejected_non_memory = False
             for call in selected_calls:
                 await self._event(
                     TOOL_CALL_REQUESTED,
@@ -92,6 +111,10 @@ class AgentToolCallLoopExecutor:
                 )
                 result = await self._execute_call(call)
                 executed += 1
+                if call.name not in self.allowed_tools:
+                    rejected_non_memory = True
+                elif result.get("success") and explicit_memory_request and call.name in {"memory_add", "memory_replace"}:
+                    memory_task_completed = True
                 working.append(
                     ChatMessage(
                         role="tool",
@@ -100,14 +123,17 @@ class AgentToolCallLoopExecutor:
                         name=call.name,
                     )
                 )
+            if rejected_non_memory:
+                working.append(ChatMessage(role="system", content=TOOL_REJECTION_GUIDANCE))
 
         self._reserve_model_call()
         final_turn = await chat_turn(working, tool_choice="none")
+        answer = finalize_loop_answer(final_turn.content or "", explicit_memory_request=explicit_memory_request)
         await self._event(
             TOOL_CALL_LOOP_COMPLETED,
             {"iterations": self.max_iterations, "executedToolCalls": executed, "finishReason": final_turn.finish_reason},
         )
-        return ToolCallLoopResult(answer=final_turn.content or "", messages=working, executed_tool_calls=executed)
+        return ToolCallLoopResult(answer=answer, messages=working, executed_tool_calls=executed)
 
     async def _execute_call(self, call: ChatToolCall) -> dict[str, Any]:
         executor = self.allowed_tools.get(call.name)
@@ -167,6 +193,38 @@ class AgentToolCallLoopExecutor:
             await self.backend.append_event(self.run_id, RunEventCreate(eventType=event_type, eventJson=payload))
         except Exception:
             pass
+
+
+def contains_pseudo_tool_call(text: str) -> bool:
+    lowered = str(text or "").lower()
+    return (
+        "dsml" in lowered
+        or "tool_calls" in lowered
+        or "<｜｜dsml｜｜" in lowered
+        or "invoke name=" in lowered
+    )
+
+
+def strip_pseudo_tool_calls(text: str) -> str:
+    cleaned = str(text or "").strip()
+    if not cleaned or not contains_pseudo_tool_call(cleaned):
+        return cleaned
+    cleaned = re.sub(r"<｜｜DSML｜｜[\s\S]*", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"<\|DSML\|>[\s\S]*", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"invoke\s+name=\"[^\"]*\"[\s\S]*", "", cleaned, flags=re.IGNORECASE)
+    return cleaned.strip()
+
+
+def finalize_loop_answer(answer: str, *, explicit_memory_request: bool = False) -> str:
+    had_pseudo = contains_pseudo_tool_call(answer)
+    cleaned = strip_pseudo_tool_calls(answer)
+    if had_pseudo and (explicit_memory_request or not cleaned):
+        return MEMORY_TASK_COMPLETE_FALLBACK
+    if cleaned:
+        return cleaned
+    if explicit_memory_request:
+        return MEMORY_TASK_COMPLETE_FALLBACK
+    return cleaned
 
 
 def _tool_call_message_payload(call: ChatToolCall) -> dict[str, Any]:

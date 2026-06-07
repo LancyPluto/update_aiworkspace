@@ -68,7 +68,7 @@ class OpenAIImagesClient:
         style: str | None = None,
         output_format: str | None = None,
         response_format: str | None = None,
-        image: str | None = None,
+        image: str | list[str] | None = None,
         **_: Any,
     ) -> list[str]:
         if not self.base_url:
@@ -78,21 +78,21 @@ class OpenAIImagesClient:
         if not model:
             raise OpenAIImagesError("openai images modelName is required")
 
-        reference_image = (image or "").strip()
-        if reference_image:
-            form_fields, image_file = self._build_edit_multipart(
+        reference_images = _normalize_reference_images(image)
+        if reference_images:
+            form_fields, image_files = self._build_edit_multipart(
                 prompt=prompt,
                 model=model,
                 image_size=image_size,
                 batch_size=batch_size,
                 quality=quality,
                 output_format=output_format,
-                reference_image=reference_image,
+                reference_images=reference_images,
             )
             endpoint = self.edit_endpoint_path
             transport = "openai-sdk" if _as_bool(self.extra_auth.get("preferSdkEdit"), False) else "requests-multipart"
             LOGGER.info(
-                "openai images edit request endpoint=%s model=%s candidates=%s n=%s size=%s quality=%s output_format=%s transport=%s referenceImage=<resolved>",
+                "openai images edit request endpoint=%s model=%s candidates=%s n=%s size=%s quality=%s output_format=%s transport=%s referenceImages=%s",
                 endpoint,
                 form_fields.get("model"),
                 ",".join(self._edit_model_candidates(model or "")),
@@ -101,11 +101,12 @@ class OpenAIImagesClient:
                 form_fields.get("quality"),
                 form_fields.get("output_format"),
                 transport,
+                len(image_files),
             )
             response = self._edit_reference_image(
                 endpoint,
                 form_fields,
-                image_file,
+                image_files,
                 source_model=model,
             )
             payload = {**form_fields, "images": [f"<{transport}>"]}
@@ -177,14 +178,17 @@ class OpenAIImagesClient:
         batch_size: int,
         quality: str | None,
         output_format: str | None,
-        reference_image: str,
-    ) -> tuple[dict[str, str], tuple[str, bytes, str]]:
-        try:
-            image_bytes, mime = decode_reference_image_data_url(reference_image)
-        except InputImageError as exc:
-            raise OpenAIImagesError(str(exc)) from exc
-        extension = mimetypes.guess_extension(mime) or ".png"
-        filename = f"reference{extension}"
+        reference_images: list[str],
+    ) -> tuple[dict[str, str], list[tuple[str, bytes, str]]]:
+        image_files: list[tuple[str, bytes, str]] = []
+        for index, reference_image in enumerate(reference_images, start=1):
+            try:
+                image_bytes, mime = decode_reference_image_data_url(reference_image)
+            except InputImageError as exc:
+                raise OpenAIImagesError(str(exc)) from exc
+            extension = mimetypes.guess_extension(mime) or ".png"
+            filename = f"reference-{index}{extension}"
+            image_files.append((filename, image_bytes, mime))
         resolved_quality = (quality or self.extra_auth.get("quality") or "low").strip()
         form_fields: dict[str, str] = {
             "model": self._resolve_edit_model(model),
@@ -196,7 +200,7 @@ class OpenAIImagesClient:
         resolved_output_format = (output_format or self.extra_auth.get("outputFormat") or "").strip()
         if resolved_output_format:
             form_fields["output_format"] = resolved_output_format
-        return form_fields, (filename, image_bytes, mime)
+        return form_fields, image_files
 
     def _post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
         url = f"{self.base_url}{_ensure_leading_slash(path)}"
@@ -225,14 +229,14 @@ class OpenAIImagesClient:
         self,
         endpoint: str,
         form_fields: dict[str, str],
-        image_file: tuple[str, bytes, str],
+        image_files: list[tuple[str, bytes, str]],
         *,
         source_model: str,
     ) -> dict[str, Any]:
         """Reference edits default to requests (same TLS stack as text-to-image). SDK is opt-in."""
         if _as_bool(self.extra_auth.get("preferSdkEdit"), False):
             try:
-                return self._edit_via_openai_sdk(form_fields, image_file, source_model=source_model)
+                return self._edit_via_openai_sdk(form_fields, image_files, source_model=source_model)
             except OpenAIImagesError as exc:
                 if not _should_fallback_to_requests_edit(str(exc)):
                     raise
@@ -240,7 +244,7 @@ class OpenAIImagesClient:
                     "openai images sdk edit failed, falling back to requests multipart: %s",
                     exc,
                 )
-        return self._post_multipart(endpoint, form_fields, image_file, source_model=source_model)
+        return self._post_multipart(endpoint, form_fields, image_files, source_model=source_model)
 
     def _create_httpx_client(self) -> Any:
         import httpx
@@ -260,7 +264,7 @@ class OpenAIImagesClient:
     def _edit_via_openai_sdk(
         self,
         form_fields: dict[str, str],
-        image_file: tuple[str, bytes, str],
+        image_files: list[tuple[str, bytes, str]],
         *,
         source_model: str,
     ) -> dict[str, Any]:
@@ -274,7 +278,7 @@ class OpenAIImagesClient:
         try:
             return self._edit_via_openai_sdk_once(
                 form_fields,
-                image_file,
+                image_files,
                 source_model=source_model,
                 APIConnectionError=APIConnectionError,
                 APIStatusError=APIStatusError,
@@ -291,7 +295,7 @@ class OpenAIImagesClient:
     def _edit_via_openai_sdk_once(
         self,
         form_fields: dict[str, str],
-        image_file: tuple[str, bytes, str],
+        image_files: list[tuple[str, bytes, str]],
         *,
         source_model: str,
         APIConnectionError: Any,
@@ -299,7 +303,6 @@ class OpenAIImagesClient:
         APITimeoutError: Any,
         OpenAI: Any,
     ) -> dict[str, Any]:
-        filename, image_bytes, mime = image_file
         candidates = self._edit_model_candidates(source_model)
         last_error: OpenAIImagesError | None = None
         connection_failed = False
@@ -329,14 +332,14 @@ class OpenAIImagesClient:
                         http_client=http_client,
                         max_retries=0,
                     )
-                    image_io = BytesIO(image_bytes)
-                    edit_kwargs["image"] = (filename, image_io, mime)
+                    edit_kwargs["image"] = _sdk_image_argument(image_files)
                     LOGGER.info(
-                        "openai images sdk edit model=%s size=%s quality=%s bytes=%s sslAttempt=%s/%s",
+                        "openai images sdk edit model=%s size=%s quality=%s images=%s bytes=%s sslAttempt=%s/%s",
                         model_name,
                         edit_kwargs.get("size"),
                         edit_kwargs.get("quality"),
-                        len(image_bytes),
+                        len(image_files),
+                        sum(len(item[1]) for item in image_files),
                         ssl_attempt,
                         ssl_attempts,
                     )
@@ -387,7 +390,7 @@ class OpenAIImagesClient:
             return self._post_multipart(
                 self.edit_endpoint_path,
                 form_fields,
-                image_file,
+                image_files,
                 source_model=source_model,
             )
 
@@ -423,7 +426,7 @@ class OpenAIImagesClient:
         self,
         path: str,
         form_fields: dict[str, str],
-        image_file: tuple[str, bytes, str],
+        image_files: list[tuple[str, bytes, str]],
         *,
         source_model: str,
     ) -> dict[str, Any]:
@@ -433,7 +436,7 @@ class OpenAIImagesClient:
         for index, model_name in enumerate(candidates):
             attempt_fields = {**form_fields, "model": model_name}
             try:
-                return self._post_multipart_with_ssl_retries(url, attempt_fields, image_file)
+                return self._post_multipart_with_ssl_retries(url, attempt_fields, image_files)
             except OpenAIImagesError as exc:
                 last_error = exc
                 if _is_missing_model_error(str(exc)) and index < len(candidates) - 1:
@@ -452,12 +455,12 @@ class OpenAIImagesClient:
         self,
         url: str,
         form_fields: dict[str, str],
-        image_file: tuple[str, bytes, str],
+        image_files: list[tuple[str, bytes, str]],
     ) -> dict[str, Any]:
         attempts = self.ssl_eof_retries + 1
         for attempt in range(1, attempts + 1):
             try:
-                return self._post_multipart_once(url, form_fields, image_file)
+                return self._post_multipart_once(url, form_fields, image_files)
             except SSLError as exc:
                 if not _is_ssl_eof_error(exc) or attempt >= attempts:
                     raise OpenAIImagesError(
@@ -478,7 +481,7 @@ class OpenAIImagesClient:
         self,
         url: str,
         form_fields: dict[str, str],
-        image_file: tuple[str, bytes, str],
+        image_files: list[tuple[str, bytes, str]],
     ) -> dict[str, Any]:
         started_at = time.perf_counter()
         diagnostics = self._connection_diagnostics(url)
@@ -488,13 +491,13 @@ class OpenAIImagesClient:
             self.timeout,
             diagnostics,
         )
-        filename, image_bytes, mime = image_file
         multipart_body: list[tuple[str, Any]] = []
         for key in ("model", "prompt", "n", "size", "quality", "output_format"):
             value = form_fields.get(key)
             if value:
                 multipart_body.append((key, (None, value)))
-        multipart_body.append(("image", (filename, image_bytes, mime)))
+        for filename, image_bytes, mime in image_files:
+            multipart_body.append(("image", (filename, image_bytes, mime)))
         try:
             response = self.session.post(
                 url,
@@ -732,6 +735,33 @@ def _format_openai_images_http_error(status_code: int, body: str, model: str | N
             "(see https://ofox.ai/zh/docs/api/openai/images)."
         )
     return message
+
+
+def _normalize_reference_images(image: str | list[str] | None) -> list[str]:
+    if isinstance(image, str):
+        text = image.strip()
+        return [text] if text else []
+    if not isinstance(image, list):
+        return []
+    images: list[str] = []
+    seen: set[str] = set()
+    for item in image:
+        if not isinstance(item, str):
+            continue
+        text = item.strip()
+        if text and text not in seen:
+            seen.add(text)
+            images.append(text)
+    return images
+
+
+def _sdk_image_argument(image_files: list[tuple[str, bytes, str]]) -> Any:
+    images: list[tuple[str, BytesIO, str]] = []
+    for filename, image_bytes, mime in image_files:
+        image_io = BytesIO(image_bytes)
+        image_io.name = filename
+        images.append((filename, image_io, mime))
+    return images[0] if len(images) == 1 else images
 
 
 def _is_missing_model_error(message: str) -> bool:

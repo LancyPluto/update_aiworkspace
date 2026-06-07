@@ -10,7 +10,7 @@ from client.siliconflow_video_client import (
 )
 from client.kling_video_client import KlingVideoClient, KlingVideoError, KlingVideoTimeoutError
 from client.openai_images_client import OpenAIImagesClient, OpenAIImagesError, OpenAIImagesTimeoutError
-from config import resolve_kling_api_key, resolve_kling_credentials, resolve_siliconflow_api_key
+from config import resolve_kling_api_key, resolve_kling_credentials, resolve_kling_credentials_source, resolve_siliconflow_api_key
 from handlers.generated_image_persister import GeneratedImagePersistError, GeneratedImagePersister
 from providers import registry as provider_registry
 from providers.registry import ProviderRegistryError
@@ -104,12 +104,14 @@ class ImageGenerationHandler:
                 image_request["output_format"] = _first_text(params, "outputFormat", "output_format")
                 image_request["response_format"] = _first_text(params, "responseFormat", "response_format")
                 image_request["image_size"] = _resolve_openai_image_size(params)
-                reference_image = _resolve_reference_image_source(params)
-                if reference_image:
-                    image_request["image"] = resolve_reference_image_data_url(
-                        reference_image,
-                        session=client.session if isinstance(client, OpenAIImagesClient) else None,
-                    )
+                reference_images = _resolve_reference_image_sources(params)
+                if reference_images:
+                    session = client.session if isinstance(client, OpenAIImagesClient) else None
+                    resolved_images = [
+                        resolve_reference_image_data_url(reference_image, session=session)
+                        for reference_image in reference_images
+                    ]
+                    image_request["image"] = resolved_images if len(resolved_images) > 1 else resolved_images[0]
             LOGGER.info(
                 "image generation request built taskId=%s traceId=%s provider=%s protocol=%s model=%s params=%s request=%s",
                 task_id,
@@ -170,6 +172,16 @@ class ImageGenerationHandler:
         provider_protocol = provider_registry.provider_protocol(provider)
         if provider_protocol == "kling_video":
             access_key, secret_key = resolve_kling_credentials(model_config)
+            LOGGER.info(
+                "kling image credentials resolved source=%s contextSource=%s vendorAccountId=%s fingerprint=%s hasAccessKey=%s hasSecretKey=%s hasApiKey=%s",
+                resolve_kling_credentials_source(model_config),
+                model_config.get("credentialSource") or "",
+                model_config.get("vendorAccountId") or "",
+                model_config.get("credentialFingerprint") or "",
+                bool(access_key),
+                bool(secret_key),
+                bool(resolve_kling_api_key(model_config)),
+            )
             return KlingVideoClient(
                 base_url=model_config.get("baseUrl"),
                 api_key=resolve_kling_api_key(model_config),
@@ -232,26 +244,50 @@ def _first_text(params: dict[str, Any], *keys: str) -> str:
     return ""
 
 
-def _resolve_reference_image_source(params: dict[str, Any]) -> str:
-    direct = _first_text(
-        params,
+def _resolve_reference_image_sources(params: dict[str, Any]) -> list[str]:
+    keys = (
         "image",
+        "images",
         "imageUrl",
+        "imageUrls",
         "image_url",
+        "image_urls",
         "referenceImage",
+        "referenceImages",
         "referenceImageUrl",
+        "referenceImageUrls",
         "reference_image_url",
+        "reference_image_urls",
+        "inputImage",
+        "inputImages",
         "baseImage",
+        "baseImages",
         "baseImageUrl",
+        "baseImageUrls",
     )
-    if direct:
-        return direct
+    sources: list[str] = []
+    seen: set[str] = set()
+
+    def add(value: Any) -> None:
+        if isinstance(value, str):
+            text = value.strip()
+            if text and text not in seen:
+                seen.add(text)
+                sources.append(text)
+
+    for key in keys:
+        value = params.get(key)
+        if isinstance(value, list):
+            for item in value:
+                add(item)
+        else:
+            add(value)
+
     attachments = params.get("attachments")
     if isinstance(attachments, list):
         for item in attachments:
-            if isinstance(item, str) and item.strip():
-                return item.strip()
-    return ""
+            add(item)
+    return sources
 
 
 def _build_prompt(
@@ -413,6 +449,8 @@ def _model_call_error_code(message: str) -> str:
         return "MODEL_AUTH_FAILED"
     if "invalid token" in normalized or "unauthorized" in normalized or "api key" in normalized:
         return "MODEL_AUTH_FAILED"
+    if "account balance not enough" in normalized or "balance not enough" in normalized or "insufficient balance" in normalized or '"code":1102' in normalized:
+        return "MODEL_CREDIT_INSUFFICIENT"
     if "status=429" in normalized or "rate limit" in normalized or "too many requests" in normalized:
         return "MODEL_RATE_LIMITED"
     if "timed out" in normalized or "timeout" in normalized:

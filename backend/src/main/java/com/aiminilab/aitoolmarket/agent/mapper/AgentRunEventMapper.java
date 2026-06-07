@@ -44,4 +44,40 @@ public interface AgentRunEventMapper extends BaseMapper<AgentRunEvent> {
             LIMIT #{limit}
             """)
     List<AgentRunEvent> findEventsForAdmin(@Param("runId") Long runId, @Param("limit") int limit);
+
+    @Select("""
+            <script>
+            SELECT *
+            FROM agent_run_events
+            WHERE run_id = #{runId}
+            <if test="afterEventId != null">
+              AND id &gt; #{afterEventId}
+            </if>
+            ORDER BY id ASC
+            LIMIT #{limit}
+            </script>
+            """)
+    List<AgentRunEvent> findEventsForAdminPaged(@Param("runId") Long runId,
+                                                @Param("afterEventId") Long afterEventId,
+                                                @Param("limit") int limit);
+
+    @Select("""
+            SELECT COUNT(*)
+            FROM agent_run_events
+            WHERE run_id = #{runId}
+            """)
+    long countByRunId(@Param("runId") Long runId);
+
+    @Select("""
+            SELECT *
+            FROM (
+                SELECT *
+                FROM agent_run_events
+                WHERE run_id = #{runId}
+                ORDER BY id DESC
+                LIMIT #{limit}
+            ) recent
+            ORDER BY id ASC
+            """)
+    List<AgentRunEvent> findRecentEventsForAdmin(@Param("runId") Long runId, @Param("limit") int limit);
 }

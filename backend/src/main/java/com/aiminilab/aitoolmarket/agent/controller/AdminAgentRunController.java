@@ -3,7 +3,10 @@ package com.aiminilab.aitoolmarket.agent.controller;
 import com.aiminilab.aitoolmarket.agent.dto.AdminAgentRunDetailResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AdminAgentRunListItemResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AdminAgentRunStatsResponse;
+import com.aiminilab.aitoolmarket.agent.dto.AgentRunEventResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AgentRunResponse;
+
+import java.util.List;
 import com.aiminilab.aitoolmarket.agent.service.AdminAgentRunService;
 import com.aiminilab.aitoolmarket.common.dto.ApiResponse;
 import com.aiminilab.aitoolmarket.common.dto.PageResponse;
@@ -41,6 +44,13 @@ public class AdminAgentRunController {
     @GetMapping("/{runId}")
     public ApiResponse<AdminAgentRunDetailResponse> detail(@PathVariable Long runId) {
         return ApiResponse.success(adminAgentRunService.detail(runId));
+    }
+
+    @GetMapping("/{runId}/events")
+    public ApiResponse<List<AgentRunEventResponse>> events(@PathVariable Long runId,
+                                                           @RequestParam(required = false) Long afterEventId,
+                                                           @RequestParam(required = false) Integer pageSize) {
+        return ApiResponse.success(adminAgentRunService.listEvents(runId, afterEventId, pageSize));
     }
 
     @PostMapping("/{runId}/cancel")

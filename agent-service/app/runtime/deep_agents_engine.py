@@ -21,6 +21,8 @@ from app.core.event_types import (
     MEMORY_CONTEXT_FROZEN,
     MESSAGE_COMPLETED,
     MESSAGE_DELTA,
+    REASONING_COMPLETED,
+    REASONING_DELTA,
     RUN_STARTED,
     RUNTIME_SETTINGS_APPLIED,
     SUBAGENT_COMPLETED,
@@ -47,7 +49,7 @@ from app.core.schemas import (
 )
 from app.runtime.file_context_runtime import WorkspaceFileRuntime
 from app.runtime.followup_task_resolver import FollowupTaskResolver, FollowupResolution
-from app.runtime.memory_curator import MemoryCuratorService
+from app.runtime.memory_curator import MemoryCuratorService, looks_like_memory_management_turn
 from app.runtime.memory_runtime import (
     WorkspaceMemoryRuntime,
     build_consolidated_memory_summary,
@@ -67,7 +69,11 @@ from app.runtime.runtime_settings import (
 )
 from app.runtime.subagent_profiles import default_subagent_profiles, profiles_to_deepagents_subagents
 from app.runtime.agent_router_service import AgentRouterService
-from app.runtime.tool_call_loop import AgentToolCallLoopExecutor
+from app.runtime.tool_call_loop import (
+    AgentToolCallLoopExecutor,
+    finalize_loop_answer,
+    strip_pseudo_tool_calls,
+)
 from app.runtime.tool_decision_validator import ToolDecisionValidator
 from app.runtime.tool_orchestrator import ToolOrchestrator, missing_execution_arguments
 from app.runtime.workspace_files import WorkspaceFileContext
@@ -96,6 +102,13 @@ DEEP_AGENTS_SYSTEM_PROMPT = (
     "use available context from the conversation, workspace memory, and files, "
     "and return a concise final answer for the user."
 )
+MEMORY_MANAGEMENT_TURN_PROMPT = (
+    "本回合任务是整理/写入长期记忆。\n"
+    "- 只允许调用 memory_add / memory_replace / memory_remove\n"
+    "- 禁止调用任何生图/生视频/音乐等平台工具\n"
+    "- 先完成记忆写入，再用自然语言向用户确认；不要输出工具调用代码或 JSON"
+)
+MEMORY_MANAGEMENT_HISTORY_LIMIT = 8
 
 
 class DeepAgentsRuntimeEngine:
@@ -912,10 +925,12 @@ class DeepAgentsRuntimeEngine:
     # --- Chat / Deep Agents flow ---
 
     async def _run_chat(self, context: RunContext, intent=None) -> str:
+        memory_management_turn = looks_like_memory_management_turn(context.message)
         system_prompt = _compose_system_prompt(
             context.agentSystemPrompt,
             context,
             DEFAULT_AGENT_SYSTEM_PROMPT,
+            include_tools=not memory_management_turn,
         )
 
         messages = [ChatMessage(role="system", content=system_prompt)]
@@ -970,11 +985,15 @@ class DeepAgentsRuntimeEngine:
                     ),
                 )
             )
+        elif memory_management_turn and context.workspaceId and _memory_auto_save_enabled(context):
+            memory_tool = MemoryTool(self.backend, context.workspaceId, context.userId, run_id=context.runId)
+            messages.append(ChatMessage(role="system", content=_memory_tool_prompt(context)))
+            messages.append(ChatMessage(role="system", content=MEMORY_MANAGEMENT_TURN_PROMPT))
         elif context.workspaceId and _memory_auto_save_enabled(context):
             memory_tool = MemoryTool(self.backend, context.workspaceId, context.userId, run_id=context.runId)
             messages.append(ChatMessage(role="system", content=_memory_tool_prompt(context)))
 
-        messages.extend(context.history)
+        messages.extend(_history_for_chat(context, memory_management=memory_management_turn))
         messages.append(ChatMessage(role="user", content=context.message))
         budget = BudgetState(credit_budget=context.creditBudget)
         return await self._stream_model_answer(
@@ -983,6 +1002,7 @@ class DeepAgentsRuntimeEngine:
             budget,
             memory_tool=memory_tool,
             memory_tool_loop_enabled=_memory_tool_loop_enabled(context),
+            explicit_memory_request=memory_management_turn,
         )
 
     def _format_clarifying_answer(self, context: RunContext, intent) -> str:
@@ -1126,9 +1146,12 @@ class DeepAgentsRuntimeEngine:
         memory_tool: MemoryTool | None = None,
         fallback_answer: str | None = None,
         memory_tool_loop_enabled: bool | None = None,
+        explicit_memory_request: bool = False,
     ) -> str:
         parts: list[str] = []
+        reasoning_parts: list[str] = []
         stream = getattr(self.model, "chat_stream", None)
+        stream_parts = getattr(self.model, "chat_stream_parts", None)
         if memory_tool is not None and (settings.agent_memory_tool_loop_enabled if memory_tool_loop_enabled is None else memory_tool_loop_enabled) and callable(getattr(self.model, "chat_turn", None)):
             try:
                 loop = AgentToolCallLoopExecutor(
@@ -1140,10 +1163,10 @@ class DeepAgentsRuntimeEngine:
                     max_iterations=self._budget_guard().max_tool_calls,
                     max_tool_calls_per_turn=4,
                 )
-                result = await loop.run(messages_list)
+                result = await loop.run(messages_list, explicit_memory_request=explicit_memory_request)
                 if result.executed_tool_calls > 0:
                     self._memory_tool_executed_runs.add(run_id)
-                answer = result.answer.strip()
+                answer = finalize_loop_answer(result.answer.strip(), explicit_memory_request=explicit_memory_request)
                 if not answer and fallback_answer:
                     answer = fallback_answer
                 if answer:
@@ -1160,20 +1183,41 @@ class DeepAgentsRuntimeEngine:
                 answer = await self.model.chat(messages_list)
             if not answer.strip() and fallback_answer:
                 answer = fallback_answer
+            answer = strip_pseudo_tool_calls(answer)
             await self._emit_answer_events(run_id, answer)
             return answer
+        use_stream_parts = callable(stream_parts)
         try:
-            stream_iter = self.model.chat_stream(messages_list)
+            stream_iter = stream_parts(messages_list) if use_stream_parts else self.model.chat_stream(messages_list)
         except TypeError:
             stream_iter = self.model.chat_stream(messages_list)
+            use_stream_parts = False
         persisted_length = 0
         try:
             async for chunk in stream_iter:
-                parts.append(chunk)
-                await self.backend.append_event(
-                    run_id,
-                    RunEventCreate(eventType=MESSAGE_DELTA, eventText=chunk, eventJson={"delta": chunk}),
-                )
+                if use_stream_parts:
+                    kind = getattr(chunk, "kind", "text")
+                    text = getattr(chunk, "text", "") or ""
+                    if not text:
+                        continue
+                    if kind == "reasoning":
+                        reasoning_parts.append(text)
+                        await self.backend.append_event(
+                            run_id,
+                            RunEventCreate(eventType=REASONING_DELTA, eventText=text, eventJson={"delta": text}),
+                        )
+                        continue
+                    parts.append(text)
+                    await self.backend.append_event(
+                        run_id,
+                        RunEventCreate(eventType=MESSAGE_DELTA, eventText=text, eventJson={"delta": text}),
+                    )
+                else:
+                    parts.append(str(chunk))
+                    await self.backend.append_event(
+                        run_id,
+                        RunEventCreate(eventType=MESSAGE_DELTA, eventText=str(chunk), eventJson={"delta": str(chunk)}),
+                    )
                 current_answer = "".join(parts)
                 if len(current_answer) - persisted_length >= 160:
                     await self._upsert_streaming_answer(run_id, current_answer)
@@ -1184,6 +1228,12 @@ class DeepAgentsRuntimeEngine:
                 await self._upsert_streaming_answer(run_id, partial_answer)
             raise
         answer = "".join(parts)
+        reasoning = "".join(reasoning_parts)
+        if reasoning.strip():
+            await self.backend.append_event(
+                run_id,
+                RunEventCreate(eventType=REASONING_COMPLETED, eventText=reasoning, eventJson={"content": reasoning}),
+            )
         if not answer.strip() and fallback_answer:
             answer = fallback_answer
             for chunk in _chunks(answer, 32):
@@ -1191,6 +1241,7 @@ class DeepAgentsRuntimeEngine:
                     run_id,
                     RunEventCreate(eventType=MESSAGE_DELTA, eventText=chunk, eventJson={"delta": chunk}),
                 )
+        answer = strip_pseudo_tool_calls(answer)
         await self._upsert_streaming_answer(run_id, answer)
         await self.backend.append_event(
             run_id,
@@ -1652,12 +1703,44 @@ def _schema_property_user_required(prop: Any) -> bool:
     return True
 
 
-def _compose_system_prompt(configured_prompt: str | None, context: RunContext, fallback: str) -> str:
+def _compose_system_prompt(
+    configured_prompt: str | None,
+    context: RunContext,
+    fallback: str,
+    *,
+    include_tools: bool = True,
+) -> str:
     base_prompt = (configured_prompt or "").strip() or fallback
+    if not include_tools:
+        return base_prompt
     tools_prompt = _format_available_tools_prompt(context)
     if not tools_prompt:
         return base_prompt
     return f"{base_prompt}\n\n{tools_prompt}"
+
+
+def _history_for_chat(context: RunContext, *, memory_management: bool = False) -> list[ChatMessage]:
+    history = list(context.history or [])
+    if memory_management:
+        limit = MEMORY_MANAGEMENT_HISTORY_LIMIT
+        selected = history[-limit:]
+        return [_compact_message_for_memory_history(message) for message in selected]
+    limit = max(1, settings.agent_max_history_messages)
+    return history[-limit:]
+
+
+def _compact_message_for_memory_history(message: ChatMessage) -> ChatMessage:
+    content = (message.content or "").strip()
+    role = (message.role or "").strip().lower()
+    if not content:
+        return message
+    if role in {"assistant", "ai"} and len(content) > 500:
+        preview = re.sub(r"\s+", " ", content)[:500] + "…"
+        return ChatMessage(role=message.role, content=preview)
+    if role in {"user", "human"} and len(content) > 300:
+        preview = re.sub(r"\s+", " ", content)[:300] + "…"
+        return ChatMessage(role=message.role, content=preview)
+    return message
 
 
 def _format_available_tools_prompt(context: RunContext) -> str:

@@ -36,12 +36,17 @@ public class ModelConfigCredentialResolver {
         if (isBlank(merged.getBaseUrl()) && !isBlank(account.getBaseUrl())) {
             merged.setBaseUrl(account.getBaseUrl());
         }
-        if (isBlank(merged.getApiKey()) && !isBlank(account.getApiKey())) {
+
+        // A bound vendor account is the source of truth for credentials.
+        // Model rows may still contain legacy keys from before account binding;
+        // those must not override a newly edited vendor account.
+        if (!isBlank(account.getApiKey())) {
             merged.setApiKey(account.getApiKey());
         }
-        if (isBlank(merged.getExtraAuthJson()) && !isBlank(account.getExtraAuthJson())) {
+        if (!isBlank(account.getExtraAuthJson())) {
             merged.setExtraAuthJson(account.getExtraAuthJson());
         }
+
         if (isBlank(merged.getApiKey()) && !isBlank(merged.getExtraAuthJson())) {
             String apiKey = extractApiKeyFromExtraAuth(merged.getExtraAuthJson());
             if (!isBlank(apiKey)) {

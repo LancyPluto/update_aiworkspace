@@ -5,7 +5,7 @@ from typing import Any
 from client.backend_client import BackendClient, BackendClientError
 from client.kling_video_client import KlingVideoClient, KlingVideoError, KlingVideoTimeoutError
 from client.seedance_video_client import SeedanceVideoClient, SeedanceVideoError, SeedanceVideoTimeoutError
-from config import resolve_kling_api_key, resolve_kling_credentials
+from config import resolve_kling_api_key, resolve_kling_credentials, resolve_kling_credentials_source
 from handlers.generated_video_persister import GeneratedVideoPersistError, GeneratedVideoPersister
 from providers import registry as provider_registry
 
@@ -149,6 +149,16 @@ class VideoGenerationHandler:
             if self.kling_client is not None:
                 return self.kling_client
             access_key, secret_key = resolve_kling_credentials(model_config)
+            LOGGER.info(
+                "kling video credentials resolved source=%s contextSource=%s vendorAccountId=%s fingerprint=%s hasAccessKey=%s hasSecretKey=%s hasApiKey=%s",
+                resolve_kling_credentials_source(model_config),
+                model_config.get("credentialSource") or "",
+                model_config.get("vendorAccountId") or "",
+                model_config.get("credentialFingerprint") or "",
+                bool(access_key),
+                bool(secret_key),
+                bool(resolve_kling_api_key(model_config)),
+            )
             return KlingVideoClient(
                 base_url=model_config.get("baseUrl"),
                 api_key=resolve_kling_api_key(model_config),
@@ -248,6 +258,8 @@ def _model_call_error_code(message: str) -> str:
         return "MODEL_AUTH_FAILED"
     if "invalid token" in normalized or "unauthorized" in normalized or "api key" in normalized:
         return "MODEL_AUTH_FAILED"
+    if "account balance not enough" in normalized or "balance not enough" in normalized or "insufficient balance" in normalized or '"code":1102' in normalized:
+        return "MODEL_CREDIT_INSUFFICIENT"
     if "status=429" in normalized or "rate limit" in normalized or "too many requests" in normalized:
         return "MODEL_RATE_LIMITED"
     if "timed out" in normalized or "timeout" in normalized:

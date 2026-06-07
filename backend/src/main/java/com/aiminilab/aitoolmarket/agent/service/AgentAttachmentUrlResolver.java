@@ -55,7 +55,10 @@ public class AgentAttachmentUrlResolver {
         AgentFileRef parsed = ref.get();
         AgentFile file = agentFileMapper.selectById(parsed.fileId());
         if (file == null) {
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "attachment not found");
+            throw new BusinessException(
+                    ErrorCode.PARAM_ERROR,
+                    "attachment not found: sessionId=" + parsed.sessionId() + " fileId=" + parsed.fileId()
+            );
         }
         if (userId != null && !userId.equals(file.getUserId())) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "attachment owner mismatch");
@@ -74,7 +77,10 @@ public class AgentAttachmentUrlResolver {
             Files.createDirectories(root);
             AgentFile file = agentFileMapper.selectById(fileId);
             if (file == null) {
-                throw new BusinessException(ErrorCode.PARAM_ERROR, "attachment not found");
+                throw new BusinessException(
+                        ErrorCode.PARAM_ERROR,
+                        "attachment not found: sessionId=" + sessionId + " fileId=" + fileId
+                );
             }
             String ext = extensionOf(file.getOriginalFilename(), file.getContentType());
             Path stored = root.resolve(fileId + "-" + UUID.randomUUID() + ext).normalize();

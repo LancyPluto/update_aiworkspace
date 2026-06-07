@@ -178,6 +178,24 @@ def resolve_kling_credentials(model_config: dict[str, Any] | None = None) -> tup
     return access_key, secret_key
 
 
+def resolve_kling_credentials_source(model_config: dict[str, Any] | None = None) -> str:
+    if model_config:
+        parsed_access, parsed_secret = _kling_ak_sk_from_extra_auth(model_config.get("extraAuthJson"))
+        if parsed_access and parsed_secret:
+            return "model_config.extraAuthJson"
+        configured_access = str(model_config.get("apiKey") or "").strip()
+        configured_secret = str(model_config.get("minimaxGroupId") or "").strip()
+        if configured_access and configured_secret:
+            return "model_config.apiKey+minimaxGroupId"
+        if configured_access:
+            return "model_config.apiKey"
+    if (settings.kling_access_key or "").strip() and (settings.kling_secret_key or "").strip():
+        return "env.KLING_ACCESS_KEY+KLING_SECRET_KEY"
+    if (settings.kling_api_key or "").strip():
+        return "env.KLING_API_KEY"
+    return "missing"
+
+
 def resolve_infinitetalk_api_key(model_config: dict[str, Any] | None = None) -> str:
     if model_config:
         configured = model_config.get("apiKey")
