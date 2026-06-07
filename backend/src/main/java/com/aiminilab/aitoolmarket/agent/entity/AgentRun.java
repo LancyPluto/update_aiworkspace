@@ -28,6 +28,7 @@ public class AgentRun {
     private Long sourceUserMessageId;
     private Long contextSnapshotId;
     private String clientRequestId;
+    private String preferredToolCode;
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
@@ -69,4 +70,6 @@ public class AgentRun {
     public void setContextSnapshotId(Long contextSnapshotId) { this.contextSnapshotId = contextSnapshotId; }
     public String getClientRequestId() { return clientRequestId; }
     public void setClientRequestId(String clientRequestId) { this.clientRequestId = clientRequestId; }
+    public String getPreferredToolCode() { return preferredToolCode; }
+    public void setPreferredToolCode(String preferredToolCode) { this.preferredToolCode = preferredToolCode; }
 }

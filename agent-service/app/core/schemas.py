@@ -168,6 +168,7 @@ class RuntimeSettings(BaseModel):
     toolExecutionTimeoutSeconds: int | None = None
     imageToolExecutionTimeoutSeconds: int | None = None
     videoToolExecutionTimeoutSeconds: int | None = None
+    musicToolExecutionTimeoutSeconds: int | None = None
     toolPollIntervalSeconds: float | None = None
     toolStreamRelayEnabled: bool | None = None
     productToolLoopEnabled: bool | None = None
@@ -229,6 +230,7 @@ class RunContext(BaseModel):
     runtimeSettings: RuntimeSettings | None = None
     recentToolCalls: list[RecentToolCallContext] = Field(default_factory=list)
     pendingToolContext: PendingToolContext | None = Field(default=None, validation_alias=AliasChoices("pendingToolContext", "pending_tool_context"))
+    preferredToolCode: str | None = Field(default=None, validation_alias=AliasChoices("preferredToolCode", "preferred_tool_code"))
 
 
 class RunEventCreate(BaseModel):

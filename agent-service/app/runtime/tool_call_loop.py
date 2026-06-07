@@ -113,17 +113,17 @@ class AgentToolCallLoopExecutor:
         executor = self.allowed_tools.get(call.name)
         if executor is None:
             result = {"success": False, "error": f"tool not allowed: {call.name}"}
-            await self._event(TOOL_CALL_REJECTED, {"id": call.id, "name": call.name, "reason": "tool_not_allowed"})
+            await self._event(TOOL_CALL_REJECTED, {"kind": "internal", "id": call.id, "name": call.name, "reason": "tool_not_allowed"})
             return result
         try:
             result = await executor(call.arguments)
         except Exception as exc:
             result = {"success": False, "error": str(exc)}
-            await self._event(TOOL_CALL_REJECTED, {"id": call.id, "name": call.name, "reason": "execution_error"})
+            await self._event(TOOL_CALL_REJECTED, {"kind": "internal", "id": call.id, "name": call.name, "reason": "execution_error"})
             return result
         await self._event(
             TOOL_CALL_EXECUTED,
-            {"id": call.id, "name": call.name, "success": bool(result.get("success")), "result": _redact_large(result)},
+            {"kind": "internal", "id": call.id, "name": call.name, "success": bool(result.get("success")), "result": _redact_large(result)},
         )
         return result
 

@@ -224,9 +224,29 @@ public class AgentRunServiceImpl implements AgentRunService {
         message.setContentText(trimmed);
         message.setStatus("ACTIVE");
         message.setCreatedAt(now);
+        String urlAttachmentJson = urlAttachmentsJson(request.urlAttachments());
+        if (urlAttachmentJson != null) {
+            message.setContentJson(urlAttachmentJson);
+        }
         agentMessageMapper.insertMessage(message);
 
-        return executeStartRun(userId, session, message, null, clientKey, trimmed, now, request.fileIds(), request.modelConfigId());
+        String preferredToolCode = normalizePreferredToolCode(request.preferredToolCode());
+        if (preferredToolCode != null) {
+            agentToolDescriptorService.getToolForAgent(userId, preferredToolCode);
+        }
+
+        return executeStartRun(
+                userId,
+                session,
+                message,
+                null,
+                clientKey,
+                trimmed,
+                now,
+                request.fileIds(),
+                request.modelConfigId(),
+                preferredToolCode
+        );
     }
 
     @Override
@@ -264,7 +284,7 @@ public class AgentRunServiceImpl implements AgentRunService {
         LocalDateTime now = LocalDateTime.now();
         agentMessageMapper.supersedeMessagesAfter(sourceRun.getSessionId(), userMessage.getId(), now);
 
-        return executeStartRun(userId, session, userMessage, runId, clientKey, null, now, null, body.modelConfigId());
+        return executeStartRun(userId, session, userMessage, runId, clientKey, null, now, null, body.modelConfigId(), null);
     }
 
     @Override
@@ -310,7 +330,7 @@ public class AgentRunServiceImpl implements AgentRunService {
         agentMessageMapper.updateById(userMessage);
         agentMessageMapper.supersedeMessagesAfter(sessionId, messageId, now);
 
-        return executeStartRun(userId, session, userMessage, null, clientKey, trimmed, now, null, request.modelConfigId());
+        return executeStartRun(userId, session, userMessage, null, clientKey, trimmed, now, null, request.modelConfigId(), null);
     }
 
     @Override
@@ -448,11 +468,12 @@ public class AgentRunServiceImpl implements AgentRunService {
         );
         Map<Long, String> filenames = readyFiles.stream()
                 .collect(java.util.stream.Collectors.toMap(AgentFile::getId, AgentFile::getOriginalFilename));
-        List<InternalAgentFileContextResponse> agentFiles = readyFiles
+        List<InternalAgentFileContextResponse> agentFiles = new java.util.ArrayList<>(urlAttachmentContexts(userMessage));
+        agentFiles.addAll(readyFiles
                 .stream()
                 .sorted((left, right) -> Long.compare(left.getId(), right.getId()))
                 .map(InternalAgentFileContextResponse::from)
-                .toList();
+                .toList());
         List<InternalAgentFileChunkContextResponse> agentFileChunks = retrieveRelevantFileChunks(
                 run,
                 userMessage == null ? "" : userMessage.getContentText(),
@@ -471,6 +492,7 @@ public class AgentRunServiceImpl implements AgentRunService {
                 parseIntSetting(settings.get(AgentRuntimeSettings.TOOL_EXECUTION_TIMEOUT_SECONDS_KEY), AgentRuntimeSettings.DEFAULT_TOOL_EXECUTION_TIMEOUT_SECONDS, 10, 3600),
                 parseIntSetting(settings.get(AgentRuntimeSettings.IMAGE_TOOL_EXECUTION_TIMEOUT_SECONDS_KEY), AgentRuntimeSettings.DEFAULT_IMAGE_TOOL_EXECUTION_TIMEOUT_SECONDS, 10, 3600),
                 parseIntSetting(settings.get(AgentRuntimeSettings.VIDEO_TOOL_EXECUTION_TIMEOUT_SECONDS_KEY), AgentRuntimeSettings.DEFAULT_VIDEO_TOOL_EXECUTION_TIMEOUT_SECONDS, 10, 7200),
+                parseIntSetting(settings.get(AgentRuntimeSettings.MUSIC_TOOL_EXECUTION_TIMEOUT_SECONDS_KEY), AgentRuntimeSettings.DEFAULT_MUSIC_TOOL_EXECUTION_TIMEOUT_SECONDS, 10, 7200),
                 parseDoubleSetting(settings.get(AgentRuntimeSettings.TOOL_POLL_INTERVAL_SECONDS_KEY), AgentRuntimeSettings.DEFAULT_TOOL_POLL_INTERVAL_SECONDS, 0.2D, 30D),
                 parseBooleanSetting(settings.get(AgentRuntimeSettings.TOOL_STREAM_RELAY_ENABLED_KEY), AgentRuntimeSettings.DEFAULT_TOOL_STREAM_RELAY_ENABLED),
                 parseBooleanSetting(settings.get(AgentRuntimeSettings.PRODUCT_TOOL_LOOP_ENABLED_KEY), AgentRuntimeSettings.DEFAULT_PRODUCT_TOOL_LOOP_ENABLED),
@@ -551,8 +573,16 @@ public class AgentRunServiceImpl implements AgentRunService {
                 routerSettings,
                 runtimeSettings,
                 recentToolCallContext(run),
-                pendingToolContextResponse
+                pendingToolContextResponse,
+                run.getPreferredToolCode()
         );
+    }
+
+    private String normalizePreferredToolCode(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        return raw.trim();
     }
 
     private String nonBlankOrDefault(String value, String fallback) {
@@ -984,7 +1014,8 @@ public class AgentRunServiceImpl implements AgentRunService {
                                                        String sessionTitleContentHint,
                                                        LocalDateTime now,
                                                        List<Long> fileIds,
-                                                       Long requestedModelConfigId) {
+                                                       Long requestedModelConfigId,
+                                                       String preferredToolCode) {
         Long sessionId = session.getId();
         int creditBudget = Math.max(0, appProperties.getAgent().getDefaultCreditBudget());
 
@@ -999,6 +1030,7 @@ public class AgentRunServiceImpl implements AgentRunService {
         run.setParentRunId(parentRunId);
         run.setSourceUserMessageId(userMessage.getId());
         run.setClientRequestId(clientRequestId);
+        run.setPreferredToolCode(preferredToolCode);
         agentRunMapper.insertRun(run);
 
         userMessage.setRunId(run.getId());
@@ -1061,10 +1093,12 @@ public class AgentRunServiceImpl implements AgentRunService {
 
     private void persistUserMessageAttachments(AgentMessage userMessage, Long userId, Long sessionId, Long runId) {
         List<AgentFile> attachedFiles = agentFileMapper.findByRun(userId, sessionId, runId, FILE_CONTEXT_LIMIT);
-        if (attachedFiles.isEmpty()) {
+        List<Map<String, Object>> urlAttachments = urlAttachmentItems(userMessage == null ? null : userMessage.getContentJson());
+        if (attachedFiles.isEmpty() && urlAttachments.isEmpty()) {
             return;
         }
-        List<Map<String, Object>> attachments = attachedFiles.stream()
+        List<Map<String, Object>> attachments = new java.util.ArrayList<>(urlAttachments);
+        attachments.addAll(attachedFiles.stream()
                 .map(file -> {
                     Map<String, Object> item = new LinkedHashMap<>();
                     item.put("id", file.getId());
@@ -1073,11 +1107,128 @@ public class AgentRunServiceImpl implements AgentRunService {
                     item.put("size", file.getFileSize());
                     item.put("status", file.getStatus());
                     item.put("url", "/api/v1/agent/sessions/" + sessionId + "/files/" + file.getId() + "/content");
+                    item.put("source", "agent_file");
                     return item;
                 })
-                .toList();
+                .toList());
         userMessage.setContentJson(toJson(Map.of("attachments", attachments)));
         agentMessageMapper.updateById(userMessage);
+    }
+
+    private String urlAttachmentsJson(List<Map<String, Object>> rawItems) {
+        List<Map<String, Object>> items = normalizedUrlAttachments(rawItems);
+        if (items.isEmpty()) {
+            return null;
+        }
+        return toJson(Map.of("attachments", items));
+    }
+
+    private List<Map<String, Object>> urlAttachmentItems(String contentJson) {
+        JsonNode root = parseJsonNode(contentJson);
+        JsonNode attachments = root.path("attachments");
+        if (!attachments.isArray()) {
+            return List.of();
+        }
+        List<Map<String, Object>> items = new java.util.ArrayList<>();
+        int index = 0;
+        for (JsonNode item : attachments) {
+            String source = firstText(item.path("source"));
+            String url = firstText(item.path("url"), item.path("downloadUrl"));
+            if (!isUrlAttachmentSource(source) || !isAllowedMaterialUrl(url)) {
+                continue;
+            }
+            Map<String, Object> normalized = new LinkedHashMap<>();
+            normalized.put("id", firstText(item.path("id")).isBlank() ? "url-" + index : firstText(item.path("id")));
+            normalized.put("name", nonBlankOrDefault(firstText(item.path("name"), item.path("title")), "素材附件"));
+            normalized.put("contentType", firstText(item.path("contentType"), item.path("type")));
+            normalized.put("size", item.path("size").isNumber() ? item.path("size").asLong() : 0);
+            normalized.put("status", "READY");
+            normalized.put("url", url);
+            normalized.put("source", "chat_reference".equalsIgnoreCase(source) ? "chat_reference" : "url");
+            items.add(normalized);
+            index++;
+            if (items.size() >= FILE_CONTEXT_LIMIT) {
+                break;
+            }
+        }
+        return items;
+    }
+
+    private List<InternalAgentFileContextResponse> urlAttachmentContexts(AgentMessage userMessage) {
+        List<Map<String, Object>> items = urlAttachmentItems(userMessage == null ? null : userMessage.getContentJson());
+        List<InternalAgentFileContextResponse> contexts = new java.util.ArrayList<>();
+        long syntheticId = -1L;
+        for (Map<String, Object> item : items) {
+            contexts.add(InternalAgentFileContextResponse.urlAttachment(
+                    syntheticId--,
+                    nonBlankOrDefault(stringValue(item.get("name")), "素材附件"),
+                    stringValue(item.get("contentType")),
+                    stringValue(item.get("url"))
+            ));
+        }
+        return contexts;
+    }
+
+    private List<Map<String, Object>> normalizedUrlAttachments(List<Map<String, Object>> rawItems) {
+        if (rawItems == null || rawItems.isEmpty()) {
+            return List.of();
+        }
+        List<Map<String, Object>> normalized = new java.util.ArrayList<>();
+        int index = 0;
+        for (Map<String, Object> raw : rawItems) {
+            if (raw == null) {
+                continue;
+            }
+            String url = stringValue(raw.get("url"));
+            if (!isAllowedMaterialUrl(url)) {
+                continue;
+            }
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("id", nonBlankOrDefault(stringValue(raw.get("id")), "url-" + index));
+            item.put("name", nonBlankOrDefault(stringValue(raw.get("name")), nonBlankOrDefault(stringValue(raw.get("title")), "素材附件")));
+            item.put("contentType", stringValue(raw.get("contentType")));
+            item.put("size", raw.get("size") instanceof Number number ? number.longValue() : 0L);
+            item.put("status", "READY");
+            item.put("url", url);
+            String source = nonBlankOrDefault(stringValue(raw.get("source")), "url");
+            item.put("source", "chat_reference".equalsIgnoreCase(source) ? "chat_reference" : "url");
+            normalized.add(item);
+            index++;
+            if (normalized.size() >= FILE_CONTEXT_LIMIT) {
+                break;
+            }
+        }
+        return normalized;
+    }
+
+    private boolean isUrlAttachmentSource(String source) {
+        if (source == null || source.isBlank()) {
+            return false;
+        }
+        String normalized = source.trim().toLowerCase();
+        return "url".equals(normalized) || "chat_reference".equals(normalized);
+    }
+
+    private boolean isAllowedMaterialUrl(String url) {
+        if (url == null || url.isBlank()) {
+            return false;
+        }
+        String trimmed = url.trim();
+        if (trimmed.startsWith("/generated/")) {
+            return true;
+        }
+        if (trimmed.startsWith("/api/v1/agent/sessions/")) {
+            return true;
+        }
+        String workerBase = appProperties.getAgent().getWorkerMediaBaseUrl();
+        if (workerBase != null && !workerBase.isBlank() && trimmed.startsWith(workerBase.replaceAll("/+$", "") + "/generated/")) {
+            return true;
+        }
+        return trimmed.startsWith("http://") || trimmed.startsWith("https://");
+    }
+
+    private String stringValue(Object value) {
+        return value == null ? "" : String.valueOf(value).trim();
     }
 
     private AgentContextSnapshot createContextSnapshot(AgentRun run,

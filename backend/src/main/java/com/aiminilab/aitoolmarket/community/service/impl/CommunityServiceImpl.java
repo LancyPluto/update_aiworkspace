@@ -95,8 +95,23 @@ public class CommunityServiceImpl implements CommunityService {
     @Override
     @Transactional
     public void autoPublishTask(AiTask task, String resourceType, String contentText) {
-        // Community discovery is driven by explicit publishing from the user's material library.
-        // Keep this hook as a no-op so older worker callbacks remain compatible without auto-publication.
+        if (task == null || task.getId() == null || task.getUserId() == null) {
+            return;
+        }
+        User user = userMapper.findById(task.getUserId()).orElse(null);
+        if (user == null || !Boolean.TRUE.equals(user.getAutoPublishAssets())) {
+            return;
+        }
+        if (postMapper.findByTaskId(task.getId()).isPresent()) {
+            return;
+        }
+        String modality = resolveModality(task, resourceType);
+        if (!isAutoPublishableModality(modality)) {
+            return;
+        }
+        boolean promptVisible = Boolean.TRUE.equals(user.getPromptPublicByDefault());
+        String title = normalizeTitle(null, task.getToolName());
+        createPost(task, resourceType, contentText, title, null, promptVisible, "PUBLISHED");
     }
 
     @Override
@@ -132,8 +147,12 @@ public class CommunityServiceImpl implements CommunityService {
             postMapper.refreshQualityScore(post.getId());
             return response(requirePost(post.getId()), userId);
         }
+        User user = userMapper.findById(userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "User not found"));
         String title = normalizeTitle(request.title(), task.getToolName());
-        boolean promptVisible = Boolean.TRUE.equals(request.promptVisible());
+        boolean promptVisible = request.promptVisible() != null
+                ? Boolean.TRUE.equals(request.promptVisible())
+                : Boolean.TRUE.equals(user.getPromptPublicByDefault());
         CommunityPost post = createPost(task, null, null, title, request.description(), promptVisible, "PUBLISHED");
         if (request.topic() != null) {
             postMapper.updateTopic(post.getId(), normalizeTopic(request.topic()));
@@ -772,6 +791,12 @@ public class CommunityServiceImpl implements CommunityService {
         if (normalized.contains("VIDEO")) return "VIDEO";
         if (normalized.contains("AUDIO")) return "AUDIO";
         return "TEXT";
+    }
+
+    private boolean isAutoPublishableModality(String modality) {
+        return "IMAGE".equalsIgnoreCase(modality)
+                || "VIDEO".equalsIgnoreCase(modality)
+                || "AUDIO".equalsIgnoreCase(modality);
     }
 
     private void applyRuleLabelsIfEmpty(Long postId, AiTask task) {

@@ -3,6 +3,7 @@ package com.aiminilab.aitoolmarket.agent.service.impl;
 import com.aiminilab.aitoolmarket.agent.dto.AdminAgentToolAccessResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AgentToolDescriptorResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AgentToolFieldDescriptorResponse;
+import com.aiminilab.aitoolmarket.agent.dto.AgentToolPickerItemResponse;
 import com.aiminilab.aitoolmarket.agent.dto.UpdateAgentToolAccessRequest;
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
 import com.aiminilab.aitoolmarket.agent.entity.AgentToolDescriptorExtension;
@@ -68,6 +69,26 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
                     return ext == null || isAgentReadable(ext);
                 })
                 .map(tool -> toDescriptor(tool, extensions.get(tool.getToolCode())))
+                .toList();
+    }
+
+    @Override
+    public List<AgentToolPickerItemResponse> listPickerToolsForUser(Long userId) {
+        List<AiTool> tools = toolMapper.findTools(true, null, null, null, AGENT_AVAILABLE_TOOL_LIMIT, 0);
+        Map<String, AgentToolDescriptorExtension> extensions = findExtensionsByToolCode(tools);
+        return tools.stream()
+                .filter(tool -> {
+                    AgentToolDescriptorExtension ext = extensions.get(tool.getToolCode());
+                    return ext == null || isAgentReadable(ext);
+                })
+                .map(tool -> new AgentToolPickerItemResponse(
+                        tool.getToolCode(),
+                        tool.getToolName(),
+                        tool.getDescription(),
+                        normalizeOutputType(tool.getOutputModality()),
+                        tool.getCoverUrl(),
+                        tool.getEstimatedCreditCost()
+                ))
                 .toList();
     }
 

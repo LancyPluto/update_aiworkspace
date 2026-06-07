@@ -11,6 +11,7 @@ public final class AgentRuntimeSettings {
     public static final String TOOL_EXECUTION_TIMEOUT_SECONDS_KEY = "agent.runtime.tool_execution_timeout_seconds";
     public static final String IMAGE_TOOL_EXECUTION_TIMEOUT_SECONDS_KEY = "agent.runtime.image_tool_execution_timeout_seconds";
     public static final String VIDEO_TOOL_EXECUTION_TIMEOUT_SECONDS_KEY = "agent.runtime.video_tool_execution_timeout_seconds";
+    public static final String MUSIC_TOOL_EXECUTION_TIMEOUT_SECONDS_KEY = "agent.runtime.music_tool_execution_timeout_seconds";
     public static final String TOOL_POLL_INTERVAL_SECONDS_KEY = "agent.runtime.tool_poll_interval_seconds";
     public static final String TOOL_STREAM_RELAY_ENABLED_KEY = "agent.runtime.tool_stream_relay_enabled";
     public static final String PRODUCT_TOOL_LOOP_ENABLED_KEY = "agent.runtime.product_tool_loop_enabled";
@@ -23,6 +24,7 @@ public final class AgentRuntimeSettings {
     public static final int DEFAULT_TOOL_EXECUTION_TIMEOUT_SECONDS = 120;
     public static final int DEFAULT_IMAGE_TOOL_EXECUTION_TIMEOUT_SECONDS = 600;
     public static final int DEFAULT_VIDEO_TOOL_EXECUTION_TIMEOUT_SECONDS = 900;
+    public static final int DEFAULT_MUSIC_TOOL_EXECUTION_TIMEOUT_SECONDS = 900;
     public static final double DEFAULT_TOOL_POLL_INTERVAL_SECONDS = 1D;
     public static final boolean DEFAULT_TOOL_STREAM_RELAY_ENABLED = true;
     public static final boolean DEFAULT_PRODUCT_TOOL_LOOP_ENABLED = true;
@@ -40,6 +42,7 @@ public final class AgentRuntimeSettings {
         defaults.put(TOOL_EXECUTION_TIMEOUT_SECONDS_KEY, String.valueOf(DEFAULT_TOOL_EXECUTION_TIMEOUT_SECONDS));
         defaults.put(IMAGE_TOOL_EXECUTION_TIMEOUT_SECONDS_KEY, String.valueOf(DEFAULT_IMAGE_TOOL_EXECUTION_TIMEOUT_SECONDS));
         defaults.put(VIDEO_TOOL_EXECUTION_TIMEOUT_SECONDS_KEY, String.valueOf(DEFAULT_VIDEO_TOOL_EXECUTION_TIMEOUT_SECONDS));
+        defaults.put(MUSIC_TOOL_EXECUTION_TIMEOUT_SECONDS_KEY, String.valueOf(DEFAULT_MUSIC_TOOL_EXECUTION_TIMEOUT_SECONDS));
         defaults.put(TOOL_POLL_INTERVAL_SECONDS_KEY, String.valueOf(DEFAULT_TOOL_POLL_INTERVAL_SECONDS));
         defaults.put(TOOL_STREAM_RELAY_ENABLED_KEY, String.valueOf(DEFAULT_TOOL_STREAM_RELAY_ENABLED));
         defaults.put(PRODUCT_TOOL_LOOP_ENABLED_KEY, String.valueOf(DEFAULT_PRODUCT_TOOL_LOOP_ENABLED));

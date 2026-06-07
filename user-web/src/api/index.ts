@@ -36,6 +36,7 @@ export {
   fetchAgentRun,
   fetchAgentRunEvents,
   fetchAgentSessions,
+  fetchAgentTools,
   fetchAgentWorkspaces,
   fetchAgentWorkspaceMemory,
   regenerateAgentRun,

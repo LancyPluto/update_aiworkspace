@@ -47,6 +47,11 @@ public class CorsConfig implements WebMvcConfigurer {
         String mediaLocation = Path.of(appProperties.getGeneratedMediaDir()).toAbsolutePath().normalize().toUri().toString();
         registry.addResourceHandler("/generated/**")
                 .addResourceLocations(mediaLocation.endsWith("/") ? mediaLocation : mediaLocation + "/");
+        // Backward-compatible alias for historical records that still store tool covers as `tool-covers/...`.
+        String toolCoverLocation = Path.of(appProperties.getGeneratedMediaDir(), "tool-covers")
+                .toAbsolutePath().normalize().toUri().toString();
+        registry.addResourceHandler("/tool-covers/**")
+                .addResourceLocations(toolCoverLocation.endsWith("/") ? toolCoverLocation : toolCoverLocation + "/");
     }
 
     private boolean containsWildcard(String[] origins) {

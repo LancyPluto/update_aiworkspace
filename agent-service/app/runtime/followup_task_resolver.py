@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.core.schemas import RecentToolCallContext, RunContext, ToolDescriptor
+from app.core.user_attachment_priority import user_selected_image_urls
 from app.tools.registry import requested_output_modality, tool_supports_modality
 
 
@@ -70,7 +71,7 @@ class FollowupTaskResolver:
         )
         tool_code = target_tool_code if can_use_selected_target else source.toolCode
         patch_tool = selected_tool if can_use_selected_target else None
-        patched = self._patch_arguments(message, inherited, patch_tool, source)
+        patched = self._patch_arguments(context, message, inherited, patch_tool, source)
         return FollowupResolution(
             True,
             "followup_arguments_inherited",
@@ -113,6 +114,7 @@ class FollowupTaskResolver:
 
     def _patch_arguments(
         self,
+        context: RunContext,
         message: str,
         inherited: dict[str, Any],
         selected_tool: ToolDescriptor | None,
@@ -130,11 +132,12 @@ class FollowupTaskResolver:
             patched[prompt_key] = message
         patched["userRequest"] = message
 
-        if source.mediaUrls and self._tool_accepts_image(selected_tool):
-            first_url = source.mediaUrls[0]
-            for key in ("imageUrl", "image_url", "referenceImageUrl", "reference_image_url", "initImage", "inputImage"):
+        user_image_urls = user_selected_image_urls(context)
+        reference_url = user_image_urls[0] if user_image_urls else (source.mediaUrls[0] if source.mediaUrls else None)
+        if reference_url and self._tool_accepts_image(selected_tool):
+            for key in ("image", "imageUrl", "image_url", "referenceImageUrl", "reference_image_url", "initImage", "inputImage"):
                 if key in self._schema_properties(selected_tool):
-                    patched[key] = first_url
+                    patched[key] = reference_url
                     break
         return patched
 

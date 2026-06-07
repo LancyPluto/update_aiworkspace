@@ -1,4 +1,9 @@
-from app.core.intent_router import Intent, IntentRouter
+from app.core.intent_router import Intent, IntentResult, IntentRouter
+from app.core.preferred_tool_bias import (
+    apply_preferred_tool_override,
+    inject_preferred_tool_hint,
+    message_suggests_tool_use,
+)
 from app.core.schemas import AgentFileContext, ChatMessage, RunContext, ToolDescriptor
 
 
@@ -31,7 +36,56 @@ def test_routes_file_analysis_when_files_ready():
     result = IntentRouter().classify(ctx)
 
     assert result.intent == Intent.FILE_ANALYSIS
-    assert result.reason == "ready_file_context_available"
+    assert result.reason == "file_analysis_request"
+
+
+def test_ready_image_reference_generation_does_not_force_file_analysis():
+    ctx = context("按这张参考图生成 Suno 吉祥物")
+    ctx.agentFiles = [
+        AgentFileContext(
+            id=1,
+            originalFilename="ref.jpg",
+            contentType="image/jpeg",
+            status="READY",
+            downloadUrl="/api/v1/agent/sessions/1/files/1/content",
+        )
+    ]
+
+    result = IntentRouter().classify(ctx)
+
+    assert result.intent != Intent.FILE_ANALYSIS
+
+
+def test_ready_image_explicit_analysis_routes_file_analysis():
+    ctx = context("分析这张图并总结附件内容")
+    ctx.agentFiles = [
+        AgentFileContext(
+            id=1,
+            originalFilename="ref.png",
+            contentType="image/png",
+            status="READY",
+        )
+    ]
+
+    result = IntentRouter().classify(ctx)
+
+    assert result.intent == Intent.FILE_ANALYSIS
+
+
+def test_document_summary_routes_file_analysis():
+    ctx = context("总结文件")
+    ctx.agentFiles = [
+        AgentFileContext(
+            id=2,
+            originalFilename="brief.pdf",
+            contentType="application/pdf",
+            status="READY",
+        )
+    ]
+
+    result = IntentRouter().classify(ctx)
+
+    assert result.intent == Intent.FILE_ANALYSIS
 
 
 def test_routes_file_keyword_to_file_analysis():
@@ -101,3 +155,90 @@ def test_routes_structured_params_without_action_keywords():
     assert result.intent == Intent.TOOL_USE
     assert result.selectedToolCode == "xiaohongshu_copywriting"
     assert result.reason == "structured_tool_arguments"
+
+
+def test_preferred_tool_hint_for_generation_message():
+    ctx = RunContext(
+        runId=4,
+        sessionId=1,
+        userId=1,
+        message="生成一张电影海报",
+        preferredToolCode="ofox_gpt_image2",
+        availableTools=[
+            ToolDescriptor(
+                toolCode="ofox_gpt_image2",
+                toolName="GPT-image2",
+                description="image generation",
+                autoCallable=True,
+            ),
+            ToolDescriptor(
+                toolCode="kling-image-v21",
+                toolName="Kling Image",
+                description="image generation",
+                autoCallable=True,
+            ),
+        ],
+    )
+    result = IntentRouter().classify(ctx)
+    assert result.intent == Intent.GENERAL_CHAT
+    assert result.selectedToolCode == "ofox_gpt_image2"
+    assert "ofox_gpt_image2" in result.candidateToolCodes
+
+
+def test_preferred_tool_ignored_for_greeting():
+    ctx = RunContext(
+        runId=5,
+        sessionId=1,
+        userId=1,
+        message="你好",
+        preferredToolCode="ofox_gpt_image2",
+        availableTools=[
+            ToolDescriptor(
+                toolCode="ofox_gpt_image2",
+                toolName="GPT-image2",
+                description="image generation",
+                autoCallable=True,
+            ),
+        ],
+    )
+    result = IntentRouter().classify(ctx)
+    assert result.intent == Intent.GENERAL_CHAT
+    assert result.selectedToolCode is None
+
+
+def test_apply_preferred_tool_override_replaces_llm_choice():
+    ctx = RunContext(
+        runId=6,
+        sessionId=1,
+        userId=1,
+        message="生成一张海报",
+        preferredToolCode="ofox_gpt_image2",
+        availableTools=[
+            ToolDescriptor(
+                toolCode="ofox_gpt_image2",
+                toolName="GPT-image2",
+                description="image generation",
+                autoCallable=True,
+            ),
+            ToolDescriptor(
+                toolCode="kling-image-v21",
+                toolName="Kling Image",
+                description="image generation",
+                autoCallable=True,
+            ),
+        ],
+    )
+    llm_result = IntentResult(
+        intent=Intent.TOOL_USE,
+        confidence=0.9,
+        selectedToolCode="kling-image-v21",
+        candidateToolCodes=["kling-image-v21"],
+        reason="llm_router",
+    )
+    result = apply_preferred_tool_override(ctx, llm_result)
+    assert result.selectedToolCode == "ofox_gpt_image2"
+
+
+def test_message_suggests_tool_use():
+    assert message_suggests_tool_use("生成一张海报") is True
+    assert message_suggests_tool_use("你好") is False

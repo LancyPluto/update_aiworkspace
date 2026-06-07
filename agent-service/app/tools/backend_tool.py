@@ -10,6 +10,7 @@ from app.config import settings
 from app.credit_messages import credit_message_from_backend_error
 from app.core.event_types import MESSAGE_DELTA, TOOL_TASK_DISPATCHED, TOOL_TASK_PROGRESS
 from app.core.schemas import ChatMessage, RunContext, RunEventCreate, TaskCreate, TaskDetailResponse, ToolCallComplete, ToolCallCreate, ToolCallFail, ToolDescriptor
+from app.core.user_attachment_priority import apply_user_selected_attachment_priority
 from app.runtime.runtime_settings import runtime_bool, runtime_float, runtime_int
 from app.tools.registry import infer_output_modality
 from app.tools.stream_preview import extract_stream_preview
@@ -300,6 +301,11 @@ class BackendToolBridge:
                 configured_timeout,
                 _runtime_int(context, "imageToolExecutionTimeoutSeconds", settings.agent_image_tool_execution_timeout_seconds, 1, 3600),
             )
+        if _looks_like_music_tool(tool_text):
+            return max(
+                configured_timeout,
+                _runtime_int(context, "musicToolExecutionTimeoutSeconds", settings.agent_music_tool_execution_timeout_seconds, 1, 7200),
+            )
         return configured_timeout
 
     async def _cancel_task(self, user_id: int, task_id: int) -> None:
@@ -452,28 +458,10 @@ def _with_field_strategy_defaults(tool: ToolDescriptor, arguments: dict[str, Any
 
 
 def _with_attached_file_defaults(context: RunContext, tool: ToolDescriptor, arguments: dict[str, Any]) -> dict[str, Any]:
-    normalized = dict(arguments)
+    normalized = apply_user_selected_attachment_priority(context, tool, arguments)
     properties = tool.inputSchema.get("properties", {})
     if not isinstance(properties, dict):
         properties = {}
-
-    image_urls = _ready_image_download_urls(context)
-    if image_urls:
-        for key in (
-            "image",
-            "imageUrl",
-            "image_url",
-            "referenceImageUrl",
-            "reference_image_url",
-            "initImage",
-            "inputImage",
-            "firstFrameImage",
-            "firstFrameUrl",
-            "first_frame_image",
-            "first_frame_url",
-        ):
-            if key in properties and not normalized.get(key):
-                normalized[key] = image_urls[0]
 
     duration_match = re.search(r"(\d+)\s*秒", context.message or "")
     if duration_match:
@@ -483,23 +471,6 @@ def _with_attached_file_defaults(context: RunContext, tool: ToolDescriptor, argu
                 break
 
     return normalized
-
-
-def _ready_image_download_urls(context: RunContext) -> list[str]:
-    urls: list[str] = []
-    for file in context.agentFiles:
-        if file.status != "READY":
-            continue
-        content_type = (file.contentType or "").lower()
-        filename = (file.originalFilename or "").lower()
-        if not content_type.startswith("image/") and not filename.endswith(
-            (".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".heic", ".heif", ".avif")
-        ):
-            continue
-        url = _absolute_backend_url(file.downloadUrl)
-        if url and url not in urls:
-            urls.append(url)
-    return urls
 
 
 def _absolute_backend_url(url: str | None) -> str:
@@ -547,6 +518,10 @@ def _looks_like_image_tool(tool_code: str) -> bool:
 
 def _looks_like_video_tool(tool_code: str) -> bool:
     return any(marker in tool_code for marker in ("video", "movie", "kling", "seedance"))
+
+
+def _looks_like_music_tool(tool_code: str) -> bool:
+    return any(marker in tool_code for marker in ("music", "suno", "song", "chirp"))
 
 
 def _runtime_int(context: RunContext | None, field: str, fallback: int, min_value: int, max_value: int) -> int:

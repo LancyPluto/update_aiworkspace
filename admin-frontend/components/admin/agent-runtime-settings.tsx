@@ -40,6 +40,7 @@ const defaults: SettingsMap = {
   "agent.runtime.tool_execution_timeout_seconds": "120",
   "agent.runtime.image_tool_execution_timeout_seconds": "600",
   "agent.runtime.video_tool_execution_timeout_seconds": "900",
+  "agent.runtime.music_tool_execution_timeout_seconds": "900",
   "agent.runtime.tool_poll_interval_seconds": "1",
   "agent.runtime.tool_stream_relay_enabled": "true",
   "agent.runtime.product_tool_loop_enabled": "true",
@@ -97,6 +98,7 @@ const labels: Record<string, string> = {
   "agent.runtime.tool_execution_timeout_seconds": "普通工具超时秒数",
   "agent.runtime.image_tool_execution_timeout_seconds": "图片工具超时秒数",
   "agent.runtime.video_tool_execution_timeout_seconds": "视频工具超时秒数",
+  "agent.runtime.music_tool_execution_timeout_seconds": "音乐工具超时秒数",
   "agent.runtime.tool_poll_interval_seconds": "工具轮询间隔秒数",
   "agent.runtime.tool_stream_relay_enabled": "转发工具流式进度",
   "agent.runtime.product_tool_loop_enabled": "启用产品工具循环",
@@ -120,6 +122,7 @@ const numberConstraints: Record<string, { min: number; max: number; step?: numbe
   "agent.runtime.tool_execution_timeout_seconds": { min: 10, max: 3600 },
   "agent.runtime.image_tool_execution_timeout_seconds": { min: 10, max: 3600 },
   "agent.runtime.video_tool_execution_timeout_seconds": { min: 10, max: 7200 },
+  "agent.runtime.music_tool_execution_timeout_seconds": { min: 10, max: 7200 },
   "agent.runtime.tool_poll_interval_seconds": { min: 0.2, max: 30, step: 0.1 },
   "agent.runtime.product_tool_loop_max_calls": { min: 1, max: 20 },
 }

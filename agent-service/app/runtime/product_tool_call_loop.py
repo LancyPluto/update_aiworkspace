@@ -14,6 +14,7 @@ from app.core.event_types import (
     TOOL_CALL_REQUESTED,
 )
 from app.core.intent_router import Intent, IntentResult
+from app.core.preferred_tool_bias import apply_preferred_tool_override, resolve_preferred_tool, sort_tools_with_preferred
 from app.core.schemas import ChatMessage, RunContext, RunEventCreate, ToolDescriptor
 from app.tools.registry import infer_output_modality, requested_output_modality
 
@@ -59,7 +60,7 @@ class ProductToolCallLoopExecutor:
         if not callable(chat_turn):
             raise TypeError("model does not support chat_turn")
 
-        tool_defs, aliases = self._tool_definitions(context.availableTools)
+        tool_defs, aliases = self._tool_definitions(context.availableTools, context)
         if not tool_defs:
             return ProductToolCallLoopResult()
 
@@ -102,7 +103,17 @@ class ProductToolCallLoopExecutor:
         )
         selected = aliases.get(call.name)
         if selected is None:
-            return await self._reject(context, call, "tool_not_available")
+            selected = next((alias for alias in aliases.values() if alias.tool.toolCode == call.name), None)
+            if selected is None:
+                return await self._reject(
+                    context,
+                    call,
+                    "tool_not_available",
+                    {
+                        "availableToolAliases": sorted(aliases.keys())[:30],
+                        "availableToolCodes": [alias.tool.toolCode for alias in aliases.values()][:30],
+                    },
+                )
 
         requested_modality = requested_output_modality(context.message)
         selected_modality = infer_output_modality(selected.tool)
@@ -127,6 +138,9 @@ class ProductToolCallLoopExecutor:
             reason="product_tool_call_selected",
             arguments=call.arguments if isinstance(call.arguments, dict) else {},
         )
+        from app.core.preferred_tool_bias import apply_preferred_tool_override
+
+        intent = apply_preferred_tool_override(context, intent)
         await self._event(
             context.runId,
             TOOL_CALL_EXECUTED,
@@ -136,6 +150,8 @@ class ProductToolCallLoopExecutor:
                 "name": call.name,
                 "success": True,
                 "selectedToolCode": selected.tool.toolCode,
+                "usedRawToolCode": call.name == selected.tool.toolCode,
+                "expectedToolAlias": selected.alias,
                 "arguments": _redact_large(intent.arguments),
             },
         )
@@ -207,15 +223,31 @@ class ProductToolCallLoopExecutor:
                     ),
                 )
             )
+        preferred = resolve_preferred_tool(context)
+        if preferred is not None:
+            messages.append(
+                ChatMessage(
+                    role="system",
+                    content=(
+                        f"The user explicitly selected preferred tool {preferred.toolCode} ({preferred.toolName}). "
+                        "If a tool call is needed for this request, prefer that tool over alternatives."
+                    ),
+                )
+            )
         messages.extend(context.history[-8:])
         messages.append(ChatMessage(role="user", content=context.message))
         return messages
 
-    def _tool_definitions(self, tools: list[ToolDescriptor]) -> tuple[list[dict[str, Any]], dict[str, _ToolAlias]]:
+    def _tool_definitions(
+        self,
+        tools: list[ToolDescriptor],
+        context: RunContext | None = None,
+    ) -> tuple[list[dict[str, Any]], dict[str, _ToolAlias]]:
+        ordered = sort_tools_with_preferred(context, tools) if context is not None else tools
         aliases: dict[str, _ToolAlias] = {}
         definitions: list[dict[str, Any]] = []
         used_aliases: set[str] = set()
-        for tool in tools[:30]:
+        for tool in ordered[:30]:
             alias = _alias_for_tool_code(tool.toolCode)
             base_alias = alias
             index = 2

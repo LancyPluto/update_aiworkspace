@@ -125,6 +125,46 @@ async def test_product_tool_call_loop_selects_tool_by_alias():
 
 
 @pytest.mark.asyncio
+async def test_product_tool_call_loop_accepts_raw_tool_code_and_records_alias():
+    backend = FakeToolLoopBackend()
+    model = FakeProductToolModel(
+        ChatTurnResult(
+            tool_calls=[
+                ChatToolCall(
+                    id="call_product_raw",
+                    name="ofox_gpt_image2",
+                    arguments={"userRequest": "生成 Suno 吉祥物"},
+                )
+            ],
+            finish_reason="tool_calls",
+        )
+    )
+    loop = ProductToolCallLoopExecutor(backend=backend, model=model)
+    context = RunContext(
+        runId=45,
+        sessionId=1,
+        userId=2,
+        message="生成 Suno 吉祥物",
+        availableTools=[
+            ToolDescriptor(
+                toolCode="ofox_gpt_image2",
+                toolName="GPT-image2.0",
+                description="图片生成，文生图",
+                autoCallable=True,
+            )
+        ],
+    )
+
+    result = await loop.run(context)
+
+    assert result.intent is not None
+    assert result.intent.selectedToolCode == "ofox_gpt_image2"
+    executed_events = [event for _, event in backend.events if event.eventType == TOOL_CALL_EXECUTED]
+    assert executed_events[0].eventJson["usedRawToolCode"] is True
+    assert executed_events[0].eventJson["expectedToolAlias"] == "agent_tool__ofox_gpt_image2"
+
+
+@pytest.mark.asyncio
 async def test_product_tool_call_loop_includes_workspace_memory_in_model_messages():
     backend = FakeToolLoopBackend()
     model = FakeProductToolModel(

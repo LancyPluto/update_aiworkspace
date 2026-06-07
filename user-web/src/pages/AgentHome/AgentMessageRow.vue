@@ -7,6 +7,8 @@ import RunTimeline from "./RunTimeline.vue"
 import type { AgentAvatarState } from "./AgentAvatar.vue"
 import type { AgentMessage, AgentRunEvent } from "@/api/types"
 import type { AssetPreviewItem } from "@/types/assetPreview"
+import type { ChatAssetRef } from "@/utils/agentChatAssetRefs"
+import { bindLongPressReference, writeAssetDragData } from "@/utils/agentChatAssetRefs"
 import { isImageAttachment, resolveAgentFileUrl } from "@/utils/agentAttachment"
 
 const props = defineProps<{
@@ -26,6 +28,7 @@ const props = defineProps<{
   modelConfigId?: number | null
   avatarState?: AgentAvatarState
   isStreaming?: boolean
+  assetRefMap?: Map<string, ChatAssetRef>
 }>()
 
 const emit = defineEmits<{
@@ -34,17 +37,20 @@ const emit = defineEmits<{
   "cancel-edit": []
   "submit-edit": [message: AgentMessage]
   regenerate: [message: AgentMessage]
-  preview: [asset: AssetPreviewItem]
+  preview: [asset: AssetPreviewItem, message?: AgentMessage]
+  reference: [payload: import("@/utils/agentChatAssetRefs").ChatAssetDragPayload]
   "update:editingMessageDraft": [value: string]
 }>()
 
 interface MessageAttachment {
-  id: number
+  id: number | string
   name: string
   contentType?: string | null
   size?: number | null
   url?: string | null
+  downloadUrl?: string | null
   status?: string | null
+  source?: string | null
 }
 
 function parseMessageJson(value?: string | null) {
@@ -62,7 +68,9 @@ function parseMessageJson(value?: string | null) {
 function isAttachment(value: unknown): value is MessageAttachment {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false
   const item = value as Record<string, unknown>
-  return typeof item.id === "number" && typeof item.name === "string"
+  const hasId = typeof item.id === "number" || typeof item.id === "string"
+  const hasUrl = typeof item.url === "string" || typeof item.downloadUrl === "string"
+  return hasId && typeof item.name === "string" && (hasUrl || item.source === "agent_file")
 }
 
 const attachments = computed(() => {
@@ -83,7 +91,28 @@ function isImageMessageAttachment(file: MessageAttachment) {
 }
 
 function attachmentPreviewUrl(file: MessageAttachment) {
-  return resolveAgentFileUrl(file.url)
+  return resolveAgentFileUrl(file.url || file.downloadUrl)
+}
+
+function resolveChatAsset(url?: string | null) {
+  if (!url || !props.assetRefMap) return undefined
+  return props.assetRefMap.get(url) || props.assetRefMap.get(resolveAgentFileUrl(url) || url)
+}
+
+function onAttachmentDragStart(event: DragEvent, file: MessageAttachment) {
+  const url = attachmentPreviewUrl(file)
+  if (!url) return
+  const asset = resolveChatAsset(url)
+  if (!asset) return
+  writeAssetDragData(event, asset)
+}
+
+function bindAttachmentLongPress(element: HTMLElement | null, file: MessageAttachment) {
+  const url = attachmentPreviewUrl(file)
+  if (!element || !url) return
+  const asset = resolveChatAsset(url)
+  if (!asset) return
+  bindLongPressReference(element, asset, (payload) => emit("reference", payload))
 }
 
 function openAttachmentPreview(file: MessageAttachment) {
@@ -94,7 +123,7 @@ function openAttachmentPreview(file: MessageAttachment) {
     kind: "image",
     title: "图片附件",
     url,
-  })
+  }, props.message)
 }
 </script>
 
@@ -148,8 +177,14 @@ function openAttachmentPreview(file: MessageAttachment) {
             <article
               v-for="file in attachments"
               :key="file.id"
+              :ref="(el) => bindAttachmentLongPress(el as HTMLElement | null, file)"
               class="message-attachment-card"
-              :class="{ 'message-attachment-card--image': isImageMessageAttachment(file) }"
+              :class="{
+                'message-attachment-card--image': isImageMessageAttachment(file),
+                'chat-asset-draggable': !!resolveChatAsset(attachmentPreviewUrl(file)),
+              }"
+              :draggable="!!resolveChatAsset(attachmentPreviewUrl(file))"
+              @dragstart="onAttachmentDragStart($event, file)"
             >
               <button
                 v-if="isImageMessageAttachment(file) && attachmentPreviewUrl(file)"
@@ -188,7 +223,10 @@ function openAttachmentPreview(file: MessageAttachment) {
             :message="message.contentText"
             :is-user="message.role === 'USER'"
             :streaming="isStreaming"
-            @preview="emit('preview', $event)"
+            :resolve-chat-asset="resolveChatAsset"
+            :enable-asset-drag="message.role === 'ASSISTANT'"
+            @preview="(asset) => emit('preview', asset, message)"
+            @reference="(payload) => emit('reference', payload)"
           />
         </template>
       </div>
@@ -539,5 +577,13 @@ function openAttachmentPreview(file: MessageAttachment) {
   .message-actions {
     opacity: 1;
   }
+}
+.chat-asset-draggable {
+  cursor: grab;
+}
+
+.chat-asset-draggable:active {
+  cursor: grabbing;
+  opacity: 0.88;
 }
 </style>

@@ -72,6 +72,7 @@ from app.runtime.tool_decision_validator import ToolDecisionValidator
 from app.runtime.tool_orchestrator import ToolOrchestrator, missing_execution_arguments
 from app.runtime.workspace_files import WorkspaceFileContext
 from app.security.prompt_guard import PromptGuard
+from app.core.user_attachment_priority import apply_user_selected_attachment_priority
 from app.tools.backend_tool import BackendToolBridge, ToolExecutionError
 from app.tools.memory_tool import (
     MEMORY_TOOL_SYSTEM_PROMPT,
@@ -516,6 +517,8 @@ class DeepAgentsRuntimeEngine:
                     intent.arguments,
                     user_request=context.message,
                 )
+                if inherited_tool is not None:
+                    intent.arguments = apply_user_selected_attachment_priority(context, inherited_tool, intent.arguments)
                 intent.isFollowUp = True
                 intent.inheritedFromToolCallId = followup.inherited_from_tool_call_id
         if tool is None:
@@ -576,6 +579,7 @@ class DeepAgentsRuntimeEngine:
         seed_args = dict(intent.arguments or {})
         base_args = self.tool_bridge.build_arguments(context, tool, apply_placeholder_defaults=True)
         base_args.update({key: value for key, value in seed_args.items() if value not in (None, "")})
+        base_args = apply_user_selected_attachment_priority(context, tool, base_args)
         missing_args = self._missing_user_arguments(base_args, tool)
         extracted_args = base_args
         LOGGER.info(
@@ -591,7 +595,7 @@ class DeepAgentsRuntimeEngine:
             )
             prepared_enriched = self.tool_bridge.build_arguments(context, tool, apply_placeholder_defaults=True)
             prepared_enriched.update({key: value for key, value in enriched.items() if value not in (None, "")})
-            enriched = prepared_enriched
+            enriched = apply_user_selected_attachment_priority(context, tool, prepared_enriched)
             still_missing = self._missing_user_arguments(enriched, tool)
             extracted_args = enriched
             auto_call = self._should_auto_call(context, tool, followup, intent)
@@ -635,6 +639,7 @@ class DeepAgentsRuntimeEngine:
         auto_call = self._should_auto_call(context, tool, followup, intent)
         current_args = self.tool_bridge.build_arguments(context, tool, apply_placeholder_defaults=True)
         extracted_args = self._merge_tool_arguments(current_args, extracted_args, {}, user_request=context.message)
+        extracted_args = apply_user_selected_attachment_priority(context, tool, extracted_args)
         await self._emit_arguments_preview(context, tool, extracted_args, [], not auto_call)
         await self._emit_arguments_merged(context, tool, intent, extracted_args)
 

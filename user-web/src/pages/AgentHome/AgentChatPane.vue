@@ -43,8 +43,11 @@ import {
   fetchAgentFiles,
   fetchAgentRun,
   fetchAgentRunEvents,
+  fetchAgentTools,
   fetchAgentWorkspaceMemory,
   fetchAgentWorkspaces,
+  fetchTaskById,
+  fetchTasks,
   fetchTools,
   publishCommunityPost,
   regenerateAgentRun,
@@ -63,12 +66,27 @@ import type {
   AgentRunEvent,
   AgentRunStatus,
   AgentSession,
+  AgentToolPickerItem,
+  AgentUrlAttachment,
   AgentWorkspace,
   AgentWorkspaceMemoryItem,
+  TaskDetail,
   ToolSummary,
 } from "@/api/types"
 import type { AssetPreviewItem, AssetPreviewRecommendation } from "@/types/assetPreview"
 import { randomUUID } from "@/utils/randomUUID"
+import {
+  mergeAssetWithTask,
+  promptFromToolEventPayload,
+  resolveTaskIdFromRunEvents,
+} from "@/utils/assetPreviewAdapter"
+import { openDashboardWithAsset } from "@/utils/assetReplay"
+import { buildTaskResultBlocks, resolveAudioTracks } from "@/utils/taskResultBlocks"
+import {
+  chatAssetRefByUrl,
+  dragPayloadToUrlAttachment,
+  type ChatAssetDragPayload,
+} from "@/utils/agentChatAssetRefs"
 
 const auth = useAuthStore()
 
@@ -91,12 +109,19 @@ const emit = defineEmits<{
 
 const messages = ref<AgentMessage[]>([])
 const files = ref<AgentFile[]>([])
+const urlAttachments = ref<AgentUrlAttachment[]>([])
 const filePreviewUrls = ref<Record<number, string>>({})
 const pendingUploadPreview = ref<{ name: string; url: string } | null>(null)
+const recentAttachments = ref<AgentMaterialAttachment[]>([])
+const materialAssets = ref<AgentMaterialAttachment[]>([])
+const materialAssetsLoading = ref(false)
 const events = ref<AgentRunEvent[]>([])
 const runEventsByRunId = ref<Record<number, AgentRunEvent[]>>({})
 const submittedAttachmentJsonByRunId = ref<Record<number, string>>({})
 const previewTools = ref<ToolSummary[]>([])
+const agentTools = ref<AgentToolPickerItem[]>([])
+const agentToolsLoading = ref(false)
+const selectedToolCode = ref<string | null>(null)
 const previewAsset = ref<AssetPreviewItem | null>(null)
 const memoryPanelOpen = ref(false)
 const memoryWorkspaces = ref<AgentWorkspace[]>([])
@@ -119,6 +144,14 @@ const removingFileId = ref<number | null>(null)
 const agentError = ref<string | null>(null)
 const creditModalOpen = ref(false)
 const rememberTool = ref(true)
+
+interface AgentMaterialAttachment extends AgentUrlAttachment {
+  id: string
+  kind: "image" | "video" | "audio" | "file"
+  previewUrl?: string
+  uploadedAt?: string
+  subtitle?: string
+}
 const activeRunId = ref<number | null>(null)
 const streamingAssistantMessageId = ref<number | null>(null)
 const runConnectionStatus = ref<
@@ -263,6 +296,8 @@ const input = computed({
   set: (val: string) => emit("update:draft", val),
 })
 
+const sessionAssetRefMap = computed(() => chatAssetRefByUrl(messages.value))
+
 const suggestions = [
   "帮我写一篇小红书种草笔记",
   "帮我优化一个电商商品标题",
@@ -371,17 +406,29 @@ function messageTime(value?: string | null) {
   })
 }
 
-function messageContentJsonForFiles(items: AgentFile[]) {
-  if (items.length === 0) return undefined
+function messageContentJsonForFiles(items: AgentFile[], urlItems: AgentUrlAttachment[] = []) {
+  if (items.length === 0 && urlItems.length === 0) return undefined
   return JSON.stringify({
-    attachments: items.map((file) => ({
-      id: file.id,
-      name: file.originalFilename,
-      contentType: file.contentType,
-      size: file.fileSize,
-      url: file.downloadUrl,
-      status: file.status,
-    })),
+    attachments: [
+      ...urlItems.map((item) => ({
+        id: item.id,
+        name: item.name,
+        contentType: item.contentType,
+        size: item.size,
+        url: item.url,
+        status: "READY",
+        source: "url",
+      })),
+      ...items.map((file) => ({
+        id: file.id,
+        name: file.originalFilename,
+        contentType: file.contentType,
+        size: file.fileSize,
+        url: file.downloadUrl,
+        status: file.status,
+        source: "agent_file",
+      })),
+    ],
   })
 }
 
@@ -749,6 +796,161 @@ function clearPendingUploadPreview() {
   pendingUploadPreview.value = null
 }
 
+function recentAttachmentStorageKey() {
+  return `agent:recent-attachments:${auth.user?.id ?? "anon"}`
+}
+
+function materialKind(contentType?: string | null, name?: string | null): AgentMaterialAttachment["kind"] {
+  const type = (contentType || "").toLowerCase()
+  if (type.startsWith("image/") || isImageAttachment(contentType, name)) return "image"
+  if (type.startsWith("video/")) return "video"
+  if (type.startsWith("audio/")) return "audio"
+  return "file"
+}
+
+function normalizeUrlAttachment(item: AgentUrlAttachment): AgentMaterialAttachment | null {
+  const url = item.url?.trim()
+  if (!url) return null
+  const name = item.name || "素材附件"
+  return {
+    id: String(item.id ?? `${url}-${name}`),
+    name,
+    contentType: item.contentType ?? null,
+    size: item.size ?? null,
+    url,
+    source: "url",
+    kind: materialKind(item.contentType, name),
+    previewUrl: item.contentType?.startsWith("image/") || isImageAttachment(item.contentType, name) ? resolveAgentFileUrl(url) : undefined,
+  }
+}
+
+function readRecentAttachments() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(recentAttachmentStorageKey()) || "[]") as unknown
+    const items = Array.isArray(parsed) ? parsed : []
+    recentAttachments.value = items
+      .map((item) => normalizeUrlAttachment(item as AgentUrlAttachment))
+      .filter((item): item is AgentMaterialAttachment => Boolean(item))
+      .slice(0, 20)
+  } catch {
+    recentAttachments.value = []
+  }
+}
+
+function writeRecentAttachments(items: AgentMaterialAttachment[]) {
+  recentAttachments.value = items.slice(0, 20)
+  localStorage.setItem(recentAttachmentStorageKey(), JSON.stringify(recentAttachments.value))
+}
+
+function rememberRecentAttachment(item: AgentUrlAttachment) {
+  const normalized = normalizeUrlAttachment(item)
+  if (!normalized) return
+  const withTime = { ...normalized, uploadedAt: new Date().toISOString() }
+  writeRecentAttachments([
+    withTime,
+    ...recentAttachments.value.filter((entry) => entry.url !== withTime.url && entry.id !== withTime.id),
+  ])
+}
+
+function removeRecentAttachment(item: AgentMaterialAttachment) {
+  writeRecentAttachments(recentAttachments.value.filter((entry) => entry.id !== item.id && entry.url !== item.url))
+}
+
+function selectUrlAttachment(item: AgentUrlAttachment) {
+  const normalized = normalizeUrlAttachment(item)
+  if (!normalized) return
+  urlAttachments.value = [
+    normalized,
+    ...urlAttachments.value.filter((entry) => entry.url !== normalized.url),
+  ].slice(0, 5)
+  rememberRecentAttachment(normalized)
+}
+
+function removeUrlAttachment(item: AgentUrlAttachment) {
+  urlAttachments.value = urlAttachments.value.filter((entry) => entry.url !== item.url)
+}
+
+function addReferenceAttachment(payload: ChatAssetDragPayload) {
+  const normalized = dragPayloadToUrlAttachment(payload)
+  if (urlAttachments.value.some((entry) => entry.url === normalized.url)) return
+  urlAttachments.value = [normalized, ...urlAttachments.value].slice(0, 5)
+}
+
+function formatMaterialTime(value?: string | null): string {
+  if (!value) return ""
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ""
+  return date.toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
+}
+
+function createMaterialAssets(task: TaskDetail): AgentMaterialAttachment[] {
+  const content = task.result?.contentText || ""
+  if (!content.trim()) return []
+  const blocks = buildTaskResultBlocks(content, task)
+  const taskTitle = task.toolName || task.toolCode || "历史任务"
+  const subtitle = `${task.taskNo || `#${task.taskId}`} · ${formatMaterialTime(task.finishedAt || task.createdAt)}`
+  const assets: AgentMaterialAttachment[] = []
+  for (const block of blocks) {
+    if (block.type === "image") {
+      block.images.forEach((image, index) => {
+        assets.push({
+          id: `${task.taskId}-image-${index}`,
+          kind: "image",
+          name: image.label || taskTitle,
+          contentType: "image/*",
+          url: image.url,
+          previewUrl: image.url,
+          source: "url",
+          subtitle,
+        })
+      })
+    } else if (block.type === "video") {
+      assets.push({
+        id: `${task.taskId}-video`,
+        kind: "video",
+        name: block.title || taskTitle,
+        contentType: "video/*",
+        url: block.url,
+        source: "url",
+        subtitle,
+      })
+    } else if (block.type === "audio") {
+      resolveAudioTracks(block).forEach((track, index) => {
+        assets.push({
+          id: `${task.taskId}-audio-${index}`,
+          kind: "audio",
+          name: track.title || block.title || taskTitle,
+          contentType: "audio/*",
+          url: track.url,
+          previewUrl: track.coverUrl || track.url,
+          source: "url",
+          subtitle,
+        })
+      })
+    }
+  }
+  return assets
+}
+
+async function loadMaterialAssets() {
+  if (!props.token || materialAssetsLoading.value) return
+  materialAssetsLoading.value = true
+  try {
+    const page = await fetchTasks({ token: props.token, query: { pageNo: 1, pageSize: 80, status: "SUCCESS" } })
+    const seen = new Set<string>()
+    materialAssets.value = page.list.flatMap(createMaterialAssets).filter((asset) => {
+      const key = `${asset.kind}:${asset.url}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    }).slice(0, 60)
+  } catch {
+    materialAssets.value = []
+  } finally {
+    materialAssetsLoading.value = false
+  }
+}
+
 async function handleFileSelected(event: Event) {
   const target = event.target as HTMLInputElement
   const selected = target.files?.[0]
@@ -762,6 +964,14 @@ async function handleFileSelected(event: Event) {
   try {
     const uploaded = await uploadAgentFile(props.sessionId, selected, { token: props.token })
     files.value = [uploaded, ...files.value.filter((item) => item.id !== uploaded.id)]
+    rememberRecentAttachment({
+      id: uploaded.id,
+      name: uploaded.originalFilename,
+      contentType: uploaded.contentType,
+      size: uploaded.fileSize,
+      url: uploaded.downloadUrl,
+      source: "url",
+    })
   } finally {
     clearPendingUploadPreview()
     uploading.value = false
@@ -794,7 +1004,7 @@ async function removeFile(file: AgentFile) {
 
 async function submitMessage(content = input.value) {
   const text = content.trim()
-  if (!text && files.value.length === 0) return
+  if (!text && files.value.length === 0 && urlAttachments.value.length === 0) return
   if (!props.token || sending.value || editingRegenerating.value || hasActiveRun.value) return
   stickToBottom.value = true
   if (props.modelsLoading) {
@@ -813,9 +1023,13 @@ async function submitMessage(content = input.value) {
   try {
     input.value = ""
     const submittedFiles = [...files.value]
-    const submittedAttachmentJson = messageContentJsonForFiles(submittedFiles)
+    const submittedUrlAttachments = [...urlAttachments.value]
+    const submittedPreferredToolCode = selectedToolCode.value
+    const submittedAttachmentJson = messageContentJsonForFiles(submittedFiles, submittedUrlAttachments)
     const optimisticMessageId = Date.now()
     files.value = []
+    urlAttachments.value = []
+    selectedToolCode.value = null
     messages.value.push({
       id: optimisticMessageId,
       sessionId: props.sessionId,
@@ -835,7 +1049,16 @@ async function submitMessage(content = input.value) {
         content: text,
         clientRequestId: randomUUID(),
         modelConfigId: props.modelConfigId ?? null,
+        preferredToolCode: submittedPreferredToolCode,
         fileIds: submittedFiles.map((item) => item.id),
+        urlAttachments: submittedUrlAttachments.map((item) => ({
+          id: item.id,
+          name: item.refLabel || item.name,
+          contentType: item.contentType,
+          size: item.size,
+          url: item.url,
+          source: item.source || "url",
+        })),
       },
       { token: props.token },
     )
@@ -875,6 +1098,18 @@ async function loadPreviewTools() {
     previewTools.value = response.list
   } catch {
     previewTools.value = []
+  }
+}
+
+async function loadAgentTools() {
+  if (!props.token || agentToolsLoading.value) return
+  agentToolsLoading.value = true
+  try {
+    agentTools.value = await fetchAgentTools({ token: props.token })
+  } catch {
+    agentTools.value = []
+  } finally {
+    agentToolsLoading.value = false
   }
 }
 
@@ -1626,22 +1861,50 @@ function recommendToolsForAsset(asset: AssetPreviewItem): AssetPreviewRecommenda
   return (matches.length ? matches : previewTools.value).slice(0, 8)
 }
 
-function openAssetPreview(asset: AssetPreviewItem) {
+async function openAssetPreview(asset: AssetPreviewItem, message?: AgentMessage) {
+  let enriched: AssetPreviewItem = { ...asset }
+  const runEvents = message?.runId != null ? runEventsForMessage(message) : []
+  const taskId = resolveTaskIdFromRunEvents(runEvents, asset.url)
+
+  if (taskId && props.token) {
+    try {
+      const task = await fetchTaskById(taskId, { token: props.token })
+      enriched = mergeAssetWithTask(enriched, task, {
+        defaultPromptVisible: auth.user?.promptPublicByDefault ?? false,
+      })
+    } catch {
+      // Keep the lightweight preview when task lookup fails.
+    }
+  } else if (runEvents.length) {
+    const finishedEvent = [...runEvents].reverse().find((event) => event.eventType === "tool.finished")
+    if (finishedEvent) {
+      const prompt = promptFromToolEventPayload(parseEventJson(finishedEvent.eventJson))
+      if (prompt) enriched = { ...enriched, prompt }
+    }
+  }
+
+  if (!enriched.createdAt && message?.createdAt) {
+    enriched = { ...enriched, createdAt: message.createdAt }
+  }
+
   previewAsset.value = {
-    ...asset,
-    title: asset.title || "Agent 生成资产",
-    toolName: asset.toolName || "Agent",
+    ...enriched,
+    title: enriched.title || "生成资产",
+    toolName: enriched.toolName || "Agent",
   }
 }
 
 function useAssetWithTool(tool: AssetPreviewRecommendation, asset: AssetPreviewItem) {
-  window.sessionStorage.setItem("dashboard_pending_asset", JSON.stringify(asset))
+  openDashboardWithAsset(asset, tool)
   previewAsset.value = null
-  window.location.href = `/dashboard?modality=${encodeURIComponent(tool.outputModality || "IMAGE")}&tool=${encodeURIComponent(tool.toolCode)}`
 }
 
-function openPreviewTask() {
-  previewAsset.value = null
+function openPreviewTask(asset: AssetPreviewItem) {
+  if (!asset.taskId) {
+    previewAsset.value = null
+    return
+  }
+  window.location.href = `/tasks/${asset.taskId}/result`
 }
 
 async function publishPreviewAsset(asset: AssetPreviewItem) {
@@ -1652,7 +1915,7 @@ async function publishPreviewAsset(asset: AssetPreviewItem) {
         taskId: asset.taskId,
         title: asset.title,
         description: asset.subtitle || null,
-        promptVisible: asset.promptVisible ?? false,
+        promptVisible: asset.promptVisible ?? auth.user?.promptPublicByDefault ?? false,
       },
       { token: auth.token },
     )
@@ -1767,9 +2030,12 @@ watch(
 )
 
 onMounted(() => {
+  readRecentAttachments()
   loadPersistedRunEventCache()
   void loadPane()
   void loadPreviewTools()
+  void loadAgentTools()
+  void loadMaterialAssets()
   void nextTick(() => {
     adjustComposerTextareaHeight()
     updateComposerScrollInset()
@@ -1857,12 +2123,14 @@ defineExpose({
             :model-config-id="modelConfigId"
             :avatar-state="message.role === 'ASSISTANT' ? resolveAssistantAvatarState(message) : undefined"
             :is-streaming="message.id === streamingAssistantMessageId"
+            :asset-ref-map="sessionAssetRefMap"
             @copy="copyMessage"
             @start-edit="startEditMessage"
             @cancel-edit="cancelEditMessage"
             @submit-edit="submitEditedMessage"
             @regenerate="regenerateAssistantMessage"
-            @preview="openAssetPreview"
+            @preview="(asset, message) => openAssetPreview(asset, message)"
+            @reference="addReferenceAttachment"
           />
         </template>
 
@@ -1983,6 +2251,10 @@ defineExpose({
         :models-loading="modelsLoading"
         :draft="input"
         :files="files"
+        :url-attachments="urlAttachments"
+        :recent-attachments="recentAttachments"
+        :material-assets="materialAssets"
+        :material-assets-loading="materialAssetsLoading"
         :file-preview-urls="filePreviewUrls"
         :pending-upload-preview="pendingUploadPreview"
         :uploading="uploading"
@@ -1993,13 +2265,23 @@ defineExpose({
         :regenerating-message-id="regeneratingMessageId"
         :cancelling-run="cancellingRun"
         :memory-panel-open="memoryPanelOpen"
+        :agent-tools="agentTools"
+        :agent-tools-loading="agentToolsLoading"
+        :selected-tool-code="selectedToolCode"
         @update:draft="emit('update:draft', $event)"
+        @update:selected-tool-code="selectedToolCode = $event"
         @change-model="emit('change-model', $event)"
         @submit="submitMessage()"
         @cancel-run="cancelCurrentRun()"
         @file-selected="handleFileSelected"
         @preview-attachment="openAttachmentPreview"
         @remove-file="removeFile"
+        @select-url-attachment="selectUrlAttachment"
+        @remove-url-attachment="removeUrlAttachment"
+        @remove-recent-attachment="removeRecentAttachment"
+        @refresh-material-assets="loadMaterialAssets"
+        @refresh-agent-tools="loadAgentTools"
+        @add-reference-attachment="addReferenceAttachment"
         @open-memory="openMemoryPanel"
       />
     </div>
