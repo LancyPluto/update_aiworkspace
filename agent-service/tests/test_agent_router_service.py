@@ -80,6 +80,31 @@ async def test_router_accepts_valid_tool_selection():
 
 
 @pytest.mark.asyncio
+async def test_router_accepts_image_editing_alias_as_tool_use():
+    backend = FakeBackend()
+    model = FakeModel({
+        "intent": "image_editing",
+        "selectedToolCode": "kling_image_v21",
+        "candidateToolCodes": ["kling_image_v21"],
+        "confidence": 0.95,
+        "reason": "face swap poster",
+        "arguments": {"prompt": "movie poster"},
+        "missingFields": [],
+    })
+    service = AgentRouterService(backend, model)
+
+    result = await service.classify(
+        _context("换脸生成电影海报"),
+        IntentResult(intent=Intent.GENERAL_CHAT, confidence=0.6, reason="rule_fallback"),
+    )
+
+    assert result is not None
+    assert result.intent == Intent.TOOL_USE
+    assert result.selectedToolCode == "kling_image_v21"
+    assert any(event.eventType == ROUTER_SELECTED for _, event in backend.events)
+
+
+@pytest.mark.asyncio
 async def test_router_falls_back_on_unknown_tool():
     backend = FakeBackend()
     model = FakeModel({

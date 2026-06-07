@@ -589,6 +589,30 @@ public class AgentRunServiceImpl implements AgentRunService {
         return value == null || value.isBlank() ? fallback : value;
     }
 
+    private String referenceAttachmentLabel(int index, String name, String contentType) {
+        if (!isImageAttachmentName(name, contentType)) {
+            return nonBlankOrDefault(name, "素材附件");
+        }
+        String cleaned = nonBlankOrDefault(name, "图片").replaceFirst("^@[^-]+-", "").trim();
+        if (cleaned.length() > 14) {
+            cleaned = cleaned.substring(0, 14) + "…";
+        }
+        return "@图片" + (index + 1) + "-" + cleaned;
+    }
+
+    private boolean isImageAttachmentName(String name, String contentType) {
+        String type = contentType == null ? "" : contentType.toLowerCase(java.util.Locale.ROOT);
+        if (type.startsWith("image/")) {
+            return true;
+        }
+        String lowerName = name == null ? "" : name.toLowerCase(java.util.Locale.ROOT);
+        return lowerName.endsWith(".png")
+                || lowerName.endsWith(".jpg")
+                || lowerName.endsWith(".jpeg")
+                || lowerName.endsWith(".webp")
+                || lowerName.endsWith(".gif");
+    }
+
     private boolean parseBooleanSetting(String value, boolean fallback) {
         if (value == null || value.isBlank()) {
             return fallback;
@@ -1098,19 +1122,19 @@ public class AgentRunServiceImpl implements AgentRunService {
             return;
         }
         List<Map<String, Object>> attachments = new java.util.ArrayList<>(urlAttachments);
-        attachments.addAll(attachedFiles.stream()
-                .map(file -> {
-                    Map<String, Object> item = new LinkedHashMap<>();
-                    item.put("id", file.getId());
-                    item.put("name", file.getOriginalFilename());
-                    item.put("contentType", file.getContentType());
-                    item.put("size", file.getFileSize());
-                    item.put("status", file.getStatus());
-                    item.put("url", "/api/v1/agent/sessions/" + sessionId + "/files/" + file.getId() + "/content");
-                    item.put("source", "agent_file");
-                    return item;
-                })
-                .toList());
+        int attachmentIndex = attachments.size();
+        for (AgentFile file : attachedFiles) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("id", file.getId());
+            item.put("name", referenceAttachmentLabel(attachmentIndex, file.getOriginalFilename(), file.getContentType()));
+            item.put("contentType", file.getContentType());
+            item.put("size", file.getFileSize());
+            item.put("status", file.getStatus());
+            item.put("url", "/api/v1/agent/sessions/" + sessionId + "/files/" + file.getId() + "/content");
+            item.put("source", "agent_file");
+            attachments.add(item);
+            attachmentIndex++;
+        }
         userMessage.setContentJson(toJson(Map.of("attachments", attachments)));
         agentMessageMapper.updateById(userMessage);
     }

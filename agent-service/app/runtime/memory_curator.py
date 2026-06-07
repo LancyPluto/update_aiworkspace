@@ -109,6 +109,24 @@ def build_memory_metadata(decision: MemoryCuratorDecision) -> str:
     )
 
 
+def looks_like_memory_management_turn(message: str) -> bool:
+    """User wants to summarize, organize, or explicitly persist conversation memory."""
+    if _explicit_memory_request(message):
+        return True
+    compact = re.sub(r"\s+", "", (message or "").lower())
+    return any(
+        token in compact
+        for token in (
+            "总结对话",
+            "总结我们",
+            "整理对话",
+            "归纳对话",
+            "对话总结",
+            "会话总结",
+        )
+    )
+
+
 def _explicit_memory_request(text: str) -> bool:
     compact = re.sub(r"\s+", "", text.lower())
     return any(
@@ -118,8 +136,11 @@ def _explicit_memory_request(text: str) -> bool:
             "记下来",
             "记录一下",
             "帮我记",
+            "帮我记住",
             "写入你的记忆",
             "写到你的记忆",
+            "写入记忆",
+            "写到记忆",
             "存到记忆",
             "保存到记忆",
             "remember",

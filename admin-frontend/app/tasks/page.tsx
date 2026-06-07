@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
+import { useSearchParams } from "next/navigation"
 import { AdminLayout } from "@/components/admin/admin-layout"
 import { AdminHeader } from "@/components/admin/header"
 import { DataTable, StatusBadge } from "@/components/admin/data-table"
@@ -319,6 +320,10 @@ function renderTaskOutput(task?: Task | null) {
 }
 
 export default function TasksPage() {
+  const searchParams = useSearchParams()
+  const runIdParam = searchParams.get("runId")
+  const mainTab = runIdParam && /^\d+$/.test(runIdParam) ? "agent-runs" : "tasks"
+
   const [searchQuery, setSearchQuery] = useState("")
   const [statusFilter, setStatusFilter] = useState("all")
   const [selectedTask, setSelectedTask] = useState<Task | null>(null)
@@ -472,9 +477,25 @@ export default function TasksPage() {
               <DialogHeader className="shrink-0 pr-8">
                 <DialogTitle>任务详情</DialogTitle>
                 <DialogDescription>
-                  {detailLoadingId === item.rawId
-                    ? "正在加载详情…"
-                    : `任务 ID: ${selectedTask?.id || item.id}${selectedTask?.agentSource ? ` · Agent Run #${selectedTask.agentSource.runId} / Tool Call #${selectedTask.agentSource.toolCallId}` : ""}`}
+                  {detailLoadingId === item.rawId ? (
+                    "正在加载详情…"
+                  ) : (
+                    <span className="inline-flex flex-wrap items-center gap-1">
+                      <span>任务 ID: {selectedTask?.id || item.id}</span>
+                      {selectedTask?.agentSource ? (
+                        <>
+                          <span>·</span>
+                          <a
+                            className="text-primary hover:underline"
+                            href={`/tasks?runId=${selectedTask.agentSource.runId}`}
+                          >
+                            Agent Run #{selectedTask.agentSource.runId}
+                          </a>
+                          <span>/ Tool Call #{selectedTask.agentSource.toolCallId}</span>
+                        </>
+                      ) : null}
+                    </span>
+                  )}
                 </DialogDescription>
               </DialogHeader>
               <Tabs defaultValue="input" className="mt-4 flex min-h-0 flex-col overflow-hidden">
@@ -608,7 +629,7 @@ export default function TasksPage() {
       <AdminHeader title="任务管理" description={headerDescription} />
 
       <div className="p-6 space-y-6">
-        <Tabs defaultValue="tasks" className="space-y-6">
+        <Tabs defaultValue={mainTab} key={mainTab} className="space-y-6">
           <TabsList className="bg-secondary">
             <TabsTrigger value="tasks">AI 任务</TabsTrigger>
             <TabsTrigger value="agent-runs">Agent 运行</TabsTrigger>

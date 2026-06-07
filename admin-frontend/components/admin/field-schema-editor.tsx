@@ -725,9 +725,9 @@ function PreviewField({ field, index }: { field: EditableField; index: number })
           <span className="h-4 w-4 rounded border border-border bg-background" />
           <span>{field.placeholder.trim() || label}</span>
         </div>
-      ) : field.fieldType === "image" || field.fieldType === "file" ? (
+      ) : field.fieldType === "image" || field.fieldType === "multi_image" || field.fieldType === "file" ? (
         <div className="flex h-10 items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm text-muted-foreground">
-          {field.fieldType === "image" ? <ImageUp className="h-4 w-4" /> : <FileUp className="h-4 w-4" />}
+          {field.fieldType === "file" ? <FileUp className="h-4 w-4" /> : <ImageUp className="h-4 w-4" />}
           <span className="truncate">{placeholder}</span>
         </div>
       ) : field.fieldType === "slider" ? (
@@ -771,6 +771,7 @@ function PreviewField({ field, index }: { field: EditableField; index: number })
 
 function defaultPlaceholder(field: EditableField) {
   if (field.fieldType === "number" || field.fieldType === "slider") return "请输入数字"
+  if (field.fieldType === "multi_image") return "选择多张参考图"
   if (field.fieldType === "image" || field.fieldType === "file") return "请输入资源 URL"
   return `请输入${field.fieldName.trim() || "内容"}`
 }

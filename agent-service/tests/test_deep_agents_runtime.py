@@ -387,6 +387,58 @@ async def test_memory_consolidation_does_not_replace_explicit_preference_memory(
     assert "二次元" in backend.created_memories[0]["content"]
 
 
+def test_memory_management_prompt_omits_available_tools():
+    from app.core.schemas import ToolDescriptor
+    from app.runtime.deep_agents_engine import DEFAULT_AGENT_SYSTEM_PROMPT, _compose_system_prompt
+
+    context = RunContext(
+        runId=1,
+        sessionId=2,
+        userId=3,
+        message="总结我们的对话内容，写入你的记忆",
+        availableTools=[ToolDescriptor(toolCode="ofox_gpt_image2", toolName="GPT-image2.0")],
+    )
+
+    default_prompt = _compose_system_prompt(None, context, DEFAULT_AGENT_SYSTEM_PROMPT)
+    memory_prompt = _compose_system_prompt(None, context, DEFAULT_AGENT_SYSTEM_PROMPT, include_tools=False)
+
+    assert "ofox_gpt_image2" in default_prompt
+    assert "ofox_gpt_image2" not in memory_prompt
+
+
+def test_history_for_chat_trims_default_and_memory_modes():
+    from app.runtime.deep_agents_engine import _history_for_chat
+
+    long_history = [ChatMessage(role="user", content=f"message-{index}") for index in range(30)]
+    context = RunContext(runId=1, sessionId=2, userId=3, message="hello", history=long_history)
+
+    default_history = _history_for_chat(context, memory_management=False)
+    memory_history = _history_for_chat(context, memory_management=True)
+
+    assert len(default_history) == 20
+    assert default_history[0].content == "message-10"
+    assert len(memory_history) == 8
+    assert memory_history[0].content == "message-22"
+
+
+def test_history_for_chat_compacts_long_assistant_messages_in_memory_mode():
+    from app.runtime.deep_agents_engine import _history_for_chat
+
+    long_assistant = "A" * 900
+    context = RunContext(
+        runId=1,
+        sessionId=2,
+        userId=3,
+        message="总结对话写入记忆",
+        history=[ChatMessage(role="assistant", content=long_assistant)],
+    )
+
+    memory_history = _history_for_chat(context, memory_management=True)
+
+    assert len(memory_history[0].content) < len(long_assistant)
+    assert memory_history[0].content.endswith("…")
+
+
 @pytest.mark.asyncio
 async def test_deep_agents_engine_fails_cleanly_when_model_is_not_supported():
     from app.runtime.deep_agents_engine import DeepAgentsRuntimeEngine

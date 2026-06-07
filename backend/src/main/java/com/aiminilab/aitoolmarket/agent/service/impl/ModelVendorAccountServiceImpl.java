@@ -214,14 +214,14 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
     private ModelVendorAccountTestResponse testAcceptOnlyVendorAccount(ModelVendorAccount account,
                                                                        String providerCode,
                                                                        ModelProviderDefinition provider) {
-        if (account.getApiKey() == null || account.getApiKey().isBlank()) {
+        if (!hasCredential(account)) {
             account.setHealthStatus("ERROR");
-            account.setBalanceErrorMessage("API Key 未配置");
+            account.setBalanceErrorMessage("账号凭据未配置");
             account.setUpdatedAt(LocalDateTime.now());
             vendorAccountMapper.updateAccount(account);
             return new ModelVendorAccountTestResponse(
                     false,
-                    "API Key 未配置",
+                    "账号凭据未配置，请在厂商账户中填写 API Key 或额外鉴权 JSON",
                     null,
                     providerCode,
                     provider.defaultModel(),
@@ -356,9 +356,23 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
         }
         boolean hasKey = request.apiKey() != null && !request.apiKey().isBlank();
         boolean hasExtra = request.extraAuthJson() != null && !request.extraAuthJson().isBlank();
-        if (existing == null && !hasKey && !hasExtra) {
+        boolean keepsExistingKey = existing != null
+                && !Boolean.TRUE.equals(request.clearApiKey())
+                && existing.getApiKey() != null
+                && !existing.getApiKey().isBlank();
+        boolean keepsExistingExtra = existing != null
+                && !Boolean.TRUE.equals(request.clearExtraAuthJson())
+                && existing.getExtraAuthJson() != null
+                && !existing.getExtraAuthJson().isBlank();
+        if (!hasKey && !hasExtra && !keepsExistingKey && !keepsExistingExtra) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "请填写 API Key 或 extraAuthJson");
         }
+    }
+
+    private boolean hasCredential(ModelVendorAccount account) {
+        return account != null
+                && ((account.getApiKey() != null && !account.getApiKey().isBlank())
+                || (account.getExtraAuthJson() != null && !account.getExtraAuthJson().isBlank()));
     }
 
     private ModelVendorAccountResponse toResponse(ModelVendorAccount account) {

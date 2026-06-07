@@ -34,7 +34,7 @@ DEFAULT_ROUTER_PROMPT = (
     "Prefer the tool that directly produces the requested output modality: image/photo/poster/cos/visual requests use image tools; "
     "video/short-video/image-to-video requests use video tools; copywriting/title/article requests use text tools. "
     "Use recentToolCalls to detect follow-up requests, inherit prior arguments, and return only the user's changes in followupPatch. "
-    "Uploaded media attachments may be reference material for generation tools; do not classify them as file analysis unless the user asks to analyze/read/summarize the attachment. "
+    "Uploaded media attachments, including multiple images, may be reference material for generation tools; do not classify them as file analysis unless the user asks to analyze/read/summarize the attachment. "
     "Only ask for missing information when it changes intent, cost, authorization, safety, or the core subject. "
     "Do not ask for low-risk defaults such as aspect ratio, count, quality, or style strength."
 )
@@ -381,7 +381,11 @@ def _normalize_router_intent(raw: Any) -> str | None:
         "call_tool": "tool_use",
         "use_tool": "tool_use",
         "image_generation": "tool_use",
+        "image_editing": "tool_use",
+        "image_edit": "tool_use",
+        "face_swap": "tool_use",
         "video_generation": "tool_use",
+        "video_editing": "tool_use",
         "audio_generation": "tool_use",
         "music_generation": "tool_use",
         "text_generation": "tool_use",

@@ -1,5 +1,6 @@
 package com.aiminilab.aitoolmarket.agent.service.impl;
 
+import com.aiminilab.aitoolmarket.agent.dto.AdminAgentRunContextSnapshotResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AdminAgentRunDetailResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AdminAgentRunListItemResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AdminAgentRunStatsResponse;
@@ -7,6 +8,7 @@ import com.aiminilab.aitoolmarket.agent.dto.AgentRunEventResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AgentRunResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AgentToolCallResponse;
 import com.aiminilab.aitoolmarket.agent.entity.AgentRun;
+import com.aiminilab.aitoolmarket.agent.entity.AgentRunEvent;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentRunEventMapper;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentRunMapper;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentToolCallMapper;
@@ -17,8 +19,12 @@ import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
+
 @Service
 public class AdminAgentRunServiceImpl implements AdminAgentRunService {
+
+    private static final int ADMIN_EVENT_LIMIT = 500;
 
     private final AgentRunMapper agentRunMapper;
     private final AgentRunEventMapper agentRunEventMapper;
@@ -51,21 +57,48 @@ public class AdminAgentRunServiceImpl implements AdminAgentRunService {
     @Override
     public AdminAgentRunDetailResponse detail(Long runId) {
         AgentRun run = findRun(runId);
+        long totalEventCount = agentRunEventMapper.countByRunId(runId);
+        List<AgentRunEvent> events = loadRecentEvents(runId, totalEventCount);
+        var context = agentRunService.context(runId);
         return new AdminAgentRunDetailResponse(
                 AgentRunResponse.from(run),
-                agentRunEventMapper.findEventsForAdmin(runId, 200).stream()
-                        .map(AgentRunEventResponse::from)
-                        .toList(),
+                events.stream().map(AgentRunEventResponse::from).toList(),
                 agentToolCallMapper.findByRunId(runId).stream()
                         .map(AgentToolCallResponse::from)
-                        .toList()
+                        .toList(),
+                AdminAgentRunContextSnapshotResponse.from(context),
+                totalEventCount > events.size(),
+                totalEventCount
         );
+    }
+
+    @Override
+    public List<AgentRunEventResponse> listEvents(Long runId, Long afterEventId, Integer pageSize) {
+        findRun(runId);
+        int limit = normalizeEventPageSize(pageSize);
+        return agentRunEventMapper.findEventsForAdminPaged(runId, afterEventId, limit).stream()
+                .map(AgentRunEventResponse::from)
+                .toList();
     }
 
     @Override
     public AgentRunResponse cancel(Long runId) {
         AgentRun run = findRun(runId);
         return agentRunService.cancel(run.getUserId(), runId);
+    }
+
+    private List<AgentRunEvent> loadRecentEvents(Long runId, long totalEventCount) {
+        if (totalEventCount <= ADMIN_EVENT_LIMIT) {
+            return agentRunEventMapper.findEventsForAdmin(runId, ADMIN_EVENT_LIMIT);
+        }
+        return agentRunEventMapper.findRecentEventsForAdmin(runId, ADMIN_EVENT_LIMIT);
+    }
+
+    private int normalizeEventPageSize(Integer pageSize) {
+        if (pageSize == null || pageSize < 1) {
+            return 200;
+        }
+        return Math.min(pageSize, 500);
     }
 
     private AgentRun findRun(Long runId) {

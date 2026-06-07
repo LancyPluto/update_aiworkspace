@@ -270,7 +270,7 @@ export interface ToolFieldOption {
 export interface ToolField {
   fieldKey: string
   fieldName: string
-  fieldType: "text" | "textarea" | "select" | "number" | "radio" | "checkbox" | "slider" | "image" | "file"
+  fieldType: "text" | "textarea" | "select" | "number" | "radio" | "checkbox" | "slider" | "image" | "multi_image" | "file"
   placeholder?: string | null
   options?: Array<ToolFieldOption | string> | null
   optionsJson?: string | null

@@ -3,7 +3,7 @@ import json
 import pytest
 
 from app.core.schemas import ChatMessage, ContextWindow, MemorySettings, RecentToolCallContext, RunContext, WorkspaceMemoryItem
-from app.runtime.memory_curator import MemoryCuratorService
+from app.runtime.memory_curator import MemoryCuratorService, looks_like_memory_management_turn
 from app.runtime.memory_runtime import (
     AUTO_PROFILE_TITLE,
     WorkspaceMemoryRuntime,
@@ -12,6 +12,12 @@ from app.runtime.memory_runtime import (
     memory_consolidation_trigger,
     parse_consolidation_json,
 )
+
+
+def test_looks_like_memory_management_turn_detects_conversation_summary_request():
+    assert looks_like_memory_management_turn("总结我们的对话内容，写入你的记忆")
+    assert looks_like_memory_management_turn("整理对话并写到记忆")
+    assert not looks_like_memory_management_turn("生成一张校园海报")
 
 
 def test_memory_curator_auto_adds_explicit_preference():

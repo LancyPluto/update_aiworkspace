@@ -8,7 +8,8 @@ from typing import Any
 from app.clients.backend_client import BackendBusinessError
 from app.config import settings
 from app.credit_messages import credit_message_from_backend_error
-from app.core.event_types import MESSAGE_DELTA, TOOL_TASK_DISPATCHED, TOOL_TASK_PROGRESS
+from app.core.attachment_precheck import format_attachment_error, validate_attachment_arguments
+from app.core.event_types import MESSAGE_DELTA, TOOL_CALL_REJECTED, TOOL_TASK_DISPATCHED, TOOL_TASK_PROGRESS
 from app.core.schemas import ChatMessage, RunContext, RunEventCreate, TaskCreate, TaskDetailResponse, ToolCallComplete, ToolCallCreate, ToolCallFail, ToolDescriptor
 from app.core.user_attachment_priority import apply_user_selected_attachment_priority
 from app.runtime.runtime_settings import runtime_bool, runtime_float, runtime_int
@@ -146,6 +147,23 @@ class BackendToolBridge:
     async def execute_with_args(self, context: RunContext, tool: ToolDescriptor, arguments: dict[str, Any]) -> dict[str, Any]:
         if tool.toolCode == "xiaohongshu_copywriting":
             arguments = _with_xiaohongshu_defaults(context.message, arguments)
+        attachment_errors = validate_attachment_arguments(context, arguments)
+        if attachment_errors:
+            message = format_attachment_error(attachment_errors)
+            await self.backend.append_event(
+                context.runId,
+                RunEventCreate(
+                    eventType=TOOL_CALL_REJECTED,
+                    eventText=message,
+                    eventJson={
+                        "kind": "attachment_precheck",
+                        "name": tool.toolCode,
+                        "reason": "attachment_not_found",
+                        "attachments": attachment_errors,
+                    },
+                ),
+            )
+            raise ToolExecutionError(message, error_code="PARAM_ERROR")
         call = await self.backend.create_tool_call(context.runId, ToolCallCreate(toolCode=tool.toolCode, argumentsJson=arguments))
         task_id: int | None = None
         try:

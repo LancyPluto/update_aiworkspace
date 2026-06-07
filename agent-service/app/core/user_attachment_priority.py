@@ -19,6 +19,18 @@ _IMAGE_REFERENCE_ARG_KEYS = (
     "first_frame_url",
 )
 
+_IMAGE_REFERENCE_ARRAY_ARG_KEYS = (
+    "image",
+    "images",
+    "imageUrls",
+    "image_urls",
+    "referenceImage",
+    "referenceImages",
+    "referenceImageUrls",
+    "reference_image_urls",
+    "inputImages",
+)
+
 
 def is_user_explicit_attachment(file: AgentFileContext) -> bool:
     if file.id is not None and file.id < 0:
@@ -86,6 +98,16 @@ def apply_user_selected_attachment_priority(
     if not image_urls:
         return normalized
 
+    for key in _IMAGE_REFERENCE_ARRAY_ARG_KEYS:
+        prop = properties.get(key)
+        if key not in properties or not _is_string_array_property(prop):
+            continue
+        if user_image_urls:
+            normalized[key] = user_image_urls
+        elif not normalized.get(key):
+            normalized[key] = image_urls
+        return normalized
+
     for key in _IMAGE_REFERENCE_ARG_KEYS:
         if key not in properties:
             continue
@@ -94,3 +116,12 @@ def apply_user_selected_attachment_priority(
         elif not normalized.get(key):
             normalized[key] = image_urls[0]
     return normalized
+
+
+def _is_string_array_property(prop: Any) -> bool:
+    if not isinstance(prop, dict):
+        return False
+    if str(prop.get("type") or "").lower() != "array":
+        return False
+    items = prop.get("items")
+    return not isinstance(items, dict) or str(items.get("type") or "string").lower() == "string"

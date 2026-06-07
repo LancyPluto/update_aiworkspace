@@ -115,6 +115,7 @@ const pendingUploadPreview = ref<{ name: string; url: string } | null>(null)
 const recentAttachments = ref<AgentMaterialAttachment[]>([])
 const materialAssets = ref<AgentMaterialAttachment[]>([])
 const materialAssetsLoading = ref(false)
+const uploadedFileCache = ref<Record<number, AgentFile>>({})
 const events = ref<AgentRunEvent[]>([])
 const runEventsByRunId = ref<Record<number, AgentRunEvent[]>>({})
 const submittedAttachmentJsonByRunId = ref<Record<number, string>>({})
@@ -144,6 +145,7 @@ const removingFileId = ref<number | null>(null)
 const agentError = ref<string | null>(null)
 const creditModalOpen = ref(false)
 const rememberTool = ref(true)
+const AGENT_REFERENCE_ATTACHMENT_LIMIT = 8
 
 interface AgentMaterialAttachment extends AgentUrlAttachment {
   id: string
@@ -410,18 +412,18 @@ function messageContentJsonForFiles(items: AgentFile[], urlItems: AgentUrlAttach
   if (items.length === 0 && urlItems.length === 0) return undefined
   return JSON.stringify({
     attachments: [
-      ...urlItems.map((item) => ({
+      ...urlItems.map((item, index) => ({
         id: item.id,
-        name: item.name,
+        name: referenceAttachmentLabel(index, item.refLabel || item.name, item.contentType),
         contentType: item.contentType,
         size: item.size,
         url: item.url,
         status: "READY",
         source: "url",
       })),
-      ...items.map((file) => ({
+      ...items.map((file, index) => ({
         id: file.id,
-        name: file.originalFilename,
+        name: referenceAttachmentLabel(urlItems.length + index, file.originalFilename, file.contentType),
         contentType: file.contentType,
         size: file.fileSize,
         url: file.downloadUrl,
@@ -856,13 +858,22 @@ function removeRecentAttachment(item: AgentMaterialAttachment) {
   writeRecentAttachments(recentAttachments.value.filter((entry) => entry.id !== item.id && entry.url !== item.url))
 }
 
+function shortReferenceName(name?: string | null) {
+  const cleaned = (name || "图片").replace(/^@[^-]+-/, "").trim() || "图片"
+  return cleaned.length > 14 ? `${cleaned.slice(0, 14)}…` : cleaned
+}
+
+function referenceAttachmentLabel(index: number, name?: string | null, contentType?: string | null) {
+  return isImageAttachment(contentType, name) ? `@图片${index + 1}-${shortReferenceName(name)}` : (name || "素材附件")
+}
+
 function selectUrlAttachment(item: AgentUrlAttachment) {
   const normalized = normalizeUrlAttachment(item)
   if (!normalized) return
   urlAttachments.value = [
-    normalized,
     ...urlAttachments.value.filter((entry) => entry.url !== normalized.url),
-  ].slice(0, 5)
+    normalized,
+  ].slice(0, AGENT_REFERENCE_ATTACHMENT_LIMIT)
   rememberRecentAttachment(normalized)
 }
 
@@ -873,7 +884,7 @@ function removeUrlAttachment(item: AgentUrlAttachment) {
 function addReferenceAttachment(payload: ChatAssetDragPayload) {
   const normalized = dragPayloadToUrlAttachment(payload)
   if (urlAttachments.value.some((entry) => entry.url === normalized.url)) return
-  urlAttachments.value = [normalized, ...urlAttachments.value].slice(0, 5)
+  urlAttachments.value = [...urlAttachments.value, normalized].slice(0, AGENT_REFERENCE_ATTACHMENT_LIMIT)
 }
 
 function formatMaterialTime(value?: string | null): string {
@@ -951,31 +962,57 @@ async function loadMaterialAssets() {
   }
 }
 
-async function handleFileSelected(event: Event) {
-  const target = event.target as HTMLInputElement
-  const selected = target.files?.[0]
-  target.value = ""
-  if (!selected || !props.token || uploading.value) return
+async function uploadFiles(
+  selectedFiles: File[],
+  options: { autoSelect?: boolean } = {},
+) {
+  if (selectedFiles.length === 0 || !props.token || uploading.value) return
+  const autoSelect = options.autoSelect ?? false
   clearPendingUploadPreview()
-  if (isImageAttachment(selected.type, selected.name)) {
+  const selected = selectedFiles[0]!
+  if (selectedFiles.length === 1 && isImageAttachment(selected.type, selected.name)) {
     pendingUploadPreview.value = { name: selected.name, url: URL.createObjectURL(selected) }
   }
   uploading.value = true
   try {
-    const uploaded = await uploadAgentFile(props.sessionId, selected, { token: props.token })
-    files.value = [uploaded, ...files.value.filter((item) => item.id !== uploaded.id)]
-    rememberRecentAttachment({
-      id: uploaded.id,
-      name: uploaded.originalFilename,
-      contentType: uploaded.contentType,
-      size: uploaded.fileSize,
-      url: uploaded.downloadUrl,
-      source: "url",
-    })
+    const availableSlots = Math.max(0, AGENT_REFERENCE_ATTACHMENT_LIMIT - files.value.length - urlAttachments.value.length)
+    for (const file of selectedFiles.slice(0, availableSlots)) {
+      const uploaded = await uploadAgentFile(props.sessionId, file, { token: props.token })
+      uploadedFileCache.value = { ...uploadedFileCache.value, [uploaded.id]: uploaded }
+      if (uploaded.downloadUrl) {
+        rememberRecentAttachment({
+          id: uploaded.id,
+          name: uploaded.originalFilename,
+          contentType: uploaded.contentType,
+          size: uploaded.fileSize,
+          url: uploaded.downloadUrl,
+          source: "url",
+        })
+      }
+      if (autoSelect) {
+        files.value = [...files.value.filter((item) => item.id !== uploaded.id), uploaded]
+      }
+    }
   } finally {
     clearPendingUploadPreview()
     uploading.value = false
   }
+}
+
+function syncUploadedFiles(fileIds: number[]) {
+  const next: AgentFile[] = []
+  for (const fileId of fileIds) {
+    const cached = uploadedFileCache.value[fileId] || files.value.find((item) => item.id === fileId)
+    if (cached) next.push(cached)
+  }
+  files.value = next
+}
+
+async function handleFileSelected(event: Event) {
+  const target = event.target as HTMLInputElement
+  const selectedFiles = Array.from(target.files || [])
+  target.value = ""
+  await uploadFiles(selectedFiles)
 }
 
 function openAttachmentPreview(payload: { name: string; url: string; contentType?: string | null }) {
@@ -1051,9 +1088,9 @@ async function submitMessage(content = input.value) {
         modelConfigId: props.modelConfigId ?? null,
         preferredToolCode: submittedPreferredToolCode,
         fileIds: submittedFiles.map((item) => item.id),
-        urlAttachments: submittedUrlAttachments.map((item) => ({
+        urlAttachments: submittedUrlAttachments.map((item, index) => ({
           id: item.id,
-          name: item.refLabel || item.name,
+          name: referenceAttachmentLabel(index, item.refLabel || item.name, item.contentType),
           contentType: item.contentType,
           size: item.size,
           url: item.url,
@@ -2274,6 +2311,8 @@ defineExpose({
         @submit="submitMessage()"
         @cancel-run="cancelCurrentRun()"
         @file-selected="handleFileSelected"
+        @files-dropped="(items, options) => uploadFiles(items, options)"
+        @sync-uploaded-files="syncUploadedFiles"
         @preview-attachment="openAttachmentPreview"
         @remove-file="removeFile"
         @select-url-attachment="selectUrlAttachment"

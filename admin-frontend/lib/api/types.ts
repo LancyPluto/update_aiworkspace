@@ -682,10 +682,29 @@ export interface AgentRun {
   updatedAt?: string | null
 }
 
+export interface AdminAgentFileSnapshot {
+  id: number
+  originalFilename?: string | null
+  contentType?: string | null
+  status: string
+  downloadUrl?: string | null
+}
+
+export interface AdminAgentRunContextSnapshot {
+  sessionId: number
+  workspaceId: number
+  userId: number
+  userMessage: string
+  agentFiles: AdminAgentFileSnapshot[]
+}
+
 export interface AdminAgentRunDetail {
   run: AgentRun
   events: AgentRunEvent[]
   toolCalls: AgentToolCall[]
+  contextSnapshot?: AdminAgentRunContextSnapshot | null
+  eventTruncated?: boolean | null
+  totalEventCount?: number | null
 }
 
 export interface AdminAgentRunStats {

@@ -14,6 +14,7 @@ export type FieldTypeValue =
   | "checkbox"
   | "slider"
   | "image"
+  | "multi_image"
   | "file"
 
 export const FIELD_TYPE_OPTIONS: Array<{ value: FieldTypeValue; label: string; hint: string }> = [
@@ -25,6 +26,7 @@ export const FIELD_TYPE_OPTIONS: Array<{ value: FieldTypeValue; label: string; h
   { value: "checkbox", label: "勾选", hint: "是/否开关" },
   { value: "slider", label: "滑块", hint: "0–100 强度类参数" },
   { value: "image", label: "图片 URL", hint: "参考图链接" },
+  { value: "multi_image", label: "多参考图", hint: "多张参考图 URL，提交为数组" },
   { value: "file", label: "文件 URL", hint: "音频等文件链接" },
 ]
 
