@@ -31,6 +31,8 @@ import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -721,8 +723,25 @@ public class CommunityServiceImpl implements CommunityService {
                 postMapper.findTags(post.getId()),
                 authorNickname,
                 authorAvatarUrl,
-                promptSnapshot
+                promptSnapshot,
+                resolvePostMediaUrls(post)
         );
+    }
+
+    private List<String> resolvePostMediaUrls(CommunityPost post) {
+        LinkedHashSet<String> urls = new LinkedHashSet<>();
+        if (post.getTaskId() != null && "IMAGE".equalsIgnoreCase(post.getModality())) {
+            taskMapper.findFirstResult(post.getTaskId())
+                    .map(result -> extractImageUrls(result.contentText()))
+                    .ifPresent(urls::addAll);
+        }
+        if (post.getMediaUrl() != null && !post.getMediaUrl().isBlank()) {
+            urls.add(post.getMediaUrl());
+        }
+        if (post.getCoverUrl() != null && !post.getCoverUrl().isBlank()) {
+            urls.add(post.getCoverUrl());
+        }
+        return new ArrayList<>(urls);
     }
 
     private String resolvePromptSnapshot(CommunityPost post) {
@@ -1164,6 +1183,77 @@ public class CommunityServiceImpl implements CommunityService {
                 .compile("(https?://\\S+|/generated/\\S+)")
                 .matcher(contentText);
         return matcher.find() ? trimUrl(matcher.group(1)) : null;
+    }
+
+    private List<String> extractImageUrls(String contentText) {
+        if (contentText == null || contentText.isBlank()) {
+            return List.of();
+        }
+        LinkedHashSet<String> urls = new LinkedHashSet<>();
+        boolean parsedJson = false;
+        try {
+            JsonNode root = objectMapper.readTree(contentText);
+            collectImageUrls(root, urls);
+            parsedJson = true;
+        } catch (Exception ignored) {
+            // Plain text results can still contain image URLs.
+        }
+        if (parsedJson) {
+            return new ArrayList<>(urls);
+        }
+        java.util.regex.Matcher matcher = java.util.regex.Pattern
+                .compile("(https?://\\S+|/generated/\\S+)")
+                .matcher(contentText);
+        while (matcher.find()) {
+            String candidate = trimUrl(matcher.group(1));
+            if (candidate != null && looksLikeImageUrl(candidate)) {
+                urls.add(candidate);
+            }
+        }
+        return new ArrayList<>(urls);
+    }
+
+    private void collectImageUrls(JsonNode node, LinkedHashSet<String> urls) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return;
+        }
+        if (node.isTextual()) {
+            String value = trimUrl(node.asText());
+            if (value != null && looksLikeImageUrl(value)) {
+                urls.add(value);
+            }
+            return;
+        }
+        if (node.isObject()) {
+            String directUrl = firstImageUrl(node, "url", "imageUrl", "image_url", "src", "coverUrl", "cover_url", "sourceUrl", "source_url");
+            if (directUrl != null) {
+                urls.add(directUrl);
+                return;
+            }
+            var fields = node.fields();
+            while (fields.hasNext()) {
+                collectImageUrls(fields.next().getValue(), urls);
+            }
+            return;
+        }
+        if (node.isArray()) {
+            for (JsonNode child : node) {
+                collectImageUrls(child, urls);
+            }
+        }
+    }
+
+    private String firstImageUrl(JsonNode node, String... keys) {
+        for (String key : keys) {
+            JsonNode child = node.path(key);
+            if (child.isTextual()) {
+                String value = trimUrl(child.asText());
+                if (value != null && looksLikeImageUrl(value)) {
+                    return value;
+                }
+            }
+        }
+        return null;
     }
 
     private String findUrl(JsonNode node) {

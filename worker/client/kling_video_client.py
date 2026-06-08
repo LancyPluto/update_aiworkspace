@@ -146,8 +146,9 @@ class KlingVideoClient:
             "model_name": model or settings.kling_image_model,
             "prompt": prompt,
             "n": max(1, batch_size),
-            "aspect_ratio": resolved_aspect_ratio,
         }
+        if resolved_aspect_ratio:
+            payload["aspect_ratio"] = resolved_aspect_ratio
         if image.strip():
             payload["image"] = self._image_to_base64(image.strip())
         if negative_prompt.strip():
@@ -776,11 +777,13 @@ class KlingVideoClient:
 
     @staticmethod
     def _aspect_ratio(aspect_ratio: str, image_size: str) -> str:
-        raw = str(aspect_ratio or "")
+        raw = str(aspect_ratio or "").strip().replace("：", ":").lower()
+        size = str(image_size or "").strip().lower()
+        if raw in {"", "auto", "智能", "adaptive", "default"} or size == "auto":
+            return ""
         for ratio in ("21:9", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "1:1"):
             if ratio in raw:
                 return ratio
-        size = str(image_size or "")
         if size in {"2560x1080", "1920x810"}:
             return "21:9"
         if size in {"1280x720", "1920x1080"}:

@@ -1,7 +1,7 @@
 import pytest
 
 from app.core.agent_decision import AgentDecisionService
-from app.core.intent_router import Intent
+from app.core.intent_router import Intent, IntentResult
 from app.core.schemas import AgentFileContext, RunContext, ToolDescriptor
 
 
@@ -78,3 +78,79 @@ async def test_llm_router_failure_falls_back_to_general_chat():
     assert decision.intent == Intent.GENERAL_CHAT
     assert decision.reason == "router_fallback_general_chat"
     assert decision.selectedToolCode is None
+
+
+@pytest.mark.asyncio
+async def test_preferred_tool_overrides_rule_structured_tool_selection():
+    class RuleRouter:
+        def classify(self, context):
+            return IntentResult(
+                intent=Intent.TOOL_USE,
+                confidence=0.85,
+                selectedToolCode="kling-image-generation-v3",
+                candidateToolCodes=["kling-image-generation-v3", "gpt_image2"],
+                reason="structured_tool_arguments",
+            )
+
+    context = RunContext(
+        runId=272,
+        sessionId=1,
+        userId=1,
+        message="别用可灵，用GPT",
+        preferredToolCode="gpt_image2",
+        availableTools=[
+            ToolDescriptor(
+                toolCode="kling-image-generation-v3",
+                toolName="可灵生图 V3",
+                description="图片生成工具",
+                autoCallable=True,
+            ),
+            ToolDescriptor(
+                toolCode="gpt_image2",
+                toolName="GPT-image2",
+                description="图片生成工具",
+                autoCallable=True,
+            ),
+        ],
+    )
+    service = AgentDecisionService(intent_router=RuleRouter())
+
+    async def llm_router(ctx, rule_intent):
+        raise AssertionError("structured rule path should short-circuit after preferred override")
+
+    decision = await service.decide(context, llm_router=llm_router)
+
+    assert decision.intent == Intent.TOOL_USE
+    assert decision.selectedToolCode == "gpt_image2"
+    assert decision.candidateToolCodes[0] == "gpt_image2"
+    assert "preferred_tool_applied" in decision.reason
+    assert decision.signals[-1]["source"] == "preferred_tool"
+
+
+@pytest.mark.asyncio
+async def test_preferred_tool_generation_request_does_not_fall_back_to_chat_when_router_returns_none():
+    context = RunContext(
+        runId=273,
+        sessionId=1,
+        userId=1,
+        message="生成一张电影海报",
+        preferredToolCode="gpt_image2",
+        availableTools=[
+            ToolDescriptor(
+                toolCode="gpt_image2",
+                toolName="GPT-image2",
+                description="图片生成工具",
+                autoCallable=True,
+            ),
+        ],
+    )
+    service = AgentDecisionService()
+
+    async def llm_router(ctx, rule_intent):
+        raise AssertionError("explicit preferred tool request should not need LLM router")
+
+    decision = await service.decide(context, llm_router=llm_router)
+
+    assert decision.intent == Intent.TOOL_USE
+    assert decision.selectedToolCode == "gpt_image2"
+    assert decision.reason == "preferred_tool_selected"

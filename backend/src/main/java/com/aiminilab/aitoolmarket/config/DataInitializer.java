@@ -66,6 +66,7 @@ public class DataInitializer implements CommandLineRunner {
         modelVendorAccountMigrationService.migrateIfNeeded();
         seedGptImageApiKeysFromEnv();
         toolTemplateBootstrap.ensureSchemaAndSeed();
+        normalizeGptImageToolFieldOptions();
         createUserIfAbsent("admin", "123456", "Admin", UserType.ADMIN);
         createUserIfAbsent("user1", "123456", "User One", UserType.USER);
         toolCategoryMapper.ensureDefaultCategory();
@@ -772,6 +773,44 @@ public class DataInitializer implements CommandLineRunner {
     private void seedGptImageApiKeysFromEnv() {
         seedGptImageApiKeyForHost("shiyunapi.com", appProperties.getAgent().getGptImageShiyunApiKey());
         seedGptImageApiKeyForHost("ofox.ai", appProperties.getAgent().getGptImageOfoxApiKey());
+    }
+
+    private void normalizeGptImageToolFieldOptions() {
+        String sizeOptionsJson = """
+                [{"label":"智能","value":"auto"},{"label":"9:16","value":"1024x1536"},{"label":"2:3","value":"1024x1536"},{"label":"3:4","value":"1024x1536"},{"label":"1:1","value":"1024x1024"},{"label":"4:3","value":"1536x1024"},{"label":"3:2","value":"1536x1024"},{"label":"16:9","value":"1536x1024"}]
+                """.trim();
+        jdbcTemplate.update("""
+                UPDATE tool_field_schema_items
+                SET field_type = 'aspect_ratio',
+                    options_json = ?,
+                    updated_at = NOW()
+                WHERE status = 'ACTIVE'
+                  AND field_key IN ('aspectRatio', 'aspect_ratio', 'imageRatio', 'image_size', 'imageSize', 'size')
+                  AND (
+                    field_type <> 'aspect_ratio'
+                    OR options_json IS NULL
+                    OR options_json = ''
+                    OR REPLACE(options_json, ' ', '') LIKE '%"value":"16:9"%'
+                    OR REPLACE(options_json, ' ', '') LIKE '%"value":"16：9"%'
+                    OR REPLACE(options_json, ' ', '') LIKE '%"value":"9:16"%'
+                    OR REPLACE(options_json, ' ', '') LIKE '%"value":"9：16"%'
+                  )
+                  AND schema_id IN (
+                    SELECT s.id
+                    FROM tool_field_schemas s
+                    JOIN ai_tools t ON t.id = s.tool_id
+                    LEFT JOIN agent_model_configs m ON m.id = t.model_config_id
+                    WHERE s.status = 'ACTIVE'
+                      AND t.is_deleted = 0
+                      AND (
+                        LOWER(COALESCE(t.tool_code, '')) LIKE '%gpt%image%'
+                        OR LOWER(COALESCE(t.tool_name, '')) LIKE '%gpt%image%'
+                        OR LOWER(COALESCE(t.tool_name, '')) LIKE '%image2%'
+                        OR LOWER(COALESCE(m.model_name, '')) LIKE '%gpt-image%'
+                        OR LOWER(COALESCE(m.provider, '')) IN ('ofox_openai_images', 'openai_images_gateway')
+                      )
+                  )
+                """, sizeOptionsJson);
     }
 
     private void seedGptImageApiKeyForHost(String hostFragment, String apiKey) {

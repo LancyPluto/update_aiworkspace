@@ -116,9 +116,10 @@ class SeedanceVideoClient:
             "model": model,
             "content": content,
             "resolution": resolution,
-            "size": image_size,
-            "image_size": image_size,
         }
+        if str(image_size or "").strip().lower() != "auto":
+            payload["size"] = image_size
+            payload["image_size"] = image_size
         duration_seconds = self._duration_seconds(duration)
         if duration_seconds is not None:
             payload["duration"] = duration_seconds
@@ -240,7 +241,9 @@ class SeedanceVideoClient:
 
     @staticmethod
     def _aspect_ratio(aspect_ratio: str, image_size: str) -> str:
-        raw = str(aspect_ratio or "")
+        raw = str(aspect_ratio or "").strip().replace("：", ":").lower()
+        if raw in {"", "auto", "智能", "adaptive", "default"} or str(image_size or "").strip().lower() == "auto":
+            return ""
         if "9:16" in raw or image_size in {"480x854", "720x1280"}:
             return "9:16"
         if "1:1" in raw or image_size in {"480x480", "960x960"}:

@@ -91,16 +91,19 @@ def apply_user_selected_attachment_priority(
     normalized = dict(arguments)
     properties = tool.inputSchema.get("properties", {})
     if not isinstance(properties, dict):
-        return normalized
+        properties = {}
 
     user_image_urls = user_selected_image_urls(context)
     image_urls = ready_image_download_urls(context)
     if not image_urls:
         return normalized
 
-    for key in _IMAGE_REFERENCE_ARRAY_ARG_KEYS:
+    array_keys = _reference_array_arg_keys(tool, properties)
+    single_keys = _reference_single_arg_keys(tool, properties)
+
+    for key in array_keys:
         prop = properties.get(key)
-        if key not in properties or not _is_string_array_property(prop):
+        if key in properties and not _is_string_array_property(prop):
             continue
         if user_image_urls:
             normalized[key] = user_image_urls
@@ -108,14 +111,41 @@ def apply_user_selected_attachment_priority(
             normalized[key] = image_urls
         return normalized
 
-    for key in _IMAGE_REFERENCE_ARG_KEYS:
-        if key not in properties:
-            continue
+    for key in single_keys:
         if user_image_urls:
             normalized[key] = user_image_urls[0]
         elif not normalized.get(key):
             normalized[key] = image_urls[0]
     return normalized
+
+
+def _reference_array_arg_keys(tool: ToolDescriptor, properties: dict[str, Any]) -> list[str]:
+    keys: list[str] = []
+    for key in _IMAGE_REFERENCE_ARRAY_ARG_KEYS:
+        prop = properties.get(key)
+        if key in properties and _is_string_array_property(prop):
+            keys.append(key)
+    for field in tool.fields:
+        key = field.fieldKey
+        if not key or key in keys:
+            continue
+        if field.fieldType.lower() == "multi_image" or key in _IMAGE_REFERENCE_ARRAY_ARG_KEYS:
+            keys.append(key)
+    return keys
+
+
+def _reference_single_arg_keys(tool: ToolDescriptor, properties: dict[str, Any]) -> list[str]:
+    keys: list[str] = []
+    for key in _IMAGE_REFERENCE_ARG_KEYS:
+        if key in properties:
+            keys.append(key)
+    for field in tool.fields:
+        key = field.fieldKey
+        if not key or key in keys:
+            continue
+        if field.fieldType.lower() == "image" or key in _IMAGE_REFERENCE_ARG_KEYS:
+            keys.append(key)
+    return keys
 
 
 def _is_string_array_property(prop: Any) -> bool:

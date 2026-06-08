@@ -165,7 +165,7 @@ function validate(): { valid: boolean; message?: string } {
         return { valid: false, message: `${f.fieldName} 不能超过 ${maxLen} 字` }
       }
     }
-    if ((f.fieldType === "select" || f.fieldType === "radio") && v === "__custom__") {
+    if ((f.fieldType === "select" || f.fieldType === "radio" || f.fieldType === "aspect_ratio") && v === "__custom__") {
       const custom = model.value[`${f.fieldKey}Custom`]
       if (custom === undefined || custom === null || String(custom).trim() === "") {
         return { valid: false, message: `请填写：${f.fieldName}` }
@@ -238,7 +238,7 @@ defineExpose({ validate })
               @input="setField(f.fieldKey, ($event.target as HTMLTextAreaElement).value)"
             />
 
-            <div v-else-if="(f.fieldType === 'select' || f.fieldType === 'radio') && fieldOptions(f).length" class="flex flex-wrap gap-2">
+            <div v-else-if="(f.fieldType === 'select' || f.fieldType === 'radio' || f.fieldType === 'aspect_ratio') && fieldOptions(f).length" class="flex flex-wrap gap-2">
               <button
                 v-for="opt in fieldOptions(f)"
                 :key="optionValue(opt)"

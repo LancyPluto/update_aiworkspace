@@ -11,6 +11,7 @@ export type FieldTypeValue =
   | "select"
   | "number"
   | "radio"
+  | "aspect_ratio"
   | "checkbox"
   | "slider"
   | "image"
@@ -22,6 +23,7 @@ export const FIELD_TYPE_OPTIONS: Array<{ value: FieldTypeValue; label: string; h
   { value: "textarea", label: "多行文本", hint: "长描述、脚本等" },
   { value: "select", label: "下拉选择", hint: "用户从预设选项中选一项" },
   { value: "radio", label: "单选按钮", hint: "适合 3–6 个互斥选项，如画面比例" },
+  { value: "aspect_ratio", label: "画面比例", hint: "图片/视频比例分段控件，选项由 JSON 配置" },
   { value: "number", label: "数字", hint: "数量、时长秒数等" },
   { value: "checkbox", label: "勾选", hint: "是/否开关" },
   { value: "slider", label: "滑块", hint: "0–100 强度类参数" },
@@ -50,11 +52,17 @@ export const OPTION_PRESETS: Record<
 > = {
   aspect_ratio_image: {
     label: "图片比例（文生图）",
-    options: ["1:1", "4:3", "3:4", "16:9", "9:16"].map((v) => ({ label: v, value: v })),
+    options: [
+      { label: "智能", value: "auto" },
+      ...["9:16", "2:3", "3:4", "1:1", "4:3", "3:2", "16:9", "21:9"].map((v) => ({ label: v, value: v })),
+    ],
   },
   aspect_ratio_video: {
     label: "视频比例",
-    options: ["16:9", "9:16", "1:1"].map((v) => ({ label: v, value: v })),
+    options: [
+      { label: "智能", value: "auto" },
+      ...["16:9", "9:16", "1:1"].map((v) => ({ label: v, value: v })),
+    ],
   },
   image_style: {
     label: "画面风格",
@@ -147,7 +155,7 @@ export interface EditableField {
 }
 
 export function supportsOptions(fieldType: string): boolean {
-  return fieldType === "select" || fieldType === "radio"
+  return fieldType === "select" || fieldType === "radio" || fieldType === "aspect_ratio"
 }
 
 export function parseOptionsJson(raw?: string | null): FieldOptionRow[] {

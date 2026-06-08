@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue"
 import { useRoute, useRouter } from "vue-router"
-import { ArrowLeft, Copy, Download, Heart, Loader2, Send, Star } from "lucide-vue-next"
+import { ArrowLeft, ChevronLeft, ChevronRight, Copy, Download, Heart, Loader2, Send, Star } from "lucide-vue-next"
 import CommunityAudioMedia from "@/components/community/CommunityAudioMedia.vue"
 import UserAvatar from "@/components/UserAvatar.vue"
 import {
@@ -35,6 +35,7 @@ const collecting = ref(false)
 const error = ref("")
 const audioPlaying = ref(false)
 const detailAudioRef = ref<HTMLAudioElement | null>(null)
+const activeImageIndex = ref(0)
 
 const postId = computed(() => String(route.params.postId || ""))
 const kind = computed(() => {
@@ -71,6 +72,25 @@ const displayTitle = computed(() => {
   })
 })
 
+const imageUrls = computed(() => {
+  if (!post.value || kind.value !== "image") return []
+  const urls = [...(post.value.mediaUrls || []), post.value.mediaUrl, post.value.coverUrl]
+    .map((url) => mediaUrl(url))
+    .filter((url): url is string => Boolean(url))
+  return [...new Set(urls)]
+})
+
+const activeImageUrl = computed(() => {
+  if (!imageUrls.value.length) return ""
+  return imageUrls.value[Math.min(Math.max(activeImageIndex.value, 0), imageUrls.value.length - 1)] || imageUrls.value[0] || ""
+})
+
+const downloadUrl = computed(() => {
+  if (kind.value === "audio") return audioMedia.value.audioUrl
+  if (kind.value === "image") return activeImageUrl.value
+  return post.value ? mediaUrl(post.value.coverUrl) : ""
+})
+
 function mediaUrl(value?: string | null) {
   const raw = value?.trim()
   if (!raw) return ""
@@ -85,6 +105,7 @@ async function load() {
   error.value = ""
   try {
     post.value = await fetchCommunityPost(postId.value, { token: auth.token })
+    activeImageIndex.value = 0
   } catch (err) {
     error.value = err instanceof Error ? err.message : "作品加载失败"
   } finally {
@@ -127,13 +148,24 @@ async function createSameStyle() {
       { postId: post.value.id, eventType: "dashboard_open", source: "community_detail", toolCode: post.value.toolCode },
       { token: auth.token },
     ).catch(() => undefined)
-    openDashboardWithAsset(assetFromCommunityPost(post.value, mediaUrl(post.value.coverUrl)), post.value.toolCode, {
+    openDashboardWithAsset(assetFromCommunityPost(post.value, kind.value === "image" ? activeImageUrl.value : mediaUrl(post.value.coverUrl)), post.value.toolCode, {
       modality: post.value.modality,
       sourcePost: post.value.id,
     })
   } finally {
     sameStyleLoading.value = false
   }
+}
+
+function selectImage(index: number) {
+  if (index < 0 || index >= imageUrls.value.length) return
+  activeImageIndex.value = index
+}
+
+function stepImage(delta: number) {
+  const count = imageUrls.value.length
+  if (count <= 1) return
+  activeImageIndex.value = (activeImageIndex.value + delta + count) % count
 }
 
 async function addToInspiration() {
@@ -199,6 +231,7 @@ watch(() => auth.token, () => void load())
 
 watch(postId, () => {
   audioPlaying.value = false
+  activeImageIndex.value = 0
   if (detailAudioRef.value) {
     detailAudioRef.value.pause()
     detailAudioRef.value.removeAttribute("src")
@@ -227,7 +260,46 @@ onUnmounted(() => {
 
     <section v-else-if="post" class="post-layout">
       <div class="media-stage">
-        <img v-if="kind === 'image' && mediaUrl(post.coverUrl)" :src="mediaUrl(post.coverUrl)" :alt="displayTitle" />
+        <div v-if="kind === 'image' && activeImageUrl" class="image-viewer">
+          <div class="image-frame">
+            <img :src="activeImageUrl" :alt="displayTitle" />
+            <button
+              v-if="imageUrls.length > 1"
+              type="button"
+              class="image-nav previous"
+              aria-label="上一张"
+              @click="stepImage(-1)"
+            >
+              <ChevronLeft class="h-5 w-5" />
+            </button>
+            <button
+              v-if="imageUrls.length > 1"
+              type="button"
+              class="image-nav next"
+              aria-label="下一张"
+              @click="stepImage(1)"
+            >
+              <ChevronRight class="h-5 w-5" />
+            </button>
+            <span v-if="imageUrls.length > 1" class="image-counter">
+              {{ activeImageIndex + 1 }} / {{ imageUrls.length }}
+            </span>
+          </div>
+
+          <div v-if="imageUrls.length > 1" class="image-strip" aria-label="同组图片">
+            <button
+              v-for="(url, index) in imageUrls"
+              :key="url"
+              type="button"
+              class="image-thumb"
+              :class="{ active: activeImageIndex === index }"
+              :aria-label="`切换到第 ${index + 1} 张`"
+              @click="selectImage(index)"
+            >
+              <img :src="url" :alt="`${displayTitle} ${index + 1}`" loading="lazy" decoding="async" />
+            </button>
+          </div>
+        </div>
         <video
           v-else-if="kind === 'video' && mediaUrl(post.coverUrl)"
           :src="mediaUrl(post.coverUrl)"
@@ -296,8 +368,8 @@ onUnmounted(() => {
             分享
           </button>
           <a
-            v-if="kind === 'audio' ? audioMedia.audioUrl : mediaUrl(post.coverUrl)"
-            :href="kind === 'audio' ? audioMedia.audioUrl : mediaUrl(post.coverUrl)"
+            v-if="downloadUrl"
+            :href="downloadUrl"
             download
             aria-label="下载作品"
           >
@@ -391,12 +463,103 @@ onUnmounted(() => {
   place-items: center;
 }
 
-.media-stage img,
+.image-viewer {
+  display: grid;
+  width: 100%;
+  gap: 18px;
+  justify-items: center;
+}
+
+.image-frame {
+  position: relative;
+  display: grid;
+  max-width: 100%;
+  place-items: center;
+}
+
+.image-frame img,
 .media-stage video {
   max-width: 100%;
   max-height: 78vh;
   border-radius: 24px;
   box-shadow: 0 30px 100px rgb(0 0 0 / 0.68);
+}
+
+.image-nav {
+  position: absolute;
+  top: 50%;
+  display: inline-flex;
+  width: 42px;
+  height: 42px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgb(255 255 255 / 0.16);
+  border-radius: 999px;
+  background: rgb(0 0 0 / 0.48);
+  color: rgb(255 255 255 / 0.9);
+  transform: translateY(-50%);
+  backdrop-filter: blur(12px);
+}
+
+.image-nav.previous {
+  left: 18px;
+}
+
+.image-nav.next {
+  right: 18px;
+}
+
+.image-counter {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  border-radius: 999px;
+  background: rgb(0 0 0 / 0.58);
+  color: rgb(255 255 255 / 0.9);
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 800;
+  backdrop-filter: blur(10px);
+}
+
+.image-strip {
+  display: flex;
+  width: min(100%, 760px);
+  gap: 10px;
+  overflow-x: auto;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 18px;
+  background: rgb(255 255 255 / 0.035);
+  padding: 10px;
+  scrollbar-width: thin;
+}
+
+.image-thumb {
+  flex: 0 0 96px;
+  height: 68px;
+  overflow: hidden;
+  border: 2px solid transparent;
+  border-radius: 12px;
+  background: rgb(255 255 255 / 0.06);
+  padding: 0;
+  opacity: 0.58;
+  transition: border-color 0.18s ease, opacity 0.18s ease, transform 0.18s ease;
+}
+
+.image-thumb:hover,
+.image-thumb.active {
+  border-color: #c884ff;
+  opacity: 1;
+}
+
+.image-thumb.active {
+  box-shadow: 0 0 0 3px rgb(200 132 255 / 0.16);
+}
+
+.image-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .audio-stage {
