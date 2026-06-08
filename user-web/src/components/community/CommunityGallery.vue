@@ -16,13 +16,10 @@ import {
 import CommunityAudioMedia from "@/components/community/CommunityAudioMedia.vue"
 import { ApiBusinessError, getApiOrigin } from "@/api/client"
 import {
-  addCommunityCollectionItem,
   favoriteCommunityPost,
-  fetchCommunityCollections,
   fetchCommunityTopics,
   likeCommunityPost,
   markCommunityPostSameStyle,
-  removeCommunityCollectionItem,
   searchCommunityPosts,
   trackCommunityEvent,
   unfavoriteCommunityPost,
@@ -32,6 +29,9 @@ import type { CommunityPost, CommunityTopic } from "@/api/types"
 import {
   COMMUNITY_POST_UNPUBLISHED_EVENT,
   type CommunityPostUnpublishedDetail,
+  preloadDefaultCommunityCollection,
+  resetDefaultCommunityCollectionCache,
+  syncFavoriteToInspirationCollection,
 } from "@/utils/communitySync"
 import UserAvatar from "@/components/UserAvatar.vue"
 import { userRoutes } from "@/router/userRoutes"
@@ -64,7 +64,6 @@ const topic = ref("")
 const searchOpen = ref(false)
 const sameStyleLoadingId = ref<number | null>(null)
 const actingPostId = ref<number | null>(null)
-const defaultCollectionId = ref<number | null>(null)
 const loadSentinelRef = ref<HTMLElement | null>(null)
 const playingPostId = ref<number | null>(null)
 const galleryAudioPlaying = ref(false)
@@ -236,40 +235,17 @@ async function toggleLike(post: CommunityPost, event: Event) {
   }
 }
 
-async function resolveDefaultCollectionId() {
-  if (!auth.token) return null
-  if (defaultCollectionId.value) return defaultCollectionId.value
-  try {
-    const result = await fetchCommunityCollections({ token: auth.token })
-    if (!result.supported || !result.collections.length) return null
-    const target = result.collections.find((item) => item.defaultCollection) || result.collections[0]
-    defaultCollectionId.value = target?.id ?? null
-    return defaultCollectionId.value
-  } catch {
-    return null
-  }
-}
-
-async function syncFavoriteToInspiration(postId: number, favorited: boolean) {
-  const collectionId = await resolveDefaultCollectionId()
-  if (!collectionId) return
-  if (favorited) {
-    await addCommunityCollectionItem(collectionId, postId, { token: auth.token })
-  } else {
-    await removeCommunityCollectionItem(collectionId, postId, { token: auth.token })
-  }
-}
-
 async function toggleFavorite(post: CommunityPost, event: Event) {
   event.stopPropagation()
   if (!auth.token) return router.push({ name: "Login", query: { redirect: route.fullPath } })
   actingPostId.value = post.id
+  const wasFavorited = post.favorited
   try {
-    const updated = post.favorited
+    const updated = wasFavorited
       ? await unfavoriteCommunityPost(post.id, { token: auth.token })
       : await favoriteCommunityPost(post.id, { token: auth.token })
     try {
-      await syncFavoriteToInspiration(post.id, !post.favorited)
+      await syncFavoriteToInspirationCollection(post.id, !wasFavorited, { token: auth.token })
     } catch {
       // 作品收藏状态已更新；同步灵感收藏夹失败时不阻断主流程
     }
@@ -401,8 +377,8 @@ watch([modality, sort, featuredOnly, topic], () => void load(true))
 watch(
   () => auth.token,
   (token, prev) => {
-    defaultCollectionId.value = null
-    if (token) void resolveDefaultCollectionId()
+    resetDefaultCommunityCollectionCache()
+    if (token) void preloadDefaultCommunityCollection(token)
     if (token !== prev) void load(true)
   },
 )
@@ -429,7 +405,7 @@ function handleCommunityPostUnpublished(event: Event) {
 onMounted(() => {
   void loadTopics()
   void load(true)
-  if (auth.token) void resolveDefaultCollectionId()
+  if (auth.token) void preloadDefaultCommunityCollection(auth.token)
   window.addEventListener(COMMUNITY_POST_UNPUBLISHED_EVENT, handleCommunityPostUnpublished)
 })
 

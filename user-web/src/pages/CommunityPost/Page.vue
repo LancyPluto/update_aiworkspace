@@ -15,6 +15,7 @@ import {
   unfavoriteCommunityPost,
   unlikeCommunityPost,
 } from "@/api/communityApi"
+import { syncFavoriteToInspirationCollection } from "@/utils/communitySync"
 import { getApiOrigin } from "@/api/client"
 import type { CommunityPost } from "@/api/types"
 import { useAuthStore } from "@/store/authStore"
@@ -107,10 +108,17 @@ async function toggleLike() {
 async function toggleFavorite() {
   if (!post.value || !auth.token) return router.push({ name: "Login", query: { redirect: route.fullPath } })
   acting.value = true
+  const wasFavorited = post.value.favorited
+  const postId = post.value.id
   try {
-    post.value = post.value.favorited
-      ? await unfavoriteCommunityPost(post.value.id, { token: auth.token })
-      : await favoriteCommunityPost(post.value.id, { token: auth.token })
+    post.value = wasFavorited
+      ? await unfavoriteCommunityPost(postId, { token: auth.token })
+      : await favoriteCommunityPost(postId, { token: auth.token })
+    try {
+      await syncFavoriteToInspirationCollection(postId, !wasFavorited, { token: auth.token })
+    } catch {
+      // 作品收藏状态已更新；同步灵感收藏夹失败时不阻断主流程
+    }
   } finally {
     acting.value = false
   }
