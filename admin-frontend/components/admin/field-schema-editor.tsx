@@ -372,7 +372,7 @@ export function FieldSchemaEditor({ fields, onChange, disabled }: FieldSchemaEdi
                     </Button>
                   </div>
                   <p className="text-[11px] text-muted-foreground">
-                    用户端将显示为{field.fieldType === "radio" ? "单选按钮" : "下拉框"}，只能在这些值中选择，无需手输比例。
+                    用户端将显示为{field.fieldType === "aspect_ratio" ? "画面比例控件" : field.fieldType === "radio" ? "单选按钮" : "下拉框"}，只能在这些值中选择，无需手输比例。
                     文生图风格可配置提示词前缀；“无”使用 __none__，“自定义”使用 __custom__。
                   </p>
                   {field.options.length === 0 ? (

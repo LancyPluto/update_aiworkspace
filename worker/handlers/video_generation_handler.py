@@ -225,7 +225,9 @@ def _resolve_image_size(params: dict[str, Any]) -> str:
     explicit = params.get("imageSize") or params.get("image_size") or params.get("size")
     if isinstance(explicit, str) and explicit.strip():
         return explicit.strip()
-    aspect_ratio = str(params.get("aspectRatio") or params.get("aspect_ratio") or params.get("imageRatio") or "16:9").strip()
+    aspect_ratio = _normalize_aspect_ratio(params.get("aspectRatio") or params.get("aspect_ratio") or params.get("imageRatio") or "auto")
+    if _is_auto_aspect_ratio(aspect_ratio):
+        return "auto"
     return {
         "1:1": "960x960",
         "16:9": "1280x720",
@@ -233,6 +235,15 @@ def _resolve_image_size(params: dict[str, Any]) -> str:
         "4:3": "1024x768",
         "3:4": "768x1024",
     }.get(aspect_ratio, "1280x720")
+
+
+def _normalize_aspect_ratio(value: Any) -> str:
+    return str(value or "").strip().replace("：", ":").replace(" ", "")
+
+
+def _is_auto_aspect_ratio(value: Any) -> bool:
+    normalized = _normalize_aspect_ratio(value).lower()
+    return normalized in {"", "auto", "智能", "adaptive", "default"}
 
 
 def _optional_int(value: Any) -> int | None:

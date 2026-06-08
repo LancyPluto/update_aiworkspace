@@ -89,11 +89,12 @@ class SkyworkVideoClient:
     ) -> dict[str, Any]:
         ratio = self._aspect_ratio(aspect_ratio, image_size)
         duration_seconds = self._duration_seconds(duration)
-        style: dict[str, Any] = {"aspect_ratio": ratio}
-        options: dict[str, Any] = {
-            "model": model,
-            "image_size": image_size,
-        }
+        style: dict[str, Any] = {}
+        if ratio:
+            style["aspect_ratio"] = ratio
+        options: dict[str, Any] = {"model": model}
+        if str(image_size or "").strip().lower() != "auto":
+            options["image_size"] = image_size
         if duration_seconds is not None:
             options["duration"] = duration_seconds
             options["duration_seconds"] = duration_seconds
@@ -235,7 +236,9 @@ class SkyworkVideoClient:
 
     @staticmethod
     def _aspect_ratio(aspect_ratio: str, image_size: str) -> str:
-        raw = str(aspect_ratio or "")
+        raw = str(aspect_ratio or "").strip().replace("：", ":").lower()
+        if raw in {"", "auto", "智能", "adaptive", "default"} or str(image_size or "").strip().lower() == "auto":
+            return ""
         if "9:16" in raw or image_size == "720x1280":
             return "9:16"
         if "1:1" in raw or image_size == "960x960":

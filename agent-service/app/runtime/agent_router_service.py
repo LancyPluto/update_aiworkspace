@@ -31,6 +31,7 @@ DEFAULT_ROUTER_PROMPT = (
     "\"followupPatch\":object,\"requiresConfirmation\":boolean|null,\"clarifyingQuestion\":string|null}. "
     "Use intent value tool_use (not tool_call) when a tool should run. "
     "Use the available tool metadata as source of truth. "
+    "If preferredToolCode is present, treat it as the user's explicit tool selection; keep that tool selected unless it is unavailable or cannot produce the requested output modality. "
     "Prefer the tool that directly produces the requested output modality: image/photo/poster/cos/visual requests use image tools; "
     "video/short-video/image-to-video requests use video tools; copywriting/title/article requests use text tools. "
     "Use recentToolCalls to detect follow-up requests, inherit prior arguments, and return only the user's changes in followupPatch. "

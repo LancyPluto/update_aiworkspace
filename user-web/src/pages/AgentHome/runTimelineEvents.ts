@@ -1,7 +1,9 @@
 import type { AgentRunEvent } from "@/api/types"
 
-/** 仅面向用户的进度（意图识别、记忆快照、run 起止等内部步骤不展示） */
+/** 面向用户的进度；记忆事件保留可见，方便确认工具调用实际使用了哪些长期记忆。 */
 export const USER_FACING_EVENT_TYPES = [
+  "memory.retrieved",
+  "memory.context_frozen",
   "tool.confirmation_required",
   "subagent.started",
   "subagent.completed",

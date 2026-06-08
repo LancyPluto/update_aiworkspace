@@ -265,6 +265,7 @@ export function assetFromCommunityPost(post: CommunityPost, url?: string): Asset
     prompt: resolvedPrompt || undefined,
     rawText: kind === "text" ? resolvedPrompt || post.description || post.title : undefined,
     taskId: post.taskId,
+    urls: post.mediaUrls?.length ? post.mediaUrls : undefined,
     toolName: post.toolName || undefined,
     toolCode: post.toolCode || undefined,
     communityPostId: post.id,

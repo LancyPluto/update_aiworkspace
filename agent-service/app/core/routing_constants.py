@@ -12,4 +12,5 @@ INFRASTRUCTURE_RULE_REASONS = frozenset({
 
 
 def is_infrastructure_rule_reason(reason: str) -> bool:
-    return reason in INFRASTRUCTURE_RULE_REASONS
+    base_reason = (reason or "").split(";", 1)[0].strip()
+    return base_reason in INFRASTRUCTURE_RULE_REASONS

@@ -182,7 +182,7 @@ export function defaultFieldValue(field: ToolField): unknown {
   const meta = parseFieldMeta(field)
   if (meta.defaultValue !== undefined) return meta.defaultValue
   const options = fieldOptionsFromMeta(field)
-  if ((field.fieldType === "select" || field.fieldType === "radio") && options.length) {
+  if ((field.fieldType === "select" || field.fieldType === "radio" || field.fieldType === "aspect_ratio") && options.length) {
     const first = options[0]
     return typeof first === "string" ? first : first.value
   }
