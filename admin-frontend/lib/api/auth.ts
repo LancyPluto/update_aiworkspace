@@ -2,7 +2,11 @@ import { http, setStoredUser, setToken, clearSession } from './http'
 import type { AdminUser, LoginResponse } from './types'
 
 export async function adminLogin(account: string, password: string) {
-  const data = await http.post<LoginResponse>('/api/admin/v1/auth/login', { account, password })
+  const data = await http.post<LoginResponse>(
+    '/api/admin/v1/auth/login',
+    { account, password },
+    { skipAuthRedirect: true },
+  )
   setToken(data.accessToken)
   setStoredUser(data.user)
   return data

@@ -97,6 +97,22 @@ function redirectToAlipayCheckout(order: RechargeOrder) {
   return true
 }
 
+function normalizeCustomAmountInput(raw: string): string {
+  const value = raw.trim()
+  if (!value) return ""
+  const matched = value.match(/^\d*(?:\.\d{0,2})?/)
+  return matched?.[0] ?? ""
+}
+
+function onCustomAmountInput(event: Event) {
+  const input = event.target as HTMLInputElement
+  const normalized = normalizeCustomAmountInput(input.value)
+  if (normalized !== input.value) {
+    input.value = normalized
+  }
+  customAmount.value = normalized
+}
+
 function formatMoney(value: number | string | undefined | null) {
   const amount = Number(value ?? 0)
   return Number.isInteger(amount) ? String(amount) : amount.toFixed(2)
@@ -193,7 +209,7 @@ function openPaymentChoice(pkg: RechargePackage) {
 }
 
 function openCustomPaymentChoice() {
-  const amount = parseFloat(customAmount.value)
+  const amount = Math.round(parseFloat(customAmount.value) * 100) / 100
   if (!Number.isFinite(amount) || amount < 0.01) {
     error.value = "请输入有效的充值金额（最低 0.01 元）"
     return
@@ -207,7 +223,7 @@ function openCustomPaymentChoice() {
 }
 
 async function submitCustomRecharge(channel: PaymentChannel) {
-  const amount = parseFloat(customAmount.value)
+  const amount = Math.round(parseFloat(customAmount.value) * 100) / 100
   if (!Number.isFinite(amount) || amount < 0.01) {
     error.value = "请输入有效的充值金额（最低 0.01 元）"
     return
@@ -412,12 +428,12 @@ onUnmounted(clearPolling)
               <span class="text-lg font-semibold">¥</span>
               <input
                 v-model="customAmount"
-                type="number"
-                min="0.01"
-                step="0.01"
+                type="text"
+                inputmode="decimal"
                 placeholder="输入金额"
                 class="w-full border-0 border-b border-border bg-transparent px-0 py-0.5 text-2xl font-bold tabular-nums text-primary outline-none placeholder:text-muted-foreground/40 focus:border-primary focus:ring-0"
                 @click.stop
+                @input="onCustomAmountInput"
               />
             </div>
           </div>

@@ -10,6 +10,7 @@ import com.aiminilab.aitoolmarket.agent.dto.ModelVendorAccountRequest;
 import com.aiminilab.aitoolmarket.agent.dto.ModelVendorAccountResponse;
 import com.aiminilab.aitoolmarket.agent.dto.ModelVendorAccountTestResponse;
 import com.aiminilab.aitoolmarket.agent.entity.ModelVendorAccount;
+import com.aiminilab.aitoolmarket.agent.mapper.AgentModelConfigMapper;
 import com.aiminilab.aitoolmarket.agent.mapper.ModelVendorAccountMapper;
 import com.aiminilab.aitoolmarket.agent.service.ModelVendorAccountService;
 import com.aiminilab.aitoolmarket.agent.support.VendorCodeResolver;
@@ -35,6 +36,7 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
 
     private static final Set<String> BALANCE_MODES = Set.of("MANUAL", "REST_API", "NONE", "INFERRED");
     private final ModelVendorAccountMapper vendorAccountMapper;
+    private final AgentModelConfigMapper agentModelConfigMapper;
     private final VendorCodeResolver vendorCodeResolver;
     private final ModelProviderRegistry providerRegistry;
     private final AgentServiceClient agentServiceClient;
@@ -42,12 +44,14 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
     private final ObjectMapper objectMapper;
 
     public ModelVendorAccountServiceImpl(ModelVendorAccountMapper vendorAccountMapper,
+                                         AgentModelConfigMapper agentModelConfigMapper,
                                          VendorCodeResolver vendorCodeResolver,
                                          ModelProviderRegistry providerRegistry,
                                          AgentServiceClient agentServiceClient,
                                          VendorBalanceRefreshService balanceRefreshService,
                                          ObjectMapper objectMapper) {
         this.vendorAccountMapper = vendorAccountMapper;
+        this.agentModelConfigMapper = agentModelConfigMapper;
         this.vendorCodeResolver = vendorCodeResolver;
         this.providerRegistry = providerRegistry;
         this.agentServiceClient = agentServiceClient;
@@ -131,6 +135,9 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
         if ("accept_only".equalsIgnoreCase(provider.testStrategy())) {
             return testAcceptOnlyVendorAccount(account, providerCode, provider);
         }
+        if (requiresMediaGatewayProbe(provider)) {
+            return testMediaGatewayVendorAccount(account, providerCode, provider);
+        }
         AgentModelConfigRequest testRequest = new AgentModelConfigRequest(
                 account.getId(),
                 account.getAccountName(),
@@ -201,6 +208,9 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
         }
         account.setUpdatedAt(LocalDateTime.now());
         vendorAccountMapper.updateAccount(account);
+        if (success) {
+            enableLinkedModelConfigs(account);
+        }
         return new ModelVendorAccountTestResponse(
                 success,
                 message,
@@ -209,6 +219,104 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
                 provider.defaultModel(),
                 toResponse(account)
         );
+    }
+
+    private boolean requiresMediaGatewayProbe(ModelProviderDefinition provider) {
+        if (provider == null) {
+            return false;
+        }
+        String protocol = provider.providerProtocol();
+        if (protocol != null && "openai_images".equalsIgnoreCase(protocol.trim())) {
+            return true;
+        }
+        List<String> capabilities = provider.capabilities() == null ? List.of() : provider.capabilities();
+        return capabilities.stream().anyMatch(capability ->
+                "IMAGE_GENERATION".equalsIgnoreCase(capability)
+                        || "VIDEO_GENERATION".equalsIgnoreCase(capability)
+                        || "MUSIC_GENERATION".equalsIgnoreCase(capability));
+    }
+
+    private ModelVendorAccountTestResponse testMediaGatewayVendorAccount(ModelVendorAccount account,
+                                                                         String providerCode,
+                                                                         ModelProviderDefinition provider) {
+        long startedAt = System.currentTimeMillis();
+        if (!hasCredential(account)) {
+            account.setHealthStatus("ERROR");
+            account.setBalanceErrorMessage("账号凭据未配置");
+            account.setUpdatedAt(LocalDateTime.now());
+            vendorAccountMapper.updateAccount(account);
+            return new ModelVendorAccountTestResponse(
+                    false,
+                    "账号凭据未配置，请在厂商账户中填写 API Key 或额外鉴权 JSON",
+                    null,
+                    providerCode,
+                    provider.defaultModel(),
+                    toResponse(account)
+            );
+        }
+        String baseUrl = blankToNull(account.getBaseUrl());
+        if (baseUrl == null || baseUrl.isBlank()) {
+            baseUrl = provider.defaultBaseUrl();
+        }
+        MediaGatewayProbeResult probe = probeMediaGateway(baseUrl, account.getApiKey());
+        long latencyMs = Math.max(0L, System.currentTimeMillis() - startedAt);
+        boolean success = probe.success();
+        String message = probe.message();
+        account.setHealthStatus(success ? "OK" : "ERROR");
+        account.setBalanceErrorMessage(success ? null : message);
+        account.setUpdatedAt(LocalDateTime.now());
+        vendorAccountMapper.updateAccount(account);
+        if (success) {
+            enableLinkedModelConfigs(account);
+        } else {
+            LOGGER.warn(
+                    "Vendor account media gateway probe failed: accountId={}, vendorCode={}, providerCode={}, baseUrl={}, message={}",
+                    account.getId(),
+                    account.getVendorCode(),
+                    providerCode,
+                    baseUrl,
+                    message
+            );
+        }
+        return new ModelVendorAccountTestResponse(
+                success,
+                message,
+                latencyMs,
+                providerCode,
+                provider.defaultModel(),
+                toResponse(account)
+        );
+    }
+
+    private MediaGatewayProbeResult probeMediaGateway(String baseUrl, String apiKey) {
+        String normalized = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
+        String probeUrl = normalized.endsWith("/v1") ? normalized + "/models" : normalized + "/v1/models";
+        try {
+            java.net.http.HttpClient client = com.aiminilab.aitoolmarket.agent.support.OutboundHttpClientFactory
+                    .create(java.time.Duration.ofSeconds(8));
+            java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create(probeUrl))
+                    .timeout(java.time.Duration.ofSeconds(12))
+                    .header("Accept", "application/json")
+                    .header("Authorization", "Bearer " + apiKey.trim())
+                    .GET()
+                    .build();
+            java.net.http.HttpResponse<String> response = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+            int status = response.statusCode();
+            if (status == 401 || status == 403) {
+                return new MediaGatewayProbeResult(false, "API Key 无效或权限不足（HTTP " + status + "）");
+            }
+            if (status >= 200 && status < 500) {
+                return new MediaGatewayProbeResult(true, "网关鉴权通过（HTTP " + status + "）");
+            }
+            return new MediaGatewayProbeResult(false, "网关不可达（HTTP " + status + "）");
+        } catch (Exception exception) {
+            String detail = exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
+            return new MediaGatewayProbeResult(false, "网关连接失败：" + detail);
+        }
+    }
+
+    private record MediaGatewayProbeResult(boolean success, String message) {
     }
 
     private ModelVendorAccountTestResponse testAcceptOnlyVendorAccount(ModelVendorAccount account,
@@ -235,6 +343,7 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
         account.setBalanceErrorMessage(null);
         account.setUpdatedAt(LocalDateTime.now());
         vendorAccountMapper.updateAccount(account);
+        enableLinkedModelConfigs(account);
         return new ModelVendorAccountTestResponse(
                 true,
                 message,
@@ -245,14 +354,22 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
         );
     }
 
+    private void enableLinkedModelConfigs(ModelVendorAccount account) {
+        if (account == null || account.getId() == null) {
+            return;
+        }
+        int updated = agentModelConfigMapper.enableByVendorAccountId(account.getId());
+        if (updated > 0) {
+            LOGGER.info("Re-enabled {} model config(s) linked to vendor account {}", updated, account.getId());
+        }
+    }
+
     private VendorEndpointProbeResult probeVendorEndpoint(String baseUrl) {
         String normalized = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
         String probeUrl = normalized.endsWith("/v1") ? normalized + "/models" : normalized;
         try {
-            java.net.http.HttpClient client = java.net.http.HttpClient.newBuilder()
-                    .connectTimeout(java.time.Duration.ofSeconds(8))
-                    .followRedirects(java.net.http.HttpClient.Redirect.NORMAL)
-                    .build();
+            java.net.http.HttpClient client = com.aiminilab.aitoolmarket.agent.support.OutboundHttpClientFactory
+                    .create(java.time.Duration.ofSeconds(8));
             java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
                     .uri(java.net.URI.create(probeUrl))
                     .timeout(java.time.Duration.ofSeconds(10))
@@ -312,6 +429,9 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
         }
         account.setBalanceLowThreshold(request.balanceLowThreshold());
         account.setEnabled(request.enabled() == null || request.enabled());
+        if (account.getBalanceStatus() == null || account.getBalanceStatus().isBlank()) {
+            account.setBalanceStatus("UNKNOWN");
+        }
         if (account.getHealthStatus() == null || account.getHealthStatus().isBlank()) {
             account.setHealthStatus("UNKNOWN");
         }

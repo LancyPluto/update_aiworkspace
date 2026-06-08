@@ -23,7 +23,7 @@ public class VendorCodeResolver {
             Map.entry("minimax", "minimax"),
             Map.entry("minimax_speech", "minimax"),
             Map.entry("minimax_music", "minimax"),
-            Map.entry("suno_music", "suno_music"),
+            Map.entry("suno_music", "suno"),
             Map.entry("siliconflow_images", "siliconflow"),
             Map.entry("siliconflow_speech", "siliconflow"),
             Map.entry("siliconflow_asr", "siliconflow"),
@@ -49,7 +49,7 @@ public class VendorCodeResolver {
         VENDOR_LABELS.put("moonshot", "Moonshot / Kimi");
         VENDOR_LABELS.put("anthropic", "Anthropic Claude");
         VENDOR_LABELS.put("minimax", "MiniMax");
-        VENDOR_LABELS.put("suno_music", "Suno music");
+        VENDOR_LABELS.put("suno", "Suno");
         VENDOR_LABELS.put("siliconflow", "SiliconFlow");
         VENDOR_LABELS.put("volcengine", "火山引擎 / 豆包");
         VENDOR_LABELS.put("kling", "可灵");
@@ -177,6 +177,7 @@ public class VendorCodeResolver {
         if (text.contains("volces.com") || text.contains("volcengine")) return "volcengine";
         if (text.contains("klingai.com") || text.contains("kling")) return "kling";
         if (text.contains("minimaxi.com") || text.contains("minimax")) return "minimax";
+        if (text.contains("sunoapi.org") || text.contains("suno.com") || text.contains("suno")) return "suno";
         if (text.contains("generativelanguage.googleapis.com") || text.contains("googleapis.com")) return "google";
         if (text.contains("dashscope.aliyuncs.com") || text.contains("aliyuncs.com")) return "qwen";
         if (text.contains("bigmodel.cn") || text.contains("zhipu")) return "zhipu";
@@ -184,6 +185,7 @@ public class VendorCodeResolver {
         if (text.contains("anthropic.com") || text.contains("claude")) return "anthropic";
         if (text.contains("mineru.net") || text.contains("mineru")) return "mineru";
         if (text.contains("openai.com")) return "openai";
+        if (text.contains("api.openai.com")) return "openai";
         if (text.contains("ofox.ai")) return "openai_gateway";
         return null;
     }
@@ -198,6 +200,7 @@ public class VendorCodeResolver {
         if (combined.contains("kling")) return "kling";
         if (combined.contains("doubao") || combined.contains("seed") || combined.contains("volc")) return "volcengine";
         if (combined.contains("minimax")) return "minimax";
+        if (combined.contains("suno")) return "suno";
         if (combined.contains("gemini") || combined.contains("google")) return "google";
         if (combined.contains("qwen") || combined.contains("tongyi") || combined.contains("通义")) return "qwen";
         if (combined.contains("zhipu") || combined.contains("glm") || combined.contains("chatglm") || combined.contains("智谱")) return "zhipu";
@@ -205,7 +208,11 @@ public class VendorCodeResolver {
         if (combined.contains("anthropic") || combined.contains("claude")) return "anthropic";
         if (combined.contains("mineru")) return "mineru";
         String fromUrl = inferFromBaseUrl(baseUrl);
-        return fromUrl != null ? fromUrl : fallback;
+        if (fromUrl != null) {
+            return fromUrl;
+        }
+        if (combined.contains("gpt-") || combined.contains("chatgpt")) return "openai";
+        return fallback;
     }
 
     private static String capitalize(String code) {

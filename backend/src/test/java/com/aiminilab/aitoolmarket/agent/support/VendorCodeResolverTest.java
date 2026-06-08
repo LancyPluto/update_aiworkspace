@@ -54,4 +54,47 @@ class VendorCodeResolverTest {
                 "claude-sonnet-4-6"
         )).isEqualTo("anthropic");
     }
+
+    @Test
+    void officialOpenAiCompatibleModelsStayInOpenAiGroup() {
+        assertThat(resolver.resolveVendorCode(
+                "openai_compatible",
+                "https://api.openai.com/v1",
+                "OpenAI GPT-5.5",
+                "gpt-5.5"
+        )).isEqualTo("openai");
+
+        assertThat(resolver.resolveVendorCode(
+                "openai_compatible",
+                "",
+                "OpenAI GPT-5.5",
+                "gpt-5.5"
+        )).isEqualTo("openai");
+
+        assertThat(resolver.resolveVendorCode(
+                "openai_compatible",
+                "https://api.ofox.ai/v1",
+                "GPT-Image-2",
+                "openai/gpt-image-2"
+        )).isEqualTo("openai_gateway");
+    }
+
+    @Test
+    void sunoMusicModelsAreGroupedBySunoVendor() {
+        assertThat(resolver.resolveVendorCode(
+                "suno_music",
+                "https://api.sunoapi.org",
+                "SunoV5_5",
+                "V5_5"
+        )).isEqualTo("suno");
+
+        assertThat(resolver.resolveVendorCode(
+                "openai_compatible",
+                "https://api.sunoapi.org",
+                "Suno account",
+                "V5"
+        )).isEqualTo("suno");
+
+        assertThat(resolver.vendorIconAsset("suno")).isEqualTo("suno");
+    }
 }

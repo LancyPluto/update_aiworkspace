@@ -55,14 +55,15 @@
       "unitPrice": 3,
       "enabled": true,
       "agentEnabled": false,
-      "isDefault": true,
+      "isDefault": false,
       "capabilities": [
         "VIDEO_GENERATION",
         "IMAGE_GENERATION"
       ],
       "channelCode": "kling",
       "channelLabel": "可灵 Kling",
-      "channelIconAsset": "kling"
+      "channelIconAsset": "kling",
+      "vendorAccountRef": "kling::默认账户"
     },
     {
       "displayName": "可灵 V1 图生视频",
@@ -95,7 +96,8 @@
       ],
       "channelCode": "kling",
       "channelLabel": "可灵 Kling",
-      "channelIconAsset": "kling"
+      "channelIconAsset": "kling",
+      "vendorAccountRef": "kling::默认账户"
     },
     {
       "displayName": "可灵 V1.5 图生视频",
@@ -128,7 +130,8 @@
       ],
       "channelCode": "kling",
       "channelLabel": "可灵 Kling",
-      "channelIconAsset": "kling"
+      "channelIconAsset": "kling",
+      "vendorAccountRef": "kling::默认账户"
     },
     {
       "displayName": "可灵 V1.6 图生视频",
@@ -161,7 +164,8 @@
       ],
       "channelCode": "kling",
       "channelLabel": "可灵 Kling",
-      "channelIconAsset": "kling"
+      "channelIconAsset": "kling",
+      "vendorAccountRef": "kling::默认账户"
     },
     {
       "displayName": "可灵 V2 Master 图生视频",
@@ -194,7 +198,8 @@
       ],
       "channelCode": "kling",
       "channelLabel": "可灵 Kling",
-      "channelIconAsset": "kling"
+      "channelIconAsset": "kling",
+      "vendorAccountRef": "kling::默认账户"
     },
     {
       "displayName": "可灵 V2.1 图生视频",
@@ -227,7 +232,8 @@
       ],
       "channelCode": "kling",
       "channelLabel": "可灵 Kling",
-      "channelIconAsset": "kling"
+      "channelIconAsset": "kling",
+      "vendorAccountRef": "kling::默认账户"
     },
     {
       "displayName": "可灵 V2.1 Master 图生视频",
@@ -260,7 +266,8 @@
       ],
       "channelCode": "kling",
       "channelLabel": "可灵 Kling",
-      "channelIconAsset": "kling"
+      "channelIconAsset": "kling",
+      "vendorAccountRef": "kling::默认账户"
     },
     {
       "displayName": "可灵 V2.5 Turbo 图生视频",
@@ -293,7 +300,8 @@
       ],
       "channelCode": "kling",
       "channelLabel": "可灵 Kling",
-      "channelIconAsset": "kling"
+      "channelIconAsset": "kling",
+      "vendorAccountRef": "kling::默认账户"
     },
     {
       "displayName": "可灵 V2.6 动作控制",
@@ -325,7 +333,8 @@
       ],
       "channelCode": "kling",
       "channelLabel": "可灵 Kling",
-      "channelIconAsset": "kling"
+      "channelIconAsset": "kling",
+      "vendorAccountRef": "kling::默认账户"
     },
     {
       "displayName": "可灵 V2.6 图生视频",
@@ -358,7 +367,8 @@
       ],
       "channelCode": "kling",
       "channelLabel": "可灵 Kling",
-      "channelIconAsset": "kling"
+      "channelIconAsset": "kling",
+      "vendorAccountRef": "kling::默认账户"
     },
     {
       "displayName": "可灵 V3 动作控制",
@@ -390,7 +400,8 @@
       ],
       "channelCode": "kling",
       "channelLabel": "可灵 Kling",
-      "channelIconAsset": "kling"
+      "channelIconAsset": "kling",
+      "vendorAccountRef": "kling::默认账户"
     },
     {
       "displayName": "可灵 V3 图生视频",
@@ -423,7 +434,8 @@
       ],
       "channelCode": "kling",
       "channelLabel": "可灵 Kling",
-      "channelIconAsset": "kling"
+      "channelIconAsset": "kling",
+      "vendorAccountRef": "kling::默认账户"
     },
     {
       "displayName": "可灵 V3 文生视频",
@@ -455,7 +467,8 @@
       ],
       "channelCode": "kling",
       "channelLabel": "可灵 Kling",
-      "channelIconAsset": "kling"
+      "channelIconAsset": "kling",
+      "vendorAccountRef": "kling::默认账户"
     },
     {
       "displayName": "可灵 Video O1 Omni",
@@ -488,7 +501,8 @@
       ],
       "channelCode": "kling",
       "channelLabel": "可灵 Kling",
-      "channelIconAsset": "kling"
+      "channelIconAsset": "kling",
+      "vendorAccountRef": "kling::默认账户"
     },
     {
       "displayName": "可灵图生视频 v2-6",
@@ -520,7 +534,8 @@
       ],
       "channelCode": "kling",
       "channelLabel": "可灵 Kling",
-      "channelIconAsset": "kling"
+      "channelIconAsset": "kling",
+      "vendorAccountRef": "kling::默认账户"
     },
     {
       "displayName": "可灵生图 v2-1",
@@ -552,7 +567,8 @@
       ],
       "channelCode": "kling",
       "channelLabel": "可灵 Kling",
-      "channelIconAsset": "kling"
+      "channelIconAsset": "kling",
+      "vendorAccountRef": "kling::默认账户"
     },
     {
       "displayName": "GPT-image2.0",
@@ -584,7 +600,8 @@
       ],
       "channelCode": "openai",
       "channelLabel": "OpenAI",
-      "channelIconAsset": "openai"
+      "channelIconAsset": "openai",
+      "vendorAccountRef": "openai_gateway::ofox"
     },
     {
       "displayName": "gpt-image-2_SY",
@@ -616,7 +633,8 @@
       ],
       "channelCode": "openai",
       "channelLabel": "OpenAI",
-      "channelIconAsset": "openai"
+      "channelIconAsset": "openai",
+      "vendorAccountRef": "openai_gateway::shiyun"
     },
     {
       "displayName": "DeepSeek-v4-pro",
@@ -642,13 +660,14 @@
       "unitPrice": 0,
       "enabled": true,
       "agentEnabled": true,
-      "isDefault": false,
+      "isDefault": true,
       "capabilities": [
         "TEXT_GENERATION"
       ],
       "channelCode": "deepseek",
       "channelLabel": "DeepSeek",
-      "channelIconAsset": "deepseek"
+      "channelIconAsset": "deepseek",
+      "vendorAccountRef": "deepseek::默认账户"
     },
     {
       "displayName": "mineru",
@@ -680,7 +699,8 @@
       ],
       "channelCode": "openai",
       "channelLabel": "OpenAI",
-      "channelIconAsset": "openai"
+      "channelIconAsset": "openai",
+      "vendorAccountRef": "mineru::默认账户"
     },
     {
       "displayName": "SF Z-Image Turbo",
@@ -713,7 +733,8 @@
       ],
       "channelCode": "qwen",
       "channelLabel": "通义千问",
-      "channelIconAsset": "qwen"
+      "channelIconAsset": "qwen",
+      "vendorAccountRef": "siliconflow::默认账户"
     },
     {
       "displayName": "豆包 Seedream 生图",
@@ -747,7 +768,8 @@
       "channelLabel": "火山引擎 / 豆包",
       "channelIconAsset": "doubao",
       "category": "IMAGE_GENERATION",
-      "defaultModel": false
+      "defaultModel": false,
+      "vendorAccountRef": "volcengine::默认账户"
     },
     {
       "displayName": "Seedance 1.5 Pro",
@@ -780,7 +802,8 @@
       ],
       "channelCode": "other",
       "channelLabel": "其他模型",
-      "channelIconAsset": "api"
+      "channelIconAsset": "api",
+      "vendorAccountRef": "volcengine::默认账户"
     },
     {
       "displayName": "DeepSeek V4 Flash",
@@ -812,7 +835,8 @@
       ],
       "channelCode": "deepseek",
       "channelLabel": "DeepSeek",
-      "channelIconAsset": "deepseek"
+      "channelIconAsset": "deepseek",
+      "vendorAccountRef": "deepseek::默认账户"
     },
     {
       "displayName": "豆包 Seed 2.0 Lite",
@@ -908,7 +932,8 @@
       ],
       "channelCode": "moonshot",
       "channelLabel": "Moonshot / Kimi",
-      "channelIconAsset": "moonshot"
+      "channelIconAsset": "moonshot",
+      "vendorAccountRef": "moonshot::默认账户"
     },
     {
       "displayName": "智谱 GLM-5",
@@ -940,7 +965,8 @@
       ],
       "channelCode": "zhipu",
       "channelLabel": "智谱 GLM",
-      "channelIconAsset": "zhipu"
+      "channelIconAsset": "zhipu",
+      "vendorAccountRef": "zhipu::默认账户"
     },
     {
       "displayName": "通义千问 3.5 Flash",
@@ -972,7 +998,8 @@
       ],
       "channelCode": "qwen",
       "channelLabel": "通义千问",
-      "channelIconAsset": "qwen"
+      "channelIconAsset": "qwen",
+      "vendorAccountRef": "qwen::默认账户"
     },
     {
       "displayName": "通义千问 3.7 Max",
@@ -1004,7 +1031,8 @@
       ],
       "channelCode": "qwen",
       "channelLabel": "通义千问",
-      "channelIconAsset": "qwen"
+      "channelIconAsset": "qwen",
+      "vendorAccountRef": "qwen::默认账户"
     },
     {
       "displayName": "Google Gemini 2.5 Pro",
@@ -1036,7 +1064,8 @@
       ],
       "channelCode": "google",
       "channelLabel": "Google Gemini",
-      "channelIconAsset": "gemini"
+      "channelIconAsset": "gemini",
+      "vendorAccountRef": "google::默认账户"
     },
     {
       "displayName": "Google Gemini 2.5 Flash",
@@ -1068,7 +1097,8 @@
       ],
       "channelCode": "google",
       "channelLabel": "Google Gemini",
-      "channelIconAsset": "gemini"
+      "channelIconAsset": "gemini",
+      "vendorAccountRef": "google::默认账户"
     },
     {
       "displayName": "Anthropic Claude Sonnet 4.6",
@@ -1132,7 +1162,8 @@
       ],
       "channelCode": "openai",
       "channelLabel": "OpenAI",
-      "channelIconAsset": "openai"
+      "channelIconAsset": "openai",
+      "vendorAccountRef": "openai::默认账户"
     },
     {
       "displayName": "DeepSeek Chat",
@@ -1164,7 +1195,74 @@
       ],
       "channelCode": "deepseek",
       "channelLabel": "DeepSeek",
-      "channelIconAsset": "deepseek"
+      "channelIconAsset": "deepseek",
+      "vendorAccountRef": "deepseek::默认账户"
+    },
+    {
+      "displayName": "可灵生图 V1",
+      "configCode": "kling-image-generation-v1-model",
+      "provider": "kling_video",
+      "modelName": "kling-v1",
+      "baseUrl": "https://api-beijing.klingai.com",
+      "apiKey": "",
+      "extraAuthJson": "{\"taskType\":\"image2video\",\"accessKey\":\"ADp4YdKAPmnKeHhEHdFaEpnygPpdYYF3\",\"secretKey\":\"YTQ3KNB3FRABGdrftGYDeyLhTramy4Ly\",\"pricingNote\":\"按秒计费，默认5秒std档\",\"pricingVerifiedAt\":\"2026-05-28\",\"costAffectingParams\":\"model_name;image;image_tail;duration;mode;aspect_ratio;motion_brush\"}",
+      "secretsRedacted": false,
+      "minimaxGroupId": null,
+      "consoleUrl": "https://app.klingai.com/cn/dev/api-key",
+      "balanceUrl": "https://app.klingai.com/cn/dev/resource-pack",
+      "docsUrl": "https://www.klingai.com/document-api/apiReference/model/KlingV1",
+      "timeoutSeconds": 300,
+      "connectTimeoutSeconds": null,
+      "readTimeoutSeconds": null,
+      "inputTokenPricePer1k": 0,
+      "outputTokenPricePer1k": 0,
+      "inputTokenPricePer1m": 0,
+      "outputTokenPricePer1m": 0,
+      "billingUnit": "PER_CALL",
+      "unitPrice": 0.019998,
+      "enabled": true,
+      "agentEnabled": false,
+      "isDefault": false,
+      "capabilities": [
+        "IMAGE_GENERATION"
+      ],
+      "channelCode": "kling",
+      "channelLabel": "可灵 Kling",
+      "channelIconAsset": "kling",
+      "vendorAccountRef": "kling::默认账户"
+    },
+    {
+      "displayName": "可灵生图 V3",
+      "configCode": "kling-image-generation-v3-model",
+      "provider": "kling_video",
+      "modelName": "kling-v3",
+      "baseUrl": "https://api-beijing.klingai.com",
+      "apiKey": "",
+      "extraAuthJson": "{\"authHint\":\"extraAuthJson配置accessKey/secretKey\",\"accessKey\":\"ADp4YdKAPmnKeHhEHdFaEpnygPpdYYF3\",\"secretKey\":\"YTQ3KNB3FRABGdrftGYDeyLhTramy4Ly\",\"pricingNote\":\"按秒计费，默认5秒std档\",\"pricingVerifiedAt\":\"2026-05-28\",\"costAffectingParams\":\"model_name;duration;mode;resolution;aspect_ratio;sound;image_list;video_list;element_list;multi_shot;shot_type;multi_prompt\",\"defaultBillingParams\":{\"mode\":\"std\",\"duration\":\"5\",\"aspect_ratio\":\"16:9\"}}",
+      "secretsRedacted": false,
+      "minimaxGroupId": null,
+      "consoleUrl": "https://app.klingai.com/cn/dev/api-key",
+      "balanceUrl": "https://app.klingai.com/cn/dev/resource-pack",
+      "docsUrl": "https://www.klingai.com/document-api/apiReference/model/OmniVideo",
+      "timeoutSeconds": 294,
+      "connectTimeoutSeconds": null,
+      "readTimeoutSeconds": null,
+      "inputTokenPricePer1k": 0,
+      "outputTokenPricePer1k": 0,
+      "inputTokenPricePer1m": 0,
+      "outputTokenPricePer1m": 0,
+      "billingUnit": "PER_CALL",
+      "unitPrice": 0.019998,
+      "enabled": true,
+      "agentEnabled": false,
+      "isDefault": false,
+      "capabilities": [
+        "IMAGE_GENERATION"
+      ],
+      "channelCode": "kling",
+      "channelLabel": "可灵 Kling",
+      "channelIconAsset": "kling",
+      "vendorAccountRef": "kling::默认账户"
     }
   ],
   "categories": [
@@ -1229,8 +1327,8 @@
       "outputModality": "IMAGE",
       "configNote": "可灵生图（可灵生图 V1）\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"icon\",\"modelIconUrl\":\"\"} -->",
       "status": "OFFLINE",
-      "estimatedCreditCost": 300,
-      "modelConfigCode": "kling-v1-image-to-video",
+      "estimatedCreditCost": 3,
+      "modelConfigCode": "kling-image-generation-v1-model",
       "executionHandler": "IMAGE_GENERATION",
       "agentEnabled": true,
       "fields": [
@@ -1370,7 +1468,7 @@
       "outputModality": "IMAGE",
       "configNote": "可灵生图（可灵生图 V2.1）\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"effect\",\"modelIconUrl\":\"\"} -->",
       "status": "OFFLINE",
-      "estimatedCreditCost": 300,
+      "estimatedCreditCost": 3,
       "modelConfigCode": "8",
       "executionHandler": "IMAGE_GENERATION",
       "agentEnabled": true,
@@ -1511,8 +1609,8 @@
       "outputModality": "IMAGE",
       "configNote": "可灵生图（可灵生图 V3）\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"effect\",\"modelIconUrl\":\"\"} -->",
       "status": "ONLINE",
-      "estimatedCreditCost": 300,
-      "modelConfigCode": "kling-v3-omni",
+      "estimatedCreditCost": 3,
+      "modelConfigCode": "kling-image-generation-v3-model",
       "executionHandler": "IMAGE_GENERATION",
       "agentEnabled": true,
       "fields": [
@@ -1652,7 +1750,7 @@
       "outputModality": "IMAGE",
       "configNote": "豆包 Seedream 文生图工具，适合海报、插画、产品图和创意视觉生成。\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#2563eb\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"icon\",\"modelIconUrl\":\"\"} -->",
       "status": "ONLINE",
-      "estimatedCreditCost": 25,
+      "estimatedCreditCost": 30,
       "modelConfigCode": "volcengine-seedream",
       "executionHandler": "IMAGE_GENERATION",
       "agentEnabled": true,
@@ -1738,7 +1836,7 @@
       "outputModality": "VIDEO",
       "configNote": "可灵 可灵 V1 图生视频\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"icon\",\"modelIconUrl\":\"\"} -->",
       "status": "OFFLINE",
-      "estimatedCreditCost": 300,
+      "estimatedCreditCost": 360,
       "modelConfigCode": "kling-v1-image-to-video",
       "executionHandler": "VIDEO_GENERATION",
       "agentEnabled": true,
@@ -1940,7 +2038,7 @@
       "outputModality": "VIDEO",
       "configNote": "可灵 可灵 V1.5 图生视频\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"icon\",\"modelIconUrl\":\"\"} -->",
       "status": "OFFLINE",
-      "estimatedCreditCost": 300,
+      "estimatedCreditCost": 360,
       "modelConfigCode": "kling-v1-5-image-to-video",
       "executionHandler": "VIDEO_GENERATION",
       "agentEnabled": true,
@@ -2142,7 +2240,7 @@
       "outputModality": "VIDEO",
       "configNote": "可灵 可灵 V1.6 图生视频\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"icon\",\"modelIconUrl\":\"\"} -->",
       "status": "OFFLINE",
-      "estimatedCreditCost": 300,
+      "estimatedCreditCost": 360,
       "modelConfigCode": "kling-v1-6-image-to-video",
       "executionHandler": "VIDEO_GENERATION",
       "agentEnabled": true,
@@ -2344,7 +2442,7 @@
       "outputModality": "VIDEO",
       "configNote": "可灵 可灵 V2 Master 图生视频\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"icon\",\"modelIconUrl\":\"\"} -->",
       "status": "OFFLINE",
-      "estimatedCreditCost": 300,
+      "estimatedCreditCost": 360,
       "modelConfigCode": "kling-v2-master-image-to-video",
       "executionHandler": "VIDEO_GENERATION",
       "agentEnabled": true,
@@ -2546,7 +2644,7 @@
       "outputModality": "VIDEO",
       "configNote": "可灵 可灵 V2.1 图生视频\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"icon\",\"modelIconUrl\":\"\"} -->",
       "status": "OFFLINE",
-      "estimatedCreditCost": 300,
+      "estimatedCreditCost": 360,
       "modelConfigCode": "kling-v2-1-master-image-to-video",
       "executionHandler": "VIDEO_GENERATION",
       "agentEnabled": true,
@@ -2748,7 +2846,7 @@
       "outputModality": "VIDEO",
       "configNote": "可灵 可灵 V2.1 Master 图生视频\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"icon\",\"modelIconUrl\":\"\"} -->",
       "status": "OFFLINE",
-      "estimatedCreditCost": 300,
+      "estimatedCreditCost": 360,
       "modelConfigCode": "kling-v2-1-master-image-to-video",
       "executionHandler": "VIDEO_GENERATION",
       "agentEnabled": true,
@@ -2950,7 +3048,7 @@
       "outputModality": "VIDEO",
       "configNote": "可灵 可灵 V2.5 Turbo 图生视频\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"icon\",\"modelIconUrl\":\"\"} -->",
       "status": "OFFLINE",
-      "estimatedCreditCost": 300,
+      "estimatedCreditCost": 360,
       "modelConfigCode": "kling-v2-5-turbo-image-to-video",
       "executionHandler": "VIDEO_GENERATION",
       "agentEnabled": true,
@@ -3152,7 +3250,7 @@
       "outputModality": "VIDEO",
       "configNote": "可灵 可灵 V2.6 动作控制\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"icon\",\"modelIconUrl\":\"\"} -->",
       "status": "OFFLINE",
-      "estimatedCreditCost": 300,
+      "estimatedCreditCost": 360,
       "modelConfigCode": "kling-v2-6-motion-control",
       "executionHandler": "VIDEO_GENERATION",
       "agentEnabled": true,
@@ -3365,7 +3463,7 @@
       "outputModality": "VIDEO",
       "configNote": "可灵 可灵 V2.6 图生视频\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"icon\",\"modelIconUrl\":\"\"} -->",
       "status": "OFFLINE",
-      "estimatedCreditCost": 300,
+      "estimatedCreditCost": 360,
       "modelConfigCode": "kling-v2-6-motion-control",
       "executionHandler": "VIDEO_GENERATION",
       "agentEnabled": true,
@@ -3567,7 +3665,7 @@
       "outputModality": "VIDEO",
       "configNote": "可灵 可灵 V3 动作控制\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"icon\",\"modelIconUrl\":\"\"} -->",
       "status": "ONLINE",
-      "estimatedCreditCost": 300,
+      "estimatedCreditCost": 360,
       "modelConfigCode": "kling-v3-motion-control",
       "executionHandler": "VIDEO_GENERATION",
       "agentEnabled": true,
@@ -3780,7 +3878,7 @@
       "outputModality": "VIDEO",
       "configNote": "可灵 可灵 V3 多图参考生视频\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"effect\",\"modelIconUrl\":\"\"} -->",
       "status": "ONLINE",
-      "estimatedCreditCost": 300,
+      "estimatedCreditCost": 360,
       "modelConfigCode": "kling-v3-image-to-video",
       "executionHandler": "VIDEO_GENERATION",
       "agentEnabled": true,
@@ -4021,7 +4119,7 @@
       "outputModality": "VIDEO",
       "configNote": "可灵 可灵 V3 图生视频\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"effect\",\"modelIconUrl\":\"\"} -->",
       "status": "ONLINE",
-      "estimatedCreditCost": 300,
+      "estimatedCreditCost": 360,
       "modelConfigCode": "kling-v3-image-to-video",
       "executionHandler": "VIDEO_GENERATION",
       "agentEnabled": true,
@@ -4223,7 +4321,7 @@
       "outputModality": "VIDEO",
       "configNote": "可灵 可灵 V3 文生视频\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"effect\",\"modelIconUrl\":\"\"} -->",
       "status": "ONLINE",
-      "estimatedCreditCost": 300,
+      "estimatedCreditCost": 360,
       "modelConfigCode": "kling-v3-text-to-video",
       "executionHandler": "VIDEO_GENERATION",
       "agentEnabled": true,
@@ -4399,7 +4497,7 @@
       "outputModality": "VIDEO",
       "configNote": "可灵 可灵 Video O1 Omni\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"effect\",\"modelIconUrl\":\"\"} -->",
       "status": "ONLINE",
-      "estimatedCreditCost": 300,
+      "estimatedCreditCost": 360,
       "modelConfigCode": "kling-video-o1-omni",
       "executionHandler": "VIDEO_GENERATION",
       "agentEnabled": true,
@@ -4679,7 +4777,7 @@
       "outputModality": "VIDEO",
       "configNote": "可灵 可灵 V3 Omni\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"effect\",\"modelIconUrl\":\"\"} -->",
       "status": "OFFLINE",
-      "estimatedCreditCost": 300,
+      "estimatedCreditCost": 360,
       "modelConfigCode": "kling-v3-omni",
       "executionHandler": "VIDEO_GENERATION",
       "agentEnabled": true,
@@ -5148,7 +5246,7 @@
       "outputModality": "IMAGE",
       "configNote": "需要配置画面描述、比例、风格、生成数量与反向提示词。\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"哈哈\"} -->",
       "status": "OFFLINE",
-      "estimatedCreditCost": 300,
+      "estimatedCreditCost": 5,
       "modelConfigCode": "siliconflow-z-image-turbo",
       "executionHandler": "IMAGE_GENERATION",
       "agentEnabled": true,
@@ -5312,7 +5410,7 @@
       "outputModality": "IMAGE",
       "configNote": "需要配置画面描述、比例、风格、生成数量与反向提示词。\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\"} -->",
       "status": "OFFLINE",
-      "estimatedCreditCost": 300,
+      "estimatedCreditCost": 5,
       "modelConfigCode": "siliconflow-z-image-turbo",
       "executionHandler": "IMAGE_GENERATION",
       "agentEnabled": true,
@@ -5478,7 +5576,7 @@
       "outputModality": "VIDEO",
       "configNote": "描述镜头、比例与时长，由视频生成 Handler 处理。\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"effect\"} -->",
       "status": "OFFLINE",
-      "estimatedCreditCost": 300,
+      "estimatedCreditCost": 240,
       "modelConfigCode": "kling_image_to_video",
       "executionHandler": "VIDEO_GENERATION",
       "agentEnabled": true,
@@ -5620,7 +5718,7 @@
       "outputModality": "IMAGE",
       "configNote": "需要配置画面描述、比例、风格、生成数量与反向提示词。",
       "status": "OFFLINE",
-      "estimatedCreditCost": 300,
+      "estimatedCreditCost": 3,
       "modelConfigCode": "8",
       "executionHandler": "IMAGE_GENERATION",
       "agentEnabled": true,
@@ -5763,7 +5861,7 @@
       "outputModality": "IMAGE",
       "configNote": "使用 GPT-Image-2 模型根据提示词生成图片，支持文本生图和参考图生图。\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"effect\"} -->",
       "status": "ONLINE",
-      "estimatedCreditCost": 300,
+      "estimatedCreditCost": 38,
       "modelConfigCode": "10",
       "executionHandler": "IMAGE_GENERATION",
       "agentEnabled": true,
@@ -5933,7 +6031,7 @@
       "outputModality": "VIDEO",
       "configNote": "<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"icon\",\"modelIconUrl\":\"\"} -->",
       "status": "OFFLINE",
-      "estimatedCreditCost": 300,
+      "estimatedCreditCost": 106,
       "modelConfigCode": "volcengine-seedance",
       "executionHandler": "DIGITAL_HUMAN",
       "agentEnabled": true,
@@ -6360,7 +6458,7 @@
       "outputModality": "VIDEO",
       "configNote": null,
       "status": "OFFLINE",
-      "estimatedCreditCost": 300,
+      "estimatedCreditCost": 106,
       "modelConfigCode": "volcengine-seedance",
       "executionHandler": "DIGITAL_HUMAN",
       "agentEnabled": true,
@@ -6623,6 +6721,301 @@
         }
       ],
       "workflow": null
+    }
+  ],
+  "vendorAccounts": [
+    {
+      "vendorCode": "anthropic",
+      "channelCode": "anthropic",
+      "channelLabel": null,
+      "channelIconAsset": null,
+      "accountName": "默认账户",
+      "accountRef": "anthropic::默认账户",
+      "baseUrl": "https://api.anthropic.com",
+      "apiKey": "",
+      "extraAuthJson": "{\"pricingVerifiedAt\":\"2026-05-25\",\"pricingNote\":\"USD/1M\",\"costAffectingParams\":\"model;messages;max_tokens;thinking;tools\"}",
+      "secretsRedacted": false,
+      "consoleUrl": "https://console.anthropic.com/settings/keys",
+      "balanceUrl": "https://console.anthropic.com/settings/billing",
+      "balanceQueryMode": "MANUAL",
+      "balanceAmount": null,
+      "balanceCurrency": "CNY",
+      "balanceLowThreshold": null,
+      "enabled": true
+    },
+    {
+      "vendorCode": "deepseek",
+      "channelCode": "deepseek",
+      "channelLabel": null,
+      "channelIconAsset": null,
+      "accountName": "默认账户",
+      "accountRef": "deepseek::默认账户",
+      "baseUrl": "https://api.deepseek.com",
+      "apiKey": "sk-6a0d4c215f734d8680b46822f8751d35",
+      "extraAuthJson": "{\"pricingVerifiedAt\":\"2026-05-25\",\"costAffectingParams\":\"model;messages;max_tokens;cache_hit;thinking\"}",
+      "secretsRedacted": false,
+      "consoleUrl": "https://platform.deepseek.com/api_keys",
+      "balanceUrl": "https://platform.deepseek.com/usage",
+      "balanceQueryMode": "REST_API",
+      "balanceAmount": 7.16,
+      "balanceCurrency": "CNY",
+      "balanceLowThreshold": null,
+      "enabled": true
+    },
+    {
+      "vendorCode": "google",
+      "channelCode": "google",
+      "channelLabel": null,
+      "channelIconAsset": null,
+      "accountName": "默认账户",
+      "accountRef": "google::默认账户",
+      "baseUrl": "https://generativelanguage.googleapis.com/v1beta/openai/",
+      "apiKey": "",
+      "extraAuthJson": "{\"pricingVerifiedAt\":\"2026-05-25\",\"pricingNote\":\"USD/1M ≤200k\",\"costAffectingParams\":\"model;contents;>200k_input_tier\"}",
+      "secretsRedacted": false,
+      "consoleUrl": "https://aistudio.google.com/apikey",
+      "balanceUrl": "https://console.cloud.google.com/billing",
+      "balanceQueryMode": "MANUAL",
+      "balanceAmount": null,
+      "balanceCurrency": "CNY",
+      "balanceLowThreshold": null,
+      "enabled": true
+    },
+    {
+      "vendorCode": "kling",
+      "channelCode": "kling",
+      "channelLabel": null,
+      "channelIconAsset": null,
+      "accountName": "默认账户",
+      "accountRef": "kling::默认账户",
+      "baseUrl": "https://api-beijing.klingai.com",
+      "apiKey": "",
+      "extraAuthJson": "{\"accessKey\":\"Ap4eRhrQKHLeTRbarmAmgEtCYYmbgHHP\",\"secretKey\":\"tbpaymK8EHBRKnFa3fYGLyHGJRHyEb4h\"}",
+      "secretsRedacted": false,
+      "consoleUrl": "https://klingai.com/dev/api-key",
+      "balanceUrl": "https://klingai.com/dev/usage-billing",
+      "balanceQueryMode": "NONE",
+      "balanceAmount": null,
+      "balanceCurrency": "CNY",
+      "balanceLowThreshold": null,
+      "enabled": true
+    },
+    {
+      "vendorCode": "mineru",
+      "channelCode": "mineru",
+      "channelLabel": null,
+      "channelIconAsset": null,
+      "accountName": "默认账户",
+      "accountRef": "mineru::默认账户",
+      "baseUrl": "https://mineru.net",
+      "apiKey": "eyJ0eXBlIjoiSldUIiwiYWxnIjoiSFM1MTIifQ.eyJqdGkiOiI2MDQwMDc3NCIsInJvbCI6IlJPTEVfUkVHSVNURVIiLCJpc3MiOiJPcGVuWExhYiIsImlhdCI6MTc3OTc4MzU3NiwiY2xpZW50SWQiOiJsa3pkeDU3bnZ5MjJqa3BxOXgydyIsInBob25lIjoiMTc3MjgwMzMwMTkiLCJvcGVuSWQiOm51bGwsInV1aWQiOiJiYTk2NThlOS1iZjMxLTRkZDgtOGViZC1kYTk3ZmI4MWQ0Y2MiLCJlbWFpbCI6IiIsImV4cCI6MTc4NzU1OTU3Nn0.DQgSxtO9XUWntS0TF2nFAEmqYeuRj5NWowp54mgPbi28CvNXR7a4CtA7whZuQ0R43yH9hUUD_fa5krr-NupxRg",
+      "extraAuthJson": "",
+      "secretsRedacted": false,
+      "consoleUrl": "https://mineru.net/apiManage/token",
+      "balanceUrl": "https://mineru.net/apiManage/token",
+      "balanceQueryMode": "MANUAL",
+      "balanceAmount": null,
+      "balanceCurrency": "CNY",
+      "balanceLowThreshold": null,
+      "enabled": true
+    },
+    {
+      "vendorCode": "minimax",
+      "channelCode": "minimax",
+      "channelLabel": null,
+      "channelIconAsset": null,
+      "accountName": "默认账户",
+      "accountRef": "minimax::默认账户",
+      "baseUrl": "https://api.minimaxi.com",
+      "apiKey": "sk-api-Df_Jdnygxw5mQOCxPjmcm7NVYyKUbLLpQSoRg68tq_CrBjlMEulqps5Qpx_ROo6n98T5CYwnefPIZxmaPuFpDx4msen5U0-Mltb1TchtCmo9C71rivXrFXw",
+      "extraAuthJson": "",
+      "secretsRedacted": false,
+      "consoleUrl": "https://platform.minimaxi.com/user-center/basic-information/interface-key",
+      "balanceUrl": "https://platform.minimaxi.com/user-center/payment/balance",
+      "balanceQueryMode": "REST_API",
+      "balanceAmount": null,
+      "balanceCurrency": "CNY",
+      "balanceLowThreshold": null,
+      "enabled": true
+    },
+    {
+      "vendorCode": "moonshot",
+      "channelCode": "moonshot",
+      "channelLabel": null,
+      "channelIconAsset": null,
+      "accountName": "默认账户",
+      "accountRef": "moonshot::默认账户",
+      "baseUrl": "https://api.moonshot.cn/v1",
+      "apiKey": "sk-CZICTgX2GDVZ27B9pZpYe6CqdT4EjblOxo3eAIbP8mDQx7XY",
+      "extraAuthJson": "{\"pricingVerifiedAt\":\"2026-05-25\",\"costAffectingParams\":\"model;messages;max_completion_tokens;thinking\"}",
+      "secretsRedacted": false,
+      "consoleUrl": "https://platform.moonshot.cn/console/api-keys",
+      "balanceUrl": "https://platform.moonshot.cn/console/billing",
+      "balanceQueryMode": "MANUAL",
+      "balanceAmount": null,
+      "balanceCurrency": "CNY",
+      "balanceLowThreshold": null,
+      "enabled": true
+    },
+    {
+      "vendorCode": "openai",
+      "accountName": "默认账户",
+      "accountRef": "openai::默认账户",
+      "baseUrl": "https://api.openai.com/v1",
+      "enabled": true,
+      "secretsRedacted": false
+    },
+    {
+      "vendorCode": "openai_gateway",
+      "channelCode": "openai_gateway",
+      "channelLabel": null,
+      "channelIconAsset": null,
+      "accountName": "oFox 网关",
+      "accountRef": "openai_gateway::ofox",
+      "baseUrl": "https://api.ofox.ai/v1",
+      "apiKey": "sk-of-XJdvfPEUgOEWKDiyctyNFmFHIKIVLBOUlwPoMZTyMyOimpJRAqUePRKgBJADjQpg",
+      "extraAuthJson": "{\"readTimeoutSeconds\":300,\"sslEofRetries\":1,\"connectTimeoutSeconds\":119}",
+      "secretsRedacted": false,
+      "consoleUrl": "https://app.ofox.ai/manage/api-keys",
+      "balanceUrl": "https://app.ofox.ai/manage/wallet",
+      "balanceQueryMode": "REST_API",
+      "balanceAmount": 10,
+      "balanceCurrency": "CNY",
+      "balanceLowThreshold": null,
+      "enabled": true
+    },
+    {
+      "vendorCode": "openai_gateway",
+      "channelCode": "openai_gateway",
+      "channelLabel": null,
+      "channelIconAsset": null,
+      "accountName": "时云网关",
+      "accountRef": "openai_gateway::shiyun",
+      "baseUrl": "https://shiyunapi.com/v1",
+      "apiKey": "123456",
+      "extraAuthJson": "{\"readTimeoutSeconds\":300,\"sslEofRetries\":1}",
+      "secretsRedacted": false,
+      "consoleUrl": "https://shiyunapi.com/console/token",
+      "balanceUrl": "https://shiyunapi.com/console/topup",
+      "balanceQueryMode": "REST_API",
+      "balanceAmount": null,
+      "balanceCurrency": "CNY",
+      "balanceLowThreshold": null,
+      "enabled": true
+    },
+    {
+      "vendorCode": "qwen",
+      "channelCode": "openai",
+      "channelLabel": null,
+      "channelIconAsset": null,
+      "accountName": "默认账户",
+      "accountRef": "qwen::默认账户",
+      "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "apiKey": "",
+      "extraAuthJson": "{\"pricingVerifiedAt\":\"2026-05-25\",\"pricingNote\":\"≤32K档\",\"costAffectingParams\":\"model;输入分档;messages;max_tokens;enable_thinking\"}",
+      "secretsRedacted": false,
+      "consoleUrl": "https://bailian.console.aliyun.com/?tab=model#/api-key",
+      "balanceUrl": "https://usercenter2.aliyun.com/home",
+      "balanceQueryMode": "REST_API",
+      "balanceAmount": null,
+      "balanceCurrency": "CNY",
+      "balanceLowThreshold": null,
+      "enabled": true
+    },
+    {
+      "vendorCode": "siliconflow",
+      "channelCode": "siliconflow",
+      "channelLabel": null,
+      "channelIconAsset": null,
+      "accountName": "默认账户",
+      "accountRef": "siliconflow::默认账户",
+      "baseUrl": "https://api.siliconflow.cn",
+      "apiKey": "replace-with-siliconflow-api-key",
+      "extraAuthJson": "",
+      "secretsRedacted": false,
+      "consoleUrl": null,
+      "balanceUrl": null,
+      "balanceQueryMode": "REST_API",
+      "balanceAmount": null,
+      "balanceCurrency": "CNY",
+      "balanceLowThreshold": null,
+      "enabled": true
+    },
+    {
+      "vendorCode": "suno_music",
+      "channelCode": "suno_music",
+      "channelLabel": null,
+      "channelIconAsset": null,
+      "accountName": "账户1",
+      "accountRef": "suno_music::账户1",
+      "baseUrl": "https://api.sunoapi.org",
+      "apiKey": "bf340cff021a76f1435134a985bb18a5",
+      "extraAuthJson": "",
+      "secretsRedacted": false,
+      "consoleUrl": "https://sunoapi.org/zh-CN/api-key",
+      "balanceUrl": "https://sunoapi.org/zh-CN/billing",
+      "balanceQueryMode": "MANUAL",
+      "balanceAmount": 50,
+      "balanceCurrency": "CNY",
+      "balanceLowThreshold": null,
+      "enabled": true
+    },
+    {
+      "vendorCode": "volcengine",
+      "channelCode": "volcengine",
+      "channelLabel": null,
+      "channelIconAsset": null,
+      "accountName": "默认账户",
+      "accountRef": "volcengine::默认账户",
+      "baseUrl": "https://ark.cn-beijing.volces.com",
+      "apiKey": "123456",
+      "extraAuthJson": "",
+      "secretsRedacted": false,
+      "consoleUrl": "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey?apikey=%7B%7D",
+      "balanceUrl": null,
+      "balanceQueryMode": "NONE",
+      "balanceAmount": null,
+      "balanceCurrency": "CNY",
+      "balanceLowThreshold": null,
+      "enabled": true
+    },
+    {
+      "vendorCode": "volcengine",
+      "channelCode": "volcengine",
+      "channelLabel": null,
+      "channelIconAsset": null,
+      "accountName": "API v3 兼容模式",
+      "accountRef": "volcengine::api-v3",
+      "baseUrl": "https://ark.cn-beijing.volces.com/api/v3",
+      "apiKey": "ark-b7758026-1966-4dd0-a95a-58e1efba51e0-03da8",
+      "extraAuthJson": "{\"pricingVerifiedAt\":\"2026-05-25\",\"costAffectingParams\":\"model;messages;reasoning_effort;multimodal\"}",
+      "secretsRedacted": false,
+      "consoleUrl": "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey",
+      "balanceUrl": "https://console.volcengine.com/finance/overview",
+      "balanceQueryMode": "NONE",
+      "balanceAmount": null,
+      "balanceCurrency": "CNY",
+      "balanceLowThreshold": null,
+      "enabled": true
+    },
+    {
+      "vendorCode": "zhipu",
+      "channelCode": "openai",
+      "channelLabel": null,
+      "channelIconAsset": null,
+      "accountName": "默认账户",
+      "accountRef": "zhipu::默认账户",
+      "baseUrl": "https://open.bigmodel.cn/api/paas/v4",
+      "apiKey": "f5fb82ac6c804c889211fac454ab1aa9.fkdbD6D14GcQfgLE",
+      "extraAuthJson": "{\"pricingVerifiedAt\":\"2026-05-25\",\"costAffectingParams\":\"model;messages;max_tokens;thinking.type;tools\"}",
+      "secretsRedacted": false,
+      "consoleUrl": "https://open.bigmodel.cn/usercenter/apikeys",
+      "balanceUrl": "https://open.bigmodel.cn/usercenter/billing",
+      "balanceQueryMode": "REST_API",
+      "balanceAmount": null,
+      "balanceCurrency": "CNY",
+      "balanceLowThreshold": null,
+      "enabled": true
     }
   ]
 }

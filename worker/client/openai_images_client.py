@@ -2,6 +2,7 @@ import json
 import logging
 import math
 import mimetypes
+import os
 import socket
 import time
 from io import BytesIO
@@ -44,7 +45,7 @@ class OpenAIImagesClient:
         self.ssl_eof_retries = self._resolve_ssl_eof_retries()
         self.last_usage: dict[str, int] = {}
         self.session = requests.Session()
-        self.session.trust_env = _as_bool(self.extra_auth.get("trustEnv"), False)
+        self._configure_session_proxy()
         # Do not set Content-Type on the session: multipart edits need requests to
         # inject multipart/form-data; a session-level application/json leaks through.
         self.session.headers.update(
@@ -53,9 +54,20 @@ class OpenAIImagesClient:
                 "Connection": "close",
             }
         )
+
+    def _configure_session_proxy(self) -> None:
         proxy_url = str(self.extra_auth.get("proxyUrl") or "").strip()
         if proxy_url:
             self.session.proxies.update({"http": proxy_url, "https": proxy_url})
+            return
+        if "trustEnv" in self.extra_auth:
+            self.session.trust_env = _as_bool(self.extra_auth.get("trustEnv"), False)
+            return
+        env_proxy = (os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY") or "").strip()
+        if env_proxy:
+            self.session.trust_env = True
+            return
+        self.session.trust_env = False
 
     def generate_images(
         self,

@@ -150,7 +150,9 @@ public class ModelCapabilityService {
         AgentModelConfig executionConfig = credentialResolver.resolveForExecution(modelConfig);
         if (requiresApiKey(requiredCapability, executionConfig) && !hasExecutableSecret(executionConfig.getApiKey())) {
             throw new BusinessException(ErrorCode.PARAM_ERROR,
-                    "bound model config has no API key: " + displayModelName(modelConfig));
+                    "bound model config has no API key: " + displayModelName(modelConfig)
+                            + ". 请在管理端「统一 API 设置」为对应厂商账户填入 API Key，"
+                            + "或在 .env 配置 SHIYUN_API_KEY / OFOX_API_KEY 后重启 backend");
         }
     }
 

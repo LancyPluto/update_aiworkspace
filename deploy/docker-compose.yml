@@ -90,6 +90,8 @@ services:
     image: deploy-backend
     container_name: ai-supermarket-backend
     restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     env_file:
       - ../.env
     depends_on:
@@ -146,6 +148,11 @@ services:
       - ../WXcert:/app/WXcert:ro
       - ../docs:/docs:ro
       - ../data/generated-media:/data/generated-media
+    dns:
+      # Keep backend model connectivity tests away from poisoned/default container DNS.
+      - 223.5.5.5
+      - 1.1.1.1
+      - 8.8.8.8
 
   admin-frontend:
     image: ${DOCKER_REGISTRY:-docker.1ms.run/}node:22-alpine
@@ -181,13 +188,12 @@ services:
       - ../.env
     environment:
       APP_PRODUCTION_MODE: ${APP_PRODUCTION_MODE:-true}
-      # 留空：浏览器请求走当前页面的 /api，由 Vite 代理到后端（避免 localhost vs 127.0.0.1 跨域导致 Failed to fetch）
+      # 留空：浏览器请求走当前页面的 /api，由 nginx 反代到后端
       VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
       VITE_ALIYUN_CAPTCHA_ENABLED: ${VITE_ALIYUN_CAPTCHA_ENABLED:-false}
       VITE_ALIYUN_CAPTCHA_REGION: ${VITE_ALIYUN_CAPTCHA_REGION:-cn}
       VITE_ALIYUN_CAPTCHA_PREFIX: ${VITE_ALIYUN_CAPTCHA_PREFIX:-}
       VITE_ALIYUN_CAPTCHA_SCENE_ID: ${VITE_ALIYUN_CAPTCHA_SCENE_ID:-}
-      # 本机 mvn 启动后端时，容器内代理需用 host.docker.internal，不能用已停掉的 backend 服务名
       VITE_DEV_PROXY_TARGET: ${VITE_DEV_PROXY_TARGET:-http://backend:8080}
       CHOKIDAR_USEPOLLING: "true"
       NPM_CONFIG_REGISTRY: https://registry.npmmirror.com
@@ -195,10 +201,21 @@ services:
       - "127.0.0.1:${USER_WEB_PORT:-5173}:5173"
     volumes:
       - ../user-web:/app
-      - /app/node_modules     
+      - /app/node_modules
+      - user_web_dist:/dist-out
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "if [ \"$$APP_PRODUCTION_MODE\" = 'true' ]; then test -f /dist-out/index.html; else wget -q -O- http://127.0.0.1:5173/ >/dev/null 2>&1; fi",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 36
+      start_period: 180s
     command: >-
       sh -c "npm config set registry https://registry.npmmirror.com && npm install &&
-      if [ \"$${APP_PRODUCTION_MODE}\" = 'true' ]; then npm run build && npm run preview -- --host 0.0.0.0 --port 5173;
+      if [ \"$${APP_PRODUCTION_MODE}\" = 'true' ]; then npm run build && cp -r dist/. /dist-out/ && tail -f /dev/null;
       else npm run dev -- --host 0.0.0.0 --port 5173; fi"
 
   worker:
@@ -211,6 +228,8 @@ services:
     container_name: ai-supermarket-worker
     working_dir: /app
     restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     env_file:
       - ../.env
     depends_on:
@@ -263,6 +282,8 @@ services:
     container_name: ai-supermarket-agent-service
     working_dir: /app
     restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     env_file:
       - ../.env
     depends_on:
@@ -299,3 +320,4 @@ volumes:
   rabbitmq_data:
   maven_cache:
   admin_frontend_next:
+  user_web_dist:

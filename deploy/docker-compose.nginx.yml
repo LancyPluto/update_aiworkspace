@@ -4,14 +4,22 @@ services:
     container_name: ai-supermarket-nginx
     restart: unless-stopped
     depends_on:
-      - backend
-      - user-web
-      - admin-frontend
+      backend:
+        condition: service_started
+      user-web:
+        condition: service_healthy
+      admin-frontend:
+        condition: service_started
     ports:
       # 生产默认 80，便于 http://<公网IP>/ 直接访问；本地若 80 被占用可设 NGINX_HTTP_PORT=8088
       - "${NGINX_HTTP_PORT:-80}:80"
+      - "${NGINX_HTTPS_PORT:-443}:443"
     volumes:
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/snippets:/etc/nginx/conf.d/snippets:ro
+      - ./nginx/wlcloudai.com.pem:/etc/nginx/certs/wlcloudai.com.pem:ro
+      - ./nginx/wlcloudai.com.key:/etc/nginx/certs/wlcloudai.com.key:ro
+      - user_web_dist:/usr/share/nginx/user-web:ro
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1/healthz"]
       interval: 15s

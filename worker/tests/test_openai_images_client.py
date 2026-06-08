@@ -36,6 +36,16 @@ def test_openai_images_allows_explicit_trust_env_override():
     assert client.timeout == (10, 900)
 
 
+def test_openai_images_uses_http_proxy_env_when_configured(monkeypatch):
+    monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:7890")
+    client = OpenAIImagesClient(
+        base_url="https://api.ofox.ai/v1",
+        api_key="test-key",
+    )
+
+    assert client.session.trust_env is True
+
+
 def test_openai_images_multipart_request_uses_form_data_content_type() -> None:
     client = OpenAIImagesClient(base_url="https://api.ofox.ai/v1", api_key="fake-key")
     multipart = [

@@ -166,7 +166,17 @@ public class AuthInterceptor implements HandlerInterceptor, Filter {
                 || ("GET".equalsIgnoreCase(method) && path.equals("/api/v1/community/posts"))
                 || ("GET".equalsIgnoreCase(method) && path.matches("/api/v1/community/posts/\\d+"))
                 || ("POST".equalsIgnoreCase(method) && path.equals("/api/v1/community/events"))
-                || path.equals("/api/admin/v1/auth/login");
+                || isAdminAuthLoginPath(path);
+    }
+
+    private boolean isAdminAuthLoginPath(String path) {
+        if (path == null || path.isBlank()) {
+            return false;
+        }
+        String normalized = path.endsWith("/") && path.length() > 1
+                ? path.substring(0, path.length() - 1)
+                : path;
+        return "/api/admin/v1/auth/login".equals(normalized);
     }
 
     private boolean requiresAdmin(String path) {

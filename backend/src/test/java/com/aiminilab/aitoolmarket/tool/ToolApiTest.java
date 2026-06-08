@@ -361,6 +361,14 @@ class ToolApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.list[?(@.toolCode=='per_call_credit_display_tool')].estimatedCreditCost")
                         .value(hasItem(4)));
+
+        mockMvc.perform(get("/api/admin/v1/tools")
+                        .queryParam("pageNo", "1")
+                        .queryParam("pageSize", "100")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[?(@.toolCode=='per_call_credit_display_tool')].estimatedCreditCost")
+                        .value(hasItem(4)));
     }
 
     private String loginAdmin() throws Exception {

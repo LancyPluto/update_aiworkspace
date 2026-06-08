@@ -161,6 +161,9 @@ public class UnifiedApiOverviewServiceImpl implements UnifiedApiOverviewService 
                 account.getAccountName(),
                 null
         );
+        if ("openai".equalsIgnoreCase(inferred)) {
+            return "openai";
+        }
         if (!inferred.isBlank() && !"openai".equalsIgnoreCase(inferred) && !"other".equalsIgnoreCase(inferred)) {
             return inferred;
         }
@@ -170,6 +173,9 @@ public class UnifiedApiOverviewServiceImpl implements UnifiedApiOverviewService 
     private static String canonicalVendorCode(String vendorCode) {
         if ("openai_gateway".equalsIgnoreCase(vendorCode)) {
             return "openai";
+        }
+        if ("suno_music".equalsIgnoreCase(vendorCode)) {
+            return "suno";
         }
         return vendorCode;
     }

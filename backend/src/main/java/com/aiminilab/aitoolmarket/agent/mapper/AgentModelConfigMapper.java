@@ -204,4 +204,14 @@ public interface AgentModelConfigMapper extends BaseMapper<AgentModelConfig> {
             WHERE id = #{config.id}
             """)
     void updateConnectivityTest(@Param("config") AgentModelConfig config);
+
+    @Update("""
+            UPDATE agent_model_configs
+            SET enabled = 1,
+                updated_at = NOW()
+            WHERE vendor_account_id = #{vendorAccountId}
+              AND COALESCE(is_deleted, 0) = 0
+              AND COALESCE(enabled, 0) = 0
+            """)
+    int enableByVendorAccountId(@Param("vendorAccountId") Long vendorAccountId);
 }

@@ -6,7 +6,7 @@ password = os.environ.get("DEPLOY_PASSWORD", "")
 host = os.environ.get("DEPLOY_HOST", "8.134.93.203")
 ssh = paramiko.SSHClient()
 ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-ssh.connect(host, username="root", password=password, timeout=30)
+ssh.connect(host, username="root", password=password, timeout=30, allow_agent=False, look_for_keys=False)
 _, out, _ = ssh.exec_command(
     "pgrep -a docker 2>/dev/null | head -3; "
     "pgrep -a 'compose|buildx' 2>/dev/null | head -5; "
