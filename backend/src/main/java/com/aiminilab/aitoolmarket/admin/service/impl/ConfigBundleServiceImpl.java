@@ -412,9 +412,9 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                     vendorCode,
                     accountName,
                     item.baseUrl(),
-                    secretsRedacted ? "" : nullToEmpty(item.apiKey()),
+                    secretsRedacted ? null : nullToEmpty(item.apiKey()),
                     null,
-                    secretsRedacted ? "" : nullToEmpty(item.extraAuthJson()),
+                    secretsRedacted ? null : nullToEmpty(item.extraAuthJson()),
                     null,
                     item.consoleUrl(),
                     item.balanceUrl(),
@@ -424,11 +424,12 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                     item.balanceLowThreshold(),
                     item.enabled()
             );
-            ModelVendorAccount existing = vendorAccountMapper.findActiveByVendorCodeAndAccountName(vendorCode, accountName);
+            ModelVendorAccount existing = resolveExistingVendorAccount(vendorCode, accountName, item.baseUrl(), ref, warnings);
             ModelVendorAccountResponse saved = existing == null
                     ? modelVendorAccountService.adminCreate(request)
                     : modelVendorAccountService.adminUpdate(existing.getId(), request);
             accountIdsByRef.put(ref, saved.id());
+            removeDuplicateVendorAccounts(vendorCode, item.baseUrl(), saved.id(), warnings);
         }
         return accountIdsByRef;
     }
@@ -460,34 +461,8 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                             + ": vendorAccountRef not found -> " + config.vendorAccountRef());
                 }
             }
-            AgentModelConfigRequest request = new AgentModelConfigRequest(
-                    vendorAccountId,
-                    config.displayName(),
-                    config.configCode(),
-                    config.provider(),
-                    config.modelName(),
-                    config.baseUrl(),
-                    secretsRedacted ? "" : nullToEmpty(config.apiKey()),
-                    null,
-                    secretsRedacted ? "" : nullToEmpty(config.extraAuthJson()),
-                    config.minimaxGroupId(),
-                    config.consoleUrl(),
-                    config.balanceUrl(),
-                    config.docsUrl(),
-                    config.timeoutSeconds(),
-                    config.connectTimeoutSeconds(),
-                    config.readTimeoutSeconds(),
-                    config.inputTokenPricePer1k(),
-                    config.outputTokenPricePer1k(),
-                    config.inputTokenPricePer1m(),
-                    config.outputTokenPricePer1m(),
-                    config.billingUnit(),
-                    config.unitPrice(),
-                    config.enabled(),
-                    config.agentEnabled(),
-                    config.isDefault(),
-                    config.capabilities()
-            );
+            boolean forceDisabled = shouldDisableImportedModel(config, vendorAccountId, secretsRedacted, warnings);
+            AgentModelConfigRequest request = modelConfigRequest(config, vendorAccountId, secretsRedacted, forceDisabled);
             AgentModelConfig existing = agentModelConfigMapper.findActiveByConfigCode(config.configCode());
             if (existing == null) {
                 Optional<AgentModelConfigResponse> equivalent = findEquivalentModelConfig(config);
@@ -506,6 +481,94 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
             count++;
         }
         return new ImportModelResult(count, modelIdsByImportedCode);
+    }
+
+    private AgentModelConfigRequest modelConfigRequest(ConfigBundleDto.ModelConfig config,
+                                                       Long vendorAccountId,
+                                                       boolean secretsRedacted,
+                                                       boolean forceDisabled) {
+        return new AgentModelConfigRequest(
+                vendorAccountId,
+                config.displayName(),
+                config.configCode(),
+                config.provider(),
+                config.modelName(),
+                config.baseUrl(),
+                secretsRedacted ? null : nullToEmpty(config.apiKey()),
+                null,
+                secretsRedacted ? null : nullToEmpty(config.extraAuthJson()),
+                config.minimaxGroupId(),
+                config.consoleUrl(),
+                config.balanceUrl(),
+                config.docsUrl(),
+                config.timeoutSeconds(),
+                config.connectTimeoutSeconds(),
+                config.readTimeoutSeconds(),
+                config.inputTokenPricePer1k(),
+                config.outputTokenPricePer1k(),
+                config.inputTokenPricePer1m(),
+                config.outputTokenPricePer1m(),
+                config.billingUnit(),
+                config.unitPrice(),
+                forceDisabled ? false : config.enabled(),
+                forceDisabled ? false : config.agentEnabled(),
+                config.isDefault(),
+                config.capabilities()
+        );
+    }
+
+    private boolean shouldDisableImportedModel(ConfigBundleDto.ModelConfig config,
+                                               Long vendorAccountId,
+                                               boolean secretsRedacted,
+                                               List<String> warnings) {
+        boolean requestedEnabled = config.enabled() == null || config.enabled()
+                || config.agentEnabled() == null || config.agentEnabled();
+        if (!requestedEnabled) {
+            return false;
+        }
+        if (vendorAccountId == null) {
+            boolean hasInlineCredential = !secretsRedacted && (hasSecret(config.apiKey()) || hasSecret(config.extraAuthJson()));
+            if (!hasInlineCredential && !"mock".equalsIgnoreCase(config.provider())) {
+                warnings.add("Imported model config " + config.configCode()
+                        + " as disabled: credential is not configured");
+                return true;
+            }
+            return false;
+        }
+        ModelVendorAccount account = vendorAccountMapper.findActiveById(vendorAccountId);
+        if (account == null) {
+            return false;
+        }
+        if (Boolean.FALSE.equals(account.getEnabled())) {
+            warnings.add("Imported model config " + config.configCode()
+                    + " as disabled: vendor account is disabled");
+            return true;
+        }
+        boolean acceptOnly = modelProviderRegistry.findByCode(config.provider())
+                .map(provider -> "accept_only".equalsIgnoreCase(provider.testStrategy()))
+                .orElse(false);
+        if (acceptOnly) {
+            boolean hasCredential = hasSecret(account.getApiKey()) || hasSecret(account.getExtraAuthJson());
+            if (!hasCredential) {
+                warnings.add("Imported model config " + config.configCode()
+                        + " as disabled: vendor account credential is not configured");
+            }
+            return !hasCredential;
+        }
+        String health = account.getHealthStatus() == null ? "" : account.getHealthStatus().trim();
+        if (!"OK".equalsIgnoreCase(health)) {
+            warnings.add("Imported model config " + config.configCode()
+                    + " keeps enabled=true but vendor account connectivity is not OK yet; run account test in admin");
+        }
+        return false;
+    }
+
+    private boolean hasSecret(String value) {
+        if (value == null || value.isBlank()) {
+            return false;
+        }
+        String normalized = value.trim().toLowerCase(Locale.ROOT);
+        return !normalized.startsWith("replace-with-") && !normalized.startsWith("sk-xxx");
     }
 
     private int importCategories(List<ConfigBundleDto.Category> categories) {
@@ -551,6 +614,7 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
             warnings.add("Tool " + item.toolCode() + " imported without model binding; modelConfigCode not found: " + item.modelConfigCode());
         }
 
+        boolean restoreDisabledModelBinding = isDisabledModelConfig(modelConfigId);
         UpsertToolRequest request = new UpsertToolRequest(
                 item.toolCode(),
                 item.toolName(),
@@ -562,7 +626,7 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                 item.outputModality(),
                 item.configNote(),
                 item.estimatedCreditCost() == null ? 0 : item.estimatedCreditCost(),
-                modelConfigId,
+                restoreDisabledModelBinding ? null : modelConfigId,
                 item.executionHandler(),
                 null
         );
@@ -570,6 +634,11 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
         ToolSummaryResponse saved = existing == null
                 ? toolService.createTool(request, operatorId)
                 : toolService.updateTool(existing.getId(), request, operatorId);
+        if (restoreDisabledModelBinding) {
+            toolMapper.updateToolModelConfig(saved.id(), modelConfigId, operatorId);
+            warnings.add("Restored disabled model binding for tool " + item.toolCode()
+                    + "; enable and test the model before runtime use");
+        }
         counter.tools++;
         if (item.agentEnabled() != null) {
             upsertAgentToolAccess(saved, item.agentEnabled());
@@ -605,6 +674,14 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
         } else if ("OFFLINE".equals(status)) {
             toolService.offlineTool(saved.id(), operatorId);
         }
+    }
+
+    private boolean isDisabledModelConfig(Long modelConfigId) {
+        if (modelConfigId == null) {
+            return false;
+        }
+        AgentModelConfig config = agentModelConfigMapper.findActiveById(modelConfigId);
+        return config != null && Boolean.FALSE.equals(config.getEnabled());
     }
 
     private void upsertAgentToolAccess(ToolSummaryResponse tool, Boolean agentEnabled) {
@@ -730,9 +807,20 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
     }
 
     private Optional<AgentModelConfigResponse> findEquivalentModelConfig(ConfigBundleDto.ModelConfig imported) {
+        if (!isLegacyGeneratedModelConfigCode(imported.configCode())) {
+            return Optional.empty();
+        }
         return agentModelConfigService.adminList().stream()
                 .filter(existing -> sameModelIdentity(existing, imported))
                 .findFirst();
+    }
+
+    private boolean isLegacyGeneratedModelConfigCode(String configCode) {
+        if (isBlank(configCode)) {
+            return true;
+        }
+        String normalized = configCode.trim().toLowerCase(Locale.ROOT);
+        return normalized.matches("\\d+") || normalized.matches("model_\\d+");
     }
 
     private boolean sameModelIdentity(AgentModelConfigResponse existing, ConfigBundleDto.ModelConfig imported) {
@@ -765,8 +853,75 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
         return list == null ? List.of() : list;
     }
 
+    private ModelVendorAccount resolveExistingVendorAccount(String vendorCode,
+                                                            String accountName,
+                                                            String baseUrl,
+                                                            String ref,
+                                                            List<String> warnings) {
+        ModelVendorAccount existing = vendorAccountMapper.findActiveByVendorCodeAndAccountName(vendorCode, accountName);
+        if (existing != null || isBlank(baseUrl)) {
+            return existing;
+        }
+        String normalizedBaseUrl = normalizeVendorBaseUrl(baseUrl);
+        ModelVendorAccount matchedByBaseUrl = vendorAccountMapper.findActiveByVendorCode(vendorCode).stream()
+                .filter(account -> normalizedBaseUrl.equals(normalizeVendorBaseUrl(account.getBaseUrl())))
+                .max((left, right) -> {
+                    int leftModels = vendorAccountMapper.countActiveModelsByAccountId(left.getId());
+                    int rightModels = vendorAccountMapper.countActiveModelsByAccountId(right.getId());
+                    if (leftModels != rightModels) {
+                        return Integer.compare(leftModels, rightModels);
+                    }
+                    return Long.compare(left.getId(), right.getId());
+                })
+                .orElse(null);
+        if (matchedByBaseUrl != null) {
+            warnings.add("Merged vendor account import ref " + ref
+                    + " into existing account #" + matchedByBaseUrl.getId()
+                    + " (" + matchedByBaseUrl.getAccountName() + ") by matching baseUrl");
+        }
+        return matchedByBaseUrl;
+    }
+
+    private void removeDuplicateVendorAccounts(String vendorCode,
+                                               String baseUrl,
+                                               Long keptAccountId,
+                                               List<String> warnings) {
+        if (isBlank(baseUrl) || keptAccountId == null) {
+            return;
+        }
+        String normalizedBaseUrl = normalizeVendorBaseUrl(baseUrl);
+        for (ModelVendorAccount account : vendorAccountMapper.findActiveByVendorCode(vendorCode)) {
+            if (keptAccountId.equals(account.getId())) {
+                continue;
+            }
+            if (!normalizedBaseUrl.equals(normalizeVendorBaseUrl(account.getBaseUrl()))) {
+                continue;
+            }
+            int modelCount = vendorAccountMapper.countActiveModelsByAccountId(account.getId());
+            if (modelCount > 0) {
+                warnings.add("Kept duplicate vendor account #" + account.getId()
+                        + " (" + account.getAccountName() + ") because " + modelCount + " model(s) still reference it");
+                continue;
+            }
+            vendorAccountMapper.softDelete(account.getId());
+            warnings.add("Removed duplicate vendor account #" + account.getId()
+                    + " (" + account.getAccountName() + ") with same baseUrl as account #" + keptAccountId);
+        }
+    }
+
     private static String accountRef(String vendorCode, String accountName) {
         return vendorCode.trim().toLowerCase(Locale.ROOT) + "::" + accountName.trim();
+    }
+
+    private static String normalizeVendorBaseUrl(String baseUrl) {
+        if (baseUrl == null || baseUrl.isBlank()) {
+            return "";
+        }
+        String normalized = baseUrl.trim().toLowerCase(Locale.ROOT);
+        while (normalized.endsWith("/")) {
+            normalized = normalized.substring(0, normalized.length() - 1);
+        }
+        return normalized;
     }
 
     private static final class ImportCounter {

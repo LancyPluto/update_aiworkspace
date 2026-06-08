@@ -78,6 +78,7 @@ class TaskCreditEstimateServiceTest {
     void estimateForTool_resolvesModelConfig() {
         AiTool tool = new AiTool();
         tool.setEstimatedCreditCost(1);
+        tool.setModelConfigId(10L);
 
         AgentModelConfig modelConfig = new AgentModelConfig();
         modelConfig.setBillingUnit("PER_CALL");

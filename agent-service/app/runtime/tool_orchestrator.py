@@ -7,15 +7,14 @@ from app.core.budget_guard import BudgetState, BudgetGuard
 from app.core.schemas import RunContext, ToolDescriptor
 from app.core.user_attachment_priority import apply_user_selected_attachment_priority
 from app.tools.backend_tool import BackendToolBridge
-from app.tools.task_dispatch_credit import assert_task_dispatch_credits
 
 
 class ToolOrchestrator:
     """Orchestrates local guard checks before delegating real execution to the backend bridge.
 
-    Agent Service is not the credit source of truth. It only performs a local run budget guard
-    and a preflight dispatch check; actual task creation, credit freezing, settlement, and worker
-    execution must stay behind BackendToolBridge -> backend task APIs.
+    Agent Service is not the credit source of truth. It only guards local model/tool-call counts;
+    actual task credit validation, freezing, settlement, and worker execution must stay behind
+    BackendToolBridge -> backend task APIs.
     """
 
     def __init__(self, tool_bridge: BackendToolBridge, budget_guard_provider: Callable[[], BudgetGuard]) -> None:
@@ -35,8 +34,7 @@ class ToolOrchestrator:
         if missing:
             return {"missing_tool_arguments": missing}
 
-        assert_task_dispatch_credits(context, tool)
-        self._budget_guard_provider().reserve_tool_call(budget, tool.estimatedCreditCost)
+        self._budget_guard_provider().reserve_tool_call(budget, 0)
         return await self.tool_bridge.execute_with_args(context, tool, prepared)
 
     async def _prepare_execution_arguments(

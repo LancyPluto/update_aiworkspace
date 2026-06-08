@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { Suspense, useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { AdminLayout } from "@/components/admin/admin-layout"
 import { AdminHeader } from "@/components/admin/header"
@@ -319,7 +319,7 @@ function renderTaskOutput(task?: Task | null) {
   )
 }
 
-export default function TasksPage() {
+function TasksPageContent() {
   const searchParams = useSearchParams()
   const runIdParam = searchParams.get("runId")
   const mainTab = runIdParam && /^\d+$/.test(runIdParam) ? "agent-runs" : "tasks"
@@ -694,5 +694,13 @@ export default function TasksPage() {
         </Tabs>
       </div>
     </AdminLayout>
+  )
+}
+
+export default function TasksPage() {
+  return (
+    <Suspense fallback={null}>
+      <TasksPageContent />
+    </Suspense>
   )
 }

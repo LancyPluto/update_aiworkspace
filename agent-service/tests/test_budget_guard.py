@@ -114,7 +114,7 @@ class FakeProductToolModel(FakeModel):
 
 
 @pytest.mark.asyncio
-async def test_graph_fails_when_selected_tool_exceeds_credit_budget():
+async def test_graph_dispatches_selected_tool_when_tool_cost_exceeds_agent_run_budget():
     backend = FakeBackend()
     engine = DeepAgentsRuntimeEngine(backend, FakeModel())
     context = RunContext(
@@ -136,9 +136,10 @@ async def test_graph_fails_when_selected_tool_exceeds_credit_budget():
 
     await engine.run_confirmed_tool(context, "expensive_tool")
 
-    assert backend.tool_calls == []
-    assert backend.completed == []
-    assert backend.failed == [(7, "AGENT_RUN_BUDGET_EXCEEDED")]
+    assert (7, "expensive_tool", {"userRequest": "please use expensive_tool"}) in backend.tool_calls
+    assert ("task", "expensive_tool", {"userRequest": "please use expensive_tool"}, "agent-run-7-tool-call-99") in backend.tool_calls
+    assert backend.completed
+    assert backend.failed == []
 
 
 @pytest.mark.asyncio

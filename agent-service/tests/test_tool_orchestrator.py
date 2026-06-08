@@ -44,3 +44,25 @@ async def test_tool_orchestrator_missing_execution_arguments_does_not_dispatch_b
 
     assert result == {"missing_tool_arguments": ["accountId"]}
     assert bridge.executed is False
+
+
+@pytest.mark.asyncio
+async def test_tool_orchestrator_allows_tool_cost_above_agent_run_budget():
+    bridge = FakeBridge()
+    guard = BudgetGuard(max_tool_calls=1)
+    orchestrator = ToolOrchestrator(bridge, lambda: guard)  # type: ignore[arg-type]
+    context = RunContext(runId=1, sessionId=1, userId=1, message="生成一段音乐", creditBudget=20)
+    tool = ToolDescriptor(
+        toolCode="suno",
+        toolName="Suno",
+        estimatedCreditCost=55,
+        inputSchema={"type": "object", "properties": {}},
+    )
+    budget = BudgetState(credit_budget=20)
+
+    result = await orchestrator.execute_with_guard(context, tool, budget)
+
+    assert result == {"success": True}
+    assert bridge.executed is True
+    assert budget.tool_calls == 1
+    assert budget.consumed_credits == 0

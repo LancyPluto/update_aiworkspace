@@ -245,6 +245,7 @@ const taskMaterials = computed(() =>
         task,
         blocks,
         modality: inferTaskModality(task, blocks),
+        historyCardClass: historyCardClass(task, blocks),
       }
     }),
 )
@@ -828,6 +829,84 @@ function primaryBlock(blocks: ResultBlock[]): ResultBlock | null {
 function audioTracksForItem(blocks: ResultBlock[]) {
   const block = primaryBlock(blocks)
   return block?.type === "audio" ? resolveAudioTracks(block) : []
+}
+
+function historyCardClass(task: TaskDetail, blocks: ResultBlock[]): string {
+  if (task.status !== "SUCCESS") return "history-card-pending"
+  const block = primaryBlock(blocks)
+  if (block?.type !== "image") return "history-card-standard"
+  const ratio = inferImageAspectRatio(task)
+  if (ratio >= 1.45) return "history-card-wide"
+  if (ratio > 0 && ratio <= 0.78) return "history-card-tall"
+  return "history-card-standard"
+}
+
+function inferImageAspectRatio(task: TaskDetail): number {
+  const params = task.params || {}
+  const ratio = parseAspectRatio(findAspectRatioText(params))
+  if (ratio > 0) return ratio
+  const sizeRatio = parseSizeRatio(findSizeText(params))
+  if (sizeRatio > 0) return sizeRatio
+  return 1
+}
+
+function findAspectRatioText(value: unknown): string {
+  if (!value || typeof value !== "object") return ""
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findAspectRatioText(item)
+      if (found) return found
+    }
+    return ""
+  }
+  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
+    const normalizedKey = key.toLowerCase()
+    if (
+      typeof raw === "string" &&
+      (normalizedKey.includes("aspect") || normalizedKey.includes("ratio") || normalizedKey.includes("比例"))
+    ) {
+      return raw
+    }
+    const nested = findAspectRatioText(raw)
+    if (nested) return nested
+  }
+  return ""
+}
+
+function findSizeText(value: unknown): string {
+  if (!value || typeof value !== "object") return ""
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findSizeText(item)
+      if (found) return found
+    }
+    return ""
+  }
+  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
+    const normalizedKey = key.toLowerCase()
+    if (typeof raw === "string" && (normalizedKey.includes("size") || normalizedKey.includes("resolution"))) {
+      return raw
+    }
+    const nested = findSizeText(raw)
+    if (nested) return nested
+  }
+  return ""
+}
+
+function parseAspectRatio(value: string): number {
+  const match = value.match(/(\d+(?:\.\d+)?)\s*[:/]\s*(\d+(?:\.\d+)?)/)
+  if (!match) return 0
+  const width = Number(match[1])
+  const height = Number(match[2])
+  return width > 0 && height > 0 ? width / height : 0
+}
+
+function parseSizeRatio(value: string): number {
+  const match = value.match(/(\d{2,5})\s*[x×]\s*(\d{2,5})/i)
+  if (!match) return 0
+  const width = Number(match[1])
+  const height = Number(match[2])
+  return width > 0 && height > 0 ? width / height : 0
 }
 
 function audioTaskTitle(track?: DashboardAudioTrack | null): string {
@@ -1698,12 +1777,12 @@ onUnmounted(() => {
                     </div>
                   </section>
                 </div>
-                <div v-else class="content-masonry">
+                <div v-else class="dashboard-history-grid">
                   <article
                     v-for="item in taskMaterials"
                     :key="item.task.taskId"
                     class="group overflow-hidden rounded-2xl border border-white/8 bg-[#191919] shadow-[0_16px_36px_rgb(0_0_0_/_0.24)] transition hover:-translate-y-0.5 hover:border-primary/50"
-                    :class="item.task.status === 'SUCCESS' ? 'cursor-zoom-in' : ''"
+                    :class="[item.task.status === 'SUCCESS' ? 'cursor-zoom-in' : '', item.historyCardClass]"
                     @click="openAssetPreview(item)"
                   >
                     <div class="relative bg-muted">
@@ -2171,6 +2250,36 @@ onUnmounted(() => {
 .audio-wave-hit {
   min-height: 32px;
   cursor: pointer;
+}
+
+.dashboard-history-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  grid-auto-flow: dense;
+  align-items: start;
+  gap: clamp(16px, 2vw, 24px);
+}
+
+.dashboard-history-grid > .history-card-wide {
+  grid-column: span 2;
+}
+
+.dashboard-history-grid > .history-card-tall {
+  grid-row: span 2;
+}
+
+.dashboard-history-grid > .history-card-pending {
+  min-height: 300px;
+}
+
+@media (max-width: 900px) {
+  .dashboard-history-grid {
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  }
+
+  .dashboard-history-grid > .history-card-wide {
+    grid-column: span 1;
+  }
 }
 
 .audio-wave-bar {

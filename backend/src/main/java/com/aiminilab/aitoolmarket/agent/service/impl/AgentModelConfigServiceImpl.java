@@ -229,7 +229,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
 
     @Override
     public InternalAgentModelConfigResponse internalGet() {
-        AgentModelConfig config = findOrDefault();
+        AgentModelConfig config = findExecutableAgentDefault();
         return InternalAgentModelConfigResponse.from(credentialResolver.resolveForExecution(config));
     }
 
@@ -372,10 +372,8 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         String normalized = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
         String probeUrl = normalized.endsWith("/v1") ? normalized + "/models" : normalized + "/v1/models";
         try {
-            java.net.http.HttpClient client = java.net.http.HttpClient.newBuilder()
-                    .connectTimeout(java.time.Duration.ofSeconds(8))
-                    .followRedirects(java.net.http.HttpClient.Redirect.NORMAL)
-                    .build();
+            java.net.http.HttpClient client = com.aiminilab.aitoolmarket.agent.support.OutboundHttpClientFactory
+                    .create(java.time.Duration.ofSeconds(8));
             java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
                     .uri(java.net.URI.create(probeUrl))
                     .timeout(java.time.Duration.ofSeconds(12))
@@ -514,6 +512,18 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         if (config != null) {
             return config;
         }
+        return mockDefaultConfig();
+    }
+
+    private AgentModelConfig findExecutableAgentDefault() {
+        List<AgentModelConfig> executable = executableAgentConfigs();
+        if (!executable.isEmpty()) {
+            return executable.get(0);
+        }
+        return mockDefaultConfig();
+    }
+
+    private AgentModelConfig mockDefaultConfig() {
         LocalDateTime now = LocalDateTime.now();
         AgentModelConfig fallback = new AgentModelConfig();
         fallback.setId(0L);

@@ -6,7 +6,7 @@ password = os.environ.get("DEPLOY_PASSWORD", "")
 host = os.environ.get("DEPLOY_HOST", "8.134.93.203")
 ssh = paramiko.SSHClient()
 ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-ssh.connect(host, username="root", password=password, timeout=30)
+ssh.connect(host, username="root", password=password, timeout=30, allow_agent=False, look_for_keys=False)
 for cmd in [
     "cd /root/ai_tool_market/deploy && docker compose -f docker-compose.yml -f docker-compose.nginx.yml ps",
     "curl -s -o /dev/null -w 'nginx:%{http_code}\\n' http://127.0.0.1/",
