@@ -12,5 +12,5 @@ CREATE TABLE IF NOT EXISTS user_upload_assets (
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   KEY idx_user_upload_assets_user_kind (user_id, asset_kind, status, id),
-  UNIQUE KEY uk_user_upload_assets_url (user_id, url)
+  KEY idx_user_upload_assets_user_url (user_id, url(255))
 );
