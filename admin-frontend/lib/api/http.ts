@@ -91,6 +91,8 @@ interface RequestOptions {
   skipAuthRedirect?: boolean
 }
 
+type HttpMethod = NonNullable<RequestOptions['method']>
+
 function buildUrl(path: string, query?: RequestOptions['query']): string {
   const baseUrl = getBaseUrl()
   const url = `${baseUrl}${path}`
@@ -165,7 +167,10 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   }
 
   if (!response.ok || !payload) {
-    const message = payload?.message || `请求失败 (${response.status})`
+    let message = payload?.message || `请求失败 (${response.status})`
+    if (response.status === 403 && !payload?.message) {
+      message = '请求被拒绝（403）。请确认通过 https://wlcloudai.com/admin 访问，或使用管理员账号登录。'
+    }
     const code = payload?.code || 'HTTP_ERROR'
     throw new ApiError(message, code, response.status, payload?.traceId || payload?.requestId || null, payload)
   }
@@ -181,8 +186,8 @@ export const http = {
   get<T>(path: string, query?: RequestOptions['query']) {
     return request<T>(path, { method: 'GET', query })
   },
-  post<T>(path: string, body?: unknown) {
-    return request<T>(path, { method: 'POST', body })
+  post<T>(path: string, body?: unknown, options?: Omit<RequestOptions, 'method' | 'body'>) {
+    return request<T>(path, { method: 'POST', body, ...options })
   },
   put<T>(path: string, body?: unknown) {
     return request<T>(path, { method: 'PUT', body })
@@ -215,13 +220,16 @@ export const http = {
       // ignore JSON parse error
     }
 
-    if (!response.ok || !payload) {
-      const message = payload?.message || `请求失败 (${response.status})`
-      const code = payload?.code || 'HTTP_ERROR'
-      throw new ApiError(message, code, response.status, payload?.traceId || payload?.requestId || null, payload)
+  if (!response.ok || !payload) {
+    let message = payload?.message || `请求失败 (${response.status})`
+    if (response.status === 403 && !payload?.message) {
+      message = '请求被拒绝（403）。请确认通过 https://wlcloudai.com/admin 访问，或使用管理员账号登录。'
     }
+    const code = payload?.code || 'HTTP_ERROR'
+    throw new ApiError(message, code, response.status, payload?.traceId || payload?.requestId || null, payload)
+  }
 
-    if (payload.code && payload.code !== 'SUCCESS') {
+  if (payload.code && payload.code !== 'SUCCESS') {
       throw new ApiError(payload.message || payload.code, payload.code, response.status, payload.traceId || payload.requestId || null, payload)
     }
 

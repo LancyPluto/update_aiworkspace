@@ -118,6 +118,20 @@ function titleFor(event: AgentRunEvent) {
 
 function detailFor(event: AgentRunEvent) {
   const payload = parseEventJson(event.eventJson)
+  if (event.eventType === "memory.retrieved" || event.eventType === "memory.context_frozen") {
+    const count = typeof payload.count === "number" ? payload.count : Array.isArray(payload.items) ? payload.items.length : null
+    const source = typeof payload.source === "string" ? payload.source : typeof payload.view === "string" ? payload.view : ""
+    const itemTitles = Array.isArray(payload.items)
+      ? payload.items
+          .map((item) => typeof item === "object" && item !== null && "title" in item ? String((item as Record<string, unknown>).title || "") : "")
+          .filter(Boolean)
+          .slice(0, 3)
+      : []
+    const prefix = count == null ? "已读取长期记忆" : `已读取 ${count} 条长期记忆`
+    const sourceText = source ? `（${source}）` : ""
+    const titles = itemTitles.length > 0 ? `：${itemTitles.join("、")}` : ""
+    return `${prefix}${sourceText}${titles}`
+  }
   if (event.eventType === "intent.detected") {
     if (typeof payload.selectedToolCode === "string") return `候选工具：${payload.selectedToolCode}`
     if (Array.isArray(payload.candidateToolCodes) && payload.candidateToolCodes.length > 0) return `候选工具：${payload.candidateToolCodes.join("、")}`

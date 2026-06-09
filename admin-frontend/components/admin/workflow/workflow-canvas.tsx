@@ -879,6 +879,17 @@ function findSlotByHandle(node: WFNode | undefined, side: "inputSlots" | "output
   return getNodeSlots(node, side).find((slot) => slot.name === name)
 }
 
+function slotsCompatible(sourceType: string, targetType: string): boolean {
+  const source = sourceType.trim().toLowerCase()
+  const target = targetType.trim().toLowerCase()
+  if (!source || !target) return true
+  if (source === target) return true
+  if (source === "any" || target === "any") return true
+  if (source === "json" && (target === "text" || target === "json")) return true
+  if (source === "text" && target === "json") return true
+  return false
+}
+
 function canConnectBySlot(nodes: WFNode[], connection: Connection): boolean {
   if (!connection.source || !connection.target) return false
   const sourceNode = nodes.find((node) => node.id === connection.source)
@@ -887,7 +898,7 @@ function canConnectBySlot(nodes: WFNode[], connection: Connection): boolean {
   const targetSlot = findSlotByHandle(targetNode, "inputSlots", connection.targetHandle)
   if (!sourceSlot || !targetSlot) return true
 
-  return sourceSlot.type === targetSlot.type || sourceSlot.type === "any" || targetSlot.type === "any"
+  return slotsCompatible(sourceSlot.type, targetSlot.type)
 }
 
 function applyConnectionMapping(nodes: WFNode[], connection: Connection) {

@@ -18,6 +18,7 @@ VALUES
   ('siliconflow', 'SiliconFlow', 'siliconflow', 30, 1),
   ('deepseek', 'DeepSeek', 'deepseek', 40, 1),
   ('minimax', 'MiniMax', 'minimax', 50, 1),
+  ('suno', 'Suno', 'suno', 55, 1),
   ('openai', 'OpenAI', 'openai', 60, 1),
   ('openai_gateway', 'OpenAI 兼容网关', 'openrouter', 70, 1),
   ('infinitetalk', 'InfiniteTalk', 'infinitetalk', 80, 1),

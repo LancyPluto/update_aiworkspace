@@ -39,7 +39,7 @@ touch {MARKER}
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     print(f"Connecting to {HOST}...")
-    ssh.connect(HOST, username="root", password=PASSWORD, timeout=30)
+    ssh.connect(HOST, username="root", password=PASSWORD, timeout=30, allow_agent=False, look_for_keys=False)
 
     # Start build in background
     sftp = ssh.open_sftp()

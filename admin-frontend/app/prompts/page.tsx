@@ -55,6 +55,17 @@ const AGENT_MEMORY_RETRIEVAL_LIMIT_KEY = "agent.memory.retrieval_limit"
 const AGENT_MEMORY_ENABLED_TYPES_KEY = "agent.memory.enabled_types"
 const AGENT_MEMORY_WRITE_PROMPT_KEY = "agent.memory.write_prompt"
 const AGENT_MEMORY_RETRIEVAL_PROMPT_KEY = "agent.memory.retrieval_prompt"
+const AGENT_MEMORY_TOOL_LOOP_ENABLED_KEY = "agent.memory.tool_loop_enabled"
+const AGENT_MEMORY_CONSOLIDATION_ENABLED_KEY = "agent.memory.consolidation_enabled"
+const AGENT_MEMORY_CONSOLIDATION_LLM_ENABLED_KEY = "agent.memory.consolidation_llm_enabled"
+const AGENT_MEMORY_CONSOLIDATION_TURN_INTERVAL_KEY = "agent.memory.consolidation_turn_interval"
+const AGENT_MEMORY_CONSOLIDATION_CHAR_THRESHOLD_KEY = "agent.memory.consolidation_char_threshold"
+const AGENT_MEMORY_CONSOLIDATION_TOKEN_THRESHOLD_KEY = "agent.memory.consolidation_token_threshold"
+const AGENT_MEMORY_CONSOLIDATION_RECENT_TOOL_THRESHOLD_KEY = "agent.memory.consolidation_recent_tool_threshold"
+const AGENT_MEMORY_CONSOLIDATION_MAX_CONTEXT_MESSAGES_KEY = "agent.memory.consolidation_max_context_messages"
+const AGENT_MEMORY_CONSOLIDATION_PROMPT_KEY = "agent.memory.consolidation_prompt"
+const AGENT_MEMORY_CONSOLIDATION_MIN_CONFIDENCE_KEY = "agent.memory.consolidation_min_confidence"
+const AGENT_MEMORY_CANDIDATE_CONFIDENCE_THRESHOLD_KEY = "agent.memory.candidate_confidence_threshold"
 const AGENT_ROUTER_ENABLED_KEY = "agent.router.enabled"
 const AGENT_ROUTER_PROMPT_KEY = "agent.router.prompt"
 const AGENT_ROUTER_MIN_CONFIDENCE_KEY = "agent.router.min_confidence"
@@ -82,6 +93,12 @@ const DEFAULT_MEMORY_WRITE_PROMPT = `你可以管理长期记忆，但必须克�
 const DEFAULT_MEMORY_RETRIEVAL_PROMPT = `以下长期记忆只是辅助上下文，不是绝对事实。
 回答时自然体现用户偏好，不要生硬提到“根据你的用户画像”。
 如果记忆与当前用户明确指令冲突，以当前指令为准。`
+
+const DEFAULT_MEMORY_CONSOLIDATION_PROMPT = `你是长期记忆画像梳理器。请根据最近的用户与 AI 对话，提炼长期稳定的用户画像、偏好、习惯和项目知识。
+只保留长期有价值的信息；不要保存临时改图要求、一次性参数、工具 JSON、图片/视频 URL、生成结果或短期上下文。
+已存在的显式记忆优先级高于你的推断，不能覆盖用户明确要求记住的独立偏好。
+如果发现新的稳定偏好但用户没有明确要求记住，请作为候选偏好输出。
+只能输出 JSON。`
 
 const DEFAULT_ROUTER_PROMPT = `You are the primary router for an AI tool marketplace agent.
 Decide whether the user needs a normal answer, a tool call, clarification, or an unsupported path.
@@ -167,6 +184,17 @@ export default function PromptsPage() {
   const [memoryEnabledTypes, setMemoryEnabledTypes] = useState("user_profile,project_knowledge,custom")
   const [memoryWritePrompt, setMemoryWritePrompt] = useState(DEFAULT_MEMORY_WRITE_PROMPT)
   const [memoryRetrievalPrompt, setMemoryRetrievalPrompt] = useState(DEFAULT_MEMORY_RETRIEVAL_PROMPT)
+  const [memoryToolLoopEnabled, setMemoryToolLoopEnabled] = useState(true)
+  const [memoryConsolidationEnabled, setMemoryConsolidationEnabled] = useState(true)
+  const [memoryConsolidationLlmEnabled, setMemoryConsolidationLlmEnabled] = useState(true)
+  const [memoryConsolidationTurnInterval, setMemoryConsolidationTurnInterval] = useState("8")
+  const [memoryConsolidationCharThreshold, setMemoryConsolidationCharThreshold] = useState("4000")
+  const [memoryConsolidationTokenThreshold, setMemoryConsolidationTokenThreshold] = useState("3000")
+  const [memoryConsolidationRecentToolThreshold, setMemoryConsolidationRecentToolThreshold] = useState("3")
+  const [memoryConsolidationMaxContextMessages, setMemoryConsolidationMaxContextMessages] = useState("24")
+  const [memoryConsolidationPrompt, setMemoryConsolidationPrompt] = useState(DEFAULT_MEMORY_CONSOLIDATION_PROMPT)
+  const [memoryConsolidationMinConfidence, setMemoryConsolidationMinConfidence] = useState("0.72")
+  const [memoryCandidateConfidenceThreshold, setMemoryCandidateConfidenceThreshold] = useState("0.55")
   const [routerEnabled, setRouterEnabled] = useState(true)
   const [routerPrompt, setRouterPrompt] = useState(DEFAULT_ROUTER_PROMPT)
   const [routerMinConfidence, setRouterMinConfidence] = useState("0.7")
@@ -179,6 +207,17 @@ export default function PromptsPage() {
     enabledTypes: "user_profile,project_knowledge,custom",
     writePrompt: DEFAULT_MEMORY_WRITE_PROMPT,
     retrievalPrompt: DEFAULT_MEMORY_RETRIEVAL_PROMPT,
+    toolLoopEnabled: true,
+    consolidationEnabled: true,
+    consolidationLlmEnabled: true,
+    consolidationTurnInterval: "8",
+    consolidationCharThreshold: "4000",
+    consolidationTokenThreshold: "3000",
+    consolidationRecentToolThreshold: "3",
+    consolidationMaxContextMessages: "24",
+    consolidationPrompt: DEFAULT_MEMORY_CONSOLIDATION_PROMPT,
+    consolidationMinConfidence: "0.72",
+    candidateConfidenceThreshold: "0.55",
   })
   const [originalRouterConfig, setOriginalRouterConfig] = useState({
     enabled: true,
@@ -210,7 +249,18 @@ export default function PromptsPage() {
     memoryRetrievalLimit !== originalMemoryConfig.retrievalLimit ||
     memoryEnabledTypes !== originalMemoryConfig.enabledTypes ||
     memoryWritePrompt !== originalMemoryConfig.writePrompt ||
-    memoryRetrievalPrompt !== originalMemoryConfig.retrievalPrompt,
+    memoryRetrievalPrompt !== originalMemoryConfig.retrievalPrompt ||
+    memoryToolLoopEnabled !== originalMemoryConfig.toolLoopEnabled ||
+    memoryConsolidationEnabled !== originalMemoryConfig.consolidationEnabled ||
+    memoryConsolidationLlmEnabled !== originalMemoryConfig.consolidationLlmEnabled ||
+    memoryConsolidationTurnInterval !== originalMemoryConfig.consolidationTurnInterval ||
+    memoryConsolidationCharThreshold !== originalMemoryConfig.consolidationCharThreshold ||
+    memoryConsolidationTokenThreshold !== originalMemoryConfig.consolidationTokenThreshold ||
+    memoryConsolidationRecentToolThreshold !== originalMemoryConfig.consolidationRecentToolThreshold ||
+    memoryConsolidationMaxContextMessages !== originalMemoryConfig.consolidationMaxContextMessages ||
+    memoryConsolidationPrompt !== originalMemoryConfig.consolidationPrompt ||
+    memoryConsolidationMinConfidence !== originalMemoryConfig.consolidationMinConfidence ||
+    memoryCandidateConfidenceThreshold !== originalMemoryConfig.candidateConfidenceThreshold,
   )
   const dirtyRouterConfig = Number(
     routerEnabled !== originalRouterConfig.enabled ||
@@ -252,12 +302,34 @@ export default function PromptsPage() {
         enabledTypes: settings[AGENT_MEMORY_ENABLED_TYPES_KEY] || "user_profile,project_knowledge,custom",
         writePrompt: settings[AGENT_MEMORY_WRITE_PROMPT_KEY] || DEFAULT_MEMORY_WRITE_PROMPT,
         retrievalPrompt: settings[AGENT_MEMORY_RETRIEVAL_PROMPT_KEY] || DEFAULT_MEMORY_RETRIEVAL_PROMPT,
+        toolLoopEnabled: (settings[AGENT_MEMORY_TOOL_LOOP_ENABLED_KEY] ?? "true") !== "false",
+        consolidationEnabled: (settings[AGENT_MEMORY_CONSOLIDATION_ENABLED_KEY] ?? "true") !== "false",
+        consolidationLlmEnabled: (settings[AGENT_MEMORY_CONSOLIDATION_LLM_ENABLED_KEY] ?? "true") !== "false",
+        consolidationTurnInterval: settings[AGENT_MEMORY_CONSOLIDATION_TURN_INTERVAL_KEY] || "8",
+        consolidationCharThreshold: settings[AGENT_MEMORY_CONSOLIDATION_CHAR_THRESHOLD_KEY] || "4000",
+        consolidationTokenThreshold: settings[AGENT_MEMORY_CONSOLIDATION_TOKEN_THRESHOLD_KEY] || "3000",
+        consolidationRecentToolThreshold: settings[AGENT_MEMORY_CONSOLIDATION_RECENT_TOOL_THRESHOLD_KEY] || "3",
+        consolidationMaxContextMessages: settings[AGENT_MEMORY_CONSOLIDATION_MAX_CONTEXT_MESSAGES_KEY] || "24",
+        consolidationPrompt: settings[AGENT_MEMORY_CONSOLIDATION_PROMPT_KEY] || DEFAULT_MEMORY_CONSOLIDATION_PROMPT,
+        consolidationMinConfidence: settings[AGENT_MEMORY_CONSOLIDATION_MIN_CONFIDENCE_KEY] || "0.72",
+        candidateConfidenceThreshold: settings[AGENT_MEMORY_CANDIDATE_CONFIDENCE_THRESHOLD_KEY] || "0.55",
       }
       setMemoryAutoSaveEnabled(nextMemoryConfig.autoSaveEnabled)
       setMemoryRetrievalLimit(nextMemoryConfig.retrievalLimit)
       setMemoryEnabledTypes(nextMemoryConfig.enabledTypes)
       setMemoryWritePrompt(nextMemoryConfig.writePrompt)
       setMemoryRetrievalPrompt(nextMemoryConfig.retrievalPrompt)
+      setMemoryToolLoopEnabled(nextMemoryConfig.toolLoopEnabled)
+      setMemoryConsolidationEnabled(nextMemoryConfig.consolidationEnabled)
+      setMemoryConsolidationLlmEnabled(nextMemoryConfig.consolidationLlmEnabled)
+      setMemoryConsolidationTurnInterval(nextMemoryConfig.consolidationTurnInterval)
+      setMemoryConsolidationCharThreshold(nextMemoryConfig.consolidationCharThreshold)
+      setMemoryConsolidationTokenThreshold(nextMemoryConfig.consolidationTokenThreshold)
+      setMemoryConsolidationRecentToolThreshold(nextMemoryConfig.consolidationRecentToolThreshold)
+      setMemoryConsolidationMaxContextMessages(nextMemoryConfig.consolidationMaxContextMessages)
+      setMemoryConsolidationPrompt(nextMemoryConfig.consolidationPrompt)
+      setMemoryConsolidationMinConfidence(nextMemoryConfig.consolidationMinConfidence)
+      setMemoryCandidateConfidenceThreshold(nextMemoryConfig.candidateConfidenceThreshold)
       setOriginalMemoryConfig(nextMemoryConfig)
       const nextRouterConfig = {
         enabled: (settings[AGENT_ROUTER_ENABLED_KEY] ?? "true") !== "false",
@@ -356,6 +428,17 @@ export default function PromptsPage() {
         enabledTypes: normalizedTypes,
         writePrompt: memoryWritePrompt.trim() || DEFAULT_MEMORY_WRITE_PROMPT,
         retrievalPrompt: memoryRetrievalPrompt.trim() || DEFAULT_MEMORY_RETRIEVAL_PROMPT,
+        toolLoopEnabled: memoryToolLoopEnabled,
+        consolidationEnabled: memoryConsolidationEnabled,
+        consolidationLlmEnabled: memoryConsolidationLlmEnabled,
+        consolidationTurnInterval: String(Math.max(2, Math.min(50, Number(memoryConsolidationTurnInterval) || 8))),
+        consolidationCharThreshold: String(Math.max(500, Math.min(50000, Number(memoryConsolidationCharThreshold) || 4000))),
+        consolidationTokenThreshold: String(Math.max(0, Math.min(200000, Number(memoryConsolidationTokenThreshold) || 3000))),
+        consolidationRecentToolThreshold: String(Math.max(0, Math.min(50, Number(memoryConsolidationRecentToolThreshold) || 3))),
+        consolidationMaxContextMessages: String(Math.max(4, Math.min(100, Number(memoryConsolidationMaxContextMessages) || 24))),
+        consolidationPrompt: memoryConsolidationPrompt.trim() || DEFAULT_MEMORY_CONSOLIDATION_PROMPT,
+        consolidationMinConfidence: String(Math.max(0, Math.min(1, Number(memoryConsolidationMinConfidence) || 0.72))),
+        candidateConfidenceThreshold: String(Math.max(0, Math.min(1, Number(memoryCandidateConfidenceThreshold) || 0.55))),
       }
       const settings = await updateSettings({
         [AGENT_MEMORY_AUTO_SAVE_KEY]: String(savedConfig.autoSaveEnabled),
@@ -363,6 +446,17 @@ export default function PromptsPage() {
         [AGENT_MEMORY_ENABLED_TYPES_KEY]: savedConfig.enabledTypes,
         [AGENT_MEMORY_WRITE_PROMPT_KEY]: savedConfig.writePrompt,
         [AGENT_MEMORY_RETRIEVAL_PROMPT_KEY]: savedConfig.retrievalPrompt,
+        [AGENT_MEMORY_TOOL_LOOP_ENABLED_KEY]: String(savedConfig.toolLoopEnabled),
+        [AGENT_MEMORY_CONSOLIDATION_ENABLED_KEY]: String(savedConfig.consolidationEnabled),
+        [AGENT_MEMORY_CONSOLIDATION_LLM_ENABLED_KEY]: String(savedConfig.consolidationLlmEnabled),
+        [AGENT_MEMORY_CONSOLIDATION_TURN_INTERVAL_KEY]: savedConfig.consolidationTurnInterval,
+        [AGENT_MEMORY_CONSOLIDATION_CHAR_THRESHOLD_KEY]: savedConfig.consolidationCharThreshold,
+        [AGENT_MEMORY_CONSOLIDATION_TOKEN_THRESHOLD_KEY]: savedConfig.consolidationTokenThreshold,
+        [AGENT_MEMORY_CONSOLIDATION_RECENT_TOOL_THRESHOLD_KEY]: savedConfig.consolidationRecentToolThreshold,
+        [AGENT_MEMORY_CONSOLIDATION_MAX_CONTEXT_MESSAGES_KEY]: savedConfig.consolidationMaxContextMessages,
+        [AGENT_MEMORY_CONSOLIDATION_PROMPT_KEY]: savedConfig.consolidationPrompt,
+        [AGENT_MEMORY_CONSOLIDATION_MIN_CONFIDENCE_KEY]: savedConfig.consolidationMinConfidence,
+        [AGENT_MEMORY_CANDIDATE_CONFIDENCE_THRESHOLD_KEY]: savedConfig.candidateConfidenceThreshold,
       })
       const nextConfig = {
         autoSaveEnabled: (settings[AGENT_MEMORY_AUTO_SAVE_KEY] ?? String(savedConfig.autoSaveEnabled)) !== "false",
@@ -370,12 +464,34 @@ export default function PromptsPage() {
         enabledTypes: settings[AGENT_MEMORY_ENABLED_TYPES_KEY] || savedConfig.enabledTypes,
         writePrompt: settings[AGENT_MEMORY_WRITE_PROMPT_KEY] || savedConfig.writePrompt,
         retrievalPrompt: settings[AGENT_MEMORY_RETRIEVAL_PROMPT_KEY] || savedConfig.retrievalPrompt,
+        toolLoopEnabled: (settings[AGENT_MEMORY_TOOL_LOOP_ENABLED_KEY] ?? String(savedConfig.toolLoopEnabled)) !== "false",
+        consolidationEnabled: (settings[AGENT_MEMORY_CONSOLIDATION_ENABLED_KEY] ?? String(savedConfig.consolidationEnabled)) !== "false",
+        consolidationLlmEnabled: (settings[AGENT_MEMORY_CONSOLIDATION_LLM_ENABLED_KEY] ?? String(savedConfig.consolidationLlmEnabled)) !== "false",
+        consolidationTurnInterval: settings[AGENT_MEMORY_CONSOLIDATION_TURN_INTERVAL_KEY] || savedConfig.consolidationTurnInterval,
+        consolidationCharThreshold: settings[AGENT_MEMORY_CONSOLIDATION_CHAR_THRESHOLD_KEY] || savedConfig.consolidationCharThreshold,
+        consolidationTokenThreshold: settings[AGENT_MEMORY_CONSOLIDATION_TOKEN_THRESHOLD_KEY] || savedConfig.consolidationTokenThreshold,
+        consolidationRecentToolThreshold: settings[AGENT_MEMORY_CONSOLIDATION_RECENT_TOOL_THRESHOLD_KEY] || savedConfig.consolidationRecentToolThreshold,
+        consolidationMaxContextMessages: settings[AGENT_MEMORY_CONSOLIDATION_MAX_CONTEXT_MESSAGES_KEY] || savedConfig.consolidationMaxContextMessages,
+        consolidationPrompt: settings[AGENT_MEMORY_CONSOLIDATION_PROMPT_KEY] || savedConfig.consolidationPrompt,
+        consolidationMinConfidence: settings[AGENT_MEMORY_CONSOLIDATION_MIN_CONFIDENCE_KEY] || savedConfig.consolidationMinConfidence,
+        candidateConfidenceThreshold: settings[AGENT_MEMORY_CANDIDATE_CONFIDENCE_THRESHOLD_KEY] || savedConfig.candidateConfidenceThreshold,
       }
       setMemoryAutoSaveEnabled(nextConfig.autoSaveEnabled)
       setMemoryRetrievalLimit(nextConfig.retrievalLimit)
       setMemoryEnabledTypes(nextConfig.enabledTypes)
       setMemoryWritePrompt(nextConfig.writePrompt)
       setMemoryRetrievalPrompt(nextConfig.retrievalPrompt)
+      setMemoryToolLoopEnabled(nextConfig.toolLoopEnabled)
+      setMemoryConsolidationEnabled(nextConfig.consolidationEnabled)
+      setMemoryConsolidationLlmEnabled(nextConfig.consolidationLlmEnabled)
+      setMemoryConsolidationTurnInterval(nextConfig.consolidationTurnInterval)
+      setMemoryConsolidationCharThreshold(nextConfig.consolidationCharThreshold)
+      setMemoryConsolidationTokenThreshold(nextConfig.consolidationTokenThreshold)
+      setMemoryConsolidationRecentToolThreshold(nextConfig.consolidationRecentToolThreshold)
+      setMemoryConsolidationMaxContextMessages(nextConfig.consolidationMaxContextMessages)
+      setMemoryConsolidationPrompt(nextConfig.consolidationPrompt)
+      setMemoryConsolidationMinConfidence(nextConfig.consolidationMinConfidence)
+      setMemoryCandidateConfidenceThreshold(nextConfig.candidateConfidenceThreshold)
       setOriginalMemoryConfig(nextConfig)
       setLastSavedAt(new Date().toLocaleTimeString())
       toast.success("长期记忆配置已保存", { id: toastId })
@@ -701,12 +817,34 @@ export default function PromptsPage() {
               enabledTypes={memoryEnabledTypes}
               writePrompt={memoryWritePrompt}
               retrievalPrompt={memoryRetrievalPrompt}
+              toolLoopEnabled={memoryToolLoopEnabled}
+              consolidationEnabled={memoryConsolidationEnabled}
+              consolidationLlmEnabled={memoryConsolidationLlmEnabled}
+              consolidationTurnInterval={memoryConsolidationTurnInterval}
+              consolidationCharThreshold={memoryConsolidationCharThreshold}
+              consolidationTokenThreshold={memoryConsolidationTokenThreshold}
+              consolidationRecentToolThreshold={memoryConsolidationRecentToolThreshold}
+              consolidationMaxContextMessages={memoryConsolidationMaxContextMessages}
+              consolidationPrompt={memoryConsolidationPrompt}
+              consolidationMinConfidence={memoryConsolidationMinConfidence}
+              candidateConfidenceThreshold={memoryCandidateConfidenceThreshold}
               dirty={Boolean(dirtyMemoryConfig)}
               onAutoSaveChange={setMemoryAutoSaveEnabled}
               onRetrievalLimitChange={setMemoryRetrievalLimit}
               onEnabledTypesChange={setMemoryEnabledTypes}
               onWritePromptChange={setMemoryWritePrompt}
               onRetrievalPromptChange={setMemoryRetrievalPrompt}
+              onToolLoopEnabledChange={setMemoryToolLoopEnabled}
+              onConsolidationEnabledChange={setMemoryConsolidationEnabled}
+              onConsolidationLlmEnabledChange={setMemoryConsolidationLlmEnabled}
+              onConsolidationTurnIntervalChange={setMemoryConsolidationTurnInterval}
+              onConsolidationCharThresholdChange={setMemoryConsolidationCharThreshold}
+              onConsolidationTokenThresholdChange={setMemoryConsolidationTokenThreshold}
+              onConsolidationRecentToolThresholdChange={setMemoryConsolidationRecentToolThreshold}
+              onConsolidationMaxContextMessagesChange={setMemoryConsolidationMaxContextMessages}
+              onConsolidationPromptChange={setMemoryConsolidationPrompt}
+              onConsolidationMinConfidenceChange={setMemoryConsolidationMinConfidence}
+              onCandidateConfidenceThresholdChange={setMemoryCandidateConfidenceThreshold}
               onSave={saveMemoryConfig}
             />
           </TabsContent>
@@ -1059,12 +1197,34 @@ function MemoryConfigCard({
   enabledTypes,
   writePrompt,
   retrievalPrompt,
+  toolLoopEnabled,
+  consolidationEnabled,
+  consolidationLlmEnabled,
+  consolidationTurnInterval,
+  consolidationCharThreshold,
+  consolidationTokenThreshold,
+  consolidationRecentToolThreshold,
+  consolidationMaxContextMessages,
+  consolidationPrompt,
+  consolidationMinConfidence,
+  candidateConfidenceThreshold,
   dirty,
   onAutoSaveChange,
   onRetrievalLimitChange,
   onEnabledTypesChange,
   onWritePromptChange,
   onRetrievalPromptChange,
+  onToolLoopEnabledChange,
+  onConsolidationEnabledChange,
+  onConsolidationLlmEnabledChange,
+  onConsolidationTurnIntervalChange,
+  onConsolidationCharThresholdChange,
+  onConsolidationTokenThresholdChange,
+  onConsolidationRecentToolThresholdChange,
+  onConsolidationMaxContextMessagesChange,
+  onConsolidationPromptChange,
+  onConsolidationMinConfidenceChange,
+  onCandidateConfidenceThresholdChange,
   onSave,
 }: {
   loading: boolean
@@ -1074,12 +1234,34 @@ function MemoryConfigCard({
   enabledTypes: string
   writePrompt: string
   retrievalPrompt: string
+  toolLoopEnabled: boolean
+  consolidationEnabled: boolean
+  consolidationLlmEnabled: boolean
+  consolidationTurnInterval: string
+  consolidationCharThreshold: string
+  consolidationTokenThreshold: string
+  consolidationRecentToolThreshold: string
+  consolidationMaxContextMessages: string
+  consolidationPrompt: string
+  consolidationMinConfidence: string
+  candidateConfidenceThreshold: string
   dirty: boolean
   onAutoSaveChange: (value: boolean) => void
   onRetrievalLimitChange: (value: string) => void
   onEnabledTypesChange: (value: string) => void
   onWritePromptChange: (value: string) => void
   onRetrievalPromptChange: (value: string) => void
+  onToolLoopEnabledChange: (value: boolean) => void
+  onConsolidationEnabledChange: (value: boolean) => void
+  onConsolidationLlmEnabledChange: (value: boolean) => void
+  onConsolidationTurnIntervalChange: (value: string) => void
+  onConsolidationCharThresholdChange: (value: string) => void
+  onConsolidationTokenThresholdChange: (value: string) => void
+  onConsolidationRecentToolThresholdChange: (value: string) => void
+  onConsolidationMaxContextMessagesChange: (value: string) => void
+  onConsolidationPromptChange: (value: string) => void
+  onConsolidationMinConfidenceChange: (value: string) => void
+  onCandidateConfidenceThresholdChange: (value: string) => void
   onSave: () => void
 }) {
   return (
@@ -1130,6 +1312,46 @@ function MemoryConfigCard({
           </div>
         </div>
 
+        <div className="grid gap-4 lg:grid-cols-3">
+          <div className="rounded-lg border p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <Label>记忆工具循环</Label>
+                <p className="mt-1 text-xs text-muted-foreground">允许 Agent 在明确记忆请求中调用 memory_add/replace/remove。</p>
+              </div>
+              <Switch checked={toolLoopEnabled} disabled={loading || saving} onCheckedChange={onToolLoopEnabledChange} />
+            </div>
+          </div>
+          <div className="rounded-lg border p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <Label>自动整合</Label>
+                <p className="mt-1 text-xs text-muted-foreground">对多轮对话做长期画像与偏好归纳。</p>
+              </div>
+              <Switch checked={consolidationEnabled} disabled={loading || saving} onCheckedChange={onConsolidationEnabledChange} />
+            </div>
+          </div>
+          <div className="rounded-lg border p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <Label>LLM 整合</Label>
+                <p className="mt-1 text-xs text-muted-foreground">使用模型提炼候选偏好和画像更新。</p>
+              </div>
+              <Switch checked={consolidationLlmEnabled} disabled={loading || saving} onCheckedChange={onConsolidationLlmEnabledChange} />
+            </div>
+          </div>
+        </div>
+
+        <div className="grid gap-4 lg:grid-cols-4">
+          <NumberField label="整合间隔轮数" value={consolidationTurnInterval} min={2} max={50} disabled={loading || saving} onChange={onConsolidationTurnIntervalChange} />
+          <NumberField label="字符阈值" value={consolidationCharThreshold} min={500} max={50000} disabled={loading || saving} onChange={onConsolidationCharThresholdChange} />
+          <NumberField label="Token 阈值" value={consolidationTokenThreshold} min={0} max={200000} disabled={loading || saving} onChange={onConsolidationTokenThresholdChange} />
+          <NumberField label="近期工具阈值" value={consolidationRecentToolThreshold} min={0} max={50} disabled={loading || saving} onChange={onConsolidationRecentToolThresholdChange} />
+          <NumberField label="整合历史消息数" value={consolidationMaxContextMessages} min={4} max={100} disabled={loading || saving} onChange={onConsolidationMaxContextMessagesChange} />
+          <NumberField label="整合最低置信度" value={consolidationMinConfidence} min={0} max={1} step="0.01" disabled={loading || saving} onChange={onConsolidationMinConfidenceChange} />
+          <NumberField label="候选记忆置信度" value={candidateConfidenceThreshold} min={0} max={1} step="0.01" disabled={loading || saving} onChange={onCandidateConfidenceThresholdChange} />
+        </div>
+
         <div className="grid gap-4 lg:grid-cols-2">
           <div className="space-y-2">
             <Label>记忆写入提示词</Label>
@@ -1151,6 +1373,16 @@ function MemoryConfigCard({
           </div>
         </div>
 
+        <div className="space-y-2">
+          <Label>记忆整合提示词</Label>
+          <Textarea
+            value={consolidationPrompt}
+            disabled={loading || saving}
+            onChange={(event) => onConsolidationPromptChange(event.target.value)}
+            className="min-h-44 resize-y text-sm leading-6"
+          />
+        </div>
+
         <Alert>
           <AlertTriangle className="h-4 w-4" />
           <AlertTitle>边界</AlertTitle>
@@ -1166,6 +1398,39 @@ function MemoryConfigCard({
         </div>
       </CardContent>
     </Card>
+  )
+}
+
+function NumberField({
+  label,
+  value,
+  min,
+  max,
+  step,
+  disabled,
+  onChange,
+}: {
+  label: string
+  value: string
+  min: number
+  max: number
+  step?: string
+  disabled: boolean
+  onChange: (value: string) => void
+}) {
+  return (
+    <div className="space-y-2">
+      <Label>{label}</Label>
+      <Input
+        type="number"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value)}
+      />
+    </div>
   )
 }
 

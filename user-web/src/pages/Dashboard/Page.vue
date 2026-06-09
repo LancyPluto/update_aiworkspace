@@ -245,6 +245,7 @@ const taskMaterials = computed(() =>
         task,
         blocks,
         modality: inferTaskModality(task, blocks),
+        historyCardClass: historyCardClass(task, blocks),
       }
     }),
 )
@@ -828,6 +829,81 @@ function primaryBlock(blocks: ResultBlock[]): ResultBlock | null {
 function audioTracksForItem(blocks: ResultBlock[]) {
   const block = primaryBlock(blocks)
   return block?.type === "audio" ? resolveAudioTracks(block) : []
+}
+
+function historyCardClass(task: TaskDetail, blocks: ResultBlock[]): string {
+  if (task.status !== "SUCCESS") return "history-card-pending"
+  const block = primaryBlock(blocks)
+  if (block?.type !== "image") return "history-card-standard"
+  return "history-card-image"
+}
+
+function inferImageAspectRatio(task: TaskDetail): number {
+  const params = task.params || {}
+  const ratio = parseAspectRatio(findAspectRatioText(params))
+  if (ratio > 0) return ratio
+  const sizeRatio = parseSizeRatio(findSizeText(params))
+  if (sizeRatio > 0) return sizeRatio
+  return 1
+}
+
+function findAspectRatioText(value: unknown): string {
+  if (!value || typeof value !== "object") return ""
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findAspectRatioText(item)
+      if (found) return found
+    }
+    return ""
+  }
+  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
+    const normalizedKey = key.toLowerCase()
+    if (
+      typeof raw === "string" &&
+      (normalizedKey.includes("aspect") || normalizedKey.includes("ratio") || normalizedKey.includes("比例"))
+    ) {
+      return raw
+    }
+    const nested = findAspectRatioText(raw)
+    if (nested) return nested
+  }
+  return ""
+}
+
+function findSizeText(value: unknown): string {
+  if (!value || typeof value !== "object") return ""
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findSizeText(item)
+      if (found) return found
+    }
+    return ""
+  }
+  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
+    const normalizedKey = key.toLowerCase()
+    if (typeof raw === "string" && (normalizedKey.includes("size") || normalizedKey.includes("resolution"))) {
+      return raw
+    }
+    const nested = findSizeText(raw)
+    if (nested) return nested
+  }
+  return ""
+}
+
+function parseAspectRatio(value: string): number {
+  const match = value.match(/(\d+(?:\.\d+)?)\s*[:/]\s*(\d+(?:\.\d+)?)/)
+  if (!match) return 0
+  const width = Number(match[1])
+  const height = Number(match[2])
+  return width > 0 && height > 0 ? width / height : 0
+}
+
+function parseSizeRatio(value: string): number {
+  const match = value.match(/(\d{2,5})\s*[x×]\s*(\d{2,5})/i)
+  if (!match) return 0
+  const width = Number(match[1])
+  const height = Number(match[2])
+  return width > 0 && height > 0 ? width / height : 0
 }
 
 function audioTaskTitle(track?: DashboardAudioTrack | null): string {
@@ -1698,15 +1774,15 @@ onUnmounted(() => {
                     </div>
                   </section>
                 </div>
-                <div v-else class="content-masonry">
+                <div v-else class="dashboard-history-grid">
                   <article
                     v-for="item in taskMaterials"
                     :key="item.task.taskId"
-                    class="group overflow-hidden rounded-2xl border border-white/8 bg-[#191919] shadow-[0_16px_36px_rgb(0_0_0_/_0.24)] transition hover:-translate-y-0.5 hover:border-primary/50"
-                    :class="item.task.status === 'SUCCESS' ? 'cursor-zoom-in' : ''"
+                    class="group overflow-hidden rounded-[18px] border border-white/8 bg-white/[0.045] shadow-[0_14px_34px_rgb(0_0_0_/_0.22)] transition hover:-translate-y-0.5 hover:border-primary/45 hover:bg-white/[0.06]"
+                    :class="[item.task.status === 'SUCCESS' ? 'cursor-zoom-in' : '', item.historyCardClass]"
                     @click="openAssetPreview(item)"
                   >
-                    <div class="relative bg-muted">
+                    <div class="relative overflow-hidden bg-[#101014]">
                       <template v-if="isTaskRunning(item.task.status) || canRetryTask(item.task.status) || (!item.task.result?.contentText && item.task.status !== 'SUCCESS')">
                         <div
                           class="relative min-h-[300px] overflow-hidden bg-[radial-gradient(circle_at_28%_20%,rgb(176_92_255_/_0.28),transparent_34%),linear-gradient(145deg,rgb(29_30_38),rgb(12_12_14))] p-5"
@@ -1768,16 +1844,34 @@ onUnmounted(() => {
                         </div>
                       </template>
                       <template v-else-if="primaryBlock(item.blocks)?.type === 'image'">
+                        <div
+                          v-if="(primaryBlock(item.blocks)?.images.length || 0) > 1"
+                          class="relative grid aspect-[4/3] w-full grid-cols-2 gap-px bg-black/40"
+                        >
+                          <img
+                            v-for="image in primaryBlock(item.blocks)?.images.slice(0, 4)"
+                            :key="image.url"
+                            :src="image.url"
+                            :alt="item.task.toolName"
+                            class="h-full min-h-0 w-full object-cover"
+                            loading="lazy"
+                            decoding="async"
+                          />
+                          <span class="absolute right-2 top-2 rounded-full bg-black/65 px-2 py-0.5 text-[11px] font-medium text-white">
+                            共 {{ primaryBlock(item.blocks)?.images.length }} 张
+                          </span>
+                        </div>
                         <img
+                          v-else
                           :src="primaryBlock(item.blocks)?.images[0]?.url"
                           :alt="item.task.toolName"
-                          class="block h-auto w-full"
+                          class="block aspect-[4/3] w-full bg-black/30 object-contain"
                           loading="lazy"
                           decoding="async"
                         />
                       </template>
                       <template v-else-if="primaryBlock(item.blocks)?.type === 'video'">
-                        <video :src="primaryBlock(item.blocks)?.url" controls playsinline preload="metadata" class="block h-auto w-full bg-black" />
+                        <video :src="primaryBlock(item.blocks)?.url" controls playsinline preload="metadata" class="block aspect-[4/3] w-full bg-black object-contain" />
                       </template>
                       <template v-else-if="primaryBlock(item.blocks)?.type === 'audio'">
                         <div class="space-y-4 bg-white/[0.05] p-4 pt-12">
@@ -1839,10 +1933,10 @@ onUnmounted(() => {
                       </span>
                     </div>
 
-                    <div class="space-y-3 p-4">
+                    <div class="space-y-3 p-3.5">
                       <div class="flex items-start justify-between gap-3">
                         <div class="min-w-0">
-                          <h3 class="truncate text-base font-semibold text-white">{{ item.task.toolName }}</h3>
+                          <h3 class="truncate text-sm font-semibold text-white">{{ item.task.toolName }}</h3>
                           <p class="mt-1 truncate text-xs text-white/45">{{ item.task.taskNo }}</p>
                         </div>
                         <div class="flex shrink-0 items-center gap-1 text-xs text-white/35">
@@ -1886,7 +1980,7 @@ onUnmounted(() => {
                           <button
                             v-else-if="!canCancelTask(item.task.status)"
                             type="button"
-                            class="rounded-full bg-primary/15 px-3 py-1.5 text-xs font-medium text-primary transition hover:bg-primary hover:text-white"
+                            class="rounded-full bg-primary/12 px-2.5 py-1 text-xs font-medium text-primary transition hover:bg-primary hover:text-white"
                             @click.stop="replayTask(item.task)"
                           >
                             再次生成
@@ -2171,6 +2265,39 @@ onUnmounted(() => {
 .audio-wave-hit {
   min-height: 32px;
   cursor: pointer;
+}
+
+.dashboard-history-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-items: start;
+  gap: clamp(14px, 1.6vw, 20px);
+}
+
+.dashboard-history-grid > .history-card-image {
+  min-width: 0;
+}
+
+.dashboard-history-grid > .history-card-pending {
+  min-height: 300px;
+}
+
+@media (max-width: 1280px) {
+  .dashboard-history-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .dashboard-history-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .dashboard-history-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .audio-wave-bar {

@@ -30,26 +30,39 @@ public class TaskCreditEstimateService {
         if (tool == null) {
             return 0;
         }
-        return estimateTaskCredits(tool, modelCapabilityService.resolveModelConfigForTool(tool));
+        AgentModelConfig modelConfig = tool.getModelConfigId() == null
+                ? null
+                : modelCapabilityService.resolveModelConfigForTool(tool);
+        return estimate(tool, modelConfig).credits();
     }
 
     public int estimateUserFacingTaskCredits(AiTool tool) {
-        return userFacingCredits(estimateForTool(tool));
+        if (tool == null) {
+            return 0;
+        }
+        AgentModelConfig modelConfig = tool.getModelConfigId() == null
+                ? null
+                : modelCapabilityService.resolveModelConfigForTool(tool);
+        return userFacingCredits(estimate(tool, modelConfig));
     }
 
     public int estimateUserFacingTaskCredits(AiTool tool, AgentModelConfig modelConfig) {
-        return userFacingCredits(estimateTaskCredits(tool, modelConfig));
+        return userFacingCredits(estimate(tool, modelConfig));
     }
 
     public int estimateTaskCredits(AiTool tool, AgentModelConfig modelConfig) {
+        return estimate(tool, modelConfig).credits();
+    }
+
+    private EstimateResult estimate(AiTool tool, AgentModelConfig modelConfig) {
         int toolEstimate = tool.getEstimatedCreditCost() == null ? 0 : Math.max(0, tool.getEstimatedCreditCost());
         if (modelConfig == null) {
-            return toolEstimate;
+            return new EstimateResult(toolEstimate, false);
         }
         String billingUnit = modelConfig.getBillingUnit();
         if (BILLING_UNIT_PER_CALL.equals(billingUnit) && modelConfig.getUnitPrice() != null) {
             int calculated = modelConfig.getUnitPrice().divide(CREDIT_PRICE_CNY, 0, RoundingMode.CEILING).intValue();
-            return calculated > 0 ? calculated : toolEstimate;
+            return calculated > 0 ? new EstimateResult(calculated, true) : new EstimateResult(toolEstimate, false);
         }
         if (BILLING_UNIT_IMAGE_TOKEN.equals(billingUnit)) {
             BigDecimal inputPrice = price(modelConfig.getInputTokenPricePer1m());
@@ -58,9 +71,9 @@ public class TaskCreditEstimateService {
                     .add(outputPrice.multiply(BigDecimal.valueOf(IMAGE_OUTPUT_TOKEN_UPPER_ESTIMATE)))
                     .divide(BigDecimal.valueOf(1_000_000), 6, RoundingMode.HALF_UP);
             int calculated = estimatedCost.divide(CREDIT_PRICE_CNY, 0, RoundingMode.CEILING).intValue();
-            return calculated > 0 ? calculated : toolEstimate;
+            return calculated > 0 ? new EstimateResult(calculated, true) : new EstimateResult(toolEstimate, false);
         }
-        return toolEstimate;
+        return new EstimateResult(toolEstimate, false);
     }
 
     private BigDecimal price(BigDecimal value) {
@@ -75,5 +88,15 @@ public class TaskCreditEstimateService {
                 .multiply(new BigDecimal("1.2"))
                 .setScale(0, RoundingMode.CEILING)
                 .intValue();
+    }
+
+    private int userFacingCredits(EstimateResult estimate) {
+        if (!estimate.modelDerived()) {
+            return estimate.credits();
+        }
+        return userFacingCredits(estimate.credits());
+    }
+
+    private record EstimateResult(int credits, boolean modelDerived) {
     }
 }

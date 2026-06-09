@@ -80,8 +80,9 @@ class SiliconFlowVideoClient:
         payload: dict[str, Any] = {
             "model": model or settings.siliconflow_image_model,
             "prompt": prompt,
-            "image_size": image_size,
         }
+        if str(image_size or "").strip().lower() != "auto":
+            payload["image_size"] = image_size
         if batch_size > 1:
             payload["batch_size"] = batch_size
         if negative_prompt.strip():
@@ -145,8 +146,9 @@ class SiliconFlowVideoClient:
         payload: dict[str, Any] = {
             "model": model or self.default_model,
             "prompt": prompt,
-            "image_size": image_size,
         }
+        if str(image_size or "").strip().lower() != "auto":
+            payload["image_size"] = image_size
         if negative_prompt.strip():
             payload["negative_prompt"] = negative_prompt.strip()
         if image.strip():

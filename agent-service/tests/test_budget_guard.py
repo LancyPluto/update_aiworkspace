@@ -114,7 +114,7 @@ class FakeProductToolModel(FakeModel):
 
 
 @pytest.mark.asyncio
-async def test_graph_fails_when_selected_tool_exceeds_credit_budget():
+async def test_graph_dispatches_selected_tool_when_tool_cost_exceeds_agent_run_budget():
     backend = FakeBackend()
     engine = DeepAgentsRuntimeEngine(backend, FakeModel())
     context = RunContext(
@@ -136,9 +136,10 @@ async def test_graph_fails_when_selected_tool_exceeds_credit_budget():
 
     await engine.run_confirmed_tool(context, "expensive_tool")
 
-    assert backend.tool_calls == []
-    assert backend.completed == []
-    assert backend.failed == [(7, "AGENT_RUN_BUDGET_EXCEEDED")]
+    assert (7, "expensive_tool", {"userRequest": "please use expensive_tool"}) in backend.tool_calls
+    assert ("task", "expensive_tool", {"userRequest": "please use expensive_tool"}, "agent-run-7-tool-call-99") in backend.tool_calls
+    assert backend.completed
+    assert backend.failed == []
 
 
 @pytest.mark.asyncio
@@ -576,6 +577,102 @@ async def test_llm_router_is_primary_for_media_tool_selection():
     assert not any(call[0] == "task" and call[1] == "kling_image_to_video" for call in backend.tool_calls)
     intent_events = [event for event in backend.events if event[1] == "intent.detected"]
     assert intent_events[-1][3]["decisionSource"] == "llm_router"
+
+
+@pytest.mark.asyncio
+async def test_tool_use_applies_workspace_memory_quality_preference():
+    backend = FakeBackend(resource_type="IMAGE", content_text='{"images":[{"url":"/generated/image.png"}]}')
+    backend.memory_items = [
+        WorkspaceMemoryItem(
+            id=11,
+            title="GPT 生图质量偏好",
+            content="记住以后 gpt 生图一定用质量 low，不要默认 high。",
+            memoryType="preference",
+            score=10,
+        )
+    ]
+    engine = DeepAgentsRuntimeEngine(backend, FakeModel())
+    context = RunContext(
+        runId=18,
+        sessionId=1,
+        userId=1,
+        workspaceId=7,
+        message="生成一张电影海报",
+        creditBudget=20,
+        preferredToolCode="gpt_image2",
+        availableTools=[
+            ToolDescriptor(
+                toolCode="gpt_image2",
+                toolName="GPT-image2",
+                description="GPT 图片生成工具，图片生成，文生图",
+                autoCallable=True,
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "prompt": {"type": "string", "title": "提示词"},
+                        "quality": {"type": "string", "enum": ["low", "medium", "high"], "default": "high"},
+                    },
+                },
+            ),
+        ],
+    )
+
+    await engine.run(context)
+
+    task_calls = [call for call in backend.tool_calls if call[0] == "task"]
+    assert len(task_calls) == 1
+    params = task_calls[0][2]
+    assert params["quality"] == "low"
+    assert backend.memory_requests[0] == (7, "生成一张电影海报", 10, "tool")
+    frozen_events = [event for event in backend.events if event[1] == "memory.context_frozen"]
+    assert frozen_events
+    assert frozen_events[0][3]["source"] == "tool_use"
+
+
+@pytest.mark.asyncio
+async def test_confirmed_tool_execution_applies_workspace_memory_quality_preference():
+    backend = FakeBackend(resource_type="IMAGE", content_text='{"images":[{"url":"/generated/image.png"}]}')
+    backend.memory_items = [
+        WorkspaceMemoryItem(
+            id=12,
+            title="GPT 生图质量偏好",
+            content="GPT 生图一律使用 low 档。",
+            memoryType="preference",
+            score=10,
+        )
+    ]
+    engine = DeepAgentsRuntimeEngine(backend, FakeModel())
+    context = RunContext(
+        runId=19,
+        sessionId=1,
+        userId=1,
+        workspaceId=7,
+        message="生成一张电影海报",
+        creditBudget=20,
+        availableTools=[
+            ToolDescriptor(
+                toolCode="gpt_image2",
+                toolName="GPT-image2",
+                description="GPT 图片生成工具，图片生成，文生图",
+                autoCallable=False,
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "prompt": {"type": "string", "title": "提示词"},
+                        "quality": {"type": "string", "enum": ["low", "medium", "high"], "default": "high"},
+                    },
+                },
+            ),
+        ],
+    )
+
+    await engine.run_confirmed_tool(context, "gpt_image2")
+
+    task_calls = [call for call in backend.tool_calls if call[0] == "task"]
+    assert len(task_calls) == 1
+    assert task_calls[0][2]["quality"] == "low"
+    merged_events = [event for event in backend.events if event[1] == "arguments.merged"]
+    assert merged_events[-1][3]["arguments"]["quality"] == "low"
 
 
 @pytest.mark.asyncio

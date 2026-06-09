@@ -32,8 +32,8 @@ public class CorsConfig implements WebMvcConfigurer {
                 .toArray(String[]::new);
         if (containsWildcard(origins)) {
             registration.allowedOriginPatterns(origins);
-        } else {
-            registration.allowedOrigins(origins);
+        } else if (origins.length > 0) {
+            registration.allowedOriginPatterns(origins);
         }
     }
 

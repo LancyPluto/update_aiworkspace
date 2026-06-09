@@ -16,6 +16,7 @@ public record CommunityPostResponse(
         String modality,
         String coverUrl,
         String mediaUrl,
+        List<String> mediaUrls,
         String title,
         String description,
         Boolean promptVisible,
@@ -50,7 +51,7 @@ public record CommunityPostResponse(
     }
 
     public static CommunityPostResponse from(CommunityPost post, boolean liked, boolean favorited, List<String> tags) {
-        return from(post, liked, favorited, tags, null, null, post.getPromptSnapshot());
+        return from(post, liked, favorited, tags, null, null, post.getPromptSnapshot(), defaultMediaUrls(post));
     }
 
     public static CommunityPostResponse from(CommunityPost post,
@@ -59,7 +60,7 @@ public record CommunityPostResponse(
                                              List<String> tags,
                                              String authorNickname,
                                              String authorAvatarUrl) {
-        return from(post, liked, favorited, tags, authorNickname, authorAvatarUrl, post.getPromptSnapshot());
+        return from(post, liked, favorited, tags, authorNickname, authorAvatarUrl, post.getPromptSnapshot(), defaultMediaUrls(post));
     }
 
     public static CommunityPostResponse from(CommunityPost post,
@@ -69,7 +70,18 @@ public record CommunityPostResponse(
                                              String authorNickname,
                                              String authorAvatarUrl,
                                              String promptSnapshot) {
-        return from(post, liked, favorited, tags, authorNickname, authorAvatarUrl, promptSnapshot, Boolean.TRUE.equals(post.getPromptVisible()));
+        return from(post, liked, favorited, tags, authorNickname, authorAvatarUrl, promptSnapshot, defaultMediaUrls(post));
+    }
+
+    public static CommunityPostResponse from(CommunityPost post,
+                                             boolean liked,
+                                             boolean favorited,
+                                             List<String> tags,
+                                             String authorNickname,
+                                             String authorAvatarUrl,
+                                             String promptSnapshot,
+                                             List<String> mediaUrls) {
+        return from(post, liked, favorited, tags, authorNickname, authorAvatarUrl, promptSnapshot, mediaUrls, Boolean.TRUE.equals(post.getPromptVisible()));
     }
 
     public static CommunityPostResponse adminFrom(CommunityPost post,
@@ -77,7 +89,7 @@ public record CommunityPostResponse(
                                                   String authorNickname,
                                                   String authorAvatarUrl,
                                                   String promptSnapshot) {
-        return from(post, false, false, tags, authorNickname, authorAvatarUrl, promptSnapshot, true);
+        return from(post, false, false, tags, authorNickname, authorAvatarUrl, promptSnapshot, defaultMediaUrls(post), true);
     }
 
     private static CommunityPostResponse from(CommunityPost post,
@@ -87,6 +99,7 @@ public record CommunityPostResponse(
                                               String authorNickname,
                                               String authorAvatarUrl,
                                               String promptSnapshot,
+                                              List<String> mediaUrls,
                                               boolean exposePrompt) {
         return new CommunityPostResponse(
                 post.getId(),
@@ -97,6 +110,7 @@ public record CommunityPostResponse(
                 post.getModality(),
                 post.getCoverUrl(),
                 post.getMediaUrl(),
+                mediaUrls == null ? defaultMediaUrls(post) : mediaUrls,
                 post.getTitle(),
                 post.getDescription(),
                 Boolean.TRUE.equals(post.getPromptVisible()),
@@ -123,6 +137,16 @@ public record CommunityPostResponse(
                 post.getCreatedAt(),
                 post.getUpdatedAt()
         );
+    }
+
+    private static List<String> defaultMediaUrls(CommunityPost post) {
+        if (post.getMediaUrl() != null && !post.getMediaUrl().isBlank()) {
+            return List.of(post.getMediaUrl());
+        }
+        if (post.getCoverUrl() != null && !post.getCoverUrl().isBlank()) {
+            return List.of(post.getCoverUrl());
+        }
+        return List.of();
     }
 
     private static Long zero(Long value) {

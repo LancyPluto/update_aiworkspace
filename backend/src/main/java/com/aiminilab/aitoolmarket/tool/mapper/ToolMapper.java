@@ -150,6 +150,17 @@ public interface ToolMapper extends BaseMapper<AiTool> {
 
     @Update("""
             UPDATE ai_tools
+            SET model_config_id = #{modelConfigId},
+                updated_by = #{operatorId},
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{toolId} AND is_deleted = 0
+            """)
+    void updateToolModelConfig(@Param("toolId") Long toolId,
+                               @Param("modelConfigId") Long modelConfigId,
+                               @Param("operatorId") Long operatorId);
+
+    @Update("""
+            UPDATE ai_tools
             SET status = #{status}, updated_by = #{operatorId}, updated_at = CURRENT_TIMESTAMP
             WHERE id = #{toolId} AND is_deleted = 0
             """)

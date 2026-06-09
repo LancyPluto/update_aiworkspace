@@ -107,7 +107,17 @@ function openAuthorProfile() {
             <Music class="h-6 w-6" />
           </div>
           <p v-if="coverUrl" class="audio-cover-title">{{ asset.title }}</p>
-          <audio v-if="mediaUrl" :src="mediaUrl" controls preload="metadata" class="w-full" @click.stop />
+          <div
+            v-if="mediaUrl"
+            class="audio-player-shell"
+            @click.stop
+            @pointerdown.stop
+            @mousedown.stop
+            @mouseup.stop
+            @keydown.stop
+          >
+            <audio :src="mediaUrl" controls preload="metadata" class="w-full" />
+          </div>
         </div>
       </div>
       <div v-else class="text-cover">
@@ -375,6 +385,12 @@ function openAuthorProfile() {
   line-height: 1.4;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.audio-player-shell {
+  position: relative;
+  z-index: 2;
+  cursor: default;
 }
 
 .compact .audio-cover.has-cover,

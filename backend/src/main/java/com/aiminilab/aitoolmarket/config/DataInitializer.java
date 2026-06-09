@@ -37,13 +37,15 @@ public class DataInitializer implements CommandLineRunner {
     private final ToolTemplateBootstrap toolTemplateBootstrap;
     private final ModelVendorAccountMigrationService modelVendorAccountMigrationService;
     private final ModelProviderRegistry modelProviderRegistry;
+    private final AppProperties appProperties;
 
     public DataInitializer(UserMapper userMapper, ToolCategoryMapper toolCategoryMapper,
                            SystemSettingMapper systemSettingMapper, SystemSettingVersionMapper systemSettingVersionMapper,
                            PasswordEncoder passwordEncoder,
                            JdbcTemplate jdbcTemplate, ToolTemplateBootstrap toolTemplateBootstrap,
                            ModelVendorAccountMigrationService modelVendorAccountMigrationService,
-                           ModelProviderRegistry modelProviderRegistry) {
+                           ModelProviderRegistry modelProviderRegistry,
+                           AppProperties appProperties) {
         this.userMapper = userMapper;
         this.toolCategoryMapper = toolCategoryMapper;
         this.systemSettingMapper = systemSettingMapper;
@@ -54,6 +56,7 @@ public class DataInitializer implements CommandLineRunner {
         this.toolTemplateBootstrap = toolTemplateBootstrap;
         this.modelVendorAccountMigrationService = modelVendorAccountMigrationService;
         this.modelProviderRegistry = modelProviderRegistry;
+        this.appProperties = appProperties;
     }
 
     @Override
@@ -61,7 +64,9 @@ public class DataInitializer implements CommandLineRunner {
         ensureSchemaCompatibility();
         seedModelProviderMetadata();
         modelVendorAccountMigrationService.migrateIfNeeded();
+        seedGptImageApiKeysFromEnv();
         toolTemplateBootstrap.ensureSchemaAndSeed();
+        normalizeGptImageToolFieldOptions();
         createUserIfAbsent("admin", "123456", "Admin", UserType.ADMIN);
         createUserIfAbsent("user1", "123456", "User One", UserType.USER);
         toolCategoryMapper.ensureDefaultCategory();
@@ -227,6 +232,28 @@ public class DataInitializer implements CommandLineRunner {
                 "idx_agent_model_configs_vendor_account",
                 "CREATE INDEX idx_agent_model_configs_vendor_account ON agent_model_configs(vendor_account_id, enabled, is_deleted)"
         );
+        ensureTable("model_vendors", """
+                CREATE TABLE model_vendors (
+                  vendor_code VARCHAR(64) PRIMARY KEY,
+                  vendor_label VARCHAR(128) NOT NULL,
+                  icon_asset VARCHAR(128) NOT NULL,
+                  sort_order INT NOT NULL DEFAULT 0,
+                  enabled TINYINT NOT NULL DEFAULT 1,
+                  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                  KEY idx_model_vendors_enabled (enabled, sort_order)
+                )
+                """);
+        executeSql("""
+                INSERT INTO model_vendors(vendor_code, vendor_label, icon_asset, sort_order, enabled)
+                VALUES('suno', 'Suno', 'suno', 55, 1)
+                ON DUPLICATE KEY UPDATE
+                  vendor_label = VALUES(vendor_label),
+                  icon_asset = VALUES(icon_asset),
+                  sort_order = VALUES(sort_order),
+                  enabled = VALUES(enabled),
+                  updated_at = CURRENT_TIMESTAMP
+                """);
         ensureTable("model_vendor_accounts", """
                 CREATE TABLE model_vendor_accounts (
                   id BIGINT PRIMARY KEY AUTO_INCREMENT,
@@ -325,15 +352,10 @@ public class DataInitializer implements CommandLineRunner {
                 "CREATE UNIQUE INDEX uk_recharge_user_idem ON credit_recharge_orders(user_id, idempotency_key)"
         );
         executeSql("""
-                INSERT INTO credit_recharge_packages (
-                  package_code, package_name, credits, price_amount, currency,
-                  validity_days, benefits_json, recommended, sort_order, status
-                )
-                SELECT 'test_1000', 'Test credits', 1000, 10.00, 'CNY',
-                       30, '["Priority queue"]', 1, 10, 'ACTIVE'
-                WHERE NOT EXISTS (
-                  SELECT 1 FROM credit_recharge_packages WHERE package_code = 'test_1000'
-                )
+                UPDATE credit_recharge_packages
+                SET status = 'INACTIVE', updated_at = NOW()
+                WHERE package_code = 'test_1000'
+                  AND status = 'ACTIVE'
                 """);
         ensureTable("billing_usage_logs", """
                 CREATE TABLE billing_usage_logs (
@@ -378,6 +400,7 @@ public class DataInitializer implements CommandLineRunner {
         ensureColumn("agent_runs", "source_user_message_id", "ALTER TABLE agent_runs ADD COLUMN source_user_message_id BIGINT NULL");
         ensureColumn("agent_runs", "context_snapshot_id", "ALTER TABLE agent_runs ADD COLUMN context_snapshot_id BIGINT NULL");
         ensureColumn("agent_runs", "client_request_id", "ALTER TABLE agent_runs ADD COLUMN client_request_id VARCHAR(64) NULL");
+        ensureColumn("agent_runs", "preferred_tool_code", "ALTER TABLE agent_runs ADD COLUMN preferred_tool_code VARCHAR(64) NULL");
         ensureIndex("agent_runs", "uk_agent_runs_user_client", "CREATE UNIQUE INDEX uk_agent_runs_user_client ON agent_runs(user_id, client_request_id)");
         ensureIndex("agent_runs", "idx_agent_runs_session_user_id", "CREATE INDEX idx_agent_runs_session_user_id ON agent_runs(session_id, user_id, id)");
         ensureIndex("agent_runs", "idx_agent_runs_model_config", "CREATE INDEX idx_agent_runs_model_config ON agent_runs(model_config_id)");
@@ -745,6 +768,75 @@ public class DataInitializer implements CommandLineRunner {
             }
         }
         return false;
+    }
+
+    private void seedGptImageApiKeysFromEnv() {
+        seedGptImageApiKeyForHost("shiyunapi.com", appProperties.getAgent().getGptImageShiyunApiKey());
+        seedGptImageApiKeyForHost("ofox.ai", appProperties.getAgent().getGptImageOfoxApiKey());
+    }
+
+    private void normalizeGptImageToolFieldOptions() {
+        String sizeOptionsJson = """
+                [{"label":"智能","value":"auto"},{"label":"9:16","value":"1024x1536"},{"label":"2:3","value":"1024x1536"},{"label":"3:4","value":"1024x1536"},{"label":"1:1","value":"1024x1024"},{"label":"4:3","value":"1536x1024"},{"label":"3:2","value":"1536x1024"},{"label":"16:9","value":"1536x1024"}]
+                """.trim();
+        jdbcTemplate.update("""
+                UPDATE tool_field_schema_items
+                SET field_type = 'aspect_ratio',
+                    options_json = ?,
+                    updated_at = NOW()
+                WHERE status = 'ACTIVE'
+                  AND field_key IN ('aspectRatio', 'aspect_ratio', 'imageRatio', 'image_size', 'imageSize', 'size')
+                  AND (
+                    field_type <> 'aspect_ratio'
+                    OR options_json IS NULL
+                    OR options_json = ''
+                    OR REPLACE(options_json, ' ', '') LIKE '%"value":"16:9"%'
+                    OR REPLACE(options_json, ' ', '') LIKE '%"value":"16：9"%'
+                    OR REPLACE(options_json, ' ', '') LIKE '%"value":"9:16"%'
+                    OR REPLACE(options_json, ' ', '') LIKE '%"value":"9：16"%'
+                  )
+                  AND schema_id IN (
+                    SELECT s.id
+                    FROM tool_field_schemas s
+                    JOIN ai_tools t ON t.id = s.tool_id
+                    LEFT JOIN agent_model_configs m ON m.id = t.model_config_id
+                    WHERE s.status = 'ACTIVE'
+                      AND t.is_deleted = 0
+                      AND (
+                        LOWER(COALESCE(t.tool_code, '')) LIKE '%gpt%image%'
+                        OR LOWER(COALESCE(t.tool_name, '')) LIKE '%gpt%image%'
+                        OR LOWER(COALESCE(t.tool_name, '')) LIKE '%image2%'
+                        OR LOWER(COALESCE(m.model_name, '')) LIKE '%gpt-image%'
+                        OR LOWER(COALESCE(m.provider, '')) IN ('ofox_openai_images', 'openai_images_gateway')
+                      )
+                  )
+                """, sizeOptionsJson);
+    }
+
+    private void seedGptImageApiKeyForHost(String hostFragment, String apiKey) {
+        if (apiKey == null || apiKey.isBlank() || apiKey.trim().startsWith("replace-with-")) {
+            return;
+        }
+        String normalizedKey = apiKey.trim();
+        String hostPattern = "%" + hostFragment + "%";
+        jdbcTemplate.update("""
+                UPDATE model_vendor_accounts
+                SET api_key = ?, updated_at = NOW()
+                WHERE is_deleted = 0
+                  AND enabled = 1
+                  AND base_url LIKE ?
+                  AND (api_key IS NULL OR api_key = '')
+                """, normalizedKey, hostPattern);
+        jdbcTemplate.update("""
+                UPDATE agent_model_configs
+                SET api_key = ?, updated_at = NOW()
+                WHERE is_deleted = 0
+                  AND (base_url LIKE ? OR vendor_account_id IN (
+                    SELECT id FROM model_vendor_accounts
+                    WHERE is_deleted = 0 AND base_url LIKE ?
+                  ))
+                  AND (api_key IS NULL OR api_key = '')
+                """, normalizedKey, hostPattern, hostPattern);
     }
 
     private void createUserIfAbsent(String username, String password, String nickname, UserType userType) {

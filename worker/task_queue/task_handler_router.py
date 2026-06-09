@@ -53,6 +53,9 @@ class TaskHandlerRouter:
             return self.video_generation_handler.handle(routed_message)
         if context.get("toolCode") in {"digital_human_agent", "ai_comic_drama_agent"}:
             return self.digital_human_handler.handle(routed_message)
+        tool_code = str(context.get("toolCode") or "").strip().lower()
+        if tool_code in {"suno", "suno_music"}:
+            return self.music_generation_handler.handle(routed_message)
         if str(context.get("toolType") or "").upper() == "IMAGE_GENERATION":
             return self.image_generation_handler.handle(routed_message)
         if str(context.get("toolType") or "").upper() == "MUSIC_GENERATION":

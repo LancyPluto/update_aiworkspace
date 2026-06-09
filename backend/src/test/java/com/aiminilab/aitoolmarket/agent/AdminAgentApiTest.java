@@ -465,6 +465,42 @@ class AdminAgentApiTest {
     }
 
     @Test
+    void openaiGatewayVendorAccountTestUsesMediaGatewayProbeInsteadOfAgentChat() throws Exception {
+        mockExternalAuthDependencies();
+        String adminToken = login("/api/admin/v1/auth/login", "admin");
+
+        String response = mockMvc.perform(post("/api/admin/v1/model-vendor-accounts")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "vendorCode": "openai_gateway",
+                                  "accountName": "oFox gateway test",
+                                  "baseUrl": "https://api.ofox.ai/v1",
+                                  "apiKey": "sk-test-ofox-key",
+                                  "balanceQueryMode": "MANUAL",
+                                  "enabled": true
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        Long accountId = Long.parseLong(response.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
+
+        mockMvc.perform(post("/api/admin/v1/model-vendor-accounts/{id}/test", accountId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.provider").value("openai_images_gateway"))
+                .andExpect(jsonPath("$.data.modelName").value("openai/gpt-image-2"))
+                .andExpect(jsonPath("$.data.message").value(org.hamcrest.Matchers.not(
+                        org.hamcrest.Matchers.containsString("unsupported model provider"))));
+
+        Mockito.verify(agentServiceClient, Mockito.never()).testModelConfig(argThat(request ->
+                request != null && "openai_images_gateway".equals(request.provider())));
+    }
+
+    @Test
     void emptyApiKeyUpdateKeepsExistingModelSecret() throws Exception {
         mockExternalAuthDependencies();
         String adminToken = login("/api/admin/v1/auth/login", "admin");

@@ -33,10 +33,26 @@ const emit = defineEmits<{
 }>()
 
 const copyHint = ref("")
+const selectedUrl = ref("")
 
 const promptText = computed(() => props.asset?.prompt || props.asset?.rawText || "")
 
-const downloadUrl = computed(() => normalizeMediaUrl(props.asset?.url))
+const mediaUrls = computed(() => {
+  const urls = props.asset?.urls?.length ? props.asset.urls : props.asset?.url ? [props.asset.url] : []
+  const seen = new Set<string>()
+  return urls
+    .map((url) => normalizeMediaUrl(url))
+    .filter((url) => {
+      if (!url || seen.has(url)) return false
+      seen.add(url)
+      return true
+    })
+})
+
+const mediaUrl = computed(() => selectedUrl.value || normalizeMediaUrl(props.asset?.url) || mediaUrls.value[0] || "")
+const activeAsset = computed<AssetPreviewItem | null>(() => (props.asset ? { ...props.asset, url: mediaUrl.value } : null))
+
+const downloadUrl = computed(() => mediaUrl.value)
 
 const canDownload = computed(() => Boolean(downloadUrl.value))
 
@@ -95,10 +111,12 @@ function normalizeMediaUrl(value?: string | null) {
 }
 
 watch(
-  () => props.asset?.id,
+  () => [props.asset?.id, props.asset?.url, props.asset?.urls?.join("|")],
   () => {
     copyHint.value = ""
+    selectedUrl.value = normalizeMediaUrl(props.asset?.url) || mediaUrls.value[0] || ""
   },
+  { immediate: true },
 )
 
 async function copyPrompt() {
@@ -159,20 +177,20 @@ async function copyPrompt() {
           <section class="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(220px,0.32fr)] gap-5 max-2xl:grid-cols-1">
             <div class="relative flex min-h-[420px] items-center justify-center overflow-visible">
               <img
-                v-if="asset.kind === 'image' && asset.url"
-                :src="asset.url"
+                v-if="asset.kind === 'image' && mediaUrl"
+                :src="mediaUrl"
                 :alt="asset.title"
                 class="relative z-10 max-h-full max-w-full rounded-2xl object-contain shadow-[0_24px_90px_rgb(0_0_0_/_0.62)]"
               />
               <video
-                v-else-if="asset.kind === 'video' && asset.url"
-                :src="asset.url"
+                v-else-if="asset.kind === 'video' && mediaUrl"
+                :src="mediaUrl"
                 controls
                 playsinline
                 preload="metadata"
                 class="relative z-10 max-h-full max-w-full rounded-2xl bg-black shadow-[0_24px_90px_rgb(0_0_0_/_0.62)]"
               />
-              <div v-else-if="asset.kind === 'audio' && asset.url" class="relative z-10 w-full max-w-xl rounded-[28px] border border-white/10 bg-black/35 p-8">
+              <div v-else-if="asset.kind === 'audio' && mediaUrl" class="relative z-10 w-full max-w-xl rounded-[28px] border border-white/10 bg-black/35 p-8">
                 <div class="mb-8 flex items-center gap-4">
                   <div class="grid h-16 w-16 place-items-center rounded-3xl bg-primary/15 text-primary shadow-[0_0_40px_rgb(176_92_255_/_0.18)]">
                     <Music class="h-8 w-8" />
@@ -182,7 +200,7 @@ async function copyPrompt() {
                     <p class="mt-1 text-sm text-white/45">Audio material</p>
                   </div>
                 </div>
-                <audio :src="asset.url" controls preload="metadata" class="w-full" />
+                <audio :src="mediaUrl" controls preload="metadata" class="w-full" />
               </div>
               <article v-else class="relative z-10 max-h-full w-full max-w-3xl overflow-auto rounded-[28px] border border-white/10 bg-black/30 p-8">
                 <FileText class="mb-8 h-10 w-10 text-white/35" />
@@ -190,6 +208,25 @@ async function copyPrompt() {
                   {{ asset.rawText || asset.prompt || "暂无可预览内容" }}
                 </p>
               </article>
+            </div>
+
+            <div
+              v-if="asset.kind === 'image' && mediaUrls.length > 1"
+              class="mt-4 flex gap-3 overflow-x-auto pb-2"
+            >
+              <button
+                v-for="(url, index) in mediaUrls"
+                :key="url"
+                type="button"
+                class="relative h-20 w-20 shrink-0 overflow-hidden rounded-2xl border transition"
+                :class="url === mediaUrl ? 'border-primary shadow-[0_0_0_2px_rgb(176_92_255_/_0.22)]' : 'border-white/10 opacity-70 hover:opacity-100'"
+                @click="selectedUrl = url"
+              >
+                <img :src="url" :alt="`${asset.title}-${index + 1}`" class="h-full w-full object-cover" />
+                <span class="absolute bottom-1 right-1 rounded-full bg-black/65 px-1.5 py-0.5 text-[10px] text-white">
+                  {{ index + 1 }}
+                </span>
+              </button>
             </div>
 
             <aside class="grid content-start gap-0 max-2xl:grid-cols-3 max-lg:grid-cols-1">
@@ -247,7 +284,7 @@ async function copyPrompt() {
                 v-if="!asset.communityPostId"
                 type="button"
                 class="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-full border border-primary/35 bg-primary/18 px-4 text-sm font-semibold text-white transition hover:bg-primary/25"
-                @click="emit('publish', asset)"
+                @click="activeAsset && emit('publish', activeAsset)"
               >
                 <Globe2 class="h-4 w-4" />
                 发布到主页
@@ -256,7 +293,7 @@ async function copyPrompt() {
                 v-else
                 type="button"
                 class="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-full border border-white/10 bg-white/[0.06] px-4 text-sm font-semibold text-white/72 transition hover:bg-white/10"
-                @click="emit('unpublish', asset)"
+                @click="activeAsset && emit('unpublish', activeAsset)"
               >
                 撤回公开
               </button>
@@ -277,7 +314,7 @@ async function copyPrompt() {
               :key="tool.id"
               type="button"
               class="group grid grid-cols-[72px_minmax(0,1fr)] gap-4 rounded-[24px] border border-white/8 bg-white/[0.04] p-3 text-left transition hover:-translate-y-0.5 hover:border-primary/45 hover:bg-white/[0.07]"
-              @click="emit('use-tool', tool, asset)"
+              @click="activeAsset && emit('use-tool', tool, activeAsset)"
             >
               <div class="relative h-20 overflow-hidden rounded-[18px] bg-white/[0.06]">
                 <video

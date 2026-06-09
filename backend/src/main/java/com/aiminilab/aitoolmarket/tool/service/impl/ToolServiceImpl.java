@@ -202,7 +202,7 @@ public class ToolServiceImpl implements ToolService {
         List<ToolSummaryResponse> list = toolMapper
                 .findTools(false, keyword, categoryId, status, normalizedPageSize, offset)
                 .stream()
-                .map(ToolSummaryResponse::from)
+                .map(this::toEstimatedSummary)
                 .toList();
         long total = toolMapper.countTools(false, keyword, categoryId, status);
         return PageResponse.of(list, total, pageNo, pageSize);
@@ -487,8 +487,12 @@ public class ToolServiceImpl implements ToolService {
 
     private ToolSummaryResponse findToolSummary(Long toolId) {
         return toolMapper.findById(toolId)
-                .map(ToolSummaryResponse::from)
+                .map(this::toEstimatedSummary)
                 .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在"));
+    }
+
+    private ToolSummaryResponse toEstimatedSummary(AiTool tool) {
+        return ToolSummaryResponse.from(tool, taskCreditEstimateService.estimateUserFacingTaskCredits(tool));
     }
 
     private AiTool fromRequest(UpsertToolRequest request) {

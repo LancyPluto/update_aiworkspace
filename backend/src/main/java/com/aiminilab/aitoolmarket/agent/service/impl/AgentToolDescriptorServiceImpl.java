@@ -12,6 +12,7 @@ import com.aiminilab.aitoolmarket.agent.mapper.AgentToolDescriptorExtensionMappe
 import com.aiminilab.aitoolmarket.agent.service.AgentToolDescriptorService;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
+import com.aiminilab.aitoolmarket.credit.service.TaskCreditEstimateService;
 import com.aiminilab.aitoolmarket.tool.dto.ToolFieldResponse;
 import com.aiminilab.aitoolmarket.tool.entity.AiTool;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolFieldItemMapper;
@@ -45,17 +46,20 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
     private final ToolFieldItemMapper toolFieldItemMapper;
     private final AgentToolDescriptorExtensionMapper extensionMapper;
     private final AgentModelConfigMapper modelConfigMapper;
+    private final TaskCreditEstimateService taskCreditEstimateService;
     private final ObjectMapper objectMapper;
 
     public AgentToolDescriptorServiceImpl(ToolMapper toolMapper,
                                           ToolFieldItemMapper toolFieldItemMapper,
                                           AgentToolDescriptorExtensionMapper extensionMapper,
                                           AgentModelConfigMapper modelConfigMapper,
+                                          TaskCreditEstimateService taskCreditEstimateService,
                                           ObjectMapper objectMapper) {
         this.toolMapper = toolMapper;
         this.toolFieldItemMapper = toolFieldItemMapper;
         this.extensionMapper = extensionMapper;
         this.modelConfigMapper = modelConfigMapper;
+        this.taskCreditEstimateService = taskCreditEstimateService;
         this.objectMapper = objectMapper;
     }
 
@@ -87,7 +91,7 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
                         tool.getDescription(),
                         normalizeOutputType(tool.getOutputModality()),
                         tool.getCoverUrl(),
-                        tool.getEstimatedCreditCost()
+                        taskCreditEstimateService.estimateUserFacingTaskCredits(tool)
                 ))
                 .toList();
     }
@@ -222,7 +226,7 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
                 tool.getToolCode(),
                 tool.getToolName(),
                 tool.getDescription(),
-                tool.getEstimatedCreditCost(),
+                taskCreditEstimateService.estimateUserFacingTaskCredits(tool),
                 toInputSchema(fields),
                 autoCallable,
                 fieldDescriptors,
@@ -386,7 +390,7 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
             if (field.placeholder() != null && !field.placeholder().isBlank()) {
                 property.put("description", field.placeholder());
             }
-            if ("select".equalsIgnoreCase(field.fieldType()) && field.options() != null && field.options().isArray()) {
+            if (supportsEnum(field.fieldType()) && field.options() != null && field.options().isArray()) {
                 ArrayNode enumValues = objectMapper.createArrayNode();
                 field.options().forEach(option -> {
                     if (option.isTextual()) {
@@ -418,15 +422,21 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
     }
 
     private String jsonType(String fieldType) {
-        if ("number".equalsIgnoreCase(fieldType)) {
+        if ("number".equalsIgnoreCase(fieldType) || "slider".equalsIgnoreCase(fieldType)) {
             return "number";
         }
         if ("integer".equalsIgnoreCase(fieldType)) {
             return "integer";
         }
-        if ("boolean".equalsIgnoreCase(fieldType)) {
+        if ("boolean".equalsIgnoreCase(fieldType) || "checkbox".equalsIgnoreCase(fieldType)) {
             return "boolean";
         }
         return "string";
+    }
+
+    private boolean supportsEnum(String fieldType) {
+        return "select".equalsIgnoreCase(fieldType)
+                || "radio".equalsIgnoreCase(fieldType)
+                || "aspect_ratio".equalsIgnoreCase(fieldType);
     }
 }

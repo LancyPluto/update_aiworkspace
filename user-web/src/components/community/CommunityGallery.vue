@@ -2,6 +2,8 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue"
 import { useRoute, useRouter } from "vue-router"
 import {
+  ChevronLeft,
+  ChevronRight,
   Heart,
   Loader2,
   Music,
@@ -68,6 +70,7 @@ const loadSentinelRef = ref<HTMLElement | null>(null)
 const playingPostId = ref<number | null>(null)
 const galleryAudioPlaying = ref(false)
 const galleryAudioRef = ref<HTMLAudioElement | null>(null)
+const activeMediaIndexes = ref<Record<number, number>>({})
 let loadObserver: IntersectionObserver | null = null
 
 const modalityFilters = [
@@ -98,6 +101,39 @@ function mediaUrl(value?: string | null) {
   const path = raw.startsWith("/") ? raw : `/${raw}`
   const apiOrigin = getApiOrigin()
   return apiOrigin ? `${apiOrigin}${path}` : path
+}
+
+function postImageUrls(post: CommunityPost) {
+  if (postKind(post) !== "image") return []
+  const rawUrls = post.mediaUrls?.length ? post.mediaUrls : [post.mediaUrl, post.coverUrl]
+  const urls = rawUrls
+    .map((url) => mediaUrl(url))
+    .filter((url): url is string => Boolean(url))
+  return [...new Set(urls)]
+}
+
+function activePostImageUrl(post: CommunityPost) {
+  const urls = postImageUrls(post)
+  if (!urls.length) return ""
+  const current = activeMediaIndexes.value[post.id] ?? 0
+  return urls[Math.min(Math.max(current, 0), urls.length - 1)] || urls[0] || ""
+}
+
+function activePostImageIndex(post: CommunityPost) {
+  const urls = postImageUrls(post)
+  if (!urls.length) return 0
+  return Math.min(Math.max(activeMediaIndexes.value[post.id] ?? 0, 0), urls.length - 1)
+}
+
+function stepPostImage(post: CommunityPost, delta: number, event: Event) {
+  event.stopPropagation()
+  const urls = postImageUrls(post)
+  if (urls.length <= 1) return
+  const current = activePostImageIndex(post)
+  activeMediaIndexes.value = {
+    ...activeMediaIndexes.value,
+    [post.id]: (current + delta + urls.length) % urls.length,
+  }
 }
 
 function postKind(post: CommunityPost) {
@@ -142,6 +178,7 @@ function patchPost(updated: CommunityPost) {
 
 function hasMediaCover(post: CommunityPost) {
   if (postKind(post) === "audio") return hasCommunityAudioMedia(post)
+  if (postKind(post) === "image") return Boolean(activePostImageUrl(post))
   return Boolean(mediaUrl(post.coverUrl)) && postKind(post) !== "text"
 }
 
@@ -280,6 +317,7 @@ async function load(reset = true) {
     loading.value = true
     pageNo.value = 1
     posts.value = []
+    activeMediaIndexes.value = {}
   } else {
     loadingMore.value = true
   }
@@ -329,7 +367,8 @@ async function createSameStyle(post: CommunityPost, event: Event) {
       { postId: post.id, eventType: "dashboard_open", source: "discover_card", toolCode: post.toolCode },
       { token: auth.token },
     ).catch(() => undefined)
-    openDashboardWithAsset(assetFromCommunityPost(post, mediaUrl(post.coverUrl)), post.toolCode, {
+    const selectedMediaUrl = postKind(post) === "image" ? activePostImageUrl(post) : mediaUrl(post.coverUrl)
+    openDashboardWithAsset(assetFromCommunityPost(post, selectedMediaUrl), post.toolCode, {
       modality: post.modality,
       sourcePost: post.id,
     })
@@ -547,7 +586,7 @@ onUnmounted(() => {
               <div class="thumb">
                 <img
                   v-if="hasMediaCover(post) && postKind(post) === 'image'"
-                  :src="mediaUrl(post.coverUrl)"
+                  :src="activePostImageUrl(post)"
                   :alt="postTitle(post)"
                   class="thumb-media"
                   loading="lazy"
@@ -584,6 +623,9 @@ onUnmounted(() => {
                   <Music class="h-3 w-3" />
                   音乐
                 </span>
+                <span v-if="postImageUrls(post).length > 1" class="media-count-badge">
+                  {{ activePostImageIndex(post) + 1 }} / {{ postImageUrls(post).length }}
+                </span>
               </div>
 
               <div class="card-body">
@@ -596,6 +638,15 @@ onUnmounted(() => {
                 </p>
               </div>
             </button>
+
+            <div v-if="postImageUrls(post).length > 1" class="carousel-controls" aria-label="切换图片">
+              <button type="button" class="carousel-button previous" aria-label="上一张" @click="stepPostImage(post, -1, $event)">
+                <ChevronLeft class="h-4 w-4" />
+              </button>
+              <button type="button" class="carousel-button next" aria-label="下一张" @click="stepPostImage(post, 1, $event)">
+                <ChevronRight class="h-4 w-4" />
+              </button>
+            </div>
 
             <button
               type="button"
@@ -949,6 +1000,64 @@ onUnmounted(() => {
   backdrop-filter: blur(8px);
 }
 
+.media-count-badge {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  z-index: 1;
+  border-radius: 999px;
+  background: rgb(0 0 0 / 0.58);
+  color: rgb(255 255 255 / 0.9);
+  padding: 4px 9px;
+  font-size: 11px;
+  font-weight: 700;
+  backdrop-filter: blur(8px);
+}
+
+.carousel-controls {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.carousel-button {
+  position: absolute;
+  top: 50%;
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgb(255 255 255 / 0.16);
+  border-radius: 999px;
+  background: rgb(0 0 0 / 0.46);
+  color: rgb(255 255 255 / 0.88);
+  opacity: 0;
+  pointer-events: auto;
+  transform: translateY(-50%);
+  transition: opacity 0.18s ease, background 0.18s ease, transform 0.18s ease;
+  backdrop-filter: blur(10px);
+}
+
+.carousel-button.previous {
+  left: 10px;
+}
+
+.carousel-button.next {
+  right: 10px;
+}
+
+.post-card:hover .carousel-button,
+.carousel-button:focus-visible {
+  opacity: 1;
+}
+
+.carousel-button:hover {
+  background: rgb(0 0 0 / 0.68);
+  transform: translateY(-50%) scale(1.04);
+}
+
 .thumb-text {
   display: flex;
   min-height: 160px;
@@ -1227,6 +1336,10 @@ onUnmounted(() => {
     opacity: 1;
     transform: none;
     padding: 8px;
+  }
+
+  .carousel-button {
+    opacity: 1;
   }
 
   .sort-select,

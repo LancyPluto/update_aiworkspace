@@ -152,11 +152,12 @@ public class ToolTemplateBootstrap {
                 2,
                 List.of(
                         field("prompt", "画面描述", "textarea", "描述主体、场景、光线、构图和细节", null, true, 1),
-                        field("aspectRatio", "画面比例", "radio", null,
-                                options("1:1", "4:3", "3:4", "16:9", "9:16"), true, 2),
+                        field("aspectRatio", "画面比例", "aspect_ratio", null,
+                                imageAspectRatioOptions(), true, 2),
                         field("style", "风格", "select", null,
                                 options("写实", "电商", "插画", "动漫", "极简", "国潮"), false, 3),
-                        field("count", "生成数量", "number", "例如 1", null, false, 4),
+                        field("count", "生成数量", "slider", "1",
+                                "{\"slider\":{\"min\":1,\"max\":9,\"step\":1},\"defaultValue\":1}", false, 4),
                         field("negativePrompt", "反向提示词", "textarea", "不希望出现的元素", null, false, 5)
                 )
         );
@@ -173,8 +174,8 @@ public class ToolTemplateBootstrap {
                 3,
                 List.of(
                         field("prompt", "视频描述", "textarea", "描述镜头、主体、动作、风格和时长", null, true, 1),
-                        field("aspectRatio", "视频比例", "radio", null,
-                                options("16:9", "9:16", "1:1"), true, 2),
+                        field("aspectRatio", "视频比例", "aspect_ratio", null,
+                                videoAspectRatioOptions(), true, 2),
                         field("duration", "时长秒数", "number", "例如 5", null, false, 3)
                 )
         );
@@ -205,8 +206,8 @@ public class ToolTemplateBootstrap {
                                 options("职业主播", "科技感主持人", "亲和力导购", "知识博主"), true, 3),
                         field("scene", "视频场景", "select", "选择数字人所在场景",
                                 options("直播间", "产品展示台", "办公室", "纯色演播室"), true, 4),
-                        field("aspectRatio", "画面比例", "select", "选择视频比例",
-                                options("16:9 横屏", "9:16 竖屏", "1:1 方形"), true, 5),
+                        field("aspectRatio", "画面比例", "aspect_ratio", "选择视频比例",
+                                videoAspectRatioOptions(), true, 5),
                         field("duration", "视频时长要求", "select",
                                 "选择期望成片时长",
                                 options("5 秒", "10 秒", "15 秒", "30 秒", "60 秒"), true, 6),
@@ -408,6 +409,14 @@ public class ToolTemplateBootstrap {
         }
         builder.append(']');
         return builder.toString();
+    }
+
+    private static String imageAspectRatioOptions() {
+        return "[{\"label\":\"智能\",\"value\":\"auto\"},{\"label\":\"9:16\",\"value\":\"9:16\"},{\"label\":\"2:3\",\"value\":\"2:3\"},{\"label\":\"3:4\",\"value\":\"3:4\"},{\"label\":\"1:1\",\"value\":\"1:1\"},{\"label\":\"4:3\",\"value\":\"4:3\"},{\"label\":\"3:2\",\"value\":\"3:2\"},{\"label\":\"16:9\",\"value\":\"16:9\"},{\"label\":\"21:9\",\"value\":\"21:9\"}]";
+    }
+
+    private static String videoAspectRatioOptions() {
+        return "[{\"label\":\"智能\",\"value\":\"auto\"},{\"label\":\"16:9\",\"value\":\"16:9\"},{\"label\":\"9:16\",\"value\":\"9:16\"},{\"label\":\"1:1\",\"value\":\"1:1\"}]";
     }
 
     private record TemplateFieldSeed(

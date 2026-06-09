@@ -84,7 +84,7 @@ def main() -> int:
         ssh = paramiko.SSHClient()
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         print(f"Connecting to {user}@{host}...")
-        ssh.connect(host, username=user, password=password, timeout=30)
+        ssh.connect(host, username=user, password=password, timeout=30, allow_agent=False, look_for_keys=False)
 
         sftp = ssh.open_sftp()
         print(f"Uploading to {REMOTE_TAR}...")
