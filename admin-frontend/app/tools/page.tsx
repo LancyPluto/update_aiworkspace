@@ -480,6 +480,7 @@ function modelVendorKey(config?: AgentModelConfig | null) {
   if (text.includes("kling")) return "kling"
   if (text.includes("minimax")) return "minimax"
   if (text.includes("openai")) return "openai"
+  if (text.includes("suno")) return "suno"
   return config.provider || "other"
 }
 
@@ -492,6 +493,7 @@ function modelVendorLabel(key: string, config?: AgentModelConfig | null) {
     aliyun: "阿里云 / 通义千问",
     kling: "可灵",
     minimax: "MiniMax",
+    suno: "Suno",
     openai: "OpenAI",
     google: "Google Gemini",
     qwen: "通义千问",

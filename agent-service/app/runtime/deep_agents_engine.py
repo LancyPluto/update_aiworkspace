@@ -306,7 +306,6 @@ class DeepAgentsRuntimeEngine:
         tool = ToolRegistry(context).get(tool_code)
         if tool is None:
             intent = self.intent_router.classify(context)
-            from app.core.intent_router import IntentResult
             intent_result = IntentResult(
                 intent=Intent.NEEDS_CLARIFICATION, confidence=0.5, reason="confirmed_tool_unavailable"
             )
@@ -549,7 +548,6 @@ class DeepAgentsRuntimeEngine:
                 intent.isFollowUp = True
                 intent.inheritedFromToolCallId = followup.inherited_from_tool_call_id
         if tool is None:
-            from app.core.intent_router import IntentResult
             intent_result = IntentResult(
                 intent=Intent.NEEDS_CLARIFICATION, confidence=0.5, reason="tool_unavailable"
             )

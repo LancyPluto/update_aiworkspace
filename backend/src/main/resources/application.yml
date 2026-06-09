@@ -22,7 +22,8 @@ spring:
     hikari:
       connection-timeout: 2000
       validation-timeout: 1000
-      connection-init-sql: ${MYSQL_CONNECTION_INIT_SQL:}
+      # 会话层强制 utf8mb4，避免中文工具名/分类名在 JDBC 读取时乱码
+      connection-init-sql: ${MYSQL_CONNECTION_INIT_SQL:SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci}
   data:
     redis:
       host: ${REDIS_HOST:127.0.0.1}

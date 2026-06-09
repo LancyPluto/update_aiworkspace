@@ -33,6 +33,7 @@ const BRAND_RULES: Array<{ patterns: string[]; brand: ModelBrand }> = [
   { patterns: ["kling"], brand: { name: "Kling", iconUrl: "https://app.klingai.com/favicon.ico", color: "#111827" } },
   { patterns: ["siliconflow"], brand: { name: "SiliconFlow", iconUrl: "https://siliconflow.cn/favicon.ico", color: "#111827" } },
   { patterns: ["minimax"], brand: { name: "MiniMax", iconUrl: "https://www.minimaxi.com/favicon.ico", color: "#0f172a" } },
+  { patterns: ["suno"], brand: { name: "Suno", iconUrl: "/assets/vendor-icons/suno.svg", color: "#111827" } },
   { patterns: ["openai", "gpt"], brand: { name: "OpenAI", iconUrl: "https://cdn.simpleicons.org/openai/111827", color: "#111827" } },
   { patterns: ["claude", "anthropic"], brand: { name: "Anthropic", iconUrl: "https://cdn.simpleicons.org/anthropic/111827", color: "#111827" } },
 ]

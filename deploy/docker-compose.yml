@@ -109,6 +109,7 @@ services:
       MYSQL_DATABASE: ai_supermarket_v1
       MYSQL_USERNAME: root
       MYSQL_PASSWORD: root123456
+      MYSQL_CONNECTION_INIT_SQL: SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_PASSWORD: ""
