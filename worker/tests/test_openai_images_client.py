@@ -103,6 +103,95 @@ def test_openai_images_with_reference_uses_requests_multipart_by_default() -> No
     assert posted["files"]["image"][1] == b"fake", posted
 
 
+def test_openai_images_edit_does_not_top_up_by_default_when_gateway_returns_fewer_than_requested() -> None:
+    class FakeResponse:
+        status_code = 200
+        text = "{}"
+
+        def __init__(self, index: int) -> None:
+            self.index = index
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {
+                "data": [{"url": f"https://example.com/openai-image-{self.index}.png"}],
+                "usage": {"input_tokens": 10, "output_tokens": 20, "total_tokens": 30},
+            }
+
+    client = OpenAIImagesClient(base_url="https://api.ofox.ai/v1", api_key="fake-key")
+    posted_n: list[str] = []
+
+    def fake_post(url, json=None, data=None, files=None, timeout=None, headers=None):
+        files_map = dict(files or [])
+        n_field = files_map.get("n")
+        posted_n.append(n_field[1] if isinstance(n_field, tuple) else "")
+        return FakeResponse(len(posted_n))
+
+    client.session.post = fake_post
+    urls = client.generate_images(
+        prompt="edit this",
+        model="openai/gpt-image-2",
+        image_size="1536x1024",
+        batch_size=2,
+        quality="low",
+        image="data:image/png;base64,ZmFrZQ==",
+    )
+
+    assert urls == ["https://example.com/openai-image-1.png"], urls
+    assert posted_n == ["2"], posted_n
+    assert client.last_usage == {"promptTokens": 10, "completionTokens": 20, "totalTokens": 30}
+
+
+def test_openai_images_edit_can_top_up_when_gateway_returns_fewer_than_requested() -> None:
+    class FakeResponse:
+        status_code = 200
+        text = "{}"
+
+        def __init__(self, index: int) -> None:
+            self.index = index
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {
+                "data": [{"url": f"https://example.com/openai-image-{self.index}.png"}],
+                "usage": {"input_tokens": 10, "output_tokens": 20, "total_tokens": 30},
+            }
+
+    client = OpenAIImagesClient(
+        base_url="https://api.ofox.ai/v1",
+        api_key="fake-key",
+        extra_auth_json='{"topUpEditBatch": true}',
+    )
+    posted_n: list[str] = []
+
+    def fake_post(url, json=None, data=None, files=None, timeout=None, headers=None):
+        files_map = dict(files or [])
+        n_field = files_map.get("n")
+        posted_n.append(n_field[1] if isinstance(n_field, tuple) else "")
+        return FakeResponse(len(posted_n))
+
+    client.session.post = fake_post
+    urls = client.generate_images(
+        prompt="edit this",
+        model="openai/gpt-image-2",
+        image_size="1536x1024",
+        batch_size=2,
+        quality="low",
+        image="data:image/png;base64,ZmFrZQ==",
+    )
+
+    assert urls == [
+        "https://example.com/openai-image-1.png",
+        "https://example.com/openai-image-2.png",
+    ], urls
+    assert posted_n == ["2", "1"], posted_n
+    assert client.last_usage == {"promptTokens": 20, "completionTokens": 40, "totalTokens": 60}
+
+
 def test_openai_images_with_multiple_references_uses_edit_multipart() -> None:
     class FakeResponse:
         status_code = 200

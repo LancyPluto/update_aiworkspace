@@ -93,11 +93,7 @@ const materials = computed(() => {
 
 const materialAssets = computed<MaterialAssetItem[]>(() =>
   materials.value
-    .map((item) => {
-      const asset = assetFromMaterial(item)
-      return asset ? { ...item, asset } : null
-    })
-    .filter((item): item is MaterialAssetItem => Boolean(item)),
+    .flatMap((item) => assetsFromMaterial(item).map((asset) => ({ ...item, asset }))),
 )
 
 const toolOptions = computed(() => {
@@ -142,13 +138,21 @@ function inferModality(task: TaskDetail, blocks: ResultBlock[]): Exclude<Materia
   return "OTHER"
 }
 
-function assetFromMaterial(item: MaterialItem): AssetPreviewItem | null {
-  return assetFromTask(item.task, {
+function assetsFromMaterial(item: MaterialItem): AssetPreviewItem[] {
+  const asset = assetFromTask(item.task, {
     blocks: item.blocks,
     idPrefix: "material",
     source: "private",
     modality: item.modality,
   })
+  if (!asset) return []
+  if (asset.kind !== "image" || !asset.urls || asset.urls.length <= 1) return [asset]
+  return asset.urls.map((url, index) => ({
+    ...asset,
+    id: `${asset.id}-image-${index + 1}`,
+    url,
+    subtitle: `${asset.taskNo || asset.subtitle || ""} · 第 ${index + 1}/${asset.urls?.length || 1} 张`,
+  }))
 }
 
 function openAssetPreview(item: MaterialAssetItem) {

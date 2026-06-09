@@ -59,6 +59,36 @@ class WorkspaceMemoryRuntime:
         except Exception:
             return []
 
+    async def fetch_tool_items(self, context: RunContext) -> list[WorkspaceMemoryItem]:
+        workspace_id = context.workspaceId
+        if workspace_id is None:
+            return []
+        try:
+            view = "tool"
+            items = await self.backend.retrieve_workspace_memory(
+                workspace_id=workspace_id,
+                query=context.message,
+                limit=memory_retrieval_limit(context),
+                view=view,
+            )
+            if items:
+                await self.backend.append_event(
+                    context.runId,
+                    RunEventCreate(
+                        eventType=MEMORY_RETRIEVED,
+                        eventJson={
+                            "count": len(items),
+                            "view": view,
+                            "memoryIds": [item.id for item in items],
+                            "types": [item.memoryType for item in items],
+                            "items": memory_trace_items(items),
+                        },
+                    ),
+                )
+            return items
+        except Exception:
+            return []
+
     async def fetch_context(self, context: RunContext) -> str:
         items = await self.fetch_items(context)
         memory_context = format_workspace_memory_context(items)

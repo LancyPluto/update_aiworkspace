@@ -429,11 +429,15 @@ function resolveAgentUploadedFileId(item: AgentMaterialAttachment): number | nul
 
 function confirmPickerMaterials() {
   const selectedUrls = pickerSelectedUrls.value
-  const selectedAgentFileIds: number[] = []
+  const selectedAgentFileIds = props.files
+    .filter((file) => file.downloadUrl && selectedUrls.has(file.downloadUrl))
+    .map((file) => file.id)
   for (const item of pickerMaterials.value) {
     if (!selectedUrls.has(item.url)) continue
     const agentFileId = resolveAgentUploadedFileId(item)
-    if (agentFileId != null) selectedAgentFileIds.push(agentFileId)
+    if (agentFileId != null && !selectedAgentFileIds.includes(agentFileId)) {
+      selectedAgentFileIds.push(agentFileId)
+    }
   }
   emit("sync-uploaded-files", selectedAgentFileIds)
   for (const item of selectedMaterialAttachments.value) {

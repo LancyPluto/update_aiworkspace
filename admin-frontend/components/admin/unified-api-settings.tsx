@@ -322,7 +322,14 @@ function renderModelCost(model: UnifiedApiModelItem) {
   )
 }
 
-const emptyAccountForm = (): ModelVendorAccountPayload & { id?: number; apiKeyMasked?: string; extraAuthJsonMasked?: string } => ({
+type AccountFormState = ModelVendorAccountPayload & {
+  id?: number
+  apiKeyMasked?: string
+  extraAuthJsonMasked?: string
+  topUpEditBatch?: boolean
+}
+
+const emptyAccountForm = (): AccountFormState => ({
   vendorCode: "deepseek",
   accountName: "默认账户",
   baseUrl: "",
@@ -388,6 +395,36 @@ const billingUnitOptions: Array<{ value: NonNullable<AgentModelConfigPayload["bi
 function numberOrZero(value: unknown) {
   const parsed = Number(value)
   return Number.isFinite(parsed) ? parsed : 0
+}
+
+function parseExtraAuthObject(extraAuthJson?: string | null): Record<string, unknown> {
+  const raw = (extraAuthJson || "").trim()
+  if (!raw) return {}
+  const parsed = JSON.parse(raw)
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("额外鉴权 JSON 必须是对象")
+  }
+  return parsed as Record<string, unknown>
+}
+
+function hasTopUpEditBatch(extraAuthJson?: string | null) {
+  try {
+    return parseExtraAuthObject(extraAuthJson).topUpEditBatch === true
+  } catch {
+    return false
+  }
+}
+
+function buildExtraAuthJsonWithTopUp(extraAuthJson: string | undefined, topUpEditBatch: boolean | undefined) {
+  if (topUpEditBatch === undefined) return extraAuthJson
+  const config = parseExtraAuthObject(extraAuthJson)
+  if (topUpEditBatch) {
+    config.topUpEditBatch = true
+  } else {
+    delete config.topUpEditBatch
+  }
+  const keys = Object.keys(config)
+  return keys.length > 0 ? JSON.stringify(config, null, 2) : ""
 }
 
 function EmbeddedOnOffSwitch({
@@ -934,6 +971,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
       apiKeyMasked: account.apiKeyMasked || "",
       extraAuthJson: account.extraAuthJson || "",
       extraAuthJsonMasked: account.extraAuthJsonMasked || "",
+      topUpEditBatch: hasTopUpEditBatch(account.extraAuthJson),
       consoleUrl: account.consoleUrl || "",
       balanceUrl: account.balanceUrl || "",
       balanceQueryMode: account.balanceQueryMode || "MANUAL",
@@ -949,14 +987,15 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
     setAccountSaving(true)
     setError(null)
     try {
+      const extraAuthJson = buildExtraAuthJsonWithTopUp(accountForm.extraAuthJson, accountForm.topUpEditBatch)
       const payload: ModelVendorAccountPayload = {
         vendorCode: accountForm.vendorCode,
         accountName: accountForm.accountName,
         baseUrl: accountForm.baseUrl,
         apiKey: accountForm.apiKey,
         clearApiKey: accountForm.clearApiKey,
-        extraAuthJson: accountForm.extraAuthJson,
-        clearExtraAuthJson: accountForm.clearExtraAuthJson,
+        extraAuthJson,
+        clearExtraAuthJson: accountForm.clearExtraAuthJson || (accountForm.topUpEditBatch !== undefined && !extraAuthJson),
         consoleUrl: accountForm.consoleUrl,
         balanceUrl: accountForm.balanceUrl,
         balanceQueryMode: accountForm.balanceQueryMode,
@@ -973,7 +1012,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
       setAccountDialogOpen(false)
       await load()
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "保存账户失败")
+      setError(err instanceof ApiError ? err.message : err instanceof Error ? err.message : "保存账户失败")
     } finally {
       setAccountSaving(false)
     }
@@ -1678,6 +1717,21 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                 onChange={(e) => setAccountForm((f) => ({ ...f, extraAuthJson: e.target.value }))}
               />
               <p className="text-xs text-muted-foreground">用于可灵 Access Key / Secret Key、代理、超时等账号级扩展配置。</p>
+            </div>
+            <div className="rounded-xl border bg-muted/30 p-3">
+              <div className="flex items-start justify-between gap-4">
+                <div className="space-y-1">
+                  <Label>图片编辑批量补全</Label>
+                  <p className="text-xs leading-relaxed text-muted-foreground">
+                    写入 <code>topUpEditBatch=true</code>。当 openai_images 参考图编辑请求返回图片数少于生成数量时，worker 会追加单张 edit 请求补齐。
+                  </p>
+                </div>
+                <EmbeddedOnOffSwitch
+                  checked={accountForm.topUpEditBatch === true}
+                  label="图片编辑批量补全"
+                  onCheckedChange={(topUpEditBatch) => setAccountForm((f) => ({ ...f, topUpEditBatch }))}
+                />
+              </div>
             </div>
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">

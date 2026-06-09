@@ -114,6 +114,42 @@ def test_multi_image_schema_supports_ofox_image_key():
     assert args["image"][1].endswith("/generated/images/2.png")
 
 
+def test_multi_image_field_receives_images_when_schema_is_missing_property():
+    tool = ToolDescriptor(
+        toolCode="ofox_gpt_image2",
+        toolName="GPT-image2",
+        autoCallable=True,
+        inputSchema={"type": "object", "properties": {"prompt": {"type": "string"}}},
+        fields=[
+            {
+                "fieldKey": "image",
+                "fieldName": "参考图",
+                "fieldType": "multi_image",
+                "required": False,
+            }
+        ],
+    )
+    ctx = RunContext(
+        runId=1,
+        sessionId=1,
+        userId=1,
+        message="参考该图片生成一组海贼王真人版剧照",
+        agentFiles=[
+            AgentFileContext(
+                id=-1,
+                originalFilename="@图片1",
+                contentType="image/png",
+                status="READY",
+                downloadUrl="/generated/images/1.png",
+            ),
+        ],
+    )
+
+    args = apply_user_selected_attachment_priority(ctx, tool, {"prompt": "生成剧照"})
+
+    assert args["image"][0].endswith("/generated/images/1.png")
+
+
 def test_single_image_schema_keeps_first_ready_image():
     tool = ToolDescriptor(
         toolCode="gpt_image2",

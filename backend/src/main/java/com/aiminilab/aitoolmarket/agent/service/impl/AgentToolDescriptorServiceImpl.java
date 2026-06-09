@@ -390,7 +390,7 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
             if (field.placeholder() != null && !field.placeholder().isBlank()) {
                 property.put("description", field.placeholder());
             }
-            if ("select".equalsIgnoreCase(field.fieldType()) && field.options() != null && field.options().isArray()) {
+            if (supportsEnum(field.fieldType()) && field.options() != null && field.options().isArray()) {
                 ArrayNode enumValues = objectMapper.createArrayNode();
                 field.options().forEach(option -> {
                     if (option.isTextual()) {
@@ -422,15 +422,21 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
     }
 
     private String jsonType(String fieldType) {
-        if ("number".equalsIgnoreCase(fieldType)) {
+        if ("number".equalsIgnoreCase(fieldType) || "slider".equalsIgnoreCase(fieldType)) {
             return "number";
         }
         if ("integer".equalsIgnoreCase(fieldType)) {
             return "integer";
         }
-        if ("boolean".equalsIgnoreCase(fieldType)) {
+        if ("boolean".equalsIgnoreCase(fieldType) || "checkbox".equalsIgnoreCase(fieldType)) {
             return "boolean";
         }
         return "string";
+    }
+
+    private boolean supportsEnum(String fieldType) {
+        return "select".equalsIgnoreCase(fieldType)
+                || "radio".equalsIgnoreCase(fieldType)
+                || "aspect_ratio".equalsIgnoreCase(fieldType);
     }
 }

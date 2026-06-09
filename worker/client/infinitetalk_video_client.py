@@ -146,6 +146,7 @@ class InfiniteTalkVideoClient:
         resolution: str,
         mode: str,
     ) -> dict[str, Any]:
+        normalized_aspect_ratio = str(aspect_ratio or "").strip().replace("：", ":")
         payload: dict[str, Any] = {
             "model": model or "MeiGen-AI/InfiniteTalk",
             "prompt": prompt,
@@ -156,11 +157,12 @@ class InfiniteTalkVideoClient:
             "mode": mode or "streaming",
             "size": "infinitetalk-720" if "720" in str(resolution) else "infinitetalk-480",
             "resolution": resolution,
-            "aspectRatio": aspect_ratio,
             "duration": duration,
             "sampleAudioGuideScale": 4,
             "sampleTextGuideScale": 5,
         }
+        if normalized_aspect_ratio.lower() not in {"", "auto", "智能", "adaptive", "default"}:
+            payload["aspectRatio"] = normalized_aspect_ratio
         if seed is not None:
             payload["seed"] = seed
         return payload

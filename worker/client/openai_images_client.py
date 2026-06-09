@@ -120,6 +120,39 @@ class OpenAIImagesClient:
                 source_model=model,
             )
             payload = {**form_fields, "images": [f"<{transport}>"]}
+            responses = [response]
+            urls = self._extract_image_urls(response)
+            requested_count = max(1, min(10, int(batch_size or 1)))
+            if len(urls) < requested_count:
+                LOGGER.warning(
+                    "openai images edit returned fewer images than requested requested=%s received=%s endpoint=%s model=%s responseData=%s usage=%s",
+                    requested_count,
+                    len(urls),
+                    endpoint,
+                    form_fields.get("model"),
+                    _image_response_data_summary(response),
+                    _safe_usage_summary(response),
+                )
+            if len(urls) < requested_count and _as_bool(self.extra_auth.get("topUpEditBatch"), False):
+                LOGGER.warning(
+                    "openai images edit top-up enabled; issuing additional single-image edit requests requested=%s received=%s endpoint=%s model=%s",
+                    requested_count,
+                    len(urls),
+                    endpoint,
+                    form_fields.get("model"),
+                )
+                single_fields = {**form_fields, "n": "1"}
+                while len(urls) < requested_count:
+                    top_up_response = self._edit_reference_image(
+                        endpoint,
+                        single_fields,
+                        image_files,
+                        source_model=model,
+                    )
+                    responses.append(top_up_response)
+                    urls.extend(self._extract_image_urls(top_up_response))
+            urls = urls[:requested_count]
+            response = _combine_image_responses(responses)
         else:
             payload = self._build_generation_payload(
                 prompt=prompt,
@@ -143,7 +176,7 @@ class OpenAIImagesClient:
                 payload.get("response_format"),
             )
             response = self._post(self.endpoint_path, payload)
-        urls = self._extract_image_urls(response)
+            urls = self._extract_image_urls(response)
         self.last_usage = self._resolve_usage(response, payload, len(urls))
         return urls
 
@@ -747,6 +780,63 @@ def _format_openai_images_http_error(status_code: int, body: str, model: str | N
     return message
 
 
+def _combine_image_responses(responses: list[dict[str, Any]]) -> dict[str, Any]:
+    if not responses:
+        return {"data": []}
+    combined = dict(responses[0])
+    data: list[Any] = []
+    usage: dict[str, int] = {}
+    for response in responses:
+        response_data = response.get("data")
+        if isinstance(response_data, list):
+            data.extend(response_data)
+        response_usage = response.get("usage")
+        if isinstance(response_usage, dict):
+            for key, value in response_usage.items():
+                numeric = _as_int(value)
+                if numeric > 0:
+                    usage[key] = usage.get(key, 0) + numeric
+    combined["data"] = data
+    if usage:
+        combined["usage"] = usage
+    return combined
+
+
+def _image_response_data_summary(response: dict[str, Any]) -> dict[str, Any]:
+    data = response.get("data")
+    if not isinstance(data, list):
+        return {"type": type(data).__name__, "count": 0}
+    items: list[dict[str, Any]] = []
+    for index, item in enumerate(data[:10]):
+        if not isinstance(item, dict):
+            items.append({"index": index, "type": type(item).__name__})
+            continue
+        items.append(
+            {
+                "index": item.get("index", index),
+                "hasUrl": bool(str(item.get("url") or "").strip()),
+                "hasB64": bool(str(item.get("b64_json") or "").strip()),
+                "keys": sorted(str(key) for key in item.keys())[:12],
+            }
+        )
+    return {"type": "list", "count": len(data), "items": items}
+
+
+def _safe_usage_summary(response: dict[str, Any]) -> dict[str, Any]:
+    usage = response.get("usage")
+    if not isinstance(usage, dict):
+        return {}
+    allowed_keys = (
+        "input_tokens",
+        "output_tokens",
+        "total_tokens",
+        "num_input_images",
+        "prompt_tokens",
+        "completion_tokens",
+    )
+    return {key: usage.get(key) for key in allowed_keys if key in usage}
+
+
 def _normalize_reference_images(image: str | list[str] | None) -> list[str]:
     if isinstance(image, str):
         text = image.strip()
@@ -792,14 +882,18 @@ def _should_fallback_to_requests_edit(message: str) -> bool:
 
 
 def _normalize_size(value: str) -> str:
-    size = (value or "1024x1024").strip()
+    size = (value or "1024x1024").strip().replace("：", ":")
+    if size.lower() in {"auto", "智能", "adaptive", "default"}:
+        return "auto"
     if ":" in size:
         return {
             "1:1": "1024x1024",
-            "16:9": "1536x864",
-            "9:16": "864x1536",
-            "4:3": "1024x768",
-            "3:4": "768x1024",
+            "16:9": "1536x1024",
+            "4:3": "1536x1024",
+            "3:2": "1536x1024",
+            "9:16": "1024x1536",
+            "3:4": "1024x1536",
+            "2:3": "1024x1536",
         }.get(size, "1024x1024")
     return size
 

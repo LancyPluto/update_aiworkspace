@@ -37,6 +37,7 @@ export interface CapabilityState {
 }
 
 type FieldOption = string | { label: string; value: string; promptPrefix?: string }
+type AspectRatioOption = { label: string; value: string }
 type MaterialKind = "image" | "video" | "audio" | "file"
 
 interface MaterialAsset {
@@ -88,7 +89,25 @@ const UPLOAD_HISTORY_LIMIT = 60
 const MULTI_IMAGE_LIMIT = 8
 
 function isAspectRatioField(field: ToolField): boolean {
-  return field.fieldKey === "aspectRatio" || field.fieldKey === "aspect_ratio" || field.fieldKey === "imageRatio"
+  return field.fieldType === "aspect_ratio" || field.fieldKey === "aspectRatio" || field.fieldKey === "aspect_ratio" || field.fieldKey === "imageRatio"
+}
+
+function normalizeAspectRatio(value: unknown): string {
+  const normalized = String(value ?? "")
+    .trim()
+    .replace(/：/g, ":")
+    .replace(/\s+/g, "")
+  if (["auto", "智能", "adaptive", "default"].includes(normalized.toLowerCase())) return "auto"
+  return normalized
+}
+
+function defaultAspectRatioValue(): string {
+  const fieldDefault = ratioField.value ? normalizeAspectRatio(parseFieldMeta(ratioField.value).defaultValue) : ""
+  if (fieldDefault && aspectRatios.value.includes(fieldDefault)) return fieldDefault
+  const configuredDefault = normalizeAspectRatio(imageCapability.value?.config.defaultRatio)
+  if (configuredDefault && aspectRatios.value.includes(configuredDefault)) return configuredDefault
+  if (aspectRatios.value.includes("auto")) return "auto"
+  return aspectRatios.value[0] || "auto"
 }
 
 const configuredFields = computed(() =>
@@ -107,15 +126,51 @@ const activeUploadKind = computed(() => (uploadHistoryField.value ? materialKind
 const ratioField = computed(() => (props.fields || []).find(isAspectRatioField))
 const hasAspectRatioControl = computed(() => Boolean(imageCapability.value || ratioField.value))
 
-const aspectRatios = computed(() => {
+const aspectRatioOptions = computed<AspectRatioOption[]>(() => {
   const config = imageCapability.value?.config
-  const configured = Array.isArray(config?.aspectRatios) ? config.aspectRatios.map(String) : []
-  const fieldOptionsValues = ratioField.value ? fieldOptions(ratioField.value).map(optionValue) : []
-  const source = [...configured, ...fieldOptionsValues, "16:9", "9:16"]
-  const allowed = new Set(["16:9", "9:16"])
-  const values = source.filter((value) => allowed.has(value))
-  return [...new Set(values)].length ? [...new Set(values)] : ["16:9", "9:16"]
+  const options: AspectRatioOption[] = []
+  const seen = new Set<string>()
+
+  function add(label: string, rawValue: unknown) {
+    const value = normalizeAspectRatio(rawValue)
+    if (!value || seen.has(value)) return
+    seen.add(value)
+    options.push({ label: label.trim() || (value === "auto" ? "智能" : value), value })
+  }
+
+  if (ratioField.value) {
+    for (const option of fieldOptions(ratioField.value)) {
+      add(optionLabel(option), optionValue(option))
+    }
+  }
+  if (Array.isArray(config?.aspectRatios)) {
+    for (const ratio of config.aspectRatios) {
+      add(String(ratio), ratio)
+    }
+  }
+
+  return options.length > 0 ? options : [{ label: "智能", value: "auto" }]
 })
+const aspectRatios = computed(() => aspectRatioOptions.value.map((option) => option.value))
+
+function aspectRatioLabel(value: string): string {
+  return aspectRatioOptions.value.find((option) => option.value === value)?.label || (value === "auto" ? "智能" : value)
+}
+
+function aspectRatioIconStyle(value: string): Record<string, string> {
+  const match = normalizeAspectRatio(value).match(/^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/)
+  if (!match) return { width: "14px", height: "14px" }
+  const widthRatio = Number(match[1])
+  const heightRatio = Number(match[2])
+  if (!Number.isFinite(widthRatio) || !Number.isFinite(heightRatio) || widthRatio <= 0 || heightRatio <= 0) {
+    return { width: "14px", height: "14px" }
+  }
+  const max = 16
+  if (widthRatio >= heightRatio) {
+    return { width: `${max}px`, height: `${Math.max(5, (max * heightRatio) / widthRatio)}px` }
+  }
+  return { width: `${Math.max(5, (max * widthRatio) / heightRatio)}px`, height: `${max}px` }
+}
 
 const codeLanguages = computed(() => {
   const config = codeCapability.value?.config
@@ -146,11 +201,8 @@ function defaultFieldValue(field: ToolField): unknown {
 function buildDefaultState(): CapabilityState {
   const next: CapabilityState = { attachments: [], fields: {} }
   if (hasAspectRatioControl.value) {
-    next.imageRatio =
-      typeof imageCapability.value?.config.defaultRatio === "string"
-        ? String(imageCapability.value.config.defaultRatio)
-        : aspectRatios.value[0]
-    if (!aspectRatios.value.includes(next.imageRatio)) next.imageRatio = aspectRatios.value[0]
+    next.imageRatio = defaultAspectRatioValue()
+    if (!aspectRatios.value.includes(next.imageRatio)) next.imageRatio = defaultAspectRatioValue()
   }
   if (webSearchCapability.value) next.webSearch = webSearchCapability.value.config.defaultEnabled === true
   if (codeCapability.value) next.language = codeLanguages.value[0] || "python"
@@ -158,9 +210,9 @@ function buildDefaultState(): CapabilityState {
     const initial = props.initialParams?.[field.fieldKey]
     next.fields[field.fieldKey] = initial !== undefined && initial !== null ? initial : defaultFieldValue(field)
   }
-  if (typeof props.initialParams?.imageRatio === "string") next.imageRatio = props.initialParams.imageRatio
-  if (typeof props.initialParams?.aspectRatio === "string") next.imageRatio = props.initialParams.aspectRatio
-  if (typeof props.initialParams?.aspect_ratio === "string") next.imageRatio = props.initialParams.aspect_ratio
+  if (typeof props.initialParams?.imageRatio === "string") next.imageRatio = normalizeAspectRatio(props.initialParams.imageRatio)
+  if (typeof props.initialParams?.aspectRatio === "string") next.imageRatio = normalizeAspectRatio(props.initialParams.aspectRatio)
+  if (typeof props.initialParams?.aspect_ratio === "string") next.imageRatio = normalizeAspectRatio(props.initialParams.aspect_ratio)
   if (next.imageRatio && !aspectRatios.value.includes(next.imageRatio)) next.imageRatio = aspectRatios.value[0]
   if (typeof props.initialParams?.webSearch === "boolean") next.webSearch = props.initialParams.webSearch
   if (typeof props.initialParams?.language === "string") next.language = props.initialParams.language
@@ -617,8 +669,9 @@ function validate(): { valid: boolean; message?: string } {
 function getRequestParams(): Record<string, unknown> {
   const params: Record<string, unknown> = {}
   if (hasAspectRatioControl.value && state.value.imageRatio) {
-    params.aspectRatio = state.value.imageRatio
-    params.imageRatio = state.value.imageRatio
+    const ratio = normalizeAspectRatio(state.value.imageRatio)
+    params.aspectRatio = ratio
+    params.imageRatio = ratio
   }
   if (webSearchCapability.value && showWebSearch.value) params.webSearch = state.value.webSearch === true
   if (codeCapability.value && state.value.language) params.language = state.value.language
@@ -869,15 +922,45 @@ defineExpose({
       </div>
     </div>
 
-    <div class="flex flex-wrap items-center gap-1.5">
-      <select
+    <div class="space-y-1.5">
+      <label v-if="hasAspectRatioControl" class="block text-[11px] font-medium text-muted-foreground">比例</label>
+      <div
         v-if="hasAspectRatioControl"
-        v-model="state.imageRatio"
-        class="h-7 rounded-lg border border-border/60 bg-background px-2 text-xs"
+        class="grid h-12 overflow-hidden rounded-xl border border-border/50 bg-muted/40 p-1"
+        :style="{ gridTemplateColumns: `repeat(${aspectRatioOptions.length}, minmax(0, 1fr))` }"
         title="图片比例"
       >
-        <option v-for="ratio in aspectRatios" :key="ratio" :value="ratio">{{ ratio }}</option>
-      </select>
+        <button
+          v-for="option in aspectRatioOptions"
+          :key="option.value"
+          type="button"
+          class="flex min-w-0 flex-col items-center justify-center gap-0.5 rounded-lg text-xs font-medium transition"
+          :class="
+            normalizeAspectRatio(state.imageRatio) === option.value
+              ? 'bg-white/12 text-foreground shadow-sm'
+              : 'text-muted-foreground hover:bg-white/6 hover:text-foreground'
+          "
+          @click="state.imageRatio = option.value"
+        >
+          <span class="flex h-4 items-center justify-center">
+            <span
+              v-if="option.value === 'auto'"
+              class="flex h-3.5 w-3.5 items-center justify-center rounded-[3px] border border-current opacity-70"
+            >
+              <span class="h-1.5 w-1.5 rounded-[2px] border border-current opacity-70"></span>
+            </span>
+            <span
+              v-else
+              class="block rounded-[3px] border border-current opacity-90"
+              :style="aspectRatioIconStyle(option.value)"
+            ></span>
+          </span>
+          <span class="truncate">{{ aspectRatioLabel(option.value) }}</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="flex flex-wrap items-center gap-1.5">
 
       <label
         v-if="fileCapability"

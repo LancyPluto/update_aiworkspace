@@ -177,6 +177,7 @@ export interface CommunityPost {
   modality: string
   coverUrl?: string | null
   mediaUrl?: string | null
+  mediaUrls?: string[]
   title: string
   description?: string | null
   promptVisible: boolean
@@ -270,7 +271,7 @@ export interface ToolFieldOption {
 export interface ToolField {
   fieldKey: string
   fieldName: string
-  fieldType: "text" | "textarea" | "select" | "number" | "radio" | "checkbox" | "slider" | "image" | "multi_image" | "file"
+  fieldType: "text" | "textarea" | "select" | "number" | "radio" | "aspect_ratio" | "checkbox" | "slider" | "image" | "multi_image" | "file"
   placeholder?: string | null
   options?: Array<ToolFieldOption | string> | null
   optionsJson?: string | null

@@ -320,9 +320,23 @@ class DeepAgentsRuntimeEngine:
             RunEventCreate(eventType=TOOL_SELECTED, eventText=tool.toolCode, eventJson={"toolCode": tool.toolCode, "confirmed": True}),
         )
 
+        workspace_memory_items = await self._fetch_tool_workspace_memory_items(context)
+        workspace_memory_context = await self._emit_tool_memory_context(context, workspace_memory_items)
+        execution_args = self.tool_bridge.build_arguments(context, tool, apply_placeholder_defaults=True)
+        execution_args = apply_user_selected_attachment_priority(context, tool, execution_args)
+        execution_args = _apply_workspace_memory_argument_overrides(context, tool, execution_args, workspace_memory_items)
+        if workspace_memory_context:
+            await self._emit_arguments_merged(context, tool, IntentResult(
+                intent=Intent.TOOL_USE,
+                confidence=1.0,
+                selectedToolCode=tool.toolCode,
+                candidateToolCodes=[tool.toolCode],
+                reason="confirmed_tool_with_memory",
+            ), execution_args)
+
         budget = BudgetState(credit_budget=context.creditBudget)
         try:
-            result = await self._execute_tool_with_guard(context, tool, budget)
+            result = await self._execute_tool_with_guard(context, tool, budget, arguments=execution_args)
         except BudgetExceeded as exception:
             await self._fail_run(context.runId, exception.error_code, exception.message, budget=budget)
             return
@@ -583,6 +597,8 @@ class DeepAgentsRuntimeEngine:
             tool.autoCallable,
             intent.candidateToolCodes,
         )
+        workspace_memory_items = await self._fetch_tool_workspace_memory_items(context)
+        await self._emit_tool_memory_context(context, workspace_memory_items)
         await self.backend.append_event(
             context.runId,
             RunEventCreate(eventType=TOOL_SELECTED, eventText=tool.toolCode, eventJson={"toolCode": tool.toolCode}),
@@ -593,6 +609,7 @@ class DeepAgentsRuntimeEngine:
         base_args = self.tool_bridge.build_arguments(context, tool, apply_placeholder_defaults=True)
         base_args.update({key: value for key, value in seed_args.items() if value not in (None, "")})
         base_args = apply_user_selected_attachment_priority(context, tool, base_args)
+        base_args = _apply_workspace_memory_argument_overrides(context, tool, base_args, workspace_memory_items)
         missing_args = self._missing_user_arguments(base_args, tool)
         extracted_args = base_args
         LOGGER.info(
@@ -609,6 +626,7 @@ class DeepAgentsRuntimeEngine:
             prepared_enriched = self.tool_bridge.build_arguments(context, tool, apply_placeholder_defaults=True)
             prepared_enriched.update({key: value for key, value in enriched.items() if value not in (None, "")})
             enriched = apply_user_selected_attachment_priority(context, tool, prepared_enriched)
+            enriched = _apply_workspace_memory_argument_overrides(context, tool, enriched, workspace_memory_items)
             still_missing = self._missing_user_arguments(enriched, tool)
             extracted_args = enriched
             auto_call = self._should_auto_call(context, tool, followup, intent)
@@ -653,6 +671,7 @@ class DeepAgentsRuntimeEngine:
         current_args = self.tool_bridge.build_arguments(context, tool, apply_placeholder_defaults=True)
         extracted_args = self._merge_tool_arguments(current_args, extracted_args, {}, user_request=context.message)
         extracted_args = apply_user_selected_attachment_priority(context, tool, extracted_args)
+        extracted_args = _apply_workspace_memory_argument_overrides(context, tool, extracted_args, workspace_memory_items)
         await self._emit_arguments_preview(context, tool, extracted_args, [], not auto_call)
         await self._emit_arguments_merged(context, tool, intent, extracted_args)
 
@@ -1351,6 +1370,28 @@ class DeepAgentsRuntimeEngine:
     async def _fetch_workspace_memory_items(self, context: RunContext) -> list[WorkspaceMemoryItem]:
         return await self.memory_runtime.fetch_items(context)
 
+    async def _fetch_tool_workspace_memory_items(self, context: RunContext) -> list[WorkspaceMemoryItem]:
+        return await self.memory_runtime.fetch_tool_items(context)
+
+    async def _emit_tool_memory_context(self, context: RunContext, memory_items: list[WorkspaceMemoryItem]) -> str:
+        workspace_memory_context = format_workspace_memory_context(memory_items)
+        retrieval_prompt = context.memorySettings.retrievalPrompt if context.memorySettings is not None else None
+        if workspace_memory_context and retrieval_prompt and retrieval_prompt.strip():
+            workspace_memory_context = f"{retrieval_prompt.strip()}\n\n{workspace_memory_context}"
+        if workspace_memory_context:
+            await self.backend.append_event(
+                context.runId,
+                RunEventCreate(
+                    eventType=MEMORY_CONTEXT_FROZEN,
+                    eventJson=memory_context_trace_payload(
+                        workspace_memory_context,
+                        source="tool_use",
+                        items=memory_items,
+                    ),
+                ),
+            )
+        return workspace_memory_context
+
     async def _fetch_workspace_memory_context(self, context: RunContext) -> str:
         return await self.memory_runtime.fetch_context(context)
 
@@ -1688,6 +1729,112 @@ def _field_requires_user_input(field, tool: ToolDescriptor) -> bool:
         return bool(field.userRequired)
     properties = tool.inputSchema.get("properties", {})
     return _schema_property_user_required(properties.get(field.fieldKey) if isinstance(properties, dict) else None)
+
+
+def _apply_workspace_memory_argument_overrides(
+    context: RunContext,
+    tool: ToolDescriptor,
+    arguments: dict[str, Any],
+    memory_items: list[WorkspaceMemoryItem],
+) -> dict[str, Any]:
+    if not memory_items:
+        return arguments
+    normalized = dict(arguments)
+    quality_key = _quality_argument_key(tool, normalized)
+    if quality_key and _memory_prefers_gpt_image_low_quality(context, tool, memory_items):
+        normalized[quality_key] = "low"
+    return normalized
+
+
+def _quality_argument_key(tool: ToolDescriptor, arguments: dict[str, Any]) -> str | None:
+    properties = tool.inputSchema.get("properties", {}) if isinstance(tool.inputSchema, dict) else {}
+    candidate_keys: list[str] = []
+    if isinstance(properties, dict):
+        candidate_keys.extend(key for key in properties if isinstance(key, str) and "quality" in key.lower())
+    candidate_keys.extend(field.fieldKey for field in tool.fields if "quality" in (field.fieldKey or "").lower())
+    candidate_keys.extend(key for key in arguments if isinstance(key, str) and "quality" in key.lower())
+    seen: set[str] = set()
+    for key in candidate_keys:
+        if key in seen:
+            continue
+        seen.add(key)
+        if _quality_key_accepts_value(tool, key, "low"):
+            return key
+    return None
+
+
+def _quality_key_accepts_value(tool: ToolDescriptor, key: str, value: str) -> bool:
+    properties = tool.inputSchema.get("properties", {}) if isinstance(tool.inputSchema, dict) else {}
+    prop = properties.get(key) if isinstance(properties, dict) else None
+    enum_values = prop.get("enum") if isinstance(prop, dict) else None
+    if isinstance(enum_values, list) and enum_values:
+        return value in {str(item).strip().lower() for item in enum_values}
+    field = next((item for item in tool.fields if item.fieldKey == key), None)
+    options = getattr(field, "options", None) if field is not None else None
+    if isinstance(options, list) and options:
+        values = set()
+        for option in options:
+            raw = option.get("value") if isinstance(option, dict) else option
+            if raw not in (None, ""):
+                values.add(str(raw).strip().lower())
+        return value in values
+    return True
+
+
+def _memory_prefers_gpt_image_low_quality(
+    context: RunContext,
+    tool: ToolDescriptor,
+    memory_items: list[WorkspaceMemoryItem],
+) -> bool:
+    if _current_request_explicitly_sets_quality(context.message):
+        return False
+    tool_text = f"{tool.toolCode} {tool.toolName or ''} {tool.description or ''}".lower()
+    if "gpt" not in tool_text or not tool_supports_modality(tool, "image"):
+        return False
+    memory_text = "\n".join(f"{item.title}\n{item.content}" for item in memory_items).lower()
+    compact = re.sub(r"\s+", "", memory_text)
+    if "gpt" not in compact or not any(token in compact for token in ("生图", "image", "图片", "生成图")):
+        return False
+    return any(
+        token in compact
+        for token in (
+            "qualitylow",
+            "质量low",
+            "低质量",
+            "最低质量",
+            "低档",
+            "low档",
+            "用low",
+            "使用low",
+            "一律使用low",
+            "一定用质量low",
+        )
+    )
+
+
+def _current_request_explicitly_sets_quality(message: str) -> bool:
+    compact = re.sub(r"\s+", "", (message or "").lower())
+    if not compact:
+        return False
+    return any(
+        token in compact
+        for token in (
+            "qualityhigh",
+            "quality=high",
+            "质量high",
+            "高质量档",
+            "高档质量",
+            "用high",
+            "使用high",
+            "这次high",
+            "qualitylow",
+            "quality=low",
+            "质量low",
+            "用low",
+            "使用low",
+            "这次low",
+        )
+    )
 
 
 def _schema_property_user_required(prop: Any) -> bool:
