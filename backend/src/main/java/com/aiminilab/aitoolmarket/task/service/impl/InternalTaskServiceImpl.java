@@ -185,7 +185,7 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         }
         BigDecimal costAmount = BigDecimal.ZERO;
         String billingUnit = modelConfig.getBillingUnit();
-        if (("PER_CALL".equals(billingUnit) || "PER_SECOND".equals(billingUnit)) && modelConfig.getUnitPrice() != null) {
+        if ("PER_CALL".equals(billingUnit) && modelConfig.getUnitPrice() != null) {
             int units = request.billableUnits() != null && request.billableUnits() > 0 ? request.billableUnits() : 1;
             costAmount = modelConfig.getUnitPrice().multiply(BigDecimal.valueOf(units));
         } else {

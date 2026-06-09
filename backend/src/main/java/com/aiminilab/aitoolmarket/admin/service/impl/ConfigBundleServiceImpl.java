@@ -187,12 +187,7 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                 modelResult.changed,
                 categories);
         for (ConfigBundleDto.Tool tool : safeList(bundle.tools())) {
-            try {
-                importTool(tool, operatorId, modelIdsByCode, categoryIdsByCode, counter, warnings);
-            } catch (Exception exception) {
-                String toolCode = tool == null || isBlank(tool.toolCode()) ? "<missing>" : tool.toolCode();
-                warnings.add("Tool " + toolCode + " import failed: " + rootMessage(exception));
-            }
+            importTool(tool, operatorId, modelIdsByCode, categoryIdsByCode, counter, warnings);
         }
 
         bypassCacheService.invalidateImportedCatalogData();
@@ -714,7 +709,7 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                 item.executionHandler(),
                 null
         );
-        AiTool existing = findImportTargetTool(item.toolCode(), operatorId, warnings).orElse(null);
+        AiTool existing = findToolByCode(item.toolCode()).orElse(null);
         ToolSummaryResponse saved = existing == null
                 ? toolService.createTool(request, operatorId)
                 : toolService.updateTool(existing.getId(), request, operatorId);
@@ -766,23 +761,6 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
         }
         AgentModelConfig config = agentModelConfigMapper.findActiveById(modelConfigId);
         return config != null && Boolean.FALSE.equals(config.getEnabled());
-    }
-
-    private Optional<AiTool> findImportTargetTool(String toolCode, Long operatorId, List<String> warnings) {
-        Optional<AiTool> active = findToolByCode(toolCode);
-        if (active.isPresent()) {
-            return active;
-        }
-        Optional<AiTool> any = toolMapper.findAnyByCode(toolCode);
-        if (any.isEmpty()) {
-            return Optional.empty();
-        }
-        AiTool tool = any.get();
-        if (Boolean.TRUE.equals(tool.getDeleted())) {
-            toolMapper.restoreDeletedTool(tool.getId(), operatorId);
-            warnings.add("Restored soft-deleted tool " + toolCode + " before import");
-        }
-        return toolMapper.findById(tool.getId()).or(() -> Optional.of(tool));
     }
 
     private void upsertAgentToolAccess(ToolSummaryResponse tool, Boolean agentEnabled) {
@@ -1048,18 +1026,6 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
             normalized = normalized.substring(0, normalized.length() - 1);
         }
         return normalized;
-    }
-
-    private static String rootMessage(Throwable throwable) {
-        Throwable current = throwable;
-        while (current.getCause() != null) {
-            current = current.getCause();
-        }
-        String message = current.getMessage();
-        if (message == null || message.isBlank()) {
-            message = throwable == null ? "unknown error" : throwable.getClass().getSimpleName();
-        }
-        return message.length() > 500 ? message.substring(0, 500) + "..." : message;
     }
 
     private static final class ImportCounter {

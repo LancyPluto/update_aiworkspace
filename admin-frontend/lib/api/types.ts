@@ -351,7 +351,7 @@ export interface AgentModelConfig {
   outputTokenPricePer1k?: number | null
   inputTokenPricePer1m?: number | null
   outputTokenPricePer1m?: number | null
-  billingUnit?: 'TOKEN_PER_M' | 'PER_CALL' | 'IMAGE_TOKEN' | 'PER_SECOND' | string | null
+  billingUnit?: 'TOKEN_PER_M' | 'PER_CALL' | 'IMAGE_TOKEN' | string | null
   unitPrice?: number | null
   enabled: boolean
   agentEnabled?: boolean | null
@@ -558,7 +558,7 @@ export interface AgentModelConfigPayload {
   outputTokenPricePer1k?: number
   inputTokenPricePer1m?: number
   outputTokenPricePer1m?: number
-  billingUnit?: 'TOKEN_PER_M' | 'PER_CALL' | 'IMAGE_TOKEN' | 'PER_SECOND' | string
+  billingUnit?: 'TOKEN_PER_M' | 'PER_CALL' | 'IMAGE_TOKEN' | string
   unitPrice?: number
   enabled?: boolean
   agentEnabled?: boolean

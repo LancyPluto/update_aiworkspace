@@ -39,18 +39,6 @@ public interface AgentFileMapper extends BaseMapper<AgentFile> {
     @Select("""
             SELECT *
             FROM agent_files
-            WHERE user_id = #{userId}
-              AND status = 'READY'
-              AND (content_type LIKE 'image/%' OR content_type LIKE 'video/%' OR content_type LIKE 'audio/%')
-            ORDER BY id DESC
-            LIMIT #{limit}
-            """)
-    List<AgentFile> findRecentMediaByUser(@Param("userId") Long userId,
-                                          @Param("limit") int limit);
-
-    @Select("""
-            SELECT *
-            FROM agent_files
             WHERE session_id = #{sessionId} AND user_id = #{userId} AND status = 'READY' AND attached_run_id = #{runId}
             ORDER BY id DESC
             LIMIT #{limit}

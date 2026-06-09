@@ -160,24 +160,6 @@ public class DataInitializer implements CommandLineRunner {
         ensureColumn("ai_tasks", "user_deleted", "ALTER TABLE ai_tasks ADD COLUMN user_deleted TINYINT NOT NULL DEFAULT 0");
         ensureColumn("ai_tasks", "user_deleted_at", "ALTER TABLE ai_tasks ADD COLUMN user_deleted_at DATETIME NULL");
         ensureColumn("ai_tasks", "model_snapshot_json", "ALTER TABLE ai_tasks ADD COLUMN model_snapshot_json TEXT NULL");
-        ensureTable("user_upload_assets", """
-                CREATE TABLE user_upload_assets (
-                  id BIGINT PRIMARY KEY AUTO_INCREMENT,
-                  user_id BIGINT NOT NULL,
-                  file_id VARCHAR(64) NOT NULL,
-                  asset_kind VARCHAR(16) NOT NULL DEFAULT 'file',
-                  original_filename VARCHAR(255) NOT NULL,
-                  content_type VARCHAR(128) NULL,
-                  file_size BIGINT NULL,
-                  url VARCHAR(1024) NOT NULL,
-                  storage_path VARCHAR(1024) NULL,
-                  status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
-                  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                  KEY idx_user_upload_assets_user_kind (user_id, asset_kind, status, id),
-                  UNIQUE KEY uk_user_upload_assets_url (user_id, url)
-                )
-                """);
         ensureColumn("agent_model_configs", "display_name", "ALTER TABLE agent_model_configs ADD COLUMN display_name VARCHAR(128) NULL");
         ensureColumn("agent_model_configs", "config_code", "ALTER TABLE agent_model_configs ADD COLUMN config_code VARCHAR(64) NULL");
         ensureColumn("agent_model_configs", "console_url", "ALTER TABLE agent_model_configs ADD COLUMN console_url VARCHAR(512) NULL");
@@ -264,9 +246,7 @@ public class DataInitializer implements CommandLineRunner {
                 """);
         executeSql("""
                 INSERT INTO model_vendors(vendor_code, vendor_label, icon_asset, sort_order, enabled)
-                VALUES
-                  ('qwen', '阿里云百炼', 'qwen', 45, 1),
-                  ('suno', 'Suno', 'suno', 55, 1)
+                VALUES('suno', 'Suno', 'suno', 55, 1)
                 ON DUPLICATE KEY UPDATE
                   vendor_label = VALUES(vendor_label),
                   icon_asset = VALUES(icon_asset),
@@ -298,14 +278,6 @@ public class DataInitializer implements CommandLineRunner {
                   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )
                 """);
-        executeSql("""
-                UPDATE model_vendor_accounts
-                SET enabled = 0,
-                    is_deleted = 1,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE vendor_code = 'aliyun_bailian'
-                """);
-        executeSql("DELETE FROM model_vendors WHERE vendor_code = 'aliyun_bailian'");
         ensureTable("model_provider_metadata", """
                 CREATE TABLE model_provider_metadata (
                   id BIGINT PRIMARY KEY AUTO_INCREMENT,

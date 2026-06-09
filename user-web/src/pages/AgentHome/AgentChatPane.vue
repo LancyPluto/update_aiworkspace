@@ -36,13 +36,11 @@ import {
   cancelAgentRun,
   confirmAgentTool,
   deleteAgentFile,
-  deleteUploadAsset,
   editRegenerateAgentMessage,
   createAgentWorkspaceMemory,
   deleteAgentWorkspaceMemory,
   fetchAgentMessages,
   fetchAgentFiles,
-  fetchRecentAgentFiles,
   fetchAgentRun,
   fetchAgentRunEvents,
   fetchAgentTools,
@@ -51,7 +49,6 @@ import {
   fetchTaskById,
   fetchTasks,
   fetchTools,
-  fetchUploadAssets,
   publishCommunityPost,
   regenerateAgentRun,
   sendAgentMessage,
@@ -59,7 +56,6 @@ import {
   unpublishCommunityPost,
   updateAgentWorkspaceMemory,
   uploadAgentFile,
-  uploadToolFile,
 } from "@/api"
 import { formatCreditInsufficientError, isCreditInsufficientCode } from "@/api/creditErrorMessage"
 import type {
@@ -76,7 +72,6 @@ import type {
   AgentWorkspaceMemoryItem,
   TaskDetail,
   ToolSummary,
-  UserUploadAsset,
 } from "@/api/types"
 import type { AssetPreviewItem, AssetPreviewRecommendation } from "@/types/assetPreview"
 import { randomUUID } from "@/utils/randomUUID"
@@ -128,7 +123,6 @@ const previewTools = ref<ToolSummary[]>([])
 const agentTools = ref<AgentToolPickerItem[]>([])
 const agentToolsLoading = ref(false)
 const selectedToolCode = ref<string | null>(null)
-const intelligenceLevel = ref<"standard" | "high">("standard")
 const previewAsset = ref<AssetPreviewItem | null>(null)
 const memoryPanelOpen = ref(false)
 const memoryWorkspaces = ref<AgentWorkspace[]>([])
@@ -152,14 +146,10 @@ const agentError = ref<string | null>(null)
 const creditModalOpen = ref(false)
 const rememberTool = ref(true)
 const AGENT_REFERENCE_ATTACHMENT_LIMIT = 8
-const SHARED_UPLOAD_HISTORY_LIMIT = 60
-
-type MaterialKind = "image" | "video" | "audio" | "file"
 
 interface AgentMaterialAttachment extends AgentUrlAttachment {
   id: string
-  assetId?: number
-  kind: MaterialKind
+  kind: "image" | "video" | "audio" | "file"
   previewUrl?: string
   uploadedAt?: string
   subtitle?: string
@@ -812,12 +802,7 @@ function recentAttachmentStorageKey() {
   return `agent:recent-attachments:${auth.user?.id ?? "anon"}`
 }
 
-function sharedUploadHistoryStorageKey(kind: MaterialKind): string {
-  const userId = auth.user?.id ?? "guest"
-  return `ai_tool_market_upload_history:${userId}:${kind}`
-}
-
-function materialKind(contentType?: string | null, name?: string | null): MaterialKind {
+function materialKind(contentType?: string | null, name?: string | null): AgentMaterialAttachment["kind"] {
   const type = (contentType || "").toLowerCase()
   if (type.startsWith("image/") || isImageAttachment(contentType, name)) return "image"
   if (type.startsWith("video/")) return "video"
@@ -825,133 +810,32 @@ function materialKind(contentType?: string | null, name?: string | null): Materi
   return "file"
 }
 
-function readSharedUploadHistory(kind: MaterialKind): AgentMaterialAttachment[] {
-  if (typeof window === "undefined") return []
-  try {
-    const raw = window.localStorage.getItem(sharedUploadHistoryStorageKey(kind))
-    if (!raw) return []
-    const parsed = JSON.parse(raw) as unknown
-    if (!Array.isArray(parsed)) return []
-    return parsed
-      .map((item) => normalizeUrlAttachment(item as AgentUrlAttachment))
-      .filter((item): item is AgentMaterialAttachment => Boolean(item))
-      .map((item) => ({ ...item, kind }))
-      .slice(0, SHARED_UPLOAD_HISTORY_LIMIT)
-  } catch {
-    return []
-  }
-}
-
-function writeSharedUploadHistory(kind: MaterialKind, items: AgentMaterialAttachment[]) {
-  if (typeof window === "undefined") return
-  window.localStorage.setItem(sharedUploadHistoryStorageKey(kind), JSON.stringify(items.slice(0, SHARED_UPLOAD_HISTORY_LIMIT)))
-}
-
-function rememberSharedUploadHistory(item: AgentMaterialAttachment) {
-  const kind = item.kind || materialKind(item.contentType, item.name)
-  const existing = readSharedUploadHistory(kind).filter((entry) => entry.url !== item.url)
-  writeSharedUploadHistory(kind, [{ ...item, kind }, ...existing])
-}
-
-function readAllSharedUploadHistory() {
-  return (["image", "video", "audio", "file"] as MaterialKind[]).flatMap((kind) => readSharedUploadHistory(kind))
-}
-
-function dedupeRecentAttachments(items: AgentMaterialAttachment[]) {
-  const seen = new Set<string>()
-  const result: AgentMaterialAttachment[] = []
-  for (const item of items) {
-    const key = item.url || item.id
-    if (!key || seen.has(key)) continue
-    seen.add(key)
-    result.push(item)
-  }
-  return result
-}
-
 function normalizeUrlAttachment(item: AgentUrlAttachment): AgentMaterialAttachment | null {
   const url = item.url?.trim()
   if (!url) return null
   const name = item.name || "素材附件"
-  const record = item as AgentUrlAttachment & { assetId?: number; uploadedAt?: string; subtitle?: string }
   return {
     id: String(item.id ?? `${url}-${name}`),
-    assetId: record.assetId,
-    sessionId: item.sessionId ?? null,
     name,
     contentType: item.contentType ?? null,
     size: item.size ?? null,
     url,
-    source: item.source || "url",
+    source: "url",
     kind: materialKind(item.contentType, name),
     previewUrl: item.contentType?.startsWith("image/") || isImageAttachment(item.contentType, name) ? resolveAgentFileUrl(url) : undefined,
-    uploadedAt: record.uploadedAt,
-    subtitle: record.subtitle,
   }
-}
-
-function uploadAssetToMaterialAttachment(asset: UserUploadAsset): AgentMaterialAttachment | null {
-  const url = asset.url?.trim()
-  if (!url) return null
-  const name = asset.name || asset.fileId || "上传素材"
-  const kind = materialKind(asset.contentType || asset.kind, name)
-  const normalized = normalizeUrlAttachment({
-    id: asset.fileId || String(asset.id),
-    assetId: asset.id,
-    name,
-    contentType: asset.contentType ?? null,
-    size: asset.size ?? null,
-    url,
-    source: "url",
-  } as AgentUrlAttachment & { assetId?: number })
-  return normalized ? { ...normalized, kind, uploadedAt: asset.createdAt || undefined } : null
-}
-
-function agentFileToMaterialAttachment(file: AgentFile): AgentMaterialAttachment | null {
-  if (!file.downloadUrl) return null
-  return normalizeUrlAttachment({
-    id: file.id,
-    sessionId: file.sessionId,
-    name: file.originalFilename || "素材附件",
-    contentType: file.contentType,
-    size: file.fileSize,
-    url: file.downloadUrl,
-    source: "agent_file",
-  })
 }
 
 function readRecentAttachments() {
-  const sharedItems = readAllSharedUploadHistory()
   try {
     const parsed = JSON.parse(localStorage.getItem(recentAttachmentStorageKey()) || "[]") as unknown
     const items = Array.isArray(parsed) ? parsed : []
-    const localItems = items
+    recentAttachments.value = items
       .map((item) => normalizeUrlAttachment(item as AgentUrlAttachment))
       .filter((item): item is AgentMaterialAttachment => Boolean(item))
-    recentAttachments.value = dedupeRecentAttachments([...sharedItems, ...localItems]).slice(0, 20)
+      .slice(0, 20)
   } catch {
-    recentAttachments.value = sharedItems.slice(0, 20)
-  }
-}
-
-async function loadRecentAttachments() {
-  readRecentAttachments()
-  if (!props.token) return
-  try {
-    const uploadAssetsPage = await fetchUploadAssets({ token: props.token, pageSize: SHARED_UPLOAD_HISTORY_LIMIT })
-    const uploadAssetItems = uploadAssetsPage.list
-      .map(uploadAssetToMaterialAttachment)
-      .filter((item): item is AgentMaterialAttachment => Boolean(item))
-    for (const item of uploadAssetItems) {
-      rememberSharedUploadHistory(item)
-    }
-    const page = await fetchRecentAgentFiles(props.sessionId, { token: props.token })
-    const serverItems = page.list
-      .map(agentFileToMaterialAttachment)
-      .filter((item): item is AgentMaterialAttachment => Boolean(item))
-    writeRecentAttachments(dedupeRecentAttachments([...uploadAssetItems, ...readAllSharedUploadHistory(), ...serverItems]))
-  } catch {
-    // Keep localStorage fallback when the server-side material list is temporarily unavailable.
+    recentAttachments.value = []
   }
 }
 
@@ -970,33 +854,8 @@ function rememberRecentAttachment(item: AgentUrlAttachment) {
   ])
 }
 
-async function removeRecentAttachment(item: AgentMaterialAttachment) {
+function removeRecentAttachment(item: AgentMaterialAttachment) {
   writeRecentAttachments(recentAttachments.value.filter((entry) => entry.id !== item.id && entry.url !== item.url))
-  const kind = item.kind || materialKind(item.contentType, item.name)
-  writeSharedUploadHistory(kind, readSharedUploadHistory(kind).filter((entry) => entry.id !== item.id && entry.url !== item.url))
-  if (item.assetId && props.token) {
-    try {
-      await deleteUploadAsset(item.assetId, { token: props.token })
-    } catch {
-      // The local recent list is already cleaned; stale server assets can be retried on refresh.
-    }
-    return
-  }
-  const fileId = typeof item.id === "number" ? item.id : Number(item.id)
-  const sessionId = item.sessionId ?? sessionIdFromAgentFileUrl(item.url)
-  if (!props.token || !Number.isFinite(fileId) || !sessionId) return
-  try {
-    await deleteAgentFile(sessionId, fileId, { token: props.token })
-  } catch {
-    // The local recent list is already cleaned; stale server files can be retried on refresh.
-  }
-}
-
-function sessionIdFromAgentFileUrl(url?: string | null): number | null {
-  const match = String(url || "").match(/\/api\/v1\/agent\/sessions\/(\d+)\/files\/\d+\/content/)
-  if (!match) return null
-  const value = Number(match[1])
-  return Number.isFinite(value) ? value : null
 }
 
 function shortReferenceName(name?: string | null) {
@@ -1109,10 +968,6 @@ async function uploadFiles(
 ) {
   if (selectedFiles.length === 0 || !props.token || uploading.value) return
   const autoSelect = options.autoSelect ?? false
-  if (!autoSelect) {
-    await uploadMaterialFiles(selectedFiles)
-    return
-  }
   clearPendingUploadPreview()
   const selected = selectedFiles[0]!
   if (selectedFiles.length === 1 && isImageAttachment(selected.type, selected.name)) {
@@ -1127,52 +982,16 @@ async function uploadFiles(
       if (uploaded.downloadUrl) {
         rememberRecentAttachment({
           id: uploaded.id,
-          sessionId: uploaded.sessionId,
           name: uploaded.originalFilename,
           contentType: uploaded.contentType,
           size: uploaded.fileSize,
           url: uploaded.downloadUrl,
-          source: "agent_file",
+          source: "url",
         })
       }
       if (autoSelect) {
         files.value = [...files.value.filter((item) => item.id !== uploaded.id), uploaded]
       }
-    }
-  } finally {
-    clearPendingUploadPreview()
-    uploading.value = false
-  }
-}
-
-async function uploadMaterialFiles(selectedFiles: File[]) {
-  clearPendingUploadPreview()
-  const selected = selectedFiles[0]!
-  if (selectedFiles.length === 1 && isImageAttachment(selected.type, selected.name)) {
-    pendingUploadPreview.value = { name: selected.name, url: URL.createObjectURL(selected) }
-  }
-  uploading.value = true
-  try {
-    const availableSlots = Math.max(0, AGENT_REFERENCE_ATTACHMENT_LIMIT - urlAttachments.value.length)
-    for (const file of selectedFiles.slice(0, availableSlots)) {
-      const uploaded = await uploadToolFile(file, { token: props.token })
-      const attachment = normalizeUrlAttachment({
-        id: uploaded.fileId,
-        assetId: uploaded.assetId,
-        name: uploaded.name || file.name || uploaded.fileId,
-        contentType: uploaded.contentType || file.type || null,
-        size: uploaded.size ?? file.size,
-        url: uploaded.url,
-        source: "url",
-      } as AgentUrlAttachment & { assetId?: number })
-      if (!attachment) continue
-      const withTime = { ...attachment, uploadedAt: new Date().toISOString() }
-      rememberSharedUploadHistory(withTime)
-      rememberRecentAttachment(withTime)
-      urlAttachments.value = [
-        ...urlAttachments.value.filter((entry) => entry.url !== withTime.url),
-        withTime,
-      ].slice(0, AGENT_REFERENCE_ATTACHMENT_LIMIT)
     }
   } finally {
     clearPendingUploadPreview()
@@ -1268,7 +1087,6 @@ async function submitMessage(content = input.value) {
         clientRequestId: randomUUID(),
         modelConfigId: props.modelConfigId ?? null,
         preferredToolCode: submittedPreferredToolCode,
-        intelligenceLevel: intelligenceLevel.value,
         fileIds: submittedFiles.map((item) => item.id),
         urlAttachments: submittedUrlAttachments.map((item, index) => ({
           id: item.id,
@@ -2236,7 +2054,6 @@ watch(
     loadPersistedRunEventCache()
     stickToBottom.value = true
     scrollOffset.value = 0
-    void loadRecentAttachments()
     void loadPane()
   },
 )
@@ -2250,7 +2067,7 @@ watch(
 )
 
 onMounted(() => {
-  void loadRecentAttachments()
+  readRecentAttachments()
   loadPersistedRunEventCache()
   void loadPane()
   void loadPreviewTools()
@@ -2488,10 +2305,8 @@ defineExpose({
         :agent-tools="agentTools"
         :agent-tools-loading="agentToolsLoading"
         :selected-tool-code="selectedToolCode"
-        :intelligence-level="intelligenceLevel"
         @update:draft="emit('update:draft', $event)"
         @update:selected-tool-code="selectedToolCode = $event"
-        @update:intelligence-level="intelligenceLevel = $event"
         @change-model="emit('change-model', $event)"
         @submit="submitMessage()"
         @cancel-run="cancelCurrentRun()"

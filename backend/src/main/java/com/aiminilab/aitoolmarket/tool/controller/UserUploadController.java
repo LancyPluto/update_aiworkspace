@@ -1,18 +1,10 @@
 package com.aiminilab.aitoolmarket.tool.controller;
 
 import com.aiminilab.aitoolmarket.common.dto.ApiResponse;
-import com.aiminilab.aitoolmarket.common.dto.PageResponse;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.config.AppProperties;
 import com.aiminilab.aitoolmarket.tool.dto.FileUploadResponse;
-import com.aiminilab.aitoolmarket.tool.dto.UserUploadAssetResponse;
-import com.aiminilab.aitoolmarket.tool.entity.UserUploadAsset;
-import com.aiminilab.aitoolmarket.tool.mapper.UserUploadAssetMapper;
-import com.aiminilab.aitoolmarket.auth.security.AuthContext;
-import org.springframework.web.bind.annotation.DeleteMapping;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -26,9 +18,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.text.Normalizer;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
@@ -43,17 +33,13 @@ public class UserUploadController {
     );
 
     private final AppProperties appProperties;
-    private final UserUploadAssetMapper userUploadAssetMapper;
 
-    public UserUploadController(AppProperties appProperties,
-                                UserUploadAssetMapper userUploadAssetMapper) {
+    public UserUploadController(AppProperties appProperties) {
         this.appProperties = appProperties;
-        this.userUploadAssetMapper = userUploadAssetMapper;
     }
 
     @PostMapping("/tool-upload")
     public ApiResponse<FileUploadResponse> upload(@RequestParam("file") MultipartFile file) {
-        Long userId = AuthContext.get().userId();
         if (file == null || file.isEmpty()) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "请选择要上传的文件");
         }
@@ -89,48 +75,15 @@ public class UserUploadController {
         }
 
         String url = "/generated/uploads/" + datePath + "/" + filename;
-        UserUploadAsset asset = new UserUploadAsset();
-        asset.setUserId(userId);
-        asset.setFileId(fileId);
-        asset.setAssetKind(assetKind(file.getContentType(), extension));
-        asset.setOriginalFilename(originalName);
-        asset.setContentType(file.getContentType() == null ? "" : file.getContentType());
-        asset.setFileSize(file.getSize());
-        asset.setUrl(url);
-        asset.setStoragePath(target.toString());
-        asset.setStatus("ACTIVE");
-        asset.setCreatedAt(LocalDateTime.now());
-        asset.setUpdatedAt(asset.getCreatedAt());
-        userUploadAssetMapper.insertAsset(asset);
         log.info("User uploaded file: url={}, originalName={}, contentType={}, size={}",
                 url, originalName, file.getContentType(), file.getSize());
         return ApiResponse.success(new FileUploadResponse(
-                asset.getId(),
                 fileId,
                 url,
                 originalName,
                 file.getContentType() == null ? "" : file.getContentType(),
                 file.getSize()
         ));
-    }
-
-    @GetMapping("/upload-assets")
-    public ApiResponse<PageResponse<UserUploadAssetResponse>> recent(@RequestParam(value = "kind", required = false) String kind,
-                                                                     @RequestParam(value = "pageSize", required = false) Integer pageSize) {
-        int limit = pageSize == null || pageSize < 1 ? 60 : Math.min(pageSize, 100);
-        String normalizedKind = normalizeKind(kind);
-        List<UserUploadAssetResponse> items = userUploadAssetMapper
-                .findRecentByUser(AuthContext.get().userId(), normalizedKind, limit)
-                .stream()
-                .map(UserUploadAssetResponse::from)
-                .toList();
-        return ApiResponse.success(new PageResponse<>(items, items.size(), 1, limit, items.size() == limit));
-    }
-
-    @DeleteMapping("/upload-assets/{assetId}")
-    public ApiResponse<Void> deleteAsset(@PathVariable Long assetId) {
-        userUploadAssetMapper.softDelete(AuthContext.get().userId(), assetId, LocalDateTime.now());
-        return ApiResponse.success(null);
     }
 
     private String safeOriginalName(String value) {
@@ -167,22 +120,5 @@ public class UserUploadController {
             case "application/pdf" -> "pdf";
             default -> "";
         };
-    }
-
-    private String assetKind(String contentType, String extension) {
-        String type = contentType == null ? "" : contentType.toLowerCase();
-        if (type.startsWith("image/")) return "image";
-        if (type.startsWith("video/")) return "video";
-        if (type.startsWith("audio/")) return "audio";
-        if (Set.of("jpg", "jpeg", "png", "webp", "gif").contains(extension)) return "image";
-        if (Set.of("mp4", "webm", "mov").contains(extension)) return "video";
-        if (Set.of("mp3", "wav", "m4a", "flac", "ogg", "aac").contains(extension)) return "audio";
-        return "file";
-    }
-
-    private String normalizeKind(String kind) {
-        if (kind == null || kind.isBlank()) return null;
-        String normalized = kind.trim().toLowerCase();
-        return Set.of("image", "video", "audio", "file").contains(normalized) ? normalized : null;
     }
 }

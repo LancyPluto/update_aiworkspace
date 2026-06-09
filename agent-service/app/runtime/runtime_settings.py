@@ -87,7 +87,6 @@ def runtime_settings_event_payload(
             1,
             20,
         ),
-        "intelligenceLevel": getattr(runtime, "intelligenceLevel", None) if runtime is not None else None,
         "source": "backend" if runtime is not None else "environment",
     }
 

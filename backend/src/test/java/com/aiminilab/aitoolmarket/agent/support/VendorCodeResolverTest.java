@@ -97,16 +97,4 @@ class VendorCodeResolverTest {
 
         assertThat(resolver.vendorIconAsset("suno")).isEqualTo("suno");
     }
-
-    @Test
-    void happyHorseUsesQwenVendorAccountGroup() {
-        assertThat(resolver.resolveVendorCode(
-                "bailian_happyhorse",
-                "https://dashscope.aliyuncs.com",
-                "HappyHorse 文生视频",
-                "happyhorse-1.0-t2v"
-        )).isEqualTo("qwen");
-
-        assertThat(resolver.vendorLabel("qwen")).isEqualTo("阿里云百炼");
-    }
 }

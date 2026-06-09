@@ -67,7 +67,4 @@ public interface AccountDataCleanupMapper {
 
     @Delete("DELETE FROM ai_market_files WHERE user_id = #{userId}")
     int deleteMarketFiles(@Param("userId") Long userId);
-
-    @Delete("DELETE FROM user_upload_assets WHERE user_id = #{userId}")
-    int deleteUserUploadAssets(@Param("userId") Long userId);
 }

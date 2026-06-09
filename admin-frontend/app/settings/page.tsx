@@ -18,9 +18,8 @@ import { ApiError } from "@/lib/api/http"
 import { downloadConfigBundle, exportConfigBundle, importConfigBundle, readConfigBundleFile } from "@/lib/api/config-bundles"
 import { getBaseUrl } from "@/lib/api/http"
 import { fetchSettings, updateSettings, uploadCustomerServiceQr } from "@/lib/api/settings"
-import type { ConfigBundleImportResult } from "@/lib/api/types"
 import { cn } from "@/lib/utils"
-import { AlertTriangle, Bot, Brain, CheckCircle, Database, Download, Headphones, KeyRound, RefreshCw, Save, Server, Settings2, Shield, Upload } from "lucide-react"
+import { Bot, Brain, CheckCircle, Database, Download, Headphones, KeyRound, RefreshCw, Save, Server, Settings2, Shield, Upload } from "lucide-react"
 
 interface SettingsForm {
   platformName: string
@@ -80,7 +79,6 @@ export default function SettingsPage() {
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
-  const [importResult, setImportResult] = useState<ConfigBundleImportResult | null>(null)
   const [modelRefreshKey, setModelRefreshKey] = useState(0)
   const [exportDialogOpen, setExportDialogOpen] = useState(false)
   const [exporting, setExporting] = useState(false)
@@ -126,7 +124,6 @@ export default function SettingsPage() {
     setQrUploading(true)
     setError(null)
     setNotice(null)
-    setImportResult(null)
     try {
       const uploaded = await uploadCustomerServiceQr(file)
       updateForm("customerServiceQrCodeUrl", uploaded.url)
@@ -144,7 +141,6 @@ export default function SettingsPage() {
     setSaved(false)
     setError(null)
     setNotice(null)
-    setImportResult(null)
     try {
       await updateSettings({
         "platform.name": form.platformName,
@@ -196,8 +192,10 @@ export default function SettingsPage() {
       await loadSettings()
       setModelRefreshKey((key) => key + 1)
       setSaved(true)
-      setImportResult(result)
-      setNotice(`导入完成：模型 ${result.modelConfigs}、工具 ${result.tools}、字段 ${result.fields}`)
+      const warningText = result.warnings?.length ? `，提示：${result.warnings.join("；")}` : ""
+      setNotice(
+        `导入完成：厂商账户 ${result.vendorAccounts ?? 0}、模型 ${result.modelConfigs}、分类 ${result.categories}、工具 ${result.tools}、字段 ${result.fields}${warningText}`,
+      )
       setTimeout(() => setSaved(false), 1800)
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "导入配置包失败，请确认 JSON 格式正确")
@@ -219,48 +217,6 @@ export default function SettingsPage() {
       <AdminHeader title="系统配置" description={description} />
 
       <div className="p-6">
-        {importResult ? (
-          <section className="mb-6 rounded-lg border border-border bg-card p-4">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <div className="flex items-center gap-2 text-sm font-medium">
-                  {importResult.warnings?.length ? (
-                    <AlertTriangle className="h-4 w-4 text-amber-500" />
-                  ) : (
-                    <CheckCircle className="h-4 w-4 text-emerald-500" />
-                  )}
-                  配置包导入结果
-                </div>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  设置 {importResult.settings}、厂商账户 {importResult.vendorAccounts}、模型 {importResult.modelConfigs}、分类 {importResult.categories}、工具 {importResult.tools}、字段 {importResult.fields}、提示词版本 {importResult.promptVersions}、工作流 {importResult.workflows}
-                </p>
-              </div>
-              <Button variant="ghost" size="sm" onClick={() => setImportResult(null)}>
-                关闭
-              </Button>
-            </div>
-            {importResult.warnings?.length ? (
-              <div className="mt-4 rounded-md border border-amber-500/25 bg-amber-500/5 p-3">
-                <div className="mb-2 text-xs font-medium text-amber-600 dark:text-amber-300">
-                  发现 {importResult.warnings.length} 条需要处理的问题
-                </div>
-                <ul className="max-h-72 space-y-1 overflow-auto text-xs text-muted-foreground">
-                  {importResult.warnings.slice(0, 20).map((warning, index) => (
-                    <li key={`${warning}-${index}`} className="rounded bg-background/60 px-2 py-1">
-                      {warning}
-                    </li>
-                  ))}
-                </ul>
-                {importResult.warnings.length > 20 ? (
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    还有 {importResult.warnings.length - 20} 条未显示，请根据后端日志或重新导入结果继续排查。
-                  </p>
-                ) : null}
-              </div>
-            ) : null}
-          </section>
-        ) : null}
-
         <Tabs defaultValue="model" className="space-y-6">
           <TabsList className="flex h-auto flex-wrap justify-start gap-2 bg-transparent p-0">
             <TabsTrigger value="model" className="gap-2">

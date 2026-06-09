@@ -94,7 +94,7 @@ import { fetchAgentModelConfigs } from "@/lib/api/agent-model"
 import { fetchModelProviders } from "@/lib/api/model-providers"
 import { ApiError, getBaseUrl } from "@/lib/api/http"
 import { downloadConfigBundle, exportConfigBundle, importConfigBundle, readConfigBundleFile } from "@/lib/api/config-bundles"
-import type { AgentModelConfig, ConfigBundleImportResult, ModelProviderDescriptor, ToolCategory, ToolField, ToolFieldPayload, ToolSummary } from "@/lib/api/types"
+import type { AgentModelConfig, ModelProviderDescriptor, ToolCategory, ToolField, ToolFieldPayload, ToolSummary } from "@/lib/api/types"
 
 const adminBasePath = (process.env.NEXT_PUBLIC_ADMIN_BASE_PATH || "").replace(/\/$/, "")
 
@@ -490,13 +490,13 @@ function modelVendorLabel(key: string, config?: AgentModelConfig | null) {
     deepseek: "DeepSeek",
     volcengine: "火山引擎 / 豆包",
     siliconflow: "SiliconFlow",
-    aliyun: "阿里云百炼",
+    aliyun: "阿里云 / 通义千问",
     kling: "可灵",
     minimax: "MiniMax",
     suno: "Suno",
     openai: "OpenAI",
     google: "Google Gemini",
-    qwen: "阿里云百炼",
+    qwen: "通义千问",
     zhipu: "智谱 GLM",
     moonshot: "Moonshot / Kimi",
     anthropic: "Anthropic Claude",
@@ -521,7 +521,6 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
-  const [importResult, setImportResult] = useState<ConfigBundleImportResult | null>(null)
   const [saveFeedback, setSaveFeedback] = useState<{ type: "success" | "error"; title: string; detail: string } | null>(null)
   const [bundleBusy, setBundleBusy] = useState(false)
   const [exportDialogOpen, setExportDialogOpen] = useState(false)
@@ -575,7 +574,6 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
     setBundleBusy(true)
     setError(null)
     setNotice(null)
-    setImportResult(null)
     try {
       const bundle = await exportConfigBundle(includeSecrets)
       downloadConfigBundle(bundle)
@@ -592,13 +590,12 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
     setBundleBusy(true)
     setError(null)
     setNotice(null)
-    setImportResult(null)
     try {
       const bundle = await readConfigBundleFile(file)
       const result = await importConfigBundle(bundle)
       await loadAll()
-      setImportResult(result)
-      setNotice(`导入完成：工具 ${result.tools}、字段 ${result.fields}、提示词版本 ${result.promptVersions}、工作流 ${result.workflows}`)
+      const warningText = result.warnings?.length ? `；提示：${result.warnings.join("；")}` : ""
+      setNotice(`导入完成：工具 ${result.tools}、字段 ${result.fields}、提示词版本 ${result.promptVersions}、工作流 ${result.workflows}${warningText}`)
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "导入配置包失败，请确认 JSON 格式正确")
     } finally {
@@ -1104,45 +1101,6 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
               className="absolute right-3 top-3 rounded-md p-1 text-muted-foreground hover:bg-secondary hover:text-foreground"
               aria-label="关闭提示"
               onClick={() => setSaveFeedback(null)}
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </Alert>
-        ) : null}
-        {importResult ? (
-          <Alert
-            variant={importResult.warnings?.length ? "default" : "default"}
-            className={cn(importResult.warnings?.length ? "border-amber-500/40 bg-amber-500/10" : "border-emerald-500/40 bg-emerald-500/10")}
-          >
-            {importResult.warnings?.length ? <AlertCircle className="h-4 w-4 text-amber-500" /> : <CheckCircle2 className="h-4 w-4 text-emerald-500" />}
-            <AlertTitle>配置包导入结果</AlertTitle>
-            <AlertDescription>
-              <div className="space-y-3">
-                <p>
-                  模型 {importResult.modelConfigs}、分类 {importResult.categories}、工具 {importResult.tools}、字段 {importResult.fields}、提示词版本 {importResult.promptVersions}、工作流 {importResult.workflows}
-                </p>
-                {importResult.warnings?.length ? (
-                  <div className="rounded-md border border-amber-500/25 bg-background/60 p-3">
-                    <div className="mb-2 text-xs font-medium">发现 {importResult.warnings.length} 条需要处理的问题</div>
-                    <ul className="max-h-60 space-y-1 overflow-auto text-xs">
-                      {importResult.warnings.slice(0, 20).map((warning, index) => (
-                        <li key={`${warning}-${index}`} className="rounded bg-muted/60 px-2 py-1">
-                          {warning}
-                        </li>
-                      ))}
-                    </ul>
-                    {importResult.warnings.length > 20 ? (
-                      <p className="mt-2 text-xs text-muted-foreground">还有 {importResult.warnings.length - 20} 条未显示。</p>
-                    ) : null}
-                  </div>
-                ) : null}
-              </div>
-            </AlertDescription>
-            <button
-              type="button"
-              className="absolute right-3 top-3 rounded-md p-1 text-muted-foreground hover:bg-secondary hover:text-foreground"
-              aria-label="关闭导入结果"
-              onClick={() => setImportResult(null)}
             >
               <X className="h-4 w-4" />
             </button>

@@ -294,15 +294,6 @@ function renderModelCost(model: UnifiedApiModelItem) {
       </>
     )
   }
-  if (billingUnit === "PER_SECOND") {
-    const price = model.unitPrice
-    return (
-      <>
-        <div>按秒计费</div>
-        <div className="font-medium text-foreground">{price != null ? `¥${price}` : "¥—"}/秒</div>
-      </>
-    )
-  }
   if (billingUnit === "TOKEN_PER_M") {
     const input = model.inputTokenPricePer1m
     const output = model.outputTokenPricePer1m
@@ -398,7 +389,6 @@ const vendorSortOptions: Array<{ value: VendorSort; label: string }> = [
 const billingUnitOptions: Array<{ value: NonNullable<AgentModelConfigPayload["billingUnit"]>; label: string; description: string }> = [
   { value: "TOKEN_PER_M", label: "按量计费", description: "按输入/输出 Token 百万单位填写成本" },
   { value: "PER_CALL", label: "按次计费", description: "每次调用固定成本，适合图片、语音等任务" },
-  { value: "PER_SECOND", label: "按秒计费", description: "视频等任务按生成秒数填写成本" },
   { value: "IMAGE_TOKEN", label: "图片 Token", description: "同时记录图片基础价和 Token 成本" },
 ]
 
@@ -516,25 +506,6 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
     () => providers.find((provider) => provider.code === modelForm.provider) || null,
     [providers, modelForm.provider],
   )
-
-  const allVendorAccounts = useMemo(
-    () => overview?.vendors.flatMap((vendor) => vendor.accounts) ?? [],
-    [overview],
-  )
-
-  const accountById = useMemo(
-    () => new Map(allVendorAccounts.map((account) => [account.id, account])),
-    [allVendorAccounts],
-  )
-
-  const modelAccountOptions = useMemo(() => {
-    const vendorAccounts = overview?.vendors.find((vendor) => vendor.vendorCode === modelVendorCode)?.accounts ?? []
-    const selected = modelForm.vendorAccountId ? accountById.get(modelForm.vendorAccountId) : undefined
-    if (selected && !vendorAccounts.some((account) => account.id === selected.id)) {
-      return [selected, ...vendorAccounts]
-    }
-    return vendorAccounts
-  }, [accountById, modelForm.vendorAccountId, modelVendorCode, overview])
 
   const fetchOverviewData = useCallback(async () => {
     const [data, catalog] = await Promise.all([
@@ -1357,7 +1328,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                       </TableCell>
                       <TableCell className="align-middle text-center">
                         {model.vendorAccountId ? (() => {
-                          const boundAccount = accountById.get(model.vendorAccountId) || vendor.accounts.find((account) => account.id === model.vendorAccountId)
+                          const boundAccount = vendor.accounts.find((account) => account.id === model.vendorAccountId)
                           const accountIndex = vendor.accounts.findIndex((account) => account.id === model.vendorAccountId)
                           const fallbackAccount = {
                             id: model.vendorAccountId,
@@ -1378,11 +1349,6 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                               <span className={`truncate text-[11px] ${hasAccountCredential(account) ? "text-muted-foreground" : "text-amber-700"}`}>
                                 {boundAccount ? accountCredentialLabel(boundAccount) : "账号详情未加载"}
                               </span>
-                              {boundAccount && boundAccount.vendorCode !== vendor.vendorCode ? (
-                                <span className="truncate text-[11px] text-amber-700">
-                                  当前绑定账号属于 {boundAccount.vendorLabel || boundAccount.vendorCode}
-                                </span>
-                              ) : null}
                             </div>
                           )
                         })() : vendor.accounts.length > 0 ? (
@@ -1860,48 +1826,6 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
             <DialogDescription>使用所属账户的 API 密钥，无需在此重复填写 Key。</DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-2">
-            <div className="space-y-2 rounded-md border p-3">
-              <div className="flex items-center justify-between gap-3">
-                <Label>绑定 API 账户</Label>
-                <span className="text-xs text-muted-foreground">模型调用时继承该账户凭据</span>
-              </div>
-              <Select
-                value={modelForm.vendorAccountId ? String(modelForm.vendorAccountId) : undefined}
-                onValueChange={(value) => {
-                  const accountId = Number(value)
-                  const account = modelAccountOptions.find((item) => item.id === accountId)
-                  setModelForm((form) => ({
-                    ...form,
-                    vendorAccountId: Number.isFinite(accountId) ? accountId : undefined,
-                    baseUrl: account?.baseUrl || "",
-                  }))
-                }}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder={modelAccountOptions.length > 0 ? "选择该模型使用的 API 账户" : "请先接入厂商账户"} />
-                </SelectTrigger>
-                <SelectContent>
-                  {modelAccountOptions.map((account, index) => (
-                    <SelectItem key={account.id} value={String(account.id)}>
-                      #{account.id} {displayAccountName(account, index)}
-                      {account.enabled ? "" : "（已停用）"}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {modelForm.vendorAccountId ? (() => {
-                const account = accountById.get(modelForm.vendorAccountId)
-                return (
-                  <p className={`text-xs ${account && hasAccountCredential(account) ? "text-muted-foreground" : "text-amber-700"}`}>
-                    {account
-                      ? `${account.vendorLabel || account.vendorCode} · ${accountCredentialLabel(account)} · ${account.healthStatus || "UNKNOWN"}`
-                      : `账号 #${modelForm.vendorAccountId} 详情未加载，请重新选择一个可用账户`}
-                  </p>
-                )
-              })() : (
-                <p className="text-xs text-amber-700">必须绑定一个厂商账户；API Key/AK/SK 只在账户里维护。</p>
-              )}
-            </div>
             <div className="space-y-2">
               <Label>显示名称</Label>
               <Input value={modelForm.displayName || ""} onChange={(e) => setModelForm((f) => ({ ...f, displayName: e.target.value }))} />
@@ -2003,9 +1927,9 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                 </p>
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
-                {modelForm.billingUnit === "PER_CALL" || modelForm.billingUnit === "PER_SECOND" ? (
+                {modelForm.billingUnit === "PER_CALL" ? (
                   <div className="space-y-2 sm:col-span-2">
-                    <Label>{modelForm.billingUnit === "PER_SECOND" ? "每秒成本" : "单次调用成本"}</Label>
+                    <Label>单次调用成本</Label>
                     <Input
                       type="number"
                       min="0"

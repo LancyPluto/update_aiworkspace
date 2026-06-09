@@ -255,7 +255,7 @@ public class TaskServiceImpl implements TaskService {
         task.setParamsJson(normalizedParams.toString());
         task.setModelSnapshotJson(modelExecutionSnapshotService.serialize(modelSnapshot));
         task.setIdempotencyKey(clientRequestId);
-        int estimatedCredits = chargeTaskCredits ? estimatedTaskCredits(tool, modelConfig, normalizedParams) : 0;
+        int estimatedCredits = chargeTaskCredits ? estimatedTaskCredits(tool, modelConfig) : 0;
         task.setEstimatedCreditCost(estimatedCredits);
 
         Long taskId = taskMapper.insertTask(task);
@@ -269,14 +269,14 @@ public class TaskServiceImpl implements TaskService {
         return TaskStatusResponse.from(findTask(taskId, userId));
     }
 
-    private int estimatedTaskCredits(AiTool tool, AgentModelConfig modelConfig, JsonNode params) {
+    private int estimatedTaskCredits(AiTool tool, AgentModelConfig modelConfig) {
         if (tool == null) {
             return 0;
         }
         if (tool.getModelConfigId() == null) {
             return tool.getEstimatedCreditCost() == null ? 0 : Math.max(0, tool.getEstimatedCreditCost());
         }
-        return taskCreditEstimateService.estimateUserFacingTaskCredits(tool, modelConfig, params);
+        return taskCreditEstimateService.estimateUserFacingTaskCredits(tool, modelConfig);
     }
 
     private TaskDetailResponse toDetail(AiTask task) {
