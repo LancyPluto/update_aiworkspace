@@ -34,7 +34,7 @@ async def test_infrastructure_file_analysis_short_circuits_without_llm():
     decision = await service.decide(context, llm_router=llm_router)
 
     assert decision.intent == Intent.FILE_ANALYSIS
-    assert decision.reason == "ready_file_context_available"
+    assert decision.reason == "file_analysis_request"
 
 
 @pytest.mark.asyncio

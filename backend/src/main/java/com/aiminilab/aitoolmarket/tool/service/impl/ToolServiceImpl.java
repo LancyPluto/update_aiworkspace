@@ -1,5 +1,7 @@
 package com.aiminilab.aitoolmarket.tool.service.impl;
 
+import com.aiminilab.aitoolmarket.common.cache.BypassCacheService;
+import com.aiminilab.aitoolmarket.common.cache.CacheNamespaces;
 import com.aiminilab.aitoolmarket.config.AppProperties;
 import com.aiminilab.aitoolmarket.support.GeneratedMediaPathSupport;
 import com.aiminilab.aitoolmarket.common.dto.PageResponse;
@@ -53,6 +55,7 @@ import com.aiminilab.aitoolmarket.tool.integration.ToolIntegrationResolver;
 import com.aiminilab.aitoolmarket.tool.service.ToolService;
 import com.aiminilab.aitoolmarket.tool.service.ToolTemplateService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.fasterxml.jackson.databind.JavaType;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -95,6 +98,7 @@ public class ToolServiceImpl implements ToolService {
     private final GeneratedMediaPathSupport generatedMediaPathSupport;
     private final ToolIntegrationResolver toolIntegrationResolver;
     private final ToolIntegrationRegistry toolIntegrationRegistry;
+    private final BypassCacheService bypassCacheService;
 
     public ToolServiceImpl(ToolMapper toolMapper, ToolCategoryMapper toolCategoryMapper,
                            ToolFieldSchemaMapper toolFieldSchemaMapper, ToolFieldItemMapper toolFieldItemMapper,
@@ -105,7 +109,8 @@ public class ToolServiceImpl implements ToolService {
                            AppProperties appProperties,
                            GeneratedMediaPathSupport generatedMediaPathSupport,
                            ToolIntegrationResolver toolIntegrationResolver,
-                           ToolIntegrationRegistry toolIntegrationRegistry) {
+                           ToolIntegrationRegistry toolIntegrationRegistry,
+                           BypassCacheService bypassCacheService) {
         this.toolMapper = toolMapper;
         this.toolCategoryMapper = toolCategoryMapper;
         this.toolFieldSchemaMapper = toolFieldSchemaMapper;
@@ -120,13 +125,21 @@ public class ToolServiceImpl implements ToolService {
         this.generatedMediaPathSupport = generatedMediaPathSupport;
         this.toolIntegrationResolver = toolIntegrationResolver;
         this.toolIntegrationRegistry = toolIntegrationRegistry;
+        this.bypassCacheService = bypassCacheService;
     }
 
     @Override
     public List<ToolCategoryResponse> categories() {
-        return toolCategoryMapper.findActiveCategories().stream()
-                .map(ToolCategoryResponse::from)
-                .toList();
+        JavaType type = objectMapper.getTypeFactory()
+                .constructCollectionType(List.class, ToolCategoryResponse.class);
+        return bypassCacheService.getOrLoad(
+                CacheNamespaces.TOOL_CATEGORIES,
+                bypassCacheService.toolTtl(),
+                type,
+                () -> toolCategoryMapper.findActiveCategories().stream()
+                        .map(ToolCategoryResponse::from)
+                        .toList()
+        );
     }
 
     @Override
@@ -140,6 +153,7 @@ public class ToolServiceImpl implements ToolService {
     public ToolCategoryResponse createCategory(UpsertToolCategoryRequest request) {
         ToolCategory category = toCategory(request);
         toolCategoryMapper.insert(category);
+        bypassCacheService.invalidateToolCategories();
         return ToolCategoryResponse.from(category);
     }
 
@@ -151,6 +165,7 @@ public class ToolServiceImpl implements ToolService {
         category.setSortOrder(request.sortOrder() == null ? 0 : request.sortOrder());
         category.setStatus(normalizeCategoryStatus(request.status()));
         toolCategoryMapper.updateById(category);
+        bypassCacheService.invalidateToolCategories();
         return ToolCategoryResponse.from(category);
     }
 
@@ -159,11 +174,36 @@ public class ToolServiceImpl implements ToolService {
         ToolCategory category = ensureCategoryExists(categoryId);
         category.setStatus(normalizeCategoryStatus(status));
         toolCategoryMapper.updateById(category);
+        bypassCacheService.invalidateToolCategories();
         return ToolCategoryResponse.from(category);
     }
 
     @Override
     public PageResponse<ToolSummaryResponse> userTools(String keyword, Long categoryId, Integer pageNo, Integer pageSize) {
+        String queryHash = toolListQueryHash(keyword, categoryId, pageNo, pageSize);
+        long version = bypassCacheService.currentToolListVersion();
+        JavaType type = objectMapper.getTypeFactory()
+                .constructParametricType(PageResponse.class, ToolSummaryResponse.class);
+        return bypassCacheService.getOrLoad(
+                CacheNamespaces.toolList(version, queryHash),
+                bypassCacheService.toolTtl(),
+                type,
+                () -> loadUserTools(keyword, categoryId, pageNo, pageSize)
+        );
+    }
+
+    @Override
+    public ToolDetailResponse userToolDetail(String toolCode) {
+        JavaType type = objectMapper.getTypeFactory().constructType(ToolDetailResponse.class);
+        return bypassCacheService.getOrLoad(
+                CacheNamespaces.toolDetail(toolCode),
+                bypassCacheService.toolTtl(),
+                type,
+                () -> loadUserToolDetail(toolCode)
+        );
+    }
+
+    private PageResponse<ToolSummaryResponse> loadUserTools(String keyword, Long categoryId, Integer pageNo, Integer pageSize) {
         int normalizedPageSize = PageResponse.normalizePageSize(pageSize);
         int offset = PageResponse.offset(pageNo, pageSize);
         List<ToolSummaryResponse> list = toolMapper
@@ -175,12 +215,18 @@ public class ToolServiceImpl implements ToolService {
         return PageResponse.of(list, total, pageNo, pageSize);
     }
 
-    @Override
-    public ToolDetailResponse userToolDetail(String toolCode) {
+    private ToolDetailResponse loadUserToolDetail(String toolCode) {
         AiTool tool = toolMapper.findOnlineByCode(toolCode)
                 .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在或未上线"));
         ToolSummaryResponse summary = toUserFacingSummary(tool);
         return ToolDetailResponse.of(summary, fields(tool.getId()), resolveIntegrationView(tool));
+    }
+
+    private String toolListQueryHash(String keyword, Long categoryId, Integer pageNo, Integer pageSize) {
+        String normalizedKeyword = keyword == null || keyword.isBlank() ? "_" : keyword.trim().toLowerCase();
+        long normalizedCategoryId = categoryId == null ? 0L : categoryId;
+        return normalizedKeyword + ":" + normalizedCategoryId + ":"
+                + PageResponse.normalizePageNo(pageNo) + ":" + PageResponse.normalizePageSize(pageSize);
     }
 
     private ToolSummaryResponse toUserFacingSummary(AiTool tool) {
@@ -313,7 +359,9 @@ public class ToolServiceImpl implements ToolService {
                 existing.getConfigNote(), tool.getConfigNote()));
         modelCapabilityService.validateToolModelBinding(tool);
         toolMapper.updateTool(toolId, tool, operatorId);
-        return findToolSummary(toolId);
+        ToolSummaryResponse summary = findToolSummary(toolId);
+        bypassCacheService.invalidateToolCatalog(summary.toolCode());
+        return summary;
     }
 
     @Override
@@ -324,6 +372,7 @@ public class ToolServiceImpl implements ToolService {
         if (updated == 0) {
             throw new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在或已删除");
         }
+        bypassCacheService.invalidateToolCatalog(existing.getToolCode());
         log.info("Admin deleted AI tool: toolId={}, toolCode={}, toolName={}, operatorId={}",
                 toolId, existing.getToolCode(), existing.getToolName(), operatorId);
     }
@@ -332,14 +381,18 @@ public class ToolServiceImpl implements ToolService {
     public ToolSummaryResponse publishTool(Long toolId, Long operatorId) {
         ensureToolExists(toolId);
         toolMapper.updateToolStatus(toolId, ToolStatus.ONLINE, operatorId);
-        return findToolSummary(toolId);
+        ToolSummaryResponse summary = findToolSummary(toolId);
+        bypassCacheService.invalidateToolCatalog(summary.toolCode());
+        return summary;
     }
 
     @Override
     public ToolSummaryResponse offlineTool(Long toolId, Long operatorId) {
         ensureToolExists(toolId);
         toolMapper.updateToolStatus(toolId, ToolStatus.OFFLINE, operatorId);
-        return findToolSummary(toolId);
+        ToolSummaryResponse summary = findToolSummary(toolId);
+        bypassCacheService.invalidateToolCatalog(summary.toolCode());
+        return summary;
     }
 
     @Override
@@ -357,6 +410,7 @@ public class ToolServiceImpl implements ToolService {
         toolFieldItemMapper.replaceActiveFields(schemaId, request.fields().stream()
                 .map(this::toFieldItem)
                 .toList());
+        invalidateUserToolCaches(toolId);
         return fields(toolId);
     }
 
@@ -812,5 +866,10 @@ public class ToolServiceImpl implements ToolService {
         } catch (Exception ignored) {
             return false;
         }
+    }
+
+    private void invalidateUserToolCaches(Long toolId) {
+        toolMapper.findById(toolId)
+                .ifPresent(tool -> bypassCacheService.invalidateToolCatalog(tool.getToolCode()));
     }
 }

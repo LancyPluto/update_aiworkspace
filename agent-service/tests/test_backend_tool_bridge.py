@@ -2,6 +2,7 @@
 
 import pytest
 
+from app.config import settings
 from app.core.schemas import AgentFileContext, ChatMessage, RunContext, RuntimeSettings, TaskDetailResponse, ToolDescriptor
 from app.tools.backend_tool import BackendToolBridge, ToolExecutionError, _with_attached_file_defaults
 
@@ -388,7 +389,8 @@ def test_build_arguments_injects_uploaded_image_and_duration():
         ],
     )
     args = bridge.build_arguments(ctx, tool, apply_placeholder_defaults=True)
-    assert args["image"] == "http://127.0.0.1:8080/api/v1/agent/sessions/9/files/12/content"
+    expected_image = f"{settings.backend_internal_base_url.rstrip('/')}/api/v1/agent/sessions/9/files/12/content"
+    assert args["image"] == expected_image
     assert args["duration"] == "5"
 
 

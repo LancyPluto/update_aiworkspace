@@ -20,6 +20,7 @@ public class AppProperties {
     private Auth auth = new Auth();
     private Cors cors = new Cors();
     private Payment payment = new Payment();
+    private Cache cache = new Cache();
 
     public boolean isProductionMode() {
         return productionMode;
@@ -109,6 +110,107 @@ public class AppProperties {
 
     public void setPayment(Payment payment) {
         this.payment = payment == null ? new Payment() : payment;
+    }
+
+    public Cache getCache() {
+        return cache;
+    }
+
+    public void setCache(Cache cache) {
+        this.cache = cache == null ? new Cache() : cache;
+    }
+
+    public static class Cache {
+        private boolean enabled = true;
+        private int defaultTtlSeconds = 300;
+        private int toolTtlSeconds = 180;
+        private int packageTtlSeconds = 600;
+        private int settingsTtlSeconds = 300;
+        private int vendorTtlSeconds = 300;
+        private long evictDelayMs = 500;
+        private int loadLockSeconds = 10;
+        private int loadWaitMaxAttempts = 40;
+        private long loadWaitIntervalMs = 50;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public int getDefaultTtlSeconds() {
+            return defaultTtlSeconds;
+        }
+
+        public void setDefaultTtlSeconds(int defaultTtlSeconds) {
+            this.defaultTtlSeconds = defaultTtlSeconds < 1 ? 300 : defaultTtlSeconds;
+        }
+
+        public int getToolTtlSeconds() {
+            return toolTtlSeconds;
+        }
+
+        public void setToolTtlSeconds(int toolTtlSeconds) {
+            this.toolTtlSeconds = toolTtlSeconds < 1 ? 180 : toolTtlSeconds;
+        }
+
+        public int getPackageTtlSeconds() {
+            return packageTtlSeconds;
+        }
+
+        public void setPackageTtlSeconds(int packageTtlSeconds) {
+            this.packageTtlSeconds = packageTtlSeconds < 1 ? 600 : packageTtlSeconds;
+        }
+
+        public int getSettingsTtlSeconds() {
+            return settingsTtlSeconds;
+        }
+
+        public void setSettingsTtlSeconds(int settingsTtlSeconds) {
+            this.settingsTtlSeconds = settingsTtlSeconds < 1 ? 300 : settingsTtlSeconds;
+        }
+
+        public int getVendorTtlSeconds() {
+            return vendorTtlSeconds;
+        }
+
+        public void setVendorTtlSeconds(int vendorTtlSeconds) {
+            this.vendorTtlSeconds = vendorTtlSeconds < 1 ? 300 : vendorTtlSeconds;
+        }
+
+        public long getEvictDelayMs() {
+            return evictDelayMs;
+        }
+
+        public void setEvictDelayMs(long evictDelayMs) {
+            this.evictDelayMs = evictDelayMs < 0 ? 500 : evictDelayMs;
+        }
+
+        public int getLoadLockSeconds() {
+            return loadLockSeconds;
+        }
+
+        public void setLoadLockSeconds(int loadLockSeconds) {
+            this.loadLockSeconds = loadLockSeconds < 1 ? 10 : loadLockSeconds;
+        }
+
+        public int getLoadWaitMaxAttempts() {
+            return loadWaitMaxAttempts;
+        }
+
+        public void setLoadWaitMaxAttempts(int loadWaitMaxAttempts) {
+            this.loadWaitMaxAttempts = loadWaitMaxAttempts < 1 ? 40 : loadWaitMaxAttempts;
+        }
+
+        public long getLoadWaitIntervalMs() {
+            return loadWaitIntervalMs;
+        }
+
+        public void setLoadWaitIntervalMs(long loadWaitIntervalMs) {
+            this.loadWaitIntervalMs = loadWaitIntervalMs < 1 ? 50 : loadWaitIntervalMs;
+        }
     }
 
     public static class Cors {

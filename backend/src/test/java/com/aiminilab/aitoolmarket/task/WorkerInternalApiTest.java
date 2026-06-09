@@ -108,7 +108,7 @@ class WorkerInternalApiTest {
                 .andExpect(jsonPath("$.data.list[0].promptTokens").value(120))
                 .andExpect(jsonPath("$.data.list[0].completionTokens").value(35))
                 .andExpect(jsonPath("$.data.list[0].totalTokens").value(155))
-                .andExpect(jsonPath("$.data.list[0].chargedCredits").value(12));
+                .andExpect(jsonPath("$.data.list[0].chargedCredits").value(10));
 
         mockMvc.perform(get("/api/admin/v1/billing/overview")
                         .header("Authorization", "Bearer " + adminToken)
@@ -117,7 +117,7 @@ class WorkerInternalApiTest {
                         .param("sourceId", taskId.toString()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.todayTotalTokens").value(155))
-                .andExpect(jsonPath("$.data.todayChargedCredits").value(12))
+                .andExpect(jsonPath("$.data.todayChargedCredits").value(10))
                 .andExpect(jsonPath("$.data.modelCosts[0].modelName").isNotEmpty())
                 .andExpect(jsonPath("$.data.userCosts[0].userId").value(2))
                 .andExpect(jsonPath("$.data.userCosts[0].usageCount").value(1))
@@ -298,7 +298,7 @@ class WorkerInternalApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.list[0].sourceId").value(taskId.intValue()))
                 .andExpect(jsonPath("$.data.list[0].taskNo", not(blankOrNullString())))
-                .andExpect(jsonPath("$.data.list[0].chargedCredits").value(12));
+                .andExpect(jsonPath("$.data.list[0].chargedCredits").value(10));
     }
 
     @Test

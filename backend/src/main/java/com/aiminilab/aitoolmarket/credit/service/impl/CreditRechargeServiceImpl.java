@@ -23,8 +23,11 @@ import com.aiminilab.aitoolmarket.credit.wechat.QrCodeDataUriGenerator;
 import com.aiminilab.aitoolmarket.credit.wechat.WechatNativePayClient;
 import com.aiminilab.aitoolmarket.credit.wechat.WechatPayCallbackHeaders;
 import com.aiminilab.aitoolmarket.credit.wechat.WechatPayNotification;
+import com.aiminilab.aitoolmarket.common.cache.BypassCacheService;
+import com.aiminilab.aitoolmarket.common.cache.CacheNamespaces;
 import com.aiminilab.aitoolmarket.config.AppProperties;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.fasterxml.jackson.databind.JavaType;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -55,6 +58,7 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
     private final AppProperties.AlipayPage alipayProperties;
     private final AppProperties appProperties;
     private final CreditRechargeCreditDispatcher creditDispatcher;
+    private final BypassCacheService bypassCacheService;
 
     public CreditRechargeServiceImpl(CreditRechargePackageMapper packageMapper,
                                      CreditRechargeOrderMapper orderMapper,
@@ -64,7 +68,8 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
                                      AlipayPagePayClient alipayPagePayClient,
                                      QrCodeDataUriGenerator qrCodeDataUriGenerator,
                                      AppProperties appProperties,
-                                     CreditRechargeCreditDispatcher creditDispatcher) {
+                                     CreditRechargeCreditDispatcher creditDispatcher,
+                                     BypassCacheService bypassCacheService) {
         this.packageMapper = packageMapper;
         this.orderMapper = orderMapper;
         this.creditService = creditService;
@@ -76,13 +81,21 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
         this.alipayProperties = appProperties.getPayment().getAlipayPage();
         this.appProperties = appProperties;
         this.creditDispatcher = creditDispatcher;
+        this.bypassCacheService = bypassCacheService;
     }
 
     @Override
     public List<RechargePackageResponse> packages() {
-        return packageMapper.findActive().stream()
-                .map(item -> RechargePackageResponse.from(item, objectMapper))
-                .toList();
+        JavaType type = objectMapper.getTypeFactory()
+                .constructCollectionType(List.class, RechargePackageResponse.class);
+        return bypassCacheService.getOrLoad(
+                CacheNamespaces.RECHARGE_PACKAGES,
+                bypassCacheService.packageTtl(),
+                type,
+                () -> packageMapper.findActive().stream()
+                        .map(item -> RechargePackageResponse.from(item, objectMapper))
+                        .toList()
+        );
     }
 
     @Override

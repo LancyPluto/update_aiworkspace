@@ -616,7 +616,7 @@ class AdminAgentApiTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
-                                  "provider": "ofox_openai_images",
+                                  "provider": "openai_compatible",
                                   "modelName": "openai/gpt-image-2",
                                   "baseUrl": "https://api.ofox.ai/v1",
                                   "apiKey": "image-secret",
@@ -636,7 +636,7 @@ class AdminAgentApiTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
-                                  "provider": "ofox_openai_images",
+                                  "provider": "openai_compatible",
                                   "modelName": "openai/gpt-image-2",
                                   "baseUrl": "https://api.ofox.ai/v1",
                                   "apiKey": "",

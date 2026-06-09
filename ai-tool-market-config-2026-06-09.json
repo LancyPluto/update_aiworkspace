@@ -194,7 +194,7 @@
       "accountName": "oFox 网关",
       "accountRef": "openai_gateway::ofox",
       "baseUrl": "https://api.ofox.ai/v1",
-      "apiKey": "sk-of-XJdvfPEUgOEWKDiyctyNFmFHIKIVLBOUlwPoMZTyMyOimpJRAqUePRKgBJADjQpg",
+      "apiKey": "sk-of-lhWOVDJUMxMTIVCopopUSrMkGrMCGzabsDkfXqWxjnLdiEwamXJSzPUhAjpumLAX",
       "extraAuthJson": "{\"readTimeoutSeconds\":300,\"sslEofRetries\":1,\"connectTimeoutSeconds\":119}",
       "secretsRedacted": false,
       "consoleUrl": "https://app.ofox.ai/manage/api-keys",

@@ -6,6 +6,9 @@
 *.log
 logs/
 
+# local API/debug snapshots
+tmp_*.json
+
 # local tool bundles
 .tools/
 

@@ -863,7 +863,7 @@ INSERT INTO credit_recharge_packages (
   sort_order,
   status
 ) VALUES (
-  'test_1000',
+  'ci_recharge_1000',
   'Test credits',
   1000,
   10.00,

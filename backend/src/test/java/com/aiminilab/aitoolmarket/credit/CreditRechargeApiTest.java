@@ -36,9 +36,16 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "spring.datasource.password=",
         "spring.sql.init.mode=always",
         "spring.sql.init.schema-locations=classpath:schema-test.sql",
+        "app.production-mode=false",
+        "app.payment.wechat-native.enabled=true",
         "app.payment.wechat-native.appid=wx-test",
         "app.payment.wechat-native.mchid=mch-test",
-        "app.payment.alipay-page.app-id=alipay-test-app"
+        "app.payment.wechat-native.merchant-serial-no=test-serial",
+        "app.payment.wechat-native.api-v3-key=01234567890123456789012345678901",
+        "app.payment.alipay-page.enabled=true",
+        "app.payment.alipay-page.app-id=alipay-test-app",
+        "app.payment.alipay-page.merchant-private-key=test-private-key",
+        "app.payment.alipay-page.alipay-public-key=test-public-key"
 })
 class CreditRechargeApiTest {
 

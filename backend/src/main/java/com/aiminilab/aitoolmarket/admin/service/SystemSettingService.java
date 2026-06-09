@@ -1,6 +1,7 @@
 package com.aiminilab.aitoolmarket.admin.service;
 
 import com.aiminilab.aitoolmarket.admin.dto.CustomerServiceQrUploadResponse;
+import com.aiminilab.aitoolmarket.admin.dto.CustomerServiceSettingsResponse;
 import com.aiminilab.aitoolmarket.admin.dto.SystemSettingVersionResponse;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -9,6 +10,10 @@ import java.util.Map;
 
 public interface SystemSettingService {
     Map<String, String> settings();
+
+    default CustomerServiceSettingsResponse publicCustomerServiceSettings() {
+        return CustomerServiceSettingsResponse.from(settings());
+    }
 
     Map<String, String> updateSettings(Map<String, String> settings);
 

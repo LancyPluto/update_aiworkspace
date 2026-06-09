@@ -19,6 +19,6 @@ public class PublicSettingController {
 
     @GetMapping("/customer-service")
     public ApiResponse<CustomerServiceSettingsResponse> customerService() {
-        return ApiResponse.success(CustomerServiceSettingsResponse.from(systemSettingService.settings()));
+        return ApiResponse.success(systemSettingService.publicCustomerServiceSettings());
     }
 }
