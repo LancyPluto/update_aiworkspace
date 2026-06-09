@@ -175,58 +175,60 @@ async function copyPrompt() {
           </div>
 
           <section class="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(220px,0.32fr)] gap-5 max-2xl:grid-cols-1">
-            <div class="relative flex min-h-[420px] items-center justify-center overflow-visible">
-              <img
-                v-if="asset.kind === 'image' && mediaUrl"
-                :src="mediaUrl"
-                :alt="asset.title"
-                class="relative z-10 max-h-full max-w-full rounded-2xl object-contain shadow-[0_24px_90px_rgb(0_0_0_/_0.62)]"
-              />
-              <video
-                v-else-if="asset.kind === 'video' && mediaUrl"
-                :src="mediaUrl"
-                controls
-                playsinline
-                preload="metadata"
-                class="relative z-10 max-h-full max-w-full rounded-2xl bg-black shadow-[0_24px_90px_rgb(0_0_0_/_0.62)]"
-              />
-              <div v-else-if="asset.kind === 'audio' && mediaUrl" class="relative z-10 w-full max-w-xl rounded-[28px] border border-white/10 bg-black/35 p-8">
-                <div class="mb-8 flex items-center gap-4">
-                  <div class="grid h-16 w-16 place-items-center rounded-3xl bg-primary/15 text-primary shadow-[0_0_40px_rgb(176_92_255_/_0.18)]">
-                    <Music class="h-8 w-8" />
+            <div class="flex min-h-0 flex-col">
+              <div class="relative flex min-h-[420px] flex-1 items-center justify-center overflow-visible">
+                <img
+                  v-if="asset.kind === 'image' && mediaUrl"
+                  :src="mediaUrl"
+                  :alt="asset.title"
+                  class="relative z-10 max-h-full max-w-full rounded-2xl object-contain shadow-[0_24px_90px_rgb(0_0_0_/_0.62)]"
+                />
+                <video
+                  v-else-if="asset.kind === 'video' && mediaUrl"
+                  :src="mediaUrl"
+                  controls
+                  playsinline
+                  preload="metadata"
+                  class="relative z-10 max-h-full max-w-full rounded-2xl bg-black shadow-[0_24px_90px_rgb(0_0_0_/_0.62)]"
+                />
+                <div v-else-if="asset.kind === 'audio' && mediaUrl" class="relative z-10 w-full max-w-xl rounded-[28px] border border-white/10 bg-black/35 p-8">
+                  <div class="mb-8 flex items-center gap-4">
+                    <div class="grid h-16 w-16 place-items-center rounded-3xl bg-primary/15 text-primary shadow-[0_0_40px_rgb(176_92_255_/_0.18)]">
+                      <Music class="h-8 w-8" />
+                    </div>
+                    <div>
+                      <p class="text-2xl font-black">{{ asset.title }}</p>
+                      <p class="mt-1 text-sm text-white/45">Audio material</p>
+                    </div>
                   </div>
-                  <div>
-                    <p class="text-2xl font-black">{{ asset.title }}</p>
-                    <p class="mt-1 text-sm text-white/45">Audio material</p>
-                  </div>
+                  <audio :src="mediaUrl" controls preload="metadata" class="w-full" />
                 </div>
-                <audio :src="mediaUrl" controls preload="metadata" class="w-full" />
+                <article v-else class="relative z-10 max-h-full w-full max-w-3xl overflow-auto rounded-[28px] border border-white/10 bg-black/30 p-8">
+                  <FileText class="mb-8 h-10 w-10 text-white/35" />
+                  <p class="whitespace-pre-wrap text-lg font-light leading-9 text-white/78">
+                    {{ asset.rawText || asset.prompt || "暂无可预览内容" }}
+                  </p>
+                </article>
               </div>
-              <article v-else class="relative z-10 max-h-full w-full max-w-3xl overflow-auto rounded-[28px] border border-white/10 bg-black/30 p-8">
-                <FileText class="mb-8 h-10 w-10 text-white/35" />
-                <p class="whitespace-pre-wrap text-lg font-light leading-9 text-white/78">
-                  {{ asset.rawText || asset.prompt || "暂无可预览内容" }}
-                </p>
-              </article>
-            </div>
 
-            <div
-              v-if="asset.kind === 'image' && mediaUrls.length > 1"
-              class="mt-4 flex gap-3 overflow-x-auto pb-2"
-            >
-              <button
-                v-for="(url, index) in mediaUrls"
-                :key="url"
-                type="button"
-                class="relative h-20 w-20 shrink-0 overflow-hidden rounded-2xl border transition"
-                :class="url === mediaUrl ? 'border-primary shadow-[0_0_0_2px_rgb(176_92_255_/_0.22)]' : 'border-white/10 opacity-70 hover:opacity-100'"
-                @click="selectedUrl = url"
+              <div
+                v-if="asset.kind === 'image' && mediaUrls.length > 1"
+                class="mx-auto mt-4 flex w-fit max-w-full justify-center gap-3 overflow-x-auto pb-2"
               >
-                <img :src="url" :alt="`${asset.title}-${index + 1}`" class="h-full w-full object-cover" />
-                <span class="absolute bottom-1 right-1 rounded-full bg-black/65 px-1.5 py-0.5 text-[10px] text-white">
-                  {{ index + 1 }}
-                </span>
-              </button>
+                <button
+                  v-for="(url, index) in mediaUrls"
+                  :key="url"
+                  type="button"
+                  class="relative h-20 w-20 shrink-0 overflow-hidden rounded-2xl border transition"
+                  :class="url === mediaUrl ? 'border-primary shadow-[0_0_0_2px_rgb(176_92_255_/_0.22)]' : 'border-white/10 opacity-70 hover:opacity-100'"
+                  @click="selectedUrl = url"
+                >
+                  <img :src="url" :alt="`${asset.title}-${index + 1}`" class="h-full w-full object-cover" />
+                  <span class="absolute bottom-1 right-1 rounded-full bg-black/65 px-1.5 py-0.5 text-[10px] text-white">
+                    {{ index + 1 }}
+                  </span>
+                </button>
+              </div>
             </div>
 
             <aside class="grid content-start gap-0 max-2xl:grid-cols-3 max-lg:grid-cols-1">

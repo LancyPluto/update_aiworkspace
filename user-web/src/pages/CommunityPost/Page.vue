@@ -5,9 +5,7 @@ import { ArrowLeft, ChevronLeft, ChevronRight, Copy, Download, Heart, Loader2, S
 import CommunityAudioMedia from "@/components/community/CommunityAudioMedia.vue"
 import UserAvatar from "@/components/UserAvatar.vue"
 import {
-  addCommunityCollectionItem,
   favoriteCommunityPost,
-  fetchCommunityCollections,
   fetchCommunityPost,
   likeCommunityPost,
   markCommunityPostSameStyle,
@@ -15,12 +13,19 @@ import {
   unfavoriteCommunityPost,
   unlikeCommunityPost,
 } from "@/api/communityApi"
-import { getApiOrigin } from "@/api/client"
+import { fetchTaskById } from "@/api/taskApi"
+import { syncFavoriteToInspirationCollection } from "@/utils/communitySync"
 import type { CommunityPost } from "@/api/types"
 import { useAuthStore } from "@/store/authStore"
 import { assetFromCommunityPost } from "@/utils/assetPreviewAdapter"
 import { communityDisplayTitle } from "@/utils/communityDisplay"
 import { resolveCommunityAuthorAvatar, resolveCommunityAuthorName, resolveCommunityPrompt } from "@/utils/communityPostNormalize"
+import {
+  extractImageUrlsFromTask,
+  normalizeCommunityMediaUrl,
+  resolveCommunityImageUrls,
+  resolveCommunityPostKind,
+} from "@/utils/communityPostMedia"
 import { openDashboardWithAsset } from "@/utils/assetReplay"
 import { resolveCommunityAudioMedia } from "@/utils/communityAudioMedia"
 
@@ -31,20 +36,14 @@ const post = ref<CommunityPost | null>(null)
 const loading = ref(false)
 const acting = ref(false)
 const sameStyleLoading = ref(false)
-const collecting = ref(false)
 const error = ref("")
 const audioPlaying = ref(false)
 const detailAudioRef = ref<HTMLAudioElement | null>(null)
 const activeImageIndex = ref(0)
+const extraImageUrls = ref<string[]>([])
 
 const postId = computed(() => String(route.params.postId || ""))
-const kind = computed(() => {
-  const modality = (post.value?.modality || "").toLowerCase()
-  if (modality.includes("video")) return "video"
-  if (modality.includes("audio")) return "audio"
-  if (modality.includes("image")) return "image"
-  return "text"
-})
+const kind = computed(() => resolveCommunityPostKind(post.value?.modality))
 
 const authorName = computed(() => (post.value ? resolveCommunityAuthorName(post.value) : ""))
 
@@ -52,8 +51,8 @@ const audioMedia = computed(() => {
   if (!post.value) return { coverUrl: "", audioUrl: "" }
   const resolved = resolveCommunityAudioMedia(post.value)
   return {
-    coverUrl: mediaUrl(resolved.coverUrl),
-    audioUrl: mediaUrl(resolved.audioUrl),
+    coverUrl: normalizeCommunityMediaUrl(resolved.coverUrl),
+    audioUrl: normalizeCommunityMediaUrl(resolved.audioUrl),
   }
 })
 
@@ -73,11 +72,8 @@ const displayTitle = computed(() => {
 })
 
 const imageUrls = computed(() => {
-  if (!post.value || kind.value !== "image") return []
-  const urls = [...(post.value.mediaUrls || []), post.value.mediaUrl, post.value.coverUrl]
-    .map((url) => mediaUrl(url))
-    .filter((url): url is string => Boolean(url))
-  return [...new Set(urls)]
+  if (!post.value) return []
+  return resolveCommunityImageUrls(post.value, extraImageUrls.value)
 })
 
 const activeImageUrl = computed(() => {
@@ -88,24 +84,36 @@ const activeImageUrl = computed(() => {
 const downloadUrl = computed(() => {
   if (kind.value === "audio") return audioMedia.value.audioUrl
   if (kind.value === "image") return activeImageUrl.value
-  return post.value ? mediaUrl(post.value.coverUrl) : ""
+  return post.value ? normalizeCommunityMediaUrl(post.value.coverUrl) : ""
 })
 
-function mediaUrl(value?: string | null) {
-  const raw = value?.trim()
-  if (!raw) return ""
-  if (raw.startsWith("http://") || raw.startsWith("https://") || raw.startsWith("data:")) return raw
-  const path = raw.startsWith("/") ? raw : `/${raw}`
-  const apiOrigin = getApiOrigin()
-  return apiOrigin ? `${apiOrigin}${path}` : path
+async function enrichPostImagesFromTask(current: CommunityPost) {
+  extraImageUrls.value = []
+  if (!current.taskId || resolveCommunityPostKind(current.modality) !== "image") return
+
+  const existing = resolveCommunityImageUrls(current)
+  if (existing.length > 1) return
+
+  try {
+    const task = await fetchTaskById(current.taskId, { token: auth.token })
+    const fromTask = extractImageUrlsFromTask(task)
+    if (fromTask.length <= existing.length) return
+    extraImageUrls.value = fromTask
+    post.value = { ...current, mediaUrls: fromTask }
+  } catch {
+    // 任务补全失败时保留帖子接口返回的媒体信息
+  }
 }
 
 async function load() {
   loading.value = true
   error.value = ""
+  extraImageUrls.value = []
   try {
-    post.value = await fetchCommunityPost(postId.value, { token: auth.token })
+    const loaded = await fetchCommunityPost(postId.value, { token: auth.token })
+    post.value = loaded
     activeImageIndex.value = 0
+    await enrichPostImagesFromTask(loaded)
   } catch (err) {
     error.value = err instanceof Error ? err.message : "作品加载失败"
   } finally {
@@ -128,10 +136,17 @@ async function toggleLike() {
 async function toggleFavorite() {
   if (!post.value || !auth.token) return router.push({ name: "Login", query: { redirect: route.fullPath } })
   acting.value = true
+  const wasFavorited = post.value.favorited
+  const postId = post.value.id
   try {
-    post.value = post.value.favorited
-      ? await unfavoriteCommunityPost(post.value.id, { token: auth.token })
-      : await favoriteCommunityPost(post.value.id, { token: auth.token })
+    post.value = wasFavorited
+      ? await unfavoriteCommunityPost(postId, { token: auth.token })
+      : await favoriteCommunityPost(postId, { token: auth.token })
+    try {
+      await syncFavoriteToInspirationCollection(postId, !wasFavorited, { token: auth.token })
+    } catch {
+      // 作品收藏状态已更新；同步灵感收藏夹失败时不阻断主流程
+    }
   } finally {
     acting.value = false
   }
@@ -148,7 +163,7 @@ async function createSameStyle() {
       { postId: post.value.id, eventType: "dashboard_open", source: "community_detail", toolCode: post.value.toolCode },
       { token: auth.token },
     ).catch(() => undefined)
-    openDashboardWithAsset(assetFromCommunityPost(post.value, kind.value === "image" ? activeImageUrl.value : mediaUrl(post.value.coverUrl)), post.value.toolCode, {
+    openDashboardWithAsset(assetFromCommunityPost(post.value, kind.value === "image" ? activeImageUrl.value : normalizeCommunityMediaUrl(post.value.coverUrl)), post.value.toolCode, {
       modality: post.value.modality,
       sourcePost: post.value.id,
     })
@@ -166,28 +181,6 @@ function stepImage(delta: number) {
   const count = imageUrls.value.length
   if (count <= 1) return
   activeImageIndex.value = (activeImageIndex.value + delta + count) % count
-}
-
-async function addToInspiration() {
-  if (!post.value || !auth.token) return router.push({ name: "Login", query: { redirect: route.fullPath } })
-  collecting.value = true
-  try {
-    const { collections, supported } = await fetchCommunityCollections({ token: auth.token })
-    if (!supported) {
-      if (!post.value.favorited) {
-        await favoriteCommunityPost(post.value.id, { token: auth.token })
-        post.value = { ...post.value, favorited: true, favoriteCount: post.value.favoriteCount + 1 }
-      }
-      return
-    }
-    const target = collections.find((item) => item.defaultCollection) || collections[0]
-    if (target) {
-      await addCommunityCollectionItem(target.id, post.value.id, { token: auth.token })
-      post.value = { ...post.value, favorited: true, favoriteCount: post.value.favoriteCount + (post.value.favorited ? 0 : 1) }
-    }
-  } finally {
-    collecting.value = false
-  }
 }
 
 async function sharePost() {
@@ -236,6 +229,7 @@ watch(postId, () => {
     detailAudioRef.value.pause()
     detailAudioRef.value.removeAttribute("src")
   }
+  void load()
 })
 
 onMounted(() => void load())
@@ -301,8 +295,8 @@ onUnmounted(() => {
           </div>
         </div>
         <video
-          v-else-if="kind === 'video' && mediaUrl(post.coverUrl)"
-          :src="mediaUrl(post.coverUrl)"
+          v-else-if="kind === 'video' && normalizeCommunityMediaUrl(post.coverUrl)"
+          :src="normalizeCommunityMediaUrl(post.coverUrl)"
           controls
           playsinline
           preload="metadata"
@@ -336,6 +330,9 @@ onUnmounted(() => {
       <aside class="post-panel">
         <p class="eyebrow">{{ post.modality }} creation</p>
         <h1>{{ displayTitle }}</h1>
+        <p v-if="imageUrls.length > 1" class="image-count-hint">
+          第 {{ activeImageIndex + 1 }} / {{ imageUrls.length }} 张
+        </p>
         <p v-if="post.description" class="description">{{ post.description }}</p>
 
         <div class="action-row">
@@ -358,10 +355,6 @@ onUnmounted(() => {
           >
             <Star class="h-4 w-4" :class="{ 'icon-filled': post.favorited }" />
             {{ post.favoriteCount }}
-          </button>
-          <button type="button" :disabled="collecting" @click="addToInspiration">
-            <Star class="h-4 w-4" />
-            灵感
           </button>
           <button type="button" @click="sharePost">
             <Send class="h-4 w-4" />
@@ -458,16 +451,19 @@ onUnmounted(() => {
 }
 
 .media-stage {
-  display: grid;
-  min-height: 72vh;
-  place-items: center;
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
 }
 
 .image-viewer {
-  display: grid;
+  display: flex;
   width: 100%;
+  flex-direction: column;
   gap: 18px;
-  justify-items: center;
+  align-items: center;
 }
 
 .image-frame {
@@ -480,7 +476,7 @@ onUnmounted(() => {
 .image-frame img,
 .media-stage video {
   max-width: 100%;
-  max-height: 78vh;
+  max-height: min(78vh, 720px);
   border-radius: 24px;
   box-shadow: 0 30px 100px rgb(0 0 0 / 0.68);
 }
@@ -524,7 +520,8 @@ onUnmounted(() => {
 
 .image-strip {
   display: flex;
-  width: min(100%, 760px);
+  width: 100%;
+  max-width: 760px;
   gap: 10px;
   overflow-x: auto;
   border: 1px solid rgb(255 255 255 / 0.08);
@@ -616,6 +613,13 @@ onUnmounted(() => {
   margin: 0;
   font-size: 34px;
   line-height: 1.08;
+}
+
+.image-count-hint {
+  margin: 10px 0 0;
+  color: rgb(255 255 255 / 0.58);
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .description {

@@ -29,6 +29,7 @@ import {
 } from "@/api/communityApi"
 import { getApiOrigin } from "@/api/client"
 import type { CommunityCollection, CommunityPost } from "@/api/types"
+import MasonryLayout from "@/components/MasonryLayout.vue"
 import { confirmDelete } from "@/composables/useConfirmDelete"
 import { userRoutes } from "@/router/userRoutes"
 import { useAuthStore } from "@/store/authStore"
@@ -96,6 +97,13 @@ const hasMore = computed(() => visibleCount.value < filteredPosts.value.length)
 const selectedCount = computed(() => selectedIds.value.size)
 const batchActive = computed(() => selectedCount.value > 0)
 const otherCollections = computed(() => collections.value.filter((item) => item.id !== activeCollection.value?.id))
+
+const skeletonItems = computed(() =>
+  Array.from({ length: 6 }, (_, index) => ({
+    id: index + 1,
+    height: 180 + (index % 3) * 40,
+  })),
+)
 
 function mediaUrl(value?: string | null) {
   const raw = value?.trim()
@@ -463,15 +471,24 @@ onUnmounted(() => {
       <p v-if="copyHint" class="inline-hint">{{ copyHint }}</p>
       <div v-if="error" class="state-panel error">{{ error }}</div>
 
-      <div v-else-if="loading" class="content-masonry">
-        <article v-for="index in 6" :key="index" class="insp-card skeleton">
-          <div class="thumb skeleton-block" />
-          <div class="card-body">
-            <div class="skeleton-line wide" />
-            <div class="skeleton-line" />
-          </div>
-        </article>
-      </div>
+      <MasonryLayout
+        v-else-if="loading"
+        :items="skeletonItems"
+        item-key="id"
+        :estimate-height="(item) => item.height"
+        aria-busy="true"
+        aria-label="加载中"
+      >
+        <template #default="{ item }">
+          <article class="insp-card skeleton" :style="{ '--skeleton-h': `${item.height}px` }">
+            <div class="thumb skeleton-block" />
+            <div class="card-body">
+              <div class="skeleton-line wide" />
+              <div class="skeleton-line" />
+            </div>
+          </article>
+        </template>
+      </MasonryLayout>
 
       <div v-else-if="!visiblePosts.length" class="empty-state">
         <FolderHeart class="h-10 w-10 text-primary/70" />
@@ -482,8 +499,9 @@ onUnmounted(() => {
         </button>
       </div>
 
-      <section v-else class="content-masonry">
-        <article v-for="post in visiblePosts" :key="post.id" class="insp-card group">
+      <MasonryLayout v-else :items="visiblePosts" :item-key="(post) => post.id" aria-label="收藏作品">
+        <template #default="{ item: post }">
+        <article class="insp-card group">
           <label class="select-box" :class="{ checked: isSelected(post.id) }" @click.stop>
             <input type="checkbox" :checked="isSelected(post.id)" @change="toggleSelect(post.id)" />
             <Check v-if="isSelected(post.id)" class="h-3 w-3" />
@@ -553,7 +571,8 @@ onUnmounted(() => {
             </div>
           </div>
         </article>
-      </section>
+        </template>
+      </MasonryLayout>
 
       <button v-if="hasMore && !loading" type="button" class="load-more" :disabled="acting" @click="loadMore">
         加载更多

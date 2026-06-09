@@ -16,15 +16,12 @@ import {
   X,
 } from "lucide-vue-next"
 import CommunityAudioMedia from "@/components/community/CommunityAudioMedia.vue"
-import { ApiBusinessError, getApiOrigin } from "@/api/client"
+import { ApiBusinessError } from "@/api/client"
 import {
-  addCommunityCollectionItem,
   favoriteCommunityPost,
-  fetchCommunityCollections,
   fetchCommunityTopics,
   likeCommunityPost,
   markCommunityPostSameStyle,
-  removeCommunityCollectionItem,
   searchCommunityPosts,
   trackCommunityEvent,
   unfavoriteCommunityPost,
@@ -34,7 +31,11 @@ import type { CommunityPost, CommunityTopic } from "@/api/types"
 import {
   COMMUNITY_POST_UNPUBLISHED_EVENT,
   type CommunityPostUnpublishedDetail,
+  preloadDefaultCommunityCollection,
+  resetDefaultCommunityCollectionCache,
+  syncFavoriteToInspirationCollection,
 } from "@/utils/communitySync"
+import MasonryLayout from "@/components/MasonryLayout.vue"
 import UserAvatar from "@/components/UserAvatar.vue"
 import { userRoutes } from "@/router/userRoutes"
 import { useAuthStore } from "@/store/authStore"
@@ -43,6 +44,11 @@ import { openDashboardWithAsset } from "@/utils/assetReplay"
 import { communityDisplayTitle, promptExcerpt } from "@/utils/communityDisplay"
 import { hasCommunityAudioMedia, resolveCommunityAudioMedia } from "@/utils/communityAudioMedia"
 import { resolveCommunityAuthorAvatar, resolveCommunityAuthorName, resolveCommunityPrompt } from "@/utils/communityPostNormalize"
+import {
+  normalizeCommunityMediaUrl,
+  resolveCommunityImageUrls,
+  resolveCommunityPostKind,
+} from "@/utils/communityPostMedia"
 
 const router = useRouter()
 const route = useRoute()
@@ -66,7 +72,6 @@ const topic = ref("")
 const searchOpen = ref(false)
 const sameStyleLoadingId = ref<number | null>(null)
 const actingPostId = ref<number | null>(null)
-const defaultCollectionId = ref<number | null>(null)
 const loadSentinelRef = ref<HTMLElement | null>(null)
 const playingPostId = ref<number | null>(null)
 const galleryAudioPlaying = ref(false)
@@ -95,22 +100,15 @@ const extendedSorts = [
 
 const inlineTopics = computed(() => topics.value.length > 0 && topics.value.length < 5)
 
-function mediaUrl(value?: string | null) {
-  const raw = value?.trim()
-  if (!raw) return ""
-  if (raw.startsWith("http://") || raw.startsWith("https://") || raw.startsWith("data:")) return raw
-  const path = raw.startsWith("/") ? raw : `/${raw}`
-  const apiOrigin = getApiOrigin()
-  return apiOrigin ? `${apiOrigin}${path}` : path
-}
+const skeletonItems = computed(() =>
+  Array.from({ length: 8 }, (_, index) => ({
+    id: index + 1,
+    height: 120 + (index % 4) * 48,
+  })),
+)
 
 function postImageUrls(post: CommunityPost) {
-  if (postKind(post) !== "image") return []
-  const rawUrls = post.mediaUrls?.length ? post.mediaUrls : [post.mediaUrl, post.coverUrl]
-  const urls = rawUrls
-    .map((url) => mediaUrl(url))
-    .filter((url): url is string => Boolean(url))
-  return [...new Set(urls)]
+  return resolveCommunityImageUrls(post)
 }
 
 function activePostImageUrl(post: CommunityPost) {
@@ -138,11 +136,7 @@ function stepPostImage(post: CommunityPost, delta: number, event: Event) {
 }
 
 function postKind(post: CommunityPost) {
-  const modality = (post.modality || "").toLowerCase()
-  if (modality.includes("video")) return "video"
-  if (modality.includes("audio")) return "audio"
-  if (modality.includes("image")) return "image"
-  return "text"
+  return resolveCommunityPostKind(post.modality)
 }
 
 function postTitle(post: CommunityPost) {
@@ -180,14 +174,14 @@ function patchPost(updated: CommunityPost) {
 function hasMediaCover(post: CommunityPost) {
   if (postKind(post) === "audio") return hasCommunityAudioMedia(post)
   if (postKind(post) === "image") return Boolean(activePostImageUrl(post))
-  return Boolean(mediaUrl(post.coverUrl)) && postKind(post) !== "text"
+  return Boolean(normalizeCommunityMediaUrl(post.coverUrl)) && postKind(post) !== "text"
 }
 
 function audioMedia(post: CommunityPost) {
   const resolved = resolveCommunityAudioMedia(post)
   return {
-    coverUrl: mediaUrl(resolved.coverUrl),
-    audioUrl: mediaUrl(resolved.audioUrl),
+    coverUrl: normalizeCommunityMediaUrl(resolved.coverUrl),
+    audioUrl: normalizeCommunityMediaUrl(resolved.audioUrl),
   }
 }
 
@@ -273,40 +267,17 @@ async function toggleLike(post: CommunityPost, event: Event) {
   }
 }
 
-async function resolveDefaultCollectionId() {
-  if (!auth.token) return null
-  if (defaultCollectionId.value) return defaultCollectionId.value
-  try {
-    const result = await fetchCommunityCollections({ token: auth.token })
-    if (!result.supported || !result.collections.length) return null
-    const target = result.collections.find((item) => item.defaultCollection) || result.collections[0]
-    defaultCollectionId.value = target?.id ?? null
-    return defaultCollectionId.value
-  } catch {
-    return null
-  }
-}
-
-async function syncFavoriteToInspiration(postId: number, favorited: boolean) {
-  const collectionId = await resolveDefaultCollectionId()
-  if (!collectionId) return
-  if (favorited) {
-    await addCommunityCollectionItem(collectionId, postId, { token: auth.token })
-  } else {
-    await removeCommunityCollectionItem(collectionId, postId, { token: auth.token })
-  }
-}
-
 async function toggleFavorite(post: CommunityPost, event: Event) {
   event.stopPropagation()
   if (!auth.token) return router.push({ name: "Login", query: { redirect: route.fullPath } })
   actingPostId.value = post.id
+  const wasFavorited = post.favorited
   try {
-    const updated = post.favorited
+    const updated = wasFavorited
       ? await unfavoriteCommunityPost(post.id, { token: auth.token })
       : await favoriteCommunityPost(post.id, { token: auth.token })
     try {
-      await syncFavoriteToInspiration(post.id, !post.favorited)
+      await syncFavoriteToInspirationCollection(post.id, !wasFavorited, { token: auth.token })
     } catch {
       // 作品收藏状态已更新；同步灵感收藏夹失败时不阻断主流程
     }
@@ -391,7 +362,7 @@ async function createSameStyle(post: CommunityPost, event: Event) {
       { postId: post.id, eventType: "dashboard_open", source: "discover_card", toolCode: post.toolCode },
       { token: auth.token },
     ).catch(() => undefined)
-    const selectedMediaUrl = postKind(post) === "image" ? activePostImageUrl(post) : mediaUrl(post.coverUrl)
+    const selectedMediaUrl = postKind(post) === "image" ? activePostImageUrl(post) : normalizeCommunityMediaUrl(post.coverUrl)
     openDashboardWithAsset(assetFromCommunityPost(post, selectedMediaUrl), post.toolCode, {
       modality: post.modality,
       sourcePost: post.id,
@@ -440,8 +411,8 @@ watch([modality, sort, featuredOnly, topic], () => void load(true))
 watch(
   () => auth.token,
   (token, prev) => {
-    defaultCollectionId.value = null
-    if (token) void resolveDefaultCollectionId()
+    resetDefaultCommunityCollectionCache()
+    if (token) void preloadDefaultCommunityCollection(token)
     if (token !== prev) void load(true)
   },
 )
@@ -468,7 +439,7 @@ function handleCommunityPostUnpublished(event: Event) {
 onMounted(() => {
   void loadTopics()
   void load(true)
-  if (auth.token) void resolveDefaultCollectionId()
+  if (auth.token) void preloadDefaultCommunityCollection(auth.token)
   window.addEventListener(COMMUNITY_POST_UNPUBLISHED_EVENT, handleCommunityPostUnpublished)
 })
 
@@ -588,23 +559,33 @@ onUnmounted(() => {
 
     <p v-if="sameStyleError" class="inline-alert" role="alert">{{ sameStyleError }}</p>
 
-    <div v-if="loading" class="content-masonry" aria-busy="true" aria-label="加载中">
-      <article v-for="index in 8" :key="index" class="post-card skeleton" :style="{ '--skeleton-h': `${120 + (index % 4) * 48}px` }">
-        <div class="thumb skeleton-block" />
-        <div class="card-body">
-          <div class="skeleton-line wide" />
-          <div class="skeleton-line" />
-        </div>
-        <div class="card-footer skeleton-footer" />
-      </article>
-    </div>
+    <MasonryLayout
+      v-if="loading"
+      :items="skeletonItems"
+      item-key="id"
+      :estimate-height="(item) => item.height"
+      aria-busy="true"
+      aria-label="加载中"
+    >
+      <template #default="{ item }">
+        <article class="post-card skeleton" :style="{ '--skeleton-h': `${item.height}px` }">
+          <div class="thumb skeleton-block" />
+          <div class="card-body">
+            <div class="skeleton-line wide" />
+            <div class="skeleton-line" />
+          </div>
+          <div class="card-footer skeleton-footer" />
+        </article>
+      </template>
+    </MasonryLayout>
 
     <div v-else-if="error" class="state-panel error">{{ error }}</div>
     <div v-else-if="!posts.length" class="state-panel">暂时没有匹配的公开作品，换个筛选条件再试试。</div>
 
     <template v-else>
-      <section class="content-masonry">
-        <article v-for="post in posts" :key="post.id" class="post-card group">
+      <MasonryLayout :items="posts" :item-key="(post) => post.id" aria-label="社区作品">
+        <template #default="{ item: post }">
+        <article class="post-card group">
           <div class="card-main">
             <button type="button" class="card-clickable" @click="openPost(post)">
               <div class="thumb">
@@ -618,7 +599,7 @@ onUnmounted(() => {
                 />
                 <video
                   v-else-if="hasMediaCover(post) && postKind(post) === 'video'"
-                  :src="mediaUrl(post.coverUrl)"
+                  :src="normalizeCommunityMediaUrl(post.coverUrl)"
                   class="thumb-media"
                   muted
                   loop
@@ -717,7 +698,8 @@ onUnmounted(() => {
             </div>
           </div>
         </article>
-      </section>
+        </template>
+      </MasonryLayout>
 
       <div ref="loadSentinelRef" class="load-sentinel" aria-hidden="true" />
       <div v-if="loadingMore" class="loading-more" aria-live="polite">

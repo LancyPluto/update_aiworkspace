@@ -10,6 +10,7 @@ import {
 } from "lucide-vue-next"
 import AppShell from "@/components/AppShell.vue"
 import AssetCard from "@/components/AssetCard.vue"
+import MasonryLayout from "@/components/MasonryLayout.vue"
 import AssetPreviewModal from "@/components/AssetPreviewModal.vue"
 import { confirmDelete } from "@/composables/useConfirmDelete"
 import { deleteTask, fetchTasks } from "@/api/taskApi"
@@ -358,10 +359,14 @@ onMounted(loadMaterials)
         </RouterLink>
       </div>
 
-      <div v-else class="content-masonry">
+      <MasonryLayout
+        v-else
+        :items="materialAssets"
+        :item-key="(item) => item.task.taskId"
+        aria-label="素材库作品"
+      >
+        <template #default="{ item }">
         <AssetCard
-          v-for="item in materialAssets"
-          :key="item.task.taskId"
           :asset="item.asset"
           source="private"
           masonry
@@ -406,7 +411,8 @@ onMounted(loadMaterials)
             </button>
           </template>
         </AssetCard>
-      </div>
+        </template>
+      </MasonryLayout>
     </div>
     <AssetPreviewModal
       :asset="previewAsset"
