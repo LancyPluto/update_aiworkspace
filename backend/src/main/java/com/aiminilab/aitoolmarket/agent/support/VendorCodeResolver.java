@@ -30,6 +30,7 @@ public class VendorCodeResolver {
             Map.entry("volcengine_images", "volcengine"),
             Map.entry("seedance", "volcengine"),
             Map.entry("kling_video", "kling"),
+            Map.entry("bailian_happyhorse", "qwen"),
             Map.entry("ofox_openai_images", "openai_gateway"),
             Map.entry("openai_images_gateway", "openai_gateway"),
             Map.entry("worker_video", "siliconflow"),
@@ -44,7 +45,7 @@ public class VendorCodeResolver {
         VENDOR_LABELS.put("openai", "OpenAI");
         VENDOR_LABELS.put("openai_gateway", "OpenAI 兼容网关");
         VENDOR_LABELS.put("google", "Google Gemini");
-        VENDOR_LABELS.put("qwen", "通义千问");
+        VENDOR_LABELS.put("qwen", "阿里云百炼");
         VENDOR_LABELS.put("zhipu", "智谱 GLM");
         VENDOR_LABELS.put("moonshot", "Moonshot / Kimi");
         VENDOR_LABELS.put("anthropic", "Anthropic Claude");

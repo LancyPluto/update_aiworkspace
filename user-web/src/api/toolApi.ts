@@ -1,6 +1,6 @@
 import { apiRequest } from "./client"
 import type { AITool, Capability } from "./aiToolTypes"
-import type { PageResult, ToolCategory, ToolDetail, ToolSummary } from "./types"
+import type { PageResult, ToolCategory, ToolDetail, ToolSummary, UserUploadAsset } from "./types"
 import {
   isMarketplaceMockToolId,
   isMockMode,
@@ -155,11 +155,32 @@ export async function fetchAIToolById(
 export async function uploadToolFile(
   file: File,
   options?: { token?: string | null },
-): Promise<{ fileId: string; url: string }> {
+): Promise<{ assetId?: number; fileId: string; url: string; name?: string; contentType?: string; size?: number }> {
   const formData = new FormData()
   formData.append("file", file)
-  return apiRequest<{ fileId: string; url: string }>("POST", "/api/v1/tool-upload", {
+  return apiRequest<{ assetId?: number; fileId: string; url: string; name?: string; contentType?: string; size?: number }>("POST", "/api/v1/tool-upload", {
     token: options?.token,
     body: formData,
   })
+}
+
+export async function fetchUploadAssets(options?: {
+  token?: string | null
+  kind?: "image" | "video" | "audio" | "file" | string | null
+  pageSize?: number
+}): Promise<PageResult<UserUploadAsset>> {
+  return apiRequest<PageResult<UserUploadAsset>>("GET", "/api/v1/upload-assets", {
+    token: options?.token,
+    query: {
+      kind: options?.kind ?? undefined,
+      pageSize: options?.pageSize ?? undefined,
+    },
+  })
+}
+
+export async function deleteUploadAsset(
+  assetId: number,
+  options?: { token?: string | null },
+): Promise<void> {
+  await apiRequest<void>("DELETE", `/api/v1/upload-assets/${assetId}`, { token: options?.token })
 }

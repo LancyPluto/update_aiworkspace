@@ -36,6 +36,7 @@ public class AgentFileServiceImpl implements AgentFileService {
 
     private static final long MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
     private static final int DEFAULT_FILE_LIST_SIZE = 20;
+    private static final int RECENT_MEDIA_LIST_SIZE = 60;
     private static final int CHUNK_SIZE = 1200;
     private static final int CHUNK_OVERLAP = 120;
 
@@ -156,6 +157,16 @@ public class AgentFileServiceImpl implements AgentFileService {
     }
 
     @Override
+    public PageResponse<AgentFileResponse> listRecentMedia(Long userId, Long sessionId) {
+        findActiveSession(userId, sessionId);
+        List<AgentFileResponse> files = agentFileMapper.findRecentMediaByUser(userId, RECENT_MEDIA_LIST_SIZE)
+                .stream()
+                .map(AgentFileResponse::from)
+                .toList();
+        return new PageResponse<>(files, files.size(), 1, RECENT_MEDIA_LIST_SIZE, files.size() == RECENT_MEDIA_LIST_SIZE);
+    }
+
+    @Override
     @Transactional
     public void delete(Long userId, Long sessionId, Long fileId) {
         findActiveSession(userId, sessionId);
@@ -203,7 +214,7 @@ public class AgentFileServiceImpl implements AgentFileService {
     public void attachPendingFilesToRun(Long userId, Long sessionId, Long runId, List<Long> fileIds) {
         findActiveSession(userId, sessionId);
         LocalDateTime now = LocalDateTime.now();
-        if (fileIds == null) {
+        if (fileIds == null || fileIds.isEmpty()) {
             agentFileMapper.attachAllPendingFilesToRun(userId, sessionId, runId, now);
             return;
         }

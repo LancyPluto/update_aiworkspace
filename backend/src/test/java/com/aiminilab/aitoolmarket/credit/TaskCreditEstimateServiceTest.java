@@ -4,6 +4,7 @@ import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
 import com.aiminilab.aitoolmarket.agent.service.ModelCapabilityService;
 import com.aiminilab.aitoolmarket.credit.service.TaskCreditEstimateService;
 import com.aiminilab.aitoolmarket.tool.entity.AiTool;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -17,6 +18,7 @@ import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class TaskCreditEstimateServiceTest {
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     @Mock
     private ModelCapabilityService modelCapabilityService;
@@ -47,6 +49,34 @@ class TaskCreditEstimateServiceTest {
         modelConfig.setUnitPrice(null);
 
         assertThat(taskCreditEstimateService.estimateTaskCredits(tool, modelConfig)).isEqualTo(8);
+    }
+
+    @Test
+    void perSecondBilling_usesDurationParam() throws Exception {
+        AiTool tool = new AiTool();
+        tool.setEstimatedCreditCost(5);
+
+        AgentModelConfig modelConfig = new AgentModelConfig();
+        modelConfig.setBillingUnit("PER_SECOND");
+        modelConfig.setUnitPrice(new BigDecimal("0.02"));
+
+        assertThat(taskCreditEstimateService.estimateUserFacingTaskCredits(
+                tool,
+                modelConfig,
+                OBJECT_MAPPER.readTree("{\"duration\":5}")
+        )).isEqualTo(12);
+    }
+
+    @Test
+    void perSecondBilling_defaultsToFiveSeconds() {
+        AiTool tool = new AiTool();
+        tool.setEstimatedCreditCost(5);
+
+        AgentModelConfig modelConfig = new AgentModelConfig();
+        modelConfig.setBillingUnit("PER_SECOND");
+        modelConfig.setUnitPrice(new BigDecimal("0.02"));
+
+        assertThat(taskCreditEstimateService.estimateUserFacingTaskCredits(tool, modelConfig)).isEqualTo(12);
     }
 
     @Test

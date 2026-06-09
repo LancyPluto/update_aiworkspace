@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from "vue"
+import { BookOpen, ImageIcon, Plus, RefreshCw, X } from "lucide-vue-next"
 import type { ToolField } from "@/api/types"
 import { uploadToolFile } from "@/api/toolApi"
 import {
@@ -21,6 +22,7 @@ const props = defineProps<{
 const model = defineModel<Record<string, unknown>>({ required: true })
 
 type FieldOption = string | { label: string; value: string; promptPrefix?: string }
+const MULTI_IMAGE_HISTORY_KEY = "aidesu_multi_image_history:image"
 
 function optionLabel(option: FieldOption): string {
   return typeof option === "string" ? option : option.label
@@ -92,6 +94,9 @@ function setField(key: string, val: unknown) {
 }
 
 const uploading = reactive<Record<string, boolean>>({})
+const replacingIndex = reactive<Record<string, number | null>>({})
+const libraryOpen = reactive<Record<string, boolean>>({})
+const libraryImages = ref<string[]>(loadLibraryImages())
 
 async function onFilePicked(key: string, ev: Event) {
   const input = ev.target as HTMLInputElement
@@ -105,6 +110,122 @@ async function onFilePicked(key: string, ev: Event) {
     uploading[key] = false
     input.value = ""
   }
+}
+
+function loadLibraryImages(): string[] {
+  if (typeof window === "undefined") return []
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(MULTI_IMAGE_HISTORY_KEY) || "[]")
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string" && item.trim().length > 0) : []
+  } catch {
+    return []
+  }
+}
+
+function saveLibraryImage(url: string) {
+  const clean = url.trim()
+  if (!clean || typeof window === "undefined") return
+  const next = [clean, ...libraryImages.value.filter((item) => item !== clean)].slice(0, 48)
+  libraryImages.value = next
+  window.localStorage.setItem(MULTI_IMAGE_HISTORY_KEY, JSON.stringify(next))
+}
+
+function multiImageValues(field: ToolField): string[] {
+  const value = model.value[field.fieldKey]
+  if (Array.isArray(value)) return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+  if (typeof value === "string" && value.trim()) return [value.trim()]
+  return []
+}
+
+function setMultiImageValues(field: ToolField, values: string[]) {
+  const limit = multiImageMax(field)
+  const clean = values.map((item) => item.trim()).filter(Boolean).slice(0, limit)
+  setField(field.fieldKey, clean)
+}
+
+function multiImageMeta(field: ToolField) {
+  return parseFieldMeta(field)
+}
+
+function multiImageMax(field: ToolField): number {
+  return multiImageMeta(field).maxCount ?? 8
+}
+
+function multiImageMin(field: ToolField): number {
+  return multiImageMeta(field).minCount ?? 0
+}
+
+function multiImageAccept(field: ToolField): string {
+  return multiImageMeta(field).accept || "image/*"
+}
+
+function multiImageLibraryEnabled(field: ToolField): boolean {
+  return multiImageMeta(field).libraryEnabled ?? true
+}
+
+function canAddMultiImage(field: ToolField): boolean {
+  return multiImageValues(field).length < multiImageMax(field)
+}
+
+async function onMultiImagePicked(field: ToolField, ev: Event) {
+  const input = ev.target as HTMLInputElement
+  const files = Array.from(input.files || [])
+  if (!files.length) return
+  const current = multiImageValues(field)
+  const limit = multiImageMax(field)
+  const replaceAt = replacingIndex[field.fieldKey]
+  const remaining = replaceAt !== null && replaceAt !== undefined ? 1 : limit - current.length
+  if (remaining <= 0) {
+    window.alert(`最多选择 ${limit} 张参考图`)
+    input.value = ""
+    return
+  }
+  const selected = files.slice(0, remaining)
+  if (files.length > selected.length) {
+    window.alert(`最多选择 ${limit} 张参考图，已自动保留前 ${selected.length} 张`)
+  }
+  uploading[field.fieldKey] = true
+  try {
+    const uploadedUrls: string[] = []
+    for (const file of selected) {
+      const uploaded = await uploadToolFile(file)
+      if (uploaded?.url) {
+        uploadedUrls.push(uploaded.url)
+        saveLibraryImage(uploaded.url)
+      }
+    }
+    if (replaceAt !== null && replaceAt !== undefined) {
+      const next = [...current]
+      if (uploadedUrls[0]) next[replaceAt] = uploadedUrls[0]
+      setMultiImageValues(field, next)
+    } else {
+      setMultiImageValues(field, [...current, ...uploadedUrls])
+    }
+  } finally {
+    replacingIndex[field.fieldKey] = null
+    uploading[field.fieldKey] = false
+    input.value = ""
+  }
+}
+
+function removeMultiImage(field: ToolField, index: number) {
+  const next = multiImageValues(field).filter((_, itemIndex) => itemIndex !== index)
+  setMultiImageValues(field, next)
+}
+
+function addLibraryImage(field: ToolField, url: string) {
+  if (!canAddMultiImage(field)) {
+    window.alert(`最多选择 ${multiImageMax(field)} 张参考图`)
+    return
+  }
+  const current = multiImageValues(field)
+  if (current.includes(url)) return
+  setMultiImageValues(field, [...current, url])
+}
+
+function previewImage(url: string) {
+  if (!url) return
+  window.open(url, "_blank", "noopener,noreferrer")
 }
 
 function setOptionField(key: string, val: string) {
@@ -148,6 +269,22 @@ function isEffectivelyRequired(field: ToolField): boolean {
 function validate(): { valid: boolean; message?: string } {
   for (const f of visibleFields.value) {
     if (!isFieldVisible(f, model.value)) continue
+    if (uploading[f.fieldKey]) {
+      return { valid: false, message: `${f.fieldName} 上传中，请稍后提交` }
+    }
+    if (f.fieldType === "multi_image") {
+      const count = multiImageValues(f).length
+      const minCount = multiImageMin(f)
+      if (isEffectivelyRequired(f) && count < Math.max(1, minCount)) {
+        return { valid: false, message: `请至少选择 ${Math.max(1, minCount)} 张${f.fieldName}` }
+      }
+      if (count < minCount) {
+        return { valid: false, message: `${f.fieldName} 至少需要 ${minCount} 张` }
+      }
+      if (count > multiImageMax(f)) {
+        return { valid: false, message: `${f.fieldName} 最多选择 ${multiImageMax(f)} 张` }
+      }
+    }
     if (!isEffectivelyRequired(f)) continue
     const v = model.value[f.fieldKey]
     if (v === undefined || v === null) {
@@ -223,7 +360,7 @@ defineExpose({ validate })
 
         <div v-show="group.key === '__default__' || !isGroupCollapsed(group.key)" class="space-y-5">
           <div v-for="f in group.fields" :key="f.fieldKey" class="space-y-2">
-            <label class="text-sm font-medium">
+            <label v-if="f.fieldType !== 'multi_image'" class="text-sm font-medium">
               {{ f.fieldName }}
               <span v-if="isEffectivelyRequired(f)" class="text-destructive"> *</span>
             </label>
@@ -300,6 +437,97 @@ defineExpose({ validate })
               />
               <span>{{ f.placeholder || f.fieldName }}</span>
             </label>
+
+            <div v-else-if="f.fieldType === 'multi_image'" class="rounded-lg border border-white/10 bg-[#18181f] p-4 text-[#f5f5f7] shadow-sm">
+              <div class="mb-3 text-sm text-[#c8c7d2]">
+                {{ f.fieldName }}
+                <span v-if="isEffectivelyRequired(f)" class="text-destructive"> *</span>
+              </div>
+              <div class="flex flex-wrap gap-3">
+                <label
+                  class="grid h-24 w-24 cursor-pointer place-items-center rounded-xl border border-dashed border-white/15 bg-[#07070c] text-[#b9b7c6] transition hover:border-white/35 hover:text-white"
+                  :class="{ 'cursor-not-allowed opacity-50': !canAddMultiImage(f) || uploading[f.fieldKey] }"
+                >
+                  <Plus class="h-7 w-7" />
+                  <input
+                    type="file"
+                    class="hidden"
+                    multiple
+                    :disabled="!canAddMultiImage(f) || uploading[f.fieldKey]"
+                    :accept="multiImageAccept(f)"
+                    @change="onMultiImagePicked(f, $event)"
+                  />
+                </label>
+
+                <button
+                  v-if="multiImageLibraryEnabled(f)"
+                  type="button"
+                  class="flex h-24 w-28 items-center justify-center gap-2 rounded-xl border border-white/10 bg-[#08070d] px-3 text-sm text-[#d7d5df] transition hover:border-white/25 hover:text-white"
+                  @click="libraryOpen[f.fieldKey] = !libraryOpen[f.fieldKey]"
+                >
+                  <BookOpen class="h-5 w-5" />
+                  <span>素材库</span>
+                </button>
+              </div>
+
+              <div class="mt-3 text-xs text-[#a8a6b5]">
+                已选 {{ multiImageValues(f).length }}/{{ multiImageMax(f) }} 张参考图
+                <span v-if="uploading[f.fieldKey]" class="ml-2 text-[#d8d6e4]">上传中...</span>
+              </div>
+
+              <div v-if="multiImageValues(f).length" class="mt-4 grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-6">
+                <div
+                  v-for="(url, index) in multiImageValues(f)"
+                  :key="`${url}-${index}`"
+                  class="group relative aspect-square overflow-hidden rounded-lg border border-white/10 bg-[#09090f]"
+                >
+                  <button type="button" class="h-full w-full" @click="previewImage(url)">
+                    <img :src="url" alt="参考图" class="h-full w-full object-cover" />
+                  </button>
+                  <div class="absolute inset-x-1 top-1 flex justify-end gap-1 opacity-0 transition group-hover:opacity-100">
+                    <label
+                      class="grid h-7 w-7 cursor-pointer place-items-center rounded-md bg-black/65 text-white backdrop-blur hover:bg-black/85"
+                      title="替换"
+                      @click="replacingIndex[f.fieldKey] = index"
+                    >
+                      <RefreshCw class="h-3.5 w-3.5" />
+                      <input
+                        type="file"
+                        class="hidden"
+                        :accept="multiImageAccept(f)"
+                        @change="onMultiImagePicked(f, $event)"
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      class="grid h-7 w-7 place-items-center rounded-md bg-black/65 text-white backdrop-blur hover:bg-black/85"
+                      title="删除"
+                      @click="removeMultiImage(f, index)"
+                    >
+                      <X class="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div v-if="libraryOpen[f.fieldKey]" class="mt-4 rounded-lg border border-white/10 bg-black/20 p-3">
+                <div v-if="libraryImages.length" class="grid grid-cols-4 gap-2 sm:grid-cols-6 md:grid-cols-8">
+                  <button
+                    v-for="url in libraryImages"
+                    :key="url"
+                    type="button"
+                    class="aspect-square overflow-hidden rounded-md border border-white/10 bg-[#09090f] transition hover:border-white/35"
+                    @click="addLibraryImage(f, url)"
+                  >
+                    <img :src="url" alt="素材图" class="h-full w-full object-cover" />
+                  </button>
+                </div>
+                <div v-else class="flex items-center gap-2 text-xs text-[#a8a6b5]">
+                  <ImageIcon class="h-4 w-4" />
+                  <span>暂无最近上传图片</span>
+                </div>
+              </div>
+            </div>
 
             <div v-else-if="f.fieldType === 'image' || f.fieldType === 'file'" class="space-y-2">
               <input
