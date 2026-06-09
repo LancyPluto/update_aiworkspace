@@ -32,6 +32,17 @@ spring:
       timeout: 2s
 
 app:
+  cache:
+    enabled: ${APP_CACHE_ENABLED:true}
+    default-ttl-seconds: ${APP_CACHE_DEFAULT_TTL_SECONDS:300}
+    tool-ttl-seconds: ${APP_CACHE_TOOL_TTL_SECONDS:180}
+    package-ttl-seconds: ${APP_CACHE_PACKAGE_TTL_SECONDS:600}
+    settings-ttl-seconds: ${APP_CACHE_SETTINGS_TTL_SECONDS:300}
+    vendor-ttl-seconds: ${APP_CACHE_VENDOR_TTL_SECONDS:300}
+    evict-delay-ms: ${APP_CACHE_EVICT_DELAY_MS:500}
+    load-lock-seconds: ${APP_CACHE_LOAD_LOCK_SECONDS:10}
+    load-wait-max-attempts: ${APP_CACHE_LOAD_WAIT_MAX_ATTEMPTS:40}
+    load-wait-interval-ms: ${APP_CACHE_LOAD_WAIT_INTERVAL_MS:50}
   production-mode: ${APP_PRODUCTION_MODE:false}
   jwt-secret: ${JWT_SECRET:local-dev-secret}
   internal-api-token: ${INTERNAL_API_TOKEN:local-internal-token}

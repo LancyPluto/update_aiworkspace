@@ -1,6 +1,10 @@
 package com.aiminilab.aitoolmarket.agent.service.impl;
 
 import com.aiminilab.aitoolmarket.agent.dto.ModelVendorResponse;
+import com.aiminilab.aitoolmarket.common.cache.BypassCacheService;
+import com.aiminilab.aitoolmarket.common.cache.CacheNamespaces;
+import com.fasterxml.jackson.databind.JavaType;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.aiminilab.aitoolmarket.agent.dto.UpsertModelVendorRequest;
 import com.aiminilab.aitoolmarket.agent.entity.ModelVendor;
 import com.aiminilab.aitoolmarket.agent.mapper.ModelVendorMapper;
@@ -16,16 +20,29 @@ import java.util.List;
 public class ModelVendorServiceImpl implements ModelVendorService {
 
     private final ModelVendorMapper modelVendorMapper;
+    private final BypassCacheService bypassCacheService;
+    private final ObjectMapper objectMapper;
 
-    public ModelVendorServiceImpl(ModelVendorMapper modelVendorMapper) {
+    public ModelVendorServiceImpl(ModelVendorMapper modelVendorMapper,
+                                  BypassCacheService bypassCacheService,
+                                  ObjectMapper objectMapper) {
         this.modelVendorMapper = modelVendorMapper;
+        this.bypassCacheService = bypassCacheService;
+        this.objectMapper = objectMapper;
     }
 
     @Override
     public List<ModelVendorResponse> listEnabled() {
-        return modelVendorMapper.findAllEnabled().stream()
-                .map(ModelVendorResponse::from)
-                .toList();
+        JavaType type = objectMapper.getTypeFactory()
+                .constructCollectionType(List.class, ModelVendorResponse.class);
+        return bypassCacheService.getOrLoad(
+                CacheNamespaces.MODEL_VENDORS_ENABLED,
+                bypassCacheService.vendorTtl(),
+                type,
+                () -> modelVendorMapper.findAllEnabled().stream()
+                        .map(ModelVendorResponse::from)
+                        .toList()
+        );
     }
 
     @Override
@@ -54,6 +71,7 @@ public class ModelVendorServiceImpl implements ModelVendorService {
             vendor.setCreatedAt(now);
             vendor.setUpdatedAt(now);
             modelVendorMapper.insert(vendor);
+            bypassCacheService.invalidateModelVendors();
             return ModelVendorResponse.from(vendor);
         }
         existing.setVendorLabel(request.vendorLabel());
@@ -62,6 +80,7 @@ public class ModelVendorServiceImpl implements ModelVendorService {
         existing.setEnabled(Boolean.TRUE.equals(request.enabled()));
         existing.setUpdatedAt(now);
         modelVendorMapper.updateById(existing);
+        bypassCacheService.invalidateModelVendors();
         return ModelVendorResponse.from(existing);
     }
 }

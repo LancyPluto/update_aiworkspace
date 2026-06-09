@@ -17,6 +17,7 @@ import com.aiminilab.aitoolmarket.agent.mapper.AgentToolDescriptorExtensionMappe
 import com.aiminilab.aitoolmarket.agent.mapper.ModelVendorAccountMapper;
 import com.aiminilab.aitoolmarket.agent.service.AgentModelConfigService;
 import com.aiminilab.aitoolmarket.agent.service.ModelVendorAccountService;
+import com.aiminilab.aitoolmarket.common.cache.BypassCacheService;
 import com.aiminilab.aitoolmarket.common.dto.PageResponse;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
@@ -92,6 +93,7 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
     private final ModelProviderRegistry modelProviderRegistry;
     private final ModelVendorAccountMapper vendorAccountMapper;
     private final ModelVendorAccountService modelVendorAccountService;
+    private final BypassCacheService bypassCacheService;
 
     public ConfigBundleServiceImpl(SystemSettingService systemSettingService,
                                    AgentModelConfigService agentModelConfigService,
@@ -104,7 +106,8 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                                    ToolPromptVersionMapper toolPromptVersionMapper,
                                    ModelProviderRegistry modelProviderRegistry,
                                    ModelVendorAccountMapper vendorAccountMapper,
-                                   ModelVendorAccountService modelVendorAccountService) {
+                                   ModelVendorAccountService modelVendorAccountService,
+                                   BypassCacheService bypassCacheService) {
         this.systemSettingService = systemSettingService;
         this.agentModelConfigService = agentModelConfigService;
         this.agentModelConfigMapper = agentModelConfigMapper;
@@ -117,6 +120,7 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
         this.modelProviderRegistry = modelProviderRegistry;
         this.vendorAccountMapper = vendorAccountMapper;
         this.modelVendorAccountService = modelVendorAccountService;
+        this.bypassCacheService = bypassCacheService;
     }
 
     @Override
@@ -185,6 +189,8 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
         for (ConfigBundleDto.Tool tool : safeList(bundle.tools())) {
             importTool(tool, operatorId, modelIdsByCode, categoryIdsByCode, counter, warnings);
         }
+
+        bypassCacheService.invalidateImportedCatalogData();
 
         return new ConfigBundleImportResult(
                 counter.settings,

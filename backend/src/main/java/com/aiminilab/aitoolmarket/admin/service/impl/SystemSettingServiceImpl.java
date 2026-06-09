@@ -1,6 +1,9 @@
 package com.aiminilab.aitoolmarket.admin.service.impl;
 
 import com.aiminilab.aitoolmarket.admin.dto.CustomerServiceQrUploadResponse;
+import com.aiminilab.aitoolmarket.admin.dto.CustomerServiceSettingsResponse;
+import com.aiminilab.aitoolmarket.common.cache.BypassCacheService;
+import com.aiminilab.aitoolmarket.common.cache.CacheNamespaces;
 import com.aiminilab.aitoolmarket.admin.dto.SystemSettingVersionResponse;
 import com.aiminilab.aitoolmarket.admin.entity.SystemSettingVersion;
 import com.aiminilab.aitoolmarket.admin.mapper.SystemSettingMapper;
@@ -42,13 +45,16 @@ public class SystemSettingServiceImpl implements SystemSettingService {
     private final SystemSettingMapper systemSettingMapper;
     private final SystemSettingVersionMapper versionMapper;
     private final AppProperties appProperties;
+    private final BypassCacheService bypassCacheService;
 
     public SystemSettingServiceImpl(SystemSettingMapper systemSettingMapper,
                                     SystemSettingVersionMapper versionMapper,
-                                    AppProperties appProperties) {
+                                    AppProperties appProperties,
+                                    BypassCacheService bypassCacheService) {
         this.systemSettingMapper = systemSettingMapper;
         this.versionMapper = versionMapper;
         this.appProperties = appProperties;
+        this.bypassCacheService = bypassCacheService;
     }
 
     @Override
@@ -57,6 +63,16 @@ public class SystemSettingServiceImpl implements SystemSettingService {
         systemSettingMapper.selectList(null).forEach(setting ->
                 result.put(setting.getSettingKey(), setting.getSettingValue()));
         return result;
+    }
+
+    @Override
+    public CustomerServiceSettingsResponse publicCustomerServiceSettings() {
+        return bypassCacheService.getOrLoad(
+                CacheNamespaces.PUBLIC_CUSTOMER_SERVICE,
+                bypassCacheService.settingsTtl(),
+                CustomerServiceSettingsResponse.class,
+                () -> CustomerServiceSettingsResponse.from(settings())
+        );
     }
 
     @Override
@@ -73,6 +89,9 @@ public class SystemSettingServiceImpl implements SystemSettingService {
             systemSettingMapper.upsert(key, normalizedValue);
             recordVersion(key, normalizedValue, operatorId);
         });
+        if (settings.keySet().stream().anyMatch(key -> key != null && key.startsWith("customerService."))) {
+            bypassCacheService.invalidatePublicCustomerService();
+        }
         return settings();
     }
 
@@ -130,6 +149,7 @@ public class SystemSettingServiceImpl implements SystemSettingService {
 
         String url = "/generated/customer-service/" + filename;
         systemSettingMapper.upsert(CUSTOMER_SERVICE_QR_SETTING_KEY, url);
+        bypassCacheService.invalidatePublicCustomerService();
         log.info("Admin uploaded customer service QR: url={}, originalFilename={}, contentType={}, size={}",
                 url, originalFilename, file.getContentType(), file.getSize());
         return new CustomerServiceQrUploadResponse(

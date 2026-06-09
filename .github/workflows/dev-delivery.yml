@@ -1,0 +1,154 @@
+name: Dev Branch CI/CD
+
+# PR to dev: CI only. Push to dev: CI then deploy to production (secrets required).
+on:
+  push:
+    branches: [dev]
+  pull_request:
+    branches: [dev]
+  workflow_dispatch:
+    inputs:
+      deploy_sync_mode:
+        description: "Deploy sync mode (rsync=incremental upload, git=server git pull)"
+        required: false
+        default: rsync
+        type: choice
+        options:
+          - rsync
+          - git
+
+concurrency:
+  group: dev-delivery-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-test:
+    name: Backend (Maven)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+      - name: Run tests
+        working-directory: backend
+        run: mvn -B test
+
+  agent-service-test:
+    name: Agent Service (pytest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: agent-service/requirements.txt
+      - name: Install and test
+        working-directory: agent-service
+        run: |
+          pip install -r requirements.txt
+          pytest -q
+
+  worker-test:
+    name: Worker (pytest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: worker/requirements.txt
+      - name: Install and test
+        working-directory: worker
+        run: |
+          pip install -r requirements.txt pytest
+          pytest -q
+
+  frontend-build:
+    name: Frontends (build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            admin-frontend/package-lock.json
+            user-web/package-lock.json
+      - name: Build admin-frontend
+        working-directory: admin-frontend
+        run: |
+          npm ci
+          npm run build
+      - name: Build user-web
+        working-directory: user-web
+        run: |
+          npm ci
+          npm run build
+
+  deploy-production:
+    name: Deploy to Production
+    needs: [backend-test, agent-service-test, worker-test, frontend-build]
+    if: |
+      github.ref == 'refs/heads/dev' && (
+        github.event_name == 'push' ||
+        github.event_name == 'workflow_dispatch'
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment:
+      name: production
+      url: http://wlcloudai.com
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate deploy secrets
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PASSWORD: ${{ secrets.DEPLOY_PASSWORD }}
+        run: |
+          if [ -z "$DEPLOY_HOST" ] || [ -z "$DEPLOY_USER" ] || [ -z "$DEPLOY_PASSWORD" ]; then
+            echo "::error::Missing GitHub Actions secrets. Configure DEPLOY_HOST, DEPLOY_USER, DEPLOY_PASSWORD."
+            exit 1
+          fi
+
+      - name: Install sshpass
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+
+      - name: Detect changed services
+        id: changes
+        run: |
+          SERVICES="$(bash deploy/scripts/detect_deploy_services.sh)"
+          echo "services=$SERVICES" >> "$GITHUB_OUTPUT"
+          echo "Changed services: $SERVICES"
+
+      - name: Deploy via SSH (light sync)
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PASSWORD: ${{ secrets.DEPLOY_PASSWORD }}
+          DEPLOY_SYNC_MODE: ${{ github.event.inputs.deploy_sync_mode || 'rsync' }}
+          DEPLOY_SERVICES: ${{ steps.changes.outputs.services }}
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash deploy/scripts/ci_remote_deploy_light.sh
+
+      - name: External smoke check
+        run: |
+          for url in http://wlcloudai.com/ http://wlcloudai.com/api/health; do
+            code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "$url" || echo 000)"
+            echo "$url -> $code"
+            if [ "$code" = "000" ]; then
+              echo "::warning::Could not reach $url from GitHub runner (DNS/firewall may block external check)."
+            fi
+          done
