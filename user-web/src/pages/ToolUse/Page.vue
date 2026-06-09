@@ -60,6 +60,8 @@ function buildTaskParams(fields: ToolField[], raw: Record<string, unknown>): Rec
       if (custom !== undefined && custom !== null && String(custom).trim() !== "") {
         out[f.fieldKey] = String(custom).trim()
       }
+    } else if (Array.isArray(v)) {
+      if (v.length > 0) out[f.fieldKey] = v
     } else if (v !== undefined && v !== null && v !== "") {
       out[f.fieldKey] = typeof v === "string" ? v.trim() : v
     }

@@ -72,6 +72,7 @@ export function sendAgentMessage(
     clientRequestId?: string
     modelConfigId?: number | null
     preferredToolCode?: string | null
+    intelligenceLevel?: "standard" | "high"
     fileIds?: number[]
     urlAttachments?: AgentUrlAttachment[]
   },
@@ -112,6 +113,12 @@ export function editRegenerateAgentMessage(
 
 export function fetchAgentFiles(sessionId: number, options?: { token?: string | null }) {
   return apiRequest<PageResult<AgentFile>>("GET", `/api/v1/agent/sessions/${sessionId}/files`, {
+    token: options?.token,
+  })
+}
+
+export function fetchRecentAgentFiles(sessionId: number, options?: { token?: string | null }) {
+  return apiRequest<PageResult<AgentFile>>("GET", `/api/v1/agent/sessions/${sessionId}/files/recent`, {
     token: options?.token,
   })
 }

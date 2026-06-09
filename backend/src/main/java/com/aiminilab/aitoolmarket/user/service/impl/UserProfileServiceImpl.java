@@ -155,6 +155,7 @@ public class UserProfileServiceImpl implements UserProfileService {
         accountDataCleanupMapper.deleteMarketMessages(userId);
         accountDataCleanupMapper.deleteMarketSessions(userId);
         accountDataCleanupMapper.deleteMarketFiles(userId);
+        accountDataCleanupMapper.deleteUserUploadAssets(userId);
 
         String suffix = userId + "_" + System.currentTimeMillis();
         int updated = userMapper.cancelAccount(userId, "cancelled_" + suffix, "CANCELLED:" + UUID.randomUUID());

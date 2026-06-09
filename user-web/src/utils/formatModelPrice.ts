@@ -17,6 +17,10 @@ export function formatModelPriceSummary(model: AgentModelConfig): string {
     const price = toNumber(model.unitPrice)
     return price != null && price > 0 ? `¥${trimAmount(price)}/次` : "按次计费"
   }
+  if (unit === "PER_SECOND") {
+    const price = toNumber(model.unitPrice)
+    return price != null && price > 0 ? `¥${trimAmount(price)}/秒` : "按秒计费"
+  }
   if (unit === "IMAGE_TOKEN") {
     const price = toNumber(model.unitPrice)
     return price != null && price > 0 ? `¥${trimAmount(price)}/图` : "按图计费"

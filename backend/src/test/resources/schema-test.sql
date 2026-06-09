@@ -815,6 +815,21 @@ CREATE TABLE ai_market_files (
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE user_upload_assets (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  user_id BIGINT NOT NULL,
+  file_id VARCHAR(64) NOT NULL,
+  asset_kind VARCHAR(16) NOT NULL DEFAULT 'file',
+  original_filename VARCHAR(255) NOT NULL,
+  content_type VARCHAR(128),
+  file_size BIGINT,
+  url VARCHAR(1024) NOT NULL,
+  storage_path VARCHAR(1024),
+  status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 INSERT INTO ai_market_tools (tool_id, name, icon_url, description, enabled, sort_order, primary_color, welcome_message, capabilities_json)
 VALUES (
   'doubao',

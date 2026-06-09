@@ -224,9 +224,9 @@ public class AgentRunServiceImpl implements AgentRunService {
         message.setContentText(trimmed);
         message.setStatus("ACTIVE");
         message.setCreatedAt(now);
-        String urlAttachmentJson = urlAttachmentsJson(request.urlAttachments());
-        if (urlAttachmentJson != null) {
-            message.setContentJson(urlAttachmentJson);
+        String contentJson = messageContentJson(request.urlAttachments(), request.intelligenceLevel());
+        if (contentJson != null) {
+            message.setContentJson(contentJson);
         }
         agentMessageMapper.insertMessage(message);
 
@@ -485,10 +485,22 @@ public class AgentRunServiceImpl implements AgentRunService {
                 .map(com.aiminilab.aitoolmarket.agent.dto.AgentToolPreferenceResponse::from)
                 .toList();
         Map<String, String> settings = systemSettingService.settings();
+        String intelligenceLevel = intelligenceLevelFromMessage(userMessage);
+        boolean highIntelligence = "high".equals(intelligenceLevel);
+        int maxModelCalls = parseIntSetting(settings.get(AgentRuntimeSettings.MAX_MODEL_CALLS_KEY), AgentRuntimeSettings.DEFAULT_MAX_MODEL_CALLS, 1, 50);
+        int maxHistoryMessages = parseIntSetting(settings.get(AgentRuntimeSettings.MAX_HISTORY_MESSAGES_KEY), AgentRuntimeSettings.DEFAULT_MAX_HISTORY_MESSAGES, 1, 100);
+        int routerHistoryTurns = parseIntSetting(settings.get(AgentRouterSettings.HISTORY_TURNS_KEY), AgentRouterSettings.DEFAULT_HISTORY_TURNS, 0, 20);
+        int recentToolCallLimit = parseIntSetting(settings.get(AgentRouterSettings.RECENT_TOOL_CALLS_KEY), AgentRouterSettings.DEFAULT_RECENT_TOOL_CALLS, 0, 10);
+        if (highIntelligence) {
+            maxModelCalls = Math.max(maxModelCalls, 8);
+            maxHistoryMessages = Math.max(maxHistoryMessages, 32);
+            routerHistoryTurns = Math.max(routerHistoryTurns, 8);
+            recentToolCallLimit = Math.max(recentToolCallLimit, 8);
+        }
         var runtimeSettings = new com.aiminilab.aitoolmarket.agent.dto.AgentRuntimeSettingsResponse(
-                parseIntSetting(settings.get(AgentRuntimeSettings.MAX_MODEL_CALLS_KEY), AgentRuntimeSettings.DEFAULT_MAX_MODEL_CALLS, 1, 50),
+                maxModelCalls,
                 parseIntSetting(settings.get(AgentRuntimeSettings.MAX_TOOL_CALLS_KEY), AgentRuntimeSettings.DEFAULT_MAX_TOOL_CALLS, 1, 50),
-                parseIntSetting(settings.get(AgentRuntimeSettings.MAX_HISTORY_MESSAGES_KEY), AgentRuntimeSettings.DEFAULT_MAX_HISTORY_MESSAGES, 1, 100),
+                maxHistoryMessages,
                 parseIntSetting(settings.get(AgentRuntimeSettings.TOOL_EXECUTION_TIMEOUT_SECONDS_KEY), AgentRuntimeSettings.DEFAULT_TOOL_EXECUTION_TIMEOUT_SECONDS, 10, 3600),
                 parseIntSetting(settings.get(AgentRuntimeSettings.IMAGE_TOOL_EXECUTION_TIMEOUT_SECONDS_KEY), AgentRuntimeSettings.DEFAULT_IMAGE_TOOL_EXECUTION_TIMEOUT_SECONDS, 10, 3600),
                 parseIntSetting(settings.get(AgentRuntimeSettings.VIDEO_TOOL_EXECUTION_TIMEOUT_SECONDS_KEY), AgentRuntimeSettings.DEFAULT_VIDEO_TOOL_EXECUTION_TIMEOUT_SECONDS, 10, 7200),
@@ -497,7 +509,8 @@ public class AgentRunServiceImpl implements AgentRunService {
                 parseBooleanSetting(settings.get(AgentRuntimeSettings.TOOL_STREAM_RELAY_ENABLED_KEY), AgentRuntimeSettings.DEFAULT_TOOL_STREAM_RELAY_ENABLED),
                 parseBooleanSetting(settings.get(AgentRuntimeSettings.PRODUCT_TOOL_LOOP_ENABLED_KEY), AgentRuntimeSettings.DEFAULT_PRODUCT_TOOL_LOOP_ENABLED),
                 parseIntSetting(settings.get(AgentRuntimeSettings.PRODUCT_TOOL_LOOP_MAX_CALLS_KEY), AgentRuntimeSettings.DEFAULT_PRODUCT_TOOL_LOOP_MAX_CALLS, 1, 20),
-                parseBooleanSetting(settings.get(AgentRuntimeSettings.PRODUCT_TOOL_LOOP_FALLBACK_TO_ROUTER_KEY), AgentRuntimeSettings.DEFAULT_PRODUCT_TOOL_LOOP_FALLBACK_TO_ROUTER)
+                parseBooleanSetting(settings.get(AgentRuntimeSettings.PRODUCT_TOOL_LOOP_FALLBACK_TO_ROUTER_KEY), AgentRuntimeSettings.DEFAULT_PRODUCT_TOOL_LOOP_FALLBACK_TO_ROUTER),
+                intelligenceLevel
         );
         String agentSystemPrompt = nonBlankOrDefault(
                 settings.get(AgentPromptSettings.SYSTEM_PROMPT_KEY),
@@ -530,8 +543,8 @@ public class AgentRunServiceImpl implements AgentRunService {
                 nonBlankOrDefault(settings.get(AgentRouterSettings.PROMPT_KEY), AgentRouterSettings.DEFAULT_PROMPT),
                 parseDoubleSetting(settings.get(AgentRouterSettings.MIN_CONFIDENCE_KEY), 0.7D, 0D, 1D),
                 parseBooleanSetting(settings.get(AgentRouterSettings.FALLBACK_TO_RULES_KEY), AgentRouterSettings.DEFAULT_FALLBACK_TO_RULES),
-                parseIntSetting(settings.get(AgentRouterSettings.HISTORY_TURNS_KEY), AgentRouterSettings.DEFAULT_HISTORY_TURNS, 0, 20),
-                parseIntSetting(settings.get(AgentRouterSettings.RECENT_TOOL_CALLS_KEY), AgentRouterSettings.DEFAULT_RECENT_TOOL_CALLS, 0, 10)
+                routerHistoryTurns,
+                recentToolCallLimit
         );
         InternalPendingToolContextResponse pendingToolContextResponse = null;
         AgentPendingToolContext pendingCtx = agentPendingToolContextMapper.findActiveByRunId(runId);
@@ -741,6 +754,7 @@ public class AgentRunServiceImpl implements AgentRunService {
         LocalDateTime now = LocalDateTime.now();
         if ("tool.confirmation_required".equals(request.eventType())) {
             agentRunMapper.markWaitingForConfirmationIfStatus(runId, "RUNNING", now);
+            persistPendingToolContextFromConfirmation(run, request.eventJson(), now);
         }
         return AgentRunEventResponse.from(appendEventInternal(
                 runId,
@@ -750,6 +764,34 @@ public class AgentRunServiceImpl implements AgentRunService {
                 toJson(request.eventJson()),
                 now
         ));
+    }
+
+    private void persistPendingToolContextFromConfirmation(AgentRun run, Object eventJson, LocalDateTime now) {
+        JsonNode payload = objectMapper.valueToTree(eventJson == null ? Map.of() : eventJson);
+        String toolCode = firstText(payload.path("toolCode"));
+        if (toolCode.isBlank()) {
+            return;
+        }
+        JsonNode arguments = payload.path("arguments");
+        if (!arguments.isObject()) {
+            arguments = objectMapper.createObjectNode();
+        }
+        AgentPendingToolContext ctx = new AgentPendingToolContext();
+        ctx.setRunId(run.getId());
+        ctx.setSessionId(run.getSessionId());
+        ctx.setUserId(run.getUserId());
+        ctx.setSelectedToolCode(toolCode);
+        ctx.setCandidateToolCodesJson(toJson(List.of(toolCode)));
+        ctx.setCollectedArgumentsJson(toJson(arguments));
+        ctx.setMissingArgumentsJson(toJson(List.of()));
+        ctx.setClarifyingQuestion(null);
+        ctx.setConfirmationRequired(true);
+        ctx.setSource("tool_confirmation_required");
+        ctx.setStatus("ACTIVE");
+        ctx.setCreatedAt(now);
+        ctx.setUpdatedAt(now);
+        agentPendingToolContextMapper.expireByRunId(run.getId());
+        agentPendingToolContextMapper.insertPendingContext(ctx);
     }
 
     @Override
@@ -1135,16 +1177,49 @@ public class AgentRunServiceImpl implements AgentRunService {
             attachments.add(item);
             attachmentIndex++;
         }
-        userMessage.setContentJson(toJson(Map.of("attachments", attachments)));
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("attachments", attachments);
+        JsonNode existing = parseJsonNode(userMessage.getContentJson());
+        if (existing.path("agentOptions").isObject()) {
+            payload.put("agentOptions", objectMapper.convertValue(existing.path("agentOptions"), Map.class));
+        }
+        userMessage.setContentJson(toJson(payload));
         agentMessageMapper.updateById(userMessage);
     }
 
-    private String urlAttachmentsJson(List<Map<String, Object>> rawItems) {
+    private String messageContentJson(List<Map<String, Object>> rawItems, String intelligenceLevel) {
         List<Map<String, Object>> items = normalizedUrlAttachments(rawItems);
-        if (items.isEmpty()) {
+        String normalizedLevel = normalizeIntelligenceLevel(intelligenceLevel);
+        if (items.isEmpty() && normalizedLevel == null) {
             return null;
         }
-        return toJson(Map.of("attachments", items));
+        Map<String, Object> payload = new LinkedHashMap<>();
+        if (!items.isEmpty()) {
+            payload.put("attachments", items);
+        }
+        if (normalizedLevel != null) {
+            payload.put("agentOptions", Map.of("intelligenceLevel", normalizedLevel));
+        }
+        return toJson(payload);
+    }
+
+    private String normalizeIntelligenceLevel(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        String normalized = value.trim().toLowerCase();
+        if ("high".equals(normalized)) {
+            return "high";
+        }
+        if ("standard".equals(normalized) || "normal".equals(normalized)) {
+            return "standard";
+        }
+        return null;
+    }
+
+    private String intelligenceLevelFromMessage(AgentMessage userMessage) {
+        JsonNode root = parseJsonNode(userMessage == null ? null : userMessage.getContentJson());
+        return normalizeIntelligenceLevel(firstText(root.path("agentOptions").path("intelligenceLevel")));
     }
 
     private List<Map<String, Object>> urlAttachmentItems(String contentJson) {
@@ -1214,8 +1289,8 @@ public class AgentRunServiceImpl implements AgentRunService {
             item.put("size", raw.get("size") instanceof Number number ? number.longValue() : 0L);
             item.put("status", "READY");
             item.put("url", url);
-            String source = nonBlankOrDefault(stringValue(raw.get("source")), "url");
-            item.put("source", "chat_reference".equalsIgnoreCase(source) ? "chat_reference" : "url");
+            String source = nonBlankOrDefault(stringValue(raw.get("source")), "url").trim().toLowerCase();
+            item.put("source", ("chat_reference".equals(source) || "agent_file".equals(source)) ? source : "url");
             normalized.add(item);
             index++;
             if (normalized.size() >= FILE_CONTEXT_LIMIT) {
@@ -1230,7 +1305,7 @@ public class AgentRunServiceImpl implements AgentRunService {
             return false;
         }
         String normalized = source.trim().toLowerCase();
-        return "url".equals(normalized) || "chat_reference".equals(normalized);
+        return "url".equals(normalized) || "chat_reference".equals(normalized) || "agent_file".equals(normalized);
     }
 
     private boolean isAllowedMaterialUrl(String url) {

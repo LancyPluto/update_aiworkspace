@@ -15,6 +15,8 @@ public interface AgentFileService {
 
     PageResponse<AgentFileResponse> list(Long userId, Long sessionId);
 
+    PageResponse<AgentFileResponse> listRecentMedia(Long userId, Long sessionId);
+
     void delete(Long userId, Long sessionId, Long fileId);
 
     InputStream openFileStream(Long userId, Long sessionId, Long fileId);
