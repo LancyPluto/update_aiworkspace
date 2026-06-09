@@ -69,6 +69,18 @@ export interface PageResult<T> {
   hasNext: boolean
 }
 
+export interface UserUploadAsset {
+  id: number
+  fileId: string
+  kind: "image" | "video" | "audio" | "file" | string
+  name: string
+  contentType?: string | null
+  size?: number | null
+  url: string
+  createdAt?: string | null
+  updatedAt?: string | null
+}
+
 /* ========== 认证相关 ========== */
 
 /** POST /api/v1/auth/login —— 契约要求 account + password */
@@ -533,12 +545,13 @@ export interface AgentMessage {
 
 export interface AgentUrlAttachment {
   id?: string | number
+  sessionId?: number | null
   name: string
   contentType?: string | null
   size?: number | null
   url: string
   refLabel?: string | null
-  source?: "url" | "chat_reference" | string
+  source?: "url" | "chat_reference" | "agent_file" | string
 }
 
 export interface AgentToolPickerItem {

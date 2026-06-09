@@ -322,15 +322,18 @@ class DeepAgentsRuntimeEngine:
         workspace_memory_items = await self._fetch_tool_workspace_memory_items(context)
         workspace_memory_context = await self._emit_tool_memory_context(context, workspace_memory_items)
         execution_args = self.tool_bridge.build_arguments(context, tool, apply_placeholder_defaults=True)
+        pending_args = self._pending_tool_arguments(context, tool.toolCode)
+        if pending_args:
+            execution_args.update({key: value for key, value in pending_args.items() if value not in (None, "")})
         execution_args = apply_user_selected_attachment_priority(context, tool, execution_args)
         execution_args = _apply_workspace_memory_argument_overrides(context, tool, execution_args, workspace_memory_items)
-        if workspace_memory_context:
+        if workspace_memory_context or pending_args:
             await self._emit_arguments_merged(context, tool, IntentResult(
                 intent=Intent.TOOL_USE,
                 confidence=1.0,
                 selectedToolCode=tool.toolCode,
                 candidateToolCodes=[tool.toolCode],
-                reason="confirmed_tool_with_memory",
+                reason="confirmed_tool_with_pending_arguments" if pending_args else "confirmed_tool_with_memory",
             ), execution_args)
 
         budget = BudgetState(credit_budget=context.creditBudget)
@@ -632,7 +635,7 @@ class DeepAgentsRuntimeEngine:
                 await self._emit_arguments_preview(context, tool, extracted_args, [], not auto_call)
                 await self._emit_arguments_merged(context, tool, intent, extracted_args)
                 if not auto_call:
-                    await self._request_confirmation(context, tool)
+                    await self._request_confirmation(context, tool, extracted_args)
                     return
                 try:
                     result = await self._execute_tool_with_guard(context, tool, budget, arguments=enriched)
@@ -674,7 +677,7 @@ class DeepAgentsRuntimeEngine:
         await self._emit_arguments_merged(context, tool, intent, extracted_args)
 
         if not auto_call:
-            await self._request_confirmation(context, tool)
+            await self._request_confirmation(context, tool, extracted_args)
             return
 
         try:
@@ -865,7 +868,7 @@ class DeepAgentsRuntimeEngine:
             ),
         )
 
-    async def _request_confirmation(self, context: RunContext, tool: ToolDescriptor) -> None:
+    async def _request_confirmation(self, context: RunContext, tool: ToolDescriptor, arguments: dict[str, Any]) -> None:
         await self.backend.append_event(
             context.runId,
             RunEventCreate(
@@ -877,20 +880,30 @@ class DeepAgentsRuntimeEngine:
                     "description": tool.description,
                     "creditCost": tool.estimatedCreditCost,
                     "inputSchema": tool.inputSchema,
+                    "arguments": arguments,
                 },
             ),
         )
 
     def _should_auto_call(self, context: RunContext, tool: ToolDescriptor, followup: FollowupResolution | None = None, intent=None) -> bool:
+        if any(p.toolCode == tool.toolCode and p.autoCallEnabled for p in context.toolPreferences):
+            return True
         if intent is not None and intent.requiresConfirmation is True:
             return False
         if tool.autoCallable:
             return True
-        if any(p.toolCode == tool.toolCode and p.autoCallEnabled for p in context.toolPreferences):
-            return True
         if followup is not None and followup.accepted and self._is_safe_followup_auto_call(tool):
             return True
         return self._is_direct_generation_request(context, tool)
+
+    @staticmethod
+    def _pending_tool_arguments(context: RunContext, tool_code: str) -> dict[str, Any]:
+        pending = context.pendingToolContext
+        if pending is None or pending.status != "ACTIVE":
+            return {}
+        if pending.selectedToolCode and pending.selectedToolCode != tool_code:
+            return {}
+        return dict(pending.collectedArgumentsJson or {})
 
     @staticmethod
     def _is_safe_followup_auto_call(tool: ToolDescriptor) -> bool:

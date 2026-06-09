@@ -64,6 +64,9 @@ function billingUnit(log: BillingUsageLog) {
   if (log.billingUnit === "PER_CALL") {
     return `${number(log.billableUnits)} 次 x ${money(log.unitPrice)}`
   }
+  if (log.billingUnit === "PER_SECOND") {
+    return `${number(log.billableUnits)} 秒 x ${money(log.unitPrice)}`
+  }
   const inputPrice = log.inputTokenPricePer1m ?? Number(log.inputTokenPricePer1k || 0) * 1000
   const outputPrice = log.outputTokenPricePer1m ?? Number(log.outputTokenPricePer1k || 0) * 1000
   return `输入 ${money(inputPrice)}/1M，输出 ${money(outputPrice)}/1M`

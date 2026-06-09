@@ -40,6 +40,11 @@ public class AgentFileController {
         return ApiResponse.success(agentFileService.list(AuthContext.get().userId(), sessionId));
     }
 
+    @GetMapping("/recent")
+    public ApiResponse<PageResponse<AgentFileResponse>> recent(@PathVariable Long sessionId) {
+        return ApiResponse.success(agentFileService.listRecentMedia(AuthContext.get().userId(), sessionId));
+    }
+
     @GetMapping("/{fileId}/content")
     public ResponseEntity<org.springframework.core.io.InputStreamResource> content(@PathVariable Long sessionId,
                                                                                    @PathVariable Long fileId) {

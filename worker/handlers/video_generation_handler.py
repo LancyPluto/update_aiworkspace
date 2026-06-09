@@ -3,11 +3,13 @@ import logging
 from typing import Any
 
 from client.backend_client import BackendClient, BackendClientError
+from client.dashscope_video_client import DashScopeVideoClient, DashScopeVideoError, DashScopeVideoTimeoutError
 from client.kling_video_client import KlingVideoClient, KlingVideoError, KlingVideoTimeoutError
 from client.seedance_video_client import SeedanceVideoClient, SeedanceVideoError, SeedanceVideoTimeoutError
 from config import resolve_kling_api_key, resolve_kling_credentials, resolve_kling_credentials_source
 from handlers.generated_video_persister import GeneratedVideoPersistError, GeneratedVideoPersister
 from providers import registry as provider_registry
+from utils.input_image import InputImageError, resolve_reference_image_data_url
 
 
 LOGGER = logging.getLogger(__name__)
@@ -20,11 +22,13 @@ class VideoGenerationHandler:
         backend_client: BackendClient | None = None,
         seedance_client: SeedanceVideoClient | None = None,
         kling_client: KlingVideoClient | None = None,
+        dashscope_client: DashScopeVideoClient | None = None,
         video_persister: GeneratedVideoPersister | None = None,
     ) -> None:
         self.backend_client = backend_client or BackendClient()
         self.seedance_client = seedance_client
         self.kling_client = kling_client
+        self.dashscope_client = dashscope_client
         self.video_persister = video_persister or GeneratedVideoPersister()
 
     def handle(self, message: dict[str, Any]) -> dict[str, Any]:
@@ -72,35 +76,39 @@ class VideoGenerationHandler:
 
             self._mark_processing_safe(task_id, progress=12, progress_message="Video generation task started", trace_id=trace_id)
             client = self._client(provider, model_config)
-            video_request = {
-                "prompt": prompt,
-                "image_size": _resolve_image_size(params),
-                "negative_prompt": str(params.get("negativePrompt") or params.get("negative_prompt") or ""),
-                "model": model_config.get("modelName"),
-                "image": _first_text(
-                    params,
-                    "image",
-                    "imageUrl",
-                    "image_url",
-                    "referenceImage",
-                    "referenceImageUrl",
-                    "firstFrameImage",
-                    "firstFrameUrl",
-                    "first_frame_image",
-                    "first_frame_url",
-                ),
-                "image_tail": _first_text(params, "imageTail", "image_tail", "tailImage", "tailImageUrl", "lastFrameUrl"),
-                "seed": _optional_int(params.get("seed")),
-                "duration": str(params.get("duration") or ""),
-                "aspect_ratio": str(params.get("aspectRatio") or params.get("aspect_ratio") or ""),
-                "resolution": str(params.get("resolution") or ""),
-            }
-            if provider == "kling_video":
-                video_request["mode"] = str(params.get("mode") or params.get("qualityMode") or "")
-                video_request["sound"] = str(params.get("sound") or "off")
-                video_request["callback_url"] = str(params.get("callbackUrl") or params.get("callback_url") or "")
-                video_request["external_task_id"] = str(params.get("externalTaskId") or params.get("external_task_id") or "")
-            result = client.generate_video(**video_request)
+            if provider == "bailian_happyhorse":
+                payload = _build_happyhorse_payload(params, model_config.get("modelName"))
+                result = client.generate_video(payload)
+            else:
+                video_request = {
+                    "prompt": prompt,
+                    "image_size": _resolve_image_size(params),
+                    "negative_prompt": str(params.get("negativePrompt") or params.get("negative_prompt") or ""),
+                    "model": model_config.get("modelName"),
+                    "image": _first_text(
+                        params,
+                        "image",
+                        "imageUrl",
+                        "image_url",
+                        "referenceImage",
+                        "referenceImageUrl",
+                        "firstFrameImage",
+                        "firstFrameUrl",
+                        "first_frame_image",
+                        "first_frame_url",
+                    ),
+                    "image_tail": _first_text(params, "imageTail", "image_tail", "tailImage", "tailImageUrl", "lastFrameUrl"),
+                    "seed": _optional_int(params.get("seed")),
+                    "duration": str(params.get("duration") or ""),
+                    "aspect_ratio": str(params.get("aspectRatio") or params.get("aspect_ratio") or ""),
+                    "resolution": str(params.get("resolution") or ""),
+                }
+                if provider == "kling_video":
+                    video_request["mode"] = str(params.get("mode") or params.get("qualityMode") or "")
+                    video_request["sound"] = str(params.get("sound") or "off")
+                    video_request["callback_url"] = str(params.get("callbackUrl") or params.get("callback_url") or "")
+                    video_request["external_task_id"] = str(params.get("externalTaskId") or params.get("external_task_id") or "")
+                result = client.generate_video(**video_request)
 
             self.backend_client.mark_processing(
                 task_id,
@@ -109,12 +117,15 @@ class VideoGenerationHandler:
                 trace_id=trace_id,
             )
             persisted_video = self.video_persister.persist_video_url(task_id=task_id, source_url=result["videoUrl"])
+            billable_units = _resolve_billable_seconds(result.get("usage"), params) if provider == "bailian_happyhorse" else 1
             content = json.dumps(
                 {
                     "provider": result.get("provider") or provider,
                     "model": result.get("model") or model_config.get("modelName"),
                     "requestId": result.get("requestId"),
+                    "dashscopeTaskId": result.get("dashscopeTaskId"),
                     "status": result.get("status"),
+                    "usage": result.get("usage") or {},
                     "videos": [persisted_video],
                     "sourceVideoUrl": result.get("videoUrl"),
                     "resolution": result.get("resolution"),
@@ -126,15 +137,15 @@ class VideoGenerationHandler:
                 {
                     "resourceType": "VIDEO",
                     "contentText": content,
-                    "billableUnits": 1,
+                    "billableUnits": billable_units,
                 },
                 trace_id=trace_id,
             )
             LOGGER.info("video generation task %s completed traceId=%s provider=%s", task_id, trace_id or "-", provider)
             return {"status": "SUCCESS", "taskId": task_id, "traceId": trace_id, "provider": provider}
-        except (KlingVideoTimeoutError, SeedanceVideoTimeoutError) as exc:
+        except (KlingVideoTimeoutError, SeedanceVideoTimeoutError, DashScopeVideoTimeoutError) as exc:
             return self._mark_failed(task_id, "MODEL_TIMEOUT", str(exc), trace_id)
-        except (KlingVideoError, SeedanceVideoError, provider_registry.ProviderRegistryError) as exc:
+        except (KlingVideoError, SeedanceVideoError, DashScopeVideoError, provider_registry.ProviderRegistryError) as exc:
             return self._mark_failed(task_id, _model_call_error_code(str(exc)), str(exc), trace_id)
         except GeneratedVideoPersistError as exc:
             return self._mark_failed(task_id, "MEDIA_PERSIST_FAILED", str(exc), trace_id)
@@ -172,6 +183,12 @@ class VideoGenerationHandler:
             )
         if provider == "seedance":
             return self.seedance_client or SeedanceVideoClient()
+        if provider == "bailian_happyhorse":
+            return self.dashscope_client or DashScopeVideoClient(
+                base_url=model_config.get("baseUrl"),
+                api_key=model_config.get("apiKey"),
+                timeout_seconds=model_config.get("timeoutSeconds"),
+            )
         raise KlingVideoError(f"unsupported video provider: {provider or 'empty'}")
 
     def _mark_failed(self, task_id: int, error_code: str, error_message: str, trace_id: str | None) -> dict[str, Any]:
@@ -219,6 +236,112 @@ def _first_text(params: dict[str, Any], *keys: str) -> str:
         if isinstance(value, str) and value.strip():
             return value.strip()
     return ""
+
+
+def _build_happyhorse_payload(params: dict[str, Any], model_name: Any) -> dict[str, Any]:
+    model = str(model_name or "happyhorse-1.0-t2v").strip()
+    input_payload: dict[str, Any] = {"prompt": _build_prompt(params)}
+    parameters: dict[str, Any] = {}
+    media: list[dict[str, str]] = []
+
+    first_frame = _first_text(params, "firstFrameImage", "firstFrameUrl", "first_frame_image", "first_frame_url", "imageUrl", "image")
+    source_video = _first_text(params, "sourceVideo", "sourceVideoUrl", "video", "videoUrl", "inputVideo", "inputVideoUrl")
+    references = _resolve_reference_image_sources(params)
+    if first_frame:
+        first_frame = _resolve_happyhorse_image_data_url(first_frame, "firstFrameImage")
+    if references:
+        references = [_resolve_happyhorse_image_data_url(url, "referenceImages") for url in references]
+
+    if model.endswith("-i2v") and first_frame:
+        media.append({"type": "first_frame", "url": first_frame})
+        input_payload["img_url"] = first_frame
+    elif model.endswith("-r2v"):
+        media.extend({"type": "reference_image", "url": url} for url in references)
+    elif "video-edit" in model:
+        if source_video:
+            media.append({"type": "video", "url": source_video})
+            input_payload["video_url"] = source_video
+        media.extend({"type": "reference_image", "url": url} for url in references)
+
+    if media:
+        input_payload["media"] = media
+    if references:
+        input_payload["reference_images"] = references
+    if source_video:
+        input_payload["source_video_url"] = source_video
+
+    for source_key, target_key in (
+        ("resolution", "resolution"),
+        ("ratio", "ratio"),
+        ("aspectRatio", "ratio"),
+        ("aspect_ratio", "ratio"),
+        ("audioSetting", "audio_setting"),
+        ("audio_setting", "audio_setting"),
+    ):
+        value = params.get(source_key)
+        if isinstance(value, str) and value.strip():
+            parameters[target_key] = value.strip()
+    duration = _optional_int(params.get("duration"))
+    if duration is not None:
+        parameters["duration"] = duration
+    seed = _optional_int(params.get("seed"))
+    if seed is not None:
+        parameters["seed"] = seed
+    if "watermark" in params:
+        parameters["watermark"] = bool(params.get("watermark"))
+
+    payload: dict[str, Any] = {"model": model, "input": input_payload}
+    if parameters:
+        payload["parameters"] = parameters
+    return payload
+
+
+def _resolve_reference_image_sources(params: dict[str, Any]) -> list[str]:
+    keys = (
+        "referenceImages",
+        "referenceImageUrls",
+        "referenceImage",
+        "referenceImageUrl",
+        "reference_images",
+        "reference_image_urls",
+        "images",
+        "imageUrls",
+    )
+    sources: list[str] = []
+    seen: set[str] = set()
+
+    def add(value: Any) -> None:
+        if isinstance(value, str):
+            text = value.strip()
+            if text and text not in seen:
+                seen.add(text)
+                sources.append(text)
+
+    for key in keys:
+        value = params.get(key)
+        if isinstance(value, list):
+            for item in value:
+                add(item)
+        else:
+            add(value)
+    return sources
+
+
+def _resolve_happyhorse_image_data_url(value: str, field_name: str) -> str:
+    try:
+        return resolve_reference_image_data_url(value)
+    except InputImageError as exc:
+        raise DashScopeVideoError(f"{field_name} must be a valid image or base64 data: {exc}") from exc
+
+
+def _resolve_billable_seconds(usage: Any, params: dict[str, Any]) -> int:
+    if isinstance(usage, dict):
+        for key in ("output_video_duration", "duration", "video_duration", "billable_seconds"):
+            units = _optional_int(usage.get(key))
+            if units is not None:
+                return max(1, units)
+    params_duration = _optional_int(params.get("duration"))
+    return max(1, params_duration or 1)
 
 
 def _resolve_image_size(params: dict[str, Any]) -> str:
