@@ -12,6 +12,11 @@ PROVIDERS: dict[str, dict[str, Any]] = {
     "minimax": {"capabilities": {"TEXT_GENERATION"}, "worker_ready": True},
     "siliconflow": {"capabilities": {"IMAGE_GENERATION", "DIGITAL_HUMAN"}, "worker_ready": True},
     "siliconflow_images": {"capabilities": {"IMAGE_GENERATION", "DIGITAL_HUMAN"}, "worker_ready": True},
+    "volcengine_images": {
+        "capabilities": {"IMAGE_GENERATION"},
+        "worker_ready": True,
+        "provider_protocol": "openai_images",
+    },
     "seedance": {"capabilities": {"VIDEO_GENERATION", "DIGITAL_HUMAN"}, "worker_ready": True},
     "infinitetalk": {"capabilities": {"VIDEO_GENERATION", "DIGITAL_HUMAN"}, "worker_ready": True},
     "kling_video": {"capabilities": {"VIDEO_GENERATION", "IMAGE_GENERATION"}, "worker_ready": True},

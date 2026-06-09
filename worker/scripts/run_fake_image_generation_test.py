@@ -154,6 +154,44 @@ def main() -> None:
     print(json.dumps({"success_payload": backend.success_payload, "image_call": image_client.calls[0]}, ensure_ascii=False, indent=2))
 
 
+def test_volcengine_images_provider_is_supported() -> None:
+    class FakeOpenAIImagesClient:
+        def __init__(self) -> None:
+            self.last_usage = {"promptTokens": 4, "completionTokens": 1024, "totalTokens": 1028}
+            self.calls = []
+
+        def generate_images(self, **kwargs):
+            self.calls.append(kwargs)
+            return ["https://example.com/volcengine-image.png"]
+
+    backend = FakeBackendClient()
+    context = backend.get_execution_context(99127)
+    context["modelConfig"] = {
+        "provider": "volcengine_images",
+        "modelName": "doubao-seedream-4-5-251128",
+        "baseUrl": "https://ark.cn-beijing.volces.com",
+        "apiKey": "fake-ark-key",
+    }
+    client = FakeOpenAIImagesClient()
+    image_handler = ImageGenerationHandler(
+        backend_client=backend,
+        image_client=client,
+        image_persister=FakeImagePersister(),
+    )
+
+    result = image_handler.handle({"taskId": 99127, "traceId": "fake-volcengine-images-test", "__executionContext": context})
+
+    assert result["status"] == "SUCCESS", result
+    assert client.calls[0]["model"] == "doubao-seedream-4-5-251128"
+    content = json.loads(backend.success_payload["contentText"])
+    assert content["provider"] == "volcengine_images", content
+
+
+def test_volcengine_images_client_uses_ark_endpoint() -> None:
+    client = OpenAIImagesClient(base_url="https://ark.cn-beijing.volces.com", api_key="fake-key")
+    assert client.endpoint_path == "/api/v3/images/generations", client.endpoint_path
+
+
 def test_failure_is_marked_processing_before_failed() -> None:
     backend = FakeBackendClient()
     context = backend.get_execution_context(99121)
@@ -435,6 +473,8 @@ def test_openai_images_client_can_retry_ssl_eof_when_enabled() -> None:
 
 if __name__ == "__main__":
     test_terminal_task_is_skipped_before_handler()
+    test_volcengine_images_provider_is_supported()
+    test_volcengine_images_client_uses_ark_endpoint()
     test_failure_is_marked_processing_before_failed()
     test_model_auth_failure_error_code_is_specific()
     test_data_url_image_is_persisted()

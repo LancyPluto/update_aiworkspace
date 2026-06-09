@@ -187,7 +187,7 @@ services:
     env_file:
       - ../.env
     environment:
-      APP_PRODUCTION_MODE: ${APP_PRODUCTION_MODE:-true}
+      APP_PRODUCTION_MODE: ${APP_PRODUCTION_MODE:-false}
       # 留空：浏览器请求走当前页面的 /api，由 nginx 反代到后端
       VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
       VITE_ALIYUN_CAPTCHA_ENABLED: ${VITE_ALIYUN_CAPTCHA_ENABLED:-false}

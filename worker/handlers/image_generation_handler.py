@@ -49,7 +49,13 @@ class ImageGenerationHandler:
             provider_registry.require_capability(provider, "IMAGE_GENERATION")
             provider_registry.require_worker_ready(provider)
             provider_protocol = provider_registry.provider_protocol(provider)
-            if provider_protocol not in {"siliconflow_images", "siliconflow", "kling_video", "openai_images"}:
+            if provider_protocol not in {
+                "siliconflow_images",
+                "siliconflow",
+                "kling_video",
+                "openai_images",
+                "volcengine_images",
+            }:
                 raise SiliconFlowVideoError(f"unsupported image provider: {provider or 'empty'}")
 
             prompt = _build_prompt(
@@ -191,7 +197,7 @@ class ImageGenerationHandler:
                 image_generation_result_path=model_config.get("imageResultPath"),
                 timeout_seconds=model_config.get("timeoutSeconds"),
             )
-        if provider_protocol == "openai_images":
+        if provider_protocol in {"openai_images", "volcengine_images"}:
             return OpenAIImagesClient(
                 base_url=model_config.get("baseUrl"),
                 api_key=model_config.get("apiKey"),

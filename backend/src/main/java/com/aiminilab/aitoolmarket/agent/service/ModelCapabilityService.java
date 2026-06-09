@@ -95,6 +95,7 @@ public class ModelCapabilityService {
         }
         String requiredCapability = resolveRequiredCapability(tool);
         return agentModelConfigMapper.findAllActive().stream()
+                .filter(config -> Boolean.TRUE.equals(config.getEnabled()))
                 .filter(config -> resolveCapabilities(config).stream()
                         .anyMatch(capability -> capability.equalsIgnoreCase(requiredCapability)))
                 .sorted(Comparator
@@ -151,8 +152,8 @@ public class ModelCapabilityService {
         if (requiresApiKey(requiredCapability, executionConfig) && !hasExecutableSecret(executionConfig.getApiKey())) {
             throw new BusinessException(ErrorCode.PARAM_ERROR,
                     "bound model config has no API key: " + displayModelName(modelConfig)
-                            + ". 请在管理端「统一 API 设置」为对应厂商账户填入 API Key，"
-                            + "或在 .env 配置 SHIYUN_API_KEY / OFOX_API_KEY 后重启 backend");
+                            + ". 请在管理端「统一 API 设置」为对应厂商账户填入有效 API Key"
+                            + "（当前工具绑定或自动匹配到的模型配置缺少可用密钥）");
         }
     }
 
@@ -186,7 +187,22 @@ public class ModelCapabilityService {
     }
 
     private boolean hasExecutableSecret(String value) {
-        return value != null && !value.isBlank() && !value.trim().startsWith("replace-with-");
+        if (value == null || value.isBlank()) {
+            return false;
+        }
+        String trimmed = value.trim();
+        if (trimmed.startsWith("replace-with-")) {
+            return false;
+        }
+        return !isObviousPlaceholderSecret(trimmed);
+    }
+
+    private boolean isObviousPlaceholderSecret(String value) {
+        String lowered = value.toLowerCase(Locale.ROOT);
+        return "123456".equals(lowered)
+                || "test".equals(lowered)
+                || "changeme".equals(lowered)
+                || lowered.matches("^x+$");
     }
 
     private boolean hasKlingAccessSecretPair(String extraAuthJson) {
