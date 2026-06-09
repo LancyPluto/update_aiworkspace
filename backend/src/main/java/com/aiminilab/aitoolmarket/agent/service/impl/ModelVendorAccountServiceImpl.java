@@ -9,6 +9,7 @@ import com.aiminilab.aitoolmarket.agent.dto.AgentModelConfigTestResponse;
 import com.aiminilab.aitoolmarket.agent.dto.ModelVendorAccountRequest;
 import com.aiminilab.aitoolmarket.agent.dto.ModelVendorAccountResponse;
 import com.aiminilab.aitoolmarket.agent.dto.ModelVendorAccountTestResponse;
+import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
 import com.aiminilab.aitoolmarket.agent.entity.ModelVendorAccount;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentModelConfigMapper;
 import com.aiminilab.aitoolmarket.agent.mapper.ModelVendorAccountMapper;
@@ -138,7 +139,108 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
         if (requiresMediaGatewayProbe(provider)) {
             return testMediaGatewayVendorAccount(account, providerCode, provider);
         }
-        AgentModelConfigRequest testRequest = new AgentModelConfigRequest(
+        AgentModelConfigRequest testRequest = accountTestRequest(account, providerCode, provider);
+        boolean success;
+        String message;
+        Long latencyMs;
+        try {
+            AgentModelConfigTestResponse result = agentServiceClient.testModelConfig(testRequest);
+            success = Boolean.TRUE.equals(result.success());
+            message = result.message() == null || result.message().isBlank()
+                    ? (success ? "连接成功" : "连接失败")
+                    : result.message();
+            latencyMs = result.latencyMs();
+            account.setHealthStatus(success ? "OK" : "ERROR");
+            account.setBalanceErrorMessage(success ? null : message);
+            if (!success) {
+                LOGGER.warn(
+                        "Vendor account connectivity test failed: accountId={}, vendorCode={}, providerCode={}, modelName={}, stage=agent_service_test, message={}",
+                        account.getId(),
+                        account.getVendorCode(),
+                        testRequest.provider(),
+                        testRequest.modelName(),
+                        message
+                );
+            }
+        } catch (IllegalStateException exception) {
+            success = false;
+            message = exception.getMessage() == null || exception.getMessage().isBlank()
+                    ? "连接失败"
+                    : exception.getMessage();
+            latencyMs = null;
+            account.setHealthStatus("ERROR");
+            account.setBalanceErrorMessage(message);
+            LOGGER.warn(
+                    "Vendor account connectivity test error: accountId={}, vendorCode={}, providerCode={}, modelName={}, stage=agent_service_test, message={}",
+                    account.getId(),
+                    account.getVendorCode(),
+                    testRequest.provider(),
+                    testRequest.modelName(),
+                    message,
+                    exception
+            );
+        }
+        account.setUpdatedAt(LocalDateTime.now());
+        vendorAccountMapper.updateAccount(account);
+        if (success) {
+            enableLinkedModelConfigs(account);
+        }
+        return new ModelVendorAccountTestResponse(
+                success,
+                message,
+                latencyMs,
+                testRequest.provider(),
+                testRequest.modelName(),
+                toResponse(account)
+        );
+    }
+
+    private AgentModelConfigRequest accountTestRequest(ModelVendorAccount account,
+                                                       String providerCode,
+                                                       ModelProviderDefinition provider) {
+        AgentModelConfig linked = agentModelConfigMapper.findActiveByVendorAccountId(account.getId())
+                .stream()
+                .filter(config -> config.getProvider() != null && providerRegistry.isSupported(config.getProvider()))
+                .findFirst()
+                .orElse(null);
+        if (linked != null) {
+            return new AgentModelConfigRequest(
+                    account.getId(),
+                    linked.getDisplayName() == null || linked.getDisplayName().isBlank()
+                            ? account.getAccountName()
+                            : linked.getDisplayName(),
+                    "vendor_account_test",
+                    linked.getProvider(),
+                    linked.getModelName(),
+                    linked.getBaseUrl() == null || linked.getBaseUrl().isBlank() ? account.getBaseUrl() : linked.getBaseUrl(),
+                    account.getApiKey(),
+                    null,
+                    account.getExtraAuthJson(),
+                    linked.getMinimaxGroupId(),
+                    account.getConsoleUrl(),
+                    account.getBalanceUrl(),
+                    linked.getDocsUrl(),
+                    linked.getTimeoutSeconds(),
+                    null,
+                    null,
+                    linked.getInputTokenPricePer1k(),
+                    linked.getOutputTokenPricePer1k(),
+                    linked.getInputTokenPricePer1m(),
+                    linked.getOutputTokenPricePer1m(),
+                    linked.getBillingUnit(),
+                    linked.getUnitPrice(),
+                    true,
+                    false,
+                    false,
+                    linked.getCapabilities() == null || linked.getCapabilities().isBlank()
+                            ? provider.capabilities()
+                            : java.util.Arrays.stream(linked.getCapabilities().split(","))
+                            .map(String::trim)
+                            .filter(value -> !value.isBlank())
+                            .toList()
+            );
+        }
+        return new AgentModelConfigRequest(
                 account.getId(),
                 account.getAccountName(),
                 "vendor_account_test",
@@ -165,59 +267,6 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
                 false,
                 false,
                 provider.capabilities()
-        );
-        boolean success;
-        String message;
-        Long latencyMs;
-        try {
-            AgentModelConfigTestResponse result = agentServiceClient.testModelConfig(testRequest);
-            success = Boolean.TRUE.equals(result.success());
-            message = result.message() == null || result.message().isBlank()
-                    ? (success ? "连接成功" : "连接失败")
-                    : result.message();
-            latencyMs = result.latencyMs();
-            account.setHealthStatus(success ? "OK" : "ERROR");
-            account.setBalanceErrorMessage(success ? null : message);
-            if (!success) {
-                LOGGER.warn(
-                        "Vendor account connectivity test failed: accountId={}, vendorCode={}, providerCode={}, modelName={}, stage=agent_service_test, message={}",
-                        account.getId(),
-                        account.getVendorCode(),
-                        providerCode,
-                        provider.defaultModel(),
-                        message
-                );
-            }
-        } catch (IllegalStateException exception) {
-            success = false;
-            message = exception.getMessage() == null || exception.getMessage().isBlank()
-                    ? "连接失败"
-                    : exception.getMessage();
-            latencyMs = null;
-            account.setHealthStatus("ERROR");
-            account.setBalanceErrorMessage(message);
-            LOGGER.warn(
-                    "Vendor account connectivity test error: accountId={}, vendorCode={}, providerCode={}, modelName={}, stage=agent_service_test, message={}",
-                    account.getId(),
-                    account.getVendorCode(),
-                    providerCode,
-                    provider.defaultModel(),
-                    message,
-                    exception
-            );
-        }
-        account.setUpdatedAt(LocalDateTime.now());
-        vendorAccountMapper.updateAccount(account);
-        if (success) {
-            enableLinkedModelConfigs(account);
-        }
-        return new ModelVendorAccountTestResponse(
-                success,
-                message,
-                latencyMs,
-                providerCode,
-                provider.defaultModel(),
-                toResponse(account)
         );
     }
 

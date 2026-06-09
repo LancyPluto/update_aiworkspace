@@ -42,12 +42,16 @@ import com.aiminilab.aitoolmarket.tool.mapper.ToolPromptVersionMapper;
 import com.aiminilab.aitoolmarket.tool.service.ToolService;
 import com.aiminilab.aitoolmarket.tool.service.WorkflowService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -64,6 +68,17 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
     private static final String FORMAT = "ai-tool-market-config-bundle";
     private static final int VERSION = 1;
     private static final Set<String> SECRET_KEY_PARTS = Set.of("secret", "token", "password", "apikey", "api_key", "key");
+    private static final Set<String> EXTRA_AUTH_METADATA_KEYS = Set.of(
+            "pricingVerifiedAt",
+            "pricingNote",
+            "pricingSource",
+            "billingDetail",
+            "billingNote",
+            "balanceNote",
+            "costAffectingParams",
+            "defaultBillingParams"
+    );
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     private final SystemSettingService systemSettingService;
     private final AgentModelConfigService agentModelConfigService;
@@ -162,7 +177,11 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
         Map<String, Long> categoryIdsByCode = toolService.adminCategories().stream()
                 .collect(Collectors.toMap(ToolCategoryResponse::categoryCode, ToolCategoryResponse::id, (a, b) -> a));
 
-        ImportCounter counter = new ImportCounter(settings, accountIdsByRef.size(), modelResult.changed, categories);
+        ImportCounter counter = new ImportCounter(
+                settings,
+                (int) accountIdsByRef.values().stream().distinct().count(),
+                modelResult.changed,
+                categories);
         for (ConfigBundleDto.Tool tool : safeList(bundle.tools())) {
             importTool(tool, operatorId, modelIdsByCode, categoryIdsByCode, counter, warnings);
         }
@@ -405,16 +424,22 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
             String vendorCode = item.vendorCode().trim().toLowerCase(Locale.ROOT);
             String accountName = item.accountName().trim();
             String ref = isBlank(item.accountRef()) ? accountRef(vendorCode, accountName) : item.accountRef().trim();
+            if ("mineru".equals(vendorCode)) {
+                warnings.add("Skipped vendor account import ref " + ref
+                        + ": MinerU belongs to System Settings -> Engine API, not model vendor accounts");
+                continue;
+            }
             boolean secretsRedacted = item.secretsRedacted() != null
                     ? item.secretsRedacted()
                     : bundleSecretsRedacted == null || bundleSecretsRedacted;
+            String extraAuthJson = secretsRedacted ? null : cleanExtraAuthJson(item.extraAuthJson(), warnings, "vendor account " + ref);
             ModelVendorAccountRequest request = new ModelVendorAccountRequest(
                     vendorCode,
                     accountName,
                     item.baseUrl(),
                     secretsRedacted ? null : nullToEmpty(item.apiKey()),
                     null,
-                    secretsRedacted ? null : nullToEmpty(item.extraAuthJson()),
+                    extraAuthJson,
                     null,
                     item.consoleUrl(),
                     item.balanceUrl(),
@@ -424,12 +449,13 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                     item.balanceLowThreshold(),
                     item.enabled()
             );
-            ModelVendorAccount existing = resolveExistingVendorAccount(vendorCode, accountName, item.baseUrl(), ref, warnings);
+            ModelVendorAccount existing = resolveExistingVendorAccount(
+                    vendorCode, accountName, item.baseUrl(), request.apiKey(), request.extraAuthJson(), ref, warnings);
             ModelVendorAccountResponse saved = existing == null
                     ? modelVendorAccountService.adminCreate(request)
                     : modelVendorAccountService.adminUpdate(existing.getId(), request);
             accountIdsByRef.put(ref, saved.id());
-            removeDuplicateVendorAccounts(vendorCode, item.baseUrl(), saved.id(), warnings);
+            removeDuplicateVendorAccounts(vendorCode, item.baseUrl(), request.apiKey(), request.extraAuthJson(), saved.id(), warnings);
         }
         return accountIdsByRef;
     }
@@ -461,8 +487,6 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                             + ": vendorAccountRef not found -> " + config.vendorAccountRef());
                 }
             }
-            boolean forceDisabled = shouldDisableImportedModel(config, vendorAccountId, secretsRedacted, warnings);
-            AgentModelConfigRequest request = modelConfigRequest(config, vendorAccountId, secretsRedacted, forceDisabled);
             AgentModelConfig existing = agentModelConfigMapper.findActiveByConfigCode(config.configCode());
             if (existing == null) {
                 Optional<AgentModelConfigResponse> equivalent = findEquivalentModelConfig(config);
@@ -472,6 +496,10 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                             + " for imported model config " + config.configCode());
                     continue;
                 }
+            }
+            boolean forceDisabled = shouldDisableImportedModel(config, vendorAccountId, secretsRedacted, warnings);
+            AgentModelConfigRequest request = modelConfigRequest(config, vendorAccountId, secretsRedacted, forceDisabled);
+            if (existing == null) {
                 AgentModelConfigResponse created = agentModelConfigService.adminCreate(request);
                 modelIdsByImportedCode.put(config.configCode(), created.id());
             } else {
@@ -496,7 +524,7 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                 config.baseUrl(),
                 secretsRedacted ? null : nullToEmpty(config.apiKey()),
                 null,
-                secretsRedacted ? null : nullToEmpty(config.extraAuthJson()),
+                secretsRedacted ? null : cleanExtraAuthJson(config.extraAuthJson(), null, "model config " + config.configCode()),
                 config.minimaxGroupId(),
                 config.consoleUrl(),
                 config.balanceUrl(),
@@ -511,7 +539,7 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                 config.billingUnit(),
                 config.unitPrice(),
                 forceDisabled ? false : config.enabled(),
-                forceDisabled ? false : config.agentEnabled(),
+                forceDisabled ? Boolean.FALSE : config.agentEnabled(),
                 config.isDefault(),
                 config.capabilities()
         );
@@ -558,7 +586,8 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
         String health = account.getHealthStatus() == null ? "" : account.getHealthStatus().trim();
         if (!"OK".equalsIgnoreCase(health)) {
             warnings.add("Imported model config " + config.configCode()
-                    + " keeps enabled=true but vendor account connectivity is not OK yet; run account test in admin");
+                    + " as disabled: vendor account connectivity is not OK yet; run account test in admin");
+            return true;
         }
         return false;
     }
@@ -569,6 +598,50 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
         }
         String normalized = value.trim().toLowerCase(Locale.ROOT);
         return !normalized.startsWith("replace-with-") && !normalized.startsWith("sk-xxx");
+    }
+
+    private String cleanExtraAuthJson(String json, List<String> warnings, String subject) {
+        if (json == null || json.isBlank()) {
+            return "";
+        }
+        try {
+            JsonNode parsed = OBJECT_MAPPER.readTree(json);
+            if (!parsed.isObject()) {
+                return json.trim();
+            }
+            ObjectNode copy = ((ObjectNode) parsed).deepCopy();
+            boolean changed = removeMetadataFields(copy);
+            if (copy.isEmpty()) {
+                if (changed && warnings != null) {
+                    warnings.add("Removed non-auth metadata from " + subject + " extraAuthJson");
+                }
+                return "";
+            }
+            if (changed && warnings != null) {
+                warnings.add("Cleaned non-auth metadata from " + subject + " extraAuthJson");
+            }
+            return copy.toString();
+        } catch (Exception ignored) {
+            return json.trim();
+        }
+    }
+
+    private boolean removeMetadataFields(ObjectNode node) {
+        boolean changed = false;
+        for (String key : EXTRA_AUTH_METADATA_KEYS) {
+            if (node.has(key)) {
+                node.remove(key);
+                changed = true;
+            }
+        }
+        Iterator<Map.Entry<String, JsonNode>> fields = node.fields();
+        while (fields.hasNext()) {
+            Map.Entry<String, JsonNode> entry = fields.next();
+            if (entry.getValue().isObject()) {
+                changed = removeMetadataFields((ObjectNode) entry.getValue()) || changed;
+            }
+        }
+        return changed;
     }
 
     private int importCategories(List<ConfigBundleDto.Category> categories) {
@@ -856,6 +929,8 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
     private ModelVendorAccount resolveExistingVendorAccount(String vendorCode,
                                                             String accountName,
                                                             String baseUrl,
+                                                            String apiKey,
+                                                            String extraAuthJson,
                                                             String ref,
                                                             List<String> warnings) {
         ModelVendorAccount existing = vendorAccountMapper.findActiveByVendorCodeAndAccountName(vendorCode, accountName);
@@ -865,6 +940,8 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
         String normalizedBaseUrl = normalizeVendorBaseUrl(baseUrl);
         ModelVendorAccount matchedByBaseUrl = vendorAccountMapper.findActiveByVendorCode(vendorCode).stream()
                 .filter(account -> normalizedBaseUrl.equals(normalizeVendorBaseUrl(account.getBaseUrl())))
+                .filter(account -> credentialCompatible(apiKey, account.getApiKey())
+                        && credentialCompatible(extraAuthJson, account.getExtraAuthJson()))
                 .max((left, right) -> {
                     int leftModels = vendorAccountMapper.countActiveModelsByAccountId(left.getId());
                     int rightModels = vendorAccountMapper.countActiveModelsByAccountId(right.getId());
@@ -884,6 +961,8 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
 
     private void removeDuplicateVendorAccounts(String vendorCode,
                                                String baseUrl,
+                                               String apiKey,
+                                               String extraAuthJson,
                                                Long keptAccountId,
                                                List<String> warnings) {
         if (isBlank(baseUrl) || keptAccountId == null) {
@@ -897,16 +976,35 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
             if (!normalizedBaseUrl.equals(normalizeVendorBaseUrl(account.getBaseUrl()))) {
                 continue;
             }
-            int modelCount = vendorAccountMapper.countActiveModelsByAccountId(account.getId());
-            if (modelCount > 0) {
-                warnings.add("Kept duplicate vendor account #" + account.getId()
-                        + " (" + account.getAccountName() + ") because " + modelCount + " model(s) still reference it");
+            if (!credentialCompatible(apiKey, account.getApiKey())
+                    || !credentialCompatible(extraAuthJson, account.getExtraAuthJson())) {
                 continue;
             }
+            int modelCount = vendorAccountMapper.countActiveModelsByAccountId(account.getId());
+            reassignVendorAccountModels(account.getId(), keptAccountId);
             vendorAccountMapper.softDelete(account.getId());
             warnings.add("Removed duplicate vendor account #" + account.getId()
-                    + " (" + account.getAccountName() + ") with same baseUrl as account #" + keptAccountId);
+                    + " (" + account.getAccountName() + ") with same baseUrl as account #" + keptAccountId
+                    + (modelCount > 0 ? "; reassigned " + modelCount + " model(s)" : ""));
         }
+    }
+
+    private void reassignVendorAccountModels(Long fromAccountId, Long toAccountId) {
+        if (fromAccountId == null || toAccountId == null || fromAccountId.equals(toAccountId)) {
+            return;
+        }
+        LocalDateTime now = LocalDateTime.now();
+        for (AgentModelConfig config : agentModelConfigMapper.findAllActive()) {
+            if (fromAccountId.equals(config.getVendorAccountId())) {
+                agentModelConfigMapper.updateVendorAccountId(config.getId(), toAccountId, now);
+            }
+        }
+    }
+
+    private static boolean credentialCompatible(String left, String right) {
+        String a = left == null ? "" : left.trim();
+        String b = right == null ? "" : right.trim();
+        return a.isEmpty() || b.isEmpty() || a.equals(b);
     }
 
     private static String accountRef(String vendorCode, String accountName) {

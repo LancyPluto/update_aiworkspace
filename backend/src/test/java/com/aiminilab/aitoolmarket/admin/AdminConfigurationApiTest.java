@@ -400,6 +400,95 @@ class AdminConfigurationApiTest {
                 .andExpect(jsonPath("$.data.tools[?(@.toolCode=='dup_tool')].agentEnabled").value(false));
     }
 
+    @Test
+    void configBundleImportDeduplicatesVendorAccountsAndDropsNonAuthMetadata() throws Exception {
+        String adminToken = loginAdmin();
+
+        mockMvc.perform(post("/api/admin/v1/config-bundles/import")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "format": "ai-tool-market-config-bundle",
+                                  "version": 1,
+                                  "secretsRedacted": false,
+                                  "settings": {},
+                                  "vendorAccounts": [
+                                    {
+                                      "vendorCode": "moonshot",
+                                      "accountName": "账户A",
+                                      "accountRef": "moonshot::a",
+                                      "baseUrl": "https://api.moonshot.cn/v1/",
+                                      "apiKey": "sk-moonshot",
+                                      "extraAuthJson": "{\\"pricingVerifiedAt\\":\\"2026-05-25\\",\\"pricingNote\\":\\"ignored\\",\\"costAffectingParams\\":\\"model;messages\\"}",
+                                      "secretsRedacted": false,
+                                      "balanceQueryMode": "MANUAL",
+                                      "enabled": true
+                                    },
+                                    {
+                                      "vendorCode": "moonshot",
+                                      "accountName": "账户B",
+                                      "accountRef": "moonshot::b",
+                                      "baseUrl": "https://api.moonshot.cn/v1",
+                                      "apiKey": "sk-moonshot",
+                                      "extraAuthJson": "{\\"pricingVerifiedAt\\":\\"2026-05-25\\"}",
+                                      "secretsRedacted": false,
+                                      "balanceQueryMode": "MANUAL",
+                                      "enabled": true
+                                    },
+                                    {
+                                      "vendorCode": "mineru",
+                                      "accountName": "MinerU",
+                                      "accountRef": "mineru::default",
+                                      "baseUrl": "https://mineru.net",
+                                      "apiKey": "mineru-token",
+                                      "secretsRedacted": false,
+                                      "balanceQueryMode": "MANUAL",
+                                      "enabled": true
+                                    }
+                                  ],
+                                  "modelConfigs": [
+                                    {
+                                      "displayName": "Kimi",
+                                      "configCode": "test_kimi_import_cleanup",
+                                      "vendorAccountRef": "moonshot::b",
+                                      "provider": "openai_compatible",
+                                      "modelName": "kimi-k2.6",
+                                      "baseUrl": "https://api.moonshot.cn/v1",
+                                      "extraAuthJson": "{\\"pricingVerifiedAt\\":\\"2026-05-25\\",\\"taskType\\":\\"chat\\"}",
+                                      "secretsRedacted": false,
+                                      "timeoutSeconds": 60,
+                                      "enabled": true,
+                                      "agentEnabled": true,
+                                      "isDefault": false,
+                                      "capabilities": ["TEXT_GENERATION"]
+                                    }
+                                  ],
+                                  "categories": [],
+                                  "tools": []
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.vendorAccounts").value(1))
+                .andExpect(jsonPath("$.data.modelConfigs").value(1))
+                .andExpect(jsonPath("$.data.warnings[?(@ =~ /.*MinerU.*/)]").isNotEmpty())
+                .andExpect(jsonPath("$.data.warnings[?(@ =~ /.*non-auth metadata.*/)]").isNotEmpty());
+
+        mockMvc.perform(get("/api/admin/v1/unified-api/overview")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.vendors[?(@.vendorCode=='mineru')]").isEmpty())
+                .andExpect(jsonPath("$.data.vendors[?(@.vendorCode=='moonshot')].accounts[0].extraAuthJson")
+                        .value(org.hamcrest.Matchers.hasItem(org.hamcrest.Matchers.nullValue())))
+                .andExpect(jsonPath("$.data.vendors[?(@.vendorCode=='moonshot')].accounts[0].extraAuthJsonMasked").value(""))
+                .andExpect(jsonPath("$.data.vendors[?(@.vendorCode=='moonshot')].accounts.length()").value(1));
+
+        mockMvc.perform(get("/api/admin/v1/agent/model-config/list")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[?(@.configCode=='test_kimi_import_cleanup')].extraAuthJsonMasked").value(""));
+    }
+
     private String loginAdmin() throws Exception {
         String response = mockMvc.perform(post("/api/admin/v1/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)

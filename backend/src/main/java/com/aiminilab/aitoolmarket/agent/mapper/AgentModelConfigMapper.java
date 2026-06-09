@@ -68,6 +68,18 @@ public interface AgentModelConfigMapper extends BaseMapper<AgentModelConfig> {
     @Select("""
             SELECT *
             FROM agent_model_configs
+            WHERE vendor_account_id = #{vendorAccountId}
+              AND COALESCE(is_deleted, 0) = 0
+            ORDER BY COALESCE(enabled, 0) DESC,
+                     COALESCE(agent_enabled, 0) DESC,
+                     COALESCE(is_default, 0) DESC,
+                     id DESC
+            """)
+    List<AgentModelConfig> findActiveByVendorAccountId(@Param("vendorAccountId") Long vendorAccountId);
+
+    @Select("""
+            SELECT *
+            FROM agent_model_configs
             WHERE COALESCE(is_deleted, 0) = 0
               AND enabled = 1
               AND COALESCE(agent_enabled, 0) = 1

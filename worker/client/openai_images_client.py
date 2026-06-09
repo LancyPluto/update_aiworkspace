@@ -40,7 +40,11 @@ class OpenAIImagesClient:
         self.api_key = (api_key or "").strip()
         self.extra_auth = self._parse_json(extra_auth_json)
         self.timeout = self._resolve_timeout(timeout_seconds)
-        self.endpoint_path = str(endpoint_path or self.extra_auth.get("endpointPath") or "/images/generations")
+        self.endpoint_path = str(
+            endpoint_path
+            or self.extra_auth.get("endpointPath")
+            or _default_images_endpoint(self.base_url)
+        )
         self.edit_endpoint_path = str(self.extra_auth.get("editEndpointPath") or "/images/edits")
         self.ssl_eof_retries = self._resolve_ssl_eof_retries()
         self.last_usage: dict[str, int] = {}
@@ -57,17 +61,15 @@ class OpenAIImagesClient:
 
     def _configure_session_proxy(self) -> None:
         proxy_url = str(self.extra_auth.get("proxyUrl") or "").strip()
-        if proxy_url:
-            self.session.proxies.update({"http": proxy_url, "https": proxy_url})
-            return
+        if not proxy_url:
+            proxy_url = (os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY") or "").strip()
         if "trustEnv" in self.extra_auth:
             self.session.trust_env = _as_bool(self.extra_auth.get("trustEnv"), False)
-            return
-        env_proxy = (os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY") or "").strip()
-        if env_proxy:
-            self.session.trust_env = True
-            return
-        self.session.trust_env = False
+        else:
+            # Explicit proxies are more stable than trust_env inside Docker + mihomo.
+            self.session.trust_env = False
+        if proxy_url:
+            self.session.proxies.update({"http": proxy_url, "https": proxy_url})
 
     def generate_images(
         self,
@@ -198,7 +200,7 @@ class OpenAIImagesClient:
             "model": model,
             "prompt": prompt,
             "n": max(1, min(10, int(batch_size or 1))),
-            "size": _normalize_size(image_size),
+            "size": _normalize_size(image_size, base_url=self.base_url),
         }
         resolved_quality = (quality or self.extra_auth.get("quality") or "").strip()
         if resolved_quality:
@@ -212,6 +214,17 @@ class OpenAIImagesClient:
         resolved_response_format = (response_format or self.extra_auth.get("responseFormat") or "").strip()
         if resolved_response_format:
             payload["response_format"] = resolved_response_format
+        if _is_volcengine_ark_base_url(self.base_url):
+            payload.setdefault("response_format", "url")
+            payload.setdefault("stream", False)
+            if "watermark" in self.extra_auth:
+                payload["watermark"] = _as_bool(self.extra_auth.get("watermark"), False)
+            else:
+                payload.setdefault("watermark", False)
+            payload.setdefault("sequential_image_generation", "disabled")
+            model_name = str(payload.get("model") or "").lower()
+            if "seedream-5" in model_name and "guidance_scale" in payload:
+                payload.pop("guidance_scale", None)
         return payload
 
     def _build_edit_multipart(
@@ -883,11 +896,29 @@ def _should_fallback_to_requests_edit(message: str) -> bool:
     )
 
 
-def _normalize_size(value: str) -> str:
+def _default_images_endpoint(base_url: str | None) -> str:
+    normalized = (base_url or "").strip().lower()
+    if "volces.com" in normalized or "bytepluses.com" in normalized:
+        if normalized.endswith("/api/v3"):
+            return "/images/generations"
+        return "/api/v3/images/generations"
+    if normalized.endswith("/v1"):
+        return "/images/generations"
+    return "/images/generations"
+
+
+def _is_volcengine_ark_base_url(base_url: str | None) -> bool:
+    normalized = (base_url or "").strip().lower()
+    return "volces.com" in normalized or "bytepluses.com" in normalized
+
+
+def _normalize_size(value: str, *, base_url: str = "") -> str:
     size = (value or "1024x1024").strip().replace("：", ":")
+    if _is_volcengine_ark_base_url(base_url):
+        return _normalize_volcengine_size(size)
     if size.lower() in {"auto", "智能", "adaptive", "default"}:
         return "auto"
-    if ":" in size:
+    if ":" in size and "x" not in size.lower():
         return {
             "1:1": "1024x1024",
             "16:9": "1536x1024",
@@ -898,6 +929,51 @@ def _normalize_size(value: str) -> str:
             "2:3": "1024x1536",
         }.get(size, "1024x1024")
     return size
+
+
+def _normalize_volcengine_size(value: str) -> str:
+    """Seedream requires at least 3,686,400 pixels (~1920x1920)."""
+    size = (value or "2K").strip().replace("：", ":")
+    if size.lower() in {"auto", "智能", "adaptive", "default", "2k"}:
+        return "2K"
+    if size.lower() in {"3k", "4k"}:
+        return size.upper()
+    ratio_map = {
+        "1:1": "1920x1920",
+        "16:9": "2560x1440",
+        "4:3": "2304x1728",
+        "3:2": "2400x1600",
+        "9:16": "1440x2560",
+        "3:4": "1728x2304",
+        "2:3": "1600x2400",
+        "21:9": "3440x1440",
+    }
+    if ":" in size and "x" not in size.lower():
+        return ratio_map.get(size, "2K")
+    if "x" in size.lower():
+        width, height = _parse_size(size)
+        if width * height >= 3_686_400:
+            return f"{width}x{height}"
+        scaled = ratio_map.get(_closest_ratio(width, height), "1920x1920")
+        return scaled
+    return "2K"
+
+
+def _closest_ratio(width: int, height: int) -> str:
+    if width <= 0 or height <= 0:
+        return "1:1"
+    target = width / height
+    candidates = {
+        "1:1": 1.0,
+        "16:9": 16 / 9,
+        "4:3": 4 / 3,
+        "3:2": 3 / 2,
+        "9:16": 9 / 16,
+        "3:4": 3 / 4,
+        "2:3": 2 / 3,
+        "21:9": 21 / 9,
+    }
+    return min(candidates, key=lambda name: abs(candidates[name] - target))
 
 
 def _parse_size(value: str) -> tuple[int, int]:

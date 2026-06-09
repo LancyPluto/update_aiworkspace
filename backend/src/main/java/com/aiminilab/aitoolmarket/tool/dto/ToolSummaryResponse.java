@@ -48,4 +48,30 @@ public record ToolSummaryResponse(
                 tool.getExecutionHandler()
         );
     }
+
+    public ToolSummaryResponse withSanitizedCoverUrl(String coverUrl) {
+        if (coverUrl == null ? this.coverUrl == null : coverUrl.equals(this.coverUrl)) {
+            return this;
+        }
+        return new ToolSummaryResponse(
+                id,
+                toolCode,
+                toolName,
+                categoryId,
+                categoryCode,
+                categoryName,
+                description,
+                coverUrl,
+                toolType,
+                inputModality,
+                outputModality,
+                configNote,
+                status,
+                estimatedCreditCost,
+                modelConfigId,
+                modelConfigName,
+                modelName,
+                executionHandler
+        );
+    }
 }

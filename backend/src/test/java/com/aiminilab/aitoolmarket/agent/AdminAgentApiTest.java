@@ -501,6 +501,68 @@ class AdminAgentApiTest {
     }
 
     @Test
+    void vendorAccountTestUsesLinkedOpenAiCompatibleModelForMoonshot() throws Exception {
+        mockExternalAuthDependencies();
+        String adminToken = login("/api/admin/v1/auth/login", "admin");
+        Mockito.when(agentServiceClient.testModelConfig(any()))
+                .thenReturn(new AgentModelConfigTestResponse(true, "openai_compatible", "kimi-k2.6", 12L, "ok", "pong"));
+
+        String accountResponse = mockMvc.perform(post("/api/admin/v1/model-vendor-accounts")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "vendorCode": "moonshot",
+                                  "accountName": "Moonshot test",
+                                  "baseUrl": "https://api.moonshot.cn/v1",
+                                  "apiKey": "sk-moonshot-test",
+                                  "balanceQueryMode": "MANUAL",
+                                  "enabled": true
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        Long accountId = Long.parseLong(accountResponse.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
+
+        mockMvc.perform(post("/api/admin/v1/agent/model-config")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "vendorAccountId": %d,
+                                  "displayName": "Kimi linked test",
+                                  "configCode": "kimi_linked_test",
+                                  "provider": "openai_compatible",
+                                  "modelName": "kimi-k2.6",
+                                  "baseUrl": "https://api.moonshot.cn/v1",
+                                  "timeoutSeconds": 60,
+                                  "enabled": false,
+                                  "agentEnabled": false,
+                                  "isDefault": false,
+                                  "capabilities": ["TEXT_GENERATION"]
+                                }
+                                """.formatted(accountId)))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/admin/v1/model-vendor-accounts/{id}/test", accountId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.success").value(true))
+                .andExpect(jsonPath("$.data.provider").value("openai_compatible"))
+                .andExpect(jsonPath("$.data.modelName").value("kimi-k2.6"))
+                .andExpect(jsonPath("$.data.account.healthStatus").value("OK"));
+
+        Mockito.verify(agentServiceClient).testModelConfig(argThat(request ->
+                request != null
+                        && "openai_compatible".equals(request.provider())
+                        && "kimi-k2.6".equals(request.modelName())
+                        && "https://api.moonshot.cn/v1".equals(request.baseUrl())
+                        && "sk-moonshot-test".equals(request.apiKey())));
+    }
+
+    @Test
     void emptyApiKeyUpdateKeepsExistingModelSecret() throws Exception {
         mockExternalAuthDependencies();
         String adminToken = login("/api/admin/v1/auth/login", "admin");

@@ -75,6 +75,26 @@ class ModelCapabilityServiceTest {
     }
 
     @Test
+    void resolveModelConfigForTool_skipsDisabledCapabilityFallback() {
+        AiTool ttsTool = new AiTool();
+        ttsTool.setId(75L);
+        ttsTool.setExecutionHandler("TEXT_TO_SPEECH");
+
+        AgentModelConfig disabledSiliconflow = config(2L, "siliconflow_voice_tts", "[\"TEXT_TO_SPEECH\"]", false);
+        disabledSiliconflow.setEnabled(false);
+        disabledSiliconflow.setProvider("siliconflow_speech");
+        AgentModelConfig enabledMinimax = config(26L, "minimax-speech-hd", "[\"TEXT_TO_SPEECH\"]", false);
+        enabledMinimax.setProvider("minimax_speech");
+
+        when(agentModelConfigMapper.findAllActive()).thenReturn(List.of(disabledSiliconflow, enabledMinimax));
+
+        AgentModelConfig resolved = modelCapabilityService.resolveModelConfigForTool(ttsTool);
+
+        assertThat(resolved).isNotNull();
+        assertThat(resolved.getConfigCode()).isEqualTo("minimax-speech-hd");
+    }
+
+    @Test
     void resolveModelConfigForTool_usesExplicitBindingWhenPresent() {
         AiTool digitalHumanTool = new AiTool();
         digitalHumanTool.setId(20L);
