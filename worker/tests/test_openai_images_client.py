@@ -43,7 +43,9 @@ def test_openai_images_uses_http_proxy_env_when_configured(monkeypatch):
         api_key="test-key",
     )
 
-    assert client.session.trust_env is True
+    assert client.session.trust_env is False
+    assert client.session.proxies["http"] == "http://127.0.0.1:7890"
+    assert client.session.proxies["https"] == "http://127.0.0.1:7890"
 
 
 def test_openai_images_multipart_request_uses_form_data_content_type() -> None:

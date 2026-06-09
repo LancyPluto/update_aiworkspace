@@ -57,17 +57,15 @@ class OpenAIImagesClient:
 
     def _configure_session_proxy(self) -> None:
         proxy_url = str(self.extra_auth.get("proxyUrl") or "").strip()
-        if proxy_url:
-            self.session.proxies.update({"http": proxy_url, "https": proxy_url})
-            return
+        if not proxy_url:
+            proxy_url = (os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY") or "").strip()
         if "trustEnv" in self.extra_auth:
             self.session.trust_env = _as_bool(self.extra_auth.get("trustEnv"), False)
-            return
-        env_proxy = (os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY") or "").strip()
-        if env_proxy:
-            self.session.trust_env = True
-            return
-        self.session.trust_env = False
+        else:
+            # Explicit proxies are more stable than trust_env inside Docker + mihomo.
+            self.session.trust_env = False
+        if proxy_url:
+            self.session.proxies.update({"http": proxy_url, "https": proxy_url})
 
     def generate_images(
         self,

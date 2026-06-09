@@ -1,6 +1,7 @@
 package com.aiminilab.aitoolmarket.tool.service.impl;
 
 import com.aiminilab.aitoolmarket.config.AppProperties;
+import com.aiminilab.aitoolmarket.support.GeneratedMediaPathSupport;
 import com.aiminilab.aitoolmarket.common.dto.PageResponse;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.enums.ExecutionHandler;
@@ -91,6 +92,7 @@ public class ToolServiceImpl implements ToolService {
     private final ModelCapabilityService modelCapabilityService;
     private final TaskCreditEstimateService taskCreditEstimateService;
     private final AppProperties appProperties;
+    private final GeneratedMediaPathSupport generatedMediaPathSupport;
     private final ToolIntegrationResolver toolIntegrationResolver;
     private final ToolIntegrationRegistry toolIntegrationRegistry;
 
@@ -101,6 +103,7 @@ public class ToolServiceImpl implements ToolService {
                            ModelCapabilityService modelCapabilityService,
                            TaskCreditEstimateService taskCreditEstimateService,
                            AppProperties appProperties,
+                           GeneratedMediaPathSupport generatedMediaPathSupport,
                            ToolIntegrationResolver toolIntegrationResolver,
                            ToolIntegrationRegistry toolIntegrationRegistry) {
         this.toolMapper = toolMapper;
@@ -114,6 +117,7 @@ public class ToolServiceImpl implements ToolService {
         this.modelCapabilityService = modelCapabilityService;
         this.taskCreditEstimateService = taskCreditEstimateService;
         this.appProperties = appProperties;
+        this.generatedMediaPathSupport = generatedMediaPathSupport;
         this.toolIntegrationResolver = toolIntegrationResolver;
         this.toolIntegrationRegistry = toolIntegrationRegistry;
     }
@@ -180,7 +184,8 @@ public class ToolServiceImpl implements ToolService {
     }
 
     private ToolSummaryResponse toUserFacingSummary(AiTool tool) {
-        return ToolSummaryResponse.from(tool, taskCreditEstimateService.estimateUserFacingTaskCredits(tool));
+        return sanitizeCoverUrl(
+                ToolSummaryResponse.from(tool, taskCreditEstimateService.estimateUserFacingTaskCredits(tool)));
     }
 
     private ToolIntegrationView resolveIntegrationView(AiTool tool) {
@@ -492,7 +497,13 @@ public class ToolServiceImpl implements ToolService {
     }
 
     private ToolSummaryResponse toEstimatedSummary(AiTool tool) {
-        return ToolSummaryResponse.from(tool, taskCreditEstimateService.estimateUserFacingTaskCredits(tool));
+        return sanitizeCoverUrl(
+                ToolSummaryResponse.from(tool, taskCreditEstimateService.estimateUserFacingTaskCredits(tool)));
+    }
+
+    private ToolSummaryResponse sanitizeCoverUrl(ToolSummaryResponse summary) {
+        return summary.withSanitizedCoverUrl(
+                generatedMediaPathSupport.resolveExistingPublicUrl(summary.coverUrl()));
     }
 
     private AiTool fromRequest(UpsertToolRequest request) {
