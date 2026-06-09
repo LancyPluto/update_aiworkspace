@@ -16,7 +16,7 @@ import {
   X,
 } from "lucide-vue-next"
 import CommunityAudioMedia from "@/components/community/CommunityAudioMedia.vue"
-import { ApiBusinessError, getApiOrigin } from "@/api/client"
+import { ApiBusinessError } from "@/api/client"
 import {
   favoriteCommunityPost,
   fetchCommunityTopics,
@@ -35,6 +35,7 @@ import {
   resetDefaultCommunityCollectionCache,
   syncFavoriteToInspirationCollection,
 } from "@/utils/communitySync"
+import MasonryLayout from "@/components/MasonryLayout.vue"
 import UserAvatar from "@/components/UserAvatar.vue"
 import { userRoutes } from "@/router/userRoutes"
 import { useAuthStore } from "@/store/authStore"
@@ -43,6 +44,11 @@ import { openDashboardWithAsset } from "@/utils/assetReplay"
 import { communityDisplayTitle, promptExcerpt } from "@/utils/communityDisplay"
 import { hasCommunityAudioMedia, resolveCommunityAudioMedia } from "@/utils/communityAudioMedia"
 import { resolveCommunityAuthorAvatar, resolveCommunityAuthorName, resolveCommunityPrompt } from "@/utils/communityPostNormalize"
+import {
+  normalizeCommunityMediaUrl,
+  resolveCommunityImageUrls,
+  resolveCommunityPostKind,
+} from "@/utils/communityPostMedia"
 
 const router = useRouter()
 const route = useRoute()
@@ -94,22 +100,15 @@ const extendedSorts = [
 
 const inlineTopics = computed(() => topics.value.length > 0 && topics.value.length < 5)
 
-function mediaUrl(value?: string | null) {
-  const raw = value?.trim()
-  if (!raw) return ""
-  if (raw.startsWith("http://") || raw.startsWith("https://") || raw.startsWith("data:")) return raw
-  const path = raw.startsWith("/") ? raw : `/${raw}`
-  const apiOrigin = getApiOrigin()
-  return apiOrigin ? `${apiOrigin}${path}` : path
-}
+const skeletonItems = computed(() =>
+  Array.from({ length: 8 }, (_, index) => ({
+    id: index + 1,
+    height: 120 + (index % 4) * 48,
+  })),
+)
 
 function postImageUrls(post: CommunityPost) {
-  if (postKind(post) !== "image") return []
-  const rawUrls = post.mediaUrls?.length ? post.mediaUrls : [post.mediaUrl, post.coverUrl]
-  const urls = rawUrls
-    .map((url) => mediaUrl(url))
-    .filter((url): url is string => Boolean(url))
-  return [...new Set(urls)]
+  return resolveCommunityImageUrls(post)
 }
 
 function activePostImageUrl(post: CommunityPost) {
@@ -137,11 +136,7 @@ function stepPostImage(post: CommunityPost, delta: number, event: Event) {
 }
 
 function postKind(post: CommunityPost) {
-  const modality = (post.modality || "").toLowerCase()
-  if (modality.includes("video")) return "video"
-  if (modality.includes("audio")) return "audio"
-  if (modality.includes("image")) return "image"
-  return "text"
+  return resolveCommunityPostKind(post.modality)
 }
 
 function postTitle(post: CommunityPost) {
@@ -179,14 +174,14 @@ function patchPost(updated: CommunityPost) {
 function hasMediaCover(post: CommunityPost) {
   if (postKind(post) === "audio") return hasCommunityAudioMedia(post)
   if (postKind(post) === "image") return Boolean(activePostImageUrl(post))
-  return Boolean(mediaUrl(post.coverUrl)) && postKind(post) !== "text"
+  return Boolean(normalizeCommunityMediaUrl(post.coverUrl)) && postKind(post) !== "text"
 }
 
 function audioMedia(post: CommunityPost) {
   const resolved = resolveCommunityAudioMedia(post)
   return {
-    coverUrl: mediaUrl(resolved.coverUrl),
-    audioUrl: mediaUrl(resolved.audioUrl),
+    coverUrl: normalizeCommunityMediaUrl(resolved.coverUrl),
+    audioUrl: normalizeCommunityMediaUrl(resolved.audioUrl),
   }
 }
 
@@ -367,7 +362,7 @@ async function createSameStyle(post: CommunityPost, event: Event) {
       { postId: post.id, eventType: "dashboard_open", source: "discover_card", toolCode: post.toolCode },
       { token: auth.token },
     ).catch(() => undefined)
-    const selectedMediaUrl = postKind(post) === "image" ? activePostImageUrl(post) : mediaUrl(post.coverUrl)
+    const selectedMediaUrl = postKind(post) === "image" ? activePostImageUrl(post) : normalizeCommunityMediaUrl(post.coverUrl)
     openDashboardWithAsset(assetFromCommunityPost(post, selectedMediaUrl), post.toolCode, {
       modality: post.modality,
       sourcePost: post.id,
@@ -564,23 +559,33 @@ onUnmounted(() => {
 
     <p v-if="sameStyleError" class="inline-alert" role="alert">{{ sameStyleError }}</p>
 
-    <div v-if="loading" class="content-masonry" aria-busy="true" aria-label="加载中">
-      <article v-for="index in 8" :key="index" class="post-card skeleton" :style="{ '--skeleton-h': `${120 + (index % 4) * 48}px` }">
-        <div class="thumb skeleton-block" />
-        <div class="card-body">
-          <div class="skeleton-line wide" />
-          <div class="skeleton-line" />
-        </div>
-        <div class="card-footer skeleton-footer" />
-      </article>
-    </div>
+    <MasonryLayout
+      v-if="loading"
+      :items="skeletonItems"
+      item-key="id"
+      :estimate-height="(item) => item.height"
+      aria-busy="true"
+      aria-label="加载中"
+    >
+      <template #default="{ item }">
+        <article class="post-card skeleton" :style="{ '--skeleton-h': `${item.height}px` }">
+          <div class="thumb skeleton-block" />
+          <div class="card-body">
+            <div class="skeleton-line wide" />
+            <div class="skeleton-line" />
+          </div>
+          <div class="card-footer skeleton-footer" />
+        </article>
+      </template>
+    </MasonryLayout>
 
     <div v-else-if="error" class="state-panel error">{{ error }}</div>
     <div v-else-if="!posts.length" class="state-panel">暂时没有匹配的公开作品，换个筛选条件再试试。</div>
 
     <template v-else>
-      <section class="content-masonry">
-        <article v-for="post in posts" :key="post.id" class="post-card group">
+      <MasonryLayout :items="posts" :item-key="(post) => post.id" aria-label="社区作品">
+        <template #default="{ item: post }">
+        <article class="post-card group">
           <div class="card-main">
             <button type="button" class="card-clickable" @click="openPost(post)">
               <div class="thumb">
@@ -594,7 +599,7 @@ onUnmounted(() => {
                 />
                 <video
                   v-else-if="hasMediaCover(post) && postKind(post) === 'video'"
-                  :src="mediaUrl(post.coverUrl)"
+                  :src="normalizeCommunityMediaUrl(post.coverUrl)"
                   class="thumb-media"
                   muted
                   loop
@@ -693,7 +698,8 @@ onUnmounted(() => {
             </div>
           </div>
         </article>
-      </section>
+        </template>
+      </MasonryLayout>
 
       <div ref="loadSentinelRef" class="load-sentinel" aria-hidden="true" />
       <div v-if="loadingMore" class="loading-more" aria-live="polite">
