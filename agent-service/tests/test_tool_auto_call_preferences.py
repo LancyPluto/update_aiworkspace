@@ -1,4 +1,4 @@
-from app.core.intent_router import IntentResult
+from app.core.intent_router import Intent, IntentResult
 from app.core.schemas import RunContext, ToolDescriptor, ToolPreference
 from app.runtime.deep_agents_engine import DeepAgentsRuntimeEngine
 
@@ -19,6 +19,12 @@ def test_user_tool_preference_skips_confirmation_even_for_expensive_tool():
         estimatedCreditCost=50,
         autoCallable=False,
     )
-    intent = IntentResult(intent="TOOL_USE", selectedToolCode="gpt_image2", requiresConfirmation=True)
+    intent = IntentResult(
+        intent=Intent.TOOL_USE,
+        confidence=1.0,
+        selectedToolCode="gpt_image2",
+        reason="test_preference_override",
+        requiresConfirmation=True,
+    )
 
     assert engine._should_auto_call(context, tool, intent=intent) is True

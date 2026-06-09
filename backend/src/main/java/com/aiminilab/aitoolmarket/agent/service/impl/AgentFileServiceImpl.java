@@ -214,7 +214,7 @@ public class AgentFileServiceImpl implements AgentFileService {
     public void attachPendingFilesToRun(Long userId, Long sessionId, Long runId, List<Long> fileIds) {
         findActiveSession(userId, sessionId);
         LocalDateTime now = LocalDateTime.now();
-        if (fileIds == null) {
+        if (fileIds == null || fileIds.isEmpty()) {
             agentFileMapper.attachAllPendingFilesToRun(userId, sessionId, runId, now);
             return;
         }

@@ -1243,7 +1243,7 @@ public class AgentRunServiceImpl implements AgentRunService {
             normalized.put("size", item.path("size").isNumber() ? item.path("size").asLong() : 0);
             normalized.put("status", "READY");
             normalized.put("url", url);
-            normalized.put("source", "chat_reference".equalsIgnoreCase(source) ? "chat_reference" : "url");
+            normalized.put("source", normalizedAttachmentSource(source));
             items.add(normalized);
             index++;
             if (items.size() >= FILE_CONTEXT_LIMIT) {
@@ -1258,6 +1258,9 @@ public class AgentRunServiceImpl implements AgentRunService {
         List<InternalAgentFileContextResponse> contexts = new java.util.ArrayList<>();
         long syntheticId = -1L;
         for (Map<String, Object> item : items) {
+            if ("agent_file".equalsIgnoreCase(stringValue(item.get("source")))) {
+                continue;
+            }
             contexts.add(InternalAgentFileContextResponse.urlAttachment(
                     syntheticId--,
                     nonBlankOrDefault(stringValue(item.get("name")), "素材附件"),
@@ -1266,6 +1269,14 @@ public class AgentRunServiceImpl implements AgentRunService {
             ));
         }
         return contexts;
+    }
+
+    private String normalizedAttachmentSource(String source) {
+        String normalized = source == null ? "" : source.trim().toLowerCase();
+        if ("chat_reference".equals(normalized) || "agent_file".equals(normalized)) {
+            return normalized;
+        }
+        return "url";
     }
 
     private List<Map<String, Object>> normalizedUrlAttachments(List<Map<String, Object>> rawItems) {
@@ -1289,8 +1300,8 @@ public class AgentRunServiceImpl implements AgentRunService {
             item.put("size", raw.get("size") instanceof Number number ? number.longValue() : 0L);
             item.put("status", "READY");
             item.put("url", url);
-            String source = nonBlankOrDefault(stringValue(raw.get("source")), "url").trim().toLowerCase();
-            item.put("source", ("chat_reference".equals(source) || "agent_file".equals(source)) ? source : "url");
+            String source = nonBlankOrDefault(stringValue(raw.get("source")), "url");
+            item.put("source", normalizedAttachmentSource(source));
             normalized.add(item);
             index++;
             if (normalized.size() >= FILE_CONTEXT_LIMIT) {
