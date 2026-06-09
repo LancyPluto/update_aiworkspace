@@ -17,7 +17,6 @@ import java.time.LocalDateTime;
 @Service
 public class BillingServiceImpl implements BillingService {
     private static final String BILLING_UNIT_PER_CALL = "PER_CALL";
-    private static final String BILLING_UNIT_PER_SECOND = "PER_SECOND";
     private static final BigDecimal CREDIT_PRICE_CNY = new BigDecimal("0.01");
 
     private final BillingUsageLogMapper billingUsageLogMapper;
@@ -105,7 +104,7 @@ public class BillingServiceImpl implements BillingService {
         log.setUnitPrice(unitPrice);
         BigDecimal costAmount = costPerMillion(prompt, inputPricePer1m)
                 .add(costPerMillion(completion, outputPricePer1m))
-                .add(perUnitCost(billingUnit, units, unitPrice));
+                .add(perCallCost(billingUnit, units, unitPrice));
         log.setCostAmount(costAmount);
         int calculatedCredits = costToCredits(costAmount);
         int finalCredits = calculatedCredits > 0 ? calculatedCredits : charged;
@@ -119,8 +118,8 @@ public class BillingServiceImpl implements BillingService {
                 .divide(BigDecimal.valueOf(1_000_000), 6, RoundingMode.HALF_UP);
     }
 
-    private BigDecimal perUnitCost(String billingUnit, int units, BigDecimal unitPrice) {
-        if ((!BILLING_UNIT_PER_CALL.equals(billingUnit) && !BILLING_UNIT_PER_SECOND.equals(billingUnit)) || units <= 0) {
+    private BigDecimal perCallCost(String billingUnit, int units, BigDecimal unitPrice) {
+        if (!BILLING_UNIT_PER_CALL.equals(billingUnit) || units <= 0) {
             return BigDecimal.ZERO;
         }
         return unitPrice.multiply(BigDecimal.valueOf(units)).setScale(6, RoundingMode.HALF_UP);

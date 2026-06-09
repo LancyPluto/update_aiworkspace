@@ -27,7 +27,7 @@ export type ToolPreviewVariant = "comparison" | "effect" | "icon"
 const BRAND_RULES: Array<{ patterns: string[]; brand: ModelBrand }> = [
   { patterns: ["deepseek"], brand: { name: "DeepSeek", iconUrl: "https://www.deepseek.com/favicon.ico", color: "#4d6bfe" } },
   { patterns: ["doubao", "seedance", "seedream", "volcengine"], brand: { name: "Doubao", iconUrl: "https://www.doubao.com/favicon.ico", color: "#4f46e5" } },
-  { patterns: ["qwen", "tongyi", "aliyun"], brand: { name: "阿里云百炼", iconUrl: "https://tongyi.aliyun.com/favicon.ico", color: "#615ced" } },
+  { patterns: ["qwen", "tongyi", "aliyun"], brand: { name: "Qwen", iconUrl: "https://tongyi.aliyun.com/favicon.ico", color: "#615ced" } },
   { patterns: ["glm", "zhipu", "chatglm"], brand: { name: "GLM", iconUrl: "https://chatglm.cn/favicon.ico", color: "#2563eb" } },
   { patterns: ["kimi", "moonshot"], brand: { name: "Kimi", iconUrl: "https://kimi.moonshot.cn/favicon.ico", color: "#111827" } },
   { patterns: ["kling"], brand: { name: "Kling", iconUrl: "https://app.klingai.com/favicon.ico", color: "#111827" } },

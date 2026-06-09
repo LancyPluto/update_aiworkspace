@@ -161,17 +161,6 @@ providers:
     workerReady: true
     description: Kling official text/image-to-video and image generation API. Configure AK/SK in extra auth JSON.
 
-  - code: bailian_happyhorse
-    label: Bailian HappyHorse
-    capabilities:
-      - VIDEO_GENERATION
-    defaultBaseUrl: https://dashscope.aliyuncs.com
-    defaultModel: happyhorse-1.0-t2v
-    billingDefault: PER_SECOND
-    testStrategy: accept_only
-    workerReady: true
-    description: Alibaba Cloud Bailian/DashScope HappyHorse video generation models.
-
   - code: ofox_openai_images
     label: oFox OpenAI images gateway
     capabilities:

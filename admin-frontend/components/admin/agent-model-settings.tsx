@@ -57,7 +57,7 @@ interface ModelForm {
   readTimeoutSeconds: string
   inputTokenPricePer1m: string
   outputTokenPricePer1m: string
-  billingUnit: "TOKEN_PER_M" | "PER_CALL" | "IMAGE_TOKEN" | "PER_SECOND"
+  billingUnit: "TOKEN_PER_M" | "PER_CALL" | "IMAGE_TOKEN"
   unitPrice: string
   enabled: boolean
   agentEnabled: boolean
@@ -250,7 +250,7 @@ const vendorCatalog: Record<string, VendorMeta> = {
   deepseek: { label: "DeepSeek", shortName: "DeepSeek", mark: "DS", iconAsset: "deepseek" },
   moonshot: { label: "Moonshot AI", shortName: "Kimi", mark: "K", iconAsset: "moonshot" },
   zhipu: { label: "Zhipu AI", shortName: "GLM", mark: "Z", iconAsset: "zhipu" },
-  qwen: { label: "阿里云百炼", shortName: "百炼", mark: "百", iconAsset: "qwen" },
+  qwen: { label: "Qwen", shortName: "Qwen", mark: "QW", iconAsset: "qwen" },
   alibabacloud: { label: "Alibaba Cloud", shortName: "Alibaba", mark: "ALI", iconAsset: "alibabacloud" },
   google: { label: "Google", shortName: "Gemini", mark: "G", iconAsset: "gemini" },
   openrouter: { label: "OpenRouter", shortName: "OpenRouter", mark: "OR", iconAsset: "openrouter" },
@@ -313,8 +313,6 @@ function toForm(config: AgentModelConfig, catalog: ModelProviderDescriptor[]): M
     billingUnit:
       config.billingUnit === "PER_CALL"
         ? "PER_CALL"
-        : config.billingUnit === "PER_SECOND"
-          ? "PER_SECOND"
         : config.billingUnit === "IMAGE_TOKEN"
           ? "IMAGE_TOKEN"
           : "TOKEN_PER_M",
@@ -359,7 +357,6 @@ function normalizeConfigCode(value: string) {
 
 function normalizeBillingUnit(value?: string | null): ModelForm["billingUnit"] {
   if (value === "PER_CALL") return "PER_CALL"
-  if (value === "PER_SECOND") return "PER_SECOND"
   if (value === "IMAGE_TOKEN") return "IMAGE_TOKEN"
   return "TOKEN_PER_M"
 }
@@ -656,7 +653,7 @@ export function AgentModelSettings({ refreshKey = 0 }: AgentModelSettingsProps) 
       if (!allowed.has(cap.toUpperCase())) return `能力 ${cap} 不适用于当前供应商 ${form.provider}。`
     }
     const timeout = Number(form.timeoutSeconds)
-    if (!Number.isFinite(timeout) || timeout < 1 || timeout > 7200) return "超时时间必须在 1 到 7200 秒之间。"
+    if (!Number.isFinite(timeout) || timeout < 1 || timeout > 300) return "超时时间必须在 1 到 300 秒之间。"
     if (form.connectTimeoutSeconds.trim()) {
       const connectTimeout = Number(form.connectTimeoutSeconds)
       if (!Number.isFinite(connectTimeout) || connectTimeout < 1 || connectTimeout > 120) {
@@ -1034,7 +1031,7 @@ export function AgentModelSettings({ refreshKey = 0 }: AgentModelSettingsProps) 
               </div>
               <div className="space-y-2">
                 <Label>默认读取超时（秒）</Label>
-                <Input type="number" min={1} max={7200} value={form.timeoutSeconds} onChange={(event) => updateForm("timeoutSeconds", event.target.value)} />
+                <Input type="number" min={1} max={300} value={form.timeoutSeconds} onChange={(event) => updateForm("timeoutSeconds", event.target.value)} />
               </div>
             </div>
 
@@ -1100,20 +1097,19 @@ export function AgentModelSettings({ refreshKey = 0 }: AgentModelSettingsProps) 
                   <SelectContent>
                     <SelectItem value="TOKEN_PER_M">Token / 1M</SelectItem>
                     <SelectItem value="PER_CALL">按生成次数</SelectItem>
-                    <SelectItem value="PER_SECOND">按生成秒数</SelectItem>
                     <SelectItem value="IMAGE_TOKEN">图片 Token</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label>{form.billingUnit === "PER_SECOND" ? "每秒价格" : "单次价格"}</Label>
+                <Label>单次价格</Label>
                 <Input
                   type="number"
                   min={0}
                   step="0.000001"
                   value={form.unitPrice}
                   onChange={(event) => updateForm("unitPrice", event.target.value)}
-                  placeholder={form.billingUnit === "PER_CALL" ? "图片/视频等单次调用成本" : form.billingUnit === "PER_SECOND" ? "视频等按秒生成成本" : "Token 计费通常填 0"}
+                  placeholder={form.billingUnit === "PER_CALL" ? "图片/视频等单次调用成本" : "Token 计费通常填 0"}
                 />
               </div>
             </div>

@@ -34,13 +34,13 @@ const MOCK_TOOLS: AITool[] = [
   },
   {
     id: 'qwen',
-    name: '阿里云百炼',
+    name: '通义千问',
     iconUrl: 'https://api.dicebear.com/7.x/shapes/svg?seed=qwen',
     description: '多模态对话（已下架示例）',
     enabled: false,
     order: 30,
     primaryColor: '#8b5cf6',
-    welcomeMessage: '你好，我是阿里云百炼。',
+    welcomeMessage: '你好，我是通义千问。',
     capabilities: [{ type: 'voiceInput', config: { language: 'zh-CN' } }],
   },
 ]

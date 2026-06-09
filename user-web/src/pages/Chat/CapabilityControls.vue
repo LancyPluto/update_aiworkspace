@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue"
 import type { Capability } from "@/api/aiToolTypes"
-import type { TaskDetail, ToolField, UserUploadAsset } from "@/api/types"
-import { deleteUploadAsset, fetchUploadAssets, uploadToolFile } from "@/api/toolApi"
+import type { TaskDetail, ToolField } from "@/api/types"
+import { uploadToolFile } from "@/api/toolApi"
 import { getApiOrigin } from "@/api/client"
 import { fetchTasks } from "@/api/taskApi"
 import { useAuthStore } from "@/store/authStore"
@@ -51,7 +51,6 @@ interface MaterialAsset {
 
 interface UploadHistoryItem {
   id: string
-  assetId?: number
   kind: MaterialKind
   url: string
   name: string
@@ -256,24 +255,19 @@ function isMultiImageField(field: ToolField): boolean {
   return field.fieldType === "multi_image"
 }
 
-function multiImageLimit(field: ToolField): number {
-  return parseFieldMeta(field).maxCount ?? MULTI_IMAGE_LIMIT
-}
-
 function multiImageValues(field: ToolField): string[] {
   const value = state.value.fields[field.fieldKey]
-  const limit = multiImageLimit(field)
   if (Array.isArray(value)) {
-    return value.map((item) => String(item).trim()).filter(Boolean).slice(0, limit)
+    return value.map((item) => String(item).trim()).filter(Boolean).slice(0, MULTI_IMAGE_LIMIT)
   }
   if (typeof value === "string" && value.trim()) {
     try {
       const parsed = JSON.parse(value) as unknown
       if (Array.isArray(parsed)) {
-        return parsed.map((item) => String(item).trim()).filter(Boolean).slice(0, limit)
+        return parsed.map((item) => String(item).trim()).filter(Boolean).slice(0, MULTI_IMAGE_LIMIT)
       }
     } catch {
-      return value.split(",").map((item) => item.trim()).filter(Boolean).slice(0, limit)
+      return value.split(",").map((item) => item.trim()).filter(Boolean).slice(0, MULTI_IMAGE_LIMIT)
     }
   }
   return []
@@ -281,7 +275,6 @@ function multiImageValues(field: ToolField): string[] {
 
 function setMultiImageValues(field: ToolField, urls: string[]) {
   const seen = new Set<string>()
-  const limit = multiImageLimit(field)
   const next = urls
     .map((url) => url.trim())
     .filter((url) => {
@@ -289,7 +282,7 @@ function setMultiImageValues(field: ToolField, urls: string[]) {
       seen.add(url)
       return true
     })
-    .slice(0, limit)
+    .slice(0, MULTI_IMAGE_LIMIT)
   setField(field.fieldKey, next)
 }
 
@@ -302,11 +295,9 @@ function removeMultiImageUrl(field: ToolField, url: string) {
 }
 
 function togglePickerUrl(url: string) {
-  const field = uploadHistoryOpen.value ? uploadHistoryField.value : materialPickerField.value
-  const limit = field ? multiImageLimit(field) : MULTI_IMAGE_LIMIT
   pickerSelectedUrls.value = pickerSelectedUrls.value.includes(url)
     ? pickerSelectedUrls.value.filter((item) => item !== url)
-    : [...pickerSelectedUrls.value, url].slice(0, limit)
+    : [...pickerSelectedUrls.value, url].slice(0, MULTI_IMAGE_LIMIT)
 }
 
 function pickerIsSelected(url: string) {
@@ -340,14 +331,6 @@ function materialKindForField(field: ToolField): MaterialKind {
   if (/image|img|picture|photo|frame|cover|avatar|poster|图片|图像|照片|帧|封面|首图/.test(text)) return "image"
   if (/audio|voice|sound|speech|music|音频|语音|声音|音乐/.test(text)) return "audio"
   if (/video|clip|movie|视频|短片|影片/.test(text)) return "video"
-  return "file"
-}
-
-function materialKindFromValue(value?: string | null): MaterialKind {
-  const text = String(value || "").toLowerCase()
-  if (text === "image" || text.startsWith("image/") || /\.(png|jpe?g|webp|gif|bmp|avif)(\?|$)/.test(text)) return "image"
-  if (text === "video" || text.startsWith("video/") || /\.(mp4|webm|mov|m4v)(\?|$)/.test(text)) return "video"
-  if (text === "audio" || text.startsWith("audio/") || /\.(mp3|wav|m4a|flac|ogg|aac)(\?|$)/.test(text)) return "audio"
   return "file"
 }
 
@@ -390,52 +373,6 @@ function writeUploadHistory(kind: MaterialKind, items: UploadHistoryItem[]) {
   window.localStorage.setItem(uploadHistoryStorageKey(kind), JSON.stringify(items.slice(0, UPLOAD_HISTORY_LIMIT)))
 }
 
-function uploadAssetToHistoryItem(asset: UserUploadAsset): UploadHistoryItem | null {
-  if (!asset.url) return null
-  const kind = materialKindFromValue(asset.kind || asset.contentType || asset.name)
-  return {
-    id: asset.fileId || String(asset.id),
-    assetId: asset.id,
-    kind,
-    url: asset.url,
-    name: asset.name || asset.fileId || "上传素材",
-    size: asset.size ?? undefined,
-    type: asset.contentType ?? undefined,
-    uploadedAt: asset.createdAt || new Date().toISOString(),
-    toolId: props.toolId,
-  }
-}
-
-function mergeUploadHistoryItems(items: UploadHistoryItem[]): UploadHistoryItem[] {
-  const seen = new Set<string>()
-  const result: UploadHistoryItem[] = []
-  for (const item of items) {
-    const key = item.url || item.id
-    if (!key || seen.has(key)) continue
-    seen.add(key)
-    result.push(item)
-  }
-  return result.slice(0, UPLOAD_HISTORY_LIMIT)
-}
-
-async function loadUploadHistory(kind: MaterialKind) {
-  const localItems = readUploadHistory(kind)
-  uploadHistoryItems.value = localItems
-  if (!auth.token) return
-  try {
-    const page = await fetchUploadAssets({ token: auth.token, kind, pageSize: UPLOAD_HISTORY_LIMIT })
-    const serverItems = page.list
-      .map(uploadAssetToHistoryItem)
-      .filter((item): item is UploadHistoryItem => Boolean(item))
-      .filter((item) => item.kind === kind)
-    const merged = mergeUploadHistoryItems([...serverItems, ...localItems])
-    writeUploadHistory(kind, merged)
-    uploadHistoryItems.value = merged
-  } catch {
-    uploadHistoryItems.value = localItems
-  }
-}
-
 function rememberUploadHistoryItem(field: ToolField, item: UploadHistoryItem) {
   const kind = materialKindForField(field)
   const existing = readUploadHistory(kind).filter((entry) => entry.url !== item.url)
@@ -447,9 +384,7 @@ function rememberUploadHistoryItem(field: ToolField, item: UploadHistoryItem) {
 
 function openUploadHistoryPicker(field: ToolField) {
   uploadHistoryField.value = field
-  const kind = materialKindForField(field)
-  uploadHistoryItems.value = readUploadHistory(kind)
-  void loadUploadHistory(kind)
+  uploadHistoryItems.value = readUploadHistory(materialKindForField(field))
   pickerSelectedUrls.value = isMultiImageField(field) ? multiImageValues(field) : []
   uploadHistoryOpen.value = true
 }
@@ -476,19 +411,12 @@ function selectUploadHistoryItem(item: UploadHistoryItem) {
   closeUploadHistoryPicker()
 }
 
-async function deleteUploadHistoryItem(item: UploadHistoryItem) {
+function deleteUploadHistoryItem(item: UploadHistoryItem) {
   const field = uploadHistoryField.value
   const kind = field ? materialKindForField(field) : item.kind
   const next = readUploadHistory(kind).filter((entry) => entry.id !== item.id && entry.url !== item.url)
   writeUploadHistory(kind, next)
   uploadHistoryItems.value = next
-  if (item.assetId && auth.token) {
-    try {
-      await deleteUploadAsset(item.assetId, { token: auth.token })
-    } catch {
-      // 本地列表已删除，服务端失败时下次刷新会重新同步。
-    }
-  }
   if (field && isMultiImageField(field)) removeMultiImageUrl(field, item.url)
   else if (field && strField(field.fieldKey) === item.url) clearUploadedField(field)
 }
@@ -637,12 +565,11 @@ async function uploadFieldFile(field: ToolField, file: File, options: { closeHis
     }
     rememberUploadHistoryItem(field, {
       id: result.fileId || fallbackId,
-      assetId: result.assetId,
       kind,
       url: result.url,
-      name: result.name || file.name,
-      size: result.size ?? file.size,
-      type: result.contentType || file.type,
+      name: file.name,
+      size: file.size,
+      type: file.type,
       uploadedAt: startedAt,
       toolId: props.toolId,
     })
@@ -672,7 +599,7 @@ async function handleFieldUpload(field: ToolField, files: FileList | File[] | nu
     await uploadFieldFile(field, selected[0]!)
     return
   }
-  for (const file of selected.slice(0, multiImageLimit(field) - multiImageValues(field).length)) {
+  for (const file of selected.slice(0, MULTI_IMAGE_LIMIT - multiImageValues(field).length)) {
     await uploadFieldFile(field, file)
   }
 }
@@ -685,7 +612,7 @@ async function handleUploadHistoryFile(files: FileList | File[] | null) {
     await uploadFieldFile(field, selected[0]!, { closeHistoryAfterUpload: true })
     return
   }
-  for (const file of selected.slice(0, multiImageLimit(field) - multiImageValues(field).length)) {
+  for (const file of selected.slice(0, MULTI_IMAGE_LIMIT - multiImageValues(field).length)) {
     await uploadFieldFile(field, file)
   }
 }
@@ -724,24 +651,10 @@ function validate(): { valid: boolean; message?: string } {
     if (maxLength !== undefined && typeof value === "string" && value.length > maxLength) {
       return { valid: false, message: `${field.fieldName} 超出 ${maxLength} 字限制` }
     }
-    if (uploadState(field.fieldKey).uploading) {
-      return { valid: false, message: `${field.fieldName} 上传中，请稍后提交` }
-    }
-    if (isMultiImageField(field)) {
-      const minCount = parseFieldMeta(field).minCount ?? 0
-      const count = multiImageValues(field).length
-      if (count < minCount) {
-        return { valid: false, message: `${field.fieldName} 至少需要 ${minCount} 张` }
-      }
-      if (count > multiImageLimit(field)) {
-        return { valid: false, message: `${field.fieldName} 最多选择 ${multiImageLimit(field)} 张` }
-      }
-    }
     if (!field.required) continue
     if (field.fieldType === "checkbox") continue
     if (isMultiImageField(field)) {
-      const minCount = Math.max(1, parseFieldMeta(field).minCount ?? 0)
-      if (multiImageValues(field).length < minCount) {
+      if (multiImageValues(field).length === 0) {
         return { valid: false, message: `请填写：${field.fieldName}` }
       }
       continue
@@ -936,7 +849,7 @@ defineExpose({
             </button>
           </div>
           <p class="text-[11px] text-muted-foreground">
-            已选 {{ multiImageValues(field).length }}/{{ multiImageLimit(field) }} 张参考图
+            已选 {{ multiImageValues(field).length }}/{{ MULTI_IMAGE_LIMIT }} 张参考图
           </p>
           <p v-if="uploadState(field.fieldKey).error" class="text-[11px] text-destructive">
             {{ uploadState(field.fieldKey).error }}
@@ -1182,7 +1095,7 @@ defineExpose({
             v-if="uploadHistoryField && isMultiImageField(uploadHistoryField)"
             class="flex items-center justify-between border-t border-white/10 px-6 py-4"
           >
-            <span class="text-sm text-white/45">已选 {{ pickerSelectedUrls.length }}/{{ materialPickerField ? multiImageLimit(materialPickerField) : MULTI_IMAGE_LIMIT }} 张</span>
+            <span class="text-sm text-white/45">已选 {{ pickerSelectedUrls.length }}/{{ MULTI_IMAGE_LIMIT }} 张</span>
             <button
               type="button"
               class="rounded-full bg-primary px-4 py-2 text-sm font-semibold text-white transition hover:brightness-110"
@@ -1266,7 +1179,7 @@ defineExpose({
             v-if="materialPickerField && isMultiImageField(materialPickerField)"
             class="flex items-center justify-between border-t border-white/10 px-6 py-4"
           >
-            <span class="text-sm text-white/45">已选 {{ pickerSelectedUrls.length }}/{{ uploadHistoryField ? multiImageLimit(uploadHistoryField) : MULTI_IMAGE_LIMIT }} 张</span>
+            <span class="text-sm text-white/45">已选 {{ pickerSelectedUrls.length }}/{{ MULTI_IMAGE_LIMIT }} 张</span>
             <button
               type="button"
               class="rounded-full bg-primary px-4 py-2 text-sm font-semibold text-white transition hover:brightness-110"

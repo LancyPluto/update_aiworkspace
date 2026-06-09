@@ -1,4 +1,4 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch, withDefaults } from "vue"
 import {
   Check,
@@ -54,7 +54,6 @@ const props = withDefaults(defineProps<{
   regeneratingMessageId: number | null
   cancellingRun: boolean
   memoryPanelOpen: boolean
-  intelligenceLevel?: "standard" | "high"
   agentTools?: AgentToolPickerItem[]
   agentToolsLoading?: boolean
   selectedToolCode?: string | null
@@ -85,7 +84,6 @@ const emit = defineEmits<{
   "remove-recent-attachment": [file: AgentMaterialAttachment]
   "refresh-material-assets": []
   "open-memory": []
-  "update:intelligenceLevel": [value: "standard" | "high"]
   "update:selectedToolCode": [value: string | null]
   "refresh-agent-tools": []
   "add-reference-attachment": [payload: import("@/utils/agentChatAssetRefs").ChatAssetDragPayload]
@@ -106,8 +104,6 @@ const pickerSelectedUrls = ref<Set<string>>(new Set())
 const materialUploadDropActive = ref(false)
 const toolMenuOpen = ref(false)
 const toolMenuRef = ref<HTMLElement | null>(null)
-const intelligenceMenuOpen = ref(false)
-const intelligenceMenuRef = ref<HTMLElement | null>(null)
 const toolSearch = ref("")
 const selectedToolModality = ref("all")
 const composerDropActive = ref(false)
@@ -201,7 +197,7 @@ function toolModalityLabel(key: string) {
 function toolPickerButtonLabel() {
   if (!selectedTool.value) return "工具选择"
   const name = selectedTool.value.toolName || selectedTool.value.toolCode
-  return name.length > 10 ? `${name.slice(0, 10)}...` : name
+  return name.length > 10 ? `${name.slice(0, 10)}…` : name
 }
 
 function toggleToolMenu() {
@@ -221,19 +217,6 @@ function chooseTool(tool: AgentToolPickerItem) {
 
 function clearSelectedTool() {
   emit("update:selectedToolCode", null)
-}
-
-const intelligenceLabel = computed(() => props.intelligenceLevel === "high" ? "高智能" : "标准")
-
-function toggleIntelligenceMenu() {
-  if (inputBlocked.value) return
-  intelligenceMenuOpen.value = !intelligenceMenuOpen.value
-}
-
-function chooseIntelligence(value: "standard" | "high") {
-  emit("update:intelligenceLevel", value)
-  intelligenceMenuOpen.value = false
-  lightTap()
 }
 
 function onComposerDragOver(event: DragEvent) {
@@ -262,7 +245,7 @@ function onComposerDrop(event: DragEvent) {
 
 function shortAttachmentName(name?: string | null) {
   const cleaned = (name || "图片").replace(/^@[^-]+-/, "").trim() || "图片"
-  return cleaned.length > 14 ? `${cleaned.slice(0, 14)}...` : cleaned
+  return cleaned.length > 14 ? `${cleaned.slice(0, 14)}…` : cleaned
 }
 
 function imageReferenceLabel(index: number, name?: string | null) {
@@ -557,7 +540,7 @@ defineExpose({ adjustComposerTextareaHeight })
           :tint-class="vendorIconClassForGroup(selectedModelVendor)"
         />
         <span class="composer-model-pill-label">
-          {{ selectedAgentModel ? modelLabel(selectedAgentModel) : (modelsLoading ? "加载中..." : "选择模型") }}
+          {{ selectedAgentModel ? modelLabel(selectedAgentModel) : (modelsLoading ? "加载中" : "选择模型") }}
         </span>
       </button>
 
@@ -768,6 +751,15 @@ defineExpose({ adjustComposerTextareaHeight })
             素材
           </button>
         </div>
+        <button
+          type="button"
+          class="tool-btn tool-btn--placeholder"
+          aria-disabled="true"
+          title="即将推出"
+        >
+          <Sparkles class="h-4 w-4 tool-icon" />
+          深度思考
+        </button>
         <div ref="toolMenuRef" class="attachment-menu-host">
           <button
             type="button"
@@ -839,39 +831,6 @@ defineExpose({ adjustComposerTextareaHeight })
           <Database class="h-4 w-4 tool-icon" />
           记忆
         </button>
-        <div ref="intelligenceMenuRef" class="tool-menu-wrap">
-          <button
-            type="button"
-            class="tool-btn"
-            :class="{ 'tool-btn--active': intelligenceLevel === 'high' }"
-            @click="toggleIntelligenceMenu"
-          >
-            <Sparkles class="h-4 w-4 tool-icon" />
-            智能程度：{{ intelligenceLabel }}
-          </button>
-          <Transition :name="reducedMotion ? '' : 'tool-menu-fade'">
-            <div v-if="intelligenceMenuOpen" class="intelligence-menu">
-              <button
-                type="button"
-                class="intelligence-item"
-                :class="{ active: intelligenceLevel !== 'high' }"
-                @click="chooseIntelligence('standard')"
-              >
-                <strong>标准</strong>
-                <small>快速填参，使用确定性附件和上下文规则。</small>
-              </button>
-              <button
-                type="button"
-                class="intelligence-item"
-                :class="{ active: intelligenceLevel === 'high' }"
-                @click="chooseIntelligence('high')"
-              >
-                <strong>高智能</strong>
-                <small>扩大上下文和检查预算，提交前更重视附件、记忆和最近结果。</small>
-              </button>
-            </div>
-          </Transition>
-        </div>
       </div>
 
       <button
@@ -939,7 +898,7 @@ defineExpose({ adjustComposerTextareaHeight })
               >
                 <Loader2 v-if="uploading" class="h-5 w-5 animate-spin" />
                 <Upload v-else class="h-5 w-5" />
-                <span>{{ uploading ? "上传中..." : (materialUploadDropActive ? "松开上传素材" : "上传或拖拽图片/文件") }}</span>
+                <span>{{ uploading ? "上传中" : (materialUploadDropActive ? "松开上传素材" : "上传或拖拽图片/文件") }}</span>
               </button>
 
               <section class="material-section">
@@ -994,7 +953,7 @@ defineExpose({ adjustComposerTextareaHeight })
               </div>
               <div v-if="materialAssetsLoading" class="attachment-empty">
                 <Loader2 class="h-3.5 w-3.5 animate-spin" />
-                加载中...
+                加载中
               </div>
               <div v-else-if="libraryMaterialAttachments.length === 0" class="attachment-empty">暂无可复用素材</div>
               <div v-else class="material-grid material-grid--library">
@@ -1551,51 +1510,6 @@ defineExpose({ adjustComposerTextareaHeight })
   cursor: pointer;
 }
 
-.intelligence-menu {
-  position: absolute;
-  left: 0;
-  bottom: calc(100% + 10px);
-  z-index: 40;
-  width: min(320px, calc(100vw - 32px));
-  border: 1px solid rgb(255 255 255 / 0.10);
-  border-radius: 16px;
-  background:
-    linear-gradient(180deg, rgb(34 34 42 / 0.96), rgb(18 18 24 / 0.96));
-  box-shadow: 0 18px 42px rgb(0 0 0 / 0.38);
-  padding: 8px;
-  backdrop-filter: blur(18px);
-}
-
-.intelligence-item {
-  width: 100%;
-  display: grid;
-  gap: 3px;
-  border: 0;
-  border-radius: 12px;
-  background: transparent;
-  color: rgb(255 255 255 / 0.78);
-  padding: 10px;
-  text-align: left;
-  cursor: pointer;
-}
-
-.intelligence-item:hover,
-.intelligence-item.active {
-  background: rgb(255 255 255 / 0.075);
-  color: #fff;
-}
-
-.intelligence-item strong {
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.intelligence-item small {
-  color: rgb(255 255 255 / 0.48);
-  font-size: 11px;
-  line-height: 1.45;
-}
-
 .attachment-menu-host {
   position: relative;
 }
@@ -2005,13 +1919,18 @@ defineExpose({ adjustComposerTextareaHeight })
   stroke-width: 1.75;
 }
 
-.tool-btn:hover:not(:disabled) {
+.tool-btn:hover:not(:disabled):not(.tool-btn--placeholder) {
   color: rgb(255 255 255 / 0.72);
 }
 
 .tool-btn--active {
   color: var(--theme-color) !important;
   text-shadow: 0 0 12px var(--agent-accent-glow);
+}
+
+.tool-btn--placeholder {
+  cursor: default;
+  opacity: 0.55;
 }
 
 .tool-btn:disabled {

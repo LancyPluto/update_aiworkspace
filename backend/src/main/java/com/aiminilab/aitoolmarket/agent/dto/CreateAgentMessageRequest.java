@@ -12,7 +12,6 @@ public record CreateAgentMessageRequest(
         String content,
         String clientRequestId,
         Long modelConfigId,
-        String intelligenceLevel,
         /** 用户在本条消息中优先选择的 Agent 工具 code，仅影响本次 run 的路由偏置。 */
         String preferredToolCode,
         /** 随消息一并提交的会话附件 ID；为空则绑定当前会话全部待发送附件。 */

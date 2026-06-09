@@ -59,8 +59,7 @@ class FollowupTaskResolver:
             return FollowupResolution(False, "no_compatible_recent_tool_call", tool_code=target_tool_code)
 
         inherited = dict(source.argumentsJson or {})
-        has_reference_media = bool(source.mediaUrls) or bool(user_selected_image_urls(context))
-        if not inherited and not (has_reference_media and self._tool_accepts_image(selected_tool)):
+        if not inherited:
             return FollowupResolution(False, "recent_tool_call_missing_arguments", tool_code=target_tool_code or source.toolCode)
 
         can_use_selected_target = (

@@ -1,8 +1,6 @@
 from typing import Any
 
-import json
-
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 
 class ChatMessage(BaseModel):
@@ -176,7 +174,6 @@ class RuntimeSettings(BaseModel):
     productToolLoopEnabled: bool | None = None
     productToolLoopMaxCalls: int | None = None
     productToolLoopFallbackToRouter: bool | None = None
-    intelligenceLevel: str | None = None
 
 
 class RecentToolCallContext(BaseModel):
@@ -207,56 +204,6 @@ class PendingToolContext(BaseModel):
     clarifyingQuestion: str | None = None
     confirmationRequired: bool = False
     status: str = "ACTIVE"
-
-    @field_validator("candidateToolCodesJson", mode="before")
-    @classmethod
-    def _parse_candidate_tool_codes(cls, value: Any) -> list[str] | None:
-        if value is None:
-            return None
-        if isinstance(value, list):
-            return [str(item) for item in value if str(item).strip()]
-        if isinstance(value, str) and value.strip():
-            try:
-                parsed = json.loads(value)
-                if isinstance(parsed, str):
-                    parsed = json.loads(parsed)
-                if isinstance(parsed, list):
-                    return [str(item) for item in parsed if str(item).strip()]
-            except Exception:
-                return None
-        return None
-
-    @field_validator("collectedArgumentsJson", mode="before")
-    @classmethod
-    def _parse_collected_arguments(cls, value: Any) -> dict[str, Any]:
-        if isinstance(value, dict):
-            return value
-        if isinstance(value, str) and value.strip():
-            try:
-                parsed = json.loads(value)
-                if isinstance(parsed, str):
-                    parsed = json.loads(parsed)
-                if isinstance(parsed, dict):
-                    return parsed
-            except Exception:
-                return {}
-        return {}
-
-    @field_validator("missingArgumentsJson", mode="before")
-    @classmethod
-    def _parse_missing_arguments(cls, value: Any) -> list[str]:
-        if isinstance(value, list):
-            return [str(item) for item in value if str(item).strip()]
-        if isinstance(value, str) and value.strip():
-            try:
-                parsed = json.loads(value)
-                if isinstance(parsed, str):
-                    parsed = json.loads(parsed)
-                if isinstance(parsed, list):
-                    return [str(item) for item in parsed if str(item).strip()]
-            except Exception:
-                return []
-        return []
 
 
 class RunContext(BaseModel):

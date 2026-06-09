@@ -110,22 +110,6 @@ public interface ToolMapper extends BaseMapper<AiTool> {
     }
 
     @Select("""
-            SELECT t.*, c.category_name, c.category_code,
-                   COALESCE(m.display_name, m.model_name) AS model_config_name,
-                   m.model_name
-            FROM ai_tools t
-            JOIN tool_categories c ON c.id = t.category_id
-            LEFT JOIN agent_model_configs m ON m.id = t.model_config_id AND COALESCE(m.is_deleted, 0) = 0
-            WHERE t.tool_code = #{toolCode}
-            LIMIT 1
-            """)
-    AiTool selectAnyByCode(@Param("toolCode") String toolCode);
-
-    default Optional<AiTool> findAnyByCode(String toolCode) {
-        return Optional.ofNullable(selectAnyByCode(toolCode));
-    }
-
-    @Select("""
             SELECT COUNT(*)
             FROM ai_tools
             WHERE tool_code = #{toolCode} AND is_deleted = 0
@@ -163,17 +147,6 @@ public interface ToolMapper extends BaseMapper<AiTool> {
     void updateTool(@Param("toolId") Long toolId,
                     @Param("tool") AiTool tool,
                     @Param("operatorId") Long operatorId);
-
-    @Update("""
-            UPDATE ai_tools
-            SET is_deleted = 0,
-                status = 'DRAFT',
-                updated_by = #{operatorId},
-                updated_at = CURRENT_TIMESTAMP
-            WHERE id = #{toolId}
-            """)
-    int restoreDeletedTool(@Param("toolId") Long toolId,
-                           @Param("operatorId") Long operatorId);
 
     @Update("""
             UPDATE ai_tools

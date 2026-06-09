@@ -20,7 +20,6 @@ PROVIDERS: dict[str, dict[str, Any]] = {
     "seedance": {"capabilities": {"VIDEO_GENERATION", "DIGITAL_HUMAN"}, "worker_ready": True},
     "infinitetalk": {"capabilities": {"VIDEO_GENERATION", "DIGITAL_HUMAN"}, "worker_ready": True},
     "kling_video": {"capabilities": {"VIDEO_GENERATION", "IMAGE_GENERATION"}, "worker_ready": True},
-    "bailian_happyhorse": {"capabilities": {"VIDEO_GENERATION"}, "worker_ready": True},
     "ofox_openai_images": {
         "capabilities": {"IMAGE_GENERATION"},
         "worker_ready": True,

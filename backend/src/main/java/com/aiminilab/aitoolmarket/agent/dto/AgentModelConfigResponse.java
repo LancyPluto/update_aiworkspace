@@ -134,9 +134,6 @@ public record AgentModelConfigResponse(
         if ("PER_CALL".equalsIgnoreCase(unit)) {
             return "PER_CALL " + (config.getUnitPrice() == null ? "0" : config.getUnitPrice().toPlainString());
         }
-        if ("PER_SECOND".equalsIgnoreCase(unit)) {
-            return "PER_SECOND " + (config.getUnitPrice() == null ? "0" : config.getUnitPrice().toPlainString()) + "/s";
-        }
         if ("IMAGE_TOKEN".equalsIgnoreCase(unit)) {
             return "IMAGE_TOKEN input="
                     + (config.getInputTokenPricePer1m() == null ? "0" : config.getInputTokenPricePer1m().toPlainString())
