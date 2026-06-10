@@ -1,9 +1,12 @@
 import assert from "node:assert/strict"
+import { execFileSync } from "node:child_process"
 import { readdir, readFile } from "node:fs/promises"
 import path from "node:path"
 import test from "node:test"
+import { fileURLToPath } from "node:url"
 
 const srcRoot = new URL("./", import.meta.url)
+const webRoot = new URL("../", srcRoot)
 
 async function readSource(relativePath) {
   return readFile(new URL(relativePath, srcRoot), "utf8")
@@ -166,6 +169,15 @@ test("internal user navigation does not target legacy marketplace compatibility 
   }
 
   assert.deepEqual(violations, [])
+})
+
+test("workspace creative hub data is tracked for clean CI checkouts", () => {
+  const trackedFile = execFileSync("git", ["ls-files", "--", "src/data/creativeHub.ts"], {
+    cwd: fileURLToPath(webRoot),
+    encoding: "utf8",
+  }).trim()
+
+  assert.equal(trackedFile, "src/data/creativeHub.ts")
 })
 
 test("create page consumes migrated replay route context directly", async () => {
