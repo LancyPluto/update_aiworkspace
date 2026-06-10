@@ -207,11 +207,29 @@ export const http = {
       headers.Authorization = `Bearer ${token}`
     }
 
-    const response = await fetch(buildUrl(path), {
-      method: 'POST',
-      headers,
-      body: formData,
-    })
+    let response: Response
+    try {
+      response = await fetch(buildUrl(path), {
+        method: 'POST',
+        headers,
+        body: formData,
+        credentials: 'include',
+      })
+    } catch (err) {
+      if ((err as Error).name === 'AbortError') {
+        throw err
+      }
+      throw new ApiError('Network error, please check backend service.', 'NETWORK_ERROR')
+    }
+
+    if (response.status === 401 || response.status === 403) {
+      clearSession()
+      if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
+        const basePath = (process.env.NEXT_PUBLIC_ADMIN_BASE_PATH || '').replace(/\/$/, '')
+        window.location.href = `${basePath}/login`
+      }
+      throw new ApiError('Login expired, please sign in again.', 'UNAUTHORIZED', 401)
+    }
 
     let payload: ApiResponse<T> | null = null
     try {

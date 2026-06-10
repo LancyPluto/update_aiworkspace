@@ -1,5 +1,10 @@
 import { http } from './http'
-import type { ModelVendorAccount, ModelVendorAccountPayload, ModelVendorAccountTestResult } from './types'
+import type {
+  ModelVendorAccount,
+  ModelVendorAccountDiscoverModelsResult,
+  ModelVendorAccountPayload,
+  ModelVendorAccountTestResult,
+} from './types'
 
 const BASE = '/api/admin/v1/model-vendor-accounts'
 
@@ -74,6 +79,10 @@ export async function testModelVendorAccount(id: number) {
 
 export function refreshModelVendorAccountBalance(id: number) {
   return http.post<ModelVendorAccount>(`${BASE}/${id}/refresh-balance`)
+}
+
+export function discoverModelVendorAccountModels(id: number) {
+  return http.post<ModelVendorAccountDiscoverModelsResult>(`${BASE}/${id}/discover-models`)
 }
 
 export function refreshAllModelVendorAccountBalances() {

@@ -1,9 +1,10 @@
-export type AppTheme = "dark"
+export type AppTheme = "light" | "dark"
 
 export const APP_THEME_STORAGE_KEY = "ai_tool_market_theme"
 
 export function getStoredTheme(): AppTheme {
-  return "dark"
+  if (typeof window === "undefined") return "light"
+  return localStorage.getItem(APP_THEME_STORAGE_KEY) === "dark" ? "dark" : "light"
 }
 
 export function applyAppTheme(theme: AppTheme) {

@@ -28,6 +28,7 @@ import type { ToolDetail } from "@/api/types"
 import ProjectCard from "@/pages/PptWorkspace/components/ProjectCard.vue"
 import { userRoutes } from "@/router/userRoutes"
 import { useAuthStore } from "@/store/authStore"
+import { cleanToolDisplayText } from "@/utils/toolDisplayText"
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -93,6 +94,7 @@ const enabledCreationTypes = computed<PptCreationType[]>(() => {
 const stepCredits = computed(() => workflow.value?.steps?.filter((s) => s.enabled) ?? [])
 
 const activeMeta = computed(() => CREATION_META[activeTab.value])
+const displayToolName = computed(() => cleanToolDisplayText(tool.value?.toolName) || "AI PPT 工作台")
 
 async function load() {
   loading.value = true
@@ -173,7 +175,7 @@ onMounted(load)
 
 <template>
   <AppShell
-    :title="tool?.toolName || 'PPT 生成'"
+    :title="displayToolName"
     description="多步工作台 · 大纲 · 描述 · 预览 · 导出"
   >
     <div class="mx-auto max-w-4xl space-y-8 px-6 py-6">
@@ -186,7 +188,7 @@ onMounted(load)
           :to="userRoutes.toolDetail(PPT_TOOL_CODE)"
           class="hover:text-foreground"
         >
-          {{ tool?.toolName || "PPT" }}
+          {{ displayToolName }}
         </RouterLink>
         <span>/</span>
         <span class="text-foreground">工作台</span>
@@ -199,7 +201,7 @@ onMounted(load)
           <Sparkles class="h-7 w-7 text-amber-500" />
         </div>
         <h1 class="text-2xl font-semibold tracking-tight">
-          {{ tool?.toolName || "AI PPT 工作台" }}
+          {{ displayToolName }}
         </h1>
         <div v-if="stepCredits.length" class="flex flex-wrap justify-center gap-2">
           <span

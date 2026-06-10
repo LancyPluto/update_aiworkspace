@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from "vue"
-import { BookOpen, ImageIcon, Plus, RefreshCw, X } from "lucide-vue-next"
+import { BookOpen, FileUp, ImageIcon, Music, Plus, RefreshCw, Video, X } from "lucide-vue-next"
+import { getApiOrigin } from "@/api/client"
 import type { ToolField } from "@/api/types"
 import { uploadToolFile } from "@/api/toolApi"
 import {
@@ -97,6 +98,46 @@ const uploading = reactive<Record<string, boolean>>({})
 const replacingIndex = reactive<Record<string, number | null>>({})
 const libraryOpen = reactive<Record<string, boolean>>({})
 const libraryImages = ref<string[]>(loadLibraryImages())
+
+type UploadFieldKind = "image" | "video" | "audio" | "file"
+
+function isUploadField(field: ToolField): boolean {
+  return ["image_upload", "video_upload", "audio_upload", "file_upload"].includes(field.fieldType)
+}
+
+function uploadFieldKind(field: ToolField): UploadFieldKind {
+  if (field.fieldType === "image_upload") return "image"
+  if (field.fieldType === "video_upload") return "video"
+  if (field.fieldType === "audio_upload") return "audio"
+  return "file"
+}
+
+function uploadAccept(field: ToolField): string {
+  const metaAccept = parseFieldMeta(field).accept
+  if (metaAccept) return metaAccept
+  const kind = uploadFieldKind(field)
+  if (kind === "image") return "image/*"
+  if (kind === "video") return "video/*"
+  if (kind === "audio") return "audio/*"
+  return "image/*,video/*,audio/*,.pdf,.txt,.doc,.docx"
+}
+
+function uploadPrompt(field: ToolField): string {
+  const kind = uploadFieldKind(field)
+  if (kind === "image") return "点击上传图片"
+  if (kind === "video") return "点击上传视频"
+  if (kind === "audio") return "点击上传音频"
+  return "点击上传文件"
+}
+
+function uploadedPreviewUrl(value: string): string {
+  const raw = value.trim()
+  if (!raw) return ""
+  if (raw.startsWith("http://") || raw.startsWith("https://") || raw.startsWith("data:") || raw.startsWith("blob:")) return raw
+  const path = raw.startsWith("/") ? raw : `/${raw}`
+  const apiOrigin = getApiOrigin()
+  return apiOrigin ? `${apiOrigin}${path}` : path
+}
 
 async function onFilePicked(key: string, ev: Event) {
   const input = ev.target as HTMLInputElement
@@ -527,6 +568,73 @@ defineExpose({ validate })
                   <span>暂无最近上传图片</span>
                 </div>
               </div>
+            </div>
+
+            <div v-else-if="isUploadField(f)" class="space-y-2">
+              <div
+                v-if="strVal(f.fieldKey) && !uploading[f.fieldKey]"
+                class="group relative overflow-hidden rounded-xl border border-border bg-background/60"
+              >
+                <img
+                  v-if="uploadFieldKind(f) === 'image'"
+                  :src="uploadedPreviewUrl(strVal(f.fieldKey))"
+                  :alt="f.fieldName"
+                  class="max-h-64 w-full object-contain"
+                />
+                <video
+                  v-else-if="uploadFieldKind(f) === 'video'"
+                  :src="uploadedPreviewUrl(strVal(f.fieldKey))"
+                  class="max-h-64 w-full object-contain bg-black"
+                  controls
+                  playsinline
+                  preload="metadata"
+                />
+                <div v-else class="flex items-center gap-3 px-4 py-5 text-sm">
+                  <Music v-if="uploadFieldKind(f) === 'audio'" class="h-5 w-5 text-primary" />
+                  <FileUp v-else class="h-5 w-5 text-primary" />
+                  <span class="truncate text-foreground/80">{{ strVal(f.fieldKey) }}</span>
+                </div>
+                <div class="absolute inset-x-0 bottom-0 flex items-center justify-end gap-2 bg-gradient-to-t from-black/70 to-transparent p-2 opacity-0 transition group-hover:opacity-100">
+                  <label class="inline-flex cursor-pointer items-center gap-1 rounded-md bg-white/15 px-2.5 py-1 text-xs font-medium text-white backdrop-blur transition hover:bg-white/25">
+                    重新上传
+                    <input class="hidden" type="file" :accept="uploadAccept(f)" @change="onFilePicked(f.fieldKey, $event)" />
+                  </label>
+                  <button
+                    type="button"
+                    class="inline-flex items-center gap-1 rounded-md bg-white/15 px-2.5 py-1 text-xs font-medium text-white backdrop-blur transition hover:bg-white/25"
+                    @click="setField(f.fieldKey, '')"
+                  >
+                    <X class="h-3.5 w-3.5" />移除
+                  </button>
+                </div>
+              </div>
+
+              <label
+                v-else
+                class="flex w-full cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border bg-background/40 px-4 py-10 text-center transition hover:border-primary/50 hover:bg-background/70"
+                :class="{ 'cursor-not-allowed opacity-60': uploading[f.fieldKey] }"
+              >
+                <RefreshCw v-if="uploading[f.fieldKey]" class="h-7 w-7 animate-spin text-primary" />
+                <template v-else>
+                  <ImageIcon v-if="uploadFieldKind(f) === 'image'" class="h-8 w-8 text-muted-foreground" />
+                  <Video v-else-if="uploadFieldKind(f) === 'video'" class="h-8 w-8 text-muted-foreground" />
+                  <Music v-else-if="uploadFieldKind(f) === 'audio'" class="h-8 w-8 text-muted-foreground" />
+                  <FileUp v-else class="h-8 w-8 text-muted-foreground" />
+                </template>
+                <span class="text-sm text-muted-foreground">
+                  {{ uploading[f.fieldKey] ? "上传中..." : uploadPrompt(f) }}
+                </span>
+                <span v-if="!uploading[f.fieldKey]" class="text-xs text-muted-foreground/70">
+                  支持点击选择文件
+                </span>
+                <input
+                  class="hidden"
+                  type="file"
+                  :accept="uploadAccept(f)"
+                  :disabled="uploading[f.fieldKey]"
+                  @change="onFilePicked(f.fieldKey, $event)"
+                />
+              </label>
             </div>
 
             <div v-else-if="f.fieldType === 'image' || f.fieldType === 'file'" class="space-y-2">

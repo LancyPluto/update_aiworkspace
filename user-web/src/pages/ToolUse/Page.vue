@@ -79,8 +79,7 @@ function normalizeToolMediaUrl(value?: string | null): string {
 }
 
 function isVideoPreviewUrl(value?: string | null): boolean {
-  const raw = value?.split(/[?#]/)[0]?.toLowerCase() || ""
-  return [".mp4", ".webm", ".mov", ".m4v"].some((ext) => raw.endsWith(ext))
+  return /\.(mp4|webm|mov|m4v)(?:[?#].*)?$/i.test(value?.trim() || "")
 }
 
 function applyCommunityPromptPreset() {
@@ -242,7 +241,7 @@ async function handleCreateTask() {
                 <li class="flex gap-2">
                   <span class="text-primary mt-0.5">•</span>
                   生成结果将保存至
-                  <RouterLink :to="userRoutes.myTasks" class="text-primary hover:underline">我的任务</RouterLink>
+                  <RouterLink :to="userRoutes.dashboard" class="text-primary hover:underline">生成工作台</RouterLink>
                 </li>
               </ul>
 

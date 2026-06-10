@@ -2,7 +2,6 @@ import json
 import logging
 import math
 import mimetypes
-import os
 import socket
 import time
 from io import BytesIO
@@ -12,7 +11,16 @@ from urllib.parse import urlparse
 import requests
 
 from utils.input_image import InputImageError, decode_reference_image_data_url
-from requests.exceptions import ConnectTimeout, ProxyError, ReadTimeout, RequestException, SSLError, Timeout
+from requests.exceptions import (
+    ChunkedEncodingError,
+    ConnectionError as RequestsConnectionError,
+    ConnectTimeout,
+    ProxyError,
+    ReadTimeout,
+    RequestException,
+    SSLError,
+    Timeout,
+)
 
 
 LOGGER = logging.getLogger(__name__)
@@ -24,6 +32,10 @@ class OpenAIImagesError(RuntimeError):
 
 class OpenAIImagesTimeoutError(OpenAIImagesError):
     pass
+
+
+class OpenAIImagesRetryableServerError(OpenAIImagesError):
+    """5xx gateway responses that are safe to retry within the same task."""
 
 
 class OpenAIImagesClient:
@@ -40,16 +52,15 @@ class OpenAIImagesClient:
         self.api_key = (api_key or "").strip()
         self.extra_auth = self._parse_json(extra_auth_json)
         self.timeout = self._resolve_timeout(timeout_seconds)
-        self.endpoint_path = str(
-            endpoint_path
-            or self.extra_auth.get("endpointPath")
-            or _default_images_endpoint(self.base_url)
-        )
+        self.endpoint_path = str(endpoint_path or self.extra_auth.get("endpointPath") or "/images/generations")
         self.edit_endpoint_path = str(self.extra_auth.get("editEndpointPath") or "/images/edits")
         self.ssl_eof_retries = self._resolve_ssl_eof_retries()
+        self.connection_retries = self._resolve_connection_retries()
+        self.retry_backoff_seconds = _as_float(self.extra_auth.get("retryBackoffSeconds"), 2.0)
+        self.retry_backoff_max_seconds = _as_float(self.extra_auth.get("retryBackoffMaxSeconds"), 30.0)
         self.last_usage: dict[str, int] = {}
         self.session = requests.Session()
-        self._configure_session_proxy()
+        self.session.trust_env = _as_bool(self.extra_auth.get("trustEnv"), False)
         # Do not set Content-Type on the session: multipart edits need requests to
         # inject multipart/form-data; a session-level application/json leaks through.
         self.session.headers.update(
@@ -58,16 +69,7 @@ class OpenAIImagesClient:
                 "Connection": "close",
             }
         )
-
-    def _configure_session_proxy(self) -> None:
         proxy_url = str(self.extra_auth.get("proxyUrl") or "").strip()
-        if not proxy_url:
-            proxy_url = (os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY") or "").strip()
-        if "trustEnv" in self.extra_auth:
-            self.session.trust_env = _as_bool(self.extra_auth.get("trustEnv"), False)
-        else:
-            # Explicit proxies are more stable than trust_env inside Docker + mihomo.
-            self.session.trust_env = False
         if proxy_url:
             self.session.proxies.update({"http": proxy_url, "https": proxy_url})
 
@@ -94,69 +96,91 @@ class OpenAIImagesClient:
 
         reference_images = _normalize_reference_images(image)
         if reference_images:
-            form_fields, image_files = self._build_edit_multipart(
-                prompt=prompt,
-                model=model,
-                image_size=image_size,
-                batch_size=batch_size,
-                quality=quality,
-                output_format=output_format,
-                reference_images=reference_images,
-            )
-            endpoint = self.edit_endpoint_path
-            transport = "openai-sdk" if _as_bool(self.extra_auth.get("preferSdkEdit"), False) else "requests-multipart"
-            LOGGER.info(
-                "openai images edit request endpoint=%s model=%s candidates=%s n=%s size=%s quality=%s output_format=%s transport=%s referenceImages=%s",
-                endpoint,
-                form_fields.get("model"),
-                ",".join(self._edit_model_candidates(model or "")),
-                form_fields.get("n"),
-                form_fields.get("size"),
-                form_fields.get("quality"),
-                form_fields.get("output_format"),
-                transport,
-                len(image_files),
-            )
-            response = self._edit_reference_image(
-                endpoint,
-                form_fields,
-                image_files,
-                source_model=model,
-            )
-            payload = {**form_fields, "images": [f"<{transport}>"]}
-            responses = [response]
-            urls = self._extract_image_urls(response)
-            requested_count = max(1, min(10, int(batch_size or 1)))
-            if len(urls) < requested_count:
-                LOGGER.warning(
-                    "openai images edit returned fewer images than requested requested=%s received=%s endpoint=%s model=%s responseData=%s usage=%s",
-                    requested_count,
-                    len(urls),
+            if self._uses_json_image_array_input():
+                payload = self._build_generation_payload(
+                    prompt=prompt,
+                    model=model,
+                    image_size=image_size,
+                    batch_size=batch_size,
+                    quality=quality,
+                    style=style,
+                    output_format=output_format,
+                    response_format=response_format,
+                )
+                payload["image"] = reference_images
+                LOGGER.info(
+                    "openai images json-image request endpoint=%s model=%s n=%s size=%s referenceImages=%s response_format=%s",
+                    self.endpoint_path,
+                    payload.get("model"),
+                    payload.get("n"),
+                    payload.get("size"),
+                    len(reference_images),
+                    _response_format_for_log(payload),
+                )
+                response = self._post(self.endpoint_path, payload)
+            else:
+                form_fields, image_files = self._build_edit_multipart(
+                    prompt=prompt,
+                    model=model,
+                    image_size=image_size,
+                    batch_size=batch_size,
+                    quality=quality,
+                    output_format=output_format,
+                    reference_images=reference_images,
+                )
+                endpoint = self.edit_endpoint_path
+                transport = "openai-sdk" if _as_bool(self.extra_auth.get("preferSdkEdit"), False) else "requests-multipart"
+                LOGGER.info(
+                    "openai images edit request endpoint=%s model=%s candidates=%s n=%s size=%s quality=%s output_format=%s transport=%s referenceImages=%s",
                     endpoint,
                     form_fields.get("model"),
-                    _image_response_data_summary(response),
-                    _safe_usage_summary(response),
+                    ",".join(self._edit_model_candidates(model or "")),
+                    form_fields.get("n"),
+                    form_fields.get("size"),
+                    form_fields.get("quality"),
+                    form_fields.get("output_format"),
+                    transport,
+                    len(image_files),
                 )
-            if len(urls) < requested_count and _as_bool(self.extra_auth.get("topUpEditBatch"), False):
-                LOGGER.warning(
-                    "openai images edit top-up enabled; issuing additional single-image edit requests requested=%s received=%s endpoint=%s model=%s",
-                    requested_count,
-                    len(urls),
+                response = self._edit_reference_image(
                     endpoint,
-                    form_fields.get("model"),
+                    form_fields,
+                    image_files,
+                    source_model=model,
                 )
-                single_fields = {**form_fields, "n": "1"}
-                while len(urls) < requested_count:
-                    top_up_response = self._edit_reference_image(
+                payload = {**form_fields, "images": [f"<{transport}>"]}
+                responses = [response]
+                urls = self._extract_image_urls(response)
+                requested_count = max(1, min(10, int(batch_size or 1)))
+                if len(urls) < requested_count:
+                    LOGGER.warning(
+                        "openai images edit returned fewer images than requested requested=%s received=%s endpoint=%s model=%s responseData=%s",
+                        requested_count,
+                        len(urls),
                         endpoint,
-                        single_fields,
-                        image_files,
-                        source_model=model,
+                        form_fields.get("model"),
+                        _image_response_data_summary(response),
                     )
-                    responses.append(top_up_response)
-                    urls.extend(self._extract_image_urls(top_up_response))
-            urls = urls[:requested_count]
-            response = _combine_image_responses(responses)
+                if len(urls) < requested_count and _as_bool(self.extra_auth.get("topUpEditBatch"), False):
+                    LOGGER.warning(
+                        "openai images edit top-up enabled; issuing additional single-image edit requests requested=%s received=%s endpoint=%s model=%s",
+                        requested_count,
+                        len(urls),
+                        endpoint,
+                        form_fields.get("model"),
+                    )
+                    single_fields = {**form_fields, "n": "1"}
+                    while len(urls) < requested_count:
+                        top_up_response = self._edit_reference_image(
+                            endpoint,
+                            single_fields,
+                            image_files,
+                            source_model=model,
+                        )
+                        responses.append(top_up_response)
+                        urls.extend(self._extract_image_urls(top_up_response))
+                urls = urls[:requested_count]
+                response = _combine_image_responses(responses)
         else:
             payload = self._build_generation_payload(
                 prompt=prompt,
@@ -180,7 +204,7 @@ class OpenAIImagesClient:
                 payload.get("response_format"),
             )
             response = self._post(self.endpoint_path, payload)
-            urls = self._extract_image_urls(response)
+        urls = self._extract_image_urls(response)
         self.last_usage = self._resolve_usage(response, payload, len(urls))
         return urls
 
@@ -200,7 +224,7 @@ class OpenAIImagesClient:
             "model": model,
             "prompt": prompt,
             "n": max(1, min(10, int(batch_size or 1))),
-            "size": _normalize_size(image_size, base_url=self.base_url),
+            "size": _normalize_size(image_size),
         }
         resolved_quality = (quality or self.extra_auth.get("quality") or "").strip()
         if resolved_quality:
@@ -213,7 +237,7 @@ class OpenAIImagesClient:
             payload["output_format"] = resolved_output_format
         resolved_response_format = (response_format or self.extra_auth.get("responseFormat") or "").strip()
         if resolved_response_format:
-            payload["response_format"] = resolved_response_format
+            self._apply_response_format(payload, resolved_response_format)
         if _is_volcengine_ark_base_url(self.base_url):
             payload.setdefault("response_format", "url")
             payload.setdefault("stream", False)
@@ -262,19 +286,29 @@ class OpenAIImagesClient:
 
     def _post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
         url = f"{self.base_url}{_ensure_leading_slash(path)}"
-        attempts = self.ssl_eof_retries + 1
-        for attempt in range(1, attempts + 1):
+        ssl_budget = self.ssl_eof_retries
+        conn_budget = self.connection_retries
+        conn_retry_index = 0
+        attempt = 0
+        while True:
+            attempt += 1
             try:
                 return self._post_once(url, payload)
             except SSLError as exc:
-                if not _is_ssl_eof_error(exc) or attempt >= attempts:
+                if not _is_ssl_eof_error(exc) or ssl_budget <= 0:
                     raise OpenAIImagesError(
                         "openai images SSL connection failed before an HTTP response was received. "
                         "Check the gateway URL, local requests/urllib3 versions, proxy/VPN, and TLS interception. "
                         f"detail={exc}"
                     ) from exc
-                time.sleep(min(2, attempt))
-        raise OpenAIImagesError("openai images request failed")
+                ssl_budget -= 1
+                time.sleep(min(2.0, float(attempt)))
+            except (RequestsConnectionError, ChunkedEncodingError, OpenAIImagesRetryableServerError) as exc:
+                if conn_budget <= 0:
+                    raise OpenAIImagesError(f"openai images request failed: {exc}") from exc
+                conn_budget -= 1
+                conn_retry_index += 1
+                time.sleep(self._compute_backoff(conn_retry_index))
 
     def _resolve_edit_model(self, model: str) -> str:
         override = str(self.extra_auth.get("editModel") or "").strip()
@@ -515,19 +549,29 @@ class OpenAIImagesClient:
         form_fields: dict[str, str],
         image_files: list[tuple[str, bytes, str]],
     ) -> dict[str, Any]:
-        attempts = self.ssl_eof_retries + 1
-        for attempt in range(1, attempts + 1):
+        ssl_budget = self.ssl_eof_retries
+        conn_budget = self.connection_retries
+        conn_retry_index = 0
+        attempt = 0
+        while True:
+            attempt += 1
             try:
                 return self._post_multipart_once(url, form_fields, image_files)
             except SSLError as exc:
-                if not _is_ssl_eof_error(exc) or attempt >= attempts:
+                if not _is_ssl_eof_error(exc) or ssl_budget <= 0:
                     raise OpenAIImagesError(
                         "openai images SSL connection failed before an HTTP response was received. "
                         "Check the gateway URL, local requests/urllib3 versions, proxy/VPN, and TLS interception. "
                         f"detail={exc}"
                     ) from exc
-                time.sleep(min(2, attempt))
-        raise OpenAIImagesError("openai images request failed")
+                ssl_budget -= 1
+                time.sleep(min(2.0, float(attempt)))
+            except (RequestsConnectionError, ChunkedEncodingError, OpenAIImagesRetryableServerError) as exc:
+                if conn_budget <= 0:
+                    raise OpenAIImagesError(f"openai images edit request failed: {exc}") from exc
+                conn_budget -= 1
+                conn_retry_index += 1
+                time.sleep(self._compute_backoff(conn_retry_index))
 
     def _multipart_headers(self) -> dict[str, str]:
         return {
@@ -597,12 +641,18 @@ class OpenAIImagesClient:
                 "disable trustEnv or configure proxyUrl explicitly. "
                 f"detail={exc}"
             ) from exc
+        except (RequestsConnectionError, ChunkedEncodingError):
+            raise
         except RequestException as exc:
             raise OpenAIImagesError(f"openai images request failed: {exc}") from exc
 
         try:
             response.raise_for_status()
         except requests.HTTPError as exc:
+            if 500 <= response.status_code < 600:
+                raise OpenAIImagesRetryableServerError(
+                    f"openai images request failed: status={response.status_code}, body={response.text}"
+                ) from exc
             raise OpenAIImagesError(
                 _format_openai_images_http_error(response.status_code, response.text, form_fields.get("model"))
             ) from exc
@@ -664,12 +714,18 @@ class OpenAIImagesClient:
                 "disable trustEnv or configure proxyUrl explicitly. "
                 f"detail={exc}"
             ) from exc
+        except (RequestsConnectionError, ChunkedEncodingError):
+            raise
         except RequestException as exc:
             raise OpenAIImagesError(f"openai images request failed: {exc}") from exc
 
         try:
             response.raise_for_status()
         except requests.HTTPError as exc:
+            if 500 <= response.status_code < 600:
+                raise OpenAIImagesRetryableServerError(
+                    f"openai images request failed: status={response.status_code}, body={response.text}"
+                ) from exc
             raise OpenAIImagesError(
                 f"openai images request failed: status={response.status_code}, body={response.text}"
             ) from exc
@@ -772,6 +828,33 @@ class OpenAIImagesClient:
             return 1 if value else 0
         return min(2, _as_int(value))
 
+    def _resolve_connection_retries(self) -> int:
+        value = self.extra_auth.get("connectionRetries")
+        if isinstance(value, bool):
+            return 1 if value else 0
+        if value is None:
+            return 2
+        return min(5, _as_int(value))
+
+    def _compute_backoff(self, retry_index: int) -> float:
+        base = max(0.0, self.retry_backoff_seconds)
+        cap = max(base, self.retry_backoff_max_seconds)
+        backoff = base * (2 ** max(0, retry_index - 1))
+        return min(cap, backoff)
+
+    def _apply_response_format(self, payload: dict[str, Any], response_format: str) -> None:
+        location = str(self.extra_auth.get("responseFormatLocation") or "").strip()
+        if _normalized_option(location) == "extrabody":
+            extra_body = payload.setdefault("extra_body", {})
+            if isinstance(extra_body, dict):
+                extra_body["response_format"] = response_format
+                return
+        payload["response_format"] = response_format
+
+    def _uses_json_image_array_input(self) -> bool:
+        mode = _normalized_option(self.extra_auth.get("imageInputMode"))
+        return mode in {"jsonarray", "jsonimagearray"}
+
     @staticmethod
     def _parse_json(value: str | None) -> dict[str, Any]:
         if not value or not value.strip():
@@ -793,63 +876,6 @@ def _format_openai_images_http_error(status_code: int, body: str, model: str | N
             "(see https://ofox.ai/zh/docs/api/openai/images)."
         )
     return message
-
-
-def _combine_image_responses(responses: list[dict[str, Any]]) -> dict[str, Any]:
-    if not responses:
-        return {"data": []}
-    combined = dict(responses[0])
-    data: list[Any] = []
-    usage: dict[str, int] = {}
-    for response in responses:
-        response_data = response.get("data")
-        if isinstance(response_data, list):
-            data.extend(response_data)
-        response_usage = response.get("usage")
-        if isinstance(response_usage, dict):
-            for key, value in response_usage.items():
-                numeric = _as_int(value)
-                if numeric > 0:
-                    usage[key] = usage.get(key, 0) + numeric
-    combined["data"] = data
-    if usage:
-        combined["usage"] = usage
-    return combined
-
-
-def _image_response_data_summary(response: dict[str, Any]) -> dict[str, Any]:
-    data = response.get("data")
-    if not isinstance(data, list):
-        return {"type": type(data).__name__, "count": 0}
-    items: list[dict[str, Any]] = []
-    for index, item in enumerate(data[:10]):
-        if not isinstance(item, dict):
-            items.append({"index": index, "type": type(item).__name__})
-            continue
-        items.append(
-            {
-                "index": item.get("index", index),
-                "hasUrl": bool(str(item.get("url") or "").strip()),
-                "hasB64": bool(str(item.get("b64_json") or "").strip()),
-                "keys": sorted(str(key) for key in item.keys())[:12],
-            }
-        )
-    return {"type": "list", "count": len(data), "items": items}
-
-
-def _safe_usage_summary(response: dict[str, Any]) -> dict[str, Any]:
-    usage = response.get("usage")
-    if not isinstance(usage, dict):
-        return {}
-    allowed_keys = (
-        "input_tokens",
-        "output_tokens",
-        "total_tokens",
-        "num_input_images",
-        "prompt_tokens",
-        "completion_tokens",
-    )
-    return {key: usage.get(key) for key in allowed_keys if key in usage}
 
 
 def _normalize_reference_images(image: str | list[str] | None) -> list[str]:
@@ -896,84 +922,17 @@ def _should_fallback_to_requests_edit(message: str) -> bool:
     )
 
 
-def _default_images_endpoint(base_url: str | None) -> str:
-    normalized = (base_url or "").strip().lower()
-    if "volces.com" in normalized or "bytepluses.com" in normalized:
-        if normalized.endswith("/api/v3"):
-            return "/images/generations"
-        return "/api/v3/images/generations"
-    if normalized.endswith("/v1"):
-        return "/images/generations"
-    return "/images/generations"
-
-
-def _is_volcengine_ark_base_url(base_url: str | None) -> bool:
-    normalized = (base_url or "").strip().lower()
-    return "volces.com" in normalized or "bytepluses.com" in normalized
-
-
-def _normalize_size(value: str, *, base_url: str = "") -> str:
-    size = (value or "1024x1024").strip().replace("：", ":")
-    if _is_volcengine_ark_base_url(base_url):
-        return _normalize_volcengine_size(size)
-    if size.lower() in {"auto", "智能", "adaptive", "default"}:
-        return "auto"
-    if ":" in size and "x" not in size.lower():
+def _normalize_size(value: str) -> str:
+    size = (value or "1024x1024").strip()
+    if ":" in size:
         return {
             "1:1": "1024x1024",
-            "16:9": "1536x1024",
-            "4:3": "1536x1024",
-            "3:2": "1536x1024",
-            "9:16": "1024x1536",
-            "3:4": "1024x1536",
-            "2:3": "1024x1536",
+            "16:9": "1536x864",
+            "9:16": "864x1536",
+            "4:3": "1024x768",
+            "3:4": "768x1024",
         }.get(size, "1024x1024")
     return size
-
-
-def _normalize_volcengine_size(value: str) -> str:
-    """Seedream requires at least 3,686,400 pixels (~1920x1920)."""
-    size = (value or "2K").strip().replace("：", ":")
-    if size.lower() in {"auto", "智能", "adaptive", "default", "2k"}:
-        return "2K"
-    if size.lower() in {"3k", "4k"}:
-        return size.upper()
-    ratio_map = {
-        "1:1": "1920x1920",
-        "16:9": "2560x1440",
-        "4:3": "2304x1728",
-        "3:2": "2400x1600",
-        "9:16": "1440x2560",
-        "3:4": "1728x2304",
-        "2:3": "1600x2400",
-        "21:9": "3440x1440",
-    }
-    if ":" in size and "x" not in size.lower():
-        return ratio_map.get(size, "2K")
-    if "x" in size.lower():
-        width, height = _parse_size(size)
-        if width * height >= 3_686_400:
-            return f"{width}x{height}"
-        scaled = ratio_map.get(_closest_ratio(width, height), "1920x1920")
-        return scaled
-    return "2K"
-
-
-def _closest_ratio(width: int, height: int) -> str:
-    if width <= 0 or height <= 0:
-        return "1:1"
-    target = width / height
-    candidates = {
-        "1:1": 1.0,
-        "16:9": 16 / 9,
-        "4:3": 4 / 3,
-        "3:2": 3 / 2,
-        "9:16": 9 / 16,
-        "3:4": 3 / 4,
-        "2:3": 2 / 3,
-        "21:9": 21 / 9,
-    }
-    return min(candidates, key=lambda name: abs(candidates[name] - target))
 
 
 def _parse_size(value: str) -> tuple[int, int]:
@@ -1017,6 +976,22 @@ def _as_bool(value: Any, fallback: bool) -> bool:
     return fallback
 
 
+def _normalized_option(value: Any) -> str:
+    return str(value or "").strip().lower().replace("_", "").replace("-", "")
+
+
+def _response_format_for_log(payload: dict[str, Any]) -> str:
+    value = payload.get("response_format")
+    if isinstance(value, str) and value:
+        return value
+    extra_body = payload.get("extra_body")
+    if isinstance(extra_body, dict):
+        value = extra_body.get("response_format")
+        if isinstance(value, str):
+            return value
+    return ""
+
+
 def _is_ssl_eof_error(exc: BaseException) -> bool:
     message = str(exc).lower()
     return "eof occurred in violation of protocol" in message or "ssleoferror" in message
@@ -1052,3 +1027,8 @@ def _redact_url(url: str) -> str:
     port = f":{parsed.port}" if parsed.port else ""
     path = parsed.path or "/"
     return f"{parsed.scheme}://{parsed.hostname}{port}{path}"
+
+
+def _is_volcengine_ark_base_url(base_url: str) -> bool:
+    host = (urlparse(base_url).hostname or "").lower()
+    return host.endswith("volces.com") or host.endswith("ark.cn-beijing.volces.com")

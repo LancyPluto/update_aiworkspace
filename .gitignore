@@ -12,6 +12,11 @@ tmp_*.json
 # local tool bundles
 .tools/
 
+# local verification/runtime output
+.tmp/
+data/generated-media/
+docs/superpowers/plans/
+
 # Java
 target/
 *.class

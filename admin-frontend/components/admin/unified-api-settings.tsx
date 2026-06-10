@@ -87,7 +87,6 @@ function VendorIcon({ iconAsset, label }: { iconAsset: string; label: string }) 
     </span>
   )
 }
-
 function balanceStatusBadge(account: ModelVendorAccount) {
   const status = account.balanceStatus
   if (status === "OK") {
@@ -2098,4 +2097,3 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
     </div>
   )
 }
-

@@ -1,6 +1,7 @@
 package com.aiminilab.aitoolmarket.agent.controller;
 
 import com.aiminilab.aitoolmarket.agent.dto.ModelVendorAccountRequest;
+import com.aiminilab.aitoolmarket.agent.dto.ModelVendorAccountDiscoveryResponse;
 import com.aiminilab.aitoolmarket.agent.dto.ModelVendorAccountResponse;
 import com.aiminilab.aitoolmarket.agent.dto.ModelVendorAccountTestResponse;
 import com.aiminilab.aitoolmarket.agent.service.ModelVendorAccountService;
@@ -59,6 +60,11 @@ public class AdminModelVendorAccountController {
     @PostMapping("/{id}/test")
     public ApiResponse<ModelVendorAccountTestResponse> test(@PathVariable Long id) {
         return ApiResponse.success(modelVendorAccountService.adminTest(id));
+    }
+
+    @PostMapping("/{id}/discover-models")
+    public ApiResponse<ModelVendorAccountDiscoveryResponse> discoverModels(@PathVariable Long id) {
+        return ApiResponse.success(modelVendorAccountService.adminDiscoverModels(id));
     }
 
     @PostMapping("/{id}/refresh-balance")

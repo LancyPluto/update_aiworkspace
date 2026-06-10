@@ -36,7 +36,7 @@ public class InternalTaskController {
     public ApiResponse<TaskStatusResponse> createForAgent(@Valid @RequestBody InternalCreateTaskRequest request) {
         return ApiResponse.success(taskService.createForAgentTool(
                 request.userId(),
-                new CreateTaskRequest(request.toolCode(), request.params(), request.clientRequestId(), null)
+                new CreateTaskRequest(request.toolCode(), request.params(), request.clientRequestId(), null, request.modelConfigId())
         ));
     }
 

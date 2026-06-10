@@ -1,6 +1,7 @@
 package com.aiminilab.aitoolmarket.agent.service;
 
 import com.aiminilab.aitoolmarket.agent.dto.ModelVendorAccountRequest;
+import com.aiminilab.aitoolmarket.agent.dto.ModelVendorAccountDiscoveryResponse;
 import com.aiminilab.aitoolmarket.agent.dto.ModelVendorAccountResponse;
 import com.aiminilab.aitoolmarket.agent.dto.ModelVendorAccountTestResponse;
 
@@ -23,4 +24,6 @@ public interface ModelVendorAccountService {
     int adminRefreshBalanceAll();
 
     ModelVendorAccountTestResponse adminTest(Long id);
+
+    ModelVendorAccountDiscoveryResponse adminDiscoverModels(Long id);
 }

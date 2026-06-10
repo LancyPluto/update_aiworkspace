@@ -38,7 +38,7 @@ class AgentDecisionService:
     ) -> IntentResult:
         signals: list[DecisionSignal] = []
 
-        rule_intent = self.intent_router.classify(context)
+        rule_intent = _normalize_ready_file_context_decision(context, self.intent_router.classify(context))
         signals.append(_signal("rule_router", rule_intent.intent.value, rule_intent.confidence, rule_intent.reason))
         preferred = preferred_tool_code(context)
         if preferred and rule_intent.intent == Intent.TOOL_USE:
@@ -94,6 +94,14 @@ class AgentDecisionService:
 
 def _signal(source: str, verdict: str, confidence: float, reason: str) -> DecisionSignal:
     return DecisionSignal(source=source, verdict=verdict, confidence=confidence, reason=reason)
+
+
+def _normalize_ready_file_context_decision(context: RunContext, intent: IntentResult) -> IntentResult:
+    if intent.intent != Intent.FILE_ANALYSIS or intent.reason != "file_analysis_request":
+        return intent
+    if not any(file.status == "READY" for file in context.agentFiles):
+        return intent
+    return intent.model_copy(update={"reason": "ready_file_context_available"})
 
 
 def _with_signals(intent: IntentResult, signals: list[DecisionSignal]) -> IntentResult:

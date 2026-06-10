@@ -14,10 +14,14 @@ export interface BillingQuery {
   endDate?: string
 }
 
+function toBillingQueryRecord(query?: BillingQuery): Record<string, string | number | boolean | null | undefined> | undefined {
+  return query ? { ...query } : undefined
+}
+
 export function fetchBillingOverview(query?: Omit<BillingQuery, 'pageNo' | 'pageSize'>) {
-  return http.get<BillingOverview>('/api/admin/v1/billing/overview', query)
+  return http.get<BillingOverview>('/api/admin/v1/billing/overview', toBillingQueryRecord(query))
 }
 
 export function fetchBillingUsageLogs(query?: BillingQuery) {
-  return http.get<PageResponse<BillingUsageLog>>('/api/admin/v1/billing/usage-logs', query)
+  return http.get<PageResponse<BillingUsageLog>>('/api/admin/v1/billing/usage-logs', toBillingQueryRecord(query))
 }

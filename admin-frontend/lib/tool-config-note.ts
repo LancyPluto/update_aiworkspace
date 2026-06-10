@@ -1,10 +1,10 @@
 /** 与 backend ToolIntegrationConstants / PptConstants 中的 HTML 注释块对齐 */
 
 export const FRONTEND_STYLE_MARKER = "<!-- ai-tool-ui:"
-export const FRONTEND_STYLE_PATTERN = /<!-- ai-tool-ui:(.*?) -->/s
+export const FRONTEND_STYLE_PATTERN = /<!-- ai-tool-ui:([\s\S]*?) -->/
 
-const PPT_WORKFLOW_PATTERN = /<!--\s*ppt-workflow:\{.*?\}\s*-->/gs
-const TOOL_INTEGRATION_PATTERN = /<!--\s*tool-integration:\{.*?\}\s*-->/gs
+const PPT_WORKFLOW_PATTERN = /<!--\s*ppt-workflow:\{[\s\S]*?\}\s*-->/g
+const TOOL_INTEGRATION_PATTERN = /<!--\s*tool-integration:\{[\s\S]*?\}\s*-->/g
 
 export interface FrontendStyleConfig {
   primaryColor: string
@@ -13,6 +13,14 @@ export interface FrontendStyleConfig {
   modelIconUrl: string
   comparisonOriginalUrl: string
   comparisonEffectUrl: string
+  heroTitle: string
+  heroSubtitle: string
+  demoThumbnails: string[]
+  useCases: string[]
+  steps: string[]
+  recommendedToolCodes: string[]
+  beforeVideoUrl: string
+  afterVideoUrl: string
 }
 
 const defaultFrontendStyle: FrontendStyleConfig = {
@@ -22,6 +30,14 @@ const defaultFrontendStyle: FrontendStyleConfig = {
   modelIconUrl: "",
   comparisonOriginalUrl: "",
   comparisonEffectUrl: "",
+  heroTitle: "",
+  heroSubtitle: "",
+  demoThumbnails: [],
+  useCases: [],
+  steps: [],
+  recommendedToolCodes: [],
+  beforeVideoUrl: "",
+  afterVideoUrl: "",
 }
 
 /** 从 config_note 抽出需原样保留的工作台集成块（ppt-workflow / tool-integration） */
@@ -71,6 +87,14 @@ export function extractFrontendStyle(configNote?: string | null): { note: string
         modelIconUrl: typeof parsed.modelIconUrl === "string" ? parsed.modelIconUrl : "",
         comparisonOriginalUrl: typeof parsed.comparisonOriginalUrl === "string" ? parsed.comparisonOriginalUrl : "",
         comparisonEffectUrl: typeof parsed.comparisonEffectUrl === "string" ? parsed.comparisonEffectUrl : "",
+        heroTitle: typeof parsed.heroTitle === "string" ? parsed.heroTitle : "",
+        heroSubtitle: typeof parsed.heroSubtitle === "string" ? parsed.heroSubtitle : "",
+        demoThumbnails: stringList(parsed.demoThumbnails),
+        useCases: stringList(parsed.useCases),
+        steps: stringList(parsed.steps),
+        recommendedToolCodes: stringList(parsed.recommendedToolCodes),
+        beforeVideoUrl: typeof parsed.beforeVideoUrl === "string" ? parsed.beforeVideoUrl : "",
+        afterVideoUrl: typeof parsed.afterVideoUrl === "string" ? parsed.afterVideoUrl : "",
       },
     }
   } catch {
@@ -81,7 +105,7 @@ export function extractFrontendStyle(configNote?: string | null): { note: string
   }
 }
 
-export function serializeConfigNote(note: string, style: FrontendStyleConfig, preservedMarkers?: string[]): string {
+export function serializeConfigNote(note: string, style: Partial<FrontendStyleConfig>, preservedMarkers?: string[]): string {
   const cleanNote = note.trim()
   const styleJson = JSON.stringify({
     primaryColor: style.primaryColor || "#3b82f6",
@@ -91,9 +115,26 @@ export function serializeConfigNote(note: string, style: FrontendStyleConfig, pr
     modelIconUrl: style.modelIconUrl || "",
     comparisonOriginalUrl: style.comparisonOriginalUrl || "",
     comparisonEffectUrl: style.comparisonEffectUrl || "",
+    heroTitle: style.heroTitle || "",
+    heroSubtitle: style.heroSubtitle || "",
+    demoThumbnails: cleanStringList(style.demoThumbnails),
+    useCases: cleanStringList(style.useCases),
+    steps: cleanStringList(style.steps),
+    recommendedToolCodes: cleanStringList(style.recommendedToolCodes),
+    beforeVideoUrl: style.beforeVideoUrl || "",
+    afterVideoUrl: style.afterVideoUrl || "",
   })
   const base = [cleanNote, `${FRONTEND_STYLE_MARKER}${styleJson} -->`].filter(Boolean).join("\n\n")
   const markers = preservedMarkers?.filter(Boolean) ?? []
   if (markers.length === 0) return base
   return [base, ...markers].join("\n\n")
+}
+
+function stringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value.map((item) => (typeof item === "string" ? item.trim() : "")).filter(Boolean)
+}
+
+function cleanStringList(value: string[] | undefined): string[] {
+  return Array.isArray(value) ? value.map((item) => item.trim()).filter(Boolean) : []
 }

@@ -1,18 +1,13 @@
 export { apiRequest, ApiBusinessError } from "./client"
 export { login, logout, register, resetPassword, sendSmsCode, smsLogin, smsRegister } from "./authApi"
-export {
-  cancelCurrentUserAccount,
-  getCurrentUser,
-  sendCancelAccountSmsCode,
-  updateCurrentUserProfile,
-  uploadCurrentUserAvatar,
-  updateCommunitySettings,
-} from "./userApi"
+export { getCurrentUser, updateCurrentUserProfile, uploadCurrentUserAvatar, updateCommunitySettings } from "./userApi"
 export * from "./communityApi"
-export { fetchToolCategories, fetchTools, searchTools, fetchToolByCode, fetchEnabledAITools, fetchAIToolById, uploadToolFile, fetchUploadAssets, deleteUploadAsset } from "./toolApi"
+export { fetchToolCategories, fetchTools, searchTools, fetchToolByCode, uploadToolFile, fetchUploadAssets, deleteUploadAsset } from "./toolApi"
+export { fetchModelOptions } from "./modelOptionsApi"
 export * from "./pptApi"
 export {
-  fetchMarketplaceAITools,
+  fetchEnabledAITools,
+  fetchAIToolById,
   isMarketplaceMockToolId,
   fetchChatSessions,
   createChatSession,

@@ -172,7 +172,7 @@ function buildWorkflowNodes(tool: WorkflowTool, configs: AgentModelConfig[]): Wo
   return [
     { id: "start", position: { x: 64, y: 210 }, data: { title: "Start", subtitle: "用户提交表单", detail: `${tool.inputModality} -> ${tool.outputModality}`, kind: "start", iconName: "play" } },
     { id: "input", position: { x: 360, y: 210 }, data: { title: "字段 Schema", subtitle: "参数校验与补全", detail: tool.configNote || "读取工具字段配置并组装参数", kind: "input", iconName: "file-input" } },
-    { id: "prompt", position: { x: 660, y: 210 }, data: { title: "Prompt 模板", subtitle: "Worker 构造任务提示词", detail: tool.description || "按工具模板生成模型输入", kind: "tool", iconName: "file-text" } },
+    { id: "prompt", position: { x: 660, y: 210 }, data: { title: "隐藏 Prompt", subtitle: "Worker 构造任务提示词", detail: tool.description || "按工具配置生成模型输入", kind: "tool", iconName: "file-text" } },
     { id: "model", position: { x: 960, y: 210 }, data: { title: "模型调用", subtitle: modelLabel(primaryConfig, tool.modelConfigName || tool.modelName || "默认模型配置"), detail: primaryConfig?.provider || "使用当前绑定或默认模型", kind: "model", iconName: "settings", config: primaryConfig } },
     { id: "output", position: { x: 1260, y: 210 }, data: { title: "End", subtitle: "结果渲染", detail: "保存任务结果并展示给用户", kind: "output", iconName: "sparkles" } },
   ]

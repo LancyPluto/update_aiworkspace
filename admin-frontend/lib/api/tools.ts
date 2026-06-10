@@ -4,8 +4,11 @@ import type {
   FieldSchemaAdmin,
   ToolCategory,
   ToolCoverUploadResult,
+  ToolDetail,
   ToolField,
   ToolFieldPayload,
+  ToolPromptDraftPayload,
+  ToolPromptDraftResult,
   ToolSummary,
   UpsertFieldSchemaPayload,
   UpsertToolCategoryPayload,
@@ -69,6 +72,10 @@ export async function fetchAllAdminTools(
   }
 }
 
+export function fetchAdminToolDetail(toolId: number) {
+  return http.get<ToolDetail>(`/api/admin/v1/tools/${toolId}`)
+}
+
 export function createTool(payload: UpsertToolPayload) {
   return http.post<ToolSummary>('/api/admin/v1/tools', payload)
 }
@@ -89,6 +96,10 @@ export function uploadToolCover(payload: {
   if (payload.toolCode) formData.append('toolCode', payload.toolCode)
   if (payload.modelName) formData.append('modelName', payload.modelName)
   return http.postForm<ToolCoverUploadResult>('/api/admin/v1/tools/cover-upload', formData)
+}
+
+export function generateToolPromptDraft(payload: ToolPromptDraftPayload) {
+  return http.post<ToolPromptDraftResult>('/api/admin/v1/tools/prompt-draft', payload)
 }
 
 export function deleteTool(toolId: number) {

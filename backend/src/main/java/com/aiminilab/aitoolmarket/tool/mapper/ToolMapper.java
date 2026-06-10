@@ -18,7 +18,7 @@ public interface ToolMapper extends BaseMapper<AiTool> {
                    COALESCE(m.display_name, m.model_name) AS model_config_name,
                    m.model_name
             FROM ai_tools t
-            JOIN tool_categories c ON c.id = t.category_id
+            LEFT JOIN tool_categories c ON c.id = t.category_id
             LEFT JOIN agent_model_configs m ON m.id = t.model_config_id AND COALESCE(m.is_deleted, 0) = 0
             WHERE t.is_deleted = 0
             <if test="onlineOnly">
@@ -52,7 +52,7 @@ public interface ToolMapper extends BaseMapper<AiTool> {
             <script>
             SELECT COUNT(*)
             FROM ai_tools t
-            JOIN tool_categories c ON c.id = t.category_id
+            LEFT JOIN tool_categories c ON c.id = t.category_id
             WHERE t.is_deleted = 0
             <if test="onlineOnly">
               AND t.status = 'ONLINE'
@@ -82,7 +82,7 @@ public interface ToolMapper extends BaseMapper<AiTool> {
                    COALESCE(m.display_name, m.model_name) AS model_config_name,
                    m.model_name
             FROM ai_tools t
-            JOIN tool_categories c ON c.id = t.category_id
+            LEFT JOIN tool_categories c ON c.id = t.category_id
             LEFT JOIN agent_model_configs m ON m.id = t.model_config_id AND COALESCE(m.is_deleted, 0) = 0
             WHERE t.id = #{toolId} AND t.is_deleted = 0
             LIMIT 1
@@ -98,7 +98,7 @@ public interface ToolMapper extends BaseMapper<AiTool> {
                    COALESCE(m.display_name, m.model_name) AS model_config_name,
                    m.model_name
             FROM ai_tools t
-            JOIN tool_categories c ON c.id = t.category_id
+            LEFT JOIN tool_categories c ON c.id = t.category_id
             LEFT JOIN agent_model_configs m ON m.id = t.model_config_id AND COALESCE(m.is_deleted, 0) = 0
             WHERE t.tool_code = #{toolCode} AND t.status = 'ONLINE' AND t.is_deleted = 0
             LIMIT 1

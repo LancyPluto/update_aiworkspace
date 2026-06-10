@@ -41,7 +41,7 @@
           </div>
           <p class="agreement-text">
             注册登录即代表已阅读并同意我们的
-            <a href="#" @click.prevent="openPrivacyPolicy">隐私政策</a>
+            <a href="#" @click.prevent>隐私政策</a>
             ，未注册的手机号将自动注册
           </p>
         </div>
@@ -56,7 +56,7 @@
           </div>
           <p class="agreement-text password-agreement">
             注册登录即代表已阅读并同意我们的
-            <a href="#" @click.prevent="openPrivacyPolicy">隐私政策</a>
+            <a href="#" @click.prevent>隐私政策</a>
           </p>
           <div class="auth-row-links">
             <a href="#" @click.prevent="switchMode('forgotVerify')">忘记密码</a>
@@ -85,7 +85,7 @@
           </div>
           <p class="agreement-text">
             注册即代表已阅读并同意我们的
-            <a href="#" @click.prevent="openPrivacyPolicy">隐私政策</a>
+            <a href="#" @click.prevent>隐私政策</a>
           </p>
         </div>
 
@@ -134,39 +134,6 @@
       </p>
     </div>
   </div>
-  <div v-if="privacyModalVisible" class="privacy-modal" @click.self="privacyModalVisible = false">
-    <section class="privacy-card" role="dialog" aria-modal="true" aria-labelledby="privacy-title">
-      <button type="button" class="privacy-close" aria-label="关闭隐私政策" @click="privacyModalVisible = false">×</button>
-      <p class="privacy-eyebrow">数字伦理与隐私承诺</p>
-      <h2 id="privacy-title">我们尊重并保护每一位客户的隐私</h2>
-      <p class="privacy-lead">
-        未来云 AI 坚持最小必要、目的明确、公开透明和安全可控的原则，只在提供账号、计费、内容生成、风控与客户支持所必需的范围内处理个人信息。
-      </p>
-      <div class="privacy-grid">
-        <div>
-          <h3>我们的承诺</h3>
-          <ul>
-            <li>不会将客户数据用于无关营销或未经授权的模型训练。</li>
-            <li>对敏感信息、支付信息、访问凭证和生成记录采用分级权限与安全审计。</li>
-            <li>用户可依法查询、更正、删除个人信息，或撤回非必要授权。</li>
-          </ul>
-        </div>
-        <div>
-          <h3>法律与合规依据</h3>
-          <ul>
-            <li>《中华人民共和国个人信息保护法》</li>
-            <li>《中华人民共和国网络安全法》</li>
-            <li>《中华人民共和国数据安全法》</li>
-            <li>《生成式人工智能服务管理暂行办法》</li>
-          </ul>
-        </div>
-      </div>
-      <p class="privacy-note">
-        若后续隐私政策有重大更新，我们会以页面提示、站内消息或其他合理方式告知，并在需要时重新征得授权。
-      </p>
-      <button type="button" class="privacy-confirm" @click="privacyModalVisible = false">我知道了</button>
-    </section>
-  </div>
   </div>
 </template>
 
@@ -205,14 +172,9 @@
   let pendingCaptchaReject = null;
 
   const loginModalVisible = ref(false);
-  const privacyModalVisible = ref(false);
 
   function openLoginModal() {
     loginModalVisible.value = true;
-  }
-
-  function openPrivacyPolicy() {
-    privacyModalVisible.value = true;
   }
 
   // ================= 登录弹窗逻辑 =================
@@ -441,10 +403,11 @@
       typeof raw !== 'string' ||
       !raw.startsWith('/') ||
       raw === '/' ||
+      raw === '/home' ||
       raw === '/login' ||
       raw.startsWith('/login?')
     ) {
-      return '/marketplace';
+      return '/home';
     }
     return raw;
   }
@@ -523,7 +486,9 @@
   onMounted(() => {
     if (auth.isLoggedIn) {
       router.replace(resolvePostLoginRedirect());
+      return;
     }
+    loginModalVisible.value = true;
   });
   onBeforeUnmount(() => {
     if (countdownTimer) clearInterval(countdownTimer);
@@ -580,113 +545,6 @@
   display: flex;
   align-items: center;
   justify-content: center;
-}
-.privacy-modal {
-  position: fixed;
-  inset: 0;
-  z-index: 10020;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 1.25rem;
-  background: rgb(0 0 0 / 0.68);
-  backdrop-filter: blur(14px);
-}
-.privacy-card {
-  position: relative;
-  width: min(620px, 100%);
-  max-height: min(86vh, 720px);
-  overflow-y: auto;
-  border: 1px solid rgb(255 255 255 / 0.12);
-  border-radius: 24px;
-  background:
-    radial-gradient(circle at 12% 0%, rgb(176 92 255 / 0.16), transparent 34%),
-    linear-gradient(180deg, rgb(29 29 36 / 0.98), rgb(17 17 24 / 0.98));
-  box-shadow: 0 28px 90px rgb(0 0 0 / 0.58), 0 0 0 1px rgb(255 255 255 / 0.04) inset;
-  color: var(--foreground);
-  padding: 1.75rem;
-}
-.privacy-close {
-  position: absolute;
-  top: 1rem;
-  right: 1rem;
-  width: 34px;
-  height: 34px;
-  border: 1px solid rgb(255 255 255 / 0.12);
-  border-radius: 999px;
-  background: rgb(255 255 255 / 0.06);
-  color: rgb(255 255 255 / 0.72);
-  font-size: 1.35rem;
-  line-height: 1;
-  cursor: pointer;
-}
-.privacy-close:hover {
-  color: var(--foreground);
-  background: rgb(255 255 255 / 0.1);
-}
-.privacy-eyebrow {
-  margin: 0 0 0.5rem;
-  color: var(--primary);
-  font-size: 0.78rem;
-  font-weight: 700;
-  letter-spacing: 0;
-}
-.privacy-card h2 {
-  margin: 0;
-  padding-right: 2rem;
-  font-size: 1.45rem;
-  line-height: 1.35;
-}
-.privacy-lead,
-.privacy-note {
-  margin: 1rem 0 0;
-  color: rgb(255 255 255 / 0.68);
-  font-size: 0.9rem;
-  line-height: 1.8;
-}
-.privacy-grid {
-  display: grid;
-  gap: 1rem;
-  margin-top: 1.25rem;
-}
-@media (min-width: 640px) {
-  .privacy-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-.privacy-grid > div {
-  border: 1px solid rgb(255 255 255 / 0.1);
-  border-radius: 18px;
-  background: rgb(255 255 255 / 0.045);
-  padding: 1rem;
-}
-.privacy-grid h3 {
-  margin: 0 0 0.75rem;
-  font-size: 0.95rem;
-}
-.privacy-grid ul {
-  display: grid;
-  gap: 0.55rem;
-  margin: 0;
-  padding-left: 1.1rem;
-  color: rgb(255 255 255 / 0.64);
-  font-size: 0.82rem;
-  line-height: 1.65;
-}
-.privacy-confirm {
-  width: 100%;
-  height: 44px;
-  margin-top: 1.4rem;
-  border: none;
-  border-radius: 999px;
-  background: var(--primary);
-  color: var(--primary-foreground);
-  font-weight: 700;
-  cursor: pointer;
-  box-shadow: 0 12px 28px rgb(176 92 255 / 0.32);
-}
-.privacy-confirm:hover {
-  filter: brightness(1.08);
 }
 .login-container {
   width: 100%;

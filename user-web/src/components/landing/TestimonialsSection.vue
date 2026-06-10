@@ -4,7 +4,7 @@ import Avatar from '@/components/ui/Avatar.vue'
 
 const testimonials = [
   {
-    quote: '以前做海报、剪视频、配文案要在好几个工具之间来回切换，流程特别乱。现在在一个平台就能搞定所有创作环节，还会自动帮我匹配最合适的能力模块，省心太多了。',
+    quote: '以前做海报要打开 Midjourney，做视频要切到 Runway，配音还得另找工具。现在一个平台全搞定，而且它会自动帮我选最合适的模型，太省心了。',
     author: '周雨',
     role: '自媒体博主',
     company: '',
@@ -16,7 +16,7 @@ const testimonials = [
     company: '',
   },
   {
-    quote: '免费试用体验了全部工具，感觉很棒。算了一下成本，比单独订阅好几个平台便宜太多了，果断升级了专业版。',
+    quote: '免费试用体验了全部工具，感觉很棒。算了一下，比单独订阅 GPT-4 + Midjourney + Suno 便宜太多了，果断升级了专业版。',
     author: '李佳',
     role: '创业者',
     company: '',

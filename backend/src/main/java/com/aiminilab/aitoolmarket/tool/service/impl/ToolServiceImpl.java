@@ -231,7 +231,7 @@ public class ToolServiceImpl implements ToolService {
 
     private ToolSummaryResponse toUserFacingSummary(AiTool tool) {
         return sanitizeCoverUrl(
-                ToolSummaryResponse.from(tool, taskCreditEstimateService.estimateUserFacingTaskCredits(tool)));
+                ToolSummaryResponse.publicFrom(tool, taskCreditEstimateService.estimateUserFacingTaskCredits(tool), objectMapper));
     }
 
     private ToolIntegrationView resolveIntegrationView(AiTool tool) {

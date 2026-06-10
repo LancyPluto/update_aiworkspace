@@ -34,7 +34,7 @@ import { confirmDelete } from "@/composables/useConfirmDelete"
 import { userRoutes } from "@/router/userRoutes"
 import { useAuthStore } from "@/store/authStore"
 import { assetFromCommunityPost } from "@/utils/assetPreviewAdapter"
-import { openDashboardWithAsset } from "@/utils/assetReplay"
+import { openCreateWithAssetRecommendation } from "@/utils/assetReplay"
 import { communityDisplayTitle } from "@/utils/communityDisplay"
 import { resolveCommunityAuthorName, resolveCommunityPrompt } from "@/utils/communityPostNormalize"
 
@@ -345,7 +345,7 @@ function replay(post: CommunityPost) {
     { postId: post.id, eventType: "dashboard_open", source: "inspiration_collection", toolCode: post.toolCode },
     { token: auth.token },
   ).catch(() => undefined)
-  openDashboardWithAsset(assetFromCommunityPost(post, mediaUrl(post.coverUrl)), post.toolCode, {
+  openCreateWithAssetRecommendation(assetFromCommunityPost(post, mediaUrl(post.coverUrl)), post.toolCode, {
     modality: post.modality,
     sourcePost: post.id,
   })
@@ -449,7 +449,6 @@ onUnmounted(() => {
             <Menu class="h-5 w-5" />
           </button>
           <div>
-            <p class="eyebrow">Inspiration Library</p>
             <h1>{{ activeCollection?.name || "灵感收藏夹" }}</h1>
           </div>
         </div>

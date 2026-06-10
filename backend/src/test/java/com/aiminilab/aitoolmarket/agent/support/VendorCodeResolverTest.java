@@ -109,4 +109,15 @@ class VendorCodeResolverTest {
 
         assertThat(resolver.vendorLabel("qwen")).isEqualTo("阿里云百炼");
     }
+    @Test
+    void agnesProvidersAreGroupedAsAgnesVendor() {
+        assertThat(resolver.resolveVendorCode("agnes_chat", "https://apihub.agnes-ai.com/v1", "Agnes 2.0", "agnes-2.0-flash"))
+                .isEqualTo("agnes");
+        assertThat(resolver.resolveVendorCode("agnes_images", "https://apihub.agnes-ai.com/v1", "Agnes Image", "agnes-image-2.1-flash"))
+                .isEqualTo("agnes");
+        assertThat(resolver.resolveVendorCode("agnes_video", "https://apihub.agnes-ai.com", "Agnes Video", "agnes-video-v2.0"))
+                .isEqualTo("agnes");
+        assertThat(resolver.vendorLabel("agnes")).isEqualTo("Agnes AI");
+        assertThat(resolver.vendorIconAsset("agnes")).isEqualTo("api");
+    }
 }

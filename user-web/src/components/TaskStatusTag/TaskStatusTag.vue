@@ -1,17 +1,16 @@
 <script setup lang="ts">
 import { computed } from "vue"
-
-export type TaskStatus = "running" | "success" | "failed" | "queued"
+import type { TaskStatusViewKind } from "@/utils/taskStatusLabels"
 
 const props = withDefaults(
   defineProps<{
-    status: TaskStatus
+    status: TaskStatusViewKind
     label?: string
   }>(),
   { label: undefined },
 )
 
-const map: Record<TaskStatus, { label: string; wrap: string; dot: string }> = {
+const map: Record<TaskStatusViewKind, { label: string; wrap: string; dot: string }> = {
   running: {
     label: "生成中",
     wrap: "border-primary/30 bg-primary/10 text-primary",
@@ -31,6 +30,11 @@ const map: Record<TaskStatus, { label: string; wrap: string; dot: string }> = {
     label: "失败",
     wrap: "border-destructive/30 bg-destructive/10 text-destructive",
     dot: "bg-destructive",
+  },
+  cancelled: {
+    label: "已取消",
+    wrap: "border-border bg-muted text-muted-foreground",
+    dot: "bg-muted-foreground",
   },
 }
 

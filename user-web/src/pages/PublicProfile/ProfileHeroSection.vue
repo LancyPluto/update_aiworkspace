@@ -34,7 +34,7 @@ defineProps<{
 
         <p v-if="bio" class="profile-bio">{{ bio }}</p>
         <template v-else>
-          <p class="profile-bio profile-bio--empty">灵感正在酝酿中…</p>
+          <p class="profile-bio profile-bio--empty">灵感正在酝酿中...</p>
           <p class="profile-bio-slogan">每一幅作品，都是一次与 AI 的对话</p>
         </template>
       </div>

@@ -14,8 +14,6 @@ export const USER_FACING_EVENT_TYPES = [
   "tool.task_dispatched",
   "tool.task_progress",
   "tool.finished",
-  "message.completed",
-  "run.completed",
   "run.failed",
 ] as const
 
@@ -27,13 +25,4 @@ export const INLINE_VISIBLE_EVENT_TYPES = USER_FACING_EVENT_TYPES.filter(
 export function filterUserFacingRunEvents(events: AgentRunEvent[], inlineMode = false) {
   const allowed = new Set<string>(inlineMode ? INLINE_VISIBLE_EVENT_TYPES : USER_FACING_EVENT_TYPES)
   return events.filter((event) => allowed.has(event.eventType))
-}
-
-export function filterToolProcessEvents(events: AgentRunEvent[]) {
-  return events.filter((event) =>
-    event.eventType === "tool.started" ||
-    event.eventType === "tool.task_dispatched" ||
-    event.eventType === "tool.task_progress" ||
-    event.eventType === "tool.finished",
-  )
 }

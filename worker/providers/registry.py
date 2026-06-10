@@ -7,6 +7,7 @@ from typing import Any
 
 PROVIDERS: dict[str, dict[str, Any]] = {
     "mock": {"capabilities": {"TEXT_GENERATION"}, "worker_ready": True},
+    "local_media_mock": {"capabilities": {"IMAGE_GENERATION", "VIDEO_GENERATION"}, "worker_ready": True},
     "openai_compatible": {"capabilities": {"TEXT_GENERATION"}, "worker_ready": True},
     "anthropic_compatible": {"capabilities": {"TEXT_GENERATION"}, "worker_ready": True},
     "minimax": {"capabilities": {"TEXT_GENERATION"}, "worker_ready": True},
@@ -34,6 +35,27 @@ PROVIDERS: dict[str, dict[str, Any]] = {
         "provider_protocol": "openai_images",
         "vendor_kind": "gateway",
         "upstream_vendor": "openai",
+    },
+    "agnes_chat": {
+        "capabilities": {"TEXT_GENERATION"},
+        "worker_ready": True,
+        "provider_protocol": "openai_chat",
+        "vendor_kind": "direct",
+        "upstream_vendor": "agnes",
+    },
+    "agnes_images": {
+        "capabilities": {"IMAGE_GENERATION"},
+        "worker_ready": True,
+        "provider_protocol": "openai_images",
+        "vendor_kind": "direct",
+        "upstream_vendor": "agnes",
+    },
+    "agnes_video": {
+        "capabilities": {"VIDEO_GENERATION"},
+        "worker_ready": True,
+        "provider_protocol": "agnes_video",
+        "vendor_kind": "direct",
+        "upstream_vendor": "agnes",
     },
     "worker_video": {"capabilities": {"VIDEO_GENERATION"}, "worker_ready": True},
     "minimax_speech": {"capabilities": {"TEXT_TO_SPEECH"}, "worker_ready": True},

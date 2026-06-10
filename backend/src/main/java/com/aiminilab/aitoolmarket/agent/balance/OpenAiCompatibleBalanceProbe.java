@@ -1,6 +1,7 @@
 package com.aiminilab.aitoolmarket.agent.balance;
 
 import com.aiminilab.aitoolmarket.agent.entity.ModelVendorAccount;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.web.client.RestClientResponseException;
@@ -48,19 +49,28 @@ final class OpenAiCompatibleBalanceProbe {
                 }
             }
             if (lastHttpError != null) {
-                return BalanceQueryResult.failed(
-                        "未找到可用余额接口（HTTP " + lastHttpError.getStatusCode().value() + "），请使用控制台查看或手填余额");
+                return BalanceQueryResult.unsupported(
+                        "中转站未提供标准余额 JSON 接口（HTTP " + lastHttpError.getStatusCode().value() + "），请在控制台查看或手动填写余额。");
             }
-            return BalanceQueryResult.failed("未找到可用余额接口，请使用控制台查看或手填余额");
+            return BalanceQueryResult.unsupported("中转站未提供标准余额 JSON 接口，请在控制台查看或手动填写余额。");
         } catch (RestClientResponseException exception) {
             return VendorBalanceHttpSupport.httpFailure(exception);
         } catch (Exception exception) {
-            return VendorBalanceHttpSupport.httpFailure(exception);
+            return BalanceQueryResult.unsupported("中转站未提供标准余额 JSON 接口，请在控制台查看或手动填写余额。");
         }
     }
 
     BalanceQueryResult parseBody(String body) throws Exception {
-        JsonNode root = objectMapper.readTree(body);
+        String trimmed = body == null ? "" : body.trim();
+        if (trimmed.isBlank() || !(trimmed.startsWith("{") || trimmed.startsWith("["))) {
+            return null;
+        }
+        JsonNode root;
+        try {
+            root = objectMapper.readTree(trimmed);
+        } catch (JsonProcessingException exception) {
+            return null;
+        }
         JsonNode data = root.path("data");
         if (!data.isMissingNode() && !data.isNull() && data.isObject()) {
             BalanceQueryResult fromData = parseNode(data);

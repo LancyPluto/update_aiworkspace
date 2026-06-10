@@ -121,7 +121,31 @@ function modelLabel(model: AgentModelConfig): string {
   return model.displayName || model.configCode || model.modelName
 }
 
-const DIGITAL_HUMAN_FIELD_DRAFT: EditableField[] = [
+type EditableFieldDraft = Omit<
+  EditableField,
+  "executionRequired" | "userRequired" | "defaultValue" | "agentFillStrategy" | "riskLevel" | "isCore" | "uiMeta"
+> &
+  Partial<
+    Pick<
+      EditableField,
+      "executionRequired" | "userRequired" | "defaultValue" | "agentFillStrategy" | "riskLevel" | "isCore" | "uiMeta"
+    >
+  >
+
+function withFieldDefaults(field: EditableFieldDraft): EditableField {
+  return {
+    executionRequired: field.required,
+    userRequired: field.required,
+    defaultValue: "",
+    agentFillStrategy: field.required ? "ask_user" : "default",
+    riskLevel: "LOW",
+    isCore: false,
+    uiMeta: {},
+    ...field,
+  }
+}
+
+const DIGITAL_HUMAN_FIELD_DRAFT: EditableField[] = ([
   {
     fieldKey: "videoTopic",
     fieldName: "视频主题",
@@ -257,7 +281,7 @@ const DIGITAL_HUMAN_FIELD_DRAFT: EditableField[] = [
     sortOrder: 12,
     options: [],
   },
-]
+] satisfies EditableFieldDraft[]).map(withFieldDefaults)
 
 function cloneFields(fields: EditableField[]): EditableField[] {
   return fields.map((field) => ({

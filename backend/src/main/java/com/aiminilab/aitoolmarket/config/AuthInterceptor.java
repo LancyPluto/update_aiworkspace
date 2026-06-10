@@ -154,6 +154,7 @@ public class AuthInterceptor implements HandlerInterceptor, Filter {
                 || path.startsWith("/api/v1/pay/alipay/")
                 || path.startsWith("/api/v1/pay/mock/")
                 || path.equals("/api/v1/tool-categories")
+                || ("GET".equalsIgnoreCase(method) && path.equals("/api/v1/model-options"))
                 || path.equals("/api/v1/tools")
                 || path.startsWith("/api/v1/tools/")
                 || path.equals("/api/v1/ai-tools")

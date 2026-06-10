@@ -1,5 +1,4 @@
 import { ApiBusinessError } from "./client"
-import { formatCreditInsufficientError, isCreditInsufficientCode } from "./creditErrorMessage"
 
 function withTraceId(message: string, traceId?: string): string {
   return traceId ? `${message}（追踪号：${traceId}）` : message
@@ -19,8 +18,8 @@ export function formatAgentRequestError(error: unknown): string {
   if (error instanceof ApiBusinessError && error.code === "AGENT_RATE_LIMITED") {
     return withTraceId("Agent 请求过于频繁，请稍后再试。", error.traceId)
   }
-  if (error instanceof ApiBusinessError && isCreditInsufficientCode(error.code)) {
-    return withTraceId(formatCreditInsufficientError(error), error.traceId)
+  if (error instanceof ApiBusinessError && error.code === "AGENT_CREDIT_NOT_ENOUGH") {
+    return withTraceId("可用算力不足，暂时无法启动 Agent。请先补充或释放算力后再试。", error.traceId)
   }
   if (error instanceof ApiBusinessError && error.code === "AGENT_RUN_NOT_CANCELLABLE") {
     return withTraceId("当前 Agent 状态已变化，这次操作没有生效。请刷新后重试。", error.traceId)
@@ -44,17 +43,11 @@ export function formatAgentRunFailure(errorCode?: string, errorMessage?: string)
   if (errorCode === "AGENT_SERVICE_NOTIFY_FAILED") {
     return errorMessage || "Agent 服务暂时不可用，请稍后重试。"
   }
-  if (isCreditInsufficientCode(errorCode)) {
-    return errorMessage || "可用算力不足，请前往「会员与算力」充值后再试。"
-  }
   if (errorCode === "MODEL_RISK_CONTROL_REJECTED") {
     return "第三方模型平台的内容风控未通过，本次没有生成结果。请换一种更安全、明确的描述后重试。"
   }
   if (errorCode === "MODEL_CALL_FAILED") {
     return errorMessage || "模型调用失败，请稍后重试。"
-  }
-  if (errorCode === "CREDIT_NOT_ENOUGH" || errorCode === "AGENT_CREDIT_NOT_ENOUGH") {
-    return "可用算力不足，无法完成本次操作。请先充值。"
   }
   if (errorCode === "TOOL_CALL_FAILED" || errorCode === "TOOL_TASK_FAILED" || errorCode === "TOOL_TASK_TIMEOUT") {
     return errorMessage || "工具执行失败，请稍后再试，或换一种更明确的描述。"

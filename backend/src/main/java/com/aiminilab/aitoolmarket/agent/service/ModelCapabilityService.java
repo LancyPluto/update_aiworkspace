@@ -105,6 +105,18 @@ public class ModelCapabilityService {
                 .orElse(null);
     }
 
+    public AgentModelConfig resolveModelConfigForTool(AiTool tool, Long requestedModelConfigId) {
+        if (requestedModelConfigId == null) {
+            return resolveModelConfigForTool(tool);
+        }
+        AgentModelConfig selected = agentModelConfigMapper.findAgentEnabledById(requestedModelConfigId);
+        if (selected == null) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "model config not found or not selectable");
+        }
+        validateExecution(tool, selected);
+        return selected;
+    }
+
     public void validateToolModelBinding(AiTool tool) {
         if (tool == null || tool.getModelConfigId() == null) {
             return;

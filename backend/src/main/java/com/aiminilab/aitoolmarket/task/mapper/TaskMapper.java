@@ -28,9 +28,13 @@ public interface TaskMapper extends BaseMapper<AiTask> {
     }
 
     @Select("""
-            SELECT t.*, tool.tool_code, tool.tool_name, tool.tool_type, tool.execution_handler, tool.input_modality, tool.output_modality
+            SELECT t.*, tool.tool_code, tool.tool_name, tool.tool_type, tool.execution_handler, tool.input_modality, tool.output_modality,
+                   COALESCE(model_config.display_name, model_config.model_name) AS model_config_name,
+                   model_config.model_name AS model_name
             FROM ai_tasks t
             JOIN ai_tools tool ON tool.id = t.tool_id
+            LEFT JOIN agent_model_configs model_config ON model_config.id = t.model_config_id
+              AND COALESCE(model_config.is_deleted, 0) = 0
             WHERE t.id = #{taskId} AND t.user_id = #{userId}
               AND COALESCE(t.user_deleted, 0) = 0
             """)
@@ -41,9 +45,13 @@ public interface TaskMapper extends BaseMapper<AiTask> {
     }
 
     @Select("""
-            SELECT t.*, tool.tool_code, tool.tool_name, tool.tool_type, tool.execution_handler, tool.input_modality, tool.output_modality
+            SELECT t.*, tool.tool_code, tool.tool_name, tool.tool_type, tool.execution_handler, tool.input_modality, tool.output_modality,
+                   COALESCE(model_config.display_name, model_config.model_name) AS model_config_name,
+                   model_config.model_name AS model_name
             FROM ai_tasks t
             JOIN ai_tools tool ON tool.id = t.tool_id
+            LEFT JOIN agent_model_configs model_config ON model_config.id = t.model_config_id
+              AND COALESCE(model_config.is_deleted, 0) = 0
             WHERE t.id = #{taskId}
             """)
     AiTask selectDetailById(@Param("taskId") Long taskId);
@@ -54,9 +62,13 @@ public interface TaskMapper extends BaseMapper<AiTask> {
 
     @Select("""
             <script>
-            SELECT t.*, tool.tool_code, tool.tool_name, tool.tool_type, tool.execution_handler, tool.input_modality, tool.output_modality
+            SELECT t.*, tool.tool_code, tool.tool_name, tool.tool_type, tool.execution_handler, tool.input_modality, tool.output_modality,
+                   COALESCE(model_config.display_name, model_config.model_name) AS model_config_name,
+                   model_config.model_name AS model_name
             FROM ai_tasks t
             JOIN ai_tools tool ON tool.id = t.tool_id
+            LEFT JOIN agent_model_configs model_config ON model_config.id = t.model_config_id
+              AND COALESCE(model_config.is_deleted, 0) = 0
             WHERE t.user_id = #{userId}
               AND COALESCE(t.user_deleted, 0) = 0
             <if test="idempotencyKey != null and idempotencyKey.trim() != ''">
@@ -78,9 +90,13 @@ public interface TaskMapper extends BaseMapper<AiTask> {
 
     @Select("""
             <script>
-            SELECT t.*, tool.tool_code, tool.tool_name, tool.tool_type, tool.execution_handler, tool.input_modality, tool.output_modality
+            SELECT t.*, tool.tool_code, tool.tool_name, tool.tool_type, tool.execution_handler, tool.input_modality, tool.output_modality,
+                   COALESCE(model_config.display_name, model_config.model_name) AS model_config_name,
+                   model_config.model_name AS model_name
             FROM ai_tasks t
             JOIN ai_tools tool ON tool.id = t.tool_id
+            LEFT JOIN agent_model_configs model_config ON model_config.id = t.model_config_id
+              AND COALESCE(model_config.is_deleted, 0) = 0
             WHERE t.user_id = #{userId}
               AND COALESCE(t.user_deleted, 0) = 0
             <if test="status != null and status.trim() != ''">
@@ -120,9 +136,13 @@ public interface TaskMapper extends BaseMapper<AiTask> {
 
     @Select("""
             <script>
-            SELECT t.*, tool.tool_code, tool.tool_name, tool.tool_type, tool.execution_handler, tool.input_modality, tool.output_modality
+            SELECT t.*, tool.tool_code, tool.tool_name, tool.tool_type, tool.execution_handler, tool.input_modality, tool.output_modality,
+                   COALESCE(model_config.display_name, model_config.model_name) AS model_config_name,
+                   model_config.model_name AS model_name
             FROM ai_tasks t
             JOIN ai_tools tool ON tool.id = t.tool_id
+            LEFT JOIN agent_model_configs model_config ON model_config.id = t.model_config_id
+              AND COALESCE(model_config.is_deleted, 0) = 0
             WHERE 1 = 1
             <if test="status != null and status.trim() != ''">
               AND t.status = #{status}

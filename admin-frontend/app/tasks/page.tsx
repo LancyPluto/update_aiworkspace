@@ -252,7 +252,10 @@ function renderTaskOutput(task?: Task | null) {
   const audios = Array.isArray(parsed?.audios) ? parsed.audios.filter((item) => item?.url) : []
 
   if ((resourceType === "AUDIO" || audios.length > 0) && audios.length > 0) {
-    const metadata = parsed?.metadata || {}
+    const metadata =
+      parsed?.metadata && typeof parsed.metadata === "object" && !Array.isArray(parsed.metadata)
+        ? (parsed.metadata as Record<string, unknown>)
+        : {}
     return (
       <div className="space-y-4">
         <div className="flex items-center gap-3">
@@ -301,11 +304,11 @@ function renderTaskOutput(task?: Task | null) {
           </div>
           <div className="rounded-md bg-background p-3">
             <p className="text-muted-foreground">采样率</p>
-            <p className="font-medium">{metadata.audio_sample_rate ? `${metadata.audio_sample_rate} Hz` : "-"}</p>
+            <p className="font-medium">{metadata.audio_sample_rate ? `${String(metadata.audio_sample_rate)} Hz` : "-"}</p>
           </div>
           <div className="rounded-md bg-background p-3">
             <p className="text-muted-foreground">计费字符</p>
-            <p className="font-medium">{metadata.usage_characters ?? "-"}</p>
+            <p className="font-medium">{metadata.usage_characters == null ? "-" : String(metadata.usage_characters)}</p>
           </div>
         </div>
       </div>
@@ -699,7 +702,7 @@ function TasksPageContent() {
 
 export default function TasksPage() {
   return (
-    <Suspense fallback={null}>
+    <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">正在加载任务页面...</div>}>
       <TasksPageContent />
     </Suspense>
   )

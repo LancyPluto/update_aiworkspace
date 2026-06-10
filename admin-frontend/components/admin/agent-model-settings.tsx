@@ -39,6 +39,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 
 interface ModelForm {
   id: number | null
+  vendorAccountId: number | null
   displayName: string
   configCode: string
   provider: string
@@ -260,6 +261,7 @@ const vendorCatalog: Record<string, VendorMeta> = {
 
 const emptyForm: ModelForm = {
   id: null,
+  vendorAccountId: null,
   displayName: "",
   configCode: "",
   provider: "openai_compatible",
@@ -292,6 +294,7 @@ function toForm(config: AgentModelConfig, catalog: ModelProviderDescriptor[]): M
     config.capabilities && config.capabilities.length > 0 ? [...config.capabilities] : [...meta.capabilities]
   return {
     id: config.id,
+    vendorAccountId: config.vendorAccountId ?? null,
     displayName: config.displayName || config.modelName || "",
     configCode: config.configCode || "",
     provider: config.provider,
@@ -328,6 +331,7 @@ function toForm(config: AgentModelConfig, catalog: ModelProviderDescriptor[]): M
 
 function toPayload(form: ModelForm): AgentModelConfigPayload {
   return {
+    vendorAccountId: form.vendorAccountId ?? undefined,
     displayName: form.displayName.trim(),
     configCode: form.configCode.trim(),
     provider: form.provider,
@@ -900,7 +904,7 @@ export function AgentModelSettings({ refreshKey = 0 }: AgentModelSettingsProps) 
                           <Badge variant="outline">{vendor.shortName}</Badge>
                           <Badge variant="secondary">{pickMeta(catalogResolved, config.provider).label}</Badge>
                           <Badge variant="outline">{capabilityModalityLabel(capabilities)}</Badge>
-                          {config.agentEnabled !== false ? <Badge variant="outline">Agent 可选</Badge> : null}
+                          {config.agentEnabled !== false ? <Badge variant="outline">前台可选</Badge> : null}
                           {config.enabled === false ? <Badge variant="secondary">已停用</Badge> : null}
                           {testStatusBadge(config)}
                         </div>
@@ -1211,8 +1215,8 @@ export function AgentModelSettings({ refreshKey = 0 }: AgentModelSettingsProps) 
 
             <div className="flex flex-wrap items-center justify-between gap-4 rounded-md bg-secondary p-4">
               <div>
-                <p className="font-medium">作为 Agent 模型</p>
-                <p className="text-sm text-muted-foreground">勾选后会出现在用户端 Agent 页的模型选择中。</p>
+                <p className="font-medium">前台可选</p>
+                <p className="text-sm text-muted-foreground">勾选后会出现在用户端模型选择器中。</p>
               </div>
               <Switch
                 checked={form.agentEnabled}

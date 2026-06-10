@@ -270,7 +270,7 @@ export function ToolIntegrationApiSection({ pluginId, toolId, onSaved }: ToolInt
     return <p className="text-sm text-muted-foreground">正在加载 API 配置目录…</p>
   }
 
-  if (!workflow || !catalog) {
+  if (!workflow || !catalog || !detail) {
     return (
       <Alert variant="destructive">
         <AlertCircle className="h-4 w-4" />

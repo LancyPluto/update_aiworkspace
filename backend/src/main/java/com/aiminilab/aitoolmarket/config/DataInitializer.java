@@ -71,6 +71,8 @@ public class DataInitializer implements CommandLineRunner {
         createUserIfAbsent("user1", "123456", "User One", UserType.USER);
         toolCategoryMapper.ensureDefaultCategory();
         toolCategoryMapper.retireLegacyCategories();
+        seedAgnesTextToVideoTool();
+        seedDefaultTextToImageTool();
         systemSettingMapper.ensureTable();
         systemSettingVersionMapper.ensureTable();
         seedAgentPromptSettings();
@@ -85,6 +87,331 @@ public class DataInitializer implements CommandLineRunner {
 
     private void seedSettingDefaults(java.util.Map<String, String> defaults, String group, String description) {
         defaults.forEach((key, value) -> systemSettingMapper.insertIfAbsent(key, value, group, description));
+    }
+
+    private void seedAgnesTextToVideoTool() {
+        executeSql("""
+                INSERT INTO ai_tools (
+                  tool_code, tool_name, category_id, description, cover_url, status,
+                  estimated_credit_cost, model_config_id, tool_type, input_modality,
+                  output_modality, config_note, template_id, execution_handler,
+                  created_by, updated_by, is_deleted
+                )
+                SELECT
+                  'agnes_text_to_video',
+                  'Agnes 视频生成',
+                  c.id,
+                  '输入提示词，可选上传参考图；未上传图片走文生视频，上传图片走图文生视频。',
+                  '/workspace-assets/tool-ai-video.jpg',
+                  'ONLINE',
+                  5,
+                  m.id,
+                  'VIDEO_GENERATION',
+                  'MULTIMODAL',
+                  'VIDEO',
+                  '<!-- ai-tool-ui:{"primaryColor":"#ff2f6d","welcomeMessage":"","mediaDisplayMode":"effect","modelIconUrl":"","comparisonOriginalUrl":"","comparisonEffectUrl":"","heroTitle":"Agnes 视频生成","heroSubtitle":"输入提示词，可选上传参考图；未上传图片走文生视频，上传图片走图文生视频。","demoThumbnails":[],"useCases":["短视频创作","产品展示","剧情分镜"],"steps":["输入提示词","可选上传参考图","点击生成"],"recommendedToolCodes":[],"beforeVideoUrl":"","afterVideoUrl":""} -->',
+                  tt.id,
+                  'VIDEO_GENERATION',
+                  1,
+                  1,
+                  0
+                FROM (
+                  SELECT id
+                  FROM agent_model_configs
+                  WHERE COALESCE(is_deleted, 0) = 0
+                    AND enabled = 1
+                    AND COALESCE(agent_enabled, 0) = 1
+                    AND UPPER(COALESCE(capabilities, '')) LIKE '%VIDEO_GENERATION%'
+                    AND (
+                      provider = 'agnes_video'
+                      OR model_name = 'agnes-video-v2.0'
+                      OR config_code LIKE '%agnes_video_v2_0%'
+                    )
+                  ORDER BY
+                    CASE WHEN model_name = 'agnes-video-v2.0' THEN 0 ELSE 1 END,
+                    COALESCE(is_default, 0) DESC,
+                    id DESC
+                  LIMIT 1
+                ) m
+                LEFT JOIN tool_categories c ON c.category_code = 'text-to-video'
+                LEFT JOIN tool_templates tt ON tt.template_code = 'video_generation_default'
+                WHERE NOT EXISTS (
+                  SELECT 1 FROM ai_tools
+                  WHERE tool_code = 'agnes_text_to_video' AND is_deleted = 0
+                )
+                """);
+        executeSql("""
+                UPDATE ai_tools
+                SET tool_name = 'Agnes 视频生成',
+                    category_id = COALESCE((SELECT id FROM tool_categories WHERE category_code = 'text-to-video' LIMIT 1), category_id),
+                    description = '输入提示词，可选上传参考图；未上传图片走文生视频，上传图片走图文生视频。',
+                    cover_url = COALESCE(cover_url, '/workspace-assets/tool-ai-video.jpg'),
+                    status = 'ONLINE',
+                    estimated_credit_cost = 5,
+                    model_config_id = COALESCE((
+                      SELECT id
+                      FROM agent_model_configs
+                      WHERE COALESCE(is_deleted, 0) = 0
+                        AND enabled = 1
+                        AND COALESCE(agent_enabled, 0) = 1
+                        AND UPPER(COALESCE(capabilities, '')) LIKE '%VIDEO_GENERATION%'
+                        AND (
+                          provider = 'agnes_video'
+                          OR model_name = 'agnes-video-v2.0'
+                          OR config_code LIKE '%agnes_video_v2_0%'
+                        )
+                      ORDER BY
+                        CASE WHEN model_name = 'agnes-video-v2.0' THEN 0 ELSE 1 END,
+                        COALESCE(is_default, 0) DESC,
+                        id DESC
+                      LIMIT 1
+                    ), model_config_id),
+                    tool_type = 'VIDEO_GENERATION',
+                    input_modality = 'MULTIMODAL',
+                    output_modality = 'VIDEO',
+                    config_note = '<!-- ai-tool-ui:{"primaryColor":"#ff2f6d","welcomeMessage":"","mediaDisplayMode":"effect","modelIconUrl":"","comparisonOriginalUrl":"","comparisonEffectUrl":"","heroTitle":"Agnes 视频生成","heroSubtitle":"输入提示词，可选上传参考图；未上传图片走文生视频，上传图片走图文生视频。","demoThumbnails":[],"useCases":["短视频创作","产品展示","剧情分镜"],"steps":["输入提示词","可选上传参考图","点击生成"],"recommendedToolCodes":[],"beforeVideoUrl":"","afterVideoUrl":""} -->',
+                    template_id = COALESCE((SELECT id FROM tool_templates WHERE template_code = 'video_generation_default' LIMIT 1), template_id),
+                    execution_handler = 'VIDEO_GENERATION',
+                    updated_by = 1,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE tool_code = 'agnes_text_to_video' AND is_deleted = 0
+                """);
+        executeSql("""
+                INSERT INTO tool_field_schemas (tool_id, schema_version, status, created_by)
+                SELECT t.id, 'v1.0.1', 'ACTIVE', 1
+                FROM ai_tools t
+                WHERE t.tool_code = 'agnes_text_to_video'
+                  AND t.is_deleted = 0
+                  AND NOT EXISTS (
+                    SELECT 1 FROM tool_field_schemas s
+                    WHERE s.tool_id = t.id AND s.status = 'ACTIVE'
+                  )
+                """);
+        seedAgnesTextToVideoField("prompt", "视频描述", "textarea",
+                "描述镜头、主体、动作、风格和氛围", null, true, true, true, null, "ask_user", "MEDIUM", 1);
+        seedAgnesTextToVideoField("aspectRatio", "视频比例", "radio",
+                null, "[{\"label\":\"16:9\",\"value\":\"16:9\"},{\"label\":\"9:16\",\"value\":\"9:16\"},{\"label\":\"1:1\",\"value\":\"1:1\"}]",
+                false, false, false, "16:9", "default", "LOW", 2);
+        seedAgnesTextToVideoField("duration", "视频时长", "radio",
+                null, "[{\"label\":\"5 秒\",\"value\":\"5\"},{\"label\":\"10 秒\",\"value\":\"10\"},{\"label\":\"15 秒\",\"value\":\"15\"}]",
+                false, false, false, "5", "default", "LOW", 3);
+        seedAgnesTextToVideoField("referenceImageUrl", "参考图片", "image_upload",
+                "上传参考图片后走图文生视频；不上传则走文生视频。",
+                null, false, false, false, null, "context", "LOW", 4);
+    }
+
+    private void seedDefaultTextToImageTool() {
+        executeSql("""
+                INSERT INTO ai_tools (
+                  tool_code, tool_name, category_id, description, cover_url, status,
+                  estimated_credit_cost, model_config_id, tool_type, input_modality,
+                  output_modality, config_note, template_id, execution_handler,
+                  created_by, updated_by, is_deleted
+                )
+                SELECT
+                  'gpt_image_text_to_image',
+                  'AI 文生图',
+                  c.id,
+                  '输入提示词直接生成图片；上传参考图后走图文生图，未上传图片走文生图。模型由首页选择项决定。',
+                  '/workspace-assets/feature-gpt-image.jpg',
+                  'ONLINE',
+                  4,
+                  m.id,
+                  'IMAGE_GENERATION',
+                  'MULTIMODAL',
+                  'IMAGE',
+                  '<!-- ai-tool-ui:{"primaryColor":"#ff2f6d","welcomeMessage":"","mediaDisplayMode":"effect","modelIconUrl":"","comparisonOriginalUrl":"","heroTitle":"AI 文生图","heroSubtitle":"输入提示词直接生成图片；上传参考图后走图文生图，未上传图片走文生图。模型由首页选择项决定。","demoThumbnails":[],"useCases":["角色设定","商品图","海报视觉"],"steps":["输入提示词","可选上传参考图","选择生图模型","点击生成"],"recommendedToolCodes":[],"beforeVideoUrl":"","afterVideoUrl":""} -->',
+                  tt.id,
+                  'IMAGE_GENERATION',
+                  1,
+                  1,
+                  0
+                FROM (
+                  SELECT id
+                  FROM agent_model_configs
+                  WHERE COALESCE(is_deleted, 0) = 0
+                    AND enabled = 1
+                    AND COALESCE(agent_enabled, 0) = 1
+                    AND UPPER(COALESCE(capabilities, '')) LIKE '%IMAGE_GENERATION%'
+                  ORDER BY
+                    CASE WHEN provider = 'openai_images_gateway' THEN 0 ELSE 1 END,
+                    COALESCE(is_default, 0) DESC,
+                    id DESC
+                  LIMIT 1
+                ) m
+                LEFT JOIN tool_categories c ON c.category_code = 'text-to-image'
+                LEFT JOIN tool_templates tt ON tt.template_code = 'image_generation_default'
+                WHERE NOT EXISTS (
+                  SELECT 1 FROM ai_tools
+                  WHERE tool_code = 'gpt_image_text_to_image' AND is_deleted = 0
+                )
+                """);
+        executeSql("""
+                UPDATE ai_tools
+                SET tool_name = 'AI 文生图',
+                    category_id = COALESCE((SELECT id FROM tool_categories WHERE category_code = 'text-to-image' LIMIT 1), category_id),
+                    description = '输入提示词直接生成图片；上传参考图后走图文生图，未上传图片走文生图。模型由首页选择项决定。',
+                    cover_url = COALESCE(cover_url, '/workspace-assets/feature-gpt-image.jpg'),
+                    status = 'ONLINE',
+                    estimated_credit_cost = 4,
+                    model_config_id = COALESCE((
+                      SELECT id
+                      FROM agent_model_configs
+                      WHERE COALESCE(is_deleted, 0) = 0
+                        AND enabled = 1
+                        AND COALESCE(agent_enabled, 0) = 1
+                        AND UPPER(COALESCE(capabilities, '')) LIKE '%IMAGE_GENERATION%'
+                      ORDER BY
+                        CASE WHEN provider = 'openai_images_gateway' THEN 0 ELSE 1 END,
+                        COALESCE(is_default, 0) DESC,
+                        id DESC
+                      LIMIT 1
+                    ), model_config_id),
+                    tool_type = 'IMAGE_GENERATION',
+                    input_modality = 'MULTIMODAL',
+                    output_modality = 'IMAGE',
+                    config_note = '<!-- ai-tool-ui:{"primaryColor":"#ff2f6d","welcomeMessage":"","mediaDisplayMode":"effect","modelIconUrl":"","comparisonOriginalUrl":"","comparisonEffectUrl":"","heroTitle":"AI 文生图","heroSubtitle":"输入提示词直接生成图片；上传参考图后走图文生图，未上传图片走文生图。模型由首页选择项决定。","demoThumbnails":[],"useCases":["角色设定","商品图","海报视觉"],"steps":["输入提示词","可选上传参考图","选择生图模型","点击生成"],"recommendedToolCodes":[],"beforeVideoUrl":"","afterVideoUrl":""} -->',
+                    template_id = COALESCE((SELECT id FROM tool_templates WHERE template_code = 'image_generation_default' LIMIT 1), template_id),
+                    execution_handler = 'IMAGE_GENERATION',
+                    updated_by = 1,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE tool_code = 'gpt_image_text_to_image' AND is_deleted = 0
+                """);
+        executeSql("""
+                INSERT INTO tool_field_schemas (tool_id, schema_version, status, created_by)
+                SELECT t.id, 'v1.0.1', 'ACTIVE', 1
+                FROM ai_tools t
+                WHERE t.tool_code = 'gpt_image_text_to_image'
+                  AND t.is_deleted = 0
+                  AND NOT EXISTS (
+                    SELECT 1 FROM tool_field_schemas s
+                    WHERE s.tool_id = t.id AND s.status = 'ACTIVE'
+                  )
+                """);
+        seedToolField("gpt_image_text_to_image", "prompt", "提示词", "textarea",
+                "描述主体、场景、风格、构图和细节", null, true, true, true, null, "ask_user", "MEDIUM", 1);
+        seedToolField("gpt_image_text_to_image", "sourceImageUrl", "参考图片", "image_upload",
+                "可选上传参考图片；未上传图片走文生图，上传图片走图文生图。",
+                null, false, false, false, null, "context", "LOW", 2);
+        executeSql("""
+                UPDATE tool_field_schema_items
+                SET field_name = '提示词',
+                    field_type = 'textarea',
+                    placeholder = '描述主体、场景、风格、构图和细节',
+                    required = 1,
+                    execution_required = 1,
+                    user_required = 1,
+                    agent_fill_strategy = 'ask_user',
+                    risk_level = 'MEDIUM',
+                    sort_order = 1,
+                    status = 'ACTIVE'
+                WHERE field_key = 'prompt'
+                  AND schema_id IN (
+                    SELECT s.id
+                    FROM tool_field_schemas s
+                    JOIN ai_tools t ON t.id = s.tool_id
+                    WHERE t.tool_code = 'gpt_image_text_to_image'
+                      AND t.is_deleted = 0
+                      AND s.status = 'ACTIVE'
+                  )
+                """);
+        executeSql("""
+                UPDATE tool_field_schema_items
+                SET field_name = '参考图片',
+                    field_type = 'image_upload',
+                    placeholder = '可选上传参考图片；未上传图片走文生图，上传图片走图文生图。',
+                    options_json = NULL,
+                    required = 0,
+                    execution_required = 0,
+                    user_required = 0,
+                    default_value = NULL,
+                    agent_fill_strategy = 'context',
+                    risk_level = 'LOW',
+                    sort_order = 2,
+                    status = 'ACTIVE'
+                WHERE field_key = 'sourceImageUrl'
+                  AND schema_id IN (
+                    SELECT s.id
+                    FROM tool_field_schemas s
+                    JOIN ai_tools t ON t.id = s.tool_id
+                    WHERE t.tool_code = 'gpt_image_text_to_image'
+                      AND t.is_deleted = 0
+                      AND s.status = 'ACTIVE'
+                  )
+                """);
+    }
+
+    private void seedAgnesTextToVideoField(String fieldKey,
+                                           String fieldName,
+                                           String fieldType,
+                                           String placeholder,
+                                           String optionsJson,
+                                           boolean required,
+                                           boolean executionRequired,
+                                           boolean userRequired,
+                                           String defaultValue,
+                                           String agentFillStrategy,
+                                           String riskLevel,
+                                           int sortOrder) {
+        seedToolField("agnes_text_to_video", fieldKey, fieldName, fieldType, placeholder, optionsJson,
+                required, executionRequired, userRequired, defaultValue, agentFillStrategy, riskLevel, sortOrder);
+    }
+
+    private void seedToolField(String toolCode,
+                               String fieldKey,
+                               String fieldName,
+                               String fieldType,
+                               String placeholder,
+                               String optionsJson,
+                               boolean required,
+                               boolean executionRequired,
+                               boolean userRequired,
+                               String defaultValue,
+                               String agentFillStrategy,
+                               String riskLevel,
+                               int sortOrder) {
+        executeSql("""
+                INSERT INTO tool_field_schema_items (
+                  schema_id, field_key, field_name, field_type, placeholder, options_json,
+                  required, execution_required, user_required, default_value,
+                  agent_fill_strategy, risk_level, sort_order, status
+                )
+                SELECT s.id, '%s', '%s', '%s', %s, %s, %d, %d, %d, %s, '%s', '%s', %d, 'ACTIVE'
+                FROM tool_field_schemas s
+                JOIN ai_tools t ON t.id = s.tool_id
+                WHERE t.tool_code = '%s'
+                  AND t.is_deleted = 0
+                  AND s.status = 'ACTIVE'
+                  AND NOT EXISTS (
+                    SELECT 1 FROM tool_field_schema_items i
+                    WHERE i.schema_id = s.id AND i.field_key = '%s'
+                  )
+                ORDER BY s.id DESC
+                LIMIT 1
+                """.formatted(
+                sqlString(fieldKey),
+                sqlString(fieldName),
+                sqlString(fieldType),
+                sqlNullableString(placeholder),
+                sqlNullableString(optionsJson),
+                required ? 1 : 0,
+                executionRequired ? 1 : 0,
+                userRequired ? 1 : 0,
+                sqlNullableString(defaultValue),
+                sqlString(agentFillStrategy),
+                sqlString(riskLevel),
+                sortOrder,
+                sqlString(toolCode),
+                sqlString(fieldKey)
+        ));
+    }
+
+    private static String sqlNullableString(String value) {
+        return value == null ? "NULL" : "'" + sqlString(value) + "'";
+    }
+
+    private static String sqlString(String value) {
+        return value == null ? "" : value.replace("'", "''");
     }
 
     private void seedModelProviderMetadata() {
@@ -144,6 +471,7 @@ public class DataInitializer implements CommandLineRunner {
         ensureColumn("ai_tools", "input_modality", "ALTER TABLE ai_tools ADD COLUMN input_modality VARCHAR(32) NOT NULL DEFAULT 'TEXT'");
         ensureColumn("ai_tools", "output_modality", "ALTER TABLE ai_tools ADD COLUMN output_modality VARCHAR(32) NOT NULL DEFAULT 'TEXT'");
         ensureColumn("ai_tools", "config_note", "ALTER TABLE ai_tools ADD COLUMN config_note TEXT NULL");
+        executeSqlIgnore("ALTER TABLE ai_tools MODIFY COLUMN category_id BIGINT NULL");
         ensureColumn("tool_field_schema_items", "execution_required", "ALTER TABLE tool_field_schema_items ADD COLUMN execution_required TINYINT NOT NULL DEFAULT 0");
         ensureColumn("tool_field_schema_items", "user_required", "ALTER TABLE tool_field_schema_items ADD COLUMN user_required TINYINT NOT NULL DEFAULT 0");
         ensureColumn("tool_field_schema_items", "default_value", "ALTER TABLE tool_field_schema_items ADD COLUMN default_value VARCHAR(512) NULL");
@@ -159,6 +487,8 @@ public class DataInitializer implements CommandLineRunner {
                 """);
         ensureColumn("ai_tasks", "user_deleted", "ALTER TABLE ai_tasks ADD COLUMN user_deleted TINYINT NOT NULL DEFAULT 0");
         ensureColumn("ai_tasks", "user_deleted_at", "ALTER TABLE ai_tasks ADD COLUMN user_deleted_at DATETIME NULL");
+        ensureColumn("ai_tasks", "model_config_id", "ALTER TABLE ai_tasks ADD COLUMN model_config_id BIGINT NULL");
+        ensureIndex("ai_tasks", "idx_tasks_model_config", "CREATE INDEX idx_tasks_model_config ON ai_tasks(model_config_id)");
         ensureColumn("ai_tasks", "model_snapshot_json", "ALTER TABLE ai_tasks ADD COLUMN model_snapshot_json TEXT NULL");
         ensureTable("user_upload_assets", """
                 CREATE TABLE user_upload_assets (

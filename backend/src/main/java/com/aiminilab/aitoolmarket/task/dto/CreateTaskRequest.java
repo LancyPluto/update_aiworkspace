@@ -8,6 +8,7 @@ public record CreateTaskRequest(
         @NotBlank String toolCode,
         @NotNull JsonNode params,
         String clientRequestId,
-        Long sourcePostId
+        Long sourcePostId,
+        Long modelConfigId
 ) {
 }

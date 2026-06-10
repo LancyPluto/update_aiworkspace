@@ -51,7 +51,7 @@ export function templateFieldsToPayload(fields: ToolField[]): ToolFieldPayload[]
     fieldKey: field.fieldKey,
     fieldName: field.fieldName,
     fieldType: field.fieldType,
-    placeholder: field.placeholder,
+    placeholder: field.placeholder ?? undefined,
     optionsJson: field.optionsJson ?? (field.options ? JSON.stringify(field.options) : undefined),
     required: field.required,
     sortOrder: field.sortOrder,

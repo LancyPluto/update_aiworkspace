@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { AdminLayout } from "@/components/admin/admin-layout"
 import { AdminHeader } from "@/components/admin/header"
@@ -48,6 +48,7 @@ import {
   Search,
   Square,
   Wrench,
+  type LucideIcon,
 } from "lucide-react"
 
 function isCancellable(status: string) {
@@ -79,6 +80,13 @@ export function AgentRunsContent() {
     () => (detail ? diagnoseAgentRun(detail) : null),
     [detail],
   )
+
+  const statCards: Array<{ label: string; value: number; Icon: LucideIcon }> = [
+    { label: "总运行", value: stats?.totalRuns ?? 0, Icon: Bot },
+    { label: "运行中", value: stats?.activeRuns ?? 0, Icon: Clock3 },
+    { label: "失败", value: stats?.failedRuns ?? 0, Icon: AlertTriangle },
+    { label: "工具调用", value: stats?.toolCalls ?? 0, Icon: Wrench },
+  ]
 
   async function load() {
     setLoading(true)
@@ -150,20 +158,15 @@ export function AgentRunsContent() {
       />
       <div className="space-y-6 p-6">
         <div className="grid gap-4 md:grid-cols-4">
-          {[
-            ["总运行", stats?.totalRuns ?? 0, Bot],
-            ["运行中", stats?.activeRuns ?? 0, Clock3],
-            ["失败", stats?.failedRuns ?? 0, AlertTriangle],
-            ["工具调用", stats?.toolCalls ?? 0, Wrench],
-          ].map(([label, value, Icon]) => (
-            <Card key={String(label)}>
+          {statCards.map(({ label, value, Icon }) => (
+            <Card key={label}>
               <CardHeader className="pb-2">
                 <CardTitle className="flex items-center gap-2 text-sm text-muted-foreground">
                   <Icon className="h-4 w-4" />
-                  {label as string}
+                  {label}
                 </CardTitle>
               </CardHeader>
-              <CardContent className="text-2xl font-semibold">{value as number}</CardContent>
+              <CardContent className="text-2xl font-semibold">{value}</CardContent>
             </Card>
           ))}
         </div>
@@ -301,7 +304,9 @@ export function AgentRunsContent() {
 export default function AgentRunsPage() {
   return (
     <AdminLayout>
-      <AgentRunsContent />
+      <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">正在加载 Agent Runs...</div>}>
+        <AgentRunsContent />
+      </Suspense>
     </AdminLayout>
   )
 }

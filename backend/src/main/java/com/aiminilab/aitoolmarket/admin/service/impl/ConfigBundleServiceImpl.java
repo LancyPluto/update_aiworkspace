@@ -754,7 +754,12 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
 
         String status = item.status() == null ? "" : item.status().trim().toUpperCase(Locale.ROOT);
         if ("ONLINE".equals(status)) {
-            toolService.publishTool(saved.id(), operatorId);
+            try {
+                toolService.publishTool(saved.id(), operatorId);
+            } catch (BusinessException exception) {
+                warnings.add("Tool " + item.toolCode()
+                        + " kept as draft because it could not be published: " + exception.getMessage());
+            }
         } else if ("OFFLINE".equals(status)) {
             toolService.offlineTool(saved.id(), operatorId);
         }

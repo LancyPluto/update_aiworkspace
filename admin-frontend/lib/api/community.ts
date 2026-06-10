@@ -13,8 +13,12 @@ export interface AdminCommunityPostQuery {
   pageSize?: number
 }
 
+function toCommunityQueryRecord(query: AdminCommunityPostQuery): Record<string, string | number | boolean | null | undefined> {
+  return { ...query }
+}
+
 export function fetchAdminCommunityPosts(query: AdminCommunityPostQuery = {}) {
-  return http.get<PageResponse<AdminCommunityPost>>('/api/admin/v1/community/posts', query)
+  return http.get<PageResponse<AdminCommunityPost>>('/api/admin/v1/community/posts', toCommunityQueryRecord(query))
 }
 
 export function fetchAdminCommunityStats() {

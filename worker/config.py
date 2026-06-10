@@ -34,6 +34,8 @@ class Settings:
     rabbitmq_retry_queue_prefix: str = os.getenv('RABBITMQ_RETRY_QUEUE_PREFIX', 'ai.tool.normal.retry')
     rabbitmq_retry_delays_ms: str = os.getenv('RABBITMQ_RETRY_DELAYS_MS', '5000,30000,120000')
     rabbitmq_max_retries: int = int(os.getenv('RABBITMQ_MAX_RETRIES', '3'))
+    worker_concurrency: int = int(os.getenv('WORKER_CONCURRENCY', '5'))
+    rabbitmq_prefetch_count: int = int(os.getenv('RABBITMQ_PREFETCH_COUNT', os.getenv('WORKER_CONCURRENCY', '5')))
     rabbitmq_heartbeat_seconds: int = int(os.getenv('RABBITMQ_HEARTBEAT_SECONDS', '1800'))
     rabbitmq_blocked_connection_timeout_seconds: int = int(os.getenv('RABBITMQ_BLOCKED_CONNECTION_TIMEOUT_SECONDS', '1800'))
     backend_internal_base_url: str = os.getenv('BACKEND_INTERNAL_BASE_URL', 'http://localhost:8080')

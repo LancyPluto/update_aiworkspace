@@ -10,6 +10,18 @@ providers:
     workerReady: true
     description: Local development mock responses.
 
+  - code: local_media_mock
+    label: Local media mock
+    capabilities:
+      - IMAGE_GENERATION
+      - VIDEO_GENERATION
+    defaultBaseUrl: ""
+    defaultModel: local-media-mock
+    billingDefault: PER_CALL
+    testStrategy: accept_only
+    workerReady: true
+    description: Local mock image/video generator used for development and fallback media tests.
+
   - code: openai_compatible
     label: OpenAI compatible
     capabilities:
@@ -199,6 +211,48 @@ providers:
     testStrategy: agent_service
     workerReady: true
     description: Generic gateway slot for OpenAI-compatible image generation APIs. Use this when only Base URL/API Key changes.
+
+  - code: agnes_chat
+    label: Agnes AI chat
+    capabilities:
+      - TEXT_GENERATION
+    defaultBaseUrl: https://apihub.agnes-ai.com/v1
+    defaultModel: agnes-2.0-flash
+    billingDefault: TOKEN_PER_M
+    providerProtocol: openai_chat
+    vendorKind: direct
+    upstreamVendor: agnes
+    testStrategy: agent_service
+    workerReady: true
+    description: Agnes AI OpenAI-compatible chat completions models such as agnes-2.0-flash.
+
+  - code: agnes_images
+    label: Agnes AI images
+    capabilities:
+      - IMAGE_GENERATION
+    defaultBaseUrl: https://apihub.agnes-ai.com/v1
+    defaultModel: agnes-image-2.1-flash
+    billingDefault: IMAGE_TOKEN
+    providerProtocol: openai_images
+    vendorKind: direct
+    upstreamVendor: agnes
+    testStrategy: accept_only
+    workerReady: true
+    description: Agnes Image 2.x Flash models via /v1/images/generations with Agnes extra_body response format.
+
+  - code: agnes_video
+    label: Agnes AI video
+    capabilities:
+      - VIDEO_GENERATION
+    defaultBaseUrl: https://apihub.agnes-ai.com
+    defaultModel: agnes-video-v2.0
+    billingDefault: PER_CALL
+    providerProtocol: agnes_video
+    vendorKind: direct
+    upstreamVendor: agnes
+    testStrategy: accept_only
+    workerReady: true
+    description: Agnes Video V2.0 asynchronous video generation API using /v1/videos and video_id result polling.
 
   - code: worker_video
     label: Video generation (stub)

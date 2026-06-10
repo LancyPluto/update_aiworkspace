@@ -1,6 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" role="img" aria-label="Relay">
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" role="img" aria-label="API">
   <rect width="64" height="64" rx="14" fill="#ffffff"/>
-  <path fill="none" stroke="#475569" stroke-width="3" stroke-linecap="round" d="M20 24h24M20 40h24"/>
-  <path fill="#475569" d="M28 20v24M36 20v24"/>
-  <path fill="#94A3B8" d="M42 28l6 4-6 4V28z"/>
+  <g stroke="#64748b" stroke-width="2" fill="none">
+    <rect x="16" y="16" width="32" height="32" rx="4"/>
+    <path d="M24 24h16M24 32h16M24 40h10"/>
+  </g>
 </svg>

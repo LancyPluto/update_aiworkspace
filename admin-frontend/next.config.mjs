@@ -7,14 +7,14 @@ const adminBasePath = process.env.NEXT_PUBLIC_ADMIN_BASE_PATH || ''
 const projectRoot = path.dirname(fileURLToPath(import.meta.url))
 const nextConfig = {
   ...(adminBasePath ? { basePath: adminBasePath } : {}),
+  experimental: {
+    proxyClientMaxBodySize: '30mb',
+  },
   turbopack: {
     root: projectRoot,
   },
   webpack: (config, { dev }) => { if (dev) { config.watchOptions = { poll: false }; } return config; },
   allowedDevOrigins: ['127.0.0.1', 'localhost'],
-  typescript: {
-    ignoreBuildErrors: true,
-  },
   images: {
     unoptimized: true,
   },

@@ -253,7 +253,8 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
     @Override
     public AgentModelConfigTestResponse adminTestById(Long id) {
         AgentModelConfig existing = findActiveOrThrow(id);
-        AgentModelConfigTestResponse response = adminTest(toTestRequest(existing));
+        AgentModelConfig executable = credentialResolver.resolveForExecution(existing);
+        AgentModelConfigTestResponse response = adminTest(toTestRequest(executable));
         recordModelConnectivityTest(existing, response);
         return response;
     }
@@ -274,7 +275,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
     public AgentModelConfigTestResponse adminTest(AgentModelConfigRequest request) {
         validate(request);
         AgentModelConfig existing = findExistingForTest(request);
-        AgentModelConfigRequest merged = mergeSecretFields(request, existing);
+        AgentModelConfigRequest merged = mergeInheritedCredentialFields(mergeSecretFields(request, existing), existing);
         ModelProviderDefinition provider = providerRegistry.findByCode(merged.provider())
                 .orElseThrow(() -> new BusinessException(ErrorCode.PARAM_ERROR, "unsupported model provider"));
         if (shouldUseAcceptOnlyShortcut(merged, provider)) {
@@ -805,6 +806,55 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                 request.capabilities()
         );
         return mergeFromVendorAccount(merged, existing);
+    }
+
+    private AgentModelConfigRequest mergeInheritedCredentialFields(AgentModelConfigRequest request, AgentModelConfig existing) {
+        Long accountId = request.vendorAccountId();
+        if (accountId == null && existing != null) {
+            accountId = existing.getVendorAccountId();
+        }
+        if (accountId == null) {
+            return request;
+        }
+        AgentModelConfig probe = new AgentModelConfig();
+        probe.setVendorAccountId(accountId);
+        probe.setProvider(request.provider());
+        probe.setModelName(request.modelName());
+        probe.setBaseUrl(blankToNull(request.baseUrl()));
+        probe.setApiKey(blankToNull(request.apiKey()));
+        probe.setExtraAuthJson(blankToNull(request.extraAuthJson()));
+        AgentModelConfig resolved = credentialResolver.resolveForExecution(probe);
+        String baseUrl = blankToNull(request.baseUrl()) != null ? request.baseUrl() : resolved.getBaseUrl();
+        String apiKey = blankToNull(request.apiKey()) != null ? request.apiKey() : resolved.getApiKey();
+        String extraAuthJson = blankToNull(request.extraAuthJson()) != null ? request.extraAuthJson() : resolved.getExtraAuthJson();
+        return new AgentModelConfigRequest(
+                accountId,
+                request.displayName(),
+                request.configCode(),
+                request.provider(),
+                request.modelName(),
+                baseUrl,
+                apiKey,
+                request.clearApiKey(),
+                extraAuthJson,
+                request.minimaxGroupId(),
+                request.consoleUrl(),
+                request.balanceUrl(),
+                request.docsUrl(),
+                request.timeoutSeconds(),
+                request.connectTimeoutSeconds(),
+                request.readTimeoutSeconds(),
+                request.inputTokenPricePer1k(),
+                request.outputTokenPricePer1k(),
+                request.inputTokenPricePer1m(),
+                request.outputTokenPricePer1m(),
+                request.billingUnit(),
+                request.unitPrice(),
+                request.enabled(),
+                request.agentEnabled(),
+                request.isDefault(),
+                request.capabilities()
+        );
     }
 
     private AgentModelConfigRequest mergeFromVendorAccount(AgentModelConfigRequest request, AgentModelConfig existing) {

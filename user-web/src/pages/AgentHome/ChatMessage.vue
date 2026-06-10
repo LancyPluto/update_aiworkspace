@@ -186,9 +186,6 @@ watch(
   async (streaming) => {
     typeToken += 1
     if (streaming) {
-      if (fullText.value && displayed.value === fullText.value) {
-        displayed.value = ""
-      }
       await nextTick()
       void type()
     } else {
@@ -239,10 +236,6 @@ watch(
 .message-content {
   line-height: 1.65;
   position: relative;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, "PingFang SC", "Hiragino Sans GB",
-    "Microsoft YaHei", "Noto Sans", sans-serif;
-  font-size: 16px;
-  letter-spacing: 0.1px;
 }
 
 .markdown-body {

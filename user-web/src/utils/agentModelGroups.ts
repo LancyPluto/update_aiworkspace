@@ -1,4 +1,4 @@
-﻿import type { AgentModelConfig } from "@/api/types"
+import type { AgentModelConfig } from "@/api/types"
 
 export type AgentModelGroupKind = "vendor" | "relay"
 
@@ -25,7 +25,7 @@ type CatalogEntry = {
 /** Vite publicDir=asset锛岄潤鎬佽祫婧愯矾寰勪负 /assets/vendor-icons */
 export const VENDOR_ICON_BASE = "/assets/vendor-icons"
 
-/** 涓浆绔欙細浼樺厛鎸?baseUrl 鍩熷悕鍖归厤 */
+/** 涓浆绔欙細浼樺厛鎸?baseUrl 鍩熷悕鍖归厤 */
 const relayCatalog: CatalogEntry[] = [
   { key: "relay:siliconflow", label: "纭呭熀娴佸姩", mark: "SF", iconAsset: "siliconflow", patterns: ["siliconflow"] },
   { key: "relay:openrouter", label: "OpenRouter", mark: "OR", iconAsset: "openrouter", patterns: ["openrouter"] },
@@ -53,7 +53,7 @@ const vendorCatalog: CatalogEntry[] = [
   },
   {
     key: "vendor:volcengine",
-    label: "鐏北寮曟搸",
+    label: "鐏北寮曟搸",
     mark: "VE",
     iconAsset: "volcengine",
     patterns: ["volc", "volces.com", "volcengine", "ark.cn-beijing"],
@@ -73,8 +73,8 @@ const vendorCatalog: CatalogEntry[] = [
   { key: "vendor:claude", label: "Claude", mark: "C", iconAsset: "claude", patterns: ["claude"] },
   { key: "vendor:anthropic", label: "Anthropic", mark: "A", iconAsset: "anthropic", patterns: ["anthropic"] },
   { key: "vendor:alibabacloud", label: "阿里云", mark: "ALI", iconAsset: "alibabacloud", patterns: ["alibabacloud", "alibaba cloud"] },
-  { key: "vendor:tencent", label: "鑵捐娣峰厓", mark: "HY", iconAsset: "tencent", patterns: ["hunyuan", "tencent"] },
-  { key: "vendor:kling", label: "鍙伒 Kling", mark: "KL", iconAsset: "kling", patterns: ["kling"] },
+  { key: "vendor:tencent", label: "鑵捐娣峰厓", mark: "HY", iconAsset: "tencent", patterns: ["hunyuan", "tencent"] },
+  { key: "vendor:kling", label: "鍙伒 Kling", mark: "KL", iconAsset: "kling", patterns: ["kling"] },
   { key: "vendor:mineru", label: "MinerU", mark: "M", iconAsset: "mineru", patterns: ["mineru"] },
   { key: "vendor:stepfun", label: "阶跃 StepFun", mark: "SF", iconAsset: "stepfun", patterns: ["stepfun", "step-"] },
   { key: "vendor:yi", label: "闆朵竴涓囩墿 Yi", mark: "Y", iconAsset: "yi", patterns: ["yi-lightning", "01.ai", "lingyi"] },
@@ -168,7 +168,7 @@ function relayLabelFromHost(hostname: string): string {
   const short = hostname.replace(/^www\./, "")
   const parts = short.split(".")
   const brand = parts.length >= 2 ? parts[parts.length - 2] : short
-  return `涓浆绔?路 ${brand}`
+  return `涓浆绔?路 ${brand}`
 }
 
 function relayMetaFromHost(hostname: string): AgentModelGroupMeta {
@@ -244,7 +244,7 @@ export function groupKeyForModel(model: AgentModelConfig) {
   return resolveAgentModelGroup(model).key
 }
 
-/** 妯″瀷鏉＄洰涓婂睍绀虹殑鐪熷疄鍘傚晢锛堜笉鍙椾腑杞珯鍒嗙粍褰卞搷锛?*/
+/** 妯″瀷鏉＄洰涓婂睍绀虹殑鐪熷疄鍘傚晢锛堜笉鍙椾腑杞珯鍒嗙粍褰卞搷锛?*/
 export function resolveAgentModelVendor(model: AgentModelConfig): AgentModelGroupMeta {
   if (model.channelCode?.trim() || model.channelLabel?.trim() || model.channelIconAsset?.trim()) {
     const key = model.channelCode?.trim() || model.channelIconAsset?.trim() || "channel"

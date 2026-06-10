@@ -105,7 +105,8 @@ public class TaskServiceImpl implements TaskService {
     public TaskStatusResponse create(Long userId, CreateTaskRequest request) {
         return taskMapper.findByUserIdAndIdempotencyKey(userId, request.clientRequestId())
                 .map(TaskStatusResponse::from)
-                .orElseGet(() -> createNewTask(userId, request.toolCode(), request.params(), request.clientRequestId(), request.sourcePostId(), true));
+                .orElseGet(() -> createNewTask(userId, request.toolCode(), request.params(), request.clientRequestId(),
+                        request.sourcePostId(), request.modelConfigId(), true));
     }
 
     @Override
@@ -116,7 +117,7 @@ public class TaskServiceImpl implements TaskService {
                 .orElseGet(() -> {
                     AiTool tool = toolMapper.findOnlineByCode(request.toolCode())
                             .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在或未上线"));
-                    AgentModelConfig modelConfig = modelCapabilityService.resolveModelConfigForTool(tool);
+                    AgentModelConfig modelConfig = modelCapabilityService.resolveModelConfigForTool(tool, request.modelConfigId());
                     taskCreditDispatchService.ensureDispatchAllowed(userId, tool, modelConfig);
                     return createNewTask(
                             userId,
@@ -124,6 +125,7 @@ public class TaskServiceImpl implements TaskService {
                             request.params(),
                             request.clientRequestId(),
                             request.sourcePostId(),
+                            request.modelConfigId(),
                             true
                     );
                 });
@@ -184,7 +186,8 @@ public class TaskServiceImpl implements TaskService {
         AiTask originalTask = findTask(taskId, userId);
         return taskMapper.findByUserIdAndIdempotencyKey(userId, request.clientRequestId())
                 .map(TaskStatusResponse::from)
-                .orElseGet(() -> createNewTask(userId, originalTask.getToolCode(), request.params(), request.clientRequestId(), null, true));
+                .orElseGet(() -> createNewTask(userId, originalTask.getToolCode(), request.params(),
+                        request.clientRequestId(), null, originalTask.getModelConfigId(), true));
     }
 
     @Override
@@ -237,10 +240,10 @@ public class TaskServiceImpl implements TaskService {
     }
 
     private TaskStatusResponse createNewTask(Long userId, String toolCode, JsonNode params, String clientRequestId,
-                                             Long sourcePostId, boolean chargeTaskCredits) {
+                                             Long sourcePostId, Long requestedModelConfigId, boolean chargeTaskCredits) {
         AiTool tool = toolMapper.findOnlineByCode(toolCode)
                 .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在或未上线"));
-        AgentModelConfig modelConfig = modelCapabilityService.resolveModelConfigForTool(tool);
+        AgentModelConfig modelConfig = modelCapabilityService.resolveModelConfigForTool(tool, requestedModelConfigId);
         modelCapabilityService.validateExecution(tool, modelConfig);
         ModelExecutionSnapshot modelSnapshot = modelExecutionSnapshotService.create(modelConfig);
         if (chargeTaskCredits) {
@@ -252,6 +255,7 @@ public class TaskServiceImpl implements TaskService {
         task.setTaskNo(generateTaskNo());
         task.setUserId(userId);
         task.setToolId(tool.getId());
+        task.setModelConfigId(modelConfig == null ? null : modelConfig.getId());
         task.setParamsJson(normalizedParams.toString());
         task.setModelSnapshotJson(modelExecutionSnapshotService.serialize(modelSnapshot));
         task.setIdempotencyKey(clientRequestId);

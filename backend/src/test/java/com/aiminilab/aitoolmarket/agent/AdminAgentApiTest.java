@@ -740,6 +740,75 @@ class AdminAgentApiTest {
     }
 
     @Test
+    void modelConfigTestInheritsVendorAccountCredentials() throws Exception {
+        mockExternalAuthDependencies();
+        String adminToken = login("/api/admin/v1/auth/login", "admin");
+
+        String accountResponse = mockMvc.perform(post("/api/admin/v1/model-vendor-accounts")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "vendorCode": "openai",
+                                  "accountName": "Relay account",
+                                  "baseUrl": "https://relay.example/v1",
+                                  "apiKey": "relay-secret",
+                                  "balanceQueryMode": "MANUAL",
+                                  "enabled": true
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        Long accountId = Long.parseLong(accountResponse.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
+
+        mockMvc.perform(post("/api/admin/v1/model-vendor-accounts/{id}/test", accountId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.success").value(true));
+
+        String configResponse = mockMvc.perform(post("/api/admin/v1/agent/model-config")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "vendorAccountId": %d,
+                                  "displayName": "Relay GPT",
+                                  "configCode": "relay_gpt",
+                                  "provider": "openai_compatible",
+                                  "modelName": "gpt-relay",
+                                  "baseUrl": "",
+                                  "apiKey": "",
+                                  "timeoutSeconds": 60,
+                                  "enabled": true,
+                                  "agentEnabled": true,
+                                  "capabilities": ["TEXT_GENERATION"]
+                                }
+                                """.formatted(accountId)))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        Long configId = Long.parseLong(configResponse.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
+
+        Mockito.when(agentServiceClient.testModelConfig(any()))
+                .thenAnswer(invocation -> {
+                    var forwarded = invocation.getArgument(0, com.aiminilab.aitoolmarket.agent.dto.AgentModelConfigRequest.class);
+                    assertThat(forwarded.vendorAccountId()).isEqualTo(accountId);
+                    assertThat(forwarded.baseUrl()).isEqualTo("https://relay.example/v1");
+                    assertThat(forwarded.apiKey()).isEqualTo("relay-secret");
+                    return new AgentModelConfigTestResponse(true, forwarded.provider(), forwarded.modelName(), 9L, "ok", "pong");
+                });
+
+        mockMvc.perform(post("/api/admin/v1/agent/model-config/{id}/test", configId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.success").value(true))
+                .andExpect(jsonPath("$.data.modelName").value("gpt-relay"));
+    }
+
+    @Test
     void siliconflowImageModelConfigTestDoesNotCallAgentService() throws Exception {
         mockExternalAuthDependencies();
         String adminToken = login("/api/admin/v1/auth/login", "admin");
