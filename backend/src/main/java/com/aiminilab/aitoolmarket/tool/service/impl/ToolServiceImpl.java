@@ -279,6 +279,7 @@ public class ToolServiceImpl implements ToolService {
         if (tool.getExecutionHandler() == null || tool.getExecutionHandler().isBlank()) {
             tool.setExecutionHandler(ExecutionHandler.fromNullable(tool.getToolType()).name());
         }
+        modelCapabilityService.validateToolModelBindingAvailable(tool);
         Long toolId = toolMapper.insertTool(tool, operatorId);
         toolFieldSchemaMapper.createActiveDefaultSchema(toolId, operatorId);
         if (request.templateCode() != null && !request.templateCode().isBlank()) {
@@ -366,6 +367,8 @@ public class ToolServiceImpl implements ToolService {
                 existing.getConfigNote(), tool.getConfigNote()));
         if (ToolStatus.ONLINE.name().equalsIgnoreCase(existing.getStatus())) {
             validatePublishable(tool);
+        } else {
+            modelCapabilityService.validateToolModelBindingAvailable(tool);
         }
         toolMapper.updateTool(toolId, tool, operatorId);
         ToolSummaryResponse summary = findToolSummary(toolId);
