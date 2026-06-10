@@ -397,49 +397,53 @@ onUnmounted(() => {
     <div v-if="sidebarOpen" class="sidebar-backdrop md:hidden" @click="sidebarOpen = false" />
 
     <aside class="sidebar" :class="{ open: sidebarOpen }">
-      <div class="sidebar-head">
-        <FolderHeart class="h-5 w-5 text-primary" />
-        <span>我的收藏夹</span>
+      <div class="sidebar-top">
+        <div class="sidebar-head">
+          <FolderHeart class="h-5 w-5 text-primary" />
+          <span>我的收藏夹</span>
+        </div>
+
+        <button type="button" class="new-collection-btn" :disabled="!collectionsSupported || acting" @click.stop="createOpen = true">
+          <Plus class="h-4 w-4" />
+          新建收藏夹
+        </button>
       </div>
 
-      <button type="button" class="new-collection-btn" :disabled="!collectionsSupported || acting" @click.stop="createOpen = true">
-        <Plus class="h-4 w-4" />
-        新建收藏夹
-      </button>
+      <div class="sidebar-body">
+        <div v-if="loading" class="sidebar-loading">
+          <Loader2 class="h-4 w-4 animate-spin" />
+        </div>
 
-      <div v-if="loading" class="sidebar-loading">
-        <Loader2 class="h-4 w-4 animate-spin" />
-      </div>
-
-      <nav v-else class="collection-nav" aria-label="收藏夹列表">
-        <div
-          v-for="collection in collections"
-          :key="collection.id"
-          class="collection-row"
-          :class="{ active: activeCollection?.id === collection.id }"
-        >
-          <button type="button" class="collection-btn" @click="selectCollection(collection.id)">
-            <span class="collection-name">{{ collection.name }}</span>
-            <span class="collection-count">({{ collection.itemCount }})</span>
-          </button>
-          <div class="collection-actions">
-            <button
-              type="button"
-              class="icon-btn"
-              aria-label="更多操作"
-              @click.stop="collectionMenuId = collectionMenuId === collection.id ? null : collection.id"
-            >
-              <MoreHorizontal class="h-4 w-4" />
+        <nav v-else class="collection-nav" aria-label="收藏夹列表">
+          <div
+            v-for="collection in collections"
+            :key="collection.id"
+            class="collection-row"
+            :class="{ active: activeCollection?.id === collection.id }"
+          >
+            <button type="button" class="collection-btn" @click="selectCollection(collection.id)">
+              <span class="collection-name">{{ collection.name }}</span>
+              <span class="collection-count">({{ collection.itemCount }})</span>
             </button>
-            <div v-if="collectionMenuId === collection.id" class="dropdown" @click.stop>
-              <button type="button" :disabled="collection.defaultCollection" @click="openRename(collection)">重命名</button>
-              <button type="button" class="danger" :disabled="collection.defaultCollection" @click="deleteCollection(collection)">
-                删除
+            <div class="collection-actions">
+              <button
+                type="button"
+                class="icon-btn"
+                aria-label="更多操作"
+                @click.stop="collectionMenuId = collectionMenuId === collection.id ? null : collection.id"
+              >
+                <MoreHorizontal class="h-4 w-4" />
               </button>
+              <div v-if="collectionMenuId === collection.id" class="dropdown" @click.stop>
+                <button type="button" :disabled="collection.defaultCollection" @click="openRename(collection)">重命名</button>
+                <button type="button" class="danger" :disabled="collection.defaultCollection" @click="deleteCollection(collection)">
+                  删除
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      </nav>
+        </nav>
+      </div>
     </aside>
 
     <main class="main-panel">
@@ -662,7 +666,9 @@ onUnmounted(() => {
 <style scoped>
 .inspiration-library {
   display: flex;
-  min-height: calc(100vh - 64px);
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
   color: #f8fafc;
 }
 
@@ -674,11 +680,27 @@ onUnmounted(() => {
 }
 
 .sidebar {
+  display: flex;
+  flex-direction: column;
   flex-shrink: 0;
   width: 260px;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
   border-right: 1px solid rgb(255 255 255 / 0.08);
   background: rgb(255 255 255 / 0.02);
   padding: 20px 14px;
+}
+
+.sidebar-top {
+  flex-shrink: 0;
+}
+
+.sidebar-body {
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .sidebar-head {
@@ -827,17 +849,26 @@ onUnmounted(() => {
 .main-panel {
   flex: 1;
   min-width: 0;
-  padding: clamp(20px, 3vw, 32px);
-  padding-bottom: 88px;
+  height: 100%;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 0 clamp(20px, 3vw, 32px) 88px;
 }
 
 .content-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 22px;
+  margin: 0 calc(-1 * clamp(20px, 3vw, 32px)) 22px;
+  padding: 0 clamp(20px, 3vw, 32px);
+  background: rgb(17 17 17 / 0.96);
+  backdrop-filter: blur(12px);
 }
 
 .header-left {
@@ -1320,6 +1351,7 @@ onUnmounted(() => {
     bottom: 0;
     left: 0;
     z-index: 50;
+    height: 100vh;
     transform: translateX(-100%);
     transition: transform 0.22s ease;
     box-shadow: 0 0 40px rgb(0 0 0 / 0.4);
