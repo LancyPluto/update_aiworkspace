@@ -33,7 +33,7 @@ const statusCounts = ref({
 })
 
 function mapStatus(status: TaskStatus): "running" | "success" | "failed" | "queued" {
-  if (status === "PROCESSING" || status === "RETRYING") return "running"
+  if (status === "PROCESSING" || status === "AWAITING_USER" || status === "RETRYING") return "running"
   if (status === "SUCCESS") return "success"
   if (status === "FAILED" || status === "TIMEOUT" || status === "CANCELLED") return "failed"
   return "queued"

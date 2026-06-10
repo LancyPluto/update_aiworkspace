@@ -28,6 +28,7 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
 @Service
@@ -36,6 +37,14 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
     private static final Logger LOGGER = LoggerFactory.getLogger(ModelVendorAccountServiceImpl.class);
 
     private static final Set<String> BALANCE_MODES = Set.of("MANUAL", "REST_API", "NONE", "INFERRED");
+
+    /** 厂商账户连通测试时，优先用可探测的 provider，避免误选 minimax_music 等 agent-service 不支持的模型。 */
+    private static final Map<String, List<String>> ACCOUNT_TEST_PROVIDER_PRIORITY = Map.of(
+            "minimax", List.of("minimax", "anthropic_compatible", "minimax_speech", "minimax_music"),
+            "siliconflow", List.of("siliconflow_images", "siliconflow_speech", "openai_compatible"),
+            "volcengine", List.of("volcengine_images", "seedance", "openai_compatible"),
+            "kling", List.of("kling_video", "openai_compatible")
+    );
     private final ModelVendorAccountMapper vendorAccountMapper;
     private final AgentModelConfigMapper agentModelConfigMapper;
     private final VendorCodeResolver vendorCodeResolver;
@@ -130,7 +139,10 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
     @Override
     public ModelVendorAccountTestResponse adminTest(Long id) {
         ModelVendorAccount account = findActiveOrThrow(id);
-        String providerCode = resolveTestProvider(account.getVendorCode());
+        AgentModelConfig linkedForTest = selectLinkedModelForAccountTest(account);
+        String providerCode = linkedForTest != null && providerRegistry.isSupported(linkedForTest.getProvider())
+                ? linkedForTest.getProvider().trim().toLowerCase(Locale.ROOT)
+                : resolveTestProvider(account.getVendorCode());
         ModelProviderDefinition provider = providerRegistry.findByCode(providerCode)
                 .orElseThrow(() -> new BusinessException(ErrorCode.PARAM_ERROR, "unsupported model provider for test"));
         if ("accept_only".equalsIgnoreCase(provider.testStrategy())) {
@@ -139,7 +151,7 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
         if (requiresMediaGatewayProbe(provider)) {
             return testMediaGatewayVendorAccount(account, providerCode, provider);
         }
-        AgentModelConfigRequest testRequest = accountTestRequest(account, providerCode, provider);
+        AgentModelConfigRequest testRequest = accountTestRequest(account, providerCode, provider, linkedForTest);
         boolean success;
         String message;
         Long latencyMs;
@@ -195,14 +207,42 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
         );
     }
 
-    private AgentModelConfigRequest accountTestRequest(ModelVendorAccount account,
-                                                       String providerCode,
-                                                       ModelProviderDefinition provider) {
-        AgentModelConfig linked = agentModelConfigMapper.findActiveByVendorAccountId(account.getId())
-                .stream()
+    private AgentModelConfig selectLinkedModelForAccountTest(ModelVendorAccount account) {
+        List<AgentModelConfig> linked = agentModelConfigMapper.findActiveByVendorAccountId(account.getId());
+        if (linked.isEmpty()) {
+            return null;
+        }
+        String vendor = account.getVendorCode() == null ? "" : account.getVendorCode().trim().toLowerCase(Locale.ROOT);
+        List<String> priority = ACCOUNT_TEST_PROVIDER_PRIORITY.getOrDefault(vendor, List.of());
+        for (String provider : priority) {
+            AgentModelConfig enabled = linked.stream()
+                    .filter(config -> provider.equalsIgnoreCase(config.getProvider()))
+                    .filter(config -> Boolean.TRUE.equals(config.getEnabled()))
+                    .findFirst()
+                    .orElse(null);
+            if (enabled != null) {
+                return enabled;
+            }
+        }
+        for (String provider : priority) {
+            AgentModelConfig match = linked.stream()
+                    .filter(config -> provider.equalsIgnoreCase(config.getProvider()))
+                    .findFirst()
+                    .orElse(null);
+            if (match != null) {
+                return match;
+            }
+        }
+        return linked.stream()
                 .filter(config -> config.getProvider() != null && providerRegistry.isSupported(config.getProvider()))
                 .findFirst()
                 .orElse(null);
+    }
+
+    private AgentModelConfigRequest accountTestRequest(ModelVendorAccount account,
+                                                       String providerCode,
+                                                       ModelProviderDefinition provider,
+                                                       AgentModelConfig linked) {
         if (linked != null) {
             return new AgentModelConfigRequest(
                     account.getId(),

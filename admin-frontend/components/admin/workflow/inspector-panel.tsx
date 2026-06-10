@@ -198,7 +198,7 @@ export function InspectorPanel({
               </div>
             ) : null}
 
-            {def?.type === "field_input" ? (
+            {def?.type === "field_input" && enableFieldEditor ? (
               <div className="space-y-3 rounded-lg border border-border bg-secondary/20 p-3">
                 <div>
                   <p className="text-xs font-semibold text-card-foreground">用户侧表单字段</p>
@@ -226,6 +226,22 @@ export function InspectorPanel({
                 >
                   {fieldSaving ? "保存中..." : "保存字段配置"}
                 </Button>
+              </div>
+            ) : def?.type === "field_input" ? (
+              <div className="rounded-lg border border-dashed border-border bg-secondary/10 p-3 text-[11px] leading-5 text-muted-foreground">
+                工作流类工具不在此编辑表单字段。初始参数由配置包或「工具详情」维护；分步意见由画布中的「用户补充输入」节点承接。
+              </div>
+            ) : def?.type === "user_input" ? (
+              <div className="space-y-3 rounded-lg border border-border bg-secondary/20 p-3">
+                <p className="text-xs font-semibold text-card-foreground">分步用户意见节点</p>
+                <p className="text-[11px] leading-4 text-muted-foreground">
+                  用户在工作台对应阶段填写「{String(data.parameters?.fieldKey || "意见")}」。留空则沿用上一步结果继续执行。
+                </p>
+                <SlotEditor
+                  title="输出参数"
+                  slots={outputSlots}
+                  onChange={(slots) => updateSlots("outputSlots", slots)}
+                />
               </div>
             ) : (
               <>

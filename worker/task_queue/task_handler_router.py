@@ -8,6 +8,7 @@ from handlers.music_generation_handler import MusicGenerationHandler
 from handlers.text_task_handler import TextTaskHandler
 from handlers.text_to_speech_handler import TextToSpeechHandler
 from handlers.video_generation_handler import VideoGenerationHandler
+from handlers.workflow_step_handler import WorkflowStepHandler
 
 
 LOGGER = logging.getLogger(__name__)
@@ -23,6 +24,7 @@ class TaskHandlerRouter:
         music_generation_handler: MusicGenerationHandler | None = None,
         text_to_speech_handler: TextToSpeechHandler | None = None,
         video_generation_handler: VideoGenerationHandler | None = None,
+        workflow_step_handler: WorkflowStepHandler | None = None,
         backend_client: BackendClient | None = None,
     ) -> None:
         self.text_handler = text_handler or TextTaskHandler()
@@ -31,6 +33,7 @@ class TaskHandlerRouter:
         self.music_generation_handler = music_generation_handler or MusicGenerationHandler()
         self.text_to_speech_handler = text_to_speech_handler or TextToSpeechHandler()
         self.video_generation_handler = video_generation_handler or VideoGenerationHandler()
+        self.workflow_step_handler = workflow_step_handler or WorkflowStepHandler()
         self.backend_client = backend_client or BackendClient()
 
     def handle(self, message: dict[str, Any]) -> dict[str, Any]:
@@ -40,6 +43,9 @@ class TaskHandlerRouter:
             LOGGER.info("skip terminal task taskId=%s status=%s", message.get("taskId"), status)
             return {"status": "SKIPPED", "taskId": int(message["taskId"]), "taskStatus": status}
         routed_message = {**message, "__executionContext": context}
+        params = context.get("params") or {}
+        if params.get("workflowStep"):
+            return self.workflow_step_handler.handle(routed_message)
         handler = str(context.get("executionHandler") or "").upper()
         if handler == "DIGITAL_HUMAN":
             return self.digital_human_handler.handle(routed_message)
@@ -51,7 +57,7 @@ class TaskHandlerRouter:
             return self.text_to_speech_handler.handle(routed_message)
         if handler == "VIDEO_GENERATION":
             return self.video_generation_handler.handle(routed_message)
-        if context.get("toolCode") in {"digital_human_agent", "ai_comic_drama_agent"}:
+        if context.get("toolCode") == "digital_human_agent":
             return self.digital_human_handler.handle(routed_message)
         tool_code = str(context.get("toolCode") or "").strip().lower()
         if tool_code in {"suno", "suno_music"}:

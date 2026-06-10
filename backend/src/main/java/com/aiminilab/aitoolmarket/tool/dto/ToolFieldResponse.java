@@ -1,5 +1,6 @@
 package com.aiminilab.aitoolmarket.tool.dto;
 
+import com.aiminilab.aitoolmarket.common.util.Utf8TextRepair;
 import com.aiminilab.aitoolmarket.tool.entity.ToolFieldItem;
 import com.aiminilab.aitoolmarket.tool.entity.ToolTemplateField;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -23,9 +24,9 @@ public record ToolFieldResponse(
     public static ToolFieldResponse from(ToolFieldItem item, ObjectMapper objectMapper) {
         return new ToolFieldResponse(
                 item.getFieldKey(),
-                item.getFieldName(),
+                Utf8TextRepair.repairIfNeeded(item.getFieldName()),
                 item.getFieldType(),
-                item.getPlaceholder(),
+                Utf8TextRepair.repairIfNeeded(item.getPlaceholder()),
                 parseJson(item.getOptionsJson(), objectMapper),
                 item.getOptionsJson(),
                 item.getRequired(),
@@ -41,9 +42,9 @@ public record ToolFieldResponse(
     public static ToolFieldResponse fromTemplateField(ToolTemplateField item, ObjectMapper objectMapper) {
         return new ToolFieldResponse(
                 item.getFieldKey(),
-                item.getFieldName(),
+                Utf8TextRepair.repairIfNeeded(item.getFieldName()),
                 item.getFieldType(),
-                item.getPlaceholder(),
+                Utf8TextRepair.repairIfNeeded(item.getPlaceholder()),
                 parseJson(item.getOptionsJson(), objectMapper),
                 item.getOptionsJson(),
                 item.getRequired(),

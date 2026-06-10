@@ -227,12 +227,12 @@ function defaultBalanceModeForVendor(vendorCode: string) {
   switch (vendorCode) {
     case "deepseek":
     case "siliconflow":
-    case "minimax":
     case "openai":
     case "openai_gateway":
       return "REST_API"
     case "volcengine":
     case "kling":
+    case "minimax":
       return "NONE"
     default:
       return "MANUAL"

@@ -11,7 +11,14 @@ public final class TaskStateMachine {
 
     private static final Map<String, Set<String>> ALLOWED_TRANSITIONS = Map.of(
             TaskStatus.QUEUED.name(), Set.of(TaskStatus.PROCESSING.name(), TaskStatus.CANCELLED.name()),
-            TaskStatus.PROCESSING.name(), Set.of(TaskStatus.SUCCESS.name(), TaskStatus.FAILED.name(), TaskStatus.TIMEOUT.name(), TaskStatus.CANCELLED.name()),
+            TaskStatus.PROCESSING.name(), Set.of(
+                    TaskStatus.SUCCESS.name(),
+                    TaskStatus.FAILED.name(),
+                    TaskStatus.TIMEOUT.name(),
+                    TaskStatus.CANCELLED.name(),
+                    TaskStatus.AWAITING_USER.name()
+            ),
+            TaskStatus.AWAITING_USER.name(), Set.of(TaskStatus.PROCESSING.name(), TaskStatus.CANCELLED.name()),
             TaskStatus.FAILED.name(), Set.of(TaskStatus.RETRYING.name()),
             TaskStatus.TIMEOUT.name(), Set.of(TaskStatus.RETRYING.name()),
             TaskStatus.RETRYING.name(), Set.of(TaskStatus.QUEUED.name())

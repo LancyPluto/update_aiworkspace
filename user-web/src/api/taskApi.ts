@@ -122,6 +122,19 @@ export async function cancelTask(
   })
 }
 
+/** POST /api/v1/tasks/{taskId}/workflow-feedback —— 工作流阶段意见/继续 */
+export async function submitWorkflowFeedback(
+  taskId: number | string,
+  fields: Record<string, string>,
+  options?: { token?: string | null },
+): Promise<TaskStatusPayload> {
+  const id = encodeURIComponent(String(taskId))
+  return apiRequest<TaskStatusPayload>("POST", `/api/v1/tasks/${id}/workflow-feedback`, {
+    body: { fields },
+    token: options?.token,
+  })
+}
+
 /** DELETE /api/v1/tasks/{taskId} - 从当前用户素材库/任务列表隐藏任务 */
 export async function deleteTask(
   taskId: number | string,

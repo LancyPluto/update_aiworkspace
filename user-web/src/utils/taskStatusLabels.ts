@@ -5,6 +5,7 @@ export const TASK_STATUS_DOC_LABELS: Record<TaskStatus, string> = {
   CREATED: "任务已创建",
   QUEUED: "排队中",
   PROCESSING: "AI 正在生成",
+  AWAITING_USER: "等待您的确认或意见",
   RETRYING: "生成遇到问题，正在重试",
   SUCCESS: "生成完成",
   FAILED: "生成失败",

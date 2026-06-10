@@ -1,5 +1,6 @@
 package com.aiminilab.aitoolmarket.tool.service.impl;
 
+import com.aiminilab.aitoolmarket.common.util.Utf8TextRepair;
 import com.aiminilab.aitoolmarket.tool.dto.UpsertWorkflowRequest;
 import com.aiminilab.aitoolmarket.tool.dto.WorkflowResponse;
 import com.aiminilab.aitoolmarket.tool.dto.WorkflowVersionItemResponse;
@@ -133,9 +134,11 @@ public class WorkflowServiceImpl implements WorkflowService {
     private WorkflowResponse toResponse(ToolWorkflow wf) {
         if (wf == null) return null;
         return new WorkflowResponse(
-                wf.getId(), wf.getToolId(), wf.getWorkflowName(),
-                wf.getNodesJson(), wf.getEdgesJson(),
-                wf.getGroupsJson(), wf.getConfigJson(),
+                wf.getId(), wf.getToolId(), Utf8TextRepair.repairIfNeeded(wf.getWorkflowName()),
+                Utf8TextRepair.repairIfNeeded(wf.getNodesJson()),
+                Utf8TextRepair.repairIfNeeded(wf.getEdgesJson()),
+                Utf8TextRepair.repairIfNeeded(wf.getGroupsJson()),
+                Utf8TextRepair.repairIfNeeded(wf.getConfigJson()),
                 wf.getVersion() != null ? wf.getVersion() : 1,
                 wf.getStatus(),
                 wf.getCreatedBy(), wf.getUpdatedBy(),

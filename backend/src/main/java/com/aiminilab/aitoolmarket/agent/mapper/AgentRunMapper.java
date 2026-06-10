@@ -257,4 +257,14 @@ public interface AgentRunMapper extends BaseMapper<AgentRun> {
               AND status IN ('CREATED', 'RUNNING', 'WAITING_USER_CONFIRMATION')
             """)
     int markCancelled(@Param("runId") Long runId, @Param("now") LocalDateTime now);
+
+    @Select("""
+            SELECT *
+            FROM agent_runs
+            WHERE status IN ('CREATED', 'RUNNING', 'WAITING_USER_CONFIRMATION')
+              AND updated_at < #{cutoff}
+            ORDER BY updated_at ASC
+            LIMIT #{limit}
+            """)
+    List<AgentRun> findStaleActiveRuns(@Param("cutoff") LocalDateTime cutoff, @Param("limit") int limit);
 }

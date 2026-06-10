@@ -1,17 +1,31 @@
 "use client"
 
 import { Badge } from "@/components/ui/badge"
-import { NODE_TYPES, type NodeTypeDefinition } from "./node-registry"
+import type { ToolSummary } from "@/lib/api/types"
+import { NODE_TYPES, WORKFLOW_EXECUTION_NODE_TYPES, type NodeTypeDefinition } from "./node-registry"
 
 interface NodePaletteProps {
+  tool?: ToolSummary | null
   onDragStart: (event: React.DragEvent, def: NodeTypeDefinition) => void
   onAddNode: (def: NodeTypeDefinition) => void
 }
 
 const PINNED_TYPES = ["field_input", "prompt_template", "llm_model", "backend_tool", "final_output"]
 
-export function NodePalette({ onDragStart, onAddNode }: NodePaletteProps) {
-  const items = PINNED_TYPES
+function isWorkflowExecutionTool(tool?: ToolSummary | null): boolean {
+  const marker = `${tool?.executionHandler || ""} ${tool?.toolType || ""} ${tool?.toolCode || ""}`.toUpperCase()
+  return (
+    marker.includes("COMIC") ||
+    marker.includes("DRAMA") ||
+    marker.includes("DIGITAL_HUMAN") ||
+    marker.includes("WORKFLOW") ||
+    tool?.toolCode === "ai_comic_drama_agent"
+  )
+}
+
+export function NodePalette({ tool, onDragStart, onAddNode }: NodePaletteProps) {
+  const paletteTypes = isWorkflowExecutionTool(tool) ? WORKFLOW_EXECUTION_NODE_TYPES : PINNED_TYPES
+  const items = paletteTypes
     .map((type) => NODE_TYPES.find((node) => node.type === type))
     .filter(Boolean) as NodeTypeDefinition[]
 
@@ -20,7 +34,9 @@ export function NodePalette({ onDragStart, onAddNode }: NodePaletteProps) {
       <div className="shrink-0 border-b border-border p-3">
         <p className="text-sm font-semibold text-card-foreground">流程组件</p>
         <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
-          只保留输入、提示词、大模型、后端工具和输出五类节点。
+          {isWorkflowExecutionTool(tool)
+            ? "工作流类工具可拖拽开始、分步意见、模型与合成节点。"
+            : "大模型工具保留输入、提示词、大模型、后端工具和输出五类节点。"}
         </p>
       </div>
 

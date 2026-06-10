@@ -15,6 +15,13 @@ public interface ToolWorkflowMapper extends BaseMapper<ToolWorkflow> {
         return Optional.ofNullable(selectByToolId(toolId));
     }
 
+    @Select("SELECT * FROM tool_workflows WHERE tool_id = #{toolId} AND status = 'PUBLISHED' LIMIT 1")
+    ToolWorkflow selectPublishedByToolId(@Param("toolId") Long toolId);
+
+    default Optional<ToolWorkflow> findPublishedByToolId(Long toolId) {
+        return Optional.ofNullable(selectPublishedByToolId(toolId));
+    }
+
     @Select("SELECT * FROM tool_workflows WHERE tool_id = #{toolId} AND workflow_name = #{name} LIMIT 1")
     ToolWorkflow selectByToolIdAndName(@Param("toolId") Long toolId, @Param("name") String name);
 

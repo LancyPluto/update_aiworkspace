@@ -23,7 +23,8 @@ services=()
 if [ "$#" -gt 0 ]; then
   files=("$@")
 else
-  mapfile -t files < <(git diff --name-only HEAD~1 HEAD 2>/dev/null || true)
+  SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+  mapfile -t files < <(bash "$SCRIPT_DIR/detect_deploy_changes.sh" 2>/dev/null || true)
 fi
 
 if [ "${#files[@]}" -eq 0 ] || [ -z "${files[0]:-}" ]; then
@@ -38,6 +39,7 @@ for f in "${files[@]}"; do
     agent-service/*) add agent-service ;;
     admin-frontend/*) add admin-frontend ;;
     user-web/*) add user-web ;;
+    engines/banana-slides/*) add banana-slides ;;
     deploy/nginx/*|deploy/docker-compose*|deploy/nginx/*) add nginx ;;
     deploy/*|.github/*|sql/*)
       add backend

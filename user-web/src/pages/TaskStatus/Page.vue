@@ -4,7 +4,7 @@ import { RouterLink } from "vue-router"
 import { ArrowLeft, CheckCircle2, ChevronRight, Loader2, X as XIcon } from "lucide-vue-next"
 import AppShell from "@/components/AppShell.vue"
 import TaskStatusTag from "@/components/TaskStatusTag/TaskStatusTag.vue"
-import { fetchTaskById, fetchTaskStatus, streamTaskStatus } from "@/api/taskApi"
+import { fetchTaskById, fetchTaskStatus, streamTaskStatus, submitWorkflowFeedback } from "@/api/taskApi"
 import type { TaskDetail, TaskStatus, TaskStatusPayload } from "@/api/types"
 import { userRoutes } from "@/router/userRoutes"
 import { useAuthStore } from "@/store/authStore"
@@ -21,16 +21,51 @@ const taskDetailFail = ref<TaskDetail | null>(null)
 const loading = ref(true)
 const error = ref<string | null>(null)
 const streamConnected = ref(false)
+const feedbackText = ref("")
+const feedbackSubmitting = ref(false)
+const feedbackError = ref<string | null>(null)
+
+const toolCode = computed(
+  () => statusData.value?.toolCode || taskDetailFail.value?.toolCode || "",
+)
+
+const isComicDrama = computed(() => toolCode.value === "ai_comic_drama_agent")
+
+const FEEDBACK_LABEL_TO_KEY: Record<string, string> = {
+  脚本意见: "scriptFeedback",
+  分镜意见: "storyboardFeedback",
+  场景图意见: "sceneFeedback",
+  "BGM意见": "bgmFeedback",
+  "BGM 意见": "bgmFeedback",
+}
+
+const awaitingFeedback = computed(() => statusData.value?.status === "AWAITING_USER")
+
+const awaitingStageLabel = computed(() => {
+  const msg = (statusData.value?.progressMessage || "").trim()
+  const match = msg.match(/等待您的(.+?)（/)
+  return match?.[1]?.trim() || "阶段意见"
+})
+
+const awaitingFieldKey = computed(() => FEEDBACK_LABEL_TO_KEY[awaitingStageLabel.value] || null)
 
 const taskStages = computed(() => {
-  const toolCode = statusData.value?.toolCode || taskDetailFail.value?.toolCode || ""
-  if (toolCode === "digital_human_agent" || toolCode === "ai_comic_drama_agent") {
+  if (isComicDrama.value) {
     return [
-  { label: "脚本与语音准备", progress: 18 },
-  { label: "数字人形象生成", progress: 36 },
-  { label: "背景画面生成", progress: 52 },
-  { label: "形象驱动视频生成", progress: 78 },
-  { label: "字幕整理与结果输出", progress: 96 },
+      { label: "剧本与分镜", progress: 15 },
+      { label: "脚本/分镜确认", progress: 28 },
+      { label: "关键帧生成", progress: 42 },
+      { label: "配音与视频", progress: 68 },
+      { label: "合成输出", progress: 92 },
+    ]
+  }
+  if (toolCode.value === "digital_human_agent") {
+    return [
+      { label: "脚本与语音准备", progress: 18 },
+      { label: "数字人形象生成", progress: 36 },
+      { label: "背景画面生成", progress: 52 },
+      { label: "形象驱动视频生成", progress: 78 },
+      { label: "字幕整理与结果输出", progress: 96 },
     ]
   }
   return [
@@ -50,6 +85,7 @@ function stageState(stageProgress: number): "done" | "current" | "pending" {
 function mapStatus(s: TaskStatus): "running" | "success" | "failed" | "queued" {
   switch (s) {
     case "PROCESSING":
+    case "AWAITING_USER":
     case "RETRYING":
       return "running"
     case "SUCCESS":
@@ -128,6 +164,23 @@ async function loadFailDetailOnce() {
     taskDetailFail.value = await fetchTaskById(props.taskId, { token: auth.token })
   } catch {
     // 忽略，仍用 status 接口文案
+  }
+}
+
+async function submitFeedback(skip = false) {
+  if (!props.taskId || feedbackSubmitting.value) return
+  feedbackSubmitting.value = true
+  feedbackError.value = null
+  try {
+    const key = awaitingFieldKey.value || "scriptFeedback"
+    const fields: Record<string, string> = { [key]: skip ? "" : feedbackText.value.trim() }
+    const payload = await submitWorkflowFeedback(props.taskId, fields, { token: auth.token })
+    feedbackText.value = ""
+    await applyStatus(payload)
+  } catch (e) {
+    feedbackError.value = (e as Error).message || "提交意见失败"
+  } finally {
+    feedbackSubmitting.value = false
   }
 }
 
@@ -287,7 +340,42 @@ onUnmounted(() => {
           </div>
 
           <div
-            v-if="!isTerminal(statusData.status)"
+            v-if="awaitingFeedback && isComicDrama"
+            class="mt-5 rounded-lg border border-primary/25 bg-background p-4 space-y-3"
+          >
+            <p class="text-sm font-medium">交互式短剧 · {{ awaitingStageLabel }}</p>
+            <p class="text-xs text-muted-foreground">
+              可填写修改意见后提交；若满意可直接点「跳过继续」进入下一步。
+            </p>
+            <textarea
+              v-model="feedbackText"
+              rows="4"
+              class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              :placeholder="'请输入' + awaitingStageLabel + '（可选）'"
+            />
+            <p v-if="feedbackError" class="text-xs text-destructive">{{ feedbackError }}</p>
+            <div class="flex flex-wrap gap-2">
+              <button
+                type="button"
+                class="inline-flex h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+                :disabled="feedbackSubmitting"
+                @click="submitFeedback(false)"
+              >
+                {{ feedbackSubmitting ? "提交中..." : "提交并继续" }}
+              </button>
+              <button
+                type="button"
+                class="inline-flex h-9 items-center rounded-md border px-4 text-sm hover:bg-accent disabled:opacity-50"
+                :disabled="feedbackSubmitting"
+                @click="submitFeedback(true)"
+              >
+                跳过继续
+              </button>
+            </div>
+          </div>
+
+          <div
+            v-if="!isTerminal(statusData.status) && !awaitingFeedback"
             class="mt-5 grid gap-2"
             :class="taskStages.length >= 5 ? 'sm:grid-cols-5' : 'sm:grid-cols-3'"
           >

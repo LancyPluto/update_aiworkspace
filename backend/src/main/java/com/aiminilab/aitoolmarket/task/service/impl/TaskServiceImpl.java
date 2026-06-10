@@ -37,6 +37,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.databind.node.TextNode;
+import com.aiminilab.aitoolmarket.workflow.service.WorkflowExecutionService;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -65,6 +67,7 @@ public class TaskServiceImpl implements TaskService {
     private final CommunityEventMapper communityEventMapper;
     private final CommunityPostMapper communityPostMapper;
     private final AgentAttachmentUrlResolver agentAttachmentUrlResolver;
+    private final WorkflowExecutionService workflowExecutionService;
 
     public TaskServiceImpl(
             TaskMapper taskMapper,
@@ -81,7 +84,8 @@ public class TaskServiceImpl implements TaskService {
             TaskCreditDispatchService taskCreditDispatchService,
             CommunityEventMapper communityEventMapper,
             CommunityPostMapper communityPostMapper,
-            AgentAttachmentUrlResolver agentAttachmentUrlResolver
+            AgentAttachmentUrlResolver agentAttachmentUrlResolver,
+            @Lazy WorkflowExecutionService workflowExecutionService
     ) {
         this.taskMapper = taskMapper;
         this.toolMapper = toolMapper;
@@ -98,6 +102,7 @@ public class TaskServiceImpl implements TaskService {
         this.communityEventMapper = communityEventMapper;
         this.communityPostMapper = communityPostMapper;
         this.agentAttachmentUrlResolver = agentAttachmentUrlResolver;
+        this.workflowExecutionService = workflowExecutionService;
     }
 
     @Override
@@ -265,7 +270,11 @@ public class TaskServiceImpl implements TaskService {
         if (sourcePostId != null) {
             communityEventMapper.insertEvent(sourcePostId, userId, "task_created", "dashboard", tool.getToolCode(), taskId, 0);
         }
-        taskOutboxService.enqueueTaskCreated(taskId);
+        if (workflowExecutionService.shouldUseWorkflow(tool)) {
+            workflowExecutionService.startForRootTask(taskId);
+        } else {
+            taskOutboxService.enqueueTaskCreated(taskId);
+        }
         return TaskStatusResponse.from(findTask(taskId, userId));
     }
 

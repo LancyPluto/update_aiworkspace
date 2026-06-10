@@ -49,6 +49,7 @@ export type TaskStatus =
   | "CREATED"
   | "QUEUED"
   | "PROCESSING"
+  | "AWAITING_USER"
   | "RETRYING"
   | "SUCCESS"
   | "FAILED"

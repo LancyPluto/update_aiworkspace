@@ -210,6 +210,30 @@ public interface TaskMapper extends BaseMapper<AiTask> {
     @Update("""
             <script>
             UPDATE ai_tasks
+            SET status = 'AWAITING_USER', progress = #{progress}, progress_message = #{progressMessage},
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{taskId}
+              AND status IN
+              <foreach collection="expectedStatuses" item="status" open="(" separator="," close=")">
+                #{status}
+              </foreach>
+            </script>
+            """)
+    int markAwaitingUser(@Param("taskId") Long taskId,
+                         @Param("progress") int progress,
+                         @Param("progressMessage") String progressMessage,
+                         @Param("expectedStatuses") List<String> expectedStatuses);
+
+    @Update("""
+            UPDATE ai_tasks
+            SET params_json = #{paramsJson}, updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{taskId}
+            """)
+    int updateParamsJson(@Param("taskId") Long taskId, @Param("paramsJson") String paramsJson);
+
+    @Update("""
+            <script>
+            UPDATE ai_tasks
             SET status = 'SUCCESS', progress = 100, progress_message = '生成完成',
                 finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
             WHERE id = #{taskId}

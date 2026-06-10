@@ -1,24 +1,25 @@
 name: Dev Branch CI/CD
 
-# PR to dev: CI only. Push to dev: CI then deploy to production (secrets required).
+# push / PR to dev: CI then deploy to production (git incremental sync on server).
 on:
   push:
     branches: [dev]
   pull_request:
     branches: [dev]
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
     inputs:
       deploy_sync_mode:
-        description: "Deploy sync mode (rsync=incremental upload, git=server git pull)"
+        description: "Deploy sync mode (git=server git pull, rsync=incremental upload)"
         required: false
-        default: rsync
+        default: git
         type: choice
         options:
-          - rsync
           - git
+          - rsync
 
 concurrency:
-  group: dev-delivery-${{ github.ref }}
+  group: dev-delivery-ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -28,6 +29,8 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -43,6 +46,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -60,6 +65,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -77,6 +84,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -99,17 +108,22 @@ jobs:
     name: Deploy to Production
     needs: [backend-test, agent-service-test, worker-test, frontend-build]
     if: |
-      github.ref == 'refs/heads/dev' && (
-        github.event_name == 'push' ||
-        github.event_name == 'workflow_dispatch'
-      )
+      (github.event_name == 'push' && github.ref == 'refs/heads/dev') ||
+      (github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'dev' && github.event.pull_request.draft == false) ||
+      github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    concurrency:
+      group: production-deploy
+      cancel-in-progress: false
     environment:
       name: production
       url: http://wlcloudai.com
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
 
       - name: Validate deploy secrets
         env:
@@ -127,20 +141,37 @@ jobs:
 
       - name: Detect changed services
         id: changes
+        env:
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          GITHUB_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
         run: |
-          SERVICES="$(bash deploy/scripts/detect_deploy_services.sh)"
+          CHANGED="$(bash deploy/scripts/detect_deploy_changes.sh || true)"
+          echo "Changed files:"
+          echo "$CHANGED"
+          if [ -n "$CHANGED" ]; then
+            mapfile -t FILES <<< "$CHANGED"
+            SERVICES="$(bash deploy/scripts/detect_deploy_services.sh "${FILES[@]}")"
+          else
+            SERVICES="$(bash deploy/scripts/detect_deploy_services.sh)"
+          fi
           echo "services=$SERVICES" >> "$GITHUB_OUTPUT"
-          echo "Changed services: $SERVICES"
+          echo "Deploy services: $SERVICES"
 
-      - name: Deploy via SSH (light sync)
+      - name: Deploy via SSH (git sync)
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           DEPLOY_PASSWORD: ${{ secrets.DEPLOY_PASSWORD }}
-          DEPLOY_SYNC_MODE: ${{ github.event.inputs.deploy_sync_mode || 'rsync' }}
+          DEPLOY_SYNC_MODE: ${{ github.event.inputs.deploy_sync_mode || 'git' }}
           DEPLOY_SERVICES: ${{ steps.changes.outputs.services }}
-          GITHUB_SHA: ${{ github.sha }}
+          DEPLOY_GIT_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          DEPLOY_EVENT: ${{ github.event_name }}
+          DEPLOY_PR_NUMBER: ${{ github.event.pull_request.number || '' }}
+          GITHUB_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_ACTOR: ${{ github.actor }}
         run: bash deploy/scripts/ci_remote_deploy_light.sh
 
       - name: External smoke check

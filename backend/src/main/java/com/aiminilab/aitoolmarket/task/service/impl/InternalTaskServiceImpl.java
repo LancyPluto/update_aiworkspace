@@ -28,6 +28,7 @@ import com.aiminilab.aitoolmarket.task.mapper.TaskMapper;
 import com.aiminilab.aitoolmarket.task.metrics.TaskMetrics;
 import com.aiminilab.aitoolmarket.task.service.InternalTaskService;
 import com.aiminilab.aitoolmarket.task.service.TaskStateMachine;
+import com.aiminilab.aitoolmarket.workflow.service.WorkflowExecutionService;
 import com.aiminilab.aitoolmarket.tool.dto.ToolFieldResponse;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolFieldItemMapper;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -59,6 +60,7 @@ public class InternalTaskServiceImpl implements InternalTaskService {
     private final BillingService billingService;
     private final TaskMetrics taskMetrics;
     private final CommunityService communityService;
+    private final WorkflowExecutionService workflowExecutionService;
 
     public InternalTaskServiceImpl(TaskMapper taskMapper, ToolMapper toolMapper,
                                    AgentModelConfigMapper agentModelConfigMapper,
@@ -68,7 +70,8 @@ public class InternalTaskServiceImpl implements InternalTaskService {
                                    ModelExecutionSnapshotService modelExecutionSnapshotService,
                                    ToolFieldItemMapper toolFieldItemMapper, ObjectMapper objectMapper,
                                    CreditService creditService, TaskCreditEstimateService taskCreditEstimateService, BillingService billingService,
-                                   TaskMetrics taskMetrics, CommunityService communityService) {
+                                   TaskMetrics taskMetrics, CommunityService communityService,
+                                   WorkflowExecutionService workflowExecutionService) {
         this.taskMapper = taskMapper;
         this.toolMapper = toolMapper;
         this.agentModelConfigMapper = agentModelConfigMapper;
@@ -83,6 +86,7 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         this.billingService = billingService;
         this.taskMetrics = taskMetrics;
         this.communityService = communityService;
+        this.workflowExecutionService = workflowExecutionService;
     }
 
     @Override
@@ -126,6 +130,13 @@ public class InternalTaskServiceImpl implements InternalTaskService {
     @Transactional
     public TaskStatusResponse markSuccess(Long taskId, WorkerSuccessRequest request) {
         AiTask task = findTask(taskId);
+        if (isWorkflowStepTask(task)) {
+            workflowExecutionService.onStepTaskSuccess(taskId, request);
+            if (!TaskStatus.SUCCESS.name().equals(task.getStatus())) {
+                taskMapper.markSuccess(taskId, List.of(TaskStatus.PROCESSING.name(), TaskStatus.QUEUED.name()));
+            }
+            return TaskStatusResponse.from(findTask(taskId));
+        }
         if (TaskStatus.SUCCESS.name().equals(task.getStatus())) {
             return TaskStatusResponse.from(task);
         }
@@ -215,6 +226,12 @@ public class InternalTaskServiceImpl implements InternalTaskService {
     @Override
     @Transactional
     public TaskStatusResponse markFailed(Long taskId, WorkerFailedRequest request) {
+        AiTask task = findTask(taskId);
+        if (isWorkflowStepTask(task)) {
+            workflowExecutionService.onStepTaskFailed(taskId, request);
+            Long rootTaskId = resolveWorkflowRootTaskId(task);
+            return TaskStatusResponse.from(findTask(rootTaskId == null ? taskId : rootTaskId));
+        }
         String errorCode = request.errorCode() == null || request.errorCode().isBlank()
                 ? ErrorCode.MODEL_CALL_FAILED.name()
                 : request.errorCode();
@@ -225,7 +242,6 @@ public class InternalTaskServiceImpl implements InternalTaskService {
                 ? "Worker execution failed"
                 : limitText(request.errorMessage(), 4000);
         String progressMessage = limitText(("MODEL_TIMEOUT".equals(errorCode) ? "任务超时：" : "任务失败：") + errorCode, 240);
-        AiTask task = findTask(taskId);
         if (TaskStatus.FAILED.name().equals(task.getStatus()) || TaskStatus.TIMEOUT.name().equals(task.getStatus())
                 || TaskStatus.SUCCESS.name().equals(task.getStatus())
                 || TaskStatus.CANCELLED.name().equals(task.getStatus())) {
@@ -281,5 +297,18 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         } catch (Exception exception) {
             return objectMapper.createObjectNode();
         }
+    }
+
+    private boolean isWorkflowStepTask(AiTask task) {
+        JsonNode params = parseParams(task.getParamsJson());
+        return params.path("workflowStep").asBoolean(false);
+    }
+
+    private Long resolveWorkflowRootTaskId(AiTask task) {
+        JsonNode params = parseParams(task.getParamsJson());
+        if (params.hasNonNull("parentTaskId")) {
+            return params.get("parentTaskId").asLong();
+        }
+        return null;
     }
 }

@@ -80,12 +80,12 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent({
   return (
     <div
       className={cn(
-        "group relative rounded-lg border bg-card shadow-sm transition-shadow",
+        "group relative overflow-visible rounded-lg border bg-card shadow-sm transition-shadow",
         selected
           ? "border-primary shadow-lg ring-2 ring-primary/20"
           : "border-border hover:border-primary/40 hover:shadow-md",
       )}
-      style={{ minWidth: def?.defaultWidth || 250 }}
+      style={{ minWidth: def?.defaultWidth || 250, overflow: "visible" }}
     >
       <div
         className="flex items-center gap-2 rounded-t-[7px] px-3 text-white"
@@ -118,6 +118,7 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent({
                     type="target"
                     position={Position.Left}
                     id={`in-${slot.name}`}
+                    isConnectable
                     style={{
                       width: HANDLE_SIZE,
                       height: HANDLE_SIZE,
@@ -156,6 +157,7 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent({
                     type="source"
                     position={Position.Right}
                     id={`out-${slot.name}`}
+                    isConnectable
                     style={{
                       width: HANDLE_SIZE,
                       height: HANDLE_SIZE,

@@ -16,15 +16,38 @@ class SeedanceVideoTimeoutError(SeedanceVideoError):
 
 
 class SeedanceVideoClient:
-    def __init__(self) -> None:
-        self.base_url = settings.seedance_base_url.rstrip("/")
-        self.api_key = settings.seedance_api_key
-        self.default_model = settings.seedance_video_model
-        self.create_path = settings.seedance_video_create_path
-        self.poll_interval_seconds = settings.seedance_video_poll_interval_seconds
-        self.timeout_seconds = settings.seedance_video_timeout_seconds
+    def __init__(
+        self,
+        *,
+        base_url: str | None = None,
+        api_key: str | None = None,
+        default_model: str | None = None,
+        create_path: str | None = None,
+        poll_interval_seconds: int | None = None,
+        timeout_seconds: int | None = None,
+    ) -> None:
+        self.base_url = (base_url or settings.seedance_base_url).rstrip("/")
+        self.api_key = api_key if api_key is not None else settings.seedance_api_key
+        self.default_model = default_model or settings.seedance_video_model
+        self.create_path = create_path or settings.seedance_video_create_path
+        self.poll_interval_seconds = (
+            poll_interval_seconds if poll_interval_seconds is not None else settings.seedance_video_poll_interval_seconds
+        )
+        self.timeout_seconds = (
+            timeout_seconds if timeout_seconds is not None else settings.seedance_video_timeout_seconds
+        )
         self.timeout = (10, 300)
         self.session = requests.Session()
+
+    @classmethod
+    def from_model_config(cls, model_config: dict[str, Any] | None) -> "SeedanceVideoClient":
+        config = model_config or {}
+        api_key = str(config.get("apiKey") or config.get("api_key") or "").strip()
+        base_url = str(config.get("baseUrl") or config.get("base_url") or settings.seedance_base_url).strip()
+        model_name = str(config.get("modelName") or config.get("model_name") or settings.seedance_video_model).strip()
+        if not api_key:
+            raise SeedanceVideoError("Seedance model snapshot missing apiKey")
+        return cls(base_url=base_url, api_key=api_key, default_model=model_name)
 
     def generate_video(
         self,

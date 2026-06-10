@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Lightweight production deploy: incremental rsync or server-side git pull.
+# Lightweight production deploy: git incremental sync (default) or rsync fallback.
 # Password from env only — never commit credentials.
 set -euo pipefail
 
@@ -7,13 +7,16 @@ set -euo pipefail
 : "${DEPLOY_USER:?DEPLOY_USER is required}"
 : "${DEPLOY_PASSWORD:?DEPLOY_PASSWORD is required}"
 
-DEPLOY_SYNC_MODE="${DEPLOY_SYNC_MODE:-rsync}"
+DEPLOY_SYNC_MODE="${DEPLOY_SYNC_MODE:-git}"
 REMOTE_DIR="/root/ai_tool_market"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 SSH_OPTS=(-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null)
 GIT_REPO="${DEPLOY_GIT_REPO:-https://github.com/AI-miniLab/ai-tool-market.git}"
 GIT_BRANCH="${DEPLOY_GIT_BRANCH:-dev}"
+DEPLOY_GIT_REF="${DEPLOY_GIT_REF:-${GITHUB_SHA:-dev}}"
+DEPLOY_EVENT="${DEPLOY_EVENT:-${GITHUB_EVENT_NAME:-push}}"
+DEPLOY_PR_NUMBER="${DEPLOY_PR_NUMBER:-}"
 
 ssh_cmd() {
   sshpass -p "$DEPLOY_PASSWORD" ssh "${SSH_OPTS[@]}" "${DEPLOY_USER}@${DEPLOY_HOST}" "$@"
@@ -24,10 +27,16 @@ scp_cmd() {
 }
 
 if [ -z "${DEPLOY_SERVICES:-}" ]; then
-  DEPLOY_SERVICES="$(bash "$SCRIPT_DIR/detect_deploy_services.sh")"
+  CHANGED_FILES="$(bash "$SCRIPT_DIR/detect_deploy_changes.sh" || true)"
+  if [ -n "$CHANGED_FILES" ]; then
+    mapfile -t _changed_arr <<< "$CHANGED_FILES"
+    DEPLOY_SERVICES="$(bash "$SCRIPT_DIR/detect_deploy_services.sh" "${_changed_arr[@]}")"
+  else
+    DEPLOY_SERVICES="$(bash "$SCRIPT_DIR/detect_deploy_services.sh")"
+  fi
 fi
 
-echo "Deploy mode=$DEPLOY_SYNC_MODE services=$DEPLOY_SERVICES"
+echo "Deploy mode=$DEPLOY_SYNC_MODE services=$DEPLOY_SERVICES ref=$DEPLOY_GIT_REF event=$DEPLOY_EVENT"
 
 if [ "$DEPLOY_SYNC_MODE" = "rsync" ]; then
   ssh_cmd "mkdir -p '$REMOTE_DIR'"
@@ -40,22 +49,19 @@ elif [ "$DEPLOY_SYNC_MODE" = "git" ]; then
   if [ -n "${GITHUB_TOKEN:-}" ]; then
     CLONE_URL="https://x-access-token:${GITHUB_TOKEN}@github.com/AI-miniLab/ai-tool-market.git"
   fi
-  ssh_cmd "bash -s" <<REMOTE_GIT
-set -euo pipefail
-REMOTE_DIR="$REMOTE_DIR"
-CLONE_URL="$CLONE_URL"
-GIT_BRANCH="$GIT_BRANCH"
-if [ ! -d "\$REMOTE_DIR/.git" ]; then
-  rm -rf "\$REMOTE_DIR"
-  git clone --branch "\$GIT_BRANCH" --depth 1 "\$CLONE_URL" "\$REMOTE_DIR"
-else
-  cd "\$REMOTE_DIR"
-  git remote set-url origin "\$CLONE_URL"
-  git fetch origin "\$GIT_BRANCH" --depth 1
-  git checkout "\$GIT_BRANCH"
-  git reset --hard "origin/\$GIT_BRANCH"
-fi
-REMOTE_GIT
+  scp_cmd "$SCRIPT_DIR/remote_production_git_sync.sh" "${DEPLOY_USER}@${DEPLOY_HOST}:/tmp/production_git_sync.sh"
+  ssh_cmd "chmod +x /tmp/production_git_sync.sh"
+  ssh_cmd env \
+    REMOTE_DIR="$REMOTE_DIR" \
+    GIT_REPO_URL="$CLONE_URL" \
+    DEPLOY_GIT_REF="$DEPLOY_GIT_REF" \
+    DEPLOY_EVENT="$DEPLOY_EVENT" \
+    DEPLOY_GIT_BRANCH="$GIT_BRANCH" \
+    DEPLOY_PR_NUMBER="$DEPLOY_PR_NUMBER" \
+    GITHUB_SHA="${GITHUB_SHA:-}" \
+    GITHUB_RUN_ID="${GITHUB_RUN_ID:-}" \
+    GITHUB_ACTOR="${GITHUB_ACTOR:-}" \
+    /tmp/production_git_sync.sh
 else
   echo "Unknown DEPLOY_SYNC_MODE=$DEPLOY_SYNC_MODE (use rsync or git)" >&2
   exit 1
@@ -106,15 +112,27 @@ path.write_text("\n".join(out) + "\n", encoding="utf-8")
 print("patched", path)
 PY
 
-echo "\$GITHUB_SHA" > "\$REMOTE_DIR/.deploy_revision"
+if [ -f "\$REMOTE_DIR/deploy/logs/last-deploy.json" ]; then
+  echo "--- last deploy manifest ---"
+  cat "\$REMOTE_DIR/deploy/logs/last-deploy.json"
+fi
+if [ -f "\$REMOTE_DIR/deploy/logs/last-deploy.files.txt" ]; then
+  echo "--- changed files ---"
+  cat "\$REMOTE_DIR/deploy/logs/last-deploy.files.txt"
+fi
+
 cd "\$REMOTE_DIR/deploy"
+COMPOSE_ARGS=(-f docker-compose.yml -f docker-compose.nginx.yml)
+if echo "\$DEPLOY_SERVICES" | grep -qw banana-slides; then
+  COMPOSE_ARGS+=(--profile banana-slides)
+fi
 
 for svc in \$DEPLOY_SERVICES; do
   echo "Building \$svc ..."
-  docker compose -f docker-compose.yml -f docker-compose.nginx.yml build "\$svc"
+  docker compose "\${COMPOSE_ARGS[@]}" build "\$svc"
 done
 
-docker compose -f docker-compose.yml -f docker-compose.nginx.yml up -d --force-recreate \$DEPLOY_SERVICES
+docker compose "\${COMPOSE_ARGS[@]}" up -d --force-recreate \$DEPLOY_SERVICES
 
 echo "Waiting for user-web health..."
 for i in \$(seq 1 36); do
@@ -129,7 +147,7 @@ done
 curl -sf -o /dev/null -w "root:%{http_code}\n" http://127.0.0.1/ || true
 curl -sf -o /dev/null -w "api:%{http_code}\n" http://127.0.0.1/api/health || true
 curl -sf -o /dev/null -w "admin:%{http_code}\n" -L http://127.0.0.1/admin || true
-docker compose -f docker-compose.yml -f docker-compose.nginx.yml ps
+docker compose "\${COMPOSE_ARGS[@]}" ps
 REMOTE
 
 echo "Light deploy finished (mode=$DEPLOY_SYNC_MODE)."
