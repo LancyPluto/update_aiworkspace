@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
+import { ToolManagementPage as BackendCoreToolManagementPage } from "@/components/admin/tool-management-page"
 import { AdminLayout } from "@/components/admin/admin-layout"
 import { AdminHeader } from "@/components/admin/header"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -94,6 +95,7 @@ import { fetchAgentModelConfigs } from "@/lib/api/agent-model"
 import { fetchModelProviders } from "@/lib/api/model-providers"
 import { ApiError, getBaseUrl } from "@/lib/api/http"
 import { downloadConfigBundle, exportConfigBundle, importConfigBundle, readConfigBundleFile } from "@/lib/api/config-bundles"
+import { isWorkflowTool } from "@/lib/workflow-tools"
 import type { AgentModelConfig, ConfigBundleImportResult, ModelProviderDescriptor, ToolCategory, ToolField, ToolFieldPayload, ToolSummary } from "@/lib/api/types"
 
 const adminBasePath = (process.env.NEXT_PUBLIC_ADMIN_BASE_PATH || "").replace(/\/$/, "")
@@ -407,7 +409,10 @@ function VendorIconBadge({ iconAsset, label, className }: { iconAsset: string; l
   )
 }
 
-function displayCategoryForTool(tool: Pick<ToolRow, "toolType" | "inputModality" | "outputModality" | "category">) {
+function displayCategoryForTool(
+  tool: Pick<ToolRow, "toolCode" | "toolType" | "executionHandler" | "inputModality" | "outputModality" | "category" | "name" | "configNote">,
+) {
+  if (isWorkflowTool(tool)) return "工作流"
   if ((tool.toolType || "").toUpperCase() === "AGENT") return "智能体"
   const input = (tool.inputModality || "").toUpperCase()
   const output = (tool.outputModality || "").toUpperCase()
@@ -461,12 +466,13 @@ function mapTool(tool: ToolSummary): ToolRow {
 
 type ToolStatusFilter = "ALL" | "ONLINE" | "OFFLINE"
 
-function isAgentTool(tool: Pick<ToolRow, "toolCode" | "toolType" | "executionHandler" | "category" | "name">) {
-  const text = [tool.toolCode, tool.toolType, tool.executionHandler, tool.category, tool.name]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase()
-  return text.includes("agent") || text.includes("智能体")
+function isAgentTool(
+  tool: Pick<
+    ToolRow,
+    "toolCode" | "toolType" | "executionHandler" | "category" | "name" | "inputModality" | "outputModality" | "configNote"
+  >,
+) {
+  return isWorkflowTool(tool)
 }
 
 function modelVendorKey(config?: AgentModelConfig | null) {
@@ -647,7 +653,7 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
     for (const tool of filteredTools) {
       const config = tool.modelConfigId ? modelConfigById.get(tool.modelConfigId) : null
       const key = mode === "agents" ? "agent-workflow" : modelVendorKey(config)
-      const label = mode === "agents" ? "智能体工作流" : modelVendorLabel(key, config)
+      const label = mode === "agents" ? "工作流" : modelVendorLabel(key, config)
       const iconAsset = mode === "agents" ? "api" : vendorIconAssetForKey(key, config)
       const existing = groups.get(key)
       groups.set(key, { label: existing?.label || label, iconAsset: existing?.iconAsset || iconAsset, tools: [...(existing?.tools || []), tool] })
@@ -1080,12 +1086,12 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
     : loading
       ? "正在加载工具列表..."
       : mode === "agents"
-        ? "管理智能体工具、上线状态和工作流画布。"
+        ? "管理工作流工具、上线状态和工作流画布。"
         : "按模型厂商管理大模型工具，卡片预览为用户端实际展示效果。"
 
   return (
     <AdminLayout>
-      <AdminHeader title={mode === "agents" ? "智能体管理" : "大模型管理"} description={headerDescription} />
+      <AdminHeader title={mode === "agents" ? "工作流管理" : "大模型管理"} description={headerDescription} />
 
       <div className="space-y-6 p-6">
         {saveFeedback ? (
@@ -1670,7 +1676,7 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
         <div className="space-y-4">
           {groupedModelTools.length === 0 ? (
             <div className="rounded-lg border border-dashed border-border bg-card px-6 py-12 text-center text-sm text-muted-foreground">
-              {mode === "agents" ? "暂无匹配的智能体工具。" : "暂无匹配的大模型工具。"}
+              {mode === "agents" ? "暂无匹配的工作流。" : "暂无匹配的大模型工具。"}
             </div>
           ) : groupedModelTools.map((group) => {
             const isOpen = openVendorGroups[group.key] ?? true
@@ -1689,7 +1695,7 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
                       <h2 className="truncate text-base font-semibold text-card-foreground">{group.label}</h2>
                       <p className="text-xs text-muted-foreground">
                         {mode === "agents"
-                          ? "智能体工具 · 点击展开或收起"
+                          ? "工作流 · 点击展开或收起"
                           : `${group.tools.length} 个模型 · 卡片预览为用户端实际展示效果`}
                       </p>
                     </div>
@@ -1924,5 +1930,5 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
 }
 
 export default function ToolsPage() {
-  return <ToolManagementPage mode="models" />
+  return <BackendCoreToolManagementPage />
 }

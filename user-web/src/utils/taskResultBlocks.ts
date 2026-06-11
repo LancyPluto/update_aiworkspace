@@ -6,7 +6,7 @@ import type { AudioTrackItem, ResultBlock } from "@/types/result"
 export function extractTaskPreviewUrl(detail?: TaskDetail | null): string {
   const content = detail?.result?.contentText?.trim()
   if (!content) return ""
-  const blocks = buildTaskResultBlocks(content, detail)
+  const blocks = buildTaskResultBlocks(content, detail ?? undefined)
   for (const block of blocks) {
     if (block.type === "video" && block.url) return block.url
     if (block.type === "image" && block.images.length > 0) return block.images[0]!.url
@@ -69,7 +69,8 @@ export function buildTaskResultBlocks(content: string, detail?: TaskDetail): Res
   }
 
   if (outputModality === "IMAGE") {
-    const imageUrls = collectImageUrls(parsed ?? content)
+    const requestedImageCount = resolveRequestedImageCount(detail?.params)
+    const imageUrls = limitUrls(collectImageUrls(parsed ?? content), requestedImageCount)
     const images = imageUrls.map((url, index) => ({
       url: normalizeMediaUrl(url),
       label: `图片 ${index + 1}`,
@@ -134,6 +135,20 @@ function collectAudioTracks(parsed: unknown | null, taskNo?: string | null): Aud
   return tracks
 }
 
+function resolveRequestedImageCount(params?: Record<string, unknown>): number | null {
+  if (!params) return null
+  for (const key of ["count", "outputCount", "imageCount", "numImages", "batchSize", "batch_size", "n"]) {
+    const value = params[key]
+    const numeric = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN
+    if (Number.isInteger(numeric) && numeric > 0) return Math.min(numeric, 4)
+  }
+  return null
+}
+
+function limitUrls(urls: string[], limit: number | null): string[] {
+  return limit ? urls.slice(0, limit) : urls
+}
+
 function inferOutputModality(parsed: unknown | null, content: string, finalVideoUrl: string): string {
   if (finalVideoUrl) return "VIDEO"
   if (parsed && typeof parsed === "object") {
@@ -141,11 +156,11 @@ function inferOutputModality(parsed: unknown | null, content: string, finalVideo
     if (Array.isArray(root.images) && root.images.length > 0) return "IMAGE"
     if (Array.isArray(root.videos) && root.videos.length > 0) return "VIDEO"
     if (Array.isArray(root.audios) && root.audios.length > 0) return "AUDIO"
-    if (typeof root.imageUrl === "string" || typeof root.image_url === "string") return "IMAGE"
+    if (typeof root.imageUrl === "string" || typeof root.image_url === "string" || typeof root.output_url === "string") return "IMAGE"
     if (typeof root.videoUrl === "string" || typeof root.video_url === "string") return "VIDEO"
     if (typeof root.audioUrl === "string" || typeof root.audio_url === "string") return "AUDIO"
   }
-  if (/\/generated\/images\/|data:image\//i.test(content)) return "IMAGE"
+  if (/\/generated\/(?!uploads\/)\S+\.(?:png|jpe?g|webp|gif)|data:image\//i.test(content)) return "IMAGE"
   if (/\/generated\/.*\.mp4|data:video\//i.test(content)) return "VIDEO"
   if (/\/generated\/.*\.(mp3|wav|m4a)|data:audio\//i.test(content)) return "AUDIO"
   return ""
@@ -182,10 +197,6 @@ function collectUrls(value: unknown): string[] {
   return Array.from(urls)
 }
 
-function collectAudioUrls(value: unknown): string[] {
-  return collectUrls(value).filter((url) => /\/generated\/.*\.(mp3|wav|m4a|flac|ogg|aac|webm)(?:\?|$)|data:audio\//i.test(url))
-}
-
 function collectImageUrls(value: unknown): string[] {
   if (value && typeof value === "object" && !Array.isArray(value)) {
     const root = value as Record<string, unknown>
@@ -203,8 +214,58 @@ function collectImageUrls(value: unknown): string[] {
         .filter((url): url is string => Boolean(url))
       if (urls.length > 0) return uniqueUrls(urls)
     }
+    const outputUrls = collectOutputImageUrls(root)
+    if (outputUrls.length > 0) return outputUrls
   }
-  return uniqueUrls(collectUrls(value).filter((url) => /\.(png|jpe?g|webp|gif)(\?|$)/i.test(url)))
+  return uniqueUrls(collectUrls(value).filter(isGeneratedImageOutputUrl))
+}
+
+function collectAudioUrls(value: unknown): string[] {
+  return collectUrls(value).filter((url) => /\/generated\/.*\.(mp3|wav|m4a|flac|ogg|aac|webm)(?:\?|$)|data:audio\//i.test(url))
+}
+
+function collectOutputImageUrls(value: unknown): string[] {
+  const urls: string[] = []
+  const visit = (item: unknown, key = "") => {
+    if (typeof item === "string") {
+      if (isOutputMediaKey(key) || isGeneratedImageOutputUrl(item) || item.startsWith("data:image/")) {
+        extractUrlsFromText(item).forEach((url) => {
+          if (isImageUrl(url)) urls.push(url)
+        })
+      }
+      return
+    }
+    if (Array.isArray(item)) {
+      item.forEach((child) => visit(child, key))
+      return
+    }
+    if (item && typeof item === "object") {
+      for (const [childKey, childValue] of Object.entries(item as Record<string, unknown>)) {
+        if (isInputMediaKey(childKey)) continue
+        visit(childValue, childKey)
+      }
+    }
+  }
+  visit(value)
+  return uniqueUrls(urls)
+}
+
+function isOutputMediaKey(key: string): boolean {
+  return /^(url|uri|src|href|imageUrl|image_url|output|outputUrl|output_url|result|resultUrl|result_url|downloadUrl|download_url|fileUrl|file_url)$/i.test(key)
+}
+
+function isInputMediaKey(key: string): boolean {
+  return /(input|reference|ref_|source|cover|thumbnail|upload|original|mask|init|prompt)/i.test(key)
+}
+
+function isGeneratedImageOutputUrl(value: string): boolean {
+  const url = sanitizeUrl(value)
+  return /\/generated\/(?!uploads\/)\S+\.(?:png|jpe?g|webp|gif)(?:\?\S*)?$/i.test(url)
+}
+
+function isImageUrl(value: string): boolean {
+  const url = sanitizeUrl(value)
+  return url.startsWith("data:image/") || /\.(?:png|jpe?g|webp|gif)(?:\?\S*)?$/i.test(url)
 }
 
 function firstString(...values: unknown[]): string {

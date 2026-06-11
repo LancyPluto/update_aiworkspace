@@ -4,7 +4,6 @@ import { RouterLink, useRoute, useRouter } from "vue-router"
 import {
   AlertCircle,
   ArrowLeft,
-  Download,
   Loader2,
   Maximize2,
   MessageSquare,
@@ -135,15 +134,11 @@ function toggleExpand() {
 // ---------------------------------
 
 const isMarketplaceChat = computed(() => isMarketplaceMockToolId(toolId.value))
-const chatBackPath = computed(() => "/marketplace")
+const chatBackPath = computed(() => "/tool")
 const usesTaskChat = computed(() => !isMarketplaceChat.value)
 
 const showWelcome = computed(() => messages.value.length === 0 && !sending.value && !switchingSession.value)
 const coreField = computed(() => (tool.value?.fields || []).find((field) => isCoreField(field)) || null)
-
-const inputPlaceholder = computed(() => {
-  return "请输入信息，Enter 发送，Shift+Enter 换行"
-})
 
 const chatIconUrl = computed(() => {
   if (!tool.value) return ""
@@ -251,11 +246,6 @@ function normalizeMediaUrl(value?: string | null): string {
   const path = raw.startsWith("/") ? raw : `/${raw}`
   const apiOrigin = getApiOrigin()
   return apiOrigin ? `${apiOrigin}${path}` : path
-}
-
-function isVideoPreviewUrl(value?: string | null): boolean {
-  const raw = value?.split(/[?#]/)[0]?.toLowerCase() || ""
-  return [".mp4", ".webm", ".mov", ".m4v"].some((ext) => raw.endsWith(ext))
 }
 
 function isMediaParamKey(key: string): boolean {
@@ -794,18 +784,6 @@ async function handleSend() {
     sending.value = false
     await scrollToBottom()
   }
-}
-
-function exportMessageContent(content: string) {
-  const blob = new Blob([content], { type: "text/plain;charset=utf-8" })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement("a")
-  a.href = url
-  a.download = `文案_${Date.now()}.txt`
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  URL.revokeObjectURL(url)
 }
 
 function findPrecedingUserMessage(assistantMsg: LocalChatMessage): LocalChatMessage | null {

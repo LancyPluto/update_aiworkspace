@@ -8,6 +8,7 @@ public record InternalCreateTaskRequest(
         @NotNull Long userId,
         @NotBlank String toolCode,
         @NotNull JsonNode params,
-        String clientRequestId
+        String clientRequestId,
+        Long modelConfigId
 ) {
 }

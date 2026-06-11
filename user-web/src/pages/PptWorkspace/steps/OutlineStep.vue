@@ -16,7 +16,6 @@ import {
   refineOutline,
   updatePageOutline,
   updatePptProject,
-  type PptPage,
   type PptPageOutline,
   type PptProjectDetail,
 } from "@/api/pptApi"

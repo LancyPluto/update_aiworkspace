@@ -13,6 +13,11 @@ public class AiTask {
     private String taskNo;
     private Long userId;
     private Long toolId;
+    private Long modelConfigId;
+    @TableField(exist = false)
+    private String modelConfigName;
+    @TableField(exist = false)
+    private String modelName;
     @TableField(exist = false)
     private String toolCode;
     @TableField(exist = false)
@@ -69,6 +74,30 @@ public class AiTask {
 
     public void setToolId(Long toolId) {
         this.toolId = toolId;
+    }
+
+    public Long getModelConfigId() {
+        return modelConfigId;
+    }
+
+    public void setModelConfigId(Long modelConfigId) {
+        this.modelConfigId = modelConfigId;
+    }
+
+    public String getModelConfigName() {
+        return modelConfigName;
+    }
+
+    public void setModelConfigName(String modelConfigName) {
+        this.modelConfigName = modelConfigName;
+    }
+
+    public String getModelName() {
+        return modelName;
+    }
+
+    public void setModelName(String modelName) {
+        this.modelName = modelName;
     }
 
     public String getToolCode() {

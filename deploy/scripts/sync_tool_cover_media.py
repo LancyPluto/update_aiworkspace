@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Re-upload toolCoverMedia.ts and ToolList Page.vue to fix missing exports."""
+"""Re-upload migrated tool presentation files to fix missing cover exports."""
 from __future__ import annotations
 
 import os
@@ -13,7 +13,9 @@ ROOT = Path(__file__).resolve().parents[2]
 REMOTE = "/root/ai_tool_market"
 FILES = [
     "user-web/src/utils/toolCoverMedia.ts",
-    "user-web/src/pages/ToolList/Page.vue",
+    "user-web/src/adapters/toolPresentationAdapter.ts",
+    "user-web/src/components/workspace/WorkspaceToolCard.vue",
+    "user-web/src/pages/ToolCenter/Page.vue",
     "user-web/src/api/aiToolApi.ts",
 ]
 

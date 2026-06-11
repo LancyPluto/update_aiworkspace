@@ -40,6 +40,17 @@ public interface AgentModelConfigMapper extends BaseMapper<AgentModelConfig> {
     AgentModelConfig findActiveByConfigCode(@Param("configCode") String configCode);
 
     @Select("""
+            SELECT *
+            FROM agent_model_configs
+            WHERE vendor_account_id = #{vendorAccountId}
+              AND model_name = #{modelName}
+              AND COALESCE(is_deleted, 0) = 0
+            LIMIT 1
+            """)
+    AgentModelConfig findActiveByVendorAccountAndModelName(@Param("vendorAccountId") Long vendorAccountId,
+                                                           @Param("modelName") String modelName);
+
+    @Select("""
             SELECT COUNT(1)
             FROM agent_model_configs
             WHERE config_code = #{configCode}
@@ -97,6 +108,30 @@ public interface AgentModelConfigMapper extends BaseMapper<AgentModelConfig> {
             LIMIT 1
             """)
     AgentModelConfig findAgentEnabledById(@Param("id") Long id);
+
+    @Select("""
+            SELECT *
+            FROM agent_model_configs
+            WHERE vendor_account_id = #{vendorAccountId}
+              AND COALESCE(is_deleted, 0) = 0
+              AND enabled = 1
+              AND COALESCE(agent_enabled, 0) = 1
+              AND UPPER(COALESCE(capabilities, '')) LIKE '%TEXT_GENERATION%'
+            ORDER BY COALESCE(is_default, 0) DESC, id DESC
+            LIMIT 1
+            """)
+    AgentModelConfig findFirstEnabledTextByVendorAccountId(@Param("vendorAccountId") Long vendorAccountId);
+
+    @Select("""
+            SELECT *
+            FROM agent_model_configs
+            WHERE vendor_account_id = #{vendorAccountId}
+              AND COALESCE(is_deleted, 0) = 0
+              AND enabled = 1
+            ORDER BY COALESCE(agent_enabled, 0) DESC, COALESCE(is_default, 0) DESC, id DESC
+            LIMIT 1
+            """)
+    AgentModelConfig findFirstEnabledByVendorAccountId(@Param("vendorAccountId") Long vendorAccountId);
 
     @Select("""
             SELECT m.*

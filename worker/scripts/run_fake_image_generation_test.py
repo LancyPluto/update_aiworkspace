@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from handlers.image_generation_handler import ImageGenerationHandler, _model_call_error_code
 from handlers.generated_image_persister import GeneratedImagePersister
 from client.openai_images_client import OpenAIImagesClient
+from config import settings
 from task_queue.redis_consumer import TaskHandlerRouter
 
 
@@ -326,6 +327,57 @@ def test_openai_images_gateway_handler_passes_multiple_reference_images() -> Non
     assert client.calls[0]["image"][0].startswith("data:image/png;base64,"), client.calls
 
 
+def test_openai_images_outpainting_uses_source_image_without_prompt() -> None:
+    original_media_dir = settings.generated_media_dir
+    try:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            settings.generated_media_dir = temp_dir
+            source = Path(temp_dir) / "market-files" / "99127" / "source.png"
+            source.parent.mkdir(parents=True, exist_ok=True)
+            source.write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR")
+
+            backend = FakeBackendClient()
+            context = backend.get_execution_context(99127)
+            context["toolCode"] = "image_outpainting"
+            context["modelConfig"] = {
+                "provider": "agnes_images",
+                "modelName": "agnes-image-2.1-flash",
+                "baseUrl": "https://apihub.agnes-ai.com/v1",
+                "apiKey": "fake-agnes-key",
+                "extraAuthJson": '{"imageInputMode":"jsonImageArray","responseFormatLocation":"extra_body"}',
+            }
+            context["params"] = {
+                "sourceImageUrl": "http://backend:8080/generated/market-files/99127/source.png",
+            }
+            client = OpenAIImagesClient(
+                base_url="https://apihub.agnes-ai.com/v1",
+                api_key="fake-agnes-key",
+                extra_auth_json='{"imageInputMode":"jsonImageArray","responseFormatLocation":"extra_body"}',
+            )
+            client.calls = []
+
+            def fake_generate_images(**kwargs):
+                client.calls.append(kwargs)
+                client.last_usage = {}
+                return ["data:image/png;base64,ZmFrZQ=="]
+
+            client.generate_images = fake_generate_images
+            image_handler = ImageGenerationHandler(
+                backend_client=backend,
+                image_client=client,
+                image_persister=FakeImagePersister(),
+            )
+
+            result = image_handler.handle({"taskId": 99127, "traceId": "fake-openai-images-outpainting-test", "__executionContext": context})
+
+            assert result["status"] == "SUCCESS", result
+            assert backend.failed_payload is None, backend.failed_payload
+            assert client.calls[0]["image"].startswith("data:image/png;base64,"), client.calls
+            assert "Extend the uploaded image canvas" in client.calls[0]["prompt"], client.calls
+    finally:
+        settings.generated_media_dir = original_media_dir
+
+
 def test_openai_images_gateway_handler_reports_image_tokens() -> None:
     class FakeOpenAIImagesClient:
         def __init__(self) -> None:
@@ -480,6 +532,7 @@ if __name__ == "__main__":
     test_data_url_image_is_persisted()
     test_openai_images_gateway_handler_passes_reference_image()
     test_openai_images_gateway_handler_passes_multiple_reference_images()
+    test_openai_images_outpainting_uses_source_image_without_prompt()
     test_openai_images_gateway_handler_reports_image_tokens()
     test_openai_images_client_parses_url_and_usage()
     test_openai_images_client_timeout_can_be_configured()

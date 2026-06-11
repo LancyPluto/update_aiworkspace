@@ -7,11 +7,14 @@ import com.aiminilab.aitoolmarket.tool.dto.FieldSchemaAdminResponse;
 import com.aiminilab.aitoolmarket.tool.dto.ApplyToolTemplateRequest;
 import com.aiminilab.aitoolmarket.tool.dto.ToolFieldResponse;
 import com.aiminilab.aitoolmarket.tool.dto.ToolCoverUploadResponse;
+import com.aiminilab.aitoolmarket.tool.dto.ToolPromptDraftRequest;
+import com.aiminilab.aitoolmarket.tool.dto.ToolPromptDraftResponse;
 import com.aiminilab.aitoolmarket.tool.dto.ToolSummaryResponse;
 import com.aiminilab.aitoolmarket.tool.dto.UpdateToolFieldsRequest;
 import com.aiminilab.aitoolmarket.tool.dto.UpsertFieldSchemaRequest;
 import com.aiminilab.aitoolmarket.tool.dto.UpsertToolRequest;
 import com.aiminilab.aitoolmarket.tool.service.ToolService;
+import com.aiminilab.aitoolmarket.tool.service.ToolPromptDraftService;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -31,9 +34,12 @@ import java.util.List;
 public class AdminToolController {
 
     private final ToolService toolService;
+    private final ToolPromptDraftService promptDraftService;
 
-    public AdminToolController(ToolService toolService) {
+    public AdminToolController(ToolService toolService,
+                               ToolPromptDraftService promptDraftService) {
         this.toolService = toolService;
+        this.promptDraftService = promptDraftService;
     }
 
     @GetMapping
@@ -61,6 +67,11 @@ public class AdminToolController {
                                                             @RequestParam(required = false) String toolCode,
                                                             @RequestParam(required = false) String modelName) {
         return ApiResponse.success(toolService.uploadToolCover(file, toolName, toolCode, modelName));
+    }
+
+    @PostMapping("/prompt-draft")
+    public ApiResponse<ToolPromptDraftResponse> promptDraft(@RequestBody ToolPromptDraftRequest request) {
+        return ApiResponse.success(promptDraftService.generate(request));
     }
 
     @PutMapping("/{toolId}")

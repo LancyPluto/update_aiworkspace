@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { computed } from "vue"
+import { computed, type HTMLAttributes } from "vue"
 
 const props = withDefaults(
   defineProps<{
     variant?: "default" | "ghost" | "outline" | "secondary"
     size?: "default" | "lg" | "sm"
-    class?: string
+    class?: HTMLAttributes["class"]
   }>(),
   {
     variant: "default",

@@ -85,7 +85,7 @@ import {
   promptFromToolEventPayload,
   resolveTaskIdFromRunEvents,
 } from "@/utils/assetPreviewAdapter"
-import { openDashboardWithAsset } from "@/utils/assetReplay"
+import { openCreateWithAssetRecommendation } from "@/utils/assetReplay"
 import { buildTaskResultBlocks, resolveAudioTracks } from "@/utils/taskResultBlocks"
 import {
   chatAssetRefByUrl,
@@ -2114,7 +2114,7 @@ async function openAssetPreview(asset: AssetPreviewItem, message?: AgentMessage)
 }
 
 function useAssetWithTool(tool: AssetPreviewRecommendation, asset: AssetPreviewItem) {
-  openDashboardWithAsset(asset, tool)
+  openCreateWithAssetRecommendation(asset, tool)
   previewAsset.value = null
 }
 

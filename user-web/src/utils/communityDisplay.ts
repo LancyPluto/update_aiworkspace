@@ -2,7 +2,7 @@ import type { AssetPreviewItem } from "@/types/assetPreview"
 
 const GENERIC_TITLE_RE = /^(生成完成|已完成|未命名|untitled|生成图片|生成视频|生成音频|生成文本|生成作品)$/i
 const TASK_NO_RE = /^(TASK|T\d{8,}|[A-Z0-9]{2,}[-_][A-Z0-9_-]{4,})$/i
-const MOJIBAKE_TITLE_RE = /^(?:\?{2,}|�{1,}|[\s?]+(?:\d{8,})?)$/i
+const MOJIBAKE_TITLE_RE = /^(?:\?{2,}|\uFFFD{1,}|[\s?]+(?:\d{8,})?)$/i
 
 function normalize(value?: string | null) {
   return value?.trim() || ""
@@ -34,15 +34,15 @@ export function promptExcerpt(value?: string | null, maxLength = 56) {
   const prompt = normalize(value).replace(/\s+/g, " ")
   if (!prompt || isBrokenText(prompt)) return ""
   if (prompt.length <= maxLength) return prompt
-  return `${prompt.slice(0, maxLength).trim()}...`
+  return `${prompt.slice(0, maxLength).trim()}…`
 }
 
 function kindPlaceholder(kind?: AssetPreviewItem["kind"]) {
-  if (kind === "video") return "视频灵感案例"
-  if (kind === "image") return "视觉生成案例"
-  if (kind === "audio") return "音频创作案例"
-  if (kind === "text") return "文案生成案例"
-  return "AI 创作案例"
+  if (kind === "video") return "光影留声"
+  if (kind === "image") return "一笔成画"
+  if (kind === "audio") return "声线漫游"
+  if (kind === "text") return "文字拾光"
+  return "一件灵感之作"
 }
 
 export function communityDisplayTitle(input: {

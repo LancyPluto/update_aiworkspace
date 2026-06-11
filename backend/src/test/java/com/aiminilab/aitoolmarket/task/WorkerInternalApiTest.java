@@ -469,6 +469,45 @@ class WorkerInternalApiTest {
     }
 
     @Test
+    void workerExecutionContextIncludesRuntimePromptForMinimalImageTool() throws Exception {
+        String adminToken = login("/api/admin/v1/auth/login", "admin");
+        Long modelConfigId = createImageModelConfig(adminToken);
+        Long toolId = createMinimalImageTool(adminToken, "worker_background_remover", modelConfigId);
+        publishTool(adminToken, toolId);
+
+        String userToken = login("/api/v1/auth/login", "user1");
+        String response = mockMvc.perform(post("/api/v1/tasks")
+                        .header("Authorization", "Bearer " + userToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "toolCode": "worker_background_remover",
+                                  "params": {
+                                    "sourceImageUrl": "/generated/uploads/person.png"
+                                  },
+                                  "clientRequestId": "worker-background-remover-request"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        Long taskId = Long.parseLong(response.replaceAll("(?s).*\\\"taskId\\\"\\s*:\\s*(\\d+).*", "$1"));
+
+        mockMvc.perform(signed(get("/api/internal/v1/tasks/{taskId}/execution-context", taskId), "GET",
+                        "/api/internal/v1/tasks/%d/execution-context".formatted(taskId), ""))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.toolType").value("IMAGE_TO_IMAGE"))
+                .andExpect(jsonPath("$.data.inputModality").value("IMAGE"))
+                .andExpect(jsonPath("$.data.outputModality").value("IMAGE"))
+                .andExpect(jsonPath("$.data.executionHandler").value("IMAGE_GENERATION"))
+                .andExpect(jsonPath("$.data.params.sourceImageUrl").value("http://127.0.0.1:8080/generated/uploads/person.png"))
+                .andExpect(jsonPath("$.data.fields[0].fieldKey").value("sourceImageUrl"))
+                .andExpect(jsonPath("$.data.userPromptTemplate").value("Remove the background from {{sourceImageUrl}} and return a transparent PNG."))
+                .andExpect(jsonPath("$.data.systemPrompt").value("You are an image editing model."));
+    }
+
+    @Test
     void workerInternalApiRejectsMissingOrWrongInternalToken() throws Exception {
         String adminToken = login("/api/admin/v1/auth/login", "admin");
         Long toolId = createTool(adminToken, "worker_token_tool", 1);
@@ -527,6 +566,60 @@ class WorkerInternalApiTest {
                                   "estimatedCreditCost": %d%s%s
                                 }
                                 """.formatted(toolCode, toolCode, estimatedCreditCost, typeFragment, modelFragment)))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        return Long.parseLong(response.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
+    }
+
+    private Long createImageModelConfig(String adminToken) throws Exception {
+        String response = mockMvc.perform(post("/api/admin/v1/agent/model-config")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "displayName": "Image Runtime Model",
+                                  "configCode": "image_runtime_model",
+                                  "provider": "siliconflow_images",
+                                  "modelName": "Tongyi-MAI/Z-Image-Turbo",
+                                  "baseUrl": "https://api.siliconflow.cn",
+                                  "apiKey": "fake-key",
+                                  "timeoutSeconds": 60,
+                                  "billingUnit": "PER_CALL",
+                                  "unitPrice": 0.03,
+                                  "capabilities": ["IMAGE_GENERATION"],
+                                  "enabled": true,
+                                  "agentEnabled": true,
+                                  "isDefault": false
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        return Long.parseLong(response.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
+    }
+
+    private Long createMinimalImageTool(String adminToken, String toolCode, Long modelConfigId) throws Exception {
+        String response = mockMvc.perform(post("/api/admin/v1/tools")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "toolCode": "%s",
+                                  "toolName": "背景去除器",
+                                  "description": "上传图片并去除背景",
+                                  "coverUrl": "",
+                                  "toolType": "IMAGE_TO_IMAGE",
+                                  "inputModality": "IMAGE",
+                                  "outputModality": "IMAGE",
+                                  "executionHandler": "IMAGE_GENERATION",
+                                  "modelConfigId": %d,
+                                  "estimatedCreditCost": 3,
+                                  "configNote": "<!-- ai-tool-runtime:{\\"toolKind\\":\\"image\\",\\"systemPrompt\\":\\"You are an image editing model.\\",\\"adminPrompt\\":\\"Remove the background from {{sourceImageUrl}} and return a transparent PNG.\\",\\"userInputs\\":[{\\"fieldKey\\":\\"sourceImageUrl\\",\\"fieldName\\":\\"上传图片\\",\\"fieldType\\":\\"image_upload\\",\\"required\\":true}]} -->"
+                                }
+                                """.formatted(toolCode, modelConfigId)))
                 .andExpect(status().isOk())
                 .andReturn()
                 .getResponse()

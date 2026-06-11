@@ -18,6 +18,9 @@ export const fallbackProviderCapabilities: Record<string, string[]> = {
   siliconflow_speech: ["TEXT_TO_SPEECH"],
   siliconflow_asr: ["SPEECH_TO_TEXT"],
   worker_video: ["VIDEO_GENERATION"],
+  agnes_chat: ["TEXT_GENERATION"],
+  agnes_images: ["IMAGE_GENERATION"],
+  agnes_video: ["VIDEO_GENERATION"],
 }
 
 const capabilityLabels: Record<string, string> = {

@@ -31,7 +31,7 @@ public record ToolIntegrationView(
                 config.getCustomUiRoute(),
                 config.getApiPrefix(),
                 config.getDisplayName(),
-                config.getEngine(),
+                null,
                 extension
         );
     }

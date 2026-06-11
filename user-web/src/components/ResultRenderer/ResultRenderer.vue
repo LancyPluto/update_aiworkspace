@@ -405,6 +405,7 @@ function escapeXml(value: string): string {
               :href="image.url"
               download
               :class="floatingDownloadClass()"
+              @click.stop
             >
               <Download class="h-3.5 w-3.5" />
               下载

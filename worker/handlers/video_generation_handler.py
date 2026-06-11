@@ -2,6 +2,7 @@ import json
 import logging
 from typing import Any
 
+from client.agnes_video_client import AgnesVideoClient, AgnesVideoError, AgnesVideoTimeoutError
 from client.backend_client import BackendClient, BackendClientError
 from client.dashscope_video_client import DashScopeVideoClient, DashScopeVideoError, DashScopeVideoTimeoutError
 from client.kling_video_client import KlingVideoClient, KlingVideoError, KlingVideoTimeoutError
@@ -22,12 +23,14 @@ class VideoGenerationHandler:
         backend_client: BackendClient | None = None,
         seedance_client: SeedanceVideoClient | None = None,
         kling_client: KlingVideoClient | None = None,
+        agnes_client: AgnesVideoClient | None = None,
         dashscope_client: DashScopeVideoClient | None = None,
         video_persister: GeneratedVideoPersister | None = None,
     ) -> None:
         self.backend_client = backend_client or BackendClient()
         self.seedance_client = seedance_client
         self.kling_client = kling_client
+        self.agnes_client = agnes_client
         self.dashscope_client = dashscope_client
         self.video_persister = video_persister or GeneratedVideoPersister()
 
@@ -69,6 +72,8 @@ class VideoGenerationHandler:
             provider = str(model_config.get("provider") or context.get("modelProviderCode") or "").lower()
             provider_registry.require_capability(provider, "VIDEO_GENERATION")
             provider_registry.require_worker_ready(provider)
+            provider_protocol = provider_registry.provider_protocol(provider)
+            provider_progress = {"value": 12}
 
             prompt = _build_prompt(params)
             if not prompt:
@@ -103,16 +108,24 @@ class VideoGenerationHandler:
                     "aspect_ratio": str(params.get("aspectRatio") or params.get("aspect_ratio") or ""),
                     "resolution": str(params.get("resolution") or ""),
                 }
-                if provider == "kling_video":
+                if provider_protocol in {"kling_video", "agnes_video"}:
                     video_request["mode"] = str(params.get("mode") or params.get("qualityMode") or "")
+                if provider_protocol == "kling_video":
                     video_request["sound"] = str(params.get("sound") or "off")
                     video_request["callback_url"] = str(params.get("callbackUrl") or params.get("callback_url") or "")
                     video_request["external_task_id"] = str(params.get("externalTaskId") or params.get("external_task_id") or "")
+                if provider_protocol == "agnes_video":
+                    video_request["progress_callback"] = lambda progress: self._mark_provider_progress(
+                        task_id,
+                        progress,
+                        provider_progress,
+                        trace_id,
+                    )
                 result = client.generate_video(**video_request)
 
             self.backend_client.mark_processing(
                 task_id,
-                progress=90,
+                progress=max(90, min(99, provider_progress["value"])),
                 progress_message="Video generated, saving result",
                 trace_id=trace_id,
             )
@@ -143,9 +156,11 @@ class VideoGenerationHandler:
             )
             LOGGER.info("video generation task %s completed traceId=%s provider=%s", task_id, trace_id or "-", provider)
             return {"status": "SUCCESS", "taskId": task_id, "traceId": trace_id, "provider": provider}
-        except (KlingVideoTimeoutError, SeedanceVideoTimeoutError, DashScopeVideoTimeoutError) as exc:
+        except (KlingVideoTimeoutError, SeedanceVideoTimeoutError, AgnesVideoTimeoutError, DashScopeVideoTimeoutError) as exc:
             return self._mark_failed(task_id, "MODEL_TIMEOUT", str(exc), trace_id)
-        except (KlingVideoError, SeedanceVideoError, DashScopeVideoError, provider_registry.ProviderRegistryError) as exc:
+        except InputImageError as exc:
+            return self._mark_failed(task_id, "INVALID_TASK_PARAMS", str(exc), trace_id)
+        except (KlingVideoError, SeedanceVideoError, AgnesVideoError, DashScopeVideoError, provider_registry.ProviderRegistryError) as exc:
             return self._mark_failed(task_id, _model_call_error_code(str(exc)), str(exc), trace_id)
         except GeneratedVideoPersistError as exc:
             return self._mark_failed(task_id, "MEDIA_PERSIST_FAILED", str(exc), trace_id)
@@ -156,7 +171,8 @@ class VideoGenerationHandler:
             return self._mark_failed(task_id, "WORKER_INTERNAL_ERROR", str(exc), trace_id)
 
     def _client(self, provider: str, model_config: dict[str, Any]) -> Any:
-        if provider == "kling_video":
+        provider_protocol = provider_registry.provider_protocol(provider)
+        if provider_protocol == "kling_video":
             if self.kling_client is not None:
                 return self.kling_client
             access_key, secret_key = resolve_kling_credentials(model_config)
@@ -181,7 +197,14 @@ class VideoGenerationHandler:
                 image_result_path=model_config.get("imageResultPath"),
                 timeout_seconds=model_config.get("timeoutSeconds"),
             )
-        if provider == "seedance":
+        if provider_protocol == "agnes_video":
+            return self.agnes_client or AgnesVideoClient(
+                base_url=model_config.get("baseUrl"),
+                api_key=model_config.get("apiKey"),
+                timeout_seconds=model_config.get("timeoutSeconds"),
+                extra_auth_json=model_config.get("extraAuthJson"),
+            )
+        if provider_protocol == "seedance":
             return self.seedance_client or SeedanceVideoClient()
         if provider == "bailian_happyhorse":
             return self.dashscope_client or DashScopeVideoClient(
@@ -221,6 +244,24 @@ class VideoGenerationHandler:
             )
         except BackendClientError:
             LOGGER.warning("failed to mark video task processing taskId=%s", task_id, exc_info=True)
+
+    def _mark_provider_progress(
+        self,
+        task_id: int,
+        progress: int,
+        progress_state: dict[str, int],
+        trace_id: str | None,
+    ) -> None:
+        normalized = max(1, min(99, int(progress)))
+        if normalized <= progress_state["value"]:
+            return
+        progress_state["value"] = normalized
+        self._mark_processing_safe(
+            task_id,
+            progress=normalized,
+            progress_message=f"实时进度：{normalized}%",
+            trace_id=trace_id,
+        )
 
 
 def _build_prompt(params: dict[str, Any]) -> str:
@@ -361,12 +402,12 @@ def _resolve_image_size(params: dict[str, Any]) -> str:
 
 
 def _normalize_aspect_ratio(value: Any) -> str:
-    return str(value or "").strip().replace("：", ":").replace(" ", "")
+    return str(value or "").strip().replace("\uff1a", ":").replace(" ", "")
 
 
 def _is_auto_aspect_ratio(value: Any) -> bool:
     normalized = _normalize_aspect_ratio(value).lower()
-    return normalized in {"", "auto", "智能", "adaptive", "default"}
+    return normalized in {"", "auto", "\u81ea\u52a8", "adaptive", "default"}
 
 
 def _optional_int(value: Any) -> int | None:

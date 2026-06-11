@@ -31,6 +31,7 @@ import com.aiminilab.aitoolmarket.task.service.TaskStateMachine;
 import com.aiminilab.aitoolmarket.workflow.service.WorkflowExecutionService;
 import com.aiminilab.aitoolmarket.tool.dto.ToolFieldResponse;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolFieldItemMapper;
+import com.aiminilab.aitoolmarket.tool.support.ToolRuntimeConfig;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -98,16 +99,19 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         AiTool tool = toolMapper.findById(task.getToolId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在"));
         ModelExecutionSnapshot snapshot = modelExecutionSnapshotService.parse(task.getModelSnapshotJson());
+        ToolRuntimeConfig runtimeConfig = ToolRuntimeConfig.fromConfigNote(tool.getConfigNote(), objectMapper);
         if (snapshot != null) {
             return ExecutionContextResponse.of(task, parseParams(task.getParamsJson()),
-                    ExecutionModelConfigResponse.from(snapshot), snapshot, fields);
+                    ExecutionModelConfigResponse.from(snapshot), snapshot, fields,
+                    runtimeConfig.systemPrompt(), runtimeConfig.adminPrompt());
         }
-        AgentModelConfig modelConfig = modelCapabilityService.resolveModelConfigForTool(tool);
+        AgentModelConfig modelConfig = resolveTaskModelConfig(task, tool);
         modelCapabilityService.validateExecution(tool, modelConfig);
         List<String> caps = modelCapabilityService.resolveCapabilities(modelConfig);
         AgentModelConfig executionConfig = agentModelConfigService.resolveForExecution(modelConfig);
         return ExecutionContextResponse.of(task, parseParams(task.getParamsJson()),
-                ExecutionModelConfigResponse.from(executionConfig, caps), fields);
+                ExecutionModelConfigResponse.from(executionConfig, caps), fields,
+                runtimeConfig.systemPrompt(), runtimeConfig.adminPrompt());
     }
 
     @Override
@@ -157,7 +161,7 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         ModelExecutionSnapshot snapshot = modelExecutionSnapshotService.parse(task.getModelSnapshotJson());
         AgentModelConfig modelConfig = snapshot != null
                 ? snapshot.toModelConfig()
-                : modelCapabilityService.resolveModelConfigForTool(billingTool);
+                : resolveTaskModelConfig(task, billingTool);
         int actualCredits = calculateActualTaskCredits(request, modelConfig, task.getEstimatedCreditCost());
         int chargedCredits = creditService.settleCompleted(task.getUserId(), CreditSourceType.TASK, taskId, actualCredits);
         int billingCredits = Math.max(chargedCredits, taskCreditEstimateService.estimateUserFacingTaskCredits(billingTool, modelConfig));
@@ -221,6 +225,17 @@ public class InternalTaskServiceImpl implements InternalTaskService {
                 .multiply(new BigDecimal("1.2"))
                 .setScale(0, RoundingMode.CEILING)
                 .intValue();
+    }
+
+    private AgentModelConfig resolveTaskModelConfig(AiTask task, AiTool tool) {
+        if (task.getModelConfigId() != null) {
+            AgentModelConfig selected = agentModelConfigMapper.findActiveById(task.getModelConfigId());
+            if (selected != null) {
+                modelCapabilityService.validateExecution(tool, selected);
+                return selected;
+            }
+        }
+        return modelCapabilityService.resolveModelConfigForTool(tool);
     }
 
     @Override

@@ -109,6 +109,30 @@ def test_factory_treats_deepseek_as_openai_compatible():
     }
 
 
+def test_factory_treats_agnes_chat_as_openai_compatible():
+    FakeChatOpenAI.calls = []
+    factory = ChatModelFactory(
+        Settings(
+            model_provider="agnes_chat",
+            model_api_base_url="https://apihub.agnes-ai.com/v1",
+            model_api_key="key",
+            model_name="agnes-2.0-flash",
+            model_timeout_seconds=45,
+        ),
+        chat_openai_cls=FakeChatOpenAI,
+    )
+
+    model = factory.create()
+
+    assert isinstance(model, FakeChatOpenAI)
+    assert FakeChatOpenAI.calls[0] == {
+        "model": "agnes-2.0-flash",
+        "api_key": "key",
+        "base_url": "https://apihub.agnes-ai.com/v1",
+        "timeout": 45,
+    }
+
+
 def test_factory_creates_minimax_chat_model_from_settings():
     FakeMiniMaxChat.calls = []
     factory = ChatModelFactory(

@@ -1,4 +1,4 @@
-import type { ApiErrorCode, ApiResponse, CreditInsufficientDetail } from "./types"
+import type { ApiErrorCode, ApiResponse } from "./types"
 import { SESSION_TOKEN_STORAGE_KEY } from "@/constants/authStorage"
 import { clearSessionBearerJwt, getSessionBearerJwt } from "./sessionBearer"
 
@@ -32,14 +32,12 @@ export function getRequestBaseUrl(): string {
 export class ApiBusinessError extends Error {
   readonly code: ApiErrorCode
   readonly traceId?: string
-  readonly data?: CreditInsufficientDetail
 
-  constructor(code: ApiErrorCode, message: string, traceId?: string, data?: CreditInsufficientDetail) {
+  constructor(code: ApiErrorCode, message: string, traceId?: string) {
     super(message)
     this.name = "ApiBusinessError"
     this.code = code
     this.traceId = traceId
-    this.data = data
   }
 
   get requestId(): string | undefined {
@@ -85,7 +83,7 @@ function redirectToLoginPage(): void {
   const full = `${window.location.pathname}${window.location.search}`
   const base = import.meta.env.BASE_URL || "/"
   const normalizedBase = base.endsWith("/") ? base.slice(0, -1) : base
-  const loginPath = (normalizedBase || "").replace(/\/+/g, "/") || "/"
+  const loginPath = normalizedBase || "/"
   window.location.assign(`${window.location.origin}${loginPath}?redirect=${encodeURIComponent(full)}`)
 }
 
@@ -153,23 +151,8 @@ export async function apiRequest<T>(
   }
 
   if (json.code !== "SUCCESS") {
-    throw new ApiBusinessError(
-      json.code,
-      json.message ?? json.code,
-      json.traceId ?? json.requestId,
-      parseCreditInsufficientDetail(json.data),
-    )
+    throw new ApiBusinessError(json.code, json.message ?? json.code, json.traceId ?? json.requestId)
   }
 
   return json.data as T
-}
-
-function parseCreditInsufficientDetail(data: unknown): CreditInsufficientDetail | undefined {
-  if (!data || typeof data !== "object") return undefined
-  const record = data as Record<string, unknown>
-  const availableCredits = Number(record.availableCredits)
-  const requiredCredits = Number(record.requiredCredits)
-  if (!Number.isFinite(availableCredits) || !Number.isFinite(requiredCredits)) return undefined
-  const toolCode = typeof record.toolCode === "string" ? record.toolCode : null
-  return { availableCredits, requiredCredits, toolCode }
 }

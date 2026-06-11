@@ -26,15 +26,29 @@ public record ExecutionContextResponse(
         ModelExecutionSnapshot modelSnapshot,
         String modelProviderCode,
         String modelName,
+        String systemPrompt,
+        String userPromptTemplate,
         List<ToolFieldResponse> fields
 ) {
     public static ExecutionContextResponse of(AiTask task, JsonNode params, ExecutionModelConfigResponse modelConfig,
                                               List<ToolFieldResponse> fields) {
-        return of(task, params, modelConfig, null, fields);
+        return of(task, params, modelConfig, null, fields, null, null);
+    }
+
+    public static ExecutionContextResponse of(AiTask task, JsonNode params, ExecutionModelConfigResponse modelConfig,
+                                              List<ToolFieldResponse> fields, String systemPrompt,
+                                              String userPromptTemplate) {
+        return of(task, params, modelConfig, null, fields, systemPrompt, userPromptTemplate);
     }
 
     public static ExecutionContextResponse of(AiTask task, JsonNode params, ExecutionModelConfigResponse modelConfig,
                                               ModelExecutionSnapshot modelSnapshot, List<ToolFieldResponse> fields) {
+        return of(task, params, modelConfig, modelSnapshot, fields, null, null);
+    }
+
+    public static ExecutionContextResponse of(AiTask task, JsonNode params, ExecutionModelConfigResponse modelConfig,
+                                              ModelExecutionSnapshot modelSnapshot, List<ToolFieldResponse> fields,
+                                              String systemPrompt, String userPromptTemplate) {
         return new ExecutionContextResponse(
                 task.getId(),
                 task.getTaskNo(),
@@ -53,6 +67,8 @@ public record ExecutionContextResponse(
                 modelSnapshot,
                 modelConfig == null ? null : modelConfig.provider(),
                 modelConfig == null ? null : modelConfig.modelName(),
+                blankToNull(systemPrompt),
+                blankToNull(userPromptTemplate),
                 fields
         );
     }
@@ -73,5 +89,9 @@ public record ExecutionContextResponse(
             return toolType.trim().toUpperCase();
         }
         return "TEXT_GENERATION";
+    }
+
+    private static String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value;
     }
 }

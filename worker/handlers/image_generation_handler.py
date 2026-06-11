@@ -1,6 +1,9 @@
 import json
 import logging
+import threading
+import time
 from typing import Any
+from urllib.parse import urlparse
 
 from client.backend_client import BackendClient, BackendClientError
 from client.siliconflow_video_client import (
@@ -10,8 +13,15 @@ from client.siliconflow_video_client import (
 )
 from client.kling_video_client import KlingVideoClient, KlingVideoError, KlingVideoTimeoutError
 from client.openai_images_client import OpenAIImagesClient, OpenAIImagesError, OpenAIImagesTimeoutError
-from config import resolve_kling_api_key, resolve_kling_credentials, resolve_kling_credentials_source, resolve_siliconflow_api_key
+from config import (
+    resolve_kling_api_key,
+    resolve_kling_credentials,
+    resolve_kling_credentials_source,
+    resolve_siliconflow_api_key,
+    settings,
+)
 from handlers.generated_image_persister import GeneratedImagePersistError, GeneratedImagePersister
+from prompt.renderer import PromptRenderError, render_prompt
 from providers import registry as provider_registry
 from providers.registry import ProviderRegistryError
 from utils.input_image import InputImageError, resolve_reference_image_data_url
@@ -21,20 +31,75 @@ LOGGER = logging.getLogger(__name__)
 TERMINAL_TASK_STATUSES = {"SUCCESS", "FAILED", "CANCELLED"}
 
 
+class ImageProgressTicker:
+    def __init__(
+        self,
+        report_progress,
+        *,
+        current_progress: int = 1,
+        interval_seconds: float = 1.0,
+        max_progress: int = 99,
+    ) -> None:
+        self.report_progress = report_progress
+        self.current_progress = max(0, min(max_progress, int(current_progress)))
+        self.interval_seconds = max(0.001, float(interval_seconds))
+        self.max_progress = max(1, min(99, int(max_progress)))
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def start(self) -> "ImageProgressTicker":
+        if self._thread is not None:
+            return self
+        self._thread = threading.Thread(target=self._run, name="image-progress-ticker", daemon=True)
+        self._thread.start()
+        return self
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=0.2)
+
+    def report(self, progress: int) -> None:
+        normalized = max(1, min(self.max_progress, int(progress)))
+        if normalized <= self.current_progress:
+            return
+        self.current_progress = normalized
+        self.report_progress(normalized)
+
+    def finish_smoothly(self, *, target_progress: int | None = None, interval_seconds: float = 0.08) -> None:
+        target = self.max_progress if target_progress is None else max(1, min(self.max_progress, int(target_progress)))
+        delay = max(0.0, float(interval_seconds))
+        while self.current_progress < target:
+            self.report(self.current_progress + 1)
+            if delay > 0 and self.current_progress < target:
+                time.sleep(delay)
+
+    def _run(self) -> None:
+        while not self._stop.wait(self.interval_seconds):
+            if self.current_progress >= self.max_progress:
+                continue
+            self.report(self.current_progress + 1)
+
+
 class ImageGenerationHandler:
     def __init__(
         self,
         backend_client: BackendClient | None = None,
         image_client: SiliconFlowVideoClient | None = None,
         image_persister: GeneratedImagePersister | None = None,
+        progress_interval_seconds: float = 1.0,
+        final_progress_interval_seconds: float = 0.08,
     ) -> None:
         self.backend_client = backend_client or BackendClient()
         self.image_client = image_client
         self.image_persister = image_persister or GeneratedImagePersister()
+        self.progress_interval_seconds = progress_interval_seconds
+        self.final_progress_interval_seconds = final_progress_interval_seconds
 
     def handle(self, message: dict[str, Any]) -> dict[str, Any]:
         task_id = int(message["taskId"])
         trace_id = message.get("traceId")
+        progress_ticker: ImageProgressTicker | None = None
         try:
             context = message.get("__executionContext") or self.backend_client.get_execution_context(task_id, trace_id=trace_id)
             trace_id = trace_id or context.get("traceId")
@@ -44,34 +109,21 @@ class ImageGenerationHandler:
                 return {"status": "SKIPPED", "taskId": task_id, "taskStatus": status, "traceId": trace_id}
             params = context.get("params") or {}
             model_config = context.get("modelConfig") or {}
-            self._mark_processing_safe(task_id, progress=12, progress_message="Image generation task started", trace_id=trace_id)
+            self._mark_processing_safe(task_id, progress=1, progress_message="实时进度：1%", trace_id=trace_id)
             provider = str(model_config.get("provider") or context.get("modelProviderCode") or "").lower()
             provider_registry.require_capability(provider, "IMAGE_GENERATION")
             provider_registry.require_worker_ready(provider)
             provider_protocol = provider_registry.provider_protocol(provider)
-            if provider_protocol not in {
-                "siliconflow_images",
-                "siliconflow",
-                "kling_video",
-                "openai_images",
-                "volcengine_images",
-            }:
+            if provider_protocol not in {"siliconflow_images", "siliconflow", "kling_video", "openai_images"}:
                 raise SiliconFlowVideoError(f"unsupported image provider: {provider or 'empty'}")
 
-            prompt = _build_prompt(
+            prompt = _resolve_prompt(
+                context,
                 params,
-                context.get("fields") or [],
                 include_style=provider_protocol != "openai_images",
             )
             if not prompt:
                 raise SiliconFlowVideoError("prompt is required")
-
-            self.backend_client.mark_processing(
-                task_id,
-                progress=20,
-                progress_message="图片生成任务已开始",
-                trace_id=trace_id,
-            )
 
             client = self.image_client or self._image_client(provider, model_config)
             image_request: dict[str, Any] = {
@@ -109,14 +161,22 @@ class ImageGenerationHandler:
                 image_request["style"] = _first_text(params, "style", "imageStyle", "image_style")
                 image_request["output_format"] = _first_text(params, "outputFormat", "output_format")
                 image_request["response_format"] = _first_text(params, "responseFormat", "response_format")
-                image_request["image_size"] = _resolve_openai_image_size(params)
+                image_request["image_size"] = _resolve_openai_image_size(params, model_config)
                 reference_images = _resolve_reference_image_sources(params)
                 if reference_images:
-                    session = client.session if isinstance(client, OpenAIImagesClient) else None
-                    resolved_images = [
-                        resolve_reference_image_data_url(reference_image, session=session)
-                        for reference_image in reference_images
-                    ]
+                    backend_base_url = getattr(self.backend_client, "base_url", settings.backend_internal_base_url)
+                    if isinstance(client, OpenAIImagesClient) and client._uses_json_image_array_input():
+                        session = client.session
+                        resolved_images = [
+                            _resolve_json_reference_image(reference_image, backend_base_url, session=session)
+                            for reference_image in reference_images
+                        ]
+                    else:
+                        session = client.session if isinstance(client, OpenAIImagesClient) else None
+                        resolved_images = [
+                            resolve_reference_image_data_url(reference_image, session=session)
+                            for reference_image in reference_images
+                        ]
                     image_request["image"] = resolved_images if len(resolved_images) > 1 else resolved_images[0]
             LOGGER.info(
                 "image generation request built taskId=%s traceId=%s provider=%s protocol=%s model=%s params=%s request=%s",
@@ -128,15 +188,13 @@ class ImageGenerationHandler:
                 _json_for_log(params),
                 _json_for_log(image_request),
             )
+            progress_ticker = self._image_progress_ticker(task_id, trace_id).start()
             urls = client.generate_images(**image_request)
             usage = getattr(client, "last_usage", {}) or {}
 
-            self.backend_client.mark_processing(
-                task_id,
-                progress=90,
-                progress_message="图片已生成，正在保存结果",
-                trace_id=trace_id,
-            )
+            progress_ticker.stop()
+            progress_ticker.finish_smoothly(interval_seconds=self.final_progress_interval_seconds)
+            progress_ticker = None
             images = self.image_persister.persist_images(task_id=task_id, urls=urls)
             content = json.dumps(
                 {
@@ -163,6 +221,8 @@ class ImageGenerationHandler:
             return self._mark_failed(task_id, "MODEL_TIMEOUT", str(exc), trace_id)
         except ProviderRegistryError as exc:
             return self._mark_failed(task_id, "MODEL_PROVIDER_UNAVAILABLE", str(exc), trace_id)
+        except PromptRenderError as exc:
+            return self._mark_failed(task_id, "INVALID_TASK_PARAMS", str(exc), trace_id)
         except InputImageError as exc:
             return self._mark_failed(task_id, "INVALID_TASK_PARAMS", str(exc), trace_id)
         except (SiliconFlowVideoError, KlingVideoError, OpenAIImagesError) as exc:
@@ -173,6 +233,9 @@ class ImageGenerationHandler:
             raise
         except Exception as exc:
             return self._mark_failed(task_id, "WORKER_INTERNAL_ERROR", str(exc), trace_id)
+        finally:
+            if progress_ticker is not None:
+                progress_ticker.stop()
 
     def _image_client(self, provider: str, model_config: dict[str, Any]) -> Any:
         provider_protocol = provider_registry.provider_protocol(provider)
@@ -197,7 +260,7 @@ class ImageGenerationHandler:
                 image_generation_result_path=model_config.get("imageResultPath"),
                 timeout_seconds=model_config.get("timeoutSeconds"),
             )
-        if provider_protocol in {"openai_images", "volcengine_images"}:
+        if provider_protocol == "openai_images":
             return OpenAIImagesClient(
                 base_url=model_config.get("baseUrl"),
                 api_key=model_config.get("apiKey"),
@@ -241,6 +304,19 @@ class ImageGenerationHandler:
         except BackendClientError:
             LOGGER.warning("failed to mark image task processing before state update taskId=%s", task_id, exc_info=True)
 
+    def _image_progress_ticker(self, task_id: int, trace_id: str | None) -> ImageProgressTicker:
+        return ImageProgressTicker(
+            lambda progress: self._mark_processing_safe(
+                task_id,
+                progress=progress,
+                progress_message=f"实时进度：{progress}%",
+                trace_id=trace_id,
+            ),
+            current_progress=1,
+            interval_seconds=self.progress_interval_seconds,
+            max_progress=99,
+        )
+
 
 def _first_text(params: dict[str, Any], *keys: str) -> str:
     for key in keys:
@@ -248,6 +324,53 @@ def _first_text(params: dict[str, Any], *keys: str) -> str:
         if isinstance(value, str) and value.strip():
             return value.strip()
     return ""
+
+
+def _to_backend_absolute_url(value: str, backend_base_url: str) -> str:
+    text = (value or "").strip()
+    if not text or text.startswith(("http://", "https://", "data:image/")):
+        return text
+    if text.startswith("/"):
+        return backend_base_url.rstrip("/") + text
+    return text
+
+
+def _resolve_json_reference_image(value: str, backend_base_url: str, *, session: Any | None = None) -> str:
+    text = (value or "").strip()
+    if not text:
+        return text
+    if _should_inline_reference_image(text, backend_base_url):
+        return resolve_reference_image_data_url(text, session=session)
+    return _to_backend_absolute_url(text, backend_base_url)
+
+
+def _should_inline_reference_image(value: str, backend_base_url: str) -> bool:
+    text = (value or "").strip()
+    if not text:
+        return False
+    if text.startswith("data:") or text.startswith("/"):
+        return True
+    if not text.startswith(("http://", "https://")):
+        return True
+    parsed = urlparse(text)
+    internal_hosts = {
+        host
+        for host in (
+            urlparse(settings.backend_internal_base_url).hostname,
+            urlparse(backend_base_url).hostname,
+            "backend",
+            "localhost",
+            "127.0.0.1",
+            "host.docker.internal",
+        )
+        if host
+    }
+    if parsed.hostname in internal_hosts:
+        return True
+    public_base = settings.generated_media_public_base_url.rstrip("/") or "/generated"
+    public_path = urlparse(public_base).path.rstrip("/") if public_base.startswith(("http://", "https://")) else public_base
+    public_path = public_path or "/generated"
+    return parsed.path.startswith(public_path + "/")
 
 
 def _resolve_reference_image_sources(params: dict[str, Any]) -> list[str]:
@@ -258,6 +381,14 @@ def _resolve_reference_image_sources(params: dict[str, Any]) -> list[str]:
         "imageUrls",
         "image_url",
         "image_urls",
+        "sourceImage",
+        "sourceImages",
+        "sourceImageUrl",
+        "sourceImageUrls",
+        "source_image",
+        "source_images",
+        "source_image_url",
+        "source_image_urls",
         "referenceImage",
         "referenceImages",
         "referenceImageUrl",
@@ -296,6 +427,18 @@ def _resolve_reference_image_sources(params: dict[str, Any]) -> list[str]:
     return sources
 
 
+def _resolve_prompt(
+    context: dict[str, Any],
+    params: dict[str, Any],
+    *,
+    include_style: bool = True,
+) -> str:
+    user_prompt_template = context.get("userPromptTemplate")
+    if isinstance(user_prompt_template, str) and user_prompt_template.strip():
+        return render_prompt(user_prompt_template, params).strip()
+    return _build_prompt(params, context.get("fields") or [], include_style=include_style)
+
+
 def _build_prompt(
     params: dict[str, Any],
     fields: list[dict[str, Any]] | None = None,
@@ -303,6 +446,8 @@ def _build_prompt(
     include_style: bool = True,
 ) -> str:
     prompt = _first_text(params, "prompt", "text", "description")
+    if not prompt:
+        prompt = _default_image_prompt(params)
     if not include_style:
         return prompt
     style = _first_text(params, "style")
@@ -312,6 +457,24 @@ def _build_prompt(
     if prompt and style:
         return f"{prompt}\nStyle: {style}"
     return prompt
+
+
+def _default_image_prompt(params: dict[str, Any]) -> str:
+    if not _resolve_reference_image_sources(params):
+        return ""
+    direction = _first_text(params, "expansionDirection", "expansion_direction", "direction")
+    aspect_ratio = _first_text(params, "aspectRatio", "aspect_ratio", "imageRatio", "image_ratio")
+    strength = _first_text(params, "strength", "expandStrength", "expand_strength")
+    parts = [
+        "Extend the uploaded image canvas outward while preserving the original subject, lighting, perspective, and style."
+    ]
+    if direction:
+        parts.append(f"Direction: {direction}.")
+    if aspect_ratio:
+        parts.append(f"Target aspect ratio: {aspect_ratio}.")
+    if strength:
+        parts.append(f"Expansion strength: {strength}.")
+    return " ".join(parts)
 
 
 def _option_prompt_prefix(fields: list[dict[str, Any]], field_key: str, selected_value: str) -> str:
@@ -354,9 +517,7 @@ def _resolve_image_size(params: dict[str, Any]) -> str:
     explicit = params.get("imageSize") or params.get("image_size")
     if isinstance(explicit, str) and explicit.strip():
         return explicit.strip()
-    aspect_ratio = _normalize_aspect_ratio(params.get("aspectRatio") or params.get("aspect_ratio") or params.get("imageRatio") or "auto")
-    if _is_auto_aspect_ratio(aspect_ratio):
-        return "auto"
+    aspect_ratio = str(params.get("aspectRatio") or params.get("aspect_ratio") or params.get("imageRatio") or "16:9").strip()
     return {
         "1:1": "1024x1024",
         "16:9": "1280x720",
@@ -369,11 +530,19 @@ def _resolve_image_size(params: dict[str, Any]) -> str:
     }.get(aspect_ratio, "1024x1024")
 
 
-def _resolve_openai_image_size(params: dict[str, Any]) -> str:
+def _resolve_openai_image_size(params: dict[str, Any], model_config: dict[str, Any] | None = None) -> str:
+    allowed_sizes = _openai_allowed_image_sizes(model_config or {})
     explicit = params.get("imageSize") or params.get("image_size") or params.get("size")
     if isinstance(explicit, str) and explicit.strip():
-        return _openai_image_size_from_ratio_or_size(explicit.strip())
+        requested = _openai_image_size_from_ratio_or_size(explicit.strip())
+        if requested == "auto":
+            return _preferred_allowed_image_size("auto", allowed_sizes) if allowed_sizes else requested
+        if allowed_sizes and requested not in allowed_sizes:
+            return _closest_allowed_image_size(requested, allowed_sizes)
+        return requested
     aspect_ratio = _normalize_aspect_ratio(params.get("aspectRatio") or params.get("aspect_ratio") or params.get("imageRatio") or "auto")
+    if allowed_sizes:
+        return _preferred_allowed_image_size(aspect_ratio, allowed_sizes)
     return _openai_image_size_from_ratio_or_size(aspect_ratio)
 
 
@@ -394,13 +563,147 @@ def _openai_image_size_from_ratio_or_size(value: Any) -> str:
     }.get(aspect_ratio, "1024x1024")
 
 
+GPT_IMAGE_2_4K_ALLOWED_SIZES = [
+    "2560x2560",
+    "2880x2880",
+    "3072x1728",
+    "3840x2160",
+    "1728x3072",
+    "2160x3840",
+    "2560x1920",
+    "3072x2304",
+    "1920x2560",
+    "2304x3072",
+    "2880x1920",
+    "3072x2048",
+    "3456x2304",
+    "1920x2880",
+    "2048x3072",
+    "2304x3456",
+    "3072x1536",
+    "3840x1920",
+    "1536x3072",
+    "1920x3840",
+    "3840x1280",
+    "1280x3840",
+]
+
+
+def _openai_allowed_image_sizes(model_config: dict[str, Any]) -> list[str]:
+    extra_auth = _parse_json_object(model_config.get("extraAuthJson"))
+    for key in ("allowedSizes", "allowedImageSizes", "imageSizes"):
+        value = extra_auth.get(key)
+        if isinstance(value, list):
+            sizes = [str(item).strip() for item in value if isinstance(item, str) and "x" in item]
+            if sizes:
+                return sizes
+    model_name = str(model_config.get("modelName") or model_config.get("model") or "").strip().lower()
+    if model_name == "gpt-image-2-4k":
+        return GPT_IMAGE_2_4K_ALLOWED_SIZES
+    return []
+
+
+def _preferred_allowed_image_size(aspect_ratio: str, allowed_sizes: list[str]) -> str:
+    normalized = _normalized_ratio(aspect_ratio)
+    preferred_by_ratio = {
+        "": "3072x2048",
+        "auto": "3072x2048",
+        "1:1": "2560x2560",
+        "16:9": "3072x1728",
+        "9:16": "1728x3072",
+        "4:3": "3072x2304",
+        "3:4": "2304x3072",
+        "3:2": "3072x2048",
+        "2:3": "2048x3072",
+        "2:1": "3072x1536",
+        "1:2": "1536x3072",
+        "3:1": "3840x1280",
+        "1:3": "1280x3840",
+    }
+    preferred = preferred_by_ratio.get(normalized)
+    if preferred in allowed_sizes:
+        return preferred
+    return _closest_allowed_image_size(normalized or "3:2", allowed_sizes)
+
+
+def _closest_allowed_image_size(requested: str, allowed_sizes: list[str]) -> str:
+    requested_ratio = _ratio_value(requested)
+    if requested_ratio is None:
+        return allowed_sizes[0]
+    for ratio, preferred in (
+        (1.0, "2560x2560"),
+        (16 / 9, "3072x1728"),
+        (9 / 16, "1728x3072"),
+        (4 / 3, "3072x2304"),
+        (3 / 4, "2304x3072"),
+        (3 / 2, "3072x2048"),
+        (2 / 3, "2048x3072"),
+        (2.0, "3072x1536"),
+        (0.5, "1536x3072"),
+        (3.0, "3840x1280"),
+        (1 / 3, "1280x3840"),
+    ):
+        if abs(requested_ratio - ratio) < 0.01 and preferred in allowed_sizes:
+            return preferred
+    parsed = [(size, _ratio_value(size), _image_area(size)) for size in allowed_sizes]
+    candidates = [(size, ratio, area) for size, ratio, area in parsed if ratio is not None]
+    if not candidates:
+        return allowed_sizes[0]
+    return min(candidates, key=lambda item: (abs(item[1] - requested_ratio), -item[2]))[0]
+
+
+def _ratio_value(value: str) -> float | None:
+    raw = str(value or "").strip().lower()
+    if ":" in raw:
+        left, _, right = raw.partition(":")
+    elif "x" in raw:
+        left, _, right = raw.partition("x")
+    else:
+        return None
+    try:
+        width = float(left.strip())
+        height = float(right.strip())
+    except ValueError:
+        return None
+    if width <= 0 or height <= 0:
+        return None
+    return width / height
+
+
+def _image_area(value: str) -> int:
+    raw = str(value or "").strip().lower()
+    if "x" not in raw:
+        return 0
+    left, _, right = raw.partition("x")
+    try:
+        return max(1, int(left.strip())) * max(1, int(right.strip()))
+    except ValueError:
+        return 0
+
+
+def _normalized_ratio(value: str) -> str:
+    return str(value or "").strip().lower().replace(" ", "")
+
+
 def _normalize_aspect_ratio(value: Any) -> str:
-    return str(value or "").strip().replace("：", ":").replace(" ", "")
+    return str(value or "").strip().replace("\uff1a", ":").replace(" ", "")
 
 
 def _is_auto_aspect_ratio(value: Any) -> bool:
     normalized = _normalize_aspect_ratio(value).lower()
-    return normalized in {"", "auto", "智能", "adaptive", "default"}
+    return normalized in {"", "auto", "\u81ea\u52a8", "adaptive", "default"}
+
+
+def _parse_json_object(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if not isinstance(value, str) or not value.strip():
+        return {}
+    try:
+        parsed = json.loads(value)
+    except ValueError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
 
 
 def _resolve_kling_image_reference(params: dict[str, Any]) -> str:

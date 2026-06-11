@@ -1,9 +1,12 @@
 package com.aiminilab.aitoolmarket.tool.dto;
 
 import com.aiminilab.aitoolmarket.ppt.workflow.PptWorkflow;
+import com.aiminilab.aitoolmarket.tool.support.ToolFrontendStyleConfig;
+import com.fasterxml.jackson.annotation.JsonInclude;
 
 import java.util.List;
 
+@JsonInclude(JsonInclude.Include.NON_NULL)
 public record ToolDetailResponse(
         Long id,
         String toolCode,
@@ -16,6 +19,7 @@ public record ToolDetailResponse(
         String toolType,
         String inputModality,
         String outputModality,
+        String toolKind,
         String configNote,
         String status,
         Integer estimatedCreditCost,
@@ -24,6 +28,7 @@ public record ToolDetailResponse(
         String modelName,
         String executionHandler,
         List<ToolFieldResponse> fields,
+        ToolFrontendStyleConfig frontendStyle,
         // 平台级集成块；标准任务工具的 integrationMode 为 STANDARD_TASK。
         // 前端入口判断、跳转、插件渲染均以本字段为准。
         ToolIntegrationView integration,
@@ -57,6 +62,7 @@ public record ToolDetailResponse(
                 summary.toolType(),
                 summary.inputModality(),
                 summary.outputModality(),
+                summary.toolKind(),
                 summary.configNote(),
                 summary.status(),
                 summary.estimatedCreditCost(),
@@ -65,6 +71,7 @@ public record ToolDetailResponse(
                 summary.modelName(),
                 summary.executionHandler(),
                 fields,
+                summary.frontendStyle(),
                 integration,
                 legacyWorkflow
         );
