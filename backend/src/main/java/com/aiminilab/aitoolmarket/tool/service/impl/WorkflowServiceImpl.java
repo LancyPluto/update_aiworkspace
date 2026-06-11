@@ -63,6 +63,7 @@ public class WorkflowServiceImpl implements WorkflowService {
                     request.groupsJson(),
                     request.configJson(),
                     newVersion,
+                    normalizeStatus(request.status()),
                     operatorId
             );
             return toResponse(workflowMapper.selectById(existing.getId()));
@@ -126,9 +127,34 @@ public class WorkflowServiceImpl implements WorkflowService {
                 snapshot.getGroupsJson(),
                 snapshot.getConfigJson(),
                 nextVersion,
+                null,
                 operatorId
         );
         return toResponse(workflowMapper.selectById(workflowId));
+    }
+
+    @Override
+    @Transactional
+    public WorkflowResponse updateStatus(Long workflowId, String status, Long operatorId) {
+        String normalized = normalizeStatus(status);
+        if (normalized == null) {
+            throw new IllegalArgumentException("Unsupported workflow status: " + status);
+        }
+        ToolWorkflow current = workflowMapper.selectById(workflowId);
+        if (current == null) {
+            throw new IllegalArgumentException("Workflow not found: " + workflowId);
+        }
+        workflowMapper.updateWorkflowStatus(workflowId, normalized, operatorId);
+        return toResponse(workflowMapper.selectById(workflowId));
+    }
+
+    /** 仅允许 DRAFT/PUBLISHED；其余（含 null）返回 null 表示“保持原状态”。 */
+    private static String normalizeStatus(String status) {
+        if (status == null) {
+            return null;
+        }
+        String upper = status.trim().toUpperCase();
+        return ("DRAFT".equals(upper) || "PUBLISHED".equals(upper)) ? upper : null;
     }
 
     private WorkflowResponse toResponse(ToolWorkflow wf) {

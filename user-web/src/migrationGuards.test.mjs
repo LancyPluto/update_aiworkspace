@@ -367,7 +367,7 @@ test("workspace shell navigation exposes preserved business routes without dead 
     'to: "/community/inspirations"',
     'to: "/tools/banana_ppt_generator/workspace"',
     'to: "/billing"',
-    'to: "/agents"',
+    'to: "/agent"',
   ]) {
     assert.match(nav, new RegExp(route.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), `missing nav ${route}`)
   }

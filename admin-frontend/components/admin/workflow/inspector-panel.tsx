@@ -42,6 +42,7 @@ interface InspectorPanelProps {
   onFieldDraftChange: (fields: EditableField[]) => void
   onSaveFields: () => void
   canDelete: boolean
+  enableFieldEditor?: boolean
 }
 
 type SlotSide = "inputSlots" | "outputSlots"
@@ -90,6 +91,7 @@ export function InspectorPanel({
   onFieldDraftChange,
   onSaveFields,
   canDelete,
+  enableFieldEditor = true,
 }: InspectorPanelProps) {
   const def = node ? getNodeDef(node) : undefined
   const data = node?.data as (WorkflowNodeData & {

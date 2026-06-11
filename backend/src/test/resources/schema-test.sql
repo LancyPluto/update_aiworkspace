@@ -867,6 +867,37 @@ CREATE TABLE ppt_step_billing_logs (
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE tool_workflows (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  tool_id BIGINT NOT NULL,
+  workflow_name VARCHAR(128) NOT NULL DEFAULT 'default',
+  nodes_json CLOB NOT NULL,
+  edges_json CLOB NOT NULL,
+  groups_json CLOB,
+  config_json CLOB,
+  version INT NOT NULL DEFAULT 1,
+  status VARCHAR(32) NOT NULL DEFAULT 'DRAFT',
+  created_by BIGINT,
+  updated_by BIGINT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT uk_tool_workflow UNIQUE (tool_id, workflow_name)
+);
+
+CREATE TABLE tool_workflow_versions (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  workflow_id BIGINT NOT NULL,
+  version INT NOT NULL,
+  nodes_json CLOB NOT NULL,
+  edges_json CLOB NOT NULL,
+  groups_json CLOB,
+  config_json CLOB,
+  snapshot_label VARCHAR(255),
+  created_by BIGINT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT uk_workflow_version UNIQUE (workflow_id, version)
+);
+
 INSERT INTO credit_recharge_packages (
   package_code,
   package_name,

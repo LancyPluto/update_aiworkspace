@@ -27,7 +27,9 @@ public interface ToolWorkflowMapper extends BaseMapper<ToolWorkflow> {
 
     default Long insertWorkflow(ToolWorkflow workflow, Long operatorId) {
         workflow.setVersion(1);
-        workflow.setStatus("DRAFT");
+        if (workflow.getStatus() == null || workflow.getStatus().isBlank()) {
+            workflow.setStatus("DRAFT");
+        }
         workflow.setCreatedBy(operatorId);
         workflow.setUpdatedBy(operatorId);
         insert(workflow);
@@ -38,7 +40,7 @@ public interface ToolWorkflowMapper extends BaseMapper<ToolWorkflow> {
             UPDATE tool_workflows
             SET nodes_json = #{nodesJson}, edges_json = #{edgesJson},
                 groups_json = #{groupsJson}, config_json = #{configJson},
-                version = #{newVersion}, status = 'DRAFT',
+                version = #{newVersion}, status = COALESCE(#{status}, status),
                 updated_by = #{operatorId}, updated_at = CURRENT_TIMESTAMP
             WHERE id = #{workflowId}
             """)
@@ -48,5 +50,15 @@ public interface ToolWorkflowMapper extends BaseMapper<ToolWorkflow> {
                                @Param("groupsJson") String groupsJson,
                                @Param("configJson") String configJson,
                                @Param("newVersion") int newVersion,
+                               @Param("status") String status,
                                @Param("operatorId") Long operatorId);
+
+    @Update("""
+            UPDATE tool_workflows
+            SET status = #{status}, updated_by = #{operatorId}, updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{workflowId}
+            """)
+    void updateWorkflowStatus(@Param("workflowId") Long workflowId,
+                              @Param("status") String status,
+                              @Param("operatorId") Long operatorId);
 }

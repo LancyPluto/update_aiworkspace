@@ -6,6 +6,7 @@ import { useEffect, useState } from "react"
 import {
   ChevronDown,
   Coins,
+  FileText,
   Images,
   LayoutDashboard,
   ListTodo,
@@ -50,6 +51,7 @@ const navigation: (NavLink | NavGroup)[] = [
       { name: "工作流", href: "/task-tools" },
     ],
   },
+  { type: "link", name: "Prompt 管理", href: "/prompts", icon: FileText },
   { type: "link", name: "任务管理", href: "/tasks", icon: ListTodo },
   { type: "link", name: "社区作品", href: "/community-posts", icon: Images },
   { type: "link", name: "计费日志", href: "/billing", icon: ReceiptText },

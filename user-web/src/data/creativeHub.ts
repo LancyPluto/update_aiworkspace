@@ -52,7 +52,6 @@ export const workspaceNavGroups: { label?: string; items: WorkspaceNavItem[] }[]
       { label: "PPT", icon: Clapperboard, to: "/tools/banana_ppt_generator/workspace" },
       { label: "社区", icon: Compass, to: "/community", match: ["/community/posts"] },
       { label: "灵感收藏", icon: Lightbulb, to: "/community/inspirations" },
-      { label: "智能体", icon: Bot, to: "/agents", match: ["/agent", "/agents"] },
     ],
   },
 ]

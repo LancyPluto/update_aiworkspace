@@ -889,3 +889,8 @@ export interface UpsertWorkflowPayload {
   configJson?: string
   status?: string
 }
+
+export interface WorkflowValidationResult {
+  valid: boolean
+  errors: string[]
+}

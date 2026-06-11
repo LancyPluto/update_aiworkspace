@@ -4,6 +4,12 @@ export const workflowToolCodes = new Set([
   "enterprise_diagnosis_agent",
   "social_media_comment_insights_agent",
   "banana_ppt_generator",
+])
+
+/** 单模型调用类工具：应出现在「大模型管理」，不应归入工作流画布。 */
+export const modelOnlyToolCodes = new Set([
+  "suno_music",
+  "suno",
   "tts_mm",
 ])
 
@@ -30,17 +36,13 @@ function includesAny(value: string, keywords: string[]) {
 
 export function isWorkflowTool(tool: WorkflowToolLike) {
   const code = normalize(tool.toolCode)
+  if (modelOnlyToolCodes.has(code)) return false
   if (workflowToolCodes.has(code)) return true
 
   const type = normalize(tool.toolType).toUpperCase()
   const handler = normalize(tool.executionHandler).toUpperCase()
-  const input = normalize(tool.inputModality).toUpperCase()
-  const output = normalize(tool.outputModality).toUpperCase()
 
   if (type === "AGENT" || handler === "DIGITAL_HUMAN") return true
-  if (type === "TEXT_TO_SPEECH" || type === "SPEECH_TO_TEXT" || type === "MUSIC_GENERATION") return true
-  if (handler === "TEXT_TO_SPEECH" || handler === "SPEECH_TO_TEXT" || handler === "MUSIC_GENERATION") return true
-  if (input === "AUDIO" || output === "AUDIO") return true
 
   const text = [
     tool.toolCode,
@@ -63,12 +65,10 @@ export function isWorkflowTool(tool: WorkflowToolLike) {
     "工作流",
     "ppt",
     "slide",
-    "audio",
-    "speech",
-    "tts",
-    "music",
-    "音频",
-    "语音",
-    "音乐",
+    "digital_human",
+    "数字人",
+    "漫剧",
+    "comic",
+    "drama",
   ])
 }

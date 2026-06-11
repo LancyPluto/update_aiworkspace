@@ -272,6 +272,8 @@
   .agent-page {
     display: grid;
     grid-template-columns: 280px minmax(0, 1fr);
+    /* 在 workspace-inner 的纵向 flex 链路中占满剩余高度，实现聊天界面撑满屏幕 */
+    flex: 1;
     height: 100%;
     max-height: 100%;
     min-height: 0;

@@ -119,6 +119,10 @@ export interface SmsAuthRequest {
   password?: string
 }
 
+export interface CancelAccountRequest {
+  smsCode: string
+}
+
 export interface ResetPasswordRequest {
   phone: string
   code: string

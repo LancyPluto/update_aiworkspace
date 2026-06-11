@@ -48,9 +48,15 @@ const customerService = ref<CustomerServiceSettings>({
   qrCodeUrl: DEFAULT_CUSTOMER_SERVICE_QR,
 })
 
+const navExactPaths = new Set(
+  [...workspaceNavGroups.flatMap((group) => group.items), ...workspaceBottomNav].map((item) => item.to.split("?")[0]),
+)
+
 const isActive = (item: WorkspaceNavItem) => {
   const path = item.to.split("?")[0]
   if (route.path === path) return true
+  // 当前路由被其他导航项精确占用时（如 PPT 工作台 /tools/.../workspace），前缀匹配项（工具）不再同时高亮
+  if (navExactPaths.has(route.path)) return false
   if (item.match) {
     return item.match.some((entry) => route.path === entry || route.path.startsWith(`${entry}/`))
   }

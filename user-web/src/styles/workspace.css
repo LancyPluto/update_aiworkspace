@@ -420,6 +420,8 @@
 }
 
 .workspace-workspace-content {
+  display: flex;
+  flex-direction: column;
   min-height: 100vh;
   padding: 102px 40px 48px 40px;
   padding-left: calc(var(--workspace-sidebar-width) + 28px);
@@ -511,9 +513,15 @@
   object-fit: contain;
 }
 
+/* 内容区撑满屏幕：去掉 1142px 居中限宽，并建立可向下传递的高度链路（供 agent 会话、灵感收藏等整屏页面使用） */
 .workspace-workspace-inner {
-  max-width: 1142px;
-  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  min-height: 0;
 }
 
 .workspace-page-heading {

@@ -1,10 +1,19 @@
 import { apiRequest } from "./client"
-import type { CommunitySettingsRequest, UpdateUserProfileRequest, UserAvatarUploadResponse, UserProfile } from "./types"
+import type {
+  CancelAccountRequest,
+  CommunitySettingsRequest,
+  SmsCodeResponse,
+  UpdateUserProfileRequest,
+  UserAvatarUploadResponse,
+  UserProfile,
+} from "./types"
 
 const P = {
   me: "/api/v1/users/me",
   avatar: "/api/v1/users/me/avatar",
   communitySettings: "/api/v1/users/me/community-settings",
+  cancelSmsCode: "/api/v1/users/me/cancel/sms-code",
+  cancel: "/api/v1/users/me/cancel",
 } as const
 
 /** GET /api/v1/users/me —— 获取当前登录用户信息 */
@@ -39,6 +48,24 @@ export async function updateCommunitySettings(
   options?: { token?: string | null },
 ): Promise<UserProfile> {
   return apiRequest<UserProfile>("PATCH", P.communitySettings, {
+    body,
+    token: options?.token,
+  })
+}
+
+/** POST /api/v1/users/me/cancel/sms-code —— 发送注销账号短信验证码 */
+export async function sendCancelAccountSmsCode(options?: { token?: string | null }): Promise<SmsCodeResponse> {
+  return apiRequest<SmsCodeResponse>("POST", P.cancelSmsCode, {
+    token: options?.token,
+  })
+}
+
+/** POST /api/v1/users/me/cancel —— 注销当前账号（需短信验证码） */
+export async function cancelCurrentUserAccount(
+  body: CancelAccountRequest,
+  options?: { token?: string | null },
+): Promise<void> {
+  await apiRequest<unknown>("POST", P.cancel, {
     body,
     token: options?.token,
   })

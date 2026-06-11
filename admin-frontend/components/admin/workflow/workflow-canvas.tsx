@@ -17,7 +17,7 @@ import {
   useNodesState,
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
-import { Redo2, Save, Undo2 } from "lucide-react"
+import { CheckCircle2, History, Redo2, Rocket, Save, Undo2 } from "lucide-react"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -28,9 +28,18 @@ import type {
   WorkflowNode,
   WorkflowNodeData,
   WorkflowResponse,
+  WorkflowVersionItem,
 } from "@/lib/api/types"
 import { fetchToolFields, updateToolFields } from "@/lib/api/tools"
-import { fetchWorkflow, saveWorkflow } from "@/lib/api/workflows"
+import {
+  fetchWorkflow,
+  fetchWorkflowVersions,
+  publishWorkflow,
+  restoreWorkflowVersion,
+  saveWorkflow,
+  unpublishWorkflow,
+  validateWorkflow,
+} from "@/lib/api/workflows"
 import {
   editableFromToolField,
   toFieldPayload,
@@ -284,7 +293,7 @@ const DIGITAL_HUMAN_FIELD_DRAFT: EditableField[] = ([
   },
 ] satisfies EditableFieldDraft[]).map(withFieldDefaults)
 
-const COMIC_DRAMA_FIELD_DRAFT: EditableField[] = [
+const COMIC_DRAMA_FIELD_DRAFT: EditableField[] = ([
   {
     fieldKey: "storyTheme",
     fieldName: "漫剧主题",
@@ -365,7 +374,7 @@ const COMIC_DRAMA_FIELD_DRAFT: EditableField[] = [
     sortOrder: 7,
     options: [],
   },
-]
+] satisfies EditableFieldDraft[]).map(withFieldDefaults)
 
 function cloneFields(fields: EditableField[]): EditableField[] {
   return fields.map((field) => ({
@@ -1057,17 +1066,18 @@ function mergeComicWorkflowWithTemplate(
   modelConfigs: AgentModelConfig[] = [],
 ): { nodes: WFNode[]; edges: WFEdge[] } {
   const template = buildComicDramaDefaultWorkflow(tool, modelConfigs)
-  const savedById = new Map(savedNodes.map((node) => [node.id, node]))
-  const nodes = template.nodes.map((templateNode) => {
-    const saved = savedById.get(templateNode.id)
-    if (!saved) return templateNode
+  const templateById = new Map(template.nodes.map((node) => [node.id, node]))
+  // 以管理员保存的节点为准（标题/槽位/新增节点都保留），模板只用于补齐缺失的元数据，避免每次加载覆盖管理员编辑
+  const nodes = savedNodes.map((saved) => {
+    const templateNode = templateById.get(saved.id)
+    if (!templateNode) return saved
     return {
-      ...templateNode,
-      position: saved.position,
-      width: saved.width,
-      height: saved.height,
+      ...saved,
       data: {
         ...templateNode.data,
+        ...saved.data,
+        inputSlots: saved.data.inputSlots?.length ? saved.data.inputSlots : templateNode.data.inputSlots,
+        outputSlots: saved.data.outputSlots?.length ? saved.data.outputSlots : templateNode.data.outputSlots,
         parameters: {
           ...templateNode.data.parameters,
           ...saved.data.parameters,
@@ -1331,6 +1341,12 @@ export function WorkflowCanvas({
   const [saveStatus, setSaveStatus] = useState<"idle" | "saved" | "error">("idle")
   const [loading, setLoading] = useState(true)
   const [workflowVersion, setWorkflowVersion] = useState(0)
+  const [workflowStatus, setWorkflowStatus] = useState<string>("DRAFT")
+  const [publishing, setPublishing] = useState(false)
+  const [versionsOpen, setVersionsOpen] = useState(false)
+  const [versions, setVersions] = useState<WorkflowVersionItem[]>([])
+  const [versionsLoading, setVersionsLoading] = useState(false)
+  const [restoringVersion, setRestoringVersion] = useState<number | null>(null)
   const [fieldDraft, setFieldDraft] = useState<EditableField[]>([])
   const [fieldSaving, setFieldSaving] = useState(false)
   const [fieldError, setFieldError] = useState<string | null>(null)
@@ -1388,6 +1404,7 @@ export function WorkflowCanvas({
         setEdges(loadedEdges)
         setGroups(loadedGroups)
         setWorkflowVersion(workflow.version)
+        setWorkflowStatus(workflow.status || "DRAFT")
         clear()
       })
       .catch(() => {
@@ -1491,25 +1508,108 @@ export function WorkflowCanvas({
     })
   }, [nodes, modelConfigs])
 
-  const doSave = useCallback(async () => {
+  const doSave = useCallback(async (): Promise<boolean> => {
     setSaving(true)
     setSaveStatus("idle")
     try {
-      await saveWorkflow(toolId, {
+      // 不传 status：保存内容时保持现有 DRAFT/PUBLISHED 状态不变，发布与否由“发布/下线”按钮单独控制
+      const saved = await saveWorkflow(toolId, {
         workflowName: toolName || "default",
         nodesJson: JSON.stringify(nodes),
         edgesJson: JSON.stringify(edges),
         groupsJson: groups.length > 0 ? JSON.stringify(groups) : undefined,
-        status: "DRAFT",
       })
+      setWorkflowVersion(saved.version)
+      setWorkflowStatus(saved.status || "DRAFT")
       setSaveStatus("saved")
       setTimeout(() => setSaveStatus("idle"), 2000)
+      return true
     } catch {
       setSaveStatus("error")
+      return false
     } finally {
       setSaving(false)
     }
   }, [toolId, toolName, nodes, edges, groups])
+
+  const doPublish = useCallback(async () => {
+    setPublishing(true)
+    try {
+      const saved = await doSave()
+      if (!saved) {
+        toast.error("保存失败，已取消发布")
+        return
+      }
+      const validation = await validateWorkflow(toolId)
+      if (!validation.valid) {
+        toast.error(`工作流校验未通过：${validation.errors.join("；")}`)
+        return
+      }
+      const published = await publishWorkflow(toolId)
+      setWorkflowStatus(published.status || "PUBLISHED")
+      setWorkflowVersion(published.version)
+      toast.success("工作流已发布，用户任务将按当前 DAG 执行")
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "发布失败")
+    } finally {
+      setPublishing(false)
+    }
+  }, [doSave, toolId])
+
+  const doUnpublish = useCallback(async () => {
+    setPublishing(true)
+    try {
+      const result = await unpublishWorkflow(toolId)
+      setWorkflowStatus(result.status || "DRAFT")
+      toast.success("工作流已下线（DRAFT），任务将回退到工具默认执行方式")
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "下线失败")
+    } finally {
+      setPublishing(false)
+    }
+  }, [toolId])
+
+  const loadVersions = useCallback(async () => {
+    setVersionsLoading(true)
+    try {
+      setVersions(await fetchWorkflowVersions(toolId, 1, 20))
+    } catch {
+      setVersions([])
+    } finally {
+      setVersionsLoading(false)
+    }
+  }, [toolId])
+
+  const toggleVersions = useCallback(() => {
+    setVersionsOpen((open) => {
+      const next = !open
+      if (next) void loadVersions()
+      return next
+    })
+  }, [loadVersions])
+
+  const doRestoreVersion = useCallback(
+    async (version: number) => {
+      setRestoringVersion(version)
+      try {
+        const restored = await restoreWorkflowVersion(toolId, version)
+        const { nodes: restoredNodes, edges: restoredEdges, groups: restoredGroups } = apiToReactFlow(restored)
+        setNodes(restoredNodes)
+        setEdges(dedupeEdgeIds(normalizeWorkflowEdges(restoredNodes, restoredEdges)))
+        setGroups(restoredGroups)
+        setWorkflowVersion(restored.version)
+        setWorkflowStatus(restored.status || "DRAFT")
+        clear()
+        toast.success(`已恢复到 v${version}（生成新版本 v${restored.version}）`)
+        void loadVersions()
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "恢复版本失败")
+      } finally {
+        setRestoringVersion(null)
+      }
+    },
+    [toolId, setNodes, setEdges, clear, loadVersions],
+  )
 
   const handleUndo = useCallback(() => {
     const snapshot = undo()
@@ -1567,7 +1667,13 @@ export function WorkflowCanvas({
   )
 
   const isValidConnection = useCallback(
-    (connection: Connection) => canConnectBySlot(nodes, connection),
+    (connection: Connection | WFEdge) =>
+      canConnectBySlot(nodes, {
+        source: connection.source ?? null,
+        target: connection.target ?? null,
+        sourceHandle: connection.sourceHandle ?? null,
+        targetHandle: connection.targetHandle ?? null,
+      } as Connection),
     [nodes],
   )
 
@@ -1732,8 +1838,14 @@ export function WorkflowCanvas({
     )
   }
 
+  const isPublished = workflowStatus === "PUBLISHED"
+
   const toolbar = (
     <div className="flex flex-wrap items-center gap-2">
+      <Badge variant={isPublished ? "default" : "secondary"} className="gap-1 text-xs">
+        {isPublished ? <CheckCircle2 className="h-3 w-3" /> : null}
+        {isPublished ? "已发布" : "草稿"}
+      </Badge>
       <Badge
         variant={saveStatus === "saved" ? "default" : saveStatus === "error" ? "destructive" : "outline"}
         className="text-xs"
@@ -1743,6 +1855,21 @@ export function WorkflowCanvas({
       <Button type="button" size="sm" variant="outline" className="gap-1.5 text-xs" onClick={doSave} disabled={saving}>
         <Save className="h-3.5 w-3.5" />
         {saving ? "保存中..." : "保存"}
+      </Button>
+      <Button
+        type="button"
+        size="sm"
+        className="gap-1.5 text-xs"
+        onClick={isPublished ? doUnpublish : doPublish}
+        disabled={publishing || saving}
+        variant={isPublished ? "outline" : "default"}
+      >
+        <Rocket className="h-3.5 w-3.5" />
+        {publishing ? "处理中..." : isPublished ? "下线" : "发布"}
+      </Button>
+      <Button type="button" size="sm" variant="outline" className="gap-1.5 text-xs" onClick={toggleVersions}>
+        <History className="h-3.5 w-3.5" />
+        版本
       </Button>
       <Button type="button" size="sm" variant="outline" className="gap-1.5 text-xs" onClick={handleUndo} disabled={!canUndo}>
         <Undo2 className="h-3.5 w-3.5" />
@@ -1755,14 +1882,54 @@ export function WorkflowCanvas({
     </div>
   )
 
+  const versionsPanel = versionsOpen ? (
+    <div className="mb-2 rounded-lg border border-border bg-card p-3">
+      <div className="mb-2 flex items-center justify-between">
+        <p className="text-xs font-medium text-foreground">版本历史（恢复会生成新版本，不会丢失当前内容）</p>
+        <Button type="button" size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => setVersionsOpen(false)}>
+          收起
+        </Button>
+      </div>
+      {versionsLoading ? (
+        <p className="text-xs text-muted-foreground">正在加载版本列表...</p>
+      ) : versions.length === 0 ? (
+        <p className="text-xs text-muted-foreground">暂无历史版本（首次保存后产生）</p>
+      ) : (
+        <ul className="max-h-44 space-y-1 overflow-y-auto">
+          {versions.map((item) => (
+            <li key={item.id} className="flex items-center justify-between gap-2 rounded-md border border-border/60 px-2 py-1.5">
+              <div className="min-w-0 text-xs">
+                <span className="font-medium">v{item.version}</span>
+                <span className="ml-2 text-muted-foreground">
+                  {item.snapshotLabel || "快照"} · {item.createdAt?.replace("T", " ").slice(0, 19) || "--"}
+                </span>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-6 px-2 text-xs"
+                disabled={restoringVersion !== null}
+                onClick={() => void doRestoreVersion(item.version)}
+              >
+                {restoringVersion === item.version ? "恢复中..." : "恢复"}
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  ) : null
+
   const canvas = (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <p className="max-w-3xl text-xs leading-5 text-muted-foreground">
-          当前画布用于描述工具执行流程。连线表示数据流向；每个入口/出口保持独立 ID，可自由重连。
+          当前画布用于描述工具执行流程。连线表示数据流向；每个入口/出口保持独立 ID，可自由重连。保存仅更新内容，需点击“发布”后用户任务才会按当前 DAG 执行。
         </p>
         {toolbar}
       </div>
+      {versionsPanel}
 
       <div
         className="flex-1 overflow-hidden rounded-lg border border-border bg-card"

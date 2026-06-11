@@ -309,6 +309,7 @@ onUnmounted(() => {
 
 <style scoped>
 .community-discover {
+  flex: 1;
   min-height: 100%;
   padding: clamp(24px, 4vw, 48px);
   color: #f8fafc;
