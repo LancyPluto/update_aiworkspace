@@ -37,8 +37,8 @@ for f in "${files[@]}"; do
     backend/*) add backend ;;
     worker/*) add worker ;;
     agent-service/*) add agent-service ;;
-    admin-frontend/*) add admin-frontend ;;
-    user-web/*) add user-web ;;
+    admin-frontend/*) add admin-frontend; add nginx ;;
+    user-web/*) add user-web; add nginx ;;
     engines/banana-slides/*) add banana-slides ;;
     deploy/nginx/*|deploy/docker-compose*|deploy/nginx/*) add nginx ;;
     deploy/*|.github/*|sql/*)

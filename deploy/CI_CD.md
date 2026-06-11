@@ -6,27 +6,36 @@
 
 | 文件 | 触发 | 行为 |
 |------|------|------|
-| `.github/workflows/dev-delivery.yml` | PR → `dev` | 仅跑 CI（测试 + 前端构建） |
-| 同上 | `push` → `dev` | CI 通过后 **轻量部署** 生产 |
-| 同上 | `workflow_dispatch`（dev 分支） | 可选 `rsync` / `git` 同步模式 |
+| `.github/workflows/dev-delivery.yml` | PR → `dev` | 仅跑 CI（测试 + 前端构建），**不部署生产** |
+| 同上 | `push` → `dev`（含 PR merge 后的 push） | CI 通过后 **git 同步 + Docker 重建** |
+| 同上 | `workflow_dispatch` | 手动触发部署，可选 `git` / `rsync` |
 
-## 链路（轻量 CD，默认 rsync）
+## 链路（轻量 CD，默认 git）
 
 ```
-push/PR dev
+push dev / PR merge → dev
   → backend: mvn test
   → agent-service / worker: pytest
   → admin-frontend + user-web: npm ci && build
-  → (仅 push/dispatch) 检测变更服务 → rsync 增量同步 → 仅重建变更的 Docker 服务
+  → 检测变更服务 → 生产机 git fetch/checkout → 仅重建变更的 Docker 服务
   → http://wlcloudai.com
 ```
+
+生产机首次需执行一次引导（将现有目录变为 git 仓库）：
+
+```bash
+export DEPLOY_HOST=8.134.93.203 DEPLOY_USER=root DEPLOY_PASSWORD='...'
+bash deploy/scripts/bootstrap_production_git.sh
+```
+
+之后 GitHub Actions 使用 `GITHUB_TOKEN` 通过 HTTPS 拉取私有仓库，无需在服务器长期保存 PAT。
 
 ### 三种同步方式对比
 
 | 方式 | 脚本 | 速度 | 适用场景 |
 |------|------|------|----------|
-| **rsync 增量**（默认 CD） | `ci_remote_deploy_light.sh` | 快，只传变更文件 | 日常 CD，不删整目录 |
-| **git pull** | `DEPLOY_SYNC_MODE=git` | 最快，无上传 | 服务器能访问 GitHub 时 |
+| **git pull**（默认 CD） | `DEPLOY_SYNC_MODE=git` | 最快，增量 fetch | 日常 CD，生产机已 `bootstrap_production_git.sh` |
+| **rsync 增量** | `DEPLOY_SYNC_MODE=rsync` | 只传变更文件 | 服务器无法访问 GitHub 时的兜底 |
 | **全量 tar**（旧） | `ci_remote_deploy.sh` | 慢，删整目录 | 兜底 / 首次初始化 |
 
 ## 必需 GitHub Secrets

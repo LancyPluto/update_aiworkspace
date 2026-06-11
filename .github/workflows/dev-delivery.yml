@@ -1,12 +1,12 @@
 name: Dev Branch CI/CD
 
-# push / PR to dev: CI then deploy to production (git incremental sync on server).
+# push / PR → dev: CI; push to dev (含 PR merge) 或手动 dispatch → 生产 git 同步 + Docker 重建。
 on:
   push:
     branches: [dev]
   pull_request:
     branches: [dev]
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review, closed]
   workflow_dispatch:
     inputs:
       deploy_sync_mode:
@@ -107,9 +107,9 @@ jobs:
   deploy-production:
     name: Deploy to Production
     needs: [backend-test, agent-service-test, worker-test, frontend-build]
+    # 仅 push 到 dev（含 PR merge 后的 push）或手动触发时部署；PR 打开/同步只跑 CI，不碰生产。
     if: |
       (github.event_name == 'push' && github.ref == 'refs/heads/dev') ||
-      (github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'dev' && github.event.pull_request.draft == false) ||
       github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 45

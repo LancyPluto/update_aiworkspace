@@ -41,6 +41,8 @@ restore_file() {
 }
 
 mkdir -p "$REMOTE_DIR/deploy/logs"
+git config --global --add safe.directory "$REMOTE_DIR" 2>/dev/null || true
+chown -R root:root "$REMOTE_DIR" 2>/dev/null || true
 
 OLD_SHA=""
 if [[ -d "$REMOTE_DIR/.git" ]]; then
@@ -87,9 +89,11 @@ git fetch origin "$DEPLOY_GIT_BRANCH" --depth "$GIT_DEPTH" 2>/dev/null || true
 
 if [[ "$DEPLOY_EVENT" == "pull_request" && -n "$DEPLOY_PR_NUMBER" ]]; then
   TRACK_BRANCH="deploy/pr-${DEPLOY_PR_NUMBER}"
-  git checkout -B "$TRACK_BRANCH" "$DEPLOY_GIT_REF"
+  git checkout -B "$TRACK_BRANCH" "$DEPLOY_GIT_REF" -f
+  git reset --hard "$DEPLOY_GIT_REF"
 else
-  git checkout -B "$DEPLOY_GIT_BRANCH" "$DEPLOY_GIT_REF"
+  git checkout -B "$DEPLOY_GIT_BRANCH" "$DEPLOY_GIT_REF" -f
+  git reset --hard "$DEPLOY_GIT_REF"
 fi
 
 NEW_SHA="$(git rev-parse HEAD)"
