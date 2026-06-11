@@ -37,6 +37,7 @@ if [ -z "${DEPLOY_SERVICES:-}" ]; then
 fi
 
 echo "Deploy mode=$DEPLOY_SYNC_MODE services=$DEPLOY_SERVICES ref=$DEPLOY_GIT_REF event=$DEPLOY_EVENT"
+echo "$DEPLOY_SERVICES" > /tmp/ai_tool_market_deploy_services.txt
 
 if [ "$DEPLOY_SYNC_MODE" = "rsync" ]; then
   ssh_cmd "mkdir -p '$REMOTE_DIR'"
@@ -127,12 +128,25 @@ if echo "\$DEPLOY_SERVICES" | grep -qw banana-slides; then
   COMPOSE_ARGS+=(--profile banana-slides)
 fi
 
+echo "DEPLOY_SERVICES=\$DEPLOY_SERVICES" | tee -a "\$REMOTE_DIR/deploy/logs/deploy-history.log"
+
 for svc in \$DEPLOY_SERVICES; do
   echo "Building \$svc ..."
-  docker compose "\${COMPOSE_ARGS[@]}" build "\$svc"
+  docker compose "\${COMPOSE_ARGS[@]}" build "\$svc" || true
 done
 
+echo "Force-recreating containers: \$DEPLOY_SERVICES"
 docker compose "\${COMPOSE_ARGS[@]}" up -d --force-recreate \$DEPLOY_SERVICES
+
+# nginx 反代静态资源；任意前端/配置变更后都 reload，避免 user_web_dist 已更新但 nginx 仍握旧连接。
+docker compose "\${COMPOSE_ARGS[@]}" restart nginx || true
+
+if echo "\$DEPLOY_SERVICES" | grep -qw user-web; then
+  echo "Writing user-web build-info.json ..."
+  docker exec ai-supermarket-user-web sh -c "printf '%s\\n' '{\"gitSha\":\"'\$GITHUB_SHA'\",\"builtAt\":\"'\"\$(date -Iseconds)\"'\"}' > /dist-out/build-info.json" || true
+  echo "Reloading nginx after user-web rebuild ..."
+  docker compose "\${COMPOSE_ARGS[@]}" restart nginx || true
+fi
 
 echo "Waiting for user-web health..."
 for i in \$(seq 1 36); do
@@ -147,6 +161,11 @@ done
 curl -sf -o /dev/null -w "root:%{http_code}\n" http://127.0.0.1/ || true
 curl -sf -o /dev/null -w "api:%{http_code}\n" http://127.0.0.1/api/health || true
 curl -sf -o /dev/null -w "admin:%{http_code}\n" -L http://127.0.0.1/admin || true
+if echo "\$DEPLOY_SERVICES" | grep -qw user-web; then
+  echo "build-info:" && curl -sf http://127.0.0.1/build-info.json || echo "(build-info pending)"
+  js_bundle="\$(docker exec ai-supermarket-nginx sh -c 'ls /usr/share/nginx/user-web/assets/index-*.js 2>/dev/null | head -1' || true)"
+  echo "user-web bundle: \${js_bundle:-unknown}"
+fi
 docker compose "\${COMPOSE_ARGS[@]}" ps
 REMOTE
 
