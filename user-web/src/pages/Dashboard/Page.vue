@@ -4,20 +4,20 @@ import { RouterLink, useRoute, useRouter } from "vue-router"
 import {
   ArrowRight,
   Bot,
-  Box,
-  Braces,
   ChevronDown,
   Clock,
   Download,
   FileText,
-  Files,
   Image as ImageIcon,
+  LayoutGrid,
   Loader2,
   MessageSquareText,
   MoreHorizontal,
   Music,
   Pause,
   Play,
+  Presentation,
+  Rows3,
   Search,
   Send,
   Sparkles,
@@ -67,6 +67,7 @@ import { buildDashboardTaskParams, buildOptimisticDashboardTask } from "./dashbo
 const auth = useAuthStore()
 const route = useRoute()
 const router = useRouter()
+const HISTORY_VIEW_KEY = "ai_tool_market_dashboard_history_view"
 
 const loading = ref(false)
 const credit = ref<CreditAccount | null>(null)
@@ -89,8 +90,14 @@ const submitting = ref(false)
 const submitError = ref("")
 const submitNotice = ref("")
 const activePanel = ref<"models" | "tasks">("models")
+const historyView = ref<"cards" | "feed">("cards")
 const modalityDockOpen = ref(true)
 const historySentinelRef = ref<HTMLElement | null>(null)
+const historyFeedStartRef = ref<HTMLElement | null>(null)
+const historyFeedEndRef = ref<HTMLElement | null>(null)
+const dashboardMainRef = ref<HTMLElement | null>(null)
+const expandedPromptIds = ref<Set<number>>(new Set())
+const shouldScrollHistoryFeedToBottom = ref(false)
 let historyObserver: IntersectionObserver | null = null
 const taskPollTimers = new Map<number, number>()
 const retryingTaskIds = ref<Set<number>>(new Set())
@@ -123,9 +130,7 @@ const modalityLabels: Record<string, string> = {
   VIDEO: "视频",
   AUDIO: "音乐",
   TEXT: "文本",
-  MULTIMODAL: "多模态",
-  JSON: "数据",
-  FILE: "文件",
+  PPT: "PPT",
 }
 
 const modalityDescriptions: Record<string, string> = {
@@ -133,9 +138,7 @@ const modalityDescriptions: Record<string, string> = {
   VIDEO: "短片、运镜、动态素材",
   AUDIO: "配音、音效、音乐",
   TEXT: "文案、脚本、营销内容",
-  MULTIMODAL: "图文混合与理解",
-  JSON: "结构化数据生成",
-  FILE: "文件解析与生成",
+  PPT: "演示文稿与页面设计",
 }
 
 const modalityIcons = {
@@ -143,33 +146,8 @@ const modalityIcons = {
   VIDEO: Video,
   AUDIO: Music,
   TEXT: FileText,
-  MULTIMODAL: Box,
-  JSON: Braces,
-  FILE: Files,
+  PPT: Presentation,
 }
-
-const gallerySeeds = [
-  {
-    title: "品牌新品主视觉",
-    prompt: "高质感电商棚拍，柔和布光，细腻产品材质",
-    gradient: "bg-[radial-gradient(circle_at_18%_18%,rgb(244_114_182_/_0.70),transparent_32%),radial-gradient(circle_at_82%_22%,rgb(251_191_36_/_0.36),transparent_34%),radial-gradient(circle_at_45%_90%,rgb(127_29_29_/_0.66),transparent_42%),linear-gradient(135deg,rgb(42_22_28),rgb(21_18_24))]",
-  },
-  {
-    title: "社媒种草封面",
-    prompt: "年轻化生活方式，明亮构图，强记忆点标题空间",
-    gradient: "bg-[radial-gradient(circle_at_18%_20%,rgb(34_211_238_/_0.58),transparent_34%),radial-gradient(circle_at_82%_28%,rgb(129_140_248_/_0.48),transparent_38%),radial-gradient(circle_at_55%_92%,rgb(30_64_175_/_0.62),transparent_44%),linear-gradient(135deg,rgb(14_28_44),rgb(18_18_30))]",
-  },
-  {
-    title: "短视频口播脚本",
-    prompt: "三秒钩子，真实体验，轻转化结尾",
-    gradient: "bg-[radial-gradient(circle_at_20%_24%,rgb(16_185_129_/_0.56),transparent_35%),radial-gradient(circle_at_84%_30%,rgb(45_212_191_/_0.34),transparent_36%),radial-gradient(circle_at_56%_90%,rgb(14_116_144_/_0.58),transparent_45%),linear-gradient(135deg,rgb(13_36_32),rgb(13_20_25))]",
-  },
-  {
-    title: "直播间氛围素材",
-    prompt: "暖色灯光，大促氛围，层次丰富的空间布景",
-    gradient: "bg-[radial-gradient(circle_at_18%_22%,rgb(217_70_239_/_0.56),transparent_34%),radial-gradient(circle_at_82%_26%,rgb(168_85_247_/_0.42),transparent_36%),radial-gradient(circle_at_56%_92%,rgb(71_85_105_/_0.64),transparent_46%),linear-gradient(135deg,rgb(35_24_46),rgb(17_18_24))]",
-  },
-]
 
 const toolsByModality = computed(() => {
   const groups = new Map<string, ToolSummary[]>()
@@ -181,14 +159,8 @@ const toolsByModality = computed(() => {
 })
 
 const modalityTabs = computed(() => {
-  const order = ["IMAGE", "VIDEO", "AUDIO", "TEXT", "MULTIMODAL", "JSON", "FILE"]
-  const available = new Set([...toolsByModality.value.keys(), ...order])
-  return [...available]
-    .sort((a, b) => {
-      const ia = order.indexOf(a)
-      const ib = order.indexOf(b)
-      return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib)
-    })
+  const order = ["IMAGE", "VIDEO", "AUDIO", "TEXT", "PPT"]
+  return order
     .map((key) => ({
       key,
       label: modalityLabels[key] || key,
@@ -246,6 +218,14 @@ const taskMaterials = computed(() =>
       }
     }),
 )
+const historyFeedMaterials = computed(() =>
+  [...taskMaterials.value].sort((a, b) => {
+    const timeA = Date.parse(a.task.createdAt || "") || 0
+    const timeB = Date.parse(b.task.createdAt || "") || 0
+    if (timeA !== timeB) return timeA - timeB
+    return a.task.taskId - b.task.taskId
+  }),
+)
 const previewRecommendations = computed<AssetPreviewRecommendation[]>(() =>
   previewAsset.value ? recommendToolsForAsset(previewAsset.value) : [],
 )
@@ -259,6 +239,39 @@ const audioStatusMaterials = computed(() =>
   taskMaterials.value.filter((item) => item.task.status !== "SUCCESS" || primaryBlock(item.blocks)?.type !== "audio"),
 )
 const audioWorkbenchVisible = computed(() => selectedModality.value === "AUDIO" && recentTasks.value.length > 0)
+const isHistoryFeedView = computed(() => activePanel.value === "tasks" && historyView.value === "feed")
+
+watch(historyView, (view) => {
+  localStorage.setItem(HISTORY_VIEW_KEY, view)
+  void nextTick(() => {
+    setupHistoryObserver()
+    if (view === "feed" && activePanel.value === "tasks") {
+      scrollHistoryFeedToBottom()
+      shouldScrollHistoryFeedToBottom.value = false
+    }
+  })
+})
+
+watch(activePanel, async (panel) => {
+  if (panel !== "tasks") return
+  await nextTick()
+  setupHistoryObserver()
+  if (historyView.value === "feed") {
+    scrollHistoryFeedToBottom()
+    shouldScrollHistoryFeedToBottom.value = false
+  }
+})
+
+watch(
+  () => tasks.value.length,
+  async () => {
+    if (!isHistoryFeedView.value || !shouldScrollHistoryFeedToBottom.value) return
+    await nextTick()
+    scrollHistoryFeedToBottom()
+    shouldScrollHistoryFeedToBottom.value = false
+  },
+)
+
 const primaryAudioStatusItem = computed(() => audioStatusMaterials.value.find((item) => isTaskRunning(item.task.status)) || audioStatusMaterials.value[0] || null)
 const audioRows = computed<DashboardAudioTrack[]>(() =>
   audioTaskMaterials.value.flatMap((item) => {
@@ -316,12 +329,6 @@ watch(
     attribution.value = mergePendingAssetAttribution(dashboardAttributionFromRoute(route), pendingAssetReplay.value)
   },
 )
-
-watch(activePanel, async (panel) => {
-  if (panel !== "tasks") return
-  await nextTick()
-  setupHistoryObserver()
-})
 
 watch(audioRows, (rows) => {
   if (!rows.length) {
@@ -399,7 +406,7 @@ function ensureSelectedModality() {
     selectedToolCode.value = currentTools.value[0]?.toolCode || null
     return
   }
-  const fallback = ["IMAGE", "VIDEO", "AUDIO", "TEXT", "MULTIMODAL", "JSON", "FILE"].find(
+  const fallback = ["IMAGE", "VIDEO", "AUDIO", "TEXT"].find(
     (key) => (toolsByModality.value.get(key)?.length || 0) > 0,
   )
   if (fallback) {
@@ -413,6 +420,14 @@ function normalizeModality(value?: string | null) {
 }
 
 function selectModality(key: string) {
+  if (key === "PPT") {
+    selectedModality.value = key
+    selectedToolCode.value = null
+    modelSearch.value = ""
+    modelPickerOpen.value = false
+    replayParams.value = null
+    return
+  }
   selectedModality.value = key
   selectedToolCode.value = toolsByModality.value.get(key)?.[0]?.toolCode || null
   modelSearch.value = ""
@@ -496,6 +511,7 @@ async function createWithSelectedTool() {
       selectedModality: selectedModality.value,
       userId: auth.user?.id ?? 0,
     })
+    shouldScrollHistoryFeedToBottom.value = true
     upsertTask(optimisticTask, true)
     activePanel.value = "tasks"
     submitNotice.value = `已进入工作历史：${response.taskNo}`
@@ -503,6 +519,10 @@ async function createWithSelectedTool() {
     startTaskPolling(response.taskId)
     await nextTick()
     setupHistoryObserver()
+    if (historyView.value === "feed") {
+      scrollHistoryFeedToBottom()
+      shouldScrollHistoryFeedToBottom.value = false
+    }
   } catch (e) {
     if (e instanceof ApiBusinessError && (e.code === "CREDIT_NOT_ENOUGH" || e.code === "AGENT_CREDIT_NOT_ENOUGH")) {
       submitError.value = "算力不足，请前往会员与算力页充值后再试"
@@ -593,8 +613,12 @@ function setupHistoryObserver() {
   historyObserver?.disconnect()
   historyObserver = new IntersectionObserver((entries) => {
     if (entries.some((entry) => entry.isIntersecting)) void loadMoreTasks()
-  }, { rootMargin: "260px" })
-  if (historySentinelRef.value) historyObserver.observe(historySentinelRef.value)
+  }, {
+    root: dashboardMainRef.value,
+    rootMargin: historyView.value === "feed" ? "280px 0px 0px 0px" : "0px 0px 260px 0px",
+  })
+  const target = historyView.value === "feed" ? historyFeedStartRef.value : historySentinelRef.value
+  if (target) historyObserver.observe(target)
 }
 
 function startPollingVisibleTasks() {
@@ -790,6 +814,10 @@ function taskPrompt(task: TaskDetail): string {
   return typeof value === "string" && value.trim() ? value.trim() : ""
 }
 
+function taskModelTag(task: TaskDetail): string {
+  return String(task.params?.model || task.params?.modelName || task.toolCode || task.outputModality || "AI")
+}
+
 function inferTaskModality(task: TaskDetail, blocks: ResultBlock[]): string {
   const raw = (task.outputModality || task.result?.resourceType || "").toUpperCase()
   if (raw === "IMAGE" || blocks.some((block) => block.type === "image")) return "图像"
@@ -801,6 +829,39 @@ function inferTaskModality(task: TaskDetail, blocks: ResultBlock[]): string {
 
 function primaryBlock(blocks: ResultBlock[]): ResultBlock | null {
   return blocks.find((block) => block.type === "image" || block.type === "video" || block.type === "audio") || blocks[0] || null
+}
+
+function imageItemsForBlocks(blocks: ResultBlock[]) {
+  const block = primaryBlock(blocks)
+  return block?.type === "image" ? block.images : []
+}
+
+function videoUrlForBlocks(blocks: ResultBlock[]) {
+  const block = primaryBlock(blocks)
+  return block?.type === "video" ? block.url : ""
+}
+
+function firstDownloadUrl(blocks: ResultBlock[]): string {
+  const block = primaryBlock(blocks)
+  if (block?.type === "image") return block.images[0]?.url || ""
+  if (block?.type === "video") return block.url
+  if (block?.type === "audio") return resolveAudioTracks(block)[0]?.url || ""
+  return ""
+}
+
+function isPromptExpanded(taskId: number) {
+  return expandedPromptIds.value.has(taskId)
+}
+
+function togglePrompt(taskId: number) {
+  const next = new Set(expandedPromptIds.value)
+  if (next.has(taskId)) next.delete(taskId)
+  else next.add(taskId)
+  expandedPromptIds.value = next
+}
+
+function scrollHistoryFeedToBottom() {
+  historyFeedEndRef.value?.scrollIntoView({ behavior: "smooth", block: "end" })
 }
 
 function audioTracksForItem(blocks: ResultBlock[]) {
@@ -1179,6 +1240,8 @@ function modalityLabel(value?: string | null) {
 }
 
 onMounted(async () => {
+  const savedHistoryView = localStorage.getItem(HISTORY_VIEW_KEY)
+  if (savedHistoryView === "cards" || savedHistoryView === "feed") historyView.value = savedHistoryView
   await loadDashboard()
   setupHistoryObserver()
 })
@@ -1224,31 +1287,27 @@ onUnmounted(() => {
           </RouterLink>
         </div>
 
-        <main class="min-h-0 flex-1 overflow-y-auto px-5 pb-40 pt-6 lg:pl-[132px] xl:px-10 xl:pl-[132px]">
+        <main ref="dashboardMainRef" class="min-h-0 flex-1 overflow-y-auto px-5 pb-40 pt-6 lg:pl-[132px] xl:px-10 xl:pl-[132px]">
           <div class="mx-auto w-full max-w-[1380px]">
             <div class="sticky top-0 z-20 -mx-5 mb-8 border-b border-transparent bg-transparent px-5 py-4 backdrop-blur-0 xl:-mx-10 xl:px-10">
               <div class="flex flex-wrap items-center justify-between gap-4">
-                <div class="flex rounded-full border border-white/10 bg-white/[0.04] p-1 shadow-[0_16px_40px_rgb(0_0_0_/_0.25)]">
+                <div class="min-w-0">
+                  <p class="text-xs font-medium uppercase tracking-[0.18em] text-white/32">{{ activePanel === 'tasks' ? 'HISTORY' : modalityLabel(selectedModality) }}</p>
+                  <h2 class="mt-1 text-xl font-semibold text-white">{{ activePanel === 'tasks' ? '工作历史' : '开始创作' }}</h2>
+                </div>
+                <div class="flex flex-wrap items-center justify-end gap-3">
+                  <div class="hidden text-right font-mono text-[12px] leading-5 text-white/36 sm:block">
+                    <p>{{ currentTools.length }} 个可用模型 · 可用算力 {{ credit?.available ?? "--" }} · 进行中 {{ runningCount }}</p>
+                  </div>
                   <button
                     type="button"
-                    class="rounded-full px-7 py-3 text-base font-semibold transition"
-                    :class="activePanel === 'models' ? 'bg-primary text-white shadow-[0_10px_28px_rgb(176_92_255_/_0.3)]' : 'text-white/45 hover:text-white'"
-                    @click="activePanel = 'models'"
+                    class="rounded-full border border-white/10 px-5 py-2.5 text-sm font-medium transition"
+                    :class="activePanel === 'tasks' ? 'bg-white/[0.08] text-white shadow-[0_10px_28px_rgb(0_0_0_/_0.22)]' : 'bg-white/[0.035] text-white/55 hover:bg-white/[0.06] hover:text-white'"
+                    @click="activePanel = activePanel === 'tasks' ? 'models' : 'tasks'"
                   >
-                    模型推荐
-                  </button>
-                  <button
-                    type="button"
-                    class="rounded-full px-7 py-3 text-base font-semibold transition"
-                    :class="activePanel === 'tasks' ? 'bg-primary text-white shadow-[0_10px_28px_rgb(176_92_255_/_0.3)]' : 'text-white/45 hover:text-white'"
-                    @click="activePanel = 'tasks'"
-                  >
-                    工作历史
+                    {{ activePanel === 'tasks' ? '返回创作' : '工作历史' }}
                     <span class="ml-1 text-xs opacity-70">{{ recentTasks.length }}</span>
                   </button>
-                </div>
-                <div class="hidden text-right font-mono text-[12px] leading-5 text-white/36 sm:block">
-                  <p>{{ modalityLabel(selectedModality) }} · {{ currentTools.length }} 个可用模型 · 可用算力 {{ credit?.available ?? "--" }} · 进行中 {{ runningCount }}</p>
                 </div>
               </div>
             </div>
@@ -1261,30 +1320,6 @@ onUnmounted(() => {
                     <h2 class="mt-1 text-4xl font-semibold">{{ modalityLabel(selectedModality) }}创作</h2>
                   </div>
                 </div>
-
-                <section class="grid gap-2 overflow-hidden rounded-[28px] bg-white/[0.025] p-2 ring-1 ring-white/6 lg:grid-cols-4">
-                  <article
-                    v-for="seed in gallerySeeds"
-                    :key="seed.title"
-                    class="group relative min-h-[220px] overflow-hidden rounded-[24px] bg-secondary"
-                  >
-                    <div class="absolute inset-0" :class="seed.gradient" />
-                    <div class="absolute inset-0 opacity-[0.07] bg-[url('data:image/svg+xml,%3Csvg_viewBox=%220_0_120_120%22_xmlns=%22http://www.w3.org/2000/svg%22%3E%3Cfilter_id=%22n%22%3E%3CfeTurbulence_type=%22fractalNoise%22_baseFrequency=%220.9%22_numOctaves=%222%22_stitchTiles=%22stitch%22/%3E%3C/filter%3E%3Crect_width=%22120%22_height=%22120%22_filter=%22url(%23n)%22_opacity=%220.65%22/%3E%3C/svg%3E')]" />
-                    <div class="absolute inset-0 bg-gradient-to-t from-black/78 via-black/8 to-white/5" />
-                    <WandSparkles class="absolute -bottom-3 -right-2 h-28 w-28 text-white/[0.075] transition duration-500 group-hover:scale-105 group-hover:text-white/[0.11]" />
-                    <div class="absolute bottom-5 left-5 right-5">
-                      <p class="text-xl font-semibold text-white/90">{{ seed.title }}</p>
-                      <p class="mt-2 line-clamp-2 text-sm font-light leading-6 text-white/62">{{ seed.prompt }}</p>
-                    </div>
-                    <button
-                      type="button"
-                      class="absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-black/24 text-white/74 opacity-0 backdrop-blur transition group-hover:opacity-100 hover:bg-white/10 hover:text-white"
-                      @click="promptText = seed.prompt; expandComposer()"
-                    >
-                      <WandSparkles class="h-4 w-4" />
-                    </button>
-                  </article>
-                </section>
 
                 <div class="grid gap-5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
                 <article
@@ -1342,7 +1377,7 @@ onUnmounted(() => {
                 <div v-else-if="recentTasks.length === 0" class="rounded-2xl border border-dashed border-white/10 py-10 text-center text-sm text-white/45">
                   暂无任务，选择模型后开始第一条创作。
                 </div>
-                <div v-else-if="audioWorkbenchVisible" class="grid gap-4 xl:grid-cols-[minmax(420px,0.9fr)_minmax(0,1.35fr)]">
+                <div v-else-if="historyView === 'cards' && audioWorkbenchVisible" class="grid gap-4 xl:grid-cols-[minmax(420px,0.9fr)_minmax(0,1.35fr)]">
                   <audio
                     ref="audioElementRef"
                     class="hidden"
@@ -1742,11 +1777,212 @@ onUnmounted(() => {
                     </div>
                   </section>
                 </div>
+                <div v-else-if="historyView === 'feed'" class="dashboard-chat-feed">
+                  <div ref="historyFeedStartRef" class="flex min-h-14 items-center justify-center py-4 text-sm text-white/42">
+                    <template v-if="tasksLoadingMore">
+                      <Loader2 class="mr-2 h-4 w-4 animate-spin" />
+                      正在加载更早的工作历史...
+                    </template>
+                    <template v-else-if="taskHasNext">
+                      上滑加载更早历史
+                    </template>
+                    <template v-else-if="recentTasks.length > 0">
+                      已到最早的工作历史
+                    </template>
+                  </div>
+                  <article
+                    v-for="item in historyFeedMaterials"
+                    :key="`feed-${item.task.taskId}`"
+                    class="dashboard-chat-row"
+                  >
+                    <header class="flex flex-wrap items-start justify-between gap-4">
+                      <div class="flex min-w-0 items-center gap-3">
+                        <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-emerald-400/20 bg-[#12241d] text-sm font-black text-emerald-300 shadow-[inset_0_1px_0_rgb(255_255_255_/_0.08)]">
+                          P
+                        </span>
+                        <div class="min-w-0">
+                          <div class="flex flex-wrap items-center gap-2">
+                            <strong class="text-base font-semibold text-white">科创点AI</strong>
+                            <span class="h-4 w-px bg-white/12" />
+                            <span class="rounded-md border border-white/8 bg-white/[0.045] px-2 py-0.5 text-xs font-medium text-white/62">
+                              {{ item.modality }}
+                            </span>
+                            <span class="rounded-md border border-white/8 bg-white/[0.045] px-2 py-0.5 text-xs font-medium text-white/62">
+                              {{ taskModelTag(item.task) }}
+                            </span>
+                          </div>
+                          <p class="mt-1 text-xs text-white/32">{{ item.task.taskNo }}</p>
+                        </div>
+                      </div>
+                      <div class="flex shrink-0 items-center gap-2 text-xs text-white/38">
+                        <span
+                          class="rounded-full px-2 py-1"
+                          :class="canRetryTask(item.task.status) ? 'bg-red-500/12 text-red-100' : 'bg-white/[0.045] text-white/52'"
+                        >
+                          {{ taskStatusLabel(item.task.status) }}
+                        </span>
+                        <Clock class="h-3.5 w-3.5" />
+                        {{ formatTaskTime(item.task.createdAt) }}
+                      </div>
+                    </header>
+
+                    <section class="mt-4">
+                      <div v-if="taskPrompt(item.task)" class="flex items-start gap-3">
+                        <MessageSquareText class="mt-1 h-4 w-4 shrink-0 text-white/32" />
+                        <div class="min-w-0 flex-1">
+                          <p
+                            class="whitespace-pre-wrap text-sm font-medium leading-7 text-white/72"
+                            :class="isPromptExpanded(item.task.taskId) ? '' : 'line-clamp-2'"
+                          >
+                            {{ taskPrompt(item.task) }}
+                          </p>
+                          <button
+                            v-if="taskPrompt(item.task).length > 88"
+                            type="button"
+                            class="mt-1 text-xs font-medium text-primary/80 transition hover:text-primary"
+                            @click.stop="togglePrompt(item.task.taskId)"
+                          >
+                            {{ isPromptExpanded(item.task.taskId) ? "收起提示词" : "展开提示词" }}
+                          </button>
+                        </div>
+                      </div>
+                      <p v-else class="text-sm text-white/38">本次任务未记录提示词。</p>
+                    </section>
+
+                    <section class="mt-4">
+                      <div
+                        v-if="isTaskRunning(item.task.status) || canRetryTask(item.task.status) || (!item.task.result?.contentText && item.task.status !== 'SUCCESS')"
+                        class="rounded-2xl border border-white/8 bg-black/22 p-4"
+                      >
+                        <div class="flex items-center justify-between gap-4">
+                          <p class="text-sm text-white/62">
+                            {{ item.task.progressMessage || (canRetryTask(item.task.status) ? "任务生成失败，可以复用本次参数重试。" : "任务正在生成，完成后会追加到信息流底部。") }}
+                          </p>
+                          <span class="text-xs tabular-nums text-white/38">{{ item.task.progress ?? 0 }}%</span>
+                        </div>
+                        <div class="mt-3 h-1.5 overflow-hidden rounded-full bg-white/10">
+                          <div
+                            class="h-full rounded-full transition-all"
+                            :class="canRetryTask(item.task.status) ? 'bg-red-400' : 'bg-primary'"
+                            :style="{ width: `${Math.max(6, Math.min(item.task.progress ?? (isTaskRunning(item.task.status) ? 12 : 100), 100))}%` }"
+                          />
+                        </div>
+                      </div>
+
+                      <div
+                        v-else-if="imageItemsForBlocks(item.blocks).length"
+                        class="dashboard-feed-gallery"
+                        @click.stop="openAssetPreview(item)"
+                      >
+                        <img
+                          v-for="image in imageItemsForBlocks(item.blocks)"
+                          :key="image.url"
+                          :src="image.url"
+                          :alt="image.label || item.task.toolName"
+                          class="dashboard-feed-image"
+                          loading="lazy"
+                          decoding="async"
+                        />
+                      </div>
+
+                      <video
+                        v-else-if="videoUrlForBlocks(item.blocks)"
+                        :src="videoUrlForBlocks(item.blocks)"
+                        controls
+                        playsinline
+                        preload="metadata"
+                        class="max-h-[420px] w-full rounded-2xl bg-black object-contain"
+                      />
+
+                      <div v-else-if="primaryBlock(item.blocks)?.type === 'audio'" class="grid gap-3 sm:grid-cols-2">
+                        <div
+                          v-for="(track, trackIndex) in audioTracksForItem(item.blocks)"
+                          :key="`feed-audio-${track.url}-${trackIndex}`"
+                          class="rounded-2xl border border-white/8 bg-black/22 p-4"
+                        >
+                          <p class="truncate text-sm font-medium text-white">{{ track.title || `版本 ${trackIndex + 1}` }}</p>
+                          <p class="mt-1 text-xs text-white/38">{{ formatAudioDuration(track.duration) || "生成音频" }}</p>
+                          <audio :src="track.url" controls preload="metadata" class="mt-3 w-full" />
+                        </div>
+                      </div>
+
+                      <div v-else class="rounded-2xl border border-white/8 bg-black/22 p-4">
+                        <p class="whitespace-pre-wrap text-sm leading-7 text-white/70">{{ textPreview(item.blocks, item.task) }}</p>
+                      </div>
+                    </section>
+
+                    <footer class="mt-4 flex flex-wrap items-center gap-2">
+                      <button
+                        v-if="canCancelTask(item.task.status)"
+                        type="button"
+                        class="dashboard-feed-action"
+                        :disabled="
+                          cancellingTaskIds.has(item.task.taskId) ||
+                          deletingTaskIds.has(item.task.taskId) ||
+                          retryingTaskIds.has(item.task.taskId)
+                        "
+                        @click.stop="cancelQueuedTask(item.task)"
+                      >
+                        <X class="h-3.5 w-3.5" />
+                        {{ cancellingTaskIds.has(item.task.taskId) ? "取消中" : "取消任务" }}
+                      </button>
+                      <button
+                        type="button"
+                        class="dashboard-feed-action"
+                        :disabled="retryingTaskIds.has(item.task.taskId) || deletingTaskIds.has(item.task.taskId)"
+                        @click.stop="canRetryTask(item.task.status) ? retryTask(item.task) : replayTask(item.task)"
+                      >
+                        <Loader2 v-if="retryingTaskIds.has(item.task.taskId)" class="h-3.5 w-3.5 animate-spin" />
+                        <WandSparkles v-else class="h-3.5 w-3.5" />
+                        {{ canRetryTask(item.task.status) ? "重试" : "重新生成" }}
+                      </button>
+                      <button type="button" class="dashboard-feed-action opacity-55" disabled>
+                        <ImageIcon class="h-3.5 w-3.5" />
+                        局部重绘
+                      </button>
+                      <a
+                        v-if="firstDownloadUrl(item.blocks)"
+                        :href="firstDownloadUrl(item.blocks)"
+                        :download="`${item.task.taskNo || 'asset'}-result`"
+                        class="dashboard-feed-action"
+                        @click.stop
+                      >
+                        <Download class="h-3.5 w-3.5" />
+                        下载
+                      </a>
+                      <button
+                        v-if="canDeleteTask(item.task.status)"
+                        type="button"
+                        class="dashboard-feed-action dashboard-feed-action--danger"
+                        :disabled="
+                          deletingTaskIds.has(item.task.taskId) ||
+                          retryingTaskIds.has(item.task.taskId) ||
+                          cancellingTaskIds.has(item.task.taskId)
+                        "
+                        @click.stop="removeTask(item.task)"
+                      >
+                        <Loader2 v-if="deletingTaskIds.has(item.task.taskId)" class="h-3.5 w-3.5 animate-spin" />
+                        <Trash2 v-else class="h-3.5 w-3.5" />
+                        {{ deletingTaskIds.has(item.task.taskId) ? "删除中" : "删除" }}
+                      </button>
+                      <RouterLink
+                        :to="item.task.status === 'SUCCESS' ? userRoutes.taskResult(String(item.task.taskId)) : userRoutes.taskStatus(String(item.task.taskId))"
+                        class="ml-auto inline-flex items-center gap-1 text-xs font-medium text-white/38 transition hover:text-white"
+                        @click.stop
+                      >
+                        查看详情
+                        <ArrowRight class="h-3 w-3" />
+                      </RouterLink>
+                    </footer>
+                  </article>
+                  <div ref="historyFeedEndRef" class="h-2" />
+                </div>
+
                 <div v-else class="dashboard-history-grid">
                   <article
                     v-for="item in taskMaterials"
                     :key="item.task.taskId"
-                    class="group overflow-hidden rounded-[18px] border border-white/8 bg-white/[0.045] shadow-[0_14px_34px_rgb(0_0_0_/_0.22)] transition hover:-translate-y-0.5 hover:border-primary/45 hover:bg-white/[0.06]"
+                    class="group overflow-hidden border border-white/8 bg-white/[0.045] shadow-[0_14px_34px_rgb(0_0_0_/_0.22)] transition hover:-translate-y-0.5 hover:border-primary/45 hover:bg-white/[0.06]"
                     :class="[item.task.status === 'SUCCESS' ? 'cursor-zoom-in' : '', item.historyCardClass]"
                     @click="openAssetPreview(item)"
                   >
@@ -1981,7 +2217,7 @@ onUnmounted(() => {
                     </div>
                   </article>
                 </div>
-                <div ref="historySentinelRef" class="flex min-h-16 items-center justify-center py-6 text-sm text-white/45">
+                <div v-if="historyView === 'cards'" ref="historySentinelRef" class="flex min-h-16 items-center justify-center py-6 text-sm text-white/45">
                   <template v-if="tasksLoadingMore">
                     <Loader2 class="mr-2 h-4 w-4 animate-spin" />
                     正在加载更多工作历史...
@@ -1999,34 +2235,77 @@ onUnmounted(() => {
         </main>
 
         <div class="pointer-events-none fixed bottom-6 left-[calc(var(--app-sidebar-width,268px)+(100vw-var(--app-sidebar-width,268px))/2)] z-50 -translate-x-1/2 transition-[left]">
-          <button
-            v-if="!composerOpen"
-            type="button"
-            class="pointer-events-auto flex h-16 w-[min(720px,calc(100vw-2rem))] items-center gap-4 rounded-full border border-white/10 bg-[#1e1e24]/0.5 px-5 text-left text-white shadow-[0_24px_90px_rgb(0_0_0_/_0.3)] backdrop-blur-2xl transition hover:border-primary/45 hover:bg-[#252631]/0.7"
-            @click="expandComposer"
-          >
-            <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-black/30 text-primary">
-              <MessageSquareText class="h-5 w-5" />
-            </span>
-            <span class="min-w-0 flex-1">
-              <span class="block text-sm font-semibold">你想创作什么？</span>
-              <span class="block truncate text-xs text-white/40">
-                {{ selectedTool?.toolName || `${modalityLabel(selectedModality)}模型` }} · 点击展开创作参数
-              </span>
-            </span>
-            <span class="hidden rounded-full bg-[linear-gradient(180deg,rgb(199_128_255),rgb(143_73_226))] px-5 py-2 text-sm font-semibold shadow-[0_10px_28px_rgb(176_92_255_/_0.35),inset_0_1px_0_rgb(255_255_255_/_0.16)] sm:inline-flex">
-              创作
-            </span>
-          </button>
-
-          <div v-else class="pointer-events-auto w-[min(980px,calc(100vw-2rem))]">
+          <div v-if="!composerOpen" class="flex w-[min(980px,calc(100vw-2rem))] items-center justify-center gap-3">
+            <div v-if="activePanel === 'tasks'" class="dashboard-floating-view-switch pointer-events-auto">
+              <button
+                type="button"
+                class="dashboard-floating-view-button"
+                :class="historyView === 'cards' ? 'is-active' : ''"
+                @click="historyView = 'cards'"
+              >
+                <LayoutGrid class="h-3.5 w-3.5" />
+                卡片
+              </button>
+              <button
+                type="button"
+                class="dashboard-floating-view-button"
+                :class="historyView === 'feed' ? 'is-active' : ''"
+                @click="historyView = 'feed'"
+              >
+                <Rows3 class="h-3.5 w-3.5" />
+                信息流
+              </button>
+            </div>
             <button
               type="button"
-              class="mb-3 inline-flex h-11 items-center gap-2 rounded-full border border-primary/35 bg-primary/15 px-5 text-sm font-medium text-white shadow-[0_0_32px_rgb(176_92_255_/_0.24)]"
+              class="pointer-events-auto flex h-16 min-w-0 flex-1 items-center gap-4 rounded-full border border-white/10 bg-[#1e1e24]/0.5 px-5 text-left text-white shadow-[0_24px_90px_rgb(0_0_0_/_0.3)] backdrop-blur-2xl transition hover:border-primary/45 hover:bg-[#252631]/0.7"
+              @click="expandComposer"
             >
-              <WandSparkles class="h-4 w-4" />
-              玩法
+              <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-black/30 text-primary">
+                <MessageSquareText class="h-5 w-5" />
+              </span>
+              <span class="min-w-0 flex-1">
+                <span class="block text-sm font-semibold">你想创作什么？</span>
+                <span class="block truncate text-xs text-white/40">
+                  {{ selectedTool?.toolName || `${modalityLabel(selectedModality)}模型` }} · 点击展开创作参数
+                </span>
+              </span>
+              <span class="hidden rounded-full bg-[linear-gradient(180deg,rgb(199_128_255),rgb(143_73_226))] px-5 py-2 text-sm font-semibold shadow-[0_10px_28px_rgb(176_92_255_/_0.35),inset_0_1px_0_rgb(255_255_255_/_0.16)] sm:inline-flex">
+                创作
+              </span>
             </button>
+          </div>
+
+          <div v-else class="pointer-events-auto w-[min(980px,calc(100vw-2rem))]">
+            <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
+              <button
+                type="button"
+                class="inline-flex h-11 items-center gap-2 rounded-full border border-primary/35 bg-primary/15 px-5 text-sm font-medium text-white shadow-[0_0_32px_rgb(176_92_255_/_0.24)]"
+              >
+                <WandSparkles class="h-4 w-4" />
+                玩法
+              </button>
+              <div v-if="activePanel === 'tasks'" class="dashboard-floating-view-switch">
+                <button
+                  type="button"
+                  class="dashboard-floating-view-button"
+                  :class="historyView === 'cards' ? 'is-active' : ''"
+                  @click="historyView = 'cards'"
+                >
+                  <LayoutGrid class="h-3.5 w-3.5" />
+                  卡片
+                </button>
+                <button
+                  type="button"
+                  class="dashboard-floating-view-button"
+                  :class="historyView === 'feed' ? 'is-active' : ''"
+                  @click="historyView = 'feed'"
+                >
+                  <Rows3 class="h-3.5 w-3.5" />
+                  信息流
+                </button>
+              </div>
+            </div>
 
             <div class="relative rounded-3xl border border-white/10 bg-[#1e1e24]/92 p-4 shadow-[0_24px_90px_rgb(0_0_0_/_0.58)] backdrop-blur-2xl">
               <button
@@ -2242,6 +2521,148 @@ onUnmounted(() => {
   gap: clamp(14px, 1.6vw, 20px);
 }
 
+.dashboard-history-grid > article {
+  border-radius: 18px;
+}
+
+.dashboard-chat-feed {
+  display: flex;
+  max-width: min(980px, 100%);
+  margin: 0 auto;
+  padding-bottom: 36px;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.dashboard-chat-row {
+  border: 1px solid rgb(255 255 255 / 0.055);
+  border-radius: 12px;
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.045), rgb(255 255 255 / 0.032)),
+    #111116;
+  box-shadow: 0 22px 60px rgb(0 0 0 / 0.22);
+  transition: border-color 180ms ease, background-color 180ms ease, transform 180ms ease;
+}
+
+.dashboard-chat-row:hover {
+  border-color: rgb(255 255 255 / 0.085);
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.058), rgb(255 255 255 / 0.038)),
+    #121218;
+  transform: translateY(-1px);
+}
+
+.dashboard-feed-gallery {
+  display: flex;
+  max-width: 100%;
+  align-items: flex-start;
+  gap: 10px;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  padding-bottom: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: rgb(255 255 255 / 0.16) transparent;
+}
+
+.dashboard-feed-gallery::-webkit-scrollbar {
+  height: 6px;
+}
+
+.dashboard-feed-gallery::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.16);
+}
+
+.dashboard-feed-image {
+  width: auto;
+  max-width: min(360px, 72vw);
+  max-height: 420px;
+  flex: 0 0 auto;
+  object-fit: contain;
+  border: 1px solid rgb(255 255 255 / 0.06);
+  border-radius: 12px;
+  background: #050507;
+  box-shadow: 0 14px 36px rgb(0 0 0 / 0.18);
+}
+
+.dashboard-feed-action {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid rgb(255 255 255 / 0.07);
+  border-radius: 8px;
+  background: rgb(255 255 255 / 0.045);
+  padding: 0 12px;
+  color: rgb(255 255 255 / 0.62);
+  font-size: 12px;
+  font-weight: 500;
+  transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease, transform 160ms ease;
+}
+
+.dashboard-feed-action:hover:not(:disabled) {
+  border-color: rgb(255 63 121 / 0.28);
+  background: rgb(255 63 121 / 0.08);
+  color: #fff;
+  transform: translateY(-1px);
+}
+
+.dashboard-feed-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.46;
+}
+
+.dashboard-feed-action--danger {
+  color: rgb(255 114 136 / 0.92);
+}
+
+.dashboard-feed-action--danger:hover:not(:disabled) {
+  border-color: rgb(255 92 122 / 0.28);
+  background: rgb(255 72 112 / 0.08);
+  color: rgb(255 132 154);
+}
+
+.dashboard-floating-view-switch {
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 3px;
+  border: 1px solid rgb(255 255 255 / 0.1);
+  border-radius: 999px;
+  background: rgb(20 20 26 / 0.78);
+  padding: 4px;
+  box-shadow: 0 18px 54px rgb(0 0 0 / 0.32);
+  backdrop-filter: blur(20px);
+}
+
+.dashboard-floating-view-button {
+  display: inline-flex;
+  height: 38px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 999px;
+  padding: 0 12px;
+  color: rgb(255 255 255 / 0.52);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background-color 160ms ease, color 160ms ease, box-shadow 160ms ease;
+}
+
+.dashboard-floating-view-button:hover {
+  color: #fff;
+  background: rgb(255 255 255 / 0.06);
+}
+
+.dashboard-floating-view-button.is-active {
+  color: #fff;
+  background: rgb(255 63 121 / 0.18);
+  box-shadow:
+    inset 0 0 0 1px rgb(255 63 121 / 0.18),
+    0 8px 22px rgb(255 63 121 / 0.12);
+}
+
 .dashboard-history-grid > .history-card-image {
   min-width: 0;
 }
@@ -2265,6 +2686,19 @@ onUnmounted(() => {
 @media (max-width: 560px) {
   .dashboard-history-grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .dashboard-floating-view-button {
+    width: 38px;
+    padding: 0;
+  }
+
+  .dashboard-floating-view-button svg {
+    margin: 0;
+  }
+
+  .dashboard-floating-view-button {
+    font-size: 0;
   }
 }
 

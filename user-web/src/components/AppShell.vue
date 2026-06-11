@@ -3,11 +3,15 @@ import { RouterLink, useRoute, useRouter } from "vue-router"
 import type { Component } from "vue"
 import {
   Bot,
-  BrainCircuit,
-  LayoutGrid,
-  Store,
-  ListChecks,
+  Compass,
+  Gift,
+  Home,
+  Lightbulb,
+  Package,
+  UserRound,
   Wallet,
+  WandSparkles,
+  Wrench,
   FolderHeart,
   Images,
   ChevronDown,
@@ -47,14 +51,12 @@ type NavLink = {
   href: string
   label: string
   icon: Component
+  active?: (path: string, fullPath: string) => boolean
 }
 
-type NavGroup = {
-  type: "group"
-  id: string
-  label: string
-  icon: Component
-  children: { href: string; label: string; icon: Component }[]
+type NavSection = {
+  label?: string
+  items: NavLink[]
 }
 
 const route = useRoute()
@@ -91,11 +93,9 @@ const searchKindMeta: Record<
 }
 
 const SIDEBAR_OPEN_KEY = "ai_tool_market_sidebar_open"
-const EXPANDED_GROUPS_KEY = "ai_tool_market_nav_expanded_groups"
 
 const credit = ref<CreditAccount | null>(null)
 const sidebarOpen = ref(true)
-const expandedGroups = ref<Set<string>>(new Set())
 const customerServiceOpen = ref(false)
 /** Vite publicDir=asset，kf.jpg 对外路径为 /kf.jpg */
 const DEFAULT_CUSTOMER_SERVICE_QR = "/kf.jpg"
@@ -112,24 +112,49 @@ const customerServiceQrSrc = computed(() => {
   return url || DEFAULT_CUSTOMER_SERVICE_QR
 })
 
-const userNav: (NavLink | NavGroup)[] = [
-  { type: "link", href: "/agent", label: "Agent", icon: Bot },
-  { type: "link", href: "/dashboard", label: "工作台", icon: LayoutGrid },
+const mainNav: NavLink[] = [
   {
-    type: "group",
-    id: "ai-market",
-    label: "AI 工具超市",
-    icon: Store,
-    children: [
-      { href: "/marketplace", label: "大模型", icon: Sparkles },
-      { href: "/agents", label: "智能体", icon: BrainCircuit },
+    type: "link",
+    href: "/marketplace",
+    label: "首页",
+    icon: Home,
+    active: (path) => path === "/marketplace",
+  },
+  {
+    type: "link",
+    href: "/dashboard",
+    label: "生成",
+    icon: WandSparkles,
+  },
+  {
+    type: "link",
+    href: "/agent",
+    label: "Agent",
+    icon: Bot,
+  },
+]
+
+const navSections: NavSection[] = [
+  {
+    label: "创意",
+    items: [
+      {
+        type: "link",
+        href: "/marketplace",
+        label: "工具",
+        icon: Wrench,
+        active: (path) => path.startsWith("/chat/"),
+      },
+      { type: "link", href: "/library", label: "资产", icon: Package },
+      { type: "link", href: "/community", label: "社区", icon: Compass },
+      { type: "link", href: "/community/inspirations", label: "灵感收藏", icon: Lightbulb },
     ],
   },
-  { type: "link", href: "/tasks", label: "我的任务", icon: ListChecks },
-  { type: "link", href: "/library", label: "素材库", icon: FolderHeart },
-  { type: "link", href: "/community", label: "社区发现", icon: Images },
-  { type: "link", href: "/community/inspirations", label: "灵感收藏", icon: FolderHeart },
+]
+
+const accountNav: NavLink[] = [
   { type: "link", href: "/billing", label: "会员与算力", icon: Wallet },
+  { type: "link", href: "/profile", label: "个人资料", icon: UserRound },
 ]
 
 function toggleSidebar() {
@@ -140,55 +165,22 @@ watch(sidebarOpen, (open) => {
   localStorage.setItem(SIDEBAR_OPEN_KEY, open ? "1" : "0")
 })
 
-function saveExpandedGroups() {
-  localStorage.setItem(EXPANDED_GROUPS_KEY, JSON.stringify([...expandedGroups.value]))
-}
-
-function toggleGroup(id: string) {
-  const next = new Set(expandedGroups.value)
-  if (next.has(id)) next.delete(id)
-  else next.add(id)
-  expandedGroups.value = next
-  saveExpandedGroups()
-}
-
-function isGroupExpanded(id: string) {
-  return expandedGroups.value.has(id)
-}
-
-function isActive(path: string) {
-  if (path === "/marketplace") {
-    return route.path === path || route.path.startsWith("/chat/")
+function isActive(item: NavLink) {
+  if (item.active) return item.active(route.path, route.fullPath)
+  if (item.href === "/marketplace") {
+    return route.path === item.href || route.path.startsWith("/chat/")
   }
-  if (path === "/agents") {
-    return route.path === path || route.path.startsWith(path + "/")
+  if (item.href === "/agents") {
+    return route.path === item.href || route.path.startsWith(item.href + "/")
   }
-  if (path === "/agent") {
-    return route.path === path || route.path.startsWith(path + "/")
+  if (item.href === "/agent") {
+    return route.path === item.href || route.path.startsWith(item.href + "/")
   }
-  if (path === "/community") {
-    return route.path === path || route.path.startsWith("/community/posts/")
+  if (item.href === "/community") {
+    return route.path === item.href || route.path.startsWith("/community/posts/")
   }
+  const [path] = item.href.split("?")
   return route.path === path || route.path.startsWith(path + "/")
-}
-
-function isGroupActive(group: NavGroup) {
-  return group.children.some((child) => isActive(child.href))
-}
-
-function ensureActiveGroupExpanded() {
-  let changed = false
-  const next = new Set(expandedGroups.value)
-  for (const item of userNav) {
-    if (item.type === "group" && isGroupActive(item) && !next.has(item.id)) {
-      next.add(item.id)
-      changed = true
-    }
-  }
-  if (changed) {
-    expandedGroups.value = next
-    saveExpandedGroups()
-  }
 }
 
 const creditPercent = computed(() => {
@@ -298,8 +290,6 @@ async function loadCustomerServiceSettings() {
   }
 }
 
-watch(() => route.path, ensureActiveGroupExpanded, { immediate: true })
-
 watch(
   () => auth.isLoggedIn,
   (loggedIn) => {
@@ -322,19 +312,6 @@ onMounted(async () => {
   if (saved === "0") sidebarOpen.value = false
   if (saved === "1") sidebarOpen.value = true
 
-  const savedGroups = localStorage.getItem(EXPANDED_GROUPS_KEY)
-  if (savedGroups) {
-    try {
-      const parsed = JSON.parse(savedGroups) as string[]
-      if (Array.isArray(parsed)) expandedGroups.value = new Set(parsed)
-    } catch {
-      expandedGroups.value = new Set(["ai-market"])
-    }
-  } else {
-    expandedGroups.value = new Set(["ai-market"])
-  }
-
-  ensureActiveGroupExpanded()
   window.addEventListener("credits:updated", handleCreditsUpdated)
   document.addEventListener("mousedown", onDocumentPointerDown)
   await Promise.all([loadCreditAccount(), loadCustomerServiceSettings()])
@@ -358,116 +335,134 @@ watch(
 <template>
   <div
     class="app-shell-root flex h-screen overflow-hidden bg-background text-foreground"
-    :style="{ '--app-sidebar-width': sidebarOpen ? '268px' : '0px' }"
+    :style="{ '--app-sidebar-width': sidebarOpen ? '248px' : '0px' }"
   >
     <aside
-      class="hidden h-full w-[268px] shrink-0 flex-col border-r border-white/8 bg-[#141414]"
+      class="hidden h-full w-[248px] shrink-0 flex-col border-r border-white/[0.06] bg-[#08090d]"
       :class="sidebarOpen ? 'lg:flex' : 'lg:hidden'"
     >
-      <div class="flex h-20 shrink-0 items-center gap-3 px-6">
-        <img src="/logo.svg" alt="AI Tool Market" class="h-10 w-10 rounded-xl object-contain" />
-        <div class="flex flex-col leading-tight">
-          <span class="text-lg font-semibold">科创点AI</span>
-          <span class="text-[11px] text-white/45">经营助手平台</span>
-        </div>
+      <div class="flex h-[76px] shrink-0 items-center gap-3 px-3">
+        <button
+          type="button"
+          class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-white/[0.06] bg-white/[0.035] text-white/58 transition hover:border-[rgb(255_63_121_/_0.36)] hover:bg-[#32101c] hover:text-[#ff3f79]"
+          :aria-label="sidebarOpen ? '隐藏侧栏' : '显示侧栏'"
+          :aria-expanded="sidebarOpen"
+          @click="toggleSidebar"
+        >
+          <PanelLeftClose class="h-[18px] w-[18px]" aria-hidden="true" />
+        </button>
+        <RouterLink to="/agent" class="min-w-0 text-[29px] font-black leading-none tracking-[0] text-white">
+          科创点AI
+        </RouterLink>
       </div>
 
-      <nav class="min-h-0 flex-1 overflow-y-auto px-4 py-2">
-        <ul class="flex flex-col gap-2">
-          <template v-for="item in userNav" :key="item.type === 'link' ? item.href : item.id">
-            <li v-if="item.type === 'link'">
+      <nav class="sidebar-nav min-h-0 flex-1 overflow-y-auto px-3 pb-4 pt-1">
+        <ul class="flex flex-col gap-1.5">
+          <li v-for="item in mainNav" :key="item.href">
+            <RouterLink
+              :to="item.href"
+              class="sidebar-nav-link"
+              :class="isActive(item) ? 'sidebar-nav-link--active' : 'sidebar-nav-link--idle'"
+            >
+              <component
+                :is="item.icon"
+                class="h-[18px] w-[18px] shrink-0 transition-colors"
+                :class="isActive(item) ? '' : 'text-white/72'"
+              />
+              <span>{{ item.label }}</span>
+            </RouterLink>
+          </li>
+        </ul>
+
+        <section
+          v-for="section in navSections"
+          :key="section.label || section.items.map((item) => item.href).join('|')"
+          class="mt-4 border-t border-white/[0.065] pt-3 first:mt-5"
+        >
+          <p v-if="section.label" class="sidebar-section-label">{{ section.label }}</p>
+          <ul class="flex flex-col gap-1.5">
+            <li v-for="item in section.items" :key="item.href">
               <RouterLink
                 :to="item.href"
-                class="relative flex items-center gap-3 rounded-2xl px-4 py-3 text-[15px] font-semibold transition-colors before:absolute before:left-0 before:top-1/2 before:h-6 before:w-px before:-translate-y-1/2 before:rounded-full before:bg-transparent before:transition-colors"
-                :class="
-                  isActive(item.href)
-                    ? 'bg-white/[0.045] text-white before:bg-primary'
-                    : 'text-white/70 hover:bg-white/6 hover:text-white'
-                "
+                class="sidebar-nav-link"
+                :class="isActive(item) ? 'sidebar-nav-link--active' : 'sidebar-nav-link--idle'"
               >
                 <component
                   :is="item.icon"
-                  class="h-5 w-5 transition-colors"
-                  :class="isActive(item.href) ? 'text-primary' : 'text-white/68'"
+                  class="h-[18px] w-[18px] shrink-0 transition-colors"
+                  :class="isActive(item) ? '' : 'text-white/72'"
                 />
                 <span>{{ item.label }}</span>
               </RouterLink>
             </li>
-
-            <li v-else>
-              <button
-                type="button"
-                class="flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-[15px] font-semibold transition-colors"
-                :class="
-                  isGroupActive(item)
-                    ? 'text-white'
-                    : 'text-white/70 hover:bg-white/6 hover:text-white'
-                "
-                :aria-expanded="isGroupExpanded(item.id)"
-                @click="toggleGroup(item.id)"
-              >
-                <component
-                  :is="item.icon"
-                  class="h-5 w-5 shrink-0 transition-colors"
-                  :class="isGroupActive(item) ? 'text-white/85' : 'text-white/60'"
-                />
-                <span class="flex-1 text-left">{{ item.label }}</span>
-                <ChevronDown
-                  class="h-4 w-4 shrink-0 text-white/40 transition-transform duration-200"
-                  :class="{ 'rotate-180': isGroupExpanded(item.id) }"
-                />
-              </button>
-
-              <div
-                class="grid transition-[grid-template-rows] duration-200 ease-in-out"
-                :class="isGroupExpanded(item.id) ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'"
-              >
-                <div class="overflow-hidden">
-                  <ul class="ml-10 mt-1 flex flex-col gap-1 border-l border-white/10 pl-4">
-                    <li v-for="child in item.children" :key="child.href">
-                      <RouterLink
-                        :to="child.href"
-                        class="relative flex items-center gap-2.5 rounded-xl py-2 pl-3 pr-2 text-sm font-medium transition-colors before:absolute before:-left-[17px] before:top-1/2 before:h-px before:w-3 before:bg-white/10"
-                        :class="
-                          isActive(child.href)
-                            ? 'bg-white/[0.035] text-white'
-                            : 'text-white/55 hover:bg-white/6 hover:text-white'
-                        "
-                      >
-                        <component
-                          :is="child.icon"
-                          class="h-3.5 w-3.5 shrink-0 transition-colors"
-                          :class="isActive(child.href) ? 'text-primary' : 'text-white/42'"
-                        />
-                        <span>{{ child.label }}</span>
-                      </RouterLink>
-                    </li>
-                  </ul>
-                </div>
-              </div>
-            </li>
-          </template>
-        </ul>
+          </ul>
+        </section>
       </nav>
 
-      <div class="shrink-0 p-5">
-        <div class="rounded-2xl border border-white/8 bg-white/[0.025] p-4 shadow-[inset_0_1px_0_rgb(255_255_255_/_0.035)]">
-          <p class="text-[11px] font-medium tracking-wide text-white/42">可用算力</p>
-          <p class="mt-1 font-mono text-[12px] tabular-nums text-white/76">
+      <div class="shrink-0 border-t border-white/[0.065] px-3 pb-4 pt-4">
+        <RouterLink
+          v-for="item in accountNav.slice(0, 1)"
+          :key="item.href"
+          :to="item.href"
+          class="sidebar-nav-link mb-2"
+          :class="isActive(item) ? 'sidebar-nav-link--active' : 'sidebar-nav-link--idle'"
+        >
+          <component
+            :is="item.icon"
+            class="h-[18px] w-[18px] shrink-0 transition-colors"
+            :class="isActive(item) ? '' : 'text-white/72'"
+          />
+          <span>{{ item.label }}</span>
+        </RouterLink>
+
+        <button
+          type="button"
+          class="group relative mb-3 flex h-11 w-full items-center gap-2.5 overflow-hidden rounded-lg border border-white/[0.055] bg-white/[0.025] px-3 text-left text-sm font-medium text-white/76 transition hover:border-[rgb(255_63_121_/_0.2)] hover:bg-white/[0.045] hover:text-white"
+        >
+          <Gift class="h-[17px] w-[17px] shrink-0 text-white/58 transition group-hover:text-[#ff7da4]" aria-hidden="true" />
+          <span class="min-w-0 flex-1">
+            <span class="block truncate">推荐有礼</span>
+          </span>
+          <span class="rounded-full bg-white/[0.07] px-1.5 py-0.5 text-[10px] font-medium text-[#ff7da4] ring-1 ring-white/[0.05]">最新</span>
+        </button>
+
+        <RouterLink
+          to="/billing"
+          class="mb-2 block rounded-lg border border-white/[0.055] bg-white/[0.025] p-3 shadow-[inset_0_1px_0_rgb(255_255_255_/_0.02)] transition hover:border-[rgb(255_63_121_/_0.18)] hover:bg-white/[0.04]"
+        >
+          <p class="text-xs font-medium text-white/40">可用算力</p>
+          <p class="mt-2 font-mono text-[12px] font-semibold tabular-nums text-white/88">
             {{ credit ? credit.available.toLocaleString() : '---' }}
-            <span class="font-normal text-white/32">
+            <span class="ml-1 font-normal text-white/28">
               / {{ credit ? credit.totalGranted.toLocaleString() : '---' }}
             </span>
           </p>
-          <div class="mt-3 h-[3px] overflow-hidden rounded-full bg-white/8">
+          <div class="mt-3 h-1 overflow-hidden rounded-full bg-white/[0.08]">
             <div
-              class="h-full rounded-full bg-gradient-to-r from-primary/75 to-sky-300/65"
+              class="h-full rounded-full bg-gradient-to-r from-[#ff3f79] via-[#ff72ad] to-[#7ad7ff]"
               :style="{ width: Math.min(creditPercent, 100) + '%' }"
             />
           </div>
+        </RouterLink>
+
+        <RouterLink
+          v-for="item in accountNav.slice(1)"
+          :key="item.href"
+          :to="item.href"
+          class="sidebar-nav-link"
+          :class="isActive(item) ? 'sidebar-nav-link--active' : 'sidebar-nav-link--idle'"
+        >
+          <component
+            :is="item.icon"
+            class="h-[18px] w-[18px] shrink-0 transition-colors"
+            :class="isActive(item) ? '' : 'text-white/72'"
+          />
+          <span>{{ item.label }}</span>
+        </RouterLink>
+        <div class="mt-3 px-2">
           <RouterLink
             :to="'/billing'"
-            class="mt-3 block text-center text-[11px] font-medium text-primary/80 transition hover:text-primary hover:drop-shadow-[0_0_10px_rgb(176_92_255_/_0.35)]"
+            class="text-xs font-semibold text-[#ff5d8c] transition hover:text-[#ff8aaa]"
           >
             充值 / 升级套餐
           </RouterLink>
@@ -486,7 +481,8 @@ watch(
         </button>
         <button
           type="button"
-          class="hidden h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] text-white/60 hover:bg-white/10 hover:text-white lg:inline-flex"
+          class="h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] text-white/60 hover:bg-white/10 hover:text-white"
+          :class="sidebarOpen ? 'hidden' : 'hidden lg:inline-flex'"
           :aria-label="sidebarOpen ? '隐藏侧栏' : '显示侧栏'"
           :aria-expanded="sidebarOpen"
           @click="toggleSidebar"
@@ -691,14 +687,80 @@ watch(
 </template>
 
 <style scoped>
+.sidebar-nav {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(255 255 255 / 0.12) transparent;
+}
+
+.sidebar-nav::-webkit-scrollbar {
+  width: 6px;
+}
+
+.sidebar-nav::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.12);
+  background-clip: content-box;
+}
+
+.sidebar-nav-link {
+  position: relative;
+  display: flex;
+  min-height: 40px;
+  width: 100%;
+  align-items: center;
+  gap: 10px;
+  border-radius: 8px;
+  padding: 9px 12px;
+  font-size: 14px;
+  font-weight: 400;
+  letter-spacing: 0;
+  transition:
+    background-color 160ms ease,
+    color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.sidebar-nav-link--idle {
+  color: rgb(255 255 255 / 0.78);
+}
+
+.sidebar-nav-link--idle:hover {
+  background: rgb(255 255 255 / 0.045);
+  color: rgb(255 255 255 / 0.92);
+}
+
+.sidebar-nav-link--idle:hover :deep(svg) {
+  color: #fff;
+}
+
+.sidebar-nav-link--active {
+  background: #2d161d;
+  color: #e94560;
+  font-weight: 520;
+}
+
+.sidebar-nav-link--active :deep(svg) {
+  color: #e94560;
+}
+
+.sidebar-section-label {
+  margin-bottom: 10px;
+  padding-inline: 4px;
+  color: rgb(255 255 255 / 0.38);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 1px;
+}
+
 .app-shell-agent-brand {
   width: fit-content;
   max-width: 100%;
-  background: linear-gradient(120deg, #ffffff 0%, #bfe8ff 34%, #9cf2ca 66%, #caa8ff 100%);
+  background: linear-gradient(120deg, #ffffff 0%, #ffd4e2 36%, #ff5b8a 72%, #ffffff 100%);
   background-clip: text;
   color: transparent;
   font-weight: 800;
   letter-spacing: 0;
-  text-shadow: 0 0 28px rgb(100 210 255 / 0.18);
+  text-shadow: 0 0 28px rgb(255 63 121 / 0.18);
 }
 </style>
