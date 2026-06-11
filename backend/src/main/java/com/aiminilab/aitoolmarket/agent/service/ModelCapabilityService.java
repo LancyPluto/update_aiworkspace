@@ -136,6 +136,20 @@ public class ModelCapabilityService {
         }
     }
 
+    public void validateToolModelBindingAvailable(AiTool tool) {
+        if (tool == null || tool.getModelConfigId() == null) {
+            return;
+        }
+        AgentModelConfig config = agentModelConfigMapper.findActiveById(tool.getModelConfigId());
+        if (config == null) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "model config not found");
+        }
+        if (Boolean.FALSE.equals(config.getEnabled())) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR,
+                    "bound model config is disabled: " + displayModelName(config));
+        }
+    }
+
     public void validateExecution(AiTool tool, AgentModelConfig modelConfig) {
         if (tool == null) {
             return;

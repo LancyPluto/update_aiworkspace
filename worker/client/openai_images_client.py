@@ -2,6 +2,7 @@ import json
 import logging
 import math
 import mimetypes
+import os
 import socket
 import time
 from io import BytesIO
@@ -72,6 +73,17 @@ class OpenAIImagesClient:
         proxy_url = str(self.extra_auth.get("proxyUrl") or "").strip()
         if proxy_url:
             self.session.proxies.update({"http": proxy_url, "https": proxy_url})
+        elif "trustEnv" not in self.extra_auth:
+            env_http_proxy = (os.environ.get("HTTP_PROXY") or os.environ.get("http_proxy") or "").strip()
+            env_https_proxy = (os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy") or "").strip()
+            env_proxy = env_http_proxy or env_https_proxy
+            if env_proxy:
+                self.session.proxies.update(
+                    {
+                        "http": env_http_proxy or env_proxy,
+                        "https": env_https_proxy or env_proxy,
+                    }
+                )
 
     def generate_images(
         self,
@@ -876,6 +888,48 @@ def _format_openai_images_http_error(status_code: int, body: str, model: str | N
             "(see https://ofox.ai/zh/docs/api/openai/images)."
         )
     return message
+
+
+def _combine_image_responses(responses: list[dict[str, Any]]) -> dict[str, Any]:
+    if not responses:
+        return {"data": []}
+    combined = dict(responses[0])
+    data: list[Any] = []
+    usage: dict[str, int] = {}
+    for response in responses:
+        response_data = response.get("data")
+        if isinstance(response_data, list):
+            data.extend(response_data)
+        response_usage = response.get("usage")
+        if isinstance(response_usage, dict):
+            for key, value in response_usage.items():
+                numeric = _as_int(value)
+                if numeric > 0:
+                    usage[key] = usage.get(key, 0) + numeric
+    combined["data"] = data
+    if usage:
+        combined["usage"] = usage
+    return combined
+
+
+def _image_response_data_summary(response: dict[str, Any]) -> dict[str, Any]:
+    data = response.get("data")
+    if not isinstance(data, list):
+        return {"type": type(data).__name__, "count": 0}
+    items: list[dict[str, Any]] = []
+    for index, item in enumerate(data[:10]):
+        if not isinstance(item, dict):
+            items.append({"index": index, "type": type(item).__name__})
+            continue
+        items.append(
+            {
+                "index": item.get("index", index),
+                "hasUrl": bool(str(item.get("url") or "").strip()),
+                "hasB64": bool(str(item.get("b64_json") or "").strip()),
+                "keys": sorted(str(key) for key in item.keys())[:12],
+            }
+        )
+    return {"type": "list", "count": len(data), "items": items}
 
 
 def _normalize_reference_images(image: str | list[str] | None) -> list[str]:
