@@ -164,6 +164,7 @@ onMounted(loadBackendTools)
 <template>
   <WorkspaceShell>
     <WorkspaceComposer
+      dock-sized
       :tools="backendTools"
       :tool-id="selectedComposerToolCode"
       :tool-detail="selectedComposerToolDetail"

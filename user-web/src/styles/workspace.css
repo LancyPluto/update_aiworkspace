@@ -702,6 +702,15 @@
   min-height: 114px;
 }
 
+.workspace-composer-wrap.dock-sized .workspace-composer-input,
+.workspace-composer-wrap.dock-sized .workspace-composer-input.tall {
+  min-height: 92px;
+}
+
+.workspace-composer-wrap.dock-sized .workspace-composer textarea {
+  min-height: 72px;
+}
+
 .workspace-composer-input.tall {
   min-height: 150px;
 }
