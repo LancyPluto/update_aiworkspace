@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
-import { ToolManagementPage as BackendCoreToolManagementPage } from "@/components/admin/tool-management-page"
 import { AdminLayout } from "@/components/admin/admin-layout"
 import { AdminHeader } from "@/components/admin/header"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -1930,5 +1929,5 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
 }
 
 export default function ToolsPage() {
-  return <BackendCoreToolManagementPage />
+  return <ToolManagementPage mode="models" />
 }

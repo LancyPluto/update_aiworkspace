@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import { computed, onActivated, onMounted, ref, watch } from "vue"
 import { RouterLink, useRoute } from "vue-router"
-import { Sparkles } from "lucide-vue-next"
+import { ExternalLink, Sparkles, Zap } from "lucide-vue-next"
 import AppShell from "@/components/AppShell.vue"
-import CreditCostBadge from "@/components/CreditCostBadge/CreditCostBadge.vue"
 import { fetchEnabledAITools } from "@/api/toolApi"
 import { fetchTasks } from "@/api/taskApi"
 import type { AITool } from "@/api/aiToolTypes"
@@ -19,7 +18,6 @@ import {
   normalizeMediaUrl,
   resolveToolCoverFallback,
   resolveToolCoverUrl,
-  shouldUseEffectCard,
 } from "@/utils/toolCoverMedia"
 
 const auth = useAuthStore()
@@ -92,6 +90,19 @@ function updateComparisonPosition(event: MouseEvent, tool: AITool) {
 
 function modelBrand(tool: AITool) {
   return resolveModelBrand(tool)
+}
+
+function costLabel(tool: AITool): string {
+  if (tool.estimatedCreditCost === 0) return "免费"
+  return `约 ${tool.estimatedCreditCost} 算力/次`
+}
+
+function toolDescription(tool: AITool): string {
+  return tool.description || (isPptWorkspaceTool(tool.id) ? "进入 PPT 工作台" : "点击进入对话")
+}
+
+function toolModelLabel(tool: AITool): string {
+  return tool.modelConfigName || tool.modelName || modelBrand(tool).name || modalityLabel(tool.outputModality)
 }
 
 const sortedTools = computed(() => [...tools.value].sort((a, b) => a.order - b.order))
@@ -424,64 +435,39 @@ watch(
           v-for="tool in filteredTools"
           :key="tool.id"
           :to="toolEntryRoute(tool.id)"
-          class="group overflow-hidden rounded-3xl border border-white/8 bg-white/[0.04] transition hover:-translate-y-1 hover:border-primary/50 hover:shadow-[0_20px_45px_rgb(0_0_0_/_0.38)]"
+          class="marketplace-tool-card"
         >
-          <div v-if="usesComparisonMedia(tool)" class="flex h-full flex-col">
-            <div class="relative aspect-[3/4] overflow-hidden bg-muted" @mousemove="updateComparisonPosition($event, tool)">
+          <div class="marketplace-tool-media" @mousemove="usesComparisonMedia(tool) && updateComparisonPosition($event, tool)">
+            <template v-if="usesComparisonMedia(tool)">
               <img
                 :src="normalizeMediaUrl(tool.comparisonOriginalUrl)"
                 :alt="`${tool.name} 原图`"
-                class="absolute inset-0 h-full w-full object-cover"
+                class="marketplace-tool-image"
                 draggable="false"
               />
               <img
                 :src="normalizeMediaUrl(tool.comparisonEffectUrl)"
                 :alt="`${tool.name} 效果图`"
-                class="absolute inset-0 h-full w-full object-cover"
+                class="marketplace-tool-image marketplace-tool-image--effect"
                 :style="{ clipPath: `inset(0 0 0 ${comparisonPosition(tool)}%)` }"
                 draggable="false"
               />
               <div
-                class="pointer-events-none absolute inset-y-0 z-10 w-px bg-white shadow-[0_0_0_1px_rgb(0_0_0_/_0.35)]"
+                class="marketplace-comparison-line"
                 :style="{ left: `${comparisonPosition(tool)}%` }"
               />
               <div
-                class="pointer-events-none absolute top-1/2 z-10 flex h-9 w-9 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-white/65 bg-black/45 text-[11px] font-semibold text-white shadow-lg backdrop-blur"
+                class="marketplace-comparison-handle"
                 :style="{ left: `${comparisonPosition(tool)}%` }"
               >
                 ↔
               </div>
-              <div class="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/85 via-black/8 to-transparent" />
-              <span class="absolute left-3 top-3 rounded-full bg-black/45 px-2.5 py-1 text-[11px] font-medium text-white/85 backdrop-blur">原图</span>
-              <span class="absolute right-3 top-3 rounded-full bg-primary/90 px-2.5 py-1 text-[11px] font-medium text-white backdrop-blur">效果</span>
-              <div class="absolute bottom-4 left-4 right-4 flex items-end justify-between gap-3">
-                <div class="min-w-0">
-                  <h3 class="truncate text-2xl font-semibold text-white drop-shadow">{{ tool.name }}</h3>
-                  <p class="mt-1 line-clamp-1 text-xs text-white/75">
-                    {{ tool.description || (isPptWorkspaceTool(tool.id) ? "进入 PPT 工作台" : "点击进入对话") }}
-                  </p>
-                </div>
-                <span class="shrink-0 rounded-full bg-white/18 px-2.5 py-1 text-[11px] font-medium text-white ring-1 ring-white/25 backdrop-blur">
-                  {{ modalityLabel(tool.outputModality) }}
-                </span>
-              </div>
-            </div>
-            <div class="flex flex-1 flex-col px-4 py-4">
-              <p class="line-clamp-2 min-h-[40px] text-sm text-muted-foreground">
-                {{ tool.description || (isPptWorkspaceTool(tool.id) ? "进入 PPT 工作台" : "点击进入对话") }}
-              </p>
-              <div class="mt-4 flex items-center justify-between gap-2">
-                <CreditCostBadge :cost="tool.estimatedCreditCost" />
-              </div>
-            </div>
-          </div>
-
-          <div v-else-if="shouldUseEffectCard(tool)" class="flex h-full flex-col">
-            <div class="relative aspect-[3/4] overflow-hidden bg-muted">
+            </template>
+            <template v-else>
               <video
                 v-if="isVideoPreviewUrl(coverSrcForTool(tool))"
                 :src="coverSrcForTool(tool)"
-                class="h-full w-full object-cover transition duration-500 group-hover:scale-[1.03]"
+                class="marketplace-tool-image"
                 muted
                 loop
                 autoplay
@@ -493,67 +479,33 @@ watch(
                 v-else-if="coverSrcForTool(tool)"
                 :src="coverSrcForTool(tool)"
                 :alt="tool.name"
-                class="h-full w-full object-cover transition duration-500 group-hover:scale-[1.03]"
+                class="marketplace-tool-image"
                 @error="onToolCoverError(tool)"
               />
-              <div class="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/85 via-black/10 to-transparent" />
-              <div class="absolute bottom-4 left-4 right-4 flex items-end justify-between gap-3">
-                <div class="min-w-0">
-                  <h3 class="truncate text-2xl font-semibold text-white drop-shadow">{{ tool.name }}</h3>
-                  <p class="mt-1 line-clamp-1 text-xs text-white/75">
-                    {{ tool.description || (isPptWorkspaceTool(tool.id) ? "进入 PPT 工作台" : "点击进入对话") }}
-                  </p>
-                </div>
-                <span class="shrink-0 rounded-full bg-white/18 px-2.5 py-1 text-[11px] font-medium text-white ring-1 ring-white/25 backdrop-blur">
-                  {{ modalityLabel(tool.outputModality) }}
-                </span>
-              </div>
-              <div
-                class="absolute left-3 top-3 flex items-center gap-1.5 rounded-full bg-white/90 py-1 pl-1 pr-2 text-[11px] font-medium text-slate-900 shadow-sm ring-1 ring-white/50 backdrop-blur"
-                :title="modelBrand(tool).name"
-              >
+              <div v-else class="marketplace-tool-empty">
                 <img
+                  v-if="modelBrand(tool).iconUrl"
                   :src="normalizeMediaUrl(modelBrand(tool).iconUrl)"
                   :alt="modelBrand(tool).name"
-                  class="h-5 w-5 rounded-full bg-white object-contain"
                 />
-                <span class="max-w-[88px] truncate">{{ modelBrand(tool).name }}</span>
+                <Sparkles v-else class="h-10 w-10 text-white/48" />
               </div>
-            </div>
-            <div class="flex flex-1 flex-col px-4 py-4">
-              <p class="line-clamp-2 min-h-[40px] text-sm text-muted-foreground">
-                {{ tool.description || (isPptWorkspaceTool(tool.id) ? "进入 PPT 工作台" : "点击进入对话") }}
-              </p>
-              <div class="mt-4 flex items-center justify-between gap-2">
-                <CreditCostBadge :cost="tool.estimatedCreditCost" />
-              </div>
-            </div>
-          </div>
+            </template>
 
-          <div v-else class="flex min-h-[320px] flex-col px-5 pb-5 pt-6">
-            <div
-              class="mb-5 flex h-[92px] w-[92px] items-center justify-center overflow-hidden rounded-3xl border border-border bg-white p-4 shadow-sm ring-1 ring-white/10 transition group-hover:ring-primary/50 dark:bg-white"
-              :style="{ backgroundColor: `${modelBrand(tool).color}14` }"
-              :title="modelBrand(tool).name"
-            >
-              <img
-                :src="normalizeMediaUrl(modelBrand(tool).iconUrl)"
-                :alt="modelBrand(tool).name"
-                class="h-full w-full object-contain"
-              />
+            <div class="marketplace-tool-shade" />
+            <span class="marketplace-modality-badge">{{ modalityLabel(tool.outputModality) }}</span>
+            <span class="marketplace-cost-badge"><Zap class="h-3.5 w-3.5" />{{ costLabel(tool) }}</span>
+            <div class="marketplace-title-strip">
+              <h3>{{ tool.name }}</h3>
+              <p>{{ toolModelLabel(tool) }}</p>
             </div>
-            <h3 class="text-xl font-semibold">{{ tool.name }}</h3>
-            <p class="mt-1 max-w-full truncate text-[11px] font-medium text-primary">
-              {{ modelBrand(tool).name }}
-            </p>
-            <p class="mt-2 line-clamp-3 min-h-[60px] text-sm text-muted-foreground">
-              {{ tool.description || (isPptWorkspaceTool(tool.id) ? "进入 PPT 工作台" : "点击进入对话") }}
-            </p>
-            <div class="mt-auto flex flex-wrap items-center justify-between gap-2 pt-6">
-              <span class="rounded-full bg-white/8 px-2.5 py-1 text-[11px] text-muted-foreground">
-                {{ modalityLabel(tool.outputModality) }}
-              </span>
-              <CreditCostBadge :cost="tool.estimatedCreditCost" />
+            <div class="marketplace-hover-panel">
+              <p>{{ toolDescription(tool) }}</p>
+              <span>{{ toolModelLabel(tool) }}</span>
+              <div class="marketplace-start-button">
+                开始创作
+                <ExternalLink class="h-3.5 w-3.5" />
+              </div>
             </div>
           </div>
         </RouterLink>
@@ -561,3 +513,251 @@ watch(
     </div>
   </AppShell>
 </template>
+
+<style scoped>
+.marketplace-tool-card {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  border: 1px solid rgb(255 255 255 / 0.055);
+  border-radius: 22px;
+  background: #121216;
+  box-shadow: 0 24px 60px rgb(0 0 0 / 0.24);
+  transition: transform 180ms ease, border-color 180ms ease, background-color 180ms ease, box-shadow 180ms ease;
+}
+
+.marketplace-tool-card:hover {
+  transform: translateY(-3px);
+  border-color: rgb(168 85 247 / 0.34);
+  background: #15151b;
+  box-shadow: 0 26px 70px rgb(0 0 0 / 0.5);
+}
+
+.marketplace-tool-media {
+  position: relative;
+  display: grid;
+  aspect-ratio: 1 / 1;
+  place-items: center;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 18% 14%, rgb(255 63 121 / 0.32), transparent 34%),
+    radial-gradient(circle at 74% 34%, rgb(124 92 255 / 0.28), transparent 36%),
+    radial-gradient(circle at 48% 100%, rgb(18 215 178 / 0.16), transparent 42%),
+    #0d0d12;
+}
+
+.marketplace-tool-image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scale(1);
+  transition: transform 520ms ease;
+}
+
+.marketplace-tool-card:hover .marketplace-tool-image {
+  transform: scale(1.055);
+}
+
+.marketplace-tool-image--effect {
+  z-index: 1;
+}
+
+.marketplace-tool-empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background:
+    linear-gradient(135deg, rgb(255 255 255 / 0.06), transparent 42%),
+    radial-gradient(circle at 25% 35%, rgb(255 63 121 / 0.34), transparent 26%),
+    radial-gradient(circle at 70% 52%, rgb(124 92 255 / 0.34), transparent 30%),
+    radial-gradient(circle at 48% 82%, rgb(24 198 174 / 0.18), transparent 32%);
+}
+
+.marketplace-tool-empty img {
+  width: 76px;
+  height: 76px;
+  border-radius: 22px;
+  background: rgb(255 255 255 / 0.9);
+  object-fit: contain;
+  padding: 14px;
+  box-shadow: 0 18px 46px rgb(0 0 0 / 0.28);
+}
+
+.marketplace-tool-shade {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  background: linear-gradient(180deg, rgb(0 0 0 / 0.06), transparent 36%, rgb(0 0 0 / 0.82));
+  pointer-events: none;
+}
+
+.marketplace-modality-badge,
+.marketplace-cost-badge {
+  position: absolute;
+  top: 12px;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 8px;
+  box-shadow: 0 10px 28px rgb(0 0 0 / 0.28);
+  backdrop-filter: blur(14px);
+}
+
+.marketplace-modality-badge {
+  left: 12px;
+  background: rgb(0 0 0 / 0.46);
+  padding: 5px 9px;
+  color: rgb(255 255 255 / 0.78);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.marketplace-cost-badge {
+  right: 12px;
+  gap: 4px;
+  border-color: rgb(168 85 247 / 0.28);
+  background: rgb(168 85 247 / 0.2);
+  padding: 5px 9px;
+  color: rgb(216 180 254);
+  font-size: 11px;
+  font-weight: 680;
+}
+
+.marketplace-title-strip {
+  position: absolute;
+  inset: auto 0 0;
+  z-index: 3;
+  padding: 18px;
+  transition: transform 260ms ease;
+}
+
+.marketplace-tool-card:hover .marketplace-title-strip {
+  transform: translateY(-8px);
+}
+
+.marketplace-title-strip h3 {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 0;
+  color: rgb(255 255 255 / 0.92);
+  font-size: 16px;
+  font-weight: 720;
+  line-height: 1.4;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+}
+
+.marketplace-title-strip p {
+  overflow: hidden;
+  margin: 3px 0 0;
+  color: rgb(255 255 255 / 0.42);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.marketplace-hover-panel {
+  position: absolute;
+  inset: auto 0 0;
+  z-index: 4;
+  display: flex;
+  min-height: 52%;
+  flex-direction: column;
+  justify-content: flex-end;
+  border-top: 1px solid rgb(255 255 255 / 0.07);
+  background: linear-gradient(180deg, rgb(18 18 22 / 0.62), rgb(18 18 22 / 0.96) 54%, #121216);
+  padding: 18px;
+  opacity: 0;
+  transform: translateY(16px);
+  transition: opacity 260ms ease, transform 260ms ease;
+  backdrop-filter: blur(18px);
+}
+
+.marketplace-tool-card:hover .marketplace-hover-panel {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.marketplace-hover-panel p {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 0;
+  color: rgb(255 255 255 / 0.7);
+  font-size: 12px;
+  line-height: 1.75;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.marketplace-hover-panel span {
+  align-self: flex-start;
+  max-width: 100%;
+  overflow: hidden;
+  margin-top: 10px;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 7px;
+  background: rgb(255 255 255 / 0.055);
+  padding: 4px 7px;
+  color: rgb(255 255 255 / 0.42);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.marketplace-start-button {
+  display: inline-flex;
+  width: 100%;
+  height: 40px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #ff3f79, #8f5cff);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 650;
+  margin-top: 14px;
+  box-shadow: 0 12px 32px rgb(255 63 121 / 0.18);
+  transition: filter 160ms ease, transform 160ms ease;
+}
+
+.marketplace-tool-card:hover .marketplace-start-button:hover {
+  filter: brightness(1.06);
+  transform: translateY(-1px);
+}
+
+.marketplace-comparison-line {
+  position: absolute;
+  inset-block: 0;
+  z-index: 5;
+  width: 1px;
+  background: rgb(255 255 255 / 0.86);
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.35);
+  pointer-events: none;
+}
+
+.marketplace-comparison-handle {
+  position: absolute;
+  top: 50%;
+  z-index: 5;
+  display: flex;
+  width: 34px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgb(255 255 255 / 0.65);
+  border-radius: 999px;
+  background: rgb(0 0 0 / 0.45);
+  color: white;
+  font-size: 11px;
+  font-weight: 700;
+  box-shadow: 0 16px 32px rgb(0 0 0 / 0.3);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  backdrop-filter: blur(12px);
+}
+</style>

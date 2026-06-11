@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from "vue-router"
 import { useAuthStore } from "@/store/authStore"
 
 import LoginPage from "@/pages/Login/Page.vue"
+import HomePage from "@/pages/Home/Page.vue"
 import DashboardPage from "@/pages/Dashboard/Page.vue"
 import AgentHomePage from "@/pages/AgentHome/Page.vue"
 import ToolListPage from "@/pages/ToolList/Page.vue"
@@ -25,6 +26,12 @@ const router = createRouter({
     {
       path: "/login",
       redirect: (to) => ({ path: "/", query: to.query }),
+    },
+    {
+      path: "/home",
+      name: "Home",
+      meta: { requiresAuth: true },
+      component: HomePage,
     },
     {
       path: "/dashboard",
@@ -148,7 +155,7 @@ function resolvePostLoginRedirect(raw: unknown): string {
     raw === "/login" ||
     raw.startsWith("/login?")
   ) {
-    return "/marketplace"
+    return "/home"
   }
   return raw
 }

@@ -324,6 +324,14 @@ watch(
 )
 
 watch(
+  () => route.query.prompt,
+  (value) => {
+    const raw = Array.isArray(value) ? value[0] : value
+    if (typeof raw === "string") promptText.value = raw
+  },
+)
+
+watch(
   () => route.query.sourcePost,
   () => {
     attribution.value = mergePendingAssetAttribution(dashboardAttributionFromRoute(route), pendingAssetReplay.value)
@@ -383,7 +391,9 @@ async function loadDashboard() {
     taskPageNo.value = taskRes.pageNo
     taskHasNext.value = taskRes.hasNext
     const rawRouteModality = Array.isArray(route.query.modality) ? route.query.modality[0] : route.query.modality
+    const rawRoutePrompt = Array.isArray(route.query.prompt) ? route.query.prompt[0] : route.query.prompt
     if (rawRouteModality) selectedModality.value = normalizeModality(rawRouteModality)
+    if (typeof rawRoutePrompt === "string") promptText.value = rawRoutePrompt
     ensureSelectedModality()
     const rawRouteTool = Array.isArray(route.query.tool) ? route.query.tool[0] : route.query.tool
     const pendingAsset = consumePendingAssetFromStorage()

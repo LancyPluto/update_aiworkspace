@@ -115,10 +115,10 @@ const customerServiceQrSrc = computed(() => {
 const mainNav: NavLink[] = [
   {
     type: "link",
-    href: "/marketplace",
+    href: "/home",
     label: "首页",
     icon: Home,
-    active: (path) => path === "/marketplace",
+    active: (path) => path === "/home",
   },
   {
     type: "link",
@@ -143,7 +143,7 @@ const navSections: NavSection[] = [
         href: "/marketplace",
         label: "工具",
         icon: Wrench,
-        active: (path) => path.startsWith("/chat/"),
+        active: (path) => path === "/marketplace" || path.startsWith("/chat/"),
       },
       { type: "link", href: "/library", label: "资产", icon: Package },
       { type: "link", href: "/community", label: "社区", icon: Compass },
@@ -167,6 +167,9 @@ watch(sidebarOpen, (open) => {
 
 function isActive(item: NavLink) {
   if (item.active) return item.active(route.path, route.fullPath)
+  if (item.href === "/home") {
+    return route.path === item.href
+  }
   if (item.href === "/marketplace") {
     return route.path === item.href || route.path.startsWith("/chat/")
   }

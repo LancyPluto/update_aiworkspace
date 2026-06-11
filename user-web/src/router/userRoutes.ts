@@ -8,6 +8,9 @@ export const userRoutes = {
   get dashboard() {
     return { name: "Dashboard" }
   },
+  get home() {
+    return { name: "Home" }
+  },
   get agent() {
     return { name: "AgentHome" }
   },
