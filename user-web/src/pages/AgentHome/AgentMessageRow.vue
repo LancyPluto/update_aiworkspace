@@ -28,6 +28,7 @@ const props = defineProps<{
   modelConfigId?: number | null
   avatarState?: AgentAvatarState
   isStreaming?: boolean
+  liveStream?: boolean
   assetRefMap?: Map<string, ChatAssetRef>
 }>()
 
@@ -223,6 +224,7 @@ function openAttachmentPreview(file: MessageAttachment) {
             :message="message.contentText"
             :is-user="message.role === 'USER'"
             :streaming="isStreaming"
+            :live-stream="liveStream"
             :resolve-chat-asset="resolveChatAsset"
             :enable-asset-drag="message.role === 'ASSISTANT'"
             @preview="(asset) => emit('preview', asset, message)"

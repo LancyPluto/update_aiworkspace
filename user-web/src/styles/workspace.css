@@ -524,6 +524,15 @@
   min-height: 0;
 }
 
+.workspace-workspace-content:has(.agent-page-shell) {
+  height: 100vh;
+  padding-top: 88px;
+  padding-bottom: 12px;
+  padding-right: 16px;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
 .workspace-page-heading {
   display: flex;
   align-items: flex-end;

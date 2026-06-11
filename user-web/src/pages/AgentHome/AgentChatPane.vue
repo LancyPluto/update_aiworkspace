@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue"
 import {
   AlertTriangle,
   Check,
+  Database,
   Loader2,
   Pencil,
   Plus,
@@ -395,8 +396,16 @@ const scrollNavNodes = computed(() => {
   return buildScrollNavNodes(messages.value, events.value, scrollHeight, offsets)
 })
 
+function isMessageStreaming(message: AgentMessage) {
+  return message.id === streamingAssistantMessageId.value
+}
+
+function isMessageLiveStreaming(message: AgentMessage) {
+  return isMessageStreaming(message) && hasActiveRun.value
+}
+
 function resolveAssistantAvatarState(message: AgentMessage): AgentAvatarState {
-  if (message.id === streamingAssistantMessageId.value && hasActiveRun.value) return "streaming"
+  if (isMessageLiveStreaming(message)) return "streaming"
   const lastAssistant = [...messages.value].reverse().find((m) => m.role === "ASSISTANT")
   if (
     lastAssistant?.id === message.id &&
@@ -2342,7 +2351,8 @@ defineExpose({
             :models-loading="modelsLoading"
             :model-config-id="modelConfigId"
             :avatar-state="message.role === 'ASSISTANT' ? resolveAssistantAvatarState(message) : undefined"
-            :is-streaming="message.id === streamingAssistantMessageId"
+            :is-streaming="isMessageStreaming(message)"
+            :live-stream="isMessageLiveStreaming(message)"
             :asset-ref-map="sessionAssetRefMap"
             @copy="copyMessage"
             @start-edit="startEditMessage"
@@ -2447,16 +2457,28 @@ defineExpose({
       </template>
     </div>
 
-    <div v-if="!paneLoading && messages.length > 0" class="chat-floating-actions">
+    <div v-if="!paneLoading" class="chat-floating-actions">
       <ConversationPhaseTimeline
+        v-if="messages.length > 0"
         :phases="conversationPhases"
         @navigate="navigateToMessage"
       />
       <button
-        v-if="!stickToBottom"
         type="button"
-        class="scroll-to-bottom"
+        class="chat-float-btn memory-float-btn"
+        :class="{ 'memory-float-btn--active': memoryPanelOpen }"
+        aria-label="记忆记录"
+        title="长期记忆"
+        @click="memoryPanelOpen ? closeMemoryPanel() : openMemoryPanel()"
+      >
+        <Database class="h-4 w-4" />
+      </button>
+      <button
+        v-if="messages.length > 0 && !stickToBottom"
+        type="button"
+        class="chat-float-btn scroll-to-bottom"
         aria-label="回到底部"
+        title="回到底部"
         @click="stickToBottom = true; scrollBottom(true)"
       >
         ↓
@@ -2628,7 +2650,7 @@ defineExpose({
     #0a0a0d;
 }
 
-.scroll-to-bottom {
+.chat-float-btn {
   width: 36px;
   height: 36px;
   border-radius: 999px;
@@ -2638,13 +2660,22 @@ defineExpose({
   cursor: pointer;
   backdrop-filter: blur(12px);
   box-shadow: 0 8px 24px rgb(0 0 0 / 0.35);
-  transition: transform 0.18s ease, border-color 0.18s ease;
+  transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease, color 0.18s ease;
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.scroll-to-bottom:hover {
+.chat-float-btn:hover {
   transform: translateY(-2px);
   border-color: var(--agent-accent-soft);
+  color: #fff;
+}
+
+.memory-float-btn--active {
+  border-color: rgb(176 92 255 / 0.42);
+  background: rgb(176 92 255 / 0.18);
   color: #fff;
 }
 
@@ -2656,10 +2687,10 @@ defineExpose({
 
 .chat-floating-actions {
   position: absolute;
-  left: calc(50% + min(360px, calc(50vw - 56px)) + 12px);
-  right: auto;
-  top: calc(100% - var(--chat-composer-inset, 210px));
-  bottom: auto;
+  right: clamp(20px, 4vw, 56px);
+  bottom: calc(var(--chat-composer-inset, 210px) + 14px);
+  top: auto;
+  left: auto;
   z-index: 5;
   display: flex;
   flex-direction: column;
@@ -2670,8 +2701,8 @@ defineExpose({
 
 @media (max-width: 900px) {
   .chat-floating-actions {
-    left: auto;
-    right: 18px;
+    right: 16px;
+    bottom: calc(var(--chat-composer-inset, 196px) + 12px);
   }
 }
 
@@ -3690,12 +3721,6 @@ defineExpose({
 }
 
 @media (max-width: 900px) {
-  .chat-floating-actions {
-    right: 12px;
-    left: auto;
-    top: calc(100% - var(--chat-composer-inset, 196px));
-    bottom: auto;
-  }
   .message-container {
     padding: 36px 14px 16px;
   }

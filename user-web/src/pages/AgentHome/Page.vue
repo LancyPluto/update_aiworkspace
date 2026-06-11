@@ -1,7 +1,7 @@
 <script setup lang="ts">
   import { computed, onMounted, ref, watch } from "vue"
   import { ChevronLeft, ChevronRight, Loader2, Plus, Sparkles, Trash2 } from "lucide-vue-next"
-  import AppShell from "@/components/AppShell.vue"
+  import WorkspaceShell from "@/components/workspace/WorkspaceShell.vue"
   import AgentChatPane from "./AgentChatPane.vue"
   import { confirmDelete } from "@/composables/useConfirmDelete"
   import { useAuthStore } from "@/store/authStore"
@@ -39,9 +39,19 @@
       map.set(label, list)
     }
     return ["今天", "昨天", "前 7 天", "更早"]
-      .map((label) => ({ label, sessions: map.get(label) ?? [] }))
+      .map((label) => ({ label, sessions: sortSessionsByRecent(map.get(label) ?? []) }))
       .filter((group) => group.sessions.length > 0)
   })
+
+  function sessionSortTime(session: AgentSession) {
+    const raw = session.updatedAt || session.createdAt
+    const time = raw ? new Date(raw).getTime() : 0
+    return Number.isFinite(time) ? time : 0
+  }
+
+  function sortSessionsByRecent(list: AgentSession[]) {
+    return [...list].sort((a, b) => sessionSortTime(b) - sessionSortTime(a))
+  }
 
   function sessionTimeGroup(value?: string | null) {
     if (!value) return "更早"
@@ -122,12 +132,19 @@
     sessionsLoading.value = true
     try {
       const res = await fetchAgentSessions({ token: auth.token })
-      sessions.value = res.list
-      if (!activeSessionId.value && sessions.value.length > 0) {
+      sessions.value = sortSessionsByRecent(res.list)
+      if (sessions.value.length > 0) {
+        const latest = sessions.value[0]
         const savedRaw = localStorage.getItem(AGENT_LAST_SESSION_KEY)
         const savedId = savedRaw ? Number(savedRaw) : NaN
-        const target = sessions.value.find((s) => s.id === savedId) ?? sessions.value[0]
-        selectSession(target.id)
+        const saved =
+          Number.isFinite(savedId) && savedId > 0
+            ? sessions.value.find((session) => session.id === savedId)
+            : undefined
+        const target = saved ?? latest
+        if (activeSessionId.value !== target.id) {
+          selectSession(target.id)
+        }
       }
     } finally {
       sessionsLoading.value = false
@@ -143,7 +160,7 @@
   async function startSession(title = "新对话") {
     if (!auth.token) return
     const session = await createAgentSession({ title }, { token: auth.token })
-    sessions.value = [session, ...sessions.value.filter((item) => item.id !== session.id)]
+    sessions.value = sortSessionsByRecent([session, ...sessions.value.filter((item) => item.id !== session.id)])
     if (sessionDrafts.value[session.id] === undefined) {
       sessionDrafts.value[session.id] = ""
     }
@@ -169,7 +186,7 @@
       await deleteAgentSession(session.id, { token: auth.token })
       delete sessionDrafts.value[session.id]
       const wasActive = activeSessionId.value === session.id
-      sessions.value = sessions.value.filter((item) => item.id !== session.id)
+      sessions.value = sortSessionsByRecent(sessions.value.filter((item) => item.id !== session.id))
       if (wasActive) {
         activeSessionId.value = null
         const next = sessions.value[0]
@@ -192,15 +209,22 @@
 </script>
 
 <template>
-  <AppShell title="科创点AI" description="用自然语言让系统推荐、确认并调用工具">
-    <div class="agent-page" :class="{ 'agent-page--session-collapsed': !sessionSidebarOpen }">
-      <button class="sidebar-toggle-btn" type="button" @click="toggleSessionSidebar">
-        <ChevronRight v-if="!sessionSidebarOpen" class="h-4 w-4" />
-        <ChevronLeft v-else class="h-4 w-4" />
-      </button>
-
-      <aside class="agent-sidebar" :class="{ 'agent-sidebar--collapsed': !sessionSidebarOpen }">
-        <button class="new-chat" type="button" @click="startSession()">
+  <WorkspaceShell>
+    <div class="agent-page-shell">
+      <div class="agent-page" :class="{ 'agent-page--session-collapsed': !sessionSidebarOpen }">
+        <aside class="agent-sidebar" :class="{ 'agent-sidebar--collapsed': !sessionSidebarOpen }">
+          <div class="agent-sidebar-head">
+            <p class="agent-sidebar-title">会话</p>
+            <button
+              class="sidebar-collapse-btn"
+              type="button"
+              aria-label="收起会话栏"
+              @click="toggleSessionSidebar"
+            >
+              <ChevronLeft class="h-4 w-4" />
+            </button>
+          </div>
+          <button class="new-chat" type="button" @click="startSession()">
           <Plus class="h-4 w-4" />
           新会话
         </button>
@@ -235,10 +259,19 @@
             </div>
           </section>
         </div>
-      </aside>
+        </aside>
 
-      <section class="chat-pane">
-        <AgentChatPane
+        <section class="chat-pane">
+          <button
+            v-if="!sessionSidebarOpen"
+            class="sidebar-expand-btn"
+            type="button"
+            aria-label="展开会话栏"
+            @click="toggleSessionSidebar"
+          >
+            <ChevronRight class="h-4 w-4" />
+          </button>
+          <AgentChatPane
           v-if="activeSessionId"
           :key="activeSessionId"
           ref="chatPaneRef"
@@ -262,17 +295,24 @@
             <Plus class="h-4 w-4" />
             新会话
           </button>
-        </div>
-      </section>
+          </div>
+        </section>
+      </div>
     </div>
-  </AppShell>
+  </WorkspaceShell>
 </template>
 
 <style scoped>
+  .agent-page-shell {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
   .agent-page {
     display: grid;
     grid-template-columns: 280px minmax(0, 1fr);
-    /* 在 workspace-inner 的纵向 flex 链路中占满剩余高度，实现聊天界面撑满屏幕 */
     flex: 1;
     height: 100%;
     max-height: 100%;
@@ -280,36 +320,44 @@
     overflow: hidden;
     position: relative;
     background: #0a0a0d;
+    border-radius: 18px;
+    border: 1px solid rgb(255 255 255 / 0.06);
   }
 
   .agent-page--session-collapsed {
     grid-template-columns: 0 minmax(0, 1fr);
   }
 
-  .sidebar-toggle-btn {
-    position: absolute;
-    left: 10px;
-    top: 12px;
-    z-index: 10;
+  .sidebar-collapse-btn,
+  .sidebar-expand-btn {
     width: 32px;
     height: 32px;
     border-radius: 50%;
     border: 1px solid rgb(255 255 255 / 0.08);
     background: rgb(255 255 255 / 0.055);
     color: rgb(255 255 255 / 0.72);
-    display: flex;
+    display: inline-flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    box-shadow: 0 16px 36px rgb(0 0 0 / 0.38);
+    box-shadow: 0 12px 28px rgb(0 0 0 / 0.28);
     backdrop-filter: blur(16px);
     transition: transform 0.18s ease, background 0.18s ease, color 0.18s ease;
+    flex-shrink: 0;
   }
 
-  .sidebar-toggle-btn:hover {
+  .sidebar-collapse-btn:hover,
+  .sidebar-expand-btn:hover {
     transform: translateY(-1px);
     background: rgb(255 255 255 / 0.09);
     color: #fff;
+  }
+
+  .sidebar-expand-btn {
+    position: absolute;
+    left: 12px;
+    top: 14px;
+    z-index: 6;
   }
 
   .agent-sidebar {
@@ -317,10 +365,14 @@
     background:
       radial-gradient(circle at 20% 8%, rgb(176 92 255 / 0.10), transparent 28%),
       #121214;
-    padding: 16px 12px;
-    min-width: 0;
-    transition: opacity 0.15s ease, padding 0.15s ease;
+    padding: 14px 12px 16px;
+    min-width: 280px;
+    transition: opacity 0.15s ease, padding 0.15s ease, min-width 0.15s ease;
     height: 100%;
+    position: sticky;
+    left: 0;
+    top: 0;
+    align-self: stretch;
     overflow-y: auto;
     overflow-x: hidden;
     display: flex;
@@ -347,9 +399,27 @@
     background: rgb(255 255 255 / 0.18);
   }
 
+  .agent-sidebar-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+
+  .agent-sidebar-title {
+    margin: 0;
+    color: rgb(255 255 255 / 0.52);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
   .agent-sidebar--collapsed {
     width: 0;
     max-width: 0;
+    min-width: 0;
     padding: 0;
     border-right-width: 0;
     overflow: hidden;
@@ -377,7 +447,7 @@
     font-size: 14px;
     font-weight: 700;
     cursor: pointer;
-    margin-top: 32px;
+    margin-top: 0;
     box-shadow: 0 14px 44px rgb(176 92 255 / 0.12), 0 10px 24px rgb(0 0 0 / 0.28);
     transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
   }
@@ -494,6 +564,7 @@
   }
 
   .chat-pane {
+    position: relative;
     display: flex;
     flex-direction: column;
     min-width: 0;

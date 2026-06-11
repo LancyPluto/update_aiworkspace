@@ -15,6 +15,7 @@ from app.core.event_types import (
 )
 from app.core.schemas import ChatMessage, RunContext, RunEventCreate, SessionSearchItem, WorkspaceMemoryItem
 from app.runtime.memory_curator import MemoryCuratorService, build_memory_metadata
+from app.security.injection_patterns import classify_unsafe_message
 from app.tools.memory_tool import MemoryTool, _safety_rejection_reason
 
 LOGGER = logging.getLogger(__name__)
@@ -450,7 +451,7 @@ def memory_context_trace_payload(
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "frozen": bool(workspace_memory_context),
-        "count": len(items) if items is not None else (len(workspace_memory_context) if workspace_memory_context else 0),
+        "count": len(items) if items is not None else 0,
         "source": source,
         "snapshotPreview": safe_memory_text(workspace_memory_context, 800),
     }
@@ -494,6 +495,8 @@ def format_session_search_context(items: list[SessionSearchItem]) -> str:
 
 
 def looks_like_session_search_request(message: str) -> bool:
+    if classify_unsafe_message(message):
+        return False
     compact = re.sub(r"\s+", "", (message or "").lower())
     return any(token in compact for token in ("上次", "之前", "刚才", "那张", "那个", "历史", "previous", "lasttime"))
 
