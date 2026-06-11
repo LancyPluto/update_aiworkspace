@@ -3,10 +3,13 @@
  */
 export const userRoutes = {
   get login() {
-    return { name: "RootLogin" }
+    return { name: "Login" }
   },
   get dashboard() {
-    return { name: "CreatorWorkspace" }
+    return { name: "Dashboard" }
+  },
+  get home() {
+    return { name: "Home" }
   },
   get agent() {
     return { name: "AgentHome" }
@@ -15,13 +18,19 @@ export const userRoutes = {
     return { name: "ToolList" }
   },
   get agentPlaceholder() {
-    return { name: "AgentPlaceholder" }
+    return { name: "AgentTools" }
+  },
+  get agentTools() {
+    return { name: "AgentTools" }
   },
   toolDetail(id: string) {
     return { name: "ToolDetail", params: { id } }
   },
   toolUse(id: string) {
     return { name: "ToolUse", params: { id } }
+  },
+  get myTasks() {
+    return { name: "MyTasks" }
   },
   get materialLibrary() {
     return { name: "MaterialLibrary" }
@@ -43,11 +52,5 @@ export const userRoutes = {
   },
   taskResult(taskId: string) {
     return { name: "TaskResult", params: { taskId } }
-  },
-  pptWorkspace() {
-    return { name: "PptWorkspace" }
-  },
-  pptProjectEditor(bindingId: string | number) {
-    return { name: "PptProjectEditor", params: { bindingId: String(bindingId) } }
   },
 } as const
