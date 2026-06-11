@@ -2,6 +2,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.core.preferred_tool_bias import resolve_preferred_tool
 from app.core.schemas import RecentToolCallContext, RunContext, ToolDescriptor
 from app.core.user_attachment_priority import user_selected_image_urls
 from app.tools.registry import requested_output_modality, tool_supports_modality
@@ -63,6 +64,7 @@ class FollowupTaskResolver:
         if not inherited and not (has_reference_media and self._tool_accepts_image(selected_tool)):
             return FollowupResolution(False, "recent_tool_call_missing_arguments", tool_code=target_tool_code or source.toolCode)
 
+        preferred_tool = resolve_preferred_tool(context)
         can_use_selected_target = (
             target_tool_code is not None
             and (
@@ -70,8 +72,15 @@ class FollowupTaskResolver:
                 or (wants_video and bool(source.mediaUrls) and self._tool_accepts_image(selected_tool))
             )
         )
-        tool_code = target_tool_code if can_use_selected_target else source.toolCode
-        patch_tool = selected_tool if can_use_selected_target else None
+        if preferred_tool is not None:
+            tool_code = preferred_tool.toolCode
+            patch_tool = preferred_tool
+        elif can_use_selected_target:
+            tool_code = target_tool_code
+            patch_tool = selected_tool
+        else:
+            tool_code = source.toolCode
+            patch_tool = None
         patched = self._patch_arguments(context, message, inherited, patch_tool, source)
         return FollowupResolution(
             True,

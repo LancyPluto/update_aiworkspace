@@ -25,6 +25,11 @@ def resolve_preferred_tool(context: RunContext) -> ToolDescriptor | None:
     return ToolRegistry(context).get(code)
 
 
+def has_explicit_preferred_tool(context: RunContext) -> bool:
+    """True when the user explicitly picked a tool in the composer for this run."""
+    return resolve_preferred_tool(context) is not None
+
+
 def message_suggests_tool_use(message: str) -> bool:
     router = _intent_router()
     stripped = (message or "").strip()
