@@ -38,6 +38,8 @@ import {
 const props = withDefaults(defineProps<{
   title?: string
   compact?: boolean
+  /** 首页等场景：输入区高度与 /create 底栏一致 */
+  dockSized?: boolean
   initialMode?: CreatorMode
   showModeTabs?: boolean
   disabled?: boolean
@@ -60,6 +62,7 @@ const props = withDefaults(defineProps<{
 }>(), {
   title: "思维不停，创作不止",
   compact: false,
+  dockSized: false,
   initialMode: "video",
   showModeTabs: true,
   disabled: false,
@@ -758,7 +761,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="workspace-composer-wrap" :class="{ compact }">
+  <section class="workspace-composer-wrap" :class="{ compact, 'dock-sized': dockSized }">
     <h1 v-if="!compact" class="workspace-home-title">
       <Sparkles :size="20" fill="currentColor" />
       {{ title }}
