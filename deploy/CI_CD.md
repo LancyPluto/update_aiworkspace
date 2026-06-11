@@ -88,6 +88,24 @@ bash deploy/scripts/ci_build_archive.sh /tmp/ai_tool_market_ci.tar.gz
 bash deploy/scripts/ci_remote_deploy.sh /tmp/ai_tool_market_ci.tar.gz
 ```
 
+## 本地 vs 生产：为什么页面可能「看起来不一样」
+
+CI 绿灯 **不等于** 浏览器立刻看到与本地 Vite 完全一致的效果，常见原因：
+
+| 原因 | 本地 | 生产 | 相关文件 |
+|------|------|------|----------|
+| **运行模式不同** | `APP_PRODUCTION_MODE=false` → Vite 开发服（:5173，热更新） | `APP_PRODUCTION_MODE=true` → `npm run build` 静态包，由 nginx 提供 | `.env`、`deploy/docker-compose.yml` |
+| **访问入口不同** | 常直接打开 `http://localhost:5173` | 经 `http://wlcloudai.com`（nginx:80） | `deploy/nginx/snippets/app_locations.conf` |
+| **增量部署** | — | 仅 **变更路径对应的服务** 会重建；只改 backend 时 user-web 不会重编 | `detect_deploy_services.sh`、`ci_remote_deploy_light.sh` |
+| **浏览器缓存** | 开发模式几乎不缓存 | 旧版 `index.html` 可能仍引用过期 JS hash | nginx `Cache-Control`（已对 `index.html` 设 `no-cache`） |
+| **数据不同** | 本机 MySQL 数据 | 生产 MySQL 卷内数据（会话、模型、算力等） | 数据库卷，非代码 |
+
+**如何核对生产是否已跟上某次提交：**
+
+1. 生产机：`cd /root/ai_tool_market && git log -1 --oneline`
+2. 浏览器访问：`http://wlcloudai.com/build-info.json`（部署后含 `gitSha`）
+3. 与本地 `git rev-parse HEAD` 对比
+
 ## 变更服务检测
 
 `deploy/scripts/detect_deploy_services.sh` 根据 `git diff HEAD~1` 映射：
