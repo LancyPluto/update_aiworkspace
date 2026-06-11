@@ -11,6 +11,7 @@ from typing import Any
 
 from app.config import settings
 from app.core.agent_decision import AgentDecisionService
+from app.core.preferred_tool_bias import resolve_preferred_tool
 from app.core.budget_guard import BudgetExceeded, BudgetGuard, BudgetState
 from app.core.event_types import (
     ARGUMENTS_MERGED,
@@ -550,6 +551,14 @@ class DeepAgentsRuntimeEngine:
                     intent.arguments = apply_user_selected_attachment_priority(context, inherited_tool, intent.arguments)
                 intent.isFollowUp = True
                 intent.inheritedFromToolCallId = followup.inherited_from_tool_call_id
+        preferred_tool = resolve_preferred_tool(context)
+        if preferred_tool is not None:
+            tool = preferred_tool
+            intent.selectedToolCode = preferred_tool.toolCode
+            intent.candidateToolCodes = [
+                preferred_tool.toolCode,
+                *[code for code in intent.candidateToolCodes if code != preferred_tool.toolCode],
+            ][:3]
         if tool is None:
             intent_result = IntentResult(
                 intent=Intent.NEEDS_CLARIFICATION, confidence=0.5, reason="tool_unavailable"

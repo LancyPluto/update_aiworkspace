@@ -54,6 +54,7 @@ export interface ToolSummary {
   toolType?: string | null
   inputModality?: string | null
   outputModality?: string | null
+  toolKind?: "text" | "image" | "video" | "digitalHuman" | "audio" | "agent" | "other" | string | null
   configNote?: string | null
   /** 任务路由用，未设置时由 toolType 推导 */
   executionHandler?: string | null
@@ -62,6 +63,11 @@ export interface ToolSummary {
   modelConfigId?: number | null
   modelConfigName?: string | null
   modelName?: string | null
+}
+
+export interface ToolDetail extends ToolSummary {
+  fields: ToolField[]
+  integration?: unknown
 }
 
 export interface UpsertToolPayload {
@@ -76,6 +82,7 @@ export interface UpsertToolPayload {
   configNote?: string
   estimatedCreditCost: number
   modelConfigId?: number | null
+  executionHandler?: string
   templateCode?: string
 }
 
@@ -86,37 +93,29 @@ export interface ToolCoverUploadResult {
   fileSize: number
 }
 
-export interface PromptRecord {
-  id: number
-  toolId: number
-  promptCode: string
-  promptName: string
-  status: string
-  activeVersionId?: number | null
+export interface ToolPromptDraftFieldPayload {
+  fieldKey: string
+  fieldName: string
+  fieldType: string
+  placeholder?: string
+  required?: boolean
 }
 
-export interface PromptVersionRecord {
-  id: number
-  promptId: number
-  versionNo: string
-  systemPrompt?: string | null
-  userPromptTemplate: string
-  outputFormat: string
-  status: 'DRAFT' | 'ACTIVE' | 'INACTIVE' | string
-  createdAt?: string | null
-  publishedAt?: string | null
+export interface ToolPromptDraftPayload {
+  modelConfigId?: number
+  toolName: string
+  description?: string
+  toolKind?: string
+  coverUrl?: string
+  userInputs?: ToolPromptDraftFieldPayload[]
 }
 
-export interface CreatePromptPayload {
-  promptCode: string
-  promptName: string
-}
-
-export interface CreatePromptVersionPayload {
-  versionNo: string
-  systemPrompt?: string
-  userPromptTemplate: string
-  outputFormat?: string
+export interface ToolPromptDraftResult {
+  systemPrompt: string
+  toolPrompt: string
+  modelConfigId?: number | null
+  modelName?: string | null
+  warning?: string | null
 }
 
 export interface TaskResult {
@@ -215,6 +214,7 @@ export interface AdminCommunityPost {
   description?: string | null
   promptVisible: boolean
   prompt?: string | null
+  promptPreview?: string | null
   toolCode?: string | null
   toolName?: string | null
   status: string
@@ -445,6 +445,24 @@ export interface ModelVendorAccountTestResult {
   provider?: string | null
   modelName?: string | null
   account: ModelVendorAccount
+}
+
+export interface ModelVendorAccountDiscoverModelsResult {
+  importedCount?: number | null
+  updatedCount?: number | null
+  skippedCount?: number | null
+  discoveredCount?: number | null
+  createdCount?: number | null
+  totalCount?: number | null
+  modelCount?: number | null
+  imported?: number | null
+  updated?: number | null
+  skipped?: number | null
+  discovered?: number | null
+  created?: number | null
+  message?: string | null
+  warnings?: string[] | null
+  [key: string]: unknown
 }
 
 export interface ModelVendorAccountPayload {
@@ -870,4 +888,9 @@ export interface UpsertWorkflowPayload {
   groupsJson?: string
   configJson?: string
   status?: string
+}
+
+export interface WorkflowValidationResult {
+  valid: boolean
+  errors: string[]
 }

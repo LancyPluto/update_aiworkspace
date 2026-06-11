@@ -148,7 +148,7 @@ onUnmounted(() => {
                 <div
                   v-for="(line, lineIdx) in block.lines"
                   v-show="lineVisible(blockIdx, lineIdx)"
-                  :key="`${blockIdx}-${lineIdx}`"
+                  :key="`${blockIdx}-${lineIdx}-${line.length}`"
                   class="text-foreground whitespace-pre-wrap"
                 >
                   {{ typedLines[blockIdx][lineIdx] }}<span

@@ -15,12 +15,21 @@ public interface ToolWorkflowMapper extends BaseMapper<ToolWorkflow> {
         return Optional.ofNullable(selectByToolId(toolId));
     }
 
+    @Select("SELECT * FROM tool_workflows WHERE tool_id = #{toolId} AND status = 'PUBLISHED' LIMIT 1")
+    ToolWorkflow selectPublishedByToolId(@Param("toolId") Long toolId);
+
+    default Optional<ToolWorkflow> findPublishedByToolId(Long toolId) {
+        return Optional.ofNullable(selectPublishedByToolId(toolId));
+    }
+
     @Select("SELECT * FROM tool_workflows WHERE tool_id = #{toolId} AND workflow_name = #{name} LIMIT 1")
     ToolWorkflow selectByToolIdAndName(@Param("toolId") Long toolId, @Param("name") String name);
 
     default Long insertWorkflow(ToolWorkflow workflow, Long operatorId) {
         workflow.setVersion(1);
-        workflow.setStatus("DRAFT");
+        if (workflow.getStatus() == null || workflow.getStatus().isBlank()) {
+            workflow.setStatus("DRAFT");
+        }
         workflow.setCreatedBy(operatorId);
         workflow.setUpdatedBy(operatorId);
         insert(workflow);
@@ -31,7 +40,7 @@ public interface ToolWorkflowMapper extends BaseMapper<ToolWorkflow> {
             UPDATE tool_workflows
             SET nodes_json = #{nodesJson}, edges_json = #{edgesJson},
                 groups_json = #{groupsJson}, config_json = #{configJson},
-                version = #{newVersion}, status = 'DRAFT',
+                version = #{newVersion}, status = COALESCE(#{status}, status),
                 updated_by = #{operatorId}, updated_at = CURRENT_TIMESTAMP
             WHERE id = #{workflowId}
             """)
@@ -41,5 +50,15 @@ public interface ToolWorkflowMapper extends BaseMapper<ToolWorkflow> {
                                @Param("groupsJson") String groupsJson,
                                @Param("configJson") String configJson,
                                @Param("newVersion") int newVersion,
+                               @Param("status") String status,
                                @Param("operatorId") Long operatorId);
+
+    @Update("""
+            UPDATE tool_workflows
+            SET status = #{status}, updated_by = #{operatorId}, updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{workflowId}
+            """)
+    void updateWorkflowStatus(@Param("workflowId") Long workflowId,
+                              @Param("status") String status,
+                              @Param("operatorId") Long operatorId);
 }

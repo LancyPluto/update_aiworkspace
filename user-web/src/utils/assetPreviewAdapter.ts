@@ -75,7 +75,7 @@ export function assetFromTask(
     toolName: task.toolName,
     toolCode: task.toolCode,
     communityPostId: task.communityPostId ?? undefined,
-    promptVisible: options.defaultPromptVisible,
+    promptVisible: task.communityPromptVisible ?? options.defaultPromptVisible,
     modality: options.modality || task.outputModality || task.result?.resourceType || "TEXT",
     createdAt: task.finishedAt || task.createdAt,
   } satisfies Partial<AssetPreviewItem>

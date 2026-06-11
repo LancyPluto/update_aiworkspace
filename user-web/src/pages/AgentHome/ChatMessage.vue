@@ -13,12 +13,15 @@ const props = withDefaults(defineProps<{
   message?: string
   isUser?: boolean
   streaming?: boolean
+  /** SSE 实时流：直接展示已到达文本，不做打字机延迟 */
+  liveStream?: boolean
   resolveChatAsset?: (url: string) => ChatAssetRef | undefined
   enableAssetDrag?: boolean
 }>(), {
   message: "",
   isUser: false,
   streaming: false,
+  liveStream: false,
   enableAssetDrag: false,
 })
 
@@ -164,36 +167,40 @@ function openStructuredPreview(asset: AssetPreviewItem) {
   })
 }
 
+function syncDisplayedContent() {
+  const text = fullText.value
+  if (!props.streaming) {
+    displayed.value = text
+    return
+  }
+  if (props.liveStream) {
+    if (!text.startsWith(displayed.value)) {
+      displayed.value = ""
+    }
+    displayed.value = text
+    return
+  }
+  void type()
+}
+
 onMounted(() => {
-  if (props.streaming) void type()
-  else displayed.value = fullText.value
+  syncDisplayedContent()
 })
 
 watch(
   () => props.message,
   async () => {
-    if (props.streaming) {
-      await nextTick()
-      void type()
-    } else {
-      displayed.value = props.message ?? ""
-    }
+    await nextTick()
+    syncDisplayedContent()
   },
 )
 
 watch(
-  () => props.streaming,
-  async (streaming) => {
+  () => [props.streaming, props.liveStream] as const,
+  async () => {
     typeToken += 1
-    if (streaming) {
-      if (fullText.value && displayed.value === fullText.value) {
-        displayed.value = ""
-      }
-      await nextTick()
-      void type()
-    } else {
-      displayed.value = fullText.value
-    }
+    await nextTick()
+    syncDisplayedContent()
   },
 )
 </script>
@@ -239,10 +246,6 @@ watch(
 .message-content {
   line-height: 1.65;
   position: relative;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, "PingFang SC", "Hiragino Sans GB",
-    "Microsoft YaHei", "Noto Sans", sans-serif;
-  font-size: 16px;
-  letter-spacing: 0.1px;
 }
 
 .markdown-body {

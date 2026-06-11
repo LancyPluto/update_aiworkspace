@@ -6,6 +6,8 @@ import com.aiminilab.aitoolmarket.agent.config.ModelProviderDefinition;
 import com.aiminilab.aitoolmarket.agent.config.ModelProviderRegistry;
 import com.aiminilab.aitoolmarket.agent.dto.AgentModelConfigRequest;
 import com.aiminilab.aitoolmarket.agent.dto.AgentModelConfigTestResponse;
+import com.aiminilab.aitoolmarket.agent.dto.DiscoveredModelConfigResponse;
+import com.aiminilab.aitoolmarket.agent.dto.ModelVendorAccountDiscoveryResponse;
 import com.aiminilab.aitoolmarket.agent.dto.ModelVendorAccountRequest;
 import com.aiminilab.aitoolmarket.agent.dto.ModelVendorAccountResponse;
 import com.aiminilab.aitoolmarket.agent.dto.ModelVendorAccountTestResponse;
@@ -14,10 +16,12 @@ import com.aiminilab.aitoolmarket.agent.entity.ModelVendorAccount;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentModelConfigMapper;
 import com.aiminilab.aitoolmarket.agent.mapper.ModelVendorAccountMapper;
 import com.aiminilab.aitoolmarket.agent.service.ModelVendorAccountService;
+import com.aiminilab.aitoolmarket.agent.support.ModelCapabilitiesCodec;
 import com.aiminilab.aitoolmarket.agent.support.VendorCodeResolver;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,9 +29,16 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
 @Service
@@ -36,12 +47,23 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
     private static final Logger LOGGER = LoggerFactory.getLogger(ModelVendorAccountServiceImpl.class);
 
     private static final Set<String> BALANCE_MODES = Set.of("MANUAL", "REST_API", "NONE", "INFERRED");
+
+    /** 厂商账户连通测试时，优先用可探测的 provider，避免误选 minimax_music 等 agent-service 不支持的模型。 */
+    private static final Map<String, List<String>> ACCOUNT_TEST_PROVIDER_PRIORITY = Map.of(
+            "minimax", List.of("minimax", "anthropic_compatible", "minimax_speech", "minimax_music"),
+            "siliconflow", List.of("siliconflow_images", "siliconflow_speech", "openai_compatible"),
+            "volcengine", List.of("volcengine_images", "seedance", "openai_compatible"),
+            "kling", List.of("kling_video", "openai_compatible")
+    );
+
+    private static final int DISCOVER_TIMEOUT_SECONDS = 30;
     private final ModelVendorAccountMapper vendorAccountMapper;
     private final AgentModelConfigMapper agentModelConfigMapper;
     private final VendorCodeResolver vendorCodeResolver;
     private final ModelProviderRegistry providerRegistry;
     private final AgentServiceClient agentServiceClient;
     private final VendorBalanceRefreshService balanceRefreshService;
+    private final ModelCapabilitiesCodec capabilitiesCodec;
     private final ObjectMapper objectMapper;
 
     public ModelVendorAccountServiceImpl(ModelVendorAccountMapper vendorAccountMapper,
@@ -50,6 +72,7 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
                                          ModelProviderRegistry providerRegistry,
                                          AgentServiceClient agentServiceClient,
                                          VendorBalanceRefreshService balanceRefreshService,
+                                         ModelCapabilitiesCodec capabilitiesCodec,
                                          ObjectMapper objectMapper) {
         this.vendorAccountMapper = vendorAccountMapper;
         this.agentModelConfigMapper = agentModelConfigMapper;
@@ -57,6 +80,7 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
         this.providerRegistry = providerRegistry;
         this.agentServiceClient = agentServiceClient;
         this.balanceRefreshService = balanceRefreshService;
+        this.capabilitiesCodec = capabilitiesCodec;
         this.objectMapper = objectMapper;
     }
 
@@ -130,7 +154,10 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
     @Override
     public ModelVendorAccountTestResponse adminTest(Long id) {
         ModelVendorAccount account = findActiveOrThrow(id);
-        String providerCode = resolveTestProvider(account.getVendorCode());
+        AgentModelConfig linkedForTest = selectLinkedModelForAccountTest(account);
+        String providerCode = linkedForTest != null && providerRegistry.isSupported(linkedForTest.getProvider())
+                ? linkedForTest.getProvider().trim().toLowerCase(Locale.ROOT)
+                : resolveTestProvider(account.getVendorCode());
         ModelProviderDefinition provider = providerRegistry.findByCode(providerCode)
                 .orElseThrow(() -> new BusinessException(ErrorCode.PARAM_ERROR, "unsupported model provider for test"));
         if ("accept_only".equalsIgnoreCase(provider.testStrategy())) {
@@ -139,7 +166,7 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
         if (requiresMediaGatewayProbe(provider)) {
             return testMediaGatewayVendorAccount(account, providerCode, provider);
         }
-        AgentModelConfigRequest testRequest = accountTestRequest(account, providerCode, provider);
+        AgentModelConfigRequest testRequest = accountTestRequest(account, providerCode, provider, linkedForTest);
         boolean success;
         String message;
         Long latencyMs;
@@ -195,14 +222,351 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
         );
     }
 
-    private AgentModelConfigRequest accountTestRequest(ModelVendorAccount account,
-                                                       String providerCode,
-                                                       ModelProviderDefinition provider) {
-        AgentModelConfig linked = agentModelConfigMapper.findActiveByVendorAccountId(account.getId())
-                .stream()
+    private AgentModelConfig selectLinkedModelForAccountTest(ModelVendorAccount account) {
+        List<AgentModelConfig> linked = agentModelConfigMapper.findActiveByVendorAccountId(account.getId());
+        if (linked.isEmpty()) {
+            return null;
+        }
+        String vendor = account.getVendorCode() == null ? "" : account.getVendorCode().trim().toLowerCase(Locale.ROOT);
+        List<String> priority = ACCOUNT_TEST_PROVIDER_PRIORITY.getOrDefault(vendor, List.of());
+        for (String provider : priority) {
+            AgentModelConfig enabled = linked.stream()
+                    .filter(config -> provider.equalsIgnoreCase(config.getProvider()))
+                    .filter(config -> Boolean.TRUE.equals(config.getEnabled()))
+                    .findFirst()
+                    .orElse(null);
+            if (enabled != null) {
+                return enabled;
+            }
+        }
+        for (String provider : priority) {
+            AgentModelConfig match = linked.stream()
+                    .filter(config -> provider.equalsIgnoreCase(config.getProvider()))
+                    .findFirst()
+                    .orElse(null);
+            if (match != null) {
+                return match;
+            }
+        }
+        return linked.stream()
                 .filter(config -> config.getProvider() != null && providerRegistry.isSupported(config.getProvider()))
                 .findFirst()
                 .orElse(null);
+    }
+
+    @Override
+    @Transactional
+    public ModelVendorAccountDiscoveryResponse adminDiscoverModels(Long id) {
+        ModelVendorAccount account = findActiveOrThrow(id);
+        if (account.getBaseUrl() == null || account.getBaseUrl().isBlank()) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "vendor account baseUrl is required for model discovery");
+        }
+        if ((account.getApiKey() == null || account.getApiKey().isBlank())
+                && (account.getExtraAuthJson() == null || account.getExtraAuthJson().isBlank())) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "vendor account api key is required for model discovery");
+        }
+
+        List<String> modelNames = discoverRemoteModelNames(account);
+        int imported = 0;
+        int updated = 0;
+        int skipped = 0;
+        List<DiscoveredModelConfigResponse> models = new ArrayList<>();
+        for (String modelName : modelNames) {
+            String capability = inferCapability(modelName);
+            String provider = providerForCapability(account, modelName, capability);
+            if (provider == null) {
+                skipped++;
+                continue;
+            }
+            AgentModelConfig existing = agentModelConfigMapper.findActiveByVendorAccountAndModelName(account.getId(), modelName);
+            AgentModelConfig saved = upsertDiscoveredModel(account, existing, modelName, provider, capability);
+            if (existing == null) {
+                imported++;
+            } else {
+                updated++;
+            }
+            models.add(DiscoveredModelConfigResponse.from(saved, capabilitiesCodec));
+        }
+        return new ModelVendorAccountDiscoveryResponse(
+                imported,
+                updated,
+                skipped,
+                modelNames.size(),
+                "同步完成",
+                models
+        );
+    }
+
+    private List<String> discoverRemoteModelNames(ModelVendorAccount account) {
+        try {
+            HttpRequest request = HttpRequest.newBuilder(modelsEndpoint(account.getBaseUrl()))
+                    .timeout(java.time.Duration.ofSeconds(DISCOVER_TIMEOUT_SECONDS))
+                    .header("Accept", "application/json")
+                    .header("Authorization", "Bearer " + resolveApiKey(account))
+                    .GET()
+                    .build();
+            HttpResponse<String> response = HttpClient.newHttpClient()
+                    .send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                throw new BusinessException(ErrorCode.MODEL_CALL_FAILED,
+                        "model discovery failed: HTTP " + response.statusCode());
+            }
+            return parseModelNames(response.body());
+        } catch (BusinessException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw new BusinessException(ErrorCode.MODEL_CALL_FAILED,
+                    "model discovery failed: " + rootMessage(exception));
+        }
+    }
+
+    private URI modelsEndpoint(String baseUrl) {
+        String normalized = baseUrl == null ? "" : baseUrl.trim();
+        while (normalized.endsWith("/")) {
+            normalized = normalized.substring(0, normalized.length() - 1);
+        }
+        return URI.create(normalized + "/models");
+    }
+
+    private List<String> parseModelNames(String body) {
+        try {
+            JsonNode root = objectMapper.readTree(body);
+            JsonNode listNode = root.isArray() ? root : firstArray(root.get("data"), root.get("models"));
+            if (listNode == null || !listNode.isArray()) {
+                throw new BusinessException(ErrorCode.MODEL_CALL_FAILED, "model discovery response has no model list");
+            }
+            LinkedHashSet<String> names = new LinkedHashSet<>();
+            for (JsonNode item : listNode) {
+                String name = null;
+                if (item.isTextual()) {
+                    name = item.asText();
+                } else if (item.isObject()) {
+                    name = textValue(item.get("id"), item.get("name"));
+                }
+                if (name != null && !name.isBlank()) {
+                    names.add(name.trim());
+                }
+            }
+            return List.copyOf(names);
+        } catch (BusinessException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw new BusinessException(ErrorCode.MODEL_CALL_FAILED,
+                    "model discovery response cannot be parsed");
+        }
+    }
+
+    private JsonNode firstArray(JsonNode... nodes) {
+        for (JsonNode node : nodes) {
+            if (node != null && node.isArray()) {
+                return node;
+            }
+        }
+        return null;
+    }
+
+    private AgentModelConfig upsertDiscoveredModel(ModelVendorAccount account,
+                                                   AgentModelConfig existing,
+                                                   String modelName,
+                                                   String provider,
+                                                   String capability) {
+        LocalDateTime now = LocalDateTime.now();
+        AgentModelConfig config = existing == null ? new AgentModelConfig() : existing;
+        config.setVendorAccountId(account.getId());
+        if (config.getDisplayName() == null || config.getDisplayName().isBlank()) {
+            config.setDisplayName(modelName);
+        }
+        if (config.getConfigCode() == null || config.getConfigCode().isBlank()) {
+            config.setConfigCode(discoveredConfigCode(account.getId(), modelName));
+        }
+        config.setProvider(provider);
+        config.setModelName(modelName);
+        config.setBaseUrl(blankToNull(config.getBaseUrl()));
+        if (config.getApiKey() == null) {
+            config.setApiKey("");
+        }
+        String extraAuthJson = blankToNull(config.getExtraAuthJson());
+        config.setExtraAuthJson(extraAuthJson == null ? defaultExtraAuthJson(provider, modelName) : extraAuthJson);
+        if (config.getDocsUrl() == null || config.getDocsUrl().isBlank()) {
+            config.setDocsUrl(defaultDocsUrl(provider, modelName));
+        }
+        if (config.getTimeoutSeconds() == null) {
+            config.setTimeoutSeconds(defaultTimeoutSeconds(provider));
+        }
+        if (config.getInputTokenPricePer1m() == null) {
+            config.setInputTokenPricePer1m(BigDecimal.ZERO);
+        }
+        if (config.getOutputTokenPricePer1m() == null) {
+            config.setOutputTokenPricePer1m(BigDecimal.ZERO);
+        }
+        config.setInputTokenPricePer1k(config.getInputTokenPricePer1m().divide(BigDecimal.valueOf(1000)));
+        config.setOutputTokenPricePer1k(config.getOutputTokenPricePer1m().divide(BigDecimal.valueOf(1000)));
+        config.setBillingUnit(providerRegistry.defaultBillingUnit(provider));
+        config.setUnitPrice(config.getUnitPrice() == null ? BigDecimal.ZERO : config.getUnitPrice());
+        config.setCapabilities(capabilitiesCodec.serialize(List.of(capability)));
+        config.setEnabled(config.getEnabled() == null || config.getEnabled());
+        config.setAgentEnabled(config.getAgentEnabled() == null || config.getAgentEnabled());
+        config.setDefault(Boolean.TRUE.equals(config.getDefault()));
+        config.setUpdatedAt(now);
+        if (existing == null) {
+            config.setCreatedAt(now);
+            agentModelConfigMapper.insertConfig(config);
+        } else {
+            agentModelConfigMapper.updateConfig(config);
+        }
+        return config;
+    }
+
+    private String discoveredConfigCode(Long accountId, String modelName) {
+        String slug = modelName.toLowerCase(Locale.ROOT)
+                .replaceAll("[^a-z0-9]+", "_")
+                .replaceAll("^_+|_+$", "");
+        if (slug.isBlank()) {
+            slug = "model";
+        }
+        String prefix = "acct_" + accountId + "_";
+        int maxSlug = Math.max(1, 64 - prefix.length());
+        if (slug.length() > maxSlug) {
+            slug = slug.substring(0, maxSlug);
+        }
+        return prefix + slug;
+    }
+
+    private String inferCapability(String modelName) {
+        String text = modelName == null ? "" : modelName.toLowerCase(Locale.ROOT);
+        if (text.contains("image") || text.contains("img") || text.contains("flux")
+                || text.contains("stable-diffusion") || text.contains("seedream")) {
+            return "IMAGE_GENERATION";
+        }
+        if (text.contains("video") || text.contains("kling") || text.contains("wan")
+                || text.contains("sora") || text.contains("veo") || text.contains("seedance")
+                || text.contains("hailuo")) {
+            return "VIDEO_GENERATION";
+        }
+        return "TEXT_GENERATION";
+    }
+
+    private String providerForCapability(ModelVendorAccount account, String modelName, String capability) {
+        if (isAgnesModelOrAccount(account, modelName)) {
+            return switch (capability) {
+                case "IMAGE_GENERATION" -> "agnes_images";
+                case "VIDEO_GENERATION" -> "agnes_video";
+                default -> "agnes_chat";
+            };
+        }
+        return switch (capability) {
+            case "IMAGE_GENERATION" -> "openai_images_gateway";
+            case "VIDEO_GENERATION" -> "worker_video";
+            default -> "openai_compatible";
+        };
+    }
+
+    private boolean isAgnesModelOrAccount(ModelVendorAccount account, String modelName) {
+        String vendorCode = account == null || account.getVendorCode() == null
+                ? ""
+                : account.getVendorCode().trim().toLowerCase(Locale.ROOT);
+        String baseUrl = account == null || account.getBaseUrl() == null
+                ? ""
+                : account.getBaseUrl().trim().toLowerCase(Locale.ROOT);
+        String model = modelName == null ? "" : modelName.trim().toLowerCase(Locale.ROOT);
+        return "agnes".equals(vendorCode)
+                || baseUrl.contains("agnes-ai.com")
+                || baseUrl.contains("apihub.agnes-ai.com")
+                || model.startsWith("agnes-");
+    }
+
+    private String defaultExtraAuthJson(String provider, String modelName) {
+        if ("agnes_images".equals(provider)) {
+            return """
+                    {"responseFormatLocation":"extra_body","imageInputMode":"jsonImageArray","endpointPath":"/images/generations","readTimeoutSeconds":600}
+                    """.trim();
+        }
+        if ("agnes_video".equals(provider)) {
+            return """
+                    {"createEndpointPath":"/v1/videos","resultEndpointPath":"/agnesapi","resultQueryMode":"videoIdQuery","defaultNumFrames":121,"defaultFrameRate":24,"timeoutSeconds":900}
+                    """.trim();
+        }
+        return null;
+    }
+
+    private String defaultDocsUrl(String provider, String modelName) {
+        if ("agnes_images".equals(provider)) {
+            String normalized = modelName == null ? "" : modelName.trim().toLowerCase(Locale.ROOT);
+            if (normalized.contains("2.0")) {
+                return "https://agnes-ai.com/doc/agnes-image-20-flash";
+            }
+            return "https://agnes-ai.com/doc/agnes-image-21-flash";
+        }
+        if ("agnes_video".equals(provider)) {
+            return "https://agnes-ai.com/doc/agnes-video-v20";
+        }
+        if ("agnes_chat".equals(provider)) {
+            String normalized = modelName == null ? "" : modelName.trim().toLowerCase(Locale.ROOT);
+            if (normalized.contains("1.5")) {
+                return "https://agnes-ai.com/doc/agnes-15-flash";
+            }
+            return "https://agnes-ai.com/doc/agnes-20-flash";
+        }
+        return null;
+    }
+
+    private int defaultTimeoutSeconds(String provider) {
+        if ("agnes_video".equals(provider)) {
+            return 300;
+        }
+        if ("agnes_images".equals(provider)) {
+            return 300;
+        }
+        return 60;
+    }
+
+    private String resolveApiKey(ModelVendorAccount account) {
+        if (account.getApiKey() != null && !account.getApiKey().isBlank()) {
+            return account.getApiKey().trim();
+        }
+        if (account.getExtraAuthJson() == null || account.getExtraAuthJson().isBlank()) {
+            return "";
+        }
+        try {
+            JsonNode root = objectMapper.readTree(account.getExtraAuthJson());
+            String value = textValue(root.get("apiKey"), root.get("api_key"));
+            if (value != null) {
+                return value;
+            }
+            value = textValue(root.get("token"), root.get("accessToken"));
+            return value == null ? "" : value;
+        } catch (Exception ignored) {
+            return "";
+        }
+    }
+
+    private static String rootMessage(Throwable throwable) {
+        Throwable current = throwable;
+        String message = null;
+        while (current != null) {
+            if (current.getMessage() != null && !current.getMessage().isBlank()) {
+                message = current.getMessage();
+            }
+            current = current.getCause();
+        }
+        return message == null ? "" : message;
+    }
+
+    private String textValue(JsonNode primary, JsonNode fallback) {
+        JsonNode node = primary != null && primary.isTextual() && !primary.asText().isBlank()
+                ? primary
+                : fallback;
+        if (node == null || !node.isTextual()) {
+            return null;
+        }
+        String value = node.asText().trim();
+        return value.isBlank() || value.startsWith("replace-with-") ? null : value;
+    }
+
+    private AgentModelConfigRequest accountTestRequest(ModelVendorAccount account,
+                                                       String providerCode,
+                                                       ModelProviderDefinition provider,
+                                                       AgentModelConfig linked) {
         if (linked != null) {
             return new AgentModelConfigRequest(
                     account.getId(),

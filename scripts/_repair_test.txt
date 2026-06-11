@@ -1,0 +1,4 @@
+'åˆ\x9då§‹è¡¨å\x8d•'
+['0xe5', '0x2c6', '0x9d', '0xe5', '0xa7', '0x2039', '0xe8', '0xa1', '0xa8', '0xe5', '0x8d', '0x2022']
+latin1 repair failed: 'latin-1' codec can't encode character '\u02c6' in position 1: ordinal not in range(256)
+mask repair failed: 'utf-8' codec can't decode byte 0xe5 in position 0: invalid continuation byte

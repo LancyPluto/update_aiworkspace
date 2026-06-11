@@ -17,7 +17,8 @@ import org.springframework.context.annotation.Configuration;
         "com.aiminilab.aitoolmarket.tool.mapper",
         "com.aiminilab.aitoolmarket.user.mapper",
         "com.aiminilab.aitoolmarket.market.mapper",
-        "com.aiminilab.aitoolmarket.ppt.mapper"
+        "com.aiminilab.aitoolmarket.ppt.mapper",
+        "com.aiminilab.aitoolmarket.workflow.mapper"
 })
 public class MybatisPlusConfig {
 

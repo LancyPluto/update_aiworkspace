@@ -1,10 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue"
-import { Camera, Check, ExternalLink, Loader2, Shield, Sparkles, ToggleLeft, Trash2, Wallet, X } from "lucide-vue-next"
 import { useRouter } from "vue-router"
+import { Camera, Check, ExternalLink, Loader2, Shield, Sparkles, ToggleLeft, Trash2, Wallet, X } from "lucide-vue-next"
 import AppShell from "@/components/AppShell.vue"
 import UserAvatar from "@/components/UserAvatar.vue"
-import ProfileThemePicker from "@/pages/PublicProfile/ProfileThemePicker.vue"
 import { fetchCreditAccount } from "@/api/creditApi"
 import { fetchTasks } from "@/api/taskApi"
 import { cancelCurrentUserAccount, sendCancelAccountSmsCode } from "@/api/userApi"
@@ -22,18 +21,18 @@ const saving = ref(false)
 const savingCommunity = ref(false)
 const uploading = ref(false)
 const loadingStats = ref(false)
-const cancelDialogOpen = ref(false)
-const sendingCancelCode = ref(false)
-const cancellingAccount = ref(false)
-const cancelSmsCode = ref("")
-const cancelConfirmText = ref("")
-const cancelCooldown = ref(0)
-const cancelDebugCode = ref<string | null>(null)
 const error = ref("")
 const success = ref("")
 const credit = ref<CreditAccount | null>(null)
 const totalTasks = ref<number | null>(null)
 const successTasks = ref<number | null>(null)
+const cancelDialogOpen = ref(false)
+const cancelSmsCode = ref("")
+const cancelConfirmText = ref("")
+const cancelCooldown = ref(0)
+const sendingCancelCode = ref(false)
+const cancellingAccount = ref(false)
+const cancelDebugCode = ref<string | null>(null)
 
 const displayName = computed(() => auth.user?.nickname || auth.user?.username || "用户")
 const joinedLabel = computed(() => `UID ${auth.user?.id ?? "--"}`)
@@ -282,7 +281,6 @@ onMounted(async () => {
               <span>默认公开提示词</span>
               <input v-model="promptPublicByDefault" type="checkbox" />
             </label>
-            <ProfileThemePicker />
             <div class="settings-actions">
               <button type="button" class="secondary-action" @click="$router.push(publicProfileUrl)">
                 <ExternalLink class="h-4 w-4" />
@@ -747,8 +745,9 @@ onMounted(async () => {
 .cancel-dialog {
   position: relative;
   width: min(520px, 100%);
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
   border: 1px solid rgb(15 23 42 / 0.08);
-  border-radius: 0;
   background: #fff;
   box-shadow: 0 30px 90px rgb(0 0 0 / 0.28);
   color: #111827;

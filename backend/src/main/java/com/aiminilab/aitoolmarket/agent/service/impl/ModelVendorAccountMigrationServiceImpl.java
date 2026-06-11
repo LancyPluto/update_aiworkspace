@@ -84,7 +84,7 @@ public class ModelVendorAccountMigrationServiceImpl implements ModelVendorAccoun
                 continue;
             }
             String vendor = account.getVendorCode() == null ? "" : account.getVendorCode().trim().toLowerCase(Locale.ROOT);
-            if (!"volcengine".equals(vendor) && !"kling".equals(vendor)) {
+            if (!"volcengine".equals(vendor) && !"kling".equals(vendor) && !"minimax".equals(vendor)) {
                 continue;
             }
             if (account.getBalanceAmount() != null) {
@@ -95,6 +95,7 @@ public class ModelVendorAccountMigrationServiceImpl implements ModelVendorAccoun
             account.setBalanceErrorMessage(switch (vendor) {
                 case "volcengine" -> "火山方舟无公开余额 API，请使用控制台外链或改用手填余额";
                 case "kling" -> "可灵无公开余额 API，请使用控制台外链或改用手填余额";
+                case "minimax" -> "MiniMax 无稳定 OpenAI 风格余额 API，请使用控制台外链或改用手填余额";
                 default -> "该厂商不支持自动余额查询";
             });
             account.setUpdatedAt(LocalDateTime.now());
@@ -280,8 +281,8 @@ public class ModelVendorAccountMigrationServiceImpl implements ModelVendorAccoun
 
     private static String defaultBalanceMode(String vendorCode) {
         return switch (vendorCode) {
-            case "deepseek", "siliconflow", "minimax", "openai", "openai_gateway" -> "REST_API";
-            case "volcengine", "kling" -> "NONE";
+            case "deepseek", "siliconflow", "openai", "openai_gateway" -> "REST_API";
+            case "volcengine", "kling", "minimax" -> "NONE";
             default -> "MANUAL";
         };
     }

@@ -1,4 +1,4 @@
-import type { ToolField } from "./types"
+import type { ToolField, ToolFrontendStyle } from "./types"
 
 export type CapabilityType =
   | "imageGeneration"
@@ -25,14 +25,21 @@ export interface AITool {
   modelIconUrl?: string
   comparisonOriginalUrl?: string
   comparisonEffectUrl?: string
+  frontendStyle?: ToolFrontendStyle | null
+  heroTitle?: string | null
+  heroSubtitle?: string | null
+  demoThumbnails?: string[] | null
+  useCases?: string[] | null
+  steps?: string[] | null
+  recommendedToolCodes?: string[] | null
+  beforeVideoUrl?: string | null
+  afterVideoUrl?: string | null
   modelConfigName?: string | null
   modelName?: string | null
   capabilities: Capability[]
   inputModality?: string | null
   outputModality?: string | null
-  toolType?: string | null
-  categoryCode?: string | null
-  categoryName?: string | null
+  toolKind?: "text" | "image" | "video" | "digitalHuman" | "audio" | "agent" | "other" | string | null
   fields?: ToolField[]
   estimatedCreditCost?: number
 }

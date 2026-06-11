@@ -184,6 +184,34 @@ def gpt_image_tool() -> ToolDescriptor:
     )
 
 
+def test_followup_keeps_explicit_preferred_tool_over_recent_kling_call():
+    context = RunContext(
+        runId=6,
+        sessionId=1,
+        userId=1,
+        message="给科比也来一张",
+        preferredToolCode="gpt_image2",
+        recentToolCalls=[
+            RecentToolCallContext(
+                id=11,
+                runId=1,
+                toolCode="kling-image-generation-v3",
+                taskId=71,
+                argumentsJson={"prompt": "previous"},
+                resultJson={},
+                resourceType="IMAGE",
+                mediaUrls=[],
+            )
+        ],
+        availableTools=[gpt_image_tool(), image_tool()],
+    )
+
+    result = FollowupTaskResolver().resolve(context, gpt_image_tool())
+
+    assert result.accepted
+    assert result.tool_code == "gpt_image2"
+
+
 def test_followup_prefers_user_dragged_image_over_recent_tool_media():
     context = RunContext(
         runId=5,

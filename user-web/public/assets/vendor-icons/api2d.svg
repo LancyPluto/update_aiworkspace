@@ -1,7 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" role="img" aria-label="API">
-  <rect width="64" height="64" rx="14" fill="#ffffff"/>
-  <g stroke="#64748b" stroke-width="2" fill="none">
-    <rect x="16" y="16" width="32" height="32" rx="4"/>
-    <path d="M24 24h16M24 32h16M24 40h10"/>
-  </g>
-</svg>

@@ -22,7 +22,14 @@ export function resolvePptPageImageUrl(
   bindingId: string | number,
 ): string | undefined {
   if (!url) return undefined
-  if (url.startsWith("http://") || url.startsWith("https://")) return url
+  if (url.startsWith("http://") || url.startsWith("https://")) {
+    const path = new URL(url).pathname
+    if (path.startsWith("/files/")) {
+      const rest = path.replace(/^\/files\//, "")
+      return resolvePptMediaUrl(`/api/v1/ppt/files/${bindingId}/${rest}`)
+    }
+    return url
+  }
   if (url.startsWith("/api/v1/ppt/files/")) return resolvePptMediaUrl(url)
   if (url.startsWith("/files/")) {
     const rest = url.replace(/^\/files\//, "")
@@ -235,6 +242,15 @@ export function resolvePptDownloadUrl(
   return resolvePptPageImageUrl(url, bindingId)
 }
 
+export function isPptBffDownloadUrl(url: string | undefined | null): boolean {
+  if (!url) return false
+  try {
+    return new URL(url, getRequestBaseUrl()).pathname.startsWith("/api/v1/ppt/files/")
+  } catch {
+    return false
+  }
+}
+
 function guessDownloadFilename(
   resolvedUrl: string,
   preferred?: string,
@@ -260,7 +276,7 @@ export async function downloadPptFile(
 
   const headers: Record<string, string> = { Accept: "*/*" }
   const token = options?.token ?? getSessionBearerJwt()
-  if (token) headers.Authorization = `Bearer ${token}`
+  if (token && isPptBffDownloadUrl(full)) headers.Authorization = `Bearer ${token}`
 
   const res = await fetch(full, { credentials: "include", headers })
   if (!res.ok) {

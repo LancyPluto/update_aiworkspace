@@ -9,6 +9,7 @@ import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
+import static org.hamcrest.Matchers.hasItem;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -374,7 +375,8 @@ class AdminConfigurationApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.modelConfigs").value(0))
                 .andExpect(jsonPath("$.data.tools").value(1))
-                .andExpect(jsonPath("$.data.warnings[0]").value("Reused existing model config siliconflow_image_turbo for imported model config model_99"));
+                .andExpect(jsonPath("$.data.warnings[0]").value("Reused existing model config siliconflow_image_turbo for imported model config model_99"))
+                .andExpect(jsonPath("$.data.warnings").value(hasItem("Tool dup_tool kept as draft because it could not be published: bound model config has no API key: Existing Z Image")));
 
         mockMvc.perform(get("/api/admin/v1/agent/model-config/list")
                         .header("Authorization", "Bearer " + adminToken))
@@ -386,12 +388,8 @@ class AdminConfigurationApiTest {
                         .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.list[?(@.toolCode=='dup_tool')].modelConfigId").value(existingModelId.intValue()))
-                .andExpect(jsonPath("$.data.list[?(@.toolCode=='dup_tool')].executionHandler").value("IMAGE_GENERATION"));
-
-        mockMvc.perform(get("/api/admin/v1/agent/tools")
-                        .header("Authorization", "Bearer " + adminToken))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data[?(@.toolCode=='dup_tool')].agentEnabled").value(false));
+                .andExpect(jsonPath("$.data.list[?(@.toolCode=='dup_tool')].executionHandler").value("IMAGE_GENERATION"))
+                .andExpect(jsonPath("$.data.list[?(@.toolCode=='dup_tool')].status").value("DRAFT"));
 
         mockMvc.perform(get("/api/admin/v1/config-bundles/export")
                         .header("Authorization", "Bearer " + adminToken))

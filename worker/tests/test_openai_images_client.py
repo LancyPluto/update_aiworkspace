@@ -304,3 +304,63 @@ def test_openai_images_edit_can_use_sdk_when_configured(monkeypatch) -> None:
     assert urls[0].startswith("data:image/png;base64,"), urls
     assert calls[0]["model"] == "openai/gpt-image-2", calls
 
+
+def test_openai_images_can_place_response_format_inside_extra_body(monkeypatch):
+    client = OpenAIImagesClient(
+        base_url="https://apihub.agnes-ai.com/v1",
+        api_key="test-key",
+        extra_auth_json='{"responseFormatLocation": "extra_body"}',
+    )
+    captured = {}
+
+    def fake_post(path, payload):
+        captured["path"] = path
+        captured["payload"] = payload
+        return {"data": [{"url": "https://cdn.example/out.png"}]}
+
+    monkeypatch.setattr(client, "_post", fake_post)
+
+    urls = client.generate_images(
+        prompt="a tidy product photo",
+        model="agnes-image-2.1-flash",
+        image_size="1024x1024",
+        response_format="url",
+    )
+
+    assert urls == ["https://cdn.example/out.png"]
+    assert captured["path"] == "/images/generations"
+    assert "response_format" not in captured["payload"]
+    assert captured["payload"]["extra_body"] == {"response_format": "url"}
+
+
+def test_openai_images_can_send_source_images_as_json_array(monkeypatch):
+    client = OpenAIImagesClient(
+        base_url="https://apihub.agnes-ai.com/v1",
+        api_key="test-key",
+        extra_auth_json='{"imageInputMode": "json_array", "responseFormatLocation": "extra_body"}',
+    )
+    captured = {}
+
+    def fake_post(path, payload):
+        captured["path"] = path
+        captured["payload"] = payload
+        return {"data": [{"url": "https://cdn.example/out.png"}]}
+
+    def fail_multipart(*_args, **_kwargs):
+        raise AssertionError("json_array image mode must not use multipart edit requests")
+
+    monkeypatch.setattr(client, "_post", fake_post)
+    monkeypatch.setattr(client, "_post_multipart", fail_multipart)
+
+    urls = client.generate_images(
+        prompt="keep the pose and change the outfit",
+        model="agnes-image-2.1-flash",
+        image_size="1024x1024",
+        response_format="url",
+        image="https://storage.example/input.png",
+    )
+
+    assert urls == ["https://cdn.example/out.png"]
+    assert captured["path"] == "/images/generations"
+    assert captured["payload"]["image"] == ["https://storage.example/input.png"]
+    assert captured["payload"]["extra_body"] == {"response_format": "url"}

@@ -1,0 +1,12 @@
+start: Start
+field-input: åˆå§‹è¡¨å•
+script-planner: å‰§æœ¬ä¸Žåˆ†é•œ
+user-input-script: è„šæœ¬æ„è§
+user-input-storyboard: åˆ†é•œæ„è§
+keyframe: ç”µå½±æ„Ÿå…³é”®å¸§
+user-input-scene: åœºæ™¯å›¾æ„è§
+tts: è§’è‰²é…éŸ³
+user-input-bgm: BGMæ„è§
+clip-video: å›¾ç”Ÿè§†é¢‘
+compose: å­—å¹•åˆæˆ
+output: æˆç‰‡è¾“å‡º

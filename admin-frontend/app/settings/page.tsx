@@ -265,7 +265,7 @@ export default function SettingsPage() {
           <TabsList className="flex h-auto flex-wrap justify-start gap-2 bg-transparent p-0">
             <TabsTrigger value="model" className="gap-2">
               <Settings2 className="h-4 w-4" />
-              统一 API
+              模型 API 中心
             </TabsTrigger>
             <TabsTrigger value="engine-api" className="gap-2">
               <KeyRound className="h-4 w-4" />

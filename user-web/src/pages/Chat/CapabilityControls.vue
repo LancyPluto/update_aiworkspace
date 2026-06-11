@@ -975,7 +975,7 @@ defineExpose({
     <BookOpen class="h-3.5 w-3.5" />
   </button>
 </div>
-           
+
           </div>
           <div v-if="strField(field.fieldKey)" class="flex items-center gap-1">
             <img

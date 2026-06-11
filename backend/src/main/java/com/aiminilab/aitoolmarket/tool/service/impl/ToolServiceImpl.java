@@ -38,6 +38,7 @@ import com.aiminilab.aitoolmarket.tool.entity.ToolFieldItem;
 import com.aiminilab.aitoolmarket.tool.entity.ToolFieldSchema;
 import com.aiminilab.aitoolmarket.tool.entity.ToolPrompt;
 import com.aiminilab.aitoolmarket.tool.entity.ToolPromptVersion;
+import com.aiminilab.aitoolmarket.tool.support.ToolRuntimeConfig;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolCategoryMapper;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolFieldItemMapper;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolFieldSchemaMapper;
@@ -231,7 +232,7 @@ public class ToolServiceImpl implements ToolService {
 
     private ToolSummaryResponse toUserFacingSummary(AiTool tool) {
         return sanitizeCoverUrl(
-                ToolSummaryResponse.from(tool, taskCreditEstimateService.estimateUserFacingTaskCredits(tool)));
+                ToolSummaryResponse.publicFrom(tool, taskCreditEstimateService.estimateUserFacingTaskCredits(tool), objectMapper));
     }
 
     private ToolIntegrationView resolveIntegrationView(AiTool tool) {
@@ -278,6 +279,7 @@ public class ToolServiceImpl implements ToolService {
         if (tool.getExecutionHandler() == null || tool.getExecutionHandler().isBlank()) {
             tool.setExecutionHandler(ExecutionHandler.fromNullable(tool.getToolType()).name());
         }
+        modelCapabilityService.validateToolModelBindingAvailable(tool);
         Long toolId = toolMapper.insertTool(tool, operatorId);
         toolFieldSchemaMapper.createActiveDefaultSchema(toolId, operatorId);
         if (request.templateCode() != null && !request.templateCode().isBlank()) {
@@ -287,11 +289,15 @@ public class ToolServiceImpl implements ToolService {
         } else {
             Long schemaId = toolFieldSchemaMapper.findActiveSchemaId(toolId)
                     .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具字段配置不存在"));
-            toolFieldItemMapper.createDefaultFields(schemaId);
+            List<ToolFieldItem> runtimeFields = runtimeFieldsFromConfigNote(request.configNote());
+            if (runtimeFields.isEmpty()) {
+                toolFieldItemMapper.createDefaultFields(schemaId);
+            } else {
+                toolFieldItemMapper.replaceActiveFields(schemaId, runtimeFields);
+            }
         }
         AiTool persisted = toolMapper.findById(toolId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在"));
-        modelCapabilityService.validateToolModelBinding(persisted);
         log.info("Admin created AI tool: toolId={}, toolCode={}, toolType={}, modelConfigId={}, operatorId={}",
                 toolId, toolCode, persisted.getToolType(), persisted.getModelConfigId(), operatorId);
         return findToolSummary(toolId);
@@ -342,7 +348,9 @@ public class ToolServiceImpl implements ToolService {
         toolTemplateService.applyToTool(toolId, request, operatorId);
         AiTool persisted = toolMapper.findById(toolId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在"));
-        modelCapabilityService.validateToolModelBinding(persisted);
+        if (ToolStatus.ONLINE.name().equalsIgnoreCase(persisted.getStatus())) {
+            validatePublishable(persisted);
+        }
     }
 
     @Override
@@ -357,7 +365,11 @@ public class ToolServiceImpl implements ToolService {
         }
         tool.setConfigNote(ConfigNoteMergeSupport.mergePreservingIntegrationMarkers(
                 existing.getConfigNote(), tool.getConfigNote()));
-        modelCapabilityService.validateToolModelBinding(tool);
+        if (ToolStatus.ONLINE.name().equalsIgnoreCase(existing.getStatus())) {
+            validatePublishable(tool);
+        } else {
+            modelCapabilityService.validateToolModelBindingAvailable(tool);
+        }
         toolMapper.updateTool(toolId, tool, operatorId);
         ToolSummaryResponse summary = findToolSummary(toolId);
         bypassCacheService.invalidateToolCatalog(summary.toolCode());
@@ -379,7 +391,9 @@ public class ToolServiceImpl implements ToolService {
 
     @Override
     public ToolSummaryResponse publishTool(Long toolId, Long operatorId) {
-        ensureToolExists(toolId);
+        AiTool tool = toolMapper.findById(toolId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "Tool not found"));
+        validatePublishable(tool);
         toolMapper.updateToolStatus(toolId, ToolStatus.ONLINE, operatorId);
         ToolSummaryResponse summary = findToolSummary(toolId);
         bypassCacheService.invalidateToolCatalog(summary.toolCode());
@@ -814,6 +828,39 @@ public class ToolServiceImpl implements ToolService {
         item.setRiskLevel(normalizeRiskLevel(request.riskLevel()));
         item.setSortOrder(request.sortOrder() == null ? 0 : request.sortOrder());
         return item;
+    }
+
+    private List<ToolFieldItem> runtimeFieldsFromConfigNote(String configNote) {
+        ToolRuntimeConfig runtimeConfig = ToolRuntimeConfig.fromConfigNote(configNote, objectMapper);
+        if (runtimeConfig.userInputs() == null || runtimeConfig.userInputs().isEmpty()) {
+            return List.of();
+        }
+        return runtimeConfig.userInputs().stream()
+                .map(input -> toFieldItem(new ToolFieldRequest(
+                        input.fieldKey(),
+                        input.fieldName(),
+                        input.fieldType(),
+                        input.placeholder(),
+                        null,
+                        null,
+                        input.required(),
+                        input.required(),
+                        input.required(),
+                        null,
+                        input.required() ? "ask_user" : "default",
+                        "LOW",
+                        input.sortOrder()
+                )))
+                .toList();
+    }
+
+    private void validatePublishable(AiTool tool) {
+        if (tool.getModelConfigId() == null) {
+            return;
+        }
+        modelCapabilityService.validateToolModelBinding(tool);
+        var modelConfig = modelCapabilityService.resolveModelConfigForTool(tool);
+        modelCapabilityService.validateExecution(tool, modelConfig);
     }
 
     private String normalizeFillStrategy(String value, Boolean userRequired) {

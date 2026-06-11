@@ -1,5 +1,4 @@
 import { apiRequest, getRequestBaseUrl } from "./client"
-import { getSessionBearerJwt } from "./sessionBearer"
 import type {
   AgentMessage,
   AgentRun,
@@ -34,7 +33,6 @@ export function fetchAgentWorkspaces(options?: { token?: string | null }) {
 export function fetchAgentModelConfigs(options?: { token?: string | null }) {
   return apiRequest<AgentModelConfig[]>("GET", "/api/v1/agent/model-configs", {
     token: options?.token,
-    query: { t: Date.now() },
   })
 }
 
@@ -172,16 +170,13 @@ export async function streamAgentRunEvents(
   const base = getRequestBaseUrl()
   const url = new URL(path, base.endsWith("/") ? base : `${base}/`)
   if (options.afterEventId) url.searchParams.set("afterEventId", String(options.afterEventId))
-  const headers: Record<string, string> = {
-    Accept: "text/event-stream",
-  }
-  const token = options.token ?? getSessionBearerJwt()
-  if (token) headers.Authorization = `Bearer ${token}`
   const response = await fetch(url.toString(), {
     method: "GET",
     signal: options.signal,
-    headers,
-    credentials: "include",
+    headers: {
+      Accept: "text/event-stream",
+      ...(options.token ? { Authorization: `Bearer ${options.token}` } : {}),
+    },
   })
   if (!response.ok || !response.body) {
     throw new Error(`Agent event stream failed: ${response.status}`)

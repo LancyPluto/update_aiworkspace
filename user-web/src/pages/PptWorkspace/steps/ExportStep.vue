@@ -18,6 +18,7 @@ import {
   exportPptx,
   fetchPptProject,
   listPptExports,
+  updatePptProject,
   type PptExportFileItem,
   type PptProjectDetail,
   type PptTaskResponse,
@@ -192,6 +193,11 @@ async function exportEditablePptxFile() {
   try {
     const base = filename.value || `presentation_${props.bindingId}`
     const outName = `${base}_editable.pptx`
+    await updatePptProject(
+      props.bindingId,
+      { export_allow_partial: true },
+      { token: auth.token },
+    )
     const task = await exportEditablePptx(
       props.bindingId,
       { filename: outName, max_depth: 1, max_workers: 4 },

@@ -349,4 +349,3 @@ ON DUPLICATE KEY UPDATE
   sort_order = VALUES(sort_order),
   status = 'ACTIVE',
   updated_at = CURRENT_TIMESTAMP;
-

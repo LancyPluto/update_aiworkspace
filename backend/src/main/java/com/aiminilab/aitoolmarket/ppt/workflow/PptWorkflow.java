@@ -1,9 +1,12 @@
 package com.aiminilab.aitoolmarket.ppt.workflow;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+@JsonInclude(JsonInclude.Include.NON_EMPTY)
 public class PptWorkflow {
 
     private String integrationMode;
@@ -95,5 +98,17 @@ public class PptWorkflow {
 
     public void setFeatures(Map<String, Boolean> features) {
         this.features = features == null ? new LinkedHashMap<>() : features;
+    }
+
+    public PptWorkflow publicView() {
+        PptWorkflow view = new PptWorkflow();
+        view.setIntegrationMode(integrationMode);
+        view.setCustomUiRoute(customUiRoute);
+        view.setCreationTypes(creationTypes == null ? null : List.copyOf(creationTypes));
+        view.setSteps(steps == null ? null : List.copyOf(steps));
+        view.setFeatures(features == null ? null : new LinkedHashMap<>(features));
+        view.setTextModelConfigId(textModelConfigId);
+        view.setImageModelConfigId(imageModelConfigId);
+        return view;
     }
 }

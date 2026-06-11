@@ -140,8 +140,7 @@ class ToolApiTest {
                         .param("status", "DRAFT")
                         .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.total").value(1))
-                .andExpect(jsonPath("$.data.list[0].id").value(hiddenToolId.intValue()));
+                .andExpect(jsonPath("$.data.list[*].id").value(hasItem(hiddenToolId.intValue())));
 
         mockMvc.perform(get("/api/admin/v1/tools/{toolId}", writingToolId)
                         .header("Authorization", "Bearer " + adminToken))
@@ -369,6 +368,152 @@ class ToolApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.list[?(@.toolCode=='per_call_credit_display_tool')].estimatedCreditCost")
                         .value(hasItem(4)));
+    }
+
+    @Test
+    void publicToolResponsesDoNotExposeInternalConfigNotesOrEngineSecrets() throws Exception {
+        String adminToken = loginAdmin();
+
+        String createResponse = mockMvc.perform(post("/api/admin/v1/tools")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "toolCode": "public_secret_guard_tool",
+                                  "toolName": "Public Secret Guard Tool",
+                                  "categoryId": 2,
+                                  "description": "safe public description",
+                                  "toolType": "IMAGE_GENERATION",
+                                  "outputModality": "FILE",
+                                  "estimatedCreditCost": 5,
+                                  "configNote": "operator only note\\n\\n<!-- ppt-workflow:{\\"integrationMode\\":\\"PPT_WORKSPACE\\",\\"customUiRoute\\":\\"/tools/public_secret_guard_tool/workspace\\",\\"creationTypes\\":[\\"idea\\"],\\"steps\\":[{\\"code\\":\\"CREATE\\",\\"name\\":\\"Create\\",\\"credits\\":5,\\"enabled\\":true}],\\"engineSecrets\\":{\\"mineru_token\\":\\"secret-token\\"},\\"engineSecretSources\\":{\\"mineru_token\\":\\"manual\\"}} -->"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        Long toolId = Long.parseLong(createResponse.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
+        publishTool(adminToken, toolId);
+
+        mockMvc.perform(get("/api/v1/tools")
+                        .param("keyword", "public_secret_guard_tool"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].toolCode").value("public_secret_guard_tool"))
+                .andExpect(jsonPath("$.data.list[0].configNote").doesNotExist());
+
+        mockMvc.perform(get("/api/v1/tools/public_secret_guard_tool"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.toolCode").value("public_secret_guard_tool"))
+                .andExpect(jsonPath("$.data.configNote").doesNotExist())
+                .andExpect(jsonPath("$.data.workflow.engineSecrets").doesNotExist())
+                .andExpect(jsonPath("$.data.workflow.engineSecretSources").doesNotExist())
+                .andExpect(jsonPath("$.data.integration.extension.engineSecrets").doesNotExist())
+                .andExpect(jsonPath("$.data.integration.extension.engineSecretSources").doesNotExist())
+                .andExpect(jsonPath("$.data.integration.extension.customUiRoute").value("/tools/public_secret_guard_tool/workspace"));
+    }
+
+    @Test
+    void mediaToolCanSaveAsDraftButRequiresMatchingModelWhenPublishing() throws Exception {
+        String adminToken = loginAdmin();
+        Long textOnlyModelId = createTextOnlyModelConfig(adminToken);
+
+        String createResponse = mockMvc.perform(post("/api/admin/v1/tools")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "toolCode": "draft_image_without_model",
+                                  "toolName": "Draft Image Without Model",
+                                  "categoryId": 1,
+                                  "description": "can be configured before model binding",
+                                  "toolType": "IMAGE_TO_IMAGE",
+                                  "inputModality": "IMAGE",
+                                  "outputModality": "IMAGE",
+                                  "executionHandler": "IMAGE_GENERATION",
+                                  "modelConfigId": %d,
+                                  "estimatedCreditCost": 6
+                                }
+                                """.formatted(textOnlyModelId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("DRAFT"))
+                .andExpect(jsonPath("$.data.toolKind").value("image"))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        Long toolId = Long.parseLong(createResponse.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
+
+        mockMvc.perform(post("/api/admin/v1/tools/{toolId}/publish", toolId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("PARAM_ERROR"))
+                .andExpect(jsonPath("$.message").value("model config does not support execution handler IMAGE_GENERATION"));
+    }
+
+    @Test
+    void adminCanCreateMinimalImageToolWithoutCategoryAndGetsUploadField() throws Exception {
+        String adminToken = loginAdmin();
+
+        String createResponse = mockMvc.perform(post("/api/admin/v1/tools")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "toolCode": "simple_background_remover",
+                                  "toolName": "背景去除器",
+                                  "description": "上传图片后自动去除背景",
+                                  "coverUrl": "/generated/tool-covers/background-remover.webp",
+                                  "toolType": "IMAGE_TO_IMAGE",
+                                  "inputModality": "IMAGE",
+                                  "outputModality": "IMAGE",
+                                  "executionHandler": "IMAGE_GENERATION",
+                                  "estimatedCreditCost": 3,
+                                  "configNote": "<!-- ai-tool-runtime:{\\"toolKind\\":\\"image\\",\\"adminPrompt\\":\\"Remove the background from {{sourceImageUrl}} and return a transparent PNG.\\",\\"userInputs\\":[{\\"fieldKey\\":\\"sourceImageUrl\\",\\"fieldName\\":\\"上传图片\\",\\"fieldType\\":\\"image_upload\\",\\"required\\":true}]} -->"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("DRAFT"))
+                .andExpect(jsonPath("$.data.categoryId").doesNotExist())
+                .andExpect(jsonPath("$.data.toolKind").value("image"))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        Long toolId = Long.parseLong(createResponse.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
+
+        mockMvc.perform(get("/api/admin/v1/tools/{toolId}", toolId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.fields[0].fieldKey").value("sourceImageUrl"))
+                .andExpect(jsonPath("$.data.fields[0].fieldType").value("image_upload"))
+                .andExpect(jsonPath("$.data.fields[0].required").value(true));
+    }
+
+    private Long createTextOnlyModelConfig(String adminToken) throws Exception {
+        String response = mockMvc.perform(post("/api/admin/v1/agent/model-config")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "displayName": "Text Only Model",
+                                  "configCode": "text_only_for_publish_guard",
+                                  "provider": "minimax",
+                                  "modelName": "MiniMax-M2.7",
+                                  "baseUrl": "https://api.minimaxi.com/v1",
+                                  "apiKey": "fake-key",
+                                  "timeoutSeconds": 60,
+                                  "billingUnit": "TOKEN_PER_M",
+                                  "unitPrice": 0,
+                                  "capabilities": ["TEXT_GENERATION"],
+                                  "enabled": true,
+                                  "agentEnabled": true,
+                                  "isDefault": false
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        return Long.parseLong(response.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
     }
 
     private String loginAdmin() throws Exception {

@@ -26,7 +26,7 @@ import {
   resolveCommunityImageUrls,
   resolveCommunityPostKind,
 } from "@/utils/communityPostMedia"
-import { openDashboardWithAsset } from "@/utils/assetReplay"
+import { openCreateWithAssetRecommendation } from "@/utils/assetReplay"
 import { resolveCommunityAudioMedia } from "@/utils/communityAudioMedia"
 
 const route = useRoute()
@@ -163,7 +163,7 @@ async function createSameStyle() {
       { postId: post.value.id, eventType: "dashboard_open", source: "community_detail", toolCode: post.value.toolCode },
       { token: auth.token },
     ).catch(() => undefined)
-    openDashboardWithAsset(assetFromCommunityPost(post.value, kind.value === "image" ? activeImageUrl.value : normalizeCommunityMediaUrl(post.value.coverUrl)), post.value.toolCode, {
+    openCreateWithAssetRecommendation(assetFromCommunityPost(post.value, kind.value === "image" ? activeImageUrl.value : normalizeCommunityMediaUrl(post.value.coverUrl)), post.value.toolCode, {
       modality: post.value.modality,
       sourcePost: post.value.id,
     })

@@ -3,18 +3,15 @@
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { useEffect, useState } from "react"
-import { cn } from "@/lib/utils"
 import {
   ChevronDown,
   Coins,
   FileText,
-  FolderTree,
   Images,
   LayoutDashboard,
   ListTodo,
   ReceiptText,
   Settings,
-  Sparkles,
   Users,
   Wrench,
   type LucideIcon,
@@ -24,6 +21,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
+import { cn } from "@/lib/utils"
 
 type NavLink = {
   type: "link"
@@ -49,12 +47,10 @@ const navigation: (NavLink | NavGroup)[] = [
     name: "AI 工具管理",
     icon: Wrench,
     children: [
-      { name: "大模型管理", href: "/tools" },
-      { name: "智能体管理", href: "/task-tools" },
+      { name: "工具配置", href: "/tools" },
+      { name: "工作流", href: "/task-tools" },
     ],
   },
-  { type: "link", name: "工具模板", href: "/tool-templates", icon: Sparkles },
-  { type: "link", name: "分类管理", href: "/categories", icon: FolderTree },
   { type: "link", name: "Prompt 管理", href: "/prompts", icon: FileText },
   { type: "link", name: "任务管理", href: "/tasks", icon: ListTodo },
   { type: "link", name: "社区作品", href: "/community-posts", icon: Images },
@@ -80,18 +76,17 @@ function NavGroupItem({ group, pathname }: { group: NavGroup; pathname: string }
 
   useEffect(() => {
     if (groupActive) setOpen(true)
-  }, [groupActive, pathname])
+  }, [groupActive])
 
   useEffect(() => {
     try {
       const saved = localStorage.getItem(EXPANDED_GROUPS_KEY)
-      if (!saved) return
-      const parsed = JSON.parse(saved) as string[]
+      const parsed = saved ? (JSON.parse(saved) as string[]) : []
       if (Array.isArray(parsed)) {
         setOpen(parsed.includes(group.id) || groupActive)
       }
     } catch {
-      // ignore invalid storage
+      // Ignore invalid local storage.
     }
   }, [group.id, groupActive])
 
@@ -106,7 +101,7 @@ function NavGroupItem({ group, pathname }: { group: NavGroup; pathname: string }
         : current.filter((id) => id !== group.id)
       localStorage.setItem(EXPANDED_GROUPS_KEY, JSON.stringify(next))
     } catch {
-      // ignore storage errors
+      // Ignore storage errors.
     }
   }
 
@@ -131,7 +126,7 @@ function NavGroupItem({ group, pathname }: { group: NavGroup; pathname: string }
       </CollapsibleTrigger>
 
       <CollapsibleContent className="data-[state=closed]:animate-accordion-up data-[state=open]:animate-accordion-down overflow-hidden">
-        <ul className="mt-1 space-y-0.5 border-l border-sidebar-border/70 pl-3 ml-5">
+        <ul className="mt-1 ml-5 space-y-0.5 border-l border-sidebar-border/70 pl-3">
           {group.children.map((child) => {
             const childActive = isPathActive(pathname, child.href)
             return (
@@ -198,7 +193,9 @@ export function AdminSidebar() {
 
         <div className="border-t border-sidebar-border p-4">
           <div className="flex items-center gap-3">
-            <div className="h-8 w-8 rounded-full bg-secondary" />
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-secondary text-xs font-semibold">
+              N
+            </div>
             <div className="flex-1">
               <p className="text-sm font-medium text-sidebar-foreground">管理员</p>
               <p className="text-xs text-muted-foreground">admin@ai.com</p>

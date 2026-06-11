@@ -33,6 +33,9 @@ public class VendorCodeResolver {
             Map.entry("bailian_happyhorse", "qwen"),
             Map.entry("ofox_openai_images", "openai_gateway"),
             Map.entry("openai_images_gateway", "openai_gateway"),
+            Map.entry("agnes_chat", "agnes"),
+            Map.entry("agnes_images", "agnes"),
+            Map.entry("agnes_video", "agnes"),
             Map.entry("worker_video", "siliconflow"),
             Map.entry("mineru", "mineru"),
             Map.entry("mock", "mock")
@@ -44,6 +47,7 @@ public class VendorCodeResolver {
         VENDOR_LABELS.put("deepseek", "DeepSeek");
         VENDOR_LABELS.put("openai", "OpenAI");
         VENDOR_LABELS.put("openai_gateway", "OpenAI 兼容网关");
+        VENDOR_LABELS.put("agnes", "Agnes AI");
         VENDOR_LABELS.put("google", "Google Gemini");
         VENDOR_LABELS.put("qwen", "阿里云百炼");
         VENDOR_LABELS.put("zhipu", "智谱 GLM");
@@ -143,6 +147,9 @@ public class VendorCodeResolver {
         if ("openai_gateway".equalsIgnoreCase(vendorCode)) {
             return "openrouter";
         }
+        if ("agnes".equalsIgnoreCase(vendorCode)) {
+            return "api";
+        }
         if ("volcengine".equalsIgnoreCase(vendorCode)) {
             return "doubao";
         }
@@ -184,6 +191,7 @@ public class VendorCodeResolver {
         if (text.contains("bigmodel.cn") || text.contains("zhipu")) return "zhipu";
         if (text.contains("moonshot.cn") || text.contains("kimi")) return "moonshot";
         if (text.contains("anthropic.com") || text.contains("claude")) return "anthropic";
+        if (text.contains("agnes-ai.com") || text.contains("apihub.agnes-ai.com")) return "agnes";
         if (text.contains("mineru.net") || text.contains("mineru")) return "mineru";
         if (text.contains("openai.com")) return "openai";
         if (text.contains("api.openai.com")) return "openai";
@@ -207,6 +215,7 @@ public class VendorCodeResolver {
         if (combined.contains("zhipu") || combined.contains("glm") || combined.contains("chatglm") || combined.contains("智谱")) return "zhipu";
         if (combined.contains("moonshot") || combined.contains("kimi")) return "moonshot";
         if (combined.contains("anthropic") || combined.contains("claude")) return "anthropic";
+        if (combined.contains("agnes") || combined.contains("apihub.agnes-ai.com")) return "agnes";
         if (combined.contains("mineru")) return "mineru";
         String fromUrl = inferFromBaseUrl(baseUrl);
         if (fromUrl != null) {

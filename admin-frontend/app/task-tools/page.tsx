@@ -1,7 +1,7 @@
 "use client"
 
-import { ToolManagementPage } from "@/app/tools/page"
+import { ToolManagementPage as AgentWorkflowManagementPage } from "@/app/tools/page"
 
 export default function AgentToolsPage() {
-  return <ToolManagementPage mode="agents" />
+  return <AgentWorkflowManagementPage mode="agents" />
 }

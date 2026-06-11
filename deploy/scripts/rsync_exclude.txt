@@ -19,3 +19,5 @@ venv/
 .env
 .env.local
 data/
+deploy/logs/deploy-history.log
+deploy/logs/last-deploy.*

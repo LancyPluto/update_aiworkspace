@@ -33,7 +33,7 @@ const showFeaturedBadge = computed(() => Boolean(props.asset.featured || props.a
 const featuredBadgeText = computed(() => (props.asset.pinned ? "置顶" : "精选"))
 const showCreator = computed(() => Boolean(props.gallery && props.source === "community" && props.asset.authorUserId))
 const creatorName = computed(
-  () => props.asset.authorName?.trim() || (props.asset.authorUserId ? `用户 ${props.asset.authorUserId}` : ""),
+  () => props.asset.authorName?.trim() || (props.asset.authorUserId ? `用户${props.asset.authorUserId}` : ""),
 )
 const subtitle = computed(() => props.asset.subtitle || props.asset.toolName || props.asset.toolCode || "")
 const previewText = computed(() => props.asset.rawText || props.asset.prompt || props.asset.title)
@@ -203,9 +203,9 @@ function openAuthorProfile() {
 
 <style scoped>
 .asset-card {
-  display: flex;
+  display: inline-block;
   width: 100%;
-  flex-direction: column;
+  break-inside: avoid;
   overflow: hidden;
   border: 1px solid rgb(255 255 255 / 0.08);
   border-radius: 24px;
@@ -244,7 +244,7 @@ function openAuthorProfile() {
   transform: translateY(-6px);
   background: rgb(255 255 255 / 0.04);
   box-shadow:
-    var(--profile-card-hover-shadow, 0 36px 88px rgb(0 0 0 / 0.48)),
+    0 36px 88px rgb(0 0 0 / 0.48),
     inset 0 1px 0 rgb(255 255 255 / 0.06);
 }
 

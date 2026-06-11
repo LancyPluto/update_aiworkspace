@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } fro
 import {
   Background,
   BackgroundVariant,
+  ConnectionMode,
   Controls,
   MarkerType,
   MiniMap,
@@ -16,7 +17,7 @@ import {
   useNodesState,
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
-import { Redo2, Save, Undo2 } from "lucide-react"
+import { CheckCircle2, History, Redo2, Rocket, Save, Undo2 } from "lucide-react"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -27,9 +28,18 @@ import type {
   WorkflowNode,
   WorkflowNodeData,
   WorkflowResponse,
+  WorkflowVersionItem,
 } from "@/lib/api/types"
 import { fetchToolFields, updateToolFields } from "@/lib/api/tools"
-import { fetchWorkflow, saveWorkflow } from "@/lib/api/workflows"
+import {
+  fetchWorkflow,
+  fetchWorkflowVersions,
+  publishWorkflow,
+  restoreWorkflowVersion,
+  saveWorkflow,
+  unpublishWorkflow,
+  validateWorkflow,
+} from "@/lib/api/workflows"
 import {
   editableFromToolField,
   toFieldPayload,
@@ -121,7 +131,31 @@ function modelLabel(model: AgentModelConfig): string {
   return model.displayName || model.configCode || model.modelName
 }
 
-const DIGITAL_HUMAN_FIELD_DRAFT: EditableField[] = [
+type EditableFieldDraft = Omit<
+  EditableField,
+  "executionRequired" | "userRequired" | "defaultValue" | "agentFillStrategy" | "riskLevel" | "isCore" | "uiMeta"
+> &
+  Partial<
+    Pick<
+      EditableField,
+      "executionRequired" | "userRequired" | "defaultValue" | "agentFillStrategy" | "riskLevel" | "isCore" | "uiMeta"
+    >
+  >
+
+function withFieldDefaults(field: EditableFieldDraft): EditableField {
+  return {
+    executionRequired: field.required,
+    userRequired: field.required,
+    defaultValue: "",
+    agentFillStrategy: field.required ? "ask_user" : "default",
+    riskLevel: "LOW",
+    isCore: false,
+    uiMeta: {},
+    ...field,
+  }
+}
+
+const DIGITAL_HUMAN_FIELD_DRAFT: EditableField[] = ([
   {
     fieldKey: "videoTopic",
     fieldName: "视频主题",
@@ -257,7 +291,90 @@ const DIGITAL_HUMAN_FIELD_DRAFT: EditableField[] = [
     sortOrder: 12,
     options: [],
   },
-]
+] satisfies EditableFieldDraft[]).map(withFieldDefaults)
+
+const COMIC_DRAMA_FIELD_DRAFT: EditableField[] = ([
+  {
+    fieldKey: "storyTheme",
+    fieldName: "漫剧主题",
+    fieldType: "text",
+    placeholder: "例如：穿越后我靠 AI 开店逆袭",
+    required: true,
+    sortOrder: 1,
+    options: [],
+  },
+  {
+    fieldKey: "genre",
+    fieldName: "题材类型",
+    fieldType: "select",
+    placeholder: "选择漫剧题材",
+    required: false,
+    sortOrder: 2,
+    options: [
+      { label: "都市逆袭", value: "都市逆袭" },
+      { label: "甜宠恋爱", value: "甜宠恋爱" },
+      { label: "悬疑反转", value: "悬疑反转" },
+      { label: "科幻脑洞", value: "科幻脑洞" },
+    ],
+  },
+  {
+    fieldKey: "plotOutline",
+    fieldName: "剧情梗概（可选）",
+    fieldType: "textarea",
+    placeholder: "留空则由大模型自动生成剧本与分镜",
+    required: false,
+    sortOrder: 3,
+    options: [],
+  },
+  {
+    fieldKey: "visualStyle",
+    fieldName: "画风风格",
+    fieldType: "select",
+    placeholder: "选择画面风格",
+    required: false,
+    sortOrder: 4,
+    options: [
+      { label: "电影感写实", value: "电影感写实" },
+      { label: "国漫厚涂", value: "国漫厚涂" },
+      { label: "日漫赛璐璐", value: "日漫赛璐璐" },
+      { label: "Q 版轻喜剧", value: "Q 版轻喜剧" },
+    ],
+  },
+  {
+    fieldKey: "aspectRatio",
+    fieldName: "画面比例",
+    fieldType: "select",
+    placeholder: "选择发布画幅",
+    required: false,
+    sortOrder: 5,
+    options: [
+      { label: "9:16 竖屏", value: "9:16 竖屏" },
+      { label: "16:9 横屏", value: "16:9 横屏" },
+      { label: "1:1 方形", value: "1:1 方形" },
+    ],
+  },
+  {
+    fieldKey: "resolution",
+    fieldName: "视频清晰度",
+    fieldType: "select",
+    placeholder: "480p 更快更省算力",
+    required: false,
+    sortOrder: 6,
+    options: [
+      { label: "480p", value: "480p" },
+      { label: "720p", value: "720p" },
+    ],
+  },
+  {
+    fieldKey: "referenceMaterial",
+    fieldName: "参考素材（可选）",
+    fieldType: "textarea",
+    placeholder: "参考作品、角色设定、禁用元素等",
+    required: false,
+    sortOrder: 7,
+    options: [],
+  },
+] satisfies EditableFieldDraft[]).map(withFieldDefaults)
 
 function cloneFields(fields: EditableField[]): EditableField[] {
   return fields.map((field) => ({
@@ -284,6 +401,17 @@ function slotsFromFields(fields: EditableField[]): WorkflowSlot[] {
 function isDigitalHumanTool(tool?: ToolSummary | null): boolean {
   const marker = `${tool?.executionHandler || ""} ${tool?.toolType || ""} ${tool?.toolCode || ""}`.toUpperCase()
   return marker.includes("DIGITAL_HUMAN") || marker.includes("DIGITAL-HUMAN")
+}
+
+function isComicDramaTool(tool?: ToolSummary | null): boolean {
+  const marker = `${tool?.executionHandler || ""} ${tool?.toolType || ""} ${tool?.toolCode || ""}`.toUpperCase()
+  return marker.includes("COMIC") || marker.includes("DRAMA") || tool?.toolCode === "ai_comic_drama_agent"
+}
+
+function isWorkflowAgentTool(tool?: ToolSummary | null): boolean {
+  if (isComicDramaTool(tool) || isDigitalHumanTool(tool)) return true
+  const handler = String(tool?.executionHandler || "").toUpperCase()
+  return handler.includes("WORKFLOW")
 }
 
 function hasDigitalHumanFields(fields: EditableField[]): boolean {
@@ -338,7 +466,7 @@ function createWorkflowEdge(
   const targetName = targetSlot?.name || firstSlotName(targetSlots, "input")
 
   return {
-    id: `e-${source.id}-out-${sourceName}-${target.id}-in-${targetName}`,
+    id: `e-${source.id}-out-${sourceName}-${target.id}-in-${targetName}-${randomId()}`,
     source: source.id,
     target: target.id,
     sourceHandle: `out-${sourceName}`,
@@ -349,11 +477,45 @@ function createWorkflowEdge(
     data: sourceSlot
       ? {
           sourceParam: sourceSlot,
-          targetParam: { ...sourceSlot },
-          mapping: { from: sourceSlot.name, to: sourceSlot.name, modality: sourceSlot.type },
+          targetParam: targetSlot || { ...sourceSlot },
+          mapping: {
+            from: sourceSlot.name,
+            to: targetSlot?.name || targetName,
+            modality: sourceSlot.type,
+          },
         }
       : undefined,
   }
+}
+
+/** Repair UTF-8 mojibake when JDBC/API mis-decodes Chinese labels (e.g. ä¼šè¯ → 会话). */
+function repairUtf8Mojibake(text: string): string {
+  if (!text || !/[äåèæÃ]/.test(text)) return text
+  try {
+    const bytes = Uint8Array.from(text, (char) => char.charCodeAt(0) & 0xff)
+    const repaired = new TextDecoder("utf-8").decode(bytes)
+    if (/[\u4e00-\u9fff]/.test(repaired) && !repaired.includes("\uFFFD")) {
+      return repaired
+    }
+  } catch {
+    // ignore
+  }
+  return text
+}
+
+function repairWorkflowValue<T>(value: T): T {
+  if (typeof value === "string") {
+    return repairUtf8Mojibake(value) as T
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => repairWorkflowValue(item)) as T
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, repairWorkflowValue(item)]),
+    ) as T
+  }
+  return value
 }
 
 function ensureNodeSlots(node: WFNode): WFNode {
@@ -386,8 +548,11 @@ function normalizeWorkflowEdges(nodes: WFNode[], edges: WFEdge[]): WFEdge[] {
       ? edge.targetHandle.replace(/^in-/, "")
       : firstSlotName(targetSlots, "input")
 
+    const resolvedTargetSlot = targetSlots.find((slot) => slot.name === targetName) || edge.data?.targetParam
+
     return {
       ...edge,
+      id: edge.id || `e-${edge.source}-out-${sourceName}-${edge.target}-in-${targetName}-${randomId()}`,
       type: edge.type || "smoothstep",
       sourceHandle: `out-${sourceName}`,
       targetHandle: `in-${targetName}`,
@@ -396,12 +561,25 @@ function normalizeWorkflowEdges(nodes: WFNode[], edges: WFEdge[]): WFEdge[] {
       data: {
         ...(edge.data || {}),
         sourceParam: sourceSlot || edge.data?.sourceParam,
-        targetParam: sourceSlot ? { ...sourceSlot, name: targetName } : edge.data?.targetParam,
+        targetParam: resolvedTargetSlot,
         mapping: sourceSlot
           ? { from: sourceSlot.name, to: targetName, modality: sourceSlot.type }
           : edge.data?.mapping,
       },
     }
+  })
+}
+
+function dedupeEdgeIds(edges: WFEdge[]): WFEdge[] {
+  const seen = new Set<string>()
+  return edges.map((edge) => {
+    if (!seen.has(edge.id)) {
+      seen.add(edge.id)
+      return edge
+    }
+    const nextId = `${edge.id}-${randomId()}`
+    seen.add(nextId)
+    return { ...edge, id: nextId }
   })
 }
 
@@ -412,7 +590,7 @@ function apiToReactFlow(workflow: WorkflowResponse): {
 } {
   try {
     return {
-      nodes: (JSON.parse(workflow.nodesJson || "[]") as WFNode[]).map(ensureNodeSlots),
+      nodes: repairWorkflowValue(JSON.parse(workflow.nodesJson || "[]") as WFNode[]).map(ensureNodeSlots),
       edges: JSON.parse(workflow.edgesJson || "[]"),
       groups: workflow.groupsJson ? JSON.parse(workflow.groupsJson) : [],
     }
@@ -695,7 +873,229 @@ function buildSimplifiedDefaultWorkflow(
   }
 }
 
+function userInputNode(
+  id: string,
+  position: { x: number; y: number },
+  options: { title: string; fieldKey: string; stageLabel: string },
+): WFNode {
+  const def = NODE_TYPE_MAP.get("user_input")
+  if (!def) throw new Error("user_input node type is missing")
+  return {
+    ...createNodeFromDef(def, position, {
+      title: options.title,
+      detail: `用户在工作台填写「${options.stageLabel}」，留空则沿用上一步结果。`,
+      kind: "input",
+      nodeDefType: "user_input",
+      inputSlots: [{ name: "upstream", type: "any", label: "上一步结果" }],
+      outputSlots: [{ name: options.fieldKey, type: "text", label: options.stageLabel }],
+      parameters: { fieldKey: options.fieldKey, stageLabel: options.stageLabel },
+    }),
+    id,
+  }
+}
+
+function buildComicDramaDefaultWorkflow(
+  tool?: ToolSummary | null,
+  modelConfigs: AgentModelConfig[] = [],
+): { nodes: WFNode[]; edges: WFEdge[] } {
+  const fieldSlots = slotsFromFields(COMIC_DRAMA_FIELD_DRAFT)
+  const textModelId = findModelConfigId(modelConfigs, "text_generation")
+  const imageModelId = findModelConfigId(modelConfigs, "image_generation")
+  const ttsModelId = findModelConfigId(modelConfigs, "text_to_speech")
+  const videoModelId = findModelConfigId(modelConfigs, "video_generation")
+
+  const start = fixedNode("start", "start", { x: 40, y: 280 }, {
+    title: "Start",
+    detail: `当前工具：${tool?.toolName || "AI 漫剧"}`,
+    outputSlots: [{ name: "context", type: "json", label: "会话上下文" }],
+  })
+  const input = fixedNode("field-input", "field_input", { x: 400, y: 280 }, {
+    title: "初始表单",
+    detail: "用户首次提交的主题、画风、比例等参数。",
+    inputSlots: [{ name: "context", type: "json", label: "会话上下文" }],
+    outputSlots: [{ name: "params", type: "json", label: "用户填写参数" }, ...fieldSlots],
+  })
+  const scriptPlanner = fixedNode("script-planner", "llm_text", { x: 780, y: 280 }, {
+    title: "剧本与分镜",
+    detail: "大模型根据初始表单生成剧本与分镜 JSON。",
+    inputSlots: [{ name: "form", type: "json", label: "初始表单" }],
+    outputSlots: [{ name: "script", type: "json", label: "剧本分镜" }],
+    parameters: {
+      modelConfigId: textModelId,
+      role: "comic_script_planner",
+      progressStep: "生成剧本与分镜",
+    },
+  })
+  const scriptFeedback = userInputNode("user-input-script", { x: 1140, y: 60 }, {
+    title: "脚本意见",
+    fieldKey: "scriptFeedback",
+    stageLabel: "脚本意见",
+  })
+  const storyboardFeedback = userInputNode("user-input-storyboard", { x: 1140, y: 280 }, {
+    title: "分镜意见",
+    fieldKey: "storyboardFeedback",
+    stageLabel: "分镜意见",
+  })
+  const keyframe = fixedNode("keyframe", "image_model", { x: 1500, y: 280 }, {
+    title: "电影感关键帧",
+    detail: "根据剧本分镜生成关键帧图片。",
+    inputSlots: [
+      { name: "script", type: "json", label: "剧本分镜" },
+      { name: "form", type: "json", label: "表单参数" },
+    ],
+    outputSlots: [{ name: "keyframe", type: "image", label: "关键帧" }],
+    parameters: { modelConfigId: imageModelId, progressStep: "生成电影感关键帧" },
+  })
+  const sceneFeedback = userInputNode("user-input-scene", { x: 1860, y: 60 }, {
+    title: "场景图意见",
+    fieldKey: "sceneFeedback",
+    stageLabel: "场景图意见",
+  })
+  const tts = fixedNode("tts", "tts_model", { x: 1860, y: 420 }, {
+    title: "角色配音",
+    detail: "根据对白生成 TTS 音频。",
+    inputSlots: [{ name: "script", type: "json", label: "剧本分镜" }],
+    outputSlots: [{ name: "audio", type: "audio", label: "配音音频" }],
+    parameters: { modelConfigId: ttsModelId, progressStep: "生成角色配音" },
+  })
+  const bgmFeedback = userInputNode("user-input-bgm", { x: 2220, y: 60 }, {
+    title: "BGM 意见",
+    fieldKey: "bgmFeedback",
+    stageLabel: "BGM 意见",
+  })
+  const clipVideo = fixedNode("clip-video", "video_model", { x: 2220, y: 420 }, {
+    title: "图生视频",
+    detail: "根据关键帧生成视频片段。",
+    inputSlots: [
+      { name: "keyframe", type: "image", label: "关键帧" },
+      { name: "script", type: "json", label: "剧本分镜" },
+    ],
+    outputSlots: [{ name: "clip", type: "video", label: "视频片段" }],
+    parameters: { modelConfigId: videoModelId, progressStep: "图生视频" },
+  })
+  const compose = fixedNode("compose", "subtitle", { x: 2580, y: 280 }, {
+    title: "字幕合成",
+    detail: "合并配音、视频片段并烧录字幕。",
+    inputSlots: [
+      { name: "clip", type: "video", label: "视频片段" },
+      { name: "audio", type: "audio", label: "配音音频" },
+      { name: "script", type: "json", label: "剧本分镜" },
+    ],
+    outputSlots: [{ name: "finalVideo", type: "video", label: "成片" }],
+    parameters: { progressStep: "字幕与音视频合成" },
+  })
+  const outputNode = fixedNode("output", "video_output", { x: 2940, y: 280 }, {
+    title: "成片输出",
+    detail: "用户侧播放最终漫剧视频。",
+    inputSlots: [{ name: "finalVideo", type: "video", label: "成片" }],
+    parameters: { displayMode: "video" },
+  })
+
+  const nodes = [
+    start,
+    input,
+    scriptPlanner,
+    scriptFeedback,
+    storyboardFeedback,
+    keyframe,
+    sceneFeedback,
+    tts,
+    bgmFeedback,
+    clipVideo,
+    compose,
+    outputNode,
+  ]
+
+  return {
+    nodes,
+    edges: compactEdges([
+      connectNodes(start, input, { source: "context", target: "context" }),
+      connectNodes(input, scriptPlanner, { source: "params", target: "form" }),
+      connectNodes(scriptPlanner, scriptFeedback, { source: "script", target: "upstream" }),
+      connectNodes(scriptPlanner, storyboardFeedback, { source: "script", target: "upstream" }),
+      connectNodes(storyboardFeedback, keyframe, { source: "storyboardFeedback", target: "script" }),
+      connectNodes(input, keyframe, { source: "params", target: "form" }),
+      connectNodes(keyframe, sceneFeedback, { source: "keyframe", target: "upstream" }),
+      connectNodes(scriptPlanner, tts, { source: "script", target: "script" }),
+      connectNodes(tts, bgmFeedback, { source: "audio", target: "upstream" }),
+      connectNodes(keyframe, clipVideo, { source: "keyframe", target: "keyframe" }),
+      connectNodes(scriptPlanner, clipVideo, { source: "script", target: "script" }),
+      connectNodes(clipVideo, compose, { source: "clip", target: "clip" }),
+      connectNodes(tts, compose, { source: "audio", target: "audio" }),
+      connectNodes(scriptPlanner, compose, { source: "script", target: "script" }),
+      connectNodes(compose, outputNode, { source: "finalVideo", target: "finalVideo" }),
+    ]),
+  }
+}
+
+function isLegacySimplifiedComicWorkflow(nodes: WFNode[]): boolean {
+  const types = new Set(nodes.map((node) => String(getNodeDef(node.data)?.type || node.data.nodeDefType || "")))
+  return types.has("prompt_template") && types.has("llm_model") && nodes.length <= 6
+}
+
+function shouldReloadComicWorkflow(tool: ToolSummary | null | undefined, nodes: WFNode[]): boolean {
+  if (!isComicDramaTool(tool)) return false
+  if (nodes.length === 0) return true
+  if (isLegacySimplifiedComicWorkflow(nodes)) return true
+  const opinionNodeIds = ["user-input-script", "user-input-storyboard", "user-input-scene", "user-input-bgm"]
+  return !opinionNodeIds.every((id) => nodes.some((node) => node.id === id))
+}
+
+function hasGarbledWorkflowText(nodes: WFNode[]): boolean {
+  const text = nodes
+    .map((node) => {
+      const data = node.data || {}
+      const slotText = [...(data.inputSlots || []), ...(data.outputSlots || [])]
+        .map((slot) => slot.label)
+        .join(" ")
+      return `${data.title || ""} ${slotText}`
+    })
+    .join(" ")
+  if (/[äåèæÃ]|u610f/i.test(text)) return true
+  return nodes.some((node) => {
+    const title = String(node.data?.title || "")
+    return title && title !== "Start" && !/[\u4e00-\u9fff]/.test(title)
+  })
+}
+
+/** Keep saved positions/model ids, restore Chinese labels from in-repo template. */
+function mergeComicWorkflowWithTemplate(
+  savedNodes: WFNode[],
+  savedEdges: WFEdge[],
+  tool?: ToolSummary | null,
+  modelConfigs: AgentModelConfig[] = [],
+): { nodes: WFNode[]; edges: WFEdge[] } {
+  const template = buildComicDramaDefaultWorkflow(tool, modelConfigs)
+  const templateById = new Map(template.nodes.map((node) => [node.id, node]))
+  // 以管理员保存的节点为准（标题/槽位/新增节点都保留），模板只用于补齐缺失的元数据，避免每次加载覆盖管理员编辑
+  const nodes = savedNodes.map((saved) => {
+    const templateNode = templateById.get(saved.id)
+    if (!templateNode) return saved
+    return {
+      ...saved,
+      data: {
+        ...templateNode.data,
+        ...saved.data,
+        inputSlots: saved.data.inputSlots?.length ? saved.data.inputSlots : templateNode.data.inputSlots,
+        outputSlots: saved.data.outputSlots?.length ? saved.data.outputSlots : templateNode.data.outputSlots,
+        parameters: {
+          ...templateNode.data.parameters,
+          ...saved.data.parameters,
+        },
+      },
+    }
+  })
+  const edges =
+    savedEdges.length > 0
+      ? dedupeEdgeIds(normalizeWorkflowEdges(nodes, savedEdges))
+      : template.edges
+  return { nodes, edges }
+}
+
 function buildDefaultWorkflow(tool?: ToolSummary | null, modelConfigs: AgentModelConfig[] = []): { nodes: WFNode[]; edges: WFEdge[] } {
+  if (isComicDramaTool(tool)) {
+    return buildComicDramaDefaultWorkflow(tool, modelConfigs)
+  }
   return buildSimplifiedDefaultWorkflow(tool, modelConfigs)
 
   const marker = `${tool?.executionHandler || tool?.toolType || tool?.toolCode || ""}`.toUpperCase()
@@ -866,8 +1266,9 @@ function buildDefaultWorkflow(tool?: ToolSummary | null, modelConfigs: AgentMode
 }
 
 function shouldUseDigitalHumanDefault(tool: ToolSummary | null | undefined, nodes: WFNode[]): boolean {
-  void tool
+  if (isComicDramaTool(tool)) return shouldReloadComicWorkflow(tool, nodes)
   if (nodes.length === 0) return true
+  if (!isDigitalHumanTool(tool)) return false
   const nodeTypes = nodes.map((node) => getNodeDef(node.data)?.type || node.data.nodeDefType || node.data.kind)
   const allowed = new Set(["field_input", "prompt_template", "llm_model", "backend_tool", "final_output"])
   return nodeTypes.some((type) => !allowed.has(String(type)))
@@ -906,18 +1307,17 @@ function applyConnectionMapping(nodes: WFNode[], connection: Connection) {
   const targetNode = nodes.find((node) => node.id === connection.target)
   const sourceSlot = findSlotByHandle(sourceNode, "outputSlots", connection.sourceHandle)
   const targetSlot = findSlotByHandle(targetNode, "inputSlots", connection.targetHandle)
-  if (!sourceNode || !targetNode || !sourceSlot || !targetSlot) {
-    return { nodes, sourceSlot, targetSlot }
-  }
+  return { nodes, sourceSlot, targetSlot }
+}
 
-  const nextNodes = nodes.map((node) => {
-    if (node.id !== targetNode.id) return node
-    const inputSlots = getNodeSlots(targetNode, "inputSlots").map((slot) =>
-      slot.name === targetSlot.name ? { ...sourceSlot } : slot,
-    )
-    return { ...node, data: { ...node.data, inputSlots } }
-  })
-  return { nodes: nextNodes, sourceSlot, targetSlot: { ...sourceSlot } }
+function isDuplicateConnection(edges: WFEdge[], connection: Connection): boolean {
+  return edges.some(
+    (edge) =>
+      edge.source === connection.source &&
+      edge.target === connection.target &&
+      edge.sourceHandle === connection.sourceHandle &&
+      edge.targetHandle === connection.targetHandle,
+  )
 }
 
 function isPositionChange(change: WFNodeChange): boolean {
@@ -941,9 +1341,17 @@ export function WorkflowCanvas({
   const [saveStatus, setSaveStatus] = useState<"idle" | "saved" | "error">("idle")
   const [loading, setLoading] = useState(true)
   const [workflowVersion, setWorkflowVersion] = useState(0)
+  const [workflowStatus, setWorkflowStatus] = useState<string>("DRAFT")
+  const [publishing, setPublishing] = useState(false)
+  const [versionsOpen, setVersionsOpen] = useState(false)
+  const [versions, setVersions] = useState<WorkflowVersionItem[]>([])
+  const [versionsLoading, setVersionsLoading] = useState(false)
+  const [restoringVersion, setRestoringVersion] = useState<number | null>(null)
   const [fieldDraft, setFieldDraft] = useState<EditableField[]>([])
   const [fieldSaving, setFieldSaving] = useState(false)
   const [fieldError, setFieldError] = useState<string | null>(null)
+  const [inspectorWidth, setInspectorWidth] = useState(360)
+  const inspectorResizeRef = useRef<{ startX: number; startWidth: number } | null>(null)
   const dragSnapshotTakenRef = useRef(false)
 
   const { pushSnapshot, undo, redo, canUndo, canRedo, clear } = useUndoRedo()
@@ -986,12 +1394,17 @@ export function WorkflowCanvas({
           loadedNodes = defaults.nodes
           loadedEdges = defaults.edges
           loadedGroups = []
+        } else if (isComicDramaTool(tool)) {
+          const merged = mergeComicWorkflowWithTemplate(loadedNodes, loadedEdges, tool, modelConfigs)
+          loadedNodes = merged.nodes
+          loadedEdges = merged.edges
         }
-        loadedEdges = normalizeWorkflowEdges(loadedNodes, loadedEdges)
+        loadedEdges = dedupeEdgeIds(normalizeWorkflowEdges(loadedNodes, loadedEdges))
         setNodes(loadedNodes)
         setEdges(loadedEdges)
         setGroups(loadedGroups)
         setWorkflowVersion(workflow.version)
+        setWorkflowStatus(workflow.status || "DRAFT")
         clear()
       })
       .catch(() => {
@@ -1013,11 +1426,19 @@ export function WorkflowCanvas({
         setFieldDraft(
           isDigitalHumanTool(tool) && !hasDigitalHumanFields(draft)
             ? cloneFields(DIGITAL_HUMAN_FIELD_DRAFT)
-            : draft,
+            : isComicDramaTool(tool) && draft.length === 0
+              ? cloneFields(COMIC_DRAMA_FIELD_DRAFT)
+              : draft,
         )
       })
       .catch(() => {
-        setFieldDraft(isDigitalHumanTool(tool) ? cloneFields(DIGITAL_HUMAN_FIELD_DRAFT) : [])
+        setFieldDraft(
+          isDigitalHumanTool(tool)
+            ? cloneFields(DIGITAL_HUMAN_FIELD_DRAFT)
+            : isComicDramaTool(tool)
+              ? cloneFields(COMIC_DRAMA_FIELD_DRAFT)
+              : [],
+        )
         setFieldError("字段配置加载失败")
       })
   }, [toolId, tool])
@@ -1029,13 +1450,22 @@ export function WorkflowCanvas({
 
   useEffect(() => {
     if (fieldDraft.length === 0) return
-    const outputSlots = slotsFromFields(fieldDraft)
+    const fieldSlots = slotsFromFields(fieldDraft)
     setNodes((current: WFNode[]) =>
-      current.map((node) =>
-        getNodeDef(node.data)?.type === "field_input"
-          ? { ...node, data: { ...node.data, outputSlots } }
-          : node,
-      ),
+      current.map((node) => {
+        if (getNodeDef(node.data)?.type !== "field_input") return node
+        const existing = node.data.outputSlots || []
+        const paramsSlot = existing.find((slot) => slot.name === "params") || {
+          name: "params",
+          type: "json",
+          label: "用户填写参数",
+        }
+        const merged = [
+          paramsSlot,
+          ...fieldSlots.filter((slot) => slot.name !== "params"),
+        ]
+        return { ...node, data: { ...node.data, outputSlots: merged } }
+      }),
     )
   }, [fieldDraft, setNodes])
 
@@ -1078,25 +1508,108 @@ export function WorkflowCanvas({
     })
   }, [nodes, modelConfigs])
 
-  const doSave = useCallback(async () => {
+  const doSave = useCallback(async (): Promise<boolean> => {
     setSaving(true)
     setSaveStatus("idle")
     try {
-      await saveWorkflow(toolId, {
+      // 不传 status：保存内容时保持现有 DRAFT/PUBLISHED 状态不变，发布与否由“发布/下线”按钮单独控制
+      const saved = await saveWorkflow(toolId, {
         workflowName: toolName || "default",
         nodesJson: JSON.stringify(nodes),
         edgesJson: JSON.stringify(edges),
         groupsJson: groups.length > 0 ? JSON.stringify(groups) : undefined,
-        status: "DRAFT",
       })
+      setWorkflowVersion(saved.version)
+      setWorkflowStatus(saved.status || "DRAFT")
       setSaveStatus("saved")
       setTimeout(() => setSaveStatus("idle"), 2000)
+      return true
     } catch {
       setSaveStatus("error")
+      return false
     } finally {
       setSaving(false)
     }
   }, [toolId, toolName, nodes, edges, groups])
+
+  const doPublish = useCallback(async () => {
+    setPublishing(true)
+    try {
+      const saved = await doSave()
+      if (!saved) {
+        toast.error("保存失败，已取消发布")
+        return
+      }
+      const validation = await validateWorkflow(toolId)
+      if (!validation.valid) {
+        toast.error(`工作流校验未通过：${validation.errors.join("；")}`)
+        return
+      }
+      const published = await publishWorkflow(toolId)
+      setWorkflowStatus(published.status || "PUBLISHED")
+      setWorkflowVersion(published.version)
+      toast.success("工作流已发布，用户任务将按当前 DAG 执行")
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "发布失败")
+    } finally {
+      setPublishing(false)
+    }
+  }, [doSave, toolId])
+
+  const doUnpublish = useCallback(async () => {
+    setPublishing(true)
+    try {
+      const result = await unpublishWorkflow(toolId)
+      setWorkflowStatus(result.status || "DRAFT")
+      toast.success("工作流已下线（DRAFT），任务将回退到工具默认执行方式")
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "下线失败")
+    } finally {
+      setPublishing(false)
+    }
+  }, [toolId])
+
+  const loadVersions = useCallback(async () => {
+    setVersionsLoading(true)
+    try {
+      setVersions(await fetchWorkflowVersions(toolId, 1, 20))
+    } catch {
+      setVersions([])
+    } finally {
+      setVersionsLoading(false)
+    }
+  }, [toolId])
+
+  const toggleVersions = useCallback(() => {
+    setVersionsOpen((open) => {
+      const next = !open
+      if (next) void loadVersions()
+      return next
+    })
+  }, [loadVersions])
+
+  const doRestoreVersion = useCallback(
+    async (version: number) => {
+      setRestoringVersion(version)
+      try {
+        const restored = await restoreWorkflowVersion(toolId, version)
+        const { nodes: restoredNodes, edges: restoredEdges, groups: restoredGroups } = apiToReactFlow(restored)
+        setNodes(restoredNodes)
+        setEdges(dedupeEdgeIds(normalizeWorkflowEdges(restoredNodes, restoredEdges)))
+        setGroups(restoredGroups)
+        setWorkflowVersion(restored.version)
+        setWorkflowStatus(restored.status || "DRAFT")
+        clear()
+        toast.success(`已恢复到 v${version}（生成新版本 v${restored.version}）`)
+        void loadVersions()
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "恢复版本失败")
+      } finally {
+        setRestoringVersion(null)
+      }
+    },
+    [toolId, setNodes, setEdges, clear, loadVersions],
+  )
 
   const handleUndo = useCallback(() => {
     const snapshot = undo()
@@ -1153,26 +1666,42 @@ export function WorkflowCanvas({
     [reactFlowInstance, addNode],
   )
 
+  const isValidConnection = useCallback(
+    (connection: Connection | WFEdge) =>
+      canConnectBySlot(nodes, {
+        source: connection.source ?? null,
+        target: connection.target ?? null,
+        sourceHandle: connection.sourceHandle ?? null,
+        targetHandle: connection.targetHandle ?? null,
+      } as Connection),
+    [nodes],
+  )
+
   const onConnect = useCallback(
     (connection: Connection) => {
       if (!connection.source || !connection.target) return
       if (!canConnectBySlot(nodes, connection)) {
         toast.error("无法建立连线", {
-          description: "输出/输入参数不匹配，或目标节点没有可用的输入槽位。",
+          description: "输出/输入参数类型不匹配，请换一个空闲入口/出口。",
         })
+        return
+      }
+      if (isDuplicateConnection(edges, connection)) {
+        toast.error("连线已存在", { description: "同一对入口/出口只能连一条线。" })
         return
       }
       pushChange()
 
-      const { nodes: mappedNodes, sourceSlot, targetSlot } = applyConnectionMapping(nodes, connection)
-      const nextTargetHandle = targetSlot ? `in-${targetSlot.name}` : connection.targetHandle
-      setNodes(mappedNodes)
+      const { sourceSlot, targetSlot } = applyConnectionMapping(nodes, connection)
+      const targetHandle =
+        connection.targetHandle || (targetSlot ? `in-${targetSlot.name}` : undefined) || undefined
+      const edgeId = `e-${connection.source}-${connection.sourceHandle}-${connection.target}-${targetHandle}-${randomId()}`
       setEdges((current: WFEdge[]) => [
         ...current,
         {
           ...connection,
-          targetHandle: nextTargetHandle,
-          id: `e-${connection.source}-${connection.sourceHandle}-${connection.target}-${nextTargetHandle}`,
+          targetHandle,
+          id: edgeId,
           type: "smoothstep",
           markerEnd: { type: MarkerType.ArrowClosed, color: "#64748b" },
           style: { stroke: "#64748b", strokeWidth: 2.2 },
@@ -1180,13 +1709,17 @@ export function WorkflowCanvas({
             ? {
                 sourceParam: sourceSlot,
                 targetParam: targetSlot,
-                mapping: { from: sourceSlot.name, to: targetSlot?.name || sourceSlot.name, modality: sourceSlot.type },
+                mapping: {
+                  from: sourceSlot.name,
+                  to: targetSlot?.name || sourceSlot.name,
+                  modality: sourceSlot.type,
+                },
               }
             : undefined,
         } as WFEdge,
       ])
     },
-    [nodes, pushChange, setNodes, setEdges],
+    [nodes, edges, pushChange, setEdges],
   )
 
   const deleteEdge = useCallback(
@@ -1305,8 +1838,14 @@ export function WorkflowCanvas({
     )
   }
 
+  const isPublished = workflowStatus === "PUBLISHED"
+
   const toolbar = (
     <div className="flex flex-wrap items-center gap-2">
+      <Badge variant={isPublished ? "default" : "secondary"} className="gap-1 text-xs">
+        {isPublished ? <CheckCircle2 className="h-3 w-3" /> : null}
+        {isPublished ? "已发布" : "草稿"}
+      </Badge>
       <Badge
         variant={saveStatus === "saved" ? "default" : saveStatus === "error" ? "destructive" : "outline"}
         className="text-xs"
@@ -1316,6 +1855,21 @@ export function WorkflowCanvas({
       <Button type="button" size="sm" variant="outline" className="gap-1.5 text-xs" onClick={doSave} disabled={saving}>
         <Save className="h-3.5 w-3.5" />
         {saving ? "保存中..." : "保存"}
+      </Button>
+      <Button
+        type="button"
+        size="sm"
+        className="gap-1.5 text-xs"
+        onClick={isPublished ? doUnpublish : doPublish}
+        disabled={publishing || saving}
+        variant={isPublished ? "outline" : "default"}
+      >
+        <Rocket className="h-3.5 w-3.5" />
+        {publishing ? "处理中..." : isPublished ? "下线" : "发布"}
+      </Button>
+      <Button type="button" size="sm" variant="outline" className="gap-1.5 text-xs" onClick={toggleVersions}>
+        <History className="h-3.5 w-3.5" />
+        版本
       </Button>
       <Button type="button" size="sm" variant="outline" className="gap-1.5 text-xs" onClick={handleUndo} disabled={!canUndo}>
         <Undo2 className="h-3.5 w-3.5" />
@@ -1328,14 +1882,54 @@ export function WorkflowCanvas({
     </div>
   )
 
+  const versionsPanel = versionsOpen ? (
+    <div className="mb-2 rounded-lg border border-border bg-card p-3">
+      <div className="mb-2 flex items-center justify-between">
+        <p className="text-xs font-medium text-foreground">版本历史（恢复会生成新版本，不会丢失当前内容）</p>
+        <Button type="button" size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => setVersionsOpen(false)}>
+          收起
+        </Button>
+      </div>
+      {versionsLoading ? (
+        <p className="text-xs text-muted-foreground">正在加载版本列表...</p>
+      ) : versions.length === 0 ? (
+        <p className="text-xs text-muted-foreground">暂无历史版本（首次保存后产生）</p>
+      ) : (
+        <ul className="max-h-44 space-y-1 overflow-y-auto">
+          {versions.map((item) => (
+            <li key={item.id} className="flex items-center justify-between gap-2 rounded-md border border-border/60 px-2 py-1.5">
+              <div className="min-w-0 text-xs">
+                <span className="font-medium">v{item.version}</span>
+                <span className="ml-2 text-muted-foreground">
+                  {item.snapshotLabel || "快照"} · {item.createdAt?.replace("T", " ").slice(0, 19) || "--"}
+                </span>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-6 px-2 text-xs"
+                disabled={restoringVersion !== null}
+                onClick={() => void doRestoreVersion(item.version)}
+              >
+                {restoringVersion === item.version ? "恢复中..." : "恢复"}
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  ) : null
+
   const canvas = (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <p className="max-w-3xl text-xs leading-5 text-muted-foreground">
-          当前画布用于描述这个工具的执行流程。每个块可以维护输入/输出参数和模态；连线会把源输出参数覆盖到目标输入参数。
+          当前画布用于描述工具执行流程。连线表示数据流向；每个入口/出口保持独立 ID，可自由重连。保存仅更新内容，需点击“发布”后用户任务才会按当前 DAG 执行。
         </p>
         {toolbar}
       </div>
+      {versionsPanel}
 
       <div
         className="flex-1 overflow-hidden rounded-lg border border-border bg-card"
@@ -1347,6 +1941,8 @@ export function WorkflowCanvas({
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
+          isValidConnection={isValidConnection}
+          connectionMode={ConnectionMode.Loose}
           onNodeClick={(_event, node) => setSelectedNodeId(node.id)}
           onEdgeClick={(_event, edge) => {
             setSelectedEdgeId(edge.id)
@@ -1435,25 +2031,51 @@ export function WorkflowCanvas({
 
   const palette = (
     <div className="w-[250px] shrink-0 overflow-hidden rounded-lg border border-border bg-card">
-      <NodePalette onDragStart={handlePaletteDragStart} onAddNode={addNode} />
+      <NodePalette tool={tool} onDragStart={handlePaletteDragStart} onAddNode={addNode} />
     </div>
   )
 
   const inspector = (
-    <div className="w-[320px] shrink-0 overflow-hidden rounded-lg border border-border bg-card">
-      <InspectorPanel
-        node={selectedWorkflowNode}
-        modelConfigs={modelConfigs}
-        onUpdate={handleInspectorUpdate}
-        onDelete={deleteNode}
-        onDuplicate={duplicateNode}
-        fieldDraft={fieldDraft}
-        fieldSaving={fieldSaving}
-        fieldError={fieldError}
-        onFieldDraftChange={setFieldDraft}
-        onSaveFields={handleSaveFields}
-        canDelete={selectedNodeDef ? selectedNodeDef.type !== "start" : false}
-      />
+    <div className="relative flex shrink-0" style={{ width: inspectorWidth }}>
+      <button
+        type="button"
+        aria-label="拖拽调整节点属性面板宽度"
+        className="absolute -left-1.5 top-0 z-10 h-full w-3 cursor-col-resize border-0 bg-transparent p-0"
+        onMouseDown={(event) => {
+          inspectorResizeRef.current = { startX: event.clientX, startWidth: inspectorWidth }
+          const onMove = (moveEvent: MouseEvent) => {
+            const snapshot = inspectorResizeRef.current
+            if (!snapshot) return
+            const next = snapshot.startWidth - (moveEvent.clientX - snapshot.startX)
+            setInspectorWidth(Math.min(720, Math.max(280, next)))
+          }
+          const onUp = () => {
+            inspectorResizeRef.current = null
+            window.removeEventListener("mousemove", onMove)
+            window.removeEventListener("mouseup", onUp)
+          }
+          window.addEventListener("mousemove", onMove)
+          window.addEventListener("mouseup", onUp)
+        }}
+      >
+        <span className="mx-auto block h-10 w-1 rounded-full bg-border" />
+      </button>
+      <div className="h-full flex-1 overflow-hidden rounded-lg border border-border bg-card">
+        <InspectorPanel
+          node={selectedWorkflowNode}
+          modelConfigs={modelConfigs}
+          onUpdate={handleInspectorUpdate}
+          onDelete={deleteNode}
+          onDuplicate={duplicateNode}
+          fieldDraft={fieldDraft}
+          fieldSaving={fieldSaving}
+          fieldError={fieldError}
+          onFieldDraftChange={setFieldDraft}
+          onSaveFields={handleSaveFields}
+          enableFieldEditor={!isWorkflowAgentTool(tool)}
+          canDelete={selectedNodeDef ? selectedNodeDef.type !== "start" : false}
+        />
+      </div>
     </div>
   )
 

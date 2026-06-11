@@ -3,10 +3,10 @@
  */
 export const userRoutes = {
   get login() {
-    return { name: "Login" }
+    return { name: "RootLogin" }
   },
   get dashboard() {
-    return { name: "Dashboard" }
+    return { name: "CreatorWorkspace" }
   },
   get agent() {
     return { name: "AgentHome" }
@@ -15,19 +15,13 @@ export const userRoutes = {
     return { name: "ToolList" }
   },
   get agentPlaceholder() {
-    return { name: "AgentTools" }
-  },
-  get agentTools() {
-    return { name: "AgentTools" }
+    return { name: "AgentPlaceholder" }
   },
   toolDetail(id: string) {
     return { name: "ToolDetail", params: { id } }
   },
   toolUse(id: string) {
     return { name: "ToolUse", params: { id } }
-  },
-  get myTasks() {
-    return { name: "MyTasks" }
   },
   get materialLibrary() {
     return { name: "MaterialLibrary" }

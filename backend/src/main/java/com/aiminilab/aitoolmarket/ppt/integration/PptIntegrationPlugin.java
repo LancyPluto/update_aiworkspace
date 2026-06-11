@@ -48,7 +48,7 @@ public class PptIntegrationPlugin implements ToolIntegrationPlugin {
             return null;
         }
         try {
-            return objectMapper.treeToValue(node, PptWorkflow.class);
+            return objectMapper.treeToValue(node, PptWorkflow.class).publicView();
         } catch (Exception exception) {
             log.warn("PPT workflow 解析失败 toolCode={}: {}",
                     tool == null ? null : tool.getToolCode(),

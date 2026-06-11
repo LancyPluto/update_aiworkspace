@@ -754,10 +754,30 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
 
         String status = item.status() == null ? "" : item.status().trim().toUpperCase(Locale.ROOT);
         if ("ONLINE".equals(status)) {
-            toolService.publishTool(saved.id(), operatorId);
+            try {
+                toolService.publishTool(saved.id(), operatorId);
+            } catch (BusinessException exception) {
+                warnings.add("Tool " + item.toolCode()
+                        + " kept as draft because it could not be published: "
+                        + importPublishWarningMessage(exception));
+            }
         } else if ("OFFLINE".equals(status)) {
             toolService.offlineTool(saved.id(), operatorId);
         }
+    }
+
+    private String importPublishWarningMessage(BusinessException exception) {
+        String message = exception.getMessage();
+        if (message == null || message.isBlank()) {
+            return "";
+        }
+        if (message.startsWith("bound model config has no API key: ")) {
+            int hintStart = message.indexOf(". 请在管理端");
+            if (hintStart > 0) {
+                return message.substring(0, hintStart);
+            }
+        }
+        return message;
     }
 
     private boolean isDisabledModelConfig(Long modelConfigId) {

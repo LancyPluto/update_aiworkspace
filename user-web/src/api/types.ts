@@ -49,6 +49,7 @@ export type TaskStatus =
   | "CREATED"
   | "QUEUED"
   | "PROCESSING"
+  | "AWAITING_USER"
   | "RETRYING"
   | "SUCCESS"
   | "FAILED"
@@ -97,7 +98,7 @@ export interface LoginResponse {
   user?: UserProfile
 }
 
-export type SmsCodeScene = "REGISTER" | "LOGIN" | "LOGIN_OR_REGISTER" | "RESET_PASSWORD" | "CANCEL_ACCOUNT"
+export type SmsCodeScene = "REGISTER" | "LOGIN" | "LOGIN_OR_REGISTER" | "RESET_PASSWORD"
 
 export interface SmsCodeRequest {
   phone: string
@@ -116,6 +117,10 @@ export interface SmsAuthRequest {
   code: string
   nickname?: string
   password?: string
+}
+
+export interface CancelAccountRequest {
+  smsCode: string
 }
 
 export interface ResetPasswordRequest {
@@ -156,10 +161,6 @@ export interface CommunitySettingsRequest {
   bio?: string | null
   autoPublishAssets?: boolean
   promptPublicByDefault?: boolean
-}
-
-export interface CancelAccountRequest {
-  smsCode: string
 }
 
 export interface UserAvatarUploadResponse {
@@ -256,13 +257,13 @@ export interface ToolSummary {
   toolCode: string
   toolName: string
   categoryId: number
-  categoryCode?: string | null
   categoryName: string
   description?: string | null
   coverUrl?: string | null
   toolType?: string | null
   inputModality?: string | null
   outputModality?: string | null
+  toolKind?: "text" | "image" | "video" | "digitalHuman" | "audio" | "agent" | "other" | string | null
   configNote?: string | null
   status: ToolBizStatus
   estimatedCreditCost: number
@@ -270,6 +271,7 @@ export interface ToolSummary {
   modelConfigName?: string | null
   modelName?: string | null
   executionHandler?: string | null
+  frontendStyle?: ToolFrontendStyle | null
 }
 
 /** 动态字段选项 */
@@ -283,7 +285,21 @@ export interface ToolFieldOption {
 export interface ToolField {
   fieldKey: string
   fieldName: string
-  fieldType: "text" | "textarea" | "select" | "number" | "radio" | "aspect_ratio" | "checkbox" | "slider" | "image" | "multi_image" | "file"
+  fieldType:
+    | "text"
+    | "textarea"
+    | "select"
+    | "number"
+    | "radio"
+    | "aspect_ratio"
+    | "checkbox"
+    | "slider"
+    | "image"
+    | "multi_image"
+    | "file"
+    | "image_upload"
+    | "video_upload"
+    | "audio_upload"
   placeholder?: string | null
   options?: Array<ToolFieldOption | string> | null
   optionsJson?: string | null
@@ -296,19 +312,36 @@ export interface ToolField {
   sortOrder: number
 }
 
+export interface ToolFrontendStyle {
+  primaryColor?: string | null
+  welcomeMessage?: string | null
+  mediaDisplayMode?: "icon" | "effect" | "comparison" | string | null
+  modelIconUrl?: string | null
+  comparisonOriginalUrl?: string | null
+  comparisonEffectUrl?: string | null
+  heroTitle?: string | null
+  heroSubtitle?: string | null
+  demoThumbnails?: string[] | null
+  useCases?: string[] | null
+  steps?: string[] | null
+  recommendedToolCodes?: string[] | null
+  beforeVideoUrl?: string | null
+  afterVideoUrl?: string | null
+}
+
 /** GET /api/v1/tools/{toolCode} —— 包含字段配置 */
 export interface ToolDetail {
   id: number
   toolCode: string
   toolName: string
   categoryId: number
-  categoryCode?: string | null
   categoryName: string
   description?: string | null
   coverUrl?: string | null
   toolType?: string | null
   inputModality?: string | null
   outputModality?: string | null
+  toolKind?: "text" | "image" | "video" | "digitalHuman" | "audio" | "agent" | "other" | string | null
   configNote?: string | null
   status: ToolBizStatus
   estimatedCreditCost: number
@@ -316,6 +349,7 @@ export interface ToolDetail {
   modelConfigName?: string | null
   modelName?: string | null
   executionHandler?: string | null
+  frontendStyle?: ToolFrontendStyle | null
   /** 动态字段列表 */
   fields: ToolField[]
   /** 平台化集成（PPT 工作台等） */
@@ -324,12 +358,69 @@ export interface ToolDetail {
   workflow?: import("./pptApi").PptWorkflow | null
 }
 
+/* ========== 模型选项 ========== */
+
+export interface ImageSizeOption {
+  label: string
+  value: string
+}
+
+export interface ImageGenerationParameters {
+  sizes?: ImageSizeOption[] | null
+  defaultSize?: string | null
+  counts?: number[] | null
+  defaultCount?: number | null
+  qualities?: ImageSizeOption[] | null
+  defaultQuality?: string | null
+}
+
+export interface ModelOptionItem {
+  id?: number | null
+  modelConfigId?: number | null
+  configCode?: string | null
+  displayName?: string | null
+  name?: string | null
+  modelConfigName?: string | null
+  modelName?: string | null
+  description?: string | null
+  toolCode?: string | null
+  toolName?: string | null
+  provider?: string | null
+  providerName?: string | null
+  vendorCode?: string | null
+  vendorName?: string | null
+  iconUrl?: string | null
+  modelIconUrl?: string | null
+  estimatedCreditCost?: number | null
+  badges?: string[] | null
+  capabilities?: string[] | null
+  imageParameters?: ImageGenerationParameters | null
+  isDefault?: boolean | null
+  enabled?: boolean | null
+}
+
+export interface ModelOptionGroup {
+  vendorCode?: string | null
+  vendorName?: string | null
+  provider?: string | null
+  providerName?: string | null
+  iconUrl?: string | null
+  sortOrder?: number | null
+  models: ModelOptionItem[]
+}
+
+export interface ModelOptionsResponse {
+  mode?: string | null
+  groups: ModelOptionGroup[]
+}
+
 /* ========== 任务相关 ========== */
 
 /** POST /api/v1/tasks */
 export interface CreateTaskRequest {
   toolCode: string
   params: Record<string, unknown>
+  modelConfigId?: number | null
   clientRequestId?: string
   sourcePostId?: number
 }
@@ -368,16 +459,24 @@ export interface TaskDetail {
   status: TaskStatus
   progress?: number
   progressMessage?: string
+  errorCode?: string | null
+  errorMessage?: string | null
   userId: number
   toolCode: string
   toolName: string
+  modelConfigId?: number | null
+  modelConfigName?: string | null
+  modelName?: string | null
   toolType?: string
   inputModality?: string
   outputModality?: string
   params?: Record<string, unknown>
   result?: TaskResult | null
   communityPostId?: number | null
+  communityPromptVisible?: boolean | null
   createdAt: string
+  queuedAt?: string | null
+  startedAt?: string | null
   finishedAt?: string | null
 }
 
@@ -390,13 +489,6 @@ export interface ListTasksQuery {
 }
 
 /* ========== 算力相关 ========== */
-
-/** 算力不足时 API 错误响应 data */
-export interface CreditInsufficientDetail {
-  availableCredits: number
-  requiredCredits: number
-  toolCode?: string | null
-}
 
 /** GET /api/v1/credits/account —— 契约 CreditAccount */
 export interface CreditAccount {
@@ -449,6 +541,12 @@ export interface BillingUsageLog {
   costAmount: number
   chargedCredits: number
   createdAt: string
+}
+
+export interface CreditInsufficientDetail {
+  availableCredits: number
+  requiredCredits: number
+  toolCode?: string | null
 }
 
 export interface RechargePackage {
@@ -505,18 +603,8 @@ export type AgentRunEventType =
   | "workspace_file.read"
   | "memory.context_injected"
   | "memory.context_frozen"
-  | "memory.retrieved"
   | "memory.candidate_created"
   | "memory.saved"
-  | "memory.updated"
-  | "memory.consolidated"
-  | "memory.rejected"
-  | "memory.curator_started"
-  | "tool_call.loop_started"
-  | "tool_call.requested"
-  | "tool_call.executed"
-  | "tool_call.rejected"
-  | "tool_call.loop_completed"
   | "message.delta"
   | "message.completed"
   | "run.completed"
@@ -579,20 +667,10 @@ export interface AgentModelConfig {
   baseUrl?: string | null
   apiKeyMasked?: string | null
   extraAuthJsonMasked?: string | null
-  inputTokenPricePer1k?: number | null
-  outputTokenPricePer1k?: number | null
-  inputTokenPricePer1m?: number | null
-  outputTokenPricePer1m?: number | null
-  billingUnit?: string | null
-  unitPrice?: number | null
   enabled: boolean
   agentEnabled?: boolean | null
   isDefault?: boolean | null
-  channelCode?: string | null
-  channelLabel?: string | null
-  channelIconAsset?: string | null
   capabilities?: string[] | null
-  chatSelectable?: boolean | null
 }
 
 export interface AgentRun {

@@ -52,6 +52,7 @@ export interface PptPage {
   id: string
   orderIndex?: number
   status?: string
+  part?: string
   outlineContent?: PptPageOutline
   descriptionContent?: { text?: string }
   generatedImageUrl?: string

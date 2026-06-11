@@ -13,7 +13,9 @@ ROOT = Path(__file__).resolve().parents[2]
 REMOTE = "/root/ai_tool_market"
 FILES = [
     "user-web/src/components/AppShell.vue",
-    "user-web/src/pages/ToolList/Page.vue",
+    "user-web/src/components/workspace/WorkspaceShell.vue",
+    "user-web/src/pages/ToolCenter/Page.vue",
+    "user-web/src/pages/CreatorWorkspace/Page.vue",
     "user-web/src/utils/toolCoverMedia.ts",
     "user-web/src/api/aiToolApi.ts",
     "user-web/src/utils/taskResultBlocks.ts",
@@ -23,7 +25,6 @@ FILES = [
     "user-web/src/utils/index.ts",
     "user-web/src/pages/AgentHome/AgentChatPane.vue",
     "user-web/src/pages/Chat/Page.vue",
-    "user-web/src/pages/Dashboard/Page.vue",
     "user-web/src/pages/ToolUse/Page.vue",
 ]
 

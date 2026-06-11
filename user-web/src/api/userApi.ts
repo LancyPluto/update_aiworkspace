@@ -53,12 +53,14 @@ export async function updateCommunitySettings(
   })
 }
 
+/** POST /api/v1/users/me/cancel/sms-code —— 发送注销账号短信验证码 */
 export async function sendCancelAccountSmsCode(options?: { token?: string | null }): Promise<SmsCodeResponse> {
   return apiRequest<SmsCodeResponse>("POST", P.cancelSmsCode, {
     token: options?.token,
   })
 }
 
+/** POST /api/v1/users/me/cancel —— 注销当前账号（需短信验证码） */
 export async function cancelCurrentUserAccount(
   body: CancelAccountRequest,
   options?: { token?: string | null },

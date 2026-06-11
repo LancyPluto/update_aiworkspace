@@ -1,4 +1,4 @@
-import { apiRequest, ApiBusinessError } from "./client"
+import { apiRequest } from "./client"
 import type {
   AITool,
   Capability,
@@ -8,7 +8,7 @@ import type {
   ChatSession,
   FileUploadResult,
 } from "./aiToolTypes"
-import type { PageResult, ToolDetail, ToolSummary } from "./types"
+import type { PageResult, ToolDetail, ToolFrontendStyle, ToolSummary } from "./types"
 import {
   isMarketplaceMockToolId,
   isMockMode,
@@ -57,19 +57,13 @@ const FRONTEND_STYLE_PATTERN = /<!-- ai-tool-ui:(.*?) -->/s
 
 function parseFrontendStyle(
   configNote?: string | null,
-): Pick<AITool, "primaryColor" | "welcomeMessage" | "mediaDisplayMode" | "modelIconUrl" | "comparisonOriginalUrl" | "comparisonEffectUrl"> {
+): ToolFrontendStyle {
   const match = (configNote || "").match(FRONTEND_STYLE_PATTERN)
   if (!match) return {}
 
   try {
-    const parsed = JSON.parse(match[1]) as {
-      primaryColor?: unknown
-      welcomeMessage?: unknown
-      mediaDisplayMode?: unknown
-      modelIconUrl?: unknown
-      comparisonOriginalUrl?: unknown
-      comparisonEffectUrl?: unknown
-    }
+    const parsed = JSON.parse(match[1]) as Record<string, unknown>
+    const stringList = (value: unknown) => Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : undefined
     return {
       primaryColor: typeof parsed.primaryColor === "string" ? parsed.primaryColor : undefined,
       welcomeMessage: typeof parsed.welcomeMessage === "string" ? parsed.welcomeMessage : undefined,
@@ -77,6 +71,14 @@ function parseFrontendStyle(
       modelIconUrl: typeof parsed.modelIconUrl === "string" ? parsed.modelIconUrl : undefined,
       comparisonOriginalUrl: typeof parsed.comparisonOriginalUrl === "string" ? parsed.comparisonOriginalUrl : undefined,
       comparisonEffectUrl: typeof parsed.comparisonEffectUrl === "string" ? parsed.comparisonEffectUrl : undefined,
+      heroTitle: typeof parsed.heroTitle === "string" ? parsed.heroTitle : undefined,
+      heroSubtitle: typeof parsed.heroSubtitle === "string" ? parsed.heroSubtitle : undefined,
+      demoThumbnails: stringList(parsed.demoThumbnails),
+      useCases: stringList(parsed.useCases),
+      steps: stringList(parsed.steps),
+      recommendedToolCodes: stringList(parsed.recommendedToolCodes),
+      beforeVideoUrl: typeof parsed.beforeVideoUrl === "string" ? parsed.beforeVideoUrl : undefined,
+      afterVideoUrl: typeof parsed.afterVideoUrl === "string" ? parsed.afterVideoUrl : undefined,
     }
   } catch {
     return {}
@@ -89,10 +91,10 @@ function capabilitiesFromTool(tool: ToolSummary): Capability[] {
   const output = (tool.outputModality || "").toUpperCase()
   const type = (tool.toolType || "").toUpperCase()
 
-  if (output === "IMAGE" || output === "VIDEO" || type.includes("IMAGE") || type.includes("VIDEO")) {
+  if (output === "IMAGE" || type.includes("IMAGE")) {
     capabilities.push({
       type: "imageGeneration",
-      config: { aspectRatios: ["16:9", "9:16"], defaultRatio: "16:9", maxImagesPerRequest: 1 },
+      config: { aspectRatios: ["1:1", "16:9", "9:16"], defaultRatio: "1:1", maxImagesPerRequest: 1 },
     })
   }
   if (input === "FILE" || input === "MULTIMODAL") {
@@ -106,10 +108,11 @@ function capabilitiesFromTool(tool: ToolSummary): Capability[] {
 }
 
 function mapToolSummaryToAITool(tool: ToolSummary | ToolDetail): AITool {
-  const style = parseFrontendStyle(tool.configNote)
+  const style = tool.frontendStyle || parseFrontendStyle(tool.configNote)
   const outputModality = (tool.outputModality || "").trim().toUpperCase()
+  const rawMediaDisplayMode = style.mediaDisplayMode ?? (outputModality === "VIDEO" ? "effect" : "icon")
   const mediaDisplayMode =
-    style.mediaDisplayMode ?? (outputModality === "VIDEO" ? "effect" : "icon")
+    rawMediaDisplayMode === "comparison" ? "comparison" : rawMediaDisplayMode === "effect" ? "effect" : "icon"
   return {
     id: tool.toolCode,
     name: tool.toolName,
@@ -117,18 +120,25 @@ function mapToolSummaryToAITool(tool: ToolSummary | ToolDetail): AITool {
     description: tool.description || "",
     enabled: (tool.status || "").toUpperCase() === "ONLINE",
     order: tool.id,
-    primaryColor: style.primaryColor,
-    welcomeMessage: style.welcomeMessage,
+    primaryColor: style.primaryColor ?? undefined,
+    welcomeMessage: style.welcomeMessage ?? undefined,
     mediaDisplayMode,
-    modelIconUrl: style.modelIconUrl,
-    comparisonOriginalUrl: style.comparisonOriginalUrl,
-    comparisonEffectUrl: style.comparisonEffectUrl,
+    modelIconUrl: style.modelIconUrl ?? undefined,
+    comparisonOriginalUrl: style.comparisonOriginalUrl ?? undefined,
+    comparisonEffectUrl: style.comparisonEffectUrl ?? undefined,
+    frontendStyle: style,
+    heroTitle: style.heroTitle,
+    heroSubtitle: style.heroSubtitle,
+    demoThumbnails: style.demoThumbnails,
+    useCases: style.useCases,
+    steps: style.steps,
+    recommendedToolCodes: style.recommendedToolCodes,
+    beforeVideoUrl: style.beforeVideoUrl,
+    afterVideoUrl: style.afterVideoUrl,
     capabilities: capabilitiesFromTool(tool),
     inputModality: tool.inputModality,
     outputModality: tool.outputModality,
-    toolType: tool.toolType,
-    categoryCode: tool.categoryCode,
-    categoryName: tool.categoryName,
+    toolKind: tool.toolKind,
     fields: "fields" in tool ? tool.fields : undefined,
     estimatedCreditCost: tool.estimatedCreditCost,
     modelConfigName: tool.modelConfigName,
@@ -136,12 +146,7 @@ function mapToolSummaryToAITool(tool: ToolSummary | ToolDetail): AITool {
   }
 }
 
-/** 大模型页专用：始终读取 aiToolMock 中的已上架大模型（不依赖 VITE_AI_TOOL_MOCK） */
-export async function fetchMarketplaceAITools(): Promise<AITool[]> {
-  return mockFetchEnabledAITools()
-}
-
-/** GET /api/v1/tools — 已上架列表，按 order 排序 */
+/** GET /api/v1/ai-tools — 已上架列表，按 order 排序 */
 export async function fetchEnabledAITools(options?: { token?: string | null }): Promise<AITool[]> {
   return withMockFallback(
     async () => {
@@ -158,7 +163,7 @@ export async function fetchEnabledAITools(options?: { token?: string | null }): 
   )
 }
 
-/** GET /api/v1/tools/{toolCode} */
+/** GET /api/v1/ai-tools/{toolId} */
 export async function fetchAIToolById(
   toolId: string,
   options?: { token?: string | null },
@@ -265,7 +270,6 @@ export async function uploadChatFile(
     () => {
       const formData = new FormData()
       formData.append("file", file)
-      if (options?.toolId) formData.append("toolId", options.toolId)
       return apiRequest<FileUploadResult>("POST", "/api/v1/upload", {
         token: options?.token,
         body: formData,

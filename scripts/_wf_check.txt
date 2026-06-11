@@ -1,0 +1,38 @@
+start: title=Start
+  out context: 会话上下文
+field-input: title=初始表单
+  in context: 会话上下文
+  out params: 用户填写参数
+script-planner: title=剧本与分镜
+  in form: 初始表单
+  out script: 剧本分镜
+user-input-script: title=脚本意见
+  in upstream: 上一步结果
+  out scriptFeedback: 脚本意见
+user-input-storyboard: title=分镜意见
+  in upstream: 上一步结果
+  out storyboardFeedback: 分镜意见
+keyframe: title=电影感关键帧
+  in script: 剧本分镜
+  in form: 表单参数
+  out keyframe: 关键帧
+user-input-scene: title=场景图意见
+  in upstream: 上一步结果
+  out sceneFeedback: 场景图意见
+tts: title=角色配音
+  in script: 剧本分镜
+  out audio: 配音音频
+user-input-bgm: title=BGM意见
+  in upstream: 上一步结果
+  out bgmFeedback: BGM意见
+clip-video: title=图生视频
+  in keyframe: 关键帧
+  in script: 剧本分镜
+  out clip: 视频片段
+compose: title=字幕合成
+  in clip: 视频片段
+  in audio: 配音音频
+  in script: 剧本分镜
+  out finalVideo: 成片
+output: title=成片输出
+  in finalVideo: 成片

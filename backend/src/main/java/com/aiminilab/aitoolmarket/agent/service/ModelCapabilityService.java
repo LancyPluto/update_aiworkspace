@@ -105,6 +105,18 @@ public class ModelCapabilityService {
                 .orElse(null);
     }
 
+    public AgentModelConfig resolveModelConfigForTool(AiTool tool, Long requestedModelConfigId) {
+        if (requestedModelConfigId == null) {
+            return resolveModelConfigForTool(tool);
+        }
+        AgentModelConfig selected = agentModelConfigMapper.findAgentEnabledById(requestedModelConfigId);
+        if (selected == null) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "model config not found or not selectable");
+        }
+        validateExecution(tool, selected);
+        return selected;
+    }
+
     public void validateToolModelBinding(AiTool tool) {
         if (tool == null || tool.getModelConfigId() == null) {
             return;
@@ -121,6 +133,20 @@ public class ModelCapabilityService {
         if (resolveCapabilities(config).stream().noneMatch(capability -> capability.equalsIgnoreCase(requiredCapability))) {
             throw new BusinessException(ErrorCode.PARAM_ERROR,
                     "model config does not support execution handler " + requiredCapability);
+        }
+    }
+
+    public void validateToolModelBindingAvailable(AiTool tool) {
+        if (tool == null || tool.getModelConfigId() == null) {
+            return;
+        }
+        AgentModelConfig config = agentModelConfigMapper.findActiveById(tool.getModelConfigId());
+        if (config == null) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "model config not found");
+        }
+        if (Boolean.FALSE.equals(config.getEnabled())) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR,
+                    "bound model config is disabled: " + displayModelName(config));
         }
     }
 

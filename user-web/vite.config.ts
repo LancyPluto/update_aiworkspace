@@ -3,6 +3,10 @@ import { defineConfig } from "vite"
 import vue from "@vitejs/plugin-vue"
 import tailwindcss from "@tailwindcss/vite"
 
+function stripBrowserOrigin(proxyReq: import("node:http").ClientRequest) {
+  proxyReq.removeHeader("origin")
+}
+
 export default defineConfig({
   plugins: [vue(), tailwindcss()],
   publicDir: "asset",
@@ -18,10 +22,16 @@ export default defineConfig({
       "/api": {
         target: process.env.VITE_DEV_PROXY_TARGET ?? "http://127.0.0.1:8080",
         changeOrigin: true,
+        configure(proxy) {
+          proxy.on("proxyReq", stripBrowserOrigin)
+        },
       },
       "/generated": {
         target: process.env.VITE_DEV_PROXY_TARGET ?? "http://127.0.0.1:8080",
         changeOrigin: true,
+        configure(proxy) {
+          proxy.on("proxyReq", stripBrowserOrigin)
+        },
       },
     },
   },

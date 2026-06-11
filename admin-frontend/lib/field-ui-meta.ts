@@ -157,8 +157,8 @@ export function filterFieldsByTier(
   return fields.filter(({ meta }) => {
     const tier = meta.uiTier || "all"
     if (tier === "all") return true
-    if (advanced) return tier === "advanced" || tier === "all"
-    return tier === "simple" || tier === "all"
+    if (advanced) return tier === "advanced"
+    return tier === "simple"
   })
 }
 

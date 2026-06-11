@@ -1,5 +1,5 @@
-import type { CreditInsufficientDetail } from "./types"
 import { ApiBusinessError } from "./client"
+import type { CreditInsufficientDetail } from "./types"
 
 export function formatCreditInsufficientMessage(
   detail?: CreditInsufficientDetail,
@@ -7,19 +7,11 @@ export function formatCreditInsufficientMessage(
 ): string {
   if (detail) {
     if (detail.toolCode) {
-      return (
-        `可用算力不足：当前 ${detail.availableCredits}，调用「${detail.toolCode}」至少需要 ${detail.requiredCredits}。` +
-        "请前往「会员与算力」充值后再试。"
-      )
+      return `可用算力不足：当前 ${detail.availableCredits}，调用「${detail.toolCode}」至少需要 ${detail.requiredCredits}。请前往「会员与算力」充值后再试。`
     }
-    return (
-      `可用算力不足：当前 ${detail.availableCredits}，至少需要 ${detail.requiredCredits}。` +
-      "请前往「会员与算力」充值后再试。"
-    )
+    return `可用算力不足：当前 ${detail.availableCredits}，至少需要 ${detail.requiredCredits}。请前往「会员与算力」充值后再试。`
   }
-  if (fallbackMessage?.trim()) {
-    return fallbackMessage.trim()
-  }
+  if (fallbackMessage?.trim()) return fallbackMessage.trim()
   return "可用算力不足，请前往「会员与算力」充值后再试。"
 }
 

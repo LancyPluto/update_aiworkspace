@@ -102,7 +102,7 @@ function goBack() {
   if (window.history.length > 1) {
     router.back()
   } else {
-    router.push("/marketplace")
+    router.push("/tool")
   }
 }
 

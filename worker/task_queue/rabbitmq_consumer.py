@@ -1,6 +1,7 @@
 import json
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import pika
 from pika.exceptions import AMQPError, ConnectionWrongStateError, UnroutableError
@@ -19,6 +20,8 @@ class RabbitMqConsumer:
         self.retry_queue_prefix = settings.rabbitmq_retry_queue_prefix
         retry_queue_count = len([value for value in settings.rabbitmq_retry_delays_ms.split(",") if value.strip()])
         self.max_retries = min(settings.rabbitmq_max_retries, retry_queue_count)
+        self.concurrency = max(1, settings.worker_concurrency)
+        self.prefetch_count = max(1, settings.rabbitmq_prefetch_count)
         self.handler = handler or TaskHandlerRouter()
 
     def start(self) -> None:
@@ -44,22 +47,22 @@ class RabbitMqConsumer:
     def _consume(self, connection: pika.BlockingConnection) -> None:
         channel = connection.channel()
         channel.confirm_delivery()
-        channel.basic_qos(prefetch_count=1)
-        LOGGER.info("worker is listening rabbitmq queue=%s", self.queue_name)
+        channel.basic_qos(prefetch_count=self.prefetch_count)
+        executor = ThreadPoolExecutor(max_workers=self.concurrency, thread_name_prefix="task-worker")
+        LOGGER.info(
+            "worker is listening rabbitmq queue=%s basic_qos prefetch_count=%s concurrency=%s",
+            self.queue_name,
+            self.prefetch_count,
+            self.concurrency,
+        )
 
-        def callback(ch, method, properties, body: bytes):
-            try:
-                message = json.loads(body.decode("utf-8"))
-                if "taskId" not in message:
-                    raise ValueError(f"message missing taskId: {message}")
-                result = self.handler.handle(message)
-                LOGGER.info("task handled result=%s", result)
-            except Exception as exc:
-                self._handle_task_exception(ch, method, properties, body, exc)
-                return
-            self._ack(ch, method.delivery_tag)
+        def on_message(ch, method, properties, body: bytes):
+            # Dispatch to the thread pool so up to `concurrency` tasks run in parallel.
+            # The blocking IO thread stays free to receive more deliveries and keep
+            # heartbeats alive while handlers (which can block ~145s) run off-thread.
+            executor.submit(self._process_message, connection, ch, method, properties, body)
 
-        channel.basic_consume(queue=self.queue_name, on_message_callback=callback)
+        channel.basic_consume(queue=self.queue_name, on_message_callback=on_message)
         try:
             channel.start_consuming()
         except KeyboardInterrupt:
@@ -67,7 +70,23 @@ class RabbitMqConsumer:
             if channel.is_open:
                 channel.stop_consuming()
         finally:
+            executor.shutdown(wait=True)
             self._safe_close(connection)
+
+    def _process_message(self, connection, channel, method, properties, body: bytes) -> None:
+        try:
+            message = json.loads(body.decode("utf-8"))
+            if "taskId" not in message:
+                raise ValueError(f"message missing taskId: {message}")
+            result = self.handler.handle(message)
+            LOGGER.info("task handled result=%s", result)
+        except Exception as exc:
+            # pika is not thread-safe: schedule ack/nack/publish back onto the IO thread.
+            connection.add_callback_threadsafe(
+                lambda: self._handle_task_exception(channel, method, properties, body, exc)
+            )
+            return
+        connection.add_callback_threadsafe(lambda: self._ack(channel, method.delivery_tag))
 
     def _publish(self, channel, routing_key: str, body: bytes, headers: dict) -> None:
         self._ensure_channel_open(channel)

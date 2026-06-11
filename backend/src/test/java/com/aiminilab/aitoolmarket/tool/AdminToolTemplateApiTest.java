@@ -11,6 +11,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.hamcrest.Matchers.containsString;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -38,6 +39,9 @@ class AdminToolTemplateApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data[?(@.templateCode=='image_generation_default')]").exists())
                 .andExpect(jsonPath("$.data[?(@.templateCode=='text_to_speech_default')]").exists())
+                .andExpect(jsonPath("$.data[?(@.templateCode=='image_outpainting')]").exists())
+                .andExpect(jsonPath("$.data[?(@.templateCode=='video_face_swap')]").exists())
+                .andExpect(jsonPath("$.data[?(@.templateCode=='digital_human_presenter')]").exists())
                 .andExpect(jsonPath("$.data[?(@.templateCode=='music_generation_default')]").exists());
 
         mockMvc.perform(get("/api/admin/v1/tool-templates/image_generation_default")
@@ -52,6 +56,15 @@ class AdminToolTemplateApiTest {
                 .andExpect(jsonPath("$.data.executionHandler").value("TEXT_TO_SPEECH"))
                 .andExpect(jsonPath("$.data.outputModality").value("AUDIO"))
                 .andExpect(jsonPath("$.data.fields[0].fieldKey").value("text"));
+
+        mockMvc.perform(get("/api/admin/v1/tool-templates/image_outpainting")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.toolType").value("IMAGE_TO_IMAGE"))
+                .andExpect(jsonPath("$.data.executionHandler").value("IMAGE_GENERATION"))
+                .andExpect(jsonPath("$.data.handlerConfigJson").value(containsString("\"toolKind\":\"image\"")))
+                .andExpect(jsonPath("$.data.handlerConfigJson").value(containsString("\"abilityCode\":\"image_outpainting\"")))
+                .andExpect(jsonPath("$.data.fields[0].fieldKey").value("sourceImageUrl"));
 
         mockMvc.perform(get("/api/admin/v1/tool-templates/music_generation_default")
                         .header("Authorization", "Bearer " + adminToken))

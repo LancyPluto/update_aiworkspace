@@ -14,7 +14,7 @@ import { cn } from "@/lib/utils"
 export interface Column<T> {
   key: keyof T | string
   title: string
-  render?: (value: T[keyof T], item: T) => React.ReactNode
+  render?: (value: unknown, item: T) => React.ReactNode
 }
 
 interface DataTableProps<T> {
@@ -23,11 +23,15 @@ interface DataTableProps<T> {
   className?: string
 }
 
-export function DataTable<T extends Record<string, unknown>>({
+export function DataTable<T extends object>({
   columns,
   data,
   className,
 }: DataTableProps<T>) {
+  const readValue = (item: T, key: keyof T | string): unknown => {
+    return (item as Record<string, unknown>)[String(key)]
+  }
+
   return (
     <div
       className={cn(
@@ -58,10 +62,10 @@ export function DataTable<T extends Record<string, unknown>>({
                 <TableCell key={String(column.key)}>
                   {column.render
                     ? column.render(
-                        item[column.key as keyof T],
+                        readValue(item, column.key),
                         item
                       )
-                    : String(item[column.key as keyof T] ?? "")}
+                    : String(readValue(item, column.key) ?? "")}
                 </TableCell>
               ))}
             </TableRow>

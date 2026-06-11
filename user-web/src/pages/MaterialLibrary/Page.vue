@@ -26,8 +26,8 @@ import type { AssetPreviewItem, AssetPreviewRecommendation } from "@/types/asset
 import type { ResultBlock } from "@/types/result"
 import { userRoutes } from "@/router/userRoutes"
 import { useAuthStore } from "@/store/authStore"
-import { assetFromTask, taskPrompt, taskPromptPreview } from "@/utils/assetPreviewAdapter"
-import { openDashboardWithAsset } from "@/utils/assetReplay"
+import { assetFromTask, taskPromptPreview } from "@/utils/assetPreviewAdapter"
+import { openCreateWithAssetRecommendation } from "@/utils/assetReplay"
 import { buildTaskResultBlocks } from "@/utils/taskResultBlocks"
 
 type MaterialModality = "all" | "IMAGE" | "VIDEO" | "AUDIO" | "TEXT" | "OTHER"
@@ -50,6 +50,9 @@ const tools = ref<ToolSummary[]>([])
 const selectedModality = ref<MaterialModality>("all")
 const selectTool = ref("all")
 const sortType = ref("desc")
+const currentPage = ref(1)
+const hasNextPage = ref(false)
+const loadingMore = ref(false)
 const deletingTaskId = ref<number | null>(null)
 const communityActionTaskId = ref<number | null>(null)
 const previewAsset = ref<AssetPreviewItem | null>(null)
@@ -112,22 +115,37 @@ watch(selectedModality, () => {
   selectTool.value = "all"
 })
 
-async function loadMaterials() {
-  loading.value = true
+async function loadMaterials(reset = true) {
+  if (reset) {
+    currentPage.value = 1
+    loading.value = true
+  } else {
+    loadingMore.value = true
+  }
   error.value = ""
   try {
     const response = await fetchTasks({
       token: auth.token,
-      query: { status: "SUCCESS", pageNo: 1, pageSize: 80 },
+      query: { status: "SUCCESS", pageNo: currentPage.value, pageSize: 40 },
     })
-    tasks.value = response.list
-    const toolResponse = await fetchTools({ token: auth.token, query: { pageNo: 1, pageSize: 120 } })
-    tools.value = toolResponse.list
+    tasks.value = reset ? response.list : [...tasks.value, ...response.list]
+    hasNextPage.value = response.hasNext
+    currentPage.value += 1
+    if (reset) {
+      const toolResponse = await fetchTools({ token: auth.token, query: { pageNo: 1, pageSize: 120 } })
+      tools.value = toolResponse.list
+    }
   } catch (err) {
     error.value = err instanceof Error ? err.message : "加载素材库失败"
   } finally {
-    loading.value = false
+    if (reset) loading.value = false
+    else loadingMore.value = false
   }
+}
+
+async function loadMoreMaterials() {
+  if (loading.value || loadingMore.value || !hasNextPage.value) return
+  await loadMaterials(false)
 }
 
 function inferModality(task: TaskDetail, blocks: ResultBlock[]): Exclude<MaterialModality, "all"> {
@@ -185,7 +203,7 @@ function recommendToolsForAsset(asset: AssetPreviewItem): AssetPreviewRecommenda
 }
 
 function useAssetWithTool(tool: AssetPreviewRecommendation) {
-  if (previewAsset.value) openDashboardWithAsset(previewAsset.value, tool)
+  if (previewAsset.value) openCreateWithAssetRecommendation(previewAsset.value, tool)
   previewAsset.value = null
 }
 
@@ -413,6 +431,17 @@ onMounted(loadMaterials)
         </AssetCard>
         </template>
       </MasonryLayout>
+      <div v-if="!loading && (hasNextPage || loadingMore)" class="mt-8 flex justify-center">
+        <button
+          type="button"
+          class="inline-flex h-10 items-center justify-center rounded-full border border-white/10 bg-white/[0.06] px-5 text-sm font-medium text-white/70 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+          :disabled="loadingMore"
+          @click="loadMoreMaterials"
+        >
+          <LoaderCircle v-if="loadingMore" class="mr-2 h-4 w-4 animate-spin" />
+          加载更多
+        </button>
+      </div>
     </div>
     <AssetPreviewModal
       :asset="previewAsset"

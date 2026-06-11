@@ -7,6 +7,15 @@ from app.config import Settings
 MINIMAX_OPENAI_COMPATIBLE_BASE_URL = "https://api.minimax.io/v1"
 MINIMAX_ANTHROPIC_COMPATIBLE_BASE_URL = "https://api.minimaxi.com/anthropic"
 DEEPSEEK_OPENAI_COMPATIBLE_BASE_URL = "https://api.deepseek.com"
+OPENAI_CHAT_COMPATIBLE_PROVIDERS = {
+    "openai",
+    "openai_chat",
+    "openai_compatible",
+    "deepseek",
+    "deepseek_compatible",
+    "agnes",
+    "agnes_chat",
+}
 
 
 class ChatModelProviderError(RuntimeError):
@@ -45,7 +54,7 @@ class ChatModelFactory:
         provider = self.settings.model_provider.strip().lower()
         if provider == "mock":
             return MockChatModel()
-        if provider in {"openai_compatible", "deepseek", "deepseek_compatible"}:
+        if is_openai_chat_compatible_provider(provider):
             return self._create_openai_compatible()
         if provider == "anthropic_compatible":
             return self._create_anthropic_compatible()
@@ -63,6 +72,10 @@ class ChatModelFactory:
         base_url = self.settings.model_api_base_url.strip()
         if not base_url and self.settings.model_provider.strip().lower() in {"deepseek", "deepseek_compatible"}:
             base_url = DEEPSEEK_OPENAI_COMPATIBLE_BASE_URL
+        if not base_url and self.settings.model_provider.strip().lower() in {"agnes", "agnes_chat"}:
+            base_url = "https://apihub.agnes-ai.com/v1"
+        if not base_url and self.settings.model_provider.strip().lower() in {"openai", "openai_chat", "openai_compatible"}:
+            base_url = "https://api.openai.com/v1"
         resolved_base_url = base_url.rstrip("/")
         return chat_openai_cls(
             model=resolve_volcengine_model_name(self.settings.model_name, resolved_base_url),
@@ -118,6 +131,10 @@ def _load_init_chat_model():
     except ImportError:
         return None
     return init_chat_model
+
+
+def is_openai_chat_compatible_provider(provider: str) -> bool:
+    return provider.strip().lower() in OPENAI_CHAT_COMPATIBLE_PROVIDERS
 
 
 def _load_chat_openai():

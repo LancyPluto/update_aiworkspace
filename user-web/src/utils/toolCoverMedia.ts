@@ -14,9 +14,10 @@ export function normalizeMediaUrl(value?: string | null): string {
   return apiOrigin ? `${apiOrigin}${path}` : path
 }
 
+const VIDEO_PREVIEW_EXTENSION_PATTERN = /\.(mp4|webm|mov|m4v)(?:[?#].*)?$/i
+
 export function isVideoPreviewUrl(value?: string | null): boolean {
-  const raw = value?.split(/[?#]/)[0]?.toLowerCase() || ""
-  return [".mp4", ".webm", ".mov", ".m4v"].some((ext) => raw.endsWith(ext))
+  return VIDEO_PREVIEW_EXTENSION_PATTERN.test(value?.trim() || "")
 }
 
 export function isKlingTool(tool: Pick<AITool, "id" | "name">): boolean {
