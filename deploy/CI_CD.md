@@ -74,10 +74,14 @@ bash deploy/scripts/quick_sync_local.sh --restart all
 ## 本地脚本（与 CI 同源）
 
 ```bash
-# 轻量部署（与 CI 相同）
+# 轻量部署（与 CI 相同，Linux/macOS）
 export DEPLOY_HOST=... DEPLOY_USER=root DEPLOY_PASSWORD='...'
-export DEPLOY_SYNC_MODE=rsync   # 或 git
+export DEPLOY_SYNC_MODE=git   # 或 rsync
 bash deploy/scripts/ci_remote_deploy_light.sh
+
+# Windows（无 sshpass 时，bundle 同步 + Docker 重建）
+set DEPLOY_HOST=8.134.93.203 DEPLOY_USER=root DEPLOY_PASSWORD=...
+python deploy/scripts/remote_deploy_production.py
 
 # 全量 tar 部署（旧方案）
 bash deploy/scripts/ci_build_archive.sh /tmp/ai_tool_market_ci.tar.gz
@@ -93,8 +97,8 @@ bash deploy/scripts/ci_remote_deploy.sh /tmp/ai_tool_market_ci.tar.gz
 | `backend/**` | backend |
 | `worker/**` | worker |
 | `agent-service/**` | agent-service |
-| `admin-frontend/**` | admin-frontend |
-| `user-web/**` | user-web |
+| `admin-frontend/**` | admin-frontend + nginx |
+| `user-web/**` | user-web + nginx |
 | `deploy/docker-compose*` / `deploy/nginx/**` | nginx（及必要时全部） |
 
 ## 安全说明
@@ -108,8 +112,9 @@ bash deploy/scripts/ci_remote_deploy.sh /tmp/ai_tool_market_ci.tar.gz
 | 环节 | 状态 |
 |------|------|
 | CI 测试门禁 | ✅ |
-| rsync 增量同步 | ✅ 默认 CD |
-| git pull 同步 | ✅ 可选 `DEPLOY_SYNC_MODE=git` |
+| git 增量同步 | ✅ 默认 CD（`DEPLOY_SYNC_MODE=git`） |
+| rsync 增量同步 | ✅ 兜底 `DEPLOY_SYNC_MODE=rsync` |
+| 生产 git 首次引导 | ✅ `bootstrap_production_git.sh` / `.py` |
 | 按变更选择性重建容器 | ✅ |
 | 本地快速同步脚本 | ✅ `quick_sync_local.sh` |
 | 生产 .env 保护 | ✅ |
