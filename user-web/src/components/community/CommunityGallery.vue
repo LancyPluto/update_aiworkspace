@@ -40,7 +40,7 @@ import UserAvatar from "@/components/UserAvatar.vue"
 import { userRoutes } from "@/router/userRoutes"
 import { useAuthStore } from "@/store/authStore"
 import { assetFromCommunityPost } from "@/utils/assetPreviewAdapter"
-import { openCreateWithAssetRecommendation } from "@/utils/assetReplay"
+import { openDashboardWithAsset } from "@/utils/assetReplay"
 import { communityDisplayTitle, promptExcerpt } from "@/utils/communityDisplay"
 import { hasCommunityAudioMedia, resolveCommunityAudioMedia } from "@/utils/communityAudioMedia"
 import { resolveCommunityAuthorAvatar, resolveCommunityAuthorName, resolveCommunityPrompt } from "@/utils/communityPostNormalize"
@@ -363,7 +363,7 @@ async function createSameStyle(post: CommunityPost, event: Event) {
       { token: auth.token },
     ).catch(() => undefined)
     const selectedMediaUrl = postKind(post) === "image" ? activePostImageUrl(post) : normalizeCommunityMediaUrl(post.coverUrl)
-    openCreateWithAssetRecommendation(assetFromCommunityPost(post, selectedMediaUrl), post.toolCode, {
+    openDashboardWithAsset(assetFromCommunityPost(post, selectedMediaUrl), post.toolCode, {
       modality: post.modality,
       sourcePost: post.id,
     })
@@ -454,6 +454,7 @@ onUnmounted(() => {
   <div class="community-gallery">
     <section class="hero">
       <div>
+        <p class="eyebrow">Community Gallery</p>
         <h1>发现作品，学习 Prompt，回到工具继续创作</h1>
         <p class="hero-lead">社区不是论坛入口，而是从公开案例到工作台复用的增长路径。</p>
       </div>
