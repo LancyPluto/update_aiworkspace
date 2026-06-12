@@ -3,6 +3,7 @@ import { computed, onActivated, onMounted, ref, watch } from "vue"
 import { RouterLink, useRouter } from "vue-router"
 import {
   ArrowRight,
+  Copy,
   ExternalLink,
   Image as ImageIcon,
   Info,
@@ -12,14 +13,23 @@ import {
   Sparkles,
   Video,
   WandSparkles,
+  X,
   Zap,
 } from "lucide-vue-next"
 import AppShell from "@/components/AppShell.vue"
+import { searchCommunityPosts } from "@/api/communityApi"
 import { fetchTools } from "@/api/toolApi"
 import { fetchTasks } from "@/api/taskApi"
-import type { PageResult, TaskDetail, ToolSummary } from "@/api/types"
+import type { CommunityPost, PageResult, TaskDetail, ToolSummary } from "@/api/types"
 import { useAuthStore } from "@/store/authStore"
 import { getApiOrigin } from "@/api/client"
+import { communityDisplayTitle } from "@/utils/communityDisplay"
+import { resolveCommunityPrompt } from "@/utils/communityPostNormalize"
+import {
+  normalizeCommunityMediaUrl,
+  resolveCommunityImageUrls,
+  resolveCommunityPostKind,
+} from "@/utils/communityPostMedia"
 
 type HomeTab = "ALL" | "IMAGE" | "VIDEO" | "AUDIO"
 
@@ -34,9 +44,11 @@ const router = useRouter()
 const promptText = ref("")
 const tools = ref<ToolSummary[]>([])
 const tasks = ref<TaskDetail[]>([])
+const communityPosts = ref<CommunityPost[]>([])
 const loading = ref(false)
 const error = ref("")
 const activeTab = ref<HomeTab>("ALL")
+const selectedCommunityPost = ref<CommunityPost | null>(null)
 
 const tabs: Array<{ key: HomeTab; label: string }> = [
   { key: "ALL", label: "全部" },
@@ -79,6 +91,36 @@ const featuredTools = computed(() => {
   return onlineTools.value.filter((tool) => normalizeModality(tool.outputModality) === activeTab.value).slice(0, 12)
 })
 
+const communityWallItems = computed(() =>
+  communityPosts.value
+    .slice()
+    .sort((a, b) => (b.likeCount || 0) - (a.likeCount || 0))
+    .filter((post) => Boolean(communityPostMediaUrl(post)))
+    .slice(0, 18),
+)
+
+const communityWallColumns = computed(() => {
+  const items = communityWallItems.value
+  const firstColumn = items.filter((_, index) => index % 2 === 0)
+  const secondColumn = items.filter((_, index) => index % 2 === 1)
+  return [
+    repeatWallItems(firstColumn.length ? firstColumn : items),
+    repeatWallItems(secondColumn.length ? secondColumn : items),
+  ]
+})
+
+const selectedCommunityMediaUrl = computed(() =>
+  selectedCommunityPost.value ? communityPostMediaUrl(selectedCommunityPost.value) : "",
+)
+
+const selectedCommunityTitle = computed(() =>
+  selectedCommunityPost.value ? communityPostTitle(selectedCommunityPost.value) : "",
+)
+
+const selectedCommunityPrompt = computed(() =>
+  selectedCommunityPost.value ? communityPostPrompt(selectedCommunityPost.value) : "",
+)
+
 function normalizeModality(value?: string | null) {
   return (value || "TEXT").trim().toUpperCase()
 }
@@ -108,6 +150,47 @@ function normalizeMediaUrl(value?: string | null) {
 
 function isVideoUrl(value?: string | null) {
   return /\.(mp4|webm|mov|m4v)(?:[?#].*)?$/i.test(value?.trim() || "")
+}
+
+function repeatWallItems(items: CommunityPost[]) {
+  if (!items.length) return []
+  const base: CommunityPost[] = []
+  while (base.length < Math.max(4, items.length)) {
+    base.push(...items)
+  }
+  return [...base, ...base]
+}
+
+function communityPostMediaUrl(post: CommunityPost) {
+  const imageUrl = resolveCommunityImageUrls(post)[0]
+  return imageUrl || normalizeCommunityMediaUrl(post.coverUrl || post.mediaUrl)
+}
+
+function communityPostKindLabel(post: CommunityPost) {
+  const kind = resolveCommunityPostKind(post.modality)
+  if (kind === "image") return "图像"
+  if (kind === "video") return "视频"
+  if (kind === "audio") return "音频"
+  return "作品"
+}
+
+function communityPostTitle(post: CommunityPost) {
+  const kind = resolveCommunityPostKind(post.modality)
+  const prompt = resolveCommunityPrompt(post)
+  return communityDisplayTitle({
+    title: post.title,
+    prompt,
+    promptPreview: post.promptPreview || prompt,
+    topic: post.topic,
+    tags: post.tags,
+    toolName: post.toolName,
+    toolCode: post.toolCode,
+    kind,
+  })
+}
+
+function communityPostPrompt(post: CommunityPost) {
+  return resolveCommunityPrompt(post) || post.description?.trim() || post.promptPreview?.trim() || ""
 }
 
 function toolCover(tool: ToolSummary) {
@@ -146,20 +229,44 @@ function openTool(tool: ToolSummary) {
   void router.push(`/tools/${encodeURIComponent(tool.toolCode)}`)
 }
 
+function openCommunityPreview(post: CommunityPost) {
+  selectedCommunityPost.value = post
+}
+
+function closeCommunityPreview() {
+  selectedCommunityPost.value = null
+}
+
+function quoteCommunityPrompt() {
+  if (!selectedCommunityPrompt.value) return
+  promptText.value = selectedCommunityPrompt.value
+  selectedCommunityPost.value = null
+}
+
+function openCommunityPost(post: CommunityPost) {
+  void router.push(`/community/posts/${post.id}`)
+}
+
 async function loadHomeData() {
   loading.value = true
   error.value = ""
   try {
-    const [toolPage, taskPage] = await Promise.all([
+    const [toolPage, taskPage, communityPage] = await Promise.all([
       fetchTools({ token: auth.token, query: { pageNo: 1, pageSize: 120 } }),
       fetchTasks({ token: auth.token, query: { pageNo: 1, pageSize: 80 } }).catch(() => null as PageResult<TaskDetail> | null),
+      searchCommunityPosts({
+        token: auth.token,
+        query: { pageNo: 1, pageSize: 24, sort: "POPULAR" },
+      }).catch(() => null as PageResult<CommunityPost> | null),
     ])
     tools.value = toolPage.list
     tasks.value = taskPage?.list || []
+    communityPosts.value = communityPage?.list || []
   } catch (err) {
     error.value = err instanceof Error ? err.message : "首页数据加载失败"
     tools.value = []
     tasks.value = []
+    communityPosts.value = []
   } finally {
     loading.value = false
   }
@@ -182,37 +289,80 @@ watch(
       <section class="home-hero">
         <div class="hero-glow hero-glow--pink" />
         <div class="hero-glow hero-glow--blue" />
-        <div class="hero-content">
-          <p class="hero-kicker">
-            <Sparkles class="h-4 w-4" />
-            Smart Router · Launchpad
-          </p>
-          <h1>思维不停，创作不止</h1>
-          <p class="hero-lead">输入一个想法，选择创作方向，科创点AI 会把你带到对应工作台继续完成专业配置。</p>
+        <div class="hero-layout">
+          <div class="hero-content">
+            <p class="hero-kicker">
+              <Sparkles class="h-4 w-4" />
+              Smart Router · Launchpad
+            </p>
+            <h1>思维不停，创作不止</h1>
+            <p class="hero-lead">输入一个想法，选择创作方向，科创点AI 会把你带到对应工作台继续完成专业配置。</p>
 
-          <div class="router-panel">
-            <div class="prompt-shell">
-              <Search class="h-5 w-5 text-white/36" />
-              <input
-                v-model="promptText"
-                type="text"
-                placeholder="输入灵感，即刻创作！"
-                @keydown.enter.prevent="launchRouter('IMAGE')"
-              />
-            </div>
-            <div class="router-actions" aria-label="创作分流">
-              <button
-                v-for="action in routerActions"
-                :key="action.modality"
-                type="button"
-                class="route-button"
-                @click="launchRouter(action.modality)"
-              >
-                <component :is="action.icon" class="h-4 w-4" />
-                {{ action.label }}
-              </button>
+            <div class="router-panel">
+              <div class="prompt-shell">
+                <Search class="h-5 w-5 text-white/36" />
+                <input
+                  v-model="promptText"
+                  type="text"
+                  placeholder="输入灵感，即刻创作！"
+                  @keydown.enter.prevent="launchRouter('IMAGE')"
+                />
+              </div>
+              <div class="router-actions" aria-label="创作分流">
+                <button
+                  v-for="action in routerActions"
+                  :key="action.modality"
+                  type="button"
+                  class="route-button"
+                  @click="launchRouter(action.modality)"
+                >
+                  <component :is="action.icon" class="h-4 w-4" />
+                  {{ action.label }}
+                </button>
+              </div>
             </div>
           </div>
+
+          <aside class="hero-wall" aria-label="社区动态作品墙">
+            <template v-if="communityWallItems.length">
+              <div class="hero-wall-fade hero-wall-fade--top" />
+              <div class="hero-wall-fade hero-wall-fade--bottom" />
+              <div
+                v-for="(column, columnIndex) in communityWallColumns"
+                :key="columnIndex"
+                class="hero-wall-column"
+                :class="{ 'hero-wall-column--down': columnIndex % 2 === 1 }"
+              >
+                <button
+                  v-for="(post, postIndex) in column"
+                  :key="`${post.id}-${postIndex}`"
+                  type="button"
+                  class="hero-wall-card"
+                  @click="openCommunityPreview(post)"
+                >
+                  <video
+                    v-if="isVideoUrl(communityPostMediaUrl(post))"
+                    :src="communityPostMediaUrl(post)"
+                    muted
+                    loop
+                    playsinline
+                    preload="metadata"
+                  />
+                  <img
+                    v-else
+                    :src="communityPostMediaUrl(post)"
+                    :alt="communityPostTitle(post)"
+                    loading="lazy"
+                  />
+                  <span class="hero-wall-badge">{{ communityPostKindLabel(post) }}</span>
+                </button>
+              </div>
+            </template>
+            <div v-else class="hero-wall-empty">
+              <Sparkles class="h-5 w-5" />
+              <span>社区作品载入后将在这里流动展示</span>
+            </div>
+          </aside>
         </div>
       </section>
 
@@ -319,6 +469,53 @@ watch(
           </article>
         </div>
       </section>
+
+      <Teleport to="body">
+        <div
+          v-if="selectedCommunityPost"
+          class="community-preview-backdrop"
+          role="dialog"
+          aria-modal="true"
+          @click.self="closeCommunityPreview"
+        >
+          <section class="community-preview-modal">
+            <button type="button" class="community-preview-close" aria-label="关闭" @click="closeCommunityPreview">
+              <X class="h-5 w-5" />
+            </button>
+            <div class="community-preview-media">
+              <video
+                v-if="isVideoUrl(selectedCommunityMediaUrl)"
+                :src="selectedCommunityMediaUrl"
+                controls
+                autoplay
+                loop
+                playsinline
+              />
+              <img v-else :src="selectedCommunityMediaUrl" :alt="selectedCommunityTitle" />
+            </div>
+            <div class="community-preview-body">
+              <p class="community-preview-kicker">Community Prompt</p>
+              <h3>{{ selectedCommunityTitle }}</h3>
+              <p class="community-preview-prompt">{{ selectedCommunityPrompt || "该作品暂未公开完整提示词。" }}</p>
+              <div class="community-preview-actions">
+                <button
+                  type="button"
+                  class="community-preview-primary"
+                  :disabled="!selectedCommunityPrompt"
+                  @click="quoteCommunityPrompt"
+                >
+                  <Copy class="h-4 w-4" />
+                  引用到输入框
+                </button>
+                <button type="button" class="community-preview-secondary" @click="openCommunityPost(selectedCommunityPost)">
+                  查看作品
+                  <ExternalLink class="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          </section>
+        </div>
+      </Teleport>
     </main>
   </AppShell>
 </template>
@@ -337,7 +534,8 @@ watch(
 .home-hero {
   position: relative;
   overflow: hidden;
-  min-height: 420px;
+  height: auto;
+  min-height: 0;
   border: 1px solid rgb(255 255 255 / 0.06);
   border-radius: 28px;
   background:
@@ -370,11 +568,22 @@ watch(
   background: #7c5cff;
 }
 
+.hero-layout {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  height: auto;
+  min-height: 0;
+  grid-template-columns: minmax(0, 3fr) minmax(320px, 2fr);
+  gap: 18px;
+}
+
 .hero-content {
   position: relative;
   z-index: 1;
-  max-width: 920px;
-  padding: clamp(36px, 6vw, 74px);
+  max-width: none;
+  padding: clamp(34px, 4.6vw, 56px) clamp(34px, 5vw, 64px) 32px;
+  align-self: center;
 }
 
 .hero-kicker,
@@ -391,24 +600,24 @@ watch(
 }
 
 .hero-content h1 {
-  margin: 18px 0 0;
-  font-size: clamp(48px, 6.2vw, 88px);
+  margin: 14px 0 0;
+  font-size: clamp(36px, 4.2vw, 58px);
   font-weight: 760;
-  line-height: 0.96;
+  line-height: 1.04;
   letter-spacing: 0;
 }
 
 .hero-lead {
   max-width: 560px;
-  margin: 24px 0 0;
+  margin: 18px 0 0;
   color: rgb(255 255 255 / 0.58);
   font-size: 16px;
-  line-height: 1.9;
+  line-height: 1.75;
 }
 
 .router-panel {
   max-width: 760px;
-  margin-top: 34px;
+  margin-top: 26px;
   border: 1px solid rgb(255 255 255 / 0.08);
   border-radius: 24px;
   background: rgb(10 10 14 / 0.62);
@@ -469,6 +678,160 @@ watch(
   border-color: rgb(255 63 121 / 0.34);
   background: linear-gradient(135deg, rgb(255 63 121 / 0.2), rgb(124 92 255 / 0.18));
   color: #fff;
+}
+
+.hero-wall {
+  position: relative;
+  display: grid;
+  height: clamp(360px, 28vw, 440px);
+  min-height: 0;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  overflow: hidden;
+  padding: 20px 22px 20px 0;
+  mask-image: linear-gradient(to bottom, transparent, #000 15%, #000 85%, transparent);
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 15%, #000 85%, transparent);
+}
+
+.hero-wall::before {
+  position: absolute;
+  inset: 0;
+  border-left: 1px solid rgb(255 255 255 / 0.055);
+  background:
+    linear-gradient(90deg, rgb(18 18 22 / 0.08), rgb(18 18 22 / 0.56)),
+    radial-gradient(circle at 66% 12%, rgb(255 63 121 / 0.12), transparent 34%);
+  content: "";
+  pointer-events: none;
+}
+
+.hero-wall-fade {
+  position: absolute;
+  right: 0;
+  left: 0;
+  z-index: 6;
+  height: 112px;
+  pointer-events: none;
+}
+
+.hero-wall-fade--top {
+  top: 0;
+  background: linear-gradient(180deg, #121216 0%, rgb(18 18 22 / 0.86) 34%, rgb(18 18 22 / 0) 100%);
+}
+
+.hero-wall-fade--bottom {
+  bottom: 0;
+  background: linear-gradient(0deg, #121216 0%, rgb(18 18 22 / 0.86) 34%, rgb(18 18 22 / 0) 100%);
+}
+
+.hero-wall-column {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  height: max-content;
+  min-height: max-content;
+  flex-direction: column;
+  gap: 12px;
+  animation: hero-wall-scroll-up 46s linear infinite;
+  will-change: transform;
+}
+
+.hero-wall-column--down {
+  animation-name: hero-wall-scroll-down;
+  animation-duration: 52s;
+}
+
+.hero-wall-column:hover {
+  animation-play-state: paused;
+}
+
+.hero-wall-card {
+  position: relative;
+  min-height: 156px;
+  overflow: hidden;
+  border: 1px solid rgb(255 255 255 / 0.07);
+  border-radius: 18px;
+  background: rgb(255 255 255 / 0.04);
+  box-shadow: 0 18px 42px rgb(0 0 0 / 0.28);
+  color: #fff;
+  text-align: left;
+  transition: border-color 200ms ease, box-shadow 200ms ease, transform 200ms ease;
+}
+
+.hero-wall-card:hover {
+  z-index: 3;
+  transform: scale(1.035);
+  border-color: rgb(255 63 121 / 0.45);
+  box-shadow: 0 22px 58px rgb(0 0 0 / 0.48), 0 0 0 1px rgb(255 255 255 / 0.04);
+}
+
+.hero-wall-card img,
+.hero-wall-card video {
+  width: 100%;
+  height: 100%;
+  min-height: 156px;
+  object-fit: cover;
+  transition: transform 420ms ease;
+}
+
+.hero-wall-card:hover img,
+.hero-wall-card:hover video {
+  transform: scale(1.06);
+}
+
+.hero-wall-badge {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 2;
+  border: 1px solid rgb(255 255 255 / 0.12);
+  border-radius: 999px;
+  background: rgb(0 0 0 / 0.4);
+  padding: 4px 8px;
+  color: rgb(255 255 255 / 0.78);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  backdrop-filter: blur(8px);
+}
+
+.hero-wall-empty {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  grid-column: 1 / -1;
+  border: 1px dashed rgb(255 255 255 / 0.08);
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at 42% 34%, rgb(255 63 121 / 0.2), transparent 30%),
+    radial-gradient(circle at 64% 62%, rgb(124 92 255 / 0.18), transparent 34%),
+    rgb(255 255 255 / 0.025);
+  color: rgb(255 255 255 / 0.42);
+  font-size: 13px;
+}
+
+@keyframes hero-wall-scroll-up {
+  from {
+    transform: translateY(0);
+  }
+
+  to {
+    transform: translateY(-50%);
+  }
+}
+
+@keyframes hero-wall-scroll-down {
+  from {
+    transform: translateY(-50%);
+  }
+
+  to {
+    transform: translateY(0);
+  }
 }
 
 .home-section {
@@ -853,6 +1216,151 @@ watch(
   color: rgb(254 202 202);
 }
 
+.community-preview-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  background: rgb(0 0 0 / 0.68);
+  padding: 24px;
+  backdrop-filter: blur(18px);
+}
+
+.community-preview-modal {
+  position: relative;
+  display: grid;
+  width: min(920px, 100%);
+  max-height: min(760px, calc(100vh - 48px));
+  grid-template-columns: minmax(0, 1.05fr) minmax(320px, 0.95fr);
+  overflow: hidden;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 28px;
+  background: #121216;
+  box-shadow: 0 36px 120px rgb(0 0 0 / 0.66);
+}
+
+.community-preview-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 3;
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 999px;
+  background: rgb(0 0 0 / 0.36);
+  color: rgb(255 255 255 / 0.74);
+  backdrop-filter: blur(16px);
+  transition: background-color 160ms ease, color 160ms ease;
+}
+
+.community-preview-close:hover {
+  background: rgb(255 63 121 / 0.18);
+  color: #fff;
+}
+
+.community-preview-media {
+  display: grid;
+  min-height: 460px;
+  place-items: center;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 25% 18%, rgb(255 63 121 / 0.12), transparent 28%),
+    radial-gradient(circle at 68% 76%, rgb(124 92 255 / 0.14), transparent 32%),
+    #09090c;
+}
+
+.community-preview-media img,
+.community-preview-media video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.community-preview-body {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  justify-content: center;
+  border-left: 1px solid rgb(255 255 255 / 0.06);
+  padding: 40px;
+}
+
+.community-preview-kicker {
+  margin: 0;
+  color: #ff3f79;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.community-preview-body h3 {
+  margin: 12px 0 0;
+  color: rgb(255 255 255 / 0.94);
+  font-size: 26px;
+  font-weight: 740;
+  line-height: 1.35;
+}
+
+.community-preview-prompt {
+  max-height: 260px;
+  overflow: auto;
+  margin: 18px 0 0;
+  color: rgb(255 255 255 / 0.62);
+  font-size: 14px;
+  line-height: 1.9;
+}
+
+.community-preview-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 26px;
+}
+
+.community-preview-primary,
+.community-preview-secondary {
+  display: inline-flex;
+  height: 42px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 999px;
+  padding: 0 16px;
+  font-size: 13px;
+  font-weight: 650;
+  transition: filter 160ms ease, transform 160ms ease, background-color 160ms ease, color 160ms ease;
+}
+
+.community-preview-primary {
+  border: 0;
+  background: linear-gradient(135deg, #ff3f79, #8f5cff);
+  color: #fff;
+  box-shadow: 0 14px 34px rgb(255 63 121 / 0.18);
+}
+
+.community-preview-primary:disabled {
+  cursor: not-allowed;
+  filter: grayscale(0.7);
+  opacity: 0.45;
+}
+
+.community-preview-primary:not(:disabled):hover,
+.community-preview-secondary:hover {
+  filter: brightness(1.06);
+  transform: translateY(-1px);
+}
+
+.community-preview-secondary {
+  border: 1px solid rgb(255 255 255 / 0.08);
+  background: rgb(255 255 255 / 0.055);
+  color: rgb(255 255 255 / 0.68);
+}
+
 @media (max-width: 1280px) {
   .recent-row,
   .tool-grid {
@@ -865,6 +1373,25 @@ watch(
     padding: 18px;
   }
 
+  .home-hero {
+    height: auto;
+    min-height: 0;
+  }
+
+  .hero-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .hero-wall {
+    min-height: 320px;
+    padding: 0 22px 24px;
+  }
+
+  .hero-wall::before {
+    border-top: 1px solid rgb(255 255 255 / 0.055);
+    border-left: 0;
+  }
+
   .section-heading {
     align-items: flex-start;
     flex-direction: column;
@@ -873,6 +1400,21 @@ watch(
   .recent-row,
   .tool-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .community-preview-modal {
+    grid-template-columns: minmax(0, 1fr);
+    overflow-y: auto;
+  }
+
+  .community-preview-media {
+    min-height: 340px;
+  }
+
+  .community-preview-body {
+    border-top: 1px solid rgb(255 255 255 / 0.06);
+    border-left: 0;
+    padding: 28px;
   }
 }
 
@@ -888,6 +1430,30 @@ watch(
 
   .route-button {
     width: 100%;
+  }
+
+  .hero-content {
+    padding: 30px 22px;
+  }
+
+  .hero-wall {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .hero-wall-column--down {
+    display: none;
+  }
+
+  .community-preview-backdrop {
+    padding: 12px;
+  }
+
+  .community-preview-media {
+    min-height: 280px;
+  }
+
+  .community-preview-actions {
+    flex-direction: column;
   }
 }
 </style>

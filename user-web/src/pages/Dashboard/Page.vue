@@ -16,6 +16,7 @@ import {
   Music,
   Pause,
   Play,
+  Plus,
   Presentation,
   Rows3,
   Search,
@@ -32,6 +33,7 @@ import AppShell from "@/components/AppShell.vue"
 import AssetPreviewModal from "@/components/AssetPreviewModal.vue"
 import CreditCostBadge from "@/components/CreditCostBadge/CreditCostBadge.vue"
 import CapabilityControls from "@/pages/Chat/CapabilityControls.vue"
+import type { PrimaryReferenceMaterialInfo } from "@/pages/Chat/CapabilityControls.vue"
 import DashboardModalityDock from "./DashboardModalityDock.vue"
 import { fetchCreditAccount } from "@/api/creditApi"
 import { ApiBusinessError, getApiOrigin } from "@/api/client"
@@ -84,6 +86,15 @@ const modelSearch = ref("")
 const selectedChatTool = ref<AITool | null>(null)
 const selectedToolDetailLoading = ref(false)
 const capabilityRef = ref<InstanceType<typeof CapabilityControls> | null>(null)
+const primaryReferenceInfo = ref<PrimaryReferenceMaterialInfo>({
+  available: false,
+  fieldName: "",
+  kind: "file",
+  count: 0,
+  maxCount: 1,
+  previewUrls: [],
+  uploading: false,
+})
 const composerRootRef = ref<HTMLElement | null>(null)
 const composerOpen = ref(false)
 const composerManuallyClosed = ref(false)
@@ -483,6 +494,20 @@ function selectToolByCode(toolCode: string, openComposer = false) {
 function expandComposer() {
   composerManuallyClosed.value = false
   composerOpen.value = true
+}
+
+function updatePrimaryReferenceInfo(info: PrimaryReferenceMaterialInfo) {
+  primaryReferenceInfo.value = info
+}
+
+function openPrimaryReferencePicker() {
+  capabilityRef.value?.openReferenceMaterialPicker("upload")
+  expandComposer()
+}
+
+function removePrimaryReferenceAt(index: number, event: MouseEvent) {
+  event.stopPropagation()
+  capabilityRef.value?.removePrimaryReferenceMaterialAt(index)
 }
 
 function collapseComposerForPreview(manual = true) {
@@ -1998,17 +2023,18 @@ onUnmounted(() => {
                           <button
                             v-if="taskPrompt(item.task).length > 88"
                             type="button"
-                            class="mt-1 text-xs font-medium text-primary/80 transition hover:text-primary"
+                            class="dashboard-feed-prompt-toggle"
                             @click.stop="togglePrompt(item.task.taskId)"
                           >
                             {{ isPromptExpanded(item.task.taskId) ? "收起提示词" : "展开提示词" }}
+                            <ChevronDown class="h-3.5 w-3.5 transition-transform" :class="{ 'rotate-180': isPromptExpanded(item.task.taskId) }" />
                           </button>
                         </div>
                       </div>
                       <p v-else class="text-sm text-white/38">本次任务未记录提示词。</p>
                     </section>
 
-                    <section class="mt-4">
+                    <section class="mt-5">
                       <div
                         v-if="isTaskRunning(item.task.status) || canRetryTask(item.task.status) || (!item.task.result?.contentText && item.task.status !== 'SUCCESS')"
                         class="rounded-2xl border border-white/8 bg-black/22 p-4"
@@ -2072,7 +2098,7 @@ onUnmounted(() => {
                       </div>
                     </section>
 
-                    <footer class="mt-4 flex flex-wrap items-center gap-2">
+                    <footer class="mt-5 flex flex-wrap items-center gap-2">
                       <button
                         v-if="canCancelTask(item.task.status)"
                         type="button"
@@ -2126,14 +2152,6 @@ onUnmounted(() => {
                         <Trash2 v-else class="h-3.5 w-3.5" />
                         {{ deletingTaskIds.has(item.task.taskId) ? "删除中" : "删除" }}
                       </button>
-                      <RouterLink
-                        :to="item.task.status === 'SUCCESS' ? userRoutes.taskResult(String(item.task.taskId)) : userRoutes.taskStatus(String(item.task.taskId))"
-                        class="ml-auto inline-flex items-center gap-1 text-xs font-medium text-white/38 transition hover:text-white"
-                        @click.stop
-                      >
-                        查看详情
-                        <ArrowRight class="h-3 w-3" />
-                      </RouterLink>
                     </footer>
                   </article>
                   <div ref="historyFeedEndRef" class="h-2" />
@@ -2366,14 +2384,6 @@ onUnmounted(() => {
                             {{ deletingTaskIds.has(item.task.taskId) ? "删除中" : "删除" }}
                           </button>
                         </div>
-                        <RouterLink
-                          :to="item.task.status === 'SUCCESS' ? userRoutes.taskResult(String(item.task.taskId)) : userRoutes.taskStatus(String(item.task.taskId))"
-                          class="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-white/45 transition hover:text-white"
-                          @click.stop
-                        >
-                          查看完整内容
-                          <ArrowRight class="h-3 w-3" />
-                        </RouterLink>
                       </div>
                     </div>
                   </article>
@@ -2499,15 +2509,62 @@ onUnmounted(() => {
               >
                 <X class="h-4 w-4" />
               </button>
-              <div class="flex items-start gap-3">
-                <MessageSquareText class="mt-2 h-6 w-6 shrink-0 text-white/50" />
+              <div class="relative">
+                <div class="pointer-events-none absolute left-0 top-1 z-10 flex h-10 w-10 items-center justify-center text-white/48">
+                  <MessageSquareText v-if="!primaryReferenceInfo.available" class="h-6 w-6" />
+                </div>
+                <button
+                  v-if="primaryReferenceInfo.available"
+                  type="button"
+                  class="absolute left-0 top-1 z-20 flex h-10 w-10 items-center justify-center rounded-xl border border-dashed border-white/16 bg-black/24 text-white/46 shadow-[0_8px_28px_rgb(0_0_0_/_0.2)] transition hover:border-primary/55 hover:bg-primary/10 hover:text-white"
+                  :class="primaryReferenceInfo.count > 0 ? 'border-solid border-primary/35 bg-primary/10' : ''"
+                  :title="primaryReferenceInfo.fieldName || '选择参考素材'"
+                  @click="openPrimaryReferencePicker"
+                >
+                  <Loader2 v-if="primaryReferenceInfo.uploading" class="h-4 w-4 animate-spin text-primary" />
+                  <Plus v-else class="h-5 w-5" />
+                  <span class="sr-only">选择参考素材</span>
+                </button>
                 <textarea
                   v-model="promptText"
                   rows="2"
-                  class="min-h-[72px] flex-1 resize-none bg-transparent text-base leading-7 text-white outline-none placeholder:text-white/28"
+                  class="min-h-[72px] w-full resize-none bg-transparent pb-1 pr-10 pt-1 text-base leading-7 text-white outline-none placeholder:text-white/28"
+                  :class="primaryReferenceInfo.available ? 'pl-14' : 'pl-10'"
                   :placeholder="coreFieldPlaceholder"
                   @focus="expandComposer"
                 />
+                <div
+                  v-if="primaryReferenceInfo.previewUrls.length > 0"
+                  class="mt-3 flex flex-wrap gap-3 px-1"
+                >
+                  <div
+                    v-for="(url, index) in primaryReferenceInfo.previewUrls"
+                    :key="`${url}-${index}`"
+                    class="group relative h-14 w-14 overflow-visible"
+                  >
+                    <img
+                      :src="url"
+                      alt="参考图"
+                      class="h-14 w-14 rounded-lg border border-white/10 object-cover"
+                    />
+                    <button
+                      type="button"
+                      class="absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-black/80 text-[10px] text-white opacity-0 transition-colors hover:bg-red-500 group-hover:opacity-100"
+                      aria-label="移除参考图"
+                      @click="removePrimaryReferenceAt(index, $event)"
+                    >
+                      ×
+                    </button>
+                  </div>
+                  <button
+                    v-if="primaryReferenceInfo.count > primaryReferenceInfo.previewUrls.length"
+                    type="button"
+                    class="flex h-14 min-w-14 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] px-3 text-xs font-medium text-white/45 transition hover:border-primary/40 hover:text-white"
+                    @click="openPrimaryReferencePicker"
+                  >
+                    +{{ primaryReferenceInfo.count - primaryReferenceInfo.previewUrls.length }}
+                  </button>
+                </div>
               </div>
 
               <div
@@ -2526,6 +2583,7 @@ onUnmounted(() => {
                 :tool-id="selectedChatTool.id"
                 :initial-params="replayParams"
                 class="mt-3 rounded-2xl border border-white/8 bg-black/18 px-3 py-2"
+                @primary-reference-change="updatePrimaryReferenceInfo"
               />
 
               <p v-if="submitError" class="mt-3 rounded-2xl border border-red-500/25 bg-red-500/10 px-3 py-2 text-xs text-red-200">
@@ -2710,7 +2768,7 @@ onUnmounted(() => {
 
 .dashboard-chat-feed {
   display: flex;
-  max-width: min(980px, 100%);
+  max-width: min(1040px, 100%);
   margin: 0 auto;
   padding-bottom: 36px;
   flex-direction: column;
@@ -2723,6 +2781,7 @@ onUnmounted(() => {
   background:
     linear-gradient(180deg, rgb(255 255 255 / 0.045), rgb(255 255 255 / 0.032)),
     #111116;
+  padding: 22px 26px 24px;
   box-shadow: 0 22px 60px rgb(0 0 0 / 0.22);
   transition: border-color 180ms ease, background-color 180ms ease, transform 180ms ease;
 }
@@ -2735,14 +2794,32 @@ onUnmounted(() => {
   transform: translateY(-1px);
 }
 
+.dashboard-feed-prompt-toggle {
+  display: inline-flex;
+  margin-top: 6px;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  background: transparent;
+  color: rgb(255 255 255 / 0.42);
+  padding: 0;
+  font-size: 12px;
+  font-weight: 500;
+  transition: color 160ms ease;
+}
+
+.dashboard-feed-prompt-toggle:hover {
+  color: rgb(196 181 253 / 0.95);
+}
+
 .dashboard-feed-gallery {
   display: flex;
   max-width: 100%;
   align-items: flex-start;
-  gap: 10px;
+  gap: 12px;
   overflow-x: auto;
   overscroll-behavior-inline: contain;
-  padding-bottom: 4px;
+  padding-bottom: 6px;
   scrollbar-width: thin;
   scrollbar-color: rgb(255 255 255 / 0.16) transparent;
 }
@@ -2770,23 +2847,23 @@ onUnmounted(() => {
 
 .dashboard-feed-action {
   display: inline-flex;
-  min-height: 34px;
+  min-height: 36px;
   align-items: center;
   justify-content: center;
   gap: 7px;
-  border: 1px solid rgb(255 255 255 / 0.07);
-  border-radius: 8px;
-  background: rgb(255 255 255 / 0.045);
+  border: 1px solid rgb(255 255 255 / 0.1);
+  border-radius: 10px;
+  background: transparent;
   padding: 0 12px;
-  color: rgb(255 255 255 / 0.62);
+  color: rgb(255 255 255 / 0.58);
   font-size: 12px;
   font-weight: 500;
   transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease, transform 160ms ease;
 }
 
 .dashboard-feed-action:hover:not(:disabled) {
-  border-color: rgb(255 63 121 / 0.28);
-  background: rgb(255 63 121 / 0.08);
+  border-color: rgb(255 255 255 / 0.16);
+  background: rgb(255 255 255 / 0.06);
   color: #fff;
   transform: translateY(-1px);
 }
