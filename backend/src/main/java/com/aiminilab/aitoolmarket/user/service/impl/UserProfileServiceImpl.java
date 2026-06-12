@@ -4,7 +4,8 @@ import com.aiminilab.aitoolmarket.auth.dto.SmsCodeResponse;
 import com.aiminilab.aitoolmarket.auth.service.SmsCodeService;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
-import com.aiminilab.aitoolmarket.config.AppProperties;
+import com.aiminilab.aitoolmarket.storage.AssetStorageService;
+import com.aiminilab.aitoolmarket.storage.StoredAsset;
 import com.aiminilab.aitoolmarket.user.dto.CancelAccountRequest;
 import com.aiminilab.aitoolmarket.user.dto.CommunitySettingsRequest;
 import com.aiminilab.aitoolmarket.user.dto.UpdateUserProfileRequest;
@@ -39,16 +40,16 @@ public class UserProfileServiceImpl implements UserProfileService {
     private static final String CANCEL_ACCOUNT_SMS_SCENE = "CANCEL_ACCOUNT";
 
     private final UserMapper userMapper;
-    private final AppProperties appProperties;
+    private final AssetStorageService assetStorageService;
     private final SmsCodeService smsCodeService;
     private final AccountDataCleanupMapper accountDataCleanupMapper;
 
     public UserProfileServiceImpl(UserMapper userMapper,
-                                  AppProperties appProperties,
+                                  AssetStorageService assetStorageService,
                                   SmsCodeService smsCodeService,
                                   AccountDataCleanupMapper accountDataCleanupMapper) {
         this.userMapper = userMapper;
-        this.appProperties = appProperties;
+        this.assetStorageService = assetStorageService;
         this.smsCodeService = smsCodeService;
         this.accountDataCleanupMapper = accountDataCleanupMapper;
     }
@@ -84,24 +85,8 @@ public class UserProfileServiceImpl implements UserProfileService {
 
         String timestamp = LocalDateTime.now().format(AVATAR_FILENAME_TIME);
         String filename = timestamp + "-" + UUID.randomUUID().toString().replace("-", "") + "." + extension;
-        Path dir = Path.of(appProperties.getGeneratedMediaDir())
-                .resolve("avatars")
-                .resolve(String.valueOf(userId))
-                .normalize()
-                .toAbsolutePath();
-        Path target = dir.resolve(filename).normalize();
-        if (!target.startsWith(dir)) {
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "头像文件名无效");
-        }
-
-        try {
-            Files.createDirectories(dir);
-            file.transferTo(target);
-        } catch (IOException ex) {
-            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "头像保存失败，请稍后再试");
-        }
-
-        String avatarUrl = "/generated/avatars/" + userId + "/" + filename;
+        StoredAsset stored = assetStorageService.storeMultipart("avatars/" + userId + "/" + filename, file);
+        String avatarUrl = stored.publicUrl();
         userMapper.updateAvatarUrl(userId, avatarUrl);
         UserProfileResponse user = UserProfileResponse.from(requireUser(userId));
         return new UserAvatarUploadResponse(avatarUrl, user);

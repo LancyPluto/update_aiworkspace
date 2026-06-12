@@ -40,6 +40,7 @@ import {
   Download,
   FileText,
   KeyRound,
+  Loader2,
   MessageSquare,
   MoreHorizontal,
   Pencil,
@@ -529,6 +530,7 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
   const [importResult, setImportResult] = useState<ConfigBundleImportResult | null>(null)
   const [saveFeedback, setSaveFeedback] = useState<{ type: "success" | "error"; title: string; detail: string } | null>(null)
   const [bundleBusy, setBundleBusy] = useState(false)
+  const [importingBundle, setImportingBundle] = useState(false)
   const [exportDialogOpen, setExportDialogOpen] = useState(false)
   const [togglingId, setTogglingId] = useState<number | null>(null)
   const [deletingId, setDeletingId] = useState<number | null>(null)
@@ -594,7 +596,7 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
 
   async function handleImportBundle(file: File | undefined) {
     if (!file) return
-    setBundleBusy(true)
+    setImportingBundle(true)
     setError(null)
     setNotice(null)
     setImportResult(null)
@@ -607,7 +609,7 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "导入配置包失败，请确认 JSON 格式正确")
     } finally {
-      setBundleBusy(false)
+      setImportingBundle(false)
     }
   }
 
@@ -1168,14 +1170,14 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
               <Download className="h-4 w-4" />
               导出
             </Button>
-            <Button variant="outline" className="relative gap-2" disabled={bundleBusy || loading}>
-              <Upload className={bundleBusy ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
-              导入
+            <Button variant="outline" className="relative gap-2" disabled={bundleBusy || importingBundle || loading}>
+              {importingBundle ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+              {importingBundle ? "导入中..." : "导入"}
               <input
                 type="file"
                 accept="application/json,.json"
                 className="absolute inset-0 cursor-pointer opacity-0"
-                disabled={bundleBusy || loading}
+                disabled={bundleBusy || importingBundle || loading}
                 onChange={(event) => {
                   handleImportBundle(event.target.files?.[0])
                   event.currentTarget.value = ""

@@ -45,6 +45,7 @@ public class CorsConfig implements WebMvcConfigurer {
     @Override
     public void addResourceHandlers(ResourceHandlerRegistry registry) {
         String mediaLocation = Path.of(appProperties.getGeneratedMediaDir()).toAbsolutePath().normalize().toUri().toString();
+        // Local filesystem only; OSS assets are served directly from the bucket/CDN URL.
         registry.addResourceHandler("/generated/**")
                 .addResourceLocations(mediaLocation.endsWith("/") ? mediaLocation : mediaLocation + "/");
         // Backward-compatible alias for historical records that still store tool covers as `tool-covers/...`.

@@ -50,6 +50,5 @@ export {
   fetchCreditUsageLogs,
   fetchRechargeOrder,
   fetchRechargePackages,
-  mockPayRechargeOrder,
 } from "./creditApi"
 export * from "./types"

@@ -42,7 +42,7 @@ class WorkerInternalApiSecurityTest {
         internalTaskService = mock(InternalTaskService.class);
         taskService = mock(TaskService.class);
         when(internalTaskService.markProcessing(eq(1L), any()))
-                .thenReturn(new TaskStatusResponse(1L, "TASK-1", "moments_copywriting_generator", "PROCESSING", 35, "AI is generating"));
+                .thenReturn(new TaskStatusResponse(1L, "TASK-1", "moments_copywriting_generator", "PROCESSING", 35, "AI is generating", null));
 
         AuthInterceptor authInterceptor = new AuthInterceptor(
                 mock(JwtTokenProvider.class),

@@ -54,9 +54,3 @@ export async function createCustomRechargeOrder(
 export async function fetchRechargeOrder(orderId: number, options?: { token?: string | null }): Promise<RechargeOrder> {
   return apiRequest<RechargeOrder>("GET", `/api/v1/credits/recharge-orders/${orderId}`, { token: options?.token })
 }
-
-export async function mockPayRechargeOrder(orderId: number, options?: { token?: string | null }): Promise<RechargeOrder> {
-  return apiRequest<RechargeOrder>("POST", `/api/v1/credits/recharge-orders/${orderId}/mock-pay-success`, {
-    token: options?.token,
-  })
-}

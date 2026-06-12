@@ -64,64 +64,57 @@ def main() -> int:
     pkg = next((p for p in packages if p.get("recommended")), packages[0])
     print(f"   using package id={pkg['id']} credits={pkg['credits']} price={pkg['priceAmount']}")
 
-    print("4) Create MOCK recharge order...")
+    print("4) Reject MOCK recharge channel...")
     code, res = req(
         "POST",
         "/api/v1/credits/recharge-orders",
         {
             "packageId": pkg["id"],
             "paymentChannel": "MOCK",
-            "clientRequestId": f"test-mock-{pkg['id']}",
+            "clientRequestId": f"test-mock-rejected-{pkg['id']}",
+        },
+        token=token,
+    )
+    if code == 200 and ok(res):
+        print("FAIL: MOCK channel should be rejected", res)
+        return 1
+    message = str(res.get("message") or res)
+    if "mock payment is not supported" not in message.lower():
+        print("FAIL: unexpected rejection message", code, res)
+        return 1
+    print("   ok MOCK channel rejected")
+
+    print("5) Create WECHAT_NATIVE recharge order...")
+    code, res = req(
+        "POST",
+        "/api/v1/credits/recharge-orders",
+        {
+            "packageId": pkg["id"],
+            "paymentChannel": "WECHAT_NATIVE",
+            "clientRequestId": f"test-wechat-{pkg['id']}",
         },
         token=token,
     )
     if code != 200 or not ok(res):
-        print("CREATE ORDER FAIL", code, res)
+        print("CREATE WECHAT ORDER FAIL", code, res)
         return 1
     order = res["data"]
-    order_id = order["id"]
-    print(f"   order id={order_id} status={order.get('status')} channel={order.get('paymentChannel')}")
+    print(
+        f"   order id={order['id']} status={order.get('status')} "
+        f"channel={order.get('paymentChannel')} payUrl={'yes' if order.get('payUrl') else 'no'}"
+    )
 
-    print("5) Mock pay success...")
-    code, res = req("POST", f"/api/v1/credits/recharge-orders/{order_id}/mock-pay-success", token=token)
-    if code != 200 or not ok(res):
-        print("MOCK PAY FAIL", code, res)
-        return 1
-    paid = res["data"]
-    print(f"   status={paid.get('status')} creditedAt={paid.get('creditedAt')}")
-
-    print("6) Credit account after...")
-    code, res = req("GET", "/api/v1/credits/account", token=token)
-    after = res["data"]
-    delta = after.get("available", 0) - before.get("available", 0)
-    print(f"   available={after.get('available')} (delta +{delta}, expected +{pkg['credits']})")
-
-    print("7) Custom recharge MOCK 1 yuan...")
+    print("6) Custom recharge rejects MOCK...")
     code, res = req(
         "POST",
         "/api/v1/credits/recharge-orders/custom",
-        {"amount": 1, "paymentChannel": "MOCK", "clientRequestId": "test-custom-1"},
+        {"amount": 1, "paymentChannel": "MOCK", "clientRequestId": "test-custom-mock-rejected"},
         token=token,
     )
-    if code != 200 or not ok(res):
-        print("CUSTOM ORDER FAIL", code, res)
+    if code == 200 and ok(res):
+        print("FAIL: custom MOCK channel should be rejected", res)
         return 1
-    c_order = res["data"]
-    code, res = req("POST", f"/api/v1/credits/recharge-orders/{c_order['id']}/mock-pay-success", token=token)
-    if code != 200 or not ok(res):
-        print("CUSTOM PAY FAIL", code, res)
-        return 1
-    print(f"   custom order credited status={res['data'].get('status')}")
-
-    code, res = req("GET", "/api/v1/credits/account", token=token)
-    final = res["data"]
-    print(f"   final available={final.get('available')}")
-
-    if paid.get("status") != "CREDITED":
-        print("FAIL: package order not CREDITED")
-        return 1
-    if delta != pkg["credits"]:
-        print(f"WARN: credit delta {delta} != package credits {pkg['credits']}")
+    print("   ok custom MOCK rejected")
 
     print("\nAll recharge API steps passed.")
     return 0

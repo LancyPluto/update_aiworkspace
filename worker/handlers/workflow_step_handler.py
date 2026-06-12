@@ -1,3 +1,4 @@
+import base64
 import json
 import logging
 import re
@@ -10,6 +11,9 @@ from client.siliconflow_video_client import SiliconFlowVideoClient, SiliconFlowV
 from config import resolve_siliconflow_api_key
 from handlers.digital_human_postprocessor import DigitalHumanPostprocessError, DigitalHumanPostprocessor
 from handlers.digital_human_video_handler import DigitalHumanVideoHandler
+from handlers.generated_image_persister import GeneratedImagePersister
+from handlers.generated_video_persister import GeneratedVideoPersister
+from storage.asset_storage import asset_storage
 
 
 LOGGER = logging.getLogger(__name__)
@@ -136,7 +140,9 @@ class WorkflowStepHandler:
             model=model_config.get("modelName"),
             image_size="1024x576",
         )
-        return {"imageUrl": image_url, "prompt": prompt}
+        persisted = GeneratedImagePersister().persist_images(task_id=task_id, urls=[image_url])
+        stable_url = persisted[0]["url"] if persisted else image_url
+        return {"imageUrl": stable_url, "sourceImageUrl": image_url, "prompt": prompt}
 
     def _run_tts(
         self,
@@ -160,7 +166,13 @@ class WorkflowStepHandler:
             model=model_config.get("modelName"),
             voice=voice,
         )
-        return {"audioDataUrl": audio_data_url, "speechText": speech_text, "voice": voice}
+        audio_url = _persist_audio_data_url(task_id, audio_data_url)
+        return {
+            "audioUrl": audio_url,
+            "audioDataUrl": audio_data_url,
+            "speechText": speech_text,
+            "voice": voice,
+        }
 
     def _run_video(
         self,
@@ -189,7 +201,12 @@ class WorkflowStepHandler:
             aspect_ratio="16:9",
             image_size="1024x576",
         )
-        return {"videoUrl": result["videoUrl"], "provider": "seedance"}
+        persisted = GeneratedVideoPersister().persist_video_url(task_id=task_id, source_url=result["videoUrl"])
+        return {
+            "videoUrl": persisted["url"],
+            "sourceVideoUrl": result["videoUrl"],
+            "provider": "seedance",
+        }
 
     def _run_compose(
         self,
@@ -202,8 +219,9 @@ class WorkflowStepHandler:
         tts = workflow_inputs.get("tts") or {}
         script = workflow_inputs.get("script-planner") or {}
         video_url = video.get("videoUrl")
+        audio_url = tts.get("audioUrl")
         audio_data_url = tts.get("audioDataUrl")
-        if not video_url or not audio_data_url:
+        if not video_url or (not audio_url and not audio_data_url):
             raise DigitalHumanPostprocessError("video and audio are required for compose")
         subtitle_text = script.get("subtitleZh") or script.get("dialogue") or tts.get("speechText") or ""
         subtitle_en = script.get("subtitleEn") or ""
@@ -211,7 +229,8 @@ class WorkflowStepHandler:
         final = self.postprocessor.process(
             task_id=task_id,
             video_url=video_url,
-            audio_data_url=audio_data_url,
+            audio_data_url=audio_data_url or "",
+            audio_url=audio_url or "",
             subtitle_text=subtitle_text,
         )
         markdown = _build_delivery_markdown(
@@ -242,6 +261,16 @@ class WorkflowStepHandler:
             )
         except BackendClientError:
             LOGGER.exception("failed to report workflow step failure taskId=%s", task_id)
+
+
+def _persist_audio_data_url(task_id: int, audio_data_url: str) -> str:
+    prefix = "base64,"
+    if prefix not in audio_data_url:
+        return audio_data_url
+    encoded = audio_data_url.split(prefix, 1)[1]
+    audio_bytes = base64.b64decode(encoded)
+    relative_key = f"audio/{task_id}/voice.mp3"
+    return asset_storage.put_bytes(relative_key, audio_bytes, "audio/mpeg")
 
 
 def _merge_form(workflow_inputs: dict[str, Any]) -> dict[str, Any]:

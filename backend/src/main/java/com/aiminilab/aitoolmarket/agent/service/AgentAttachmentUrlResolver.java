@@ -4,13 +4,12 @@ import com.aiminilab.aitoolmarket.agent.entity.AgentFile;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentFileMapper;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
-import com.aiminilab.aitoolmarket.config.AppProperties;
+import com.aiminilab.aitoolmarket.storage.AssetStorageService;
+import com.aiminilab.aitoolmarket.storage.StoredAsset;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
@@ -30,14 +29,14 @@ public class AgentAttachmentUrlResolver {
 
     private final AgentFileMapper agentFileMapper;
     private final AgentFileService agentFileService;
-    private final AppProperties appProperties;
+    private final AssetStorageService assetStorageService;
 
     public AgentAttachmentUrlResolver(AgentFileMapper agentFileMapper,
                                       AgentFileService agentFileService,
-                                      AppProperties appProperties) {
+                                      AssetStorageService assetStorageService) {
         this.agentFileMapper = agentFileMapper;
         this.agentFileService = agentFileService;
-        this.appProperties = appProperties;
+        this.assetStorageService = assetStorageService;
     }
 
     public String resolveForWorker(Long userId, String rawUrl) {
@@ -45,8 +44,8 @@ public class AgentAttachmentUrlResolver {
             return rawUrl;
         }
         String trimmed = rawUrl.trim();
-        if (trimmed.startsWith("/generated/")) {
-            return workerAccessibleUrl(trimmed);
+        if (trimmed.startsWith("/generated/") || trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+            return assetStorageService.workerAccessibleUrl(trimmed);
         }
         Optional<AgentFileRef> ref = parseAgentFileRef(trimmed);
         if (ref.isEmpty()) {
@@ -69,12 +68,6 @@ public class AgentAttachmentUrlResolver {
 
     private String publishToGenerated(Long userId, Long sessionId, Long fileId) {
         try (InputStream stream = agentFileService.openFileStream(userId, sessionId, fileId)) {
-            Path root = Path.of(appProperties.getGeneratedMediaDir())
-                    .resolve("agent-attachments")
-                    .resolve(String.valueOf(userId))
-                    .toAbsolutePath()
-                    .normalize();
-            Files.createDirectories(root);
             AgentFile file = agentFileMapper.selectById(fileId);
             if (file == null) {
                 throw new BusinessException(
@@ -83,26 +76,17 @@ public class AgentAttachmentUrlResolver {
                 );
             }
             String ext = extensionOf(file.getOriginalFilename(), file.getContentType());
-            Path stored = root.resolve(fileId + "-" + UUID.randomUUID() + ext).normalize();
-            if (!stored.startsWith(root)) {
-                throw new BusinessException(ErrorCode.PARAM_ERROR, "invalid attachment path");
-            }
-            Files.copy(stream, stored);
-            Path mediaRoot = Path.of(appProperties.getGeneratedMediaDir()).toAbsolutePath().normalize();
-            String relative = mediaRoot.relativize(stored).toString().replace('\\', '/');
-            return workerAccessibleUrl("/generated/" + relative);
+            String relativeKey = "agent-attachments/" + userId + "/" + fileId + "-" + UUID.randomUUID() + ext;
+            StoredAsset stored = assetStorageService.storeStream(
+                    relativeKey,
+                    stream,
+                    file.getFileSize() == null ? -1 : file.getFileSize(),
+                    file.getContentType()
+            );
+            return assetStorageService.workerAccessibleUrl(stored.publicUrl());
         } catch (IOException exception) {
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "failed to publish agent attachment");
         }
-    }
-
-    private String workerAccessibleUrl(String publicPath) {
-        String path = publicPath.startsWith("/") ? publicPath : "/" + publicPath;
-        String base = appProperties.getAgent().getWorkerMediaBaseUrl();
-        if (base == null || base.isBlank()) {
-            return path;
-        }
-        return base.replaceAll("/+$", "") + path;
     }
 
     private Optional<AgentFileRef> parseAgentFileRef(String value) {

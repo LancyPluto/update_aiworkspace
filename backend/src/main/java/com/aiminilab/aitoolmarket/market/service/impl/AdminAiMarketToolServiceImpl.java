@@ -2,7 +2,8 @@ package com.aiminilab.aitoolmarket.market.service.impl;
 
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
-import com.aiminilab.aitoolmarket.config.AppProperties;
+import com.aiminilab.aitoolmarket.storage.AssetStorageService;
+import com.aiminilab.aitoolmarket.storage.StoredAsset;
 import com.aiminilab.aitoolmarket.market.dto.AiToolResponse;
 import com.aiminilab.aitoolmarket.market.dto.UpsertAiToolRequest;
 import com.aiminilab.aitoolmarket.market.dto.UploadIconResponse;
@@ -32,18 +33,18 @@ public class AdminAiMarketToolServiceImpl implements AdminAiMarketToolService {
     private final AiMarketToolMapper aiMarketToolMapper;
     private final CapabilitiesCodec capabilitiesCodec;
     private final AiMarketToolValidator validator;
-    private final AppProperties appProperties;
+    private final AssetStorageService assetStorageService;
 
     public AdminAiMarketToolServiceImpl(
             AiMarketToolMapper aiMarketToolMapper,
             CapabilitiesCodec capabilitiesCodec,
             AiMarketToolValidator validator,
-            AppProperties appProperties
+            AssetStorageService assetStorageService
     ) {
         this.aiMarketToolMapper = aiMarketToolMapper;
         this.capabilitiesCodec = capabilitiesCodec;
         this.validator = validator;
-        this.appProperties = appProperties;
+        this.assetStorageService = assetStorageService;
     }
 
     @Override
@@ -97,19 +98,9 @@ public class AdminAiMarketToolServiceImpl implements AdminAiMarketToolService {
         if (!ICON_EXTENSIONS.contains(extension)) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "仅支持 jpg/png/svg/webp 图标");
         }
-        try {
-            Path iconsDir = Path.of(appProperties.getGeneratedMediaDir()).resolve("icons").toAbsolutePath().normalize();
-            Files.createDirectories(iconsDir);
-            String filename = UUID.randomUUID() + "." + extension;
-            Path stored = iconsDir.resolve(filename).normalize();
-            if (!stored.startsWith(iconsDir)) {
-                throw new BusinessException(ErrorCode.PARAM_ERROR, "invalid filename");
-            }
-            Files.write(stored, file.getBytes());
-            return new UploadIconResponse("/generated/icons/" + filename);
-        } catch (IOException exception) {
-            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "图标上传失败");
-        }
+        String filename = UUID.randomUUID() + "." + extension;
+        StoredAsset stored = assetStorageService.storeMultipart("icons/" + filename, file);
+        return new UploadIconResponse(stored.publicUrl());
     }
 
     private AiMarketTool toEntity(UpsertAiToolRequest request, String toolId, LocalDateTime now) {

@@ -58,10 +58,10 @@ public class WorkflowServiceImpl implements WorkflowService {
             int newVersion = existing.getVersion() + 1;
             workflowMapper.updateWorkflowContent(
                     existing.getId(),
-                    request.nodesJson(),
-                    request.edgesJson(),
-                    request.groupsJson(),
-                    request.configJson(),
+                    repairJson(request.nodesJson()),
+                    repairJson(request.edgesJson()),
+                    repairJson(request.groupsJson()),
+                    repairJson(request.configJson()),
                     newVersion,
                     normalizeStatus(request.status()),
                     operatorId
@@ -71,10 +71,10 @@ public class WorkflowServiceImpl implements WorkflowService {
             ToolWorkflow workflow = new ToolWorkflow();
             workflow.setToolId(toolId);
             workflow.setWorkflowName(request.workflowName());
-            workflow.setNodesJson(request.nodesJson());
-            workflow.setEdgesJson(request.edgesJson());
-            workflow.setGroupsJson(request.groupsJson());
-            workflow.setConfigJson(request.configJson());
+            workflow.setNodesJson(repairJson(request.nodesJson()));
+            workflow.setEdgesJson(repairJson(request.edgesJson()));
+            workflow.setGroupsJson(repairJson(request.groupsJson()));
+            workflow.setConfigJson(repairJson(request.configJson()));
             if (request.status() != null && !request.status().isBlank()) {
                 workflow.setStatus(request.status());
             }
@@ -155,6 +155,10 @@ public class WorkflowServiceImpl implements WorkflowService {
         }
         String upper = status.trim().toUpperCase();
         return ("DRAFT".equals(upper) || "PUBLISHED".equals(upper)) ? upper : null;
+    }
+
+    private static String repairJson(String json) {
+        return Utf8TextRepair.repairIfNeeded(json);
     }
 
     private WorkflowResponse toResponse(ToolWorkflow wf) {
