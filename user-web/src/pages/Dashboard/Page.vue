@@ -84,7 +84,9 @@ const modelSearch = ref("")
 const selectedChatTool = ref<AITool | null>(null)
 const selectedToolDetailLoading = ref(false)
 const capabilityRef = ref<InstanceType<typeof CapabilityControls> | null>(null)
+const composerRootRef = ref<HTMLElement | null>(null)
 const composerOpen = ref(false)
+const composerManuallyClosed = ref(false)
 const replayParams = ref<Record<string, unknown> | null>(null)
 const submitting = ref(false)
 const submitError = ref("")
@@ -249,6 +251,7 @@ const isHistoryFeedView = computed(() => activePanel.value === "tasks" && histor
 watch(historyView, (view) => {
   localStorage.setItem(HISTORY_VIEW_KEY, view)
   historyScrollContainer = null
+  if (view === "feed") composerManuallyClosed.value = false
   if (view !== "feed") showHistoryScrollBottom.value = false
   void nextTick(() => {
     setupHistoryObserver()
@@ -269,6 +272,7 @@ watch(activePanel, async (panel) => {
   await nextTick()
   setupHistoryObserver()
   if (historyView.value === "feed") {
+    composerManuallyClosed.value = false
     scrollHistoryFeedToBottom("smooth")
     shouldScrollHistoryFeedToBottom.value = false
     updateHistoryScrollBottomVisibility()
@@ -477,13 +481,28 @@ function selectToolByCode(toolCode: string, openComposer = false) {
 }
 
 function expandComposer() {
+  composerManuallyClosed.value = false
   composerOpen.value = true
 }
 
-function collapseComposerForPreview() {
+function collapseComposerForPreview(manual = true) {
   if (!composerOpen.value || submitting.value) return
+  if (manual) composerManuallyClosed.value = true
   composerOpen.value = false
   modelPickerOpen.value = false
+}
+
+function autoExpandComposerAtFeedBottom() {
+  if (!isHistoryFeedView.value || composerManuallyClosed.value) return
+  composerOpen.value = true
+}
+
+function handleDashboardPointerDown(event: PointerEvent) {
+  if (!composerOpen.value || submitting.value) return
+  const root = composerRootRef.value
+  const target = event.target
+  if (!root || !(target instanceof Node) || root.contains(target)) return
+  collapseComposerForPreview()
 }
 
 async function createWithSelectedTool() {
@@ -922,6 +941,7 @@ function updateHistoryScrollBottomVisibility() {
 function scrollHistoryFeedToBottom(behavior: ScrollBehavior = "smooth", stabilize = true) {
   const container = resolveHistoryScrollContainer()
   if (stabilize) historyFeedAutoStickUntil = Date.now() + 1400
+  autoExpandComposerAtFeedBottom()
   if (container) {
     container.scrollTo({ top: container.scrollHeight, behavior })
   } else {
@@ -987,6 +1007,7 @@ function handleDashboardScroll() {
   const container = resolveHistoryScrollContainer()
   if (!container) return
   showHistoryScrollBottom.value = historyBottomDistance(container) > 300
+  if (historyBottomDistance(container) <= 80) autoExpandComposerAtFeedBottom()
   if (isHistoryFeedNearTop(container) && taskHasNext.value && !tasksLoadingMore.value) {
     void loadMoreTasks({ preserveFeedAnchor: true })
   }
@@ -1369,6 +1390,7 @@ function modalityLabel(value?: string | null) {
 
 onMounted(async () => {
   window.addEventListener("scroll", handleDashboardScroll, true)
+  window.addEventListener("pointerdown", handleDashboardPointerDown, true)
   const savedHistoryView = localStorage.getItem(HISTORY_VIEW_KEY)
   if (savedHistoryView === "cards" || savedHistoryView === "feed") historyView.value = savedHistoryView
   await loadDashboard()
@@ -1379,6 +1401,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   window.removeEventListener("scroll", handleDashboardScroll, true)
+  window.removeEventListener("pointerdown", handleDashboardPointerDown, true)
   historyObserver?.disconnect()
   for (const timer of taskPollTimers.values()) window.clearInterval(timer)
   taskPollTimers.clear()
@@ -2385,8 +2408,14 @@ onUnmounted(() => {
           </button>
         </Transition>
 
-        <div class="pointer-events-none fixed bottom-6 left-[calc(var(--app-sidebar-width,268px)+(100vw-var(--app-sidebar-width,268px))/2)] z-50 -translate-x-1/2 transition-[left]">
-          <div v-if="!composerOpen" class="flex w-[min(980px,calc(100vw-2rem))] items-center justify-center gap-3">
+        <div
+          ref="composerRootRef"
+          class="pointer-events-none fixed bottom-6 left-[calc(var(--app-sidebar-width,268px)+(100vw-var(--app-sidebar-width,268px))/2)] z-50 grid w-[min(980px,calc(100vw-2rem))] -translate-x-1/2 transition-[left]"
+        >
+          <div
+            class="col-start-1 row-start-1 flex w-full items-center justify-center gap-3 self-end transition-all duration-200"
+            :class="composerOpen ? 'pointer-events-none translate-y-4 scale-[0.98] opacity-0' : 'translate-y-0 scale-100 opacity-100'"
+          >
             <div v-if="activePanel === 'tasks'" class="dashboard-floating-view-switch pointer-events-auto">
               <button
                 type="button"
@@ -2427,7 +2456,10 @@ onUnmounted(() => {
             </button>
           </div>
 
-          <div v-else class="pointer-events-auto w-[min(980px,calc(100vw-2rem))]">
+          <div
+            class="pointer-events-auto col-start-1 row-start-1 w-full self-end transition-all duration-200"
+            :class="composerOpen ? 'translate-y-0 scale-100 opacity-100' : 'pointer-events-none translate-y-8 scale-[0.98] opacity-0'"
+          >
             <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
               <button
                 type="button"
