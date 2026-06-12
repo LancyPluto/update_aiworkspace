@@ -103,6 +103,7 @@ let historyObserver: IntersectionObserver | null = null
 let historyFeedAutoStickUntil = 0
 let historyFeedAnchorUntil = 0
 let historyFeedAnchorHeight = 0
+let historyScrollContainer: HTMLElement | null = null
 const taskPollTimers = new Map<number, number>()
 const retryingTaskIds = ref<Set<number>>(new Set())
 const deletingTaskIds = ref<Set<number>>(new Set())
@@ -247,6 +248,7 @@ const isHistoryFeedView = computed(() => activePanel.value === "tasks" && histor
 
 watch(historyView, (view) => {
   localStorage.setItem(HISTORY_VIEW_KEY, view)
+  historyScrollContainer = null
   if (view !== "feed") showHistoryScrollBottom.value = false
   void nextTick(() => {
     setupHistoryObserver()
@@ -259,6 +261,7 @@ watch(historyView, (view) => {
 })
 
 watch(activePanel, async (panel) => {
+  historyScrollContainer = null
   if (panel !== "tasks") {
     showHistoryScrollBottom.value = false
     return
@@ -596,7 +599,7 @@ async function reloadTasksForCurrentModality() {
 
 async function loadMoreTasks(options: { preserveFeedAnchor?: boolean } = {}) {
   if (tasksLoadingMore.value || !taskHasNext.value) return
-  const scrollContainer = options.preserveFeedAnchor ? dashboardMainRef.value : null
+  const scrollContainer = options.preserveFeedAnchor ? resolveHistoryScrollContainer() : null
   const previousScrollHeight = scrollContainer?.scrollHeight ?? 0
   const previousScrollTop = scrollContainer?.scrollTop ?? 0
   tasksLoadingMore.value = true
@@ -645,7 +648,7 @@ function setupHistoryObserver() {
   historyObserver = new IntersectionObserver((entries) => {
     if (entries.some((entry) => entry.isIntersecting)) void loadMoreTasks()
   }, {
-    root: dashboardMainRef.value,
+    root: resolveHistoryScrollContainer(),
     rootMargin: "0px 0px 260px 0px",
   })
   if (historySentinelRef.value) historyObserver.observe(historySentinelRef.value)
@@ -890,7 +893,24 @@ function togglePrompt(taskId: number) {
   expandedPromptIds.value = next
 }
 
-function historyBottomDistance(container = dashboardMainRef.value) {
+function resolveHistoryScrollContainer(): HTMLElement | null {
+  if (historyScrollContainer && document.contains(historyScrollContainer)) return historyScrollContainer
+  const fallback = (document.scrollingElement || document.documentElement) as HTMLElement
+  const candidates: HTMLElement[] = []
+  let node = dashboardMainRef.value
+  while (node) {
+    candidates.push(node)
+    node = node.parentElement
+  }
+  candidates.push(fallback)
+  historyScrollContainer =
+    candidates.find((item) => item.scrollHeight - item.clientHeight > 2) ||
+    dashboardMainRef.value ||
+    fallback
+  return historyScrollContainer
+}
+
+function historyBottomDistance(container = resolveHistoryScrollContainer()) {
   if (!container) return 0
   return Math.max(0, container.scrollHeight - container.scrollTop - container.clientHeight)
 }
@@ -900,7 +920,7 @@ function updateHistoryScrollBottomVisibility() {
 }
 
 function scrollHistoryFeedToBottom(behavior: ScrollBehavior = "smooth", stabilize = true) {
-  const container = dashboardMainRef.value
+  const container = resolveHistoryScrollContainer()
   if (stabilize) historyFeedAutoStickUntil = Date.now() + 1400
   if (container) {
     container.scrollTo({ top: container.scrollHeight, behavior })
@@ -911,7 +931,7 @@ function scrollHistoryFeedToBottom(behavior: ScrollBehavior = "smooth", stabiliz
   if (!stabilize) return
   const settleBottom = () => {
     if (!isHistoryFeedView.value || Date.now() > historyFeedAutoStickUntil) return
-    const nextContainer = dashboardMainRef.value
+    const nextContainer = resolveHistoryScrollContainer()
     if (!nextContainer) return
     nextContainer.scrollTo({ top: nextContainer.scrollHeight, behavior: "auto" })
     showHistoryScrollBottom.value = false
@@ -938,7 +958,7 @@ function beginHistoryFeedAnchorPreservation(container: HTMLElement) {
 
 function preserveHistoryFeedAnchorIfNeeded() {
   if (!isHistoryFeedView.value || Date.now() > historyFeedAnchorUntil) return
-  const container = dashboardMainRef.value
+  const container = resolveHistoryScrollContainer()
   if (!container || historyFeedAnchorHeight <= 0) return
   const heightDelta = container.scrollHeight - historyFeedAnchorHeight
   if (heightDelta > 0) {
@@ -964,7 +984,7 @@ function handleDashboardScroll() {
     showHistoryScrollBottom.value = false
     return
   }
-  const container = dashboardMainRef.value
+  const container = resolveHistoryScrollContainer()
   if (!container) return
   showHistoryScrollBottom.value = historyBottomDistance(container) > 300
   if (isHistoryFeedNearTop(container) && taskHasNext.value && !tasksLoadingMore.value) {
@@ -1348,13 +1368,17 @@ function modalityLabel(value?: string | null) {
 }
 
 onMounted(async () => {
+  window.addEventListener("scroll", handleDashboardScroll, true)
   const savedHistoryView = localStorage.getItem(HISTORY_VIEW_KEY)
   if (savedHistoryView === "cards" || savedHistoryView === "feed") historyView.value = savedHistoryView
   await loadDashboard()
   setupHistoryObserver()
+  await nextTick()
+  if (isHistoryFeedView.value) scrollHistoryFeedToBottom("auto")
 })
 
 onUnmounted(() => {
+  window.removeEventListener("scroll", handleDashboardScroll, true)
   historyObserver?.disconnect()
   for (const timer of taskPollTimers.values()) window.clearInterval(timer)
   taskPollTimers.clear()
