@@ -141,6 +141,7 @@ function mapToolSummaryToAITool(tool: ToolSummary | ToolDetail): AITool {
     toolKind: tool.toolKind,
     fields: "fields" in tool ? tool.fields : undefined,
     estimatedCreditCost: tool.estimatedCreditCost,
+    variableCreditPricing: "variableCreditPricing" in tool ? tool.variableCreditPricing : undefined,
     modelConfigName: tool.modelConfigName,
     modelName: tool.modelName,
   }

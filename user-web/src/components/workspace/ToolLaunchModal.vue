@@ -12,6 +12,7 @@ import { randomUUID } from "@/utils/randomUUID"
 import { buildTaskParams } from "@/utils/toolTaskParams"
 import { isVideoPreviewUrl } from "@/adapters/toolPresentationAdapter"
 import { cleanToolDisplayText } from "@/utils/toolDisplayText"
+import { formatToolCreditHint, formatToolCreditLabel } from "@/utils/toolCreditLabel"
 
 const props = defineProps<{
   open: boolean
@@ -38,7 +39,8 @@ const dynamicFormRef = ref<InstanceType<typeof DynamicForm> | null>(null)
 const title = computed(() => cleanToolDisplayText(tool.value?.toolName) || props.toolName || props.toolCode)
 const description = computed(() => cleanToolDisplayText(tool.value?.description) || "")
 const isOffline = computed(() => tool.value?.status === "OFFLINE")
-const estimatedCost = computed(() => tool.value?.estimatedCreditCost ?? 0)
+const creditLabel = computed(() => formatToolCreditLabel(tool.value))
+const creditHint = computed(() => formatToolCreditHint(tool.value))
 const coverMediaUrl = computed(() => normalizeMediaUrl(tool.value?.coverUrl || props.toolCover))
 const coverIsVideo = computed(() => isVideoPreviewUrl(tool.value?.coverUrl || props.toolCover))
 
@@ -184,8 +186,11 @@ async function handleGenerate() {
               <span class="flex items-center gap-1.5 text-muted-foreground">
                 <Zap class="h-4 w-4 text-warning" />所需额度
               </span>
-              <span class="text-base font-semibold text-primary">{{ estimatedCost }} 额度</span>
+              <span class="text-base font-semibold text-primary">{{ creditLabel }}</span>
             </div>
+            <p v-if="tool?.variableCreditPricing" class="mb-3 text-xs text-muted-foreground leading-relaxed">
+              {{ creditHint }}
+            </p>
             <button
               type="button"
               class="inline-flex h-11 w-full items-center justify-center gap-2 rounded-md bg-primary text-sm font-medium text-primary-foreground transition hover:opacity-90 disabled:pointer-events-none disabled:opacity-50"

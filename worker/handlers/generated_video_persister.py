@@ -43,10 +43,10 @@ class GeneratedVideoPersister:
         self.output_dir = asset_storage.local_root
         self.timeout = (10, 300)
 
-    def persist_video_url(self, *, task_id: int, source_url: str) -> dict[str, str]:
+    def persist_video_url(self, *, task_id: int, source_url: str, index: int = 1) -> dict[str, str]:
         video_bytes, content_type = self._download(source_url)
         extension = self._resolve_extension(source_url, content_type)
-        relative_key = f"video/{task_id}/video-1{extension}"
+        relative_key = f"video/{task_id}/video-{max(1, index)}{extension}"
         try:
             url = asset_storage.put_bytes(relative_key, video_bytes, content_type)
         except Exception as exc:

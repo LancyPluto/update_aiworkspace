@@ -81,13 +81,15 @@ export function assetFromTask(
   } satisfies Partial<AssetPreviewItem>
 
   if (block.type === "image") {
-    const url = block.images[0]?.url || extractPrimaryMediaUrl(task.result?.contentText || "") || ""
+    const urls = block.images.map((image) => image.url).filter(Boolean)
+    const url = urls[0] || extractPrimaryMediaUrl(task.result?.contentText || "") || ""
     return {
       ...base,
       kind: "image",
       url,
-      urls: block.images.map((image) => image.url).filter(Boolean),
+      urls,
       title: block.title || base.title,
+      subtitle: urls.length > 1 ? `${base.subtitle} · 共 ${urls.length} 张` : base.subtitle,
     } as AssetPreviewItem
   }
   if (block.type === "video") return { ...base, kind: "video", url: block.url, title: block.title || base.title } as AssetPreviewItem

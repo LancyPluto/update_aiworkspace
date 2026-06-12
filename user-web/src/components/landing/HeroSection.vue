@@ -94,7 +94,7 @@ const currentWord = computed(() => words[wordIndex.value])
           ]"
         >
           不用纠结选哪个 AI，我们帮你挑最擅长的那个。
-          文生图、图生视频、音频生成、PPT 制作，一个平台全搞定。
+          文生图、图生视频、音频生成、工作流编排，一个平台全搞定。
         </p>
         
         <!-- CTAs -->

@@ -95,7 +95,9 @@ const resolvedPreview = computed(() =>
     : null,
 )
 const costLabel = computed(() => {
-  const cost = selectedSummary.value?.estimatedCreditCost
+  const summary = selectedSummary.value
+  if (summary?.variableCreditPricing) return "生成（算力不详）"
+  const cost = summary?.estimatedCreditCost
   return cost ? `生成 ${cost}` : "生成"
 })
 const timelineItems = computed(() => buildCreateTimelineItems(tasks.value, tools.value))

@@ -56,12 +56,14 @@ import com.aiminilab.aitoolmarket.tool.integration.ToolIntegrationRegistry;
 import com.aiminilab.aitoolmarket.tool.integration.ToolIntegrationResolver;
 import com.aiminilab.aitoolmarket.tool.service.ToolService;
 import com.aiminilab.aitoolmarket.tool.service.ToolTemplateService;
+import com.aiminilab.aitoolmarket.workflow.service.WorkflowExecutionService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.JavaType;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -101,6 +103,7 @@ public class ToolServiceImpl implements ToolService {
     private final ToolIntegrationResolver toolIntegrationResolver;
     private final ToolIntegrationRegistry toolIntegrationRegistry;
     private final BypassCacheService bypassCacheService;
+    private final WorkflowExecutionService workflowExecutionService;
 
     public ToolServiceImpl(ToolMapper toolMapper, ToolCategoryMapper toolCategoryMapper,
                            ToolFieldSchemaMapper toolFieldSchemaMapper, ToolFieldItemMapper toolFieldItemMapper,
@@ -112,7 +115,8 @@ public class ToolServiceImpl implements ToolService {
                            GeneratedMediaPathSupport generatedMediaPathSupport,
                            ToolIntegrationResolver toolIntegrationResolver,
                            ToolIntegrationRegistry toolIntegrationRegistry,
-                           BypassCacheService bypassCacheService) {
+                           BypassCacheService bypassCacheService,
+                           @Lazy WorkflowExecutionService workflowExecutionService) {
         this.toolMapper = toolMapper;
         this.toolCategoryMapper = toolCategoryMapper;
         this.toolFieldSchemaMapper = toolFieldSchemaMapper;
@@ -128,6 +132,7 @@ public class ToolServiceImpl implements ToolService {
         this.toolIntegrationResolver = toolIntegrationResolver;
         this.toolIntegrationRegistry = toolIntegrationRegistry;
         this.bypassCacheService = bypassCacheService;
+        this.workflowExecutionService = workflowExecutionService;
     }
 
     @Override
@@ -232,8 +237,12 @@ public class ToolServiceImpl implements ToolService {
     }
 
     private ToolSummaryResponse toUserFacingSummary(AiTool tool) {
+        boolean variableCreditPricing = workflowExecutionService.shouldUseWorkflow(tool);
+        Integer estimatedCredits = variableCreditPricing
+                ? null
+                : taskCreditEstimateService.estimateUserFacingTaskCredits(tool);
         return sanitizeCoverUrl(
-                ToolSummaryResponse.publicFrom(tool, taskCreditEstimateService.estimateUserFacingTaskCredits(tool), objectMapper));
+                ToolSummaryResponse.publicFrom(tool, estimatedCredits, variableCreditPricing, objectMapper));
     }
 
     private ToolIntegrationView resolveIntegrationView(AiTool tool) {

@@ -1,8 +1,10 @@
 <script setup lang="ts">
+// 资产卡片：多图任务以微信九宫格图集展示
 import { computed } from "vue"
 import { useRouter } from "vue-router"
 import { ArrowRight, Clock, Eye, FileText, Heart, Image as ImageIcon, Music, Sparkles, Star, Video, Wand2 } from "lucide-vue-next"
 import { getApiOrigin } from "@/api/client"
+import ImageStackPreview from "@/components/ImageStackPreview.vue"
 import UserAvatar from "@/components/UserAvatar.vue"
 import type { AssetPreviewItem } from "@/types/assetPreview"
 
@@ -28,6 +30,18 @@ const emit = defineEmits<{
 
 const router = useRouter()
 const mediaUrl = computed(() => normalizeMediaUrl(props.asset.url))
+const imageStackUrls = computed(() => {
+  const urls = props.asset.urls?.length ? props.asset.urls : props.asset.url ? [props.asset.url] : []
+  const seen = new Set<string>()
+  return urls
+    .map((url) => normalizeMediaUrl(url))
+    .filter((url) => {
+      if (!url || seen.has(url)) return false
+      seen.add(url)
+      return true
+    })
+})
+const isImageStack = computed(() => props.asset.kind === "image" && imageStackUrls.value.length > 1)
 const coverUrl = computed(() => normalizeMediaUrl(props.asset.coverUrl))
 const showFeaturedBadge = computed(() => Boolean(props.asset.featured || props.asset.pinned))
 const featuredBadgeText = computed(() => (props.asset.pinned ? "置顶" : "精选"))
@@ -76,9 +90,16 @@ function openAuthorProfile() {
     :class="{ compact, masonry, gallery: gallery || (source === 'community' && compact) }"
     @click="emit('open', asset)"
   >
-    <div class="media-frame">
+    <div class="media-frame" :class="{ 'has-image-stack': isImageStack }">
+      <ImageStackPreview
+        v-if="isImageStack"
+        :images="imageStackUrls"
+        :alt="asset.title"
+        fit="cover"
+        class="media image-stack-media"
+      />
       <img
-        v-if="asset.kind === 'image' && mediaUrl"
+        v-else-if="asset.kind === 'image' && mediaUrl"
         :src="mediaUrl"
         :alt="asset.title"
         class="media"
@@ -319,6 +340,28 @@ function openAuthorProfile() {
 .compact .media-frame,
 .gallery .media-frame {
   aspect-ratio: 4 / 3;
+}
+
+.media-frame.has-image-stack {
+  display: flex;
+}
+
+.image-stack-media {
+  flex: 1;
+  min-height: 0;
+}
+
+/* compact/gallery 卡片是固定 4:3 框：让九宫格充满容器、行高均分，避免底行被裁切 */
+.compact .media-frame.has-image-stack :deep(.image-grid-preview.grid),
+.gallery .media-frame.has-image-stack :deep(.image-grid-preview.grid) {
+  height: 100%;
+  grid-auto-rows: minmax(0, 1fr);
+}
+
+.compact .media-frame.has-image-stack :deep(.image-grid-cell),
+.gallery .media-frame.has-image-stack :deep(.image-grid-cell) {
+  aspect-ratio: auto;
+  min-height: 0;
 }
 
 .compact .media,

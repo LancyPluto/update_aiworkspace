@@ -242,6 +242,29 @@ test("migrated user shell uses 科创点AI brand and browser title", async () =>
   assert.doesNotMatch(html, /智效 AI 工作台|Studio\.ai/)
 })
 
+test("multi-image assets use stacked preview instead of splitting cards", async () => {
+  const assetCard = await readSource("components/AssetCard.vue")
+  const dashboard = await readSource("pages/Dashboard/Page.vue")
+  const materialLibrary = await readSource("pages/MaterialLibrary/Page.vue")
+  const imageStack = await readSource("components/ImageStackPreview.vue")
+
+  assert.match(imageStack, /image-stack-preview/)
+  assert.match(assetCard, /ImageStackPreview/)
+  assert.match(dashboard, /ImageStackPreview/)
+  assert.doesNotMatch(materialLibrary, /asset\.urls\.map\(\(url, index\)/)
+  assert.match(materialLibrary, /共 \$\{asset\.urls\.length\} 张/)
+})
+
+test("ppt workspace routes are exposed via userRoutes helpers", async () => {
+  const userRoutes = await readSource("router/userRoutes.ts")
+  const protectedRoutes = await readSource("app/routes/protectedRoutes.ts")
+
+  assert.match(userRoutes, /pptWorkspace\(\)/)
+  assert.match(userRoutes, /pptProjectEditor\(/)
+  assert.match(protectedRoutes, /name:\s*"PptWorkspace"/)
+  assert.match(protectedRoutes, /name:\s*"PptProjectEditor"/)
+})
+
 test("my tasks overview is removed from user-facing navigation and routes", async () => {
   const shell = await readSource("components/workspace/WorkspaceShell.vue")
   const nav = await readSource("data/creativeHub.ts")

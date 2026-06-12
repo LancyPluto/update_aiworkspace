@@ -4,7 +4,6 @@ export { getCurrentUser, updateCurrentUserProfile, uploadCurrentUserAvatar, upda
 export * from "./communityApi"
 export { fetchToolCategories, fetchTools, searchTools, fetchToolByCode, uploadToolFile, fetchUploadAssets, deleteUploadAsset } from "./toolApi"
 export { fetchModelOptions } from "./modelOptionsApi"
-export * from "./pptApi"
 export {
   fetchEnabledAITools,
   fetchAIToolById,

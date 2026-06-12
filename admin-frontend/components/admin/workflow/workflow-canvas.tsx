@@ -17,7 +17,7 @@ import {
   useNodesState,
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
-import { CheckCircle2, History, Redo2, Rocket, Save, Undo2 } from "lucide-react"
+import { CheckCircle2, History, LayoutGrid, Redo2, Rocket, Save, Undo2 } from "lucide-react"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -1764,6 +1764,74 @@ export function WorkflowCanvas({
     [nodes, pushChange, setNodes],
   )
 
+  /**
+   * 一键整理：按连线拓扑分层（从无入边节点开始 BFS），
+   * 同层节点纵向均匀排布。仅整理普通节点，分组框保持原位。
+   */
+  const autoLayout = useCallback(() => {
+    const layoutNodes = nodes.filter((node) => node.type !== "groupNode")
+    if (layoutNodes.length === 0) return
+    pushChange()
+
+    const ids = new Set(layoutNodes.map((node) => node.id))
+    const indegree = new Map<string, number>()
+    const adjacency = new Map<string, string[]>()
+    for (const id of ids) indegree.set(id, 0)
+    for (const edge of edges) {
+      if (!edge.source || !edge.target || !ids.has(edge.source) || !ids.has(edge.target)) continue
+      indegree.set(edge.target, (indegree.get(edge.target) || 0) + 1)
+      adjacency.set(edge.source, [...(adjacency.get(edge.source) || []), edge.target])
+    }
+
+    const layerOf = new Map<string, number>()
+    let frontier = layoutNodes.filter((node) => (indegree.get(node.id) || 0) === 0).map((node) => node.id)
+    if (frontier.length === 0) frontier = [layoutNodes[0]!.id]
+    let layer = 0
+    const remainingIndegree = new Map(indegree)
+    const visited = new Set<string>()
+    while (frontier.length > 0) {
+      const next: string[] = []
+      for (const id of frontier) {
+        if (visited.has(id)) continue
+        visited.add(id)
+        layerOf.set(id, layer)
+        for (const child of adjacency.get(id) || []) {
+          const remaining = (remainingIndegree.get(child) || 0) - 1
+          remainingIndegree.set(child, remaining)
+          if (remaining <= 0 && !visited.has(child)) next.push(child)
+        }
+      }
+      frontier = next
+      layer += 1
+    }
+    // 环或孤立节点放到最后一层
+    for (const node of layoutNodes) {
+      if (!layerOf.has(node.id)) layerOf.set(node.id, layer)
+    }
+
+    const X_GAP = 360
+    const Y_GAP = 190
+    const layerBuckets = new Map<number, string[]>()
+    for (const node of layoutNodes) {
+      const l = layerOf.get(node.id) || 0
+      layerBuckets.set(l, [...(layerBuckets.get(l) || []), node.id])
+    }
+    const positions = new Map<string, { x: number; y: number }>()
+    for (const [l, bucket] of layerBuckets) {
+      const offset = ((bucket.length - 1) * Y_GAP) / 2
+      bucket.forEach((id, index) => {
+        positions.set(id, { x: 60 + l * X_GAP, y: 280 + index * Y_GAP - offset })
+      })
+    }
+    setNodes((current: WFNode[]) =>
+      current.map((node) => {
+        const position = positions.get(node.id)
+        return position ? { ...node, position } : node
+      }),
+    )
+    window.requestAnimationFrame(() => reactFlowInstance?.fitView({ padding: 0.28 }))
+  }, [nodes, edges, pushChange, setNodes, reactFlowInstance])
+
   const handleInspectorUpdate = useCallback(
     (nodeId: string, updates: Record<string, unknown>) => {
       pushChange()
@@ -1870,6 +1938,10 @@ export function WorkflowCanvas({
       <Button type="button" size="sm" variant="outline" className="gap-1.5 text-xs" onClick={toggleVersions}>
         <History className="h-3.5 w-3.5" />
         版本
+      </Button>
+      <Button type="button" size="sm" variant="outline" className="gap-1.5 text-xs" onClick={autoLayout} title="按数据流拓扑自动排列节点">
+        <LayoutGrid className="h-3.5 w-3.5" />
+        整理布局
       </Button>
       <Button type="button" size="sm" variant="outline" className="gap-1.5 text-xs" onClick={handleUndo} disabled={!canUndo}>
         <Undo2 className="h-3.5 w-3.5" />
@@ -1992,6 +2064,8 @@ export function WorkflowCanvas({
           nodesDraggable
           nodesConnectable
           elementsSelectable
+          snapToGrid
+          snapGrid={[20, 20]}
           minZoom={0.1}
           maxZoom={3}
           defaultEdgeOptions={{

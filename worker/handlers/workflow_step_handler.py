@@ -19,6 +19,11 @@ from storage.asset_storage import asset_storage
 LOGGER = logging.getLogger(__name__)
 TERMINAL_TASK_STATUSES = {"SUCCESS", "FAILED", "CANCELLED"}
 
+# 每个分镜固定 5 秒：30s -> 6 镜，60s -> 12 镜，90s -> 18 镜
+SCENE_SECONDS = 5
+MAX_SCENES = 18
+DEFAULT_EPISODE_SECONDS = 30
+
 
 class WorkflowStepHandler:
     def __init__(
@@ -86,16 +91,32 @@ class WorkflowStepHandler:
         story_theme = form.get("storyTheme") or "温情漫剧"
         plot_outline = form.get("plotOutline") or "祖孙之间的暖心对话"
         visual_style = form.get("visualStyle") or "电影感写实"
-        script_feedback = form.get("scriptFeedback") or form.get("scriptRevision") or ""
-        storyboard_feedback = form.get("storyboardFeedback") or ""
+        genre = form.get("genre") or ""
+        scene_count = _resolve_scene_count(form, workflow_inputs)
+        script_global, script_per_scene = _parse_per_scene_feedback(form.get("scriptFeedback") or form.get("scriptRevision"))
+        storyboard_global, storyboard_per_scene = _parse_per_scene_feedback(form.get("storyboardFeedback"))
+
+        feedback_lines: list[str] = []
+        if script_global:
+            feedback_lines.append(f"整体脚本意见：{script_global}")
+        if storyboard_global:
+            feedback_lines.append(f"整体分镜意见：{storyboard_global}")
+        for index, text in sorted({**script_per_scene, **storyboard_per_scene}.items()):
+            feedback_lines.append(f"分镜{index}意见：{text}")
+
         prompt = (
-            "你是 AI 漫剧分镜编剧。根据用户输入，输出一个 5 秒单镜场景的 JSON，不要 markdown。\n"
-            "字段：sceneTitle, sceneDescription, dialogue, subtitleZh, subtitleEn, narration, presenterGender。\n"
-            "要求：电影感镜头、人物表情细腻、适合图生视频；对白简短自然；subtitleZh 与 dialogue 一致；subtitleEn 为地道英文。\n"
-            f"主题：{story_theme}\n梗概：{plot_outline}\n画风：{visual_style}\n"
-            f"脚本意见：{script_feedback or '无'}\n分镜意见：{storyboard_feedback or '无'}\n"
-            "若用户未指定角色，可生成祖孙温情室内对话场景。"
+            "你是 AI 漫剧分镜编剧。请把用户故事改编成完整可拍的多分镜短剧脚本，一次性输出全部分镜的脚本和台词。\n"
+            f"目标时长约 {scene_count * SCENE_SECONDS} 秒，必须正好输出 {scene_count} 个分镜，每个分镜时长 5 秒。\n"
+            "只输出 JSON 对象，不要 markdown。格式：\n"
+            '{"title": "整集标题", "scenes": [{"index": 1, "sceneTitle": "...", "sceneDescription": "...", '
+            '"dialogue": "...", "subtitleZh": "...", "subtitleEn": "...", "narration": "...", "presenterGender": "female|male"}]}\n'
+            "要求：分镜之间剧情连贯有起承转合；sceneDescription 为电影感画面描述（人物、镜头、光线），适合图生视频；"
+            "dialogue 为该镜台词（5 秒内能说完，简短自然）；subtitleZh 与 dialogue 一致；subtitleEn 为地道英文翻译。\n"
+            f"主题：{story_theme}\n题材：{genre or '未指定'}\n梗概：{plot_outline}\n画风：{visual_style}\n"
+            + ("\n".join(feedback_lines) + "\n" if feedback_lines else "")
+            + "若用户未指定角色，可生成祖孙温情室内对话场景。"
         )
+        parsed: dict[str, Any] | None = None
         try:
             raw = self.model_client.generate(
                 prompt,
@@ -104,15 +125,32 @@ class WorkflowStepHandler:
                 model_name=model_config.get("modelName"),
                 base_url=model_config.get("baseUrl"),
                 api_key=model_config.get("apiKey"),
-                timeout_seconds=model_config.get("timeoutSeconds") or 90,
-                max_tokens=1200,
+                timeout_seconds=model_config.get("timeoutSeconds") or 120,
+                max_tokens=max(1200, 400 * scene_count),
             )
             parsed = _extract_json(raw)
-            if parsed:
-                return parsed
         except ModelClientError:
-            LOGGER.warning("script planner model call failed, using fallback scene")
-        return _fallback_script(form)
+            LOGGER.warning("script planner model call failed, using fallback scenes")
+
+        scenes = _normalize_scenes(parsed, scene_count, form)
+        title = ""
+        if isinstance(parsed, dict):
+            title = str(parsed.get("title") or "").strip()
+        if not title:
+            title = str(story_theme)
+
+        output: dict[str, Any] = {
+            "title": title,
+            "sceneCount": len(scenes),
+            "sceneSeconds": SCENE_SECONDS,
+            "totalSeconds": len(scenes) * SCENE_SECONDS,
+            "scenes": scenes,
+        }
+        # 向后兼容：旧版单镜字段取第一镜
+        output.update({key: scenes[0][key] for key in (
+            "sceneTitle", "sceneDescription", "dialogue", "subtitleZh", "subtitleEn", "narration", "presenterGender",
+        )})
+        return output
 
     def _run_keyframe(
         self,
@@ -123,26 +161,63 @@ class WorkflowStepHandler:
         trace_id: str | None,
     ) -> dict[str, Any]:
         script = workflow_inputs.get("script-planner") or {}
-        scene_description = script.get("sceneDescription") or script.get("narration") or form.get("plotOutline") or ""
-        merged = {**form, "plotOutline": scene_description, "mainCharacters": script.get("dialogue") or form.get("mainCharacters")}
-        prompt = (
-            f"{DigitalHumanVideoHandler._build_comic_image_prompt(merged)}, "
-            f"cinematic close-up, warm indoor lighting, shallow depth of field, emotional expression, "
-            f"scene detail: {scene_description}, no text, no watermark, 16:9 composition."
-        )
-        self.backend_client.mark_processing(task_id, progress=30, progress_message="正在生成电影感关键帧", trace_id=trace_id)
+        scenes = _scenes_from_script(script, form)
+        script_global, _ = _parse_per_scene_feedback(form.get("scriptFeedback") or form.get("scriptRevision"))
+        storyboard_global, storyboard_per_scene = _parse_per_scene_feedback(form.get("storyboardFeedback"))
+
         image_client = SiliconFlowVideoClient(
             api_key=resolve_siliconflow_api_key(model_config),
             base_url=model_config.get("baseUrl"),
         )
-        image_url = image_client.generate_image(
-            prompt=prompt,
-            model=model_config.get("modelName"),
-            image_size="1024x576",
-        )
-        persisted = GeneratedImagePersister().persist_images(task_id=task_id, urls=[image_url])
-        stable_url = persisted[0]["url"] if persisted else image_url
-        return {"imageUrl": stable_url, "sourceImageUrl": image_url, "prompt": prompt}
+        total = len(scenes)
+        source_urls: list[str] = []
+        prompts: list[str] = []
+        for position, scene in enumerate(scenes, start=1):
+            scene_description = scene.get("sceneDescription") or scene.get("narration") or form.get("plotOutline") or ""
+            merged = {**form, "plotOutline": scene_description, "mainCharacters": scene.get("dialogue") or form.get("mainCharacters")}
+            feedback_parts = [part for part in (script_global, storyboard_global, storyboard_per_scene.get(position)) if part]
+            prompt = (
+                f"{DigitalHumanVideoHandler._build_comic_image_prompt(merged)}, "
+                f"cinematic close-up, warm indoor lighting, shallow depth of field, emotional expression, "
+                f"scene detail: {scene_description}, no text, no watermark, 16:9 composition."
+            )
+            if feedback_parts:
+                prompt = f"{prompt}\nUser revision notes: {'；'.join(feedback_parts)}"
+            self.backend_client.mark_processing(
+                task_id,
+                progress=20 + int(60 * position / max(total, 1)),
+                progress_message=f"正在生成关键帧 {position}/{total}",
+                trace_id=trace_id,
+            )
+            source_urls.append(
+                image_client.generate_image(
+                    prompt=prompt,
+                    model=model_config.get("modelName"),
+                    image_size="1024x576",
+                )
+            )
+            prompts.append(prompt)
+
+        persisted = GeneratedImagePersister().persist_images(task_id=task_id, urls=source_urls)
+        images: list[dict[str, Any]] = []
+        for position, source_url in enumerate(source_urls, start=1):
+            stable_url = persisted[position - 1]["url"] if len(persisted) >= position else source_url
+            images.append(
+                {
+                    "sceneIndex": position,
+                    "imageUrl": stable_url,
+                    "sourceImageUrl": source_url,
+                    "prompt": prompts[position - 1],
+                }
+            )
+        return {
+            "images": images,
+            "sceneCount": total,
+            # 向后兼容字段
+            "imageUrl": images[0]["imageUrl"] if images else "",
+            "sourceImageUrl": images[0]["sourceImageUrl"] if images else "",
+            "prompt": images[0]["prompt"] if images else "",
+        }
 
     def _run_tts(
         self,
@@ -153,25 +228,48 @@ class WorkflowStepHandler:
         trace_id: str | None,
     ) -> dict[str, Any]:
         script = workflow_inputs.get("script-planner") or {}
-        speech_text = script.get("dialogue") or script.get("narration") or form.get("plotOutline") or "奶就放心了。"
-        presenter_gender = script.get("presenterGender") or DigitalHumanVideoHandler._resolve_presenter_gender(form)
-        voice = DigitalHumanVideoHandler._resolve_voice(form, presenter_gender)
-        self.backend_client.mark_processing(task_id, progress=45, progress_message="正在生成角色配音", trace_id=trace_id)
+        scenes = _scenes_from_script(script, form)
         client = SiliconFlowVideoClient(
             api_key=resolve_siliconflow_api_key(model_config),
             base_url=model_config.get("baseUrl"),
         )
-        audio_data_url = client.generate_speech_data_url(
-            input_text=speech_text,
-            model=model_config.get("modelName"),
-            voice=voice,
-        )
-        audio_url = _persist_audio_data_url(task_id, audio_data_url)
+        total = len(scenes)
+        audios: list[dict[str, Any]] = []
+        for position, scene in enumerate(scenes, start=1):
+            speech_text = scene.get("dialogue") or scene.get("narration") or form.get("plotOutline") or "奶就放心了。"
+            presenter_gender = scene.get("presenterGender") or DigitalHumanVideoHandler._resolve_presenter_gender(form)
+            voice = DigitalHumanVideoHandler._resolve_voice(form, presenter_gender)
+            self.backend_client.mark_processing(
+                task_id,
+                progress=20 + int(60 * position / max(total, 1)),
+                progress_message=f"正在生成角色配音 {position}/{total}",
+                trace_id=trace_id,
+            )
+            audio_data_url = client.generate_speech_data_url(
+                input_text=speech_text,
+                model=model_config.get("modelName"),
+                voice=voice,
+            )
+            audio_url = _persist_audio_data_url(task_id, audio_data_url, index=position)
+            audios.append(
+                {
+                    "sceneIndex": position,
+                    "audioUrl": audio_url,
+                    "audioDataUrl": audio_data_url,
+                    "speechText": speech_text,
+                    "voice": voice,
+                }
+            )
+        first = audios[0] if audios else {}
         return {
-            "audioUrl": audio_url,
-            "audioDataUrl": audio_data_url,
-            "speechText": speech_text,
-            "voice": voice,
+            "audios": [{key: value for key, value in item.items() if key != "audioDataUrl"} for item in audios],
+            "audioDataUrls": [item.get("audioDataUrl") or "" for item in audios],
+            "sceneCount": total,
+            # 向后兼容字段
+            "audioUrl": first.get("audioUrl") or "",
+            "audioDataUrl": first.get("audioDataUrl") or "",
+            "speechText": first.get("speechText") or "",
+            "voice": first.get("voice") or "",
         }
 
     def _run_video(
@@ -183,29 +281,62 @@ class WorkflowStepHandler:
         trace_id: str | None,
     ) -> dict[str, Any]:
         keyframe = workflow_inputs.get("keyframe") or {}
-        image_url = keyframe.get("imageUrl")
-        if not image_url:
-            raise SeedanceVideoError("keyframe image is required")
-        prompt = DigitalHumanVideoHandler._build_comic_video_prompt(form)
         script = workflow_inputs.get("script-planner") or {}
-        if script.get("sceneDescription"):
-            prompt = f"{prompt}\nScene focus: {script.get('sceneDescription')}"
-        self.backend_client.mark_processing(task_id, progress=65, progress_message="正在生成图生视频片段", trace_id=trace_id)
+        scenes = _scenes_from_script(script, form)
+        keyframe_images = keyframe.get("images")
+        if not isinstance(keyframe_images, list) or not keyframe_images:
+            single = keyframe.get("imageUrl")
+            if not single:
+                raise SeedanceVideoError("keyframe image is required")
+            keyframe_images = [{"sceneIndex": index + 1, "imageUrl": single} for index in range(len(scenes))]
+        scene_global, scene_per_scene = _parse_per_scene_feedback(form.get("sceneFeedback"))
+
         video_client = SeedanceVideoClient.from_model_config(model_config)
-        result = video_client.generate_video(
-            prompt=prompt,
-            image=image_url,
-            model=model_config.get("modelName"),
-            duration="5",
-            resolution="480p",
-            aspect_ratio="16:9",
-            image_size="1024x576",
-        )
-        persisted = GeneratedVideoPersister().persist_video_url(task_id=task_id, source_url=result["videoUrl"])
+        persister = GeneratedVideoPersister()
+        total = len(scenes)
+        clips: list[dict[str, Any]] = []
+        for position, scene in enumerate(scenes, start=1):
+            image_entry = keyframe_images[position - 1] if position <= len(keyframe_images) else keyframe_images[-1]
+            image_url = (image_entry or {}).get("imageUrl")
+            if not image_url:
+                raise SeedanceVideoError(f"keyframe image missing for scene {position}")
+            prompt = DigitalHumanVideoHandler._build_comic_video_prompt(form)
+            if scene.get("sceneDescription"):
+                prompt = f"{prompt}\nScene focus: {scene.get('sceneDescription')}"
+            feedback_parts = [part for part in (scene_global, scene_per_scene.get(position)) if part]
+            if feedback_parts:
+                prompt = f"{prompt}\nUser revision notes: {'；'.join(feedback_parts)}"
+            self.backend_client.mark_processing(
+                task_id,
+                progress=15 + int(70 * position / max(total, 1)),
+                progress_message=f"正在生成分镜视频 {position}/{total}",
+                trace_id=trace_id,
+            )
+            result = video_client.generate_video(
+                prompt=prompt,
+                image=image_url,
+                model=model_config.get("modelName"),
+                duration=str(SCENE_SECONDS),
+                resolution="480p",
+                aspect_ratio="16:9",
+                image_size="1024x576",
+            )
+            persisted = persister.persist_video_url(task_id=task_id, source_url=result["videoUrl"], index=position)
+            clips.append(
+                {
+                    "sceneIndex": position,
+                    "videoUrl": persisted["url"],
+                    "sourceVideoUrl": result["videoUrl"],
+                }
+            )
+        first = clips[0] if clips else {}
         return {
-            "videoUrl": persisted["url"],
-            "sourceVideoUrl": result["videoUrl"],
+            "clips": clips,
+            "sceneCount": total,
             "provider": "seedance",
+            # 向后兼容字段
+            "videoUrl": first.get("videoUrl") or "",
+            "sourceVideoUrl": first.get("sourceVideoUrl") or "",
         }
 
     def _run_compose(
@@ -218,35 +349,97 @@ class WorkflowStepHandler:
         video = workflow_inputs.get("clip-video") or {}
         tts = workflow_inputs.get("tts") or {}
         script = workflow_inputs.get("script-planner") or {}
-        video_url = video.get("videoUrl")
-        audio_url = tts.get("audioUrl")
-        audio_data_url = tts.get("audioDataUrl")
-        if not video_url or (not audio_url and not audio_data_url):
-            raise DigitalHumanPostprocessError("video and audio are required for compose")
-        subtitle_text = script.get("subtitleZh") or script.get("dialogue") or tts.get("speechText") or ""
-        subtitle_en = script.get("subtitleEn") or ""
-        self.backend_client.mark_processing(task_id, progress=85, progress_message="正在烧录字幕并合成成片", trace_id=trace_id)
-        final = self.postprocessor.process(
-            task_id=task_id,
-            video_url=video_url,
-            audio_data_url=audio_data_url or "",
-            audio_url=audio_url or "",
-            subtitle_text=subtitle_text,
-        )
+        scenes = _scenes_from_script(script, form)
+
+        clips = video.get("clips")
+        if not isinstance(clips, list) or not clips:
+            if not video.get("videoUrl"):
+                raise DigitalHumanPostprocessError("video and audio are required for compose")
+            clips = [{"sceneIndex": 1, "videoUrl": video.get("videoUrl")}]
+        audios = tts.get("audios")
+        audio_data_urls = tts.get("audioDataUrls") if isinstance(tts.get("audioDataUrls"), list) else []
+        if not isinstance(audios, list) or not audios:
+            if not tts.get("audioUrl") and not tts.get("audioDataUrl"):
+                raise DigitalHumanPostprocessError("video and audio are required for compose")
+            audios = [{"sceneIndex": 1, "audioUrl": tts.get("audioUrl") or "", "speechText": tts.get("speechText") or ""}]
+            audio_data_urls = [tts.get("audioDataUrl") or ""]
+
+        total = len(clips)
+        segment_paths = []
+        segments: list[dict[str, Any]] = []
+        for position, clip in enumerate(clips, start=1):
+            scene = scenes[position - 1] if position <= len(scenes) else (scenes[-1] if scenes else {})
+            audio_entry = audios[position - 1] if position <= len(audios) else (audios[-1] if audios else {})
+            audio_data_url = audio_data_urls[position - 1] if position <= len(audio_data_urls) else ""
+            video_url = (clip or {}).get("videoUrl")
+            audio_url = (audio_entry or {}).get("audioUrl") or ""
+            if not video_url or (not audio_url and not audio_data_url):
+                raise DigitalHumanPostprocessError(f"video and audio are required for compose (scene {position})")
+            subtitle_text = scene.get("subtitleZh") or scene.get("dialogue") or (audio_entry or {}).get("speechText") or ""
+            self.backend_client.mark_processing(
+                task_id,
+                progress=70 + int(20 * position / max(total, 1)),
+                progress_message=f"正在合成分镜 {position}/{total}",
+                trace_id=trace_id,
+            )
+            segment = self.postprocessor.process(
+                task_id=task_id,
+                video_url=video_url,
+                audio_data_url=audio_data_url or "",
+                audio_url=audio_url,
+                subtitle_text=subtitle_text,
+                segment=f"scene-{position}" if total > 1 else None,
+            )
+            segment_paths.append(segment.video_path)
+            segments.append(
+                {
+                    "sceneIndex": position,
+                    "videoUrl": segment.video_url,
+                    "subtitleUrl": segment.subtitle_url,
+                    "subtitleZh": subtitle_text,
+                    "subtitleEn": scene.get("subtitleEn") or "",
+                }
+            )
+
+        if total > 1:
+            self.backend_client.mark_processing(task_id, progress=94, progress_message="正在拼接成片", trace_id=trace_id)
+            _, final_video_url = self.postprocessor.concat_videos(task_id=task_id, video_paths=segment_paths)
+            subtitle_url = segments[0]["subtitleUrl"]
+        else:
+            final_video_url = segments[0]["videoUrl"]
+            subtitle_url = segments[0]["subtitleUrl"]
+
+        title = script.get("title") or script.get("sceneTitle") or form.get("storyTheme") or "AI 漫剧成片"
+        keyframe_images = (workflow_inputs.get("keyframe") or {}).get("images")
+        first_image_url = ""
+        if isinstance(keyframe_images, list) and keyframe_images:
+            first_image_url = (keyframe_images[0] or {}).get("imageUrl") or ""
+        else:
+            first_image_url = (workflow_inputs.get("keyframe") or {}).get("imageUrl") or ""
         markdown = _build_delivery_markdown(
-            title=script.get("sceneTitle") or form.get("storyTheme") or "AI 漫剧成片",
-            final_video_url=final.video_url,
-            subtitle_zh=subtitle_text,
-            subtitle_en=subtitle_en,
-            image_url=(workflow_inputs.get("keyframe") or {}).get("imageUrl"),
+            title=title,
+            final_video_url=final_video_url,
+            subtitle_zh=segments[0]["subtitleZh"],
+            subtitle_en=segments[0]["subtitleEn"],
+            image_url=first_image_url or None,
+            scenes=[
+                {
+                    "index": item["sceneIndex"],
+                    "subtitleZh": item["subtitleZh"],
+                    "subtitleEn": item["subtitleEn"],
+                }
+                for item in segments
+            ] if total > 1 else None,
         )
         return {
-            "finalVideoUrl": final.video_url,
-            "subtitleUrl": final.subtitle_url,
-            "videoUrl": final.video_url,
+            "finalVideoUrl": final_video_url,
+            "subtitleUrl": subtitle_url,
+            "videoUrl": final_video_url,
+            "segments": segments,
+            "sceneCount": total,
             "markdown": markdown,
-            "subtitleZh": subtitle_text,
-            "subtitleEn": subtitle_en,
+            "subtitleZh": segments[0]["subtitleZh"],
+            "subtitleEn": segments[0]["subtitleEn"],
         }
 
     def _mark_failed_safe(self, task_id: int, error: Exception, trace_id: str | None = None) -> None:
@@ -263,13 +456,14 @@ class WorkflowStepHandler:
             LOGGER.exception("failed to report workflow step failure taskId=%s", task_id)
 
 
-def _persist_audio_data_url(task_id: int, audio_data_url: str) -> str:
+def _persist_audio_data_url(task_id: int, audio_data_url: str, index: int = 1) -> str:
     prefix = "base64,"
     if prefix not in audio_data_url:
         return audio_data_url
     encoded = audio_data_url.split(prefix, 1)[1]
     audio_bytes = base64.b64decode(encoded)
-    relative_key = f"audio/{task_id}/voice.mp3"
+    suffix = "" if index <= 1 else f"-{index}"
+    relative_key = f"audio/{task_id}/voice{suffix}.mp3"
     return asset_storage.put_bytes(relative_key, audio_bytes, "audio/mpeg")
 
 
@@ -302,6 +496,116 @@ def _merge_form(workflow_inputs: dict[str, Any]) -> dict[str, Any]:
     if isinstance(direct_form, dict):
         form.update(direct_form)
     return form
+
+
+def _resolve_scene_count(form: dict[str, Any], workflow_inputs: dict[str, Any] | None = None) -> int:
+    # 优先使用画布"分镜循环(scene_loop)"节点的显式拆分结果
+    explicit = _scene_loop_count(workflow_inputs)
+    if explicit:
+        return max(1, min(explicit, MAX_SCENES))
+    raw = str(form.get("episodeLength") or form.get("episodeDuration") or "").strip()
+    digits = re.sub(r"[^0-9.]", "", raw)
+    try:
+        seconds = float(digits) if digits else float(DEFAULT_EPISODE_SECONDS)
+    except ValueError:
+        seconds = float(DEFAULT_EPISODE_SECONDS)
+    if seconds <= 0:
+        seconds = float(DEFAULT_EPISODE_SECONDS)
+    count = int(round(seconds / SCENE_SECONDS))
+    return max(1, min(count, MAX_SCENES))
+
+
+def _scene_loop_count(workflow_inputs: dict[str, Any] | None) -> int | None:
+    """读取 scene_loop 节点输出（含 sceneCount + indices）。"""
+    if not isinstance(workflow_inputs, dict):
+        return None
+    for payload in workflow_inputs.values():
+        if not isinstance(payload, dict):
+            continue
+        scene_count = payload.get("sceneCount")
+        if isinstance(scene_count, int) and scene_count > 0 and isinstance(payload.get("indices"), list):
+            return scene_count
+    return None
+
+
+def _parse_per_scene_feedback(value: Any) -> tuple[str, dict[int, str]]:
+    """用户意见兼容两种格式：纯文本（整体意见）或 JSON 映射（逐分镜意见）。
+
+    JSON 形如 {"all": "整体加快节奏", "1": "第一镜镜头拉近", "scene-3": "换成夜景"}。
+    返回 (整体意见, {分镜序号: 意见})。
+    """
+    if value is None:
+        return "", {}
+    mapping: dict[str, Any] | None = None
+    if isinstance(value, dict):
+        mapping = value
+    else:
+        text = str(value).strip()
+        if not text:
+            return "", {}
+        if text.startswith("{"):
+            try:
+                parsed = json.loads(text)
+                if isinstance(parsed, dict):
+                    mapping = parsed
+            except json.JSONDecodeError:
+                mapping = None
+        if mapping is None:
+            return text, {}
+    global_text = ""
+    per_scene: dict[int, str] = {}
+    for key, raw in mapping.items():
+        if raw is None:
+            continue
+        text = str(raw).strip()
+        if not text:
+            continue
+        normalized = str(key).strip().lower()
+        if normalized in {"all", "global", "overall", "*", "整体"}:
+            global_text = text
+            continue
+        match = re.search(r"(\d+)", normalized)
+        if match:
+            per_scene[int(match.group(1))] = text
+    return global_text, per_scene
+
+
+def _scenes_from_script(script: dict[str, Any], form: dict[str, Any]) -> list[dict[str, Any]]:
+    scenes = script.get("scenes") if isinstance(script, dict) else None
+    if isinstance(scenes, list) and scenes:
+        return [scene for scene in scenes if isinstance(scene, dict)] or [_fallback_script(form)]
+    if isinstance(script, dict) and (script.get("sceneDescription") or script.get("dialogue")):
+        return [script]
+    return [_fallback_script(form)]
+
+
+def _normalize_scenes(parsed: dict[str, Any] | None, count: int, form: dict[str, Any]) -> list[dict[str, Any]]:
+    scenes_raw: list[Any] = []
+    if isinstance(parsed, dict):
+        if isinstance(parsed.get("scenes"), list):
+            scenes_raw = parsed["scenes"]
+        elif parsed.get("sceneDescription") or parsed.get("dialogue"):
+            scenes_raw = [parsed]
+    fallback = _fallback_script(form)
+    theme = form.get("storyTheme") or "温情漫剧"
+    scenes: list[dict[str, Any]] = []
+    for position in range(1, count + 1):
+        source = scenes_raw[position - 1] if position <= len(scenes_raw) and isinstance(scenes_raw[position - 1], dict) else {}
+        dialogue = str(source.get("dialogue") or fallback["dialogue"])
+        scenes.append(
+            {
+                "index": position,
+                "sceneTitle": str(source.get("sceneTitle") or f"{theme} · 分镜{position}"),
+                "sceneDescription": str(source.get("sceneDescription") or fallback["sceneDescription"]),
+                "dialogue": dialogue,
+                "subtitleZh": str(source.get("subtitleZh") or dialogue),
+                "subtitleEn": str(source.get("subtitleEn") or fallback["subtitleEn"]),
+                "narration": str(source.get("narration") or ""),
+                "presenterGender": str(source.get("presenterGender") or fallback["presenterGender"]),
+                "durationSeconds": SCENE_SECONDS,
+            }
+        )
+    return scenes
 
 
 def _extract_json(raw: str) -> dict[str, Any] | None:
@@ -348,6 +652,7 @@ def _build_delivery_markdown(
     subtitle_zh: str,
     subtitle_en: str,
     image_url: str | None,
+    scenes: list[dict[str, Any]] | None = None,
 ) -> str:
     lines = [
         f"# {title}",
@@ -357,9 +662,21 @@ def _build_delivery_markdown(
     ]
     if image_url:
         lines.extend([f"![关键帧]({image_url})", ""])
-    if subtitle_zh:
-        lines.append(f"**{subtitle_zh}**  ")
-    if subtitle_en:
-        lines.append(f"*{subtitle_en}*")
+    if scenes:
+        for scene in scenes:
+            zh = scene.get("subtitleZh") or ""
+            en = scene.get("subtitleEn") or ""
+            line = f"**分镜{scene.get('index')}**"
+            if zh:
+                line += f" {zh}"
+            lines.append(line + "  ")
+            if en:
+                lines.append(f"*{en}*  ")
+        lines.append("")
+    else:
+        if subtitle_zh:
+            lines.append(f"**{subtitle_zh}**  ")
+        if subtitle_en:
+            lines.append(f"*{subtitle_en}*")
     lines.extend(["", "> AI 制作", ""])
     return "\n".join(lines)
