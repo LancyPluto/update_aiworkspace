@@ -487,6 +487,51 @@ class AdminConfigurationApiTest {
                 .andExpect(jsonPath("$.data[?(@.configCode=='test_kimi_import_cleanup')].extraAuthJsonMasked").value(""));
     }
 
+    @Test
+    void configBundleImportPrunesStaleModelsAndAccountsWithoutCredentials() throws Exception {
+        String adminToken = loginAdmin();
+
+        mockMvc.perform(post("/api/admin/v1/agent/model-config")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "displayName": "Stale No Key",
+                                  "configCode": "stale_no_key_model",
+                                  "provider": "openai_compatible",
+                                  "modelName": "stale-model",
+                                  "apiKey": "",
+                                  "timeoutSeconds": 60,
+                                  "enabled": false,
+                                  "isDefault": false
+                                }
+                                """))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/admin/v1/config-bundles/import")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "format": "ai-tool-market-config-bundle",
+                                  "version": 1,
+                                  "secretsRedacted": true,
+                                  "settings": {},
+                                  "vendorAccounts": [],
+                                  "modelConfigs": [],
+                                  "categories": [],
+                                  "tools": []
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.warnings[?(@ =~ /.*stale_no_key_model.*/)]").isNotEmpty());
+
+        mockMvc.perform(get("/api/admin/v1/agent/model-config/list")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[?(@.configCode=='stale_no_key_model')]").isEmpty());
+    }
+
     private String loginAdmin() throws Exception {
         String response = mockMvc.perform(post("/api/admin/v1/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)

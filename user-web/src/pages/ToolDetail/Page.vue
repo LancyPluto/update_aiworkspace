@@ -24,11 +24,11 @@ import AppShell from "@/components/AppShell.vue"
 import { fetchToolByCode } from "@/api/toolApi"
 import { createTask } from "@/api/taskApi"
 import { uploadChatFile } from "@/api/aiToolApi"
-import { isPptWorkspaceTool } from "@/api/pptApi"
 import type { ToolDetail, ToolField, ToolFieldOption } from "@/api/types"
 import { userRoutes } from "@/router/userRoutes"
 import { useAuthStore } from "@/store/authStore"
 import { cleanToolDisplayText } from "@/utils/toolDisplayText"
+import { formatToolCreditLabel, usesVariableWorkflowCredits } from "@/utils/toolCreditLabel"
 import {
   buildImageTemplateTaskParams,
   compactOptionFields,
@@ -77,9 +77,6 @@ const uploadDragging = ref(false)
 const title = computed(() => cleanToolDisplayText(tool.value?.toolName) || `工具 · ${props.id}`)
 const isOffline = computed(() => tool.value?.status === "OFFLINE")
 
-const isPptTool = computed(() =>
-  isPptWorkspaceTool(tool.value?.toolCode, tool.value?.integration?.integrationMode),
-)
 const imageTemplateMode = computed(() => isImageTemplateTool(tool.value))
 const videoTemplateMode = computed(() => isVideoTemplateTool(tool.value))
 const frontendStyle = computed(() => tool.value?.frontendStyle || null)
@@ -134,10 +131,7 @@ const activeSubmitLoading = computed(() => imageTemplateMode.value ? imageSubmit
 const activeUploadedUrl = computed(() => imageTemplateMode.value ? uploadedImageUrl.value : uploadedMediaUrl.value)
 const activeCanSubmit = computed(() => !isOffline.value && !activeBusy.value && Boolean(activeUploadedUrl.value))
 
-const useLink = computed(() => {
-  if (isPptTool.value) return userRoutes.pptWorkspace()
-  return userRoutes.toolUse(props.id)
-})
+const useLink = computed(() => userRoutes.toolUse(props.id))
 
 const toolTypeLabels: Record<string, string> = {
   TEXT_GENERATION: "文本生成",
@@ -250,10 +244,6 @@ function clientRequestId() {
 
 async function openUseTool() {
   if (!tool.value || isOffline.value) return
-  if (isPptTool.value) {
-    await router.push(userRoutes.pptWorkspace())
-    return
-  }
   if (imageTemplateMode.value || videoTemplateMode.value) {
     toolUseModalOpen.value = true
     return
@@ -523,7 +513,7 @@ onMounted(async () => {
                     <ArrowRight class="ml-1.5 h-4 w-4" />
                   </button>
                   <span class="inline-flex items-center gap-1 rounded-full border border-border bg-card px-3 py-1.5 text-xs text-muted-foreground">
-                    <Zap class="h-3.5 w-3.5 text-warning" /> {{ tool.estimatedCreditCost }} 算力 / 次
+                    <Zap class="h-3.5 w-3.5 text-warning" /> {{ formatToolCreditLabel(tool) }} / 次
                   </span>
                 </div>
               </div>
@@ -585,7 +575,7 @@ onMounted(async () => {
                   </p>
                 </div>
                 <span class="inline-flex items-center gap-1 text-xs text-warning">
-                  <Zap class="h-3.5 w-3.5" /> {{ tool?.estimatedCreditCost ?? 0 }} 算力
+                  <Zap class="h-3.5 w-3.5" /> {{ formatToolCreditLabel(tool) }}
                 </span>
               </div>
 
@@ -742,7 +732,7 @@ onMounted(async () => {
                     <ArrowRight class="ml-1.5 h-4 w-4" />
                   </button>
                   <span class="inline-flex items-center gap-1 rounded-full border border-border bg-card px-3 py-1.5 text-xs text-muted-foreground">
-                    <Zap class="h-3.5 w-3.5 text-warning" /> {{ tool.estimatedCreditCost }} 算力 / 次
+                    <Zap class="h-3.5 w-3.5 text-warning" /> {{ formatToolCreditLabel(tool) }} / 次
                   </span>
                 </div>
               </div>
@@ -812,7 +802,7 @@ onMounted(async () => {
                   </p>
                 </div>
                 <span class="inline-flex items-center gap-1 text-xs text-warning">
-                  <Zap class="h-3.5 w-3.5" /> {{ tool?.estimatedCreditCost ?? 0 }} 算力
+                  <Zap class="h-3.5 w-3.5" /> {{ formatToolCreditLabel(tool) }}
                 </span>
               </div>
 
@@ -949,7 +939,7 @@ onMounted(async () => {
               <div class="flex flex-wrap items-center gap-2">
                 <h2 class="text-xl font-semibold">{{ title }}</h2>
                 <span
-                  v-if="tool.estimatedCreditCost > 50"
+                  v-if="(tool.estimatedCreditCost ?? 0) > 50"
                   class="rounded bg-destructive/10 px-1.5 py-0.5 text-[10px] font-medium text-destructive"
                 >
                   HOT
@@ -978,7 +968,7 @@ onMounted(async () => {
             <div class="flex flex-col items-stretch md:items-end gap-2 shrink-0">
               <div class="flex items-center gap-2 text-sm">
                 <Zap class="h-4 w-4 text-warning" />
-                <span class="text-2xl font-semibold">{{ tool.estimatedCreditCost }}</span>
+                <span class="text-2xl font-semibold">{{ usesVariableWorkflowCredits(tool) ? "不详" : (tool.estimatedCreditCost ?? 0) }}</span>
                 <span class="text-xs text-muted-foreground">算力 / 次</span>
               </div>
               <RouterLink
@@ -986,7 +976,7 @@ onMounted(async () => {
                 :to="useLink"
                 class="inline-flex h-11 items-center justify-center rounded-md bg-primary px-8 text-sm font-medium text-primary-foreground hover:opacity-90"
               >
-                {{ isPptTool ? "进入 PPT 工作台" : "开始使用" }}
+                开始使用
                 <ArrowRight class="ml-1.5 h-4 w-4" />
               </RouterLink>
               <span
@@ -1205,7 +1195,7 @@ onMounted(async () => {
                   <span class="inline-flex items-center gap-2 text-zinc-300">
                     <Zap class="h-4 w-4 text-primary" /> 所需额度
                   </span>
-                  <span class="font-medium text-white">{{ tool.estimatedCreditCost }} 额度</span>
+                  <span class="font-medium text-white">{{ usesVariableWorkflowCredits(tool) ? "按实际用量结算" : `${tool.estimatedCreditCost ?? 0} 额度` }}</span>
                 </div>
                 <button
                   type="button"

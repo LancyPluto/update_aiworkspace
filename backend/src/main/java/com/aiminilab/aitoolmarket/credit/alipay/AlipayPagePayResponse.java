@@ -1,9 +1,6 @@
 package com.aiminilab.aitoolmarket.credit.alipay;
 
-/**
- * PRECREATE mode returns qr_code for scanner payment.
- * PAGE mode returns a launch path that renders alipay.trade.page.pay HTML form.
- */
+/** 电脑网站支付：返回 launch 路径，由服务端渲染 alipay.trade.page.pay 跳转表单。 */
 public record AlipayPagePayResponse(String qrCode, String redirectPath, String mode) {
     public static final String MODE_QR = "QR";
     public static final String MODE_PAGE = "PAGE";

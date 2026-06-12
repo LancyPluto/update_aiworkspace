@@ -321,11 +321,7 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
     }
 
     private URI modelsEndpoint(String baseUrl) {
-        String normalized = baseUrl == null ? "" : baseUrl.trim();
-        while (normalized.endsWith("/")) {
-            normalized = normalized.substring(0, normalized.length() - 1);
-        }
-        return URI.create(normalized + "/models");
+        return com.aiminilab.aitoolmarket.agent.support.OpenAiCompatibleModelsEndpoint.toUri(baseUrl);
     }
 
     private List<String> parseModelNames(String body) {
@@ -702,8 +698,7 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
     }
 
     private MediaGatewayProbeResult probeMediaGateway(String baseUrl, String apiKey) {
-        String normalized = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
-        String probeUrl = normalized.endsWith("/v1") ? normalized + "/models" : normalized + "/v1/models";
+        String probeUrl = com.aiminilab.aitoolmarket.agent.support.OpenAiCompatibleModelsEndpoint.resolve(baseUrl);
         try {
             java.net.http.HttpClient client = com.aiminilab.aitoolmarket.agent.support.OutboundHttpClientFactory
                     .create(java.time.Duration.ofSeconds(8));

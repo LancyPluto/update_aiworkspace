@@ -2,8 +2,9 @@ package com.aiminilab.aitoolmarket.tool.service.impl;
 
 import com.aiminilab.aitoolmarket.common.cache.BypassCacheService;
 import com.aiminilab.aitoolmarket.common.cache.CacheNamespaces;
-import com.aiminilab.aitoolmarket.config.AppProperties;
 import com.aiminilab.aitoolmarket.support.GeneratedMediaPathSupport;
+import com.aiminilab.aitoolmarket.storage.AssetStorageService;
+import com.aiminilab.aitoolmarket.storage.StoredAsset;
 import com.aiminilab.aitoolmarket.common.dto.PageResponse;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.enums.ExecutionHandler;
@@ -55,12 +56,14 @@ import com.aiminilab.aitoolmarket.tool.integration.ToolIntegrationRegistry;
 import com.aiminilab.aitoolmarket.tool.integration.ToolIntegrationResolver;
 import com.aiminilab.aitoolmarket.tool.service.ToolService;
 import com.aiminilab.aitoolmarket.tool.service.ToolTemplateService;
+import com.aiminilab.aitoolmarket.workflow.service.WorkflowExecutionService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.JavaType;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -95,11 +98,12 @@ public class ToolServiceImpl implements ToolService {
     private final ToolTemplateService toolTemplateService;
     private final ModelCapabilityService modelCapabilityService;
     private final TaskCreditEstimateService taskCreditEstimateService;
-    private final AppProperties appProperties;
+    private final AssetStorageService assetStorageService;
     private final GeneratedMediaPathSupport generatedMediaPathSupport;
     private final ToolIntegrationResolver toolIntegrationResolver;
     private final ToolIntegrationRegistry toolIntegrationRegistry;
     private final BypassCacheService bypassCacheService;
+    private final WorkflowExecutionService workflowExecutionService;
 
     public ToolServiceImpl(ToolMapper toolMapper, ToolCategoryMapper toolCategoryMapper,
                            ToolFieldSchemaMapper toolFieldSchemaMapper, ToolFieldItemMapper toolFieldItemMapper,
@@ -107,11 +111,12 @@ public class ToolServiceImpl implements ToolService {
                            ObjectMapper objectMapper, ToolTemplateService toolTemplateService,
                            ModelCapabilityService modelCapabilityService,
                            TaskCreditEstimateService taskCreditEstimateService,
-                           AppProperties appProperties,
+                           AssetStorageService assetStorageService,
                            GeneratedMediaPathSupport generatedMediaPathSupport,
                            ToolIntegrationResolver toolIntegrationResolver,
                            ToolIntegrationRegistry toolIntegrationRegistry,
-                           BypassCacheService bypassCacheService) {
+                           BypassCacheService bypassCacheService,
+                           @Lazy WorkflowExecutionService workflowExecutionService) {
         this.toolMapper = toolMapper;
         this.toolCategoryMapper = toolCategoryMapper;
         this.toolFieldSchemaMapper = toolFieldSchemaMapper;
@@ -122,11 +127,12 @@ public class ToolServiceImpl implements ToolService {
         this.toolTemplateService = toolTemplateService;
         this.modelCapabilityService = modelCapabilityService;
         this.taskCreditEstimateService = taskCreditEstimateService;
-        this.appProperties = appProperties;
+        this.assetStorageService = assetStorageService;
         this.generatedMediaPathSupport = generatedMediaPathSupport;
         this.toolIntegrationResolver = toolIntegrationResolver;
         this.toolIntegrationRegistry = toolIntegrationRegistry;
         this.bypassCacheService = bypassCacheService;
+        this.workflowExecutionService = workflowExecutionService;
     }
 
     @Override
@@ -231,8 +237,12 @@ public class ToolServiceImpl implements ToolService {
     }
 
     private ToolSummaryResponse toUserFacingSummary(AiTool tool) {
+        boolean variableCreditPricing = workflowExecutionService.shouldUseWorkflow(tool);
+        Integer estimatedCredits = variableCreditPricing
+                ? null
+                : taskCreditEstimateService.estimateUserFacingTaskCredits(tool);
         return sanitizeCoverUrl(
-                ToolSummaryResponse.publicFrom(tool, taskCreditEstimateService.estimateUserFacingTaskCredits(tool), objectMapper));
+                ToolSummaryResponse.publicFrom(tool, estimatedCredits, variableCreditPricing, objectMapper));
     }
 
     private ToolIntegrationView resolveIntegrationView(AiTool tool) {
@@ -324,18 +334,17 @@ public class ToolServiceImpl implements ToolService {
                 safeFilenamePart(modelName, "model")
         ).replaceAll("-{2,}", "-");
         String filename = baseName + "-" + LocalDateTime.now().format(COVER_FILENAME_TIME) + "." + extension;
-        Path dir = Path.of(appProperties.getGeneratedMediaDir()).resolve("tool-covers").normalize().toAbsolutePath();
-        Path target = dir.resolve(filename).normalize();
+        StoredAsset stored;
         try {
-            Files.createDirectories(dir);
-            file.transferTo(target);
-        } catch (IOException ex) {
+            stored = assetStorageService.storeMultipart("tool-covers/" + filename, file);
+        } catch (BusinessException ex) {
+            throw ex;
+        } catch (RuntimeException ex) {
             log.warn("Failed to store tool cover upload: filename={}, contentType={}, size={}",
                     originalFilename, file.getContentType(), file.getSize(), ex);
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "工具展示素材保存失败，请查看后端日志");
         }
-
-        String url = "/generated/tool-covers/" + filename;
+        String url = stored.publicUrl();
         log.info("Admin uploaded tool cover: url={}, originalFilename={}, contentType={}, size={}",
                 url, originalFilename, file.getContentType(), file.getSize());
         return new ToolCoverUploadResponse(url, filename, defaultString(file.getContentType()), file.getSize());

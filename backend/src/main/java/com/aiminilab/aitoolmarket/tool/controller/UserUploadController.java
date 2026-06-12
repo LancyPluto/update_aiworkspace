@@ -4,7 +4,8 @@ import com.aiminilab.aitoolmarket.common.dto.ApiResponse;
 import com.aiminilab.aitoolmarket.common.dto.PageResponse;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
-import com.aiminilab.aitoolmarket.config.AppProperties;
+import com.aiminilab.aitoolmarket.storage.AssetStorageService;
+import com.aiminilab.aitoolmarket.storage.StoredAsset;
 import com.aiminilab.aitoolmarket.tool.dto.FileUploadResponse;
 import com.aiminilab.aitoolmarket.tool.dto.UserUploadAssetResponse;
 import com.aiminilab.aitoolmarket.tool.entity.UserUploadAsset;
@@ -21,8 +22,6 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.text.Normalizer;
 import java.time.LocalDate;
@@ -42,12 +41,12 @@ public class UserUploadController {
             "exe", "bat", "cmd", "com", "scr", "ps1", "sh", "jar", "war", "dll", "msi"
     );
 
-    private final AppProperties appProperties;
+    private final AssetStorageService assetStorageService;
     private final UserUploadAssetMapper userUploadAssetMapper;
 
-    public UserUploadController(AppProperties appProperties,
+    public UserUploadController(AssetStorageService assetStorageService,
                                 UserUploadAssetMapper userUploadAssetMapper) {
-        this.appProperties = appProperties;
+        this.assetStorageService = assetStorageService;
         this.userUploadAssetMapper = userUploadAssetMapper;
     }
 
@@ -73,22 +72,18 @@ public class UserUploadController {
         String datePath = LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE);
         String fileId = UUID.randomUUID().toString().replace("-", "");
         String filename = fileId + "." + extension;
-        Path dir = Path.of(appProperties.getGeneratedMediaDir()).resolve("uploads").resolve(datePath).normalize().toAbsolutePath();
-        Path target = dir.resolve(filename).normalize();
-        if (!target.startsWith(dir)) {
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "文件名无效");
-        }
-
+        String relativeKey = "uploads/" + datePath + "/" + filename;
+        StoredAsset stored;
         try {
-            Files.createDirectories(dir);
-            file.transferTo(target);
-        } catch (IOException ex) {
+            stored = assetStorageService.storeMultipart(relativeKey, file);
+        } catch (BusinessException ex) {
+            throw ex;
+        } catch (RuntimeException ex) {
             log.warn("Failed to store user upload: originalName={}, contentType={}, size={}",
                     originalName, file.getContentType(), file.getSize(), ex);
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "文件保存失败，请查看后端日志");
         }
-
-        String url = "/generated/uploads/" + datePath + "/" + filename;
+        String url = stored.publicUrl();
         UserUploadAsset asset = new UserUploadAsset();
         asset.setUserId(userId);
         asset.setFileId(fileId);
@@ -97,7 +92,7 @@ public class UserUploadController {
         asset.setContentType(file.getContentType() == null ? "" : file.getContentType());
         asset.setFileSize(file.getSize());
         asset.setUrl(url);
-        asset.setStoragePath(target.toString());
+        asset.setStoragePath(stored.storagePath());
         asset.setStatus("ACTIVE");
         asset.setCreatedAt(LocalDateTime.now());
         asset.setUpdatedAt(asset.getCreatedAt());

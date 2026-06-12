@@ -21,6 +21,7 @@ public class AppProperties {
     private Cors cors = new Cors();
     private Payment payment = new Payment();
     private Cache cache = new Cache();
+    private AssetStorage assetStorage = new AssetStorage();
 
     public boolean isProductionMode() {
         return productionMode;
@@ -78,6 +79,14 @@ public class AppProperties {
         this.generatedMediaDir = generatedMediaDir == null || generatedMediaDir.isBlank()
                 ? "../data/generated-media"
                 : generatedMediaDir;
+    }
+
+    public AssetStorage getAssetStorage() {
+        return assetStorage;
+    }
+
+    public void setAssetStorage(AssetStorage assetStorage) {
+        this.assetStorage = assetStorage == null ? new AssetStorage() : assetStorage;
     }
 
     public Agent getAgent() {
@@ -674,7 +683,7 @@ public class AppProperties {
         private String notifyUrl = "";
         private String returnUrl = "";
         private String gatewayUrl = "https://openapi.alipay.com/gateway.do";
-        /** PAGE = 电脑网站支付(alipay.trade.page.pay); PRECREATE = 当面付扫码(alipay.trade.precreate) */
+        /** 固定为电脑网站支付 alipay.trade.page.pay */
         private String payMode = "PAGE";
 
         public boolean isEnabled() {
@@ -836,6 +845,94 @@ public class AppProperties {
             this.apiBaseUrl = apiBaseUrl == null || apiBaseUrl.isBlank()
                     ? "https://api.mch.weixin.qq.com"
                     : apiBaseUrl;
+        }
+    }
+
+    /**
+     * Unified asset storage: {@code local} (filesystem under {@link #generatedMediaDir}) or {@code oss} (Aliyun OSS).
+     * Switch provider via {@code ASSET_STORAGE_PROVIDER}; secrets stay in environment variables only.
+     */
+    public static class AssetStorage {
+        /** {@code local} or {@code oss}. */
+        private String provider = "local";
+        /**
+         * Public URL prefix for stored assets.
+         * Local: {@code /generated} (served by backend/nginx).
+         * OSS: full base such as {@code https://bucket.oss-cn-hangzhou.aliyuncs.com/prod}.
+         */
+        private String publicBaseUrl = "/generated";
+        private String ossEndpoint = "";
+        private String ossBucket = "";
+        private String ossAccessKeyId = "";
+        private String ossAccessKeySecret = "";
+        /** Optional key prefix inside the bucket, e.g. {@code prod/} or {@code dev/}. */
+        private String ossKeyPrefix = "";
+
+        public String getProvider() {
+            return provider == null || provider.isBlank() ? "local" : provider.trim().toLowerCase(Locale.ROOT);
+        }
+
+        public void setProvider(String provider) {
+            this.provider = provider;
+        }
+
+        public String getPublicBaseUrl() {
+            return publicBaseUrl == null || publicBaseUrl.isBlank() ? "/generated" : publicBaseUrl.trim();
+        }
+
+        public void setPublicBaseUrl(String publicBaseUrl) {
+            this.publicBaseUrl = publicBaseUrl;
+        }
+
+        public String getOssEndpoint() {
+            return ossEndpoint == null ? "" : ossEndpoint.trim();
+        }
+
+        public void setOssEndpoint(String ossEndpoint) {
+            this.ossEndpoint = ossEndpoint;
+        }
+
+        public String getOssBucket() {
+            return ossBucket == null ? "" : ossBucket.trim();
+        }
+
+        public void setOssBucket(String ossBucket) {
+            this.ossBucket = ossBucket;
+        }
+
+        public String getOssAccessKeyId() {
+            return ossAccessKeyId == null ? "" : ossAccessKeyId.trim();
+        }
+
+        public void setOssAccessKeyId(String ossAccessKeyId) {
+            this.ossAccessKeyId = ossAccessKeyId;
+        }
+
+        public String getOssAccessKeySecret() {
+            return ossAccessKeySecret == null ? "" : ossAccessKeySecret.trim();
+        }
+
+        public void setOssAccessKeySecret(String ossAccessKeySecret) {
+            this.ossAccessKeySecret = ossAccessKeySecret;
+        }
+
+        public String getOssKeyPrefix() {
+            if (ossKeyPrefix == null || ossKeyPrefix.isBlank()) {
+                return "";
+            }
+            String normalized = ossKeyPrefix.trim().replace('\\', '/');
+            while (normalized.startsWith("/")) {
+                normalized = normalized.substring(1);
+            }
+            return normalized.endsWith("/") ? normalized : normalized + "/";
+        }
+
+        public void setOssKeyPrefix(String ossKeyPrefix) {
+            this.ossKeyPrefix = ossKeyPrefix;
+        }
+
+        public boolean isOss() {
+            return "oss".equals(getProvider());
         }
     }
 }

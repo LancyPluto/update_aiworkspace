@@ -138,7 +138,13 @@ public class TaskServiceImpl implements TaskService {
 
     @Override
     public TaskStatusResponse status(Long userId, Long taskId) {
-        return TaskStatusResponse.from(findTask(taskId, userId));
+        AiTask task = findTask(taskId, userId);
+        JsonNode workflowPreview = null;
+        if (TaskStatus.AWAITING_USER.name().equals(task.getStatus())
+                || TaskStatus.PROCESSING.name().equals(task.getStatus())) {
+            workflowPreview = workflowExecutionService.buildWorkflowPreview(task.getId());
+        }
+        return TaskStatusResponse.from(task, workflowPreview);
     }
 
     @Override
@@ -284,6 +290,9 @@ public class TaskServiceImpl implements TaskService {
 
     private int estimatedTaskCredits(AiTool tool, AgentModelConfig modelConfig, JsonNode params) {
         if (tool == null) {
+            return 0;
+        }
+        if (workflowExecutionService.shouldUseWorkflow(tool)) {
             return 0;
         }
         if (tool.getModelConfigId() == null) {

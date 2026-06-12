@@ -19,7 +19,7 @@ const features = [
   },
   {
     icon: FileText,
-    title: 'PPT 生成',
+    title: '工作流编排',
     description: '基于 GPT-4o + Claude，输入主题即可生成结构清晰、设计精美的演示文稿。',
   },
   {

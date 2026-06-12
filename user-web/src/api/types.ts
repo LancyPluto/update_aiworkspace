@@ -29,11 +29,6 @@ export type ApiErrorCode =
   | "AGENT_TOOL_CALL_LIMIT"
   | "AGENT_MODEL_CALL_LIMIT"
   | "AGENT_SECURITY_REJECTED"
-  | "PPT_PROJECT_NOT_FOUND"
-  | "PPT_STEP_DISABLED"
-  | "PPT_ENGINE_ERROR"
-  | "PPT_TASK_FAILED"
-  | "PPT_EXPORT_FAILED"
   | "SYSTEM_ERROR"
 
 export interface ApiResponse<T> {
@@ -266,7 +261,9 @@ export interface ToolSummary {
   toolKind?: "text" | "image" | "video" | "digitalHuman" | "audio" | "agent" | "other" | string | null
   configNote?: string | null
   status: ToolBizStatus
-  estimatedCreditCost: number
+  estimatedCreditCost?: number | null
+  /** 交互式工作流：展示「算力不详」，按步骤实际模型成本×1.2 扣费 */
+  variableCreditPricing?: boolean | null
   modelConfigId?: number | null
   modelConfigName?: string | null
   modelName?: string | null
@@ -344,7 +341,9 @@ export interface ToolDetail {
   toolKind?: "text" | "image" | "video" | "digitalHuman" | "audio" | "agent" | "other" | string | null
   configNote?: string | null
   status: ToolBizStatus
-  estimatedCreditCost: number
+  estimatedCreditCost?: number | null
+  /** 交互式工作流：展示「算力不详」，按步骤实际模型成本×1.2 扣费 */
+  variableCreditPricing?: boolean | null
   modelConfigId?: number | null
   modelConfigName?: string | null
   modelName?: string | null
@@ -352,10 +351,6 @@ export interface ToolDetail {
   frontendStyle?: ToolFrontendStyle | null
   /** 动态字段列表 */
   fields: ToolField[]
-  /** 平台化集成（PPT 工作台等） */
-  integration?: import("./pptApi").ToolIntegrationView | null
-  /** 兼容字段，优先读 integration.extension */
-  workflow?: import("./pptApi").PptWorkflow | null
 }
 
 /* ========== 模型选项 ========== */
@@ -436,6 +431,44 @@ export interface RegenerateTaskRequest {
   clientRequestId?: string
 }
 
+export interface WorkflowSceneScript {
+  index?: number
+  sceneTitle?: string
+  sceneDescription?: string
+  dialogue?: string
+  narration?: string
+  subtitleZh?: string
+  subtitleEn?: string
+  presenterGender?: string
+  durationSeconds?: number
+}
+
+export interface WorkflowStagePreview {
+  stageLabel?: string
+  fieldKey?: string
+  currentNodeId?: string
+  script?: {
+    title?: string
+    sceneTitle?: string
+    sceneDescription?: string
+    dialogue?: string
+    narration?: string
+    subtitleZh?: string
+    subtitleEn?: string
+    presenterGender?: string
+    sceneCount?: number
+    scenes?: WorkflowSceneScript[]
+  }
+  imageUrl?: string
+  /** 多分镜关键帧（与 script.scenes 按 sceneIndex 对应） */
+  images?: Array<{ sceneIndex?: number; imageUrl: string }>
+  audioUrl?: string
+  /** 多分镜配音 */
+  audios?: Array<{ sceneIndex?: number; audioUrl: string; speechText?: string }>
+  videoUrl?: string
+  finalVideoUrl?: string
+}
+
 /** GET /api/v1/tasks/{taskId}/status —— 轮询用精简状态 */
 export interface TaskStatusPayload {
   taskId: number
@@ -444,6 +477,7 @@ export interface TaskStatusPayload {
   status: TaskStatus
   progress?: number
   progressMessage?: string
+  workflowPreview?: WorkflowStagePreview | null
 }
 
 /** 任务结果 */

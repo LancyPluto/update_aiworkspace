@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 import java.util.Optional;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -37,6 +38,14 @@ class PptWorkflowServiceTest {
     @Test
     void returnsEmptyWhenMarkerMissing() {
         assertTrue(service.parseWorkflow("plain note").isEmpty());
+    }
+
+    @Test
+    void acceptsDescriptionCreationTypeAlias() {
+        PptWorkflow workflow = new PptWorkflow();
+        workflow.setCreationTypes(List.of("idea", "outline", "descriptions"));
+        assertDoesNotThrow(() -> service.validateCreationType(workflow, "description"));
+        assertDoesNotThrow(() -> service.validateCreationType(workflow, "descriptions"));
     }
 
     @Test

@@ -7,9 +7,11 @@ async function importTsModule(path) {
   const source = await readFile(new URL(path, import.meta.url), "utf8")
   const rewritten = source
     .replace('import { cleanToolDisplayText } from "@/utils/toolDisplayText"\n', "")
+    .replace('import { formatToolCreditLabel } from "@/utils/toolCreditLabel"\n', "")
     .replaceAll("cleanToolDisplayText", "cleanToolDisplayTextForTest")
+    .replaceAll("formatToolCreditLabel", "formatToolCreditLabelForTest")
   const { outputText } = ts.transpileModule(
-    `function cleanToolDisplayTextForTest(value) { return (value || "").replace(/AI PPT ç”Ÿæˆå™¨/g, "AI PPT 生成器").replace(/åŸºäºŽ banana-slides çš„å¤šæ­¥éª¤ PPT ç”Ÿæˆ/g, "基于 banana-slides 的多步骤 PPT 生成").trim() }\n${rewritten}`,
+    `function formatToolCreditLabelForTest(tool) { if (!tool) return "0 算力"; if (tool.variableCreditPricing || tool.estimatedCreditCost == null) return "算力不详"; return (tool.estimatedCreditCost ?? 0) + " 算力"; }\nfunction cleanToolDisplayTextForTest(value) { return (value || "").replace(/AI PPT ç”Ÿæˆå™¨/g, "AI PPT 生成器").replace(/åŸºäºŽ banana-slides çš„å¤šæ­¥éª¤ PPT ç”Ÿæˆ/g, "基于 banana-slides 的多步骤 PPT 生成").trim() }\n${rewritten}`,
     {
     compilerOptions: {
       module: ts.ModuleKind.ESNext,
@@ -81,7 +83,8 @@ test("maps backend tool summaries into qianduan-style cards without losing route
   assert.equal(card.image, "/generated/tool-covers/ppt.png")
   assert.equal(card.tag, "办公")
   assert.equal(card.to, "/tools/banana_ppt_generator")
-  assert.equal(card.useTo, "/tools/banana_ppt_generator/workspace")
+  // PPT 工作台已整体下线：所有工具统一进入 /create
+  assert.equal(card.useTo, "/create?tool=banana_ppt_generator")
   assert.equal(card.costLabel, "20 算力")
 })
 

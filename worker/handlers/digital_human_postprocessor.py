@@ -1,4 +1,5 @@
 import base64
+import mimetypes
 import re
 import shutil
 import subprocess
@@ -10,6 +11,7 @@ from urllib.parse import urlparse
 import requests
 
 from config import settings
+from storage.asset_storage import asset_storage
 
 
 class DigitalHumanPostprocessError(RuntimeError):
@@ -27,8 +29,7 @@ class DigitalHumanPostprocessResult:
 
 class DigitalHumanPostprocessor:
     def __init__(self) -> None:
-        self.output_dir = Path(settings.generated_media_dir)
-        self.public_base_url = settings.generated_media_public_base_url.rstrip("/")
+        self.output_dir = asset_storage.local_root
         self.ffmpeg_binary = settings.ffmpeg_binary
         self.ffprobe_binary = settings.ffprobe_binary
         self.subtitle_font_name = settings.subtitle_font_name
@@ -40,12 +41,16 @@ class DigitalHumanPostprocessor:
         *,
         task_id: int,
         video_url: str,
-        audio_data_url: str,
+        audio_data_url: str = "",
+        audio_url: str = "",
         subtitle_text: str,
+        segment: str | None = None,
     ) -> DigitalHumanPostprocessResult:
         ffmpeg_binary = self._resolve_ffmpeg_binary()
 
         task_dir = self.output_dir / "digital-human" / str(task_id)
+        if segment:
+            task_dir = task_dir / segment
         task_dir.mkdir(parents=True, exist_ok=True)
         source_video = task_dir / "source.mp4"
         audio_path = task_dir / "voice.mp3"
@@ -53,20 +58,77 @@ class DigitalHumanPostprocessor:
         final_video = task_dir / "final.mp4"
 
         self._download(video_url, source_video)
-        self._write_data_url(audio_data_url, audio_path)
+        self._validate_video_file(source_video)
+        if audio_data_url:
+            self._write_data_url(audio_data_url, audio_path)
+        elif audio_url:
+            self._download(audio_url, audio_path)
+        else:
+            raise DigitalHumanPostprocessError("audio is required for compose")
         audio_duration = self._probe_duration(audio_path)
         source_duration = self._probe_duration(source_video)
         duration = audio_duration or source_duration or 5.0
         subtitle_path.write_text(self._build_srt(subtitle_text, duration), encoding="utf-8")
         self._run_ffmpeg(ffmpeg_binary, source_video, audio_path, subtitle_path, final_video, duration)
+        self._validate_video_file(final_video)
 
         return DigitalHumanPostprocessResult(
             video_path=final_video,
-            video_url=self._public_url(final_video),
+            video_url=self._publish_asset(final_video),
             subtitle_path=subtitle_path,
-            subtitle_url=self._public_url(subtitle_path),
+            subtitle_url=self._publish_asset(subtitle_path),
             audio_path=audio_path,
         )
+
+    def concat_videos(
+        self,
+        *,
+        task_id: int,
+        video_paths: list[Path],
+        output_name: str = "final-combined.mp4",
+    ) -> tuple[Path, str]:
+        """按顺序拼接多个分镜成片（同一管线产出，编码参数一致），返回 (本地路径, 发布 URL)。"""
+        if not video_paths:
+            raise DigitalHumanPostprocessError("no video segments to concat")
+        if len(video_paths) == 1:
+            return video_paths[0], self._publish_asset(video_paths[0])
+        ffmpeg_binary = self._resolve_ffmpeg_binary()
+        task_dir = self.output_dir / "digital-human" / str(task_id)
+        task_dir.mkdir(parents=True, exist_ok=True)
+        list_file = task_dir / "concat-list.txt"
+        list_file.write_text(
+            "\n".join(f"file '{path.as_posix()}'" for path in video_paths),
+            encoding="utf-8",
+        )
+        output = task_dir / output_name
+        command = [
+            ffmpeg_binary,
+            "-y",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            str(list_file),
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-movflags",
+            "+faststart",
+            str(output),
+        ]
+        completed = subprocess.run(command, capture_output=True, text=True, timeout=1800)
+        if completed.returncode != 0:
+            raise DigitalHumanPostprocessError(
+                f"ffmpeg concat failed: {completed.stderr.strip() or completed.stdout.strip()}"
+            )
+        self._validate_video_file(output)
+        return output, self._publish_asset(output)
 
     def _run_ffmpeg(
         self,
@@ -183,7 +245,13 @@ class DigitalHumanPostprocessor:
                         if chunk:
                             file.write(chunk)
         except requests.RequestException as exc:
-            raise DigitalHumanPostprocessError(f"download generated video failed: {exc}") from exc
+            raise DigitalHumanPostprocessError(f"download media failed: {exc}") from exc
+
+    @staticmethod
+    def _validate_video_file(path: Path) -> None:
+        header = path.read_bytes()[:12]
+        if len(header) < 8 or header[4:8] != b"ftyp":
+            raise DigitalHumanPostprocessError("downloaded file is not a valid mp4 video")
 
     @staticmethod
     def _write_data_url(data_url: str, destination: Path) -> None:
@@ -249,6 +317,9 @@ class DigitalHumanPostprocessor:
     def _escape_filter_path(path: Path) -> str:
         return path.as_posix().replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
 
-    def _public_url(self, final_video: Path) -> str:
-        relative_path = final_video.relative_to(self.output_dir).as_posix()
-        return f"{self.public_base_url}/{relative_path}"
+    def _publish_asset(self, file_path: Path) -> str:
+        relative_key = file_path.relative_to(self.output_dir).as_posix()
+        if asset_storage.is_oss:
+            content_type = mimetypes.guess_type(file_path.name)[0]
+            return asset_storage.put_bytes(relative_key, file_path.read_bytes(), content_type)
+        return asset_storage.public_url(relative_key)

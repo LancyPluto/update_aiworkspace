@@ -7,10 +7,12 @@ import com.aiminilab.aitoolmarket.common.dto.ApiResponse;
 import com.aiminilab.aitoolmarket.common.dto.PageResponse;
 import com.aiminilab.aitoolmarket.credit.dto.CreditAccountResponse;
 import com.aiminilab.aitoolmarket.credit.dto.CreditLogResponse;
+import com.aiminilab.aitoolmarket.credit.dto.AlipayPayDiagnosticResponse;
 import com.aiminilab.aitoolmarket.credit.dto.CreateCustomRechargeOrderRequest;
 import com.aiminilab.aitoolmarket.credit.dto.CreateRechargeOrderRequest;
 import com.aiminilab.aitoolmarket.credit.dto.RechargeOrderResponse;
 import com.aiminilab.aitoolmarket.credit.dto.RechargePackageResponse;
+import com.aiminilab.aitoolmarket.credit.dto.RechargePaymentOptionsResponse;
 import com.aiminilab.aitoolmarket.credit.service.CreditRechargeService;
 import com.aiminilab.aitoolmarket.credit.service.CreditService;
 import jakarta.validation.Valid;
@@ -64,6 +66,11 @@ public class CreditController {
         return ApiResponse.success(creditRechargeService.packages());
     }
 
+    @GetMapping("/recharge-payment-options")
+    public ApiResponse<RechargePaymentOptionsResponse> rechargePaymentOptions() {
+        return ApiResponse.success(creditRechargeService.paymentOptions());
+    }
+
     @PostMapping("/recharge-orders")
     public ApiResponse<RechargeOrderResponse> createRechargeOrder(@Valid @RequestBody CreateRechargeOrderRequest request) {
         return ApiResponse.success(creditRechargeService.createOrder(AuthContext.get().userId(), request));
@@ -79,8 +86,8 @@ public class CreditController {
         return ApiResponse.success(creditRechargeService.getOrder(AuthContext.get().userId(), orderId));
     }
 
-    @PostMapping("/recharge-orders/{orderId}/mock-pay-success")
-    public ApiResponse<RechargeOrderResponse> mockPaySuccess(@PathVariable Long orderId) {
-        return ApiResponse.success(creditRechargeService.mockPaySuccess(AuthContext.get().userId(), orderId));
+    @GetMapping("/recharge-orders/{orderId}/alipay-diagnostic")
+    public ApiResponse<AlipayPayDiagnosticResponse> alipayDiagnostic(@PathVariable Long orderId) {
+        return ApiResponse.success(creditRechargeService.alipayDiagnostic(AuthContext.get().userId(), orderId));
     }
 }

@@ -17,7 +17,6 @@ import {
   Pause,
   Play,
   Plus,
-  Presentation,
   Rows3,
   Search,
   Send,
@@ -31,6 +30,7 @@ import {
 } from "lucide-vue-next"
 import AppShell from "@/components/AppShell.vue"
 import AssetPreviewModal from "@/components/AssetPreviewModal.vue"
+import ImageStackPreview from "@/components/ImageStackPreview.vue"
 import CreditCostBadge from "@/components/CreditCostBadge/CreditCostBadge.vue"
 import CapabilityControls from "@/pages/Chat/CapabilityControls.vue"
 import type { PrimaryReferenceMaterialInfo } from "@/pages/Chat/CapabilityControls.vue"
@@ -58,6 +58,7 @@ import { buildTaskResultBlocks, formatAudioDuration, resolveAudioTracks } from "
 import { isCoreField } from "@/utils/fieldUiMeta"
 import { consumeDashboardPendingAsset } from "@/utils/assetReplay"
 import { cleanToolDisplayText, toolDisplayDescription } from "@/utils/toolDisplayText"
+import { usesVariableWorkflowCredits } from "@/utils/toolCreditLabel"
 import { randomUUID } from "@/utils/randomUUID"
 import {
   dashboardAttributionFromRoute,
@@ -148,7 +149,6 @@ const modalityLabels: Record<string, string> = {
   VIDEO: "视频",
   AUDIO: "音乐",
   TEXT: "文本",
-  PPT: "PPT",
 }
 
 const modalityDescriptions: Record<string, string> = {
@@ -156,7 +156,6 @@ const modalityDescriptions: Record<string, string> = {
   VIDEO: "短片、运镜、动态素材",
   AUDIO: "配音、音效、音乐",
   TEXT: "文案、脚本、营销内容",
-  PPT: "演示文稿与页面设计",
 }
 
 const modalityIcons = {
@@ -164,20 +163,23 @@ const modalityIcons = {
   VIDEO: Video,
   AUDIO: Music,
   TEXT: FileText,
-  PPT: Presentation,
+}
+
+function resolveDashboardModality(tool: Pick<ToolSummary, "toolCode" | "outputModality">) {
+  return normalizeModality(tool.outputModality)
 }
 
 const toolsByModality = computed(() => {
   const groups = new Map<string, ToolSummary[]>()
   for (const tool of tools.value) {
-    const key = normalizeModality(tool.outputModality)
+    const key = resolveDashboardModality(tool)
     groups.set(key, [...(groups.get(key) || []), tool])
   }
   return groups
 })
 
 const modalityTabs = computed(() => {
-  const order = ["IMAGE", "VIDEO", "AUDIO", "TEXT", "PPT"]
+  const order = ["IMAGE", "VIDEO", "AUDIO", "TEXT"]
   return order
     .map((key) => ({
       key,
@@ -202,7 +204,7 @@ const filteredCurrentTools = computed(() => {
 
 const selectedTool = computed(() => {
   const byCode = tools.value.find((tool) => tool.toolCode === selectedToolCode.value)
-  return byCode && normalizeModality(byCode.outputModality) === selectedModality.value
+  return byCode && resolveDashboardModality(byCode) === selectedModality.value
     ? byCode
     : currentTools.value[0] || null
 })
@@ -458,14 +460,6 @@ function normalizeModality(value?: string | null) {
 }
 
 function selectModality(key: string) {
-  if (key === "PPT") {
-    selectedModality.value = key
-    selectedToolCode.value = null
-    modelSearch.value = ""
-    modelPickerOpen.value = false
-    replayParams.value = null
-    return
-  }
   selectedModality.value = key
   selectedToolCode.value = toolsByModality.value.get(key)?.[0]?.toolCode || null
   modelSearch.value = ""
@@ -486,7 +480,7 @@ function selectTool(tool: ToolSummary) {
 function selectToolByCode(toolCode: string, openComposer = false) {
   const tool = tools.value.find((item) => item.toolCode === toolCode)
   if (!tool) return
-  selectedModality.value = normalizeModality(tool.outputModality)
+  selectedModality.value = resolveDashboardModality(tool)
   selectedToolCode.value = tool.toolCode
   if (openComposer) expandComposer()
 }
@@ -1234,12 +1228,14 @@ function assetFromTask(item: { task: TaskDetail; blocks: ResultBlock[]; modality
     createdAt: item.task.createdAt,
   }
   if (block.type === "image") {
+    const urls = block.images.map((image) => image.url).filter(Boolean)
     return {
       ...base,
       kind: "image",
-      url: block.images[0]?.url,
-      urls: block.images.map((image) => image.url),
+      url: urls[0],
+      urls,
       title: block.title || base.title,
+      subtitle: urls.length > 1 ? `${base.subtitle} · 共 ${urls.length} 张` : base.subtitle,
     }
   }
   if (block.type === "video") return { ...base, kind: "video", url: block.url, title: block.title || base.title }
@@ -1547,7 +1543,7 @@ onUnmounted(() => {
                     </p>
                     <div class="mt-auto flex items-center justify-between pt-5">
                       <span class="text-xs text-white/45">{{ tool.modelConfigName || tool.modelName || tool.toolCode }}</span>
-                      <CreditCostBadge :cost="tool.estimatedCreditCost" size="md" class="text-amber-300" />
+                      <CreditCostBadge :cost="tool.estimatedCreditCost" :variable="usesVariableWorkflowCredits(tool)" size="md" class="text-amber-300" />
                     </div>
                   </div>
                 </article>
@@ -2227,31 +2223,26 @@ onUnmounted(() => {
                         </div>
                       </template>
                       <template v-else-if="primaryBlock(item.blocks)?.type === 'image'">
-                        <div
-                          v-if="(primaryBlock(item.blocks)?.images.length || 0) > 1"
-                          class="relative grid aspect-[4/3] w-full grid-cols-2 gap-px bg-black/40"
-                        >
-                          <img
-                            v-for="image in primaryBlock(item.blocks)?.images.slice(0, 4)"
-                            :key="image.url"
-                            :src="image.url"
-                            :alt="item.task.toolName"
-                            class="h-full min-h-0 w-full object-cover"
-                            loading="lazy"
-                            decoding="async"
-                          />
-                          <span class="absolute right-2 top-2 rounded-full bg-black/65 px-2 py-0.5 text-[11px] font-medium text-white">
-                            共 {{ primaryBlock(item.blocks)?.images.length }} 张
-                          </span>
+                        <!-- 多图逐张分开展示（与真实图片数一致），单图保持 4:3 容器 -->
+                        <div v-if="imageItemsForBlocks(item.blocks).length > 1" class="w-full space-y-1.5">
+                          <figure
+                            v-for="(image, imageIndex) in imageItemsForBlocks(item.blocks)"
+                            :key="`${image.url}-${imageIndex}`"
+                            class="relative w-full"
+                          >
+                            <img :src="image.url" :alt="`${item.task.toolName} 图${imageIndex + 1}`" class="block w-full rounded-md object-contain" loading="lazy" />
+                            <figcaption class="absolute left-2 top-2 rounded-full bg-black/60 px-2 py-0.5 text-[11px] font-medium text-white backdrop-blur">
+                              图{{ imageIndex + 1 }} / {{ imageItemsForBlocks(item.blocks).length }}
+                            </figcaption>
+                          </figure>
                         </div>
-                        <img
-                          v-else
-                          :src="primaryBlock(item.blocks)?.images[0]?.url"
-                          :alt="item.task.toolName"
-                          class="block aspect-[4/3] w-full bg-black/30 object-contain"
-                          loading="lazy"
-                          decoding="async"
-                        />
+                        <div v-else class="aspect-[4/3] w-full">
+                          <ImageStackPreview
+                            :images="imageItemsForBlocks(item.blocks).map((image) => image.url)"
+                            :alt="item.task.toolName"
+                            fit="contain"
+                          />
+                        </div>
                       </template>
                       <template v-else-if="primaryBlock(item.blocks)?.type === 'video'">
                         <video :src="primaryBlock(item.blocks)?.url" controls playsinline preload="metadata" class="block aspect-[4/3] w-full bg-black object-contain" />
@@ -2705,7 +2696,7 @@ onUnmounted(() => {
                             <h4 class="line-clamp-2 font-semibold text-white">{{ tool.toolName }}</h4>
                             <p class="mt-2 line-clamp-2 text-xs text-white/45">{{ toolDisplayDescription(tool, "模型工具") }}</p>
                             <p class="mt-3 inline-flex items-center gap-1 text-xs text-amber-300">
-                              <CreditCostBadge :cost="tool.estimatedCreditCost" />
+                              <CreditCostBadge :cost="tool.estimatedCreditCost" :variable="usesVariableWorkflowCredits(tool)" />
                             </p>
                           </div>
                         </button>
@@ -2750,6 +2741,7 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+/* dashboard 局部样式 */
 .audio-wave-hit {
   min-height: 32px;
   cursor: pointer;

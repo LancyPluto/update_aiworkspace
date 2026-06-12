@@ -9,7 +9,6 @@ import type { AITool } from "@/api/aiToolTypes"
 import type { TaskDetail } from "@/api/types"
 import { userRoutes } from "@/router/userRoutes"
 import { useAuthStore } from "@/store/authStore"
-import { isPptWorkspaceTool } from "@/api/pptApi"
 import { resolveModelBrand } from "@/utils/modelBrand"
 import { toolEntryRoute } from "@/utils/toolEntryRoute"
 import { extractTaskPreviewUrl } from "@/utils/taskResultBlocks"
@@ -93,12 +92,13 @@ function modelBrand(tool: AITool) {
 }
 
 function costLabel(tool: AITool): string {
+  if (tool.variableCreditPricing || tool.estimatedCreditCost == null) return "算力不详"
   if (tool.estimatedCreditCost === 0) return "免费"
   return `约 ${tool.estimatedCreditCost} 算力/次`
 }
 
 function toolDescription(tool: AITool): string {
-  return tool.description || (isPptWorkspaceTool(tool.id) ? "进入 PPT 工作台" : "点击进入对话")
+  return tool.description || "点击进入对话"
 }
 
 function toolModelLabel(tool: AITool): string {

@@ -1,11 +1,13 @@
 <script setup lang="ts">
+// 任务状态页：漫剧工作流支持逐分镜预览与逐分镜意见
 import { computed, onMounted, onUnmounted, ref, watch } from "vue"
 import { RouterLink } from "vue-router"
 import { ArrowLeft, CheckCircle2, ChevronRight, Loader2, X as XIcon } from "lucide-vue-next"
 import AppShell from "@/components/AppShell.vue"
 import TaskStatusTag from "@/components/TaskStatusTag/TaskStatusTag.vue"
 import { fetchTaskById, fetchTaskStatus, streamTaskStatus, submitWorkflowFeedback } from "@/api/taskApi"
-import type { TaskDetail, TaskStatus, TaskStatusPayload } from "@/api/types"
+import type { TaskDetail, TaskStatus, TaskStatusPayload, WorkflowStagePreview } from "@/api/types"
+import { normalizeMediaUrl } from "@/utils/toolCoverMedia"
 import { userRoutes } from "@/router/userRoutes"
 import { useAuthStore } from "@/store/authStore"
 import { taskFailureHint, taskProgressMessage, taskStatusDocLabel, taskStatusViewKind } from "@/utils/taskStatusLabels"
@@ -22,6 +24,8 @@ const loading = ref(true)
 const error = ref<string | null>(null)
 const streamConnected = ref(false)
 const feedbackText = ref("")
+/** 逐分镜意见：key 为分镜序号（1 起） */
+const sceneFeedbackTexts = ref<Record<number, string>>({})
 const feedbackSubmitting = ref(false)
 const feedbackError = ref<string | null>(null)
 
@@ -47,7 +51,67 @@ const awaitingStageLabel = computed(() => {
   return match?.[1]?.trim() || "阶段意见"
 })
 
-const awaitingFieldKey = computed(() => FEEDBACK_LABEL_TO_KEY[awaitingStageLabel.value] || null)
+const awaitingFieldKey = computed(
+  () => statusData.value?.workflowPreview?.fieldKey || FEEDBACK_LABEL_TO_KEY[awaitingStageLabel.value] || null,
+)
+
+const workflowPreview = computed<WorkflowStagePreview | null>(() => statusData.value?.workflowPreview ?? null)
+
+const previewStageLabel = computed(
+  () => workflowPreview.value?.stageLabel || awaitingStageLabel.value,
+)
+
+/** 分镜脚本列表（剧本台词在第一步即全部生成） */
+const previewScenes = computed(() => workflowPreview.value?.script?.scenes ?? [])
+
+/** 分镜关键帧（场景图意见阶段逐镜展示） */
+const previewSceneImages = computed(() => workflowPreview.value?.images ?? [])
+
+/** 分镜配音列表 */
+const previewSceneAudios = computed(() => workflowPreview.value?.audios ?? [])
+
+/** 当前阶段是否支持逐分镜意见 */
+const supportsPerSceneFeedback = computed(() => {
+  const key = awaitingFieldKey.value
+  if (key === "storyboardFeedback") return previewScenes.value.length > 1
+  if (key === "sceneFeedback") return previewSceneImages.value.length > 1 || previewScenes.value.length > 1
+  return false
+})
+
+function sceneImageFor(index?: number): string {
+  if (!index) return ""
+  const match = previewSceneImages.value.find((item) => item.sceneIndex === index)
+  return match?.imageUrl || ""
+}
+
+/** 把整体意见 + 逐分镜意见合并成提交值：纯文本（仅整体）或 JSON（含逐分镜） */
+function buildFeedbackValue(skip: boolean): string {
+  if (skip) return ""
+  const overall = feedbackText.value.trim()
+  const perScene: Record<string, string> = {}
+  for (const [index, text] of Object.entries(sceneFeedbackTexts.value)) {
+    const trimmed = (text || "").trim()
+    if (trimmed) perScene[index] = trimmed
+  }
+  if (Object.keys(perScene).length === 0) return overall
+  return JSON.stringify(overall ? { all: overall, ...perScene } : perScene)
+}
+
+function previewHelpText(preview: WorkflowStagePreview | null, stageLabel: string): string {
+  if (!preview) {
+    return "生成内容准备中，请稍候；出现本面板后即可查看脚本并填写意见。"
+  }
+  if (stageLabel.includes("脚本") || stageLabel.includes("分镜")) {
+    return "全部分镜的脚本和台词已一次性生成。可在每个分镜下方单独填写意见，也可在底部填写整体意见；满意可点「跳过继续」。"
+  }
+  if (stageLabel.includes("场景")) {
+    return "请逐镜查看关键帧画面，可对每个分镜单独说明构图、光影或人物表情等修改意见；满意可跳过。"
+  }
+  if (stageLabel.includes("BGM") || stageLabel.includes("配音")) {
+    return "请试听配音音频，说明语速、情绪或背景音乐风格；满意可跳过。（当前为角色配音预览）"
+  }
+  return "可填写修改意见，或点「跳过继续」进入下一步。"
+}
 
 const taskStages = computed(() => {
   if (isComicDrama.value) {
@@ -149,9 +213,10 @@ async function submitFeedback(skip = false) {
   feedbackError.value = null
   try {
     const key = awaitingFieldKey.value || "scriptFeedback"
-    const fields: Record<string, string> = { [key]: skip ? "" : feedbackText.value.trim() }
+    const fields: Record<string, string> = { [key]: buildFeedbackValue(skip) }
     const payload = await submitWorkflowFeedback(props.taskId, fields, { token: auth.token })
     feedbackText.value = ""
+    sceneFeedbackTexts.value = {}
     await applyStatus(payload)
   } catch (e) {
     feedbackError.value = (e as Error).message || "提交意见失败"
@@ -319,38 +384,152 @@ onUnmounted(() => {
           </div>
 
           <div
-            v-if="awaitingFeedback && isComicDrama"
-            class="mt-5 rounded-lg border border-primary/25 bg-background p-4 space-y-3"
+            v-if="(awaitingFeedback || workflowPreview) && isComicDrama"
+            class="mt-5 rounded-lg border border-primary/25 bg-background p-4 space-y-4"
           >
-            <p class="text-sm font-medium">交互式短剧 · {{ awaitingStageLabel }}</p>
-            <p class="text-xs text-muted-foreground">
-              可填写修改意见后提交；若满意可直接点「跳过继续」进入下一步。
-            </p>
+            <div>
+              <p class="text-sm font-medium">交互式短剧 · {{ previewStageLabel }}</p>
+              <p class="mt-1 text-xs text-muted-foreground">
+                {{ previewHelpText(workflowPreview, previewStageLabel) }}
+              </p>
+            </div>
+
+            <!-- 多分镜模式：脚本与台词一次性生成，逐镜展示并支持逐镜意见 -->
+            <div v-if="previewScenes.length > 1" class="space-y-3">
+              <p class="text-xs text-muted-foreground">
+                共 {{ previewScenes.length }} 个分镜 · 每镜 5 秒 · 约 {{ previewScenes.length * 5 }} 秒成片
+              </p>
+              <div
+                v-for="(scene, idx) in previewScenes"
+                :key="scene.index ?? idx"
+                class="rounded-md border border-border bg-muted/20 p-3 space-y-2 text-sm"
+              >
+                <p class="font-medium">
+                  分镜 {{ scene.index ?? idx + 1 }}<template v-if="scene.sceneTitle"> · {{ scene.sceneTitle }}</template>
+                </p>
+                <img
+                  v-if="sceneImageFor(scene.index ?? idx + 1)"
+                  :src="normalizeMediaUrl(sceneImageFor(scene.index ?? idx + 1))"
+                  :alt="`分镜 ${scene.index ?? idx + 1} 关键帧`"
+                  class="max-h-56 w-full rounded-md border border-border object-cover"
+                />
+                <p v-if="scene.sceneDescription" class="text-muted-foreground whitespace-pre-wrap">
+                  {{ scene.sceneDescription }}
+                </p>
+                <p v-if="scene.dialogue">
+                  <span class="text-xs text-muted-foreground">台词：</span>{{ scene.dialogue }}
+                </p>
+                <p v-if="scene.narration">
+                  <span class="text-xs text-muted-foreground">旁白：</span>{{ scene.narration }}
+                </p>
+                <p v-if="scene.subtitleZh && scene.subtitleZh !== scene.dialogue">
+                  <span class="text-xs text-muted-foreground">字幕：</span>{{ scene.subtitleZh }}
+                </p>
+                <textarea
+                  v-if="awaitingFeedback && supportsPerSceneFeedback"
+                  v-model="sceneFeedbackTexts[scene.index ?? idx + 1]"
+                  rows="2"
+                  class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  :placeholder="`分镜 ${scene.index ?? idx + 1} 的修改意见（可选）`"
+                />
+              </div>
+            </div>
+
+            <!-- 单镜/旧版兼容 -->
+            <div
+              v-else-if="workflowPreview?.script"
+              class="rounded-md border border-border bg-muted/20 p-3 space-y-2 text-sm"
+            >
+              <p v-if="workflowPreview.script.sceneTitle" class="font-medium">
+                {{ workflowPreview.script.sceneTitle }}
+              </p>
+              <p v-if="workflowPreview.script.sceneDescription" class="text-muted-foreground whitespace-pre-wrap">
+                {{ workflowPreview.script.sceneDescription }}
+              </p>
+              <p v-if="workflowPreview.script.dialogue">
+                <span class="text-xs text-muted-foreground">对白：</span>{{ workflowPreview.script.dialogue }}
+              </p>
+              <p v-if="workflowPreview.script.narration">
+                <span class="text-xs text-muted-foreground">旁白：</span>{{ workflowPreview.script.narration }}
+              </p>
+              <p v-if="workflowPreview.script.subtitleZh">
+                <span class="text-xs text-muted-foreground">字幕：</span>{{ workflowPreview.script.subtitleZh }}
+              </p>
+            </div>
+
+            <!-- 无 scenes 数据时的关键帧（多图/单图）展示 -->
+            <div v-if="previewScenes.length <= 1 && previewSceneImages.length > 1" class="grid grid-cols-2 gap-2 sm:grid-cols-3">
+              <figure v-for="image in previewSceneImages" :key="image.sceneIndex ?? image.imageUrl" class="space-y-1">
+                <img
+                  :src="normalizeMediaUrl(image.imageUrl)"
+                  :alt="`分镜 ${image.sceneIndex ?? ''} 关键帧`"
+                  class="aspect-video w-full rounded-md border border-border object-cover"
+                />
+                <figcaption class="text-center text-xs text-muted-foreground">分镜 {{ image.sceneIndex }}</figcaption>
+              </figure>
+            </div>
+            <img
+              v-else-if="previewScenes.length <= 1 && workflowPreview?.imageUrl"
+              :src="normalizeMediaUrl(workflowPreview.imageUrl)"
+              alt="关键帧预览"
+              class="max-h-72 w-full rounded-md border border-border object-cover"
+            />
+
+            <!-- 配音预览：多镜逐条试听 -->
+            <div v-if="previewSceneAudios.length > 1" class="space-y-2">
+              <div
+                v-for="audio in previewSceneAudios"
+                :key="audio.sceneIndex ?? audio.audioUrl"
+                class="rounded-md border border-border bg-muted/20 p-2"
+              >
+                <p class="mb-1 text-xs text-muted-foreground">
+                  分镜 {{ audio.sceneIndex }}<template v-if="audio.speechText"> · {{ audio.speechText }}</template>
+                </p>
+                <audio :src="normalizeMediaUrl(audio.audioUrl)" controls class="w-full" />
+              </div>
+            </div>
+            <audio
+              v-else-if="workflowPreview?.audioUrl"
+              :src="normalizeMediaUrl(workflowPreview.audioUrl)"
+              controls
+              class="w-full"
+            />
+
+            <video
+              v-if="workflowPreview?.videoUrl"
+              :src="normalizeMediaUrl(workflowPreview.videoUrl)"
+              controls
+              class="max-h-72 w-full rounded-md border border-border"
+            />
+
             <textarea
+              v-if="awaitingFeedback"
               v-model="feedbackText"
               rows="4"
               class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-              :placeholder="'请输入' + awaitingStageLabel + '（可选）'"
+              :placeholder="supportsPerSceneFeedback ? '整体' + previewStageLabel + '（可选，逐镜意见请填在各分镜下方）' : '请输入' + previewStageLabel + '（可选）'"
             />
-            <p v-if="feedbackError" class="text-xs text-destructive">{{ feedbackError }}</p>
-            <div class="flex flex-wrap gap-2">
-              <button
-                type="button"
-                class="inline-flex h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
-                :disabled="feedbackSubmitting"
-                @click="submitFeedback(false)"
-              >
-                {{ feedbackSubmitting ? "提交中..." : "提交并继续" }}
-              </button>
-              <button
-                type="button"
-                class="inline-flex h-9 items-center rounded-md border px-4 text-sm hover:bg-accent disabled:opacity-50"
-                :disabled="feedbackSubmitting"
-                @click="submitFeedback(true)"
-              >
-                跳过继续
-              </button>
-            </div>
+            <template v-if="awaitingFeedback">
+              <p v-if="feedbackError" class="text-xs text-destructive">{{ feedbackError }}</p>
+              <div class="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  class="inline-flex h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+                  :disabled="feedbackSubmitting"
+                  @click="submitFeedback(false)"
+                >
+                  {{ feedbackSubmitting ? "提交中..." : "提交并继续" }}
+                </button>
+                <button
+                  type="button"
+                  class="inline-flex h-9 items-center rounded-md border px-4 text-sm hover:bg-accent disabled:opacity-50"
+                  :disabled="feedbackSubmitting"
+                  @click="submitFeedback(true)"
+                >
+                  跳过继续
+                </button>
+              </div>
+            </template>
           </div>
 
           <div

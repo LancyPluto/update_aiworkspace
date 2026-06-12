@@ -5,7 +5,7 @@ from urllib.parse import urlparse
 
 import requests
 
-from config import settings
+from storage.asset_storage import asset_storage
 
 
 class GeneratedVideoPersistError(RuntimeError):
@@ -40,22 +40,20 @@ class GeneratedVideoPersister:
     _ALLOWED_EXTENSIONS = {".mp4", ".mov", ".webm", ".m4v"}
 
     def __init__(self) -> None:
-        self.output_dir = Path(settings.generated_media_dir)
-        self.public_base_url = settings.generated_media_public_base_url.rstrip("/")
+        self.output_dir = asset_storage.local_root
         self.timeout = (10, 300)
 
-    def persist_video_url(self, *, task_id: int, source_url: str) -> dict[str, str]:
+    def persist_video_url(self, *, task_id: int, source_url: str, index: int = 1) -> dict[str, str]:
         video_bytes, content_type = self._download(source_url)
-        task_dir = self.output_dir / "video" / str(task_id)
-        task_dir.mkdir(parents=True, exist_ok=True)
         extension = self._resolve_extension(source_url, content_type)
-        path = task_dir / f"video-1{extension}"
+        relative_key = f"video/{task_id}/video-{max(1, index)}{extension}"
         try:
-            path.write_bytes(video_bytes)
-        except OSError as exc:
+            url = asset_storage.put_bytes(relative_key, video_bytes, content_type)
+        except Exception as exc:
             raise GeneratedVideoPersistError(f"write generated video failed: {exc}") from exc
+        path = asset_storage.local_path(relative_key)
         return PersistedVideo(
-            url=self._public_url(path),
+            url=url,
             source_url=source_url,
             path=path,
             content_type=content_type,
@@ -69,7 +67,8 @@ class GeneratedVideoPersister:
             if not path.is_file():
                 continue
             content_type = mimetypes.guess_type(path.name)[0]
-            public_url = self._public_url(path)
+            relative_key = path.relative_to(self.output_dir).as_posix()
+            public_url = asset_storage.public_url(relative_key)
             return PersistedVideo(
                 url=public_url,
                 source_url=public_url,
@@ -101,6 +100,3 @@ class GeneratedVideoPersister:
             return path_extension
         return ".mp4"
 
-    def _public_url(self, video_path: Path) -> str:
-        relative_path = video_path.relative_to(self.output_dir).as_posix()
-        return f"{self.public_base_url}/{relative_path}"

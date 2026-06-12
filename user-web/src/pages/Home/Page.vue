@@ -206,6 +206,7 @@ function toolDescription(tool: ToolSummary) {
 }
 
 function costLabel(tool: ToolSummary) {
+  if (tool.variableCreditPricing || tool.estimatedCreditCost == null) return "算力不详"
   if (tool.estimatedCreditCost === 0) return "免费"
   return `约 ${tool.estimatedCreditCost} 算力/次`
 }

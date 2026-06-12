@@ -41,11 +41,16 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "app.payment.wechat-native.appid=wx-test",
         "app.payment.wechat-native.mchid=mch-test",
         "app.payment.wechat-native.merchant-serial-no=test-serial",
+        "app.payment.wechat-native.merchant-private-key-path=/tmp/wechat-test-key.pem",
         "app.payment.wechat-native.api-v3-key=01234567890123456789012345678901",
+        "app.payment.wechat-native.wechat-pay-public-key-id=test-pub-id",
+        "app.payment.wechat-native.wechat-pay-public-key-path=/tmp/wechat-test-pub.pem",
+        "app.payment.wechat-native.notify-url=https://example.com/api/v1/pay/wechat/native/notify",
         "app.payment.alipay-page.enabled=true",
         "app.payment.alipay-page.app-id=alipay-test-app",
         "app.payment.alipay-page.merchant-private-key=test-private-key",
-        "app.payment.alipay-page.alipay-public-key=test-public-key"
+        "app.payment.alipay-page.alipay-public-key=test-public-key",
+        "app.payment.alipay-page.notify-url=https://example.com/api/v1/pay/alipay/page/notify"
 })
 class CreditRechargeApiTest {
 
@@ -60,6 +65,8 @@ class CreditRechargeApiTest {
 
     @Test
     void userCanCreateRechargeOrderAndGrantCreditsIdempotently() throws Exception {
+        when(wechatNativePayClient.createNativeOrder(any(NativePrepayRequest.class)))
+                .thenReturn(new NativePrepayResponse("weixin://pay.weixin.qq.com/bizpayurl/up?pr=recharge-idem"));
         String userToken = register("recharge_user");
 
         mockMvc.perform(get("/api/v1/credits/recharge-packages")
@@ -74,7 +81,7 @@ class CreditRechargeApiTest {
                         .content("""
                                 {
                                   "packageId": 1,
-                                  "paymentChannel": "mock",
+                                  "paymentChannel": "WECHAT_NATIVE",
                                   "clientRequestId": "recharge-idem-001"
                                 }
                                 """))
@@ -85,6 +92,7 @@ class CreditRechargeApiTest {
                 .getResponse()
                 .getContentAsString();
         Long orderId = Long.parseLong(orderResponse.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
+        String orderNo = orderResponse.replaceAll("(?s).*\\\"orderNo\\\"\\s*:\\s*\\\"([^\\\"]+)\\\".*", "$1");
 
         mockMvc.perform(post("/api/v1/credits/recharge-orders")
                         .header("Authorization", "Bearer " + userToken)
@@ -92,24 +100,33 @@ class CreditRechargeApiTest {
                         .content("""
                                 {
                                   "packageId": 1,
-                                  "paymentChannel": "mock",
+                                  "paymentChannel": "WECHAT_NATIVE",
                                   "clientRequestId": "recharge-idem-001"
                                 }
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.id").value(orderId.intValue()));
 
-        mockMvc.perform(post("/api/v1/credits/recharge-orders/{orderId}/mock-pay-success", orderId)
+        when(wechatNativePayClient.parseNotification(any(WechatPayCallbackHeaders.class), anyString()))
+                .thenReturn(new WechatPayNotification(
+                        "wx-test",
+                        "mch-test",
+                        orderNo,
+                        "4200000000000000999",
+                        "NATIVE",
+                        "SUCCESS",
+                        1000,
+                        "CNY"
+                ));
+        postWechatNotify();
+        postWechatNotify();
+
+        mockMvc.perform(get("/api/v1/credits/recharge-orders/{orderId}", orderId)
                         .header("Authorization", "Bearer " + userToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("CREDITED"))
                 .andExpect(jsonPath("$.data.paidAt").exists())
                 .andExpect(jsonPath("$.data.creditedAt").exists());
-
-        mockMvc.perform(post("/api/v1/credits/recharge-orders/{orderId}/mock-pay-success", orderId)
-                        .header("Authorization", "Bearer " + userToken))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.status").value("CREDITED"));
 
         mockMvc.perform(get("/api/v1/credits/account")
                         .header("Authorization", "Bearer " + userToken))
@@ -123,6 +140,24 @@ class CreditRechargeApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.total").value(1))
                 .andExpect(jsonPath("$.data.list[0].amount").value(1000));
+    }
+
+    @Test
+    void mockPaymentChannelIsRejected() throws Exception {
+        String userToken = register("mock_channel_rejected_user");
+
+        mockMvc.perform(post("/api/v1/credits/recharge-orders")
+                        .header("Authorization", "Bearer " + userToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "packageId": 1,
+                                  "paymentChannel": "MOCK",
+                                  "clientRequestId": "mock-channel-rejected-001"
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("mock payment is not supported")));
     }
 
     @Test
@@ -182,54 +217,9 @@ class CreditRechargeApiTest {
     }
 
     @Test
-    void mockRechargeNotificationCreditsOnceAndRejectsAmountMismatch() throws Exception {
-        String userToken = register("mock_notify_recharge_user");
-
-        String orderResponse = mockMvc.perform(post("/api/v1/credits/recharge-orders")
-                        .header("Authorization", "Bearer " + userToken)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {
-                                  "packageId": 1,
-                                  "paymentChannel": "MOCK",
-                                  "clientRequestId": "mock-notify-idem-001"
-                                }
-                                """))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.paymentChannel").value("MOCK"))
-                .andReturn()
-                .getResponse()
-                .getContentAsString();
-        String orderNo = orderResponse.replaceAll("(?s).*\\\"orderNo\\\"\\s*:\\s*\\\"([^\\\"]+)\\\".*", "$1");
-
-        mockMvc.perform(post("/api/v1/pay/mock/notify")
-                        .contentType(MediaType.APPLICATION_FORM_URLENCODED)
-                        .param("order_no", orderNo)
-                        .param("external_trade_no", "MOCK-TX-001")
-                        .param("trade_status", "SUCCESS")
-                        .param("total_amount", "9.99"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value("FAIL"));
-
-        postMockNotify(orderNo);
-        postMockNotify(orderNo);
-
-        mockMvc.perform(get("/api/v1/credits/account")
-                        .header("Authorization", "Bearer " + userToken))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.balance").value(1100));
-
-        mockMvc.perform(get("/api/v1/credits/logs")
-                        .param("logType", "RECHARGE")
-                        .header("Authorization", "Bearer " + userToken))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.total").value(1));
-    }
-
-    @Test
     void alipayPageRechargeUsesNotifyToCreditIdempotently() throws Exception {
         when(alipayPagePayClient.createPagePayOrder(any(AlipayPagePayRequest.class)))
-                .thenReturn(AlipayPagePayResponse.qr("https://qr.alipay.com/bax-test"));
+                .thenReturn(AlipayPagePayResponse.pageRedirect("/api/v1/pay/alipay/page/launch?orderNo=R202606050002"));
         String userToken = register("alipay_recharge_user");
 
         String orderResponse = mockMvc.perform(post("/api/v1/credits/recharge-orders")
@@ -244,8 +234,7 @@ class CreditRechargeApiTest {
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.paymentChannel").value("ALIPAY_PAGE"))
-                .andExpect(jsonPath("$.data.payUrl").value("https://qr.alipay.com/bax-test"))
-                .andExpect(jsonPath("$.data.qrCodeUrl").isNotEmpty())
+                .andExpect(jsonPath("$.data.payUrl").value("/api/v1/pay/alipay/page/launch?orderNo=R202606050002"))
                 .andReturn()
                 .getResponse()
                 .getContentAsString();
@@ -274,25 +263,15 @@ class CreditRechargeApiTest {
     }
 
     @Test
-    void alipayPageRechargeAlwaysReturnsQrCodeForScannerPayment() throws Exception {
-        when(alipayPagePayClient.createPagePayOrder(any(AlipayPagePayRequest.class)))
-                .thenReturn(AlipayPagePayResponse.qr("https://qr.alipay.com/bax-scanner-only"));
-        String userToken = register("alipay_scanner_user");
+    void rechargePaymentOptionsExposeConfiguredChannels() throws Exception {
+        String userToken = register("payment_options_user");
 
-        mockMvc.perform(post("/api/v1/credits/recharge-orders")
-                        .header("Authorization", "Bearer " + userToken)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {
-                                  "packageId": 1,
-                                  "paymentChannel": "ALIPAY_PAGE",
-                                  "clientRequestId": "alipay-page-scanner-001"
-                                }
-                                """))
+        mockMvc.perform(get("/api/v1/credits/recharge-payment-options")
+                        .header("Authorization", "Bearer " + userToken))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.paymentChannel").value("ALIPAY_PAGE"))
-                .andExpect(jsonPath("$.data.payUrl").value("https://qr.alipay.com/bax-scanner-only"))
-                .andExpect(jsonPath("$.data.qrCodeUrl").value(org.hamcrest.Matchers.startsWith("data:image/svg+xml")));
+                .andExpect(jsonPath("$.data.wechatNativeEnabled").value(true))
+                .andExpect(jsonPath("$.data.alipayEnabled").value(true))
+                .andExpect(jsonPath("$.data.alipayPayMode").value("PAGE"));
     }
 
     @Test
@@ -325,17 +304,6 @@ class CreditRechargeApiTest {
                         .header("Wechatpay-Nonce", "nonce")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"id\":\"EV-TEST\"}"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value("SUCCESS"));
-    }
-
-    private void postMockNotify(String orderNo) throws Exception {
-        mockMvc.perform(post("/api/v1/pay/mock/notify")
-                        .contentType(MediaType.APPLICATION_FORM_URLENCODED)
-                        .param("order_no", orderNo)
-                        .param("external_trade_no", "MOCK-TX-001")
-                        .param("trade_status", "SUCCESS")
-                        .param("total_amount", "10.00"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"));
     }

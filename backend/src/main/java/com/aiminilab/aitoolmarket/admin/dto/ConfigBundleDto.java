@@ -1,6 +1,8 @@
 package com.aiminilab.aitoolmarket.admin.dto;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -142,7 +144,56 @@ public record ConfigBundleDto(
             String edgesJson,
             String groupsJson,
             String configJson,
-            String status
+            String status,
+            Integer version,
+            JsonNode nodes,
+            JsonNode edges,
+            JsonNode groups,
+            JsonNode modelConfigIds
     ) {
+        public String resolvedNodesJson() {
+            if (nodesJson != null && !nodesJson.isBlank()) {
+                return nodesJson;
+            }
+            if (nodes != null && !nodes.isNull() && nodes.isArray()) {
+                return nodes.toString();
+            }
+            return null;
+        }
+
+        public String resolvedEdgesJson() {
+            if (edgesJson != null && !edgesJson.isBlank()) {
+                return edgesJson;
+            }
+            if (edges != null && !edges.isNull() && edges.isArray()) {
+                return edges.toString();
+            }
+            return null;
+        }
+
+        public String resolvedGroupsJson() {
+            if (groupsJson != null && !groupsJson.isBlank()) {
+                return groupsJson;
+            }
+            if (groups != null && !groups.isNull() && groups.isArray()) {
+                return groups.toString();
+            }
+            return null;
+        }
+
+        public String resolvedConfigJson() {
+            if (configJson != null && !configJson.isBlank()) {
+                return configJson;
+            }
+            if (modelConfigIds == null || modelConfigIds.isNull() || modelConfigIds.isEmpty()) {
+                return null;
+            }
+            ObjectNode root = JsonNodeFactory.instance.objectNode();
+            root.set("modelConfigIds", modelConfigIds);
+            if (version != null) {
+                root.put("version", version);
+            }
+            return root.toString();
+        }
     }
 }

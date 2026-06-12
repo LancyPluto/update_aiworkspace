@@ -182,10 +182,20 @@ public class PptWorkflowService {
         if (allowed == null || allowed.isEmpty()) {
             return;
         }
-        boolean matched = allowed.stream().anyMatch(type -> type.equalsIgnoreCase(creationType.trim()));
+        String normalized = creationType.trim();
+        boolean matched = allowed.stream().anyMatch(type -> matchesCreationType(type, normalized));
         if (!matched) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "不支持的创建方式: " + creationType);
         }
+    }
+
+    private static boolean matchesCreationType(String allowed, String actual) {
+        if (allowed.equalsIgnoreCase(actual)) {
+            return true;
+        }
+        boolean allowedDescription = "description".equalsIgnoreCase(allowed) || "descriptions".equalsIgnoreCase(allowed);
+        boolean actualDescription = "description".equalsIgnoreCase(actual) || "descriptions".equalsIgnoreCase(actual);
+        return allowedDescription && actualDescription;
     }
 
     private int defaultCredits(String stepCode) {

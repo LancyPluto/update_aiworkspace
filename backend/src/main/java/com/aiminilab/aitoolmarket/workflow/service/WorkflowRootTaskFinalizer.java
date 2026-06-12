@@ -79,17 +79,40 @@ public class WorkflowRootTaskFinalizer {
             }
         }
 
-        AiTool billingTool = toolMapper.findById(task.getToolId())
-                .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在"));
-        ModelExecutionSnapshot snapshot = modelExecutionSnapshotService.parse(task.getModelSnapshotJson());
-        AgentModelConfig modelConfig = snapshot != null
-                ? snapshot.toModelConfig()
-                : modelCapabilityService.resolveModelConfigForTool(billingTool);
-        int actualCredits = task.getEstimatedCreditCost() == null ? 0 : task.getEstimatedCreditCost();
-        int chargedCredits = creditService.settleCompleted(task.getUserId(), CreditSourceType.TASK, rootTaskId, actualCredits);
-        int billingCredits = Math.max(chargedCredits, taskCreditEstimateService.estimateUserFacingTaskCredits(billingTool, modelConfig));
-        billingService.recordUsage("TASK", rootTaskId, task.getUserId(), modelConfig,
-                null, null, 1, billingCredits);
+        int frozenCredits = task.getEstimatedCreditCost() == null ? 0 : Math.max(0, task.getEstimatedCreditCost());
+        if (frozenCredits > 0) {
+            creditService.release(task.getUserId(), CreditSourceType.TASK, rootTaskId, frozenCredits);
+        }
+        int consumedCredits = taskMapper.sumConsumedCreditsByTaskId(rootTaskId);
+        if (consumedCredits <= 0) {
+            AiTool billingTool = toolMapper.findById(task.getToolId())
+                    .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在"));
+            ModelExecutionSnapshot snapshot = modelExecutionSnapshotService.parse(task.getModelSnapshotJson());
+            AgentModelConfig modelConfig = snapshot != null
+                    ? snapshot.toModelConfig()
+                    : modelCapabilityService.resolveModelConfigForTool(billingTool);
+            int fallbackCredits = taskCreditEstimateService.estimateUserFacingTaskCredits(billingTool, modelConfig);
+            if (fallbackCredits > 0) {
+                int chargedCredits = creditService.settleCompleted(
+                        task.getUserId(),
+                        CreditSourceType.TASK,
+                        rootTaskId,
+                        fallbackCredits
+                );
+                if (chargedCredits > 0) {
+                    billingService.recordUsage(
+                            "TASK",
+                            rootTaskId,
+                            task.getUserId(),
+                            modelConfig,
+                            null,
+                            null,
+                            1,
+                            chargedCredits
+                    );
+                }
+            }
+        }
         taskMapper.insertResult(rootTaskId, task.getUserId(), "MARKDOWN", markdown);
         try {
             communityService.autoPublishTask(taskMapper.findById(rootTaskId).orElse(task), "MARKDOWN", markdown);

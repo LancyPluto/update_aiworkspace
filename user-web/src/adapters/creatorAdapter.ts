@@ -32,6 +32,8 @@ export interface ComposerModelOption {
   vendorLabel?: string | null
   imageParameters?: ImageGenerationParameters | null
   estimatedCreditCost?: number
+  /** 工作流类工具：按每次实际调用模型成本 ×1.2 动态计费 */
+  variableCreditPricing?: boolean | null
   auto?: boolean
 }
 
@@ -418,6 +420,7 @@ export function buildComposerModelOptions(tools: ToolSummary[], mode: CreatorMod
       description: tool.description ?? null,
       iconUrl: tool.frontendStyle?.modelIconUrl || tool.coverUrl || null,
       estimatedCreditCost: tool.estimatedCreditCost,
+      variableCreditPricing: tool.variableCreditPricing,
     }
   })
   return [automatic, ...configured]
@@ -529,6 +532,7 @@ export function buildComposerModelGroupsFromTools(tools: ToolSummary[], mode: Cr
       vendorLabel: vendor.label,
       imageParameters: inferImageParametersFromText(`${vendor.key} ${vendor.label} ${label} ${tool.modelName || ""} ${tool.modelConfigName || ""} ${tool.toolCode || ""} ${tool.toolName || ""}`),
       estimatedCreditCost: tool.estimatedCreditCost,
+      variableCreditPricing: tool.variableCreditPricing,
     })
   }
 

@@ -3,7 +3,6 @@ export const workflowToolCodes = new Set([
   "ai_comic_drama_agent",
   "enterprise_diagnosis_agent",
   "social_media_comment_insights_agent",
-  "banana_ppt_generator",
 ])
 
 /** 单模型调用类工具：应出现在「大模型管理」，不应归入工作流画布。 */

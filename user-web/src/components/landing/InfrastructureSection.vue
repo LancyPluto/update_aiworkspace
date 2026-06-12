@@ -23,7 +23,7 @@ const infrastructureItems = [
               </div>
               <div class="bg-card rounded-xl p-6 border border-border flex flex-col items-center justify-center text-center">
                 <FileText class="w-8 h-8 text-primary mb-3" />
-                <span class="text-sm font-medium">PPT 制作</span>
+                <span class="text-sm font-medium">工作流编排</span>
               </div>
               <div class="bg-card rounded-xl p-6 border border-border flex flex-col items-center justify-center text-center">
                 <Music class="w-8 h-8 text-primary mb-3" />

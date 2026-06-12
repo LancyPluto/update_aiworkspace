@@ -15,7 +15,8 @@ import com.aiminilab.aitoolmarket.agent.config.AgentRouterSettings;
 import com.aiminilab.aitoolmarket.agent.config.AgentRuntimeSettings;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
-import com.aiminilab.aitoolmarket.config.AppProperties;
+import com.aiminilab.aitoolmarket.storage.AssetStorageService;
+import com.aiminilab.aitoolmarket.storage.StoredAsset;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -42,18 +43,18 @@ public class SystemSettingServiceImpl implements SystemSettingService {
     private static final DateTimeFormatter QR_FILENAME_TIME = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
     private static final String CUSTOMER_SERVICE_QR_SETTING_KEY = "customerService.qrCodeUrl";
 
+    private final AssetStorageService assetStorageService;
     private final SystemSettingMapper systemSettingMapper;
     private final SystemSettingVersionMapper versionMapper;
-    private final AppProperties appProperties;
     private final BypassCacheService bypassCacheService;
 
-    public SystemSettingServiceImpl(SystemSettingMapper systemSettingMapper,
+    public SystemSettingServiceImpl(AssetStorageService assetStorageService,
+                                    SystemSettingMapper systemSettingMapper,
                                     SystemSettingVersionMapper versionMapper,
-                                    AppProperties appProperties,
                                     BypassCacheService bypassCacheService) {
+        this.assetStorageService = assetStorageService;
         this.systemSettingMapper = systemSettingMapper;
         this.versionMapper = versionMapper;
-        this.appProperties = appProperties;
         this.bypassCacheService = bypassCacheService;
     }
 
@@ -136,18 +137,17 @@ public class SystemSettingServiceImpl implements SystemSettingService {
         }
 
         String filename = "customer-service-" + LocalDateTime.now().format(QR_FILENAME_TIME) + "." + extension;
-        Path dir = Path.of(appProperties.getGeneratedMediaDir()).resolve("customer-service").normalize().toAbsolutePath();
-        Path target = dir.resolve(filename).normalize();
+        StoredAsset stored;
         try {
-            Files.createDirectories(dir);
-            file.transferTo(target);
-        } catch (IOException ex) {
+            stored = assetStorageService.storeMultipart("customer-service/" + filename, file);
+        } catch (BusinessException ex) {
+            throw ex;
+        } catch (RuntimeException ex) {
             log.warn("Failed to store customer service QR upload: filename={}, contentType={}, size={}",
                     originalFilename, file.getContentType(), file.getSize(), ex);
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "客服二维码保存失败，请查看后端日志");
         }
-
-        String url = "/generated/customer-service/" + filename;
+        String url = stored.publicUrl();
         systemSettingMapper.upsert(CUSTOMER_SERVICE_QR_SETTING_KEY, url);
         bypassCacheService.invalidatePublicCustomerService();
         log.info("Admin uploaded customer service QR: url={}, originalFilename={}, contentType={}, size={}",

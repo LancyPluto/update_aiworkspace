@@ -22,32 +22,6 @@ services:
       timeout: 5s
       retries: 10
 
-  banana-slides:
-    profiles: ["banana-slides"]
-    build:
-      context: ../engines/banana-slides
-      dockerfile: backend/Dockerfile
-      args:
-        DOCKER_REGISTRY: ${DOCKER_REGISTRY:-docker.1ms.run/}
-        APT_MIRROR: ${APT_MIRROR:-mirrors.aliyun.com}
-        PYPI_INDEX_URL: ${PYPI_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}
-    container_name: ai-supermarket-banana-slides
-    restart: unless-stopped
-    env_file:
-      - ../engines/banana-slides/.env
-    ports:
-      - "127.0.0.1:${BANANA_SLIDES_PORT:-5001}:5000"
-      - "127.0.0.1:1455:1455"
-    volumes:
-      - ../engines/banana-slides/backend/instance:/app/backend/instance
-      - ../engines/banana-slides/uploads:/app/uploads
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 15s
-
   redis:
     image: ${DOCKER_REGISTRY:-docker.1ms.run/}redis:7
     container_name: ai-supermarket-redis
@@ -140,9 +114,11 @@ services:
       AGENT_MAX_RUNS_PER_HOUR: ${AGENT_MAX_RUNS_PER_HOUR:-30}
       AGENT_DEFAULT_CREDIT_BUDGET: ${AGENT_DEFAULT_CREDIT_BUDGET:-20}
       GENERATED_MEDIA_DIR: /data/generated-media
-      # 默认走宿主机 5001：与 compose 内 banana-slides 映射一致；单独起 engines/banana-slides 时也适用。
-      # 若 backend 与 banana-slides 同在 compose 且不用 Clash 假 IP，可设 PPT_ENGINE_BASE_URL=http://banana-slides:5000
-      PPT_ENGINE_BASE_URL: ${PPT_ENGINE_BASE_URL:-http://host.docker.internal:5001}
+      # OSS / ASSET_STORAGE_* 由 env_file ../.env 注入，勿在此写默认值以免覆盖
+      # Clash fake-ip (198.18.x.x) breaks direct HTTPS from containers; route via host proxy when set in deploy/.env
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,mysql,redis,rabbitmq,backend,agent-service,admin-frontend,user-web,nginx,host.docker.internal}
     ports:
       - "127.0.0.1:${BACKEND_PORT:-8080}:8080"
     volumes:
@@ -266,6 +242,10 @@ services:
       INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-local-internal-token}
       GENERATED_MEDIA_DIR: /data/generated-media
       GENERATED_MEDIA_PUBLIC_BASE_URL: /generated
+      # OSS / ASSET_STORAGE_* 由 env_file ../.env 注入，勿在此写默认值以免覆盖
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,mysql,redis,rabbitmq,backend,agent-service,admin-frontend,user-web,nginx,host.docker.internal}
     volumes:
       - ../worker:/app
       - ../data/generated-media:/data/generated-media
@@ -307,6 +287,9 @@ services:
       AGENT_MAX_MODEL_CALLS: ${AGENT_MAX_MODEL_CALLS:-5}
       AGENT_MODEL_CALL_COST: ${AGENT_MODEL_CALL_COST:-1}
       AGENT_DEFAULT_CONSUMED_CREDITS: ${AGENT_DEFAULT_CONSUMED_CREDITS:-1}
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,mysql,redis,rabbitmq,backend,agent-service,admin-frontend,user-web,nginx,host.docker.internal}
     ports:
       - "127.0.0.1:${AGENT_SERVICE_PORT:-8090}:8090"
     volumes:

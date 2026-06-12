@@ -1,5 +1,6 @@
 package com.aiminilab.aitoolmarket.workflow.service;
 
+import com.aiminilab.aitoolmarket.admin.service.BillingService;
 import com.aiminilab.aitoolmarket.agent.dto.ModelExecutionSnapshot;
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentModelConfigMapper;
@@ -67,6 +68,7 @@ public class WorkflowExecutionService {
     private final TaskOutboxService taskOutboxService;
     private final CreditService creditService;
     private final TaskCreditEstimateService taskCreditEstimateService;
+    private final BillingService billingService;
     private final ObjectMapper objectMapper;
     private final WorkflowRootTaskFinalizer workflowRootTaskFinalizer;
 
@@ -80,6 +82,7 @@ public class WorkflowExecutionService {
                                     TaskOutboxService taskOutboxService,
                                     CreditService creditService,
                                     TaskCreditEstimateService taskCreditEstimateService,
+                                    BillingService billingService,
                                     ObjectMapper objectMapper,
                                     @Lazy WorkflowRootTaskFinalizer workflowRootTaskFinalizer) {
         this.workflowDslService = workflowDslService;
@@ -92,6 +95,7 @@ public class WorkflowExecutionService {
         this.taskOutboxService = taskOutboxService;
         this.creditService = creditService;
         this.taskCreditEstimateService = taskCreditEstimateService;
+        this.billingService = billingService;
         this.objectMapper = objectMapper;
         this.workflowRootTaskFinalizer = workflowRootTaskFinalizer;
     }
@@ -229,7 +233,7 @@ public class WorkflowExecutionService {
         context.set(step.getNodeId(), output);
         saveContext(run, context, step.getNodeId());
         updateRootProgress(run, step.getNodeId(), 90, "节点完成：" + step.getNodeId());
-        chargeWorkflowStepCredits(run, stepTaskId);
+        chargeWorkflowStepCredits(run, stepTaskId, step.getNodeDefType(), output);
         advanceRun(run.getId());
     }
 
@@ -328,6 +332,7 @@ public class WorkflowExecutionService {
             }
             case USER_CONFIRM -> output.set("preview", collectConfirmPreview(context, node));
             case CONDITION -> output.set("branch", evaluateConditionBranch(run, context, node));
+            case SCENE_LOOP -> output.setAll(buildSceneLoopOutput(run, node));
             case VIDEO_OUTPUT -> output.set("artifacts", collectArtifacts(context));
             default -> throw new BusinessException(ErrorCode.SYSTEM_ERROR, "Unsupported inline node: " + node.type());
         }
@@ -603,8 +608,19 @@ public class WorkflowExecutionService {
         return node;
     }
 
+    /**
+     * Snapshot upstream node outputs for the terminal video_output node.
+     * Must not return {@code context} itself — that creates a self-reference
+     * (artifacts → context → video-output → artifacts) and Jackson fails at ~1000 nesting depth.
+     */
     private JsonNode collectArtifacts(ObjectNode context) {
-        return context;
+        ObjectNode artifacts = objectMapper.createObjectNode();
+        context.fields().forEachRemaining(entry -> {
+            if (!"video-output".equals(entry.getKey())) {
+                artifacts.set(entry.getKey(), entry.getValue());
+            }
+        });
+        return artifacts;
     }
 
     private JsonNode readUserInputStage(WorkflowRun run, WorkflowNodeDef node) {
@@ -636,6 +652,70 @@ public class WorkflowExecutionService {
             return context.get("keyframe");
         }
         return objectMapper.createObjectNode();
+    }
+
+    /**
+     * 分镜循环节点（scene_loop）：根据用户时长字段自动计算分镜数。
+     * 例如 30s / 每镜 5s = 6 镜。输出 sceneCount 与 indices，
+     * 下游模型节点（关键帧/配音/图生视频）按该数量逐镜生成并最终合成。
+     */
+    private ObjectNode buildSceneLoopOutput(WorkflowRun run, WorkflowNodeDef node) {
+        String durationField = text(node.parameters(), "durationField");
+        if (durationField == null || durationField.isBlank()) {
+            durationField = "episodeLength";
+        }
+        int secondsPerScene = intParam(node.parameters(), "secondsPerScene", 5);
+        int maxScenes = intParam(node.parameters(), "maxScenes", 18);
+        JsonNode input = readInput(run);
+        String rawDuration = text(input, durationField);
+        double seconds = parseSeconds(rawDuration, 30);
+        int sceneCount = (int) Math.round(seconds / Math.max(secondsPerScene, 1));
+        sceneCount = Math.max(1, Math.min(sceneCount, Math.max(maxScenes, 1)));
+        ObjectNode output = objectMapper.createObjectNode();
+        output.put("sceneCount", sceneCount);
+        output.put("secondsPerScene", secondsPerScene);
+        output.put("totalSeconds", sceneCount * secondsPerScene);
+        output.put("durationField", durationField);
+        var indices = objectMapper.createArrayNode();
+        for (int index = 1; index <= sceneCount; index++) {
+            indices.add(index);
+        }
+        output.set("indices", indices);
+        return output;
+    }
+
+    private int intParam(JsonNode parameters, String field, int fallback) {
+        if (parameters == null || parameters.isMissingNode()) {
+            return fallback;
+        }
+        JsonNode value = parameters.get(field);
+        if (value != null && value.isNumber()) {
+            return value.asInt(fallback);
+        }
+        if (value != null && value.isTextual()) {
+            try {
+                return Integer.parseInt(value.asText().trim());
+            } catch (NumberFormatException ignored) {
+                // fall through
+            }
+        }
+        return fallback;
+    }
+
+    private double parseSeconds(String raw, double fallback) {
+        if (raw == null || raw.isBlank()) {
+            return fallback;
+        }
+        String digits = raw.replaceAll("[^0-9.]", "");
+        if (digits.isBlank()) {
+            return fallback;
+        }
+        try {
+            double parsed = Double.parseDouble(digits);
+            return parsed > 0 ? parsed : fallback;
+        } catch (NumberFormatException exception) {
+            return fallback;
+        }
     }
 
     private JsonNode evaluateConditionBranch(WorkflowRun run, ObjectNode context, WorkflowNodeDef node) {
@@ -727,6 +807,225 @@ public class WorkflowExecutionService {
         return null;
     }
 
+    public JsonNode buildWorkflowPreview(Long rootTaskId) {
+        WorkflowRun run = workflowRunMapper.findByRootTaskId(rootTaskId).orElse(null);
+        if (run == null) {
+            return null;
+        }
+        ObjectNode context = readContext(run);
+        ObjectNode preview = objectMapper.createObjectNode();
+        String fieldKey = resolveAwaitingFieldKey(run);
+        String stageLabel = null;
+        if (run.getCurrentNodeId() != null && !run.getCurrentNodeId().isBlank()) {
+            try {
+                WorkflowDsl dsl = workflowDslService.findPublishedWorkflow(run.getToolId())
+                        .map(workflowDslService::parse)
+                        .orElse(null);
+                if (dsl != null) {
+                    WorkflowNodeDef node = dsl.requireNode(run.getCurrentNodeId());
+                    stageLabel = text(node.parameters(), "stageLabel");
+                    if (fieldKey == null || fieldKey.isBlank()) {
+                        fieldKey = text(node.parameters(), "fieldKey");
+                    }
+                }
+            } catch (Exception exception) {
+                LOGGER.warn("build workflow preview node lookup failed runId={}", run.getId(), exception);
+            }
+        }
+        if (stageLabel != null && !stageLabel.isBlank()) {
+            preview.put("stageLabel", stageLabel);
+        }
+        if (fieldKey != null && !fieldKey.isBlank()) {
+            preview.put("fieldKey", fieldKey);
+        }
+        if (run.getCurrentNodeId() != null && !run.getCurrentNodeId().isBlank()) {
+            preview.put("currentNodeId", run.getCurrentNodeId());
+        }
+
+        JsonNode script = summarizeScriptPreview(context.path("script-planner"));
+        if (script != null && !script.isMissingNode() && !script.isNull()) {
+            preview.set("script", script);
+        }
+        String imageUrl = text(context.path("keyframe"), "imageUrl");
+        if (imageUrl != null && !imageUrl.isBlank()) {
+            preview.put("imageUrl", imageUrl);
+        }
+        JsonNode keyframeImages = summarizeSceneMediaList(context.path("keyframe").path("images"), "imageUrl");
+        if (keyframeImages != null) {
+            preview.set("images", keyframeImages);
+        }
+        String audioUrl = text(context.path("tts"), "audioUrl");
+        if (audioUrl == null || audioUrl.isBlank()) {
+            audioUrl = text(context.path("tts"), "audioDataUrl");
+        }
+        if (audioUrl != null && !audioUrl.isBlank()) {
+            preview.put("audioUrl", audioUrl);
+        }
+        JsonNode sceneAudios = summarizeSceneMediaList(context.path("tts").path("audios"), "audioUrl");
+        if (sceneAudios != null) {
+            preview.set("audios", sceneAudios);
+        }
+        String videoUrl = text(context.path("clip-video"), "videoUrl");
+        if (videoUrl != null && !videoUrl.isBlank()) {
+            preview.put("videoUrl", videoUrl);
+        }
+        JsonNode compose = context.path("compose");
+        if (compose.isMissingNode()) {
+            compose = context.path("subtitle");
+        }
+        String finalVideoUrl = text(compose, "finalVideoUrl");
+        if (finalVideoUrl == null || finalVideoUrl.isBlank()) {
+            finalVideoUrl = text(compose, "videoUrl");
+        }
+        if (finalVideoUrl != null && !finalVideoUrl.isBlank()) {
+            preview.put("finalVideoUrl", finalVideoUrl);
+        }
+        applyStagePreviewFilter(preview, fieldKey);
+        return preview.isEmpty() ? null : preview;
+    }
+
+    /**
+     * Keep only the artifact relevant to the current user-input stage so the trial UI
+     * shows script at script stage, keyframe at scene stage, audio at BGM stage, etc.
+     */
+    private void applyStagePreviewFilter(ObjectNode preview, String fieldKey) {
+        if (fieldKey == null || fieldKey.isBlank()) {
+            return;
+        }
+        switch (fieldKey) {
+            case "scriptFeedback", "storyboardFeedback" -> {
+                preview.remove("imageUrl");
+                preview.remove("images");
+                preview.remove("audioUrl");
+                preview.remove("audios");
+                preview.remove("videoUrl");
+                preview.remove("finalVideoUrl");
+            }
+            case "sceneFeedback" -> {
+                // 场景图阶段保留 script.scenes（用于逐镜对照），仅过滤音视频
+                preview.remove("audioUrl");
+                preview.remove("audios");
+                preview.remove("videoUrl");
+                preview.remove("finalVideoUrl");
+            }
+            case "bgmFeedback" -> {
+                preview.remove("script");
+                preview.remove("imageUrl");
+                preview.remove("images");
+                preview.remove("videoUrl");
+                preview.remove("finalVideoUrl");
+            }
+            default -> {
+                // no-op
+            }
+        }
+    }
+
+    /** Shallow copy of per-scene media list (keyframe images / tts audios) for preview responses. */
+    private JsonNode summarizeSceneMediaList(JsonNode list, String urlField) {
+        if (list == null || !list.isArray() || list.isEmpty()) {
+            return null;
+        }
+        var result = objectMapper.createArrayNode();
+        for (JsonNode item : list) {
+            if (item == null || !item.isObject()) {
+                continue;
+            }
+            String url = text(item, urlField);
+            if (url == null || url.isBlank()) {
+                continue;
+            }
+            ObjectNode entry = objectMapper.createObjectNode();
+            JsonNode sceneIndex = item.get("sceneIndex");
+            if (sceneIndex != null && sceneIndex.isNumber()) {
+                entry.put("sceneIndex", sceneIndex.asInt());
+            }
+            entry.put(urlField, url);
+            copyTextField(entry, item, "speechText");
+            result.add(entry);
+        }
+        return result.isEmpty() ? null : result;
+    }
+
+    /** Shallow script preview for API responses — avoids deep LLM JSON blowing Jackson nesting limits. */
+    private JsonNode summarizeScriptPreview(JsonNode script) {
+        if (script == null || script.isMissingNode() || script.isNull()) {
+            return null;
+        }
+        if (script.isTextual()) {
+            ObjectNode text = objectMapper.createObjectNode();
+            text.put("contentText", script.asText());
+            return text;
+        }
+        JsonNode source = script;
+        String embedded = text(script, "contentText");
+        if (embedded != null && embedded.trim().startsWith("{")) {
+            try {
+                source = objectMapper.readTree(embedded);
+            } catch (Exception exception) {
+                LOGGER.debug("script contentText is not JSON, using node as-is");
+            }
+        }
+        ObjectNode summary = objectMapper.createObjectNode();
+        copyTextField(summary, source, "contentText");
+        copyTextField(summary, source, "sceneTitle");
+        copyTextField(summary, source, "sceneDescription");
+        copyTextField(summary, source, "dialogue");
+        copyTextField(summary, source, "narration");
+        copyTextField(summary, source, "subtitleZh");
+        copyTextField(summary, source, "subtitleEn");
+        copyTextField(summary, source, "presenterGender");
+        copyTextField(summary, source, "script");
+        copyTextField(summary, source, "markdown");
+        copyTextField(summary, source, "title");
+        JsonNode sceneCount = source.get("sceneCount");
+        if (sceneCount != null && sceneCount.isNumber()) {
+            summary.put("sceneCount", sceneCount.asInt());
+        }
+        JsonNode scenes = source.get("scenes");
+        if (scenes != null && scenes.isArray() && !scenes.isEmpty()) {
+            var sceneList = objectMapper.createArrayNode();
+            for (JsonNode scene : scenes) {
+                if (scene == null || !scene.isObject()) {
+                    continue;
+                }
+                ObjectNode sceneSummary = objectMapper.createObjectNode();
+                JsonNode index = scene.get("index");
+                if (index != null && index.isNumber()) {
+                    sceneSummary.put("index", index.asInt());
+                }
+                copyTextField(sceneSummary, scene, "sceneTitle");
+                copyTextField(sceneSummary, scene, "sceneDescription");
+                copyTextField(sceneSummary, scene, "dialogue");
+                copyTextField(sceneSummary, scene, "narration");
+                copyTextField(sceneSummary, scene, "subtitleZh");
+                copyTextField(sceneSummary, scene, "subtitleEn");
+                copyTextField(sceneSummary, scene, "presenterGender");
+                JsonNode durationSeconds = scene.get("durationSeconds");
+                if (durationSeconds != null && durationSeconds.isNumber()) {
+                    sceneSummary.put("durationSeconds", durationSeconds.asInt());
+                }
+                if (!sceneSummary.isEmpty()) {
+                    sceneList.add(sceneSummary);
+                }
+            }
+            if (!sceneList.isEmpty()) {
+                summary.set("scenes", sceneList);
+            }
+        }
+        if (!summary.isEmpty()) {
+            return summary;
+        }
+        return script.isObject() ? script : null;
+    }
+
+    private void copyTextField(ObjectNode target, JsonNode source, String field) {
+        JsonNode value = source.get(field);
+        if (value != null && value.isTextual()) {
+            target.put(field, value.asText());
+        }
+    }
+
     private String resolveAwaitingFieldKey(WorkflowRun run) {
         if (run.getCurrentNodeId() == null || run.getCurrentNodeId().isBlank()) {
             return null;
@@ -746,7 +1045,12 @@ public class WorkflowExecutionService {
         }
     }
 
-    private void chargeWorkflowStepCredits(WorkflowRun run, Long stepTaskId) {
+    /**
+     * 工作流不做静态预估（前端展示"算力不详"），每个节点成功后按本次实际使用的模型
+     * 成本 ×1.2（见 {@link TaskCreditEstimateService#estimateUserFacingTaskCredits}）响应式扣减。
+     * 多分镜节点（关键帧/配音/图生视频）一次产出 N 个分镜，对应 N 次模型调用，按 N 倍计费。
+     */
+    private void chargeWorkflowStepCredits(WorkflowRun run, Long stepTaskId, String nodeDefType, JsonNode output) {
         AiTask stepTask = taskMapper.findById(stepTaskId).orElse(null);
         if (stepTask == null) {
             return;
@@ -760,14 +1064,60 @@ public class WorkflowExecutionService {
         if (modelConfig == null) {
             return;
         }
-        int stepCredits = taskCreditEstimateService.estimateUserFacingTaskCredits(tool, modelConfig);
-        if (stepCredits <= 0) {
+        JsonNode stepParams = parseStepParams(stepTask.getParamsJson());
+        int unitCredits = taskCreditEstimateService.estimateUserFacingTaskCredits(tool, modelConfig, stepParams);
+        if (unitCredits <= 0) {
             return;
         }
+        int units = resolveStepBillingUnits(nodeDefType, output);
+        int stepCredits = unitCredits * units;
+        int chargedCredits = creditService.settleCompleted(
+                run.getUserId(),
+                CreditSourceType.TASK,
+                run.getRootTaskId(),
+                stepCredits
+        );
+        if (chargedCredits < stepCredits) {
+            throw new BusinessException(ErrorCode.CREDIT_NOT_ENOUGH, "算力不足，无法完成当前工作流步骤");
+        }
+        billingService.recordUsage(
+                "TASK",
+                run.getRootTaskId(),
+                run.getUserId(),
+                modelConfig,
+                null,
+                null,
+                units,
+                chargedCredits
+        );
+    }
+
+    /** 每镜一次模型调用的节点按实际分镜数计费；LLM/合成节点单次计费。 */
+    private int resolveStepBillingUnits(String nodeDefType, JsonNode output) {
+        if (nodeDefType == null || output == null) {
+            return 1;
+        }
+        boolean perSceneNode = "IMAGE_MODEL".equals(nodeDefType)
+                || "TTS_MODEL".equals(nodeDefType)
+                || "VIDEO_MODEL".equals(nodeDefType);
+        if (!perSceneNode) {
+            return 1;
+        }
+        JsonNode sceneCount = output.get("sceneCount");
+        if (sceneCount != null && sceneCount.isNumber()) {
+            return Math.max(1, sceneCount.asInt());
+        }
+        return 1;
+    }
+
+    private JsonNode parseStepParams(String paramsJson) {
+        if (paramsJson == null || paramsJson.isBlank()) {
+            return objectMapper.createObjectNode();
+        }
         try {
-            creditService.settle(run.getUserId(), CreditSourceType.TASK, run.getRootTaskId(), stepCredits);
+            return objectMapper.readTree(paramsJson);
         } catch (Exception exception) {
-            LOGGER.warn("workflow step credit settle skipped runId={} stepTaskId={}", run.getId(), stepTaskId, exception);
+            return objectMapper.createObjectNode();
         }
     }
 
@@ -798,7 +1148,7 @@ public class WorkflowExecutionService {
         return switch (type) {
             case FIELD_INPUT, USER_INPUT -> 10;
             case USER_CONFIRM -> 18;
-            case CONDITION -> 20;
+            case CONDITION, SCENE_LOOP -> 20;
             case LLM_TEXT -> 22;
             case IMAGE_MODEL -> 38;
             case TTS_MODEL -> 52;

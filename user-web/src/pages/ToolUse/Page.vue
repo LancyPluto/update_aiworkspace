@@ -11,6 +11,7 @@ import { fetchToolByCode, createTask, ApiBusinessError } from "@/api"
 import type { ToolDetail, ToolField } from "@/api/types"
 import { useAuthStore } from "@/store/authStore"
 import { randomUUID } from "@/utils/randomUUID"
+import { formatToolCreditHint, formatToolCreditLabel } from "@/utils/toolCreditLabel"
 
 const props = defineProps<{
   id: string
@@ -251,10 +252,13 @@ async function handleCreateTask() {
               <div class="mt-3 flex items-center justify-between rounded-lg bg-primary/5 p-3 border border-primary/20">
                 <div class="flex items-center gap-1.5">
                   <Zap class="h-4 w-4 text-warning" />
-                  <span class="text-sm font-medium">本次共消耗</span>
+                  <span class="text-sm font-medium">{{ tool.variableCreditPricing ? "预计消耗" : "本次共消耗" }}</span>
                 </div>
-                <span class="text-lg font-semibold text-primary">{{ tool.estimatedCreditCost }} 算力</span>
+                <span class="text-lg font-semibold text-primary">{{ formatToolCreditLabel(tool) }}</span>
               </div>
+              <p v-if="tool.variableCreditPricing" class="mt-2 text-xs text-muted-foreground leading-relaxed">
+                {{ formatToolCreditHint(tool) }}
+              </p>
 
               <button
                 type="button"

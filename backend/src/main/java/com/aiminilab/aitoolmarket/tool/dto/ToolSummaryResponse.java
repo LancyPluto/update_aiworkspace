@@ -23,6 +23,7 @@ public record ToolSummaryResponse(
         String configNote,
         String status,
         Integer estimatedCreditCost,
+        Boolean variableCreditPricing,
         Long modelConfigId,
         String modelConfigName,
         String modelName,
@@ -34,6 +35,10 @@ public record ToolSummaryResponse(
     }
 
     public static ToolSummaryResponse from(AiTool tool, Integer estimatedCreditCost) {
+        return from(tool, estimatedCreditCost, false);
+    }
+
+    public static ToolSummaryResponse from(AiTool tool, Integer estimatedCreditCost, boolean variableCreditPricing) {
         return new ToolSummaryResponse(
                 tool.getId(),
                 tool.getToolCode(),
@@ -49,7 +54,8 @@ public record ToolSummaryResponse(
                 ToolKindSupport.resolve(tool),
                 tool.getConfigNote(),
                 tool.getStatus(),
-                estimatedCreditCost,
+                variableCreditPricing ? null : estimatedCreditCost,
+                variableCreditPricing,
                 tool.getModelConfigId(),
                 tool.getModelConfigName(),
                 tool.getModelName(),
@@ -59,6 +65,15 @@ public record ToolSummaryResponse(
     }
 
     public static ToolSummaryResponse publicFrom(AiTool tool, Integer estimatedCreditCost, ObjectMapper objectMapper) {
+        return publicFrom(tool, estimatedCreditCost, false, objectMapper);
+    }
+
+    public static ToolSummaryResponse publicFrom(
+            AiTool tool,
+            Integer estimatedCreditCost,
+            boolean variableCreditPricing,
+            ObjectMapper objectMapper
+    ) {
         return new ToolSummaryResponse(
                 tool.getId(),
                 tool.getToolCode(),
@@ -74,7 +89,8 @@ public record ToolSummaryResponse(
                 ToolKindSupport.resolve(tool),
                 null,
                 tool.getStatus(),
-                estimatedCreditCost,
+                variableCreditPricing ? null : estimatedCreditCost,
+                variableCreditPricing,
                 tool.getModelConfigId(),
                 tool.getModelConfigName(),
                 tool.getModelName(),
@@ -103,6 +119,7 @@ public record ToolSummaryResponse(
                 configNote,
                 status,
                 estimatedCreditCost,
+                variableCreditPricing,
                 modelConfigId,
                 modelConfigName,
                 modelName,

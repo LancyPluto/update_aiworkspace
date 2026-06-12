@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 
 import requests
 
-from config import settings
+from storage.asset_storage import asset_storage
 
 
 class GeneratedImagePersistError(RuntimeError):
@@ -36,24 +36,21 @@ class GeneratedImagePersister:
     }
 
     def __init__(self) -> None:
-        self.output_dir = Path(settings.generated_media_dir)
-        self.public_base_url = settings.generated_media_public_base_url.rstrip("/")
+        self.output_dir = asset_storage.local_root
         self.timeout = (10, 120)
 
     def persist_images(self, *, task_id: int, urls: list[str]) -> list[dict[str, str]]:
         persisted: list[PersistedImage] = []
-        task_dir = self.output_dir / "images" / str(task_id)
-        task_dir.mkdir(parents=True, exist_ok=True)
-
         for index, source_url in enumerate(urls, start=1):
             image_bytes, content_type = self._read_image(source_url)
             extension = self._resolve_extension(source_url, content_type)
-            path = task_dir / f"image-{index}{extension}"
+            relative_key = f"images/{task_id}/image-{index}{extension}"
             try:
-                path.write_bytes(image_bytes)
-            except OSError as exc:
+                url = asset_storage.put_bytes(relative_key, image_bytes, content_type)
+            except Exception as exc:
                 raise GeneratedImagePersistError(f"write generated image failed: {exc}") from exc
-            persisted.append(PersistedImage(url=self._public_url(path), source_url=source_url, path=path))
+            path = asset_storage.local_path(relative_key)
+            persisted.append(PersistedImage(url=url, source_url=source_url, path=path))
 
         return [item.to_result_item() for item in persisted]
 
@@ -94,11 +91,6 @@ class GeneratedImagePersister:
         if path_extension in {".jpg", ".jpeg", ".png", ".webp", ".gif"}:
             return ".jpg" if path_extension == ".jpeg" else path_extension
         return ".png"
-
-    def _public_url(self, image_path: Path) -> str:
-        relative_path = image_path.relative_to(self.output_dir).as_posix()
-        return f"{self.public_base_url}/{relative_path}"
-
 
 def _safe_source_url_for_result(source_url: str) -> str:
     if source_url.startswith("data:") and ";base64" in source_url[:128]:
