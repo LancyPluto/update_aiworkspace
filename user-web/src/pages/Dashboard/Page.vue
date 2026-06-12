@@ -16,6 +16,7 @@ import {
   Music,
   Pause,
   Play,
+  Plus,
   Rows3,
   Search,
   Send,
@@ -32,6 +33,7 @@ import AssetPreviewModal from "@/components/AssetPreviewModal.vue"
 import ImageStackPreview from "@/components/ImageStackPreview.vue"
 import CreditCostBadge from "@/components/CreditCostBadge/CreditCostBadge.vue"
 import CapabilityControls from "@/pages/Chat/CapabilityControls.vue"
+import type { PrimaryReferenceMaterialInfo } from "@/pages/Chat/CapabilityControls.vue"
 import DashboardModalityDock from "./DashboardModalityDock.vue"
 import { fetchCreditAccount } from "@/api/creditApi"
 import { ApiBusinessError, getApiOrigin } from "@/api/client"
@@ -85,7 +87,18 @@ const modelSearch = ref("")
 const selectedChatTool = ref<AITool | null>(null)
 const selectedToolDetailLoading = ref(false)
 const capabilityRef = ref<InstanceType<typeof CapabilityControls> | null>(null)
+const primaryReferenceInfo = ref<PrimaryReferenceMaterialInfo>({
+  available: false,
+  fieldName: "",
+  kind: "file",
+  count: 0,
+  maxCount: 1,
+  previewUrls: [],
+  uploading: false,
+})
+const composerRootRef = ref<HTMLElement | null>(null)
 const composerOpen = ref(false)
+const composerManuallyClosed = ref(false)
 const replayParams = ref<Record<string, unknown> | null>(null)
 const submitting = ref(false)
 const submitError = ref("")
@@ -99,7 +112,12 @@ const historyFeedEndRef = ref<HTMLElement | null>(null)
 const dashboardMainRef = ref<HTMLElement | null>(null)
 const expandedPromptIds = ref<Set<number>>(new Set())
 const shouldScrollHistoryFeedToBottom = ref(false)
+const showHistoryScrollBottom = ref(false)
 let historyObserver: IntersectionObserver | null = null
+let historyFeedAutoStickUntil = 0
+let historyFeedAnchorUntil = 0
+let historyFeedAnchorHeight = 0
+let historyScrollContainer: HTMLElement | null = null
 const taskPollTimers = new Map<number, number>()
 const retryingTaskIds = ref<Set<number>>(new Set())
 const deletingTaskIds = ref<Set<number>>(new Set())
@@ -245,22 +263,32 @@ const isHistoryFeedView = computed(() => activePanel.value === "tasks" && histor
 
 watch(historyView, (view) => {
   localStorage.setItem(HISTORY_VIEW_KEY, view)
+  historyScrollContainer = null
+  if (view === "feed") composerManuallyClosed.value = false
+  if (view !== "feed") showHistoryScrollBottom.value = false
   void nextTick(() => {
     setupHistoryObserver()
     if (view === "feed" && activePanel.value === "tasks") {
-      scrollHistoryFeedToBottom()
+      scrollHistoryFeedToBottom("smooth")
       shouldScrollHistoryFeedToBottom.value = false
+      updateHistoryScrollBottomVisibility()
     }
   })
 })
 
 watch(activePanel, async (panel) => {
-  if (panel !== "tasks") return
+  historyScrollContainer = null
+  if (panel !== "tasks") {
+    showHistoryScrollBottom.value = false
+    return
+  }
   await nextTick()
   setupHistoryObserver()
   if (historyView.value === "feed") {
-    scrollHistoryFeedToBottom()
+    composerManuallyClosed.value = false
+    scrollHistoryFeedToBottom("smooth")
     shouldScrollHistoryFeedToBottom.value = false
+    updateHistoryScrollBottomVisibility()
   }
 })
 
@@ -269,7 +297,7 @@ watch(
   async () => {
     if (!isHistoryFeedView.value || !shouldScrollHistoryFeedToBottom.value) return
     await nextTick()
-    scrollHistoryFeedToBottom()
+    scrollHistoryFeedToBottom("smooth")
     shouldScrollHistoryFeedToBottom.value = false
   },
 )
@@ -458,13 +486,42 @@ function selectToolByCode(toolCode: string, openComposer = false) {
 }
 
 function expandComposer() {
+  composerManuallyClosed.value = false
   composerOpen.value = true
 }
 
-function collapseComposerForPreview() {
+function updatePrimaryReferenceInfo(info: PrimaryReferenceMaterialInfo) {
+  primaryReferenceInfo.value = info
+}
+
+function openPrimaryReferencePicker() {
+  capabilityRef.value?.openReferenceMaterialPicker("upload")
+  expandComposer()
+}
+
+function removePrimaryReferenceAt(index: number, event: MouseEvent) {
+  event.stopPropagation()
+  capabilityRef.value?.removePrimaryReferenceMaterialAt(index)
+}
+
+function collapseComposerForPreview(manual = true) {
   if (!composerOpen.value || submitting.value) return
+  if (manual) composerManuallyClosed.value = true
   composerOpen.value = false
   modelPickerOpen.value = false
+}
+
+function autoExpandComposerAtFeedBottom() {
+  if (!isHistoryFeedView.value || composerManuallyClosed.value) return
+  composerOpen.value = true
+}
+
+function handleDashboardPointerDown(event: PointerEvent) {
+  if (!composerOpen.value || submitting.value) return
+  const root = composerRootRef.value
+  const target = event.target
+  if (!root || !(target instanceof Node) || root.contains(target)) return
+  collapseComposerForPreview()
 }
 
 async function createWithSelectedTool() {
@@ -578,8 +635,11 @@ async function reloadTasksForCurrentModality() {
   }
 }
 
-async function loadMoreTasks() {
+async function loadMoreTasks(options: { preserveFeedAnchor?: boolean } = {}) {
   if (tasksLoadingMore.value || !taskHasNext.value) return
+  const scrollContainer = options.preserveFeedAnchor ? resolveHistoryScrollContainer() : null
+  const previousScrollHeight = scrollContainer?.scrollHeight ?? 0
+  const previousScrollTop = scrollContainer?.scrollTop ?? 0
   tasksLoadingMore.value = true
   try {
     const existing = new Set(tasks.value.map((task) => task.taskId))
@@ -603,6 +663,13 @@ async function loadMoreTasks() {
 
     tasks.value = [...tasks.value, ...matched]
     taskHasNext.value = hasNext
+    if (options.preserveFeedAnchor && scrollContainer) {
+      await nextTick()
+      const heightDelta = scrollContainer.scrollHeight - previousScrollHeight
+      scrollContainer.scrollTop = previousScrollTop + Math.max(0, heightDelta)
+      beginHistoryFeedAnchorPreservation(scrollContainer)
+      updateHistoryScrollBottomVisibility()
+    }
     startPollingVisibleTasks()
   } finally {
     tasksLoadingMore.value = false
@@ -615,14 +682,14 @@ function taskMatchesSelectedModality(task: TaskDetail): boolean {
 
 function setupHistoryObserver() {
   historyObserver?.disconnect()
+  if (historyView.value === "feed") return
   historyObserver = new IntersectionObserver((entries) => {
     if (entries.some((entry) => entry.isIntersecting)) void loadMoreTasks()
   }, {
-    root: dashboardMainRef.value,
-    rootMargin: historyView.value === "feed" ? "280px 0px 0px 0px" : "0px 0px 260px 0px",
+    root: resolveHistoryScrollContainer(),
+    rootMargin: "0px 0px 260px 0px",
   })
-  const target = historyView.value === "feed" ? historyFeedStartRef.value : historySentinelRef.value
-  if (target) historyObserver.observe(target)
+  if (historySentinelRef.value) historyObserver.observe(historySentinelRef.value)
 }
 
 function startPollingVisibleTasks() {
@@ -864,8 +931,105 @@ function togglePrompt(taskId: number) {
   expandedPromptIds.value = next
 }
 
-function scrollHistoryFeedToBottom() {
-  historyFeedEndRef.value?.scrollIntoView({ behavior: "smooth", block: "end" })
+function resolveHistoryScrollContainer(): HTMLElement | null {
+  if (historyScrollContainer && document.contains(historyScrollContainer)) return historyScrollContainer
+  const fallback = (document.scrollingElement || document.documentElement) as HTMLElement
+  const candidates: HTMLElement[] = []
+  let node = dashboardMainRef.value
+  while (node) {
+    candidates.push(node)
+    node = node.parentElement
+  }
+  candidates.push(fallback)
+  historyScrollContainer =
+    candidates.find((item) => item.scrollHeight - item.clientHeight > 2) ||
+    dashboardMainRef.value ||
+    fallback
+  return historyScrollContainer
+}
+
+function historyBottomDistance(container = resolveHistoryScrollContainer()) {
+  if (!container) return 0
+  return Math.max(0, container.scrollHeight - container.scrollTop - container.clientHeight)
+}
+
+function updateHistoryScrollBottomVisibility() {
+  showHistoryScrollBottom.value = isHistoryFeedView.value && historyBottomDistance() > 300
+}
+
+function scrollHistoryFeedToBottom(behavior: ScrollBehavior = "smooth", stabilize = true) {
+  const container = resolveHistoryScrollContainer()
+  if (stabilize) historyFeedAutoStickUntil = Date.now() + 1400
+  autoExpandComposerAtFeedBottom()
+  if (container) {
+    container.scrollTo({ top: container.scrollHeight, behavior })
+  } else {
+    historyFeedEndRef.value?.scrollIntoView({ behavior, block: "end" })
+  }
+  showHistoryScrollBottom.value = false
+  if (!stabilize) return
+  const settleBottom = () => {
+    if (!isHistoryFeedView.value || Date.now() > historyFeedAutoStickUntil) return
+    const nextContainer = resolveHistoryScrollContainer()
+    if (!nextContainer) return
+    nextContainer.scrollTo({ top: nextContainer.scrollHeight, behavior: "auto" })
+    showHistoryScrollBottom.value = false
+  }
+  window.setTimeout(settleBottom, 180)
+  window.setTimeout(settleBottom, 420)
+  window.setTimeout(settleBottom, 900)
+}
+
+function isHistoryFeedNearTop(container: HTMLElement) {
+  const start = historyFeedStartRef.value
+  if (!start) return container.scrollTop <= 50
+  const containerRect = container.getBoundingClientRect()
+  const startRect = start.getBoundingClientRect()
+  const topOffset = startRect.top - containerRect.top
+  const bottomOffset = startRect.bottom - containerRect.top
+  return topOffset <= 140 && bottomOffset >= -24
+}
+
+function beginHistoryFeedAnchorPreservation(container: HTMLElement) {
+  historyFeedAnchorUntil = Date.now() + 1600
+  historyFeedAnchorHeight = container.scrollHeight
+}
+
+function preserveHistoryFeedAnchorIfNeeded() {
+  if (!isHistoryFeedView.value || Date.now() > historyFeedAnchorUntil) return
+  const container = resolveHistoryScrollContainer()
+  if (!container || historyFeedAnchorHeight <= 0) return
+  const heightDelta = container.scrollHeight - historyFeedAnchorHeight
+  if (heightDelta > 0) {
+    container.scrollTop += heightDelta
+    historyFeedAnchorHeight = container.scrollHeight
+    updateHistoryScrollBottomVisibility()
+  }
+}
+
+function handleHistoryFeedMediaLoaded() {
+  if (!isHistoryFeedView.value) return
+  if (Date.now() <= historyFeedAnchorUntil) {
+    preserveHistoryFeedAnchorIfNeeded()
+    return
+  }
+  if (Date.now() <= historyFeedAutoStickUntil || historyBottomDistance() < 220) {
+    scrollHistoryFeedToBottom("auto", false)
+  }
+}
+
+function handleDashboardScroll() {
+  if (!isHistoryFeedView.value) {
+    showHistoryScrollBottom.value = false
+    return
+  }
+  const container = resolveHistoryScrollContainer()
+  if (!container) return
+  showHistoryScrollBottom.value = historyBottomDistance(container) > 300
+  if (historyBottomDistance(container) <= 80) autoExpandComposerAtFeedBottom()
+  if (isHistoryFeedNearTop(container) && taskHasNext.value && !tasksLoadingMore.value) {
+    void loadMoreTasks({ preserveFeedAnchor: true })
+  }
 }
 
 function audioTracksForItem(blocks: ResultBlock[]) {
@@ -1246,13 +1410,19 @@ function modalityLabel(value?: string | null) {
 }
 
 onMounted(async () => {
+  window.addEventListener("scroll", handleDashboardScroll, true)
+  window.addEventListener("pointerdown", handleDashboardPointerDown, true)
   const savedHistoryView = localStorage.getItem(HISTORY_VIEW_KEY)
   if (savedHistoryView === "cards" || savedHistoryView === "feed") historyView.value = savedHistoryView
   await loadDashboard()
   setupHistoryObserver()
+  await nextTick()
+  if (isHistoryFeedView.value) scrollHistoryFeedToBottom("auto")
 })
 
 onUnmounted(() => {
+  window.removeEventListener("scroll", handleDashboardScroll, true)
+  window.removeEventListener("pointerdown", handleDashboardPointerDown, true)
   historyObserver?.disconnect()
   for (const timer of taskPollTimers.values()) window.clearInterval(timer)
   taskPollTimers.clear()
@@ -1293,7 +1463,11 @@ onUnmounted(() => {
           </RouterLink>
         </div>
 
-        <main ref="dashboardMainRef" class="min-h-0 flex-1 overflow-y-auto px-5 pb-40 pt-6 lg:pl-[132px] xl:px-10 xl:pl-[132px]">
+        <main
+          ref="dashboardMainRef"
+          class="min-h-0 flex-1 overflow-y-auto px-5 pb-40 pt-6 lg:pl-[132px] xl:px-10 xl:pl-[132px]"
+          @scroll="handleDashboardScroll"
+        >
           <div class="mx-auto w-full max-w-[1380px]">
             <div class="sticky top-0 z-20 -mx-5 mb-8 border-b border-transparent bg-transparent px-5 py-4 backdrop-blur-0 xl:-mx-10 xl:px-10">
               <div class="flex flex-wrap items-center justify-between gap-4">
@@ -1845,17 +2019,18 @@ onUnmounted(() => {
                           <button
                             v-if="taskPrompt(item.task).length > 88"
                             type="button"
-                            class="mt-1 text-xs font-medium text-primary/80 transition hover:text-primary"
+                            class="dashboard-feed-prompt-toggle"
                             @click.stop="togglePrompt(item.task.taskId)"
                           >
                             {{ isPromptExpanded(item.task.taskId) ? "收起提示词" : "展开提示词" }}
+                            <ChevronDown class="h-3.5 w-3.5 transition-transform" :class="{ 'rotate-180': isPromptExpanded(item.task.taskId) }" />
                           </button>
                         </div>
                       </div>
                       <p v-else class="text-sm text-white/38">本次任务未记录提示词。</p>
                     </section>
 
-                    <section class="mt-4">
+                    <section class="mt-5">
                       <div
                         v-if="isTaskRunning(item.task.status) || canRetryTask(item.task.status) || (!item.task.result?.contentText && item.task.status !== 'SUCCESS')"
                         class="rounded-2xl border border-white/8 bg-black/22 p-4"
@@ -1888,6 +2063,7 @@ onUnmounted(() => {
                           class="dashboard-feed-image"
                           loading="lazy"
                           decoding="async"
+                          @load="handleHistoryFeedMediaLoaded"
                         />
                       </div>
 
@@ -1898,6 +2074,7 @@ onUnmounted(() => {
                         playsinline
                         preload="metadata"
                         class="max-h-[420px] w-full rounded-2xl bg-black object-contain"
+                        @loadedmetadata="handleHistoryFeedMediaLoaded"
                       />
 
                       <div v-else-if="primaryBlock(item.blocks)?.type === 'audio'" class="grid gap-3 sm:grid-cols-2">
@@ -1917,7 +2094,7 @@ onUnmounted(() => {
                       </div>
                     </section>
 
-                    <footer class="mt-4 flex flex-wrap items-center gap-2">
+                    <footer class="mt-5 flex flex-wrap items-center gap-2">
                       <button
                         v-if="canCancelTask(item.task.status)"
                         type="button"
@@ -1971,14 +2148,6 @@ onUnmounted(() => {
                         <Trash2 v-else class="h-3.5 w-3.5" />
                         {{ deletingTaskIds.has(item.task.taskId) ? "删除中" : "删除" }}
                       </button>
-                      <RouterLink
-                        :to="item.task.status === 'SUCCESS' ? userRoutes.taskResult(String(item.task.taskId)) : userRoutes.taskStatus(String(item.task.taskId))"
-                        class="ml-auto inline-flex items-center gap-1 text-xs font-medium text-white/38 transition hover:text-white"
-                        @click.stop
-                      >
-                        查看详情
-                        <ArrowRight class="h-3 w-3" />
-                      </RouterLink>
                     </footer>
                   </article>
                   <div ref="historyFeedEndRef" class="h-2" />
@@ -2206,14 +2375,6 @@ onUnmounted(() => {
                             {{ deletingTaskIds.has(item.task.taskId) ? "删除中" : "删除" }}
                           </button>
                         </div>
-                        <RouterLink
-                          :to="item.task.status === 'SUCCESS' ? userRoutes.taskResult(String(item.task.taskId)) : userRoutes.taskStatus(String(item.task.taskId))"
-                          class="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-white/45 transition hover:text-white"
-                          @click.stop
-                        >
-                          查看完整内容
-                          <ArrowRight class="h-3 w-3" />
-                        </RouterLink>
                       </div>
                     </div>
                   </article>
@@ -2235,8 +2396,27 @@ onUnmounted(() => {
           </div>
         </main>
 
-        <div class="pointer-events-none fixed bottom-6 left-[calc(var(--app-sidebar-width,268px)+(100vw-var(--app-sidebar-width,268px))/2)] z-50 -translate-x-1/2 transition-[left]">
-          <div v-if="!composerOpen" class="flex w-[min(980px,calc(100vw-2rem))] items-center justify-center gap-3">
+        <Transition name="dashboard-scroll-bottom">
+          <button
+            v-if="showHistoryScrollBottom"
+            type="button"
+            class="dashboard-scroll-bottom-button"
+            aria-label="回到最新任务"
+            @click="scrollHistoryFeedToBottom('smooth')"
+          >
+            <ChevronDown class="h-5 w-5" />
+            <span>最新</span>
+          </button>
+        </Transition>
+
+        <div
+          ref="composerRootRef"
+          class="pointer-events-none fixed bottom-6 left-[calc(var(--app-sidebar-width,268px)+(100vw-var(--app-sidebar-width,268px))/2)] z-50 grid w-[min(980px,calc(100vw-2rem))] -translate-x-1/2 transition-[left]"
+        >
+          <div
+            class="col-start-1 row-start-1 flex w-full items-center justify-center gap-3 self-end transition-all duration-200"
+            :class="composerOpen ? 'pointer-events-none translate-y-4 scale-[0.98] opacity-0' : 'translate-y-0 scale-100 opacity-100'"
+          >
             <div v-if="activePanel === 'tasks'" class="dashboard-floating-view-switch pointer-events-auto">
               <button
                 type="button"
@@ -2277,7 +2457,10 @@ onUnmounted(() => {
             </button>
           </div>
 
-          <div v-else class="pointer-events-auto w-[min(980px,calc(100vw-2rem))]">
+          <div
+            class="pointer-events-auto col-start-1 row-start-1 w-full self-end transition-all duration-200"
+            :class="composerOpen ? 'translate-y-0 scale-100 opacity-100' : 'pointer-events-none translate-y-8 scale-[0.98] opacity-0'"
+          >
             <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
               <button
                 type="button"
@@ -2317,15 +2500,62 @@ onUnmounted(() => {
               >
                 <X class="h-4 w-4" />
               </button>
-              <div class="flex items-start gap-3">
-                <MessageSquareText class="mt-2 h-6 w-6 shrink-0 text-white/50" />
+              <div class="relative">
+                <div class="pointer-events-none absolute left-0 top-1 z-10 flex h-10 w-10 items-center justify-center text-white/48">
+                  <MessageSquareText v-if="!primaryReferenceInfo.available" class="h-6 w-6" />
+                </div>
+                <button
+                  v-if="primaryReferenceInfo.available"
+                  type="button"
+                  class="absolute left-0 top-1 z-20 flex h-10 w-10 items-center justify-center rounded-xl border border-dashed border-white/16 bg-black/24 text-white/46 shadow-[0_8px_28px_rgb(0_0_0_/_0.2)] transition hover:border-primary/55 hover:bg-primary/10 hover:text-white"
+                  :class="primaryReferenceInfo.count > 0 ? 'border-solid border-primary/35 bg-primary/10' : ''"
+                  :title="primaryReferenceInfo.fieldName || '选择参考素材'"
+                  @click="openPrimaryReferencePicker"
+                >
+                  <Loader2 v-if="primaryReferenceInfo.uploading" class="h-4 w-4 animate-spin text-primary" />
+                  <Plus v-else class="h-5 w-5" />
+                  <span class="sr-only">选择参考素材</span>
+                </button>
                 <textarea
                   v-model="promptText"
                   rows="2"
-                  class="min-h-[72px] flex-1 resize-none bg-transparent text-base leading-7 text-white outline-none placeholder:text-white/28"
+                  class="min-h-[72px] w-full resize-none bg-transparent pb-1 pr-10 pt-1 text-base leading-7 text-white outline-none placeholder:text-white/28"
+                  :class="primaryReferenceInfo.available ? 'pl-14' : 'pl-10'"
                   :placeholder="coreFieldPlaceholder"
                   @focus="expandComposer"
                 />
+                <div
+                  v-if="primaryReferenceInfo.previewUrls.length > 0"
+                  class="mt-3 flex flex-wrap gap-3 px-1"
+                >
+                  <div
+                    v-for="(url, index) in primaryReferenceInfo.previewUrls"
+                    :key="`${url}-${index}`"
+                    class="group relative h-14 w-14 overflow-visible"
+                  >
+                    <img
+                      :src="url"
+                      alt="参考图"
+                      class="h-14 w-14 rounded-lg border border-white/10 object-cover"
+                    />
+                    <button
+                      type="button"
+                      class="absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-black/80 text-[10px] text-white opacity-0 transition-colors hover:bg-red-500 group-hover:opacity-100"
+                      aria-label="移除参考图"
+                      @click="removePrimaryReferenceAt(index, $event)"
+                    >
+                      ×
+                    </button>
+                  </div>
+                  <button
+                    v-if="primaryReferenceInfo.count > primaryReferenceInfo.previewUrls.length"
+                    type="button"
+                    class="flex h-14 min-w-14 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] px-3 text-xs font-medium text-white/45 transition hover:border-primary/40 hover:text-white"
+                    @click="openPrimaryReferencePicker"
+                  >
+                    +{{ primaryReferenceInfo.count - primaryReferenceInfo.previewUrls.length }}
+                  </button>
+                </div>
               </div>
 
               <div
@@ -2344,6 +2574,7 @@ onUnmounted(() => {
                 :tool-id="selectedChatTool.id"
                 :initial-params="replayParams"
                 class="mt-3 rounded-2xl border border-white/8 bg-black/18 px-3 py-2"
+                @primary-reference-change="updatePrimaryReferenceInfo"
               />
 
               <p v-if="submitError" class="mt-3 rounded-2xl border border-red-500/25 bg-red-500/10 px-3 py-2 text-xs text-red-200">
@@ -2529,7 +2760,7 @@ onUnmounted(() => {
 
 .dashboard-chat-feed {
   display: flex;
-  max-width: min(980px, 100%);
+  max-width: min(1040px, 100%);
   margin: 0 auto;
   padding-bottom: 36px;
   flex-direction: column;
@@ -2542,6 +2773,7 @@ onUnmounted(() => {
   background:
     linear-gradient(180deg, rgb(255 255 255 / 0.045), rgb(255 255 255 / 0.032)),
     #111116;
+  padding: 22px 26px 24px;
   box-shadow: 0 22px 60px rgb(0 0 0 / 0.22);
   transition: border-color 180ms ease, background-color 180ms ease, transform 180ms ease;
 }
@@ -2554,14 +2786,32 @@ onUnmounted(() => {
   transform: translateY(-1px);
 }
 
+.dashboard-feed-prompt-toggle {
+  display: inline-flex;
+  margin-top: 6px;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  background: transparent;
+  color: rgb(255 255 255 / 0.42);
+  padding: 0;
+  font-size: 12px;
+  font-weight: 500;
+  transition: color 160ms ease;
+}
+
+.dashboard-feed-prompt-toggle:hover {
+  color: rgb(196 181 253 / 0.95);
+}
+
 .dashboard-feed-gallery {
   display: flex;
   max-width: 100%;
   align-items: flex-start;
-  gap: 10px;
+  gap: 12px;
   overflow-x: auto;
   overscroll-behavior-inline: contain;
-  padding-bottom: 4px;
+  padding-bottom: 6px;
   scrollbar-width: thin;
   scrollbar-color: rgb(255 255 255 / 0.16) transparent;
 }
@@ -2589,23 +2839,23 @@ onUnmounted(() => {
 
 .dashboard-feed-action {
   display: inline-flex;
-  min-height: 34px;
+  min-height: 36px;
   align-items: center;
   justify-content: center;
   gap: 7px;
-  border: 1px solid rgb(255 255 255 / 0.07);
-  border-radius: 8px;
-  background: rgb(255 255 255 / 0.045);
+  border: 1px solid rgb(255 255 255 / 0.1);
+  border-radius: 10px;
+  background: transparent;
   padding: 0 12px;
-  color: rgb(255 255 255 / 0.62);
+  color: rgb(255 255 255 / 0.58);
   font-size: 12px;
   font-weight: 500;
   transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease, transform 160ms ease;
 }
 
 .dashboard-feed-action:hover:not(:disabled) {
-  border-color: rgb(255 63 121 / 0.28);
-  background: rgb(255 63 121 / 0.08);
+  border-color: rgb(255 255 255 / 0.16);
+  background: rgb(255 255 255 / 0.06);
   color: #fff;
   transform: translateY(-1px);
 }
@@ -2623,6 +2873,46 @@ onUnmounted(() => {
   border-color: rgb(255 92 122 / 0.28);
   background: rgb(255 72 112 / 0.08);
   color: rgb(255 132 154);
+}
+
+.dashboard-scroll-bottom-button {
+  position: fixed;
+  right: 30px;
+  bottom: 108px;
+  z-index: 52;
+  display: inline-flex;
+  height: 44px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid rgb(255 255 255 / 0.1);
+  border-radius: 999px;
+  background: rgb(24 24 30 / 0.82);
+  padding: 0 15px;
+  color: rgb(255 255 255 / 0.78);
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: 0 18px 54px rgb(0 0 0 / 0.38);
+  backdrop-filter: blur(18px);
+  transition: transform 160ms ease, border-color 160ms ease, background-color 160ms ease, color 160ms ease;
+}
+
+.dashboard-scroll-bottom-button:hover {
+  transform: translateY(-2px);
+  border-color: rgb(255 63 121 / 0.34);
+  background: rgb(255 63 121 / 0.18);
+  color: #fff;
+}
+
+.dashboard-scroll-bottom-enter-active,
+.dashboard-scroll-bottom-leave-active {
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.dashboard-scroll-bottom-enter-from,
+.dashboard-scroll-bottom-leave-to {
+  opacity: 0;
+  transform: translateY(10px) scale(0.96);
 }
 
 .dashboard-floating-view-switch {

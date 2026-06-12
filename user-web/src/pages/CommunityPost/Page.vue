@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue"
 import { useRoute, useRouter } from "vue-router"
-import { ArrowLeft, ChevronLeft, ChevronRight, Copy, Download, Heart, Loader2, Send, Star } from "lucide-vue-next"
+import { ArrowLeft, ChevronLeft, ChevronRight, Copy, Download, Heart, Loader2, Lock, Pause, Play, Send, Star, Volume2, VolumeX } from "lucide-vue-next"
 import CommunityAudioMedia from "@/components/community/CommunityAudioMedia.vue"
 import UserAvatar from "@/components/UserAvatar.vue"
 import {
@@ -39,6 +39,12 @@ const sameStyleLoading = ref(false)
 const error = ref("")
 const audioPlaying = ref(false)
 const detailAudioRef = ref<HTMLAudioElement | null>(null)
+const detailVideoRef = ref<HTMLVideoElement | null>(null)
+const audioCurrentTime = ref(0)
+const audioDuration = ref(0)
+const videoPlaying = ref(false)
+const mediaVolume = ref(0.8)
+const mediaMuted = ref(false)
 const activeImageIndex = ref(0)
 const extraImageUrls = ref<string[]>([])
 
@@ -86,6 +92,13 @@ const downloadUrl = computed(() => {
   if (kind.value === "image") return activeImageUrl.value
   return post.value ? normalizeCommunityMediaUrl(post.value.coverUrl) : ""
 })
+
+const audioProgress = computed(() => {
+  if (!audioDuration.value) return 0
+  return Math.min(100, Math.max(0, (audioCurrentTime.value / audioDuration.value) * 100))
+})
+
+const effectiveMediaVolume = computed(() => (mediaMuted.value ? 0 : mediaVolume.value))
 
 async function enrichPostImagesFromTask(current: CommunityPost) {
   extraImageUrls.value = []
@@ -203,6 +216,7 @@ function toggleDetailAudio() {
   const source = audioMedia.value.audioUrl
   if (!audio || !source) return
   if (!audio.src) audio.src = source
+  applyMediaPreferences(audio)
   if (audio.paused) {
     void audio.play().catch(() => {
       audioPlaying.value = false
@@ -220,10 +234,104 @@ function onDetailAudioPause() {
   audioPlaying.value = false
 }
 
+function onDetailAudioTimeUpdate() {
+  const audio = detailAudioRef.value
+  if (!audio) return
+  audioCurrentTime.value = audio.currentTime
+  audioDuration.value = Number.isFinite(audio.duration) ? audio.duration : 0
+}
+
+function onDetailAudioLoadedMetadata() {
+  const audio = detailAudioRef.value
+  if (!audio) return
+  applyMediaPreferences(audio)
+  audioDuration.value = Number.isFinite(audio.duration) ? audio.duration : 0
+  audioCurrentTime.value = audio.currentTime || 0
+}
+
+function seekDetailAudio(event: MouseEvent) {
+  const audio = detailAudioRef.value
+  if (!audio || !audioDuration.value) return
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
+  const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width))
+  audio.currentTime = ratio * audioDuration.value
+  audioCurrentTime.value = audio.currentTime
+}
+
+function formatMediaTime(value: number) {
+  if (!Number.isFinite(value) || value <= 0) return "0:00"
+  const minutes = Math.floor(value / 60)
+  const seconds = Math.floor(value % 60)
+  return `${minutes}:${String(seconds).padStart(2, "0")}`
+}
+
+function applyMediaPreferences(target?: HTMLMediaElement | null) {
+  const mediaElements = [detailAudioRef.value, detailVideoRef.value]
+  for (const media of mediaElements) {
+    if (!media) continue
+    if (target && media !== target) continue
+    media.volume = mediaVolume.value
+    media.muted = mediaMuted.value
+  }
+}
+
+function persistMediaPreferences() {
+  window.localStorage.setItem(
+    "ai_tool_market_media_preferences",
+    JSON.stringify({ volume: mediaVolume.value, muted: mediaMuted.value }),
+  )
+}
+
+function restoreMediaPreferences() {
+  try {
+    const saved = window.localStorage.getItem("ai_tool_market_media_preferences")
+    if (!saved) return
+    const parsed = JSON.parse(saved) as { volume?: number; muted?: boolean }
+    if (typeof parsed.volume === "number") mediaVolume.value = Math.min(1, Math.max(0, parsed.volume))
+    if (typeof parsed.muted === "boolean") mediaMuted.value = parsed.muted
+  } catch {
+    // 保留默认音量
+  }
+}
+
+function toggleMediaMute() {
+  mediaMuted.value = !mediaMuted.value
+  applyMediaPreferences()
+  persistMediaPreferences()
+}
+
+function updateMediaVolume(event: Event) {
+  const input = event.target as HTMLInputElement
+  mediaVolume.value = Math.min(1, Math.max(0, Number(input.value)))
+  mediaMuted.value = mediaVolume.value === 0
+  applyMediaPreferences()
+  persistMediaPreferences()
+}
+
+function toggleDetailVideo() {
+  const video = detailVideoRef.value
+  if (!video) return
+  applyMediaPreferences(video)
+  if (video.paused) void video.play()
+  else video.pause()
+}
+
+function onDetailVideoPlay() {
+  applyMediaPreferences(detailVideoRef.value)
+  videoPlaying.value = true
+}
+
+function onDetailVideoPause() {
+  videoPlaying.value = false
+}
+
 watch(() => auth.token, () => void load())
 
 watch(postId, () => {
   audioPlaying.value = false
+  videoPlaying.value = false
+  audioCurrentTime.value = 0
+  audioDuration.value = 0
   activeImageIndex.value = 0
   if (detailAudioRef.value) {
     detailAudioRef.value.pause()
@@ -232,7 +340,12 @@ watch(postId, () => {
   void load()
 })
 
-onMounted(() => void load())
+watch([mediaVolume, mediaMuted], () => applyMediaPreferences())
+
+onMounted(() => {
+  restoreMediaPreferences()
+  void load()
+})
 
 onUnmounted(() => {
   detailAudioRef.value?.pause()
@@ -294,13 +407,45 @@ onUnmounted(() => {
             </button>
           </div>
         </div>
-        <video
-          v-else-if="kind === 'video' && normalizeCommunityMediaUrl(post.coverUrl)"
-          :src="normalizeCommunityMediaUrl(post.coverUrl)"
-          controls
-          playsinline
-          preload="metadata"
-        />
+        <div v-else-if="kind === 'video' && normalizeCommunityMediaUrl(post.coverUrl)" class="video-frame">
+          <video
+            ref="detailVideoRef"
+            :src="normalizeCommunityMediaUrl(post.coverUrl)"
+            playsinline
+            preload="metadata"
+            @click="toggleDetailVideo"
+            @play="onDetailVideoPlay"
+            @pause="onDetailVideoPause"
+            @ended="onDetailVideoPause"
+          />
+          <button
+            type="button"
+            class="video-play-button"
+            :class="{ hidden: videoPlaying }"
+            aria-label="播放视频"
+            @click="toggleDetailVideo"
+          >
+            <Play class="h-8 w-8" />
+          </button>
+          <div class="video-control-shell">
+            <div class="volume-cluster">
+              <button type="button" class="media-icon-button" :aria-label="mediaMuted ? '取消静音' : '静音'" @click="toggleMediaMute">
+                <VolumeX v-if="mediaMuted || effectiveMediaVolume === 0" class="h-4 w-4" />
+                <Volume2 v-else class="h-4 w-4" />
+              </button>
+              <input
+                class="volume-slider"
+                type="range"
+                min="0"
+                max="1"
+                step="0.01"
+                :value="mediaVolume"
+                aria-label="视频音量"
+                @input="updateMediaVolume"
+              />
+            </div>
+          </div>
+        </div>
         <div v-else-if="kind === 'audio'" class="audio-stage">
           <CommunityAudioMedia
             :cover-url="audioMedia.coverUrl"
@@ -314,13 +459,41 @@ onUnmounted(() => {
             <audio
               ref="detailAudioRef"
               :src="audioMedia.audioUrl"
-              controls
               preload="metadata"
               class="audio-player"
               @play="onDetailAudioPlay"
               @pause="onDetailAudioPause"
               @ended="onDetailAudioPause"
+              @timeupdate="onDetailAudioTimeUpdate"
+              @loadedmetadata="onDetailAudioLoadedMetadata"
             />
+            <div class="media-control-bar">
+              <button type="button" class="media-icon-button" :aria-label="audioPlaying ? '暂停' : '播放'" @click="toggleDetailAudio">
+                <Pause v-if="audioPlaying" class="h-4 w-4" />
+                <Play v-else class="h-4 w-4" />
+              </button>
+              <span>{{ formatMediaTime(audioCurrentTime) }}</span>
+              <button type="button" class="audio-track" aria-label="音频进度条" @click="seekDetailAudio">
+                <span class="audio-track-fill" :style="{ width: `${audioProgress}%` }" />
+              </button>
+              <span>{{ formatMediaTime(audioDuration) }}</span>
+              <div class="volume-cluster">
+                <button type="button" class="media-icon-button" :aria-label="mediaMuted ? '取消静音' : '静音'" @click="toggleMediaMute">
+                  <VolumeX v-if="mediaMuted || effectiveMediaVolume === 0" class="h-4 w-4" />
+                  <Volume2 v-else class="h-4 w-4" />
+                </button>
+                <input
+                  class="volume-slider"
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.01"
+                  :value="mediaVolume"
+                  aria-label="音频音量"
+                  @input="updateMediaVolume"
+                />
+              </div>
+            </div>
           </div>
           <p v-else class="audio-empty">暂无可播放的音频资源</p>
         </div>
@@ -401,9 +574,12 @@ onUnmounted(() => {
               复制 Prompt
             </button>
           </div>
-          <div v-else>
-            <span>Prompt</span>
-            <strong>作者未公开 Prompt，同款创作只会带入工具与可用媒体。</strong>
+          <div v-else class="prompt-locked-card">
+            <Lock class="h-4 w-4" />
+            <div>
+              <span>Prompt 已保护</span>
+              <strong>作者未公开 Prompt，同款创作只会带入工具与可用媒体。</strong>
+            </div>
           </div>
         </div>
 
@@ -440,6 +616,13 @@ onUnmounted(() => {
   color: rgb(255 255 255 / 0.72);
   padding: 10px 15px;
   font-weight: 800;
+  transition: border-color 0.18s ease, background-color 0.18s ease, box-shadow 0.18s ease, color 0.18s ease;
+}
+
+.action-row button svg,
+.action-row a svg {
+  color: rgb(255 255 255 / 0.3);
+  transition: color 0.18s ease, fill 0.18s ease, stroke 0.18s ease;
 }
 
 .post-layout {
@@ -474,11 +657,65 @@ onUnmounted(() => {
 }
 
 .image-frame img,
-.media-stage video {
+.video-frame video {
   max-width: 100%;
   max-height: min(78vh, 720px);
   border-radius: 24px;
   box-shadow: 0 30px 100px rgb(0 0 0 / 0.68);
+}
+
+.video-frame {
+  position: relative;
+  display: grid;
+  max-width: 100%;
+  place-items: center;
+}
+
+.video-frame video {
+  cursor: pointer;
+}
+
+.video-play-button {
+  position: absolute;
+  inset: 50% auto auto 50%;
+  display: inline-flex;
+  width: 82px;
+  height: 82px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgb(255 255 255 / 0.18);
+  border-radius: 999px;
+  background: rgb(18 18 22 / 0.48);
+  color: #fff;
+  box-shadow: 0 22px 60px rgb(0 0 0 / 0.45);
+  transform: translate(-50%, -50%);
+  backdrop-filter: blur(18px);
+  transition: opacity 0.2s ease, transform 0.2s ease, background-color 0.2s ease;
+}
+
+.video-play-button:hover {
+  background: rgb(255 255 255 / 0.14);
+  transform: translate(-50%, -50%) scale(1.04);
+}
+
+.video-play-button.hidden {
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -50%) scale(0.94);
+}
+
+.video-control-shell {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  display: flex;
+  justify-content: flex-end;
+  border: 1px solid rgb(255 255 255 / 0.1);
+  border-radius: 999px;
+  background: rgb(18 18 22 / 0.54);
+  padding: 6px;
+  box-shadow: 0 16px 44px rgb(0 0 0 / 0.36);
+  backdrop-filter: blur(16px);
 }
 
 .image-nav {
@@ -570,12 +807,91 @@ onUnmounted(() => {
   width: min(100%, 520px);
   border: 1px solid rgb(255 255 255 / 0.08);
   border-radius: 18px;
-  background: rgb(255 255 255 / 0.04);
-  padding: 14px 16px;
+  background: rgb(255 255 255 / 0.035);
+  padding: 16px 18px;
 }
 
 .audio-player {
+  display: none;
+}
+
+.media-control-bar {
+  display: grid;
+  grid-template-columns: auto auto minmax(120px, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
   width: 100%;
+  color: rgb(255 255 255 / 0.42);
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.media-icon-button {
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.055);
+  color: rgb(255 255 255 / 0.72);
+  transition: border-color 0.18s ease, background-color 0.18s ease, color 0.18s ease, transform 0.18s ease;
+}
+
+.media-icon-button:hover {
+  border-color: rgb(168 85 247 / 0.32);
+  background: rgb(168 85 247 / 0.16);
+  color: #fff;
+  transform: translateY(-1px);
+}
+
+.audio-track {
+  position: relative;
+  height: 4px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.1);
+  padding: 0;
+  cursor: pointer;
+  transition: height 0.16s ease, background-color 0.16s ease;
+}
+
+.audio-track:hover {
+  height: 6px;
+  background: rgb(255 255 255 / 0.14);
+}
+
+.audio-track-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #a855f7, #ff3f79);
+  box-shadow: 0 0 18px rgb(168 85 247 / 0.36);
+}
+
+.volume-cluster {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.volume-slider {
+  width: 0;
+  height: 4px;
+  accent-color: #a855f7;
+  opacity: 0;
+  cursor: pointer;
+  transition: width 0.22s ease, opacity 0.18s ease;
+}
+
+.volume-cluster:hover .volume-slider,
+.volume-cluster:focus-within .volume-slider {
+  width: 86px;
+  opacity: 1;
 }
 
 .audio-empty {
@@ -638,12 +954,19 @@ onUnmounted(() => {
   border-color: rgb(251 113 133 / 0.46);
   color: #fb7185;
   background: rgb(251 113 133 / 0.12);
+  box-shadow: 0 0 0 1px rgb(251 113 133 / 0.08), 0 0 22px rgb(251 113 133 / 0.14);
 }
 
 .action-favorites.active {
-  border-color: rgb(251 191 36 / 0.46);
-  color: #fbbf24;
-  background: rgb(251 191 36 / 0.12);
+  border-color: rgb(245 158 11 / 0.48);
+  color: #f59e0b;
+  background: rgb(245 158 11 / 0.12);
+  box-shadow: 0 0 0 1px rgb(245 158 11 / 0.08), 0 0 22px rgb(245 158 11 / 0.14);
+}
+
+.action-likes.active svg,
+.action-favorites.active svg {
+  color: currentColor;
 }
 
 .icon-filled {
@@ -670,6 +993,30 @@ onUnmounted(() => {
   margin: 0;
   color: rgb(255 255 255 / 0.78);
   line-height: 1.7;
+}
+
+.prompt-locked-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  border: 1px solid rgb(255 255 255 / 0.07);
+  border-radius: 16px;
+  background: rgb(255 255 255 / 0.03);
+  padding: 14px;
+}
+
+.prompt-locked-card > svg {
+  margin-top: 2px;
+  color: rgb(255 255 255 / 0.36);
+}
+
+.prompt-locked-card span {
+  margin-bottom: 5px;
+}
+
+.prompt-locked-card strong {
+  color: rgb(255 255 255 / 0.42);
+  font-weight: 600;
 }
 
 .author-link,

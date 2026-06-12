@@ -2,6 +2,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue"
 import { useRoute, useRouter } from "vue-router"
 import {
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Heart,
@@ -65,14 +66,16 @@ const sameStyleError = ref("")
 const pageNo = ref(1)
 const hasNext = ref(false)
 const modality = ref("")
-const sort = ref("LATEST")
+const sort = ref("SAME_STYLE")
 const featuredOnly = ref(false)
 const keyword = ref("")
 const topic = ref("")
 const searchOpen = ref(false)
+const sortDropdownOpen = ref(false)
 const sameStyleLoadingId = ref<number | null>(null)
 const actingPostId = ref<number | null>(null)
 const loadSentinelRef = ref<HTMLElement | null>(null)
+const sortDropdownRef = ref<HTMLElement | null>(null)
 const playingPostId = ref<number | null>(null)
 const galleryAudioPlaying = ref(false)
 const galleryAudioRef = ref<HTMLAudioElement | null>(null)
@@ -96,9 +99,11 @@ const extendedSorts = [
   { label: "按发布时间", value: "LATEST" },
   { label: "按点赞数", value: "POPULAR" },
   { label: "按收藏数", value: "FAVORITES" },
+  { label: "按同款数", value: "SAME_STYLE" },
+  { label: "按浏览量", value: "VIEWS" },
 ]
 
-const inlineTopics = computed(() => topics.value.length > 0 && topics.value.length < 5)
+const currentSortLabel = computed(() => extendedSorts.find((item) => item.value === sort.value)?.label || "更多排序")
 
 const skeletonItems = computed(() =>
   Array.from({ length: 8 }, (_, index) => ({
@@ -293,6 +298,19 @@ function selectTopic(nextTopic: string) {
 
 function setQuickSort(value: string) {
   sort.value = value
+  sortDropdownOpen.value = false
+}
+
+function selectDropdownSort(value: string) {
+  sort.value = value
+  sortDropdownOpen.value = false
+}
+
+function handleDocumentClick(event: MouseEvent) {
+  const target = event.target
+  if (!(target instanceof Node)) return
+  if (sortDropdownRef.value?.contains(target)) return
+  sortDropdownOpen.value = false
 }
 
 async function loadTopics() {
@@ -441,12 +459,14 @@ onMounted(() => {
   void load(true)
   if (auth.token) void preloadDefaultCommunityCollection(auth.token)
   window.addEventListener(COMMUNITY_POST_UNPUBLISHED_EVENT, handleCommunityPostUnpublished)
+  document.addEventListener("click", handleDocumentClick)
 })
 
 onUnmounted(() => {
   loadObserver?.disconnect()
   loadObserver = null
   window.removeEventListener(COMMUNITY_POST_UNPUBLISHED_EVENT, handleCommunityPostUnpublished)
+  document.removeEventListener("click", handleDocumentClick)
 })
 </script>
 
@@ -464,8 +484,8 @@ onUnmounted(() => {
       </button>
     </section>
 
-    <section class="filter-bar">
-      <div class="filter-left">
+    <section class="filter-stack">
+      <div class="filter-row filter-row--primary">
         <div class="filter-capsule" aria-label="作品类型">
           <button
             v-for="item in modalityFilters"
@@ -479,7 +499,29 @@ onUnmounted(() => {
           </button>
         </div>
 
-        <div v-if="inlineTopics" class="topic-inline" aria-label="话题筛选">
+        <div class="filter-actions">
+          <span class="total-count">共 {{ total }} 个作品</span>
+
+          <div class="search-shell" :class="{ expanded: searchOpen }">
+            <button type="button" class="icon-button" aria-label="搜索" @click="searchOpen = !searchOpen">
+              <Search class="h-4 w-4" />
+            </button>
+            <form v-if="searchOpen" class="search-form" @submit.prevent="load(true)">
+              <input v-model="keyword" class="search-input" placeholder="搜索标题、标签、工具" @keydown.esc="searchOpen = false" />
+              <button type="button" class="search-close" aria-label="关闭搜索" @click="searchOpen = false">
+                <X class="h-3.5 w-3.5" />
+              </button>
+            </form>
+          </div>
+
+          <button type="button" class="icon-button" :disabled="loading || topicsLoading" aria-label="刷新" @click="refreshAll">
+            <RefreshCcw class="h-4 w-4" :class="{ 'animate-spin': loading || topicsLoading }" />
+          </button>
+        </div>
+      </div>
+
+      <div class="filter-row filter-row--secondary">
+        <div class="topic-inline" aria-label="话题筛选">
           <button type="button" class="topic-chip" :class="{ active: !topic }" @click="topic = ''">
             全部话题
           </button>
@@ -495,66 +537,46 @@ onUnmounted(() => {
             <span class="topic-count">{{ item.postCount }}</span>
           </button>
         </div>
-      </div>
 
-      <div class="filter-right">
-        <div class="sort-tabs" aria-label="排序方式">
-          <button
-            v-for="item in quickSorts"
-            :key="item.value"
-            type="button"
-            class="sort-tab"
-            :class="{ active: sort === item.value }"
-            @click="setQuickSort(item.value)"
-          >
-            {{ item.label }}
-          </button>
-        </div>
-
-        <select v-model="sort" class="sort-select" aria-label="更多排序">
-          <option v-for="item in extendedSorts" :key="item.value" :value="item.value">{{ item.label }}</option>
-        </select>
-
-        <label class="featured-toggle">
-          <input v-model="featuredOnly" type="checkbox" />
-          <span>精选</span>
-        </label>
-
-        <span class="total-count">共 {{ total }} 个作品</span>
-
-        <div class="search-shell" :class="{ expanded: searchOpen }">
-          <button type="button" class="icon-button" aria-label="搜索" @click="searchOpen = !searchOpen">
-            <Search class="h-4 w-4" />
-          </button>
-          <form v-if="searchOpen" class="search-form" @submit.prevent="load(true)">
-            <input v-model="keyword" class="search-input" placeholder="搜索标题、标签、工具" @keydown.esc="searchOpen = false" />
-            <button type="button" class="search-close" aria-label="关闭搜索" @click="searchOpen = false">
-              <X class="h-3.5 w-3.5" />
+        <div class="sort-controls">
+          <div class="sort-tabs" aria-label="排序方式">
+            <button
+              v-for="item in quickSorts"
+              :key="item.value"
+              type="button"
+              class="sort-tab"
+              :class="{ active: sort === item.value }"
+              @click="setQuickSort(item.value)"
+            >
+              {{ item.label }}
             </button>
-          </form>
+          </div>
+
+          <div ref="sortDropdownRef" class="sort-dropdown">
+            <button type="button" class="sort-dropdown-trigger" @click.stop="sortDropdownOpen = !sortDropdownOpen">
+              <span>{{ currentSortLabel }}</span>
+              <ChevronDown class="h-4 w-4" :class="{ rotated: sortDropdownOpen }" />
+            </button>
+            <div v-show="sortDropdownOpen" class="sort-dropdown-menu">
+              <button
+                v-for="item in extendedSorts"
+                :key="item.value"
+                type="button"
+                class="sort-dropdown-option"
+                :class="{ active: sort === item.value }"
+                @click="selectDropdownSort(item.value)"
+              >
+                {{ item.label }}
+              </button>
+            </div>
+          </div>
+
+          <label class="featured-toggle">
+            <input v-model="featuredOnly" type="checkbox" />
+            <span>精选</span>
+          </label>
         </div>
-
-        <button type="button" class="icon-button" :disabled="loading || topicsLoading" aria-label="刷新" @click="refreshAll">
-          <RefreshCcw class="h-4 w-4" :class="{ 'animate-spin': loading || topicsLoading }" />
-        </button>
       </div>
-    </section>
-
-    <section v-if="!inlineTopics && topics.length" class="topic-strip" aria-label="话题筛选">
-      <button type="button" class="topic-chip" :class="{ active: !topic }" @click="topic = ''">
-        全部话题
-      </button>
-      <button
-        v-for="item in topics"
-        :key="item.name"
-        type="button"
-        class="topic-chip"
-        :class="{ active: topic === item.name }"
-        @click="selectTopic(item.name)"
-      >
-        #{{ item.name }}
-        <span class="topic-count">· {{ item.postCount }} 个作品</span>
-      </button>
     </section>
 
     <p v-if="sameStyleError" class="inline-alert" role="alert">{{ sameStyleError }}</p>
@@ -778,23 +800,40 @@ onUnmounted(() => {
   transform: translateY(-1px);
 }
 
-.filter-bar {
+.filter-stack {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
+  flex-direction: column;
+  gap: 12px;
   margin-bottom: 18px;
 }
 
-.filter-left,
-.filter-right,
-.topic-strip,
+.filter-row,
+.filter-actions,
+.sort-controls,
 .topic-inline {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 10px;
+}
+
+.filter-row {
+  justify-content: space-between;
+}
+
+.filter-row--secondary {
+  align-items: flex-start;
+}
+
+.topic-inline {
+  min-width: 0;
+  flex: 1;
+}
+
+.filter-actions,
+.sort-controls {
+  flex-shrink: 0;
+  justify-content: flex-end;
 }
 
 .filter-capsule {
@@ -847,14 +886,74 @@ onUnmounted(() => {
   box-shadow: inset 0 -2px 0 var(--primary);
 }
 
-.sort-select {
+.sort-dropdown {
+  position: relative;
+  z-index: 20;
+}
+
+.sort-dropdown-trigger {
+  display: inline-flex;
   height: 38px;
-  border: 0;
-  border-radius: 999px;
-  background: rgb(255 255 255 / 0.07);
-  color: rgb(255 255 255 / 0.84);
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 12px;
+  background: #121216;
   padding: 0 14px;
+  color: rgb(255 255 255 / 0.8);
   font-size: 13px;
+  font-weight: 600;
+  transition: border-color 0.18s ease, background-color 0.18s ease, color 0.18s ease;
+}
+
+.sort-dropdown-trigger:hover {
+  border-color: rgb(255 255 255 / 0.2);
+  background: #16161c;
+  color: #fff;
+}
+
+.sort-dropdown-trigger svg {
+  color: rgb(255 255 255 / 0.42);
+  transition: transform 0.18s ease;
+}
+
+.sort-dropdown-trigger svg.rotated {
+  transform: rotate(180deg);
+}
+
+.sort-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 50;
+  width: 148px;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 14px;
+  background: rgb(18 18 22 / 0.95);
+  padding: 6px;
+  box-shadow: 0 22px 60px rgb(0 0 0 / 0.45);
+  backdrop-filter: blur(16px);
+}
+
+.sort-dropdown-option {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  padding: 9px 10px;
+  color: rgb(255 255 255 / 0.68);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  transition: background-color 0.16s ease, color 0.16s ease;
+}
+
+.sort-dropdown-option:hover,
+.sort-dropdown-option.active {
+  background: rgb(255 255 255 / 0.07);
+  color: #fff;
 }
 
 .featured-toggle {
@@ -1094,6 +1193,7 @@ onUnmounted(() => {
   font-size: 13px;
   font-weight: 700;
   line-height: 1.45;
+  text-shadow: 0 1px 12px rgb(0 0 0 / 0.5);
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -1105,6 +1205,7 @@ onUnmounted(() => {
   color: rgb(255 255 255 / 0.42);
   font-size: 12px;
   line-height: 1.5;
+  text-shadow: 0 1px 10px rgb(0 0 0 / 0.46);
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -1189,12 +1290,16 @@ onUnmounted(() => {
   cursor: wait;
 }
 
+.stat-item:hover {
+  color: rgb(255 255 255 / 0.68);
+}
+
 .stat-likes.active {
-  color: #fb7185;
+  color: #f4729a;
 }
 
 .stat-favorites.active {
-  color: #fbbf24;
+  color: #f59e0b;
 }
 
 .icon-filled {
@@ -1323,12 +1428,13 @@ onUnmounted(() => {
     flex-direction: column;
   }
 
-  .filter-bar {
+  .filter-row {
     flex-direction: column;
     align-items: stretch;
   }
 
-  .filter-right {
+  .filter-actions,
+  .sort-controls {
     justify-content: flex-start;
   }
 }
@@ -1348,9 +1454,17 @@ onUnmounted(() => {
     opacity: 1;
   }
 
-  .sort-select,
   .featured-toggle {
     display: none;
+  }
+
+  .sort-dropdown {
+    width: 100%;
+  }
+
+  .sort-dropdown-trigger {
+    width: 100%;
+    justify-content: space-between;
   }
 }
 </style>

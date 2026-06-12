@@ -10,6 +10,8 @@ export interface FieldSliderMeta {
 
 export interface FieldUiMeta {
   core?: boolean
+  uiRole?: string
+  placement?: string
   uiTier?: FieldUiTier
   uiGroup?: string
   uiGroupLabel?: string
@@ -63,6 +65,9 @@ export function parseFieldMeta(field: Pick<ToolField, "options" | "optionsJson">
 function parseMetaObject(obj: Record<string, unknown>): FieldUiMeta {
   const meta: FieldUiMeta = {}
   if (obj.core === true || obj.isCore === true) meta.core = true
+  if (typeof obj.uiRole === "string" && obj.uiRole.trim()) meta.uiRole = obj.uiRole.trim()
+  if (typeof obj.role === "string" && obj.role.trim()) meta.uiRole = obj.role.trim()
+  if (typeof obj.placement === "string" && obj.placement.trim()) meta.placement = obj.placement.trim()
   if (obj.uiTier === "simple" || obj.uiTier === "advanced" || obj.uiTier === "all") meta.uiTier = obj.uiTier
   if (typeof obj.uiGroup === "string" && obj.uiGroup.trim()) meta.uiGroup = obj.uiGroup.trim()
   if (typeof obj.uiGroupLabel === "string" && obj.uiGroupLabel.trim()) meta.uiGroupLabel = obj.uiGroupLabel.trim()

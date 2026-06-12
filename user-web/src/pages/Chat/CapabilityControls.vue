@@ -10,11 +10,11 @@ import { buildTaskResultBlocks, resolveAudioTracks } from "@/utils/taskResultBlo
 import {
   defaultFieldValue as resolveDefaultFieldValue,
   fieldOptionsFromMeta,
-  filterFieldsForUi,
+  isFieldVisible,
   parseFieldMeta,
   resolveMaxLength,
 } from "@/utils/fieldUiMeta"
-import { Check, FileAudio, FileVideo, ImageIcon, ImageUp, Loader2, Mic, Paperclip, Plus, UploadCloud, X } from "lucide-vue-next"
+import { Check, Clock, FileAudio, FileVideo, ImageIcon, ImageUp, Loader2, Mic, Paperclip, Plus, UploadCloud, X } from "lucide-vue-next"
 import { BookOpen } from 'lucide-vue-next'
 
 export interface PendingAttachment {
@@ -61,12 +61,27 @@ interface UploadHistoryItem {
   toolId?: string | null
 }
 
+export interface PrimaryReferenceMaterialInfo {
+  available: boolean
+  fieldName: string
+  kind: MaterialKind
+  count: number
+  maxCount: number
+  previewUrls: string[]
+  uploading: boolean
+  error?: string
+}
+
 const props = defineProps<{
   capabilities: Capability[]
   fields?: ToolField[]
   coreFieldKey?: string | null
   toolId?: string | null
   initialParams?: Record<string, unknown> | null
+}>()
+
+const emit = defineEmits<{
+  "primary-reference-change": [info: PrimaryReferenceMaterialInfo]
 }>()
 
 const state = ref<CapabilityState>({
@@ -77,6 +92,8 @@ const auth = useAuthStore()
 const fieldUploads = ref<Record<string, { uploading?: boolean; error?: string; fileName?: string }>>({})
 const materialPickerOpen = ref(false)
 const materialPickerField = ref<ToolField | null>(null)
+const referencePickerOpen = ref(false)
+const referencePickerTab = ref<"upload" | "material">("upload")
 const materialLoading = ref(false)
 const materialError = ref("")
 const materialAssets = ref<MaterialAsset[]>([])
@@ -85,6 +102,7 @@ const uploadHistoryField = ref<ToolField | null>(null)
 const uploadHistoryItems = ref<UploadHistoryItem[]>([])
 const uploadHistoryUploading = ref(false)
 const pickerSelectedUrls = ref<string[]>([])
+const advancedOpen = ref(false)
 
 const UPLOAD_HISTORY_LIMIT = 60
 const MULTI_IMAGE_LIMIT = 8
@@ -111,12 +129,6 @@ function defaultAspectRatioValue(): string {
   return aspectRatios.value[0] || "auto"
 }
 
-const configuredFields = computed(() =>
-  filterFieldsForUi(props.fields || [], state.value.fields, {
-    excludeCore: true,
-    coreFieldKey: props.coreFieldKey,
-  }).filter((field) => !isAspectRatioField(field)),
-)
 const imageCapability = computed(() => props.capabilities.find((c) => c.type === "imageGeneration"))
 const fileCapability = computed(() => props.capabilities.find((c) => c.type === "fileReading"))
 const webSearchCapability = computed(() => props.capabilities.find((c) => c.type === "webSearch"))
@@ -126,6 +138,52 @@ const activeMaterialKind = computed(() => (materialPickerField.value ? materialK
 const activeUploadKind = computed(() => (uploadHistoryField.value ? materialKindForField(uploadHistoryField.value) : "file"))
 const ratioField = computed(() => (props.fields || []).find(isAspectRatioField))
 const hasAspectRatioControl = computed(() => Boolean(imageCapability.value || ratioField.value))
+
+function isReferenceComposerField(field: ToolField): boolean {
+  if (!isReferenceMediaField(field)) return false
+  const meta = parseFieldMeta(field)
+  const key = field.fieldKey.toLowerCase()
+  const text = `${field.fieldKey} ${field.fieldName} ${field.placeholder || ""}`.toLowerCase()
+  const role = (meta.uiRole || "").toLowerCase()
+  const placement = (meta.placement || "").toLowerCase()
+  const markedForComposer =
+    meta.core === true ||
+    role === "reference" ||
+    role === "reference_material" ||
+    role === "referencematerial" ||
+    role === "composer_reference" ||
+    placement === "composer" ||
+    placement === "prompt_left"
+  const looksLikeReference =
+    /reference|refimage|ref_images|sourceimage|source_image|inputimage|input_image|material|asset|参考|素材|参考图|多参考图/.test(text)
+  if (field.fieldType === "multi_image") return true
+  return (
+    markedForComposer ||
+    looksLikeReference ||
+    key.includes("reference") ||
+    key.includes("ref") ||
+    key.includes("source") ||
+    key.includes("input") ||
+    key.includes("material") ||
+    key.includes("asset")
+  )
+}
+
+const primaryReferenceField = computed(() =>
+  (props.fields || []).find((field) => field.fieldKey !== props.coreFieldKey && isReferenceComposerField(field)) || null,
+)
+
+const configuredFields = computed(() =>
+  (props.fields || [])
+    .filter((field) => !(field.fieldKey === props.coreFieldKey || parseFieldMeta(field).core))
+    .filter((field) => field !== primaryReferenceField.value)
+    .filter((field) => !isAspectRatioField(field))
+    .filter((field) => isFieldVisible(field, state.value.fields)),
+)
+
+const customModeField = computed(() =>
+  (props.fields || []).find((field) => field.fieldKey === "customMode" || field.fieldKey === "custom_mode"),
+)
 
 const aspectRatioOptions = computed<AspectRatioOption[]>(() => {
   const config = imageCapability.value?.config
@@ -195,6 +253,19 @@ function fieldOptions(field: ToolField): FieldOption[] {
   return fieldOptionsFromMeta(field)
 }
 
+function segmentedFieldLabel(field: ToolField): string {
+  return `${field.fieldKey} ${field.fieldName} ${field.placeholder || ""}`.toLowerCase()
+}
+
+function isSegmentedOptionField(field: ToolField): boolean {
+  if (!(field.fieldType === "select" || field.fieldType === "radio")) return false
+  const options = fieldOptions(field)
+  if (!options.length || options.length > 8) return false
+  const text = segmentedFieldLabel(field)
+  if (/count|num|quantity|生成数量|张数|数量|quality|清晰度|质量|品质/.test(text)) return true
+  return field.fieldType === "radio"
+}
+
 function defaultFieldValue(field: ToolField): unknown {
   return resolveDefaultFieldValue(field)
 }
@@ -207,7 +278,11 @@ function buildDefaultState(): CapabilityState {
   }
   if (webSearchCapability.value) next.webSearch = webSearchCapability.value.config.defaultEnabled === true
   if (codeCapability.value) next.language = codeLanguages.value[0] || "python"
-  for (const field of configuredFields.value) {
+  const initialFields = [...configuredFields.value]
+  if (primaryReferenceField.value && !initialFields.some((field) => field.fieldKey === primaryReferenceField.value?.fieldKey)) {
+    initialFields.push(primaryReferenceField.value)
+  }
+  for (const field of initialFields) {
     const initial = props.initialParams?.[field.fieldKey]
     next.fields[field.fieldKey] = initial !== undefined && initial !== null ? initial : defaultFieldValue(field)
   }
@@ -222,6 +297,8 @@ function buildDefaultState(): CapabilityState {
 
 function resetState() {
   state.value = buildDefaultState()
+  const customMode = state.value.fields.customMode ?? state.value.fields.custom_mode
+  advancedOpen.value = customMode === true || String(customMode ?? "").toLowerCase() === "true"
   fieldUploads.value = {}
 }
 
@@ -358,6 +435,94 @@ function materialKindLabel(kind: MaterialKind): string {
   return "素材"
 }
 
+function isReferenceMediaField(field: ToolField): boolean {
+  return field.fieldType === "image" || field.fieldType === "multi_image" || field.fieldType === "file" || field.fieldType === "image_upload"
+}
+
+function isAdvancedOnlyField(field: ToolField): boolean {
+  if (field === customModeField.value) return true
+  const meta = parseFieldMeta(field)
+  if (meta.uiTier === "advanced") return true
+  if (isReferenceMediaField(field)) return false
+  if (field.required) return false
+  return true
+}
+
+const displayFields = computed(() => configuredFields.value.filter((field) => field !== customModeField.value))
+const normalFields = computed(() => displayFields.value.filter((field) => !isAdvancedOnlyField(field)))
+const advancedFields = computed(() => displayFields.value.filter(isAdvancedOnlyField))
+const requestFields = computed(() => {
+  const fields = [...configuredFields.value]
+  const primary = primaryReferenceField.value
+  if (primary && isFieldVisible(primary, state.value.fields) && !fields.some((field) => field.fieldKey === primary.fieldKey)) {
+    fields.push(primary)
+  }
+  return fields
+})
+const fieldSections = computed(() => [
+  { key: "normal", advanced: false, fields: normalFields.value },
+  { key: "advanced", advanced: true, fields: advancedFields.value },
+].filter((section) => section.fields.length > 0 || (section.advanced && customModeField.value)))
+
+const primaryReferenceInfo = computed<PrimaryReferenceMaterialInfo>(() => {
+  const field = primaryReferenceField.value
+  if (!field) {
+    return {
+      available: false,
+      fieldName: "",
+      kind: "file",
+      count: 0,
+      maxCount: MULTI_IMAGE_LIMIT,
+      previewUrls: [],
+      uploading: false,
+    }
+  }
+  const urls = isMultiImageField(field) ? multiImageValues(field) : strField(field.fieldKey) ? [strField(field.fieldKey)] : []
+  const upload = uploadState(field.fieldKey)
+  return {
+    available: true,
+    fieldName: field.fieldName,
+    kind: materialKindForField(field),
+    count: urls.length,
+    maxCount: isMultiImageField(field) ? multiImageLimit(field) : 1,
+    previewUrls: urls.slice(0, 3).map(normalizeResourceUrl),
+    uploading: upload.uploading === true,
+    error: upload.error,
+  }
+})
+
+watch(primaryReferenceInfo, (info) => emit("primary-reference-change", info), { immediate: true, deep: true })
+
+function fieldShellClass(field: ToolField): string {
+  if (isMultiImageField(field)) return "sm:col-span-2 lg:col-span-1"
+  if (field.fieldType === "slider") return "min-w-0"
+  return "min-w-0"
+}
+
+function shortPlaceholder(field: ToolField): string {
+  const raw = field.placeholder?.trim() || ""
+  if (!raw) return ""
+  if (raw.length <= 18) return raw
+  return raw.slice(0, 18).trim()
+}
+
+function fieldHelpText(field: ToolField): string {
+  const raw = field.placeholder?.trim() || ""
+  return raw.length > 18 ? raw : ""
+}
+
+function syncCustomModeField(open: boolean) {
+  const field = customModeField.value
+  if (!field) return
+  if (field.fieldType === "checkbox") setField(field.fieldKey, open)
+  else setField(field.fieldKey, open ? "true" : "false")
+}
+
+function toggleAdvancedOpen() {
+  advancedOpen.value = !advancedOpen.value
+  syncCustomModeField(advancedOpen.value)
+}
+
 function formatUploadSize(size?: number): string {
   if (!size || !Number.isFinite(size)) return ""
   if (size < 1024) return `${size} B`
@@ -454,6 +619,34 @@ function openUploadHistoryPicker(field: ToolField) {
   uploadHistoryOpen.value = true
 }
 
+function openReferenceMaterialPicker(tab: "upload" | "material" = "upload") {
+  const field = primaryReferenceField.value
+  if (!field) return
+  referencePickerTab.value = tab
+  referencePickerOpen.value = true
+  uploadHistoryField.value = field
+  materialPickerField.value = field
+  pickerSelectedUrls.value = isMultiImageField(field) ? multiImageValues(field) : []
+  const kind = materialKindForField(field)
+  uploadHistoryItems.value = readUploadHistory(kind)
+  void loadUploadHistory(kind)
+  if (tab === "material") void loadGeneratedMaterialAssets(field)
+}
+
+function chooseReferencePickerTab(tab: "upload" | "material") {
+  referencePickerTab.value = tab
+  const field = primaryReferenceField.value
+  if (tab === "material" && field) void loadGeneratedMaterialAssets(field)
+}
+
+function closeReferenceMaterialPicker() {
+  referencePickerOpen.value = false
+  uploadHistoryField.value = null
+  materialPickerField.value = null
+  uploadHistoryUploading.value = false
+  pickerSelectedUrls.value = []
+}
+
 function closeUploadHistoryPicker() {
   uploadHistoryOpen.value = false
   uploadHistoryField.value = null
@@ -473,7 +666,8 @@ function selectUploadHistoryItem(item: UploadHistoryItem) {
     ...fieldUploads.value,
     [field.fieldKey]: { uploading: false, fileName: item.name },
   }
-  closeUploadHistoryPicker()
+  if (referencePickerOpen.value) closeReferenceMaterialPicker()
+  else closeUploadHistoryPicker()
 }
 
 async function deleteUploadHistoryItem(item: UploadHistoryItem) {
@@ -557,6 +751,10 @@ async function openMaterialPicker(field: ToolField) {
   materialPickerField.value = field
   materialPickerOpen.value = true
   pickerSelectedUrls.value = isMultiImageField(field) ? multiImageValues(field) : []
+  await loadGeneratedMaterialAssets(field)
+}
+
+async function loadGeneratedMaterialAssets(field: ToolField) {
   materialLoading.value = true
   materialError.value = ""
   materialAssets.value = []
@@ -599,11 +797,12 @@ function selectMaterialAsset(asset: MaterialAsset) {
     ...fieldUploads.value,
     [field.fieldKey]: { uploading: false, fileName: asset.title },
   }
-  closeMaterialPicker()
+  if (referencePickerOpen.value) closeReferenceMaterialPicker()
+  else closeMaterialPicker()
 }
 
 function confirmPickerSelection() {
-  const field = uploadHistoryOpen.value ? uploadHistoryField.value : materialPickerField.value
+  const field = referencePickerOpen.value ? (materialPickerField.value || uploadHistoryField.value) : uploadHistoryOpen.value ? uploadHistoryField.value : materialPickerField.value
   if (!field || !isMultiImageField(field)) return
   setMultiImageValues(field, pickerSelectedUrls.value)
   fieldUploads.value = {
@@ -612,6 +811,7 @@ function confirmPickerSelection() {
   }
   if (uploadHistoryOpen.value) closeUploadHistoryPicker()
   if (materialPickerOpen.value) closeMaterialPicker()
+  if (referencePickerOpen.value) closeReferenceMaterialPicker()
 }
 
 async function uploadFieldFile(field: ToolField, file: File, options: { closeHistoryAfterUpload?: boolean } = {}) {
@@ -629,7 +829,7 @@ async function uploadFieldFile(field: ToolField, file: File, options: { closeHis
     const result = await uploadToolFile(file, { token: auth.token })
     if (isMultiImageField(field)) {
       addMultiImageUrls(field, [result.url])
-      if (uploadHistoryOpen.value && uploadHistoryField.value?.fieldKey === field.fieldKey) {
+      if ((uploadHistoryOpen.value || referencePickerOpen.value) && uploadHistoryField.value?.fieldKey === field.fieldKey) {
         pickerSelectedUrls.value = multiImageValues(field)
       }
     } else {
@@ -650,7 +850,10 @@ async function uploadFieldFile(field: ToolField, file: File, options: { closeHis
       ...fieldUploads.value,
       [field.fieldKey]: { uploading: false, fileName: file.name },
     }
-    if (options.closeHistoryAfterUpload) closeUploadHistoryPicker()
+    if (options.closeHistoryAfterUpload) {
+      if (referencePickerOpen.value) closeReferenceMaterialPicker()
+      else closeUploadHistoryPicker()
+    }
   } catch (err) {
     fieldUploads.value = {
       ...fieldUploads.value,
@@ -703,6 +906,26 @@ function clearUploadedField(field: ToolField) {
   fieldUploads.value = next
 }
 
+function clearPrimaryReferenceMaterial() {
+  const field = primaryReferenceField.value
+  if (field) clearUploadedField(field)
+}
+
+function removePrimaryReferenceMaterialAt(index: number) {
+  const field = primaryReferenceField.value
+  if (!field) return
+  if (isMultiImageField(field)) {
+    const next = multiImageValues(field).filter((_, itemIndex) => itemIndex !== index)
+    setMultiImageValues(field, next)
+    fieldUploads.value = {
+      ...fieldUploads.value,
+      [field.fieldKey]: { uploading: false, fileName: next.length > 0 ? `${next.length} 张参考图` : undefined },
+    }
+    return
+  }
+  clearUploadedField(field)
+}
+
 function sliderConfig(field: ToolField) {
   return parseFieldMeta(field).slider || { min: 0, max: 1, step: 0.01 }
 }
@@ -718,7 +941,7 @@ function onNumberInput(key: string, event: Event) {
 }
 
 function validate(): { valid: boolean; message?: string } {
-  for (const field of configuredFields.value) {
+  for (const field of requestFields.value) {
     const value = state.value.fields[field.fieldKey]
     const maxLength = resolveMaxLength(field, state.value.fields)
     if (maxLength !== undefined && typeof value === "string" && value.length > maxLength) {
@@ -763,7 +986,7 @@ function getRequestParams(): Record<string, unknown> {
   if (webSearchCapability.value && showWebSearch.value) params.webSearch = state.value.webSearch === true
   if (codeCapability.value && state.value.language) params.language = state.value.language
 
-  for (const field of configuredFields.value) {
+  for (const field of requestFields.value) {
     const value = state.value.fields[field.fieldKey]
     if (field.fieldType === "checkbox") {
       params[field.fieldKey] = Boolean(value)
@@ -814,34 +1037,63 @@ defineExpose({
   markUploadSuccess,
   markUploadError,
   hasPendingUploads,
+  openReferenceMaterialPicker,
+  clearPrimaryReferenceMaterial,
+  removePrimaryReferenceMaterialAt,
+  primaryReferenceInfo,
 })
 </script>
 
 <template>
   <div v-if="configuredFields.length > 0 || capabilities.length > 0" class="mt-2 space-y-2">
-    <div class="flex flex-wrap items-center gap-1.5">
+    <div class="space-y-3">
+      <section v-for="section in fieldSections" :key="section.key" class="space-y-2">
+        <button
+          v-if="section.advanced"
+          type="button"
+          class="inline-flex h-8 items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 text-xs font-medium text-white/62 transition hover:border-purple-400/30 hover:bg-purple-500/10 hover:text-white"
+          @click="toggleAdvancedOpen"
+        >
+          <span class="text-white/45">⚙</span>
+          高级配置
+          <span class="text-white/35">{{ advancedOpen ? "收起" : "展开" }}</span>
+        </button>
+
+        <div
+          class="grid gap-3 overflow-hidden transition-all duration-300 sm:grid-cols-2 lg:grid-cols-3"
+          :class="section.advanced && !advancedOpen ? 'max-h-0 opacity-0' : 'max-h-[1200px] opacity-100'"
+        >
       <div
-        v-for="field in configuredFields"
+        v-for="field in section.fields"
         :key="field.fieldKey"
-        :class="isMultiImageField(field) ? 'min-w-[220px] max-w-[360px]' : 'min-w-[100px] max-w-[180px]'"
+        :class="fieldShellClass(field)"
       >
-        <label class="mb-1 block text-[11px] font-medium text-muted-foreground">
-          {{ field.fieldName }}<span v-if="field.required" class="text-destructive"> *</span>
+        <label class="mb-1 flex items-center gap-1 text-[11px] font-medium text-muted-foreground">
+          <span>{{ field.fieldName }}<span v-if="field.required" class="text-destructive"> *</span></span>
+          <span
+            v-if="fieldHelpText(field)"
+            class="group/help relative inline-flex h-3.5 w-3.5 items-center justify-center rounded-full border border-white/10 text-[10px] text-white/35"
+          >
+            ?
+            <span class="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 hidden w-52 -translate-x-1/2 rounded-xl border border-white/10 bg-[#111217]/95 p-2 text-left text-[11px] leading-5 text-white/62 shadow-2xl backdrop-blur group-hover/help:block">
+              {{ fieldHelpText(field) }}
+            </span>
+          </span>
         </label>
 
         <div
-          v-if="(field.fieldType === 'select' || field.fieldType === 'radio') && fieldOptions(field).length && field.fieldType === 'radio'"
-          class="flex flex-wrap gap-1"
+          v-if="isSegmentedOptionField(field)"
+          class="flex min-h-9 flex-wrap items-center gap-2"
         >
           <button
             v-for="option in fieldOptions(field)"
             :key="optionValue(option)"
             type="button"
-            class="rounded-lg border px-2 py-1 text-[11px] transition"
+            class="min-h-8 rounded-full border px-3 py-1 text-xs font-medium transition"
             :class="
               strField(field.fieldKey) === optionValue(option)
-                ? 'border-primary bg-primary/10 text-primary'
-                : 'border-border/60 bg-background text-muted-foreground hover:text-foreground'
+                ? 'border-purple-400/30 bg-purple-500/20 text-purple-300 shadow-[0_0_18px_rgb(168_85_247_/_0.12)]'
+                : 'border-white/8 bg-white/[0.05] text-white/58 hover:border-white/16 hover:bg-white/[0.07] hover:text-white'
             "
             @click="setField(field.fieldKey, optionValue(option))"
           >
@@ -852,7 +1104,7 @@ defineExpose({
         <select
           v-else-if="(field.fieldType === 'select' || field.fieldType === 'radio') && fieldOptions(field).length"
           :value="strField(field.fieldKey)"
-          class="h-7 w-full rounded-lg border border-border/60 bg-background px-2 text-xs"
+          class="h-9 w-full rounded-xl border border-white/10 bg-white/[0.05] px-3 text-xs text-white/78 outline-none transition hover:border-white/18 focus:border-purple-400/40"
           @change="setField(field.fieldKey, ($event.target as HTMLSelectElement).value)"
         >
           <option v-for="option in fieldOptions(field)" :key="optionValue(option)" :value="optionValue(option)">
@@ -867,7 +1119,7 @@ defineExpose({
             :max="sliderConfig(field).max"
             :step="sliderConfig(field).step"
             :value="Number(state.fields[field.fieldKey] ?? sliderConfig(field).min)"
-            class="w-full accent-primary"
+            class="capability-slider w-full"
             @input="onSliderInput(field, $event)"
           />
           <span class="text-[10px] text-muted-foreground">{{ state.fields[field.fieldKey] ?? sliderConfig(field).min }}</span>
@@ -877,7 +1129,7 @@ defineExpose({
           v-else-if="field.fieldType === 'number'"
           type="number"
           :value="strField(field.fieldKey)"
-          :placeholder="field.placeholder || ''"
+          :placeholder="shortPlaceholder(field)"
           class="h-7 w-full rounded-lg border border-border/60 bg-background px-2 text-xs"
           @input="onNumberInput(field.fieldKey, $event)"
         />
@@ -1002,18 +1254,20 @@ defineExpose({
           v-else
           type="text"
           :value="strField(field.fieldKey)"
-          :placeholder="field.placeholder || ''"
+          :placeholder="shortPlaceholder(field)"
           class="h-7 w-full rounded-lg border border-border/60 bg-background px-2 text-xs"
           @input="setField(field.fieldKey, ($event.target as HTMLInputElement).value)"
         />
       </div>
+        </div>
+      </section>
     </div>
 
     <div class="space-y-1.5">
       <label v-if="hasAspectRatioControl" class="block text-[11px] font-medium text-muted-foreground">比例</label>
       <div
         v-if="hasAspectRatioControl"
-        class="grid h-12 overflow-hidden rounded-xl border border-border/50 bg-muted/40 p-1"
+        class="grid min-h-14 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04] p-1"
         :style="{ gridTemplateColumns: `repeat(${aspectRatioOptions.length}, minmax(0, 1fr))` }"
         title="图片比例"
       >
@@ -1024,8 +1278,8 @@ defineExpose({
           class="flex min-w-0 flex-col items-center justify-center gap-0.5 rounded-lg text-xs font-medium transition"
           :class="
             normalizeAspectRatio(state.imageRatio) === option.value
-              ? 'bg-white/12 text-foreground shadow-sm'
-              : 'text-muted-foreground hover:bg-white/6 hover:text-foreground'
+              ? 'bg-purple-500/20 text-purple-200 shadow-[0_10px_24px_rgb(0_0_0_/_0.18),inset_0_0_0_1px_rgb(168_85_247_/_0.18)]'
+              : 'text-white/52 hover:bg-white/[0.06] hover:text-white'
           "
           @click="state.imageRatio = option.value"
         >
@@ -1083,6 +1337,187 @@ defineExpose({
     </div>
 
     <Teleport to="body">
+      <div
+        v-if="referencePickerOpen"
+        class="fixed inset-0 z-[130] flex items-start justify-center bg-black/65 px-4 pb-8 pt-[7vh] backdrop-blur-sm"
+        @click.self="closeReferenceMaterialPicker"
+      >
+        <div class="flex max-h-[86vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-white/10 bg-[#191a1f] text-white shadow-[0_28px_100px_rgb(0_0_0_/_0.72)]">
+          <div class="flex items-center justify-between border-b border-white/10 px-5 py-4">
+            <div class="inline-flex rounded-full border border-white/10 bg-white/[0.06] p-1">
+              <button
+                type="button"
+                class="h-10 rounded-full px-8 text-sm font-semibold transition"
+                :class="referencePickerTab === 'upload' ? 'bg-[#557296] text-white shadow-inner' : 'text-white/48 hover:text-white'"
+                @click="chooseReferencePickerTab('upload')"
+              >
+                上传
+              </button>
+              <button
+                type="button"
+                class="h-10 rounded-full px-8 text-sm font-semibold transition"
+                :class="referencePickerTab === 'material' ? 'bg-[#557296] text-white shadow-inner' : 'text-white/48 hover:text-white'"
+                @click="chooseReferencePickerTab('material')"
+              >
+                素材
+              </button>
+            </div>
+            <button
+              type="button"
+              class="inline-flex h-11 w-11 items-center justify-center rounded-full bg-white/[0.06] text-white/55 transition hover:bg-white/10 hover:text-white"
+              aria-label="关闭素材选择"
+              @click="closeReferenceMaterialPicker"
+            >
+              <X class="h-5 w-5" />
+            </button>
+          </div>
+
+          <div v-if="referencePickerTab === 'upload'" class="min-h-[420px] overflow-y-auto p-5">
+            <label
+              class="flex min-h-40 cursor-pointer flex-col items-center justify-center gap-4 rounded-2xl border border-dashed border-white/18 bg-white/[0.035] text-white/72 transition hover:border-primary/60 hover:bg-white/[0.055]"
+              @dragover.prevent
+              @drop.prevent="uploadHistoryField && handleUploadHistoryFile(($event as DragEvent).dataTransfer?.files || null)"
+            >
+              <UploadCloud class="h-8 w-8 text-white/70" />
+              <span class="text-base font-semibold">{{ uploadHistoryUploading ? "上传中..." : "上传或拖拽图片/文件" }}</span>
+              <input
+                type="file"
+                class="hidden"
+                :accept="uploadHistoryField ? uploadAccept(uploadHistoryField) : undefined"
+                :disabled="uploadHistoryUploading"
+                :multiple="uploadHistoryField ? isMultiImageField(uploadHistoryField) : false"
+                @change="onUploadHistoryFileChange"
+              />
+            </label>
+
+            <section class="mt-7">
+              <div class="mb-4 flex items-center gap-2 text-sm font-semibold text-white/70">
+                <Clock class="h-4 w-4" />
+                最近上传
+              </div>
+              <div v-if="uploadHistoryItems.length === 0" class="flex h-40 flex-col items-center justify-center rounded-2xl border border-white/8 bg-white/[0.03] text-center text-sm text-white/42">
+                <UploadCloud class="mb-3 h-7 w-7 text-white/22" />
+                <p>还没有上传历史</p>
+                <p class="mt-1 text-xs text-white/30">上传一次后，下次可以直接复用。</p>
+              </div>
+              <div v-else class="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-4">
+                <article
+                  v-for="item in uploadHistoryItems"
+                  :key="item.id"
+                  class="group overflow-hidden rounded-2xl border border-white/10 bg-white/[0.05] transition hover:-translate-y-0.5 hover:border-primary/60 hover:bg-white/[0.075]"
+                >
+                  <button
+                    type="button"
+                    class="block w-full text-left"
+                    :class="{ 'ring-2 ring-primary': uploadHistoryField && isMultiImageField(uploadHistoryField) && pickerIsSelected(item.url) }"
+                    @click="selectUploadHistoryItem(item)"
+                  >
+                    <div class="relative flex aspect-[4/3] items-center justify-center bg-black/20">
+                      <img
+                        v-if="item.kind === 'image'"
+                        :src="normalizeResourceUrl(item.url)"
+                        alt=""
+                        class="h-full w-full object-cover"
+                      />
+                      <FileVideo v-else-if="item.kind === 'video'" class="h-9 w-9 text-white/35 group-hover:text-primary" />
+                      <FileAudio v-else-if="item.kind === 'audio'" class="h-9 w-9 text-white/35 group-hover:text-primary" />
+                      <ImageIcon v-else class="h-9 w-9 text-white/35 group-hover:text-primary" />
+                      <span
+                        v-if="uploadHistoryField && isMultiImageField(uploadHistoryField) && pickerIsSelected(item.url)"
+                        class="absolute right-3 top-3 rounded-full bg-primary p-1 text-white"
+                      >
+                        <Check class="h-3.5 w-3.5" />
+                      </span>
+                    </div>
+                    <div class="space-y-1 p-3">
+                      <p class="truncate text-sm font-semibold text-white/86">{{ item.name }}</p>
+                      <p class="truncate text-xs text-white/38">{{ formatUploadSize(item.size) || item.type || "已上传" }}</p>
+                    </div>
+                  </button>
+                  <div class="border-t border-white/8 px-3 py-2">
+                    <button
+                      type="button"
+                      class="text-xs text-white/38 transition hover:text-red-300"
+                      @click="deleteUploadHistoryItem(item)"
+                    >
+                      删除历史
+                    </button>
+                  </div>
+                </article>
+              </div>
+            </section>
+          </div>
+
+          <div v-else class="min-h-[420px] overflow-y-auto p-5">
+            <div class="mb-4 flex items-center justify-between">
+              <div class="flex items-center gap-2 text-sm font-semibold text-white/70">
+                <BookOpen class="h-4 w-4" />
+                已生成素材
+              </div>
+              <button type="button" class="rounded-full border border-white/10 px-3 py-1 text-xs text-white/45 transition hover:border-white/20 hover:text-white" @click="primaryReferenceField && loadGeneratedMaterialAssets(primaryReferenceField)">
+                刷新
+              </button>
+            </div>
+            <div v-if="materialLoading" class="flex h-56 items-center justify-center gap-2 text-sm text-white/45">
+              <Loader2 class="h-4 w-4 animate-spin" />
+              正在加载素材...
+            </div>
+            <div v-else-if="materialError" class="flex h-56 items-center justify-center text-sm text-red-300">
+              {{ materialError }}
+            </div>
+            <div v-else-if="materialAssets.length === 0" class="flex h-56 items-center justify-center rounded-2xl border border-white/8 bg-white/[0.03] text-sm text-white/42">
+              暂无可用{{ materialKindLabel(activeMaterialKind) }}素材
+            </div>
+            <div v-else class="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-4">
+              <button
+                v-for="asset in materialAssets"
+                :key="asset.id"
+                type="button"
+                class="group overflow-hidden rounded-2xl border border-white/10 bg-white/[0.05] text-left transition hover:-translate-y-0.5 hover:border-primary/60 hover:bg-white/[0.075]"
+                :class="{ 'ring-2 ring-primary': materialPickerField && isMultiImageField(materialPickerField) && pickerIsSelected(asset.url) }"
+                @click="selectMaterialAsset(asset)"
+              >
+                <div class="relative flex aspect-[4/3] items-center justify-center bg-black/20">
+                  <img
+                    v-if="asset.kind === 'image' && asset.previewUrl"
+                    :src="normalizeResourceUrl(asset.previewUrl)"
+                    alt=""
+                    class="h-full w-full object-cover"
+                  />
+                  <FileVideo v-else-if="asset.kind === 'video'" class="h-9 w-9 text-white/35 group-hover:text-primary" />
+                  <FileAudio v-else-if="asset.kind === 'audio'" class="h-9 w-9 text-white/35 group-hover:text-primary" />
+                  <ImageIcon v-else class="h-9 w-9 text-white/35 group-hover:text-primary" />
+                  <span
+                    v-if="materialPickerField && isMultiImageField(materialPickerField) && pickerIsSelected(asset.url)"
+                    class="absolute right-3 top-3 rounded-full bg-primary p-1 text-white"
+                  >
+                    <Check class="h-3.5 w-3.5" />
+                  </span>
+                </div>
+                <div class="space-y-1 p-3">
+                  <p class="truncate text-sm font-semibold text-white/86">{{ asset.title }}</p>
+                  <p class="truncate text-xs text-white/38">{{ asset.subtitle }}</p>
+                </div>
+              </button>
+            </div>
+          </div>
+
+          <footer
+            v-if="primaryReferenceField && isMultiImageField(primaryReferenceField)"
+            class="flex items-center justify-between border-t border-white/10 px-5 py-4"
+          >
+            <span class="text-sm text-white/45">已选 {{ pickerSelectedUrls.length }}/{{ multiImageLimit(primaryReferenceField) }} 个素材</span>
+            <button
+              type="button"
+              class="rounded-full bg-[#5da8ff] px-6 py-3 text-sm font-semibold text-white transition hover:brightness-110"
+              @click="confirmPickerSelection"
+            >
+              确认选择
+            </button>
+          </footer>
+        </div>
+      </div>
+
       <div
         v-if="uploadHistoryOpen"
         class="fixed inset-0 z-[125] flex items-start justify-center bg-black/65 px-4 pb-8 pt-[9vh] backdrop-blur-sm"
@@ -1280,3 +1715,43 @@ defineExpose({
     </Teleport>
   </div>
 </template>
+
+<style scoped>
+.capability-slider {
+  height: 12px;
+  appearance: none;
+  background: transparent;
+}
+
+.capability-slider::-webkit-slider-runnable-track {
+  height: 3px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.14);
+}
+
+.capability-slider::-webkit-slider-thumb {
+  width: 12px;
+  height: 12px;
+  margin-top: -4.5px;
+  appearance: none;
+  border: 0;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.35);
+}
+
+.capability-slider::-moz-range-track {
+  height: 3px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.14);
+}
+
+.capability-slider::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border: 0;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.35);
+}
+</style>
