@@ -3,7 +3,6 @@ import { RouterLink } from "vue-router"
 import { computed, ref } from "vue"
 import { ArrowRight, Sparkles, Zap } from "lucide-vue-next"
 import { DEFAULT_TOOL_COVER_URL, type ToolCardModel } from "@/adapters/toolPresentationAdapter"
-import { isPptWorkspaceTool } from "@/api/pptApi"
 import ToolLaunchModal from "@/components/workspace/ToolLaunchModal.vue"
 
 const props = defineProps<{
@@ -13,8 +12,8 @@ const props = defineProps<{
 const fallbackAsImage = ref(false)
 const launchOpen = ref(false)
 
-/** PPT 等平台化工具仍跳转到独立工作台，其余工具弹出配置悬浮框 */
-const usesWorkspaceRoute = computed(() => isPptWorkspaceTool(props.tool.id))
+/** 工具统一弹出配置悬浮框（PPT 独立工作台已下线） */
+const usesWorkspaceRoute = computed(() => false)
 const hasRenderableCover = computed(() => Boolean(props.tool.image || fallbackAsImage.value))
 
 function handleCoverError(event: Event) {

@@ -44,10 +44,13 @@ class DigitalHumanPostprocessor:
         audio_data_url: str = "",
         audio_url: str = "",
         subtitle_text: str,
+        segment: str | None = None,
     ) -> DigitalHumanPostprocessResult:
         ffmpeg_binary = self._resolve_ffmpeg_binary()
 
         task_dir = self.output_dir / "digital-human" / str(task_id)
+        if segment:
+            task_dir = task_dir / segment
         task_dir.mkdir(parents=True, exist_ok=True)
         source_video = task_dir / "source.mp4"
         audio_path = task_dir / "voice.mp3"
@@ -76,6 +79,56 @@ class DigitalHumanPostprocessor:
             subtitle_url=self._publish_asset(subtitle_path),
             audio_path=audio_path,
         )
+
+    def concat_videos(
+        self,
+        *,
+        task_id: int,
+        video_paths: list[Path],
+        output_name: str = "final-combined.mp4",
+    ) -> tuple[Path, str]:
+        """按顺序拼接多个分镜成片（同一管线产出，编码参数一致），返回 (本地路径, 发布 URL)。"""
+        if not video_paths:
+            raise DigitalHumanPostprocessError("no video segments to concat")
+        if len(video_paths) == 1:
+            return video_paths[0], self._publish_asset(video_paths[0])
+        ffmpeg_binary = self._resolve_ffmpeg_binary()
+        task_dir = self.output_dir / "digital-human" / str(task_id)
+        task_dir.mkdir(parents=True, exist_ok=True)
+        list_file = task_dir / "concat-list.txt"
+        list_file.write_text(
+            "\n".join(f"file '{path.as_posix()}'" for path in video_paths),
+            encoding="utf-8",
+        )
+        output = task_dir / output_name
+        command = [
+            ffmpeg_binary,
+            "-y",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            str(list_file),
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-movflags",
+            "+faststart",
+            str(output),
+        ]
+        completed = subprocess.run(command, capture_output=True, text=True, timeout=1800)
+        if completed.returncode != 0:
+            raise DigitalHumanPostprocessError(
+                f"ffmpeg concat failed: {completed.stderr.strip() or completed.stdout.strip()}"
+            )
+        self._validate_video_file(output)
+        return output, self._publish_asset(output)
 
     def _run_ffmpeg(
         self,

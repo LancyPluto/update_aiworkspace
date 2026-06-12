@@ -292,6 +292,9 @@ public class TaskServiceImpl implements TaskService {
         if (tool == null) {
             return 0;
         }
+        if (workflowExecutionService.shouldUseWorkflow(tool)) {
+            return 0;
+        }
         if (tool.getModelConfigId() == null) {
             return tool.getEstimatedCreditCost() == null ? 0 : Math.max(0, tool.getEstimatedCreditCost());
         }

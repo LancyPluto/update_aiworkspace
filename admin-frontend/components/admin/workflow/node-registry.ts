@@ -8,6 +8,7 @@ import {
   Image,
   Mic,
   Play,
+  Repeat,
   UserRoundPen,
   Video,
   Wrench,
@@ -322,6 +323,25 @@ export const NODE_TYPES: NodeTypeDefinition[] = [
     outputSlots: [{ name: "next", type: "any", label: "继续执行" }],
     parameters: [{ name: "revisionField", label: "修订字段", type: "string", default: "scriptFeedback" }],
   },
+  {
+    type: "scene_loop",
+    category: "编排",
+    displayName: "分镜循环",
+    description: "按时长字段自动拆分分镜数（如 30s ÷ 5s/镜 = 6 镜），下游模型节点逐镜生成并合成。",
+    icon: Repeat,
+    iconName: "repeat",
+    color: "#eab308",
+    defaultWidth: 260,
+    defaultHeight: 150,
+    defaultData: { kind: "loop", iconName: "repeat" },
+    inputSlots: [{ name: "form", type: "json", label: "用户填写参数" }],
+    outputSlots: [{ name: "loop", type: "json", label: "分镜计划(sceneCount/indices)" }],
+    parameters: [
+      { name: "durationField", label: "时长字段", type: "string", default: "episodeLength" },
+      { name: "secondsPerScene", label: "每镜时长(秒)", type: "number", default: 5 },
+      { name: "maxScenes", label: "最大分镜数", type: "number", default: 18 },
+    ],
+  },
 ]
 
 export const NODE_CATEGORIES = [...new Set(NODE_TYPES.map((node) => node.category))]
@@ -337,5 +357,6 @@ export const WORKFLOW_EXECUTION_NODE_TYPES = [
   "video_output",
   "user_confirm",
   "condition",
+  "scene_loop",
 ]
 export const NODE_TYPE_MAP = new Map(NODE_TYPES.map((node) => [node.type, node]))

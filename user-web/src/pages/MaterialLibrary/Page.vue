@@ -165,13 +165,18 @@ function assetsFromMaterial(item: MaterialItem): AssetPreviewItem[] {
     modality: item.modality,
   })
   if (!asset) return []
-  if (asset.kind !== "image" || !asset.urls || asset.urls.length <= 1) return [asset]
-  return asset.urls.map((url, index) => ({
-    ...asset,
-    id: `${asset.id}-image-${index + 1}`,
-    url,
-    subtitle: `${asset.taskNo || asset.subtitle || ""} · 第 ${index + 1}/${asset.urls?.length || 1} 张`,
-  }))
+  // 多图任务拆分为独立卡片：每张图一个结果卡（与任务真实图片数一致）
+  if (asset.kind === "image" && asset.urls && asset.urls.length > 1) {
+    return asset.urls.map((url, index) => ({
+      ...asset,
+      id: `${asset.id}-${index + 1}`,
+      url,
+      urls: [url],
+      title: `${asset.title} · 图${index + 1}`,
+      subtitle: `${asset.taskNo || asset.subtitle || ""} · 第 ${index + 1}/${asset.urls!.length} 张`,
+    }))
+  }
+  return [asset]
 }
 
 function openAssetPreview(item: MaterialAssetItem) {
@@ -380,7 +385,7 @@ onMounted(loadMaterials)
       <MasonryLayout
         v-else
         :items="materialAssets"
-        :item-key="(item) => item.task.taskId"
+        :item-key="(item) => item.asset.id"
         aria-label="素材库作品"
       >
         <template #default="{ item }">

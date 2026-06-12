@@ -313,7 +313,8 @@ function modelMetaItems(item: ComposerModelOption): string[] {
   if (mode.value === "image" && sizes) metas.push(`${sizes}+ 尺寸`)
   if (mode.value === "image" && counts.length) metas.push(`${Math.max(...counts)} 张`)
   if (mode.value === "video") metas.push("视频生成")
-  if (typeof item.estimatedCreditCost === "number") metas.push(`${item.estimatedCreditCost} 算力`)
+  if (item.variableCreditPricing) metas.push("算力不详")
+  else if (typeof item.estimatedCreditCost === "number") metas.push(`${item.estimatedCreditCost} 算力`)
   if (!metas.length && item.modelName) metas.push(item.modelName)
   return metas.slice(0, 3)
 }

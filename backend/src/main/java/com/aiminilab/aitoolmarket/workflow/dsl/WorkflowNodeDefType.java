@@ -16,7 +16,9 @@ public enum WorkflowNodeDefType {
     VIDEO_OUTPUT,
     USER_INPUT,
     USER_CONFIRM,
-    CONDITION;
+    CONDITION,
+    /** 分镜循环：按时长字段自动算出分镜数，供下游模型节点逐镜生成多段产物。 */
+    SCENE_LOOP;
 
     public static Optional<WorkflowNodeDefType> parse(String raw) {
         if (raw == null || raw.isBlank()) {
@@ -38,6 +40,7 @@ public enum WorkflowNodeDefType {
             case "user_input", "user_input_node" -> Optional.of(USER_INPUT);
             case "user_confirm", "user_confirm_node" -> Optional.of(USER_CONFIRM);
             case "condition", "condition_node" -> Optional.of(CONDITION);
+            case "scene_loop", "loop", "scene_split" -> Optional.of(SCENE_LOOP);
             default -> Optional.empty();
         };
     }
@@ -48,6 +51,7 @@ public enum WorkflowNodeDefType {
                 || this == USER_INPUT
                 || this == USER_CONFIRM
                 || this == CONDITION
+                || this == SCENE_LOOP
                 || this == VIDEO_OUTPUT;
     }
 

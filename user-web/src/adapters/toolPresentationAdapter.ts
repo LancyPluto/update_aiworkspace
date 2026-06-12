@@ -1,6 +1,7 @@
 import type { Component } from "vue"
 import type { ToolSummary } from "@/api/types"
 import { cleanToolDisplayText } from "@/utils/toolDisplayText"
+import { formatToolCreditLabel } from "@/utils/toolCreditLabel"
 
 export type ToolModeFilter = "all" | "video" | "image" | "workflow" | "digitalHuman" | "audio"
 
@@ -14,7 +15,6 @@ const WORKFLOW_TOOL_CODES = new Set([
   "ai_comic_drama_agent",
   "enterprise_diagnosis_agent",
   "social_media_comment_insights_agent",
-  "banana_ppt_generator",
   "tts_mm",
 ])
 const PUBLIC_TOOL_DESCRIPTION_FALLBACK = "点击进入工具并开始创作"
@@ -86,9 +86,6 @@ function isAudioTool(tool: Partial<ToolSummary>): boolean {
 
 function toolEntryPath(toolCode: string): string {
   const encoded = encodeURIComponent(toolCode)
-  if (toolCode === "banana_ppt_generator") {
-    return "/tools/banana_ppt_generator/workspace"
-  }
   return `/create?tool=${encoded}`
 }
 
@@ -171,7 +168,7 @@ export function toWorkspaceToolCard(tool: ToolSummary): ToolCardModel {
     tag,
     to: `/tools/${encodeURIComponent(tool.toolCode)}`,
     useTo: toolEntryPath(tool.toolCode),
-    costLabel: `${tool.estimatedCreditCost ?? 0} 算力`,
+    costLabel: formatToolCreditLabel(tool),
     outputModality: tool.outputModality,
     inputModality: tool.inputModality,
   }
