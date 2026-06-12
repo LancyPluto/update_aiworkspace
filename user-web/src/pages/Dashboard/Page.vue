@@ -98,7 +98,11 @@ const historyFeedEndRef = ref<HTMLElement | null>(null)
 const dashboardMainRef = ref<HTMLElement | null>(null)
 const expandedPromptIds = ref<Set<number>>(new Set())
 const shouldScrollHistoryFeedToBottom = ref(false)
+const showHistoryScrollBottom = ref(false)
 let historyObserver: IntersectionObserver | null = null
+let historyFeedAutoStickUntil = 0
+let historyFeedAnchorUntil = 0
+let historyFeedAnchorHeight = 0
 const taskPollTimers = new Map<number, number>()
 const retryingTaskIds = ref<Set<number>>(new Set())
 const deletingTaskIds = ref<Set<number>>(new Set())
@@ -243,22 +247,28 @@ const isHistoryFeedView = computed(() => activePanel.value === "tasks" && histor
 
 watch(historyView, (view) => {
   localStorage.setItem(HISTORY_VIEW_KEY, view)
+  if (view !== "feed") showHistoryScrollBottom.value = false
   void nextTick(() => {
     setupHistoryObserver()
     if (view === "feed" && activePanel.value === "tasks") {
-      scrollHistoryFeedToBottom()
+      scrollHistoryFeedToBottom("smooth")
       shouldScrollHistoryFeedToBottom.value = false
+      updateHistoryScrollBottomVisibility()
     }
   })
 })
 
 watch(activePanel, async (panel) => {
-  if (panel !== "tasks") return
+  if (panel !== "tasks") {
+    showHistoryScrollBottom.value = false
+    return
+  }
   await nextTick()
   setupHistoryObserver()
   if (historyView.value === "feed") {
-    scrollHistoryFeedToBottom()
+    scrollHistoryFeedToBottom("smooth")
     shouldScrollHistoryFeedToBottom.value = false
+    updateHistoryScrollBottomVisibility()
   }
 })
 
@@ -267,7 +277,7 @@ watch(
   async () => {
     if (!isHistoryFeedView.value || !shouldScrollHistoryFeedToBottom.value) return
     await nextTick()
-    scrollHistoryFeedToBottom()
+    scrollHistoryFeedToBottom("smooth")
     shouldScrollHistoryFeedToBottom.value = false
   },
 )
@@ -584,8 +594,11 @@ async function reloadTasksForCurrentModality() {
   }
 }
 
-async function loadMoreTasks() {
+async function loadMoreTasks(options: { preserveFeedAnchor?: boolean } = {}) {
   if (tasksLoadingMore.value || !taskHasNext.value) return
+  const scrollContainer = options.preserveFeedAnchor ? dashboardMainRef.value : null
+  const previousScrollHeight = scrollContainer?.scrollHeight ?? 0
+  const previousScrollTop = scrollContainer?.scrollTop ?? 0
   tasksLoadingMore.value = true
   try {
     const existing = new Set(tasks.value.map((task) => task.taskId))
@@ -609,6 +622,13 @@ async function loadMoreTasks() {
 
     tasks.value = [...tasks.value, ...matched]
     taskHasNext.value = hasNext
+    if (options.preserveFeedAnchor && scrollContainer) {
+      await nextTick()
+      const heightDelta = scrollContainer.scrollHeight - previousScrollHeight
+      scrollContainer.scrollTop = previousScrollTop + Math.max(0, heightDelta)
+      beginHistoryFeedAnchorPreservation(scrollContainer)
+      updateHistoryScrollBottomVisibility()
+    }
     startPollingVisibleTasks()
   } finally {
     tasksLoadingMore.value = false
@@ -621,14 +641,14 @@ function taskMatchesSelectedModality(task: TaskDetail): boolean {
 
 function setupHistoryObserver() {
   historyObserver?.disconnect()
+  if (historyView.value === "feed") return
   historyObserver = new IntersectionObserver((entries) => {
     if (entries.some((entry) => entry.isIntersecting)) void loadMoreTasks()
   }, {
     root: dashboardMainRef.value,
-    rootMargin: historyView.value === "feed" ? "280px 0px 0px 0px" : "0px 0px 260px 0px",
+    rootMargin: "0px 0px 260px 0px",
   })
-  const target = historyView.value === "feed" ? historyFeedStartRef.value : historySentinelRef.value
-  if (target) historyObserver.observe(target)
+  if (historySentinelRef.value) historyObserver.observe(historySentinelRef.value)
 }
 
 function startPollingVisibleTasks() {
@@ -870,8 +890,86 @@ function togglePrompt(taskId: number) {
   expandedPromptIds.value = next
 }
 
-function scrollHistoryFeedToBottom() {
-  historyFeedEndRef.value?.scrollIntoView({ behavior: "smooth", block: "end" })
+function historyBottomDistance(container = dashboardMainRef.value) {
+  if (!container) return 0
+  return Math.max(0, container.scrollHeight - container.scrollTop - container.clientHeight)
+}
+
+function updateHistoryScrollBottomVisibility() {
+  showHistoryScrollBottom.value = isHistoryFeedView.value && historyBottomDistance() > 300
+}
+
+function scrollHistoryFeedToBottom(behavior: ScrollBehavior = "smooth", stabilize = true) {
+  const container = dashboardMainRef.value
+  if (stabilize) historyFeedAutoStickUntil = Date.now() + 1400
+  if (container) {
+    container.scrollTo({ top: container.scrollHeight, behavior })
+  } else {
+    historyFeedEndRef.value?.scrollIntoView({ behavior, block: "end" })
+  }
+  showHistoryScrollBottom.value = false
+  if (!stabilize) return
+  const settleBottom = () => {
+    if (!isHistoryFeedView.value || Date.now() > historyFeedAutoStickUntil) return
+    const nextContainer = dashboardMainRef.value
+    if (!nextContainer) return
+    nextContainer.scrollTo({ top: nextContainer.scrollHeight, behavior: "auto" })
+    showHistoryScrollBottom.value = false
+  }
+  window.setTimeout(settleBottom, 180)
+  window.setTimeout(settleBottom, 420)
+  window.setTimeout(settleBottom, 900)
+}
+
+function isHistoryFeedNearTop(container: HTMLElement) {
+  const start = historyFeedStartRef.value
+  if (!start) return container.scrollTop <= 50
+  const containerRect = container.getBoundingClientRect()
+  const startRect = start.getBoundingClientRect()
+  const topOffset = startRect.top - containerRect.top
+  const bottomOffset = startRect.bottom - containerRect.top
+  return topOffset <= 140 && bottomOffset >= -24
+}
+
+function beginHistoryFeedAnchorPreservation(container: HTMLElement) {
+  historyFeedAnchorUntil = Date.now() + 1600
+  historyFeedAnchorHeight = container.scrollHeight
+}
+
+function preserveHistoryFeedAnchorIfNeeded() {
+  if (!isHistoryFeedView.value || Date.now() > historyFeedAnchorUntil) return
+  const container = dashboardMainRef.value
+  if (!container || historyFeedAnchorHeight <= 0) return
+  const heightDelta = container.scrollHeight - historyFeedAnchorHeight
+  if (heightDelta > 0) {
+    container.scrollTop += heightDelta
+    historyFeedAnchorHeight = container.scrollHeight
+    updateHistoryScrollBottomVisibility()
+  }
+}
+
+function handleHistoryFeedMediaLoaded() {
+  if (!isHistoryFeedView.value) return
+  if (Date.now() <= historyFeedAnchorUntil) {
+    preserveHistoryFeedAnchorIfNeeded()
+    return
+  }
+  if (Date.now() <= historyFeedAutoStickUntil || historyBottomDistance() < 220) {
+    scrollHistoryFeedToBottom("auto", false)
+  }
+}
+
+function handleDashboardScroll() {
+  if (!isHistoryFeedView.value) {
+    showHistoryScrollBottom.value = false
+    return
+  }
+  const container = dashboardMainRef.value
+  if (!container) return
+  showHistoryScrollBottom.value = historyBottomDistance(container) > 300
+  if (isHistoryFeedNearTop(container) && taskHasNext.value && !tasksLoadingMore.value) {
+    void loadMoreTasks({ preserveFeedAnchor: true })
+  }
 }
 
 function audioTracksForItem(blocks: ResultBlock[]) {
@@ -1297,7 +1395,11 @@ onUnmounted(() => {
           </RouterLink>
         </div>
 
-        <main ref="dashboardMainRef" class="min-h-0 flex-1 overflow-y-auto px-5 pb-40 pt-6 lg:pl-[132px] xl:px-10 xl:pl-[132px]">
+        <main
+          ref="dashboardMainRef"
+          class="min-h-0 flex-1 overflow-y-auto px-5 pb-40 pt-6 lg:pl-[132px] xl:px-10 xl:pl-[132px]"
+          @scroll="handleDashboardScroll"
+        >
           <div class="mx-auto w-full max-w-[1380px]">
             <div class="sticky top-0 z-20 -mx-5 mb-8 border-b border-transparent bg-transparent px-5 py-4 backdrop-blur-0 xl:-mx-10 xl:px-10">
               <div class="flex flex-wrap items-center justify-between gap-4">
@@ -1892,6 +1994,7 @@ onUnmounted(() => {
                           class="dashboard-feed-image"
                           loading="lazy"
                           decoding="async"
+                          @load="handleHistoryFeedMediaLoaded"
                         />
                       </div>
 
@@ -1902,6 +2005,7 @@ onUnmounted(() => {
                         playsinline
                         preload="metadata"
                         class="max-h-[420px] w-full rounded-2xl bg-black object-contain"
+                        @loadedmetadata="handleHistoryFeedMediaLoaded"
                       />
 
                       <div v-else-if="primaryBlock(item.blocks)?.type === 'audio'" class="grid gap-3 sm:grid-cols-2">
@@ -2243,6 +2347,19 @@ onUnmounted(() => {
             </section>
           </div>
         </main>
+
+        <Transition name="dashboard-scroll-bottom">
+          <button
+            v-if="showHistoryScrollBottom"
+            type="button"
+            class="dashboard-scroll-bottom-button"
+            aria-label="回到最新任务"
+            @click="scrollHistoryFeedToBottom('smooth')"
+          >
+            <ChevronDown class="h-5 w-5" />
+            <span>最新</span>
+          </button>
+        </Transition>
 
         <div class="pointer-events-none fixed bottom-6 left-[calc(var(--app-sidebar-width,268px)+(100vw-var(--app-sidebar-width,268px))/2)] z-50 -translate-x-1/2 transition-[left]">
           <div v-if="!composerOpen" class="flex w-[min(980px,calc(100vw-2rem))] items-center justify-center gap-3">
@@ -2631,6 +2748,46 @@ onUnmounted(() => {
   border-color: rgb(255 92 122 / 0.28);
   background: rgb(255 72 112 / 0.08);
   color: rgb(255 132 154);
+}
+
+.dashboard-scroll-bottom-button {
+  position: fixed;
+  right: 30px;
+  bottom: 108px;
+  z-index: 52;
+  display: inline-flex;
+  height: 44px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid rgb(255 255 255 / 0.1);
+  border-radius: 999px;
+  background: rgb(24 24 30 / 0.82);
+  padding: 0 15px;
+  color: rgb(255 255 255 / 0.78);
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: 0 18px 54px rgb(0 0 0 / 0.38);
+  backdrop-filter: blur(18px);
+  transition: transform 160ms ease, border-color 160ms ease, background-color 160ms ease, color 160ms ease;
+}
+
+.dashboard-scroll-bottom-button:hover {
+  transform: translateY(-2px);
+  border-color: rgb(255 63 121 / 0.34);
+  background: rgb(255 63 121 / 0.18);
+  color: #fff;
+}
+
+.dashboard-scroll-bottom-enter-active,
+.dashboard-scroll-bottom-leave-active {
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.dashboard-scroll-bottom-enter-from,
+.dashboard-scroll-bottom-leave-to {
+  opacity: 0;
+  transform: translateY(10px) scale(0.96);
 }
 
 .dashboard-floating-view-switch {
