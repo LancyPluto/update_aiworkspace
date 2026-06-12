@@ -1,4 +1,5 @@
 import base64
+import mimetypes
 import re
 import shutil
 import subprocess
@@ -10,6 +11,7 @@ from urllib.parse import urlparse
 import requests
 
 from config import settings
+from storage.asset_storage import asset_storage
 
 
 class DigitalHumanPostprocessError(RuntimeError):
@@ -27,8 +29,7 @@ class DigitalHumanPostprocessResult:
 
 class DigitalHumanPostprocessor:
     def __init__(self) -> None:
-        self.output_dir = Path(settings.generated_media_dir)
-        self.public_base_url = settings.generated_media_public_base_url.rstrip("/")
+        self.output_dir = asset_storage.local_root
         self.ffmpeg_binary = settings.ffmpeg_binary
         self.ffprobe_binary = settings.ffprobe_binary
         self.subtitle_font_name = settings.subtitle_font_name
@@ -40,7 +41,8 @@ class DigitalHumanPostprocessor:
         *,
         task_id: int,
         video_url: str,
-        audio_data_url: str,
+        audio_data_url: str = "",
+        audio_url: str = "",
         subtitle_text: str,
     ) -> DigitalHumanPostprocessResult:
         ffmpeg_binary = self._resolve_ffmpeg_binary()
@@ -53,18 +55,25 @@ class DigitalHumanPostprocessor:
         final_video = task_dir / "final.mp4"
 
         self._download(video_url, source_video)
-        self._write_data_url(audio_data_url, audio_path)
+        self._validate_video_file(source_video)
+        if audio_data_url:
+            self._write_data_url(audio_data_url, audio_path)
+        elif audio_url:
+            self._download(audio_url, audio_path)
+        else:
+            raise DigitalHumanPostprocessError("audio is required for compose")
         audio_duration = self._probe_duration(audio_path)
         source_duration = self._probe_duration(source_video)
         duration = audio_duration or source_duration or 5.0
         subtitle_path.write_text(self._build_srt(subtitle_text, duration), encoding="utf-8")
         self._run_ffmpeg(ffmpeg_binary, source_video, audio_path, subtitle_path, final_video, duration)
+        self._validate_video_file(final_video)
 
         return DigitalHumanPostprocessResult(
             video_path=final_video,
-            video_url=self._public_url(final_video),
+            video_url=self._publish_asset(final_video),
             subtitle_path=subtitle_path,
-            subtitle_url=self._public_url(subtitle_path),
+            subtitle_url=self._publish_asset(subtitle_path),
             audio_path=audio_path,
         )
 
@@ -183,7 +192,13 @@ class DigitalHumanPostprocessor:
                         if chunk:
                             file.write(chunk)
         except requests.RequestException as exc:
-            raise DigitalHumanPostprocessError(f"download generated video failed: {exc}") from exc
+            raise DigitalHumanPostprocessError(f"download media failed: {exc}") from exc
+
+    @staticmethod
+    def _validate_video_file(path: Path) -> None:
+        header = path.read_bytes()[:12]
+        if len(header) < 8 or header[4:8] != b"ftyp":
+            raise DigitalHumanPostprocessError("downloaded file is not a valid mp4 video")
 
     @staticmethod
     def _write_data_url(data_url: str, destination: Path) -> None:
@@ -249,6 +264,9 @@ class DigitalHumanPostprocessor:
     def _escape_filter_path(path: Path) -> str:
         return path.as_posix().replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
 
-    def _public_url(self, final_video: Path) -> str:
-        relative_path = final_video.relative_to(self.output_dir).as_posix()
-        return f"{self.public_base_url}/{relative_path}"
+    def _publish_asset(self, file_path: Path) -> str:
+        relative_key = file_path.relative_to(self.output_dir).as_posix()
+        if asset_storage.is_oss:
+            content_type = mimetypes.guess_type(file_path.name)[0]
+            return asset_storage.put_bytes(relative_key, file_path.read_bytes(), content_type)
+        return asset_storage.public_url(relative_key)

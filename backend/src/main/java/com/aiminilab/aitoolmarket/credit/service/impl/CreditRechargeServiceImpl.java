@@ -7,10 +7,12 @@ import com.aiminilab.aitoolmarket.credit.alipay.AlipayNotification;
 import com.aiminilab.aitoolmarket.credit.alipay.AlipayPagePayClient;
 import com.aiminilab.aitoolmarket.credit.alipay.AlipayPagePayRequest;
 import com.aiminilab.aitoolmarket.credit.alipay.AlipayPagePayResponse;
+import com.aiminilab.aitoolmarket.credit.dto.AlipayPayDiagnosticResponse;
 import com.aiminilab.aitoolmarket.credit.dto.CreateCustomRechargeOrderRequest;
 import com.aiminilab.aitoolmarket.credit.dto.CreateRechargeOrderRequest;
 import com.aiminilab.aitoolmarket.credit.dto.RechargeOrderResponse;
 import com.aiminilab.aitoolmarket.credit.dto.RechargePackageResponse;
+import com.aiminilab.aitoolmarket.credit.dto.RechargePaymentOptionsResponse;
 import com.aiminilab.aitoolmarket.credit.entity.CreditRechargeOrder;
 import com.aiminilab.aitoolmarket.credit.entity.CreditRechargePackage;
 import com.aiminilab.aitoolmarket.credit.mapper.CreditRechargeOrderMapper;
@@ -31,6 +33,7 @@ import com.fasterxml.jackson.databind.JavaType;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -85,6 +88,15 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
     }
 
     @Override
+    public RechargePaymentOptionsResponse paymentOptions() {
+        return new RechargePaymentOptionsResponse(
+                isWechatNativeConfigured(),
+                isAlipayConfigured(),
+                "PAGE"
+        );
+    }
+
+    @Override
     public List<RechargePackageResponse> packages() {
         JavaType type = objectMapper.getTypeFactory()
                 .constructCollectionType(List.class, RechargePackageResponse.class);
@@ -126,12 +138,8 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
         order.setExpiresAt(expiresAt);
         order.setCreatedAt(now);
         order.setUpdatedAt(now);
-        if ("WECHAT_NATIVE".equals(paymentChannel) || "ALIPAY_PAGE".equals(paymentChannel)) {
-            order.setQrCodeUrl(null);
-        } else {
-            order.setPayUrl("/mock-pay/recharge/" + order.getOrderNo());
-            order.setQrCodeUrl(null);
-        }
+        order.setPayUrl(null);
+        order.setQrCodeUrl(null);
         orderMapper.insert(order);
         if ("WECHAT_NATIVE".equals(paymentChannel)) {
             try {
@@ -158,10 +166,11 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
                         rechargePackage.getPriceAmount(),
                         expiresAt
                 ));
-                String payBinding = prepay.redirectPath() != null && !prepay.redirectPath().isBlank()
-                        ? prepay.redirectPath()
-                        : prepay.qrCode();
-                if (orderMapper.bindPayUrl(order.getId(), payBinding, "Alipay pay order created", LocalDateTime.now()) != 1) {
+                String payBinding = prepay.redirectPath();
+                if (payBinding == null || payBinding.isBlank()) {
+                    throw new BusinessException(ErrorCode.PARAM_ERROR, "Alipay page pay launch path missing");
+                }
+                if (orderMapper.bindPayUrl(order.getId(), payBinding, "Alipay page pay order created", LocalDateTime.now()) != 1) {
                     throw new BusinessException(ErrorCode.PARAM_ERROR, "recharge order status changed before Alipay pay binding");
                 }
             } catch (BusinessException exception) {
@@ -205,13 +214,8 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
         order.setExpiresAt(expiresAt);
         order.setCreatedAt(now);
         order.setUpdatedAt(now);
-        if ("WECHAT_NATIVE".equals(paymentChannel) || "ALIPAY_PAGE".equals(paymentChannel)) {
-            order.setPayUrl(null);
-            order.setQrCodeUrl(null);
-        } else {
-            order.setPayUrl("/mock-pay/recharge/" + order.getOrderNo());
-            order.setQrCodeUrl(null);
-        }
+        order.setPayUrl(null);
+        order.setQrCodeUrl(null);
         orderMapper.insert(order);
         if ("WECHAT_NATIVE".equals(paymentChannel)) {
             try {
@@ -238,10 +242,11 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
                         amount,
                         expiresAt
                 ));
-                String payBinding = payResponse.redirectPath() != null && !payResponse.redirectPath().isBlank()
-                        ? payResponse.redirectPath()
-                        : payResponse.qrCode();
-                if (orderMapper.bindPayUrl(order.getId(), payBinding, "Alipay pay order created", LocalDateTime.now()) != 1) {
+                String payBinding = payResponse.redirectPath();
+                if (payBinding == null || payBinding.isBlank()) {
+                    throw new BusinessException(ErrorCode.PARAM_ERROR, "Alipay page pay launch path missing");
+                }
+                if (orderMapper.bindPayUrl(order.getId(), payBinding, "Alipay page pay order created", LocalDateTime.now()) != 1) {
                     throw new BusinessException(ErrorCode.PARAM_ERROR, "recharge order status changed before Alipay pay binding");
                 }
             } catch (BusinessException exception) {
@@ -258,6 +263,23 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
         CreditRechargeOrder order = orderOrThrow(userId, orderId);
         refreshWechatOrderIfNeeded(order);
         return responseFrom(orderOrThrow(userId, orderId));
+    }
+
+    @Override
+    public AlipayPayDiagnosticResponse alipayDiagnostic(Long userId, Long orderId) {
+        CreditRechargeOrder order = orderOrThrow(userId, orderId);
+        if (!"ALIPAY_PAGE".equals(order.getPaymentChannel())) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "order is not an Alipay page pay recharge order");
+        }
+        String subject = order.getPackageId() == null
+                ? "Custom credits recharge " + order.getCredits() + " credits"
+                : "AI Tool Market credits recharge";
+        return alipayPagePayClient.buildDiagnostic(new AlipayPagePayRequest(
+                order.getOrderNo(),
+                subject,
+                order.getPriceAmount(),
+                order.getExpiresAt()
+        ));
     }
 
     @Override
@@ -313,28 +335,6 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "recharge order not found for Alipay notification");
         }
         applyPaidExternalNotification(order, notification.tradeNo(), notification.totalAmount(), "Alipay page payment confirmed");
-    }
-
-    @Override
-    @Transactional
-    public void handleMockPaymentNotification(String orderNo,
-                                              String externalTradeNo,
-                                              String tradeStatus,
-                                              String totalAmount) {
-        if (appProperties.isProductionMode()) {
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "mock payment notification is disabled in production mode");
-        }
-        if (!"SUCCESS".equalsIgnoreCase(tradeStatus)) {
-            return;
-        }
-        CreditRechargeOrder order = orderMapper.findByOrderNo(orderNo);
-        if (order == null || !"MOCK".equals(order.getPaymentChannel())) {
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "recharge order not found for mock notification");
-        }
-        String normalizedTradeNo = externalTradeNo == null || externalTradeNo.isBlank()
-                ? "MOCK-" + order.getOrderNo()
-                : externalTradeNo.trim();
-        applyPaidExternalNotification(order, normalizedTradeNo, new BigDecimal(totalAmount), "mock payment notification confirmed");
     }
 
     private void refreshWechatOrderIfNeeded(CreditRechargeOrder order) {
@@ -421,29 +421,6 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
             }
         }
         markPaidAndDispatchCredit(orderMapper.findByOrderNo(order.getOrderNo()), paidReason);
-    }
-
-    @Override
-    @Transactional
-    public RechargeOrderResponse mockPaySuccess(Long userId, Long orderId) {
-        CreditRechargeOrder order = orderOrThrow(userId, orderId);
-        if (RechargeOrderStatus.CREDITED.name().equals(order.getStatus())) {
-            return responseFrom(order);
-        }
-        if (RechargeOrderStatus.WAITING_PAYMENT.name().equals(order.getStatus()) && order.getExpiresAt() != null
-                && order.getExpiresAt().isBefore(LocalDateTime.now())) {
-            transitOrThrow(order, RechargeOrderStatus.CLOSED, "order expired");
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "recharge order expired");
-        }
-        if (RechargeOrderStatus.WAITING_PAYMENT.name().equals(order.getStatus())) {
-            transitOrCurrent(order, RechargeOrderStatus.PAID, "mock payment confirmed");
-            order = orderOrThrow(userId, orderId);
-        }
-        if (!RechargeOrderStatus.PAID.name().equals(order.getStatus())) {
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "recharge order cannot be paid from status " + order.getStatus());
-        }
-        markPaidAndDispatchCredit(orderOrThrow(userId, orderId), "mock payment confirmed");
-        return responseFrom(orderOrThrow(userId, orderId));
     }
 
     private void markPaidAndDispatchCredit(CreditRechargeOrder order, String paidReason) {
@@ -537,11 +514,38 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
         }
     }
 
+    private boolean isWechatNativeConfigured() {
+        return wechatProperties.isEnabled()
+                && StringUtils.hasText(wechatProperties.getAppid())
+                && StringUtils.hasText(wechatProperties.getMchid())
+                && StringUtils.hasText(wechatProperties.getMerchantSerialNo())
+                && StringUtils.hasText(wechatProperties.getMerchantPrivateKeyPath())
+                && StringUtils.hasText(wechatProperties.getApiV3Key())
+                && StringUtils.hasText(wechatProperties.getWechatPayPublicKeyId())
+                && StringUtils.hasText(wechatProperties.getWechatPayPublicKeyPath())
+                && StringUtils.hasText(wechatProperties.getNotifyUrl());
+    }
+
+    private boolean isAlipayConfigured() {
+        return alipayProperties.isEnabled()
+                && StringUtils.hasText(alipayProperties.getAppId())
+                && StringUtils.hasText(alipayProperties.getMerchantPrivateKey())
+                && StringUtils.hasText(alipayProperties.getAlipayPublicKey())
+                && StringUtils.hasText(alipayProperties.getNotifyUrl());
+    }
+
     private String normalizePaymentChannel(String paymentChannel) {
         if (paymentChannel == null || paymentChannel.isBlank()) {
-            return "MOCK";
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "payment channel is required");
         }
-        return paymentChannel.trim().toUpperCase();
+        String normalized = paymentChannel.trim().toUpperCase();
+        if ("MOCK".equals(normalized)) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "mock payment is not supported");
+        }
+        if (!"WECHAT_NATIVE".equals(normalized) && !"ALIPAY_PAGE".equals(normalized)) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "unsupported payment channel: " + normalized);
+        }
+        return normalized;
     }
 
     private String normalizeIdempotencyKey(String clientRequestId) {

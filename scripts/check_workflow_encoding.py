@@ -2,26 +2,20 @@
 import json
 import subprocess
 
-raw = subprocess.check_output(
-    [
-        "docker", "exec", "ai-supermarket-mysql",
-        "mysql", "-uroot", "-proot123456", "ai_supermarket_v1", "-N",
-        "-e",
-        "SELECT nodes_json FROM tool_workflows w JOIN ai_tools t ON t.id=w.tool_id "
-        "WHERE t.tool_code='ai_comic_drama_agent'",
-    ]
-)
-nodes = json.loads(raw.decode("utf-8"))
-lines = []
-for node in nodes:
-    data = node.get("data", {})
-    lines.append(f"{node['id']}: title={data.get('title')}")
-    for slot in data.get("inputSlots") or []:
-        lines.append(f"  in {slot.get('name')}: {slot.get('label')}")
-    for slot in data.get("outputSlots") or []:
-        lines.append(f"  out {slot.get('name')}: {slot.get('label')}")
-out = __file__.replace("check_workflow_encoding.py", "_wf_check.txt")
-open(out, "w", encoding="utf-8").write("\n".join(lines))
-print("written", out)
-for line in lines[:8]:
-    print(line)
+cmd = [
+    "docker", "exec", "ai-supermarket-mysql",
+    "mysql", "-uroot", "-proot123456", "--default-character-set=utf8mb4",
+    "-N", "-B", "-e",
+    "SELECT tool_id, nodes_json FROM tool_workflows WHERE nodes_json LIKE '%user-input-script%' LIMIT 3;",
+    "ai_supermarket_v1",
+]
+raw = subprocess.check_output(cmd, stderr=subprocess.DEVNULL).decode("utf-8", errors="replace")
+for line in raw.splitlines():
+    if not line.strip():
+        continue
+    tool_id, nodes_json = line.split("\t", 1)
+    nodes = json.loads(nodes_json)
+    for node in nodes:
+        if node.get("id") == "user-input-script":
+            title = node.get("data", {}).get("title", "")
+            print(f"tool_id={tool_id} title={title!r}")

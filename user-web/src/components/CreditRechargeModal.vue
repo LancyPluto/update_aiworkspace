@@ -2,9 +2,10 @@
 import { computed, onMounted, onUnmounted, ref } from "vue"
 import { Check, CreditCard, Loader2, MessageCircle, QrCode, Sparkles, X } from "lucide-vue-next"
 import type { RechargeOrder, RechargePackage } from "@/api/types"
-import { createRechargeOrder, fetchRechargeOrder, fetchRechargePackages, mockPayRechargeOrder } from "@/api/creditApi"
+import { createRechargeOrder, fetchRechargeOrder, fetchRechargePackages } from "@/api/creditApi"
 import { useAuthStore } from "@/store/authStore"
 import {
+  DEFAULT_RECHARGE_PAYMENT_CHANNELS,
   isAlipayPageRedirectOrder,
   rechargePaymentFailureMessage,
   resolveAlipayLaunchUrl,
@@ -34,16 +35,12 @@ let pollingTimer: ReturnType<typeof setInterval> | null = null
 const selectedPackage = computed(() => packages.value.find((item) => item.id === selectedId.value) ?? null)
 const displayedPackages = computed<RechargePackage[]>(() => pickDisplayPackages(packages.value))
 
-const paymentOptions: Array<{
-  channel: PaymentChannel
-  title: string
-  description: string
-  icon: typeof QrCode
-}> = [
-  { channel: "WECHAT_NATIVE", title: "微信扫码支付", description: "使用微信扫一扫完成付款", icon: MessageCircle },
-  { channel: "ALIPAY_PAGE", title: "支付宝扫码支付", description: "使用支付宝扫一扫完成付款", icon: CreditCard },
-  { channel: "MOCK", title: "模拟支付", description: "本地开发测试到账", icon: Sparkles },
-]
+const paymentOptions = computed(() =>
+  DEFAULT_RECHARGE_PAYMENT_CHANNELS.map((option) => ({
+    ...option,
+    icon: option.channel === "WECHAT_NATIVE" ? MessageCircle : CreditCard,
+  })),
+)
 
 function formatMoney(value: number | string | undefined | null) {
   const amount = Number(value ?? 0)
@@ -192,17 +189,13 @@ async function createOrder(channel: PaymentChannel) {
       { token: auth.token },
     )
     const hasAlipayLaunch = isAlipayPageRedirectOrder(order, channel)
-    if (channel !== "MOCK" && !order.qrCodeUrl && !hasAlipayLaunch) {
+    if (!order.qrCodeUrl && !hasAlipayLaunch) {
       loadError.value = rechargePaymentFailureMessage(order, channel)
       return
     }
     activeOrder.value = order
     showChannelModal.value = false
     paymentResult.value = null
-    if (channel === "MOCK") {
-      showPayModal.value = true
-      return
-    }
     startPolling(order.id)
     if (hasAlipayLaunch && order.payUrl) {
       window.location.assign(resolveAlipayLaunchUrl(order.payUrl))
@@ -211,19 +204,6 @@ async function createOrder(channel: PaymentChannel) {
     showPayModal.value = true
   } catch (err) {
     loadError.value = err instanceof Error ? err.message : "创建充值订单失败"
-  } finally {
-    ordering.value = false
-  }
-}
-
-async function confirmMockPayment() {
-  if (!activeOrder.value) return
-  ordering.value = true
-  try {
-    await mockPayRechargeOrder(activeOrder.value.id, { token: auth.token })
-    await pollOrder(activeOrder.value.id)
-  } catch (err) {
-    loadError.value = err instanceof Error ? err.message : "模拟支付失败"
   } finally {
     ordering.value = false
   }
@@ -339,26 +319,19 @@ onUnmounted(clearPolling)
         </button>
         <template v-if="!paymentResult">
           <h3 class="text-xl font-semibold text-white">扫码支付 ¥{{ formatMoney(activeOrder?.priceAmount) }}</h3>
-          <div v-if="activeOrder?.paymentChannel === 'MOCK'" class="credit-mock-pay">
-            <button type="button" class="credit-modal-buy" :disabled="ordering" @click="confirmMockPayment">
-              {{ ordering ? "确认中…" : "模拟支付成功" }}
-            </button>
+          <div class="credit-qr-wrap">
+            <img
+              v-if="activeOrder?.qrCodeUrl"
+              :src="activeOrder.qrCodeUrl"
+              alt="支付二维码"
+              class="h-full w-full object-contain"
+            />
+            <QrCode v-else class="h-20 w-20 text-slate-900" />
           </div>
-          <template v-else>
-            <div class="credit-qr-wrap">
-              <img
-                v-if="activeOrder?.qrCodeUrl"
-                :src="activeOrder.qrCodeUrl"
-                alt="支付二维码"
-                class="h-full w-full object-contain"
-              />
-              <QrCode v-else class="h-20 w-20 text-slate-900" />
-            </div>
-            <p class="mt-4 flex items-center justify-center gap-2 text-sm text-white/60">
-              <Loader2 class="h-4 w-4 animate-spin" />
-              正在确认支付结果…
-            </p>
-          </template>
+          <p class="mt-4 flex items-center justify-center gap-2 text-sm text-white/60">
+            <Loader2 class="h-4 w-4 animate-spin" />
+            正在确认支付结果…
+          </p>
         </template>
         <div v-else-if="paymentResult === 'success'" class="credit-pay-result">
           <Check class="h-10 w-10 text-emerald-400" />
@@ -613,10 +586,6 @@ onUnmounted(clearPolling)
   padding: 8px;
   background: #fff;
   border-radius: 12px;
-}
-
-.credit-mock-pay {
-  margin-top: 20px;
 }
 
 .credit-pay-result {

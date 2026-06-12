@@ -2,7 +2,8 @@ package com.aiminilab.aitoolmarket.market.service.impl;
 
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
-import com.aiminilab.aitoolmarket.config.AppProperties;
+import com.aiminilab.aitoolmarket.storage.AssetStorageService;
+import com.aiminilab.aitoolmarket.storage.StoredAsset;
 import com.aiminilab.aitoolmarket.market.dto.FileUploadResponse;
 import com.aiminilab.aitoolmarket.market.entity.AiMarketFile;
 import com.aiminilab.aitoolmarket.market.entity.AiMarketTool;
@@ -30,18 +31,18 @@ public class AiMarketFileServiceImpl implements AiMarketFileService {
     private final AiMarketFileMapper aiMarketFileMapper;
     private final AiMarketToolService aiMarketToolService;
     private final CapabilitiesCodec capabilitiesCodec;
-    private final AppProperties appProperties;
+    private final AssetStorageService assetStorageService;
 
     public AiMarketFileServiceImpl(
             AiMarketFileMapper aiMarketFileMapper,
             AiMarketToolService aiMarketToolService,
             CapabilitiesCodec capabilitiesCodec,
-            AppProperties appProperties
+            AssetStorageService assetStorageService
     ) {
         this.aiMarketFileMapper = aiMarketFileMapper;
         this.aiMarketToolService = aiMarketToolService;
         this.capabilitiesCodec = capabilitiesCodec;
-        this.appProperties = appProperties;
+        this.assetStorageService = assetStorageService;
     }
 
     @Override
@@ -71,19 +72,20 @@ public class AiMarketFileServiceImpl implements AiMarketFileService {
         }
 
         String fileId = MarketIdGenerator.fileId();
-        String storedPath = storeFile(userId, file);
+        String filename = UUID.randomUUID() + "-" + safeFilename(file.getOriginalFilename());
+        StoredAsset stored = assetStorageService.storeMultipart("market-files/" + userId + "/" + filename, file);
         LocalDateTime now = LocalDateTime.now();
         AiMarketFile record = new AiMarketFile();
         record.setFileId(fileId);
         record.setUserId(userId);
         record.setToolId(tool == null ? null : tool.getToolId());
         record.setOriginalName(safeFilename(file.getOriginalFilename()));
-        record.setStoragePath(storedPath);
+        record.setStoragePath(stored.storagePath());
         record.setContentType(file.getContentType() == null ? "application/octet-stream" : file.getContentType());
         record.setFileSize(file.getSize());
         record.setCreatedAt(now);
         aiMarketFileMapper.insertFile(record);
-        return new FileUploadResponse(fileId, toPublicUrl(storedPath));
+        return new FileUploadResponse(fileId, stored.publicUrl());
     }
 
     @Override
@@ -96,33 +98,6 @@ public class AiMarketFileServiceImpl implements AiMarketFileService {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "存在无效或未授权的附件");
         }
         return files;
-    }
-
-    private String storeFile(Long userId, MultipartFile file) {
-        try {
-            Path root = Path.of(appProperties.getGeneratedMediaDir()).resolve("market-files").resolve(String.valueOf(userId))
-                    .toAbsolutePath().normalize();
-            Files.createDirectories(root);
-            String filename = UUID.randomUUID() + "-" + safeFilename(file.getOriginalFilename());
-            Path stored = root.resolve(filename).normalize();
-            if (!stored.startsWith(root)) {
-                throw new BusinessException(ErrorCode.PARAM_ERROR, "invalid filename");
-            }
-            Files.write(stored, file.getBytes());
-            return stored.toString();
-        } catch (IOException exception) {
-            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "文件存储失败");
-        }
-    }
-
-    private String toPublicUrl(String storagePath) {
-        Path root = Path.of(appProperties.getGeneratedMediaDir()).toAbsolutePath().normalize();
-        Path stored = Path.of(storagePath).toAbsolutePath().normalize();
-        if (!stored.startsWith(root)) {
-            return storagePath;
-        }
-        Path relative = root.relativize(stored);
-        return "/generated/" + relative.toString().replace('\\', '/');
     }
 
     private String safeFilename(String filename) {

@@ -47,13 +47,17 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -94,6 +98,7 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
     private final ModelVendorAccountMapper vendorAccountMapper;
     private final ModelVendorAccountService modelVendorAccountService;
     private final BypassCacheService bypassCacheService;
+    private final TransactionTemplate transactionTemplate;
 
     public ConfigBundleServiceImpl(SystemSettingService systemSettingService,
                                    AgentModelConfigService agentModelConfigService,
@@ -107,7 +112,8 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                                    ModelProviderRegistry modelProviderRegistry,
                                    ModelVendorAccountMapper vendorAccountMapper,
                                    ModelVendorAccountService modelVendorAccountService,
-                                   BypassCacheService bypassCacheService) {
+                                   BypassCacheService bypassCacheService,
+                                   TransactionTemplate transactionTemplate) {
         this.systemSettingService = systemSettingService;
         this.agentModelConfigService = agentModelConfigService;
         this.agentModelConfigMapper = agentModelConfigMapper;
@@ -121,6 +127,7 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
         this.vendorAccountMapper = vendorAccountMapper;
         this.modelVendorAccountService = modelVendorAccountService;
         this.bypassCacheService = bypassCacheService;
+        this.transactionTemplate = transactionTemplate;
     }
 
     @Override
@@ -160,7 +167,7 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
     }
 
     @Override
-    @Transactional
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public ConfigBundleImportResult importBundle(ConfigBundleDto bundle, Long operatorId) {
         if (bundle == null || bundle.format() == null || !FORMAT.equals(bundle.format())) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "unsupported config bundle format");
@@ -188,12 +195,15 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                 categories);
         for (ConfigBundleDto.Tool tool : safeList(bundle.tools())) {
             try {
-                importTool(tool, operatorId, modelIdsByCode, categoryIdsByCode, counter, warnings);
+                transactionTemplate.executeWithoutResult(status ->
+                        importTool(tool, operatorId, modelIdsByCode, categoryIdsByCode, counter, warnings));
             } catch (Exception exception) {
                 String toolCode = tool == null || isBlank(tool.toolCode()) ? "<missing>" : tool.toolCode();
                 warnings.add("Tool " + toolCode + " import failed: " + rootMessage(exception));
             }
         }
+
+        pruneStaleCatalogAfterImport(bundle, accountIdsByRef, modelResult.modelIdsByImportedCode, warnings);
 
         bypassCacheService.invalidateImportedCatalogData();
 
@@ -404,7 +414,12 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                 workflow.edgesJson(),
                 workflow.groupsJson(),
                 workflow.configJson(),
-                workflow.status()
+                workflow.status(),
+                workflow.version(),
+                null,
+                null,
+                null,
+                null
         );
     }
 
@@ -440,33 +455,42 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                         + ": MinerU belongs to System Settings -> Engine API, not model vendor accounts");
                 continue;
             }
-            boolean secretsRedacted = item.secretsRedacted() != null
-                    ? item.secretsRedacted()
-                    : bundleSecretsRedacted == null || bundleSecretsRedacted;
-            String extraAuthJson = secretsRedacted ? null : cleanExtraAuthJson(item.extraAuthJson(), warnings, "vendor account " + ref);
-            ModelVendorAccountRequest request = new ModelVendorAccountRequest(
-                    vendorCode,
-                    accountName,
-                    item.baseUrl(),
-                    secretsRedacted ? null : nullToEmpty(item.apiKey()),
-                    null,
-                    extraAuthJson,
-                    null,
-                    item.consoleUrl(),
-                    item.balanceUrl(),
-                    item.balanceQueryMode(),
-                    item.balanceAmount(),
-                    item.balanceCurrency(),
-                    item.balanceLowThreshold(),
-                    item.enabled()
-            );
-            ModelVendorAccount existing = resolveExistingVendorAccount(
-                    vendorCode, accountName, item.baseUrl(), request.apiKey(), request.extraAuthJson(), ref, warnings);
-            ModelVendorAccountResponse saved = existing == null
-                    ? modelVendorAccountService.adminCreate(request)
-                    : modelVendorAccountService.adminUpdate(existing.getId(), request);
-            accountIdsByRef.put(ref, saved.id());
-            removeDuplicateVendorAccounts(vendorCode, item.baseUrl(), request.apiKey(), request.extraAuthJson(), saved.id(), warnings);
+            try {
+                transactionTemplate.executeWithoutResult(status -> {
+                    boolean secretsRedacted = item.secretsRedacted() != null
+                            ? item.secretsRedacted()
+                            : bundleSecretsRedacted == null || bundleSecretsRedacted;
+                    String extraAuthJson = secretsRedacted
+                            ? null
+                            : cleanExtraAuthJson(item.extraAuthJson(), warnings, "vendor account " + ref);
+                    ModelVendorAccountRequest request = new ModelVendorAccountRequest(
+                            vendorCode,
+                            accountName,
+                            item.baseUrl(),
+                            secretsRedacted ? null : nullToEmpty(item.apiKey()),
+                            null,
+                            extraAuthJson,
+                            null,
+                            item.consoleUrl(),
+                            item.balanceUrl(),
+                            item.balanceQueryMode(),
+                            item.balanceAmount(),
+                            item.balanceCurrency(),
+                            item.balanceLowThreshold(),
+                            item.enabled()
+                    );
+                    ModelVendorAccount existing = resolveExistingVendorAccount(
+                            vendorCode, accountName, item.baseUrl(), request.apiKey(), request.extraAuthJson(), ref, warnings);
+                    ModelVendorAccountResponse saved = existing == null
+                            ? modelVendorAccountService.adminCreate(request)
+                            : modelVendorAccountService.adminUpdate(existing.getId(), request);
+                    accountIdsByRef.put(ref, saved.id());
+                    removeDuplicateVendorAccounts(
+                            vendorCode, item.baseUrl(), request.apiKey(), request.extraAuthJson(), saved.id(), warnings);
+                });
+            } catch (Exception exception) {
+                warnings.add("Vendor account " + ref + " import failed: " + rootMessage(exception));
+            }
         }
         return accountIdsByRef;
     }
@@ -487,37 +511,46 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                         + ": unsupported provider " + config.provider());
                 continue;
             }
-            boolean secretsRedacted = config.secretsRedacted() != null
-                    ? config.secretsRedacted()
-                    : bundleSecretsRedacted == null || bundleSecretsRedacted;
-            Long vendorAccountId = null;
-            if (!isBlank(config.vendorAccountRef())) {
-                vendorAccountId = accountIdsByRef.get(config.vendorAccountRef().trim());
-                if (vendorAccountId == null) {
-                    warnings.add("Model config " + config.configCode()
-                            + ": vendorAccountRef not found -> " + config.vendorAccountRef());
+            try {
+                Boolean changed = transactionTemplate.execute(status -> {
+                    boolean secretsRedacted = config.secretsRedacted() != null
+                            ? config.secretsRedacted()
+                            : bundleSecretsRedacted == null || bundleSecretsRedacted;
+                    Long vendorAccountId = null;
+                    if (!isBlank(config.vendorAccountRef())) {
+                        vendorAccountId = accountIdsByRef.get(config.vendorAccountRef().trim());
+                        if (vendorAccountId == null) {
+                            warnings.add("Model config " + config.configCode()
+                                    + ": vendorAccountRef not found -> " + config.vendorAccountRef());
+                        }
+                    }
+                    AgentModelConfig existing = agentModelConfigMapper.findActiveByConfigCode(config.configCode());
+                    if (existing == null) {
+                        Optional<AgentModelConfigResponse> equivalent = findEquivalentModelConfig(config);
+                        if (equivalent.isPresent()) {
+                            modelIdsByImportedCode.put(config.configCode(), equivalent.get().id());
+                            warnings.add("Reused existing model config " + stableModelConfigCode(equivalent.get())
+                                    + " for imported model config " + config.configCode());
+                            return false;
+                        }
+                    }
+                    boolean forceDisabled = shouldDisableImportedModel(config, vendorAccountId, secretsRedacted, warnings);
+                    AgentModelConfigRequest request = modelConfigRequest(config, vendorAccountId, secretsRedacted, forceDisabled);
+                    if (existing == null) {
+                        AgentModelConfigResponse created = agentModelConfigService.adminCreate(request);
+                        modelIdsByImportedCode.put(config.configCode(), created.id());
+                    } else {
+                        AgentModelConfigResponse updated = agentModelConfigService.adminUpdate(existing.getId(), request);
+                        modelIdsByImportedCode.put(config.configCode(), updated.id());
+                    }
+                    return true;
+                });
+                if (Boolean.TRUE.equals(changed)) {
+                    count++;
                 }
+            } catch (Exception exception) {
+                warnings.add("Model config " + config.configCode() + " import failed: " + rootMessage(exception));
             }
-            AgentModelConfig existing = agentModelConfigMapper.findActiveByConfigCode(config.configCode());
-            if (existing == null) {
-                Optional<AgentModelConfigResponse> equivalent = findEquivalentModelConfig(config);
-                if (equivalent.isPresent()) {
-                    modelIdsByImportedCode.put(config.configCode(), equivalent.get().id());
-                    warnings.add("Reused existing model config " + stableModelConfigCode(equivalent.get())
-                            + " for imported model config " + config.configCode());
-                    continue;
-                }
-            }
-            boolean forceDisabled = shouldDisableImportedModel(config, vendorAccountId, secretsRedacted, warnings);
-            AgentModelConfigRequest request = modelConfigRequest(config, vendorAccountId, secretsRedacted, forceDisabled);
-            if (existing == null) {
-                AgentModelConfigResponse created = agentModelConfigService.adminCreate(request);
-                modelIdsByImportedCode.put(config.configCode(), created.id());
-            } else {
-                AgentModelConfigResponse updated = agentModelConfigService.adminUpdate(existing.getId(), request);
-                modelIdsByImportedCode.put(config.configCode(), updated.id());
-            }
-            count++;
         }
         return new ImportModelResult(count, modelIdsByImportedCode);
     }
@@ -609,6 +642,95 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
         }
         String normalized = value.trim().toLowerCase(Locale.ROOT);
         return !normalized.startsWith("replace-with-") && !normalized.startsWith("sk-xxx");
+    }
+
+    private void pruneStaleCatalogAfterImport(ConfigBundleDto bundle,
+                                              Map<String, Long> keptAccountIdsByRef,
+                                              Map<String, Long> keptModelIdsByImportedCode,
+                                              List<String> warnings) {
+        Set<String> importedConfigCodes = safeList(bundle.modelConfigs()).stream()
+                .map(ConfigBundleDto.ModelConfig::configCode)
+                .filter(code -> !isBlank(code))
+                .map(String::trim)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        Set<Long> keptAccountIds = new HashSet<>(keptAccountIdsByRef.values());
+        Set<Long> keptModelIds = new HashSet<>(keptModelIdsByImportedCode.values());
+        for (AgentModelConfig config : agentModelConfigMapper.findAllActive()) {
+            if (!isBlank(config.getConfigCode()) && importedConfigCodes.contains(config.getConfigCode().trim())) {
+                keptModelIds.add(config.getId());
+            }
+        }
+
+        for (AgentModelConfig config : List.copyOf(agentModelConfigMapper.findAllActive())) {
+            if (keptModelIds.contains(config.getId())) {
+                continue;
+            }
+            if (!isBlank(config.getConfigCode()) && importedConfigCodes.contains(config.getConfigCode().trim())) {
+                continue;
+            }
+            if (modelHasValidCredential(config)) {
+                continue;
+            }
+            try {
+                transactionTemplate.executeWithoutResult(status -> agentModelConfigService.adminDelete(config.getId()));
+                warnings.add("Removed stale model config without credential: " + describeModelConfig(config));
+            } catch (Exception exception) {
+                warnings.add("Could not remove stale model config " + describeModelConfig(config)
+                        + ": " + rootMessage(exception));
+            }
+        }
+
+        for (ModelVendorAccount account : List.copyOf(vendorAccountMapper.findAllActive())) {
+            if (keptAccountIds.contains(account.getId())) {
+                continue;
+            }
+            if (accountHasValidCredential(account)) {
+                continue;
+            }
+            int modelCount = vendorAccountMapper.countActiveModelsByAccountId(account.getId());
+            if (modelCount > 0) {
+                warnings.add("Skipped stale vendor account #" + account.getId()
+                        + " (" + account.getAccountName() + "): still referenced by " + modelCount + " model(s)");
+                continue;
+            }
+            try {
+                transactionTemplate.executeWithoutResult(status -> vendorAccountMapper.softDelete(account.getId()));
+                warnings.add("Removed stale vendor account without credential: "
+                        + accountRef(account.getVendorCode(), account.getAccountName()));
+            } catch (Exception exception) {
+                warnings.add("Could not remove stale vendor account #"
+                        + account.getId() + ": " + rootMessage(exception));
+            }
+        }
+    }
+
+    private boolean modelHasValidCredential(AgentModelConfig config) {
+        if (config == null) {
+            return false;
+        }
+        if ("mock".equalsIgnoreCase(config.getProvider())) {
+            return false;
+        }
+        if (config.getVendorAccountId() != null) {
+            ModelVendorAccount account = vendorAccountMapper.findActiveById(config.getVendorAccountId());
+            return account != null && accountHasValidCredential(account);
+        }
+        return hasSecret(config.getApiKey()) || hasSecret(config.getExtraAuthJson());
+    }
+
+    private boolean accountHasValidCredential(ModelVendorAccount account) {
+        if (account == null) {
+            return false;
+        }
+        return hasSecret(account.getApiKey()) || hasSecret(account.getExtraAuthJson());
+    }
+
+    private String describeModelConfig(AgentModelConfig config) {
+        if (config == null) {
+            return "<missing>";
+        }
+        String code = isBlank(config.getConfigCode()) ? "model_" + config.getId() : config.getConfigCode().trim();
+        return code + " (#" + config.getId() + ")";
     }
 
     private String cleanExtraAuthJson(String json, List<String> warnings, String subject) {
@@ -873,16 +995,20 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
     }
 
     private void importWorkflow(Long toolId, ConfigBundleDto.Workflow workflow, Long operatorId, ImportCounter counter) {
-        if (workflow == null || isBlank(workflow.workflowName())
-                || isBlank(workflow.nodesJson()) || isBlank(workflow.edgesJson())) {
+        if (workflow == null || isBlank(workflow.workflowName())) {
+            return;
+        }
+        String nodesJson = workflow.resolvedNodesJson();
+        String edgesJson = workflow.resolvedEdgesJson();
+        if (isBlank(nodesJson) || isBlank(edgesJson)) {
             return;
         }
         workflowService.saveWorkflow(toolId, new UpsertWorkflowRequest(
                 workflow.workflowName(),
-                workflow.nodesJson(),
-                workflow.edgesJson(),
-                workflow.groupsJson(),
-                workflow.configJson(),
+                nodesJson,
+                edgesJson,
+                workflow.resolvedGroupsJson(),
+                workflow.resolvedConfigJson(),
                 workflow.status()
         ), operatorId);
         counter.workflows++;

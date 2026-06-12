@@ -26,10 +26,14 @@ class SeedanceVideoClient:
         poll_interval_seconds: int | None = None,
         timeout_seconds: int | None = None,
     ) -> None:
-        self.base_url = (base_url or settings.seedance_base_url).rstrip("/")
+        normalized_base, normalized_path = self._normalize_endpoint(
+            (base_url or settings.seedance_base_url).rstrip("/"),
+            create_path or settings.seedance_video_create_path,
+        )
+        self.base_url = normalized_base
         self.api_key = api_key if api_key is not None else settings.seedance_api_key
         self.default_model = default_model or settings.seedance_video_model
-        self.create_path = create_path or settings.seedance_video_create_path
+        self.create_path = normalized_path
         self.poll_interval_seconds = (
             poll_interval_seconds if poll_interval_seconds is not None else settings.seedance_video_poll_interval_seconds
         )
@@ -38,6 +42,15 @@ class SeedanceVideoClient:
         )
         self.timeout = (10, 300)
         self.session = requests.Session()
+
+    @staticmethod
+    def _normalize_endpoint(base_url: str, path: str) -> tuple[str, str]:
+        normalized_path = path if path.startswith("/") else f"/{path}"
+        normalized_base = base_url.rstrip("/")
+        # Model configs often store baseUrl with /api/v3 while worker defaults include the same prefix.
+        if normalized_base.endswith("/api/v3") and normalized_path.startswith("/api/v3/"):
+            normalized_path = normalized_path[len("/api/v3") :] or "/contents/generations/tasks"
+        return normalized_base, normalized_path
 
     @classmethod
     def from_model_config(cls, model_config: dict[str, Any] | None) -> "SeedanceVideoClient":

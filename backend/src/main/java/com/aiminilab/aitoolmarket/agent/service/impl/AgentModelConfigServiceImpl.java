@@ -371,8 +371,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
     }
 
     private MediaGatewayProbeResult probeMediaGateway(String baseUrl, String apiKey) {
-        String normalized = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
-        String probeUrl = normalized.endsWith("/v1") ? normalized + "/models" : normalized + "/v1/models";
+        String probeUrl = com.aiminilab.aitoolmarket.agent.support.OpenAiCompatibleModelsEndpoint.resolve(baseUrl);
         try {
             java.net.http.HttpClient client = com.aiminilab.aitoolmarket.agent.support.OutboundHttpClientFactory
                     .create(java.time.Duration.ofSeconds(8));

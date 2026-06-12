@@ -436,6 +436,25 @@ export interface RegenerateTaskRequest {
   clientRequestId?: string
 }
 
+export interface WorkflowStagePreview {
+  stageLabel?: string
+  fieldKey?: string
+  currentNodeId?: string
+  script?: {
+    sceneTitle?: string
+    sceneDescription?: string
+    dialogue?: string
+    narration?: string
+    subtitleZh?: string
+    subtitleEn?: string
+    presenterGender?: string
+  }
+  imageUrl?: string
+  audioUrl?: string
+  videoUrl?: string
+  finalVideoUrl?: string
+}
+
 /** GET /api/v1/tasks/{taskId}/status —— 轮询用精简状态 */
 export interface TaskStatusPayload {
   taskId: number
@@ -444,6 +463,7 @@ export interface TaskStatusPayload {
   status: TaskStatus
   progress?: number
   progressMessage?: string
+  workflowPreview?: WorkflowStagePreview | null
 }
 
 /** 任务结果 */

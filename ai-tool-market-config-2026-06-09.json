@@ -1,7 +1,7 @@
 {
     "format": "ai-tool-market-config-bundle",
     "version": 1,
-    "exportedAt": "2026-06-08T23:59:00+08:00",
+    "exportedAt": "2026-06-11T18:30:00+08:00",
     "exportedBy": "1",
     "secretsRedacted": false,
     "settings": {
@@ -12,6 +12,14 @@
         "customerService.description": "扫码添加客服，获取使用支持",
         "customerService.enabled": "true",
         "customerService.qrCodeUrl": "/generated/customer-service/customer-service-20260529072207.jpg",
+        "assetStorage.provider": "oss",
+        "assetStorage.publicBaseUrl": "https://wlcloudai-assets-prod.oss-cn-guangzhou.aliyuncs.com",
+        "assetStorage.ossEndpoint": "oss-cn-guangzhou.aliyuncs.com",
+        "assetStorage.ossBucketProd": "wlcloudai-assets-prod",
+        "assetStorage.ossBucketDev": "wlcloudai-assets-dev",
+        "assetStorage.note": "OSS AK in .env (ALIYUN_CAPTCHA_ACCESS_KEY_ID or OSS_ACCESS_KEY_ID). Legacy /generated/* still served from local volume until migrated.",
+        "assetStorage.switchGuide": "Set ASSET_STORAGE_PROVIDER=local|oss in .env then docker compose restart backend worker. local: ASSET_STORAGE_PUBLIC_BASE_URL=/generated + volume data/generated-media. oss: ASSET_STORAGE_PUBLIC_BASE_URL=https://<bucket>.oss-cn-guangzhou.aliyuncs.com + OSS_ENDPOINT/OSS_BUCKET + AK. Dev bucket wlcloudai-assets-dev, prod wlcloudai-assets-prod. CD preserves server .env.",
+        "workflow.comicDrama.previewNote": "Stage preview maps script/dialogue/subtitleZh at script stages, keyframe at scene stage, persisted audioUrl at BGM stage; clip/final video persisted to OSS before compose.",
         "customerService.title": "联系客服",
         "note": "Only tool/category definitions; model configs are reused by configCode.",
         "platform.description": "一站式 AI 运营助手，帮助企业提升内容生产与运营效率。",
@@ -780,7 +788,7 @@
             "channelLabel": null,
             "channelIconAsset": null,
             "provider": "openai_compatible",
-            "modelName": "doubao-seed-2.0-pro",
+            "modelName": "doubao-seed-2-0-pro-260215",
             "baseUrl": "https://ark.cn-beijing.volces.com/api/v3",
             "apiKey": "",
             "extraAuthJson": "",
@@ -1278,7 +1286,7 @@
             "channelIconAsset": null,
             "provider": "seedance",
             "modelName": "doubao-seedance-1-5-pro-251215",
-            "baseUrl": "https://ark.cn-beijing.volces.com/api/v3",
+            "baseUrl": "https://ark.cn-beijing.volces.com",
             "apiKey": "",
             "extraAuthJson": "",
             "secretsRedacted": false,
@@ -2829,7 +2837,10 @@
                         "targetHandle": "in-finalVideo",
                         "type": "smoothstep"
                     }
-                ]
+                ],
+                "nodesJson": "[{\"id\":\"start\",\"type\":\"workflowNode\",\"position\":{\"x\":40,\"y\":280},\"data\":{\"title\":\"Start\",\"nodeDefType\":\"start\",\"kind\":\"start\",\"color\":\"#10b981\",\"outputSlots\":[{\"name\":\"context\",\"type\":\"json\",\"label\":\"会话上下文\"}]}},{\"id\":\"field-input\",\"type\":\"workflowNode\",\"position\":{\"x\":400,\"y\":280},\"data\":{\"title\":\"初始表单\",\"nodeDefType\":\"field_input\",\"kind\":\"input\",\"color\":\"#64748b\",\"inputSlots\":[{\"name\":\"context\",\"type\":\"json\",\"label\":\"会话上下文\"}],\"outputSlots\":[{\"name\":\"params\",\"type\":\"json\",\"label\":\"用户填写参数\"}]}},{\"id\":\"script-planner\",\"type\":\"workflowNode\",\"position\":{\"x\":780,\"y\":280},\"data\":{\"title\":\"剧本与分镜\",\"nodeDefType\":\"llm_text\",\"kind\":\"model\",\"color\":\"#3b82f6\",\"inputSlots\":[{\"name\":\"form\",\"type\":\"json\",\"label\":\"初始表单\"}],\"outputSlots\":[{\"name\":\"script\",\"type\":\"json\",\"label\":\"剧本分镜\"}],\"parameters\":{\"modelConfigId\":29,\"role\":\"comic_script_planner\",\"progressStep\":\"生成剧本与分镜\"}}},{\"id\":\"user-input-script\",\"type\":\"workflowNode\",\"position\":{\"x\":1140,\"y\":60},\"data\":{\"title\":\"脚本意见\",\"nodeDefType\":\"user_input\",\"kind\":\"input\",\"color\":\"#0ea5e9\",\"inputSlots\":[{\"name\":\"upstream\",\"type\":\"any\",\"label\":\"上一步结果\"}],\"outputSlots\":[{\"name\":\"scriptFeedback\",\"type\":\"text\",\"label\":\"脚本意见\"}],\"parameters\":{\"fieldKey\":\"scriptFeedback\",\"stageLabel\":\"脚本意见\"}}},{\"id\":\"user-input-storyboard\",\"type\":\"workflowNode\",\"position\":{\"x\":1140,\"y\":280},\"data\":{\"title\":\"分镜意见\",\"nodeDefType\":\"user_input\",\"kind\":\"input\",\"color\":\"#0ea5e9\",\"inputSlots\":[{\"name\":\"upstream\",\"type\":\"any\",\"label\":\"上一步结果\"}],\"outputSlots\":[{\"name\":\"storyboardFeedback\",\"type\":\"text\",\"label\":\"分镜意见\"}],\"parameters\":{\"fieldKey\":\"storyboardFeedback\",\"stageLabel\":\"分镜意见\"}}},{\"id\":\"keyframe\",\"type\":\"workflowNode\",\"position\":{\"x\":1500,\"y\":280},\"data\":{\"title\":\"电影感关键帧\",\"nodeDefType\":\"image_model\",\"kind\":\"model\",\"color\":\"#ec4899\",\"inputSlots\":[{\"name\":\"script\",\"type\":\"json\",\"label\":\"剧本分镜\"},{\"name\":\"form\",\"type\":\"json\",\"label\":\"表单参数\"}],\"outputSlots\":[{\"name\":\"keyframe\",\"type\":\"image\",\"label\":\"关键帧\"}],\"parameters\":{\"modelConfigId\":4,\"progressStep\":\"生成电影感关键帧\"}}},{\"id\":\"user-input-scene\",\"type\":\"workflowNode\",\"position\":{\"x\":1860,\"y\":60},\"data\":{\"title\":\"场景图意见\",\"nodeDefType\":\"user_input\",\"kind\":\"input\",\"color\":\"#0ea5e9\",\"inputSlots\":[{\"name\":\"upstream\",\"type\":\"any\",\"label\":\"上一步结果\"}],\"outputSlots\":[{\"name\":\"sceneFeedback\",\"type\":\"text\",\"label\":\"场景图意见\"}],\"parameters\":{\"fieldKey\":\"sceneFeedback\",\"stageLabel\":\"场景图意见\"}}},{\"id\":\"tts\",\"type\":\"workflowNode\",\"position\":{\"x\":1860,\"y\":420},\"data\":{\"title\":\"角色配音\",\"nodeDefType\":\"tts_model\",\"kind\":\"model\",\"color\":\"#8b5cf6\",\"inputSlots\":[{\"name\":\"script\",\"type\":\"json\",\"label\":\"剧本分镜\"}],\"outputSlots\":[{\"name\":\"audio\",\"type\":\"audio\",\"label\":\"配音音频\"}],\"parameters\":{\"modelConfigId\":2,\"progressStep\":\"生成角色配音\"}}},{\"id\":\"user-input-bgm\",\"type\":\"workflowNode\",\"position\":{\"x\":2220,\"y\":60},\"data\":{\"title\":\"BGM意见\",\"nodeDefType\":\"user_input\",\"kind\":\"input\",\"color\":\"#0ea5e9\",\"inputSlots\":[{\"name\":\"upstream\",\"type\":\"any\",\"label\":\"上一步结果\"}],\"outputSlots\":[{\"name\":\"bgmFeedback\",\"type\":\"text\",\"label\":\"BGM意见\"}],\"parameters\":{\"fieldKey\":\"bgmFeedback\",\"stageLabel\":\"BGM意见\"}}},{\"id\":\"clip-video\",\"type\":\"workflowNode\",\"position\":{\"x\":2220,\"y\":420},\"data\":{\"title\":\"图生视频\",\"nodeDefType\":\"video_model\",\"kind\":\"model\",\"color\":\"#f97316\",\"inputSlots\":[{\"name\":\"keyframe\",\"type\":\"image\",\"label\":\"关键帧\"},{\"name\":\"script\",\"type\":\"json\",\"label\":\"剧本分镜\"}],\"outputSlots\":[{\"name\":\"clip\",\"type\":\"video\",\"label\":\"视频片段\"}],\"parameters\":{\"modelConfigId\":5,\"progressStep\":\"图生视频\"}}},{\"id\":\"compose\",\"type\":\"workflowNode\",\"position\":{\"x\":2580,\"y\":280},\"data\":{\"title\":\"字幕合成\",\"nodeDefType\":\"subtitle\",\"kind\":\"tool\",\"color\":\"#f97316\",\"inputSlots\":[{\"name\":\"clip\",\"type\":\"video\",\"label\":\"视频片段\"},{\"name\":\"audio\",\"type\":\"audio\",\"label\":\"配音音频\"},{\"name\":\"script\",\"type\":\"json\",\"label\":\"剧本分镜\"}],\"outputSlots\":[{\"name\":\"finalVideo\",\"type\":\"video\",\"label\":\"成片\"}],\"parameters\":{\"progressStep\":\"字幕与音视频合成\"}}},{\"id\":\"output\",\"type\":\"workflowNode\",\"position\":{\"x\":2940,\"y\":280},\"data\":{\"title\":\"成片输出\",\"nodeDefType\":\"video_output\",\"kind\":\"output\",\"color\":\"#ef4444\",\"inputSlots\":[{\"name\":\"finalVideo\",\"type\":\"video\",\"label\":\"成片\"}],\"parameters\":{\"displayMode\":\"video\"}}}]",
+                "edgesJson": "[{\"id\":\"e-start-field\",\"source\":\"start\",\"target\":\"field-input\",\"sourceHandle\":\"out-context\",\"targetHandle\":\"in-context\",\"type\":\"smoothstep\"},{\"id\":\"e-field-script\",\"source\":\"field-input\",\"target\":\"script-planner\",\"sourceHandle\":\"out-params\",\"targetHandle\":\"in-form\",\"type\":\"smoothstep\"},{\"id\":\"e-script-feedback\",\"source\":\"script-planner\",\"target\":\"user-input-script\",\"sourceHandle\":\"out-script\",\"targetHandle\":\"in-upstream\",\"type\":\"smoothstep\"},{\"id\":\"e-script-storyboard\",\"source\":\"script-planner\",\"target\":\"user-input-storyboard\",\"sourceHandle\":\"out-script\",\"targetHandle\":\"in-upstream\",\"type\":\"smoothstep\"},{\"id\":\"e-storyboard-keyframe\",\"source\":\"user-input-storyboard\",\"target\":\"keyframe\",\"sourceHandle\":\"out-storyboardFeedback\",\"targetHandle\":\"in-script\",\"type\":\"smoothstep\"},{\"id\":\"e-field-keyframe\",\"source\":\"field-input\",\"target\":\"keyframe\",\"sourceHandle\":\"out-params\",\"targetHandle\":\"in-form\",\"type\":\"smoothstep\"},{\"id\":\"e-keyframe-scene\",\"source\":\"keyframe\",\"target\":\"user-input-scene\",\"sourceHandle\":\"out-keyframe\",\"targetHandle\":\"in-upstream\",\"type\":\"smoothstep\"},{\"id\":\"e-script-tts\",\"source\":\"script-planner\",\"target\":\"tts\",\"sourceHandle\":\"out-script\",\"targetHandle\":\"in-script\",\"type\":\"smoothstep\"},{\"id\":\"e-tts-bgm\",\"source\":\"tts\",\"target\":\"user-input-bgm\",\"sourceHandle\":\"out-audio\",\"targetHandle\":\"in-upstream\",\"type\":\"smoothstep\"},{\"id\":\"e-keyframe-clip\",\"source\":\"keyframe\",\"target\":\"clip-video\",\"sourceHandle\":\"out-keyframe\",\"targetHandle\":\"in-keyframe\",\"type\":\"smoothstep\"},{\"id\":\"e-script-clip\",\"source\":\"script-planner\",\"target\":\"clip-video\",\"sourceHandle\":\"out-script\",\"targetHandle\":\"in-script\",\"type\":\"smoothstep\"},{\"id\":\"e-clip-compose\",\"source\":\"clip-video\",\"target\":\"compose\",\"sourceHandle\":\"out-clip\",\"targetHandle\":\"in-clip\",\"type\":\"smoothstep\"},{\"id\":\"e-tts-compose\",\"source\":\"tts\",\"target\":\"compose\",\"sourceHandle\":\"out-audio\",\"targetHandle\":\"in-audio\",\"type\":\"smoothstep\"},{\"id\":\"e-script-compose\",\"source\":\"script-planner\",\"target\":\"compose\",\"sourceHandle\":\"out-script\",\"targetHandle\":\"in-script\",\"type\":\"smoothstep\"},{\"id\":\"e-compose-output\",\"source\":\"compose\",\"target\":\"output\",\"sourceHandle\":\"out-finalVideo\",\"targetHandle\":\"in-finalVideo\",\"type\":\"smoothstep\"}]",
+                "configJson": "{\"modelConfigIds\":{\"script-planner\":29,\"keyframe\":4,\"tts\":2,\"clip-video\":5},\"version\":7}"
             }
         },
         {

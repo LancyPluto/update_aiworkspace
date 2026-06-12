@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 
 import requests
 
-from config import settings
+from storage.asset_storage import asset_storage
 
 
 class GeneratedAudioPersistError(RuntimeError):
@@ -47,8 +47,7 @@ class GeneratedAudioPersister:
     _ALLOWED_EXTENSIONS = {".mp3", ".wav", ".flac", ".ogg", ".aac", ".m4a", ".webm", ".pcm"}
 
     def __init__(self) -> None:
-        self.output_dir = Path(settings.generated_media_dir)
-        self.public_base_url = settings.generated_media_public_base_url.rstrip("/")
+        self.output_dir = asset_storage.local_root
         self.timeout = (10, 120)
 
     def persist_audio_bytes(
@@ -64,17 +63,16 @@ class GeneratedAudioPersister:
         if not audio_bytes:
             raise GeneratedAudioPersistError("generated audio is empty")
 
-        task_dir = self.output_dir / "audio" / str(task_id)
-        task_dir.mkdir(parents=True, exist_ok=True)
         resolved_extension = self._normalize_extension(extension) or self._resolve_extension(source_url, content_type)
         safe_index = max(int(index or 1), 1)
-        path = task_dir / f"audio-{safe_index}{resolved_extension}"
+        relative_key = f"audio/{task_id}/audio-{safe_index}{resolved_extension}"
         try:
-            path.write_bytes(audio_bytes)
-        except OSError as exc:
+            url = asset_storage.put_bytes(relative_key, audio_bytes, content_type)
+        except Exception as exc:
             raise GeneratedAudioPersistError(f"write generated audio failed: {exc}") from exc
+        path = asset_storage.local_path(relative_key)
         return PersistedAudio(
-            url=self._public_url(path),
+            url=url,
             source_url=source_url,
             path=path,
             content_type=content_type,
@@ -140,6 +138,3 @@ class GeneratedAudioPersister:
             return value
         return None
 
-    def _public_url(self, audio_path: Path) -> str:
-        relative_path = audio_path.relative_to(self.output_dir).as_posix()
-        return f"{self.public_base_url}/{relative_path}"

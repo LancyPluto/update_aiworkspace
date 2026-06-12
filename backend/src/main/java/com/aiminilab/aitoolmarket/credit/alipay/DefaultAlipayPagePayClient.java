@@ -3,6 +3,7 @@ package com.aiminilab.aitoolmarket.credit.alipay;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.config.AppProperties;
+import com.aiminilab.aitoolmarket.credit.dto.AlipayPayDiagnosticResponse;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Component;
@@ -31,6 +32,10 @@ import java.util.stream.Collectors;
 public class DefaultAlipayPagePayClient implements AlipayPagePayClient {
     private static final DateTimeFormatter EXPIRE_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
+    private static final String PERMISSION_PROBE_METHOD = "alipay.trade.query";
+    private static final String DIAGNOSTIC_TOOL_URL =
+            "https://opensupport.alipay.com/support/diagnostic-tools/0c3f29c0-b276-42e2-ba37-7e8ee57fb4be";
+
     private final AppProperties.AlipayPage properties;
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient = HttpClient.newHttpClient();
@@ -43,18 +48,8 @@ public class DefaultAlipayPagePayClient implements AlipayPagePayClient {
     @Override
     public AlipayPagePayResponse createPagePayOrder(AlipayPagePayRequest request) {
         requireEnabled();
-        if (isPagePayMode()) {
-            String launchPath = "/api/v1/pay/alipay/page/launch?orderNo=" + url(request.outTradeNo());
-            return AlipayPagePayResponse.pageRedirect(launchPath);
-        }
-        try {
-            String qrCode = createPrecreateQrCode(request);
-            return AlipayPagePayResponse.qr(qrCode);
-        } catch (BusinessException exception) {
-            throw exception;
-        } catch (Exception exception) {
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "create Alipay QR pay order failed: " + exception.getMessage());
-        }
+        String launchPath = "/api/v1/pay/alipay/page/launch?orderNo=" + url(request.outTradeNo());
+        return AlipayPagePayResponse.pageRedirect(launchPath);
     }
 
     @Override
@@ -69,25 +64,8 @@ public class DefaultAlipayPagePayClient implements AlipayPagePayClient {
         }
     }
 
-    private String createPrecreateQrCode(AlipayPagePayRequest request) throws Exception {
-        Map<String, String> params = buildSignedParams(request, "alipay.trade.precreate", false);
-        String responseBody = postForm(properties.getGatewayUrl(), encode(params));
-        JsonNode json = objectMapper.readTree(responseBody);
-        JsonNode precreate = json.path("alipay_trade_precreate_response");
-        String code = precreate.path("code").asText("");
-        if (!"10000".equals(code)) {
-            String msg = precreate.path("sub_msg").asText(precreate.path("msg").asText("Alipay precreate failed"));
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "create Alipay QR pay order failed: " + normalizeAlipayError(msg));
-        }
-        String qrCode = precreate.path("qr_code").asText("");
-        if (qrCode.isBlank()) {
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "create Alipay QR pay order failed: missing qr_code");
-        }
-        return qrCode;
-    }
-
     private String buildAutoSubmitForm(AlipayPagePayRequest request) throws Exception {
-        Map<String, String> params = buildSignedParams(request, "alipay.trade.page.pay", true);
+        Map<String, String> params = buildSignedParams(request);
         StringBuilder html = new StringBuilder();
         html.append("<!DOCTYPE html><html><head><meta charset=\"UTF-8\"><title>跳转支付宝</title></head><body>");
         html.append("<form id=\"alipaySubmit\" name=\"alipaySubmit\" action=\"")
@@ -104,27 +82,25 @@ public class DefaultAlipayPagePayClient implements AlipayPagePayClient {
         return html.toString();
     }
 
-    private Map<String, String> buildSignedParams(AlipayPagePayRequest request, String method, boolean pagePay) throws Exception {
+    private Map<String, String> buildSignedParams(AlipayPagePayRequest request) throws Exception {
         Map<String, String> bizContent = new TreeMap<>();
         bizContent.put("out_trade_no", request.outTradeNo());
         bizContent.put("total_amount", request.totalAmount().setScale(2).toPlainString());
         bizContent.put("subject", request.subject());
-        if (pagePay) {
-            bizContent.put("product_code", "FAST_INSTANT_TRADE_PAY");
-        }
+        bizContent.put("product_code", "FAST_INSTANT_TRADE_PAY");
         if (request.expiresAt() != null) {
             bizContent.put("time_expire", EXPIRE_FORMAT.format(request.expiresAt()));
         }
         Map<String, String> params = new TreeMap<>();
         params.put("app_id", properties.getAppId());
-        params.put("method", method);
-        params.put("format", pagePay ? "JSON" : "JSON");
+        params.put("method", "alipay.trade.page.pay");
+        params.put("format", "JSON");
         params.put("charset", "UTF-8");
         params.put("sign_type", "RSA2");
         params.put("timestamp", EXPIRE_FORMAT.format(java.time.LocalDateTime.now()));
         params.put("version", "1.0");
         params.put("notify_url", properties.getNotifyUrl());
-        if (pagePay && StringUtils.hasText(properties.getReturnUrl())) {
+        if (StringUtils.hasText(properties.getReturnUrl())) {
             params.put("return_url", properties.getReturnUrl());
         }
         params.put("biz_content", objectMapper.writeValueAsString(bizContent));
@@ -132,8 +108,60 @@ public class DefaultAlipayPagePayClient implements AlipayPagePayClient {
         return params;
     }
 
-    private boolean isPagePayMode() {
-        return "PAGE".equalsIgnoreCase(properties.getPayMode());
+    @Override
+    public AlipayPayDiagnosticResponse buildDiagnostic(AlipayPagePayRequest request) {
+        requireEnabled();
+        try {
+            Map<String, String> pageParams = buildSignedParams(request);
+            JsonNode biz = objectMapper.readTree(pageParams.get("biz_content"));
+            JsonNode probe = probePermission(request.outTradeNo());
+            JsonNode error = probe.path("error_response");
+            JsonNode query = probe.path("alipay_trade_query_response");
+            JsonNode source = !error.isMissingNode() && !error.isNull() ? error : query;
+            String traceId = textOrNull(source, "trace_id");
+            if (traceId == null) {
+                traceId = extractTraceIdFromMessage(textOrNull(source, "sub_msg"));
+            }
+            return new AlipayPayDiagnosticResponse(
+                    properties.getAppId(),
+                    pageParams.get("method"),
+                    request.outTradeNo(),
+                    textOrNull(biz, "product_code"),
+                    textOrNull(biz, "total_amount"),
+                    properties.getNotifyUrl(),
+                    properties.getReturnUrl(),
+                    properties.getGatewayUrl(),
+                    pageParams.get("biz_content"),
+                    PERMISSION_PROBE_METHOD,
+                    traceId,
+                    textOrNull(source, "code"),
+                    textOrNull(source, "sub_code"),
+                    textOrNull(source, "sub_msg"),
+                    DIAGNOSTIC_TOOL_URL,
+                    Map.copyOf(pageParams)
+            );
+        } catch (BusinessException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "build Alipay diagnostic failed: " + exception.getMessage());
+        }
+    }
+
+    private JsonNode probePermission(String outTradeNo) throws Exception {
+        Map<String, String> bizContent = new TreeMap<>();
+        bizContent.put("out_trade_no", outTradeNo);
+        Map<String, String> params = new TreeMap<>();
+        params.put("app_id", properties.getAppId());
+        params.put("method", PERMISSION_PROBE_METHOD);
+        params.put("format", "JSON");
+        params.put("charset", "UTF-8");
+        params.put("sign_type", "RSA2");
+        params.put("timestamp", EXPIRE_FORMAT.format(java.time.LocalDateTime.now()));
+        params.put("version", "1.0");
+        params.put("biz_content", objectMapper.writeValueAsString(bizContent));
+        params.put("sign", sign(canonicalPayload(params), privateKey()));
+        String responseBody = postForm(properties.getGatewayUrl(), encode(params));
+        return objectMapper.readTree(responseBody);
     }
 
     @Override
@@ -193,13 +221,25 @@ public class DefaultAlipayPagePayClient implements AlipayPagePayClient {
         return KeyFactory.getInstance("RSA").generatePublic(new X509EncodedKeySpec(decoded));
     }
 
-    private String canonicalPayload(Map<String, String> params) {
-        return params.entrySet().stream()
-                .filter(entry -> entry.getValue() != null)
-                .filter(entry -> !"sign".equals(entry.getKey()))
-                .sorted(Map.Entry.comparingByKey())
-                .map(entry -> entry.getKey() + "=" + entry.getValue())
-                .collect(Collectors.joining("&"));
+    private String extractTraceIdFromMessage(String message) {
+        if (message == null || message.isBlank()) {
+            return null;
+        }
+        int marker = message.indexOf("traceId=");
+        if (marker < 0) {
+            return null;
+        }
+        String tail = message.substring(marker + "traceId=".length());
+        int end = tail.indexOf('&');
+        return end < 0 ? tail.trim() : tail.substring(0, end).trim();
+    }
+
+    private String textOrNull(JsonNode node, String field) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return null;
+        }
+        String value = node.path(field).asText("");
+        return value.isBlank() ? null : value;
     }
 
     private String encode(Map<String, String> params) {
@@ -208,9 +248,9 @@ public class DefaultAlipayPagePayClient implements AlipayPagePayClient {
                 .collect(Collectors.joining("&"));
     }
 
-    private String postForm(String url, String formBody) throws Exception {
+    private String postForm(String gatewayUrl, String formBody) throws Exception {
         HttpRequest httpRequest = HttpRequest.newBuilder()
-                .uri(URI.create(url))
+                .uri(URI.create(gatewayUrl))
                 .header("Content-Type", "application/x-www-form-urlencoded;charset=UTF-8")
                 .header("Accept", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(formBody, StandardCharsets.UTF_8))
@@ -222,18 +262,13 @@ public class DefaultAlipayPagePayClient implements AlipayPagePayClient {
         return response.body();
     }
 
-    private String normalizeAlipayError(String message) {
-        if (message == null || message.isBlank()) {
-            return "Alipay precreate failed";
-        }
-        if (message.contains("接口调用权限不足")) {
-            if (isPagePayMode()) {
-                return "支付宝应用缺少 alipay.trade.page.pay（电脑网站支付）接口权限，请在开放平台确认电脑支付已签约并添加到本应用";
-            }
-            return "支付宝应用缺少 alipay.trade.precreate（扫码预下单/当面付）接口权限。"
-                    + " 若你已开通的是「电脑网站支付」，请将 ALIPAY_PAY_MODE 设为 PAGE；若需扫码支付，请额外开通「当面付」产品";
-        }
-        return message;
+    private String canonicalPayload(Map<String, String> params) {
+        return params.entrySet().stream()
+                .filter(entry -> entry.getValue() != null)
+                .filter(entry -> !"sign".equals(entry.getKey()))
+                .sorted(Map.Entry.comparingByKey())
+                .map(entry -> entry.getKey() + "=" + entry.getValue())
+                .collect(Collectors.joining("&"));
     }
 
     private String escapeHtml(String value) {

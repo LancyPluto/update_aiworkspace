@@ -2,8 +2,9 @@ package com.aiminilab.aitoolmarket.tool.service.impl;
 
 import com.aiminilab.aitoolmarket.common.cache.BypassCacheService;
 import com.aiminilab.aitoolmarket.common.cache.CacheNamespaces;
-import com.aiminilab.aitoolmarket.config.AppProperties;
 import com.aiminilab.aitoolmarket.support.GeneratedMediaPathSupport;
+import com.aiminilab.aitoolmarket.storage.AssetStorageService;
+import com.aiminilab.aitoolmarket.storage.StoredAsset;
 import com.aiminilab.aitoolmarket.common.dto.PageResponse;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.enums.ExecutionHandler;
@@ -95,7 +96,7 @@ public class ToolServiceImpl implements ToolService {
     private final ToolTemplateService toolTemplateService;
     private final ModelCapabilityService modelCapabilityService;
     private final TaskCreditEstimateService taskCreditEstimateService;
-    private final AppProperties appProperties;
+    private final AssetStorageService assetStorageService;
     private final GeneratedMediaPathSupport generatedMediaPathSupport;
     private final ToolIntegrationResolver toolIntegrationResolver;
     private final ToolIntegrationRegistry toolIntegrationRegistry;
@@ -107,7 +108,7 @@ public class ToolServiceImpl implements ToolService {
                            ObjectMapper objectMapper, ToolTemplateService toolTemplateService,
                            ModelCapabilityService modelCapabilityService,
                            TaskCreditEstimateService taskCreditEstimateService,
-                           AppProperties appProperties,
+                           AssetStorageService assetStorageService,
                            GeneratedMediaPathSupport generatedMediaPathSupport,
                            ToolIntegrationResolver toolIntegrationResolver,
                            ToolIntegrationRegistry toolIntegrationRegistry,
@@ -122,7 +123,7 @@ public class ToolServiceImpl implements ToolService {
         this.toolTemplateService = toolTemplateService;
         this.modelCapabilityService = modelCapabilityService;
         this.taskCreditEstimateService = taskCreditEstimateService;
-        this.appProperties = appProperties;
+        this.assetStorageService = assetStorageService;
         this.generatedMediaPathSupport = generatedMediaPathSupport;
         this.toolIntegrationResolver = toolIntegrationResolver;
         this.toolIntegrationRegistry = toolIntegrationRegistry;
@@ -324,18 +325,17 @@ public class ToolServiceImpl implements ToolService {
                 safeFilenamePart(modelName, "model")
         ).replaceAll("-{2,}", "-");
         String filename = baseName + "-" + LocalDateTime.now().format(COVER_FILENAME_TIME) + "." + extension;
-        Path dir = Path.of(appProperties.getGeneratedMediaDir()).resolve("tool-covers").normalize().toAbsolutePath();
-        Path target = dir.resolve(filename).normalize();
+        StoredAsset stored;
         try {
-            Files.createDirectories(dir);
-            file.transferTo(target);
-        } catch (IOException ex) {
+            stored = assetStorageService.storeMultipart("tool-covers/" + filename, file);
+        } catch (BusinessException ex) {
+            throw ex;
+        } catch (RuntimeException ex) {
             log.warn("Failed to store tool cover upload: filename={}, contentType={}, size={}",
                     originalFilename, file.getContentType(), file.getSize(), ex);
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "工具展示素材保存失败，请查看后端日志");
         }
-
-        String url = "/generated/tool-covers/" + filename;
+        String url = stored.publicUrl();
         log.info("Admin uploaded tool cover: url={}, originalFilename={}, contentType={}, size={}",
                 url, originalFilename, file.getContentType(), file.getSize());
         return new ToolCoverUploadResponse(url, filename, defaultString(file.getContentType()), file.getSize());

@@ -603,8 +603,19 @@ public class WorkflowExecutionService {
         return node;
     }
 
+    /**
+     * Snapshot upstream node outputs for the terminal video_output node.
+     * Must not return {@code context} itself — that creates a self-reference
+     * (artifacts → context → video-output → artifacts) and Jackson fails at ~1000 nesting depth.
+     */
     private JsonNode collectArtifacts(ObjectNode context) {
-        return context;
+        ObjectNode artifacts = objectMapper.createObjectNode();
+        context.fields().forEachRemaining(entry -> {
+            if (!"video-output".equals(entry.getKey())) {
+                artifacts.set(entry.getKey(), entry.getValue());
+            }
+        });
+        return artifacts;
     }
 
     private JsonNode readUserInputStage(WorkflowRun run, WorkflowNodeDef node) {
@@ -725,6 +736,158 @@ public class WorkflowExecutionService {
             return revisions.get(fieldKey).asText("");
         }
         return null;
+    }
+
+    public JsonNode buildWorkflowPreview(Long rootTaskId) {
+        WorkflowRun run = workflowRunMapper.findByRootTaskId(rootTaskId).orElse(null);
+        if (run == null) {
+            return null;
+        }
+        ObjectNode context = readContext(run);
+        ObjectNode preview = objectMapper.createObjectNode();
+        String fieldKey = resolveAwaitingFieldKey(run);
+        String stageLabel = null;
+        if (run.getCurrentNodeId() != null && !run.getCurrentNodeId().isBlank()) {
+            try {
+                WorkflowDsl dsl = workflowDslService.findPublishedWorkflow(run.getToolId())
+                        .map(workflowDslService::parse)
+                        .orElse(null);
+                if (dsl != null) {
+                    WorkflowNodeDef node = dsl.requireNode(run.getCurrentNodeId());
+                    stageLabel = text(node.parameters(), "stageLabel");
+                    if (fieldKey == null || fieldKey.isBlank()) {
+                        fieldKey = text(node.parameters(), "fieldKey");
+                    }
+                }
+            } catch (Exception exception) {
+                LOGGER.warn("build workflow preview node lookup failed runId={}", run.getId(), exception);
+            }
+        }
+        if (stageLabel != null && !stageLabel.isBlank()) {
+            preview.put("stageLabel", stageLabel);
+        }
+        if (fieldKey != null && !fieldKey.isBlank()) {
+            preview.put("fieldKey", fieldKey);
+        }
+        if (run.getCurrentNodeId() != null && !run.getCurrentNodeId().isBlank()) {
+            preview.put("currentNodeId", run.getCurrentNodeId());
+        }
+
+        JsonNode script = summarizeScriptPreview(context.path("script-planner"));
+        if (script != null && !script.isMissingNode() && !script.isNull()) {
+            preview.set("script", script);
+        }
+        String imageUrl = text(context.path("keyframe"), "imageUrl");
+        if (imageUrl != null && !imageUrl.isBlank()) {
+            preview.put("imageUrl", imageUrl);
+        }
+        String audioUrl = text(context.path("tts"), "audioUrl");
+        if (audioUrl == null || audioUrl.isBlank()) {
+            audioUrl = text(context.path("tts"), "audioDataUrl");
+        }
+        if (audioUrl != null && !audioUrl.isBlank()) {
+            preview.put("audioUrl", audioUrl);
+        }
+        String videoUrl = text(context.path("clip-video"), "videoUrl");
+        if (videoUrl != null && !videoUrl.isBlank()) {
+            preview.put("videoUrl", videoUrl);
+        }
+        JsonNode compose = context.path("compose");
+        if (compose.isMissingNode()) {
+            compose = context.path("subtitle");
+        }
+        String finalVideoUrl = text(compose, "finalVideoUrl");
+        if (finalVideoUrl == null || finalVideoUrl.isBlank()) {
+            finalVideoUrl = text(compose, "videoUrl");
+        }
+        if (finalVideoUrl != null && !finalVideoUrl.isBlank()) {
+            preview.put("finalVideoUrl", finalVideoUrl);
+        }
+        applyStagePreviewFilter(preview, fieldKey);
+        return preview.isEmpty() ? null : preview;
+    }
+
+    /**
+     * Keep only the artifact relevant to the current user-input stage so the trial UI
+     * shows script at script stage, keyframe at scene stage, audio at BGM stage, etc.
+     */
+    private void applyStagePreviewFilter(ObjectNode preview, String fieldKey) {
+        if (fieldKey == null || fieldKey.isBlank()) {
+            return;
+        }
+        switch (fieldKey) {
+            case "scriptFeedback" -> {
+                preview.remove("imageUrl");
+                preview.remove("audioUrl");
+                preview.remove("videoUrl");
+                preview.remove("finalVideoUrl");
+            }
+            case "storyboardFeedback" -> {
+                preview.remove("imageUrl");
+                preview.remove("audioUrl");
+                preview.remove("videoUrl");
+                preview.remove("finalVideoUrl");
+            }
+            case "sceneFeedback" -> {
+                preview.remove("script");
+                preview.remove("audioUrl");
+                preview.remove("videoUrl");
+                preview.remove("finalVideoUrl");
+            }
+            case "bgmFeedback" -> {
+                preview.remove("script");
+                preview.remove("imageUrl");
+                preview.remove("videoUrl");
+                preview.remove("finalVideoUrl");
+            }
+            default -> {
+                // no-op
+            }
+        }
+    }
+
+    /** Shallow script preview for API responses — avoids deep LLM JSON blowing Jackson nesting limits. */
+    private JsonNode summarizeScriptPreview(JsonNode script) {
+        if (script == null || script.isMissingNode() || script.isNull()) {
+            return null;
+        }
+        if (script.isTextual()) {
+            ObjectNode text = objectMapper.createObjectNode();
+            text.put("contentText", script.asText());
+            return text;
+        }
+        JsonNode source = script;
+        String embedded = text(script, "contentText");
+        if (embedded != null && embedded.trim().startsWith("{")) {
+            try {
+                source = objectMapper.readTree(embedded);
+            } catch (Exception exception) {
+                LOGGER.debug("script contentText is not JSON, using node as-is");
+            }
+        }
+        ObjectNode summary = objectMapper.createObjectNode();
+        copyTextField(summary, source, "contentText");
+        copyTextField(summary, source, "sceneTitle");
+        copyTextField(summary, source, "sceneDescription");
+        copyTextField(summary, source, "dialogue");
+        copyTextField(summary, source, "narration");
+        copyTextField(summary, source, "subtitleZh");
+        copyTextField(summary, source, "subtitleEn");
+        copyTextField(summary, source, "presenterGender");
+        copyTextField(summary, source, "script");
+        copyTextField(summary, source, "markdown");
+        copyTextField(summary, source, "title");
+        if (!summary.isEmpty()) {
+            return summary;
+        }
+        return script.isObject() ? script : null;
+    }
+
+    private void copyTextField(ObjectNode target, JsonNode source, String field) {
+        JsonNode value = source.get(field);
+        if (value != null && value.isTextual()) {
+            target.put(field, value.asText());
+        }
     }
 
     private String resolveAwaitingFieldKey(WorkflowRun run) {

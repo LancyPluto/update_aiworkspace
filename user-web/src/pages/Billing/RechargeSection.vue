@@ -2,9 +2,15 @@
 import { computed, onMounted, onUnmounted, ref } from "vue"
 import { Check, Crown, CreditCard, Loader2, MessageCircle, QrCode, Sparkles, X } from "lucide-vue-next"
 import type { CreditAccount, RechargeOrder, RechargePackage } from "@/api/types"
-import { createCustomRechargeOrder, createRechargeOrder, fetchRechargeOrder, fetchRechargePackages, mockPayRechargeOrder } from "@/api/creditApi"
+import {
+  createCustomRechargeOrder,
+  createRechargeOrder,
+  fetchRechargeOrder,
+  fetchRechargePackages,
+} from "@/api/creditApi"
 import { useAuthStore } from "@/store/authStore"
 import {
+  DEFAULT_RECHARGE_PAYMENT_CHANNELS,
   isAlipayPageRedirectOrder,
   rechargePaymentFailureMessage,
   resolveAlipayLaunchUrl,
@@ -48,43 +54,22 @@ const membership = ref<{ planName: string; expiryDate: string | null }>({
 
 const availableDisplay = computed(() => (props.account ? props.account.available.toLocaleString() : "--"))
 
-const paymentOptions: Array<{
-  channel: PaymentChannel
-  title: string
-  description: string
-  icon: typeof QrCode
-}> = [
-  {
-    channel: "WECHAT_NATIVE",
-    title: "微信扫码支付",
-    description: "使用微信扫一扫完成付款",
-    icon: MessageCircle,
-  },
-  {
-    channel: "ALIPAY_PAGE",
-    title: "支付宝电脑支付",
-    description: "跳转支付宝官方收银台完成付款",
-    icon: CreditCard,
-  },
-  {
-    channel: "MOCK",
-    title: "模拟支付",
-    description: "用于本地测试充值一致性",
-    icon: Sparkles,
-  },
-]
+const paymentOptions = computed(() =>
+  DEFAULT_RECHARGE_PAYMENT_CHANNELS.map((option) => ({
+    ...option,
+    icon: option.channel === "WECHAT_NATIVE" ? MessageCircle : CreditCard,
+  })),
+)
 
 const payModalTitle = computed(() => {
   if (!activeOrder.value) return "扫码支付"
   const amount = formatMoney(activeOrder.value.priceAmount)
-  if (activeOrder.value.paymentChannel === "MOCK") return `模拟支付 ${amount} 元`
   return `扫码支付 ${amount} 元`
 })
 
 const activePaymentName = computed(() => {
   if (activeOrder.value?.paymentChannel === "ALIPAY_PAGE") return "支付宝"
-  if (activeOrder.value?.paymentChannel === "WECHAT_NATIVE") return "微信"
-  return "模拟支付"
+  return "微信"
 })
 
 const isAlipayPageRedirect = computed(() =>
@@ -253,7 +238,7 @@ async function submitCustomRecharge(channel: PaymentChannel) {
 
 function openPayModalForOrder(order: RechargeOrder, channel: PaymentChannel): boolean {
   const hasAlipayLaunch = isAlipayPageRedirectOrder(order, channel)
-  if (channel !== "MOCK" && !order.qrCodeUrl && !hasAlipayLaunch) {
+  if (!order.qrCodeUrl && !hasAlipayLaunch) {
     error.value = rechargePaymentFailureMessage(order, channel)
     return false
   }
@@ -291,26 +276,6 @@ async function createOrder(pkg: RechargePackage, channel: PaymentChannel) {
   } finally {
     ordering.value = false
     orderingPackageId.value = null
-  }
-}
-
-async function confirmMockPayment() {
-  if (!activeOrder.value) return
-  ordering.value = true
-  error.value = ""
-  try {
-    const order = await mockPayRechargeOrder(activeOrder.value.id, { token: auth.token })
-    activeOrder.value = order
-    if (order.status === "CREDITED") {
-      paymentResult.value = "success"
-      clearPolling()
-      emit("creditsUpdated")
-    }
-  } catch (err) {
-    paymentResult.value = "fail"
-    error.value = err instanceof Error ? err.message : "确认支付失败"
-  } finally {
-    ordering.value = false
   }
 }
 
@@ -543,7 +508,7 @@ onUnmounted(clearPolling)
             </h3>
 
             <div
-              v-if="activeOrder?.paymentChannel !== 'MOCK' && isAlipayPageRedirect"
+              v-if="isAlipayPageRedirect"
               class="mx-auto mt-10 max-w-sm rounded-2xl border border-border bg-secondary/35 p-5"
             >
               <p class="text-sm text-muted-foreground">当前为电脑网站支付模式，将在新窗口打开支付宝收银台。</p>
@@ -557,7 +522,7 @@ onUnmounted(clearPolling)
             </div>
 
             <div
-              v-else-if="activeOrder?.paymentChannel !== 'MOCK'"
+              v-else
               class="mx-auto mt-14 flex h-40 w-40 items-center justify-center bg-white p-1"
             >
               <img
@@ -569,20 +534,7 @@ onUnmounted(clearPolling)
               <QrCode v-else class="h-24 w-24 text-slate-900" aria-hidden="true" />
             </div>
 
-            <div v-else class="mx-auto mt-10 rounded-2xl border border-primary/20 bg-primary/5 p-5">
-              <Sparkles class="mx-auto h-10 w-10 text-primary" aria-hidden="true" />
-              <p class="mt-3 text-sm text-muted-foreground">本地模拟支付不会调用第三方平台</p>
-              <button
-                type="button"
-                class="mt-5 w-full rounded-full bg-primary py-2.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
-                :disabled="ordering"
-                @click="confirmMockPayment"
-              >
-                {{ ordering ? "确认中..." : "模拟支付成功" }}
-              </button>
-            </div>
-
-            <p v-if="activeOrder?.paymentChannel !== 'MOCK' && !isAlipayPageRedirect" class="mt-7 flex items-center justify-center gap-1.5 text-sm text-muted-foreground">
+            <p v-if="!isAlipayPageRedirect" class="mt-7 flex items-center justify-center gap-1.5 text-sm text-muted-foreground">
               请扫码完成支付
               <span class="inline-flex h-4 w-4 items-center justify-center rounded bg-sky-500 text-[10px] font-bold text-white">
                 {{ activeOrder?.paymentChannel === "ALIPAY_PAGE" ? "支" : "微" }}

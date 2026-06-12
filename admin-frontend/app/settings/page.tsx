@@ -20,7 +20,7 @@ import { getBaseUrl } from "@/lib/api/http"
 import { fetchSettings, updateSettings, uploadCustomerServiceQr } from "@/lib/api/settings"
 import type { ConfigBundleImportResult } from "@/lib/api/types"
 import { cn } from "@/lib/utils"
-import { AlertTriangle, Bot, Brain, CheckCircle, Database, Download, Headphones, KeyRound, RefreshCw, Save, Server, Settings2, Shield, Upload } from "lucide-react"
+import { AlertTriangle, Bot, Brain, CheckCircle, Database, Download, Headphones, KeyRound, Loader2, RefreshCw, Save, Server, Settings2, Shield, Upload } from "lucide-react"
 
 interface SettingsForm {
   platformName: string
@@ -484,7 +484,7 @@ export default function SettingsPage() {
             导出配置包
           </Button>
           <Button variant="outline" className="relative gap-2" disabled={loading || saving || importing}>
-            <Upload className={importing ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
+            {importing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
             {importing ? "导入中..." : "导入配置包"}
             <input
               type="file"
