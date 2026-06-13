@@ -42,9 +42,10 @@ export function resolveCommunityAuthorAvatar(post: Pick<CommunityPost, "authorAv
 }
 
 export function resolveCommunityPrompt(post: Pick<CommunityPost, "promptPreview" | "promptVisible" | "prompt">) {
+  if (!post.promptVisible) return ""
   const preview = post.promptPreview?.trim()
   if (preview) return preview
-  if (post.promptVisible && post.prompt?.trim()) return post.prompt.trim()
+  if (post.prompt?.trim()) return post.prompt.trim()
   return ""
 }
 

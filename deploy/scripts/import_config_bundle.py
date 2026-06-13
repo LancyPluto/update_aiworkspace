@@ -35,7 +35,7 @@ def main() -> int:
     parser.add_argument(
         "bundle",
         nargs="?",
-        default=str(Path(__file__).resolve().parents[2] / "ai-tool-market-config-2026-05-29.json"),
+        default=str(Path(__file__).resolve().parents[2] / "ai-tool-market-config-2026-06-12.json"),
         help="Path to config bundle JSON",
     )
     parser.add_argument("--base-url", default=os.environ.get("IMPORT_BASE_URL", "http://8.134.93.203"))

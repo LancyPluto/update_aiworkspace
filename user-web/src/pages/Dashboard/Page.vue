@@ -7,6 +7,7 @@ import {
   ChevronDown,
   Clock,
   Download,
+  ExternalLink,
   FileText,
   Image as ImageIcon,
   LayoutGrid,
@@ -27,11 +28,11 @@ import {
   Volume2,
   WandSparkles,
   X,
+  Zap,
 } from "lucide-vue-next"
 import AppShell from "@/components/AppShell.vue"
 import AssetPreviewModal from "@/components/AssetPreviewModal.vue"
 import ImageStackPreview from "@/components/ImageStackPreview.vue"
-import CreditCostBadge from "@/components/CreditCostBadge/CreditCostBadge.vue"
 import CapabilityControls from "@/pages/Chat/CapabilityControls.vue"
 import type { PrimaryReferenceMaterialInfo } from "@/pages/Chat/CapabilityControls.vue"
 import DashboardModalityDock from "./DashboardModalityDock.vue"
@@ -47,7 +48,8 @@ import {
   regenerateTask,
   streamTaskStatus,
 } from "@/api/taskApi"
-import { publishCommunityPost, unpublishCommunityPost } from "@/api/communityApi"
+import { unpublishCommunityPost } from "@/api/communityApi"
+import { publishAssetToCommunity, type CommunityPublishPayload } from "@/utils/publishCommunityAsset"
 import { fetchAIToolById, fetchTools } from "@/api/toolApi"
 import type { AITool } from "@/api/aiToolTypes"
 import type { CreditAccount, TaskDetail, TaskStatus, TaskStatusPayload, ToolField, ToolSummary } from "@/api/types"
@@ -59,7 +61,7 @@ import { buildTaskResultBlocks, formatAudioDuration, resolveAudioTracks } from "
 import { isCoreField } from "@/utils/fieldUiMeta"
 import { consumeDashboardPendingAsset } from "@/utils/assetReplay"
 import { cleanToolDisplayText, toolDisplayDescription } from "@/utils/toolDisplayText"
-import { usesVariableWorkflowCredits } from "@/utils/toolCreditLabel"
+import { formatMarketplaceCostLabel } from "@/utils/toolCreditLabel"
 import { randomUUID } from "@/utils/randomUUID"
 import {
   dashboardAttributionFromRoute,
@@ -1428,19 +1430,15 @@ function openPreviewTask(asset: AssetPreviewItem) {
   void router.push(userRoutes.taskResult(String(asset.taskId)))
 }
 
-async function publishPreviewAsset(asset: AssetPreviewItem) {
+async function publishPreviewAsset(asset: AssetPreviewItem, payload?: CommunityPublishPayload) {
   if (!auth.token || !asset.taskId) return
   try {
-    const post = await publishCommunityPost(
-      {
-        taskId: asset.taskId,
-        title: asset.title,
-        description: asset.subtitle || null,
-        promptVisible: asset.promptVisible ?? auth.user?.promptPublicByDefault ?? false,
-      },
-      { token: auth.token },
-    )
-    previewAsset.value = { ...asset, communityPostId: post.id, promptVisible: post.promptVisible }
+    const post = await publishAssetToCommunity(asset, {
+      token: auth.token,
+      payload,
+      defaultPromptVisible: auth.user?.promptPublicByDefault ?? false,
+    })
+    previewAsset.value = { ...asset, communityPostId: post.id, promptVisible: post.promptVisible, title: post.title }
   } catch (err) {
     const message = err instanceof Error ? err.message : "发布失败"
     window.alert(message)
@@ -1629,18 +1627,18 @@ onUnmounted(() => {
                   </div>
                 </div>
 
-                <div class="grid gap-5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+                <div class="grid gap-6 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
                 <article
                   v-for="tool in featuredTools"
                   :key="tool.id"
-                  class="group flex min-h-[260px] cursor-pointer flex-col overflow-hidden rounded-3xl border border-white/8 bg-[#191919] transition hover:-translate-y-1 hover:border-primary/50"
+                  class="marketplace-tool-card"
                   @click="selectTool(tool)"
                 >
-                  <div class="relative h-36 overflow-hidden bg-white/[0.04]">
+                  <div class="marketplace-tool-media">
                     <video
                       v-if="isVideoPreviewUrl(tool.coverUrl)"
                       :src="normalizeMediaUrl(tool.coverUrl)"
-                      class="h-full w-full object-cover transition duration-500 group-hover:scale-105"
+                      class="marketplace-tool-image"
                       muted
                       loop
                       autoplay
@@ -1651,27 +1649,24 @@ onUnmounted(() => {
                       v-else-if="tool.coverUrl"
                       :src="normalizeMediaUrl(tool.coverUrl)"
                       :alt="tool.toolName"
-                      class="h-full w-full object-cover transition duration-500 group-hover:scale-105"
+                      class="marketplace-tool-image"
                     />
-                    <div
-                      v-else
-                      class="flex h-full w-full items-center justify-center bg-[radial-gradient(circle_at_35%_20%,rgb(176_92_255_/_0.42),transparent_35%),linear-gradient(135deg,rgb(31_41_55),rgb(17_17_17))]"
-                    >
-                      <Sparkles class="h-10 w-10 text-primary" />
+                    <div v-else class="marketplace-tool-empty">
+                      <Sparkles class="h-10 w-10 text-white/48" />
                     </div>
-                    <div class="absolute inset-0 bg-gradient-to-t from-black/85 via-black/5 to-transparent" />
-                    <span class="absolute left-4 top-4 rounded-full bg-black/45 px-2.5 py-1 text-xs text-white/80 backdrop-blur">
-                      {{ modalityLabel(tool.outputModality) }}
-                    </span>
+                    <span class="marketplace-modality-badge">{{ modalityLabel(tool.outputModality) }}</span>
+                    <span class="marketplace-cost-badge"><Zap class="h-3 w-3" />{{ formatMarketplaceCostLabel(tool) }}</span>
                   </div>
-                  <div class="flex flex-1 flex-col p-5">
-                    <h3 class="line-clamp-2 text-xl font-semibold">{{ tool.toolName }}</h3>
-                    <p class="mt-2 line-clamp-2 text-sm text-white/50">
-                      {{ toolDisplayDescription(tool, "点击选择模型后开始创作。") }}
-                    </p>
-                    <div class="mt-auto flex items-center justify-between pt-5">
-                      <span class="text-xs text-white/45">{{ tool.modelConfigName || tool.modelName || tool.toolCode }}</span>
-                      <CreditCostBadge :cost="tool.estimatedCreditCost" :variable="usesVariableWorkflowCredits(tool)" size="md" class="text-amber-300" />
+                  <div class="marketplace-tool-overlay">
+                    <div class="marketplace-tool-content">
+                      <h3 class="marketplace-tool-title">{{ tool.toolName }}</h3>
+                      <div class="marketplace-hover-reveal">
+                        <p class="marketplace-tool-desc">{{ toolDisplayDescription(tool, "点击选择模型后开始创作。") }}</p>
+                        <div class="marketplace-start-button">
+                          开始创作
+                          <ExternalLink class="h-3.5 w-3.5" />
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </article>
@@ -2791,15 +2786,15 @@ onUnmounted(() => {
                           v-for="tool in filteredCurrentTools"
                           :key="tool.id"
                           type="button"
-                          class="group overflow-hidden rounded-2xl border bg-white/[0.04] text-left transition hover:-translate-y-0.5 hover:border-primary/50"
-                          :class="selectedToolCode === tool.toolCode ? 'border-primary/70' : 'border-white/8'"
+                          class="marketplace-tool-card"
+                          :class="selectedToolCode === tool.toolCode ? 'marketplace-tool-card--selected' : ''"
                           @click="selectTool(tool)"
                         >
-                          <div class="relative h-32 bg-secondary">
+                          <div class="marketplace-tool-media">
                             <video
                               v-if="isVideoPreviewUrl(tool.coverUrl)"
                               :src="normalizeMediaUrl(tool.coverUrl)"
-                              class="h-full w-full object-cover"
+                              class="marketplace-tool-image"
                               muted
                               loop
                               autoplay
@@ -2810,22 +2805,25 @@ onUnmounted(() => {
                               v-else-if="tool.coverUrl"
                               :src="normalizeMediaUrl(tool.coverUrl)"
                               :alt="tool.toolName"
-                              class="h-full w-full object-cover"
+                              class="marketplace-tool-image"
                             />
-                            <div v-else class="flex h-full items-center justify-center">
-                              <Sparkles class="h-8 w-8 text-primary" />
+                            <div v-else class="marketplace-tool-empty">
+                              <Sparkles class="h-10 w-10 text-white/48" />
                             </div>
-                            <div class="absolute inset-0 bg-gradient-to-t from-black/75 to-transparent" />
-                            <span class="absolute bottom-3 left-3 rounded-full bg-black/45 px-2 py-0.5 text-xs text-white/70">
-                              {{ tool.modelConfigName || tool.modelName || modalityLabel(tool.outputModality) }}
-                            </span>
+                            <span class="marketplace-modality-badge">{{ modalityLabel(tool.outputModality) }}</span>
+                            <span class="marketplace-cost-badge"><Zap class="h-3 w-3" />{{ formatMarketplaceCostLabel(tool) }}</span>
                           </div>
-                          <div class="p-4">
-                            <h4 class="line-clamp-2 font-semibold text-white">{{ tool.toolName }}</h4>
-                            <p class="mt-2 line-clamp-2 text-xs text-white/45">{{ toolDisplayDescription(tool, "模型工具") }}</p>
-                            <p class="mt-3 inline-flex items-center gap-1 text-xs text-amber-300">
-                              <CreditCostBadge :cost="tool.estimatedCreditCost" :variable="usesVariableWorkflowCredits(tool)" />
-                            </p>
+                          <div class="marketplace-tool-overlay">
+                            <div class="marketplace-tool-content">
+                              <h3 class="marketplace-tool-title">{{ tool.toolName }}</h3>
+                              <div class="marketplace-hover-reveal">
+                                <p class="marketplace-tool-desc">{{ toolDisplayDescription(tool, "模型工具") }}</p>
+                                <div class="marketplace-start-button">
+                                  开始创作
+                                  <ExternalLink class="h-3.5 w-3.5" />
+                                </div>
+                              </div>
+                            </div>
                           </div>
                         </button>
                       </div>

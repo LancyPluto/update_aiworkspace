@@ -125,13 +125,13 @@ function postKind(post: CommunityPost) {
 function postTitle(post: CommunityPost) {
   return communityDisplayTitle({
     title: post.title,
-    prompt: post.promptPreview || post.prompt,
-    promptPreview: post.promptPreview || post.prompt,
     topic: post.topic,
     tags: post.tags,
     toolName: post.toolName,
     toolCode: post.toolCode,
     kind: postKind(post),
+    modality: post.modality,
+    promptVisible: post.promptVisible,
   })
 }
 

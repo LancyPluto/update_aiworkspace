@@ -18,6 +18,7 @@ import {
   resolveToolCoverFallback,
   resolveToolCoverUrl,
 } from "@/utils/toolCoverMedia"
+import { formatMarketplaceCostLabel } from "@/utils/toolCreditLabel"
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -91,18 +92,8 @@ function modelBrand(tool: AITool) {
   return resolveModelBrand(tool)
 }
 
-function costLabel(tool: AITool): string {
-  if (tool.variableCreditPricing || tool.estimatedCreditCost == null) return "算力不详"
-  if (tool.estimatedCreditCost === 0) return "免费"
-  return `约 ${tool.estimatedCreditCost} 算力/次`
-}
-
 function toolDescription(tool: AITool): string {
   return tool.description || "点击进入对话"
-}
-
-function toolModelLabel(tool: AITool): string {
-  return tool.modelConfigName || tool.modelName || modelBrand(tool).name || modalityLabel(tool.outputModality)
 }
 
 const sortedTools = computed(() => [...tools.value].sort((a, b) => a.order - b.order))
@@ -263,16 +254,19 @@ watch(
       <section class="mb-8 grid gap-4 xl:grid-cols-[1fr_1fr_1fr_1.5fr]">
         <RouterLink
           :to="{ path: '/dashboard', query: { modality: 'IMAGE' } }"
-          class="group overflow-hidden rounded-3xl border border-white/8 bg-white/[0.05] p-6 transition hover:-translate-y-1 hover:border-primary/50"
+          class="marketplace-entry-card marketplace-entry-card--image group relative rounded-3xl border border-white/8 bg-white/[0.05] p-6 transition hover:-translate-y-1 hover:border-primary/50"
         >
-          <h2 class="text-xl font-semibold">图像生成</h2>
-          <p class="mt-2 text-sm text-white/50">智能系统，即时开发</p>
-          <div class="relative mt-8 h-24 overflow-hidden rounded-2xl bg-[linear-gradient(135deg,rgb(255_255_255_/_0.12),rgb(176_92_255_/_0.22))] transition group-hover:brightness-125">
-            <template v-if="coverForTopTool('IMAGE')">
+          <div class="marketplace-entry-card__copy">
+            <h2 class="text-xl font-semibold">图像生成</h2>
+            <p class="mt-2 text-sm text-white/50">智能系统，即时开发</p>
+          </div>
+          <div class="marketplace-entry-card__visual">
+            <div class="marketplace-entry-card__glow" aria-hidden="true" />
+            <div class="marketplace-entry-card__media-shell">
               <video
-                v-if="isVideoPreviewUrl(coverForTopTool('IMAGE'))"
+                v-if="coverForTopTool('IMAGE') && isVideoPreviewUrl(coverForTopTool('IMAGE'))"
                 :src="coverForTopTool('IMAGE')"
-                class="h-full w-full object-cover"
+                class="marketplace-entry-card__media"
                 muted
                 loop
                 autoplay
@@ -280,28 +274,30 @@ watch(
                 preload="metadata"
               />
               <img
-                v-else
+                v-else-if="coverForTopTool('IMAGE')"
                 :src="coverForTopTool('IMAGE')"
                 :alt="topToolForModality('IMAGE')?.name"
-                class="h-full w-full object-cover"
+                class="marketplace-entry-card__media"
               />
-              <div class="absolute inset-0 bg-gradient-to-t from-black/55 to-transparent" />
-              <span class="absolute bottom-3 left-3 text-sm font-semibold text-white">{{ topToolForModality('IMAGE')?.name }}</span>
-            </template>
+              <div v-else class="marketplace-entry-card__media-fallback" />
+            </div>
           </div>
         </RouterLink>
         <RouterLink
           :to="{ path: '/dashboard', query: { modality: 'VIDEO' } }"
-          class="group overflow-hidden rounded-3xl border border-white/8 bg-white/[0.05] p-6 transition hover:-translate-y-1 hover:border-primary/50"
+          class="marketplace-entry-card marketplace-entry-card--video group relative rounded-3xl border border-white/8 bg-white/[0.05] p-6 transition hover:-translate-y-1 hover:border-primary/50"
         >
-          <h2 class="text-xl font-semibold">视频创作</h2>
-          <p class="mt-2 text-sm text-white/50">图像、关键一代</p>
-          <div class="relative mt-8 h-24 overflow-hidden rounded-2xl bg-[linear-gradient(135deg,rgb(70_170_255_/_0.22),rgb(255_255_255_/_0.1))] transition group-hover:brightness-125">
-            <template v-if="coverForTopTool('VIDEO')">
+          <div class="marketplace-entry-card__copy">
+            <h2 class="text-xl font-semibold">视频创作</h2>
+            <p class="mt-2 text-sm text-white/50">图像、关键一代</p>
+          </div>
+          <div class="marketplace-entry-card__visual">
+            <div class="marketplace-entry-card__glow" aria-hidden="true" />
+            <div class="marketplace-entry-card__media-shell">
               <video
-                v-if="isVideoPreviewUrl(coverForTopTool('VIDEO'))"
+                v-if="coverForTopTool('VIDEO') && isVideoPreviewUrl(coverForTopTool('VIDEO'))"
                 :src="coverForTopTool('VIDEO')"
-                class="h-full w-full object-cover"
+                class="marketplace-entry-card__media"
                 muted
                 loop
                 autoplay
@@ -310,35 +306,27 @@ watch(
                 @error="topToolForModality('VIDEO') && onToolCoverError(topToolForModality('VIDEO')!)"
               />
               <img
-                v-else
+                v-else-if="coverForTopTool('VIDEO')"
                 :src="coverForTopTool('VIDEO')"
                 :alt="topToolForModality('VIDEO')?.name"
-                class="h-full w-full object-cover"
+                class="marketplace-entry-card__media"
                 @error="topToolForModality('VIDEO') && onToolCoverError(topToolForModality('VIDEO')!)"
               />
-              <div class="absolute inset-0 bg-gradient-to-t from-black/55 to-transparent" />
-              <span class="absolute bottom-3 left-3 text-sm font-semibold text-white">{{ topToolForModality('VIDEO')?.name }}</span>
-            </template>
+              <div v-else class="marketplace-entry-card__media-fallback marketplace-entry-card__media-fallback--video" />
+            </div>
           </div>
         </RouterLink>
         <RouterLink
           :to="userRoutes.agentTools"
-          class="group overflow-hidden rounded-3xl border border-white/8 bg-white/[0.05] p-6 transition hover:-translate-y-1 hover:border-primary/50"
+          class="marketplace-entry-card marketplace-entry-card--agent group relative rounded-3xl border border-white/8 bg-white/[0.05] p-6 transition hover:-translate-y-1 hover:border-primary/50"
         >
-          <h2 class="text-xl font-semibold">人工智能</h2>
-          <p class="mt-2 text-sm text-white/50">百步疾驰，瞬间抵达</p>
-          <div class="relative mt-8 h-24 overflow-hidden rounded-2xl bg-[linear-gradient(135deg,rgb(255_193_7_/_0.22),rgb(176_92_255_/_0.18))] transition group-hover:brightness-125">
-            <template v-if="topToolForModality('MULTIMODAL')?.iconUrl || topToolForModality('TEXT')?.iconUrl">
-              <img
-                :src="normalizeMediaUrl((topToolForModality('MULTIMODAL') || topToolForModality('TEXT'))?.iconUrl)"
-                :alt="(topToolForModality('MULTIMODAL') || topToolForModality('TEXT'))?.name"
-                class="h-full w-full object-cover"
-              />
-              <div class="absolute inset-0 bg-gradient-to-t from-black/55 to-transparent" />
-              <span class="absolute bottom-3 left-3 text-sm font-semibold text-white">
-                {{ (topToolForModality('MULTIMODAL') || topToolForModality('TEXT'))?.name }}
-              </span>
-            </template>
+          <div class="marketplace-entry-card__copy">
+            <h2 class="text-xl font-semibold">人工智能</h2>
+            <p class="mt-2 text-sm text-white/50">百步疾驰，瞬间抵达</p>
+          </div>
+          <div class="marketplace-entry-card__visual" aria-hidden="true">
+            <div class="marketplace-entry-card__glow" />
+            <img src="/agent.png" alt="" class="marketplace-entry-card__icon" />
           </div>
         </RouterLink>
         <div class="rounded-3xl border border-white/8 bg-white/[0.04] p-5">
@@ -492,19 +480,18 @@ watch(
               </div>
             </template>
 
-            <div class="marketplace-tool-shade" />
             <span class="marketplace-modality-badge">{{ modalityLabel(tool.outputModality) }}</span>
-            <span class="marketplace-cost-badge"><Zap class="h-3.5 w-3.5" />{{ costLabel(tool) }}</span>
-            <div class="marketplace-title-strip">
-              <h3>{{ tool.name }}</h3>
-              <p>{{ toolModelLabel(tool) }}</p>
-            </div>
-            <div class="marketplace-hover-panel">
-              <p>{{ toolDescription(tool) }}</p>
-              <span>{{ toolModelLabel(tool) }}</span>
-              <div class="marketplace-start-button">
-                开始创作
-                <ExternalLink class="h-3.5 w-3.5" />
+            <span class="marketplace-cost-badge"><Zap class="h-3 w-3" />{{ formatMarketplaceCostLabel(tool) }}</span>
+          </div>
+          <div class="marketplace-tool-overlay">
+            <div class="marketplace-tool-content">
+              <h3 class="marketplace-tool-title">{{ tool.name }}</h3>
+              <div class="marketplace-hover-reveal">
+                <p class="marketplace-tool-desc">{{ toolDescription(tool) }}</p>
+                <div class="marketplace-start-button">
+                  开始创作
+                  <ExternalLink class="h-3.5 w-3.5" />
+                </div>
               </div>
             </div>
           </div>
@@ -515,249 +502,155 @@ watch(
 </template>
 
 <style scoped>
-.marketplace-tool-card {
-  position: relative;
-  display: block;
-  overflow: hidden;
-  border: 1px solid rgb(255 255 255 / 0.055);
-  border-radius: 22px;
-  background: #121216;
-  box-shadow: 0 24px 60px rgb(0 0 0 / 0.24);
-  transition: transform 180ms ease, border-color 180ms ease, background-color 180ms ease, box-shadow 180ms ease;
-}
-
-.marketplace-tool-card:hover {
-  transform: translateY(-3px);
-  border-color: rgb(168 85 247 / 0.34);
-  background: #15151b;
-  box-shadow: 0 26px 70px rgb(0 0 0 / 0.5);
-}
-
-.marketplace-tool-media {
-  position: relative;
+.marketplace-entry-card {
   display: grid;
-  aspect-ratio: 1 / 1;
-  place-items: center;
-  overflow: hidden;
-  background:
-    radial-gradient(circle at 18% 14%, rgb(255 63 121 / 0.32), transparent 34%),
-    radial-gradient(circle at 74% 34%, rgb(124 92 255 / 0.28), transparent 36%),
-    radial-gradient(circle at 48% 100%, rgb(18 215 178 / 0.16), transparent 42%),
-    #0d0d12;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  overflow: visible;
+  min-height: 174px;
 }
 
-.marketplace-tool-image {
+.marketplace-entry-card__copy {
+  position: relative;
+  z-index: 2;
+  min-width: 0;
+}
+
+.marketplace-entry-card__visual {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  min-height: 126px;
+  overflow: visible;
+}
+
+.marketplace-entry-card__visual::before {
+  content: "";
   position: absolute;
-  inset: 0;
+  inset: -10px -20px -6px -8px;
+  pointer-events: none;
+}
+
+.marketplace-entry-card--image .marketplace-entry-card__visual::before {
+  background:
+    radial-gradient(circle at 72% 56%, rgb(176 92 255 / 0.16), transparent 58%),
+    radial-gradient(circle at 88% 72%, rgb(255 255 255 / 0.08), transparent 52%);
+}
+
+.marketplace-entry-card--video .marketplace-entry-card__visual::before {
+  background:
+    radial-gradient(circle at 72% 56%, rgb(70 170 255 / 0.18), transparent 58%),
+    radial-gradient(circle at 88% 72%, rgb(255 255 255 / 0.08), transparent 52%);
+}
+
+.marketplace-entry-card--agent .marketplace-entry-card__visual::before {
+  background:
+    radial-gradient(circle at 72% 56%, rgb(176 92 255 / 0.16), transparent 58%),
+    radial-gradient(circle at 88% 72%, rgb(56 189 248 / 0.1), transparent 52%);
+}
+
+.marketplace-entry-card__glow {
+  position: absolute;
+  right: 4%;
+  bottom: 6px;
+  z-index: 0;
+  width: 78%;
+  height: 28px;
+  border-radius: 999px;
+  filter: blur(14px);
+  opacity: 0.9;
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+.marketplace-entry-card--image .marketplace-entry-card__glow {
+  background: radial-gradient(ellipse at center, rgb(176 92 255 / 0.72) 0%, rgb(255 255 255 / 0.18) 42%, transparent 72%);
+}
+
+.marketplace-entry-card--video .marketplace-entry-card__glow {
+  background: radial-gradient(ellipse at center, rgb(70 170 255 / 0.72) 0%, rgb(56 189 248 / 0.34) 42%, transparent 72%);
+}
+
+.marketplace-entry-card--agent .marketplace-entry-card__glow {
+  background: radial-gradient(ellipse at center, rgb(176 92 255 / 0.72) 0%, rgb(56 189 248 / 0.42) 42%, transparent 72%);
+}
+
+.marketplace-entry-card__media-shell {
+  position: relative;
+  z-index: 1;
+  width: clamp(88px, 8.5vw, 118px);
+  height: clamp(96px, 9vw, 128px);
+  overflow: hidden;
+  border-radius: 18px;
+  border: 1px solid rgb(255 255 255 / 0.12);
+  transform: rotate(-10deg) translate(14%, -6%);
+  box-shadow:
+    0 16px 24px rgb(88 120 255 / 0.22),
+    0 0 18px rgb(176 92 255 / 0.16);
+  transition: transform 0.28s ease, box-shadow 0.28s ease;
+}
+
+.marketplace-entry-card--video .marketplace-entry-card__media-shell {
+  box-shadow:
+    0 16px 24px rgb(56 140 255 / 0.24),
+    0 0 18px rgb(70 170 255 / 0.18);
+}
+
+.marketplace-entry-card__media,
+.marketplace-entry-card__media-fallback {
   width: 100%;
   height: 100%;
+}
+
+.marketplace-entry-card__media {
   object-fit: cover;
-  transform: scale(1);
-  transition: transform 520ms ease;
 }
 
-.marketplace-tool-card:hover .marketplace-tool-image {
-  transform: scale(1.055);
+.marketplace-entry-card__media-fallback {
+  background: linear-gradient(135deg, rgb(255 255 255 / 0.12), rgb(176 92 255 / 0.22));
 }
 
-.marketplace-tool-image--effect {
+.marketplace-entry-card__media-fallback--video {
+  background: linear-gradient(135deg, rgb(70 170 255 / 0.22), rgb(255 255 255 / 0.1));
+}
+
+.marketplace-entry-card__icon {
+  position: relative;
   z-index: 1;
-}
-
-.marketplace-tool-empty {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  background:
-    linear-gradient(135deg, rgb(255 255 255 / 0.06), transparent 42%),
-    radial-gradient(circle at 25% 35%, rgb(255 63 121 / 0.34), transparent 26%),
-    radial-gradient(circle at 70% 52%, rgb(124 92 255 / 0.34), transparent 30%),
-    radial-gradient(circle at 48% 82%, rgb(24 198 174 / 0.18), transparent 32%);
-}
-
-.marketplace-tool-empty img {
-  width: 76px;
-  height: 76px;
-  border-radius: 22px;
-  background: rgb(255 255 255 / 0.9);
+  width: auto;
+  height: clamp(96px, 9vw, 128px);
+  max-width: none;
   object-fit: contain;
-  padding: 14px;
-  box-shadow: 0 18px 46px rgb(0 0 0 / 0.28);
+  transform: rotate(-10deg) translate(14%, -6%);
+  filter:
+    drop-shadow(0 16px 24px rgb(88 120 255 / 0.28))
+    drop-shadow(0 0 18px rgb(176 92 255 / 0.22));
+  transition: transform 0.28s ease, filter 0.28s ease;
 }
 
-.marketplace-tool-shade {
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  background: linear-gradient(180deg, rgb(0 0 0 / 0.06), transparent 36%, rgb(0 0 0 / 0.82));
-  pointer-events: none;
-}
-
-.marketplace-modality-badge,
-.marketplace-cost-badge {
-  position: absolute;
-  top: 12px;
-  z-index: 5;
-  display: inline-flex;
-  align-items: center;
-  border: 1px solid rgb(255 255 255 / 0.08);
-  border-radius: 8px;
-  box-shadow: 0 10px 28px rgb(0 0 0 / 0.28);
-  backdrop-filter: blur(14px);
-}
-
-.marketplace-modality-badge {
-  left: 12px;
-  background: rgb(0 0 0 / 0.46);
-  padding: 5px 9px;
-  color: rgb(255 255 255 / 0.78);
-  font-size: 11px;
-  font-weight: 650;
-}
-
-.marketplace-cost-badge {
-  right: 12px;
-  gap: 4px;
-  border-color: rgb(168 85 247 / 0.28);
-  background: rgb(168 85 247 / 0.2);
-  padding: 5px 9px;
-  color: rgb(216 180 254);
-  font-size: 11px;
-  font-weight: 680;
-}
-
-.marketplace-title-strip {
-  position: absolute;
-  inset: auto 0 0;
-  z-index: 3;
-  padding: 18px;
-  transition: transform 260ms ease;
-}
-
-.marketplace-tool-card:hover .marketplace-title-strip {
-  transform: translateY(-8px);
-}
-
-.marketplace-title-strip h3 {
-  display: -webkit-box;
-  overflow: hidden;
-  margin: 0;
-  color: rgb(255 255 255 / 0.92);
-  font-size: 16px;
-  font-weight: 720;
-  line-height: 1.4;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 1;
-}
-
-.marketplace-title-strip p {
-  overflow: hidden;
-  margin: 3px 0 0;
-  color: rgb(255 255 255 / 0.42);
-  font-size: 11px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.marketplace-hover-panel {
-  position: absolute;
-  inset: auto 0 0;
-  z-index: 4;
-  display: flex;
-  min-height: 52%;
-  flex-direction: column;
-  justify-content: flex-end;
-  border-top: 1px solid rgb(255 255 255 / 0.07);
-  background: linear-gradient(180deg, rgb(18 18 22 / 0.62), rgb(18 18 22 / 0.96) 54%, #121216);
-  padding: 18px;
-  opacity: 0;
-  transform: translateY(16px);
-  transition: opacity 260ms ease, transform 260ms ease;
-  backdrop-filter: blur(18px);
-}
-
-.marketplace-tool-card:hover .marketplace-hover-panel {
+.marketplace-entry-card:hover .marketplace-entry-card__glow {
   opacity: 1;
-  transform: translateY(0);
+  transform: scale(1.08);
 }
 
-.marketplace-hover-panel p {
-  display: -webkit-box;
-  overflow: hidden;
-  margin: 0;
-  color: rgb(255 255 255 / 0.7);
-  font-size: 12px;
-  line-height: 1.75;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+.marketplace-entry-card:hover .marketplace-entry-card__media-shell {
+  transform: rotate(-6deg) translate(18%, -10%) scale(1.04);
+  box-shadow:
+    0 22px 32px rgb(88 120 255 / 0.32),
+    0 0 24px rgb(176 92 255 / 0.24);
 }
 
-.marketplace-hover-panel span {
-  align-self: flex-start;
-  max-width: 100%;
-  overflow: hidden;
-  margin-top: 10px;
-  border: 1px solid rgb(255 255 255 / 0.08);
-  border-radius: 7px;
-  background: rgb(255 255 255 / 0.055);
-  padding: 4px 7px;
-  color: rgb(255 255 255 / 0.42);
-  font-size: 10px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.marketplace-entry-card--video:hover .marketplace-entry-card__media-shell {
+  box-shadow:
+    0 22px 32px rgb(56 140 255 / 0.34),
+    0 0 24px rgb(70 170 255 / 0.28);
 }
 
-.marketplace-start-button {
-  display: inline-flex;
-  width: 100%;
-  height: 40px;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  border-radius: 10px;
-  background: linear-gradient(135deg, #ff3f79, #8f5cff);
-  color: #fff;
-  font-size: 12px;
-  font-weight: 650;
-  margin-top: 14px;
-  box-shadow: 0 12px 32px rgb(255 63 121 / 0.18);
-  transition: filter 160ms ease, transform 160ms ease;
-}
-
-.marketplace-tool-card:hover .marketplace-start-button:hover {
-  filter: brightness(1.06);
-  transform: translateY(-1px);
-}
-
-.marketplace-comparison-line {
-  position: absolute;
-  inset-block: 0;
-  z-index: 5;
-  width: 1px;
-  background: rgb(255 255 255 / 0.86);
-  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.35);
-  pointer-events: none;
-}
-
-.marketplace-comparison-handle {
-  position: absolute;
-  top: 50%;
-  z-index: 5;
-  display: flex;
-  width: 34px;
-  height: 34px;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid rgb(255 255 255 / 0.65);
-  border-radius: 999px;
-  background: rgb(0 0 0 / 0.45);
-  color: white;
-  font-size: 11px;
-  font-weight: 700;
-  box-shadow: 0 16px 32px rgb(0 0 0 / 0.3);
-  transform: translate(-50%, -50%);
-  pointer-events: none;
-  backdrop-filter: blur(12px);
+.marketplace-entry-card:hover .marketplace-entry-card__icon {
+  transform: rotate(-6deg) translate(18%, -10%) scale(1.04);
+  filter:
+    drop-shadow(0 22px 32px rgb(88 120 255 / 0.38))
+    drop-shadow(0 0 24px rgb(176 92 255 / 0.32));
 }
 </style>

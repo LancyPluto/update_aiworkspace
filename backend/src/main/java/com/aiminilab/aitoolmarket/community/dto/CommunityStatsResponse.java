@@ -6,6 +6,7 @@ public record CommunityStatsResponse(
         Long postCount,
         Long pendingCount,
         Long hiddenCount,
+        Long reportPendingCount,
         Long impressionCount,
         Long detailViewCount,
         Long sameStyleClickCount,

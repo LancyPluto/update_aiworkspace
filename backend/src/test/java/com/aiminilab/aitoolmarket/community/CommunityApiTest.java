@@ -130,7 +130,8 @@ class CommunityApiTest {
         mockMvc.perform(get("/api/v1/community/posts/{postId}", postId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.promptVisible").value(false))
-                .andExpect(jsonPath("$.data.prompt").value(nullValue()));
+                .andExpect(jsonPath("$.data.prompt").value(nullValue()))
+                .andExpect(jsonPath("$.data.promptPreview").value(nullValue()));
     }
 
     @Test
@@ -218,6 +219,63 @@ class CommunityApiTest {
     }
 
     @Test
+    void userCanReportPostAndAdminCanListAndResolveIt() throws Exception {
+        long postId = insertPostForUser(1L, "PUBLISHED", "APPROVED", "被举报作品", true);
+        String userToken = loginUser();
+
+        mockMvc.perform(post("/api/v1/community/posts/{postId}/report", postId)
+                        .header("Authorization", "Bearer " + userToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "reason": "内容不当"
+                                }
+                                """))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/v1/community/posts/{postId}/report", postId)
+                        .header("Authorization", "Bearer " + userToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "reason": "重复举报"
+                                }
+                                """))
+                .andExpect(status().is4xxClientError());
+
+        String adminToken = loginAdmin();
+        mockMvc.perform(get("/api/admin/v1/community/reports")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .param("status", "PENDING"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].postId").value((int) postId))
+                .andExpect(jsonPath("$.data.list[0].reason").value("内容不当"));
+
+        Long reportId = jdbcTemplate.queryForObject(
+                "SELECT id FROM community_post_reports WHERE post_id = ?",
+                Long.class,
+                postId);
+
+        mockMvc.perform(post("/api/admin/v1/community/reports/{reportId}/resolve", reportId)
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "status": "REVIEWED",
+                                  "adminNote": "已处理"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("REVIEWED"));
+
+        mockMvc.perform(get("/api/admin/v1/community/reports")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .param("status", "PENDING"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(0));
+    }
+
+    @Test
     void topicEntriesOnlyComeFromVisibleApprovedPosts() throws Exception {
         long visibleId = insertPost("PUBLISHED", "APPROVED", "Visible topic post", true);
         long hiddenId = insertPost("HIDDEN", "APPROVED", "Hidden topic post", true);
@@ -245,6 +303,20 @@ class CommunityApiTest {
                 .andExpect(status().isOk())
                 .andReturn();
         return AuthTestTokens.userJwtFrom(result);
+    }
+
+    private String loginAdmin() throws Exception {
+        var result = mockMvc.perform(post("/api/admin/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "account": "admin",
+                                  "password": "123456"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andReturn();
+        return AuthTestTokens.adminJwtFrom(result);
     }
 
     private long insertSuccessImageTask(long userId, String suffix) {
@@ -287,6 +359,10 @@ class CommunityApiTest {
     }
 
     private long insertPost(String status, String auditStatus, String title, boolean promptVisible) {
+        return insertPostForUser(2L, status, auditStatus, title, promptVisible);
+    }
+
+    private long insertPostForUser(long userId, String status, String auditStatus, String title, boolean promptVisible) {
         Long nextTaskId = jdbcTemplate.queryForObject("SELECT COALESCE(MAX(task_id), 1000) + 1 FROM community_posts", Long.class);
         jdbcTemplate.update("""
                 INSERT INTO community_posts (
@@ -295,10 +371,10 @@ class CommunityApiTest {
                   like_count, favorite_count, same_style_count, quality_score
                 )
                 VALUES (
-                  2, ?, 'IMAGE', '/generated/community-test.png', ?, '社区接口测试作品',
+                  ?, ?, 'IMAGE', '/generated/community-test.png', ?, '社区接口测试作品',
                   ?, '公开 prompt 内容', 'image_tool', '图片工具', ?, ?, 0, 0, 0, 0, 0
                 )
-                """, nextTaskId, title, promptVisible ? 1 : 0, status, auditStatus);
+                """, userId, nextTaskId, title, promptVisible ? 1 : 0, status, auditStatus);
         return jdbcTemplate.queryForObject("SELECT MAX(id) FROM community_posts", Long.class);
     }
 }

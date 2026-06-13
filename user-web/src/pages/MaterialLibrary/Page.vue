@@ -12,13 +12,14 @@ import AppShell from "@/components/AppShell.vue"
 import AssetCard from "@/components/AssetCard.vue"
 import MasonryLayout from "@/components/MasonryLayout.vue"
 import AssetPreviewModal from "@/components/AssetPreviewModal.vue"
+import CommunityPublishModal from "@/components/CommunityPublishModal.vue"
 import { confirmDelete } from "@/composables/useConfirmDelete"
 import { deleteTask, fetchTasks } from "@/api/taskApi"
 import {
-  publishCommunityPost,
   resolvePublishedCommunityPostId,
   unpublishCommunityPost,
 } from "@/api/communityApi"
+import { publishAssetToCommunity, type CommunityPublishPayload } from "@/utils/publishCommunityAsset"
 import { emitCommunityPostUnpublished } from "@/utils/communitySync"
 import { fetchTools } from "@/api/toolApi"
 import type { TaskDetail, ToolSummary } from "@/api/types"
@@ -56,6 +57,8 @@ const loadingMore = ref(false)
 const deletingTaskId = ref<number | null>(null)
 const communityActionTaskId = ref<number | null>(null)
 const previewAsset = ref<AssetPreviewItem | null>(null)
+const publishModalAsset = ref<AssetPreviewItem | null>(null)
+const publishSubmitting = ref(false)
 
 const modalityOptions: Array<{ value: MaterialModality; label: string }> = [
   { value: "all", label: "全部作品" },
@@ -223,27 +226,41 @@ function syncPreviewAssetCommunityState(asset: AssetPreviewItem) {
   }
 }
 
-async function publishMaterialAsset(asset: AssetPreviewItem) {
+function openPublishModal(asset: AssetPreviewItem) {
+  if (!auth.token || !asset.taskId || communityActionTaskId.value) return
+  publishModalAsset.value = asset
+}
+
+function closePublishModal() {
+  if (publishSubmitting.value) return
+  publishModalAsset.value = null
+}
+
+async function publishMaterialAsset(asset: AssetPreviewItem, payload?: CommunityPublishPayload) {
   if (!auth.token || !asset.taskId || communityActionTaskId.value) return
   communityActionTaskId.value = asset.taskId
+  publishSubmitting.value = true
   try {
-    const post = await publishCommunityPost(
-      {
-        taskId: asset.taskId,
-        title: asset.title,
-        description: asset.subtitle || null,
-        promptVisible: asset.promptVisible ?? auth.user?.promptPublicByDefault ?? false,
-      },
-      { token: auth.token },
-    )
+    const post = await publishAssetToCommunity(asset, {
+      token: auth.token,
+      payload,
+      defaultPromptVisible: auth.user?.promptPublicByDefault ?? false,
+    })
     patchTaskCommunityPost(asset.taskId, post.id)
-    syncPreviewAssetCommunityState({ ...asset, communityPostId: post.id, promptVisible: post.promptVisible })
+    syncPreviewAssetCommunityState({ ...asset, communityPostId: post.id, promptVisible: post.promptVisible, title: post.title })
+    publishModalAsset.value = null
   } catch (err) {
     const message = err instanceof Error ? err.message : "发布失败"
     window.alert(message)
   } finally {
     communityActionTaskId.value = null
+    publishSubmitting.value = false
   }
+}
+
+async function confirmPublishMaterial(payload: CommunityPublishPayload) {
+  if (!publishModalAsset.value) return
+  await publishMaterialAsset(publishModalAsset.value, payload)
 }
 
 async function unpublishMaterialAsset(asset: AssetPreviewItem) {
@@ -414,7 +431,7 @@ onMounted(loadMaterials)
               type="button"
               class="inline-flex shrink-0 items-center gap-1 rounded-full border border-primary/35 bg-primary/15 px-2.5 py-1 text-xs font-semibold text-primary transition hover:bg-primary/25 disabled:cursor-not-allowed disabled:opacity-60"
               :disabled="communityActionTaskId === item.task.taskId || deletingTaskId === item.task.taskId"
-              @click.stop="publishMaterialAsset(item.asset)"
+              @click.stop="openPublishModal(item.asset)"
             >
               <LoaderCircle v-if="communityActionTaskId === item.task.taskId" class="h-3 w-3 animate-spin" />
               <template v-else>
@@ -456,6 +473,13 @@ onMounted(loadMaterials)
       @open-task="openPreviewTask"
       @publish="publishMaterialAsset"
       @unpublish="unpublishMaterialAsset"
+    />
+    <CommunityPublishModal
+      :open="Boolean(publishModalAsset)"
+      :asset="publishModalAsset"
+      :submitting="publishSubmitting"
+      @close="closePublishModal"
+      @confirm="confirmPublishMaterial"
     />
   </AppShell>
 </template>

@@ -11,18 +11,26 @@ import {
   approveAdminCommunityPost,
   featureAdminCommunityPost,
   fetchAdminCommunityPosts,
+  fetchAdminCommunityReports,
   fetchAdminCommunityStats,
   hideAdminCommunityPost,
   pinAdminCommunityPost,
   rejectAdminCommunityPost,
+  resolveAdminCommunityReport,
   restoreAdminCommunityPost,
 } from "@/lib/api/community"
 import { getBaseUrl } from "@/lib/api/http"
-import type { AdminCommunityMetricPoint, AdminCommunityPost, AdminCommunityStats } from "@/lib/api/types"
+import type { AdminCommunityMetricPoint, AdminCommunityPost, AdminCommunityReport, AdminCommunityStats } from "@/lib/api/types"
 
-type ViewMode = "posts" | "audit" | "stats"
+type ViewMode = "posts" | "audit" | "reports" | "stats"
 
 const TOPIC_PRESETS = ["产品图生成", "短视频脚本", "小红书文案", "数字人案例"]
+
+function reportTone(status?: string | null) {
+  if (status === "REVIEWED") return "active"
+  if (status === "DISMISSED") return "inactive"
+  return "pending"
+}
 
 function statusTone(status: string) {
   if (status === "PUBLISHED") return "active"
@@ -94,6 +102,8 @@ function metricList(title: string, items: AdminCommunityMetricPoint[]) {
 export default function CommunityPostsPage() {
   const [viewMode, setViewMode] = useState<ViewMode>("posts")
   const [posts, setPosts] = useState<AdminCommunityPost[]>([])
+  const [reports, setReports] = useState<AdminCommunityReport[]>([])
+  const [reportStatus, setReportStatus] = useState("PENDING")
   const [status, setStatus] = useState("")
   const [userId, setUserId] = useState("")
   const [modality, setModality] = useState("")
@@ -104,6 +114,7 @@ export default function CommunityPostsPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<AdminCommunityPost | null>(null)
+  const [selectedReport, setSelectedReport] = useState<AdminCommunityReport | null>(null)
   const [topicDraft, setTopicDraft] = useState("")
   const [tagsDraft, setTagsDraft] = useState("")
   const [hideReason, setHideReason] = useState("内容不符合社区展示规范")
@@ -112,6 +123,21 @@ export default function CommunityPostsPage() {
     setLoading(true)
     setError(null)
     try {
+      setStats(await fetchAdminCommunityStats())
+      if (viewMode === "reports") {
+        const resp = await fetchAdminCommunityReports({
+          pageNo: 1,
+          pageSize: 50,
+          status: reportStatus || undefined,
+        })
+        setReports(resp.list)
+        setSelectedReport((current) => {
+          if (!current) return resp.list[0] || null
+          return resp.list.find((report) => report.id === current.id) || resp.list[0] || null
+        })
+        return
+      }
+
       const resp = await fetchAdminCommunityPosts({
         pageNo: 1,
         pageSize: 50,
@@ -123,13 +149,12 @@ export default function CommunityPostsPage() {
         userId: userId.trim() ? Number(userId.trim()) : undefined,
       })
       setPosts(resp.list)
-      setStats(await fetchAdminCommunityStats())
       setSelected((current) => {
         if (!current) return resp.list[0] || null
         return resp.list.find((post) => post.id === current.id) || resp.list[0] || null
       })
     } catch (err) {
-      setError(err instanceof Error ? err.message : "加载社区作品失败")
+      setError(err instanceof Error ? err.message : viewMode === "reports" ? "加载举报队列失败" : "加载社区作品失败")
     } finally {
       setLoading(false)
     }
@@ -146,6 +171,31 @@ export default function CommunityPostsPage() {
       setStatus("")
       setAuditStatus("PENDING")
     }
+    if (next === "reports") {
+      setReportStatus("PENDING")
+    }
+  }
+
+  function selectReport(report: AdminCommunityReport) {
+    setSelectedReport(report)
+  }
+
+  async function resolveReport(report: AdminCommunityReport, nextStatus: "REVIEWED" | "DISMISSED") {
+    const updated = await resolveAdminCommunityReport(report.id, {
+      status: nextStatus,
+      adminNote: hideReason.trim() || undefined,
+    })
+    setSelectedReport(updated)
+    await load()
+  }
+
+  async function hideReportedPost(report: AdminCommunityReport) {
+    await hideAdminCommunityPost(report.postId, hideReason.trim() || "用户举报内容不当")
+    await resolveAdminCommunityReport(report.id, {
+      status: "REVIEWED",
+      adminNote: hideReason.trim() || "已隐藏被举报作品",
+    })
+    await load()
   }
 
   function selectPost(post: AdminCommunityPost) {
@@ -197,6 +247,18 @@ export default function CommunityPostsPage() {
     await load()
   }
 
+  const reportRows = useMemo(
+    () =>
+      reports.map((report) => ({
+        ...report,
+        reporter: `用户 ${report.reporterUserId}`,
+        postLabel: report.postTitle || `作品 #${report.postId}`,
+        reasonText: report.reason || "未填写原因",
+        time: formatTime(report.createdAt),
+      })),
+    [reports],
+  )
+
   const rows = useMemo(
     () =>
       posts.map((post) => ({
@@ -223,6 +285,7 @@ export default function CommunityPostsPage() {
           {[
             ["posts", "作品管理"],
             ["audit", "审核队列"],
+            ["reports", "举报队列"],
             ["stats", "数据看板"],
           ].map(([value, label]) => (
             <Button
@@ -241,6 +304,7 @@ export default function CommunityPostsPage() {
             {[
               ["作品", stats.postCount],
               ["待审", stats.pendingCount],
+              ["待处理举报", stats.reportPendingCount ?? 0],
               ["隐藏", stats.hiddenCount],
               ["详情访问", stats.detailViewCount],
               ["同款点击", stats.sameStyleClickCount],
@@ -262,6 +326,135 @@ export default function CommunityPostsPage() {
             {metricList("热门专题", stats.topTopics)}
             {metricList("创作者贡献", stats.topCreators)}
           </div>
+        ) : viewMode === "reports" ? (
+          <>
+            <div className="flex flex-wrap items-center gap-3">
+              <Input className="w-72" placeholder="处理备注 / 隐藏原因" value={hideReason} onChange={(event) => setHideReason(event.target.value)} />
+              <select className="h-10 rounded-md border border-input bg-background px-3 text-sm" value={reportStatus} onChange={(event) => setReportStatus(event.target.value)}>
+                <option value="PENDING">待处理</option>
+                <option value="REVIEWED">已处理</option>
+                <option value="DISMISSED">已忽略</option>
+                <option value="">全部</option>
+              </select>
+              <Button type="button" onClick={() => void load()} disabled={loading}>
+                {loading ? "加载中..." : "筛选"}
+              </Button>
+            </div>
+
+            <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
+              <DataTable
+                columns={[
+                  {
+                    key: "preview",
+                    title: "被举报作品",
+                    render: (_value, item) => {
+                      const report = item as AdminCommunityReport
+                      const url = mediaUrl(report.postCoverUrl)
+                      return (
+                        <button type="button" className="flex max-w-[360px] items-center gap-3 text-left" onClick={() => selectReport(report)}>
+                          <div className="flex h-16 w-20 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-muted text-xs text-muted-foreground">
+                            {url ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img src={url} alt={report.postTitle || `作品 ${report.postId}`} className="h-full w-full object-cover" />
+                            ) : (
+                              `#${report.postId}`
+                            )}
+                          </div>
+                          <div className="min-w-0">
+                            <div className="truncate font-medium">{report.postTitle || `作品 #${report.postId}`}</div>
+                            <div className="mt-1 text-xs text-muted-foreground">作品状态：{report.postStatus || "-"}</div>
+                          </div>
+                        </button>
+                      )
+                    },
+                  },
+                  { key: "reporter", title: "举报人" },
+                  { key: "reasonText", title: "原因" },
+                  {
+                    key: "status",
+                    title: "状态",
+                    render: (_value, item) => {
+                      const report = item as AdminCommunityReport
+                      return <StatusBadge status={reportTone(report.status)} label={report.status} />
+                    },
+                  },
+                  { key: "time", title: "举报时间" },
+                ]}
+                data={reportRows}
+              />
+
+              <aside className="rounded-xl border border-border bg-card p-4 shadow-sm">
+                {selectedReport ? (
+                  <div className="space-y-4">
+                    <div>
+                      <div className="text-xs text-muted-foreground">举报 #{selectedReport.id}</div>
+                      <h2 className="mt-1 text-lg font-semibold">{selectedReport.postTitle || `作品 #${selectedReport.postId}`}</h2>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <StatusBadge status={reportTone(selectedReport.status)} label={selectedReport.status} />
+                        <StatusBadge status={statusTone(selectedReport.postStatus || "PUBLISHED")} label={selectedReport.postStatus || "-"} />
+                      </div>
+                    </div>
+
+                    <div className="overflow-hidden rounded-lg border bg-muted/30">
+                      {mediaUrl(selectedReport.postCoverUrl) ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={mediaUrl(selectedReport.postCoverUrl)} alt={selectedReport.postTitle || `作品 ${selectedReport.postId}`} className="max-h-80 w-full object-contain" />
+                      ) : (
+                        <div className="flex min-h-40 items-center justify-center text-sm text-muted-foreground">暂无封面</div>
+                      )}
+                    </div>
+
+                    <div className="grid gap-2 text-sm">
+                      <div>
+                        <span className="text-muted-foreground">举报人：</span>
+                        <span>用户 {selectedReport.reporterUserId}</span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">举报时间：</span>
+                        <span>{formatTime(selectedReport.createdAt)}</span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">处理时间：</span>
+                        <span>{formatTime(selectedReport.reviewedAt)}</span>
+                      </div>
+                    </div>
+
+                    <div className="rounded-lg border bg-background p-3">
+                      <div className="mb-2 text-xs font-medium text-muted-foreground">举报原因</div>
+                      <p className="whitespace-pre-wrap text-sm">{selectedReport.reason || "未填写原因"}</p>
+                    </div>
+
+                    {selectedReport.adminNote && (
+                      <div className="rounded-lg border bg-background p-3">
+                        <div className="mb-2 text-xs font-medium text-muted-foreground">处理备注</div>
+                        <p className="whitespace-pre-wrap text-sm">{selectedReport.adminNote}</p>
+                      </div>
+                    )}
+
+                    <div className="flex flex-wrap gap-2">
+                      {selectedReport.status === "PENDING" && (
+                        <>
+                          <Button type="button" variant="outline" onClick={() => void resolveReport(selectedReport, "DISMISSED")}>
+                            忽略
+                          </Button>
+                          <Button type="button" variant="outline" onClick={() => void resolveReport(selectedReport, "REVIEWED")}>
+                            标记已处理
+                          </Button>
+                          <Button type="button" onClick={() => void hideReportedPost(selectedReport)}>
+                            隐藏作品
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex min-h-80 items-center justify-center text-sm text-muted-foreground">
+                    选择左侧举报记录后查看详情
+                  </div>
+                )}
+              </aside>
+            </div>
+          </>
         ) : (
           <>
             <div className="flex flex-wrap items-center gap-3">

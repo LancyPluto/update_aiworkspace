@@ -11,6 +11,7 @@ import com.aiminilab.aitoolmarket.community.dto.CommunityEventRequest;
 import com.aiminilab.aitoolmarket.community.dto.CommunityPostResponse;
 import com.aiminilab.aitoolmarket.community.dto.PublicUserProfileResponse;
 import com.aiminilab.aitoolmarket.community.dto.PublishPostRequest;
+import com.aiminilab.aitoolmarket.community.dto.ReportCommunityPostRequest;
 import com.aiminilab.aitoolmarket.community.dto.CommunityTopicResponse;
 import com.aiminilab.aitoolmarket.community.dto.UpdateCommunityPostRequest;
 import com.aiminilab.aitoolmarket.community.service.CommunityService;
@@ -175,6 +176,13 @@ public class CommunityController {
     @DeleteMapping("/posts/{postId}/favorite")
     public ApiResponse<CommunityPostResponse> unfavorite(@PathVariable Long postId) {
         return ApiResponse.success(communityService.unfavorite(AuthContext.get().userId(), postId));
+    }
+
+    @PostMapping("/posts/{postId}/report")
+    public ApiResponse<Void> report(@PathVariable Long postId,
+                                    @RequestBody(required = false) ReportCommunityPostRequest request) {
+        communityService.reportPost(AuthContext.get().userId(), postId, request);
+        return ApiResponse.success(null);
     }
 
     private Long currentUserIdOrNull() {

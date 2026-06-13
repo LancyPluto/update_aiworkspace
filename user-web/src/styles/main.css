@@ -1,6 +1,7 @@
 /* 扫描整个 src，避免登录后懒加载路由的 Tailwind 类在首屏未生成（需刷新才生效） */
 @import "tailwindcss" source("..");
 @import "./masonry.css";
+@import "./marketplace-tool-card.css";
 @source "../**/*.{vue,ts}";
 
 :root {
