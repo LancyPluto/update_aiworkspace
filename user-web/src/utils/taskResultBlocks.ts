@@ -1,6 +1,6 @@
-import { getRequestBaseUrl } from "@/api/client"
 import type { TaskDetail } from "@/api/types"
 import type { AudioTrackItem, ResultBlock } from "@/types/result"
+import { normalizeMediaUrl } from "@/utils/toolCoverMedia"
 
 /** 任务卡片封面：优先用生成结果中的视频/图片/音乐封面 URL */
 export function extractTaskPreviewUrl(detail?: TaskDetail | null): string {
@@ -315,13 +315,4 @@ function extractFinalVideoUrl(content: string): string {
 
 function sanitizeUrl(value: string): string {
   return value.trim().replace(/[)\]，。,.]+$/g, "")
-}
-
-function normalizeMediaUrl(value: string): string {
-  if (value.startsWith("http://") || value.startsWith("https://") || value.startsWith("data:")) {
-    return value
-  }
-  const path = value.startsWith("/") ? value : `/${value}`
-  const base = getRequestBaseUrl()
-  return new URL(path, base.endsWith("/") ? base : `${base}/`).toString()
 }

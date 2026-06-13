@@ -6,8 +6,27 @@ import ts from "typescript"
 async function importTsModule(path) {
   const source = await readFile(new URL(path, import.meta.url), "utf8")
   const rewritten = source.replace(
-    /import \{ getRequestBaseUrl \} from "@\/api\/client"\r?\n/,
-    'function getRequestBaseUrl() { return "http://localhost/" }\n',
+    /import \{ normalizeMediaUrl \} from "@\/utils\/toolCoverMedia"\r?\n/,
+    `function getApiOrigin() { return "http://localhost" }
+function normalizeMediaUrl(value) {
+  const raw = String(value || "").trim()
+  if (!raw) return ""
+  if (raw.startsWith("data:")) return raw
+  if (/^https?:\\/\\//i.test(raw)) {
+    try {
+      const parsed = new URL(raw)
+      if (parsed.hostname === "backend") {
+        return \`http://localhost\${parsed.pathname}\${parsed.search}\${parsed.hash}\`
+      }
+      return raw
+    } catch {
+      return raw
+    }
+  }
+  const path = raw.startsWith("/") ? raw : \`/\${raw}\`
+  return \`http://localhost\${path}\`
+}
+`,
   )
   const { outputText } = ts.transpileModule(rewritten, {
     compilerOptions: {

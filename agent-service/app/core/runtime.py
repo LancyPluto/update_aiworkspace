@@ -11,6 +11,26 @@ TERMINAL_RUN_STATUSES = {"SUCCESS", "FAILED", "CANCELLED", "TIMEOUT"}
 logger = logging.getLogger(__name__)
 
 
+def _requested_runtime(context) -> str | None:
+    """Derive an explicit engine request from per-run runtime settings.
+
+    Lets the backend opt a single run into the multi-step graph engine via
+    ``runtimeSettings.intelligenceLevel`` without flipping the global flag.
+    """
+    runtime_settings = getattr(context, "runtimeSettings", None)
+    level = getattr(runtime_settings, "intelligenceLevel", None) if runtime_settings else None
+    if not level:
+        return None
+    normalized = str(level).strip().lower()
+    if normalized in {"graph", "agent_graph", "agent-graph", "multi_step", "agentic"}:
+        return "agent_graph"
+    if normalized in {"deep_agents", "deep-agents", "deepagents"}:
+        return "deep_agents"
+    if normalized in {"legacy", "basic", "default"}:
+        return "legacy"
+    return None
+
+
 class AgentRuntime:
     def __init__(
         self,
@@ -38,7 +58,8 @@ class AgentRuntime:
                 self.backend,
                 model_client,
                 deep_agents_enabled=self.default_settings.agent_deep_agents_enabled,
-            ).select_engine(message=context.message)
+                graph_engine_enabled=self.default_settings.agent_graph_engine_enabled,
+            ).select_engine(message=context.message, requested_runtime=_requested_runtime(context))
             await engine.run(context)
         except BackendClientError as exc:
             logger.exception("Agent run failed while calling backend, runId=%s", run_id)
@@ -63,7 +84,8 @@ class AgentRuntime:
                 self.backend,
                 model_client,
                 deep_agents_enabled=self.default_settings.agent_deep_agents_enabled,
-            ).select_engine(message=context.message)
+                graph_engine_enabled=self.default_settings.agent_graph_engine_enabled,
+            ).select_engine(message=context.message, requested_runtime=_requested_runtime(context))
             await engine.run_confirmed_tool(context, tool_code)
         except BackendClientError as exc:
             logger.exception("Agent confirmed-tool run failed while calling backend, runId=%s, toolCode=%s", run_id, tool_code)
@@ -88,9 +110,10 @@ class AgentRuntime:
             self.backend,
             model_client,
             deep_agents_enabled=self.default_settings.agent_deep_agents_enabled,
+            graph_engine_enabled=self.default_settings.agent_graph_engine_enabled,
         )
         selector = getattr(router, "select_debug_engine", router.select_engine)
-        engine = selector(message=context.message)
+        engine = selector(message=context.message, requested_runtime=_requested_runtime(context))
         return await engine.debug_route(context)
 
     async def _model_client(self, context=None) -> ModelClient:

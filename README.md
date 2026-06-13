@@ -176,6 +176,7 @@ python -c "import yaml, pathlib; yaml.safe_load(pathlib.Path('docs/api/openapi.y
 | 文档 | 说明 |
 | --- | --- |
 | [docs/项目整体架构说明.md](docs/项目整体架构说明.md) | 总分结构的架构、模块详情、调用链路与优化建议 |
+| [docs/agent/README.md](docs/agent/README.md) | Agent 文档入口：架构与维护指南、链路梳理、历史记录 |
 | [docs/api/openapi.yml](docs/api/openapi.yml) | API 契约 |
 | [docs/统一API管理-开发文档.md](docs/统一API管理-开发文档.md) | 统一 API 与模型供应商协议映射 |
 | [docs/比例Auto规则.md](docs/比例Auto规则.md) | 比例控件、`auto` 语义和新模型接入检查清单 |

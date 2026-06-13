@@ -137,7 +137,7 @@ public class DataInitializer implements CommandLineRunner {
                 LEFT JOIN tool_templates tt ON tt.template_code = 'video_generation_default'
                 WHERE NOT EXISTS (
                   SELECT 1 FROM ai_tools
-                  WHERE tool_code = 'agnes_text_to_video' AND is_deleted = 0
+                  WHERE tool_code = 'agnes_text_to_video'
                 )
                 """);
         executeSql("""
@@ -172,9 +172,10 @@ public class DataInitializer implements CommandLineRunner {
                     config_note = '<!-- ai-tool-ui:{"primaryColor":"#ff2f6d","welcomeMessage":"","mediaDisplayMode":"effect","modelIconUrl":"","comparisonOriginalUrl":"","comparisonEffectUrl":"","heroTitle":"Agnes 视频生成","heroSubtitle":"输入提示词，可选上传参考图；未上传图片走文生视频，上传图片走图文生视频。","demoThumbnails":[],"useCases":["短视频创作","产品展示","剧情分镜"],"steps":["输入提示词","可选上传参考图","点击生成"],"recommendedToolCodes":[],"beforeVideoUrl":"","afterVideoUrl":""} -->',
                     template_id = COALESCE((SELECT id FROM tool_templates WHERE template_code = 'video_generation_default' LIMIT 1), template_id),
                     execution_handler = 'VIDEO_GENERATION',
+                    is_deleted = 0,
                     updated_by = 1,
                     updated_at = CURRENT_TIMESTAMP
-                WHERE tool_code = 'agnes_text_to_video' AND is_deleted = 0
+                WHERE tool_code = 'agnes_text_to_video'
                 """);
         executeSql("""
                 INSERT INTO tool_field_schemas (tool_id, schema_version, status, created_by)
@@ -243,7 +244,7 @@ public class DataInitializer implements CommandLineRunner {
                 LEFT JOIN tool_templates tt ON tt.template_code = 'image_generation_default'
                 WHERE NOT EXISTS (
                   SELECT 1 FROM ai_tools
-                  WHERE tool_code = 'gpt_image_text_to_image' AND is_deleted = 0
+                  WHERE tool_code = 'gpt_image_text_to_image'
                 )
                 """);
         executeSql("""
@@ -273,9 +274,10 @@ public class DataInitializer implements CommandLineRunner {
                     config_note = '<!-- ai-tool-ui:{"primaryColor":"#ff2f6d","welcomeMessage":"","mediaDisplayMode":"effect","modelIconUrl":"","comparisonOriginalUrl":"","comparisonEffectUrl":"","heroTitle":"AI 文生图","heroSubtitle":"输入提示词直接生成图片；上传参考图后走图文生图，未上传图片走文生图。模型由首页选择项决定。","demoThumbnails":[],"useCases":["角色设定","商品图","海报视觉"],"steps":["输入提示词","可选上传参考图","选择生图模型","点击生成"],"recommendedToolCodes":[],"beforeVideoUrl":"","afterVideoUrl":""} -->',
                     template_id = COALESCE((SELECT id FROM tool_templates WHERE template_code = 'image_generation_default' LIMIT 1), template_id),
                     execution_handler = 'IMAGE_GENERATION',
+                    is_deleted = 0,
                     updated_by = 1,
                     updated_at = CURRENT_TIMESTAMP
-                WHERE tool_code = 'gpt_image_text_to_image' AND is_deleted = 0
+                WHERE tool_code = 'gpt_image_text_to_image'
                 """);
         executeSql("""
                 INSERT INTO tool_field_schemas (tool_id, schema_version, status, created_by)

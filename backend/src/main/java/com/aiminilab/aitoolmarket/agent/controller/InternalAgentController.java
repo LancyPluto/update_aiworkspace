@@ -1,6 +1,7 @@
 package com.aiminilab.aitoolmarket.agent.controller;
 
 import com.aiminilab.aitoolmarket.agent.dto.AgentFileResponse;
+import com.aiminilab.aitoolmarket.agent.dto.AgentGraphCheckpointResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AgentRunEventResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AgentRunResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AgentToolCallResponse;
@@ -15,6 +16,7 @@ import com.aiminilab.aitoolmarket.agent.dto.FailAgentRunRequest;
 import com.aiminilab.aitoolmarket.agent.dto.FailAgentToolCallRequest;
 import com.aiminilab.aitoolmarket.agent.dto.InternalAgentSessionSearchItemResponse;
 import com.aiminilab.aitoolmarket.agent.dto.InternalAgentSessionSearchRequest;
+import com.aiminilab.aitoolmarket.agent.dto.UpsertAgentGraphCheckpointRequest;
 import com.aiminilab.aitoolmarket.agent.dto.UpsertStreamingAgentAnswerRequest;
 import com.aiminilab.aitoolmarket.agent.dto.InternalAgentRunContextResponse;
 import com.aiminilab.aitoolmarket.agent.dto.InternalAgentModelConfigResponse;
@@ -198,6 +200,26 @@ public class InternalAgentController {
             @Valid @RequestBody UpsertStreamingAgentAnswerRequest request
     ) {
         return ApiResponse.success(agentRunService.upsertStreamingAnswer(runId, request));
+    }
+
+    @PutMapping("/runs/{runId}/graph-checkpoint")
+    public ApiResponse<AgentGraphCheckpointResponse> saveGraphCheckpoint(
+            @PathVariable Long runId,
+            @Valid @RequestBody UpsertAgentGraphCheckpointRequest request
+    ) {
+        agentRunService.saveGraphCheckpoint(runId, request.checkpointJson());
+        return ApiResponse.success(new AgentGraphCheckpointResponse(runId, request.checkpointJson()));
+    }
+
+    @GetMapping("/runs/{runId}/graph-checkpoint")
+    public ApiResponse<AgentGraphCheckpointResponse> getGraphCheckpoint(@PathVariable Long runId) {
+        return ApiResponse.success(new AgentGraphCheckpointResponse(runId, agentRunService.getGraphCheckpoint(runId)));
+    }
+
+    @DeleteMapping("/runs/{runId}/graph-checkpoint")
+    public ApiResponse<Void> clearGraphCheckpoint(@PathVariable Long runId) {
+        agentRunService.clearGraphCheckpoint(runId);
+        return ApiResponse.success(null);
     }
 
     @PostMapping("/runs/{runId}/complete")

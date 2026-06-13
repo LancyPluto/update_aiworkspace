@@ -639,11 +639,20 @@ export type AgentRunEventType =
   | "memory.context_frozen"
   | "memory.candidate_created"
   | "memory.saved"
+  | "plan.updated"
+  | "agent.step"
+  | "tool.delta"
+  | "reflect.retry"
   | "message.delta"
   | "message.completed"
   | "run.completed"
   | "run.failed"
   | string
+
+export interface AgentPlanStep {
+  title: string
+  status: "pending" | "in_progress" | "done" | string
+}
 
 export interface AgentSession {
   id: number

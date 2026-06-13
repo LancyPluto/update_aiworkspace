@@ -36,7 +36,7 @@ import CapabilityControls from "@/pages/Chat/CapabilityControls.vue"
 import type { PrimaryReferenceMaterialInfo } from "@/pages/Chat/CapabilityControls.vue"
 import DashboardModalityDock from "./DashboardModalityDock.vue"
 import { fetchCreditAccount } from "@/api/creditApi"
-import { ApiBusinessError, getApiOrigin } from "@/api/client"
+import { ApiBusinessError } from "@/api/client"
 import {
   cancelTask,
   createTask,
@@ -45,11 +45,12 @@ import {
   fetchTasks,
   fetchTaskStatus,
   regenerateTask,
+  streamTaskStatus,
 } from "@/api/taskApi"
 import { publishCommunityPost, unpublishCommunityPost } from "@/api/communityApi"
 import { fetchAIToolById, fetchTools } from "@/api/toolApi"
 import type { AITool } from "@/api/aiToolTypes"
-import type { CreditAccount, TaskDetail, TaskStatus, ToolField, ToolSummary } from "@/api/types"
+import type { CreditAccount, TaskDetail, TaskStatus, TaskStatusPayload, ToolField, ToolSummary } from "@/api/types"
 import type { AssetPreviewItem, AssetPreviewRecommendation } from "@/types/assetPreview"
 import type { AudioTrackItem, ResultBlock } from "@/types/result"
 import { userRoutes } from "@/router/userRoutes"
@@ -66,6 +67,7 @@ import {
   type DashboardAttributionContext,
 } from "./dashboardAttribution"
 import { buildDashboardTaskParams, buildOptimisticDashboardTask } from "./dashboardTaskFactory"
+import { normalizeMediaUrl } from "@/utils/toolCoverMedia"
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -119,6 +121,7 @@ let historyFeedAnchorUntil = 0
 let historyFeedAnchorHeight = 0
 let historyScrollContainer: HTMLElement | null = null
 const taskPollTimers = new Map<number, number>()
+const taskStatusStreamControllers = new Map<number, AbortController>()
 const retryingTaskIds = ref<Set<number>>(new Set())
 const deletingTaskIds = ref<Set<number>>(new Set())
 const cancellingTaskIds = ref<Set<number>>(new Set())
@@ -252,6 +255,14 @@ const previewRecommendations = computed<AssetPreviewRecommendation[]>(() =>
 const runningCount = computed(() =>
   tasks.value.filter((task) => ["CREATED", "QUEUED", "PROCESSING", "RETRYING"].includes(task.status)).length,
 )
+
+watch(recentTasks, () => {
+  syncTaskStatusStreams()
+})
+
+watch(runningCount, (count) => {
+  if (count === 0) stopAllTaskStatusStreams()
+})
 const audioTaskMaterials = computed(() =>
   taskMaterials.value.filter((item) => item.task.status === "SUCCESS" && primaryBlock(item.blocks)?.type === "audio"),
 )
@@ -518,18 +529,32 @@ function autoExpandComposerAtFeedBottom() {
 
 function handleDashboardPointerDown(event: PointerEvent) {
   if (!composerOpen.value || submitting.value) return
+  if (capabilityRef.value?.hasOpenOverlay?.()) return
   const root = composerRootRef.value
   const target = event.target
   if (!root || !(target instanceof Node) || root.contains(target)) return
+  if (target instanceof Element && target.closest("[data-capability-overlay]")) return
   collapseComposerForPreview()
 }
 
 async function createWithSelectedTool() {
+  expandComposer()
   const tool = selectedTool.value
-  if (!tool || submitting.value) return
+  if (!tool || submitting.value) {
+    if (!tool) submitError.value = "请先选择模型"
+    return
+  }
   submitError.value = ""
   submitNotice.value = ""
 
+  if (selectedToolDetailLoading.value) {
+    submitError.value = "工具配置加载中，请稍候"
+    return
+  }
+  if (!selectedChatTool.value) {
+    submitError.value = "工具配置加载失败，请重新选择模型"
+    return
+  }
   if (capabilityRef.value?.hasPendingUploads()) {
     submitError.value = "文件上传中，请稍候"
     return
@@ -541,6 +566,10 @@ async function createWithSelectedTool() {
   }
 
   const content = promptText.value.trim()
+  if (!content) {
+    submitError.value = "请输入创作提示词"
+    return
+  }
   const params = capabilityRef.value?.getRequestParams() || {}
   const attachments = capabilityRef.value?.getAttachmentIds() || []
   const taskParams = buildDashboardTaskParams({
@@ -630,6 +659,7 @@ async function reloadTasksForCurrentModality() {
     tasks.value = matched
     taskHasNext.value = hasNext
     startPollingVisibleTasks()
+    syncTaskStatusStreams()
   } finally {
     tasksLoadingMore.value = false
   }
@@ -671,6 +701,7 @@ async function loadMoreTasks(options: { preserveFeedAnchor?: boolean } = {}) {
       updateHistoryScrollBottomVisibility()
     }
     startPollingVisibleTasks()
+    syncTaskStatusStreams()
   } finally {
     tasksLoadingMore.value = false
   }
@@ -692,6 +723,89 @@ function setupHistoryObserver() {
   if (historySentinelRef.value) historyObserver.observe(historySentinelRef.value)
 }
 
+function normalizedTaskProgress(value?: number | null): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null
+  return Math.max(0, Math.min(100, Math.round(value)))
+}
+
+function monotonicTaskProgress(existing: TaskDetail | undefined, incomingProgress?: number | null): number | undefined {
+  const previous = normalizedTaskProgress(existing?.progress)
+  const incoming = normalizedTaskProgress(incomingProgress)
+  if (incoming == null) return previous ?? existing?.progress
+  if (previous == null) return incoming
+  return Math.max(previous, incoming)
+}
+
+async function syncTerminalTaskDetail(taskId: number) {
+  try {
+    const detail = await fetchTaskById(taskId, { token: auth.token })
+    if (taskMatchesSelectedModality(detail)) upsertTask(detail)
+  } catch {
+    // detail sync may be briefly unavailable; polling will retry on next tick
+  }
+}
+
+function applyTaskStatusPayload(payload: TaskStatusPayload) {
+  const current = tasks.value.find((task) => task.taskId === payload.taskId)
+  if (!current) return
+  upsertTask({
+    ...current,
+    status: payload.status,
+    progress: monotonicTaskProgress(current, payload.progress),
+    progressMessage: payload.progressMessage ?? current.progressMessage,
+  })
+  if (isTaskTerminal(payload.status)) {
+    stopTaskPolling(payload.taskId)
+    stopTaskStatusStream(payload.taskId)
+    void syncTerminalTaskDetail(payload.taskId)
+  }
+}
+
+function stopTaskStatusStream(taskId: number) {
+  const controller = taskStatusStreamControllers.get(taskId)
+  if (!controller) return
+  controller.abort()
+  taskStatusStreamControllers.delete(taskId)
+}
+
+function stopAllTaskStatusStreams() {
+  for (const taskId of taskStatusStreamControllers.keys()) {
+    stopTaskStatusStream(taskId)
+  }
+}
+
+function subscribeActiveTaskStatus(task: TaskDetail) {
+  if (!auth.isLoggedIn || !isTaskRunning(task.status) || taskStatusStreamControllers.has(task.taskId)) return
+  const controller = new AbortController()
+  taskStatusStreamControllers.set(task.taskId, controller)
+  void streamTaskStatus(task.taskId, applyTaskStatusPayload, {
+    token: auth.token,
+    signal: controller.signal,
+  }).catch((streamError) => {
+    if (!controller.signal.aborted) {
+      console.debug("dashboard task progress stream closed", task.taskId, streamError)
+    }
+  }).finally(() => {
+    if (taskStatusStreamControllers.get(task.taskId) === controller) {
+      taskStatusStreamControllers.delete(task.taskId)
+    }
+  })
+}
+
+function syncTaskStatusStreams() {
+  const visibleTaskIds = new Set(tasks.value.map((task) => task.taskId))
+  for (const [taskId, controller] of taskStatusStreamControllers.entries()) {
+    const task = tasks.value.find((item) => item.taskId === taskId)
+    if (!visibleTaskIds.has(taskId) || !task || !isTaskRunning(task.status)) {
+      controller.abort()
+      taskStatusStreamControllers.delete(taskId)
+    }
+  }
+  for (const task of tasks.value) {
+    subscribeActiveTaskStatus(task)
+  }
+}
+
 function startPollingVisibleTasks() {
   for (const task of tasks.value) {
     if (isTaskRunning(task.status)) startTaskPolling(task.taskId)
@@ -703,7 +817,7 @@ function startTaskPolling(taskId: number) {
   void refreshTaskStatus(taskId)
   const timer = window.setInterval(() => {
     void refreshTaskStatus(taskId)
-  }, 1800)
+  }, 2500)
   taskPollTimers.set(taskId, timer)
 }
 
@@ -714,28 +828,16 @@ function stopTaskPolling(taskId: number) {
 }
 
 async function refreshTaskStatus(taskId: number) {
+  const current = tasks.value.find((task) => task.taskId === taskId)
+  if (!current || !isTaskRunning(current.status)) {
+    stopTaskPolling(taskId)
+    return
+  }
   try {
     const status = await fetchTaskStatus(taskId, { token: auth.token })
-    const current = tasks.value.find((task) => task.taskId === taskId)
-    if (current) {
-      upsertTask({
-        ...current,
-        status: status.status,
-        progress: status.progress ?? current.progress,
-        progressMessage: status.progressMessage ?? current.progressMessage,
-      })
-    }
-    if (isTaskTerminal(status.status)) {
-      stopTaskPolling(taskId)
-      try {
-        const detail = await fetchTaskById(taskId, { token: auth.token })
-        if (taskMatchesSelectedModality(detail)) upsertTask(detail)
-      } catch {
-        // The status card is still useful even if detail sync is briefly unavailable.
-      }
-    }
+    applyTaskStatusPayload(status)
   } catch {
-    stopTaskPolling(taskId)
+    // keep polling as SSE fallback when status requests fail transiently
   }
 }
 
@@ -814,6 +916,7 @@ async function retryTask(task: TaskDetail) {
       userId: auth.user?.id ?? task.userId,
     })
     stopTaskPolling(previousTaskId)
+    stopTaskStatusStream(previousTaskId)
     if (response.taskId !== previousTaskId) {
       tasks.value = tasks.value.filter((item) => item.taskId !== previousTaskId)
       upsertTask(optimisticTask, true)
@@ -843,6 +946,7 @@ async function cancelQueuedTask(task: TaskDetail) {
   try {
     const response = await cancelTask(task.taskId, { token: auth.token })
     stopTaskPolling(task.taskId)
+    stopTaskStatusStream(task.taskId)
     const current = tasks.value.find((item) => item.taskId === task.taskId)
     if (current) {
       upsertTask({
@@ -868,6 +972,7 @@ async function removeTask(task: TaskDetail) {
   submitError.value = ""
   try {
     stopTaskPolling(task.taskId)
+    stopTaskStatusStream(task.taskId)
     await deleteTask(task.taskId, { token: auth.token })
     tasks.value = tasks.value.filter((item) => item.taskId !== task.taskId)
   } catch (e) {
@@ -1373,8 +1478,39 @@ function replayTask(task: TaskDetail) {
   selectedModality.value = modality
   selectedToolCode.value = task.toolCode
   promptText.value = taskPrompt(task)
-  replayParams.value = { ...(task.params || {}) }
+  replayParams.value = normalizeReplayParams(task.params || {})
   expandComposer()
+}
+
+function normalizeReplayParams(params: Record<string, unknown>): Record<string, unknown> {
+  const next: Record<string, unknown> = { ...params }
+  for (const [key, value] of Object.entries(next)) {
+    if (typeof value === "string" && looksLikeStoredMediaUrl(value)) {
+      next[key] = normalizeMediaUrl(value)
+      continue
+    }
+    if (Array.isArray(value)) {
+      next[key] = value.map((item) =>
+        typeof item === "string" && looksLikeStoredMediaUrl(item) ? normalizeMediaUrl(item) : item,
+      )
+    }
+  }
+  return next
+}
+
+function looksLikeStoredMediaUrl(value: string): boolean {
+  const raw = value.trim()
+  if (!raw) return false
+  if (raw.startsWith("/generated") || raw.startsWith("/uploads")) return true
+  if (/^https?:\/\//i.test(raw)) {
+    try {
+      const parsed = new URL(raw)
+      return parsed.pathname.startsWith("/generated") || parsed.pathname.startsWith("/uploads")
+    } catch {
+      return false
+    }
+  }
+  return false
 }
 
 async function loadSelectedToolDetail(toolCode: string) {
@@ -1388,15 +1524,6 @@ async function loadSelectedToolDetail(toolCode: string) {
   } finally {
     selectedToolDetailLoading.value = false
   }
-}
-
-function normalizeMediaUrl(value?: string | null): string {
-  const raw = value?.trim()
-  if (!raw) return ""
-  if (raw.startsWith("http://") || raw.startsWith("https://") || raw.startsWith("data:")) return raw
-  const path = raw.startsWith("/") ? raw : `/${raw}`
-  const apiOrigin = getApiOrigin()
-  return apiOrigin ? `${apiOrigin}${path}` : path
 }
 
 function isVideoPreviewUrl(value?: string | null): boolean {
@@ -1426,6 +1553,7 @@ onUnmounted(() => {
   historyObserver?.disconnect()
   for (const timer of taskPollTimers.values()) window.clearInterval(timer)
   taskPollTimers.clear()
+  stopAllTaskStatusStreams()
 })
 </script>
 
@@ -2414,8 +2542,8 @@ onUnmounted(() => {
           class="pointer-events-none fixed bottom-6 left-[calc(var(--app-sidebar-width,268px)+(100vw-var(--app-sidebar-width,268px))/2)] z-50 grid w-[min(980px,calc(100vw-2rem))] -translate-x-1/2 transition-[left]"
         >
           <div
+            v-show="!composerOpen"
             class="col-start-1 row-start-1 flex w-full items-center justify-center gap-3 self-end transition-all duration-200"
-            :class="composerOpen ? 'pointer-events-none translate-y-4 scale-[0.98] opacity-0' : 'translate-y-0 scale-100 opacity-100'"
           >
             <div v-if="activePanel === 'tasks'" class="dashboard-floating-view-switch pointer-events-auto">
               <button
@@ -2715,8 +2843,8 @@ onUnmounted(() => {
                 <button
                   type="button"
                   class="ml-auto inline-flex h-11 min-w-32 items-center justify-center gap-2 rounded-xl bg-[linear-gradient(180deg,rgb(199_128_255),rgb(143_73_226))] px-5 text-sm font-semibold text-white shadow-[0_12px_32px_rgb(176_92_255_/_0.34),inset_0_1px_0_rgb(255_255_255_/_0.16)] transition hover:brightness-110 disabled:cursor-not-allowed disabled:bg-white/12 disabled:text-white/35"
-                  :disabled="!selectedTool || submitting"
-                  @click="createWithSelectedTool"
+                  :disabled="!selectedTool || submitting || selectedToolDetailLoading"
+                  @click.stop="createWithSelectedTool"
                 >
                   <Loader2 v-if="submitting" class="h-4 w-4 animate-spin" />
                   <Send v-else class="h-4 w-4" />

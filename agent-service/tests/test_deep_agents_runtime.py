@@ -16,7 +16,7 @@ from app.core.event_types import (
     WORKSPACE_FILE_READ,
 )
 from app.core.schemas import AgentFileChunkContext, AgentFileContext, ChatMessage, RunContext, WorkspaceMemoryItem
-from app.runtime.langgraph_engine import LangGraphRuntimeEngine
+from app.runtime.legacy_engine import LegacyDispatcherEngine
 from app.runtime.router import RuntimeRouter
 
 
@@ -30,12 +30,12 @@ def test_router_deep_agents_feature_flag_selects_preview_engine_only_when_enable
     backend = object()
     model = object()
 
-    disabled_router = RuntimeRouter(backend_client=backend, model_client=model, deep_agents_enabled=False)
-    enabled_router = RuntimeRouter(backend_client=backend, model_client=model, deep_agents_enabled=True)
+    disabled_router = RuntimeRouter(backend_client=backend, model_client=model, deep_agents_enabled=False, graph_engine_enabled=False)
+    enabled_router = RuntimeRouter(backend_client=backend, model_client=model, deep_agents_enabled=True, graph_engine_enabled=False)
 
-    assert isinstance(disabled_router.select_engine(message="plan", requested_runtime="deep_agents"), LangGraphRuntimeEngine)
+    assert isinstance(disabled_router.select_engine(message="plan", requested_runtime="deep_agents"), LegacyDispatcherEngine)
     assert isinstance(enabled_router.select_engine(message="plan", requested_runtime="deep_agents"), DeepAgentsRuntimeEngine)
-    assert isinstance(enabled_router.select_engine(message="hello"), LangGraphRuntimeEngine)
+    assert isinstance(enabled_router.select_engine(message="hello"), LegacyDispatcherEngine)
 
 
 class FakeBackend:

@@ -391,6 +391,53 @@ function onMaterialUploadDrop(event: DragEvent) {
   lightTap()
 }
 
+function normalizePastedImageFile(file: File, index: number): File {
+  const hasMeaningfulName = Boolean(file.name) && file.name !== "image.png" && !/^blob/i.test(file.name)
+  if (hasMeaningfulName) return file
+  const ext =
+    file.type === "image/jpeg" ? "jpg"
+    : file.type === "image/webp" ? "webp"
+    : file.type === "image/gif" ? "gif"
+    : "png"
+  const suffix = index > 0 ? `-${index + 1}` : ""
+  return new File([file], `pasted-image-${Date.now()}${suffix}.${ext}`, {
+    type: file.type || "image/png",
+  })
+}
+
+function extractClipboardImageFiles(event: ClipboardEvent): File[] {
+  const clipboard = event.clipboardData
+  if (!clipboard) return []
+
+  const images: File[] = []
+  const pushIfImage = (file: File | null) => {
+    if (!file || !isImageAttachment(file.type, file.name)) return
+    images.push(normalizePastedImageFile(file, images.length))
+  }
+
+  if (clipboard.items?.length) {
+    for (const item of Array.from(clipboard.items)) {
+      if (item.kind !== "file") continue
+      pushIfImage(item.getAsFile())
+    }
+  }
+  if (images.length === 0) {
+    for (const file of Array.from(clipboard.files || [])) {
+      pushIfImage(file)
+    }
+  }
+  return images
+}
+
+function onComposerPaste(event: ClipboardEvent) {
+  if (inputBlocked.value || props.uploading) return
+  const images = extractClipboardImageFiles(event)
+  if (images.length === 0) return
+  event.preventDefault()
+  emit("files-dropped", images, { autoSelect: false })
+  lightTap()
+}
+
 function openAttachmentDialog(tab: "upload" | "material" = "upload") {
   if (props.uploading || props.sending || props.editingRegenerating || props.regeneratingMessageId != null || props.hasActiveRun) return
   attachmentDialogTab.value = tab
@@ -742,6 +789,7 @@ defineExpose({ adjustComposerTextareaHeight })
         "
         :disabled="inputBlocked"
         @keydown.enter.exact.prevent="onSubmit()"
+        @paste="onComposerPaste"
       />
       <button
         class="expand-btn"

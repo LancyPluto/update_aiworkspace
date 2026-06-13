@@ -388,6 +388,7 @@ CREATE TABLE agent_runs (
   context_snapshot_id BIGINT,
   client_request_id VARCHAR(64),
   preferred_tool_code VARCHAR(64),
+  graph_checkpoint_json CLOB,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

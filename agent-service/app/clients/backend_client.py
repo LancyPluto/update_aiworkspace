@@ -216,6 +216,24 @@ class BackendClient:
     async def cancel_task(self, user_id: int, task_id: int) -> None:
         await self._request("POST", f"/api/internal/v1/tasks/{task_id}/cancel?userId={user_id}")
 
+    async def save_graph_checkpoint(self, run_id: int, checkpoint_json: str) -> None:
+        await self._request(
+            "PUT",
+            f"/api/internal/v1/agent/runs/{run_id}/graph-checkpoint",
+            {"checkpointJson": checkpoint_json},
+        )
+
+    async def load_graph_checkpoint(self, run_id: int) -> str | None:
+        data = await self._request("GET", f"/api/internal/v1/agent/runs/{run_id}/graph-checkpoint")
+        value = data.get("checkpointJson") if isinstance(data, dict) else None
+        return value if isinstance(value, str) and value.strip() else None
+
+    async def clear_graph_checkpoint(self, run_id: int) -> None:
+        try:
+            await self._request("DELETE", f"/api/internal/v1/agent/runs/{run_id}/graph-checkpoint")
+        except BackendClientError:
+            logger.debug("clear graph checkpoint failed (non-fatal) runId=%s", run_id)
+
     async def upsert_streaming_answer(self, run_id: int, content_text: str) -> None:
         await self._request(
             "PUT",
