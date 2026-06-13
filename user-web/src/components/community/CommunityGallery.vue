@@ -42,9 +42,9 @@ import { userRoutes } from "@/router/userRoutes"
 import { useAuthStore } from "@/store/authStore"
 import { assetFromCommunityPost } from "@/utils/assetPreviewAdapter"
 import { openDashboardWithAsset } from "@/utils/assetReplay"
-import { communityDisplayTitle, promptExcerpt } from "@/utils/communityDisplay"
+import { communityDisplayTitle, communityCardDescription } from "@/utils/communityDisplay"
 import { hasCommunityAudioMedia, resolveCommunityAudioMedia } from "@/utils/communityAudioMedia"
-import { resolveCommunityAuthorAvatar, resolveCommunityAuthorName, resolveCommunityPrompt } from "@/utils/communityPostNormalize"
+import { resolveCommunityAuthorAvatar, resolveCommunityAuthorName } from "@/utils/communityPostNormalize"
 import {
   normalizeCommunityMediaUrl,
   resolveCommunityImageUrls,
@@ -147,20 +147,18 @@ function postKind(post: CommunityPost) {
 function postTitle(post: CommunityPost) {
   return communityDisplayTitle({
     title: post.title,
-    prompt: post.promptPreview || post.prompt,
-    promptPreview: post.promptPreview || post.prompt,
     topic: post.topic,
     tags: post.tags,
     toolName: post.toolName,
     toolCode: post.toolCode,
     kind: postKind(post),
+    modality: post.modality,
+    promptVisible: post.promptVisible,
   })
 }
 
 function cardDescription(post: CommunityPost) {
-  const raw = resolveCommunityPrompt(post) || post.description || ""
-  if (!raw) return ""
-  return promptExcerpt(raw, 72)
+  return communityCardDescription(post)
 }
 
 function authorName(post: CommunityPost) {
@@ -591,12 +589,12 @@ onUnmounted(() => {
     >
       <template #default="{ item }">
         <article class="post-card skeleton" :style="{ '--skeleton-h': `${item.height}px` }">
-          <div class="thumb skeleton-block" />
-          <div class="card-body">
-            <div class="skeleton-line wide" />
-            <div class="skeleton-line" />
+          <div class="thumb skeleton-block">
+            <div class="card-meta-bar skeleton-meta-bar">
+              <div class="skeleton-line short" />
+              <div class="skeleton-line tiny" />
+            </div>
           </div>
-          <div class="card-footer skeleton-footer" />
         </article>
       </template>
     </MasonryLayout>
@@ -609,8 +607,8 @@ onUnmounted(() => {
         <template #default="{ item: post }">
         <article class="post-card group">
           <div class="card-main">
-            <button type="button" class="card-clickable" @click="openPost(post)">
-              <div class="thumb">
+            <div class="thumb">
+              <button type="button" class="card-clickable" @click="openPost(post)">
                 <img
                   v-if="hasMediaCover(post) && postKind(post) === 'image'"
                   :src="activePostImageUrl(post)"
@@ -641,8 +639,9 @@ onUnmounted(() => {
                 <div v-else class="thumb-text">
                   <p>{{ cardDescription(post) || postTitle(post) }}</p>
                 </div>
+              </button>
 
-                <span v-if="post.featured" class="featured-badge">
+              <span v-if="post.featured" class="featured-badge">
                   <Sparkles class="h-3 w-3" />
                   精选
                 </span>
@@ -653,18 +652,39 @@ onUnmounted(() => {
                 <span v-if="postImageUrls(post).length > 1" class="media-count-badge">
                   {{ activePostImageIndex(post) + 1 }} / {{ postImageUrls(post).length }}
                 </span>
-              </div>
 
-              <div class="card-body">
-                <h3 class="card-title">{{ postTitle(post) }}</h3>
-                <p
-                  v-if="cardDescription(post) && cardDescription(post) !== postTitle(post)"
-                  class="card-desc"
-                >
-                  {{ cardDescription(post) }}
-                </p>
-              </div>
-            </button>
+                <div class="card-meta-bar">
+                  <button type="button" class="creator-chip" @click="openAuthorProfile(post, $event)">
+                    <UserAvatar :src="authorAvatar(post)" :name="authorName(post)" size="sm" />
+                    <span class="creator-name">{{ authorName(post) }}</span>
+                  </button>
+
+                  <div class="stats-row">
+                    <button
+                      type="button"
+                      class="stat-item stat-likes"
+                      :class="{ active: post.liked }"
+                      :disabled="actingPostId === post.id"
+                      title="点赞"
+                      @click="toggleLike(post, $event)"
+                    >
+                      <Heart class="h-3 w-3" :class="{ 'icon-filled': post.liked }" />
+                      {{ post.likeCount }}
+                    </button>
+                    <button
+                      type="button"
+                      class="stat-item stat-favorites"
+                      :class="{ active: post.favorited }"
+                      :disabled="actingPostId === post.id"
+                      title="收藏"
+                      @click="toggleFavorite(post, $event)"
+                    >
+                      <Star class="h-3 w-3" :class="{ 'icon-filled': post.favorited }" />
+                      {{ post.favoriteCount }}
+                    </button>
+                  </div>
+                </div>
+            </div>
 
             <div v-if="postImageUrls(post).length > 1" class="carousel-controls" aria-label="切换图片">
               <button type="button" class="carousel-button previous" aria-label="上一张" @click="stepPostImage(post, -1, $event)">
@@ -686,38 +706,6 @@ onUnmounted(() => {
               <Wand2 v-else class="h-3.5 w-3.5" />
               <span class="same-style-label">同款创作</span>
             </button>
-          </div>
-
-          <div class="card-footer">
-            <button type="button" class="creator-chip" @click="openAuthorProfile(post, $event)">
-              <UserAvatar :src="authorAvatar(post)" :name="authorName(post)" size="sm" />
-              <span class="creator-name">{{ authorName(post) }}</span>
-            </button>
-
-            <div class="stats-row">
-              <button
-                type="button"
-                class="stat-item stat-likes"
-                :class="{ active: post.liked }"
-                :disabled="actingPostId === post.id"
-                title="点赞"
-                @click="toggleLike(post, $event)"
-              >
-                <Heart class="h-3.5 w-3.5" :class="{ 'icon-filled': post.liked }" />
-                {{ post.likeCount }}
-              </button>
-              <button
-                type="button"
-                class="stat-item stat-favorites"
-                :class="{ active: post.favorited }"
-                :disabled="actingPostId === post.id"
-                title="收藏"
-                @click="toggleFavorite(post, $event)"
-              >
-                <Star class="h-3.5 w-3.5" :class="{ 'icon-filled': post.favorited }" />
-                {{ post.favoriteCount }}
-              </button>
-            </div>
           </div>
         </article>
         </template>
@@ -1037,9 +1025,9 @@ onUnmounted(() => {
 .post-card {
   position: relative;
   overflow: hidden;
-  border: 1px solid rgb(255 255 255 / 0.08);
-  border-radius: 16px;
-  background: rgb(255 255 255 / 0.04);
+  border: 1px solid rgb(255 255 255 / 0.06);
+  border-radius: 14px;
+  background: rgb(255 255 255 / 0.02);
   transition: transform 0.22s ease, box-shadow 0.22s ease, border-color 0.22s ease;
 }
 
@@ -1067,7 +1055,7 @@ onUnmounted(() => {
 .thumb {
   position: relative;
   overflow: hidden;
-  border-radius: 16px 16px 0 0;
+  border-radius: 14px;
   background: rgb(255 255 255 / 0.03);
 }
 
@@ -1107,8 +1095,8 @@ onUnmounted(() => {
 
 .media-count-badge {
   position: absolute;
+  top: 10px;
   right: 10px;
-  bottom: 10px;
   z-index: 1;
   border-radius: 999px;
   background: rgb(0 0 0 / 0.58);
@@ -1117,6 +1105,24 @@ onUnmounted(() => {
   font-size: 11px;
   font-weight: 700;
   backdrop-filter: blur(8px);
+}
+
+.card-meta-bar {
+  position: absolute;
+  z-index: 3;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: linear-gradient(180deg, transparent 0%, rgb(0 0 0 / 0.18) 38%, rgb(0 0 0 / 0.62) 100%);
+  padding: 28px 10px 9px;
+}
+
+.card-meta-bar > * {
+  pointer-events: auto;
 }
 
 .carousel-controls {
@@ -1183,66 +1189,30 @@ onUnmounted(() => {
   overflow: hidden;
 }
 
-.card-body {
-  padding: 10px 12px 4px;
-}
-
-.card-title {
-  margin: 0;
-  color: rgb(255 255 255 / 0.92);
-  font-size: 13px;
-  font-weight: 700;
-  line-height: 1.45;
-  text-shadow: 0 1px 12px rgb(0 0 0 / 0.5);
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.card-desc {
-  margin: 6px 0 0;
-  color: rgb(255 255 255 / 0.42);
-  font-size: 12px;
-  line-height: 1.5;
-  text-shadow: 0 1px 10px rgb(0 0 0 / 0.46);
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.card-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 8px 12px 12px;
-}
-
 .creator-chip {
   display: inline-flex;
   min-width: 0;
-  max-width: 58%;
+  max-width: 62%;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   border: 0;
   background: transparent;
-  color: rgb(255 255 255 / 0.68);
+  color: rgb(255 255 255 / 0.58);
   padding: 0;
   cursor: pointer;
   transition: color 0.18s ease;
 }
 
 .creator-chip:hover {
-  color: rgb(255 255 255 / 0.92);
+  color: rgb(255 255 255 / 0.82);
 }
 
 .creator-name {
   overflow: hidden;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 500;
   line-height: 1.2;
+  letter-spacing: 0.01em;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1268,18 +1238,18 @@ onUnmounted(() => {
   display: flex;
   flex-shrink: 0;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
 }
 
 .stat-item {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
   border: 0;
   background: transparent;
-  color: rgb(255 255 255 / 0.38);
+  color: rgb(255 255 255 / 0.46);
   padding: 0;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 500;
   cursor: pointer;
   transition: color 0.18s ease;
@@ -1370,17 +1340,30 @@ onUnmounted(() => {
   margin-top: 0;
 }
 
-.skeleton-line:not(.wide) {
+.skeleton-line:not(.wide):not(.short):not(.tiny) {
   width: 62%;
 }
 
-.skeleton-footer {
-  min-height: 28px;
-  margin: 4px 12px 12px;
-  border-radius: 999px;
-  background: linear-gradient(90deg, rgb(255 255 255 / 0.03), rgb(255 255 255 / 0.07), rgb(255 255 255 / 0.03));
-  background-size: 200% 100%;
-  animation: shimmer 1.4s infinite;
+.skeleton-meta-bar {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 28px 10px 9px;
+}
+
+.skeleton-line.short {
+  width: 38%;
+  margin-top: 0;
+}
+
+.skeleton-line.tiny {
+  width: 22%;
+  margin-top: 0;
 }
 
 @keyframes shimmer {

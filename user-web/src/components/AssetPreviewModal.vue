@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue"
+import { useRoute, useRouter } from "vue-router"
 import {
   CalendarDays,
   Check,
   Copy,
   Download,
   FileText,
+  Flag,
   Globe2,
   Image as ImageIcon,
   Music,
@@ -16,7 +18,12 @@ import {
   Zap,
 } from "lucide-vue-next"
 import { getApiOrigin } from "@/api/client"
+import { reportCommunityPost } from "@/api/communityApi"
+import CommunityPublishModal from "@/components/CommunityPublishModal.vue"
+import CommunityReportModal from "@/components/CommunityReportModal.vue"
+import { useAuthStore } from "@/store/authStore"
 import type { AssetPreviewItem, AssetPreviewRecommendation } from "@/types/assetPreview"
+import type { CommunityPublishPayload } from "@/utils/publishCommunityAsset"
 import { cleanToolDisplayText } from "@/utils/toolDisplayText"
 
 const props = defineProps<{
@@ -28,12 +35,19 @@ const emit = defineEmits<{
   close: []
   "use-tool": [tool: AssetPreviewRecommendation, asset: AssetPreviewItem]
   "open-task": [asset: AssetPreviewItem]
-  "publish": [asset: AssetPreviewItem]
+  publish: [asset: AssetPreviewItem, payload?: CommunityPublishPayload]
   "unpublish": [asset: AssetPreviewItem]
 }>()
 
 const copyHint = ref("")
 const selectedUrl = ref("")
+const publishModalOpen = ref(false)
+const reportModalOpen = ref(false)
+const reportSubmitting = ref(false)
+const reportHint = ref("")
+const auth = useAuthStore()
+const router = useRouter()
+const route = useRoute()
 
 const promptText = computed(() => props.asset?.prompt || props.asset?.rawText || "")
 
@@ -55,6 +69,13 @@ const activeAsset = computed<AssetPreviewItem | null>(() => (props.asset ? { ...
 const downloadUrl = computed(() => mediaUrl.value)
 
 const canDownload = computed(() => Boolean(downloadUrl.value))
+
+const canReportCommunity = computed(() => {
+  const asset = props.asset
+  if (!asset || asset.source !== "community" || !asset.communityPostId) return false
+  if (!auth.user?.id) return true
+  return asset.authorUserId !== auth.user.id
+})
 
 function formatTime(value?: string | null) {
   if (!value) return ""
@@ -110,6 +131,47 @@ function normalizeMediaUrl(value?: string | null) {
   return apiOrigin ? `${apiOrigin}${path}` : path
 }
 
+function openPublishModal() {
+  if (!activeAsset.value) return
+  publishModalOpen.value = true
+}
+
+function closePublishModal() {
+  publishModalOpen.value = false
+}
+
+function confirmPublish(payload: CommunityPublishPayload) {
+  if (!activeAsset.value) return
+  emit("publish", activeAsset.value, payload)
+  publishModalOpen.value = false
+}
+
+function openReportModal() {
+  if (!canReportCommunity.value || !props.asset?.communityPostId) return
+  if (!auth.token) {
+    emit("close")
+    void router.push({ name: "Login", query: { redirect: route.fullPath } })
+    return
+  }
+  reportHint.value = ""
+  reportModalOpen.value = true
+}
+
+async function submitReport(payload: { reason?: string }) {
+  if (!props.asset?.communityPostId || !auth.token || reportSubmitting.value) return
+  reportSubmitting.value = true
+  reportHint.value = ""
+  try {
+    await reportCommunityPost(props.asset.communityPostId, payload, { token: auth.token })
+    reportModalOpen.value = false
+    reportHint.value = "举报已提交，感谢你的反馈"
+  } catch (err) {
+    reportHint.value = err instanceof Error ? err.message : "举报提交失败"
+  } finally {
+    reportSubmitting.value = false
+  }
+}
+
 watch(
   () => [props.asset?.id, props.asset?.url, props.asset?.urls?.join("|")],
   () => {
@@ -150,14 +212,33 @@ async function copyPrompt() {
         <div class="absolute right-[12%] top-[22%] h-96 w-96 rounded-full bg-violet-500/12 blur-[150px]" />
       </div>
 
-      <button
-        type="button"
-        class="absolute right-6 top-6 z-20 grid h-11 w-11 place-items-center rounded-full border border-white/10 bg-white/[0.06] text-white/70 backdrop-blur-xl transition hover:bg-white/12 hover:text-white"
-        aria-label="关闭资产预览"
-        @click="emit('close')"
-      >
-        <X class="h-5 w-5" />
-      </button>
+      <div class="absolute right-6 top-6 z-20 flex items-center gap-2">
+        <button
+          v-if="canReportCommunity"
+          type="button"
+          class="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.06] px-3 py-2 text-xs font-semibold text-white/55 backdrop-blur-xl transition hover:border-red-400/30 hover:bg-red-500/10 hover:text-red-100"
+          aria-label="举报作品"
+          @click="openReportModal"
+        >
+          <Flag class="h-3.5 w-3.5" />
+          举报
+        </button>
+        <button
+          type="button"
+          class="grid h-11 w-11 place-items-center rounded-full border border-white/10 bg-white/[0.06] text-white/70 backdrop-blur-xl transition hover:bg-white/12 hover:text-white"
+          aria-label="关闭资产预览"
+          @click="emit('close')"
+        >
+          <X class="h-5 w-5" />
+        </button>
+      </div>
+
+      <CommunityReportModal
+        :open="reportModalOpen"
+        :submitting="reportSubmitting"
+        @close="reportModalOpen = false"
+        @confirm="submitReport"
+      />
 
       <div class="relative z-10 grid h-full grid-cols-[minmax(0,1fr)_420px] gap-0 max-xl:grid-cols-1">
         <main class="flex min-h-0 flex-col px-8 py-8 max-xl:pb-0 sm:px-12">
@@ -172,6 +253,7 @@ async function copyPrompt() {
             <p v-if="asset.subtitle" class="mt-4 max-w-2xl text-sm leading-6 text-white/45">
               {{ asset.subtitle }}
             </p>
+            <p v-if="reportHint" class="mt-3 text-sm text-white/55">{{ reportHint }}</p>
           </div>
 
           <section class="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(220px,0.32fr)] gap-5 max-2xl:grid-cols-1">
@@ -286,7 +368,7 @@ async function copyPrompt() {
                 v-if="!asset.communityPostId"
                 type="button"
                 class="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-full border border-primary/35 bg-primary/18 px-4 text-sm font-semibold text-white transition hover:bg-primary/25"
-                @click="activeAsset && emit('publish', activeAsset)"
+                @click="openPublishModal"
               >
                 <Globe2 class="h-4 w-4" />
                 发布到主页
@@ -373,4 +455,11 @@ async function copyPrompt() {
       </div>
     </div>
   </Teleport>
+
+  <CommunityPublishModal
+    :open="publishModalOpen"
+    :asset="activeAsset"
+    @close="closePublishModal"
+    @confirm="confirmPublish"
+  />
 </template>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
   import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue"
+  import { useRoute, useRouter } from "vue-router"
   import { ChevronLeft, ChevronRight, Loader2, Plus, Sparkles, Trash2 } from "lucide-vue-next"
   import AppShell from "@/components/AppShell.vue"
   import AgentChatPane from "./AgentChatPane.vue"
@@ -16,6 +17,8 @@
   import { applyStoredAgentTheme } from "@/utils/agentTheme"
 
   const auth = useAuthStore()
+  const route = useRoute()
+  const router = useRouter()
   const sessions = ref<AgentSession[]>([])
   const agentModels = ref<AgentModelConfig[]>([])
   const activeSessionId = ref<number | null>(null)
@@ -150,13 +153,43 @@
   }
 
   async function startSession(title = "新对话") {
-    if (!auth.token) return
+    if (!auth.token) return null
     const session = await createAgentSession({ title }, { token: auth.token })
     sessions.value = [session, ...sessions.value.filter((item) => item.id !== session.id)]
     if (sessionDrafts.value[session.id] === undefined) {
       sessionDrafts.value[session.id] = ""
     }
     selectSession(session.id)
+    return session
+  }
+
+  function routePrompt() {
+    const raw = route.query.prompt
+    return typeof raw === "string" ? raw.trim() : ""
+  }
+
+  async function ensureActiveSession() {
+    if (activeSessionId.value) return activeSessionId.value
+    if (sessions.value.length > 0) {
+      selectSession(sessions.value[0].id)
+      return activeSessionId.value
+    }
+    const session = await startSession("新对话")
+    return session?.id ?? null
+  }
+
+  async function applyRoutePrompt() {
+    const prompt = routePrompt()
+    if (!prompt || !auth.token) return
+
+    const sessionId = await ensureActiveSession()
+    if (!sessionId) return
+
+    sessionDrafts.value[sessionId] = prompt
+
+    const nextQuery = { ...route.query }
+    delete nextQuery.prompt
+    void router.replace({ query: nextQuery })
   }
 
   async function removeSession(session: AgentSession, event: MouseEvent) {
@@ -196,12 +229,22 @@
     if (saved === "0") sessionSidebarOpen.value = false
     if (saved === "1") sessionSidebarOpen.value = true
     void nextTick(() => applyStoredAgentTheme())
-    void loadAgentModels()
-    void loadSessions()
+    void (async () => {
+      await loadAgentModels()
+      await loadSessions()
+      await applyRoutePrompt()
+    })()
     modelRefreshTimer = window.setInterval(refreshAgentModelsInBackground, 15000)
     window.addEventListener("focus", refreshAgentModelsInBackground)
     document.addEventListener("visibilitychange", refreshAgentModelsInBackground)
   })
+
+  watch(
+    () => route.query.prompt,
+    () => {
+      void applyRoutePrompt()
+    },
+  )
 
   onUnmounted(() => {
     if (modelRefreshTimer != null) {

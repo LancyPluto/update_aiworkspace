@@ -23,6 +23,7 @@ import { fetchTasks } from "@/api/taskApi"
 import type { CommunityPost, PageResult, TaskDetail, ToolSummary } from "@/api/types"
 import { useAuthStore } from "@/store/authStore"
 import { getApiOrigin } from "@/api/client"
+import { userRoutes } from "@/router/userRoutes"
 import { communityDisplayTitle } from "@/utils/communityDisplay"
 import { resolveCommunityPrompt } from "@/utils/communityPostNormalize"
 import {
@@ -30,6 +31,7 @@ import {
   resolveCommunityImageUrls,
   resolveCommunityPostKind,
 } from "@/utils/communityPostMedia"
+import { useTypingPlaceholder } from "@/composables/useTypingPlaceholder"
 
 type HomeTab = "ALL" | "IMAGE" | "VIDEO" | "AUDIO"
 
@@ -42,6 +44,27 @@ const auth = useAuthStore()
 const router = useRouter()
 
 const promptText = ref("")
+const promptInputRef = ref<HTMLInputElement | null>(null)
+const promptInputFocused = ref(false)
+
+const heroPromptPlaceholders = [
+  "一个雨夜现代日式茶馆，温润的烛光，木桌上的铁茶壶...",
+  "一个赛博朋克女孩自拍，横向16:9构图，冷蓝胶片色调...",
+  "一首轻快欢脱的Lo-Fi电子乐，适合午后工作背景音乐...",
+  "超写实产品摄影，磨砂玻璃香水瓶，柔光棚拍，浅景深...",
+]
+
+const typingPlaceholder = useTypingPlaceholder({
+  placeholders: heroPromptPlaceholders,
+  typeDelayMs: 100,
+  deleteDelayMs: 50,
+  pauseAfterCompleteMs: 3000,
+  pauseBeforeNextMs: 500,
+})
+
+const promptPlaceholder = computed(() =>
+  promptInputFocused.value || promptText.value.trim() ? "" : typingPlaceholder.currentText.value,
+)
 const tools = ref<ToolSummary[]>([])
 const tasks = ref<TaskDetail[]>([])
 const communityPosts = ref<CommunityPost[]>([])
@@ -176,21 +199,20 @@ function communityPostKindLabel(post: CommunityPost) {
 
 function communityPostTitle(post: CommunityPost) {
   const kind = resolveCommunityPostKind(post.modality)
-  const prompt = resolveCommunityPrompt(post)
   return communityDisplayTitle({
     title: post.title,
-    prompt,
-    promptPreview: post.promptPreview || prompt,
     topic: post.topic,
     tags: post.tags,
     toolName: post.toolName,
     toolCode: post.toolCode,
     kind,
+    modality: post.modality,
+    promptVisible: post.promptVisible,
   })
 }
 
 function communityPostPrompt(post: CommunityPost) {
-  return resolveCommunityPrompt(post) || post.description?.trim() || post.promptPreview?.trim() || ""
+  return resolveCommunityPrompt(post) || post.description?.trim() || ""
 }
 
 function toolCover(tool: ToolSummary) {
@@ -215,11 +237,44 @@ function modelLabel(tool: ToolSummary) {
   return tool.modelConfigName || tool.modelName || tool.categoryName || modalityLabel(tool.outputModality)
 }
 
-function launchRouter(modality: string) {
+function goToAgentWithPrompt(rawPrompt?: string) {
+  const prompt = (rawPrompt ?? promptText.value).trim()
+  if (!prompt) return
+
+  typingPlaceholder.pause()
+  const query = { prompt }
+  const destination = router.resolve({ ...userRoutes.agent, query })
+
+  if (!auth.token) {
+    void router.push({ name: "Login", query: { redirect: destination.fullPath } })
+    return
+  }
+
+  void router.push(destination)
+}
+
+function launchWorkbench(modality: string) {
   const query: Record<string, string> = { modality }
   const prompt = promptText.value.trim()
   if (prompt) query.prompt = prompt
   void router.push({ path: "/dashboard", query })
+}
+
+function onPromptFocus() {
+  promptInputFocused.value = true
+  typingPlaceholder.pause()
+  promptText.value = ""
+}
+
+function onPromptBlur() {
+  promptInputFocused.value = false
+  if (!promptText.value.trim()) {
+    typingPlaceholder.resume()
+  }
+}
+
+function submitHeroPrompt() {
+  goToAgentWithPrompt()
 }
 
 function quickLaunch(tool: ToolSummary) {
@@ -240,8 +295,9 @@ function closeCommunityPreview() {
 
 function quoteCommunityPrompt() {
   if (!selectedCommunityPrompt.value) return
-  promptText.value = selectedCommunityPrompt.value
+  const prompt = selectedCommunityPrompt.value
   selectedCommunityPost.value = null
+  goToAgentWithPrompt(prompt)
 }
 
 function openCommunityPost(post: CommunityPost) {
@@ -297,16 +353,19 @@ watch(
               Smart Router · Launchpad
             </p>
             <h1>思维不停，创作不止</h1>
-            <p class="hero-lead">输入一个想法，选择创作方向，科创点AI 会把你带到对应工作台继续完成专业配置。</p>
+            <p class="hero-lead">输入想法并回车进入科创点AI 对话，或选择下方创作方向进入对应工作台。</p>
 
             <div class="router-panel">
               <div class="prompt-shell">
-                <Search class="h-5 w-5 text-white/36" />
+                <Search class="h-5 w-5 shrink-0 text-white/36" />
                 <input
+                  ref="promptInputRef"
                   v-model="promptText"
                   type="text"
-                  placeholder="输入灵感，即刻创作！"
-                  @keydown.enter.prevent="launchRouter('IMAGE')"
+                  :placeholder="promptPlaceholder"
+                  @focus="onPromptFocus"
+                  @blur="onPromptBlur"
+                  @keydown.enter.prevent="submitHeroPrompt"
                 />
               </div>
               <div class="router-actions" aria-label="创作分流">
@@ -315,7 +374,7 @@ watch(
                   :key="action.modality"
                   type="button"
                   class="route-button"
-                  @click="launchRouter(action.modality)"
+                  @click="launchWorkbench(action.modality)"
                 >
                   <component :is="action.icon" class="h-4 w-4" />
                   {{ action.label }}
@@ -628,6 +687,7 @@ watch(
 }
 
 .prompt-shell {
+  position: relative;
   display: flex;
   height: 62px;
   align-items: center;
@@ -648,7 +708,7 @@ watch(
 }
 
 .prompt-shell input::placeholder {
-  color: rgb(255 255 255 / 0.34);
+  color: rgb(255 255 255 / 0.3);
 }
 
 .router-actions {

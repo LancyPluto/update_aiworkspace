@@ -37,29 +37,41 @@ export function promptExcerpt(value?: string | null, maxLength = 56) {
   return `${prompt.slice(0, maxLength).trim()}…`
 }
 
-function kindPlaceholder(kind?: AssetPreviewItem["kind"]) {
-  if (kind === "video") return "光影留声"
-  if (kind === "image") return "一笔成画"
-  if (kind === "audio") return "声线漫游"
-  if (kind === "text") return "文字拾光"
-  return "一件灵感之作"
+export function modalityDisplayName(kind?: AssetPreviewItem["kind"] | string | null): string {
+  const raw = normalize(kind).toLowerCase()
+  if (raw.includes("image") || raw === "image") return "图像"
+  if (raw.includes("video") || raw === "video") return "视频"
+  if (raw.includes("audio") || raw === "audio") return "音频"
+  if (raw.includes("text") || raw === "text") return "文本"
+  return "作品"
+}
+
+export function buildSafeCommunityTitle(input: {
+  toolName?: string | null
+  toolCode?: string | null
+  kind?: AssetPreviewItem["kind"]
+  modality?: string | null
+}): string {
+  const tool = normalize(input.toolName) || normalize(input.toolCode) || "AI 工具"
+  const modality = modalityDisplayName(input.modality || input.kind)
+  const verb = modality === "音频" ? "生成" : "创作"
+  return `由 ${tool} ${verb}的${modality}`
 }
 
 export function communityDisplayTitle(input: {
   title?: string | null
   prompt?: string | null
   promptPreview?: string | null
+  promptVisible?: boolean | null
   topic?: string | null
   tags?: string[]
   toolName?: string | null
   toolCode?: string | null
   kind?: AssetPreviewItem["kind"]
+  modality?: string | null
 }) {
   const title = normalize(input.title)
   if (title && !isToolLikeLabel(title, input.toolName, input.toolCode)) return title
-
-  const prompt = promptExcerpt(input.promptPreview || input.prompt, 48)
-  if (prompt) return prompt
 
   const topic = normalize(input.topic)
   if (topic && !isBrokenText(topic)) return topic
@@ -67,7 +79,7 @@ export function communityDisplayTitle(input: {
   const tag = normalize(input.tags?.[0])
   if (tag && !isBrokenText(tag)) return tag.startsWith("#") ? tag.slice(1) : tag
 
-  return kindPlaceholder(input.kind)
+  return buildSafeCommunityTitle(input)
 }
 
 export function communityDisplaySubtitle(input: {
@@ -75,6 +87,7 @@ export function communityDisplaySubtitle(input: {
   description?: string | null
   prompt?: string | null
   promptPreview?: string | null
+  promptVisible?: boolean | null
   topic?: string | null
   tags?: string[]
   toolName?: string | null
@@ -89,15 +102,23 @@ export function communityDisplaySubtitle(input: {
     return promptExcerpt(description, 42)
   }
 
-  const prompt = promptExcerpt(input.promptPreview || input.prompt, 42)
-  if (prompt) return prompt
-
   const topic = normalize(input.topic)
   if (topic && !isBrokenText(topic)) return topic
 
   const tag = normalize(input.tags?.[0])
   if (tag && !isBrokenText(tag)) return tag.startsWith("#") ? tag : `#${tag}`
 
+  return ""
+}
+
+export function communityCardDescription(input: {
+  description?: string | null
+  prompt?: string | null
+  promptPreview?: string | null
+  promptVisible?: boolean | null
+}): string {
+  const description = normalize(input.description)
+  if (description && !isBrokenText(description)) return promptExcerpt(description, 72)
   return ""
 }
 

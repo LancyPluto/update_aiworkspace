@@ -1,5 +1,5 @@
 import { http } from './http'
-import type { AdminCommunityPost, AdminCommunityStats, PageResponse } from './types'
+import type { AdminCommunityPost, AdminCommunityReport, AdminCommunityStats, PageResponse } from './types'
 
 export interface AdminCommunityPostQuery {
   userId?: number
@@ -51,4 +51,18 @@ export function pinAdminCommunityPost(postId: number, enabled: boolean) {
 
 export function annotateAdminCommunityPost(postId: number, body: { topic?: string | null; tags?: string[] }) {
   return http.post<AdminCommunityPost>(`/api/admin/v1/community/posts/${postId}/annotate`, body)
+}
+
+export interface AdminCommunityReportQuery {
+  status?: string
+  pageNo?: number
+  pageSize?: number
+}
+
+export function fetchAdminCommunityReports(query: AdminCommunityReportQuery = {}) {
+  return http.get<PageResponse<AdminCommunityReport>>('/api/admin/v1/community/reports', { ...query })
+}
+
+export function resolveAdminCommunityReport(reportId: number, body: { status: string; adminNote?: string }) {
+  return http.post<AdminCommunityReport>(`/api/admin/v1/community/reports/${reportId}/resolve`, body)
 }

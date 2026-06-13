@@ -512,6 +512,21 @@ CREATE TABLE community_post_tags (
 );
 CREATE INDEX idx_community_post_tags_tag_post ON community_post_tags(tag, post_id);
 
+CREATE TABLE community_post_reports (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  post_id BIGINT NOT NULL,
+  reporter_user_id BIGINT NOT NULL,
+  reason VARCHAR(500) NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'PENDING',
+  admin_note VARCHAR(500) NULL,
+  reviewed_at DATETIME NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX uk_community_post_reports_user ON community_post_reports(post_id, reporter_user_id);
+CREATE INDEX idx_community_post_reports_status_created ON community_post_reports(status, created_at, id);
+CREATE INDEX idx_community_post_reports_post ON community_post_reports(post_id, status, id);
+
 CREATE TABLE community_events (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   post_id BIGINT,

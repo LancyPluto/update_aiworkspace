@@ -50,7 +50,15 @@ const creatorName = computed(
   () => props.asset.authorName?.trim() || (props.asset.authorUserId ? `用户${props.asset.authorUserId}` : ""),
 )
 const subtitle = computed(() => props.asset.subtitle || props.asset.toolName || props.asset.toolCode || "")
-const previewText = computed(() => props.asset.rawText || props.asset.prompt || props.asset.title)
+const previewText = computed(() => {
+  if (props.source === "community") {
+    if (props.asset.promptVisible) {
+      return props.asset.rawText || props.asset.prompt || ""
+    }
+    return props.asset.subtitle || ""
+  }
+  return props.asset.rawText || props.asset.prompt || props.asset.title
+})
 const primaryStat = computed(() => {
   const likes = props.asset.stats?.likes || 0
   const views = props.asset.stats?.views || 0

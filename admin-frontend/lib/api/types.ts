@@ -244,6 +244,7 @@ export interface AdminCommunityStats {
   postCount: number
   pendingCount: number
   hiddenCount: number
+  reportPendingCount: number
   impressionCount: number
   detailViewCount: number
   sameStyleClickCount: number
@@ -252,6 +253,20 @@ export interface AdminCommunityStats {
   topTools: AdminCommunityMetricPoint[]
   topTopics: AdminCommunityMetricPoint[]
   topCreators: AdminCommunityMetricPoint[]
+}
+
+export interface AdminCommunityReport {
+  id: number
+  postId: number
+  postTitle?: string | null
+  postCoverUrl?: string | null
+  postStatus?: string | null
+  reporterUserId: number
+  reason?: string | null
+  status: string
+  adminNote?: string | null
+  reviewedAt?: string | null
+  createdAt?: string | null
 }
 
 export interface DashboardChartPoint {

@@ -115,7 +115,7 @@ public record CommunityPostResponse(
                 post.getDescription(),
                 Boolean.TRUE.equals(post.getPromptVisible()),
                 exposePrompt ? promptSnapshot : null,
-                resolvePromptPreview(promptSnapshot),
+                exposePrompt ? resolvePromptPreview(promptSnapshot) : null,
                 post.getToolCode(),
                 post.getToolName(),
                 post.getStatus(),

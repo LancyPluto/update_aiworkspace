@@ -8,17 +8,21 @@ import com.aiminilab.aitoolmarket.community.dto.CommunityCollectionResponse;
 import com.aiminilab.aitoolmarket.community.dto.CommunityCreatorResponse;
 import com.aiminilab.aitoolmarket.community.dto.CommunityEventRequest;
 import com.aiminilab.aitoolmarket.community.dto.CommunityPostDiscoverRow;
+import com.aiminilab.aitoolmarket.community.dto.CommunityPostReportResponse;
 import com.aiminilab.aitoolmarket.community.dto.CommunityPostResponse;
 import com.aiminilab.aitoolmarket.community.dto.CommunityStatsResponse;
 import com.aiminilab.aitoolmarket.community.dto.CommunityTopicResponse;
 import com.aiminilab.aitoolmarket.community.dto.PublicUserProfileResponse;
 import com.aiminilab.aitoolmarket.community.dto.PublishPostRequest;
+import com.aiminilab.aitoolmarket.community.dto.ReportCommunityPostRequest;
 import com.aiminilab.aitoolmarket.community.dto.UpdateCommunityPostRequest;
 import com.aiminilab.aitoolmarket.community.entity.CommunityCollection;
 import com.aiminilab.aitoolmarket.community.entity.CommunityPost;
+import com.aiminilab.aitoolmarket.community.entity.CommunityPostReport;
 import com.aiminilab.aitoolmarket.community.mapper.CommunityCollectionMapper;
 import com.aiminilab.aitoolmarket.community.mapper.CommunityEventMapper;
 import com.aiminilab.aitoolmarket.community.mapper.CommunityPostMapper;
+import com.aiminilab.aitoolmarket.community.mapper.CommunityPostReportMapper;
 import com.aiminilab.aitoolmarket.community.service.CommunityService;
 import com.aiminilab.aitoolmarket.task.entity.AiTask;
 import com.aiminilab.aitoolmarket.task.mapper.TaskMapper;
@@ -52,19 +56,23 @@ public class CommunityServiceImpl implements CommunityService {
     private static final int MAX_TAGS = 6;
     private static final int MAX_COLLECTION_NAME_LENGTH = 80;
 
+    private static final int MAX_REPORT_REASON_LENGTH = 500;
+
     private final CommunityPostMapper postMapper;
     private final CommunityCollectionMapper collectionMapper;
     private final CommunityEventMapper eventMapper;
+    private final CommunityPostReportMapper reportMapper;
     private final TaskMapper taskMapper;
     private final UserMapper userMapper;
     private final ObjectMapper objectMapper;
 
     public CommunityServiceImpl(CommunityPostMapper postMapper, CommunityCollectionMapper collectionMapper,
-                                CommunityEventMapper eventMapper, TaskMapper taskMapper,
-                                UserMapper userMapper, ObjectMapper objectMapper) {
+                                CommunityEventMapper eventMapper, CommunityPostReportMapper reportMapper,
+                                TaskMapper taskMapper, UserMapper userMapper, ObjectMapper objectMapper) {
         this.postMapper = postMapper;
         this.collectionMapper = collectionMapper;
         this.eventMapper = eventMapper;
+        this.reportMapper = reportMapper;
         this.taskMapper = taskMapper;
         this.userMapper = userMapper;
         this.objectMapper = objectMapper;
@@ -112,7 +120,7 @@ public class CommunityServiceImpl implements CommunityService {
             return;
         }
         boolean promptVisible = Boolean.TRUE.equals(user.getPromptPublicByDefault());
-        String title = normalizeTitle(null, task.getToolName());
+        String title = normalizeTitle(null, task);
         createPost(task, resourceType, contentText, title, null, promptVisible, "PUBLISHED");
     }
 
@@ -137,7 +145,7 @@ public class CommunityServiceImpl implements CommunityService {
             postMapper.updateOwnerMetadata(
                     post.getId(),
                     userId,
-                    normalizeTitle(request.title(), post.getTitle()),
+                    normalizeTitle(request.title(), task, post.getTitle()),
                     normalizeDescription(request.description()),
                     request.promptVisible() == null ? Boolean.TRUE.equals(post.getPromptVisible()) : Boolean.TRUE.equals(request.promptVisible()),
                     request.topic() == null ? post.getTopic() : normalizeTopic(request.topic())
@@ -151,7 +159,7 @@ public class CommunityServiceImpl implements CommunityService {
         }
         User user = userMapper.findById(userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "User not found"));
-        String title = normalizeTitle(request.title(), task.getToolName());
+        String title = normalizeTitle(request.title(), task);
         boolean promptVisible = request.promptVisible() != null
                 ? Boolean.TRUE.equals(request.promptVisible())
                 : Boolean.TRUE.equals(user.getPromptPublicByDefault());
@@ -170,7 +178,8 @@ public class CommunityServiceImpl implements CommunityService {
     @Transactional
     public CommunityPostResponse update(Long userId, Long postId, UpdateCommunityPostRequest request) {
         CommunityPost post = requireOwnedPost(postId, userId);
-        String title = normalizeTitle(request == null ? null : request.title(), post.getTitle());
+        AiTask task = taskMapper.findById(post.getTaskId()).orElse(null);
+        String title = normalizeTitle(request == null ? null : request.title(), task, post.getTitle());
         String description = normalizeDescription(request == null ? null : request.description());
         boolean promptVisible = request == null || request.promptVisible() == null
                 ? Boolean.TRUE.equals(post.getPromptVisible())
@@ -475,6 +484,7 @@ public class CommunityServiceImpl implements CommunityService {
                 postMapper.countForStats(null, null),
                 postMapper.countForStats(null, "PENDING"),
                 postMapper.countForStats("HIDDEN", null),
+                reportMapper.countByStatus("PENDING"),
                 eventMapper.countByType("impression"),
                 eventMapper.countByType("detail_view"),
                 eventMapper.countByType("same_style_click"),
@@ -484,6 +494,103 @@ public class CommunityServiceImpl implements CommunityService {
                 eventMapper.topTopics(8),
                 eventMapper.topCreators(8)
         );
+    }
+
+    @Override
+    @Transactional
+    public void reportPost(Long userId, Long postId, ReportCommunityPostRequest request) {
+        if (userId == null) {
+            throw new BusinessException(ErrorCode.UNAUTHORIZED, "Login required");
+        }
+        CommunityPost post = requirePublished(postId);
+        if (Objects.equals(post.getUserId(), userId)) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "Cannot report your own post");
+        }
+        if (reportMapper.countByPostAndReporter(postId, userId) > 0) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "You have already reported this post");
+        }
+        String reason = normalizeReportReason(request == null ? null : request.reason());
+        reportMapper.insertReport(postId, userId, reason);
+        recordEvent(userId, new CommunityEventRequest(postId, "report", "community", post.getToolCode(), null, null));
+    }
+
+    @Override
+    public PageResponse<CommunityPostReportResponse> adminReports(String status, Integer pageNo, Integer pageSize) {
+        int normalizedPageSize = PageResponse.normalizePageSize(pageSize);
+        int offset = PageResponse.offset(pageNo, pageSize);
+        String normalizedStatus = normalizeReportStatus(status);
+        List<CommunityPostReportResponse> list = reportMapper.findForAdmin(normalizedStatus, normalizedPageSize, offset)
+                .stream()
+                .map(this::toReportResponse)
+                .toList();
+        long total = reportMapper.countForAdmin(normalizedStatus);
+        return PageResponse.of(list, total, pageNo, pageSize);
+    }
+
+    @Override
+    @Transactional
+    public CommunityPostReportResponse adminResolveReport(Long reportId, String status, String adminNote) {
+        if (reportId == null) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "reportId is required");
+        }
+        String normalizedStatus = normalizeResolveStatus(status);
+        if (reportMapper.updateStatus(reportId, normalizedStatus, normalizeAdminNote(adminNote)) == 0) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "Report not found");
+        }
+        CommunityPostReport report = reportMapper.findById(reportId);
+        if (report == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "Report not found");
+        }
+        return toReportResponse(report);
+    }
+
+    private CommunityPostReportResponse toReportResponse(CommunityPostReport report) {
+        return new CommunityPostReportResponse(
+                report.getId(),
+                report.getPostId(),
+                report.getPostTitle(),
+                report.getPostCoverUrl(),
+                report.getPostStatus(),
+                report.getReporterUserId(),
+                report.getReason(),
+                report.getStatus(),
+                report.getAdminNote(),
+                report.getReviewedAt(),
+                report.getCreatedAt()
+        );
+    }
+
+    private String normalizeReportReason(String value) {
+        if (value == null || value.trim().isBlank()) {
+            return null;
+        }
+        return limit(value.trim(), MAX_REPORT_REASON_LENGTH);
+    }
+
+    private String normalizeReportStatus(String value) {
+        if (value == null || value.trim().isBlank()) {
+            return null;
+        }
+        String normalized = value.trim().toUpperCase(Locale.ROOT);
+        return List.of("PENDING", "REVIEWED", "DISMISSED").contains(normalized) ? normalized : null;
+    }
+
+    private String normalizeResolveStatus(String value) {
+        if (value == null || value.trim().isBlank()) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "status is required");
+        }
+        String normalized = value.trim().toUpperCase(Locale.ROOT);
+        if (!List.of("REVIEWED", "DISMISSED").contains(normalized)) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "Invalid report status");
+        }
+        return normalized;
+    }
+
+    private String normalizeAdminNote(String value) {
+        if (value == null || value.trim().isBlank()) {
+            return null;
+        }
+        return limit(value.trim(), MAX_REPORT_REASON_LENGTH);
     }
 
     @Override
@@ -570,7 +677,7 @@ public class CommunityServiceImpl implements CommunityService {
             post.setCoverUrl(extractCoverUrl(resultText));
             post.setMediaUrl(null);
         }
-        post.setTitle(normalizeTitle(title, task.getToolName()));
+        post.setTitle(normalizeTitle(title, task));
         post.setDescription(normalizeDescription(description));
         post.setPromptVisible(promptVisible);
         post.setPromptSnapshot(extractPrompt(task.getParamsJson()));
@@ -917,15 +1024,68 @@ public class CommunityServiceImpl implements CommunityService {
         ).toLowerCase(Locale.ROOT);
     }
 
-    private String normalizeTitle(String value, String fallback) {
+    private String normalizeTitle(String value, AiTask task) {
+        return normalizeTitle(value, task, null);
+    }
+
+    private String normalizeTitle(String value, AiTask task, String existingTitle) {
         String normalized = value == null ? "" : value.trim();
-        if (normalized.isBlank() || isBrokenCommunityText(normalized)) {
-            normalized = fallback == null || fallback.isBlank() ? "AI creation" : fallback.trim();
+        if (isValidCustomCommunityTitle(normalized, task)) {
+            return limit(normalized, MAX_TITLE_LENGTH);
         }
-        if (isBrokenCommunityText(normalized)) {
-            normalized = "AI creation";
+        String existing = existingTitle == null ? "" : existingTitle.trim();
+        if (isValidCustomCommunityTitle(existing, task)) {
+            return limit(existing, MAX_TITLE_LENGTH);
         }
-        return limit(normalized, MAX_TITLE_LENGTH);
+        return limit(buildSafeCommunityTitle(task), MAX_TITLE_LENGTH);
+    }
+
+    private boolean isValidCustomCommunityTitle(String value, AiTask task) {
+        if (value == null || value.isBlank() || isBrokenCommunityText(value)) {
+            return false;
+        }
+        if (task == null) {
+            return true;
+        }
+        if (task.getToolName() != null && value.equals(task.getToolName().trim())) {
+            return false;
+        }
+        if (task.getToolCode() != null && value.equals(task.getToolCode().trim())) {
+            return false;
+        }
+        return true;
+    }
+
+    private String buildSafeCommunityTitle(AiTask task) {
+        if (task == null) {
+            return "由 AI 工具 创作的作品";
+        }
+        String toolName = task.getToolName();
+        if (toolName == null || toolName.isBlank()) {
+            toolName = task.getToolCode();
+        }
+        if (toolName == null || toolName.isBlank()) {
+            toolName = "AI 工具";
+        } else {
+            toolName = toolName.trim();
+        }
+        String modality = resolveModality(task, null);
+        String modalityLabel = modalityDisplayLabel(modality);
+        String verb = "AUDIO".equalsIgnoreCase(modality) ? "生成" : "创作";
+        return "由 " + toolName + " " + verb + "的" + modalityLabel;
+    }
+
+    private String modalityDisplayLabel(String modality) {
+        if (modality == null || modality.isBlank()) {
+            return "作品";
+        }
+        return switch (modality.trim().toUpperCase(Locale.ROOT)) {
+            case "IMAGE" -> "图像";
+            case "VIDEO" -> "视频";
+            case "AUDIO" -> "音频";
+            case "TEXT" -> "文本";
+            default -> "作品";
+        };
     }
 
     private boolean isBrokenCommunityText(String value) {
@@ -989,7 +1149,7 @@ public class CommunityServiceImpl implements CommunityService {
     private String normalizeEventType(String value) {
         String normalized = value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
         if (List.of("impression", "detail_view", "like", "favorite", "same_style_click",
-                "dashboard_open", "task_created", "credit_spent", "share").contains(normalized)) {
+                "dashboard_open", "task_created", "credit_spent", "share", "report").contains(normalized)) {
             return normalized;
         }
         return "impression";

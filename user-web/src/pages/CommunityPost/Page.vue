@@ -1,14 +1,16 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue"
 import { useRoute, useRouter } from "vue-router"
-import { ArrowLeft, ChevronLeft, ChevronRight, Copy, Download, Heart, Loader2, Lock, Pause, Play, Send, Star, Volume2, VolumeX } from "lucide-vue-next"
+import { ArrowLeft, ChevronLeft, ChevronRight, Copy, Download, Flag, Heart, Loader2, Lock, Pause, Play, Send, Star, Volume2, VolumeX } from "lucide-vue-next"
 import CommunityAudioMedia from "@/components/community/CommunityAudioMedia.vue"
+import CommunityReportModal from "@/components/CommunityReportModal.vue"
 import UserAvatar from "@/components/UserAvatar.vue"
 import {
   favoriteCommunityPost,
   fetchCommunityPost,
   likeCommunityPost,
   markCommunityPostSameStyle,
+  reportCommunityPost,
   trackCommunityEvent,
   unfavoriteCommunityPost,
   unlikeCommunityPost,
@@ -47,11 +49,20 @@ const mediaVolume = ref(0.8)
 const mediaMuted = ref(false)
 const activeImageIndex = ref(0)
 const extraImageUrls = ref<string[]>([])
+const reportModalOpen = ref(false)
+const reportSubmitting = ref(false)
+const reportHint = ref("")
 
 const postId = computed(() => String(route.params.postId || ""))
 const kind = computed(() => resolveCommunityPostKind(post.value?.modality))
 
 const authorName = computed(() => (post.value ? resolveCommunityAuthorName(post.value) : ""))
+
+const canReport = computed(() => {
+  if (!post.value) return false
+  if (!auth.user?.id) return true
+  return post.value.userId !== auth.user.id
+})
 
 const audioMedia = computed(() => {
   if (!post.value) return { coverUrl: "", audioUrl: "" }
@@ -64,16 +75,15 @@ const audioMedia = computed(() => {
 
 const displayTitle = computed(() => {
   if (!post.value) return ""
-  const prompt = resolveCommunityPrompt(post.value)
   return communityDisplayTitle({
     title: post.value.title,
-    prompt,
-    promptPreview: post.value.promptPreview || prompt,
     topic: post.value.topic,
     tags: post.value.tags,
     toolName: post.value.toolName,
     toolCode: post.value.toolCode,
     kind: kind.value,
+    modality: post.value.modality,
+    promptVisible: post.value.promptVisible,
   })
 })
 
@@ -150,18 +160,40 @@ async function toggleFavorite() {
   if (!post.value || !auth.token) return router.push({ name: "Login", query: { redirect: route.fullPath } })
   acting.value = true
   const wasFavorited = post.value.favorited
-  const postId = post.value.id
+  const currentPostId = post.value.id
   try {
     post.value = wasFavorited
-      ? await unfavoriteCommunityPost(postId, { token: auth.token })
-      : await favoriteCommunityPost(postId, { token: auth.token })
+      ? await unfavoriteCommunityPost(currentPostId, { token: auth.token })
+      : await favoriteCommunityPost(currentPostId, { token: auth.token })
     try {
-      await syncFavoriteToInspirationCollection(postId, !wasFavorited, { token: auth.token })
+      await syncFavoriteToInspirationCollection(currentPostId, !wasFavorited, { token: auth.token })
     } catch {
       // 作品收藏状态已更新；同步灵感收藏夹失败时不阻断主流程
     }
   } finally {
     acting.value = false
+  }
+}
+
+function openReportModal() {
+  if (!post.value) return
+  if (!auth.token) return router.push({ name: "Login", query: { redirect: route.fullPath } })
+  reportHint.value = ""
+  reportModalOpen.value = true
+}
+
+async function submitReport(payload: { reason?: string }) {
+  if (!post.value || !auth.token || reportSubmitting.value) return
+  reportSubmitting.value = true
+  reportHint.value = ""
+  try {
+    await reportCommunityPost(post.value.id, payload, { token: auth.token })
+    reportModalOpen.value = false
+    reportHint.value = "举报已提交，感谢你的反馈"
+  } catch (err) {
+    reportHint.value = err instanceof Error ? err.message : "举报提交失败"
+  } finally {
+    reportSubmitting.value = false
   }
 }
 
@@ -354,10 +386,30 @@ onUnmounted(() => {
 
 <template>
   <main class="community-post-page">
-    <button class="back-button" type="button" @click="router.back()">
-      <ArrowLeft class="h-4 w-4" />
-      返回
-    </button>
+    <div class="page-top-bar">
+      <button class="back-button" type="button" @click="router.back()">
+        <ArrowLeft class="h-4 w-4" />
+        返回
+      </button>
+      <button
+        v-if="post && canReport"
+        class="report-button"
+        type="button"
+        @click="openReportModal"
+      >
+        <Flag class="h-3.5 w-3.5" />
+        举报
+      </button>
+    </div>
+
+    <p v-if="reportHint" class="report-hint">{{ reportHint }}</p>
+
+    <CommunityReportModal
+      :open="reportModalOpen"
+      :submitting="reportSubmitting"
+      @close="reportModalOpen = false"
+      @confirm="submitReport"
+    />
 
     <div v-if="loading" class="state-panel">
       <Loader2 class="h-5 w-5 animate-spin" />
@@ -601,6 +653,39 @@ onUnmounted(() => {
     #030303;
   color: #fff;
   padding: clamp(22px, 4vw, 52px);
+}
+
+.page-top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.report-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.03);
+  color: rgb(255 255 255 / 0.42);
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  transition: border-color 0.18s ease, background-color 0.18s ease, color 0.18s ease;
+}
+
+.report-button:hover {
+  border-color: rgb(255 120 120 / 0.28);
+  background: rgb(255 80 80 / 0.08);
+  color: rgb(255 210 210 / 0.92);
+}
+
+.report-hint {
+  margin-top: 12px;
+  font-size: 13px;
+  color: rgb(255 255 255 / 0.55);
 }
 
 .back-button,

@@ -8,8 +8,6 @@ import { getApiOrigin } from "@/api/client"
 import { useAuthStore } from "@/store/authStore"
 import type { CommunityPost } from "@/api/types"
 import { assetFromCommunityPost } from "@/utils/assetPreviewAdapter"
-import { communityDisplaySubtitle, communityDisplayTitle } from "@/utils/communityDisplay"
-import { resolveCommunityPrompt } from "@/utils/communityPostNormalize"
 import type { AssetPreviewItem } from "@/types/assetPreview"
 
 const props = defineProps<{
@@ -37,44 +35,9 @@ function mediaUrl(value?: string | null) {
   return apiOrigin ? `${apiOrigin}${path}` : path
 }
 
-function postKind(post: CommunityPost): AssetPreviewItem["kind"] {
-  const modality = (post.modality || "").toLowerCase()
-  if (modality.includes("video")) return "video"
-  if (modality.includes("audio")) return "audio"
-  if (modality.includes("image")) return "image"
-  if (modality.includes("text")) return "text"
-  return "other"
-}
-
 function toAsset(post: CommunityPost): AssetPreviewItem {
-  const prompt = resolveCommunityPrompt(post)
-  const kind = postKind(post)
-  const base = assetFromCommunityPost(post, mediaUrl(post.coverUrl))
-  const title = communityDisplayTitle({
-    title: post.title,
-    prompt,
-    promptPreview: post.promptPreview || prompt,
-    topic: post.topic,
-    tags: post.tags,
-    toolName: post.toolName,
-    toolCode: post.toolCode,
-    kind,
-  })
-  const subtitle =
-    communityDisplaySubtitle({
-      description: post.description,
-      prompt,
-      promptPreview: post.promptPreview || prompt,
-      topic: post.topic,
-      tags: post.tags,
-      toolName: post.toolName,
-      toolCode: post.toolCode,
-    }) || undefined
-
   return {
-    ...base,
-    title,
-    subtitle,
+    ...assetFromCommunityPost(post, mediaUrl(post.coverUrl)),
     source: "community",
   } as AssetPreviewItem
 }

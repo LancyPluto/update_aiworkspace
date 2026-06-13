@@ -1,0 +1,262 @@
+.marketplace-tool-card {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  aspect-ratio: 4 / 5;
+  border: 1px solid rgb(255 255 255 / 0.055);
+  border-radius: 22px;
+  background: #0d0d12;
+  box-shadow: 0 24px 60px rgb(0 0 0 / 0.24);
+  cursor: pointer;
+  text-decoration: none;
+  color: inherit;
+  transition:
+    transform 220ms ease,
+    border-color 220ms ease,
+    box-shadow 220ms ease;
+}
+
+button.marketplace-tool-card {
+  appearance: none;
+  font: inherit;
+  text-align: left;
+}
+
+.marketplace-tool-card:hover {
+  transform: translateY(-2px);
+  border-color: rgb(168 85 247 / 0.3);
+  box-shadow: 0 26px 70px rgb(0 0 0 / 0.45);
+}
+
+.marketplace-tool-card--selected {
+  border-color: rgb(168 85 247 / 0.55);
+  box-shadow: 0 0 0 1px rgb(168 85 247 / 0.22), 0 24px 60px rgb(0 0 0 / 0.32);
+}
+
+.marketplace-tool-media {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 18% 14%, rgb(255 63 121 / 0.32), transparent 34%),
+    radial-gradient(circle at 74% 34%, rgb(124 92 255 / 0.28), transparent 36%),
+    radial-gradient(circle at 48% 100%, rgb(18 215 178 / 0.16), transparent 42%),
+    #0d0d12;
+}
+
+.marketplace-tool-image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scale(1);
+  transition: transform 520ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.marketplace-tool-card:hover .marketplace-tool-image {
+  transform: scale(1.03);
+}
+
+.marketplace-tool-image--effect {
+  z-index: 1;
+}
+
+.marketplace-tool-empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background:
+    linear-gradient(135deg, rgb(255 255 255 / 0.06), transparent 42%),
+    radial-gradient(circle at 25% 35%, rgb(255 63 121 / 0.34), transparent 26%),
+    radial-gradient(circle at 70% 52%, rgb(124 92 255 / 0.34), transparent 30%),
+    radial-gradient(circle at 48% 82%, rgb(24 198 174 / 0.18), transparent 32%);
+}
+
+.marketplace-tool-empty img {
+  width: 76px;
+  height: 76px;
+  border-radius: 22px;
+  background: rgb(255 255 255 / 0.9);
+  object-fit: contain;
+  padding: 14px;
+  box-shadow: 0 18px 46px rgb(0 0 0 / 0.28);
+}
+
+.marketplace-modality-badge,
+.marketplace-cost-badge {
+  position: absolute;
+  top: 16px;
+  z-index: 6;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid rgb(255 255 255 / 0.1);
+  border-radius: 999px;
+  box-shadow: 0 6px 18px rgb(0 0 0 / 0.38);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.marketplace-modality-badge {
+  left: 16px;
+  background: rgb(8 8 12 / 0.72);
+  padding: 5px 10px;
+  color: rgb(255 255 255 / 0.88);
+  backdrop-filter: blur(10px);
+}
+
+.marketplace-cost-badge {
+  right: 16px;
+  gap: 3px;
+  border-color: rgb(168 85 247 / 0.28);
+  background: rgb(8 8 12 / 0.72);
+  padding: 5px 10px;
+  color: rgb(216 180 254 / 0.92);
+  backdrop-filter: blur(10px);
+}
+
+.marketplace-tool-overlay {
+  position: absolute;
+  z-index: 5;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  align-items: flex-end;
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    rgb(0 0 0 / 0.08) 34%,
+    rgb(0 0 0 / 0.52) 68%,
+    rgb(0 0 0 / 0.78) 100%
+  );
+  pointer-events: none;
+  transition: background 320ms ease;
+}
+
+.marketplace-tool-card:hover .marketplace-tool-overlay {
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    rgb(0 0 0 / 0.18) 24%,
+    rgb(0 0 0 / 0.62) 62%,
+    rgb(0 0 0 / 0.86) 100%
+  );
+}
+
+.marketplace-tool-content {
+  width: 100%;
+  padding: 20px;
+  pointer-events: auto;
+}
+
+.marketplace-tool-title {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 0;
+  color: rgb(255 255 255 / 0.96);
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: 0.015em;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  text-shadow: 0 1px 12px rgb(0 0 0 / 0.45);
+}
+
+.marketplace-hover-reveal {
+  display: flex;
+  overflow: hidden;
+  max-height: 0;
+  flex-direction: column;
+  opacity: 0;
+  transform: translateY(12px);
+  transition:
+    max-height 360ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 280ms ease,
+    transform 320ms cubic-bezier(0.22, 1, 0.36, 1),
+    margin-top 320ms ease;
+}
+
+.marketplace-tool-card:hover .marketplace-hover-reveal {
+  max-height: 132px;
+  margin-top: 10px;
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.marketplace-tool-desc {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 0;
+  color: rgb(255 255 255 / 0.72);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.6;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  text-shadow: 0 1px 10px rgb(0 0 0 / 0.35);
+}
+
+.marketplace-start-button {
+  display: inline-flex;
+  width: 100%;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid rgb(255 255 255 / 0.14);
+  border-radius: 12px;
+  background: rgb(139 92 246 / 0.32);
+  padding: 0 16px;
+  color: rgb(255 255 255 / 0.96);
+  font-size: 12px;
+  font-weight: 600;
+  margin-top: 12px;
+  box-shadow: 0 8px 28px rgb(0 0 0 / 0.28);
+  backdrop-filter: blur(14px);
+  transition: background 180ms ease, border-color 180ms ease, transform 180ms ease;
+}
+
+.marketplace-tool-card:hover .marketplace-start-button:hover {
+  border-color: rgb(196 181 253 / 0.35);
+  background: rgb(139 92 246 / 0.44);
+  transform: translateY(-1px);
+}
+
+.marketplace-comparison-line {
+  position: absolute;
+  inset-block: 0;
+  z-index: 5;
+  width: 1px;
+  background: rgb(255 255 255 / 0.86);
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.35);
+  pointer-events: none;
+}
+
+.marketplace-comparison-handle {
+  position: absolute;
+  top: 50%;
+  z-index: 5;
+  display: flex;
+  width: 34px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgb(255 255 255 / 0.65);
+  border-radius: 999px;
+  background: rgb(0 0 0 / 0.45);
+  color: white;
+  font-size: 11px;
+  font-weight: 700;
+  box-shadow: 0 16px 32px rgb(0 0 0 / 0.3);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  backdrop-filter: blur(12px);
+}

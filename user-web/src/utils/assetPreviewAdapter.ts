@@ -246,13 +246,13 @@ export function assetFromCommunityPost(post: CommunityPost, url?: string): Asset
     title: post.title,
     subtitle: post.description || undefined,
     description: post.description || undefined,
-    prompt: resolvedPrompt || undefined,
-    promptPreview: post.promptPreview || resolvedPrompt || undefined,
     topic: post.topic,
     tags: post.tags || [],
     toolName: post.toolName,
     toolCode: post.toolCode,
     kind,
+    modality: post.modality,
+    promptVisible: post.promptVisible,
   }
   const authorName = resolveCommunityAuthorName(post)
   const audioMedia = kind === "audio" ? resolveCommunityAudioMedia(post) : null

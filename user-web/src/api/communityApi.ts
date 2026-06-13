@@ -338,3 +338,14 @@ export function markCommunityPostSameStyle(postId: number | string, options?: { 
     token: options?.token,
   })
 }
+
+export function reportCommunityPost(
+  postId: number | string,
+  body?: { reason?: string },
+  options?: { token?: string | null },
+) {
+  return apiRequest<void>("POST", `/api/v1/community/posts/${encodeURIComponent(String(postId))}/report`, {
+    token: options?.token,
+    body,
+  })
+}

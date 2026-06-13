@@ -46,4 +46,7 @@ public interface CommunityService {
     CommunityPostResponse adminFeature(Long postId, boolean featured);
     CommunityPostResponse adminPin(Long postId, boolean pinned);
     CommunityPostResponse adminAnnotate(Long postId, String topic, java.util.List<String> tags);
+    void reportPost(Long userId, Long postId, com.aiminilab.aitoolmarket.community.dto.ReportCommunityPostRequest request);
+    PageResponse<com.aiminilab.aitoolmarket.community.dto.CommunityPostReportResponse> adminReports(String status, Integer pageNo, Integer pageSize);
+    com.aiminilab.aitoolmarket.community.dto.CommunityPostReportResponse adminResolveReport(Long reportId, String status, String adminNote);
 }

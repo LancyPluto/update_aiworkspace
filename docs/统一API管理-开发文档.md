@@ -2,7 +2,7 @@
 
 > 版本：v1.0（方案稿）  
 > 适用范围：管理端「系统配置」、后端模型配置域、后续 ModelGateway 演进  
-> 关联文档：[AI模型与模态配置指南](./AI模型与模态配置指南.md)、[后台模型接入操作教程](./后台模型接入操作教程.md)、[系统架构与边界](./系统架构与边界.md)
+> 关联文档：[配置包导入导出 — 维护指南](./配置包导入导出-维护指南.md)、[项目整体架构说明](./项目整体架构说明.md)、[模型配置.md](../模型配置.md)
 
 ---
 
@@ -456,36 +456,16 @@ for each config in agent_model_configs where not deleted:
 
 ### 8.4 配置包导入导出（v1.3 已落地）
 
-扩展 [`config-bundles`](../admin-frontend/lib/api/config-bundles.ts) 格式，增加 `vendorAccounts` 节点；**导入顺序：先账户，后模型**。
+配置包（Config Bundle）用于在环境间同步系统设置、厂商账户、模型、分类与工具（含字段/提示词/工作流）。**完整格式、导入顺序、密钥策略、prune 行为与管理端/CLI 操作见权威文档：[配置包导入导出 — 维护指南](./配置包导入导出-维护指南.md)。**
 
-```json
-{
-  "format": "ai-tool-market-config-bundle",
-  "version": 1,
-  "vendorAccounts": [
-    {
-      "vendorCode": "deepseek",
-      "accountName": "默认账户",
-      "accountRef": "deepseek::默认账户",
-      "apiKey": "sk-...",
-      "baseUrl": "https://api.deepseek.com",
-      "balanceQueryMode": "REST_API"
-    }
-  ],
-  "modelConfigs": [
-    {
-      "configCode": "deepseek_chat",
-      "vendorAccountRef": "deepseek::默认账户",
-      "provider": "deepseek",
-      "modelName": "deepseek-chat"
-    }
-  ]
-}
-```
+摘要：
 
-- `accountRef` / `vendorAccountRef` 稳定引用：`{vendorCode}::{accountName}`
-- 旧包（无 `vendorAccounts`）仍可导入，行为与原先一致（密钥写在 `modelConfigs`）
-- `includeSecrets=true` 时从 **厂商账户表** 导出密钥；已绑定账户的模型行不再重复导出 `apiKey`
+- API：`GET/POST /api/admin/v1/config-bundles/{export|import}`；前端 [`config-bundles.ts`](../admin-frontend/lib/api/config-bundles.ts)
+- 格式：`format: "ai-tool-market-config-bundle"`, `version: 1`
+- 导入顺序：settings → vendorAccounts → modelConfigs → categories → tools → prune → 清缓存
+- `accountRef` / `vendorAccountRef`：`{vendorCode}::{accountName}`
+- 旧包（无 `vendorAccounts`）仍可导入（密钥写在 `modelConfigs`）
+- `includeSecrets=true` 时从厂商账户表导出密钥；已绑定账户的模型行不再重复导出 `apiKey`
 
 ---
 
@@ -555,7 +535,7 @@ effectiveExtraAuth = account.extraAuthJson ?? config.extraAuthJson
 - [ ] 禁用账户后，其下模型不可被新任务选中（或自动禁用）
 - [ ] 删除账户前校验/级联策略符合预期
 - [ ] 余额刷新：REST_API 成功/失败/超时 UI
-- [ ] 配置包导入导出含 vendorAccounts
+- [x] 配置包导入导出含 vendorAccounts
 
 ### 11.2 回归
 
@@ -575,9 +555,8 @@ effectiveExtraAuth = account.extraAuthJson ?? config.extraAuthJson
 
 | 文档 | 动作 |
 |------|------|
-| [后台模型接入操作教程](./后台模型接入操作教程.md) | 改为「先建厂商账户 → 再添加模型」流程 |
-| [AI模型与模态配置指南](./AI模型与模态配置指南.md) | 增加「统一 API 与 provider 区别」一节 |
-| `模型配置.md` | 余额列改为「自动/外链」说明 |
+| [配置包导入导出 — 维护指南](./配置包导入导出-维护指南.md) | 配置包格式与跨环境同步（已建立） |
+| [模型配置.md](../模型配置.md) | 模型运营手册；余额列可补充「自动/外链」说明 |
 
 ---
 
@@ -602,3 +581,4 @@ effectiveExtraAuth = account.extraAuthJson ?? config.extraAuthJson
 | v1.1 | 2026-06-01 | P2 落地：model_vendor_accounts、overview API、管理端统一 API 页 |
 | v1.2 | 2026-06-01 | P3 落地：DeepSeek / SiliconFlow REST 余额适配、定时刷新配置 |
 | v1.3 | 2026-06-01 | 配置包 `vendorAccounts` 导入导出；MiniMax/火山/可灵/OpenAI 网关余额探测适配 |
+| v1.4 | 2026-06-13 | §8.4 收敛为摘要并链接 [配置包导入导出 — 维护指南](./配置包导入导出-维护指南.md) |

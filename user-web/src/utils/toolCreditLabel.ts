@@ -23,3 +23,10 @@ export function formatToolCreditHint(tool?: CreditTool | ToolDetail | null): str
   }
   return "创建任务时将按预估算力冻结，成功后结算"
 }
+
+export function formatMarketplaceCostLabel(tool?: CreditTool | ToolDetail | null): string {
+  if (!tool) return "算力不详"
+  if (usesVariableWorkflowCredits(tool)) return "算力不详"
+  if (tool.estimatedCreditCost === 0) return "免费"
+  return `约 ${tool.estimatedCreditCost} 算力/次`
+}

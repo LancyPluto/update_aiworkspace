@@ -7,7 +7,8 @@ import WorkspaceComposer from "@/components/workspace/WorkspaceComposer.vue"
 import ResultRenderer from "@/components/ResultRenderer/ResultRenderer.vue"
 import AssetPreviewModal from "@/components/AssetPreviewModal.vue"
 import { ApiBusinessError } from "@/api/client"
-import { publishCommunityPost, unpublishCommunityPost } from "@/api/communityApi"
+import { unpublishCommunityPost } from "@/api/communityApi"
+import { publishAssetToCommunity, type CommunityPublishPayload } from "@/utils/publishCommunityAsset"
 import { createTask, deleteTask, fetchTasks, regenerateTask, streamTaskStatus } from "@/api/taskApi"
 import { fetchToolByCode, fetchTools } from "@/api/toolApi"
 import type { CreateTaskResponse, TaskDetail, TaskStatus, TaskStatusPayload, ToolDetail, ToolSummary } from "@/api/types"
@@ -571,20 +572,16 @@ function updateTaskCommunityState(taskId: number, communityPostId?: number, prom
   )
 }
 
-async function publishPreviewAsset(asset: AssetPreviewItem) {
+async function publishPreviewAsset(asset: AssetPreviewItem, payload?: CommunityPublishPayload) {
   if (!auth.token || !asset.taskId) return
   try {
-    const post = await publishCommunityPost(
-      {
-        taskId: asset.taskId,
-        title: asset.title,
-        description: asset.subtitle || null,
-        promptVisible: asset.promptVisible ?? false,
-      },
-      { token: auth.token },
-    )
+    const post = await publishAssetToCommunity(asset, {
+      token: auth.token,
+      payload,
+      defaultPromptVisible: false,
+    })
     updateTaskCommunityState(asset.taskId, post.id, post.promptVisible)
-    previewAsset.value = { ...asset, communityPostId: post.id, promptVisible: post.promptVisible }
+    previewAsset.value = { ...asset, communityPostId: post.id, promptVisible: post.promptVisible, title: post.title }
   } catch (e) {
     error.value = (e as Error).message || "发布失败"
   }

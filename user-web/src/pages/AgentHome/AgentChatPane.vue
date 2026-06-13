@@ -53,7 +53,6 @@ import {
   fetchTasks,
   fetchTools,
   fetchUploadAssets,
-  publishCommunityPost,
   regenerateAgentRun,
   sendAgentMessage,
   streamAgentRunEvents,
@@ -87,6 +86,7 @@ import {
   resolveTaskIdFromRunEvents,
 } from "@/utils/assetPreviewAdapter"
 import { openCreateWithAssetRecommendation } from "@/utils/assetReplay"
+import { publishAssetToCommunity, type CommunityPublishPayload } from "@/utils/publishCommunityAsset"
 import { buildTaskResultBlocks, resolveAudioTracks } from "@/utils/taskResultBlocks"
 import {
   chatAssetRefByUrl,
@@ -2135,19 +2135,15 @@ function openPreviewTask(asset: AssetPreviewItem) {
   window.location.href = `/tasks/${asset.taskId}/result`
 }
 
-async function publishPreviewAsset(asset: AssetPreviewItem) {
+async function publishPreviewAsset(asset: AssetPreviewItem, payload?: CommunityPublishPayload) {
   if (!auth.token || !asset.taskId) return
   try {
-    const post = await publishCommunityPost(
-      {
-        taskId: asset.taskId,
-        title: asset.title,
-        description: asset.subtitle || null,
-        promptVisible: asset.promptVisible ?? auth.user?.promptPublicByDefault ?? false,
-      },
-      { token: auth.token },
-    )
-    previewAsset.value = { ...asset, communityPostId: post.id, promptVisible: post.promptVisible }
+    const post = await publishAssetToCommunity(asset, {
+      token: auth.token,
+      payload,
+      defaultPromptVisible: auth.user?.promptPublicByDefault ?? false,
+    })
+    previewAsset.value = { ...asset, communityPostId: post.id, promptVisible: post.promptVisible, title: post.title }
   } catch (err) {
     const message = err instanceof Error ? err.message : "发布失败"
     window.alert(message)
