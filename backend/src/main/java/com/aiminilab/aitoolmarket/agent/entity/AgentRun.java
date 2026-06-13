@@ -29,6 +29,7 @@ public class AgentRun {
     private Long contextSnapshotId;
     private String clientRequestId;
     private String preferredToolCode;
+    private String graphCheckpointJson;
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
@@ -72,4 +73,6 @@ public class AgentRun {
     public void setClientRequestId(String clientRequestId) { this.clientRequestId = clientRequestId; }
     public String getPreferredToolCode() { return preferredToolCode; }
     public void setPreferredToolCode(String preferredToolCode) { this.preferredToolCode = preferredToolCode; }
+    public String getGraphCheckpointJson() { return graphCheckpointJson; }
+    public void setGraphCheckpointJson(String graphCheckpointJson) { this.graphCheckpointJson = graphCheckpointJson; }
 }

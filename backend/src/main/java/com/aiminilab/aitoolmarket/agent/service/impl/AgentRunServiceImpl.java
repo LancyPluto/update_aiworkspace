@@ -1072,6 +1072,26 @@ public class AgentRunServiceImpl implements AgentRunService {
         return AgentRunResponse.from(findRun(runId));
     }
 
+    @Override
+    @Transactional
+    public void saveGraphCheckpoint(Long runId, String checkpointJson) {
+        findRun(runId);
+        agentRunMapper.updateGraphCheckpoint(runId, checkpointJson, LocalDateTime.now());
+    }
+
+    @Override
+    public String getGraphCheckpoint(Long runId) {
+        findRun(runId);
+        return agentRunMapper.selectGraphCheckpoint(runId);
+    }
+
+    @Override
+    @Transactional
+    public void clearGraphCheckpoint(Long runId) {
+        findRun(runId);
+        agentRunMapper.updateGraphCheckpoint(runId, null, LocalDateTime.now());
+    }
+
     private CreateAgentMessageResponse executeStartRun(Long userId,
                                                        AgentSession session,
                                                        AgentMessage userMessage,

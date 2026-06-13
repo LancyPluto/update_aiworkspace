@@ -244,36 +244,48 @@ class ProductToolCallLoopExecutor:
         tools: list[ToolDescriptor],
         context: RunContext | None = None,
     ) -> tuple[list[dict[str, Any]], dict[str, _ToolAlias]]:
-        ordered = sort_tools_with_preferred(context, tools) if context is not None else tools
-        aliases: dict[str, _ToolAlias] = {}
-        definitions: list[dict[str, Any]] = []
-        used_aliases: set[str] = set()
-        for tool in ordered[:30]:
-            alias = _alias_for_tool_code(tool.toolCode)
-            base_alias = alias
-            index = 2
-            while alias in used_aliases:
-                alias = f"{base_alias}_{index}"
-                index += 1
-            used_aliases.add(alias)
-            aliases[alias] = _ToolAlias(alias=alias, tool=tool)
-            definitions.append(
-                {
-                    "type": "function",
-                    "function": {
-                        "name": alias,
-                        "description": _tool_description(tool),
-                        "parameters": _tool_parameters(tool),
-                    },
-                }
-            )
-        return definitions, aliases
+        return build_tool_definitions(tools, context)
 
     async def _event(self, run_id: int, event_type: str, payload: dict[str, Any]) -> None:
         try:
             await self.backend.append_event(run_id, RunEventCreate(eventType=event_type, eventJson=payload))
         except Exception:
             pass
+
+
+def build_tool_definitions(
+    tools: list[ToolDescriptor],
+    context: RunContext | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, _ToolAlias]]:
+    """Build OpenAI function-tool definitions and a name->tool alias map.
+
+    Shared by the product tool loop and the multi-step graph engine so both
+    expose an identical, deduplicated tool surface to the model.
+    """
+    ordered = sort_tools_with_preferred(context, tools) if context is not None else tools
+    aliases: dict[str, _ToolAlias] = {}
+    definitions: list[dict[str, Any]] = []
+    used_aliases: set[str] = set()
+    for tool in ordered[:30]:
+        alias = _alias_for_tool_code(tool.toolCode)
+        base_alias = alias
+        index = 2
+        while alias in used_aliases:
+            alias = f"{base_alias}_{index}"
+            index += 1
+        used_aliases.add(alias)
+        aliases[alias] = _ToolAlias(alias=alias, tool=tool)
+        definitions.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": alias,
+                    "description": _tool_description(tool),
+                    "parameters": _tool_parameters(tool),
+                },
+            }
+        )
+    return definitions, aliases
 
 
 def _alias_for_tool_code(tool_code: str) -> str:

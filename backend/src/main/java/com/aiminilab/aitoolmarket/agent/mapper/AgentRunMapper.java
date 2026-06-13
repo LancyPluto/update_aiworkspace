@@ -212,6 +212,23 @@ public interface AgentRunMapper extends BaseMapper<AgentRun> {
 
     @Update("""
             UPDATE agent_runs
+            SET graph_checkpoint_json = #{checkpointJson}, updated_at = #{now}
+            WHERE id = #{runId}
+            """)
+    void updateGraphCheckpoint(@Param("runId") Long runId,
+                               @Param("checkpointJson") String checkpointJson,
+                               @Param("now") LocalDateTime now);
+
+    @Select("""
+            SELECT graph_checkpoint_json
+            FROM agent_runs
+            WHERE id = #{runId}
+            LIMIT 1
+            """)
+    String selectGraphCheckpoint(@Param("runId") Long runId);
+
+    @Update("""
+            UPDATE agent_runs
             SET status = 'SUCCESS', intent = #{intent}, model_provider_code = #{modelProviderCode},
                 model_name = #{modelName}, consumed_credits = #{consumedCredits},
                 finished_at = #{now}, updated_at = #{now}

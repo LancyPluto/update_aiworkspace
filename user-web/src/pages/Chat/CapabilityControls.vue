@@ -3,7 +3,7 @@ import { computed, ref, watch } from "vue"
 import type { Capability } from "@/api/aiToolTypes"
 import type { TaskDetail, ToolField, UserUploadAsset } from "@/api/types"
 import { deleteUploadAsset, fetchUploadAssets, uploadToolFile } from "@/api/toolApi"
-import { getApiOrigin } from "@/api/client"
+import { normalizeMediaFieldValue, normalizeMediaUrl } from "@/utils/toolCoverMedia"
 import { fetchTasks } from "@/api/taskApi"
 import { useAuthStore } from "@/store/authStore"
 import { buildTaskResultBlocks, resolveAudioTracks } from "@/utils/taskResultBlocks"
@@ -14,7 +14,7 @@ import {
   parseFieldMeta,
   resolveMaxLength,
 } from "@/utils/fieldUiMeta"
-import { Check, Clock, FileAudio, FileVideo, ImageIcon, ImageUp, Loader2, Mic, Paperclip, Plus, UploadCloud, X } from "lucide-vue-next"
+import { Check, Clock, FileAudio, FileVideo, ImageIcon, ImageUp, Loader2, Mic, Plus, UploadCloud, X } from "lucide-vue-next"
 import { BookOpen } from 'lucide-vue-next'
 
 export interface PendingAttachment {
@@ -130,7 +130,6 @@ function defaultAspectRatioValue(): string {
 }
 
 const imageCapability = computed(() => props.capabilities.find((c) => c.type === "imageGeneration"))
-const fileCapability = computed(() => props.capabilities.find((c) => c.type === "fileReading"))
 const webSearchCapability = computed(() => props.capabilities.find((c) => c.type === "webSearch"))
 const codeCapability = computed(() => props.capabilities.find((c) => c.type === "codeExecution"))
 const voiceCapability = computed(() => props.capabilities.find((c) => c.type === "voiceInput"))
@@ -284,7 +283,13 @@ function buildDefaultState(): CapabilityState {
   }
   for (const field of initialFields) {
     const initial = props.initialParams?.[field.fieldKey]
-    next.fields[field.fieldKey] = initial !== undefined && initial !== null ? initial : defaultFieldValue(field)
+    if (initial !== undefined && initial !== null) {
+      next.fields[field.fieldKey] = isReferenceMediaField(field)
+        ? normalizeMediaFieldValue(initial)
+        : initial
+    } else {
+      next.fields[field.fieldKey] = defaultFieldValue(field)
+    }
   }
   if (typeof props.initialParams?.imageRatio === "string") next.imageRatio = normalizeAspectRatio(props.initialParams.imageRatio)
   if (typeof props.initialParams?.aspectRatio === "string") next.imageRatio = normalizeAspectRatio(props.initialParams.aspectRatio)
@@ -398,17 +403,9 @@ function uploadState(key: string) {
   return fieldUploads.value[key] || {}
 }
 
-function normalizeResourceUrl(value: string): string {
-  const raw = value.trim()
-  if (!raw || raw.startsWith("http://") || raw.startsWith("https://") || raw.startsWith("data:")) return raw
-  const path = raw.startsWith("/") ? raw : `/${raw}`
-  const apiOrigin = getApiOrigin()
-  return apiOrigin ? `${apiOrigin}${path}` : path
-}
-
 function imagePreviewUrl(field: ToolField): string {
   if (materialKindForField(field) !== "image") return ""
-  return normalizeResourceUrl(strField(field.fieldKey))
+  return normalizeMediaUrl(strField(field.fieldKey))
 }
 
 function materialKindForField(field: ToolField): MaterialKind {
@@ -485,7 +482,7 @@ const primaryReferenceInfo = computed<PrimaryReferenceMaterialInfo>(() => {
     kind: materialKindForField(field),
     count: urls.length,
     maxCount: isMultiImageField(field) ? multiImageLimit(field) : 1,
-    previewUrls: urls.slice(0, 3).map(normalizeResourceUrl),
+    previewUrls: urls.slice(0, 3).map((url) => normalizeMediaUrl(url)),
     uploading: upload.uploading === true,
     error: upload.error,
   }
@@ -1029,6 +1026,10 @@ function markUploadError(localId: string, message: string) {
   }
 }
 
+function hasOpenOverlay(): boolean {
+  return referencePickerOpen.value || uploadHistoryOpen.value || materialPickerOpen.value
+}
+
 defineExpose({
   resetState,
   validate,
@@ -1037,6 +1038,7 @@ defineExpose({
   markUploadSuccess,
   markUploadError,
   hasPendingUploads,
+  hasOpenOverlay,
   openReferenceMaterialPicker,
   clearPrimaryReferenceMaterial,
   removePrimaryReferenceMaterialAt,
@@ -1167,7 +1169,7 @@ defineExpose({
               :key="url"
               class="group relative h-16 w-16 overflow-hidden rounded-xl border border-border bg-muted"
             >
-              <img :src="normalizeResourceUrl(url)" alt="" class="h-full w-full object-cover" />
+              <img :src="normalizeMediaUrl(url)" alt="" class="h-full w-full object-cover" />
               <button
                 type="button"
                 class="absolute right-1 top-1 rounded-full bg-black/60 p-1 text-white opacity-0 transition group-hover:opacity-100"
@@ -1303,14 +1305,6 @@ defineExpose({
 
     <div class="flex flex-wrap items-center gap-1.5">
 
-      <label
-        v-if="fileCapability"
-        class="inline-flex h-7 items-center gap-1.5 rounded-lg border border-border/60 bg-background px-2 text-xs text-muted-foreground"
-      >
-        <Paperclip class="h-3.5 w-3.5" />
-        上传
-      </label>
-
       <label v-if="webSearchCapability && showWebSearch" class="inline-flex h-7 cursor-pointer items-center gap-2 rounded-lg border border-border/60 bg-background px-2 text-xs">
         <input v-model="state.webSearch" type="checkbox" class="rounded border-border" />
         联网搜索
@@ -1339,6 +1333,7 @@ defineExpose({
     <Teleport to="body">
       <div
         v-if="referencePickerOpen"
+        data-capability-overlay
         class="fixed inset-0 z-[130] flex items-start justify-center bg-black/65 px-4 pb-8 pt-[7vh] backdrop-blur-sm"
         @click.self="closeReferenceMaterialPicker"
       >
@@ -1415,7 +1410,7 @@ defineExpose({
                     <div class="relative flex aspect-[4/3] items-center justify-center bg-black/20">
                       <img
                         v-if="item.kind === 'image'"
-                        :src="normalizeResourceUrl(item.url)"
+                        :src="normalizeMediaUrl(item.url)"
                         alt=""
                         class="h-full w-full object-cover"
                       />
@@ -1480,7 +1475,7 @@ defineExpose({
                 <div class="relative flex aspect-[4/3] items-center justify-center bg-black/20">
                   <img
                     v-if="asset.kind === 'image' && asset.previewUrl"
-                    :src="normalizeResourceUrl(asset.previewUrl)"
+                    :src="normalizeMediaUrl(asset.previewUrl)"
                     alt=""
                     class="h-full w-full object-cover"
                   />
@@ -1520,6 +1515,7 @@ defineExpose({
 
       <div
         v-if="uploadHistoryOpen"
+        data-capability-overlay
         class="fixed inset-0 z-[125] flex items-start justify-center bg-black/65 px-4 pb-8 pt-[9vh] backdrop-blur-sm"
         @click.self="closeUploadHistoryPicker"
       >
@@ -1580,7 +1576,7 @@ defineExpose({
                   <div class="relative flex aspect-[4/3] items-center justify-center bg-white/[0.04]">
                     <img
                       v-if="item.kind === 'image'"
-                      :src="normalizeResourceUrl(item.url)"
+                      :src="normalizeMediaUrl(item.url)"
                       alt=""
                       class="h-full w-full object-cover"
                     />
@@ -1631,6 +1627,7 @@ defineExpose({
 
       <div
         v-if="materialPickerOpen"
+        data-capability-overlay
         class="fixed inset-0 z-[120] flex items-start justify-center bg-black/65 px-4 pb-8 pt-[9vh] backdrop-blur-sm"
         @click.self="closeMaterialPicker"
       >

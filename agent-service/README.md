@@ -5,10 +5,31 @@ FastAPI service for the Cloud Universal Agent.
 ## Stack
 
 - FastAPI for the internal HTTP API.
-- LangGraph for the universal agent graph when the dependency is installed.
 - LangChain-compatible message/tool boundaries for model and tool orchestration.
-- Workspace memory and controlled tool calling are built into the default runtime.
-- Deep Agents remains an optional enhancement layer for planning, sub-agents, and richer workspace context.
+- Three selectable execution engines (see Runtime Engines below).
+- Workspace memory and controlled tool calling are built into every runtime.
+
+## Runtime Engines
+
+`RuntimeRouter.select_engine` picks one of three engines per run:
+
+1. `LegacyDispatcherEngine` (default / rollback) — the pre-refactor single-turn
+   router that classifies intent once and dispatches at most one product tool.
+   This engine does NOT use a state graph.
+2. `AgentGraphEngine` — the multi-step agentic loop built on a LangGraph
+   `StateGraph`. It performs native function-calling over product tools, chains
+   multiple tools, reflects on failures, and surfaces a plan/todo. Enabled via
+   `AGENT_GRAPH_ENGINE_ENABLED=true` or per-run via
+   `runtimeSettings.intelligenceLevel=graph`.
+3. `DeepAgentsRuntimeEngine` (native deepagents) — optional planning/sub-agent
+   layer, enabled via `AGENT_DEEP_AGENTS_ENABLED=true`.
+
+All three execute product tools exclusively through
+`ToolOrchestrator.execute_with_guard` -> `BackendToolBridge` -> backend task
+APIs, so the model can never bypass credit, permission, or confirmation checks.
+
+> Full architecture & maintenance guide (engines, graph loop, HITL checkpoint,
+> event contract, file map): [docs/agent/架构与维护指南.md](../docs/agent/架构与维护指南.md).
 
 ## Local Run
 

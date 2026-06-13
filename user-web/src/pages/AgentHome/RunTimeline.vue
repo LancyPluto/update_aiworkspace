@@ -7,13 +7,35 @@ import { filterUserFacingRunEvents } from "./runTimelineEvents"
 const props = defineProps<{
   events: AgentRunEvent[]
   inlineMode?: boolean
+  processMode?: boolean
 }>()
 
 type TimelineTone = "info" | "success" | "warning" | "error"
 
-const expandedEventIds = ref<Set<number>>(new Set())
+const TOOL_PROCESS_EVENT_TYPES = new Set([
+  "tool.started",
+  "tool.task_dispatched",
+  "tool.task_progress",
+  "tool.finished",
+])
 
-const visibleEvents = computed(() => filterUserFacingRunEvents(props.events, props.inlineMode).slice(-14))
+const expandedEventIds = ref<Set<number>>(new Set())
+const toolTimelineExpanded = ref(false)
+
+const visibleEvents = computed(() => filterUserFacingRunEvents(props.events, props.inlineMode).slice(-40))
+
+const toolProcessEvents = computed(() => visibleEvents.value.filter((event) => TOOL_PROCESS_EVENT_TYPES.has(event.eventType)))
+
+const nonToolEvents = computed(() => visibleEvents.value.filter((event) => !TOOL_PROCESS_EVENT_TYPES.has(event.eventType)))
+
+const latestToolProcessEvent = computed(() => toolProcessEvents.value[toolProcessEvents.value.length - 1] ?? null)
+
+const shouldCollapseToolProcess = computed(
+  () =>
+    (props.processMode || props.inlineMode) &&
+    toolProcessEvents.value.length > 1 &&
+    !toolTimelineExpanded.value,
+)
 
 function parseEventJson(value?: string | null | Record<string, unknown>) {
   if (value == null || value === "") return {} as Record<string, unknown>
@@ -39,6 +61,17 @@ function titleFor(event: AgentRunEvent) {
     if (event.eventText === "general_chat") return "按通用问答处理"
     if (event.eventText === "unsupported") return "当前请求暂不支持"
     return "已识别请求意图"
+  }
+  if (event.eventType === "agent.step") {
+    const iteration = typeof payload.iteration === "number" ? payload.iteration : null
+    return iteration ? `Agent 思考第 ${iteration} 步` : "Agent 正在思考"
+  }
+  if (event.eventType === "plan.updated") {
+    const steps = Array.isArray(payload.steps) ? payload.steps.length : 0
+    return steps ? `已更新执行计划（${steps} 步）` : "已更新执行计划"
+  }
+  if (event.eventType === "reflect.retry") {
+    return `工具失败，正在反思重试：${String(payload.toolCode || event.eventText || "工具")}`
   }
   if (event.eventType === "tool.selected") return `已选择工具：${String(payload.toolCode || event.eventText || "工具")}`
   if (event.eventType === "tool.confirmation_required") return `等待确认：${String(payload.toolName || payload.toolCode || event.eventText || "工具")}`
@@ -95,6 +128,20 @@ function detailFor(event: AgentRunEvent) {
     if (Array.isArray(payload.candidateToolCodes) && payload.candidateToolCodes.length > 0) return `候选工具：${payload.candidateToolCodes.join("、")}`
     if (typeof payload.reason === "string") return payload.reason
   }
+  if (event.eventType === "plan.updated" && Array.isArray(payload.steps)) {
+    const marks: Record<string, string> = { done: "✓", in_progress: "▶", pending: "•" }
+    return payload.steps
+      .map((step) => {
+        const obj = (typeof step === "object" && step !== null ? step : {}) as Record<string, unknown>
+        const status = String(obj.status || "pending")
+        return `${marks[status] || "•"} ${String(obj.title || "")}`
+      })
+      .filter(Boolean)
+      .join("\n")
+  }
+  if (event.eventType === "reflect.retry") {
+    return typeof payload.error === "string" ? payload.error : "工具执行失败，正在调整参数后重试。"
+  }
   if (event.eventType === "tool.confirmation_required") {
     return typeof payload.description === "string" ? payload.description : "确认后 Agent 会继续执行该工具。"
   }
@@ -113,6 +160,9 @@ function detailFor(event: AgentRunEvent) {
 function toneFor(event: AgentRunEvent): TimelineTone {
   const payload = parseEventJson(event.eventJson)
   if (event.eventType === "run.failed" && payload.status === "CANCELLED") return "warning"
+  if (event.eventType === "reflect.retry") return "warning"
+  if (event.eventType === "plan.updated") return "info"
+  if (event.eventType === "agent.step") return "info"
   if (event.eventType.endsWith(".failed") || event.eventType === "run.failed") return "error"
   if (event.eventType.endsWith(".completed") || event.eventType === "run.completed") return "success"
   if (event.eventType === "memory.saved") return "success"
@@ -139,6 +189,9 @@ function toneFor(event: AgentRunEvent): TimelineTone {
 function iconFor(event: AgentRunEvent) {
   if (event.eventType === "run.started") return Loader2
   if (event.eventType === "intent.detected") return Sparkles
+  if (event.eventType === "agent.step") return Sparkles
+  if (event.eventType === "plan.updated") return CheckCircle2
+  if (event.eventType === "reflect.retry") return AlertTriangle
   if (event.eventType === "tool.confirmation_required") return Store
   if (event.eventType.startsWith("subagent.")) return Bot
   if (event.eventType.startsWith("tool.")) return Hammer
@@ -162,6 +215,14 @@ function toggleExpanded(eventId: number) {
   else next.add(eventId)
   expandedEventIds.value = next
 }
+
+function toggleToolTimelineExpanded() {
+  toolTimelineExpanded.value = !toolTimelineExpanded.value
+}
+
+function isEventExpanded(eventId: number) {
+  return expandedEventIds.value.has(eventId)
+}
 </script>
 
 <template>
@@ -171,20 +232,71 @@ function toggleExpanded(eventId: number) {
     :class="{ inline: inlineMode }"
     aria-label="Agent run timeline"
   >
-    <article v-for="event in visibleEvents" :key="event.id" class="timeline-row" :class="toneFor(event)">
+    <article v-for="event in nonToolEvents" :key="event.id" class="timeline-row" :class="toneFor(event)">
       <div class="timeline-icon">
         <component :is="iconFor(event)" class="h-4 w-4" />
       </div>
       <div class="timeline-body">
         <p class="timeline-title">{{ titleFor(event) }}</p>
-        <p v-if="detailFor(event)" class="timeline-detail">{{ detailFor(event) }}</p>
-        <button v-if="detailJson(event)" class="detail-toggle" type="button" @click="toggleExpanded(event.id)">
-          <ChevronDown class="h-3 w-3" :class="{ open: expandedEventIds.has(event.id) }" />
-          详情
+        <p v-if="detailFor(event) && isEventExpanded(event.id)" class="timeline-detail">{{ detailFor(event) }}</p>
+        <button
+          v-if="detailFor(event) || detailJson(event)"
+          class="detail-toggle"
+          type="button"
+          @click="toggleExpanded(event.id)"
+        >
+          <ChevronDown class="h-3 w-3" :class="{ open: isEventExpanded(event.id) }" />
+          {{ isEventExpanded(event.id) ? "收起" : "详情" }}
         </button>
-        <pre v-if="expandedEventIds.has(event.id) && detailJson(event)" class="detail-json">{{ detailJson(event) }}</pre>
+        <pre v-if="isEventExpanded(event.id) && detailJson(event)" class="detail-json">{{ detailJson(event) }}</pre>
       </div>
     </article>
+
+    <article
+      v-if="shouldCollapseToolProcess && latestToolProcessEvent"
+      :key="`tool-summary-${latestToolProcessEvent.id}`"
+      class="timeline-row"
+      :class="toneFor(latestToolProcessEvent)"
+    >
+      <div class="timeline-icon">
+        <component :is="iconFor(latestToolProcessEvent)" class="h-4 w-4" />
+      </div>
+      <div class="timeline-body">
+        <p class="timeline-title">{{ titleFor(latestToolProcessEvent) }}</p>
+        <button class="detail-toggle" type="button" @click="toggleToolTimelineExpanded">
+          <ChevronDown class="h-3 w-3" />
+          详情（{{ toolProcessEvents.length }}）
+        </button>
+      </div>
+    </article>
+
+    <template v-else-if="toolProcessEvents.length > 0">
+      <article v-for="event in toolProcessEvents" :key="event.id" class="timeline-row" :class="toneFor(event)">
+        <div class="timeline-icon">
+          <component :is="iconFor(event)" class="h-4 w-4" />
+        </div>
+        <div class="timeline-body">
+          <p class="timeline-title">{{ titleFor(event) }}</p>
+          <p v-if="detailFor(event) && isEventExpanded(event.id)" class="timeline-detail">{{ detailFor(event) }}</p>
+          <button
+            v-if="detailFor(event) || detailJson(event)"
+            class="detail-toggle"
+            type="button"
+            @click="toggleExpanded(event.id)"
+          >
+            <ChevronDown class="h-3 w-3" :class="{ open: isEventExpanded(event.id) }" />
+            {{ isEventExpanded(event.id) ? "收起" : "详情" }}
+          </button>
+          <pre v-if="isEventExpanded(event.id) && detailJson(event)" class="detail-json">{{ detailJson(event) }}</pre>
+        </div>
+      </article>
+      <div v-if="toolProcessEvents.length > 1" class="timeline-collapse-row">
+        <button class="detail-toggle" type="button" @click="toggleToolTimelineExpanded">
+          <ChevronDown class="h-3 w-3 open" />
+          收起步骤
+        </button>
+      </div>
+    </template>
   </section>
 </template>
 
@@ -281,6 +393,10 @@ function toggleExpanded(eventId: number) {
 
 .detail-toggle .open {
   transform: rotate(180deg);
+}
+
+.timeline-collapse-row {
+  padding: 0 12px 8px 42px;
 }
 
 .detail-json {

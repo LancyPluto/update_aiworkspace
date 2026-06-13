@@ -5,13 +5,47 @@ export function normalizeOutputModality(value?: string | null): string {
   return (value || "TEXT").trim().toUpperCase()
 }
 
+function isRewritableMediaOrigin(url: URL): boolean {
+  const host = url.hostname.toLowerCase()
+  if (host === "backend") return true
+  if ((host === "localhost" || host === "127.0.0.1") && (url.port === "8080" || url.port === "")) return true
+  const path = url.pathname
+  if (!path.startsWith("/generated") && !path.startsWith("/uploads")) return false
+  if (typeof window === "undefined") return host === "backend"
+  return host !== window.location.hostname
+}
+
+function toBrowserMediaPath(pathname: string, search = "", hash = ""): string {
+  const path = `${pathname}${search}${hash}`
+  const apiOrigin = getApiOrigin()
+  return apiOrigin ? `${apiOrigin.replace(/\/$/, "")}${path}` : path
+}
+
 export function normalizeMediaUrl(value?: string | null): string {
   const raw = value?.trim()
   if (!raw) return ""
-  if (raw.startsWith("http://") || raw.startsWith("https://") || raw.startsWith("data:")) return raw
+  if (raw.startsWith("data:")) return raw
+  if (/^https?:\/\//i.test(raw)) {
+    try {
+      const parsed = new URL(raw)
+      if (isRewritableMediaOrigin(parsed)) {
+        return toBrowserMediaPath(parsed.pathname, parsed.search, parsed.hash)
+      }
+      return raw
+    } catch {
+      return raw
+    }
+  }
   const path = raw.startsWith("/") ? raw : `/${raw}`
-  const apiOrigin = getApiOrigin()
-  return apiOrigin ? `${apiOrigin}${path}` : path
+  return toBrowserMediaPath(path)
+}
+
+export function normalizeMediaFieldValue(value: unknown): unknown {
+  if (typeof value === "string") return normalizeMediaUrl(value)
+  if (Array.isArray(value)) {
+    return value.map((item) => (typeof item === "string" ? normalizeMediaUrl(item) : item))
+  }
+  return value
 }
 
 const VIDEO_PREVIEW_EXTENSION_PATTERN = /\.(mp4|webm|mov|m4v)(?:[?#].*)?$/i

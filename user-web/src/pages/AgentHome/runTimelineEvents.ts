@@ -4,7 +4,11 @@ import type { AgentRunEvent } from "@/api/types"
 export const USER_FACING_EVENT_TYPES = [
   "memory.retrieved",
   "memory.context_frozen",
+  "plan.updated",
+  "agent.step",
+  "tool.selected",
   "tool.confirmation_required",
+  "reflect.retry",
   "subagent.started",
   "subagent.completed",
   "subagent.failed",

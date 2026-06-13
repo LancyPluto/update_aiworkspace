@@ -36,10 +36,11 @@ class FakeEngine:
 class FakeRuntimeRouter:
     instances = []
 
-    def __init__(self, backend_client=None, model_client=None, deep_agents_enabled=False):
+    def __init__(self, backend_client=None, model_client=None, deep_agents_enabled=False, graph_engine_enabled=False):
         self.backend_client = backend_client
         self.model_client = model_client
         self.deep_agents_enabled = deep_agents_enabled
+        self.graph_engine_enabled = graph_engine_enabled
         self.engine = FakeEngine()
         self.select_calls = []
         FakeRuntimeRouter.instances.append(self)
