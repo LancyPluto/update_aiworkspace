@@ -108,8 +108,6 @@ export function extractFrontendStyle(configNote?: string | null): { note: string
 export function serializeConfigNote(note: string, style: Partial<FrontendStyleConfig>, preservedMarkers?: string[]): string {
   const cleanNote = note.trim()
   const styleJson = JSON.stringify({
-    primaryColor: style.primaryColor || "#3b82f6",
-    welcomeMessage: style.welcomeMessage || "",
     mediaDisplayMode:
       style.mediaDisplayMode === "comparison" ? "comparison" : style.mediaDisplayMode === "effect" ? "effect" : "icon",
     modelIconUrl: style.modelIconUrl || "",

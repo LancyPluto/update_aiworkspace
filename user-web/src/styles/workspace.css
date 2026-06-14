@@ -1115,10 +1115,31 @@
 
 .workspace-composer-controls em {
   margin-left: auto;
-  color: rgba(255, 255, 255, 0.24);
+  color: rgba(255, 255, 255, 0.55);
   font-size: 12px;
-  text-decoration: line-through;
   font-style: normal;
+}
+
+.workspace-cost-estimate {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 10px;
+  min-height: 36px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.workspace-composer-controls em.workspace-cost-insufficient,
+.workspace-cost-estimate.workspace-cost-insufficient {
+  color: #ff6b6b;
+  background: rgba(255, 107, 107, 0.12);
 }
 
 .workspace-generate {
@@ -2416,7 +2437,6 @@
 .workspace-create-composer-dock.condensed .workspace-image-format-chip-group,
 .workspace-create-composer-dock.condensed .workspace-style-chip,
 .workspace-create-composer-dock.condensed .workspace-icon-chip,
-.workspace-create-composer-dock.condensed .workspace-composer-controls em,
 .workspace-create-composer-dock.condensed .workspace-upload-status {
   display: none;
 }

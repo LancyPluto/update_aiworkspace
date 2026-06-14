@@ -44,7 +44,17 @@ export function taskFailureHint(status: TaskStatus, progressMessages: Array<stri
   return message || DEFAULT_FAILURE_HINTS[status] || "任务未成功完成。"
 }
 
+const STALE_QUEUED_PROGRESS_MESSAGE = /任务已排队|正在排队|排队生成|任务已创建/
+
+function isActiveRunningStatus(status: TaskStatus): boolean {
+  return status === "PROCESSING" || status === "RETRYING" || status === "AWAITING_USER"
+}
+
 export function taskProgressMessage(status: TaskStatus, progressMessage?: string | null): string {
   if (status === "CANCELLED") return TASK_STATUS_DOC_LABELS.CANCELLED
-  return progressMessage?.trim() || "处理中"
+  const message = progressMessage?.trim()
+  if (message && !(isActiveRunningStatus(status) && STALE_QUEUED_PROGRESS_MESSAGE.test(message))) {
+    return message
+  }
+  return TASK_STATUS_DOC_LABELS[status] ?? "处理中"
 }

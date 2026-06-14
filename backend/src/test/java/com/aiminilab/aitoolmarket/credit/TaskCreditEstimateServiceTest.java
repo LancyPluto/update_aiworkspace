@@ -2,29 +2,49 @@ package com.aiminilab.aitoolmarket.credit;
 
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
 import com.aiminilab.aitoolmarket.agent.service.ModelCapabilityService;
+import com.aiminilab.aitoolmarket.credit.mapper.PricingMarginMapper;
+import com.aiminilab.aitoolmarket.credit.mapper.PricingRuleMapper;
+import com.aiminilab.aitoolmarket.credit.service.PricingService;
 import com.aiminilab.aitoolmarket.credit.service.TaskCreditEstimateService;
+import com.aiminilab.aitoolmarket.credit.service.impl.PricingServiceImpl;
 import com.aiminilab.aitoolmarket.tool.entity.AiTool;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
 
 import java.math.BigDecimal;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.when;
 
+/**
+ * Regression around the legacy estimate API. With no margin/rule rows configured the unified
+ * pricing engine must reproduce the historical numbers (markup 1.20, no floor, no rules).
+ */
 @ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.LENIENT)
 class TaskCreditEstimateServiceTest {
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     @Mock
     private ModelCapabilityService modelCapabilityService;
+    @Mock
+    private PricingMarginMapper pricingMarginMapper;
+    @Mock
+    private PricingRuleMapper pricingRuleMapper;
 
-    @InjectMocks
     private TaskCreditEstimateService taskCreditEstimateService;
+
+    @BeforeEach
+    void setUp() {
+        PricingService pricingService = new PricingServiceImpl(pricingMarginMapper, pricingRuleMapper);
+        taskCreditEstimateService = new TaskCreditEstimateService(modelCapabilityService, pricingService);
+    }
 
     @Test
     void perCallBilling_usesUnitPrice() {

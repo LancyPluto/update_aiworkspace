@@ -12,6 +12,7 @@ import {
   ListTodo,
   ReceiptText,
   Settings,
+  SlidersHorizontal,
   Users,
   Wrench,
   type LucideIcon,
@@ -55,6 +56,7 @@ const navigation: (NavLink | NavGroup)[] = [
   { type: "link", name: "任务管理", href: "/tasks", icon: ListTodo },
   { type: "link", name: "社区作品", href: "/community-posts", icon: Images },
   { type: "link", name: "计费日志", href: "/billing", icon: ReceiptText },
+  { type: "link", name: "定价配置", href: "/pricing", icon: SlidersHorizontal },
   { type: "link", name: "会员算力", href: "/credits", icon: Coins },
   { type: "link", name: "系统配置", href: "/settings", icon: Settings },
 ]

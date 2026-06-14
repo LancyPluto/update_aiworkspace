@@ -32,7 +32,11 @@ public class BillingUsageLog {
     private Integer billableUnits;
     private BigDecimal unitPrice;
     private BigDecimal costAmount;
+    private BigDecimal vendorCostAmount;
     private Integer chargedCredits;
+    private Integer customerChargeCredits;
+    private Integer marginCredits;
+    private BigDecimal markupRatio;
     private LocalDateTime createdAt;
 
     public Long getId() { return id; }
@@ -71,8 +75,16 @@ public class BillingUsageLog {
     public void setUnitPrice(BigDecimal unitPrice) { this.unitPrice = unitPrice; }
     public BigDecimal getCostAmount() { return costAmount; }
     public void setCostAmount(BigDecimal costAmount) { this.costAmount = costAmount; }
+    public BigDecimal getVendorCostAmount() { return vendorCostAmount; }
+    public void setVendorCostAmount(BigDecimal vendorCostAmount) { this.vendorCostAmount = vendorCostAmount; }
     public Integer getChargedCredits() { return chargedCredits; }
     public void setChargedCredits(Integer chargedCredits) { this.chargedCredits = chargedCredits; }
+    public Integer getCustomerChargeCredits() { return customerChargeCredits; }
+    public void setCustomerChargeCredits(Integer customerChargeCredits) { this.customerChargeCredits = customerChargeCredits; }
+    public Integer getMarginCredits() { return marginCredits; }
+    public void setMarginCredits(Integer marginCredits) { this.marginCredits = marginCredits; }
+    public BigDecimal getMarkupRatio() { return markupRatio; }
+    public void setMarkupRatio(BigDecimal markupRatio) { this.markupRatio = markupRatio; }
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
 }

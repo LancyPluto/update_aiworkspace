@@ -323,8 +323,8 @@ FROM (
   WHERE t.tool_code = 'happyhorse_video_edit' AND s.schema_version = 'v1'
   UNION ALL
   SELECT s.id, 'audioSetting', '音频设置', 'select', '选择音频处理方式',
-         JSON_ARRAY(JSON_OBJECT('label','保留原音频','value','keep'), JSON_OBJECT('label','静音','value','mute'), JSON_OBJECT('label','自动生成','value','auto')),
-         NULL, 0, 0, 0, 'keep', 5
+         JSON_ARRAY(JSON_OBJECT('label','模型自动控制','value','auto'), JSON_OBJECT('label','保留原音频','value','origin')),
+         NULL, 0, 0, 0, 'auto', 5
   FROM tool_field_schemas s JOIN ai_tools t ON t.id = s.tool_id
   WHERE t.tool_code = 'happyhorse_video_edit' AND s.schema_version = 'v1'
   UNION ALL

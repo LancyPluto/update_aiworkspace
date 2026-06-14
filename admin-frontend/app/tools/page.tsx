@@ -95,6 +95,14 @@ import { fetchAgentModelConfigs } from "@/lib/api/agent-model"
 import { fetchModelProviders } from "@/lib/api/model-providers"
 import { ApiError, getBaseUrl } from "@/lib/api/http"
 import { downloadConfigBundle, exportConfigBundle, importConfigBundle, readConfigBundleFile } from "@/lib/api/config-bundles"
+import { deletePricingRule, fetchPricingRules, savePricingRule } from "@/lib/api/pricing"
+import {
+  GPT_IMAGE2_PRICING_RULES_EXAMPLE,
+  HAPPYHORSE_PRICING_RULES_EXAMPLE,
+  parsePricingRulesJson,
+  pricingRuleJsonToPayload,
+  pricingRulesForModelExport,
+} from "@/lib/pricing-rules-json"
 import { isWorkflowTool } from "@/lib/workflow-tools"
 import type { AgentModelConfig, ConfigBundleImportResult, ModelProviderDescriptor, ToolCategory, ToolField, ToolFieldPayload, ToolSummary } from "@/lib/api/types"
 
@@ -113,8 +121,6 @@ interface ToolRow {
   outputModality: string
   configNote: string | null
   coverUrl: string | null
-  primaryColor: string
-  welcomeMessage: string
   mediaDisplayMode: "icon" | "effect" | "comparison"
   modelIconUrl: string
   comparisonOriginalUrl: string
@@ -139,13 +145,12 @@ interface ToolForm {
   outputModality: string
   configNote: string
   coverUrl: string
-  primaryColor: string
-  welcomeMessage: string
   mediaDisplayMode: "icon" | "effect" | "comparison"
   modelIconUrl: string
   comparisonOriginalUrl: string
   comparisonEffectUrl: string
   estimatedCreditCost: string
+  pricingRulesJson: string
   modelConfigId: string
   templateCode: string
 }
@@ -160,13 +165,12 @@ const initialForm: ToolForm = {
   outputModality: "TEXT",
   configNote: "",
   coverUrl: "",
-  primaryColor: "#3b82f6",
-  welcomeMessage: "",
   mediaDisplayMode: "icon",
   modelIconUrl: "",
   comparisonOriginalUrl: "",
   comparisonEffectUrl: "",
   estimatedCreditCost: "5",
+  pricingRulesJson: "[]",
   modelConfigId: "",
   templateCode: "text_generation_default",
 }
@@ -447,8 +451,6 @@ function mapTool(tool: ToolSummary): ToolRow {
     outputModality: tool.outputModality || "TEXT",
     configNote: note || null,
     coverUrl: tool.coverUrl || null,
-    primaryColor: style.primaryColor,
-    welcomeMessage: style.welcomeMessage,
     mediaDisplayMode: style.mediaDisplayMode,
     modelIconUrl: style.modelIconUrl,
     comparisonOriginalUrl: style.comparisonOriginalUrl,
@@ -775,6 +777,34 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
     setForm((prev) => ({ ...prev, [key]: value }))
   }
 
+  async function loadPricingRulesJson(modelConfigId: string) {
+    if (!modelConfigId) {
+      updateForm("pricingRulesJson", "[]")
+      return
+    }
+    try {
+      const all = await fetchPricingRules()
+      const items = pricingRulesForModelExport(all, Number(modelConfigId))
+      updateForm("pricingRulesJson", JSON.stringify(items, null, 2))
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : "加载定价规则失败"
+      toast.error(message)
+      updateForm("pricingRulesJson", "[]")
+    }
+  }
+
+  async function syncModelPricingRules(modelConfigId: number, json: string) {
+    const items = parsePricingRulesJson(json)
+    const all = await fetchPricingRules()
+    const existing = all.filter((rule) => rule.scopeType === "MODEL" && (rule.scopeRef ?? 0) === modelConfigId)
+    for (const rule of existing) {
+      if (rule.id) await deletePricingRule(rule.id)
+    }
+    for (const item of items) {
+      await savePricingRule(pricingRuleJsonToPayload(modelConfigId, item))
+    }
+  }
+
   function selectedModelName(): string {
     const selected = form.modelConfigId
       ? modelConfigs.find((config) => String(config.id) === form.modelConfigId)
@@ -846,6 +876,7 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
 
   function openEditDialog(tool: ToolRow) {
     setEditingTool(tool)
+    const modelId = tool.modelConfigId ? String(tool.modelConfigId) : ""
     setForm({
       toolCode: tool.toolCode,
       toolName: tool.name,
@@ -856,20 +887,20 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
       outputModality: tool.outputModality,
       configNote: tool.configNote || "",
       coverUrl: tool.coverUrl || "",
-      primaryColor: tool.primaryColor || "#3b82f6",
-      welcomeMessage: tool.welcomeMessage || "",
       mediaDisplayMode: tool.mediaDisplayMode || "icon",
       modelIconUrl: tool.modelIconUrl || "",
       comparisonOriginalUrl: tool.comparisonOriginalUrl || "",
       comparisonEffectUrl: tool.comparisonEffectUrl || "",
       estimatedCreditCost: String(tool.credits),
-      modelConfigId: tool.modelConfigId ? String(tool.modelConfigId) : "",
+      pricingRulesJson: "[]",
+      modelConfigId: modelId,
       templateCode: "",
     })
     setFormError(null)
     setCoverUploading(false)
     setCoverDragging(false)
     setIsAddDialogOpen(true)
+    if (modelId) void loadPricingRulesJson(modelId)
   }
 
   function reportSaveValidationError(message: string) {
@@ -897,6 +928,14 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
       reportSaveValidationError(`默认模型不支持「${capabilityLabel(requiredModelCapability)}」，请选择一个匹配的模型配置。`)
       return
     }
+    if (form.modelConfigId) {
+      try {
+        parsePricingRulesJson(form.pricingRulesJson)
+      } catch (err) {
+        reportSaveValidationError(err instanceof Error ? err.message : "定价规则 JSON 格式无效")
+        return
+      }
+    }
     if (form.mediaDisplayMode === "comparison" && (!form.comparisonOriginalUrl.trim() || !form.comparisonEffectUrl.trim())) {
       reportSaveValidationError("选择「效果对比」时，请同时配置原图和模型效果图。")
       return
@@ -905,8 +944,6 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
     const toastId = toast.loading(editingTool ? "正在保存工具..." : "正在创建工具...")
     try {
       const style = {
-        primaryColor: form.primaryColor,
-        welcomeMessage: form.welcomeMessage,
         mediaDisplayMode: form.mediaDisplayMode,
         modelIconUrl: form.modelIconUrl,
         comparisonOriginalUrl: form.comparisonOriginalUrl,
@@ -941,6 +978,9 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
         const created = await createTool(payload)
         published = await publishTool(created.id)
         setToolList((prev) => [mapTool(published), ...prev])
+      }
+      if (form.modelConfigId) {
+        await syncModelPricingRules(Number(form.modelConfigId), form.pricingRulesJson)
       }
       const successTitle = editingTool ? "工具已保存并上线" : "工具已创建并上线"
       const successDetail = `「${published.toolName}」已对用户端可见，请刷新用户端大模型页查看。`
@@ -1358,6 +1398,14 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
                         模型图标会在 C 端展示圆形图标；模型效果使用展示素材；效果对比会用原图和效果图做可拖动分界预览。
                       </p>
                     </div>
+                    <div className="space-y-2 sm:col-span-2">
+                      <Label>模型图标 URL</Label>
+                      <Input
+                        value={form.modelIconUrl}
+                        onChange={(event) => updateForm("modelIconUrl", event.target.value)}
+                        placeholder="用于模型卡片；不填则按绑定模型或展示素材自动生成"
+                      />
+                    </div>
                     {form.mediaDisplayMode === "comparison" ? (
                       <div className="space-y-3 rounded-lg border border-border bg-card p-3 sm:col-span-2">
                         <div>
@@ -1410,39 +1458,6 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
                         </div>
                       </div>
                     ) : null}
-                    <div className="space-y-2">
-                      <Label>主题色</Label>
-                      <div className="flex items-center gap-2">
-                        <Input
-                          type="color"
-                          className="h-10 w-14 cursor-pointer p-1"
-                          value={form.primaryColor || "#3b82f6"}
-                          onChange={(event) => updateForm("primaryColor", event.target.value)}
-                        />
-                        <Input
-                          value={form.primaryColor || "#3b82f6"}
-                          onChange={(event) => updateForm("primaryColor", event.target.value)}
-                          placeholder="#3b82f6"
-                        />
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>欢迎语</Label>
-                      <Textarea
-                        rows={2}
-                        value={form.welcomeMessage}
-                        onChange={(event) => updateForm("welcomeMessage", event.target.value)}
-                        placeholder="首次进入聊天页时展示"
-                      />
-                    </div>
-                    <div className="space-y-2 sm:col-span-2">
-                      <Label>模型图标 URL</Label>
-                      <Input
-                        value={form.modelIconUrl}
-                        onChange={(event) => updateForm("modelIconUrl", event.target.value)}
-                        placeholder="用于聊天页左上角和欢迎态；不填则按绑定模型自动生成默认图标"
-                      />
-                    </div>
                   </div>
                   <div className="flex items-center gap-3 rounded-lg border border-border bg-card p-3">
                     {form.mediaDisplayMode === "comparison" && form.comparisonOriginalUrl.trim() && form.comparisonEffectUrl.trim() ? (
@@ -1457,10 +1472,7 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
                         <div className="absolute inset-y-0 left-1/2 w-px bg-white/80" />
                       </div>
                     ) : form.modelIconUrl.trim() ? (
-                      <div
-                        className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full ring-1 ring-border"
-                        style={{ backgroundColor: `${form.primaryColor || "#3b82f6"}18` }}
-                      >
+                      <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full ring-1 ring-border bg-muted/40">
                         <img src={normalizeToolMediaUrl(form.modelIconUrl)} alt="model icon preview" className="h-full w-full object-cover" />
                       </div>
                     ) : form.mediaDisplayMode === "effect" && form.coverUrl.trim() ? (
@@ -1472,10 +1484,7 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
                         )}
                       </div>
                     ) : (
-                    <div
-                      className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full ring-1 ring-border"
-                      style={{ backgroundColor: `${form.primaryColor || "#3b82f6"}18` }}
-                    >
+                    <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full ring-1 ring-border bg-muted/40">
                       {form.coverUrl.trim() && !isVideoPreviewUrl(form.coverUrl) ? (
                         <img src={normalizeToolMediaUrl(form.coverUrl)} alt="前端图标预览" className="h-full w-full object-cover" />
                       ) : (
@@ -1486,7 +1495,7 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
                     <div className="min-w-0">
                       <p className="truncate text-sm font-medium">{form.toolName || "工具名称"}</p>
                       <p className="line-clamp-1 text-xs text-muted-foreground">
-                        {form.welcomeMessage || "欢迎语会展示在聊天欢迎页"}
+                        {form.description || "工具描述预览"}
                       </p>
                     </div>
                   </div>
@@ -1508,14 +1517,59 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
                     </Select>
                   </div>
                   <div className="space-y-2">
-                    <Label>消耗算力</Label>
+                    <Label>预估算力（兜底）</Label>
                     <Input
                       type="number"
                       value={form.estimatedCreditCost}
                       onChange={(event) => updateForm("estimatedCreditCost", event.target.value)}
                     />
+                    <p className="text-xs text-muted-foreground">无法按模型计价时的静态兜底；有参数规则时以前端实时预估为准。</p>
                   </div>
                 </div>
+                {form.modelConfigId ? (
+                  <div className="space-y-2 rounded-lg border border-border bg-secondary/20 p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <Label>参数定价规则 JSON</Label>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() =>
+                            updateForm("pricingRulesJson", JSON.stringify(HAPPYHORSE_PRICING_RULES_EXAMPLE, null, 2))
+                          }
+                        >
+                          填入 HappyHorse 示例
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() =>
+                            updateForm("pricingRulesJson", JSON.stringify(GPT_IMAGE2_PRICING_RULES_EXAMPLE, null, 2))
+                          }
+                        >
+                          填入 GPT Image2 示例
+                        </Button>
+                      </div>
+                    </div>
+                    <Textarea
+                      rows={8}
+                      className="font-mono text-xs"
+                      value={form.pricingRulesJson}
+                      onChange={(event) => updateForm("pricingRulesJson", event.target.value)}
+                      placeholder='[{"paramKey":"resolution","ruleType":"MULTIPLIER","matchOp":"EQ","matchValue":"1080P","factor":1.7778,"priority":50}]'
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      保存工具时自动写入 pricing_rules，无需手写 SQL。枚举参数用 matchOp=EQ；数量类参数用 matchOp=VALUE（如 count=3 即 ×3）。
+                      也可在「定价配置」页单独维护；导出配置包时写入 modelConfigs.pricingRules。
+                    </p>
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    选择具体模型配置后，可在此编辑参数倍率 JSON（resolution / duration 等）；使用「默认模型」时无法绑定规则。
+                  </p>
+                )}
                 {!editingTool ? (
                   <div className="space-y-2">
                     <Label>工具模板</Label>
@@ -1632,7 +1686,11 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
                     <div className="space-y-2">
                       <Select
                         value={modelSelectValue}
-                        onValueChange={(value) => updateForm("modelConfigId", value === "default" || value === "__select_matching_model" ? "" : value)}
+                        onValueChange={(value) => {
+                          const next = value === "default" || value === "__select_matching_model" ? "" : value
+                          updateForm("modelConfigId", next)
+                          void loadPricingRulesJson(next)
+                        }}
                       >
                         <SelectTrigger>
                           <SelectValue placeholder="选择匹配的模型配置" />
@@ -1780,9 +1838,6 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
                               </DropdownMenu>
                             </div>
                           </div>
-                          {tool.welcomeMessage ? (
-                            <p className="line-clamp-1 text-xs text-muted-foreground">欢迎语：{tool.welcomeMessage}</p>
-                          ) : null}
                           {mode === "agents" ? (
                             <Button asChild variant="outline" size="sm" className="w-full gap-2">
                               <Link href={`/tools/${tool.rawId}/workflow`}>

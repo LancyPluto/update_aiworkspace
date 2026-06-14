@@ -70,7 +70,22 @@ public record ConfigBundleDto(
             Boolean enabled,
             Boolean agentEnabled,
             Boolean isDefault,
-            List<String> capabilities
+            List<String> capabilities,
+            List<PricingRuleBundle> pricingRules
+    ) {
+    }
+
+    /** Parameter pricing rules scoped to MODEL (scope_ref = model config id on import). */
+    public record PricingRuleBundle(
+            String paramKey,
+            String ruleType,
+            String matchOp,
+            String matchValue,
+            BigDecimal factor,
+            Integer extraCredits,
+            Integer priority,
+            Boolean enabled,
+            String remark
     ) {
     }
 

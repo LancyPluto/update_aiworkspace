@@ -426,6 +426,29 @@ export interface CreateTaskResponse {
   status: TaskStatus
 }
 
+/** POST /api/v1/tasks/estimate */
+export interface EstimateTaskRequest {
+  toolCode: string
+  params: Record<string, unknown>
+  modelConfigId?: number | null
+}
+
+export interface TaskEstimateBreakdownItem {
+  label: string
+  detail?: string | null
+  credits?: number | null
+}
+
+export interface TaskEstimateResponse {
+  /** 含加价后的用户侧预估算力（variable=true 时为 0，表示按步骤实扣） */
+  estimatedCredits: number
+  /** 交互式工作流：最终成本随步骤变化 */
+  variable: boolean
+  availableCredits: number
+  sufficient: boolean
+  breakdown: TaskEstimateBreakdownItem[]
+}
+
 export interface RegenerateTaskRequest {
   params: Record<string, unknown>
   clientRequestId?: string

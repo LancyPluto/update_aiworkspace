@@ -133,6 +133,37 @@ public class CreditServiceImpl implements CreditService {
 
     @Override
     @Transactional
+    public int deductAvailable(Long userId, CreditSourceType sourceType, Long sourceId, int amount) {
+        if (amount <= 0) {
+            return 0;
+        }
+        CreditAccount before = creditMapper.getOrCreateAccount(userId);
+        int available = before.getBalance() - before.getFrozen();
+        int toDeduct = Math.min(available, amount);
+        if (toDeduct <= 0) {
+            return 0;
+        }
+        if (!creditMapper.deductAvailable(before.getId(), toDeduct)) {
+            return 0;
+        }
+        insertLog(
+                before,
+                taskId(sourceType, sourceId),
+                agentRunId(sourceType, sourceId),
+                CreditLogType.DEDUCT.name(),
+                toDeduct,
+                0,
+                before.getBalance() - toDeduct,
+                before.getFrozen(),
+                "SYSTEM",
+                null,
+                sourceLabel(sourceType) + "超预算补扣算力"
+        );
+        return toDeduct;
+    }
+
+    @Override
+    @Transactional
     public void release(Long userId, CreditSourceType sourceType, Long sourceId, int amount) {
         if (amount <= 0) {
             return;

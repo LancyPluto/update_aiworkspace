@@ -5,6 +5,7 @@ import com.aiminilab.aitoolmarket.admin.dto.BillingUsageLogResponse;
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
 import com.aiminilab.aitoolmarket.common.dto.PageResponse;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 
 public interface BillingService {
@@ -15,6 +16,19 @@ public interface BillingService {
                                                String provider, String modelName, String sourceType,
                                                Long sourceId, LocalDate startDate, LocalDate endDate);
 
+    /**
+     * Records usage with full profitability fields. {@code chargedCredits} is the final user-facing
+     * charge (incl. markup); {@code vendorCostAmount} (CNY) and {@code markupRatio} may be null when
+     * the caller cannot derive them, in which case they are computed from token/unit pricing.
+     */
     void recordUsage(String sourceType, Long sourceId, Long userId, AgentModelConfig modelConfig,
-                     Integer promptTokens, Integer completionTokens, Integer billableUnits, Integer chargedCredits);
+                     Integer promptTokens, Integer completionTokens, Integer billableUnits, Integer chargedCredits,
+                     BigDecimal vendorCostAmount, BigDecimal markupRatio);
+
+    /** Backward-compatible overload (no explicit vendor cost / markup). */
+    default void recordUsage(String sourceType, Long sourceId, Long userId, AgentModelConfig modelConfig,
+                             Integer promptTokens, Integer completionTokens, Integer billableUnits, Integer chargedCredits) {
+        recordUsage(sourceType, sourceId, userId, modelConfig, promptTokens, completionTokens, billableUnits,
+                chargedCredits, null, null);
+    }
 }

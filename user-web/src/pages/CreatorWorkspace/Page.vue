@@ -95,12 +95,7 @@ const resolvedPreview = computed(() =>
     ? resolveCreatorTask(lastComposerState.value || emptyComposerState.value, selectedToolDetail.value, advancedParams.value)
     : null,
 )
-const costLabel = computed(() => {
-  const summary = selectedSummary.value
-  if (summary?.variableCreditPricing) return "生成（算力不详）"
-  const cost = summary?.estimatedCreditCost
-  return cost ? `生成 ${cost}` : "生成"
-})
+const costLabel = computed(() => "创作")
 const timelineItems = computed(() => buildCreateTimelineItems(tasks.value, tools.value))
 const hasActiveTimelineTasks = computed(() => tasks.value.some((task) => ACTIVE_TASK_STATUSES.has(task.status)))
 const previewRecommendations = computed<AssetPreviewRecommendation[]>(() =>
@@ -347,7 +342,7 @@ function applyTaskStatusUpdate(payload: TaskStatusPayload) {
       ...existing,
       status: payload.status,
       progress: monotonicTaskProgress(existing, payload.progress),
-      progressMessage: payload.progressMessage ?? existing.progressMessage,
+      progressMessage: taskProgressMessage(payload.status, payload.progressMessage ?? existing.progressMessage),
     },
     ...tasks.value.slice(index + 1),
   ]

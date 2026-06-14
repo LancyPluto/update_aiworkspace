@@ -2,14 +2,18 @@ package com.aiminilab.aitoolmarket.task.service;
 
 import com.aiminilab.aitoolmarket.common.dto.PageResponse;
 import com.aiminilab.aitoolmarket.task.dto.CreateTaskRequest;
+import com.aiminilab.aitoolmarket.task.dto.EstimateTaskRequest;
 import com.aiminilab.aitoolmarket.task.dto.RegenerateTaskRequest;
 import com.aiminilab.aitoolmarket.task.dto.TaskDetailResponse;
+import com.aiminilab.aitoolmarket.task.dto.TaskEstimateResponse;
 import com.aiminilab.aitoolmarket.task.dto.TaskStatusResponse;
 
 public interface TaskService {
     TaskStatusResponse create(Long userId, CreateTaskRequest request);
 
     TaskStatusResponse createForAgentTool(Long userId, CreateTaskRequest request);
+
+    TaskEstimateResponse estimate(Long userId, EstimateTaskRequest request);
 
     TaskStatusResponse status(Long userId, Long taskId);
 

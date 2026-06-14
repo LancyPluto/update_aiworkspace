@@ -4,8 +4,10 @@ import com.aiminilab.aitoolmarket.auth.security.AuthContext;
 import com.aiminilab.aitoolmarket.common.dto.ApiResponse;
 import com.aiminilab.aitoolmarket.common.dto.PageResponse;
 import com.aiminilab.aitoolmarket.task.dto.CreateTaskRequest;
+import com.aiminilab.aitoolmarket.task.dto.EstimateTaskRequest;
 import com.aiminilab.aitoolmarket.task.dto.RegenerateTaskRequest;
 import com.aiminilab.aitoolmarket.task.dto.TaskDetailResponse;
+import com.aiminilab.aitoolmarket.task.dto.TaskEstimateResponse;
 import com.aiminilab.aitoolmarket.task.dto.TaskStatusResponse;
 import com.aiminilab.aitoolmarket.task.service.TaskService;
 import jakarta.validation.Valid;
@@ -42,6 +44,11 @@ public class TaskController {
     @PostMapping
     public ApiResponse<TaskStatusResponse> create(@Valid @RequestBody CreateTaskRequest request) {
         return ApiResponse.success(taskService.create(AuthContext.get().userId(), request));
+    }
+
+    @PostMapping("/estimate")
+    public ApiResponse<TaskEstimateResponse> estimate(@Valid @RequestBody EstimateTaskRequest request) {
+        return ApiResponse.success(taskService.estimate(AuthContext.get().userId(), request));
     }
 
     @GetMapping("/{taskId}/status")

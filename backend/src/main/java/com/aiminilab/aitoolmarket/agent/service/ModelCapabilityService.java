@@ -109,8 +109,8 @@ public class ModelCapabilityService {
         if (requestedModelConfigId == null) {
             return resolveModelConfigForTool(tool);
         }
-        AgentModelConfig selected = agentModelConfigMapper.findAgentEnabledById(requestedModelConfigId);
-        if (selected == null) {
+        AgentModelConfig selected = agentModelConfigMapper.findActiveById(requestedModelConfigId);
+        if (selected == null || Boolean.FALSE.equals(selected.getEnabled())) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "model config not found or not selectable");
         }
         validateExecution(tool, selected);

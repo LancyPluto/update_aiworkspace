@@ -14,6 +14,13 @@ public interface CreditService {
 
     int settleCompleted(Long userId, CreditSourceType sourceType, Long sourceId, int amount);
 
+    /**
+     * Best-effort deduction directly from available balance (not frozen). Used to collect an
+     * over-budget shortfall at settlement. Returns the amount actually deducted (may be partial,
+     * down to 0 when the user has no available balance), never throwing on insufficiency.
+     */
+    int deductAvailable(Long userId, CreditSourceType sourceType, Long sourceId, int amount);
+
     void release(Long userId, CreditSourceType sourceType, Long sourceId, int amount);
 
     default void freezeForTask(Long userId, Long taskId, int amount) {

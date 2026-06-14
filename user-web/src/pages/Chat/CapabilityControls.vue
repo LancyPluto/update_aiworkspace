@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue"
+import { computed, onMounted, onUnmounted, ref, watch } from "vue"
 import type { Capability } from "@/api/aiToolTypes"
 import type { TaskDetail, ToolField, UserUploadAsset } from "@/api/types"
 import { deleteUploadAsset, fetchUploadAssets, uploadToolFile } from "@/api/toolApi"
@@ -14,7 +14,7 @@ import {
   parseFieldMeta,
   resolveMaxLength,
 } from "@/utils/fieldUiMeta"
-import { Check, Clock, FileAudio, FileVideo, ImageIcon, ImageUp, Loader2, Mic, Plus, UploadCloud, X } from "lucide-vue-next"
+import { Check, ChevronDown, Clock, FileAudio, FileVideo, ImageIcon, ImageUp, Loader2, Mic, Plus, UploadCloud, X } from "lucide-vue-next"
 import { BookOpen } from 'lucide-vue-next'
 
 export interface PendingAttachment {
@@ -82,6 +82,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   "primary-reference-change": [info: PrimaryReferenceMaterialInfo]
+  "params-change": [params: Record<string, unknown>]
 }>()
 
 const state = ref<CapabilityState>({
@@ -106,6 +107,7 @@ const advancedOpen = ref(false)
 
 const UPLOAD_HISTORY_LIMIT = 60
 const MULTI_IMAGE_LIMIT = 8
+const SEGMENTED_OPTION_LIMIT = 8
 
 function isAspectRatioField(field: ToolField): boolean {
   return field.fieldType === "aspect_ratio" || field.fieldKey === "aspectRatio" || field.fieldKey === "aspect_ratio" || field.fieldKey === "imageRatio"
@@ -252,18 +254,48 @@ function fieldOptions(field: ToolField): FieldOption[] {
   return fieldOptionsFromMeta(field)
 }
 
-function segmentedFieldLabel(field: ToolField): string {
-  return `${field.fieldKey} ${field.fieldName} ${field.placeholder || ""}`.toLowerCase()
-}
-
 function isSegmentedOptionField(field: ToolField): boolean {
   if (!(field.fieldType === "select" || field.fieldType === "radio")) return false
-  const options = fieldOptions(field)
-  if (!options.length || options.length > 8) return false
-  const text = segmentedFieldLabel(field)
-  if (/count|num|quantity|生成数量|张数|数量|quality|清晰度|质量|品质/.test(text)) return true
-  return field.fieldType === "radio"
+  const count = fieldOptions(field).length
+  return count > 0 && count <= SEGMENTED_OPTION_LIMIT
 }
+
+function isSelectOptionField(field: ToolField): boolean {
+  return (field.fieldType === "select" || field.fieldType === "radio") && fieldOptions(field).length > SEGMENTED_OPTION_LIMIT
+}
+
+const openSelectKey = ref<string | null>(null)
+
+function toggleSelectDropdown(key: string) {
+  openSelectKey.value = openSelectKey.value === key ? null : key
+}
+
+function selectDropdownOption(key: string, value: string) {
+  setField(key, value)
+  openSelectKey.value = null
+}
+
+function selectedOptionLabel(field: ToolField): string {
+  const current = strField(field.fieldKey)
+  const match = fieldOptions(field).find((option) => optionValue(option) === current)
+  if (match) return optionLabel(match)
+  return field.placeholder || "请选择"
+}
+
+function closeSelectDropdownOnOutsideClick(event: MouseEvent) {
+  const target = event.target
+  if (!(target instanceof Element)) return
+  if (target.closest("[data-capability-select]")) return
+  openSelectKey.value = null
+}
+
+onMounted(() => {
+  document.addEventListener("click", closeSelectDropdownOnOutsideClick)
+})
+
+onUnmounted(() => {
+  document.removeEventListener("click", closeSelectDropdownOnOutsideClick)
+})
 
 function defaultFieldValue(field: ToolField): unknown {
   return resolveDefaultFieldValue(field)
@@ -489,6 +521,12 @@ const primaryReferenceInfo = computed<PrimaryReferenceMaterialInfo>(() => {
 })
 
 watch(primaryReferenceInfo, (info) => emit("primary-reference-change", info), { immediate: true, deep: true })
+
+watch(
+  () => [state.value, props.fields, props.coreFieldKey],
+  () => emit("params-change", getRequestParams()),
+  { deep: true, immediate: true },
+)
 
 function fieldShellClass(field: ToolField): string {
   if (isMultiImageField(field)) return "sm:col-span-2 lg:col-span-1"
@@ -1103,16 +1141,42 @@ defineExpose({
           </button>
         </div>
 
-        <select
-          v-else-if="(field.fieldType === 'select' || field.fieldType === 'radio') && fieldOptions(field).length"
-          :value="strField(field.fieldKey)"
-          class="h-9 w-full rounded-xl border border-white/10 bg-white/[0.05] px-3 text-xs text-white/78 outline-none transition hover:border-white/18 focus:border-purple-400/40"
-          @change="setField(field.fieldKey, ($event.target as HTMLSelectElement).value)"
+        <div
+          v-else-if="isSelectOptionField(field)"
+          data-capability-select
+          class="relative"
         >
-          <option v-for="option in fieldOptions(field)" :key="optionValue(option)" :value="optionValue(option)">
-            {{ optionLabel(option) }}
-          </option>
-        </select>
+          <button
+            type="button"
+            class="flex h-9 w-full items-center justify-between gap-2 rounded-xl border border-white/10 bg-white/[0.05] px-3 text-xs text-white/78 outline-none transition hover:border-white/18 focus:border-purple-400/40"
+            @click.stop="toggleSelectDropdown(field.fieldKey)"
+          >
+            <span class="truncate">{{ selectedOptionLabel(field) }}</span>
+            <ChevronDown
+              class="h-3.5 w-3.5 shrink-0 text-white/40 transition"
+              :class="openSelectKey === field.fieldKey ? 'rotate-180' : ''"
+            />
+          </button>
+          <div
+            v-if="openSelectKey === field.fieldKey"
+            class="absolute left-0 right-0 top-[calc(100%+6px)] z-30 overflow-hidden rounded-xl border border-white/10 bg-[#111217]/98 p-1 shadow-[0_16px_40px_rgb(0_0_0_/_0.45)] backdrop-blur"
+          >
+            <button
+              v-for="option in fieldOptions(field)"
+              :key="optionValue(option)"
+              type="button"
+              class="flex w-full items-center rounded-lg px-3 py-2 text-left text-xs transition"
+              :class="
+                strField(field.fieldKey) === optionValue(option)
+                  ? 'bg-purple-500/20 text-purple-200'
+                  : 'text-white/72 hover:bg-white/[0.06] hover:text-white'
+              "
+              @click="selectDropdownOption(field.fieldKey, optionValue(option))"
+            >
+              {{ optionLabel(option) }}
+            </button>
+          </div>
+        </div>
 
         <div v-else-if="field.fieldType === 'slider'" class="space-y-1">
           <input

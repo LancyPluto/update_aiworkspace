@@ -15,8 +15,10 @@ import com.aiminilab.aitoolmarket.common.enums.CreditSourceType;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.enums.TaskStatus;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
+import com.aiminilab.aitoolmarket.credit.dto.PricingQuote;
+import com.aiminilab.aitoolmarket.credit.dto.PricingUsage;
 import com.aiminilab.aitoolmarket.credit.service.CreditService;
-import com.aiminilab.aitoolmarket.credit.service.TaskCreditEstimateService;
+import com.aiminilab.aitoolmarket.credit.service.PricingService;
 import com.aiminilab.aitoolmarket.task.dto.ExecutionContextResponse;
 import com.aiminilab.aitoolmarket.task.dto.ExecutionModelConfigResponse;
 import com.aiminilab.aitoolmarket.task.dto.TaskStatusResponse;
@@ -39,8 +41,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.util.List;
 
 @Service
@@ -57,7 +57,7 @@ public class InternalTaskServiceImpl implements InternalTaskService {
     private final ToolFieldItemMapper toolFieldItemMapper;
     private final ObjectMapper objectMapper;
     private final CreditService creditService;
-    private final TaskCreditEstimateService taskCreditEstimateService;
+    private final PricingService pricingService;
     private final BillingService billingService;
     private final TaskMetrics taskMetrics;
     private final CommunityService communityService;
@@ -70,7 +70,8 @@ public class InternalTaskServiceImpl implements InternalTaskService {
                                    ModelCapabilityService modelCapabilityService,
                                    ModelExecutionSnapshotService modelExecutionSnapshotService,
                                    ToolFieldItemMapper toolFieldItemMapper, ObjectMapper objectMapper,
-                                   CreditService creditService, TaskCreditEstimateService taskCreditEstimateService, BillingService billingService,
+                                   CreditService creditService, PricingService pricingService,
+                                   BillingService billingService,
                                    TaskMetrics taskMetrics, CommunityService communityService,
                                    WorkflowExecutionService workflowExecutionService) {
         this.taskMapper = taskMapper;
@@ -83,7 +84,7 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         this.toolFieldItemMapper = toolFieldItemMapper;
         this.objectMapper = objectMapper;
         this.creditService = creditService;
-        this.taskCreditEstimateService = taskCreditEstimateService;
+        this.pricingService = pricingService;
         this.billingService = billingService;
         this.taskMetrics = taskMetrics;
         this.communityService = communityService;
@@ -162,21 +163,21 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         AgentModelConfig modelConfig = snapshot != null
                 ? snapshot.toModelConfig()
                 : resolveTaskModelConfig(task, billingTool);
-        int actualCredits = calculateActualTaskCredits(request, modelConfig, task.getEstimatedCreditCost());
-        int chargedCredits = creditService.settleCompleted(task.getUserId(), CreditSourceType.TASK, taskId, actualCredits);
-        int billingCredits = Math.max(chargedCredits, taskCreditEstimateService.estimateUserFacingTaskCredits(billingTool, modelConfig));
-        int estimated = task.getEstimatedCreditCost() == null ? 0 : task.getEstimatedCreditCost();
-        if (actualCredits < estimated) {
-            creditService.release(task.getUserId(), CreditSourceType.TASK, taskId, estimated - actualCredits);
-        }
+        int estimated = task.getEstimatedCreditCost() == null ? 0 : Math.max(0, task.getEstimatedCreditCost());
+        PricingUsage usage = new PricingUsage(request.promptTokens(), request.completionTokens(), request.billableUnits());
+        PricingQuote quote = pricingService.computeQuote(billingTool, modelConfig,
+                parseParams(task.getParamsJson()), usage, estimated);
+        int actualCredits = quote.chargeCredits();
+        int chargedCredits = settleTaskCredits(task.getUserId(), taskId, estimated, actualCredits);
         if (chargedCredits < actualCredits) {
             LOGGER.warn(
-                    "task success saved with incomplete credit settlement taskId={} userId={} expectedCredits={} chargedCredits={}",
-                    taskId, task.getUserId(), actualCredits, chargedCredits
+                    "task settled below intended charge (credit shortfall) taskId={} userId={} intendedCredits={} chargedCredits={} shortfall={}",
+                    taskId, task.getUserId(), actualCredits, chargedCredits, actualCredits - chargedCredits
             );
         }
         billingService.recordUsage("TASK", taskId, task.getUserId(), modelConfig,
-                request.promptTokens(), request.completionTokens(), request.billableUnits(), billingCredits);
+                request.promptTokens(), request.completionTokens(), request.billableUnits(),
+                actualCredits, quote.vendorCost(), quote.markupRatio());
         taskMapper.insertResult(taskId, task.getUserId(), request.resourceType(), request.contentText());
         try {
             communityService.autoPublishTask(findTask(taskId), request.resourceType(), request.contentText());
@@ -193,38 +194,26 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         return TaskStatusResponse.from(findTask(taskId));
     }
 
-    private int calculateActualTaskCredits(WorkerSuccessRequest request, AgentModelConfig modelConfig, Integer fallbackCreditsObj) {
-        int fallbackCredits = fallbackCreditsObj == null ? 0 : Math.max(0, fallbackCreditsObj);
-        if (modelConfig == null) {
-            return fallbackCredits;
-        }
-        BigDecimal costAmount = BigDecimal.ZERO;
-        String billingUnit = modelConfig.getBillingUnit();
-        if (("PER_CALL".equals(billingUnit) || "PER_SECOND".equals(billingUnit)) && modelConfig.getUnitPrice() != null) {
-            int units = request.billableUnits() != null && request.billableUnits() > 0 ? request.billableUnits() : 1;
-            costAmount = modelConfig.getUnitPrice().multiply(BigDecimal.valueOf(units));
-        } else {
-            int prompt = request.promptTokens() != null ? Math.max(0, request.promptTokens()) : 0;
-            int completion = request.completionTokens() != null ? Math.max(0, request.completionTokens()) : 0;
-            if (prompt == 0 && completion == 0) {
-                return fallbackCredits;
+    /**
+     * Settle a finished task against the credits frozen at creation time, charging the actual amount
+     * computed by the pricing engine. Multi-charge / release / over-budget collection are all handled
+     * so the account never leaks frozen credits and over-budget runs are collected best-effort.
+     *
+     * @return credits actually charged (may be below {@code actual} only when the user lacks balance)
+     */
+    private int settleTaskCredits(Long userId, Long taskId, int estimated, int actual) {
+        if (actual <= estimated) {
+            int charged = creditService.settleCompleted(userId, CreditSourceType.TASK, taskId, actual);
+            if (estimated - actual > 0) {
+                creditService.release(userId, CreditSourceType.TASK, taskId, estimated - actual);
             }
-            BigDecimal inputPrice = modelConfig.getInputTokenPricePer1m() != null
-                    ? modelConfig.getInputTokenPricePer1m() : BigDecimal.ZERO;
-            BigDecimal outputPrice = modelConfig.getOutputTokenPricePer1m() != null
-                    ? modelConfig.getOutputTokenPricePer1m() : BigDecimal.ZERO;
-            costAmount = inputPrice.multiply(BigDecimal.valueOf(prompt))
-                    .add(outputPrice.multiply(BigDecimal.valueOf(completion)))
-                    .divide(BigDecimal.valueOf(1_000_000), 6, RoundingMode.HALF_UP);
+            return charged;
         }
-        if (costAmount.compareTo(BigDecimal.ZERO) <= 0) {
-            return fallbackCredits;
-        }
-        int baseCredits = costAmount.divide(new BigDecimal("0.01"), 0, RoundingMode.CEILING).intValue();
-        return BigDecimal.valueOf(baseCredits)
-                .multiply(new BigDecimal("1.2"))
-                .setScale(0, RoundingMode.CEILING)
-                .intValue();
+        // Actual exceeds the frozen estimate: settle the frozen portion, then collect the remainder.
+        int settledFrozen = creditService.settleCompleted(userId, CreditSourceType.TASK, taskId, estimated);
+        int extra = actual - settledFrozen;
+        int extraCharged = creditService.deductAvailable(userId, CreditSourceType.TASK, taskId, extra);
+        return settledFrozen + extraCharged;
     }
 
     private AgentModelConfig resolveTaskModelConfig(AiTask task, AiTool tool) {
