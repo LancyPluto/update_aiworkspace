@@ -23,6 +23,8 @@ import {
 import { uploadChatFile } from "@/api/aiToolApi"
 import { fetchModelOptions } from "@/api/modelOptionsApi"
 import type { ToolDetail, ToolSummary } from "@/api/types"
+import { useTaskEstimate, type UseTaskEstimateInput } from "@/composables/useTaskEstimate"
+import { formatLiveCreditEstimate } from "@/utils/toolCreditLabel"
 import {
   buildComposerFormatOptions,
   buildComposerModelGroupsFromResponse,
@@ -759,6 +761,43 @@ onBeforeUnmount(() => {
   modeTabResizeObserver?.disconnect()
   modeTabResizeObserver = null
 })
+
+// 实时算力预估：参数变化时防抖调用后端权威预估接口，与提交时冻结口径一致。
+const estimateInput = computed<UseTaskEstimateInput | null>(() => {
+  if (mode.value === "agent") return null
+  const toolCode = selectedToolCode.value
+  if (!toolCode) return null
+  const params: Record<string, unknown> = {}
+  if (prompt.value) params.prompt = prompt.value
+  const aspectRatio = mode.value === "image" ? imageRatio.value : ratio.value
+  if (aspectRatio) params.aspectRatio = aspectRatio
+  if (mode.value !== "image" && duration.value != null) params.duration = duration.value
+  const selectedQuality = mode.value === "image"
+    ? (imageQualityOptions.value.length ? quality.value : undefined)
+    : quality.value
+  if (selectedQuality) params.quality = selectedQuality
+  if (mode.value === "image" && imageCount.value != null) params.count = imageCount.value
+  return {
+    toolCode,
+    params,
+    modelConfigId: effectiveSelectedModelOption.value?.modelConfigId ?? null,
+  }
+})
+
+const { estimate: liveEstimate, loading: estimateLoading } = useTaskEstimate(estimateInput)
+
+const liveCreditView = computed(() =>
+  formatLiveCreditEstimate(liveEstimate.value, {
+    loading: estimateLoading.value,
+  }),
+)
+
+const costEstimateLabel = computed(() => {
+  if (!estimateInput.value) return ""
+  return liveCreditView.value.label
+})
+
+const costInsufficient = computed(() => liveCreditView.value.insufficient)
 </script>
 
 <template>
@@ -880,7 +919,7 @@ onBeforeUnmount(() => {
           </div>
           <button class="workspace-chip" type="button">风格</button>
           <button class="workspace-icon-chip" type="button" aria-label="高级设置"><Settings2 :size="16" /></button>
-          <em>50 额度</em>
+          <em v-if="costEstimateLabel" class="workspace-cost-estimate" :class="{ 'workspace-cost-insufficient': costInsufficient }" :title="liveCreditView.hint">{{ costEstimateLabel }}</em>
           <button class="workspace-generate" :disabled="!canGenerate" @click="submit">
             <Sparkles :size="16" />{{ submitting ? "提交中" : costLabel }}
           </button>
@@ -1046,7 +1085,7 @@ onBeforeUnmount(() => {
           </div>
           <button v-if="mode === 'image'" class="workspace-chip workspace-style-chip" type="button"><span />自动</button>
           <button class="workspace-icon-chip" type="button" aria-label="高级设置"><Settings2 :size="16" /></button>
-          <em>50 额度</em>
+          <em v-if="costEstimateLabel" class="workspace-cost-estimate" :class="{ 'workspace-cost-insufficient': costInsufficient }" :title="liveCreditView.hint">{{ costEstimateLabel }}</em>
           <button class="workspace-generate" :disabled="!canGenerate" @click="submit">
             <Sparkles :size="16" />{{ submitting ? "提交中" : costLabel }}
           </button>

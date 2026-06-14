@@ -72,7 +72,7 @@
   "agent.runtime.tool_stream_relay_enabled": "true",
   "agent.runtime.video_tool_execution_timeout_seconds": "3600",
   "happyHorseSource": "HappyHorse DashScope API",
-  "happyHorseNote": "导入后在统一 API 设置的阿里云百炼（qwen）厂商账户中填入 DashScope API Key；HappyHorse 模型为 PER_SECOND 按秒计费，unitPrice 可按实际成本调整。"
+  "happyHorseNote": "导入后在统一 API 设置的阿里云百炼（qwen）厂商账户中填入 DashScope API Key。HappyHorse 按秒计费：720P 0.9元/秒、1080P 1.6元/秒（中国内地）；执行 sql/062_seed_happyhorse_pricing.sql 写入单价与定价规则。"
  },
  "vendorAccounts": [
   {
@@ -615,6 +615,40 @@
    "isDefault": false,
    "capabilities": [
     "IMAGE_GENERATION"
+   ],
+   "pricingRules": [
+    {
+     "paramKey": "count",
+     "ruleType": "MULTIPLIER",
+     "matchOp": "VALUE",
+     "factor": 1,
+     "extraCredits": 0,
+     "priority": 40,
+     "enabled": true,
+     "remark": "按生成数量 count 倍率（参数值即倍数）"
+    },
+    {
+     "paramKey": "quality",
+     "ruleType": "MULTIPLIER",
+     "matchOp": "EQ",
+     "matchValue": "medium",
+     "factor": 8.8333,
+     "extraCredits": 0,
+     "priority": 50,
+     "enabled": true,
+     "remark": "GPT Image 2 medium $0.053 vs low $0.006 (1024x1024)"
+    },
+    {
+     "paramKey": "quality",
+     "ruleType": "MULTIPLIER",
+     "matchOp": "EQ",
+     "matchValue": "high",
+     "factor": 35.1667,
+     "extraCredits": 0,
+     "priority": 51,
+     "enabled": true,
+     "remark": "GPT Image 2 high $0.211 vs low $0.006 (1024x1024)"
+    }
    ]
   },
   {
@@ -2012,7 +2046,7 @@
    "inputTokenPricePer1m": 0,
    "outputTokenPricePer1m": 0,
    "billingUnit": "PER_SECOND",
-   "unitPrice": 0,
+   "unitPrice": 0.9,
    "enabled": true,
    "agentEnabled": false,
    "isDefault": false,
@@ -2045,7 +2079,7 @@
    "inputTokenPricePer1m": 0,
    "outputTokenPricePer1m": 0,
    "billingUnit": "PER_SECOND",
-   "unitPrice": 0,
+   "unitPrice": 0.9,
    "enabled": true,
    "agentEnabled": false,
    "isDefault": false,
@@ -2078,7 +2112,7 @@
    "inputTokenPricePer1m": 0,
    "outputTokenPricePer1m": 0,
    "billingUnit": "PER_SECOND",
-   "unitPrice": 0,
+   "unitPrice": 0.9,
    "enabled": true,
    "agentEnabled": false,
    "isDefault": false,
@@ -2111,7 +2145,7 @@
    "inputTokenPricePer1m": 0,
    "outputTokenPricePer1m": 0,
    "billingUnit": "PER_SECOND",
-   "unitPrice": 0,
+   "unitPrice": 0.9,
    "enabled": true,
    "agentEnabled": false,
    "isDefault": false,
@@ -9230,23 +9264,19 @@
      "placeholder": "选择音频处理方式",
      "options": [
       {
-       "label": "保留原音频",
-       "value": "keep"
-      },
-      {
-       "label": "静音",
-       "value": "mute"
-      },
-      {
-       "label": "自动生成",
+       "label": "模型自动控制",
        "value": "auto"
+      },
+      {
+       "label": "保留原音频",
+       "value": "origin"
       }
      ],
-     "optionsJson": "[{\"label\":\"保留原音频\",\"value\":\"keep\"},{\"label\":\"静音\",\"value\":\"mute\"},{\"label\":\"自动生成\",\"value\":\"auto\"}]",
+     "optionsJson": "[{\"label\":\"模型自动控制\",\"value\":\"auto\"},{\"label\":\"保留原音频\",\"value\":\"origin\"}]",
      "required": false,
      "executionRequired": false,
      "userRequired": false,
-     "defaultValue": "keep",
+     "defaultValue": "auto",
      "agentFillStrategy": "default",
      "riskLevel": "LOW",
      "sortOrder": 5

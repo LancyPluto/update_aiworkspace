@@ -21,6 +21,8 @@ import com.aiminilab.aitoolmarket.common.cache.BypassCacheService;
 import com.aiminilab.aitoolmarket.common.dto.PageResponse;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
+import com.aiminilab.aitoolmarket.credit.entity.PricingRule;
+import com.aiminilab.aitoolmarket.credit.mapper.PricingRuleMapper;
 import com.aiminilab.aitoolmarket.tool.dto.CreatePromptRequest;
 import com.aiminilab.aitoolmarket.tool.dto.CreatePromptVersionRequest;
 import com.aiminilab.aitoolmarket.tool.dto.PromptResponse;
@@ -52,6 +54,7 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
@@ -101,6 +104,7 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
     private final ModelVendorAccountService modelVendorAccountService;
     private final BypassCacheService bypassCacheService;
     private final TransactionTemplate transactionTemplate;
+    private final PricingRuleMapper pricingRuleMapper;
 
     public ConfigBundleServiceImpl(SystemSettingService systemSettingService,
                                    AgentModelConfigService agentModelConfigService,
@@ -116,7 +120,8 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                                    ModelVendorAccountMapper vendorAccountMapper,
                                    ModelVendorAccountService modelVendorAccountService,
                                    BypassCacheService bypassCacheService,
-                                   TransactionTemplate transactionTemplate) {
+                                   TransactionTemplate transactionTemplate,
+                                   PricingRuleMapper pricingRuleMapper) {
         this.systemSettingService = systemSettingService;
         this.agentModelConfigService = agentModelConfigService;
         this.agentModelConfigMapper = agentModelConfigMapper;
@@ -132,6 +137,7 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
         this.modelVendorAccountService = modelVendorAccountService;
         this.bypassCacheService = bypassCacheService;
         this.transactionTemplate = transactionTemplate;
+        this.pricingRuleMapper = pricingRuleMapper;
     }
 
     @Override
@@ -351,8 +357,59 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                 config.enabled(),
                 config.agentEnabled(),
                 config.isDefault(),
-                config.capabilities()
+                config.capabilities(),
+                exportModelPricingRules(config.id())
         );
+    }
+
+    private List<ConfigBundleDto.PricingRuleBundle> exportModelPricingRules(Long modelConfigId) {
+        if (modelConfigId == null) {
+            return List.of();
+        }
+        return pricingRuleMapper.findByModelScope(modelConfigId).stream()
+                .map(this::exportPricingRule)
+                .toList();
+    }
+
+    private ConfigBundleDto.PricingRuleBundle exportPricingRule(PricingRule rule) {
+        return new ConfigBundleDto.PricingRuleBundle(
+                rule.getParamKey(),
+                rule.getRuleType(),
+                rule.getMatchOp(),
+                rule.getMatchValue(),
+                rule.getFactor(),
+                rule.getExtraCredits(),
+                rule.getPriority(),
+                rule.getEnabled(),
+                rule.getRemark()
+        );
+    }
+
+    private void importModelPricingRules(Long modelConfigId, List<ConfigBundleDto.PricingRuleBundle> rules) {
+        if (modelConfigId == null || rules == null) {
+            return;
+        }
+        pricingRuleMapper.deleteByModelScope(modelConfigId);
+        for (ConfigBundleDto.PricingRuleBundle item : rules) {
+            if (item == null || isBlank(item.paramKey())) {
+                continue;
+            }
+            PricingRule entity = new PricingRule();
+            entity.setScopeType("MODEL");
+            entity.setScopeRef(modelConfigId);
+            entity.setParamKey(item.paramKey().trim());
+            entity.setRuleType(isBlank(item.ruleType()) ? "MULTIPLIER" : item.ruleType().trim().toUpperCase());
+            entity.setMatchOp(isBlank(item.matchOp()) ? "EQ" : item.matchOp().trim().toUpperCase());
+            entity.setMatchValue(item.matchValue());
+            entity.setFactor(item.factor() == null || item.factor().compareTo(BigDecimal.ZERO) <= 0
+                    ? BigDecimal.ONE
+                    : item.factor());
+            entity.setExtraCredits(item.extraCredits() == null ? 0 : Math.max(0, item.extraCredits()));
+            entity.setPriority(item.priority() == null ? 100 : item.priority());
+            entity.setEnabled(item.enabled() == null ? Boolean.TRUE : item.enabled());
+            entity.setRemark(item.remark());
+            pricingRuleMapper.insert(entity);
+        }
     }
 
     private ConfigBundleDto.Category exportCategory(ToolCategoryResponse category) {
@@ -554,6 +611,14 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                 }
             } catch (Exception exception) {
                 warnings.add("Model config " + config.configCode() + " import failed: " + rootMessage(exception));
+            }
+            Long importedModelId = modelIdsByImportedCode.get(config.configCode());
+            if (importedModelId != null && config.pricingRules() != null) {
+                try {
+                    transactionTemplate.executeWithoutResult(status -> importModelPricingRules(importedModelId, config.pricingRules()));
+                } catch (Exception exception) {
+                    warnings.add("Model config " + config.configCode() + " pricing rules import failed: " + rootMessage(exception));
+                }
             }
         }
         return new ImportModelResult(count, modelIdsByImportedCode);

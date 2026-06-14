@@ -3,10 +3,12 @@ import { getSessionBearerJwt } from "./sessionBearer"
 import type {
   CreateTaskRequest,
   CreateTaskResponse,
+  EstimateTaskRequest,
   ListTasksQuery,
   PageResult,
   RegenerateTaskRequest,
   TaskDetail,
+  TaskEstimateResponse,
   TaskStatusPayload,
 } from "./types"
 
@@ -18,6 +20,18 @@ export async function createTask(
   return apiRequest<CreateTaskResponse>("POST", "/api/v1/tasks", {
     body,
     token: options?.token,
+  })
+}
+
+/** POST /api/v1/tasks/estimate —— 权威实时算力预估（与提交时冻结口径一致） */
+export async function estimateTask(
+  body: EstimateTaskRequest,
+  options?: { token?: string | null; signal?: AbortSignal },
+): Promise<TaskEstimateResponse> {
+  return apiRequest<TaskEstimateResponse>("POST", "/api/v1/tasks/estimate", {
+    body,
+    token: options?.token,
+    signal: options?.signal,
   })
 }
 

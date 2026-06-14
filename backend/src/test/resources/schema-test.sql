@@ -738,9 +738,46 @@ CREATE TABLE billing_usage_logs (
   billable_units INT NOT NULL DEFAULT 0,
   unit_price DECIMAL(18,8) NOT NULL DEFAULT 0,
   cost_amount DECIMAL(18,6) NOT NULL DEFAULT 0,
+  vendor_cost_amount DECIMAL(18,6) NOT NULL DEFAULT 0,
   charged_credits INT NOT NULL DEFAULT 0,
+  customer_charge_credits INT NOT NULL DEFAULT 0,
+  margin_credits INT NOT NULL DEFAULT 0,
+  markup_ratio DECIMAL(10,4) NOT NULL DEFAULT 0,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE pricing_margins (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  scope_type VARCHAR(16) NOT NULL DEFAULT 'GLOBAL',
+  scope_ref BIGINT NOT NULL DEFAULT 0,
+  markup_ratio DECIMAL(10,4) NOT NULL DEFAULT 1.2000,
+  min_credits INT NOT NULL DEFAULT 0,
+  enabled TINYINT NOT NULL DEFAULT 1,
+  remark VARCHAR(255),
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT uk_pricing_margin_scope UNIQUE (scope_type, scope_ref)
+);
+
+CREATE TABLE pricing_rules (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  scope_type VARCHAR(16) NOT NULL DEFAULT 'MODEL',
+  scope_ref BIGINT NOT NULL DEFAULT 0,
+  param_key VARCHAR(64) NOT NULL,
+  rule_type VARCHAR(16) NOT NULL DEFAULT 'MULTIPLIER',
+  match_op VARCHAR(8) NOT NULL DEFAULT 'EQ',
+  match_value VARCHAR(64),
+  factor DECIMAL(10,4) NOT NULL DEFAULT 1.0000,
+  extra_credits INT NOT NULL DEFAULT 0,
+  priority INT NOT NULL DEFAULT 100,
+  enabled TINYINT NOT NULL DEFAULT 1,
+  remark VARCHAR(255),
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+INSERT INTO pricing_margins (scope_type, scope_ref, markup_ratio, min_credits, enabled, remark)
+VALUES ('GLOBAL', 0, 1.2000, 0, 1, '默认全局加价 20%');
 
 -- Default model config for TEXT_GENERATION tools (tests create tools without model_config_id)
 INSERT INTO agent_model_configs (

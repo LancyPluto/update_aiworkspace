@@ -9,6 +9,7 @@ import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.enums.TaskStatus;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.common.enums.CreditSourceType;
+import com.aiminilab.aitoolmarket.credit.dto.PricingQuote;
 import com.aiminilab.aitoolmarket.credit.service.CreditService;
 import com.aiminilab.aitoolmarket.credit.service.TaskCreditEstimateService;
 import com.aiminilab.aitoolmarket.task.dto.WorkerFailedRequest;
@@ -37,6 +38,7 @@ import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
@@ -1065,7 +1067,8 @@ public class WorkflowExecutionService {
             return;
         }
         JsonNode stepParams = parseStepParams(stepTask.getParamsJson());
-        int unitCredits = taskCreditEstimateService.estimateUserFacingTaskCredits(tool, modelConfig, stepParams);
+        PricingQuote quote = taskCreditEstimateService.quoteUserFacing(tool, modelConfig, stepParams);
+        int unitCredits = quote.chargeCredits();
         if (unitCredits <= 0) {
             return;
         }
@@ -1080,6 +1083,9 @@ public class WorkflowExecutionService {
         if (chargedCredits < stepCredits) {
             throw new BusinessException(ErrorCode.CREDIT_NOT_ENOUGH, "算力不足，无法完成当前工作流步骤");
         }
+        BigDecimal stepVendorCost = quote.vendorCost() == null
+                ? BigDecimal.ZERO
+                : quote.vendorCost().multiply(BigDecimal.valueOf(units));
         billingService.recordUsage(
                 "TASK",
                 run.getRootTaskId(),
@@ -1088,7 +1094,9 @@ public class WorkflowExecutionService {
                 null,
                 null,
                 units,
-                chargedCredits
+                stepCredits,
+                stepVendorCost,
+                quote.markupRatio()
         );
     }
 

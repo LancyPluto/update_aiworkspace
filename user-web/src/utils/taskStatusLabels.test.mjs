@@ -55,3 +55,7 @@ test("cancelled progress messages are sanitized before display", () => {
 test("running progress messages still prefer backend progress text", () => {
   assert.equal(labels.taskProgressMessage("PROCESSING", "AI is generating"), "AI is generating")
 })
+
+test("processing status ignores stale queued progress messages", () => {
+  assert.equal(labels.taskProgressMessage("PROCESSING", "\u4efb\u52a1\u5df2\u6392\u961f"), labels.TASK_STATUS_DOC_LABELS.PROCESSING)
+})

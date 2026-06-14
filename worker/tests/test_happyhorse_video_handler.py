@@ -106,6 +106,33 @@ def test_happyhorse_handler_builds_multi_reference_payload_and_bills_seconds() -
     assert dashscope.payload["parameters"]["ratio"] == "16:9"
 
 
+def test_happyhorse_video_edit_maps_audio_setting_and_omits_unsupported_params() -> None:
+    payload = video_generation_handler._build_happyhorse_payload(
+        {
+            "prompt": "Apply watercolor style",
+            "sourceVideo": "https://example.com/source.mp4",
+            "audioSetting": "keep",
+            "resolution": "720P",
+            "ratio": "16:9",
+            "duration": 8,
+            "watermark": "false",
+        },
+        "happyhorse-1.0-video-edit",
+    )
+    assert payload["parameters"]["audio_setting"] == "origin"
+    assert payload["parameters"]["resolution"] == "720P"
+    assert payload["parameters"]["watermark"] is False
+    assert "ratio" not in payload["parameters"]
+    assert "duration" not in payload["parameters"]
+    assert payload["input"]["media"][0]["type"] == "video"
+
+    mute_payload = video_generation_handler._build_happyhorse_payload(
+        {"prompt": "edit", "sourceVideo": "https://example.com/source.mp4", "audioSetting": "mute"},
+        "happyhorse-1.0-video-edit",
+    )
+    assert "audio_setting" not in mute_payload["parameters"]
+
+
 def test_happyhorse_handler_converts_reference_images_to_base64_data_urls(monkeypatch) -> None:
     backend = FakeBackendClient()
     dashscope = FakeDashScopeClient()

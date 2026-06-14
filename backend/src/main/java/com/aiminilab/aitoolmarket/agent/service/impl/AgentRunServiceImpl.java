@@ -66,7 +66,9 @@ import com.aiminilab.aitoolmarket.common.enums.CreditSourceType;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.config.AppProperties;
+import com.aiminilab.aitoolmarket.credit.dto.PricingQuote;
 import com.aiminilab.aitoolmarket.credit.service.CreditService;
+import com.aiminilab.aitoolmarket.credit.service.PricingService;
 import com.aiminilab.aitoolmarket.credit.support.CreditInsufficientSupport;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -80,8 +82,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.net.SocketTimeoutException;
 import java.net.http.HttpTimeoutException;
 import java.time.LocalDateTime;
@@ -116,8 +116,6 @@ public class AgentRunServiceImpl implements AgentRunService {
     private static final Set<String> CONFIRMABLE_STATUSES = Set.of("WAITING_USER_CONFIRMATION");
     private static final Set<String> TERMINAL_STATUSES = Set.of("SUCCESS", "FAILED", "CANCELLED", "TIMEOUT");
     private static final Set<String> TOOL_CALL_TERMINAL_STATUSES = Set.of("SUCCESS", "FAILED");
-    private static final BigDecimal CREDIT_PRICE_CNY = new BigDecimal("0.01");
-    private static final BigDecimal PLATFORM_MARKUP = new BigDecimal("1.20");
     private final Map<Long, CopyOnWriteArrayList<SseEmitter>> eventStreams = new ConcurrentHashMap<>();
 
     private final AgentSessionMapper agentSessionMapper;
@@ -138,6 +136,7 @@ public class AgentRunServiceImpl implements AgentRunService {
     private final AgentModelConfigService agentModelConfigService;
     private final AgentServiceClient agentServiceClient;
     private final CreditService creditService;
+    private final PricingService pricingService;
     private final BillingService billingService;
     private final SystemSettingService systemSettingService;
     private final AppProperties appProperties;
@@ -163,6 +162,7 @@ public class AgentRunServiceImpl implements AgentRunService {
             AgentModelConfigService agentModelConfigService,
             AgentServiceClient agentServiceClient,
             CreditService creditService,
+            PricingService pricingService,
             BillingService billingService,
             SystemSettingService systemSettingService,
             AppProperties appProperties,
@@ -187,6 +187,7 @@ public class AgentRunServiceImpl implements AgentRunService {
         this.agentModelConfigService = agentModelConfigService;
         this.agentServiceClient = agentServiceClient;
         this.creditService = creditService;
+        this.pricingService = pricingService;
         this.billingService = billingService;
         this.systemSettingService = systemSettingService;
         this.appProperties = appProperties;
@@ -962,8 +963,10 @@ public class AgentRunServiceImpl implements AgentRunService {
         }
         creditService.settle(run.getUserId(), CreditSourceType.AGENT_RUN, runId, consumedCredits);
         creditService.release(run.getUserId(), CreditSourceType.AGENT_RUN, runId, estimatedCredits - consumedCredits);
+        PricingQuote completedQuote = pricingService.computeTokenQuote(modelConfig, request.promptTokens(), request.completionTokens());
         billingService.recordUsage("AGENT_RUN", runId, run.getUserId(), modelConfig,
-                request.promptTokens(), request.completionTokens(), null, consumedCredits);
+                request.promptTokens(), request.completionTokens(), null, consumedCredits,
+                completedQuote.vendorCost(), completedQuote.markupRatio());
         appendEventInternal(runId, run.getUserId(), "run.completed", "Agent 运行已完成", null, now);
         agentSessionMapper.touch(run.getSessionId(), now);
         agentRateLimitService.decrementActiveRun(run.getUserId(), runId);
@@ -1007,26 +1010,7 @@ public class AgentRunServiceImpl implements AgentRunService {
         if (modelConfig == null) {
             return 0;
         }
-        int prompt = promptTokens == null ? 0 : Math.max(0, promptTokens);
-        int completion = completionTokens == null ? 0 : Math.max(0, completionTokens);
-        if (prompt == 0 && completion == 0) {
-            return 0;
-        }
-        BigDecimal inputCost = tokenCost(prompt, modelConfig.getInputTokenPricePer1m());
-        BigDecimal outputCost = tokenCost(completion, modelConfig.getOutputTokenPricePer1m());
-        BigDecimal customerCharge = inputCost.add(outputCost).multiply(PLATFORM_MARKUP);
-        if (customerCharge.compareTo(BigDecimal.ZERO) <= 0) {
-            return 0;
-        }
-        return customerCharge.divide(CREDIT_PRICE_CNY, 0, RoundingMode.CEILING).intValue();
-    }
-
-    private BigDecimal tokenCost(int tokens, BigDecimal pricePer1m) {
-        if (tokens <= 0 || pricePer1m == null || pricePer1m.compareTo(BigDecimal.ZERO) <= 0) {
-            return BigDecimal.ZERO;
-        }
-        return pricePer1m.multiply(BigDecimal.valueOf(tokens))
-                .divide(BigDecimal.valueOf(1_000_000), 8, RoundingMode.HALF_UP);
+        return pricingService.computeTokenQuote(modelConfig, promptTokens, completionTokens).chargeCredits();
     }
 
     @Override
@@ -1049,8 +1033,10 @@ public class AgentRunServiceImpl implements AgentRunService {
             creditService.settle(run.getUserId(), CreditSourceType.AGENT_RUN, runId, consumedCredits);
         }
         creditService.release(run.getUserId(), CreditSourceType.AGENT_RUN, runId, estimatedCredits - consumedCredits);
+        PricingQuote failedQuote = pricingService.computeTokenQuote(modelConfig, request.promptTokens(), request.completionTokens());
         billingService.recordUsage("AGENT_RUN", runId, run.getUserId(), modelConfig,
-                request.promptTokens(), request.completionTokens(), null, consumedCredits);
+                request.promptTokens(), request.completionTokens(), null, consumedCredits,
+                failedQuote.vendorCost(), failedQuote.markupRatio());
         appendEventInternal(
                 runId,
                 run.getUserId(),

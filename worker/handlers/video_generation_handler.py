@@ -311,25 +311,36 @@ def _build_happyhorse_payload(params: dict[str, Any], model_name: Any) -> dict[s
     if source_video:
         input_payload["source_video_url"] = source_video
 
+    is_video_edit = "video-edit" in model
+
     for source_key, target_key in (
         ("resolution", "resolution"),
         ("ratio", "ratio"),
         ("aspectRatio", "ratio"),
         ("aspect_ratio", "ratio"),
-        ("audioSetting", "audio_setting"),
-        ("audio_setting", "audio_setting"),
     ):
         value = params.get(source_key)
         if isinstance(value, str) and value.strip():
+            if is_video_edit and target_key == "ratio":
+                continue
             parameters[target_key] = value.strip()
-    duration = _optional_int(params.get("duration"))
-    if duration is not None:
-        parameters["duration"] = duration
+
+    audio_setting = _normalize_happyhorse_audio_setting(
+        params.get("audioSetting") or params.get("audio_setting"),
+        model,
+    )
+    if audio_setting:
+        parameters["audio_setting"] = audio_setting
+
+    if not is_video_edit:
+        duration = _optional_int(params.get("duration"))
+        if duration is not None:
+            parameters["duration"] = duration
     seed = _optional_int(params.get("seed"))
     if seed is not None:
         parameters["seed"] = seed
     if "watermark" in params:
-        parameters["watermark"] = bool(params.get("watermark"))
+        parameters["watermark"] = _resolve_bool_param(params.get("watermark"), default=False)
 
     payload: dict[str, Any] = {"model": model, "input": input_payload}
     if parameters:
@@ -366,6 +377,33 @@ def _resolve_reference_image_sources(params: dict[str, Any]) -> list[str]:
         else:
             add(value)
     return sources
+
+
+def _normalize_happyhorse_audio_setting(value: Any, model: str) -> str | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    normalized = value.strip().lower()
+    if "video-edit" not in model:
+        return None
+    if normalized in {"origin", "keep", "keep_original", "preserve", "original"}:
+        return "origin"
+    if normalized == "auto":
+        return "auto"
+    return None
+
+
+def _resolve_bool_param(value: Any, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"true", "1", "yes", "on"}:
+            return True
+        if lowered in {"false", "0", "no", "off", ""}:
+            return False
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return default
 
 
 def _resolve_happyhorse_image_data_url(value: str, field_name: str) -> str:

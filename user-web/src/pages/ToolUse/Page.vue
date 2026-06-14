@@ -12,6 +12,7 @@ import type { ToolDetail, ToolField } from "@/api/types"
 import { useAuthStore } from "@/store/authStore"
 import { randomUUID } from "@/utils/randomUUID"
 import { formatToolCreditHint, formatToolCreditLabel } from "@/utils/toolCreditLabel"
+import { useTaskEstimate, type UseTaskEstimateInput } from "@/composables/useTaskEstimate"
 
 const props = defineProps<{
   id: string
@@ -41,6 +42,34 @@ watch(
     formValues.value = {}
   },
 )
+
+// 实时算力预估：表单参数变化时防抖调用后端权威预估接口。
+const estimateInput = computed<UseTaskEstimateInput | null>(() => {
+  const current = tool.value
+  if (!current?.toolCode) return null
+  let params: Record<string, unknown> = {}
+  try {
+    params = buildTaskParams(current.fields ?? [], formValues.value)
+  } catch {
+    params = {}
+  }
+  return { toolCode: current.toolCode, params, modelConfigId: current.modelConfigId ?? null }
+})
+
+const { estimate: liveEstimate, loading: estimateLoading } = useTaskEstimate(estimateInput)
+
+const creditLabel = computed(() => {
+  const result = liveEstimate.value
+  if (result && !result.variable) return `${result.estimatedCredits} 算力`
+  if (result && result.variable) return "算力不详"
+  if (estimateLoading.value) return "估算中…"
+  return formatToolCreditLabel(tool.value)
+})
+
+const creditInsufficient = computed(() => {
+  const result = liveEstimate.value
+  return !!result && !result.variable && !result.sufficient
+})
 
 function buildTaskParams(fields: ToolField[], raw: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {}
@@ -254,9 +283,12 @@ async function handleCreateTask() {
                   <Zap class="h-4 w-4 text-warning" />
                   <span class="text-sm font-medium">{{ tool.variableCreditPricing ? "预计消耗" : "本次共消耗" }}</span>
                 </div>
-                <span class="text-lg font-semibold text-primary">{{ formatToolCreditLabel(tool) }}</span>
+                <span class="text-lg font-semibold" :class="creditInsufficient ? 'text-destructive' : 'text-primary'">{{ creditLabel }}</span>
               </div>
-              <p v-if="tool.variableCreditPricing" class="mt-2 text-xs text-muted-foreground leading-relaxed">
+              <p v-if="creditInsufficient" class="mt-2 text-xs text-destructive leading-relaxed">
+                算力不足，请前往会员与算力页充值后再试
+              </p>
+              <p v-else-if="tool.variableCreditPricing" class="mt-2 text-xs text-muted-foreground leading-relaxed">
                 {{ formatToolCreditHint(tool) }}
               </p>
 

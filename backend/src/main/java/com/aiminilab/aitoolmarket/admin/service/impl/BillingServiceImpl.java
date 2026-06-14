@@ -70,7 +70,8 @@ public class BillingServiceImpl implements BillingService {
 
     @Override
     public void recordUsage(String sourceType, Long sourceId, Long userId, AgentModelConfig modelConfig,
-                            Integer promptTokens, Integer completionTokens, Integer billableUnits, Integer chargedCredits) {
+                            Integer promptTokens, Integer completionTokens, Integer billableUnits, Integer chargedCredits,
+                            BigDecimal vendorCostAmount, BigDecimal markupRatio) {
         int prompt = nonNegative(promptTokens);
         int completion = nonNegative(completionTokens);
         int units = nonNegative(billableUnits);
@@ -103,13 +104,22 @@ public class BillingServiceImpl implements BillingService {
         log.setBillingUnit(billingUnit);
         log.setBillableUnits(units);
         log.setUnitPrice(unitPrice);
-        BigDecimal costAmount = costPerMillion(prompt, inputPricePer1m)
+        BigDecimal derivedCost = costPerMillion(prompt, inputPricePer1m)
                 .add(costPerMillion(completion, outputPricePer1m))
                 .add(perUnitCost(billingUnit, units, unitPrice));
-        log.setCostAmount(costAmount);
-        int calculatedCredits = costToCredits(costAmount);
-        int finalCredits = calculatedCredits > 0 ? calculatedCredits : charged;
-        log.setChargedCredits(finalCredits);
+        BigDecimal vendorCost = vendorCostAmount != null && vendorCostAmount.compareTo(BigDecimal.ZERO) > 0
+                ? vendorCostAmount
+                : derivedCost;
+        int costCredits = costToCredits(vendorCost);
+        // charged_credits now reflects the real user-facing charge (incl. markup) so that revenue
+        // and profitability can be aggregated directly; vendor cost stays in the *_cost columns.
+        int finalCharge = charged > 0 ? charged : costCredits;
+        log.setCostAmount(vendorCost);
+        log.setVendorCostAmount(vendorCost);
+        log.setChargedCredits(finalCharge);
+        log.setCustomerChargeCredits(finalCharge);
+        log.setMarginCredits(Math.max(0, finalCharge - costCredits));
+        log.setMarkupRatio(markupRatio == null ? BigDecimal.ZERO : markupRatio);
         log.setCreatedAt(LocalDateTime.now());
         billingUsageLogMapper.insert(log);
     }

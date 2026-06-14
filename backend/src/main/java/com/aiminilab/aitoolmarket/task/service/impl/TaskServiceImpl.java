@@ -7,12 +7,16 @@ import com.aiminilab.aitoolmarket.common.enums.TaskStatus;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.community.mapper.CommunityEventMapper;
 import com.aiminilab.aitoolmarket.community.mapper.CommunityPostMapper;
+import com.aiminilab.aitoolmarket.credit.dto.PricingBreakdownItem;
+import com.aiminilab.aitoolmarket.credit.dto.PricingQuote;
 import com.aiminilab.aitoolmarket.credit.service.CreditService;
 import com.aiminilab.aitoolmarket.credit.service.TaskCreditEstimateService;
 import com.aiminilab.aitoolmarket.task.dto.CreateTaskRequest;
 import com.aiminilab.aitoolmarket.task.dto.AgentTaskSourceResponse;
+import com.aiminilab.aitoolmarket.task.dto.EstimateTaskRequest;
 import com.aiminilab.aitoolmarket.task.dto.RegenerateTaskRequest;
 import com.aiminilab.aitoolmarket.task.dto.TaskDetailResponse;
+import com.aiminilab.aitoolmarket.task.dto.TaskEstimateResponse;
 import com.aiminilab.aitoolmarket.task.dto.TaskResultResponse;
 import com.aiminilab.aitoolmarket.task.dto.TaskStatusResponse;
 import com.aiminilab.aitoolmarket.task.entity.AiTask;
@@ -134,6 +138,31 @@ public class TaskServiceImpl implements TaskService {
                             true
                     );
                 });
+    }
+
+    @Override
+    public TaskEstimateResponse estimate(Long userId, EstimateTaskRequest request) {
+        AiTool tool = toolMapper.findOnlineByCode(request.toolCode())
+                .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在或未上线"));
+        int available = creditService.account(userId).available();
+
+        if (workflowExecutionService.shouldUseWorkflow(tool)) {
+            // Interactive workflow tools are billed per executed step; only a minimal balance is required.
+            return new TaskEstimateResponse(0, true, available, available >= 1, List.of());
+        }
+
+        JsonNode params = request.params() == null ? objectMapper.createObjectNode() : request.params();
+        int fallback = tool.getEstimatedCreditCost() == null ? 0 : Math.max(0, tool.getEstimatedCreditCost());
+        if (tool.getModelConfigId() == null) {
+            List<PricingBreakdownItem> breakdown = List.of(
+                    PricingBreakdownItem.of("预设算力", "按工具预设值", fallback));
+            return new TaskEstimateResponse(fallback, false, available, available >= fallback, breakdown);
+        }
+
+        AgentModelConfig modelConfig = modelCapabilityService.resolveModelConfigForTool(tool, request.modelConfigId());
+        PricingQuote quote = taskCreditEstimateService.quoteUserFacing(tool, modelConfig, params);
+        int credits = quote.chargeCredits();
+        return new TaskEstimateResponse(credits, false, available, available >= credits, quote.breakdown());
     }
 
     @Override

@@ -61,7 +61,8 @@ import { buildTaskResultBlocks, formatAudioDuration, resolveAudioTracks } from "
 import { isCoreField } from "@/utils/fieldUiMeta"
 import { consumeDashboardPendingAsset } from "@/utils/assetReplay"
 import { cleanToolDisplayText, toolDisplayDescription } from "@/utils/toolDisplayText"
-import { formatMarketplaceCostLabel } from "@/utils/toolCreditLabel"
+import { formatLiveCreditEstimate, formatMarketplaceCostLabel, usesVariableWorkflowCredits } from "@/utils/toolCreditLabel"
+import { useTaskEstimate, type UseTaskEstimateInput } from "@/composables/useTaskEstimate"
 import { randomUUID } from "@/utils/randomUUID"
 import {
   dashboardAttributionFromRoute,
@@ -70,6 +71,7 @@ import {
 } from "./dashboardAttribution"
 import { buildDashboardTaskParams, buildOptimisticDashboardTask } from "./dashboardTaskFactory"
 import { normalizeMediaUrl } from "@/utils/toolCoverMedia"
+import { taskFailureHint, taskProgressMessage } from "@/utils/taskStatusLabels"
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -91,6 +93,7 @@ const modelSearch = ref("")
 const selectedChatTool = ref<AITool | null>(null)
 const selectedToolDetailLoading = ref(false)
 const capabilityRef = ref<InstanceType<typeof CapabilityControls> | null>(null)
+const capabilityParams = ref<Record<string, unknown>>({})
 const primaryReferenceInfo = ref<PrimaryReferenceMaterialInfo>({
   available: false,
   fieldName: "",
@@ -224,6 +227,35 @@ const coreFieldPlaceholder = computed(() => {
   if (!field?.placeholder?.trim()) return `你想创作什么${modalityLabel(selectedModality.value)}内容？`
   return field.placeholder
 })
+
+const estimateInput = computed<UseTaskEstimateInput | null>(() => {
+  const tool = selectedTool.value
+  if (!tool?.toolCode) return null
+  const params = { ...capabilityParams.value }
+  const content = promptText.value.trim()
+  if (content) {
+    const key = coreField.value?.fieldKey
+    if (key) params[key] = content
+    else if (!("prompt" in params)) params.prompt = content
+  }
+  return {
+    toolCode: tool.toolCode,
+    params,
+    modelConfigId: tool.modelConfigId ?? null,
+    skip: usesVariableWorkflowCredits(tool),
+  }
+})
+
+const { estimate: liveEstimate, loading: estimateLoading } = useTaskEstimate(estimateInput)
+
+const liveCreditView = computed(() =>
+  formatLiveCreditEstimate(liveEstimate.value, {
+    loading: estimateLoading.value,
+    fallbackTool: selectedTool.value,
+  }),
+)
+
+const creditInsufficient = computed(() => liveCreditView.value.insufficient)
 
 const featuredTools = computed(() => {
   const list = currentTools.value.length > 0 ? currentTools.value : tools.value
@@ -507,6 +539,10 @@ function updatePrimaryReferenceInfo(info: PrimaryReferenceMaterialInfo) {
   primaryReferenceInfo.value = info
 }
 
+function onCapabilityParamsChange(params: Record<string, unknown>) {
+  capabilityParams.value = params
+}
+
 function openPrimaryReferencePicker() {
   capabilityRef.value?.openReferenceMaterialPicker("upload")
   expandComposer()
@@ -609,6 +645,7 @@ async function createWithSelectedTool() {
     submitNotice.value = `已进入工作历史：${response.taskNo}`
     replayParams.value = null
     startTaskPolling(response.taskId)
+    syncTaskStatusStreams()
     await nextTick()
     setupHistoryObserver()
     if (historyView.value === "feed") {
@@ -754,7 +791,7 @@ function applyTaskStatusPayload(payload: TaskStatusPayload) {
     ...current,
     status: payload.status,
     progress: monotonicTaskProgress(current, payload.progress),
-    progressMessage: payload.progressMessage ?? current.progressMessage,
+    progressMessage: taskProgressMessage(payload.status, payload.progressMessage ?? current.progressMessage),
   })
   if (isTaskTerminal(payload.status)) {
     stopTaskPolling(payload.taskId)
@@ -863,6 +900,13 @@ function canCancelTask(status?: TaskStatus): boolean {
   return status === "QUEUED"
 }
 
+function taskProgressSubtitle(task: TaskDetail, runningFallback: string): string {
+  if (canRetryTask(task.status)) {
+    return taskFailureHint(task.status, [task.progressMessage]) || runningFallback
+  }
+  return taskProgressMessage(task.status, task.progressMessage) || runningFallback
+}
+
 function taskStatusLabel(status?: TaskStatus): string {
   const labels: Record<TaskStatus, string> = {
     CREATED: "已创建",
@@ -932,6 +976,7 @@ async function retryTask(task: TaskDetail) {
     }
     activePanel.value = "tasks"
     startTaskPolling(response.taskId)
+    syncTaskStatusStreams()
   } catch (e) {
     submitError.value = (e as Error).message || "重试任务失败"
   } finally {
@@ -1326,7 +1371,7 @@ function assetFromTask(item: { task: TaskDetail; blocks: ResultBlock[]; modality
   const base = {
     id: `task-${item.task.taskId}`,
     title: item.task.toolName || block.title || item.task.taskNo,
-    subtitle: item.task.progressMessage || item.task.taskNo,
+    subtitle: taskProgressSubtitle(item.task, item.task.taskNo),
     prompt: taskPrompt(item.task),
     taskId: item.task.taskId,
     taskNo: item.task.taskNo,
@@ -1725,7 +1770,7 @@ onUnmounted(() => {
                               </span>
                             </div>
                             <p class="mt-0.5 truncate text-xs text-white/38">
-                              {{ item.task.progressMessage || (canRetryTask(item.task.status) ? "任务生成失败，可以重试。" : "任务正在生成，完成后自动展开版本。") }}
+                              {{ taskProgressSubtitle(item.task, canRetryTask(item.task.status) ? "任务生成失败，可以重试。" : "任务正在生成，完成后自动展开版本。") }}
                             </p>
                           </div>
                           <span class="text-xs tabular-nums text-white/40">{{ item.task.progress ?? 0 }}%</span>
@@ -1875,7 +1920,7 @@ onUnmounted(() => {
                             {{ activeAudioTrack ? audioTaskTitle(activeAudioTrack) : (primaryAudioStatusItem?.task.toolName || "音乐生成") }}
                           </h3>
                           <p class="mt-1 text-sm text-white/45">
-                            {{ activeAudioTrack ? audioTaskSubtitle(activeAudioTrack) : (primaryAudioStatusItem?.task.progressMessage || "任务正在生成，完成后会自动出现在左侧列表。") }}
+                            {{ activeAudioTrack ? audioTaskSubtitle(activeAudioTrack) : (primaryAudioStatusItem ? taskProgressSubtitle(primaryAudioStatusItem.task, "任务正在生成，完成后会自动出现在左侧列表。") : "任务正在生成，完成后会自动出现在左侧列表。") }}
                           </p>
                         </div>
                         <div v-if="activeAudioTrack" class="flex shrink-0 gap-2">
@@ -2019,7 +2064,7 @@ onUnmounted(() => {
                             <div class="min-w-0 flex-1">
                               <p class="text-lg font-semibold text-white">{{ primaryAudioStatusItem?.task.toolName || "音乐生成任务" }}</p>
                               <p class="mt-1 text-sm text-white/45">
-                                {{ primaryAudioStatusItem?.task.progressMessage || (canRetryTask(primaryAudioStatusItem?.task.status) ? "任务生成失败，可以复用参数重试。" : "音乐生成中，完成后会展示版本列表和波形播放器。") }}
+                                {{ primaryAudioStatusItem ? taskProgressSubtitle(primaryAudioStatusItem.task, canRetryTask(primaryAudioStatusItem.task.status) ? "任务生成失败，可以复用参数重试。" : "音乐生成中，完成后会展示版本列表和波形播放器。") : "音乐生成中，完成后会展示版本列表和波形播放器。" }}
                               </p>
                             </div>
                             <span
@@ -2160,7 +2205,7 @@ onUnmounted(() => {
                       >
                         <div class="flex items-center justify-between gap-4">
                           <p class="text-sm text-white/62">
-                            {{ item.task.progressMessage || (canRetryTask(item.task.status) ? "任务生成失败，可以复用本次参数重试。" : "任务正在生成，完成后会追加到信息流底部。") }}
+                            {{ taskProgressSubtitle(item.task, canRetryTask(item.task.status) ? "任务生成失败，可以复用本次参数重试。" : "任务正在生成，完成后会追加到信息流底部。") }}
                           </p>
                           <span class="text-xs tabular-nums text-white/38">{{ item.task.progress ?? 0 }}%</span>
                         </div>
@@ -2332,7 +2377,7 @@ onUnmounted(() => {
                             <div class="mt-auto">
                               <p class="line-clamp-2 text-xl font-semibold text-white">{{ item.task.toolName }}</p>
                               <p class="mt-2 line-clamp-3 text-sm leading-6 text-white/55">
-                                {{ item.task.progressMessage || (canRetryTask(item.task.status) ? "任务生成失败，可以复用本次参数重试。" : "任务正在生成，完成后结果会自动出现在这里。") }}
+                                {{ taskProgressSubtitle(item.task, canRetryTask(item.task.status) ? "任务生成失败，可以复用本次参数重试。" : "任务正在生成，完成后结果会自动出现在这里。") }}
                               </p>
                               <div class="mt-5 h-1.5 overflow-hidden rounded-full bg-white/10">
                                 <div
@@ -2346,24 +2391,15 @@ onUnmounted(() => {
                         </div>
                       </template>
                       <template v-else-if="primaryBlock(item.blocks)?.type === 'image'">
-                        <!-- 多图逐张分开展示（与真实图片数一致），单图保持 4:3 容器 -->
-                        <div v-if="imageItemsForBlocks(item.blocks).length > 1" class="w-full space-y-1.5">
-                          <figure
-                            v-for="(image, imageIndex) in imageItemsForBlocks(item.blocks)"
-                            :key="`${image.url}-${imageIndex}`"
-                            class="relative w-full"
-                          >
-                            <img :src="image.url" :alt="`${item.task.toolName} 图${imageIndex + 1}`" class="block w-full rounded-md object-contain" loading="lazy" />
-                            <figcaption class="absolute left-2 top-2 rounded-full bg-black/60 px-2 py-0.5 text-[11px] font-medium text-white backdrop-blur">
-                              图{{ imageIndex + 1 }} / {{ imageItemsForBlocks(item.blocks).length }}
-                            </figcaption>
-                          </figure>
-                        </div>
-                        <div v-else class="aspect-[4/3] w-full">
+                        <div
+                          class="dashboard-history-media-frame aspect-[4/3] w-full"
+                          :class="{ 'dashboard-history-media-frame--stack': imageItemsForBlocks(item.blocks).length > 1 }"
+                        >
                           <ImageStackPreview
                             :images="imageItemsForBlocks(item.blocks).map((image) => image.url)"
                             :alt="item.task.toolName"
                             fit="contain"
+                            class="dashboard-history-image-preview"
                           />
                         </div>
                       </template>
@@ -2698,6 +2734,7 @@ onUnmounted(() => {
                 :initial-params="replayParams"
                 class="mt-3 rounded-2xl border border-white/8 bg-black/18 px-3 py-2"
                 @primary-reference-change="updatePrimaryReferenceInfo"
+                @params-change="onCapabilityParamsChange"
               />
 
               <p v-if="submitError" class="mt-3 rounded-2xl border border-red-500/25 bg-red-500/10 px-3 py-2 text-xs text-red-200">
@@ -2838,9 +2875,20 @@ onUnmounted(() => {
                   免费体验
                 </span>
 
+                <span
+                  v-if="liveCreditView.label"
+                  class="dashboard-credit-estimate ml-auto"
+                  :class="{ 'dashboard-credit-estimate--insufficient': creditInsufficient }"
+                  :title="liveCreditView.hint"
+                >
+                  <Zap class="h-3.5 w-3.5 shrink-0 text-amber-300/90" />
+                  {{ liveCreditView.label }}
+                </span>
+
                 <button
                   type="button"
-                  class="ml-auto inline-flex h-11 min-w-32 items-center justify-center gap-2 rounded-xl bg-[linear-gradient(180deg,rgb(199_128_255),rgb(143_73_226))] px-5 text-sm font-semibold text-white shadow-[0_12px_32px_rgb(176_92_255_/_0.34),inset_0_1px_0_rgb(255_255_255_/_0.16)] transition hover:brightness-110 disabled:cursor-not-allowed disabled:bg-white/12 disabled:text-white/35"
+                  class="inline-flex h-11 min-w-32 items-center justify-center gap-2 rounded-xl bg-[linear-gradient(180deg,rgb(199_128_255),rgb(143_73_226))] px-5 text-sm font-semibold text-white shadow-[0_12px_32px_rgb(176_92_255_/_0.34),inset_0_1px_0_rgb(255_255_255_/_0.16)] transition hover:brightness-110 disabled:cursor-not-allowed disabled:bg-white/12 disabled:text-white/35"
+                  :class="liveCreditView.label ? '' : 'ml-auto'"
                   :disabled="!selectedTool || submitting || selectedToolDetailLoading"
                   @click.stop="createWithSelectedTool"
                 >
@@ -2868,6 +2916,25 @@ onUnmounted(() => {
 
 <style scoped>
 /* dashboard 局部样式 */
+.dashboard-credit-estimate {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.82);
+  white-space: nowrap;
+}
+
+.dashboard-credit-estimate--insufficient {
+  color: #fca5a5;
+  background: rgba(239, 68, 68, 0.14);
+}
+
 .audio-wave-hit {
   min-height: 32px;
   cursor: pointer;
@@ -3083,6 +3150,32 @@ onUnmounted(() => {
 
 .dashboard-history-grid > .history-card-image {
   min-width: 0;
+}
+
+.dashboard-history-media-frame {
+  position: relative;
+  overflow: hidden;
+  background: #101014;
+}
+
+.dashboard-history-media-frame--stack {
+  display: flex;
+}
+
+.dashboard-history-image-preview {
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+}
+
+.dashboard-history-media-frame--stack :deep(.image-grid-preview.grid) {
+  height: 100%;
+  grid-auto-rows: minmax(0, 1fr);
+}
+
+.dashboard-history-media-frame--stack :deep(.image-grid-cell) {
+  aspect-ratio: auto;
+  min-height: 0;
 }
 
 .dashboard-history-grid > .history-card-pending {

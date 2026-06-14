@@ -1,7 +1,7 @@
 import logging
 from typing import Any
 
-from client.backend_client import BackendClient
+from client.backend_client import BackendClient, BackendClientError
 from handlers.digital_human_video_handler import DigitalHumanVideoHandler
 from handlers.image_generation_handler import ImageGenerationHandler
 from handlers.music_generation_handler import MusicGenerationHandler
@@ -13,6 +13,7 @@ from handlers.workflow_step_handler import WorkflowStepHandler
 
 LOGGER = logging.getLogger(__name__)
 TERMINAL_TASK_STATUSES = {"SUCCESS", "FAILED", "CANCELLED"}
+ACTIVE_QUEUE_STATUSES = {"QUEUED", "CREATED", "RETRYING"}
 
 
 class TaskHandlerRouter:
@@ -37,11 +38,23 @@ class TaskHandlerRouter:
         self.backend_client = backend_client or BackendClient()
 
     def handle(self, message: dict[str, Any]) -> dict[str, Any]:
-        context = self.backend_client.get_execution_context(int(message["taskId"]))
+        task_id = int(message["taskId"])
+        trace_id = message.get("traceId")
+        context = self.backend_client.get_execution_context(task_id, trace_id=trace_id)
         status = str(context.get("status") or "").upper()
         if status in TERMINAL_TASK_STATUSES:
             LOGGER.info("skip terminal task taskId=%s status=%s", message.get("taskId"), status)
-            return {"status": "SKIPPED", "taskId": int(message["taskId"]), "taskStatus": status}
+            return {"status": "SKIPPED", "taskId": task_id, "taskStatus": status}
+        if status in ACTIVE_QUEUE_STATUSES:
+            try:
+                self.backend_client.mark_processing(
+                    task_id,
+                    progress=8,
+                    progress_message="正在生成中",
+                    trace_id=trace_id,
+                )
+            except BackendClientError:
+                LOGGER.warning("failed to mark task processing at dequeue taskId=%s", task_id, exc_info=True)
         routed_message = {**message, "__executionContext": context}
         params = context.get("params") or {}
         if params.get("workflowStep"):
