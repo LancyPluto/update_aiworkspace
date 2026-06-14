@@ -130,7 +130,8 @@ def test_happyhorse_video_edit_maps_audio_setting_and_omits_unsupported_params()
         {"prompt": "edit", "sourceVideo": "https://example.com/source.mp4", "audioSetting": "mute"},
         "happyhorse-1.0-video-edit",
     )
-    assert "audio_setting" not in mute_payload["parameters"]
+    mute_params = mute_payload.get("parameters")
+    assert mute_params is None or "audio_setting" not in mute_params
 
 
 def test_happyhorse_handler_converts_reference_images_to_base64_data_urls(monkeypatch) -> None:

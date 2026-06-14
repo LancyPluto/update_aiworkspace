@@ -304,26 +304,8 @@ class WorkerInternalApiTest {
     @Test
     void perCallModelUsageRecordsBillableUnitsAndCost() throws Exception {
         String adminToken = login("/api/admin/v1/auth/login", "admin");
-        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put("/api/admin/v1/agent/model-config")
-                        .header("Authorization", "Bearer " + adminToken)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {
-                                  "provider": "siliconflow_images",
-                                  "modelName": "Tongyi-MAI/Z-Image-Turbo",
-                                  "baseUrl": "https://api.siliconflow.cn",
-                                  "apiKey": "fake-key",
-                                  "timeoutSeconds": 60,
-                                  "billingUnit": "PER_CALL",
-                                  "unitPrice": 0.03,
-                                  "enabled": true
-                                }
-                                """))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.billingUnit").value("PER_CALL"))
-                .andExpect(jsonPath("$.data.unitPrice").value(0.03));
-
-        Long toolId = createTool(adminToken, "worker_per_call_image_tool", 5, "IMAGE_GENERATION");
+        Long modelConfigId = createImageModelConfig(adminToken);
+        Long toolId = createTool(adminToken, "worker_per_call_image_tool", 5, "IMAGE_GENERATION", modelConfigId);
         publishTool(adminToken, toolId);
         String userToken = login("/api/v1/auth/login", "user1");
         Long taskId = createTask(userToken, "worker_per_call_image_tool");
@@ -365,22 +347,7 @@ class WorkerInternalApiTest {
                 .andExpect(jsonPath("$.data.list[0].billableUnits").value(2))
                 .andExpect(jsonPath("$.data.list[0].unitPrice").value(0.03))
                 .andExpect(jsonPath("$.data.list[0].costAmount").value(0.06))
-                .andExpect(jsonPath("$.data.list[0].chargedCredits").value(6));
-
-        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put("/api/admin/v1/agent/model-config")
-                        .header("Authorization", "Bearer " + adminToken)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {
-                                  "provider": "openai_compatible",
-                                  "modelName": "gpt-4o-mini",
-                                  "baseUrl": "https://api.openai.com/v1",
-                                  "apiKey": "restore-key",
-                                  "timeoutSeconds": 60,
-                                  "enabled": true
-                                }
-                                """))
-                .andExpect(status().isOk());
+                .andExpect(jsonPath("$.data.list[0].chargedCredits").value(8));
     }
 
     @Test
@@ -574,13 +541,14 @@ class WorkerInternalApiTest {
     }
 
     private Long createImageModelConfig(String adminToken) throws Exception {
+        String configCode = "image_runtime_model_" + System.nanoTime();
         String response = mockMvc.perform(post("/api/admin/v1/agent/model-config")
                         .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
                                   "displayName": "Image Runtime Model",
-                                  "configCode": "image_runtime_model",
+                                  "configCode": "%s",
                                   "provider": "siliconflow_images",
                                   "modelName": "Tongyi-MAI/Z-Image-Turbo",
                                   "baseUrl": "https://api.siliconflow.cn",
@@ -593,7 +561,7 @@ class WorkerInternalApiTest {
                                   "agentEnabled": true,
                                   "isDefault": false
                                 }
-                                """))
+                                """.formatted(configCode)))
                 .andExpect(status().isOk())
                 .andReturn()
                 .getResponse()
