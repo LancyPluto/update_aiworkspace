@@ -5,6 +5,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
@@ -31,6 +32,9 @@ class AdminConfigurationApiTest {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @Test
     void adminCanLoadUnifiedApiOverview() throws Exception {
@@ -530,6 +534,106 @@ class AdminConfigurationApiTest {
                         .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data[?(@.configCode=='stale_no_key_model')]").isEmpty());
+    }
+
+    @Test
+    void configBundleImportCreatesFieldSchemaForLegacyToolWithoutSchema() throws Exception {
+        String adminToken = loginAdmin();
+
+        String categoryResponse = mockMvc.perform(post("/api/admin/v1/tool-categories")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "categoryCode": "legacy_schema_test",
+                                  "categoryName": "Legacy Schema Test",
+                                  "sortOrder": 1,
+                                  "status": "ACTIVE"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        Long categoryId = Long.parseLong(categoryResponse.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
+
+        jdbcTemplate.update("""
+                INSERT INTO ai_tools (
+                  tool_code, tool_name, category_id, tool_type, input_modality, output_modality,
+                  status, estimated_credit_cost, execution_handler, is_deleted
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+                """,
+                "legacy_field_tool",
+                "Legacy Field Tool",
+                categoryId,
+                "TEXT_GENERATION",
+                "TEXT",
+                "TEXT",
+                "DRAFT",
+                0,
+                "TEXT_GENERATION");
+
+        mockMvc.perform(post("/api/admin/v1/config-bundles/import")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "format": "ai-tool-market-config-bundle",
+                                  "version": 1,
+                                  "secretsRedacted": true,
+                                  "settings": {},
+                                  "categories": [
+                                    {
+                                      "categoryCode": "legacy_schema_test",
+                                      "categoryName": "Legacy Schema Test",
+                                      "sortOrder": 1,
+                                      "status": "ACTIVE"
+                                    }
+                                  ],
+                                  "tools": [
+                                    {
+                                      "toolCode": "legacy_field_tool",
+                                      "toolName": "Legacy Field Tool",
+                                      "categoryCode": "legacy_schema_test",
+                                      "toolType": "TEXT_GENERATION",
+                                      "inputModality": "TEXT",
+                                      "outputModality": "TEXT",
+                                      "status": "DRAFT",
+                                      "estimatedCreditCost": 1,
+                                      "executionHandler": "TEXT_GENERATION",
+                                      "agentEnabled": false,
+                                      "fields": [
+                                        {
+                                          "fieldKey": "prompt",
+                                          "fieldName": "Prompt",
+                                          "fieldType": "textarea",
+                                          "required": true,
+                                          "sortOrder": 1
+                                        }
+                                      ],
+                                      "prompts": []
+                                    }
+                                  ]
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.tools").value(1))
+                .andExpect(jsonPath("$.data.fields").value(1))
+                .andExpect(jsonPath("$.data.warnings").value(hasItem(
+                        "Created missing field schema for tool legacy_field_tool before importing fields")));
+
+        String toolsResponse = mockMvc.perform(get("/api/admin/v1/tools?page=1&pageSize=50&keyword=legacy_field_tool")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        Long toolId = Long.parseLong(toolsResponse.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
+
+        mockMvc.perform(get("/api/admin/v1/tools/{toolId}/fields", toolId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[?(@.fieldKey=='prompt')].fieldName").value("Prompt"));
     }
 
     private String loginAdmin() throws Exception {

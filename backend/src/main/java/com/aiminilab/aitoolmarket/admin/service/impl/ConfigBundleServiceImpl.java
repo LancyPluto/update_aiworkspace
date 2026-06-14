@@ -38,6 +38,7 @@ import com.aiminilab.aitoolmarket.tool.entity.AiTool;
 import com.aiminilab.aitoolmarket.tool.entity.ToolCategory;
 import com.aiminilab.aitoolmarket.tool.entity.ToolPromptVersion;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolCategoryMapper;
+import com.aiminilab.aitoolmarket.tool.mapper.ToolFieldSchemaMapper;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolMapper;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolPromptVersionMapper;
 import com.aiminilab.aitoolmarket.tool.service.ToolService;
@@ -92,6 +93,7 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
     private final ToolService toolService;
     private final WorkflowService workflowService;
     private final ToolMapper toolMapper;
+    private final ToolFieldSchemaMapper toolFieldSchemaMapper;
     private final ToolCategoryMapper toolCategoryMapper;
     private final ToolPromptVersionMapper toolPromptVersionMapper;
     private final ModelProviderRegistry modelProviderRegistry;
@@ -107,6 +109,7 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                                    ToolService toolService,
                                    WorkflowService workflowService,
                                    ToolMapper toolMapper,
+                                   ToolFieldSchemaMapper toolFieldSchemaMapper,
                                    ToolCategoryMapper toolCategoryMapper,
                                    ToolPromptVersionMapper toolPromptVersionMapper,
                                    ModelProviderRegistry modelProviderRegistry,
@@ -121,6 +124,7 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
         this.toolService = toolService;
         this.workflowService = workflowService;
         this.toolMapper = toolMapper;
+        this.toolFieldSchemaMapper = toolFieldSchemaMapper;
         this.toolCategoryMapper = toolCategoryMapper;
         this.toolPromptVersionMapper = toolPromptVersionMapper;
         this.modelProviderRegistry = modelProviderRegistry;
@@ -851,6 +855,7 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
         }
 
         if (!safeList(item.fields()).isEmpty()) {
+            ensureActiveFieldSchema(saved.id(), operatorId, item.toolCode(), warnings);
             toolService.updateFields(saved.id(), new UpdateToolFieldsRequest(safeList(item.fields()).stream()
                     .map(field -> new ToolFieldRequest(
                             field.fieldKey(),
@@ -908,6 +913,14 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
         }
         AgentModelConfig config = agentModelConfigMapper.findActiveById(modelConfigId);
         return config != null && Boolean.FALSE.equals(config.getEnabled());
+    }
+
+    private void ensureActiveFieldSchema(Long toolId, Long operatorId, String toolCode, List<String> warnings) {
+        if (toolFieldSchemaMapper.findActiveSchemaId(toolId).isPresent()) {
+            return;
+        }
+        toolFieldSchemaMapper.createActiveDefaultSchema(toolId, operatorId);
+        warnings.add("Created missing field schema for tool " + toolCode + " before importing fields");
     }
 
     private Optional<AiTool> findImportTargetTool(String toolCode, Long operatorId, List<String> warnings) {
