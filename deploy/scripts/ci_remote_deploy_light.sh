@@ -130,6 +130,14 @@ fi
 
 echo "DEPLOY_SERVICES=\$DEPLOY_SERVICES" | tee -a "\$REMOTE_DIR/deploy/logs/deploy-history.log"
 
+# Apply pending DB migrations BEFORE rebuilding app containers, so the backend
+# always boots against an up-to-date schema. MySQL is long-lived; ensure it is up
+# first. A real migration failure aborts the deploy (set -e) instead of shipping a
+# backend that crashes on a missing table.
+echo "Applying pending SQL migrations ..."
+docker compose "\${COMPOSE_ARGS[@]}" up -d mysql
+bash "\$REMOTE_DIR/deploy/scripts/apply_sql_migrations.sh"
+
 for svc in \$DEPLOY_SERVICES; do
   echo "Building \$svc ..."
   docker compose "\${COMPOSE_ARGS[@]}" build "\$svc" || true
