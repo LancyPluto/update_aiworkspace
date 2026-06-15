@@ -1809,8 +1809,17 @@ export function WorkflowCanvas({
       if (!layerOf.has(node.id)) layerOf.set(node.id, layer)
     }
 
-    const X_GAP = 360
-    const Y_GAP = 190
+    const X_GAP = 380
+    const Y_PAD = 56
+    // 节点高度因类型而异（如用户输入参数节点高 220），固定行距会导致同层节点重叠。
+    // 按每个节点的真实高度堆叠，保证「散得开」、彼此不压盖。
+    const nodeHeight = (id: string) => {
+      const node = layoutNodes.find((item) => item.id === id)
+      if (!node) return 160
+      const measured = node.measured?.height ?? (typeof node.height === "number" ? node.height : undefined)
+      const def = getNodeDef(node.data)
+      return measured || def?.defaultHeight || 160
+    }
     const layerBuckets = new Map<number, string[]>()
     for (const node of layoutNodes) {
       const l = layerOf.get(node.id) || 0
@@ -1818,9 +1827,12 @@ export function WorkflowCanvas({
     }
     const positions = new Map<string, { x: number; y: number }>()
     for (const [l, bucket] of layerBuckets) {
-      const offset = ((bucket.length - 1) * Y_GAP) / 2
+      const heights = bucket.map((id) => nodeHeight(id))
+      const totalHeight = heights.reduce((sum, h) => sum + h, 0) + Y_PAD * Math.max(bucket.length - 1, 0)
+      let cursor = 280 - totalHeight / 2
       bucket.forEach((id, index) => {
-        positions.set(id, { x: 60 + l * X_GAP, y: 280 + index * Y_GAP - offset })
+        positions.set(id, { x: 60 + l * X_GAP, y: cursor })
+        cursor += heights[index]! + Y_PAD
       })
     }
     setNodes((current: WFNode[]) =>
