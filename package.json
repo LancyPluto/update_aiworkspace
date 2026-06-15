@@ -1,0 +1,13 @@
+{
+  "name": "ai-tool-market",
+  "private": true,
+  "description": "Monorepo root scripts (git hooks, team tooling)",
+  "scripts": {
+    "prepare": "husky",
+    "post-merge:dev-sync": "bash deploy/scripts/post_merge_dev_sync.sh",
+    "sql:migrate": "bash deploy/scripts/apply_sql_migrations.sh"
+  },
+  "devDependencies": {
+    "husky": "^9.1.7"
+  }
+}

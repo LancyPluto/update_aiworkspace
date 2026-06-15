@@ -78,7 +78,6 @@ GITHUB_SHA="${GITHUB_SHA:-unknown}"
 python3 - <<'PY'
 from pathlib import Path
 
-path = Path("/root/ai_tool_market/.env")
 patch_lines = """
 APP_PRODUCTION_MODE=true
 VITE_API_BASE_URL=
@@ -98,19 +97,24 @@ for line in patch_lines:
     key, value = line.split("=", 1)
     patch[key] = value
 
-lines = path.read_text(encoding="utf-8", errors="replace").splitlines() if path.exists() else []
-keys = set(patch)
-out = []
-for line in lines:
-    key = line.split("=", 1)[0].strip()
-    if key in keys:
-        continue
-    out.append(line)
-for key, value in patch.items():
-    out.append(f"{key}={value}")
-path.parent.mkdir(parents=True, exist_ok=True)
-path.write_text("\n".join(out) + "\n", encoding="utf-8")
-print("patched", path)
+def patch_env(path: Path) -> None:
+    lines = path.read_text(encoding="utf-8", errors="replace").splitlines() if path.exists() else []
+    keys = set(patch)
+    out = []
+    for line in lines:
+        key = line.split("=", 1)[0].strip()
+        if key in keys:
+            continue
+        out.append(line)
+    for key, value in patch.items():
+        out.append(f"{key}={value}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(out) + "\n", encoding="utf-8")
+    print("patched", path)
+
+# docker compose interpolates deploy/.env and overrides env_file; patch both.
+patch_env(Path("/root/ai_tool_market/.env"))
+patch_env(Path("/root/ai_tool_market/deploy/.env"))
 PY
 
 if [ -f "\$REMOTE_DIR/deploy/logs/last-deploy.json" ]; then

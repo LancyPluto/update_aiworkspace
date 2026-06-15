@@ -53,3 +53,6 @@ Thumbs.db
 
 #项目规划
 项目规划/
+engines/banana-slides/backend/instance/database.db
+engines/banana-slides/backend/instance/database.db-shm
+engines/banana-slides/backend/instance/database.db-wal

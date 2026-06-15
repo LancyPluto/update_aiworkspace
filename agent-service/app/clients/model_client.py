@@ -1,6 +1,7 @@
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 import json
+import os
 from typing import Any
 
 import httpx
@@ -159,7 +160,11 @@ class ModelClient:
     def _should_use_direct_openai_compatible(self) -> bool:
         provider = self.settings.model_provider.strip().lower()
         base_url = self.settings.model_api_base_url.strip().lower()
-        return provider == "openai_compatible" and "api-inference.modelscope.cn" in base_url
+        if provider == "openai_compatible" and "api-inference.modelscope.cn" in base_url:
+            return True
+        if self._uses_injected_chat_model:
+            return False
+        return self._should_use_direct_openai_stream()
 
     def _should_use_direct_openai_stream(self) -> bool:
         provider = self.settings.model_provider.strip().lower()
@@ -194,14 +199,14 @@ class ModelClient:
             payload["tools"] = tools
         headers = {"Authorization": f"Bearer {self.settings.model_api_key}"}
         try:
-            async with httpx.AsyncClient(timeout=self.settings.model_timeout_seconds) as client:
+            async with _outbound_http_client(self.settings.model_timeout_seconds) as client:
                 response = await client.post(f"{base_url}/chat/completions", headers=headers, json=payload)
                 response.raise_for_status()
                 data = response.json()
         except httpx.HTTPStatusError as exception:
             raise ModelClientError(f"model request failed: {_format_http_error(exception.response)}") from exception
         except Exception as exception:
-            raise ModelClientError(f"model request failed: {exception}") from exception
+            raise ModelClientError(f"model request failed: {_format_connection_error(exception)}") from exception
         self._record_openai_usage(data)
         return _openai_compatible_content(data)
 
@@ -223,14 +228,14 @@ class ModelClient:
             payload["tool_choice"] = tool_choice
         headers = {"Authorization": f"Bearer {self.settings.model_api_key}"}
         try:
-            async with httpx.AsyncClient(timeout=self.settings.model_timeout_seconds) as client:
+            async with _outbound_http_client(self.settings.model_timeout_seconds) as client:
                 response = await client.post(f"{base_url}/chat/completions", headers=headers, json=payload)
                 response.raise_for_status()
                 data = response.json()
         except httpx.HTTPStatusError as exception:
             raise ModelClientError(f"model request failed: {_format_http_error(exception.response)}") from exception
         except Exception as exception:
-            raise ModelClientError(f"model request failed: {exception}") from exception
+            raise ModelClientError(f"model request failed: {_format_connection_error(exception)}") from exception
         self._record_openai_usage(data)
         return _openai_compatible_turn_result(data)
 
@@ -266,7 +271,7 @@ class ModelClient:
             "Accept": "text/event-stream",
         }
         try:
-            async with httpx.AsyncClient(timeout=self.settings.model_timeout_seconds) as client:
+            async with _outbound_http_client(self.settings.model_timeout_seconds) as client:
                 async with client.stream("POST", f"{base_url}/chat/completions", headers=headers, json=payload) as response:
                     if response.status_code >= 400:
                         body = (await response.aread()).decode("utf-8", errors="replace")
@@ -298,7 +303,7 @@ class ModelClient:
         except ModelClientError:
             raise
         except Exception as exception:
-            raise ModelClientError(f"model stream failed: {_format_exception(exception)}") from exception
+            raise ModelClientError(f"model stream failed: {_format_connection_error(exception)}") from exception
 
     def _record_usage(self, result: Any) -> None:
         usage = getattr(result, "usage_metadata", None)
@@ -696,6 +701,25 @@ def _extract_content(content: Any) -> str:
 
 def _chunk_text(value: str, size: int = 80) -> list[str]:
     return [value[index : index + size] for index in range(0, len(value), size)] or [""]
+
+
+def _outbound_http_client(timeout: int | float) -> httpx.AsyncClient:
+    return httpx.AsyncClient(timeout=timeout)
+
+
+def _format_connection_error(exception: Exception) -> str:
+    message = _format_exception(exception)
+    lowered = message.lower()
+    if "connection error" in lowered or "connecterror" in lowered or "connect timeout" in lowered:
+        proxy = os.getenv("HTTPS_PROXY") or os.getenv("HTTP_PROXY") or ""
+        hint = (
+            "容器出站网络异常（常见于 Clash TUN/fake-ip 下代理未启动或 deploy/.env 中 HTTP_PROXY 不可达）。"
+            "请确认本机 Clash 已开启且 host.docker.internal:7897 可访问，或临时关闭 fake-ip 后重试。"
+        )
+        if proxy:
+            return f"{message}；当前代理={proxy}；{hint}"
+        return f"{message}；{hint}"
+    return message
 
 
 def _format_exception(exception: Exception) -> str:
