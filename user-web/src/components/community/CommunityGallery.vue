@@ -17,15 +17,14 @@ import {
   X,
 } from "lucide-vue-next"
 import CommunityAudioMedia from "@/components/community/CommunityAudioMedia.vue"
+import CommunityCollectionPickerModal from "@/components/community/CommunityCollectionPickerModal.vue"
 import { ApiBusinessError } from "@/api/client"
 import {
-  favoriteCommunityPost,
   fetchCommunityTopics,
   likeCommunityPost,
   markCommunityPostSameStyle,
   searchCommunityPosts,
   trackCommunityEvent,
-  unfavoriteCommunityPost,
   unlikeCommunityPost,
 } from "@/api/communityApi"
 import type { CommunityPost, CommunityTopic } from "@/api/types"
@@ -34,12 +33,14 @@ import {
   type CommunityPostUnpublishedDetail,
   preloadDefaultCommunityCollection,
   resetDefaultCommunityCollectionCache,
-  syncFavoriteToInspirationCollection,
+  favoritePostToCollection,
+  unfavoritePostFromAllCollections,
 } from "@/utils/communitySync"
 import MasonryLayout from "@/components/MasonryLayout.vue"
 import UserAvatar from "@/components/UserAvatar.vue"
 import { userRoutes } from "@/router/userRoutes"
 import { useAuthStore } from "@/store/authStore"
+import { getSessionBearerJwt } from "@/api/sessionBearer"
 import { assetFromCommunityPost } from "@/utils/assetPreviewAdapter"
 import { openDashboardWithAsset } from "@/utils/assetReplay"
 import { communityDisplayTitle, communityCardDescription } from "@/utils/communityDisplay"
@@ -54,6 +55,10 @@ import {
 const router = useRouter()
 const route = useRoute()
 const auth = useAuthStore()
+
+function resolveAuthToken() {
+  return auth.token ?? getSessionBearerJwt()
+}
 
 const posts = ref<CommunityPost[]>([])
 const topics = ref<CommunityTopic[]>([])
@@ -78,7 +83,12 @@ const loadSentinelRef = ref<HTMLElement | null>(null)
 const sortDropdownRef = ref<HTMLElement | null>(null)
 const playingPostId = ref<number | null>(null)
 const galleryAudioPlaying = ref(false)
+const galleryAudioCurrentTime = ref(0)
+const galleryAudioDuration = ref(0)
 const galleryAudioRef = ref<HTMLAudioElement | null>(null)
+const favoritePickerOpen = ref(false)
+const favoritePickerPost = ref<CommunityPost | null>(null)
+const favoritePickerSubmitting = ref(false)
 const activeMediaIndexes = ref<Record<number, number>>({})
 let loadObserver: IntersectionObserver | null = null
 
@@ -188,8 +198,17 @@ function audioMedia(post: CommunityPost) {
   }
 }
 
-function toggleCardAudio(post: CommunityPost, event: Event) {
-  event.stopPropagation()
+function galleryAudioProgressFor(postId: number) {
+  if (playingPostId.value !== postId || !galleryAudioDuration.value) return 0
+  return Math.min(100, Math.max(0, (galleryAudioCurrentTime.value / galleryAudioDuration.value) * 100))
+}
+
+function resetGalleryAudioProgress() {
+  galleryAudioCurrentTime.value = 0
+  galleryAudioDuration.value = 0
+}
+
+function toggleCardAudio(post: CommunityPost) {
   const { audioUrl } = audioMedia(post)
   if (!audioUrl) return
 
@@ -199,13 +218,25 @@ function toggleCardAudio(post: CommunityPost, event: Event) {
   }
 
   playingPostId.value = post.id
+  resetGalleryAudioProgress()
   const audio = galleryAudioRef.value
   if (!audio) return
   audio.src = audioUrl
   void audio.play().catch(() => {
     playingPostId.value = null
     galleryAudioPlaying.value = false
+    resetGalleryAudioProgress()
   })
+}
+
+function seekCardAudio(event: MouseEvent) {
+  event.stopPropagation()
+  const audio = galleryAudioRef.value
+  if (!audio || !galleryAudioDuration.value) return
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
+  const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width))
+  audio.currentTime = ratio * galleryAudioDuration.value
+  galleryAudioCurrentTime.value = audio.currentTime
 }
 
 function onGalleryAudioPlay() {
@@ -215,10 +246,25 @@ function onGalleryAudioPlay() {
 function onGalleryAudioEnded() {
   playingPostId.value = null
   galleryAudioPlaying.value = false
+  resetGalleryAudioProgress()
 }
 
 function onGalleryAudioPause() {
   galleryAudioPlaying.value = false
+}
+
+function onGalleryAudioTimeUpdate() {
+  const audio = galleryAudioRef.value
+  if (!audio) return
+  galleryAudioCurrentTime.value = audio.currentTime
+  galleryAudioDuration.value = Number.isFinite(audio.duration) ? audio.duration : 0
+}
+
+function onGalleryAudioLoadedMetadata() {
+  const audio = galleryAudioRef.value
+  if (!audio) return
+  galleryAudioDuration.value = Number.isFinite(audio.duration) ? audio.duration : 0
+  galleryAudioCurrentTime.value = audio.currentTime || 0
 }
 
 function findScrollRoot(el: HTMLElement | null): Element | null {
@@ -272,20 +318,44 @@ async function toggleLike(post: CommunityPost, event: Event) {
 
 async function toggleFavorite(post: CommunityPost, event: Event) {
   event.stopPropagation()
-  if (!auth.token) return router.push({ name: "Login", query: { redirect: route.fullPath } })
-  actingPostId.value = post.id
-  const wasFavorited = post.favorited
-  try {
-    const updated = wasFavorited
-      ? await unfavoriteCommunityPost(post.id, { token: auth.token })
-      : await favoriteCommunityPost(post.id, { token: auth.token })
+  const sessionToken = resolveAuthToken()
+  if (!sessionToken) return router.push({ name: "Login", query: { redirect: route.fullPath } })
+
+  if (post.favorited) {
+    actingPostId.value = post.id
     try {
-      await syncFavoriteToInspirationCollection(post.id, !wasFavorited, { token: auth.token })
-    } catch {
-      // 作品收藏状态已更新；同步灵感收藏夹失败时不阻断主流程
+      const updated = await unfavoritePostFromAllCollections(post.id, { token: sessionToken })
+      patchPost(updated)
+    } finally {
+      actingPostId.value = null
     }
+    return
+  }
+
+  favoritePickerPost.value = post
+  favoritePickerOpen.value = true
+}
+
+function closeFavoritePicker() {
+  if (favoritePickerSubmitting.value) return
+  favoritePickerOpen.value = false
+  favoritePickerPost.value = null
+}
+
+async function confirmFavoritePicker(collectionId: number | null) {
+  const post = favoritePickerPost.value
+  const sessionToken = resolveAuthToken()
+  if (!post || !sessionToken) return
+
+  favoritePickerSubmitting.value = true
+  actingPostId.value = post.id
+  try {
+    const updated = await favoritePostToCollection(post.id, collectionId, { token: sessionToken })
     patchPost(updated)
+    favoritePickerOpen.value = false
+    favoritePickerPost.value = null
   } finally {
+    favoritePickerSubmitting.value = false
     actingPostId.value = null
   }
 }
@@ -314,7 +384,7 @@ function handleDocumentClick(event: MouseEvent) {
 async function loadTopics() {
   topicsLoading.value = true
   try {
-    const topicList = await fetchCommunityTopics({ token: auth.token, limit: 12 })
+    const topicList = await fetchCommunityTopics({ token: resolveAuthToken(), limit: 12 })
     topics.value = topicList.filter((item) => item.name && item.postCount > 0)
   } catch {
     topics.value = []
@@ -336,7 +406,7 @@ async function load(reset = true) {
   try {
     const currentPage = reset ? 1 : pageNo.value
     const page = await searchCommunityPosts({
-      token: auth.token,
+      token: resolveAuthToken(),
       query: {
         pageNo: currentPage,
         pageSize: 16,
@@ -423,14 +493,19 @@ function setupLoadObserver() {
   loadObserver.observe(loadSentinelRef.value)
 }
 
-watch([modality, sort, featuredOnly, topic], () => void load(true))
+watch([modality, sort, featuredOnly, topic], () => {
+  if (auth.bootstrapComplete) void load(true)
+})
 watch(
-  () => auth.token,
-  (token, prev) => {
+  [() => auth.bootstrapComplete, () => auth.token],
+  ([ready, token], [prevReady, prevToken]) => {
     resetDefaultCommunityCollectionCache()
-    if (token) void preloadDefaultCommunityCollection(token)
-    if (token !== prev) void load(true)
+    if (token) void preloadDefaultCommunityCollection(token).catch(() => undefined)
+    if (ready && (ready !== prevReady || token !== prevToken)) {
+      void load(true)
+    }
   },
+  { immediate: true },
 )
 watch([posts, hasNext, loading, loadingMore], async () => {
   await nextTick()
@@ -454,8 +529,8 @@ function handleCommunityPostUnpublished(event: Event) {
 
 onMounted(() => {
   void loadTopics()
-  void load(true)
-  if (auth.token) void preloadDefaultCommunityCollection(auth.token)
+  const sessionToken = resolveAuthToken()
+  if (sessionToken) void preloadDefaultCommunityCollection(sessionToken).catch(() => undefined)
   window.addEventListener(COMMUNITY_POST_UNPUBLISHED_EVENT, handleCommunityPostUnpublished)
   document.addEventListener("click", handleDocumentClick)
 })
@@ -608,7 +683,12 @@ onUnmounted(() => {
         <article class="post-card group">
           <div class="card-main">
             <div class="thumb">
-              <button type="button" class="card-clickable" @click="openPost(post)">
+              <button
+                v-if="!(hasMediaCover(post) && postKind(post) === 'audio')"
+                type="button"
+                class="card-clickable"
+                @click="openPost(post)"
+              >
                 <img
                   v-if="hasMediaCover(post) && postKind(post) === 'image'"
                   :src="activePostImageUrl(post)"
@@ -627,19 +707,23 @@ onUnmounted(() => {
                   preload="metadata"
                   loading="lazy"
                 />
-                <div v-else-if="hasMediaCover(post) && postKind(post) === 'audio'" class="thumb-audio">
-                  <CommunityAudioMedia
-                    :cover-url="audioMedia(post).coverUrl"
-                    :audio-url="audioMedia(post).audioUrl"
-                    :playing="playingPostId === post.id && galleryAudioPlaying"
-                    variant="card"
-                    @toggle-play="toggleCardAudio(post, $event)"
-                  />
-                </div>
                 <div v-else class="thumb-text">
                   <p>{{ cardDescription(post) || postTitle(post) }}</p>
                 </div>
               </button>
+
+              <CommunityAudioMedia
+                v-else
+                class="thumb-audio"
+                :cover-url="audioMedia(post).coverUrl"
+                :audio-url="audioMedia(post).audioUrl"
+                :playing="playingPostId === post.id && galleryAudioPlaying"
+                :progress="galleryAudioProgressFor(post.id)"
+                variant="card"
+                @toggle-play="toggleCardAudio(post)"
+                @seek="seekCardAudio"
+                @open-detail="openPost(post)"
+              />
 
               <span v-if="post.featured" class="featured-badge">
                   <Sparkles class="h-3 w-3" />
@@ -725,6 +809,16 @@ onUnmounted(() => {
       @play="onGalleryAudioPlay"
       @ended="onGalleryAudioEnded"
       @pause="onGalleryAudioPause"
+      @timeupdate="onGalleryAudioTimeUpdate"
+      @loadedmetadata="onGalleryAudioLoadedMetadata"
+    />
+
+    <CommunityCollectionPickerModal
+      :open="favoritePickerOpen"
+      :post-title="favoritePickerPost ? postTitle(favoritePickerPost) : ''"
+      :submitting="favoritePickerSubmitting"
+      @close="closeFavoritePicker"
+      @confirm="confirmFavoritePicker"
     />
   </div>
 </template>
@@ -1069,6 +1163,10 @@ onUnmounted(() => {
 
 .thumb-audio {
   display: block;
+  width: 100%;
+}
+
+.thumb-audio :deep(.community-audio-media) {
   width: 100%;
 }
 

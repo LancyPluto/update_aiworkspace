@@ -1,8 +1,11 @@
 import {
   addCommunityCollectionItem,
+  favoriteCommunityPost,
   fetchCommunityCollections,
   removeCommunityCollectionItem,
+  unfavoriteCommunityPost,
 } from "@/api/communityApi"
+import type { CommunityPost } from "@/api/types"
 
 export const COMMUNITY_POST_UNPUBLISHED_EVENT = "community:post-unpublished"
 
@@ -49,6 +52,40 @@ export async function syncFavoriteToInspirationCollection(
   } else {
     await removeCommunityCollectionItem(collectionId, postId, options)
   }
+}
+
+/** 收藏作品并加入指定收藏夹；collectionId 为空时仅收藏作品。 */
+export async function favoritePostToCollection(
+  postId: number,
+  collectionId: number | null,
+  options?: { token?: string | null },
+): Promise<CommunityPost> {
+  const updated = await favoriteCommunityPost(postId, options)
+  if (collectionId != null) {
+    await addCommunityCollectionItem(collectionId, postId, options)
+  }
+  return updated
+}
+
+/** 取消收藏，并从用户全部收藏夹移除该作品。 */
+export async function unfavoritePostFromAllCollections(
+  postId: number,
+  options?: { token?: string | null },
+): Promise<CommunityPost> {
+  const updated = await unfavoriteCommunityPost(postId, options)
+  try {
+    const result = await fetchCommunityCollections(options)
+    if (result.supported) {
+      await Promise.all(
+        result.collections.map((collection) =>
+          removeCommunityCollectionItem(collection.id, postId, options).catch(() => undefined),
+        ),
+      )
+    }
+  } catch {
+    // 取消收藏主状态已成功；清理收藏夹失败时不阻断
+  }
+  return updated
 }
 
 export async function preloadDefaultCommunityCollection(token: string | null | undefined) {

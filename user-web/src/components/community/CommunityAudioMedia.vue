@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Music, Pause, Play } from "lucide-vue-next"
+import { Music } from "lucide-vue-next"
 
 withDefaults(
   defineProps<{
@@ -7,6 +7,7 @@ withDefaults(
     audioUrl?: string
     title?: string
     playing?: boolean
+    progress?: number
     variant?: "card" | "detail"
   }>(),
   {
@@ -14,18 +15,25 @@ withDefaults(
     audioUrl: "",
     title: "",
     playing: false,
+    progress: 0,
     variant: "card",
   },
 )
 
 const emit = defineEmits<{
   togglePlay: []
+  openDetail: []
+  seek: [event: MouseEvent]
 }>()
 </script>
 
 <template>
   <div class="community-audio-media" :class="variant">
-    <div class="audio-cover-stage">
+    <div
+      class="audio-cover-stage"
+      :class="{ 'is-clickable': variant === 'card' }"
+      @click="variant === 'card' && emit('openDetail')"
+    >
       <img
         v-if="coverUrl"
         :src="coverUrl"
@@ -40,19 +48,19 @@ const emit = defineEmits<{
       <div class="audio-cover-gradient" aria-hidden="true" />
 
       <button
-        v-if="audioUrl"
+        v-if="audioUrl && variant === 'card'"
         type="button"
         class="audio-play-button"
+        :class="{ 'is-playing': playing }"
         :aria-label="playing ? '暂停' : '播放'"
         @click.stop="emit('togglePlay')"
-      >
-        <Pause v-if="playing" class="play-icon" />
-        <Play v-else class="play-icon" />
-      </button>
+      />
 
-      <span v-if="playing" class="audio-viz" aria-hidden="true">
-        <i v-for="bar in 4" :key="bar" class="audio-viz-bar" />
-      </span>
+      <div v-if="playing && variant === 'card'" class="audio-card-progress" @click.stop>
+        <button type="button" class="audio-card-track" aria-label="音频进度" @click="emit('seek', $event)">
+          <span class="audio-card-track-fill" :style="{ width: `${progress}%` }" />
+        </button>
+      </div>
     </div>
 
     <p v-if="variant === 'card' && title" class="audio-card-title">{{ title }}</p>
@@ -68,6 +76,10 @@ const emit = defineEmits<{
   position: relative;
   overflow: hidden;
   background: rgb(255 255 255 / 0.04);
+}
+
+.community-audio-media.card .audio-cover-stage.is-clickable {
+  cursor: pointer;
 }
 
 .community-audio-media.card .audio-cover-stage {
@@ -120,8 +132,6 @@ const emit = defineEmits<{
 
 .audio-play-button {
   position: absolute;
-  right: 12px;
-  bottom: 12px;
   z-index: 2;
   display: inline-flex;
   width: 44px;
@@ -134,70 +144,99 @@ const emit = defineEmits<{
   color: #111;
   box-shadow: 0 14px 30px rgb(0 0 0 / 0.32);
   cursor: pointer;
-  transition: transform 0.2s ease, opacity 0.2s ease;
+  transition:
+    transform 0.2s ease,
+    opacity 0.2s ease;
 }
 
-.community-audio-media.detail .audio-play-button {
-  right: auto;
+.community-audio-media.card .audio-play-button {
   left: 50%;
-  bottom: 28px;
-  width: 64px;
-  height: 64px;
-  transform: translateX(-50%);
+  top: 50%;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -50%) scale(0.92);
 }
 
-.community-audio-media.detail .audio-play-button:hover {
-  transform: translateX(-50%) scale(1.05);
+.community-audio-media.card:hover .audio-play-button,
+.community-audio-media.card .audio-play-button.is-playing,
+.community-audio-media.card .audio-play-button:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translate(-50%, -50%) scale(1);
 }
 
-.audio-play-button:hover {
-  transform: scale(1.05);
-}
-
-.play-icon {
-  width: 18px;
-  height: 18px;
-}
-
-.community-audio-media.detail .play-icon {
-  width: 26px;
-  height: 26px;
-}
-
-.audio-viz {
-  position: absolute;
-  left: 12px;
-  bottom: 12px;
-  z-index: 2;
-  display: flex;
-  height: 14px;
-  align-items: flex-end;
-  justify-content: center;
-  gap: 2px;
-  border-radius: 999px;
-  background: rgb(0 0 0 / 0.45);
-  padding: 0 8px;
-}
-
-.audio-viz-bar {
+.community-audio-media.card .audio-play-button::after {
+  content: "";
   display: block;
-  width: 2px;
-  min-height: 3px;
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 9px 0 9px 15px;
+  border-color: transparent transparent transparent currentColor;
+  margin-left: 4px;
+}
+
+.community-audio-media.card .audio-play-button.is-playing::after {
+  width: 14px;
+  height: 16px;
+  border: none;
+  margin-left: 0;
+  background:
+    linear-gradient(
+      to right,
+      currentColor 0,
+      currentColor 4px,
+      transparent 4px,
+      transparent 10px,
+      currentColor 10px,
+      currentColor 14px
+    );
+}
+
+.community-audio-media.card:hover .audio-play-button:hover,
+.community-audio-media.card .audio-play-button.is-playing:hover,
+.community-audio-media.card .audio-play-button:focus-visible:hover {
+  transform: translate(-50%, -50%) scale(1.05);
+}
+
+.community-audio-media.card:hover .audio-play-button:active,
+.community-audio-media.card .audio-play-button.is-playing:active {
+  transform: translate(-50%, -50%) scale(0.98);
+}
+
+.audio-card-progress {
+  position: absolute;
+  right: 10px;
+  bottom: 42px;
+  left: 10px;
+  z-index: 4;
+}
+
+.audio-card-track {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 4px;
+  overflow: hidden;
+  border: 0;
   border-radius: 999px;
-  background: #fff;
-  animation: audio-viz 760ms ease-in-out infinite;
+  background: rgb(255 255 255 / 0.16);
+  padding: 0;
+  cursor: pointer;
+  transition: height 0.16s ease, background-color 0.16s ease;
 }
 
-.audio-viz-bar:nth-child(2) {
-  animation-delay: 120ms;
+.audio-card-track:hover {
+  height: 6px;
+  background: rgb(255 255 255 / 0.22);
 }
 
-.audio-viz-bar:nth-child(3) {
-  animation-delay: 240ms;
-}
-
-.audio-viz-bar:nth-child(4) {
-  animation-delay: 360ms;
+.audio-card-track-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #a855f7, #ff3f79);
+  box-shadow: 0 0 12px rgb(168 85 247 / 0.36);
 }
 
 .audio-card-title {
@@ -210,18 +249,5 @@ const emit = defineEmits<{
   line-height: 1.4;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-@keyframes audio-viz {
-  0%,
-  100% {
-    height: 3px;
-    opacity: 0.45;
-  }
-
-  50% {
-    height: 12px;
-    opacity: 1;
-  }
 }
 </style>
