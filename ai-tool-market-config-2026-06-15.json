@@ -350,6 +350,25 @@
    "balanceCurrency": "CNY",
    "balanceLowThreshold": null,
    "enabled": true
+  },
+  {
+   "vendorCode": "agnes",
+   "channelCode": "agnes",
+   "channelLabel": "Agnes AI",
+   "channelIconAsset": null,
+   "accountName": "默认账户",
+   "accountRef": "agnes::默认账户",
+   "baseUrl": "https://apihub.agnes-ai.com/v1",
+   "apiKey": "sk-Mlk1Q1v2FYP4FrvpWyp0JV9v7Vub3tWBJneNgUcQZnxZgqpg",
+   "extraAuthJson": "",
+   "secretsRedacted": false,
+   "consoleUrl": "https://agnes-ai.com",
+   "balanceUrl": null,
+   "balanceQueryMode": null,
+   "balanceAmount": null,
+   "balanceCurrency": null,
+   "balanceLowThreshold": null,
+   "enabled": true
   }
  ],
  "modelConfigs": [
@@ -2251,6 +2270,171 @@
      "remark": "HappyHorse 1080P 1.6 CNY/s vs 720P 0.9 CNY/s"
     }
    ]
+  },
+  {
+   "displayName": "Agnes 1.5 Flash",
+   "configCode": "agnes-1.5-flash",
+   "vendorAccountRef": "agnes::默认账户",
+   "channelCode": "agnes",
+   "channelLabel": "Agnes AI",
+   "channelIconAsset": null,
+   "provider": "agnes_chat",
+   "modelName": "agnes-1.5-flash",
+   "baseUrl": null,
+   "apiKey": "",
+   "extraAuthJson": "",
+   "secretsRedacted": false,
+   "minimaxGroupId": null,
+   "consoleUrl": "https://agnes-ai.com",
+   "balanceUrl": null,
+   "docsUrl": "https://agnes-ai.com/doc/agnes-15-flash",
+   "timeoutSeconds": 60,
+   "connectTimeoutSeconds": null,
+   "readTimeoutSeconds": null,
+   "inputTokenPricePer1k": 0,
+   "outputTokenPricePer1k": 0,
+   "inputTokenPricePer1m": 0.5,
+   "outputTokenPricePer1m": 2,
+   "billingUnit": "TOKEN_PER_M",
+   "unitPrice": 0,
+   "enabled": true,
+   "agentEnabled": true,
+   "isDefault": false,
+   "capabilities": [
+    "TEXT_GENERATION"
+   ]
+  },
+  {
+   "displayName": "Agnes 2.0 Flash",
+   "configCode": "agnes-2.0-flash",
+   "vendorAccountRef": "agnes::默认账户",
+   "channelCode": "agnes",
+   "channelLabel": "Agnes AI",
+   "channelIconAsset": null,
+   "provider": "agnes_chat",
+   "modelName": "agnes-2.0-flash",
+   "baseUrl": null,
+   "apiKey": "",
+   "extraAuthJson": "",
+   "secretsRedacted": false,
+   "minimaxGroupId": null,
+   "consoleUrl": "https://agnes-ai.com",
+   "balanceUrl": null,
+   "docsUrl": "https://agnes-ai.com/doc/agnes-20-flash",
+   "timeoutSeconds": 60,
+   "connectTimeoutSeconds": null,
+   "readTimeoutSeconds": null,
+   "inputTokenPricePer1k": 0,
+   "outputTokenPricePer1k": 0,
+   "inputTokenPricePer1m": 0.8,
+   "outputTokenPricePer1m": 3,
+   "billingUnit": "TOKEN_PER_M",
+   "unitPrice": 0,
+   "enabled": true,
+   "agentEnabled": true,
+   "isDefault": false,
+   "capabilities": [
+    "TEXT_GENERATION"
+   ]
+  },
+  {
+   "displayName": "Agnes Image 2.0 Flash",
+   "configCode": "agnes-image-2.0-flash",
+   "vendorAccountRef": "agnes::默认账户",
+   "channelCode": "agnes",
+   "channelLabel": "Agnes AI",
+   "channelIconAsset": null,
+   "provider": "agnes_images",
+   "modelName": "agnes-image-2.0-flash",
+   "baseUrl": null,
+   "apiKey": "",
+   "extraAuthJson": "{\"responseFormatLocation\":\"extra_body\",\"imageInputMode\":\"jsonImageArray\",\"endpointPath\":\"/images/generations\",\"readTimeoutSeconds\":600}",
+   "secretsRedacted": false,
+   "minimaxGroupId": null,
+   "consoleUrl": "https://agnes-ai.com",
+   "balanceUrl": null,
+   "docsUrl": "https://agnes-ai.com/doc/agnes-image-20-flash",
+   "timeoutSeconds": 300,
+   "connectTimeoutSeconds": null,
+   "readTimeoutSeconds": 600,
+   "inputTokenPricePer1k": 0,
+   "outputTokenPricePer1k": 0,
+   "inputTokenPricePer1m": 0,
+   "outputTokenPricePer1m": 0,
+   "billingUnit": "IMAGE_TOKEN",
+   "unitPrice": 0,
+   "enabled": true,
+   "agentEnabled": true,
+   "isDefault": false,
+   "capabilities": [
+    "IMAGE_GENERATION"
+   ]
+  },
+  {
+   "displayName": "Agnes Image 2.1 Flash",
+   "configCode": "agnes-image-2.1-flash",
+   "vendorAccountRef": "agnes::默认账户",
+   "channelCode": "agnes",
+   "channelLabel": "Agnes AI",
+   "channelIconAsset": null,
+   "provider": "agnes_images",
+   "modelName": "agnes-image-2.1-flash",
+   "baseUrl": null,
+   "apiKey": "",
+   "extraAuthJson": "{\"responseFormatLocation\":\"extra_body\",\"imageInputMode\":\"jsonImageArray\",\"endpointPath\":\"/images/generations\",\"readTimeoutSeconds\":600}",
+   "secretsRedacted": false,
+   "minimaxGroupId": null,
+   "consoleUrl": "https://agnes-ai.com",
+   "balanceUrl": null,
+   "docsUrl": "https://agnes-ai.com/doc/agnes-image-21-flash",
+   "timeoutSeconds": 300,
+   "connectTimeoutSeconds": null,
+   "readTimeoutSeconds": 600,
+   "inputTokenPricePer1k": 0,
+   "outputTokenPricePer1k": 0,
+   "inputTokenPricePer1m": 0,
+   "outputTokenPricePer1m": 0,
+   "billingUnit": "IMAGE_TOKEN",
+   "unitPrice": 0,
+   "enabled": true,
+   "agentEnabled": true,
+   "isDefault": false,
+   "capabilities": [
+    "IMAGE_GENERATION"
+   ]
+  },
+  {
+   "displayName": "Agnes Video V2.0",
+   "configCode": "agnes-video-v2.0",
+   "vendorAccountRef": "agnes::默认账户",
+   "channelCode": "agnes",
+   "channelLabel": "Agnes AI",
+   "channelIconAsset": null,
+   "provider": "agnes_video",
+   "modelName": "agnes-video-v2.0",
+   "baseUrl": "https://apihub.agnes-ai.com",
+   "apiKey": "",
+   "extraAuthJson": "{\"createEndpointPath\":\"/v1/videos\",\"resultEndpointPath\":\"/agnesapi\",\"resultQueryMode\":\"videoIdQuery\",\"defaultNumFrames\":121,\"defaultFrameRate\":24,\"timeoutSeconds\":900}",
+   "secretsRedacted": false,
+   "minimaxGroupId": null,
+   "consoleUrl": "https://agnes-ai.com",
+   "balanceUrl": null,
+   "docsUrl": "https://agnes-ai.com/doc/agnes-video-v20",
+   "timeoutSeconds": 300,
+   "connectTimeoutSeconds": null,
+   "readTimeoutSeconds": null,
+   "inputTokenPricePer1k": 0,
+   "outputTokenPricePer1k": 0,
+   "inputTokenPricePer1m": 0,
+   "outputTokenPricePer1m": 0,
+   "billingUnit": "PER_CALL",
+   "unitPrice": 0,
+   "enabled": true,
+   "agentEnabled": false,
+   "isDefault": false,
+   "capabilities": [
+    "VIDEO_GENERATION"
+   ]
   }
  ],
  "categories": [
@@ -2473,8 +2657,8 @@
       "id": "start",
       "type": "workflowNode",
       "position": {
-       "x": 40,
-       "y": 280
+       "x": 60,
+       "y": 250
       },
       "data": {
        "title": "Start",
@@ -2494,8 +2678,8 @@
       "id": "field-input",
       "type": "workflowNode",
       "position": {
-       "x": 400,
-       "y": 280
+       "x": 440,
+       "y": 190
       },
       "data": {
        "title": "初始表单",
@@ -2522,8 +2706,8 @@
       "id": "scene-loop",
       "type": "workflowNode",
       "position": {
-       "x": 600,
-       "y": 80
+       "x": 820,
+       "y": 225
       },
       "data": {
        "title": "分镜循环",
@@ -2557,8 +2741,8 @@
       "id": "script-planner",
       "type": "workflowNode",
       "position": {
-       "x": 780,
-       "y": 280
+       "x": 1200,
+       "y": 215
       },
       "data": {
        "title": "剧本与分镜",
@@ -2595,8 +2779,8 @@
       "id": "user-input-script",
       "type": "workflowNode",
       "position": {
-       "x": 1140,
-       "y": 60
+       "x": 1580,
+       "y": 14
       },
       "data": {
        "title": "脚本意见",
@@ -2627,8 +2811,8 @@
       "id": "user-input-storyboard",
       "type": "workflowNode",
       "position": {
-       "x": 1140,
-       "y": 280
+       "x": 1580,
+       "y": 220
       },
       "data": {
        "title": "分镜意见",
@@ -2659,8 +2843,8 @@
       "id": "if-script-revision",
       "type": "workflowNode",
       "position": {
-       "x": 1500,
-       "y": 60
+       "x": 1960,
+       "y": 132
       },
       "data": {
        "title": "是否需修订",
@@ -2696,8 +2880,8 @@
       "id": "keyframe",
       "type": "workflowNode",
       "position": {
-       "x": 1500,
-       "y": 280
+       "x": 2340,
+       "y": 215
       },
       "data": {
        "title": "电影感关键帧",
@@ -2733,8 +2917,8 @@
       "id": "user-input-scene",
       "type": "workflowNode",
       "position": {
-       "x": 1860,
-       "y": 60
+       "x": 2720,
+       "y": 112
       },
       "data": {
        "title": "场景图意见",
@@ -2765,8 +2949,8 @@
       "id": "tts",
       "type": "workflowNode",
       "position": {
-       "x": 1860,
-       "y": 420
+       "x": 1580,
+       "y": 426
       },
       "data": {
        "title": "角色配音",
@@ -2797,8 +2981,8 @@
       "id": "user-input-bgm",
       "type": "workflowNode",
       "position": {
-       "x": 2220,
-       "y": 60
+       "x": 1960,
+       "y": 318
       },
       "data": {
        "title": "BGM意见",
@@ -2829,8 +3013,8 @@
       "id": "clip-video",
       "type": "workflowNode",
       "position": {
-       "x": 2220,
-       "y": 420
+       "x": 2720,
+       "y": 318
       },
       "data": {
        "title": "图生视频",
@@ -2866,8 +3050,8 @@
       "id": "compose",
       "type": "workflowNode",
       "position": {
-       "x": 2580,
-       "y": 280
+       "x": 3100,
+       "y": 225
       },
       "data": {
        "title": "字幕合成",
@@ -2907,8 +3091,8 @@
       "id": "output",
       "type": "workflowNode",
       "position": {
-       "x": 2940,
-       "y": 280
+       "x": 3480,
+       "y": 235
       },
       "data": {
        "title": "成片输出",
@@ -9409,6 +9593,313 @@
      "agentFillStrategy": "default",
      "riskLevel": "LOW",
      "sortOrder": 7
+    }
+   ],
+   "prompts": [],
+   "workflow": null
+  },
+  {
+   "toolCode": "agnes_chat",
+   "toolName": "Agnes 文本对话",
+   "categoryCode": "copy-generation",
+   "description": "基于 Agnes 2.0 Flash 的文本生成与对话，适合内容创作、改写、总结与问答。",
+   "coverUrl": null,
+   "toolType": "TEXT_GENERATION",
+   "inputModality": "TEXT",
+   "outputModality": "TEXT",
+   "configNote": "Agnes AI OpenAI 兼容对话接口，在 Agnes 厂商账户中配置 API Key 后可用。\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#6d28d9\",\"welcomeMessage\":\"\"} -->",
+   "status": "ONLINE",
+   "estimatedCreditCost": 5,
+   "modelConfigCode": "agnes-2.0-flash",
+   "executionHandler": "TEXT_GENERATION",
+   "agentEnabled": true,
+   "fields": [
+    {
+     "fieldKey": "prompt",
+     "fieldName": "聊天框",
+     "fieldType": "textarea",
+     "placeholder": null,
+     "options": {
+      "core": true
+     },
+     "optionsJson": "{\"core\": true}",
+     "required": true,
+     "executionRequired": false,
+     "userRequired": false,
+     "defaultValue": null,
+     "agentFillStrategy": "default",
+     "riskLevel": "LOW",
+     "sortOrder": 1
+    }
+   ],
+   "prompts": [
+    {
+     "promptCode": "default",
+     "promptName": "默认 Prompt",
+     "status": "ACTIVE",
+     "activeVersionNo": "tpl-agnes-chat-1",
+     "versions": [
+      {
+       "versionNo": "tpl-agnes-chat-1",
+       "systemPrompt": "你是 Agnes AI 智能助手，用专业、简洁的中文回答用户。",
+       "userPromptTemplate": "{{prompt}}",
+       "outputFormat": "MARKDOWN",
+       "status": "ACTIVE"
+      }
+     ]
+    }
+   ],
+   "workflow": null
+  },
+  {
+   "toolCode": "agnes_image",
+   "toolName": "Agnes 文生图",
+   "categoryCode": "text-to-image",
+   "description": "基于 Agnes Image 2.1 Flash 的文生图与图像编辑，支持参考图、比例与批量生成。",
+   "coverUrl": null,
+   "toolType": "IMAGE_GENERATION",
+   "inputModality": "TEXT",
+   "outputModality": "IMAGE",
+   "configNote": "Agnes AI 图像接口 /v1/images/generations，在 Agnes 厂商账户中配置 API Key 后可用。\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#6d28d9\",\"welcomeMessage\":\"\"} -->",
+   "status": "ONLINE",
+   "estimatedCreditCost": 38,
+   "modelConfigCode": "agnes-image-2.1-flash",
+   "executionHandler": "IMAGE_GENERATION",
+   "agentEnabled": true,
+   "fields": [
+    {
+     "fieldKey": "prompt",
+     "fieldName": "画面描述",
+     "fieldType": "textarea",
+     "placeholder": "描述主体、场景、光线、构图和细节",
+     "options": {
+      "core": true
+     },
+     "optionsJson": "{\"core\": true}",
+     "required": true,
+     "executionRequired": true,
+     "userRequired": false,
+     "defaultValue": null,
+     "agentFillStrategy": "infer_from_user",
+     "riskLevel": "LOW",
+     "sortOrder": 1
+    },
+    {
+     "fieldKey": "aspectRatio",
+     "fieldName": "画面比例",
+     "fieldType": "radio",
+     "placeholder": null,
+     "options": {
+      "options": [
+       {
+        "label": "1:1",
+        "value": "1:1"
+       },
+       {
+        "label": "4:3",
+        "value": "4:3"
+       },
+       {
+        "label": "3:4",
+        "value": "3:4"
+       },
+       {
+        "label": "16:9",
+        "value": "16:9"
+       },
+       {
+        "label": "9:16",
+        "value": "9:16"
+       }
+      ]
+     },
+     "optionsJson": "{\"options\": [{\"label\": \"1:1\", \"value\": \"1:1\"}, {\"label\": \"4:3\", \"value\": \"4:3\"}, {\"label\": \"3:4\", \"value\": \"3:4\"}, {\"label\": \"16:9\", \"value\": \"16:9\"}, {\"label\": \"9:16\", \"value\": \"9:16\"}]}",
+     "required": true,
+     "executionRequired": true,
+     "userRequired": true,
+     "defaultValue": null,
+     "agentFillStrategy": "default",
+     "riskLevel": "LOW",
+     "sortOrder": 2
+    },
+    {
+     "fieldKey": "count",
+     "fieldName": "生成数量",
+     "fieldType": "select",
+     "placeholder": "例如 1",
+     "options": {
+      "options": [
+       {
+        "label": "1",
+        "value": "1"
+       },
+       {
+        "label": "2",
+        "value": "2"
+       },
+       {
+        "label": "3",
+        "value": "3"
+       },
+       {
+        "label": "4",
+        "value": "4"
+       }
+      ],
+      "defaultValue": "1"
+     },
+     "optionsJson": "{\"options\": [{\"label\": \"1\", \"value\": \"1\"}, {\"label\": \"2\", \"value\": \"2\"}, {\"label\": \"3\", \"value\": \"3\"}, {\"label\": \"4\", \"value\": \"4\"}], \"defaultValue\": \"1\"}",
+     "required": true,
+     "executionRequired": true,
+     "userRequired": false,
+     "defaultValue": "1",
+     "agentFillStrategy": "default",
+     "riskLevel": "LOW",
+     "sortOrder": 3
+    },
+    {
+     "fieldKey": "image",
+     "fieldName": "参考图",
+     "fieldType": "multi_image",
+     "placeholder": null,
+     "options": {},
+     "optionsJson": "{}",
+     "required": false,
+     "executionRequired": false,
+     "userRequired": false,
+     "defaultValue": null,
+     "agentFillStrategy": "infer_from_user",
+     "riskLevel": "LOW",
+     "sortOrder": 4
+    }
+   ],
+   "prompts": [
+    {
+     "promptCode": "default",
+     "promptName": "默认 Prompt",
+     "status": "ACTIVE",
+     "activeVersionNo": "tpl-agnes-image-1",
+     "versions": [
+      {
+       "versionNo": "tpl-agnes-image-1",
+       "systemPrompt": null,
+       "userPromptTemplate": "画面描述：{{prompt}}\n画面比例：{{aspectRatio}}\n生成数量：{{count}}",
+       "outputFormat": "MARKDOWN",
+       "status": "ACTIVE"
+      }
+     ]
+    }
+   ],
+   "workflow": null
+  },
+  {
+   "toolCode": "agnes_video",
+   "toolName": "Agnes 视频生成",
+   "categoryCode": "text-to-video",
+   "description": "基于 Agnes Video V2.0 的文/图生视频，音画同步异步生成。",
+   "coverUrl": null,
+   "toolType": "VIDEO_GENERATION",
+   "inputModality": "TEXT",
+   "outputModality": "VIDEO",
+   "configNote": "Agnes AI 视频接口 /v1/videos 异步生成、video_id 轮询，在 Agnes 厂商账户中配置 API Key 后可用。\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#6d28d9\",\"welcomeMessage\":\"\"} -->",
+   "status": "ONLINE",
+   "estimatedCreditCost": 120,
+   "modelConfigCode": "agnes-video-v2.0",
+   "executionHandler": "VIDEO_GENERATION",
+   "agentEnabled": true,
+   "fields": [
+    {
+     "fieldKey": "prompt",
+     "fieldName": "提示词",
+     "fieldType": "textarea",
+     "placeholder": "描述主体、动作、场景、镜头",
+     "options": {
+      "maxLength": 1200,
+      "core": true
+     },
+     "optionsJson": "{\"maxLength\":1200,\"core\":true}",
+     "required": true,
+     "executionRequired": true,
+     "userRequired": true,
+     "defaultValue": null,
+     "agentFillStrategy": "default",
+     "riskLevel": "LOW",
+     "sortOrder": 1
+    },
+    {
+     "fieldKey": "image",
+     "fieldName": "参考图",
+     "fieldType": "multi_image",
+     "placeholder": null,
+     "options": {},
+     "optionsJson": "{}",
+     "required": false,
+     "executionRequired": false,
+     "userRequired": false,
+     "defaultValue": null,
+     "agentFillStrategy": "infer_from_user",
+     "riskLevel": "LOW",
+     "sortOrder": 2
+    },
+    {
+     "fieldKey": "ratio",
+     "fieldName": "比例",
+     "fieldType": "aspect_ratio",
+     "placeholder": "选择视频画面比例",
+     "options": [
+      {
+       "label": "智能",
+       "value": "auto"
+      },
+      {
+       "label": "9:16",
+       "value": "9:16"
+      },
+      {
+       "label": "1:1",
+       "value": "1:1"
+      },
+      {
+       "label": "4:3",
+       "value": "4:3"
+      },
+      {
+       "label": "16:9",
+       "value": "16:9"
+      }
+     ],
+     "optionsJson": "[{\"label\": \"智能\", \"value\": \"auto\"}, {\"label\": \"9:16\", \"value\": \"9:16\"}, {\"label\": \"1:1\", \"value\": \"1:1\"}, {\"label\": \"4:3\", \"value\": \"4:3\"}, {\"label\": \"16:9\", \"value\": \"16:9\"}]",
+     "required": true,
+     "executionRequired": true,
+     "userRequired": true,
+     "defaultValue": "16:9",
+     "agentFillStrategy": "default",
+     "riskLevel": "LOW",
+     "sortOrder": 3
+    },
+    {
+     "fieldKey": "duration",
+     "fieldName": "时长",
+     "fieldType": "select",
+     "placeholder": "选择视频时长",
+     "options": [
+      {
+       "label": "5 秒",
+       "value": "5"
+      },
+      {
+       "label": "10 秒",
+       "value": "10"
+      }
+     ],
+     "optionsJson": "[{\"label\": \"5 秒\", \"value\": \"5\"}, {\"label\": \"10 秒\", \"value\": \"10\"}]",
+     "required": true,
+     "executionRequired": true,
+     "userRequired": true,
+     "defaultValue": "5",
+     "agentFillStrategy": "default",
+     "riskLevel": "LOW",
+     "sortOrder": 4
     }
    ],
    "prompts": [],

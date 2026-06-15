@@ -32,6 +32,16 @@ public interface ToolWorkflowMapper extends BaseMapper<ToolWorkflow> {
         }
         workflow.setCreatedBy(operatorId);
         workflow.setUpdatedBy(operatorId);
+        // createdAt/updatedAt 标注了 @TableField(fill=INSERT)，但项目未注册 MetaObjectHandler，
+        // MyBatis-Plus 会把它们当作 NULL 写入（列为 NOT NULL）→ "created_at cannot be null"。
+        // 显式赋值以兜底（配置包导入工作流即依赖此路径）。
+        java.time.LocalDateTime now = java.time.LocalDateTime.now();
+        if (workflow.getCreatedAt() == null) {
+            workflow.setCreatedAt(now);
+        }
+        if (workflow.getUpdatedAt() == null) {
+            workflow.setUpdatedAt(now);
+        }
         insert(workflow);
         return workflow.getId();
     }

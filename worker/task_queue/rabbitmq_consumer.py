@@ -83,7 +83,7 @@ class RabbitMqConsumer:
         except Exception as exc:
             # pika is not thread-safe: schedule ack/nack/publish back onto the IO thread.
             connection.add_callback_threadsafe(
-                lambda: self._handle_task_exception(channel, method, properties, body, exc)
+                lambda exc=exc: self._handle_task_exception(channel, method, properties, body, exc)
             )
             return
         connection.add_callback_threadsafe(lambda: self._ack(channel, method.delivery_tag))
