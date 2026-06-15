@@ -27,10 +27,10 @@
   "platform.description": "一站式 AI 运营助手，帮助企业提升内容生产与运营效率。",
   "platform.name": "AI 工具超市",
   "pricingDisclaimer": "价格与可用模型以可灵官方控制台与账单为准。含密钥时勿提交 Git。",
-  "scope": "可灵视频模型全集（Omni + 文生视频 + 图生视频 + 多图参考 + 动作控制）",
+  "scope": "可灵网关配置（6 任务类型 + 表单 model 版本选择）",
   "security.allowedCors": "http://127.0.0.1:5173\nhttp://127.0.0.1:5174",
   "security.jwtHours": "24",
-  "source": "kling image tools generated from current configured models",
+  "source": "kling gateway consolidation patch",
   "sourceDoc": "可灵模型配置.md",
   "sourceVariant": "tools-unbound-model-config",
   "system.maintenanceMode": "false",
@@ -373,40 +373,6 @@
  ],
  "modelConfigs": [
   {
-   "displayName": "可灵 V3 Omni",
-   "configCode": "kling-v3-omni",
-   "vendorAccountRef": "kling::默认账户",
-   "channelCode": null,
-   "channelLabel": null,
-   "channelIconAsset": null,
-   "provider": "kling_video",
-   "modelName": "kling-v3",
-   "baseUrl": "https://api-beijing.klingai.com",
-   "apiKey": "",
-   "extraAuthJson": "",
-   "secretsRedacted": false,
-   "minimaxGroupId": null,
-   "consoleUrl": "https://app.klingai.com/cn/dev/api-key",
-   "balanceUrl": "https://app.klingai.com/cn/dev/resource-pack",
-   "docsUrl": "https://www.klingai.com/document-api/apiReference/model/OmniVideo",
-   "timeoutSeconds": 294,
-   "connectTimeoutSeconds": null,
-   "readTimeoutSeconds": null,
-   "inputTokenPricePer1k": 0,
-   "outputTokenPricePer1k": 0,
-   "inputTokenPricePer1m": 0,
-   "outputTokenPricePer1m": 0,
-   "billingUnit": "PER_CALL",
-   "unitPrice": 3,
-   "enabled": true,
-   "agentEnabled": false,
-   "isDefault": false,
-   "capabilities": [
-    "VIDEO_GENERATION",
-    "IMAGE_GENERATION"
-   ]
-  },
-  {
    "displayName": "SunoV5_5",
    "configCode": "SunoV5_5",
    "vendorAccountRef": "suno_music::账户1",
@@ -533,72 +499,6 @@
    "unitPrice": 0.25,
    "enabled": true,
    "agentEnabled": true,
-   "isDefault": false,
-   "capabilities": [
-    "IMAGE_GENERATION"
-   ]
-  },
-  {
-   "displayName": "可灵图生视频 v2-6",
-   "configCode": "kling_image_to_video",
-   "vendorAccountRef": "kling::默认账户",
-   "channelCode": null,
-   "channelLabel": null,
-   "channelIconAsset": null,
-   "provider": "kling_video",
-   "modelName": "kling-v2-6",
-   "baseUrl": "https://api-beijing.klingai.com",
-   "apiKey": "",
-   "extraAuthJson": "",
-   "secretsRedacted": false,
-   "minimaxGroupId": null,
-   "consoleUrl": "https://klingai.com/dev/api-key",
-   "balanceUrl": "https://klingai.com/dev/usage-billing",
-   "docsUrl": "https://klingai.com/document-api/apiReference/model/imageToVideo",
-   "timeoutSeconds": 299,
-   "connectTimeoutSeconds": null,
-   "readTimeoutSeconds": null,
-   "inputTokenPricePer1k": 0,
-   "outputTokenPricePer1k": 0,
-   "inputTokenPricePer1m": 0,
-   "outputTokenPricePer1m": 0,
-   "billingUnit": "PER_CALL",
-   "unitPrice": 2,
-   "enabled": true,
-   "agentEnabled": false,
-   "isDefault": false,
-   "capabilities": [
-    "VIDEO_GENERATION"
-   ]
-  },
-  {
-   "displayName": "可灵生图 v2-1",
-   "configCode": "8",
-   "vendorAccountRef": "kling::默认账户",
-   "channelCode": null,
-   "channelLabel": null,
-   "channelIconAsset": null,
-   "provider": "kling_video",
-   "modelName": "kling-v2-1",
-   "baseUrl": "https://api-beijing.klingai.com",
-   "apiKey": "",
-   "extraAuthJson": "",
-   "secretsRedacted": false,
-   "minimaxGroupId": null,
-   "consoleUrl": "https://klingai.com/dev/usage-billing",
-   "balanceUrl": "https://klingai.com/dev/resource-pack-manage",
-   "docsUrl": "https://klingai.com/document-api/apiReference/model/imageModels",
-   "timeoutSeconds": 60,
-   "connectTimeoutSeconds": null,
-   "readTimeoutSeconds": null,
-   "inputTokenPricePer1k": 0,
-   "outputTokenPricePer1k": 0,
-   "inputTokenPricePer1m": 0,
-   "outputTokenPricePer1m": 0,
-   "billingUnit": "PER_CALL",
-   "unitPrice": 0.019998,
-   "enabled": true,
-   "agentEnabled": false,
    "isDefault": false,
    "capabilities": [
     "IMAGE_GENERATION"
@@ -1070,74 +970,6 @@
    ]
   },
   {
-   "displayName": "可灵 V1 图生视频",
-   "configCode": "kling-v1-image-to-video",
-   "vendorAccountRef": "kling::默认账户",
-   "channelCode": null,
-   "channelLabel": null,
-   "channelIconAsset": null,
-   "provider": "kling_video",
-   "modelName": "kling-v1",
-   "baseUrl": "https://api-beijing.klingai.com",
-   "apiKey": "",
-   "extraAuthJson": "",
-   "secretsRedacted": false,
-   "minimaxGroupId": null,
-   "consoleUrl": "https://app.klingai.com/cn/dev/api-key",
-   "balanceUrl": "https://app.klingai.com/cn/dev/resource-pack",
-   "docsUrl": "https://www.klingai.com/document-api/apiReference/model/KlingV1",
-   "timeoutSeconds": 300,
-   "connectTimeoutSeconds": null,
-   "readTimeoutSeconds": null,
-   "inputTokenPricePer1k": 0,
-   "outputTokenPricePer1k": 0,
-   "inputTokenPricePer1m": 0,
-   "outputTokenPricePer1m": 0,
-   "billingUnit": "PER_CALL",
-   "unitPrice": 3,
-   "enabled": true,
-   "agentEnabled": false,
-   "isDefault": false,
-   "capabilities": [
-    "VIDEO_GENERATION",
-    "IMAGE_GENERATION"
-   ]
-  },
-  {
-   "displayName": "可灵 V2 Master 图生视频",
-   "configCode": "kling-v2-master-image-to-video",
-   "vendorAccountRef": "kling::默认账户",
-   "channelCode": null,
-   "channelLabel": null,
-   "channelIconAsset": null,
-   "provider": "kling_video",
-   "modelName": "kling-v2-master",
-   "baseUrl": "https://api-beijing.klingai.com",
-   "apiKey": "",
-   "extraAuthJson": "",
-   "secretsRedacted": false,
-   "minimaxGroupId": null,
-   "consoleUrl": "https://app.klingai.com/cn/dev/api-key",
-   "balanceUrl": "https://app.klingai.com/cn/dev/resource-pack",
-   "docsUrl": "https://www.klingai.com/document-api/apiReference/model/KlingV2",
-   "timeoutSeconds": 300,
-   "connectTimeoutSeconds": null,
-   "readTimeoutSeconds": null,
-   "inputTokenPricePer1k": 0,
-   "outputTokenPricePer1k": 0,
-   "inputTokenPricePer1m": 0,
-   "outputTokenPricePer1m": 0,
-   "billingUnit": "PER_CALL",
-   "unitPrice": 3,
-   "enabled": true,
-   "agentEnabled": false,
-   "isDefault": false,
-   "capabilities": [
-    "VIDEO_GENERATION",
-    "IMAGE_GENERATION"
-   ]
-  },
-  {
    "displayName": "通义千问 3.5 Flash",
    "configCode": "aliyun-qwen3-5-flash",
    "vendorAccountRef": "qwen::默认账户",
@@ -1535,443 +1367,6 @@
     "IMAGE_GENERATION",
     "DIGITAL_HUMAN"
    ]
-  },
-  {
-   "displayName": "可灵生图 V1",
-   "configCode": "kling-image-generation-v1-model",
-   "vendorAccountRef": "kling::默认账户",
-   "channelCode": null,
-   "channelLabel": null,
-   "channelIconAsset": null,
-   "provider": "kling_video",
-   "modelName": "kling-v1",
-   "baseUrl": "https://api-beijing.klingai.com",
-   "apiKey": "",
-   "extraAuthJson": "",
-   "secretsRedacted": false,
-   "minimaxGroupId": null,
-   "consoleUrl": "https://app.klingai.com/cn/dev/api-key",
-   "balanceUrl": "https://app.klingai.com/cn/dev/resource-pack",
-   "docsUrl": "https://www.klingai.com/document-api/apiReference/model/KlingV1",
-   "timeoutSeconds": 300,
-   "connectTimeoutSeconds": null,
-   "readTimeoutSeconds": null,
-   "inputTokenPricePer1k": 0,
-   "outputTokenPricePer1k": 0,
-   "inputTokenPricePer1m": 0,
-   "outputTokenPricePer1m": 0,
-   "billingUnit": "PER_CALL",
-   "unitPrice": 0.019998,
-   "enabled": true,
-   "agentEnabled": false,
-   "isDefault": false,
-   "capabilities": [
-    "IMAGE_GENERATION"
-   ]
-  },
-  {
-   "displayName": "可灵生图 V3",
-   "configCode": "kling-image-generation-v3-model",
-   "vendorAccountRef": "kling::默认账户",
-   "channelCode": null,
-   "channelLabel": null,
-   "channelIconAsset": null,
-   "provider": "kling_video",
-   "modelName": "kling-v3",
-   "baseUrl": "https://api-beijing.klingai.com",
-   "apiKey": "",
-   "extraAuthJson": "",
-   "secretsRedacted": false,
-   "minimaxGroupId": null,
-   "consoleUrl": "https://app.klingai.com/cn/dev/api-key",
-   "balanceUrl": "https://app.klingai.com/cn/dev/resource-pack",
-   "docsUrl": "https://www.klingai.com/document-api/apiReference/model/OmniVideo",
-   "timeoutSeconds": 294,
-   "connectTimeoutSeconds": null,
-   "readTimeoutSeconds": null,
-   "inputTokenPricePer1k": 0,
-   "outputTokenPricePer1k": 0,
-   "inputTokenPricePer1m": 0,
-   "outputTokenPricePer1m": 0,
-   "billingUnit": "PER_CALL",
-   "unitPrice": 0.019998,
-   "enabled": true,
-   "agentEnabled": false,
-   "isDefault": false,
-   "capabilities": [
-    "IMAGE_GENERATION"
-   ]
-  },
-  {
-   "displayName": "可灵 V1.5 图生视频",
-   "configCode": "kling-v1-5-image-to-video",
-   "provider": "kling_video",
-   "modelName": "kling-v1",
-   "baseUrl": "https://api-beijing.klingai.com",
-   "apiKey": "",
-   "extraAuthJson": "{\"taskType\":\"image2video\",\"accessKey\":\"ADp4YdKAPmnKeHhEHdFaEpnygPpdYYF3\",\"secretKey\":\"YTQ3KNB3FRABGdrftGYDeyLhTramy4Ly\"}",
-   "secretsRedacted": false,
-   "minimaxGroupId": null,
-   "consoleUrl": "https://app.klingai.com/cn/dev/api-key",
-   "balanceUrl": "https://app.klingai.com/cn/dev/resource-pack",
-   "docsUrl": "https://www.klingai.com/document-api/apiReference/model/KlingV1dot5",
-   "timeoutSeconds": 300,
-   "connectTimeoutSeconds": null,
-   "readTimeoutSeconds": null,
-   "inputTokenPricePer1k": 0,
-   "outputTokenPricePer1k": 0,
-   "inputTokenPricePer1m": 0,
-   "outputTokenPricePer1m": 0,
-   "billingUnit": "PER_CALL",
-   "unitPrice": 3,
-   "enabled": true,
-   "agentEnabled": false,
-   "isDefault": false,
-   "capabilities": [
-    "VIDEO_GENERATION",
-    "IMAGE_GENERATION"
-   ],
-   "channelCode": "kling",
-   "channelLabel": "可灵 Kling",
-   "channelIconAsset": "kling",
-   "vendorAccountRef": "kling::默认账户"
-  },
-  {
-   "displayName": "可灵 V1.6 图生视频",
-   "configCode": "kling-v1-6-image-to-video",
-   "provider": "kling_video",
-   "modelName": "kling-v1",
-   "baseUrl": "https://api-beijing.klingai.com",
-   "apiKey": "",
-   "extraAuthJson": "{\"taskType\":\"image2video\",\"accessKey\":\"ADp4YdKAPmnKeHhEHdFaEpnygPpdYYF3\",\"secretKey\":\"YTQ3KNB3FRABGdrftGYDeyLhTramy4Ly\"}",
-   "secretsRedacted": false,
-   "minimaxGroupId": null,
-   "consoleUrl": "https://app.klingai.com/cn/dev/api-key",
-   "balanceUrl": "https://app.klingai.com/cn/dev/resource-pack",
-   "docsUrl": "https://www.klingai.com/document-api/apiReference/model/KlingV1dot6",
-   "timeoutSeconds": 300,
-   "connectTimeoutSeconds": null,
-   "readTimeoutSeconds": null,
-   "inputTokenPricePer1k": 0,
-   "outputTokenPricePer1k": 0,
-   "inputTokenPricePer1m": 0,
-   "outputTokenPricePer1m": 0,
-   "billingUnit": "PER_CALL",
-   "unitPrice": 3,
-   "enabled": true,
-   "agentEnabled": false,
-   "isDefault": false,
-   "capabilities": [
-    "VIDEO_GENERATION",
-    "IMAGE_GENERATION"
-   ],
-   "channelCode": "kling",
-   "channelLabel": "可灵 Kling",
-   "channelIconAsset": "kling",
-   "vendorAccountRef": "kling::默认账户"
-  },
-  {
-   "displayName": "可灵 V2.1 图生视频",
-   "configCode": "kling-v2-1-image-to-video",
-   "provider": "kling_video",
-   "modelName": "kling-v2-master",
-   "baseUrl": "https://api-beijing.klingai.com",
-   "apiKey": "",
-   "extraAuthJson": "{\"taskType\":\"image2video\",\"accessKey\":\"ADp4YdKAPmnKeHhEHdFaEpnygPpdYYF3\",\"secretKey\":\"YTQ3KNB3FRABGdrftGYDeyLhTramy4Ly\"}",
-   "secretsRedacted": false,
-   "minimaxGroupId": null,
-   "consoleUrl": "https://app.klingai.com/cn/dev/api-key",
-   "balanceUrl": "https://app.klingai.com/cn/dev/resource-pack",
-   "docsUrl": "https://www.klingai.com/document-api/apiReference/model/KlingV2dot1",
-   "timeoutSeconds": 300,
-   "connectTimeoutSeconds": null,
-   "readTimeoutSeconds": null,
-   "inputTokenPricePer1k": 0,
-   "outputTokenPricePer1k": 0,
-   "inputTokenPricePer1m": 0,
-   "outputTokenPricePer1m": 0,
-   "billingUnit": "PER_CALL",
-   "unitPrice": 3,
-   "enabled": true,
-   "agentEnabled": false,
-   "isDefault": false,
-   "capabilities": [
-    "VIDEO_GENERATION",
-    "IMAGE_GENERATION"
-   ],
-   "channelCode": "kling",
-   "channelLabel": "可灵 Kling",
-   "channelIconAsset": "kling",
-   "vendorAccountRef": "kling::默认账户"
-  },
-  {
-   "displayName": "可灵 V2.1 Master 图生视频",
-   "configCode": "kling-v2-1-master-image-to-video",
-   "provider": "kling_video",
-   "modelName": "kling-v2-master",
-   "baseUrl": "https://api-beijing.klingai.com",
-   "apiKey": "",
-   "extraAuthJson": "{\"taskType\":\"image2video\",\"accessKey\":\"ADp4YdKAPmnKeHhEHdFaEpnygPpdYYF3\",\"secretKey\":\"YTQ3KNB3FRABGdrftGYDeyLhTramy4Ly\"}",
-   "secretsRedacted": false,
-   "minimaxGroupId": null,
-   "consoleUrl": "https://app.klingai.com/cn/dev/api-key",
-   "balanceUrl": "https://app.klingai.com/cn/dev/resource-pack",
-   "docsUrl": "https://www.klingai.com/document-api/apiReference/model/KlingV2dot1",
-   "timeoutSeconds": 300,
-   "connectTimeoutSeconds": null,
-   "readTimeoutSeconds": null,
-   "inputTokenPricePer1k": 0,
-   "outputTokenPricePer1k": 0,
-   "inputTokenPricePer1m": 0,
-   "outputTokenPricePer1m": 0,
-   "billingUnit": "PER_CALL",
-   "unitPrice": 3,
-   "enabled": true,
-   "agentEnabled": false,
-   "isDefault": false,
-   "capabilities": [
-    "VIDEO_GENERATION",
-    "IMAGE_GENERATION"
-   ],
-   "channelCode": "kling",
-   "channelLabel": "可灵 Kling",
-   "channelIconAsset": "kling",
-   "vendorAccountRef": "kling::默认账户"
-  },
-  {
-   "displayName": "可灵 V2.5 Turbo 图生视频",
-   "configCode": "kling-v2-5-turbo-image-to-video",
-   "provider": "kling_video",
-   "modelName": "kling-v2-master",
-   "baseUrl": "https://api-beijing.klingai.com",
-   "apiKey": "",
-   "extraAuthJson": "{\"taskType\":\"image2video\",\"accessKey\":\"ADp4YdKAPmnKeHhEHdFaEpnygPpdYYF3\",\"secretKey\":\"YTQ3KNB3FRABGdrftGYDeyLhTramy4Ly\"}",
-   "secretsRedacted": false,
-   "minimaxGroupId": null,
-   "consoleUrl": "https://app.klingai.com/cn/dev/api-key",
-   "balanceUrl": "https://app.klingai.com/cn/dev/resource-pack",
-   "docsUrl": "https://www.klingai.com/document-api/apiReference/model/KlingV2dot5",
-   "timeoutSeconds": 300,
-   "connectTimeoutSeconds": null,
-   "readTimeoutSeconds": null,
-   "inputTokenPricePer1k": 0,
-   "outputTokenPricePer1k": 0,
-   "inputTokenPricePer1m": 0,
-   "outputTokenPricePer1m": 0,
-   "billingUnit": "PER_CALL",
-   "unitPrice": 3,
-   "enabled": true,
-   "agentEnabled": false,
-   "isDefault": false,
-   "capabilities": [
-    "VIDEO_GENERATION",
-    "IMAGE_GENERATION"
-   ],
-   "channelCode": "kling",
-   "channelLabel": "可灵 Kling",
-   "channelIconAsset": "kling",
-   "vendorAccountRef": "kling::默认账户"
-  },
-  {
-   "displayName": "可灵 V2.6 动作控制",
-   "configCode": "kling-v2-6-motion-control",
-   "provider": "kling_video",
-   "modelName": "kling-v2-master",
-   "baseUrl": "https://api-beijing.klingai.com",
-   "apiKey": "",
-   "extraAuthJson": "{\"taskType\":\"motion_control\",\"accessKey\":\"ADp4YdKAPmnKeHhEHdFaEpnygPpdYYF3\",\"secretKey\":\"YTQ3KNB3FRABGdrftGYDeyLhTramy4Ly\"}",
-   "secretsRedacted": false,
-   "minimaxGroupId": null,
-   "consoleUrl": "https://app.klingai.com/cn/dev/api-key",
-   "balanceUrl": "https://app.klingai.com/cn/dev/resource-pack",
-   "docsUrl": "https://www.klingai.com/document-api/apiReference/model/KlingV2dot6",
-   "timeoutSeconds": 300,
-   "connectTimeoutSeconds": null,
-   "readTimeoutSeconds": null,
-   "inputTokenPricePer1k": 0,
-   "outputTokenPricePer1k": 0,
-   "inputTokenPricePer1m": 0,
-   "outputTokenPricePer1m": 0,
-   "billingUnit": "PER_CALL",
-   "unitPrice": 3,
-   "enabled": true,
-   "agentEnabled": false,
-   "isDefault": false,
-   "capabilities": [
-    "VIDEO_GENERATION"
-   ],
-   "channelCode": "kling",
-   "channelLabel": "可灵 Kling",
-   "channelIconAsset": "kling",
-   "vendorAccountRef": "kling::默认账户"
-  },
-  {
-   "displayName": "可灵 V2.6 图生视频",
-   "configCode": "kling-v2-6-image-to-video",
-   "provider": "kling_video",
-   "modelName": "kling-v2-master",
-   "baseUrl": "https://api-beijing.klingai.com",
-   "apiKey": "",
-   "extraAuthJson": "{\"taskType\":\"image2video\",\"accessKey\":\"ADp4YdKAPmnKeHhEHdFaEpnygPpdYYF3\",\"secretKey\":\"YTQ3KNB3FRABGdrftGYDeyLhTramy4Ly\"}",
-   "secretsRedacted": false,
-   "minimaxGroupId": null,
-   "consoleUrl": "https://app.klingai.com/cn/dev/api-key",
-   "balanceUrl": "https://app.klingai.com/cn/dev/resource-pack",
-   "docsUrl": "https://www.klingai.com/document-api/apiReference/model/KlingV2dot6",
-   "timeoutSeconds": 300,
-   "connectTimeoutSeconds": null,
-   "readTimeoutSeconds": null,
-   "inputTokenPricePer1k": 0,
-   "outputTokenPricePer1k": 0,
-   "inputTokenPricePer1m": 0,
-   "outputTokenPricePer1m": 0,
-   "billingUnit": "PER_CALL",
-   "unitPrice": 3,
-   "enabled": true,
-   "agentEnabled": false,
-   "isDefault": false,
-   "capabilities": [
-    "VIDEO_GENERATION",
-    "IMAGE_GENERATION"
-   ],
-   "channelCode": "kling",
-   "channelLabel": "可灵 Kling",
-   "channelIconAsset": "kling",
-   "vendorAccountRef": "kling::默认账户"
-  },
-  {
-   "displayName": "可灵 V3 动作控制",
-   "configCode": "kling-v3-motion-control",
-   "provider": "kling_video",
-   "modelName": "kling-v3",
-   "baseUrl": "https://api-beijing.klingai.com",
-   "apiKey": "",
-   "extraAuthJson": "{\"taskType\":\"motion_control\",\"accessKey\":\"ADp4YdKAPmnKeHhEHdFaEpnygPpdYYF3\",\"secretKey\":\"YTQ3KNB3FRABGdrftGYDeyLhTramy4Ly\"}",
-   "secretsRedacted": false,
-   "minimaxGroupId": null,
-   "consoleUrl": "https://app.klingai.com/cn/dev/api-key",
-   "balanceUrl": "https://app.klingai.com/cn/dev/resource-pack",
-   "docsUrl": "https://www.klingai.com/document-api/apiReference/model/KlingV3",
-   "timeoutSeconds": 300,
-   "connectTimeoutSeconds": null,
-   "readTimeoutSeconds": null,
-   "inputTokenPricePer1k": 0,
-   "outputTokenPricePer1k": 0,
-   "inputTokenPricePer1m": 0,
-   "outputTokenPricePer1m": 0,
-   "billingUnit": "PER_CALL",
-   "unitPrice": 3,
-   "enabled": true,
-   "agentEnabled": false,
-   "isDefault": false,
-   "capabilities": [
-    "VIDEO_GENERATION"
-   ],
-   "channelCode": "kling",
-   "channelLabel": "可灵 Kling",
-   "channelIconAsset": "kling",
-   "vendorAccountRef": "kling::默认账户"
-  },
-  {
-   "displayName": "可灵 V3 图生视频",
-   "configCode": "kling-v3-image-to-video",
-   "provider": "kling_video",
-   "modelName": "kling-v3",
-   "baseUrl": "https://api-beijing.klingai.com",
-   "apiKey": "",
-   "extraAuthJson": "{\"taskType\":\"image2video\",\"accessKey\":\"ADp4YdKAPmnKeHhEHdFaEpnygPpdYYF3\",\"secretKey\":\"YTQ3KNB3FRABGdrftGYDeyLhTramy4Ly\"}",
-   "secretsRedacted": false,
-   "minimaxGroupId": null,
-   "consoleUrl": "https://app.klingai.com/cn/dev/api-key",
-   "balanceUrl": "https://app.klingai.com/cn/dev/resource-pack",
-   "docsUrl": "https://www.klingai.com/document-api/apiReference/model/KlingV3",
-   "timeoutSeconds": 300,
-   "connectTimeoutSeconds": null,
-   "readTimeoutSeconds": null,
-   "inputTokenPricePer1k": 0,
-   "outputTokenPricePer1k": 0,
-   "inputTokenPricePer1m": 0,
-   "outputTokenPricePer1m": 0,
-   "billingUnit": "PER_CALL",
-   "unitPrice": 3,
-   "enabled": true,
-   "agentEnabled": false,
-   "isDefault": false,
-   "capabilities": [
-    "VIDEO_GENERATION",
-    "IMAGE_GENERATION"
-   ],
-   "channelCode": "kling",
-   "channelLabel": "可灵 Kling",
-   "channelIconAsset": "kling",
-   "vendorAccountRef": "kling::默认账户"
-  },
-  {
-   "displayName": "可灵 V3 文生视频",
-   "configCode": "kling-v3-text-to-video",
-   "provider": "kling_video",
-   "modelName": "kling-v3",
-   "baseUrl": "https://api-beijing.klingai.com",
-   "apiKey": "",
-   "extraAuthJson": "{\"taskType\":\"text2video\",\"accessKey\":\"ADp4YdKAPmnKeHhEHdFaEpnygPpdYYF3\",\"secretKey\":\"YTQ3KNB3FRABGdrftGYDeyLhTramy4Ly\"}",
-   "secretsRedacted": false,
-   "minimaxGroupId": null,
-   "consoleUrl": "https://app.klingai.com/cn/dev/api-key",
-   "balanceUrl": "https://app.klingai.com/cn/dev/resource-pack",
-   "docsUrl": "https://www.klingai.com/document-api/apiReference/model/KlingV3",
-   "timeoutSeconds": 300,
-   "connectTimeoutSeconds": null,
-   "readTimeoutSeconds": null,
-   "inputTokenPricePer1k": 0,
-   "outputTokenPricePer1k": 0,
-   "inputTokenPricePer1m": 0,
-   "outputTokenPricePer1m": 0,
-   "billingUnit": "PER_CALL",
-   "unitPrice": 3,
-   "enabled": true,
-   "agentEnabled": false,
-   "isDefault": false,
-   "capabilities": [
-    "VIDEO_GENERATION"
-   ],
-   "channelCode": "kling",
-   "channelLabel": "可灵 Kling",
-   "channelIconAsset": "kling",
-   "vendorAccountRef": "kling::默认账户"
-  },
-  {
-   "displayName": "可灵 Video O1 Omni",
-   "configCode": "kling-video-o1-omni",
-   "provider": "kling_video",
-   "modelName": "kling-v3",
-   "baseUrl": "https://api-beijing.klingai.com",
-   "apiKey": "",
-   "extraAuthJson": "{\"authHint\":\"extraAuthJson配置accessKey/secretKey\",\"accessKey\":\"ADp4YdKAPmnKeHhEHdFaEpnygPpdYYF3\",\"secretKey\":\"YTQ3KNB3FRABGdrftGYDeyLhTramy4Ly\"}",
-   "secretsRedacted": false,
-   "minimaxGroupId": null,
-   "consoleUrl": "https://app.klingai.com/cn/dev/api-key",
-   "balanceUrl": "https://app.klingai.com/cn/dev/resource-pack",
-   "docsUrl": "https://www.klingai.com/document-api/apiReference/model/OmniVideo",
-   "timeoutSeconds": 300,
-   "connectTimeoutSeconds": null,
-   "readTimeoutSeconds": null,
-   "inputTokenPricePer1k": 0,
-   "outputTokenPricePer1k": 0,
-   "inputTokenPricePer1m": 0,
-   "outputTokenPricePer1m": 0,
-   "billingUnit": "PER_CALL",
-   "unitPrice": 3,
-   "enabled": true,
-   "agentEnabled": false,
-   "isDefault": false,
-   "capabilities": [
-    "VIDEO_GENERATION",
-    "IMAGE_GENERATION"
-   ],
-   "channelCode": "kling",
-   "channelLabel": "可灵 Kling",
-   "channelIconAsset": "kling",
-   "vendorAccountRef": "kling::默认账户"
   },
   {
    "displayName": "SF Z-Image Turbo",
@@ -2434,6 +1829,392 @@
    "isDefault": false,
    "capabilities": [
     "VIDEO_GENERATION"
+   ]
+  },
+  {
+   "displayName": "可灵 · 文生视频",
+   "configCode": "kling-gateway-text-to-video",
+   "vendorAccountRef": "kling::默认账户",
+   "channelCode": "kling",
+   "channelLabel": "可灵 Kling",
+   "channelIconAsset": "kling",
+   "provider": "kling_video",
+   "modelName": "kling-v3",
+   "baseUrl": "https://api-beijing.klingai.com",
+   "apiKey": "",
+   "extraAuthJson": "{\"apiTask\": \"text2video\", \"createPath\": \"/v1/videos/text2video\", \"resultPath\": \"/v1/videos/text2video/{task_id}\"}",
+   "secretsRedacted": false,
+   "minimaxGroupId": null,
+   "consoleUrl": "https://app.klingai.com/cn/dev/api-key",
+   "balanceUrl": "https://app.klingai.com/cn/dev/resource-pack",
+   "docsUrl": "https://www.klingai.com/document-api/apiReference/model/textToVideo",
+   "timeoutSeconds": 600,
+   "connectTimeoutSeconds": null,
+   "readTimeoutSeconds": null,
+   "inputTokenPricePer1k": 0,
+   "outputTokenPricePer1k": 0,
+   "inputTokenPricePer1m": 0,
+   "outputTokenPricePer1m": 0,
+   "billingUnit": "PER_SECOND",
+   "unitPrice": 0.6,
+   "enabled": true,
+   "agentEnabled": false,
+   "isDefault": false,
+   "capabilities": [
+    "VIDEO_GENERATION"
+   ],
+   "pricingRules": [
+    {
+     "paramKey": "mode",
+     "ruleType": "MULTIPLIER",
+     "matchOp": "EQ",
+     "matchValue": "pro",
+     "factor": 1.5,
+     "extraCredits": 0,
+     "priority": 50,
+     "enabled": true,
+     "remark": "pro 相对 std 倍率"
+    },
+    {
+     "paramKey": "sound",
+     "ruleType": "MULTIPLIER",
+     "matchOp": "EQ",
+     "matchValue": "on",
+     "factor": 1.2,
+     "extraCredits": 0,
+     "priority": 51,
+     "enabled": true,
+     "remark": "开启声音"
+    },
+    {
+     "paramKey": "model",
+     "ruleType": "MULTIPLIER",
+     "matchOp": "EQ",
+     "matchValue": "kling-v2-5-turbo",
+     "factor": 0.8,
+     "extraCredits": 0,
+     "priority": 60,
+     "enabled": true,
+     "remark": "Turbo 版本折价示例"
+    }
+   ]
+  },
+  {
+   "displayName": "可灵 · 图生视频",
+   "configCode": "kling-gateway-image-to-video",
+   "vendorAccountRef": "kling::默认账户",
+   "channelCode": "kling",
+   "channelLabel": "可灵 Kling",
+   "channelIconAsset": "kling",
+   "provider": "kling_video",
+   "modelName": "kling-v3",
+   "baseUrl": "https://api-beijing.klingai.com",
+   "apiKey": "",
+   "extraAuthJson": "{\"apiTask\": \"image2video\", \"createPath\": \"/v1/videos/image2video\", \"resultPath\": \"/v1/videos/image2video/{task_id}\"}",
+   "secretsRedacted": false,
+   "minimaxGroupId": null,
+   "consoleUrl": "https://app.klingai.com/cn/dev/api-key",
+   "balanceUrl": "https://app.klingai.com/cn/dev/resource-pack",
+   "docsUrl": "https://www.klingai.com/document-api/apiReference/model/imageToVideo",
+   "timeoutSeconds": 600,
+   "connectTimeoutSeconds": null,
+   "readTimeoutSeconds": null,
+   "inputTokenPricePer1k": 0,
+   "outputTokenPricePer1k": 0,
+   "inputTokenPricePer1m": 0,
+   "outputTokenPricePer1m": 0,
+   "billingUnit": "PER_SECOND",
+   "unitPrice": 0.6,
+   "enabled": true,
+   "agentEnabled": false,
+   "isDefault": false,
+   "capabilities": [
+    "VIDEO_GENERATION"
+   ],
+   "pricingRules": [
+    {
+     "paramKey": "mode",
+     "ruleType": "MULTIPLIER",
+     "matchOp": "EQ",
+     "matchValue": "pro",
+     "factor": 1.5,
+     "extraCredits": 0,
+     "priority": 50,
+     "enabled": true,
+     "remark": "pro 相对 std 倍率"
+    },
+    {
+     "paramKey": "sound",
+     "ruleType": "MULTIPLIER",
+     "matchOp": "EQ",
+     "matchValue": "on",
+     "factor": 1.2,
+     "extraCredits": 0,
+     "priority": 51,
+     "enabled": true,
+     "remark": "开启声音"
+    },
+    {
+     "paramKey": "model",
+     "ruleType": "MULTIPLIER",
+     "matchOp": "EQ",
+     "matchValue": "kling-v2-5-turbo",
+     "factor": 0.8,
+     "extraCredits": 0,
+     "priority": 60,
+     "enabled": true,
+     "remark": "Turbo 版本折价示例"
+    }
+   ]
+  },
+  {
+   "displayName": "可灵 · 动作控制",
+   "configCode": "kling-gateway-motion-control",
+   "vendorAccountRef": "kling::默认账户",
+   "channelCode": "kling",
+   "channelLabel": "可灵 Kling",
+   "channelIconAsset": "kling",
+   "provider": "kling_video",
+   "modelName": "kling-v3",
+   "baseUrl": "https://api-beijing.klingai.com",
+   "apiKey": "",
+   "extraAuthJson": "{\"apiTask\": \"motion_control\", \"createPath\": \"/v1/videos/motion-control\", \"resultPath\": \"/v1/videos/motion-control/{task_id}\"}",
+   "secretsRedacted": false,
+   "minimaxGroupId": null,
+   "consoleUrl": "https://app.klingai.com/cn/dev/api-key",
+   "balanceUrl": "https://app.klingai.com/cn/dev/resource-pack",
+   "docsUrl": "https://www.klingai.com/document-api/apiReference/model/motionControl",
+   "timeoutSeconds": 600,
+   "connectTimeoutSeconds": null,
+   "readTimeoutSeconds": null,
+   "inputTokenPricePer1k": 0,
+   "outputTokenPricePer1k": 0,
+   "inputTokenPricePer1m": 0,
+   "outputTokenPricePer1m": 0,
+   "billingUnit": "PER_SECOND",
+   "unitPrice": 0.6,
+   "enabled": true,
+   "agentEnabled": false,
+   "isDefault": false,
+   "capabilities": [
+    "VIDEO_GENERATION"
+   ],
+   "pricingRules": [
+    {
+     "paramKey": "mode",
+     "ruleType": "MULTIPLIER",
+     "matchOp": "EQ",
+     "matchValue": "pro",
+     "factor": 1.5,
+     "extraCredits": 0,
+     "priority": 50,
+     "enabled": true,
+     "remark": "pro 相对 std 倍率"
+    },
+    {
+     "paramKey": "sound",
+     "ruleType": "MULTIPLIER",
+     "matchOp": "EQ",
+     "matchValue": "on",
+     "factor": 1.2,
+     "extraCredits": 0,
+     "priority": 51,
+     "enabled": true,
+     "remark": "开启声音"
+    },
+    {
+     "paramKey": "model",
+     "ruleType": "MULTIPLIER",
+     "matchOp": "EQ",
+     "matchValue": "kling-v2-5-turbo",
+     "factor": 0.8,
+     "extraCredits": 0,
+     "priority": 60,
+     "enabled": true,
+     "remark": "Turbo 版本折价示例"
+    }
+   ]
+  },
+  {
+   "displayName": "可灵 · 多图参考生视频",
+   "configCode": "kling-gateway-multi-image-to-video",
+   "vendorAccountRef": "kling::默认账户",
+   "channelCode": "kling",
+   "channelLabel": "可灵 Kling",
+   "channelIconAsset": "kling",
+   "provider": "kling_video",
+   "modelName": "kling-v3",
+   "baseUrl": "https://api-beijing.klingai.com",
+   "apiKey": "",
+   "extraAuthJson": "{\"apiTask\": \"multi_image2video\", \"createPath\": \"/v1/videos/multi-image2video\", \"resultPath\": \"/v1/videos/multi-image2video/{task_id}\"}",
+   "secretsRedacted": false,
+   "minimaxGroupId": null,
+   "consoleUrl": "https://app.klingai.com/cn/dev/api-key",
+   "balanceUrl": "https://app.klingai.com/cn/dev/resource-pack",
+   "docsUrl": "https://www.klingai.com/document-api/apiReference/model/multiImageToVideo",
+   "timeoutSeconds": 600,
+   "connectTimeoutSeconds": null,
+   "readTimeoutSeconds": null,
+   "inputTokenPricePer1k": 0,
+   "outputTokenPricePer1k": 0,
+   "inputTokenPricePer1m": 0,
+   "outputTokenPricePer1m": 0,
+   "billingUnit": "PER_SECOND",
+   "unitPrice": 0.6,
+   "enabled": true,
+   "agentEnabled": false,
+   "isDefault": false,
+   "capabilities": [
+    "VIDEO_GENERATION"
+   ],
+   "pricingRules": [
+    {
+     "paramKey": "mode",
+     "ruleType": "MULTIPLIER",
+     "matchOp": "EQ",
+     "matchValue": "pro",
+     "factor": 1.5,
+     "extraCredits": 0,
+     "priority": 50,
+     "enabled": true,
+     "remark": "pro 相对 std 倍率"
+    },
+    {
+     "paramKey": "sound",
+     "ruleType": "MULTIPLIER",
+     "matchOp": "EQ",
+     "matchValue": "on",
+     "factor": 1.2,
+     "extraCredits": 0,
+     "priority": 51,
+     "enabled": true,
+     "remark": "开启声音"
+    },
+    {
+     "paramKey": "model",
+     "ruleType": "MULTIPLIER",
+     "matchOp": "EQ",
+     "matchValue": "kling-v2-5-turbo",
+     "factor": 0.8,
+     "extraCredits": 0,
+     "priority": 60,
+     "enabled": true,
+     "remark": "Turbo 版本折价示例"
+    }
+   ]
+  },
+  {
+   "displayName": "可灵 · Omni 视频",
+   "configCode": "kling-gateway-omni-video",
+   "vendorAccountRef": "kling::默认账户",
+   "channelCode": "kling",
+   "channelLabel": "可灵 Kling",
+   "channelIconAsset": "kling",
+   "provider": "kling_video",
+   "modelName": "kling-v3-omni",
+   "baseUrl": "https://api-beijing.klingai.com",
+   "apiKey": "",
+   "extraAuthJson": "{\"apiTask\": \"omni_video\", \"createPath\": \"/v1/videos/omni-video\", \"resultPath\": \"/v1/videos/omni-video/{task_id}\"}",
+   "secretsRedacted": false,
+   "minimaxGroupId": null,
+   "consoleUrl": "https://app.klingai.com/cn/dev/api-key",
+   "balanceUrl": "https://app.klingai.com/cn/dev/resource-pack",
+   "docsUrl": "https://www.klingai.com/document-api/apiReference/model/OmniVideo",
+   "timeoutSeconds": 600,
+   "connectTimeoutSeconds": null,
+   "readTimeoutSeconds": null,
+   "inputTokenPricePer1k": 0,
+   "outputTokenPricePer1k": 0,
+   "inputTokenPricePer1m": 0,
+   "outputTokenPricePer1m": 0,
+   "billingUnit": "PER_SECOND",
+   "unitPrice": 0.6,
+   "enabled": true,
+   "agentEnabled": false,
+   "isDefault": false,
+   "capabilities": [
+    "VIDEO_GENERATION",
+    "IMAGE_GENERATION"
+   ],
+   "pricingRules": [
+    {
+     "paramKey": "mode",
+     "ruleType": "MULTIPLIER",
+     "matchOp": "EQ",
+     "matchValue": "pro",
+     "factor": 1.5,
+     "extraCredits": 0,
+     "priority": 50,
+     "enabled": true,
+     "remark": "pro 相对 std 倍率"
+    },
+    {
+     "paramKey": "sound",
+     "ruleType": "MULTIPLIER",
+     "matchOp": "EQ",
+     "matchValue": "on",
+     "factor": 1.2,
+     "extraCredits": 0,
+     "priority": 51,
+     "enabled": true,
+     "remark": "开启声音"
+    },
+    {
+     "paramKey": "model",
+     "ruleType": "MULTIPLIER",
+     "matchOp": "EQ",
+     "matchValue": "kling-v2-5-turbo",
+     "factor": 0.8,
+     "extraCredits": 0,
+     "priority": 60,
+     "enabled": true,
+     "remark": "Turbo 版本折价示例"
+    }
+   ]
+  },
+  {
+   "displayName": "可灵 · 文生图",
+   "configCode": "kling-gateway-image-generation",
+   "vendorAccountRef": "kling::默认账户",
+   "channelCode": "kling",
+   "channelLabel": "可灵 Kling",
+   "channelIconAsset": "kling",
+   "provider": "kling_video",
+   "modelName": "kling-v3",
+   "baseUrl": "https://api-beijing.klingai.com",
+   "apiKey": "",
+   "extraAuthJson": "{\"apiTask\": \"image_generation\", \"createPath\": \"/v1/images/generations\", \"resultPath\": \"/v1/images/generations/{task_id}\"}",
+   "secretsRedacted": false,
+   "minimaxGroupId": null,
+   "consoleUrl": "https://app.klingai.com/cn/dev/api-key",
+   "balanceUrl": "https://app.klingai.com/cn/dev/resource-pack",
+   "docsUrl": "https://www.klingai.com/document-api/apiReference/model/imageGeneration",
+   "timeoutSeconds": 600,
+   "connectTimeoutSeconds": null,
+   "readTimeoutSeconds": null,
+   "inputTokenPricePer1k": 0,
+   "outputTokenPricePer1k": 0,
+   "inputTokenPricePer1m": 0,
+   "outputTokenPricePer1m": 0,
+   "billingUnit": "PER_CALL",
+   "unitPrice": 0.019998,
+   "enabled": true,
+   "agentEnabled": false,
+   "isDefault": false,
+   "capabilities": [
+    "IMAGE_GENERATION"
+   ],
+   "pricingRules": [
+    {
+     "paramKey": "count",
+     "ruleType": "MULTIPLIER",
+     "matchOp": "VALUE",
+     "factor": 1,
+     "extraCredits": 0,
+     "priority": 40,
+     "enabled": true,
+     "remark": "按生成数量 count 倍率"
+    }
    ]
   }
  ],
@@ -3699,291 +3480,6 @@
    "workflow": null
   },
   {
-   "toolCode": "v2_1",
-   "toolName": "可灵生图 V2.1",
-   "categoryCode": "copywriting",
-   "description": null,
-   "coverUrl": null,
-   "toolType": "IMAGE_GENERATION",
-   "inputModality": "TEXT",
-   "outputModality": "IMAGE",
-   "configNote": "需要配置画面描述、比例、风格、生成数量与反向提示词。",
-   "status": "OFFLINE",
-   "estimatedCreditCost": 3,
-   "modelConfigCode": "8",
-   "executionHandler": "IMAGE_GENERATION",
-   "agentEnabled": true,
-   "fields": [
-    {
-     "fieldKey": "prompt",
-     "fieldName": "画面描述",
-     "fieldType": "textarea",
-     "placeholder": "描述主体、场景、光线、构图和细节",
-     "options": {
-      "core": true
-     },
-     "optionsJson": "{\"core\": true}",
-     "required": true,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 1
-    },
-    {
-     "fieldKey": "aspectRatio",
-     "fieldName": "画面比例",
-     "fieldType": "radio",
-     "placeholder": null,
-     "options": [
-      {
-       "label": "1:1",
-       "value": "1:1"
-      },
-      {
-       "label": "4:3",
-       "value": "4:3"
-      },
-      {
-       "label": "3:4",
-       "value": "3:4"
-      },
-      {
-       "label": "16:9",
-       "value": "16:9"
-      },
-      {
-       "label": "9:16",
-       "value": "9:16"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"1:1\", \"value\": \"1:1\"}, {\"label\": \"4:3\", \"value\": \"4:3\"}, {\"label\": \"3:4\", \"value\": \"3:4\"}, {\"label\": \"16:9\", \"value\": \"16:9\"}, {\"label\": \"9:16\", \"value\": \"9:16\"}]",
-     "required": true,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 2
-    },
-    {
-     "fieldKey": "image",
-     "fieldName": "参考图",
-     "fieldType": "image",
-     "placeholder": null,
-     "options": null,
-     "optionsJson": null,
-     "required": false,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 3
-    },
-    {
-     "fieldKey": "image_reference",
-     "fieldName": "参考图类型",
-     "fieldType": "select",
-     "placeholder": null,
-     "options": [
-      {
-       "label": "角色特征",
-       "value": "subject"
-      },
-      {
-       "label": "面部特征",
-       "value": "face"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"角色特征\", \"value\": \"subject\"}, {\"label\": \"面部特征\", \"value\": \"face\"}]",
-     "required": false,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 4
-    },
-    {
-     "fieldKey": "count",
-     "fieldName": "生成数量",
-     "fieldType": "number",
-     "placeholder": "例如 1",
-     "options": null,
-     "optionsJson": null,
-     "required": false,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 5
-    }
-   ],
-   "prompts": [
-    {
-     "promptCode": "default",
-     "promptName": "默认 Prompt",
-     "status": "ACTIVE",
-     "activeVersionNo": "tpl-1779520445192",
-     "versions": [
-      {
-       "versionNo": "tpl-1779520445192",
-       "systemPrompt": null,
-       "userPromptTemplate": "画面描述：{{prompt}}\n画面比例：{{aspectRatio}}\n风格：{{style}}\n生成数量：{{count}}\n反向提示词：{{negativePrompt}}",
-       "outputFormat": "MARKDOWN",
-       "status": "ACTIVE"
-      }
-     ]
-    }
-   ],
-   "workflow": null
-  },
-  {
-   "toolCode": "kling_image_to_video",
-   "toolName": "可灵生视频V2.6",
-   "categoryCode": "copywriting",
-   "description": null,
-   "coverUrl": "/generated/tool-covers/可灵生视频V2.6-kling_image_to_video-可灵图生视频-v2-6-20260524150249.mp4",
-   "toolType": "VIDEO_GENERATION",
-   "inputModality": "TEXT",
-   "outputModality": "VIDEO",
-   "configNote": "描述镜头、比例与时长，由视频生成 Handler 处理。\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"effect\"} -->",
-   "status": "OFFLINE",
-   "estimatedCreditCost": 240,
-   "modelConfigCode": "kling_image_to_video",
-   "executionHandler": "VIDEO_GENERATION",
-   "agentEnabled": true,
-   "fields": [
-    {
-     "fieldKey": "prompt",
-     "fieldName": "视频描述",
-     "fieldType": "textarea",
-     "placeholder": "描述镜头、主体、动作、风格和时长",
-     "options": {
-      "core": true
-     },
-     "optionsJson": "{\"core\": true}",
-     "required": true,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 1
-    },
-    {
-     "fieldKey": "imageUrl",
-     "fieldName": "视频首帧",
-     "fieldType": "image",
-     "placeholder": null,
-     "options": null,
-     "optionsJson": null,
-     "required": true,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 2
-    },
-    {
-     "fieldKey": "image_tail",
-     "fieldName": "视频尾帧",
-     "fieldType": "image",
-     "placeholder": null,
-     "options": null,
-     "optionsJson": null,
-     "required": false,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 3
-    },
-    {
-     "fieldKey": "aspectRatio",
-     "fieldName": "视频比例",
-     "fieldType": "radio",
-     "placeholder": null,
-     "options": [
-      {
-       "label": "16:9",
-       "value": "16:9"
-      },
-      {
-       "label": "9:16",
-       "value": "9:16"
-      },
-      {
-       "label": "1:1",
-       "value": "1:1"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"16:9\", \"value\": \"16:9\"}, {\"label\": \"9:16\", \"value\": \"9:16\"}, {\"label\": \"1:1\", \"value\": \"1:1\"}]",
-     "required": true,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 4
-    },
-    {
-     "fieldKey": "duration",
-     "fieldName": "时长秒数",
-     "fieldType": "radio",
-     "placeholder": "例如 5",
-     "options": [
-      {
-       "label": "5 秒",
-       "value": "5"
-      },
-      {
-       "label": "10 秒",
-       "value": "10"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"5 秒\", \"value\": \"5\"}, {\"label\": \"10 秒\", \"value\": \"10\"}]",
-     "required": true,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 5
-    }
-   ],
-   "prompts": [
-    {
-     "promptCode": "default",
-     "promptName": "默认 Prompt",
-     "status": "ACTIVE",
-     "activeVersionNo": "tpl-1779377698165",
-     "versions": [
-      {
-       "versionNo": "tpl-1779377698165",
-       "systemPrompt": null,
-       "userPromptTemplate": "视频描述：{{prompt}}\n视频比例：{{aspectRatio}}\n时长秒数：{{duration}}",
-       "outputFormat": "MARKDOWN",
-       "status": "ACTIVE"
-      },
-      {
-       "versionNo": "tpl-1779372458981",
-       "systemPrompt": null,
-       "userPromptTemplate": "视频描述：{{prompt}}\n视频比例：{{aspectRatio}}\n时长秒数：{{duration}}",
-       "outputFormat": "MARKDOWN",
-       "status": "INACTIVE"
-      }
-     ]
-    }
-   ],
-   "workflow": null
-  },
-  {
    "toolCode": "11",
    "toolName": "文本生成-DeepSeek-V4-flash",
    "categoryCode": "copywriting",
@@ -4037,18 +3533,18 @@
    "workflow": null
   },
   {
-   "toolCode": "kling-v3-omni",
-   "toolName": "可灵 V3 Omni",
+   "toolCode": "kling-text-to-video",
+   "toolName": "可灵文生视频",
    "categoryCode": "copywriting",
    "description": null,
-   "coverUrl": "/generated/tool-covers/可灵-V3-Omni-kling-v3-omni-可灵-V3-Omni-20260528094612.mp4",
+   "coverUrl": null,
    "toolType": "VIDEO_GENERATION",
    "inputModality": "TEXT",
    "outputModality": "VIDEO",
-   "configNote": "可灵 可灵 V3 Omni\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"effect\",\"modelIconUrl\":\"\",\"comparisonOriginalUrl\":\"\",\"comparisonEffectUrl\":\"\"} -->",
-   "status": "ONLINE",
+   "configNote": "可灵 可灵文生视频\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"effect\"} -->",
+   "status": "OFFLINE",
    "estimatedCreditCost": 360,
-   "modelConfigCode": "kling-v3-omni",
+   "modelConfigCode": "kling-gateway-text-to-video",
    "executionHandler": "VIDEO_GENERATION",
    "agentEnabled": true,
    "fields": [
@@ -4118,13 +3614,14 @@
         "label": "15秒",
         "value": "15"
        }
-      ]
+      ],
+      "defaultValue": "5"
      },
-     "optionsJson": "{\"options\": [{\"label\": \"5秒\", \"value\": \"5\"}, {\"label\": \"10秒\", \"value\": \"10\"}, {\"label\": \"15秒\", \"value\": \"15\"}]}",
+     "optionsJson": "{\"options\": [{\"label\": \"5秒\", \"value\": \"5\"}, {\"label\": \"10秒\", \"value\": \"10\"}, {\"label\": \"15秒\", \"value\": \"15\"}], \"defaultValue\": \"5\"}",
      "required": true,
      "executionRequired": true,
      "userRequired": true,
-     "defaultValue": null,
+     "defaultValue": "5",
      "agentFillStrategy": "ask_user",
      "riskLevel": "LOW",
      "sortOrder": 3
@@ -4144,13 +3641,14 @@
         "label": "高质量（pro）",
         "value": "pro"
        }
-      ]
+      ],
+      "defaultValue": "std"
      },
-     "optionsJson": "{\"options\": [{\"label\": \"标准（std）\", \"value\": \"std\"}, {\"label\": \"高质量（pro）\", \"value\": \"pro\"}]}",
+     "optionsJson": "{\"options\": [{\"label\": \"标准（std）\", \"value\": \"std\"}, {\"label\": \"高质量（pro）\", \"value\": \"pro\"}], \"defaultValue\": \"std\"}",
      "required": true,
      "executionRequired": true,
      "userRequired": true,
-     "defaultValue": null,
+     "defaultValue": "std",
      "agentFillStrategy": "ask_user",
      "riskLevel": "LOW",
      "sortOrder": 4
@@ -4170,24 +3668,25 @@
         "label": "开启",
         "value": "on"
        }
-      ]
+      ],
+      "defaultValue": "off"
      },
-     "optionsJson": "{\"options\": [{\"label\": \"关闭\", \"value\": \"off\"}, {\"label\": \"开启\", \"value\": \"on\"}]}",
+     "optionsJson": "{\"options\": [{\"label\": \"关闭\", \"value\": \"off\"}, {\"label\": \"开启\", \"value\": \"on\"}], \"defaultValue\": \"off\"}",
      "required": false,
      "executionRequired": false,
      "userRequired": false,
-     "defaultValue": null,
+     "defaultValue": "off",
      "agentFillStrategy": "default",
      "riskLevel": "LOW",
      "sortOrder": 5
     },
     {
-     "fieldKey": "imageList",
-     "fieldName": "参考图片列表",
+     "fieldKey": "negativePrompt",
+     "fieldName": "反向提示词",
      "fieldType": "textarea",
-     "placeholder": "JSON数组，例：[{\"image_url\":\"https://...\",\"type\":\"first_frame\"}]",
-     "options": {},
-     "optionsJson": "{}",
+     "placeholder": "不希望出现的元素",
+     "options": null,
+     "optionsJson": null,
      "required": false,
      "executionRequired": false,
      "userRequired": false,
@@ -4195,6 +3694,629 @@
      "agentFillStrategy": "default",
      "riskLevel": "LOW",
      "sortOrder": 6
+    },
+    {
+     "fieldKey": "model",
+     "fieldName": "可灵模型版本",
+     "fieldType": "select",
+     "placeholder": null,
+     "options": {
+      "uiTier": "all",
+      "uiGroup": "meta",
+      "defaultValue": "kling-v3",
+      "options": [
+       {
+        "label": "V3（推荐）",
+        "value": "kling-v3"
+       },
+       {
+        "label": "V2 Master",
+        "value": "kling-v2-master"
+       },
+       {
+        "label": "V1",
+        "value": "kling-v1"
+       }
+      ]
+     },
+     "optionsJson": "{\"uiTier\": \"all\", \"uiGroup\": \"meta\", \"defaultValue\": \"kling-v3\", \"options\": [{\"label\": \"V3（推荐）\", \"value\": \"kling-v3\"}, {\"label\": \"V2 Master\", \"value\": \"kling-v2-master\"}, {\"label\": \"V1\", \"value\": \"kling-v1\"}]}",
+     "required": false,
+     "executionRequired": false,
+     "userRequired": false,
+     "defaultValue": "kling-v3",
+     "agentFillStrategy": "default",
+     "riskLevel": "LOW",
+     "sortOrder": 7
+    }
+   ],
+   "prompts": [],
+   "workflow": null
+  },
+  {
+   "toolCode": "kling-image-to-video",
+   "toolName": "可灵图生视频",
+   "categoryCode": "copywriting",
+   "description": null,
+   "coverUrl": "/generated/tool-covers/可灵-V3-图生视频-kling-v3-image-to-video-可灵-V3-Omni-20260608010046.mp4",
+   "toolType": "VIDEO_GENERATION",
+   "inputModality": "IMAGE",
+   "outputModality": "VIDEO",
+   "configNote": "可灵 可灵图生视频\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"effect\"} -->",
+   "status": "ONLINE",
+   "estimatedCreditCost": 360,
+   "modelConfigCode": "kling-gateway-image-to-video",
+   "executionHandler": "VIDEO_GENERATION",
+   "agentEnabled": true,
+   "fields": [
+    {
+     "fieldKey": "imageUrl",
+     "fieldName": "首帧图片",
+     "fieldType": "image",
+     "placeholder": "上传后的 URL 或可访问的图片链接",
+     "options": null,
+     "optionsJson": null,
+     "required": true,
+     "executionRequired": true,
+     "userRequired": true,
+     "defaultValue": null,
+     "agentFillStrategy": "ask_user",
+     "riskLevel": "LOW",
+     "sortOrder": 1
+    },
+    {
+     "fieldKey": "imageTail",
+     "fieldName": "尾帧图片",
+     "fieldType": "image",
+     "placeholder": "可选，尾帧图 URL",
+     "options": null,
+     "optionsJson": null,
+     "required": false,
+     "executionRequired": false,
+     "userRequired": false,
+     "defaultValue": null,
+     "agentFillStrategy": "default",
+     "riskLevel": "LOW",
+     "sortOrder": 2
+    },
+    {
+     "fieldKey": "prompt",
+     "fieldName": "画面描述",
+     "fieldType": "textarea",
+     "placeholder": "描述主体、场景、镜头语言和细节",
+     "options": {
+      "core": true
+     },
+     "optionsJson": "{\"core\": true}",
+     "required": false,
+     "executionRequired": false,
+     "userRequired": false,
+     "defaultValue": null,
+     "agentFillStrategy": "default",
+     "riskLevel": "LOW",
+     "sortOrder": 3
+    },
+    {
+     "fieldKey": "aspectRatio",
+     "fieldName": "画面比例",
+     "fieldType": "radio",
+     "placeholder": null,
+     "options": {
+      "options": [
+       {
+        "label": "16:9",
+        "value": "16:9"
+       },
+       {
+        "label": "9:16",
+        "value": "9:16"
+       },
+       {
+        "label": "1:1",
+        "value": "1:1"
+       }
+      ]
+     },
+     "optionsJson": "{\"options\": [{\"label\": \"16:9\", \"value\": \"16:9\"}, {\"label\": \"9:16\", \"value\": \"9:16\"}, {\"label\": \"1:1\", \"value\": \"1:1\"}]}",
+     "required": true,
+     "executionRequired": true,
+     "userRequired": true,
+     "defaultValue": null,
+     "agentFillStrategy": "ask_user",
+     "riskLevel": "LOW",
+     "sortOrder": 4
+    },
+    {
+     "fieldKey": "duration",
+     "fieldName": "时长",
+     "fieldType": "radio",
+     "placeholder": null,
+     "options": {
+      "options": [
+       {
+        "label": "5秒",
+        "value": "5"
+       },
+       {
+        "label": "10秒",
+        "value": "10"
+       },
+       {
+        "label": "15秒",
+        "value": "15"
+       }
+      ],
+      "defaultValue": "5"
+     },
+     "optionsJson": "{\"options\": [{\"label\": \"5秒\", \"value\": \"5\"}, {\"label\": \"10秒\", \"value\": \"10\"}, {\"label\": \"15秒\", \"value\": \"15\"}], \"defaultValue\": \"5\"}",
+     "required": true,
+     "executionRequired": true,
+     "userRequired": true,
+     "defaultValue": "5",
+     "agentFillStrategy": "ask_user",
+     "riskLevel": "LOW",
+     "sortOrder": 5
+    },
+    {
+     "fieldKey": "mode",
+     "fieldName": "质量档位",
+     "fieldType": "radio",
+     "placeholder": null,
+     "options": {
+      "options": [
+       {
+        "label": "标准（std）",
+        "value": "std"
+       },
+       {
+        "label": "高质量（pro）",
+        "value": "pro"
+       }
+      ],
+      "defaultValue": "std"
+     },
+     "optionsJson": "{\"options\": [{\"label\": \"标准（std）\", \"value\": \"std\"}, {\"label\": \"高质量（pro）\", \"value\": \"pro\"}], \"defaultValue\": \"std\"}",
+     "required": true,
+     "executionRequired": true,
+     "userRequired": true,
+     "defaultValue": "std",
+     "agentFillStrategy": "ask_user",
+     "riskLevel": "LOW",
+     "sortOrder": 6
+    },
+    {
+     "fieldKey": "sound",
+     "fieldName": "音频",
+     "fieldType": "radio",
+     "placeholder": null,
+     "options": {
+      "options": [
+       {
+        "label": "关闭",
+        "value": "off"
+       },
+       {
+        "label": "开启",
+        "value": "on"
+       }
+      ],
+      "defaultValue": "off"
+     },
+     "optionsJson": "{\"options\": [{\"label\": \"关闭\", \"value\": \"off\"}, {\"label\": \"开启\", \"value\": \"on\"}], \"defaultValue\": \"off\"}",
+     "required": false,
+     "executionRequired": false,
+     "userRequired": false,
+     "defaultValue": "off",
+     "agentFillStrategy": "default",
+     "riskLevel": "LOW",
+     "sortOrder": 7
+    },
+    {
+     "fieldKey": "negativePrompt",
+     "fieldName": "反向提示词",
+     "fieldType": "textarea",
+     "placeholder": "不希望出现的元素",
+     "options": null,
+     "optionsJson": null,
+     "required": false,
+     "executionRequired": false,
+     "userRequired": false,
+     "defaultValue": null,
+     "agentFillStrategy": "default",
+     "riskLevel": "LOW",
+     "sortOrder": 8
+    },
+    {
+     "fieldKey": "model",
+     "fieldName": "可灵模型版本",
+     "fieldType": "select",
+     "placeholder": null,
+     "options": {
+      "uiTier": "all",
+      "uiGroup": "meta",
+      "defaultValue": "kling-v3",
+      "options": [
+       {
+        "label": "V3（推荐）",
+        "value": "kling-v3"
+       },
+       {
+        "label": "V2.6",
+        "value": "kling-v2-6"
+       },
+       {
+        "label": "V2.5 Turbo",
+        "value": "kling-v2-5-turbo"
+       },
+       {
+        "label": "V2.1 Master",
+        "value": "kling-v2-1-master"
+       },
+       {
+        "label": "V2.1",
+        "value": "kling-v2-1"
+       },
+       {
+        "label": "V2 Master",
+        "value": "kling-v2-master"
+       },
+       {
+        "label": "V1.6",
+        "value": "kling-v1-6"
+       },
+       {
+        "label": "V1.5",
+        "value": "kling-v1-5"
+       },
+       {
+        "label": "V1",
+        "value": "kling-v1"
+       }
+      ]
+     },
+     "optionsJson": "{\"uiTier\": \"all\", \"uiGroup\": \"meta\", \"defaultValue\": \"kling-v3\", \"options\": [{\"label\": \"V3（推荐）\", \"value\": \"kling-v3\"}, {\"label\": \"V2.6\", \"value\": \"kling-v2-6\"}, {\"label\": \"V2.5 Turbo\", \"value\": \"kling-v2-5-turbo\"}, {\"label\": \"V2.1 Master\", \"value\": \"kling-v2-1-master\"}, {\"label\": \"V2.1\", \"value\": \"kling-v2-1\"}, {\"label\": \"V2 Master\", \"value\": \"kling-v2-master\"}, {\"label\": \"V1.6\", \"value\": \"kling-v1-6\"}, {\"label\": \"V1.5\", \"value\": \"kling-v1-5\"}, {\"label\": \"V1\", \"value\": \"kling-v1\"}]}",
+     "required": false,
+     "executionRequired": false,
+     "userRequired": false,
+     "defaultValue": "kling-v3",
+     "agentFillStrategy": "default",
+     "riskLevel": "LOW",
+     "sortOrder": 9
+    }
+   ],
+   "prompts": [],
+   "workflow": null
+  },
+  {
+   "toolCode": "kling-motion-control",
+   "toolName": "可灵动作控制",
+   "categoryCode": "copywriting",
+   "description": null,
+   "coverUrl": null,
+   "toolType": "VIDEO_GENERATION",
+   "inputModality": "IMAGE",
+   "outputModality": "VIDEO",
+   "configNote": "可灵 可灵动作控制\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"effect\"} -->",
+   "status": "OFFLINE",
+   "estimatedCreditCost": 360,
+   "modelConfigCode": "kling-gateway-motion-control",
+   "executionHandler": "VIDEO_GENERATION",
+   "agentEnabled": true,
+   "fields": [
+    {
+     "fieldKey": "imageUrl",
+     "fieldName": "人物图片",
+     "fieldType": "image",
+     "placeholder": "角色参考图 URL",
+     "options": null,
+     "optionsJson": null,
+     "required": true,
+     "executionRequired": true,
+     "userRequired": true,
+     "defaultValue": null,
+     "agentFillStrategy": "ask_user",
+     "riskLevel": "LOW",
+     "sortOrder": 1
+    },
+    {
+     "fieldKey": "videoUrl",
+     "fieldName": "动作视频",
+     "fieldType": "file",
+     "placeholder": "驱动动作的视频 URL",
+     "options": null,
+     "optionsJson": null,
+     "required": true,
+     "executionRequired": true,
+     "userRequired": true,
+     "defaultValue": null,
+     "agentFillStrategy": "ask_user",
+     "riskLevel": "LOW",
+     "sortOrder": 2
+    },
+    {
+     "fieldKey": "prompt",
+     "fieldName": "补充描述",
+     "fieldType": "textarea",
+     "placeholder": "可选的动作或场景补充",
+     "options": null,
+     "optionsJson": null,
+     "required": false,
+     "executionRequired": false,
+     "userRequired": false,
+     "defaultValue": null,
+     "agentFillStrategy": "default",
+     "riskLevel": "LOW",
+     "sortOrder": 3
+    },
+    {
+     "fieldKey": "duration",
+     "fieldName": "时长",
+     "fieldType": "radio",
+     "placeholder": null,
+     "options": {
+      "options": [
+       {
+        "label": "5秒",
+        "value": "5"
+       },
+       {
+        "label": "10秒",
+        "value": "10"
+       }
+      ],
+      "defaultValue": "5"
+     },
+     "optionsJson": "{\"options\": [{\"label\": \"5秒\", \"value\": \"5\"}, {\"label\": \"10秒\", \"value\": \"10\"}], \"defaultValue\": \"5\"}",
+     "required": true,
+     "executionRequired": true,
+     "userRequired": true,
+     "defaultValue": "5",
+     "agentFillStrategy": "ask_user",
+     "riskLevel": "LOW",
+     "sortOrder": 4
+    },
+    {
+     "fieldKey": "mode",
+     "fieldName": "质量档位",
+     "fieldType": "radio",
+     "placeholder": null,
+     "options": {
+      "options": [
+       {
+        "label": "标准（std）",
+        "value": "std"
+       },
+       {
+        "label": "高质量（pro）",
+        "value": "pro"
+       }
+      ],
+      "defaultValue": "std"
+     },
+     "optionsJson": "{\"options\": [{\"label\": \"标准（std）\", \"value\": \"std\"}, {\"label\": \"高质量（pro）\", \"value\": \"pro\"}], \"defaultValue\": \"std\"}",
+     "required": true,
+     "executionRequired": true,
+     "userRequired": true,
+     "defaultValue": "std",
+     "agentFillStrategy": "ask_user",
+     "riskLevel": "LOW",
+     "sortOrder": 5
+    },
+    {
+     "fieldKey": "characterOrientation",
+     "fieldName": "角色朝向",
+     "fieldType": "select",
+     "placeholder": null,
+     "options": {
+      "options": [
+       {
+        "label": "跟随视频",
+        "value": "video"
+       },
+       {
+        "label": "跟随图片",
+        "value": "image"
+       }
+      ]
+     },
+     "optionsJson": "{\"options\": [{\"label\": \"跟随视频\", \"value\": \"video\"}, {\"label\": \"跟随图片\", \"value\": \"image\"}]}",
+     "required": false,
+     "executionRequired": false,
+     "userRequired": false,
+     "defaultValue": "video",
+     "agentFillStrategy": "default",
+     "riskLevel": "LOW",
+     "sortOrder": 6
+    },
+    {
+     "fieldKey": "staticMask",
+     "fieldName": "静态遮罩",
+     "fieldType": "image",
+     "placeholder": "可选",
+     "options": null,
+     "optionsJson": null,
+     "required": false,
+     "executionRequired": false,
+     "userRequired": false,
+     "defaultValue": null,
+     "agentFillStrategy": "default",
+     "riskLevel": "LOW",
+     "sortOrder": 7
+    },
+    {
+     "fieldKey": "dynamicMasks",
+     "fieldName": "动态遮罩",
+     "fieldType": "textarea",
+     "placeholder": "JSON 数组",
+     "options": null,
+     "optionsJson": null,
+     "required": false,
+     "executionRequired": false,
+     "userRequired": false,
+     "defaultValue": null,
+     "agentFillStrategy": "default",
+     "riskLevel": "LOW",
+     "sortOrder": 8
+    },
+    {
+     "fieldKey": "model",
+     "fieldName": "可灵模型版本",
+     "fieldType": "select",
+     "placeholder": null,
+     "options": {
+      "uiTier": "all",
+      "uiGroup": "meta",
+      "defaultValue": "kling-v3",
+      "options": [
+       {
+        "label": "V3（推荐）",
+        "value": "kling-v3"
+       },
+       {
+        "label": "V2.6",
+        "value": "kling-v2-6"
+       }
+      ]
+     },
+     "optionsJson": "{\"uiTier\": \"all\", \"uiGroup\": \"meta\", \"defaultValue\": \"kling-v3\", \"options\": [{\"label\": \"V3（推荐）\", \"value\": \"kling-v3\"}, {\"label\": \"V2.6\", \"value\": \"kling-v2-6\"}]}",
+     "required": false,
+     "executionRequired": false,
+     "userRequired": false,
+     "defaultValue": "kling-v3",
+     "agentFillStrategy": "default",
+     "riskLevel": "LOW",
+     "sortOrder": 9
+    }
+   ],
+   "prompts": [],
+   "workflow": null
+  },
+  {
+   "toolCode": "kling-multi-image-to-video",
+   "toolName": "可灵多图参考生视频",
+   "categoryCode": "copywriting",
+   "description": null,
+   "coverUrl": null,
+   "toolType": "VIDEO_GENERATION",
+   "inputModality": "IMAGE",
+   "outputModality": "VIDEO",
+   "configNote": "可灵 可灵多图参考生视频\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"effect\"} -->",
+   "status": "OFFLINE",
+   "estimatedCreditCost": 360,
+   "modelConfigCode": "kling-gateway-multi-image-to-video",
+   "executionHandler": "VIDEO_GENERATION",
+   "agentEnabled": true,
+   "fields": [
+    {
+     "fieldKey": "prompt",
+     "fieldName": "画面描述",
+     "fieldType": "textarea",
+     "placeholder": "描述镜头与主体",
+     "options": {
+      "core": true
+     },
+     "optionsJson": "{\"core\": true}",
+     "required": true,
+     "executionRequired": true,
+     "userRequired": true,
+     "defaultValue": null,
+     "agentFillStrategy": "ask_user",
+     "riskLevel": "LOW",
+     "sortOrder": 1
+    },
+    {
+     "fieldKey": "imageList",
+     "fieldName": "参考图片列表",
+     "fieldType": "multi_image",
+     "placeholder": "选择参考图片",
+     "options": {
+      "minCount": 1,
+      "maxCount": 7,
+      "accept": "image/*",
+      "libraryEnabled": true,
+      "libraryKind": "image",
+      "uiTier": "advanced"
+     },
+     "optionsJson": "{\"minCount\":1,\"maxCount\":7,\"accept\":\"image/*\",\"libraryEnabled\":true,\"libraryKind\":\"image\",\"uiTier\":\"advanced\"}",
+     "required": true,
+     "executionRequired": true,
+     "userRequired": true,
+     "defaultValue": null,
+     "agentFillStrategy": "ask_user",
+     "riskLevel": "LOW",
+     "sortOrder": 2
+    },
+    {
+     "fieldKey": "elementList",
+     "fieldName": "主体参考列表",
+     "fieldType": "subject_element_list",
+     "placeholder": "添加主体参考",
+     "options": {
+      "maxCount": 7,
+      "libraryEnabled": true,
+      "uiTier": "advanced"
+     },
+     "optionsJson": "{\"maxCount\":7,\"libraryEnabled\":true,\"uiTier\":\"advanced\"}",
+     "required": false,
+     "executionRequired": false,
+     "userRequired": false,
+     "defaultValue": null,
+     "agentFillStrategy": "default",
+     "riskLevel": "LOW",
+     "sortOrder": 3
+    },
+    {
+     "fieldKey": "duration",
+     "fieldName": "时长",
+     "fieldType": "radio",
+     "placeholder": null,
+     "options": {
+      "options": [
+       {
+        "label": "5秒",
+        "value": "5"
+       },
+       {
+        "label": "10秒",
+        "value": "10"
+       }
+      ],
+      "defaultValue": "5"
+     },
+     "optionsJson": "{\"options\": [{\"label\": \"5秒\", \"value\": \"5\"}, {\"label\": \"10秒\", \"value\": \"10\"}], \"defaultValue\": \"5\"}",
+     "required": true,
+     "executionRequired": true,
+     "userRequired": true,
+     "defaultValue": "5",
+     "agentFillStrategy": "ask_user",
+     "riskLevel": "LOW",
+     "sortOrder": 4
+    },
+    {
+     "fieldKey": "mode",
+     "fieldName": "质量档位",
+     "fieldType": "radio",
+     "placeholder": null,
+     "options": {
+      "options": [
+       {
+        "label": "标准（std）",
+        "value": "std"
+       },
+       {
+        "label": "高质量（pro）",
+        "value": "pro"
+       }
+      ],
+      "defaultValue": "std"
+     },
+     "optionsJson": "{\"options\": [{\"label\": \"标准（std）\", \"value\": \"std\"}, {\"label\": \"高质量（pro）\", \"value\": \"pro\"}], \"defaultValue\": \"std\"}",
+     "required": true,
+     "executionRequired": true,
+     "userRequired": true,
+     "defaultValue": "std",
+     "agentFillStrategy": "ask_user",
+     "riskLevel": "LOW",
+     "sortOrder": 5
     },
     {
      "fieldKey": "multiShot",
@@ -4211,16 +4333,17 @@
         "label": "开启",
         "value": "true"
        }
-      ]
+      ],
+      "defaultValue": "false"
      },
-     "optionsJson": "{\"options\": [{\"label\": \"关闭\", \"value\": \"false\"}, {\"label\": \"开启\", \"value\": \"true\"}]}",
+     "optionsJson": "{\"options\": [{\"label\": \"关闭\", \"value\": \"false\"}, {\"label\": \"开启\", \"value\": \"true\"}], \"defaultValue\": \"false\"}",
      "required": false,
      "executionRequired": false,
      "userRequired": false,
-     "defaultValue": null,
+     "defaultValue": "false",
      "agentFillStrategy": "default",
      "riskLevel": "LOW",
-     "sortOrder": 7
+     "sortOrder": 6
     },
     {
      "fieldKey": "shotType",
@@ -4246,86 +4369,65 @@
      "defaultValue": null,
      "agentFillStrategy": "default",
      "riskLevel": "LOW",
-     "sortOrder": 8
+     "sortOrder": 7
     },
     {
      "fieldKey": "multiPrompt",
      "fieldName": "分镜提示词",
      "fieldType": "textarea",
-     "placeholder": "JSON数组，例：[{\"shot\":1,\"prompt\":\"镜头推进\"}]",
-     "options": {},
-     "optionsJson": "{}",
+     "placeholder": "多镜头时的分镜描述",
+     "options": null,
+     "optionsJson": null,
      "required": false,
      "executionRequired": false,
      "userRequired": false,
      "defaultValue": null,
+     "agentFillStrategy": "default",
+     "riskLevel": "LOW",
+     "sortOrder": 8
+    },
+    {
+     "fieldKey": "model",
+     "fieldName": "可灵模型版本",
+     "fieldType": "select",
+     "placeholder": null,
+     "options": {
+      "uiTier": "all",
+      "uiGroup": "meta",
+      "defaultValue": "kling-v3",
+      "options": [
+       {
+        "label": "V3（推荐）",
+        "value": "kling-v3"
+       }
+      ]
+     },
+     "optionsJson": "{\"uiTier\": \"all\", \"uiGroup\": \"meta\", \"defaultValue\": \"kling-v3\", \"options\": [{\"label\": \"V3（推荐）\", \"value\": \"kling-v3\"}]}",
+     "required": false,
+     "executionRequired": false,
+     "userRequired": false,
+     "defaultValue": "kling-v3",
      "agentFillStrategy": "default",
      "riskLevel": "LOW",
      "sortOrder": 9
-    },
-    {
-     "fieldKey": "negativePrompt",
-     "fieldName": "反向提示词",
-     "fieldType": "textarea",
-     "placeholder": "不希望出现的元素",
-     "options": {},
-     "optionsJson": "{}",
-     "required": false,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 10
-    },
-    {
-     "fieldKey": "imageURL",
-     "fieldName": "视频首帧",
-     "fieldType": "image",
-     "placeholder": null,
-     "options": {},
-     "optionsJson": "{}",
-     "required": false,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 11
     }
    ],
-   "prompts": [
-    {
-     "promptCode": "default",
-     "promptName": "默认 Prompt",
-     "status": "ACTIVE",
-     "activeVersionNo": "tpl-2a97d195b7f6",
-     "versions": [
-      {
-       "versionNo": "tpl-2a97d195b7f6",
-       "systemPrompt": null,
-       "userPromptTemplate": "画面描述：{{prompt}}\n画面比例：{{aspectRatio}}\n时长：{{duration}}\n质量档位：{{mode}}\n音频：{{sound}}\n参考图片列表：{{imageList}}\n参考视频列表：{{videoList}}\n主体参考列表：{{elementList}}\n多镜头：{{multiShot}}\n分镜类型：{{shotType}}\n分镜提示词：{{multiPrompt}}\n反向提示词：{{negativePrompt}}",
-       "outputFormat": "MARKDOWN",
-       "status": "ACTIVE"
-      }
-     ]
-    }
-   ],
+   "prompts": [],
    "workflow": null
   },
   {
-   "toolCode": "kling-video-o1-omni",
-   "toolName": "可灵 Video O1 Omni",
+   "toolCode": "kling-omni-video",
+   "toolName": "可灵 Omni 视频",
    "categoryCode": "copywriting",
    "description": null,
-   "coverUrl": "/generated/tool-covers/可灵-Video-O1-Omni-kling-video-o1-omni-可灵-Video-O1-Omni-20260529031958.mp4",
+   "coverUrl": "/generated/tool-covers/可灵-V3-Omni-kling-v3-omni-可灵-V3-Omni-20260528094612.mp4",
    "toolType": "VIDEO_GENERATION",
    "inputModality": "TEXT",
    "outputModality": "VIDEO",
-   "configNote": "可灵 可灵 Video O1 Omni\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"effect\",\"modelIconUrl\":\"\"} -->",
-   "status": "OFFLINE",
+   "configNote": "可灵 可灵 Omni 视频\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"effect\"} -->",
+   "status": "ONLINE",
    "estimatedCreditCost": 360,
-   "modelConfigCode": "kling-v3-omni",
+   "modelConfigCode": "kling-gateway-omni-video",
    "executionHandler": "VIDEO_GENERATION",
    "agentEnabled": true,
    "fields": [
@@ -4351,21 +4453,23 @@
      "fieldName": "画面比例",
      "fieldType": "radio",
      "placeholder": null,
-     "options": [
-      {
-       "label": "16:9",
-       "value": "16:9"
-      },
-      {
-       "label": "9:16",
-       "value": "9:16"
-      },
-      {
-       "label": "1:1",
-       "value": "1:1"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"16:9\", \"value\": \"16:9\"}, {\"label\": \"9:16\", \"value\": \"9:16\"}, {\"label\": \"1:1\", \"value\": \"1:1\"}]",
+     "options": {
+      "options": [
+       {
+        "label": "16:9",
+        "value": "16:9"
+       },
+       {
+        "label": "9:16",
+        "value": "9:16"
+       },
+       {
+        "label": "1:1",
+        "value": "1:1"
+       }
+      ]
+     },
+     "optionsJson": "{\"options\": [{\"label\": \"16:9\", \"value\": \"16:9\"}, {\"label\": \"9:16\", \"value\": \"9:16\"}, {\"label\": \"1:1\", \"value\": \"1:1\"}]}",
      "required": true,
      "executionRequired": true,
      "userRequired": true,
@@ -4379,25 +4483,28 @@
      "fieldName": "时长",
      "fieldType": "radio",
      "placeholder": null,
-     "options": [
-      {
-       "label": "5秒",
-       "value": "5"
-      },
-      {
-       "label": "10秒",
-       "value": "10"
-      },
-      {
-       "label": "15秒",
-       "value": "15"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"5秒\", \"value\": \"5\"}, {\"label\": \"10秒\", \"value\": \"10\"}, {\"label\": \"15秒\", \"value\": \"15\"}]",
+     "options": {
+      "options": [
+       {
+        "label": "5秒",
+        "value": "5"
+       },
+       {
+        "label": "10秒",
+        "value": "10"
+       },
+       {
+        "label": "15秒",
+        "value": "15"
+       }
+      ],
+      "defaultValue": "5"
+     },
+     "optionsJson": "{\"options\": [{\"label\": \"5秒\", \"value\": \"5\"}, {\"label\": \"10秒\", \"value\": \"10\"}, {\"label\": \"15秒\", \"value\": \"15\"}], \"defaultValue\": \"5\"}",
      "required": true,
      "executionRequired": true,
      "userRequired": true,
-     "defaultValue": null,
+     "defaultValue": "5",
      "agentFillStrategy": "ask_user",
      "riskLevel": "LOW",
      "sortOrder": 3
@@ -4407,21 +4514,24 @@
      "fieldName": "质量档位",
      "fieldType": "radio",
      "placeholder": null,
-     "options": [
-      {
-       "label": "标准（std）",
-       "value": "std"
-      },
-      {
-       "label": "高质量（pro）",
-       "value": "pro"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"标准（std）\", \"value\": \"std\"}, {\"label\": \"高质量（pro）\", \"value\": \"pro\"}]",
+     "options": {
+      "options": [
+       {
+        "label": "标准（std）",
+        "value": "std"
+       },
+       {
+        "label": "高质量（pro）",
+        "value": "pro"
+       }
+      ],
+      "defaultValue": "std"
+     },
+     "optionsJson": "{\"options\": [{\"label\": \"标准（std）\", \"value\": \"std\"}, {\"label\": \"高质量（pro）\", \"value\": \"pro\"}], \"defaultValue\": \"std\"}",
      "required": true,
      "executionRequired": true,
      "userRequired": true,
-     "defaultValue": null,
+     "defaultValue": "std",
      "agentFillStrategy": "ask_user",
      "riskLevel": "LOW",
      "sortOrder": 4
@@ -4431,21 +4541,24 @@
      "fieldName": "音频",
      "fieldType": "radio",
      "placeholder": null,
-     "options": [
-      {
-       "label": "关闭",
-       "value": "off"
-      },
-      {
-       "label": "开启",
-       "value": "on"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"关闭\", \"value\": \"off\"}, {\"label\": \"开启\", \"value\": \"on\"}]",
+     "options": {
+      "options": [
+       {
+        "label": "关闭",
+        "value": "off"
+       },
+       {
+        "label": "开启",
+        "value": "on"
+       }
+      ],
+      "defaultValue": "off"
+     },
+     "optionsJson": "{\"options\": [{\"label\": \"关闭\", \"value\": \"off\"}, {\"label\": \"开启\", \"value\": \"on\"}], \"defaultValue\": \"off\"}",
      "required": false,
      "executionRequired": false,
      "userRequired": false,
-     "defaultValue": null,
+     "defaultValue": "off",
      "agentFillStrategy": "default",
      "riskLevel": "LOW",
      "sortOrder": 5
@@ -4453,10 +4566,17 @@
     {
      "fieldKey": "imageList",
      "fieldName": "参考图片列表",
-     "fieldType": "textarea",
-     "placeholder": "JSON数组，例：[{\"image_url\":\"https://...\",\"type\":\"first_frame\"}]",
-     "options": null,
-     "optionsJson": null,
+     "fieldType": "multi_image",
+     "placeholder": "选择参考图片",
+     "options": {
+      "minCount": 1,
+      "maxCount": 7,
+      "accept": "image/*",
+      "libraryEnabled": true,
+      "libraryKind": "image",
+      "uiTier": "advanced"
+     },
+     "optionsJson": "{\"minCount\":1,\"maxCount\":7,\"accept\":\"image/*\",\"libraryEnabled\":true,\"libraryKind\":\"image\",\"uiTier\":\"advanced\"}",
      "required": false,
      "executionRequired": false,
      "userRequired": false,
@@ -4468,10 +4588,16 @@
     {
      "fieldKey": "videoList",
      "fieldName": "参考视频列表",
-     "fieldType": "textarea",
-     "placeholder": "JSON数组，例：[{\"video_url\":\"https://...\",\"refer_type\":\"feature\"}]",
-     "options": null,
-     "optionsJson": null,
+     "fieldType": "multi_video",
+     "placeholder": "选择参考视频",
+     "options": {
+      "maxCount": 4,
+      "accept": "video/*",
+      "libraryEnabled": true,
+      "libraryKind": "video",
+      "uiTier": "advanced"
+     },
+     "optionsJson": "{\"maxCount\":4,\"accept\":\"video/*\",\"libraryEnabled\":true,\"libraryKind\":\"video\",\"uiTier\":\"advanced\"}",
      "required": false,
      "executionRequired": false,
      "userRequired": false,
@@ -4483,10 +4609,14 @@
     {
      "fieldKey": "elementList",
      "fieldName": "主体参考列表",
-     "fieldType": "textarea",
-     "placeholder": "JSON数组，例：[{\"element_id\":123456}]",
-     "options": null,
-     "optionsJson": null,
+     "fieldType": "subject_element_list",
+     "placeholder": "添加主体参考",
+     "options": {
+      "maxCount": 7,
+      "libraryEnabled": true,
+      "uiTier": "advanced"
+     },
+     "optionsJson": "{\"maxCount\":7,\"libraryEnabled\":true,\"uiTier\":\"advanced\"}",
      "required": false,
      "executionRequired": false,
      "userRequired": false,
@@ -4500,21 +4630,24 @@
      "fieldName": "多镜头",
      "fieldType": "radio",
      "placeholder": null,
-     "options": [
-      {
-       "label": "关闭",
-       "value": "false"
-      },
-      {
-       "label": "开启",
-       "value": "true"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"关闭\", \"value\": \"false\"}, {\"label\": \"开启\", \"value\": \"true\"}]",
+     "options": {
+      "options": [
+       {
+        "label": "关闭",
+        "value": "false"
+       },
+       {
+        "label": "开启",
+        "value": "true"
+       }
+      ],
+      "defaultValue": "false"
+     },
+     "optionsJson": "{\"options\": [{\"label\": \"关闭\", \"value\": \"false\"}, {\"label\": \"开启\", \"value\": \"true\"}], \"defaultValue\": \"false\"}",
      "required": false,
      "executionRequired": false,
      "userRequired": false,
-     "defaultValue": null,
+     "defaultValue": "false",
      "agentFillStrategy": "default",
      "riskLevel": "LOW",
      "sortOrder": 9
@@ -4524,17 +4657,19 @@
      "fieldName": "分镜类型",
      "fieldType": "select",
      "placeholder": null,
-     "options": [
-      {
-       "label": "自动",
-       "value": "auto"
-      },
-      {
-       "label": "自定义",
-       "value": "customize"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"自动\", \"value\": \"auto\"}, {\"label\": \"自定义\", \"value\": \"customize\"}]",
+     "options": {
+      "options": [
+       {
+        "label": "自动",
+        "value": "auto"
+       },
+       {
+        "label": "自定义",
+        "value": "customize"
+       }
+      ]
+     },
+     "optionsJson": "{\"options\": [{\"label\": \"自动\", \"value\": \"auto\"}, {\"label\": \"自定义\", \"value\": \"customize\"}]}",
      "required": false,
      "executionRequired": false,
      "userRequired": false,
@@ -4547,7 +4682,7 @@
      "fieldKey": "multiPrompt",
      "fieldName": "分镜提示词",
      "fieldType": "textarea",
-     "placeholder": "JSON数组，例：[{\"shot\":1,\"prompt\":\"镜头推进\"}]",
+     "placeholder": "多镜头时的分镜描述",
      "options": null,
      "optionsJson": null,
      "required": false,
@@ -4572,2701 +4707,53 @@
      "agentFillStrategy": "default",
      "riskLevel": "LOW",
      "sortOrder": 12
-    }
-   ],
-   "prompts": [
-    {
-     "promptCode": "default",
-     "promptName": "默认 Prompt",
-     "status": "ACTIVE",
-     "activeVersionNo": "tpl-ba41a7d32e79",
-     "versions": [
-      {
-       "versionNo": "tpl-ba41a7d32e79",
-       "systemPrompt": null,
-       "userPromptTemplate": "画面描述：{{prompt}}\n画面比例：{{aspectRatio}}\n时长：{{duration}}\n质量档位：{{mode}}\n音频：{{sound}}\n参考图片列表：{{imageList}}\n参考视频列表：{{videoList}}\n主体参考列表：{{elementList}}\n多镜头：{{multiShot}}\n分镜类型：{{shotType}}\n分镜提示词：{{multiPrompt}}\n反向提示词：{{negativePrompt}}",
-       "outputFormat": "MARKDOWN",
-       "status": "ACTIVE"
-      }
-     ]
-    }
-   ],
-   "workflow": null
-  },
-  {
-   "toolCode": "kling-v3-text-to-video",
-   "toolName": "可灵 V3 文生视频",
-   "categoryCode": "copywriting",
-   "description": null,
-   "coverUrl": "/generated/tool-covers/可灵-V3-文生视频-kling-v3-text-to-video-可灵-V3-文生视频-20260529032045.mp4",
-   "toolType": "VIDEO_GENERATION",
-   "inputModality": "TEXT",
-   "outputModality": "VIDEO",
-   "configNote": "可灵 可灵 V3 文生视频\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"effect\",\"modelIconUrl\":\"\"} -->",
-   "status": "OFFLINE",
-   "estimatedCreditCost": 360,
-   "modelConfigCode": "kling-v3-omni",
-   "executionHandler": "VIDEO_GENERATION",
-   "agentEnabled": true,
-   "fields": [
-    {
-     "fieldKey": "prompt",
-     "fieldName": "画面描述",
-     "fieldType": "textarea",
-     "placeholder": "描述主体、场景、光线、构图和细节",
-     "options": {
-      "core": true
-     },
-     "optionsJson": "{\"core\": true}",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 1
     },
     {
-     "fieldKey": "aspectRatio",
-     "fieldName": "画面比例",
-     "fieldType": "radio",
-     "placeholder": null,
-     "options": [
-      {
-       "label": "1:1",
-       "value": "1:1"
-      },
-      {
-       "label": "16:9",
-       "value": "16:9"
-      },
-      {
-       "label": "9:16",
-       "value": "9:16"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"1:1\", \"value\": \"1:1\"}, {\"label\": \"16:9\", \"value\": \"16:9\"}, {\"label\": \"9:16\", \"value\": \"9:16\"}]",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 2
-    },
-    {
-     "fieldKey": "duration",
-     "fieldName": "时长",
-     "fieldType": "radio",
-     "placeholder": null,
-     "options": [
-      {
-       "label": "5秒",
-       "value": "5"
-      },
-      {
-       "label": "10秒",
-       "value": "10"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"5秒\", \"value\": \"5\"}, {\"label\": \"10秒\", \"value\": \"10\"}]",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 3
-    },
-    {
-     "fieldKey": "mode",
-     "fieldName": "质量档位",
-     "fieldType": "radio",
-     "placeholder": null,
-     "options": [
-      {
-       "label": "标准（std）",
-       "value": "std"
-      },
-      {
-       "label": "高质量（pro）",
-       "value": "pro"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"标准（std）\", \"value\": \"std\"}, {\"label\": \"高质量（pro）\", \"value\": \"pro\"}]",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 4
-    },
-    {
-     "fieldKey": "style",
-     "fieldName": "风格",
+     "fieldKey": "model",
+     "fieldName": "可灵模型版本",
      "fieldType": "select",
      "placeholder": null,
-     "options": [
-      {
-       "label": "写实",
-       "value": "写实"
-      },
-      {
-       "label": "电影感",
-       "value": "电影感"
-      },
-      {
-       "label": "动漫",
-       "value": "动漫"
-      },
-      {
-       "label": "极简",
-       "value": "极简"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"写实\", \"value\": \"写实\"}, {\"label\": \"电影感\", \"value\": \"电影感\"}, {\"label\": \"动漫\", \"value\": \"动漫\"}, {\"label\": \"极简\", \"value\": \"极简\"}]",
-     "required": false,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 5
-    },
-    {
-     "fieldKey": "negativePrompt",
-     "fieldName": "反向提示词",
-     "fieldType": "textarea",
-     "placeholder": "不希望出现的元素",
-     "options": null,
-     "optionsJson": null,
-     "required": false,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 6
-    }
-   ],
-   "prompts": [
-    {
-     "promptCode": "default",
-     "promptName": "默认 Prompt",
-     "status": "ACTIVE",
-     "activeVersionNo": "tpl-e0670f10b1d1",
-     "versions": [
-      {
-       "versionNo": "tpl-e0670f10b1d1",
-       "systemPrompt": null,
-       "userPromptTemplate": "画面描述：{{prompt}}\n画面比例：{{aspectRatio}}\n时长：{{duration}}\n质量档位：{{mode}}\n风格：{{style}}\n反向提示词：{{negativePrompt}}",
-       "outputFormat": "MARKDOWN",
-       "status": "ACTIVE"
-      }
-     ]
-    }
-   ],
-   "workflow": null
-  },
-  {
-   "toolCode": "kling-v3-image-to-video",
-   "toolName": "可灵 V3 图生视频",
-   "categoryCode": "copywriting",
-   "description": null,
-   "coverUrl": "/generated/tool-covers/可灵-V3-图生视频-kling-v3-image-to-video-可灵-V3-Omni-20260608010046.mp4",
-   "toolType": "VIDEO_GENERATION",
-   "inputModality": "IMAGE",
-   "outputModality": "VIDEO",
-   "configNote": "可灵 可灵 V3 图生视频\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"effect\",\"modelIconUrl\":\"\",\"comparisonOriginalUrl\":\"\",\"comparisonEffectUrl\":\"\"} -->",
-   "status": "ONLINE",
-   "estimatedCreditCost": 360,
-   "modelConfigCode": "kling-v3-omni",
-   "executionHandler": "VIDEO_GENERATION",
-   "agentEnabled": true,
-   "fields": [
-    {
-     "fieldKey": "imageUrl",
-     "fieldName": "首帧图片",
-     "fieldType": "image",
-     "placeholder": "上传后的 URL 或可访问的图片链接",
-     "options": null,
-     "optionsJson": null,
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 1
-    },
-    {
-     "fieldKey": "imageTail",
-     "fieldName": "尾帧图片",
-     "fieldType": "image",
-     "placeholder": "可选，尾帧图 URL",
-     "options": null,
-     "optionsJson": null,
-     "required": false,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 2
-    },
-    {
-     "fieldKey": "prompt",
-     "fieldName": "动态描述",
-     "fieldType": "textarea",
-     "placeholder": "描述镜头运动、主体动作、场景变化",
      "options": {
-      "core": true
+      "uiTier": "all",
+      "uiGroup": "meta",
+      "defaultValue": "kling-v3-omni",
+      "options": [
+       {
+        "label": "V3 Omni（推荐）",
+        "value": "kling-v3-omni"
+       },
+       {
+        "label": "Video O1",
+        "value": "kling-video-o1"
+       }
+      ]
      },
-     "optionsJson": "{\"core\": true}",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 3
-    },
-    {
-     "fieldKey": "aspectRatio",
-     "fieldName": "画面比例",
-     "fieldType": "radio",
-     "placeholder": null,
-     "options": [
-      {
-       "label": "1:1",
-       "value": "1:1"
-      },
-      {
-       "label": "16:9",
-       "value": "16:9"
-      },
-      {
-       "label": "9:16",
-       "value": "9:16"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"1:1\", \"value\": \"1:1\"}, {\"label\": \"16:9\", \"value\": \"16:9\"}, {\"label\": \"9:16\", \"value\": \"9:16\"}]",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 4
-    },
-    {
-     "fieldKey": "duration",
-     "fieldName": "时长",
-     "fieldType": "radio",
-     "placeholder": null,
-     "options": [
-      {
-       "label": "5秒",
-       "value": "5"
-      },
-      {
-       "label": "10秒",
-       "value": "10"
-      },
-      {
-       "label": "15秒",
-       "value": "15"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"5秒\", \"value\": \"5\"}, {\"label\": \"10秒\", \"value\": \"10\"}, {\"label\": \"15秒\", \"value\": \"15\"}]",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 5
-    },
-    {
-     "fieldKey": "mode",
-     "fieldName": "质量档位",
-     "fieldType": "radio",
-     "placeholder": null,
-     "options": [
-      {
-       "label": "标准（std）",
-       "value": "std"
-      },
-      {
-       "label": "高质量（pro）",
-       "value": "pro"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"标准（std）\", \"value\": \"std\"}, {\"label\": \"高质量（pro）\", \"value\": \"pro\"}]",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 6
-    },
-    {
-     "fieldKey": "sound",
-     "fieldName": "音频",
-     "fieldType": "radio",
-     "placeholder": null,
-     "options": [
-      {
-       "label": "关闭",
-       "value": "off"
-      },
-      {
-       "label": "开启",
-       "value": "on"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"关闭\", \"value\": \"off\"}, {\"label\": \"开启\", \"value\": \"on\"}]",
+     "optionsJson": "{\"uiTier\": \"all\", \"uiGroup\": \"meta\", \"defaultValue\": \"kling-v3-omni\", \"options\": [{\"label\": \"V3 Omni（推荐）\", \"value\": \"kling-v3-omni\"}, {\"label\": \"Video O1\", \"value\": \"kling-video-o1\"}]}",
      "required": false,
      "executionRequired": false,
      "userRequired": false,
-     "defaultValue": null,
+     "defaultValue": "kling-v3-omni",
      "agentFillStrategy": "default",
      "riskLevel": "LOW",
-     "sortOrder": 7
-    },
-    {
-     "fieldKey": "negativePrompt",
-     "fieldName": "反向提示词",
-     "fieldType": "textarea",
-     "placeholder": "不希望出现的元素",
-     "options": null,
-     "optionsJson": null,
-     "required": false,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 8
+     "sortOrder": 13
     }
    ],
-   "prompts": [
-    {
-     "promptCode": "default",
-     "promptName": "默认 Prompt",
-     "status": "ACTIVE",
-     "activeVersionNo": "tpl-c5da2a319a20",
-     "versions": [
-      {
-       "versionNo": "tpl-c5da2a319a20",
-       "systemPrompt": null,
-       "userPromptTemplate": "首帧图片：{{imageUrl}}\n尾帧图片：{{imageTail}}\n动态描述：{{prompt}}\n画面比例：{{aspectRatio}}\n时长：{{duration}}\n质量档位：{{mode}}\n音频：{{sound}}\n反向提示词：{{negativePrompt}}",
-       "outputFormat": "MARKDOWN",
-       "status": "ACTIVE"
-      }
-     ]
-    }
-   ],
+   "prompts": [],
    "workflow": null
   },
   {
-   "toolCode": "kling-v3-multi-image-reference",
-   "toolName": "可灵 V3 多图参考生视频",
-   "categoryCode": "copywriting",
-   "description": null,
-   "coverUrl": "/generated/tool-covers/可灵-V3-多图参考生视频-kling-v3-multi-image-reference-可灵-V3-图生视频-20260529033234.mp4",
-   "toolType": "VIDEO_GENERATION",
-   "inputModality": "IMAGE",
-   "outputModality": "VIDEO",
-   "configNote": "可灵 可灵 V3 多图参考生视频\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"effect\",\"modelIconUrl\":\"\"} -->",
-   "status": "OFFLINE",
-   "estimatedCreditCost": 360,
-   "modelConfigCode": "kling-v3-omni",
-   "executionHandler": "VIDEO_GENERATION",
-   "agentEnabled": true,
-   "fields": [
-    {
-     "fieldKey": "prompt",
-     "fieldName": "主提示词",
-     "fieldType": "textarea",
-     "placeholder": "描述视频目标与主要动作",
-     "options": {
-      "core": true
-     },
-     "optionsJson": "{\"core\": true}",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 1
-    },
-    {
-     "fieldKey": "imageList",
-     "fieldName": "多图参考",
-     "fieldType": "textarea",
-     "placeholder": "JSON数组，例：[{\"image_url\":\"https://...\"},{\"image_url\":\"https://...\"}]",
-     "options": null,
-     "optionsJson": null,
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 2
-    },
-    {
-     "fieldKey": "elementList",
-     "fieldName": "主体绑定",
-     "fieldType": "textarea",
-     "placeholder": "JSON数组，例：[{\"element_id\":123456}]",
-     "options": null,
-     "optionsJson": null,
-     "required": false,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 3
-    },
-    {
-     "fieldKey": "aspectRatio",
-     "fieldName": "画面比例",
-     "fieldType": "radio",
-     "placeholder": null,
-     "options": [
-      {
-       "label": "1:1",
-       "value": "1:1"
-      },
-      {
-       "label": "16:9",
-       "value": "16:9"
-      },
-      {
-       "label": "9:16",
-       "value": "9:16"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"1:1\", \"value\": \"1:1\"}, {\"label\": \"16:9\", \"value\": \"16:9\"}, {\"label\": \"9:16\", \"value\": \"9:16\"}]",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 4
-    },
-    {
-     "fieldKey": "duration",
-     "fieldName": "时长",
-     "fieldType": "radio",
-     "placeholder": null,
-     "options": [
-      {
-       "label": "5秒",
-       "value": "5"
-      },
-      {
-       "label": "10秒",
-       "value": "10"
-      },
-      {
-       "label": "15秒",
-       "value": "15"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"5秒\", \"value\": \"5\"}, {\"label\": \"10秒\", \"value\": \"10\"}, {\"label\": \"15秒\", \"value\": \"15\"}]",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 5
-    },
-    {
-     "fieldKey": "mode",
-     "fieldName": "质量档位",
-     "fieldType": "radio",
-     "placeholder": null,
-     "options": [
-      {
-       "label": "标准（std）",
-       "value": "std"
-      },
-      {
-       "label": "高质量（pro）",
-       "value": "pro"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"标准（std）\", \"value\": \"std\"}, {\"label\": \"高质量（pro）\", \"value\": \"pro\"}]",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 6
-    },
-    {
-     "fieldKey": "multiShot",
-     "fieldName": "多镜头",
-     "fieldType": "radio",
-     "placeholder": null,
-     "options": [
-      {
-       "label": "关闭",
-       "value": "false"
-      },
-      {
-       "label": "开启",
-       "value": "true"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"关闭\", \"value\": \"false\"}, {\"label\": \"开启\", \"value\": \"true\"}]",
-     "required": false,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 7
-    },
-    {
-     "fieldKey": "shotType",
-     "fieldName": "分镜类型",
-     "fieldType": "select",
-     "placeholder": null,
-     "options": [
-      {
-       "label": "自动",
-       "value": "auto"
-      },
-      {
-       "label": "自定义",
-       "value": "customize"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"自动\", \"value\": \"auto\"}, {\"label\": \"自定义\", \"value\": \"customize\"}]",
-     "required": false,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 8
-    },
-    {
-     "fieldKey": "multiPrompt",
-     "fieldName": "分镜提示词",
-     "fieldType": "textarea",
-     "placeholder": "JSON数组，例：[{\"shot\":1,\"prompt\":\"镜头推进\"}]",
-     "options": null,
-     "optionsJson": null,
-     "required": false,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 9
-    },
-    {
-     "fieldKey": "negativePrompt",
-     "fieldName": "反向提示词",
-     "fieldType": "textarea",
-     "placeholder": "不希望出现的元素",
-     "options": null,
-     "optionsJson": null,
-     "required": false,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 10
-    }
-   ],
-   "prompts": [
-    {
-     "promptCode": "default",
-     "promptName": "默认 Prompt",
-     "status": "ACTIVE",
-     "activeVersionNo": "tpl-87a536239f87",
-     "versions": [
-      {
-       "versionNo": "tpl-87a536239f87",
-       "systemPrompt": null,
-       "userPromptTemplate": "主提示词：{{prompt}}\n多图参考：{{imageList}}\n主体绑定：{{elementList}}\n画面比例：{{aspectRatio}}\n时长：{{duration}}\n质量档位：{{mode}}\n多镜头：{{multiShot}}\n分镜类型：{{shotType}}\n分镜提示词：{{multiPrompt}}\n反向提示词：{{negativePrompt}}",
-       "outputFormat": "MARKDOWN",
-       "status": "ACTIVE"
-      }
-     ]
-    }
-   ],
-   "workflow": null
-  },
-  {
-   "toolCode": "kling-v3-motion-control",
-   "toolName": "可灵 V3 动作控制",
-   "categoryCode": "copywriting",
-   "description": null,
-   "coverUrl": null,
-   "toolType": "VIDEO_GENERATION",
-   "inputModality": "MULTIMODAL",
-   "outputModality": "VIDEO",
-   "configNote": "可灵 可灵 V3 动作控制\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"icon\",\"modelIconUrl\":\"\"} -->",
-   "status": "OFFLINE",
-   "estimatedCreditCost": 360,
-   "modelConfigCode": "kling-v3-omni",
-   "executionHandler": "VIDEO_GENERATION",
-   "agentEnabled": true,
-   "fields": [
-    {
-     "fieldKey": "imageUrl",
-     "fieldName": "角色图",
-     "fieldType": "image",
-     "placeholder": "待驱动角色图片 URL",
-     "options": null,
-     "optionsJson": null,
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 1
-    },
-    {
-     "fieldKey": "videoUrl",
-     "fieldName": "动作参考视频",
-     "fieldType": "file",
-     "placeholder": "动作参考视频 URL",
-     "options": null,
-     "optionsJson": null,
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 2
-    },
-    {
-     "fieldKey": "characterOrientation",
-     "fieldName": "人物朝向参考",
-     "fieldType": "radio",
-     "placeholder": null,
-     "options": [
-      {
-       "label": "按图片朝向（最长10s）",
-       "value": "image"
-      },
-      {
-       "label": "按视频朝向（最长30s）",
-       "value": "video"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"按图片朝向（最长10s）\", \"value\": \"image\"}, {\"label\": \"按视频朝向（最长30s）\", \"value\": \"video\"}]",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 3
-    },
-    {
-     "fieldKey": "duration",
-     "fieldName": "时长",
-     "fieldType": "radio",
-     "placeholder": null,
-     "options": [
-      {
-       "label": "5秒",
-       "value": "5"
-      },
-      {
-       "label": "10秒",
-       "value": "10"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"5秒\", \"value\": \"5\"}, {\"label\": \"10秒\", \"value\": \"10\"}]",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 4
-    },
-    {
-     "fieldKey": "mode",
-     "fieldName": "质量档位",
-     "fieldType": "radio",
-     "placeholder": null,
-     "options": [
-      {
-       "label": "标准（std）",
-       "value": "std"
-      },
-      {
-       "label": "高质量（pro）",
-       "value": "pro"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"标准（std）\", \"value\": \"std\"}, {\"label\": \"高质量（pro）\", \"value\": \"pro\"}]",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 5
-    },
-    {
-     "fieldKey": "aspectRatio",
-     "fieldName": "画面比例",
-     "fieldType": "radio",
-     "placeholder": null,
-     "options": [
-      {
-       "label": "1:1",
-       "value": "1:1"
-      },
-      {
-       "label": "16:9",
-       "value": "16:9"
-      },
-      {
-       "label": "9:16",
-       "value": "9:16"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"1:1\", \"value\": \"1:1\"}, {\"label\": \"16:9\", \"value\": \"16:9\"}, {\"label\": \"9:16\", \"value\": \"9:16\"}]",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 6
-    },
-    {
-     "fieldKey": "staticMask",
-     "fieldName": "静态涂抹蒙版",
-     "fieldType": "textarea",
-     "placeholder": "可选，蒙版图片 URL",
-     "options": null,
-     "optionsJson": null,
-     "required": false,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 7
-    },
-    {
-     "fieldKey": "dynamicMasks",
-     "fieldName": "动态轨迹蒙版",
-     "fieldType": "textarea",
-     "placeholder": "可选，JSON数组",
-     "options": null,
-     "optionsJson": null,
-     "required": false,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 8
-    },
-    {
-     "fieldKey": "prompt",
-     "fieldName": "补充描述",
-     "fieldType": "textarea",
-     "placeholder": "补充动作细节和镜头语言",
-     "options": {
-      "core": true
-     },
-     "optionsJson": "{\"core\": true}",
-     "required": false,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 9
-    }
-   ],
-   "prompts": [
-    {
-     "promptCode": "default",
-     "promptName": "默认 Prompt",
-     "status": "ACTIVE",
-     "activeVersionNo": "tpl-e216e7c46c2a",
-     "versions": [
-      {
-       "versionNo": "tpl-e216e7c46c2a",
-       "systemPrompt": null,
-       "userPromptTemplate": "角色图：{{imageUrl}}\n动作参考视频：{{videoUrl}}\n人物朝向参考：{{characterOrientation}}\n时长：{{duration}}\n质量档位：{{mode}}\n画面比例：{{aspectRatio}}\n静态涂抹蒙版：{{staticMask}}\n动态轨迹蒙版：{{dynamicMasks}}\n补充描述：{{prompt}}",
-       "outputFormat": "MARKDOWN",
-       "status": "ACTIVE"
-      }
-     ]
-    }
-   ],
-   "workflow": null
-  },
-  {
-   "toolCode": "kling-v2-6-image-to-video",
-   "toolName": "可灵 V2.6 图生视频",
-   "categoryCode": "copywriting",
-   "description": null,
-   "coverUrl": null,
-   "toolType": "VIDEO_GENERATION",
-   "inputModality": "IMAGE",
-   "outputModality": "VIDEO",
-   "configNote": "可灵 可灵 V2.6 图生视频\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"icon\",\"modelIconUrl\":\"\"} -->",
-   "status": "OFFLINE",
-   "estimatedCreditCost": 360,
-   "modelConfigCode": "kling-v2-master-image-to-video",
-   "executionHandler": "VIDEO_GENERATION",
-   "agentEnabled": true,
-   "fields": [
-    {
-     "fieldKey": "imageUrl",
-     "fieldName": "首帧图片",
-     "fieldType": "image",
-     "placeholder": "上传后的 URL 或可访问的图片链接",
-     "options": null,
-     "optionsJson": null,
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 1
-    },
-    {
-     "fieldKey": "imageTail",
-     "fieldName": "尾帧图片",
-     "fieldType": "image",
-     "placeholder": "可选，尾帧图 URL",
-     "options": null,
-     "optionsJson": null,
-     "required": false,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 2
-    },
-    {
-     "fieldKey": "prompt",
-     "fieldName": "动态描述",
-     "fieldType": "textarea",
-     "placeholder": "描述镜头运动、主体动作、场景变化",
-     "options": {
-      "core": true
-     },
-     "optionsJson": "{\"core\": true}",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 3
-    },
-    {
-     "fieldKey": "aspectRatio",
-     "fieldName": "画面比例",
-     "fieldType": "radio",
-     "placeholder": null,
-     "options": [
-      {
-       "label": "1:1",
-       "value": "1:1"
-      },
-      {
-       "label": "16:9",
-       "value": "16:9"
-      },
-      {
-       "label": "9:16",
-       "value": "9:16"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"1:1\", \"value\": \"1:1\"}, {\"label\": \"16:9\", \"value\": \"16:9\"}, {\"label\": \"9:16\", \"value\": \"9:16\"}]",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 4
-    },
-    {
-     "fieldKey": "duration",
-     "fieldName": "时长",
-     "fieldType": "radio",
-     "placeholder": null,
-     "options": [
-      {
-       "label": "5秒",
-       "value": "5"
-      },
-      {
-       "label": "10秒",
-       "value": "10"
-      },
-      {
-       "label": "15秒",
-       "value": "15"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"5秒\", \"value\": \"5\"}, {\"label\": \"10秒\", \"value\": \"10\"}, {\"label\": \"15秒\", \"value\": \"15\"}]",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 5
-    },
-    {
-     "fieldKey": "mode",
-     "fieldName": "质量档位",
-     "fieldType": "radio",
-     "placeholder": null,
-     "options": [
-      {
-       "label": "标准（std）",
-       "value": "std"
-      },
-      {
-       "label": "高质量（pro）",
-       "value": "pro"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"标准（std）\", \"value\": \"std\"}, {\"label\": \"高质量（pro）\", \"value\": \"pro\"}]",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 6
-    },
-    {
-     "fieldKey": "sound",
-     "fieldName": "音频",
-     "fieldType": "radio",
-     "placeholder": null,
-     "options": [
-      {
-       "label": "关闭",
-       "value": "off"
-      },
-      {
-       "label": "开启",
-       "value": "on"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"关闭\", \"value\": \"off\"}, {\"label\": \"开启\", \"value\": \"on\"}]",
-     "required": false,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 7
-    },
-    {
-     "fieldKey": "negativePrompt",
-     "fieldName": "反向提示词",
-     "fieldType": "textarea",
-     "placeholder": "不希望出现的元素",
-     "options": null,
-     "optionsJson": null,
-     "required": false,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 8
-    }
-   ],
-   "prompts": [
-    {
-     "promptCode": "default",
-     "promptName": "默认 Prompt",
-     "status": "ACTIVE",
-     "activeVersionNo": "tpl-5047a5df46e5",
-     "versions": [
-      {
-       "versionNo": "tpl-5047a5df46e5",
-       "systemPrompt": null,
-       "userPromptTemplate": "首帧图片：{{imageUrl}}\n尾帧图片：{{imageTail}}\n动态描述：{{prompt}}\n画面比例：{{aspectRatio}}\n时长：{{duration}}\n质量档位：{{mode}}\n音频：{{sound}}\n反向提示词：{{negativePrompt}}",
-       "outputFormat": "MARKDOWN",
-       "status": "ACTIVE"
-      }
-     ]
-    }
-   ],
-   "workflow": null
-  },
-  {
-   "toolCode": "kling-v2-6-motion-control",
-   "toolName": "可灵 V2.6 动作控制",
-   "categoryCode": "copywriting",
-   "description": null,
-   "coverUrl": null,
-   "toolType": "VIDEO_GENERATION",
-   "inputModality": "MULTIMODAL",
-   "outputModality": "VIDEO",
-   "configNote": "可灵 可灵 V2.6 动作控制\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"icon\",\"modelIconUrl\":\"\"} -->",
-   "status": "OFFLINE",
-   "estimatedCreditCost": 360,
-   "modelConfigCode": "kling-v2-master-image-to-video",
-   "executionHandler": "VIDEO_GENERATION",
-   "agentEnabled": true,
-   "fields": [
-    {
-     "fieldKey": "imageUrl",
-     "fieldName": "角色图",
-     "fieldType": "image",
-     "placeholder": "待驱动角色图片 URL",
-     "options": null,
-     "optionsJson": null,
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 1
-    },
-    {
-     "fieldKey": "videoUrl",
-     "fieldName": "动作参考视频",
-     "fieldType": "file",
-     "placeholder": "动作参考视频 URL",
-     "options": null,
-     "optionsJson": null,
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 2
-    },
-    {
-     "fieldKey": "characterOrientation",
-     "fieldName": "人物朝向参考",
-     "fieldType": "radio",
-     "placeholder": null,
-     "options": [
-      {
-       "label": "按图片朝向（最长10s）",
-       "value": "image"
-      },
-      {
-       "label": "按视频朝向（最长30s）",
-       "value": "video"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"按图片朝向（最长10s）\", \"value\": \"image\"}, {\"label\": \"按视频朝向（最长30s）\", \"value\": \"video\"}]",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 3
-    },
-    {
-     "fieldKey": "duration",
-     "fieldName": "时长",
-     "fieldType": "radio",
-     "placeholder": null,
-     "options": [
-      {
-       "label": "5秒",
-       "value": "5"
-      },
-      {
-       "label": "10秒",
-       "value": "10"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"5秒\", \"value\": \"5\"}, {\"label\": \"10秒\", \"value\": \"10\"}]",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 4
-    },
-    {
-     "fieldKey": "mode",
-     "fieldName": "质量档位",
-     "fieldType": "radio",
-     "placeholder": null,
-     "options": [
-      {
-       "label": "标准（std）",
-       "value": "std"
-      },
-      {
-       "label": "高质量（pro）",
-       "value": "pro"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"标准（std）\", \"value\": \"std\"}, {\"label\": \"高质量（pro）\", \"value\": \"pro\"}]",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 5
-    },
-    {
-     "fieldKey": "aspectRatio",
-     "fieldName": "画面比例",
-     "fieldType": "radio",
-     "placeholder": null,
-     "options": [
-      {
-       "label": "1:1",
-       "value": "1:1"
-      },
-      {
-       "label": "16:9",
-       "value": "16:9"
-      },
-      {
-       "label": "9:16",
-       "value": "9:16"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"1:1\", \"value\": \"1:1\"}, {\"label\": \"16:9\", \"value\": \"16:9\"}, {\"label\": \"9:16\", \"value\": \"9:16\"}]",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 6
-    },
-    {
-     "fieldKey": "staticMask",
-     "fieldName": "静态涂抹蒙版",
-     "fieldType": "textarea",
-     "placeholder": "可选，蒙版图片 URL",
-     "options": null,
-     "optionsJson": null,
-     "required": false,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 7
-    },
-    {
-     "fieldKey": "dynamicMasks",
-     "fieldName": "动态轨迹蒙版",
-     "fieldType": "textarea",
-     "placeholder": "可选，JSON数组",
-     "options": null,
-     "optionsJson": null,
-     "required": false,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 8
-    },
-    {
-     "fieldKey": "prompt",
-     "fieldName": "补充描述",
-     "fieldType": "textarea",
-     "placeholder": "补充动作细节和镜头语言",
-     "options": {
-      "core": true
-     },
-     "optionsJson": "{\"core\": true}",
-     "required": false,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 9
-    }
-   ],
-   "prompts": [
-    {
-     "promptCode": "default",
-     "promptName": "默认 Prompt",
-     "status": "ACTIVE",
-     "activeVersionNo": "tpl-431ab9f3e6a8",
-     "versions": [
-      {
-       "versionNo": "tpl-431ab9f3e6a8",
-       "systemPrompt": null,
-       "userPromptTemplate": "角色图：{{imageUrl}}\n动作参考视频：{{videoUrl}}\n人物朝向参考：{{characterOrientation}}\n时长：{{duration}}\n质量档位：{{mode}}\n画面比例：{{aspectRatio}}\n静态涂抹蒙版：{{staticMask}}\n动态轨迹蒙版：{{dynamicMasks}}\n补充描述：{{prompt}}",
-       "outputFormat": "MARKDOWN",
-       "status": "ACTIVE"
-      }
-     ]
-    }
-   ],
-   "workflow": null
-  },
-  {
-   "toolCode": "kling-v2-5-turbo-image-to-video",
-   "toolName": "可灵 V2.5 Turbo 图生视频",
-   "categoryCode": "copywriting",
-   "description": null,
-   "coverUrl": null,
-   "toolType": "VIDEO_GENERATION",
-   "inputModality": "IMAGE",
-   "outputModality": "VIDEO",
-   "configNote": "可灵 可灵 V2.5 Turbo 图生视频\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"icon\",\"modelIconUrl\":\"\"} -->",
-   "status": "OFFLINE",
-   "estimatedCreditCost": 360,
-   "modelConfigCode": "kling-v2-master-image-to-video",
-   "executionHandler": "VIDEO_GENERATION",
-   "agentEnabled": true,
-   "fields": [
-    {
-     "fieldKey": "imageUrl",
-     "fieldName": "首帧图片",
-     "fieldType": "image",
-     "placeholder": "上传后的 URL 或可访问的图片链接",
-     "options": null,
-     "optionsJson": null,
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 1
-    },
-    {
-     "fieldKey": "imageTail",
-     "fieldName": "尾帧图片",
-     "fieldType": "image",
-     "placeholder": "可选，尾帧图 URL",
-     "options": null,
-     "optionsJson": null,
-     "required": false,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 2
-    },
-    {
-     "fieldKey": "prompt",
-     "fieldName": "动态描述",
-     "fieldType": "textarea",
-     "placeholder": "描述镜头运动、主体动作、场景变化",
-     "options": {
-      "core": true
-     },
-     "optionsJson": "{\"core\": true}",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 3
-    },
-    {
-     "fieldKey": "aspectRatio",
-     "fieldName": "画面比例",
-     "fieldType": "radio",
-     "placeholder": null,
-     "options": [
-      {
-       "label": "1:1",
-       "value": "1:1"
-      },
-      {
-       "label": "16:9",
-       "value": "16:9"
-      },
-      {
-       "label": "9:16",
-       "value": "9:16"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"1:1\", \"value\": \"1:1\"}, {\"label\": \"16:9\", \"value\": \"16:9\"}, {\"label\": \"9:16\", \"value\": \"9:16\"}]",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 4
-    },
-    {
-     "fieldKey": "duration",
-     "fieldName": "时长",
-     "fieldType": "radio",
-     "placeholder": null,
-     "options": [
-      {
-       "label": "5秒",
-       "value": "5"
-      },
-      {
-       "label": "10秒",
-       "value": "10"
-      },
-      {
-       "label": "15秒",
-       "value": "15"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"5秒\", \"value\": \"5\"}, {\"label\": \"10秒\", \"value\": \"10\"}, {\"label\": \"15秒\", \"value\": \"15\"}]",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 5
-    },
-    {
-     "fieldKey": "mode",
-     "fieldName": "质量档位",
-     "fieldType": "radio",
-     "placeholder": null,
-     "options": [
-      {
-       "label": "标准（std）",
-       "value": "std"
-      },
-      {
-       "label": "高质量（pro）",
-       "value": "pro"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"标准（std）\", \"value\": \"std\"}, {\"label\": \"高质量（pro）\", \"value\": \"pro\"}]",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 6
-    },
-    {
-     "fieldKey": "sound",
-     "fieldName": "音频",
-     "fieldType": "radio",
-     "placeholder": null,
-     "options": [
-      {
-       "label": "关闭",
-       "value": "off"
-      },
-      {
-       "label": "开启",
-       "value": "on"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"关闭\", \"value\": \"off\"}, {\"label\": \"开启\", \"value\": \"on\"}]",
-     "required": false,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 7
-    },
-    {
-     "fieldKey": "negativePrompt",
-     "fieldName": "反向提示词",
-     "fieldType": "textarea",
-     "placeholder": "不希望出现的元素",
-     "options": null,
-     "optionsJson": null,
-     "required": false,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 8
-    }
-   ],
-   "prompts": [
-    {
-     "promptCode": "default",
-     "promptName": "默认 Prompt",
-     "status": "ACTIVE",
-     "activeVersionNo": "tpl-4bd168a929d1",
-     "versions": [
-      {
-       "versionNo": "tpl-4bd168a929d1",
-       "systemPrompt": null,
-       "userPromptTemplate": "首帧图片：{{imageUrl}}\n尾帧图片：{{imageTail}}\n动态描述：{{prompt}}\n画面比例：{{aspectRatio}}\n时长：{{duration}}\n质量档位：{{mode}}\n音频：{{sound}}\n反向提示词：{{negativePrompt}}",
-       "outputFormat": "MARKDOWN",
-       "status": "ACTIVE"
-      }
-     ]
-    }
-   ],
-   "workflow": null
-  },
-  {
-   "toolCode": "kling-v2-1-master-image-to-video",
-   "toolName": "可灵 V2.1 Master 图生视频",
-   "categoryCode": "copywriting",
-   "description": null,
-   "coverUrl": null,
-   "toolType": "VIDEO_GENERATION",
-   "inputModality": "IMAGE",
-   "outputModality": "VIDEO",
-   "configNote": "可灵 可灵 V2.1 Master 图生视频\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"icon\",\"modelIconUrl\":\"\"} -->",
-   "status": "OFFLINE",
-   "estimatedCreditCost": 360,
-   "modelConfigCode": "kling-v2-master-image-to-video",
-   "executionHandler": "VIDEO_GENERATION",
-   "agentEnabled": true,
-   "fields": [
-    {
-     "fieldKey": "imageUrl",
-     "fieldName": "首帧图片",
-     "fieldType": "image",
-     "placeholder": "上传后的 URL 或可访问的图片链接",
-     "options": null,
-     "optionsJson": null,
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 1
-    },
-    {
-     "fieldKey": "imageTail",
-     "fieldName": "尾帧图片",
-     "fieldType": "image",
-     "placeholder": "可选，尾帧图 URL",
-     "options": null,
-     "optionsJson": null,
-     "required": false,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 2
-    },
-    {
-     "fieldKey": "prompt",
-     "fieldName": "动态描述",
-     "fieldType": "textarea",
-     "placeholder": "描述镜头运动、主体动作、场景变化",
-     "options": {
-      "core": true
-     },
-     "optionsJson": "{\"core\": true}",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 3
-    },
-    {
-     "fieldKey": "aspectRatio",
-     "fieldName": "画面比例",
-     "fieldType": "radio",
-     "placeholder": null,
-     "options": [
-      {
-       "label": "1:1",
-       "value": "1:1"
-      },
-      {
-       "label": "16:9",
-       "value": "16:9"
-      },
-      {
-       "label": "9:16",
-       "value": "9:16"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"1:1\", \"value\": \"1:1\"}, {\"label\": \"16:9\", \"value\": \"16:9\"}, {\"label\": \"9:16\", \"value\": \"9:16\"}]",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 4
-    },
-    {
-     "fieldKey": "duration",
-     "fieldName": "时长",
-     "fieldType": "radio",
-     "placeholder": null,
-     "options": [
-      {
-       "label": "5秒",
-       "value": "5"
-      },
-      {
-       "label": "10秒",
-       "value": "10"
-      },
-      {
-       "label": "15秒",
-       "value": "15"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"5秒\", \"value\": \"5\"}, {\"label\": \"10秒\", \"value\": \"10\"}, {\"label\": \"15秒\", \"value\": \"15\"}]",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 5
-    },
-    {
-     "fieldKey": "mode",
-     "fieldName": "质量档位",
-     "fieldType": "radio",
-     "placeholder": null,
-     "options": [
-      {
-       "label": "标准（std）",
-       "value": "std"
-      },
-      {
-       "label": "高质量（pro）",
-       "value": "pro"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"标准（std）\", \"value\": \"std\"}, {\"label\": \"高质量（pro）\", \"value\": \"pro\"}]",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 6
-    },
-    {
-     "fieldKey": "sound",
-     "fieldName": "音频",
-     "fieldType": "radio",
-     "placeholder": null,
-     "options": [
-      {
-       "label": "关闭",
-       "value": "off"
-      },
-      {
-       "label": "开启",
-       "value": "on"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"关闭\", \"value\": \"off\"}, {\"label\": \"开启\", \"value\": \"on\"}]",
-     "required": false,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 7
-    },
-    {
-     "fieldKey": "negativePrompt",
-     "fieldName": "反向提示词",
-     "fieldType": "textarea",
-     "placeholder": "不希望出现的元素",
-     "options": null,
-     "optionsJson": null,
-     "required": false,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 8
-    }
-   ],
-   "prompts": [
-    {
-     "promptCode": "default",
-     "promptName": "默认 Prompt",
-     "status": "ACTIVE",
-     "activeVersionNo": "tpl-35fff5114785",
-     "versions": [
-      {
-       "versionNo": "tpl-35fff5114785",
-       "systemPrompt": null,
-       "userPromptTemplate": "首帧图片：{{imageUrl}}\n尾帧图片：{{imageTail}}\n动态描述：{{prompt}}\n画面比例：{{aspectRatio}}\n时长：{{duration}}\n质量档位：{{mode}}\n音频：{{sound}}\n反向提示词：{{negativePrompt}}",
-       "outputFormat": "MARKDOWN",
-       "status": "ACTIVE"
-      }
-     ]
-    }
-   ],
-   "workflow": null
-  },
-  {
-   "toolCode": "kling-v2-1-image-to-video",
-   "toolName": "可灵 V2.1 图生视频",
-   "categoryCode": "copywriting",
-   "description": null,
-   "coverUrl": null,
-   "toolType": "VIDEO_GENERATION",
-   "inputModality": "IMAGE",
-   "outputModality": "VIDEO",
-   "configNote": "可灵 可灵 V2.1 图生视频\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"icon\",\"modelIconUrl\":\"\"} -->",
-   "status": "OFFLINE",
-   "estimatedCreditCost": 360,
-   "modelConfigCode": "kling-v2-master-image-to-video",
-   "executionHandler": "VIDEO_GENERATION",
-   "agentEnabled": true,
-   "fields": [
-    {
-     "fieldKey": "imageUrl",
-     "fieldName": "首帧图片",
-     "fieldType": "image",
-     "placeholder": "上传后的 URL 或可访问的图片链接",
-     "options": null,
-     "optionsJson": null,
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 1
-    },
-    {
-     "fieldKey": "imageTail",
-     "fieldName": "尾帧图片",
-     "fieldType": "image",
-     "placeholder": "可选，尾帧图 URL",
-     "options": null,
-     "optionsJson": null,
-     "required": false,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 2
-    },
-    {
-     "fieldKey": "prompt",
-     "fieldName": "动态描述",
-     "fieldType": "textarea",
-     "placeholder": "描述镜头运动、主体动作、场景变化",
-     "options": {
-      "core": true
-     },
-     "optionsJson": "{\"core\": true}",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 3
-    },
-    {
-     "fieldKey": "aspectRatio",
-     "fieldName": "画面比例",
-     "fieldType": "radio",
-     "placeholder": null,
-     "options": [
-      {
-       "label": "1:1",
-       "value": "1:1"
-      },
-      {
-       "label": "16:9",
-       "value": "16:9"
-      },
-      {
-       "label": "9:16",
-       "value": "9:16"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"1:1\", \"value\": \"1:1\"}, {\"label\": \"16:9\", \"value\": \"16:9\"}, {\"label\": \"9:16\", \"value\": \"9:16\"}]",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 4
-    },
-    {
-     "fieldKey": "duration",
-     "fieldName": "时长",
-     "fieldType": "radio",
-     "placeholder": null,
-     "options": [
-      {
-       "label": "5秒",
-       "value": "5"
-      },
-      {
-       "label": "10秒",
-       "value": "10"
-      },
-      {
-       "label": "15秒",
-       "value": "15"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"5秒\", \"value\": \"5\"}, {\"label\": \"10秒\", \"value\": \"10\"}, {\"label\": \"15秒\", \"value\": \"15\"}]",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 5
-    },
-    {
-     "fieldKey": "mode",
-     "fieldName": "质量档位",
-     "fieldType": "radio",
-     "placeholder": null,
-     "options": [
-      {
-       "label": "标准（std）",
-       "value": "std"
-      },
-      {
-       "label": "高质量（pro）",
-       "value": "pro"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"标准（std）\", \"value\": \"std\"}, {\"label\": \"高质量（pro）\", \"value\": \"pro\"}]",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 6
-    },
-    {
-     "fieldKey": "sound",
-     "fieldName": "音频",
-     "fieldType": "radio",
-     "placeholder": null,
-     "options": [
-      {
-       "label": "关闭",
-       "value": "off"
-      },
-      {
-       "label": "开启",
-       "value": "on"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"关闭\", \"value\": \"off\"}, {\"label\": \"开启\", \"value\": \"on\"}]",
-     "required": false,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 7
-    },
-    {
-     "fieldKey": "negativePrompt",
-     "fieldName": "反向提示词",
-     "fieldType": "textarea",
-     "placeholder": "不希望出现的元素",
-     "options": null,
-     "optionsJson": null,
-     "required": false,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 8
-    }
-   ],
-   "prompts": [
-    {
-     "promptCode": "default",
-     "promptName": "默认 Prompt",
-     "status": "ACTIVE",
-     "activeVersionNo": "tpl-1f446e38620e",
-     "versions": [
-      {
-       "versionNo": "tpl-1f446e38620e",
-       "systemPrompt": null,
-       "userPromptTemplate": "首帧图片：{{imageUrl}}\n尾帧图片：{{imageTail}}\n动态描述：{{prompt}}\n画面比例：{{aspectRatio}}\n时长：{{duration}}\n质量档位：{{mode}}\n音频：{{sound}}\n反向提示词：{{negativePrompt}}",
-       "outputFormat": "MARKDOWN",
-       "status": "ACTIVE"
-      }
-     ]
-    }
-   ],
-   "workflow": null
-  },
-  {
-   "toolCode": "kling-v2-master-image-to-video",
-   "toolName": "可灵 V2 Master 图生视频",
-   "categoryCode": "copywriting",
-   "description": null,
-   "coverUrl": null,
-   "toolType": "VIDEO_GENERATION",
-   "inputModality": "IMAGE",
-   "outputModality": "VIDEO",
-   "configNote": "可灵 可灵 V2 Master 图生视频\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"icon\",\"modelIconUrl\":\"\"} -->",
-   "status": "OFFLINE",
-   "estimatedCreditCost": 360,
-   "modelConfigCode": "kling-v2-master-image-to-video",
-   "executionHandler": "VIDEO_GENERATION",
-   "agentEnabled": true,
-   "fields": [
-    {
-     "fieldKey": "imageUrl",
-     "fieldName": "首帧图片",
-     "fieldType": "image",
-     "placeholder": "上传后的 URL 或可访问的图片链接",
-     "options": null,
-     "optionsJson": null,
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 1
-    },
-    {
-     "fieldKey": "imageTail",
-     "fieldName": "尾帧图片",
-     "fieldType": "image",
-     "placeholder": "可选，尾帧图 URL",
-     "options": null,
-     "optionsJson": null,
-     "required": false,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 2
-    },
-    {
-     "fieldKey": "prompt",
-     "fieldName": "动态描述",
-     "fieldType": "textarea",
-     "placeholder": "描述镜头运动、主体动作、场景变化",
-     "options": {
-      "core": true
-     },
-     "optionsJson": "{\"core\": true}",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 3
-    },
-    {
-     "fieldKey": "aspectRatio",
-     "fieldName": "画面比例",
-     "fieldType": "radio",
-     "placeholder": null,
-     "options": [
-      {
-       "label": "1:1",
-       "value": "1:1"
-      },
-      {
-       "label": "16:9",
-       "value": "16:9"
-      },
-      {
-       "label": "9:16",
-       "value": "9:16"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"1:1\", \"value\": \"1:1\"}, {\"label\": \"16:9\", \"value\": \"16:9\"}, {\"label\": \"9:16\", \"value\": \"9:16\"}]",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 4
-    },
-    {
-     "fieldKey": "duration",
-     "fieldName": "时长",
-     "fieldType": "radio",
-     "placeholder": null,
-     "options": [
-      {
-       "label": "5秒",
-       "value": "5"
-      },
-      {
-       "label": "10秒",
-       "value": "10"
-      },
-      {
-       "label": "15秒",
-       "value": "15"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"5秒\", \"value\": \"5\"}, {\"label\": \"10秒\", \"value\": \"10\"}, {\"label\": \"15秒\", \"value\": \"15\"}]",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 5
-    },
-    {
-     "fieldKey": "mode",
-     "fieldName": "质量档位",
-     "fieldType": "radio",
-     "placeholder": null,
-     "options": [
-      {
-       "label": "标准（std）",
-       "value": "std"
-      },
-      {
-       "label": "高质量（pro）",
-       "value": "pro"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"标准（std）\", \"value\": \"std\"}, {\"label\": \"高质量（pro）\", \"value\": \"pro\"}]",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 6
-    },
-    {
-     "fieldKey": "sound",
-     "fieldName": "音频",
-     "fieldType": "radio",
-     "placeholder": null,
-     "options": [
-      {
-       "label": "关闭",
-       "value": "off"
-      },
-      {
-       "label": "开启",
-       "value": "on"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"关闭\", \"value\": \"off\"}, {\"label\": \"开启\", \"value\": \"on\"}]",
-     "required": false,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 7
-    },
-    {
-     "fieldKey": "negativePrompt",
-     "fieldName": "反向提示词",
-     "fieldType": "textarea",
-     "placeholder": "不希望出现的元素",
-     "options": null,
-     "optionsJson": null,
-     "required": false,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 8
-    }
-   ],
-   "prompts": [
-    {
-     "promptCode": "default",
-     "promptName": "默认 Prompt",
-     "status": "ACTIVE",
-     "activeVersionNo": "tpl-a7a65fd05eac",
-     "versions": [
-      {
-       "versionNo": "tpl-a7a65fd05eac",
-       "systemPrompt": null,
-       "userPromptTemplate": "首帧图片：{{imageUrl}}\n尾帧图片：{{imageTail}}\n动态描述：{{prompt}}\n画面比例：{{aspectRatio}}\n时长：{{duration}}\n质量档位：{{mode}}\n音频：{{sound}}\n反向提示词：{{negativePrompt}}",
-       "outputFormat": "MARKDOWN",
-       "status": "ACTIVE"
-      }
-     ]
-    }
-   ],
-   "workflow": null
-  },
-  {
-   "toolCode": "kling-v1-6-image-to-video",
-   "toolName": "可灵 V1.6 图生视频",
-   "categoryCode": "copywriting",
-   "description": null,
-   "coverUrl": null,
-   "toolType": "VIDEO_GENERATION",
-   "inputModality": "TEXT",
-   "outputModality": "VIDEO",
-   "configNote": "可灵 可灵 V1.6 图生视频\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"icon\",\"modelIconUrl\":\"\"} -->",
-   "status": "OFFLINE",
-   "estimatedCreditCost": 360,
-   "modelConfigCode": "kling-v1-image-to-video",
-   "executionHandler": "VIDEO_GENERATION",
-   "agentEnabled": true,
-   "fields": [
-    {
-     "fieldKey": "imageUrl",
-     "fieldName": "首帧图片",
-     "fieldType": "image",
-     "placeholder": "上传后的 URL 或可访问的图片链接",
-     "options": null,
-     "optionsJson": null,
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 1
-    },
-    {
-     "fieldKey": "imageTail",
-     "fieldName": "尾帧图片",
-     "fieldType": "image",
-     "placeholder": "可选，尾帧图 URL",
-     "options": null,
-     "optionsJson": null,
-     "required": false,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 2
-    },
-    {
-     "fieldKey": "prompt",
-     "fieldName": "动态描述",
-     "fieldType": "textarea",
-     "placeholder": "描述镜头运动、主体动作、场景变化",
-     "options": {
-      "core": true
-     },
-     "optionsJson": "{\"core\": true}",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 3
-    },
-    {
-     "fieldKey": "aspectRatio",
-     "fieldName": "画面比例",
-     "fieldType": "radio",
-     "placeholder": null,
-     "options": [
-      {
-       "label": "1:1",
-       "value": "1:1"
-      },
-      {
-       "label": "16:9",
-       "value": "16:9"
-      },
-      {
-       "label": "9:16",
-       "value": "9:16"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"1:1\", \"value\": \"1:1\"}, {\"label\": \"16:9\", \"value\": \"16:9\"}, {\"label\": \"9:16\", \"value\": \"9:16\"}]",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 4
-    },
-    {
-     "fieldKey": "duration",
-     "fieldName": "时长",
-     "fieldType": "radio",
-     "placeholder": null,
-     "options": [
-      {
-       "label": "5秒",
-       "value": "5"
-      },
-      {
-       "label": "10秒",
-       "value": "10"
-      },
-      {
-       "label": "15秒",
-       "value": "15"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"5秒\", \"value\": \"5\"}, {\"label\": \"10秒\", \"value\": \"10\"}, {\"label\": \"15秒\", \"value\": \"15\"}]",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 5
-    },
-    {
-     "fieldKey": "mode",
-     "fieldName": "质量档位",
-     "fieldType": "radio",
-     "placeholder": null,
-     "options": [
-      {
-       "label": "标准（std）",
-       "value": "std"
-      },
-      {
-       "label": "高质量（pro）",
-       "value": "pro"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"标准（std）\", \"value\": \"std\"}, {\"label\": \"高质量（pro）\", \"value\": \"pro\"}]",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 6
-    },
-    {
-     "fieldKey": "sound",
-     "fieldName": "音频",
-     "fieldType": "radio",
-     "placeholder": null,
-     "options": [
-      {
-       "label": "关闭",
-       "value": "off"
-      },
-      {
-       "label": "开启",
-       "value": "on"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"关闭\", \"value\": \"off\"}, {\"label\": \"开启\", \"value\": \"on\"}]",
-     "required": false,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 7
-    },
-    {
-     "fieldKey": "negativePrompt",
-     "fieldName": "反向提示词",
-     "fieldType": "textarea",
-     "placeholder": "不希望出现的元素",
-     "options": null,
-     "optionsJson": null,
-     "required": false,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 8
-    }
-   ],
-   "prompts": [
-    {
-     "promptCode": "default",
-     "promptName": "默认 Prompt",
-     "status": "ACTIVE",
-     "activeVersionNo": "tpl-40dedd060022",
-     "versions": [
-      {
-       "versionNo": "tpl-40dedd060022",
-       "systemPrompt": null,
-       "userPromptTemplate": "首帧图片：{{imageUrl}}\n尾帧图片：{{imageTail}}\n动态描述：{{prompt}}\n画面比例：{{aspectRatio}}\n时长：{{duration}}\n质量档位：{{mode}}\n音频：{{sound}}\n反向提示词：{{negativePrompt}}",
-       "outputFormat": "MARKDOWN",
-       "status": "ACTIVE"
-      }
-     ]
-    }
-   ],
-   "workflow": null
-  },
-  {
-   "toolCode": "kling-v1-5-image-to-video",
-   "toolName": "可灵 V1.5 图生视频",
-   "categoryCode": "copywriting",
-   "description": null,
-   "coverUrl": null,
-   "toolType": "VIDEO_GENERATION",
-   "inputModality": "IMAGE",
-   "outputModality": "VIDEO",
-   "configNote": "可灵 可灵 V1.5 图生视频\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"icon\",\"modelIconUrl\":\"\"} -->",
-   "status": "OFFLINE",
-   "estimatedCreditCost": 360,
-   "modelConfigCode": "kling-v1-image-to-video",
-   "executionHandler": "VIDEO_GENERATION",
-   "agentEnabled": true,
-   "fields": [
-    {
-     "fieldKey": "imageUrl",
-     "fieldName": "首帧图片",
-     "fieldType": "image",
-     "placeholder": "上传后的 URL 或可访问的图片链接",
-     "options": null,
-     "optionsJson": null,
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 1
-    },
-    {
-     "fieldKey": "imageTail",
-     "fieldName": "尾帧图片",
-     "fieldType": "image",
-     "placeholder": "可选，尾帧图 URL",
-     "options": null,
-     "optionsJson": null,
-     "required": false,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 2
-    },
-    {
-     "fieldKey": "prompt",
-     "fieldName": "动态描述",
-     "fieldType": "textarea",
-     "placeholder": "描述镜头运动、主体动作、场景变化",
-     "options": {
-      "core": true
-     },
-     "optionsJson": "{\"core\": true}",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 3
-    },
-    {
-     "fieldKey": "aspectRatio",
-     "fieldName": "画面比例",
-     "fieldType": "radio",
-     "placeholder": null,
-     "options": [
-      {
-       "label": "1:1",
-       "value": "1:1"
-      },
-      {
-       "label": "16:9",
-       "value": "16:9"
-      },
-      {
-       "label": "9:16",
-       "value": "9:16"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"1:1\", \"value\": \"1:1\"}, {\"label\": \"16:9\", \"value\": \"16:9\"}, {\"label\": \"9:16\", \"value\": \"9:16\"}]",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 4
-    },
-    {
-     "fieldKey": "duration",
-     "fieldName": "时长",
-     "fieldType": "radio",
-     "placeholder": null,
-     "options": [
-      {
-       "label": "5秒",
-       "value": "5"
-      },
-      {
-       "label": "10秒",
-       "value": "10"
-      },
-      {
-       "label": "15秒",
-       "value": "15"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"5秒\", \"value\": \"5\"}, {\"label\": \"10秒\", \"value\": \"10\"}, {\"label\": \"15秒\", \"value\": \"15\"}]",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 5
-    },
-    {
-     "fieldKey": "mode",
-     "fieldName": "质量档位",
-     "fieldType": "radio",
-     "placeholder": null,
-     "options": [
-      {
-       "label": "标准（std）",
-       "value": "std"
-      },
-      {
-       "label": "高质量（pro）",
-       "value": "pro"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"标准（std）\", \"value\": \"std\"}, {\"label\": \"高质量（pro）\", \"value\": \"pro\"}]",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 6
-    },
-    {
-     "fieldKey": "sound",
-     "fieldName": "音频",
-     "fieldType": "radio",
-     "placeholder": null,
-     "options": [
-      {
-       "label": "关闭",
-       "value": "off"
-      },
-      {
-       "label": "开启",
-       "value": "on"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"关闭\", \"value\": \"off\"}, {\"label\": \"开启\", \"value\": \"on\"}]",
-     "required": false,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 7
-    },
-    {
-     "fieldKey": "negativePrompt",
-     "fieldName": "反向提示词",
-     "fieldType": "textarea",
-     "placeholder": "不希望出现的元素",
-     "options": null,
-     "optionsJson": null,
-     "required": false,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 8
-    }
-   ],
-   "prompts": [
-    {
-     "promptCode": "default",
-     "promptName": "默认 Prompt",
-     "status": "ACTIVE",
-     "activeVersionNo": "tpl-48083d8b2788",
-     "versions": [
-      {
-       "versionNo": "tpl-48083d8b2788",
-       "systemPrompt": null,
-       "userPromptTemplate": "首帧图片：{{imageUrl}}\n尾帧图片：{{imageTail}}\n动态描述：{{prompt}}\n画面比例：{{aspectRatio}}\n时长：{{duration}}\n质量档位：{{mode}}\n音频：{{sound}}\n反向提示词：{{negativePrompt}}",
-       "outputFormat": "MARKDOWN",
-       "status": "ACTIVE"
-      }
-     ]
-    }
-   ],
-   "workflow": null
-  },
-  {
-   "toolCode": "kling-v1-image-to-video",
-   "toolName": "可灵 V1 图生视频",
-   "categoryCode": "copywriting",
-   "description": null,
-   "coverUrl": null,
-   "toolType": "VIDEO_GENERATION",
-   "inputModality": "IMAGE",
-   "outputModality": "VIDEO",
-   "configNote": "可灵 可灵 V1 图生视频\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"icon\",\"modelIconUrl\":\"\"} -->",
-   "status": "OFFLINE",
-   "estimatedCreditCost": 360,
-   "modelConfigCode": "kling-v1-image-to-video",
-   "executionHandler": "VIDEO_GENERATION",
-   "agentEnabled": true,
-   "fields": [
-    {
-     "fieldKey": "imageUrl",
-     "fieldName": "首帧图片",
-     "fieldType": "image",
-     "placeholder": "上传后的 URL 或可访问的图片链接",
-     "options": null,
-     "optionsJson": null,
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 1
-    },
-    {
-     "fieldKey": "imageTail",
-     "fieldName": "尾帧图片",
-     "fieldType": "image",
-     "placeholder": "可选，尾帧图 URL",
-     "options": null,
-     "optionsJson": null,
-     "required": false,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 2
-    },
-    {
-     "fieldKey": "prompt",
-     "fieldName": "动态描述",
-     "fieldType": "textarea",
-     "placeholder": "描述镜头运动、主体动作、场景变化",
-     "options": {
-      "core": true
-     },
-     "optionsJson": "{\"core\": true}",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 3
-    },
-    {
-     "fieldKey": "aspectRatio",
-     "fieldName": "画面比例",
-     "fieldType": "radio",
-     "placeholder": null,
-     "options": [
-      {
-       "label": "1:1",
-       "value": "1:1"
-      },
-      {
-       "label": "16:9",
-       "value": "16:9"
-      },
-      {
-       "label": "9:16",
-       "value": "9:16"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"1:1\", \"value\": \"1:1\"}, {\"label\": \"16:9\", \"value\": \"16:9\"}, {\"label\": \"9:16\", \"value\": \"9:16\"}]",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 4
-    },
-    {
-     "fieldKey": "duration",
-     "fieldName": "时长",
-     "fieldType": "radio",
-     "placeholder": null,
-     "options": [
-      {
-       "label": "5秒",
-       "value": "5"
-      },
-      {
-       "label": "10秒",
-       "value": "10"
-      },
-      {
-       "label": "15秒",
-       "value": "15"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"5秒\", \"value\": \"5\"}, {\"label\": \"10秒\", \"value\": \"10\"}, {\"label\": \"15秒\", \"value\": \"15\"}]",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 5
-    },
-    {
-     "fieldKey": "mode",
-     "fieldName": "质量档位",
-     "fieldType": "radio",
-     "placeholder": null,
-     "options": [
-      {
-       "label": "标准（std）",
-       "value": "std"
-      },
-      {
-       "label": "高质量（pro）",
-       "value": "pro"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"标准（std）\", \"value\": \"std\"}, {\"label\": \"高质量（pro）\", \"value\": \"pro\"}]",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 6
-    },
-    {
-     "fieldKey": "sound",
-     "fieldName": "音频",
-     "fieldType": "radio",
-     "placeholder": null,
-     "options": [
-      {
-       "label": "关闭",
-       "value": "off"
-      },
-      {
-       "label": "开启",
-       "value": "on"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"关闭\", \"value\": \"off\"}, {\"label\": \"开启\", \"value\": \"on\"}]",
-     "required": false,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 7
-    },
-    {
-     "fieldKey": "negativePrompt",
-     "fieldName": "反向提示词",
-     "fieldType": "textarea",
-     "placeholder": "不希望出现的元素",
-     "options": null,
-     "optionsJson": null,
-     "required": false,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 8
-    }
-   ],
-   "prompts": [
-    {
-     "promptCode": "default",
-     "promptName": "默认 Prompt",
-     "status": "ACTIVE",
-     "activeVersionNo": "tpl-df543c8e36b8",
-     "versions": [
-      {
-       "versionNo": "tpl-df543c8e36b8",
-       "systemPrompt": null,
-       "userPromptTemplate": "首帧图片：{{imageUrl}}\n尾帧图片：{{imageTail}}\n动态描述：{{prompt}}\n画面比例：{{aspectRatio}}\n时长：{{duration}}\n质量档位：{{mode}}\n音频：{{sound}}\n反向提示词：{{negativePrompt}}",
-       "outputFormat": "MARKDOWN",
-       "status": "ACTIVE"
-      }
-     ]
-    }
-   ],
-   "workflow": null
-  },
-  {
-   "toolCode": "kling-image-generation-v3",
-   "toolName": "可灵生图 V3",
+   "toolCode": "kling-image-generation",
+   "toolName": "可灵生图",
    "categoryCode": "ai-image",
-   "description": "可灵生图工具，支持文本生图与可选参考图。",
+   "description": null,
    "coverUrl": "/generated/tool-covers/可灵生图-V3-kling-image-generation-v3-可灵-V3-Omni-20260608010301.png",
    "toolType": "IMAGE_GENERATION",
    "inputModality": "TEXT",
    "outputModality": "IMAGE",
-   "configNote": "可灵生图（可灵生图 V3）\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"effect\",\"modelIconUrl\":\"\",\"comparisonOriginalUrl\":\"\",\"comparisonEffectUrl\":\"\"} -->",
+   "configNote": "可灵 可灵生图\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"effect\"} -->",
    "status": "ONLINE",
    "estimatedCreditCost": 3,
-   "modelConfigCode": "kling-image-generation-v3-model",
+   "modelConfigCode": "kling-gateway-image-generation",
    "executionHandler": "IMAGE_GENERATION",
    "agentEnabled": true,
    "fields": [
@@ -7292,166 +4779,28 @@
      "fieldName": "画面比例",
      "fieldType": "radio",
      "placeholder": null,
-     "options": [
-      {
-       "label": "1:1",
-       "value": "1:1"
-      },
-      {
-       "label": "16:9",
-       "value": "16:9"
-      },
-      {
-       "label": "9:16",
-       "value": "9:16"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"1:1\", \"value\": \"1:1\"}, {\"label\": \"16:9\", \"value\": \"16:9\"}, {\"label\": \"9:16\", \"value\": \"9:16\"}]",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 2
-    },
-    {
-     "fieldKey": "count",
-     "fieldName": "生成数量",
-     "fieldType": "number",
-     "placeholder": "1-4，默认 1",
-     "options": null,
-     "optionsJson": null,
-     "required": false,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 3
-    },
-    {
-     "fieldKey": "negativePrompt",
-     "fieldName": "反向提示词",
-     "fieldType": "textarea",
-     "placeholder": "不希望出现的元素（可选）",
-     "options": null,
-     "optionsJson": null,
-     "required": false,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 4
-    },
-    {
-     "fieldKey": "imageUrl",
-     "fieldName": "参考图片（可选）",
-     "fieldType": "image",
-     "placeholder": "可选，用于垫图/参考",
-     "options": null,
-     "optionsJson": null,
-     "required": false,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 5
-    },
-    {
-     "fieldKey": "seed",
-     "fieldName": "随机种子（可选）",
-     "fieldType": "number",
-     "placeholder": "留空则随机",
-     "options": null,
-     "optionsJson": null,
-     "required": false,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 6
-    }
-   ],
-   "prompts": [
-    {
-     "promptCode": "default",
-     "promptName": "默认 Prompt",
-     "status": "ACTIVE",
-     "activeVersionNo": "tpl-kling-image-default-v1",
-     "versions": [
-      {
-       "versionNo": "tpl-kling-image-default-v1",
-       "systemPrompt": null,
-       "userPromptTemplate": "画面描述：{{prompt}}\n画面比例：{{aspectRatio}}\n生成数量：{{count}}\n反向提示词：{{negativePrompt}}\n参考图片：{{imageUrl}}\n随机种子：{{seed}}",
-       "outputFormat": "MARKDOWN",
-       "status": "ACTIVE"
-      }
-     ]
-    }
-   ],
-   "workflow": null
-  },
-  {
-   "toolCode": "kling-image-generation-v2-1",
-   "toolName": "可灵生图 V2.1",
-   "categoryCode": "ai-image",
-   "description": "可灵生图工具，支持文本生图与可选参考图。",
-   "coverUrl": null,
-   "toolType": "IMAGE_GENERATION",
-   "inputModality": "TEXT",
-   "outputModality": "IMAGE",
-   "configNote": "可灵生图（可灵生图 V2.1）\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"effect\",\"modelIconUrl\":\"\"} -->",
-   "status": "OFFLINE",
-   "estimatedCreditCost": 3,
-   "modelConfigCode": "8",
-   "executionHandler": "IMAGE_GENERATION",
-   "agentEnabled": true,
-   "fields": [
-    {
-     "fieldKey": "prompt",
-     "fieldName": "画面描述",
-     "fieldType": "textarea",
-     "placeholder": "描述主体、场景、风格、构图与细节",
      "options": {
-      "core": true
+      "options": [
+       {
+        "label": "1:1",
+        "value": "1:1"
+       },
+       {
+        "label": "16:9",
+        "value": "16:9"
+       },
+       {
+        "label": "9:16",
+        "value": "9:16"
+       }
+      ],
+      "defaultValue": "1:1"
      },
-     "optionsJson": "{\"core\": true}",
+     "optionsJson": "{\"options\": [{\"label\": \"1:1\", \"value\": \"1:1\"}, {\"label\": \"16:9\", \"value\": \"16:9\"}, {\"label\": \"9:16\", \"value\": \"9:16\"}], \"defaultValue\": \"1:1\"}",
      "required": true,
      "executionRequired": true,
      "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 1
-    },
-    {
-     "fieldKey": "aspectRatio",
-     "fieldName": "画面比例",
-     "fieldType": "radio",
-     "placeholder": null,
-     "options": [
-      {
-       "label": "1:1",
-       "value": "1:1"
-      },
-      {
-       "label": "16:9",
-       "value": "16:9"
-      },
-      {
-       "label": "9:16",
-       "value": "9:16"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"1:1\", \"value\": \"1:1\"}, {\"label\": \"16:9\", \"value\": \"16:9\"}, {\"label\": \"9:16\", \"value\": \"9:16\"}]",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
+     "defaultValue": "1:1",
      "agentFillStrategy": "ask_user",
      "riskLevel": "LOW",
      "sortOrder": 2
@@ -7459,155 +4808,34 @@
     {
      "fieldKey": "count",
      "fieldName": "生成数量",
-     "fieldType": "number",
-     "placeholder": "1-4，默认 1",
-     "options": null,
-     "optionsJson": null,
-     "required": false,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 3
-    },
-    {
-     "fieldKey": "negativePrompt",
-     "fieldName": "反向提示词",
-     "fieldType": "textarea",
-     "placeholder": "不希望出现的元素（可选）",
-     "options": null,
-     "optionsJson": null,
-     "required": false,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 4
-    },
-    {
-     "fieldKey": "imageUrl",
-     "fieldName": "参考图片（可选）",
-     "fieldType": "image",
-     "placeholder": "可选，用于垫图/参考",
-     "options": null,
-     "optionsJson": null,
-     "required": false,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 5
-    },
-    {
-     "fieldKey": "seed",
-     "fieldName": "随机种子（可选）",
-     "fieldType": "number",
-     "placeholder": "留空则随机",
-     "options": null,
-     "optionsJson": null,
-     "required": false,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 6
-    }
-   ],
-   "prompts": [
-    {
-     "promptCode": "default",
-     "promptName": "默认 Prompt",
-     "status": "ACTIVE",
-     "activeVersionNo": "tpl-kling-image-default-v1",
-     "versions": [
-      {
-       "versionNo": "tpl-kling-image-default-v1",
-       "systemPrompt": null,
-       "userPromptTemplate": "画面描述：{{prompt}}\n画面比例：{{aspectRatio}}\n生成数量：{{count}}\n反向提示词：{{negativePrompt}}\n参考图片：{{imageUrl}}\n随机种子：{{seed}}",
-       "outputFormat": "MARKDOWN",
-       "status": "ACTIVE"
-      }
-     ]
-    }
-   ],
-   "workflow": null
-  },
-  {
-   "toolCode": "kling-image-generation-v1",
-   "toolName": "可灵生图 V1",
-   "categoryCode": "ai-image",
-   "description": "可灵生图工具，支持文本生图与可选参考图。",
-   "coverUrl": null,
-   "toolType": "IMAGE_GENERATION",
-   "inputModality": "TEXT",
-   "outputModality": "IMAGE",
-   "configNote": "可灵生图（可灵生图 V1）\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"icon\",\"modelIconUrl\":\"\"} -->",
-   "status": "OFFLINE",
-   "estimatedCreditCost": 3,
-   "modelConfigCode": "kling-image-generation-v1-model",
-   "executionHandler": "IMAGE_GENERATION",
-   "agentEnabled": true,
-   "fields": [
-    {
-     "fieldKey": "prompt",
-     "fieldName": "画面描述",
-     "fieldType": "textarea",
-     "placeholder": "描述主体、场景、风格、构图与细节",
+     "fieldType": "select",
+     "placeholder": null,
      "options": {
-      "core": true
+      "options": [
+       {
+        "label": "1",
+        "value": "1"
+       },
+       {
+        "label": "2",
+        "value": "2"
+       },
+       {
+        "label": "3",
+        "value": "3"
+       },
+       {
+        "label": "4",
+        "value": "4"
+       }
+      ],
+      "defaultValue": "1"
      },
-     "optionsJson": "{\"core\": true}",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 1
-    },
-    {
-     "fieldKey": "aspectRatio",
-     "fieldName": "画面比例",
-     "fieldType": "radio",
-     "placeholder": null,
-     "options": [
-      {
-       "label": "1:1",
-       "value": "1:1"
-      },
-      {
-       "label": "16:9",
-       "value": "16:9"
-      },
-      {
-       "label": "9:16",
-       "value": "9:16"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"1:1\", \"value\": \"1:1\"}, {\"label\": \"16:9\", \"value\": \"16:9\"}, {\"label\": \"9:16\", \"value\": \"9:16\"}]",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 2
-    },
-    {
-     "fieldKey": "count",
-     "fieldName": "生成数量",
-     "fieldType": "number",
-     "placeholder": "1-4，默认 1",
-     "options": null,
-     "optionsJson": null,
+     "optionsJson": "{\"options\": [{\"label\": \"1\", \"value\": \"1\"}, {\"label\": \"2\", \"value\": \"2\"}, {\"label\": \"3\", \"value\": \"3\"}, {\"label\": \"4\", \"value\": \"4\"}], \"defaultValue\": \"1\"}",
      "required": false,
      "executionRequired": false,
      "userRequired": false,
-     "defaultValue": null,
+     "defaultValue": "1",
      "agentFillStrategy": "default",
      "riskLevel": "LOW",
      "sortOrder": 3
@@ -7616,7 +4844,7 @@
      "fieldKey": "negativePrompt",
      "fieldName": "反向提示词",
      "fieldType": "textarea",
-     "placeholder": "不希望出现的元素（可选）",
+     "placeholder": "不希望出现的元素",
      "options": null,
      "optionsJson": null,
      "required": false,
@@ -7629,9 +4857,9 @@
     },
     {
      "fieldKey": "imageUrl",
-     "fieldName": "参考图片（可选）",
+     "fieldName": "参考图",
      "fieldType": "image",
-     "placeholder": "可选，用于垫图/参考",
+     "placeholder": "可选参考图 URL",
      "options": null,
      "optionsJson": null,
      "required": false,
@@ -7644,9 +4872,9 @@
     },
     {
      "fieldKey": "seed",
-     "fieldName": "随机种子（可选）",
+     "fieldName": "随机种子",
      "fieldType": "number",
-     "placeholder": "留空则随机",
+     "placeholder": "可选",
      "options": null,
      "optionsJson": null,
      "required": false,
@@ -7656,126 +4884,42 @@
      "agentFillStrategy": "default",
      "riskLevel": "LOW",
      "sortOrder": 6
-    }
-   ],
-   "prompts": [
-    {
-     "promptCode": "default",
-     "promptName": "默认 Prompt",
-     "status": "ACTIVE",
-     "activeVersionNo": "tpl-kling-image-default-v1",
-     "versions": [
-      {
-       "versionNo": "tpl-kling-image-default-v1",
-       "systemPrompt": null,
-       "userPromptTemplate": "画面描述：{{prompt}}\n画面比例：{{aspectRatio}}\n生成数量：{{count}}\n反向提示词：{{negativePrompt}}\n参考图片：{{imageUrl}}\n随机种子：{{seed}}",
-       "outputFormat": "MARKDOWN",
-       "status": "ACTIVE"
-      }
-     ]
-    }
-   ],
-   "workflow": null
-  },
-  {
-   "toolCode": "tool",
-   "toolName": "可灵生视频",
-   "categoryCode": "copywriting",
-   "description": "支持多模态输入生成视频",
-   "coverUrl": null,
-   "toolType": "VIDEO_GENERATION",
-   "inputModality": "TEXT",
-   "outputModality": "VIDEO",
-   "configNote": "描述镜头、比例与时长，由视频生成 Handler 处理。",
-   "status": "OFFLINE",
-   "estimatedCreditCost": 360,
-   "modelConfigCode": "kling-v3-omni",
-   "executionHandler": "VIDEO_GENERATION",
-   "agentEnabled": true,
-   "fields": [
-    {
-     "fieldKey": "prompt",
-     "fieldName": "视频描述",
-     "fieldType": "textarea",
-     "placeholder": "描述镜头、主体、动作、风格和时长",
-     "options": null,
-     "optionsJson": null,
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 1
     },
     {
-     "fieldKey": "aspectRatio",
-     "fieldName": "视频比例",
-     "fieldType": "radio",
+     "fieldKey": "model",
+     "fieldName": "可灵模型版本",
+     "fieldType": "select",
      "placeholder": null,
-     "options": [
-      {
-       "label": "16:9",
-       "value": "16:9"
-      },
-      {
-       "label": "9:16",
-       "value": "9:16"
-      },
-      {
-       "label": "1:1",
-       "value": "1:1"
-      }
-     ],
-     "optionsJson": "[{\"label\": \"16:9\", \"value\": \"16:9\"}, {\"label\": \"9:16\", \"value\": \"9:16\"}, {\"label\": \"1:1\", \"value\": \"1:1\"}]",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 2
-    },
-    {
-     "fieldKey": "duration",
-     "fieldName": "时长秒数",
-     "fieldType": "number",
-     "placeholder": "例如 5",
-     "options": null,
-     "optionsJson": null,
+     "options": {
+      "uiTier": "all",
+      "uiGroup": "meta",
+      "defaultValue": "kling-v3",
+      "options": [
+       {
+        "label": "V3（推荐）",
+        "value": "kling-v3"
+       },
+       {
+        "label": "V2.1",
+        "value": "kling-v2-1"
+       },
+       {
+        "label": "V1",
+        "value": "kling-v1"
+       }
+      ]
+     },
+     "optionsJson": "{\"uiTier\": \"all\", \"uiGroup\": \"meta\", \"defaultValue\": \"kling-v3\", \"options\": [{\"label\": \"V3（推荐）\", \"value\": \"kling-v3\"}, {\"label\": \"V2.1\", \"value\": \"kling-v2-1\"}, {\"label\": \"V1\", \"value\": \"kling-v1\"}]}",
      "required": false,
      "executionRequired": false,
      "userRequired": false,
-     "defaultValue": null,
+     "defaultValue": "kling-v3",
      "agentFillStrategy": "default",
      "riskLevel": "LOW",
-     "sortOrder": 3
+     "sortOrder": 7
     }
    ],
-   "prompts": [
-    {
-     "promptCode": "default",
-     "promptName": "默认 Prompt",
-     "status": "ACTIVE",
-     "activeVersionNo": "tpl-1780815621768",
-     "versions": [
-      {
-       "versionNo": "tpl-1780815621768",
-       "systemPrompt": null,
-       "userPromptTemplate": "视频描述：{{prompt}}\n视频比例：{{aspectRatio}}\n时长秒数：{{duration}}",
-       "outputFormat": "MARKDOWN",
-       "status": "ACTIVE"
-      },
-      {
-       "versionNo": "tpl-1780815576634",
-       "systemPrompt": null,
-       "userPromptTemplate": "视频描述：{{prompt}}\n视频比例：{{aspectRatio}}\n时长秒数：{{duration}}",
-       "outputFormat": "MARKDOWN",
-       "status": "INACTIVE"
-      }
-     ]
-    }
-   ],
+   "prompts": [],
    "workflow": null
   },
   {

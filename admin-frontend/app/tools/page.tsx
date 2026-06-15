@@ -99,6 +99,7 @@ import { deletePricingRule, fetchPricingRules, savePricingRule } from "@/lib/api
 import {
   GPT_IMAGE2_PRICING_RULES_EXAMPLE,
   HAPPYHORSE_PRICING_RULES_EXAMPLE,
+  KLING_VIDEO_PRICING_RULES_EXAMPLE,
   parsePricingRulesJson,
   pricingRuleJsonToPayload,
   pricingRulesForModelExport,
@@ -1550,6 +1551,16 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
                           }
                         >
                           填入 GPT Image2 示例
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() =>
+                            updateForm("pricingRulesJson", JSON.stringify(KLING_VIDEO_PRICING_RULES_EXAMPLE, null, 2))
+                          }
+                        >
+                          填入可灵视频示例
                         </Button>
                       </div>
                     </div>

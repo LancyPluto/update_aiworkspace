@@ -293,6 +293,8 @@ export interface ToolField {
     | "slider"
     | "image"
     | "multi_image"
+    | "multi_video"
+    | "subject_element_list"
     | "file"
     | "image_upload"
     | "video_upload"

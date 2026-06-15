@@ -73,7 +73,7 @@ class RecordingHandler:
 
 
 class MusicGenerationHandlerTest(unittest.TestCase):
-    def test_handler_generates_persists_first_track_and_marks_audio_success(self):
+    def test_handler_generates_persists_two_tracks_and_marks_audio_success(self):
         context = {
             "taskId": 201,
             "traceId": "trace-201",
@@ -110,7 +110,7 @@ class MusicGenerationHandlerTest(unittest.TestCase):
         self.assertEqual(handled["externalTaskId"], "suno-task-1")
         self.assertEqual(music_client.calls[0]["prompt"], "warm cinematic pop about a city sunrise")
         self.assertEqual(persister.calls[0]["index"], 1)
-        self.assertEqual(len(persister.calls), 1)
+        self.assertEqual(persister.calls[1]["index"], 2)
         success_payload = backend.successes[0][1]
         self.assertEqual(success_payload["resourceType"], "AUDIO")
         self.assertEqual(success_payload["billableUnits"], 1)
@@ -119,7 +119,8 @@ class MusicGenerationHandlerTest(unittest.TestCase):
         self.assertEqual(content["provider"], "suno_music")
         self.assertEqual(content["externalTaskId"], "suno-task-1")
         self.assertEqual(content["audios"][0]["url"], "/generated/audio/201/audio-1.mp3")
-        self.assertEqual(len(content["audios"]), 1)
+        self.assertEqual(content["audios"][1]["url"], "/generated/audio/201/audio-2.mp3")
+        self.assertEqual(len(content["audios"]), 2)
 
     def test_handler_marks_failed_when_provider_returns_empty_audio(self):
         context = {

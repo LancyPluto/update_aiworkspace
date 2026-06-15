@@ -17,6 +17,11 @@ export interface FieldUiMeta {
   maxLength?: number
   maxLengthByModel?: Record<string, number>
   defaultValue?: string | number | boolean
+  minCount?: number
+  maxCount?: number
+  accept?: string
+  libraryEnabled?: boolean
+  libraryKind?: string
 }
 
 export interface ParsedFieldOptions {
@@ -89,6 +94,11 @@ export function parseFieldOptionsJson(raw?: string | null): ParsedFieldOptions {
       )
     }
     if (obj.defaultValue !== undefined) meta.defaultValue = obj.defaultValue as string | number | boolean
+    if (typeof obj.minCount === "number") meta.minCount = Math.max(0, obj.minCount)
+    if (typeof obj.maxCount === "number") meta.maxCount = Math.max(1, obj.maxCount)
+    if (typeof obj.accept === "string" && obj.accept.trim()) meta.accept = obj.accept.trim()
+    if (typeof obj.libraryEnabled === "boolean") meta.libraryEnabled = obj.libraryEnabled
+    if (typeof obj.libraryKind === "string" && obj.libraryKind.trim()) meta.libraryKind = obj.libraryKind.trim()
     return {
       options: optionRows.map(normalizeOptionRow).filter(Boolean) as ParsedFieldOptions["options"],
       meta,
