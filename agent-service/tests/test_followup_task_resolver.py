@@ -195,7 +195,7 @@ def test_followup_keeps_explicit_preferred_tool_over_recent_kling_call():
             RecentToolCallContext(
                 id=11,
                 runId=1,
-                toolCode="kling-image-generation-v3",
+                toolCode="kling-image-generation",
                 taskId=71,
                 argumentsJson={"prompt": "previous"},
                 resultJson={},

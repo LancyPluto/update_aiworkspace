@@ -16,6 +16,8 @@ export type FieldTypeValue =
   | "slider"
   | "image"
   | "multi_image"
+  | "multi_video"
+  | "subject_element_list"
   | "file"
 
 export const FIELD_TYPE_OPTIONS: Array<{ value: FieldTypeValue; label: string; hint: string }> = [
@@ -29,6 +31,8 @@ export const FIELD_TYPE_OPTIONS: Array<{ value: FieldTypeValue; label: string; h
   { value: "slider", label: "滑块", hint: "0–100 强度类参数" },
   { value: "image", label: "图片 URL", hint: "参考图链接" },
   { value: "multi_image", label: "多参考图", hint: "多张参考图 URL，提交为数组" },
+  { value: "multi_video", label: "多参考视频", hint: "多个参考视频 URL，提交为数组" },
+  { value: "subject_element_list", label: "主体参考列表", hint: "可灵主体 element_id / 图片主体 / 视频主体" },
   { value: "file", label: "文件 URL", hint: "音频等文件链接" },
 ]
 
@@ -45,6 +49,11 @@ export type OptionPresetKey =
   | "suno_persona_model"
   | "suno_create_mode"
   | "suno_generation_type"
+  | "kling_model_text2video"
+  | "kling_model_image2video"
+  | "kling_model_motion"
+  | "kling_model_omni"
+  | "kling_model_image_gen"
 
 export const OPTION_PRESETS: Record<
   OptionPresetKey,
@@ -131,6 +140,50 @@ export const OPTION_PRESETS: Record<
     options: [
       { label: "风格 Persona", value: "style_persona" },
       { label: "Voice Persona（V5/V5.5）", value: "voice_persona" },
+    ],
+  },
+  kling_model_text2video: {
+    label: "可灵文生视频模型",
+    options: [
+      { label: "V3（推荐）", value: "kling-v3" },
+      { label: "V2 Master", value: "kling-v2-master" },
+      { label: "V1", value: "kling-v1" },
+    ],
+  },
+  kling_model_image2video: {
+    label: "可灵图生视频模型",
+    options: [
+      { label: "V3（推荐）", value: "kling-v3" },
+      { label: "V2.6", value: "kling-v2-6" },
+      { label: "V2.5 Turbo", value: "kling-v2-5-turbo" },
+      { label: "V2.1 Master", value: "kling-v2-1-master" },
+      { label: "V2.1", value: "kling-v2-1" },
+      { label: "V2 Master", value: "kling-v2-master" },
+      { label: "V1.6", value: "kling-v1-6" },
+      { label: "V1.5", value: "kling-v1-5" },
+      { label: "V1", value: "kling-v1" },
+    ],
+  },
+  kling_model_motion: {
+    label: "可灵动作控制模型",
+    options: [
+      { label: "V3（推荐）", value: "kling-v3" },
+      { label: "V2.6", value: "kling-v2-6" },
+    ],
+  },
+  kling_model_omni: {
+    label: "可灵 Omni 模型",
+    options: [
+      { label: "V3 Omni（推荐）", value: "kling-v3-omni" },
+      { label: "Video O1", value: "kling-video-o1" },
+    ],
+  },
+  kling_model_image_gen: {
+    label: "可灵生图模型",
+    options: [
+      { label: "V3（推荐）", value: "kling-v3" },
+      { label: "V2.1", value: "kling-v2-1" },
+      { label: "V1", value: "kling-v1" },
     ],
   },
 }

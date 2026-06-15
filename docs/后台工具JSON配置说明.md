@@ -34,6 +34,8 @@
 | `aspect_ratio` | 画面比例 | `string`，如 `auto`、`16:9` |
 | `image` / `image_upload` | 单图 URL | `string` |
 | `multi_image` | 多参考图 URL 数组 | `string[]` |
+| `multi_video` | 多参考视频 URL 数组 | `string[]` |
+| `subject_element_list` | 可灵主体参考列表（element_id / 图片主体 / 视频主体） | `object[]` |
 | `file` | 文件 URL，按字段名和配置推断图片/视频/音频/文件 | `string` |
 
 ## 三、optionsJson 通用字段
@@ -147,6 +149,12 @@
 }
 ```
 
+### 可灵参考列表示例
+
+可灵 `imageList` / `videoList` / `elementList` 请使用 `multi_image`、`multi_video`、`subject_element_list`，**不要**用 `textarea` 手填 JSON。
+
+完整 fieldType 说明、optionsJson、提交格式与迁移清单见 **[可灵参考列表表单配置说明](./可灵参考列表表单配置说明.md)**。
+
 ## 六、比例配置
 
 比例必须使用正式控件类型 `aspect_ratio`，不要在用户端写死比例列表。
@@ -245,6 +253,8 @@
 
 ## 九、Suno / 音频高级模式示例
 
+> **同系列多版本选型**：若多个版本共用同一 API / Handler，仅在表单里加 `model` 下拉即可（如 Suno V4.5 / V5.5），不必拆成多个工具。完整决策树、字段规范与验收清单见 [同系列模型版本表单配置规范](./同系列模型版本表单配置规范.md)。
+
 Suno 这类上游确实需要 `customMode` 的工具，保留该字段：
 
 ```json
@@ -278,6 +288,51 @@ Suno 这类上游确实需要 `customMode` 的工具，保留该字段：
   }
 }
 ```
+
+### 9.1 Suno 模型版本字段（表单内选型）
+
+同一音乐工具内切换版本时，增加 `fieldKey: model` 的 `select` 字段；`value` 必须与上游 API 枚举一致，并可用 `maxLengthByModel` 按版本限制其它字段长度。管理端可使用选项预设「Suno 模型」。示例：
+
+```json
+{
+  "fieldKey": "model",
+  "fieldName": "Suno 模型",
+  "fieldType": "select",
+  "optionsJson": {
+    "uiTier": "all",
+    "uiGroup": "meta",
+    "defaultValue": "V5_5",
+    "options": [
+      { "label": "V5.5（推荐）", "value": "V5_5" },
+      { "label": "V5", "value": "V5" },
+      { "label": "V4.5", "value": "V4_5" }
+    ]
+  }
+}
+```
+
+### 9.2 可灵模型版本字段（按任务类型拆工具）
+
+可灵按 API 任务类型拆 6 个工具（文生/图生/动作/多图/Omni/生图），**同一工具内**用 `model` 选 V1–V3 等版本。选项预设见 `kling_model_image2video` 等。示例：
+
+```json
+{
+  "fieldKey": "model",
+  "fieldName": "可灵模型版本",
+  "fieldType": "select",
+  "optionsJson": {
+    "uiTier": "all",
+    "uiGroup": "meta",
+    "defaultValue": "kling-v3",
+    "options": [
+      { "label": "V3（推荐）", "value": "kling-v3" },
+      { "label": "V2.6", "value": "kling-v2-6" }
+    ]
+  }
+}
+```
+
+详见 [可灵模型配置.md](../可灵模型配置.md)、[同系列模型版本表单配置规范](./同系列模型版本表单配置规范.md)。
 
 ## 十、配置检查清单
 

@@ -473,8 +473,8 @@ onUnmounted(() => {
     <section class="hero">
       <div>
         <p class="eyebrow">Community Gallery</p>
-        <h1>发现作品，学习 Prompt，回到工具继续创作</h1>
-        <p class="hero-lead">社区不是论坛入口，而是从公开案例到工作台复用的增长路径。</p>
+        <h1>探索创意灵感，一键复刻起航</h1>
+        <p class="hero-lead">探寻触手可及的创意火花。支持一键复刻优秀作品的提示词与参数，让灵感即刻落地。</p>
       </div>
       <button type="button" class="primary-button" @click="goToTools">
         <Store class="h-4 w-4" />
@@ -747,9 +747,9 @@ onUnmounted(() => {
 .eyebrow {
   margin: 0 0 14px;
   color: rgb(255 255 255 / 0.38);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
-  letter-spacing: 0.18em;
+  letter-spacing: 0.2em;
   text-transform: uppercase;
 }
 
@@ -764,7 +764,8 @@ onUnmounted(() => {
 .hero-lead {
   max-width: 520px;
   margin: 16px 0 0;
-  color: rgb(255 255 255 / 0.58);
+  color: rgb(255 255 255 / 0.6);
+  font-weight: 400;
   line-height: 1.8;
 }
 

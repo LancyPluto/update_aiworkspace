@@ -11,6 +11,7 @@ from config import resolve_kling_api_key, resolve_kling_credentials, resolve_kli
 from handlers.generated_video_persister import GeneratedVideoPersistError, GeneratedVideoPersister
 from providers import registry as provider_registry
 from utils.input_image import InputImageError, resolve_reference_image_data_url
+from utils.kling_config import resolve_kling_api_task, resolve_kling_model_name, resolve_kling_video_paths
 
 
 LOGGER = logging.getLogger(__name__)
@@ -76,7 +77,8 @@ class VideoGenerationHandler:
             provider_progress = {"value": 12}
 
             prompt = _build_prompt(params)
-            if not prompt:
+            api_task = resolve_kling_api_task(model_config) if provider_protocol == "kling_video" else ""
+            if not prompt and api_task not in {"motion_control"}:
                 raise KlingVideoError("prompt is required")
 
             self._mark_processing_safe(task_id, progress=12, progress_message="Video generation task started", trace_id=trace_id)
@@ -85,11 +87,16 @@ class VideoGenerationHandler:
                 payload = _build_happyhorse_payload(params, model_config.get("modelName"))
                 result = client.generate_video(payload)
             else:
+                resolved_model = (
+                    resolve_kling_model_name(params, model_config)
+                    if provider_protocol == "kling_video"
+                    else str(model_config.get("modelName") or "")
+                )
                 video_request = {
                     "prompt": prompt,
                     "image_size": _resolve_image_size(params),
                     "negative_prompt": str(params.get("negativePrompt") or params.get("negative_prompt") or ""),
-                    "model": model_config.get("modelName"),
+                    "model": resolved_model,
                     "image": _first_text(
                         params,
                         "image",
@@ -111,9 +118,30 @@ class VideoGenerationHandler:
                 if provider_protocol in {"kling_video", "agnes_video"}:
                     video_request["mode"] = str(params.get("mode") or params.get("qualityMode") or "")
                 if provider_protocol == "kling_video":
-                    video_request["sound"] = str(params.get("sound") or "off")
-                    video_request["callback_url"] = str(params.get("callbackUrl") or params.get("callback_url") or "")
-                    video_request["external_task_id"] = str(params.get("externalTaskId") or params.get("external_task_id") or "")
+                    create_path, result_path = resolve_kling_video_paths(model_config)
+                    video_request.update(
+                        {
+                            "sound": str(params.get("sound") or "off"),
+                            "callback_url": str(params.get("callbackUrl") or params.get("callback_url") or ""),
+                            "external_task_id": str(params.get("externalTaskId") or params.get("external_task_id") or ""),
+                            "create_path": create_path,
+                            "result_path_template": result_path,
+                            "video_url": _first_text(params, "videoUrl", "video_url", "sourceVideo", "sourceVideoUrl"),
+                            "character_orientation": _first_text(
+                                params,
+                                "characterOrientation",
+                                "character_orientation",
+                            ),
+                            "static_mask": _first_text(params, "staticMask", "static_mask"),
+                            "dynamic_masks": params.get("dynamicMasks") or params.get("dynamic_masks"),
+                            "image_list": params.get("imageList") or params.get("image_list"),
+                            "video_list": params.get("videoList") or params.get("video_list"),
+                            "element_list": params.get("elementList") or params.get("element_list"),
+                            "multi_shot": str(params.get("multiShot") or params.get("multi_shot") or ""),
+                            "shot_type": str(params.get("shotType") or params.get("shot_type") or ""),
+                            "multi_prompt": params.get("multiPrompt") or params.get("multi_prompt"),
+                        }
+                    )
                 if provider_protocol == "agnes_video":
                     video_request["progress_callback"] = lambda progress: self._mark_provider_progress(
                         task_id,
@@ -130,7 +158,11 @@ class VideoGenerationHandler:
                 trace_id=trace_id,
             )
             persisted_video = self.video_persister.persist_video_url(task_id=task_id, source_url=result["videoUrl"])
-            billable_units = _resolve_billable_seconds(result.get("usage"), params) if provider == "bailian_happyhorse" else 1
+            billable_units = (
+                _resolve_billable_seconds(result.get("usage"), params)
+                if provider in {"bailian_happyhorse", "kling_video"}
+                else 1
+            )
             content = json.dumps(
                 {
                     "provider": result.get("provider") or provider,
@@ -186,15 +218,16 @@ class VideoGenerationHandler:
                 bool(secret_key),
                 bool(resolve_kling_api_key(model_config)),
             )
+            create_path, result_path = resolve_kling_video_paths(model_config)
             return KlingVideoClient(
                 base_url=model_config.get("baseUrl"),
                 api_key=resolve_kling_api_key(model_config),
                 access_key=access_key,
                 secret_key=secret_key,
-                text_path=model_config.get("textPath"),
-                image_path=model_config.get("imagePath"),
-                text_result_path=model_config.get("textResultPath"),
-                image_result_path=model_config.get("imageResultPath"),
+                text_path=model_config.get("textPath") or create_path,
+                image_path=model_config.get("imagePath") or create_path,
+                text_result_path=model_config.get("textResultPath") or result_path,
+                image_result_path=model_config.get("imageResultPath") or result_path,
                 timeout_seconds=model_config.get("timeoutSeconds"),
             )
         if provider_protocol == "agnes_video":

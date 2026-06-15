@@ -136,7 +136,7 @@ def test_kling_video_handler() -> None:
     assert backend.failed_payload is None, backend.failed_payload
     assert backend.success_payload is not None
     assert backend.success_payload["resourceType"] == "VIDEO"
-    assert backend.success_payload["billableUnits"] == 1
+    assert backend.success_payload["billableUnits"] == 5
     content = json.loads(backend.success_payload["contentText"])
     assert content["provider"] == "kling_video", content
     assert content["videos"][0]["url"] == "/generated/video/99201/video-1.mp4", content
@@ -174,6 +174,75 @@ def test_kling_image_handler() -> None:
     assert persister.calls[0]["urls"] == [
         "https://example.com/kling-image-1.png",
         "https://example.com/kling-image-2.png",
+    ]
+
+
+def test_kling_video_handler_uses_params_model_override() -> None:
+    backend = FakeBackendClient(tool_type="VIDEO_GENERATION")
+    context = backend.get_execution_context(99203)
+    context["params"]["model"] = "kling-v3"
+    backend.get_execution_context = lambda task_id, trace_id=None: context
+    client = FakeKlingClient()
+    handler = VideoGenerationHandler(
+        backend_client=backend,
+        kling_client=client,
+        video_persister=FakeVideoPersister(),
+    )
+
+    result = handler.handle({"taskId": 99203, "traceId": "fake-kling-model-override"})
+
+    assert result["status"] == "SUCCESS", result
+    assert client.video_request is not None
+    assert client.video_request["model"] == "kling-v3"
+
+
+def test_kling_image_handler_uses_params_model_override() -> None:
+    backend = FakeBackendClient(tool_type="IMAGE_GENERATION")
+    context = backend.get_execution_context(99204)
+    context["params"]["model"] = "kling-v3"
+    backend.get_execution_context = lambda task_id, trace_id=None: context
+    client = FakeKlingClient()
+    handler = ImageGenerationHandler(
+        backend_client=backend,
+        image_client=client,
+        image_persister=FakeImagePersister(),
+    )
+
+    result = handler.handle({"taskId": 99204, "traceId": "fake-kling-image-model"})
+
+    assert result["status"] == "SUCCESS", result
+    assert client.image_request is not None
+    assert client.image_request["model"] == "kling-v3"
+
+
+def test_kling_client_uses_motion_control_path() -> None:
+    class RecordingKlingClient(KlingVideoClient):
+        def __init__(self) -> None:
+            super().__init__(access_key="fake-ak", secret_key="fake-sk")
+            self.requests: list[tuple[str, str]] = []
+
+        def _image_to_base64(self, value: str) -> str:
+            return base64.b64encode(value.encode("utf-8")).decode("ascii")
+
+        def _request(self, method: str, path: str, payload: dict | None) -> dict:
+            self.requests.append((method, path))
+            if method == "POST":
+                return {"data": {"task_id": "motion-123"}}
+            return {"data": {"task_status": "succeed", "task_result": {"videos": [{"url": "https://example.com/motion.mp4"}]}}}
+
+    client = RecordingKlingClient()
+    result = client.generate_video(
+        prompt="",
+        image_size="1280x720",
+        image="https://example.com/person.png",
+        video_url="https://example.com/action.mp4",
+        create_path="/v1/videos/motion-control",
+        result_path_template="/v1/videos/motion-control/{task_id}",
+    )
+    assert result["videoUrl"] == "https://example.com/motion.mp4"
+    assert client.requests == [
+        ("POST", "/v1/videos/motion-control"),
+        ("GET", "/v1/videos/motion-control/motion-123"),
     ]
 
 
@@ -280,7 +349,6 @@ def test_kling_client_polls_async_image_generation() -> None:
             "model_name": "kling-v3",
             "prompt": "画一只猫",
             "n": 2,
-            "aspect_ratio": "16:9",
             "image": expected_image,
             "image_reference": "subject",
             "image_fidelity": 0.75,
@@ -505,7 +573,10 @@ def test_kling_video_generation_reports_success_without_url_payload() -> None:
 
 if __name__ == "__main__":
     test_kling_video_handler()
+    test_kling_video_handler_uses_params_model_override()
     test_kling_image_handler()
+    test_kling_image_handler_uses_params_model_override()
+    test_kling_client_uses_motion_control_path()
     test_kling_client_encodes_input_images()
     test_kling_client_uses_image2video_result_path()
     test_kling_client_polls_async_image_generation()

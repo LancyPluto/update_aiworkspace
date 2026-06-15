@@ -14,6 +14,19 @@ import {
   parseFieldMeta,
   resolveMaxLength,
 } from "@/utils/fieldUiMeta"
+import {
+  isMediaListField,
+  mediaListAccept,
+  mediaListLibraryEnabled,
+  mediaListLibraryKind,
+  mediaListMax,
+  mediaListMin,
+  mediaListUnitLabel,
+  normalizeMediaListValues,
+  parseMediaListValue,
+} from "@/utils/mediaListField"
+import { validateSubjectElementItems, parseSubjectElementEditorItems, subjectElementMax } from "@/utils/subjectElementList"
+import SubjectElementListField from "@/components/DynamicForm/SubjectElementListField.vue"
 
 const props = defineProps<{
   fields: ToolField[]
@@ -24,6 +37,7 @@ const model = defineModel<Record<string, unknown>>({ required: true })
 
 type FieldOption = string | { label: string; value: string; promptPrefix?: string }
 const MULTI_IMAGE_HISTORY_KEY = "aidesu_multi_image_history:image"
+const MULTI_VIDEO_HISTORY_KEY = "aidesu_multi_image_history:video"
 
 function optionLabel(option: FieldOption): string {
   return typeof option === "string" ? option : option.label
@@ -96,8 +110,6 @@ function setField(key: string, val: unknown) {
 
 const uploading = reactive<Record<string, boolean>>({})
 const replacingIndex = reactive<Record<string, number | null>>({})
-const libraryOpen = reactive<Record<string, boolean>>({})
-const libraryImages = ref<string[]>(loadLibraryImages())
 
 type UploadFieldKind = "image" | "video" | "audio" | "file"
 
@@ -153,35 +165,16 @@ async function onFilePicked(key: string, ev: Event) {
   }
 }
 
-function loadLibraryImages(): string[] {
-  if (typeof window === "undefined") return []
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(MULTI_IMAGE_HISTORY_KEY) || "[]")
-    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string" && item.trim().length > 0) : []
-  } catch {
-    return []
-  }
-}
-
-function saveLibraryImage(url: string) {
-  const clean = url.trim()
-  if (!clean || typeof window === "undefined") return
-  const next = [clean, ...libraryImages.value.filter((item) => item !== clean)].slice(0, 48)
-  libraryImages.value = next
-  window.localStorage.setItem(MULTI_IMAGE_HISTORY_KEY, JSON.stringify(next))
+function isMediaListFieldType(field: ToolField): boolean {
+  return isMediaListField(field)
 }
 
 function multiImageValues(field: ToolField): string[] {
-  const value = model.value[field.fieldKey]
-  if (Array.isArray(value)) return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
-  if (typeof value === "string" && value.trim()) return [value.trim()]
-  return []
+  return parseMediaListValue(model.value[field.fieldKey], multiImageMax(field))
 }
 
 function setMultiImageValues(field: ToolField, values: string[]) {
-  const limit = multiImageMax(field)
-  const clean = values.map((item) => item.trim()).filter(Boolean).slice(0, limit)
-  setField(field.fieldKey, clean)
+  setField(field.fieldKey, normalizeMediaListValues(values, multiImageMax(field)))
 }
 
 function multiImageMeta(field: ToolField) {
@@ -189,19 +182,52 @@ function multiImageMeta(field: ToolField) {
 }
 
 function multiImageMax(field: ToolField): number {
-  return multiImageMeta(field).maxCount ?? 8
+  return isMediaListField(field) ? mediaListMax(field) : multiImageMeta(field).maxCount ?? 8
 }
 
 function multiImageMin(field: ToolField): number {
-  return multiImageMeta(field).minCount ?? 0
+  return isMediaListField(field) ? mediaListMin(field) : multiImageMeta(field).minCount ?? 0
 }
 
 function multiImageAccept(field: ToolField): string {
-  return multiImageMeta(field).accept || "image/*"
+  return isMediaListField(field) ? mediaListAccept(field) : multiImageMeta(field).accept || "image/*"
 }
 
 function multiImageLibraryEnabled(field: ToolField): boolean {
-  return multiImageMeta(field).libraryEnabled ?? true
+  return isMediaListField(field) ? mediaListLibraryEnabled(field) : multiImageMeta(field).libraryEnabled ?? true
+}
+
+function mediaListHistoryKey(field: ToolField): string {
+  return mediaListLibraryKind(field) === "video" ? MULTI_VIDEO_HISTORY_KEY : MULTI_IMAGE_HISTORY_KEY
+}
+
+function loadLibraryItems(field: ToolField): string[] {
+  if (typeof window === "undefined") return []
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(mediaListHistoryKey(field)) || "[]")
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string" && item.trim().length > 0) : []
+  } catch {
+    return []
+  }
+}
+
+function saveLibraryItem(field: ToolField, url: string) {
+  const clean = url.trim()
+  if (!clean || typeof window === "undefined") return
+  const current = loadLibraryItems(field)
+  const next = [clean, ...current.filter((item) => item !== clean)].slice(0, 48)
+  libraryItemsByField[field.fieldKey] = next
+  window.localStorage.setItem(mediaListHistoryKey(field), JSON.stringify(next))
+}
+
+const libraryItemsByField = reactive<Record<string, string[]>>({})
+const libraryOpen = reactive<Record<string, boolean>>({})
+
+function libraryItems(field: ToolField): string[] {
+  if (!libraryItemsByField[field.fieldKey]) {
+    libraryItemsByField[field.fieldKey] = loadLibraryItems(field)
+  }
+  return libraryItemsByField[field.fieldKey]
 }
 
 function canAddMultiImage(field: ToolField): boolean {
@@ -217,13 +243,13 @@ async function onMultiImagePicked(field: ToolField, ev: Event) {
   const replaceAt = replacingIndex[field.fieldKey]
   const remaining = replaceAt !== null && replaceAt !== undefined ? 1 : limit - current.length
   if (remaining <= 0) {
-    window.alert(`最多选择 ${limit} 张参考图`)
+    window.alert(`最多选择 ${limit} ${mediaListUnitLabel(field)}`)
     input.value = ""
     return
   }
   const selected = files.slice(0, remaining)
   if (files.length > selected.length) {
-    window.alert(`最多选择 ${limit} 张参考图，已自动保留前 ${selected.length} 张`)
+    window.alert(`最多选择 ${limit} ${mediaListUnitLabel(field)}，已自动保留前 ${selected.length} 个`)
   }
   uploading[field.fieldKey] = true
   try {
@@ -232,7 +258,7 @@ async function onMultiImagePicked(field: ToolField, ev: Event) {
       const uploaded = await uploadToolFile(file)
       if (uploaded?.url) {
         uploadedUrls.push(uploaded.url)
-        saveLibraryImage(uploaded.url)
+        saveLibraryItem(field, uploaded.url)
       }
     }
     if (replaceAt !== null && replaceAt !== undefined) {
@@ -256,7 +282,7 @@ function removeMultiImage(field: ToolField, index: number) {
 
 function addLibraryImage(field: ToolField, url: string) {
   if (!canAddMultiImage(field)) {
-    window.alert(`最多选择 ${multiImageMax(field)} 张参考图`)
+    window.alert(`最多选择 ${multiImageMax(field)} ${mediaListUnitLabel(field)}`)
     return
   }
   const current = multiImageValues(field)
@@ -313,18 +339,26 @@ function validate(): { valid: boolean; message?: string } {
     if (uploading[f.fieldKey]) {
       return { valid: false, message: `${f.fieldName} 上传中，请稍后提交` }
     }
-    if (f.fieldType === "multi_image") {
+    if (isMediaListField(f)) {
       const count = multiImageValues(f).length
       const minCount = multiImageMin(f)
       if (isEffectivelyRequired(f) && count < Math.max(1, minCount)) {
-        return { valid: false, message: `请至少选择 ${Math.max(1, minCount)} 张${f.fieldName}` }
+        return { valid: false, message: `请至少选择 ${Math.max(1, minCount)} ${mediaListUnitLabel(f)}` }
       }
       if (count < minCount) {
-        return { valid: false, message: `${f.fieldName} 至少需要 ${minCount} 张` }
+        return { valid: false, message: `${f.fieldName} 至少需要 ${minCount} ${mediaListUnitLabel(f)}` }
       }
       if (count > multiImageMax(f)) {
-        return { valid: false, message: `${f.fieldName} 最多选择 ${multiImageMax(f)} 张` }
+        return { valid: false, message: `${f.fieldName} 最多选择 ${multiImageMax(f)} ${mediaListUnitLabel(f)}` }
       }
+    }
+    if (f.fieldType === "subject_element_list") {
+      const items = parseSubjectElementEditorItems(model.value[f.fieldKey], subjectElementMax(f))
+      const check = validateSubjectElementItems(items, {
+        ...f,
+        required: isEffectivelyRequired(f),
+      })
+      if (!check.valid) return check
     }
     if (!isEffectivelyRequired(f)) continue
     const v = model.value[f.fieldKey]
@@ -401,7 +435,7 @@ defineExpose({ validate })
 
         <div v-show="group.key === '__default__' || !isGroupCollapsed(group.key)" class="space-y-5">
           <div v-for="f in group.fields" :key="f.fieldKey" class="space-y-2">
-            <label v-if="f.fieldType !== 'multi_image'" class="text-sm font-medium">
+            <label v-if="!isMediaListFieldType(f) && f.fieldType !== 'subject_element_list'" class="text-sm font-medium">
               {{ f.fieldName }}
               <span v-if="isEffectivelyRequired(f)" class="text-destructive"> *</span>
             </label>
@@ -479,7 +513,7 @@ defineExpose({ validate })
               <span>{{ f.placeholder || f.fieldName }}</span>
             </label>
 
-            <div v-else-if="f.fieldType === 'multi_image'" class="rounded-lg border border-white/10 bg-[#18181f] p-4 text-[#f5f5f7] shadow-sm">
+            <div v-else-if="isMediaListFieldType(f)" class="rounded-lg border border-white/10 bg-[#18181f] p-4 text-[#f5f5f7] shadow-sm">
               <div class="mb-3 text-sm text-[#c8c7d2]">
                 {{ f.fieldName }}
                 <span v-if="isEffectivelyRequired(f)" class="text-destructive"> *</span>
@@ -489,7 +523,8 @@ defineExpose({ validate })
                   class="grid h-24 w-24 cursor-pointer place-items-center rounded-xl border border-dashed border-white/15 bg-[#07070c] text-[#b9b7c6] transition hover:border-white/35 hover:text-white"
                   :class="{ 'cursor-not-allowed opacity-50': !canAddMultiImage(f) || uploading[f.fieldKey] }"
                 >
-                  <Plus class="h-7 w-7" />
+                  <Plus v-if="f.fieldType !== 'multi_video'" class="h-7 w-7" />
+                  <Video v-else class="h-7 w-7" />
                   <input
                     type="file"
                     class="hidden"
@@ -512,7 +547,7 @@ defineExpose({ validate })
               </div>
 
               <div class="mt-3 text-xs text-[#a8a6b5]">
-                已选 {{ multiImageValues(f).length }}/{{ multiImageMax(f) }} 张参考图
+                已选 {{ multiImageValues(f).length }}/{{ multiImageMax(f) }} {{ mediaListUnitLabel(f) }}
                 <span v-if="uploading[f.fieldKey]" class="ml-2 text-[#d8d6e4]">上传中...</span>
               </div>
 
@@ -522,9 +557,12 @@ defineExpose({ validate })
                   :key="`${url}-${index}`"
                   class="group relative aspect-square overflow-hidden rounded-lg border border-white/10 bg-[#09090f]"
                 >
-                  <button type="button" class="h-full w-full" @click="previewImage(url)">
-                    <img :src="url" alt="参考图" class="h-full w-full object-cover" />
+                  <button v-if="f.fieldType !== 'multi_video'" type="button" class="h-full w-full" @click="previewImage(url)">
+                    <img :src="uploadedPreviewUrl(url)" alt="参考图" class="h-full w-full object-cover" />
                   </button>
+                  <div v-else class="h-full w-full bg-black">
+                    <video :src="uploadedPreviewUrl(url)" class="h-full w-full object-cover" muted playsinline preload="metadata" />
+                  </div>
                   <div class="absolute inset-x-1 top-1 flex justify-end gap-1 opacity-0 transition group-hover:opacity-100">
                     <label
                       class="grid h-7 w-7 cursor-pointer place-items-center rounded-md bg-black/65 text-white backdrop-blur hover:bg-black/85"
@@ -552,23 +590,32 @@ defineExpose({ validate })
               </div>
 
               <div v-if="libraryOpen[f.fieldKey]" class="mt-4 rounded-lg border border-white/10 bg-black/20 p-3">
-                <div v-if="libraryImages.length" class="grid grid-cols-4 gap-2 sm:grid-cols-6 md:grid-cols-8">
+                <div v-if="libraryItems(f).length" class="grid grid-cols-4 gap-2 sm:grid-cols-6 md:grid-cols-8">
                   <button
-                    v-for="url in libraryImages"
+                    v-for="url in libraryItems(f)"
                     :key="url"
                     type="button"
                     class="aspect-square overflow-hidden rounded-md border border-white/10 bg-[#09090f] transition hover:border-white/35"
                     @click="addLibraryImage(f, url)"
                   >
-                    <img :src="url" alt="素材图" class="h-full w-full object-cover" />
+                    <img v-if="f.fieldType !== 'multi_video'" :src="uploadedPreviewUrl(url)" alt="素材图" class="h-full w-full object-cover" />
+                    <video v-else :src="uploadedPreviewUrl(url)" class="h-full w-full object-cover" muted playsinline preload="metadata" />
                   </button>
                 </div>
                 <div v-else class="flex items-center gap-2 text-xs text-[#a8a6b5]">
-                  <ImageIcon class="h-4 w-4" />
-                  <span>暂无最近上传图片</span>
+                  <ImageIcon v-if="f.fieldType !== 'multi_video'" class="h-4 w-4" />
+                  <Video v-else class="h-4 w-4" />
+                  <span>{{ f.fieldType === "multi_video" ? "暂无最近上传视频" : "暂无最近上传图片" }}</span>
                 </div>
               </div>
             </div>
+
+            <SubjectElementListField
+              v-else-if="f.fieldType === 'subject_element_list'"
+              :field="f"
+              :model-value="model[f.fieldKey]"
+              @update:model-value="setField(f.fieldKey, $event)"
+            />
 
             <div v-else-if="isUploadField(f)" class="space-y-2">
               <div

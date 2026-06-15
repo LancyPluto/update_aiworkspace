@@ -62,6 +62,55 @@ export const GPT_IMAGE2_PRICING_RULES_EXAMPLE: PricingRuleJsonItem[] = [
   },
 ]
 
+export const KLING_VIDEO_PRICING_RULES_EXAMPLE: PricingRuleJsonItem[] = [
+  {
+    paramKey: "mode",
+    ruleType: "MULTIPLIER",
+    matchOp: "EQ",
+    matchValue: "pro",
+    factor: 1.5,
+    extraCredits: 0,
+    priority: 50,
+    enabled: true,
+    remark: "pro 相对 std 倍率（duration 由 PER_SECOND 自动乘算）",
+  },
+  {
+    paramKey: "sound",
+    ruleType: "MULTIPLIER",
+    matchOp: "EQ",
+    matchValue: "on",
+    factor: 1.2,
+    extraCredits: 0,
+    priority: 51,
+    enabled: true,
+    remark: "开启声音",
+  },
+  {
+    paramKey: "model",
+    ruleType: "MULTIPLIER",
+    matchOp: "EQ",
+    matchValue: "kling-v2-5-turbo",
+    factor: 0.8,
+    extraCredits: 0,
+    priority: 60,
+    enabled: true,
+    remark: "Turbo 版本折价示例",
+  },
+]
+
+export const KLING_IMAGE_PRICING_RULES_EXAMPLE: PricingRuleJsonItem[] = [
+  {
+    paramKey: "count",
+    ruleType: "MULTIPLIER",
+    matchOp: "VALUE",
+    factor: 1,
+    extraCredits: 0,
+    priority: 40,
+    enabled: true,
+    remark: "按生成数量 count 倍率",
+  },
+]
+
 export function pricingRulesForModelExport(rules: PricingRule[], modelConfigId: number): PricingRuleJsonItem[] {
   return rules
     .filter((rule) => rule.scopeType === "MODEL" && (rule.scopeRef ?? 0) === modelConfigId)

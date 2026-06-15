@@ -25,6 +25,7 @@ from prompt.renderer import PromptRenderError, render_prompt
 from providers import registry as provider_registry
 from providers.registry import ProviderRegistryError
 from utils.input_image import InputImageError, resolve_reference_image_data_url
+from utils.kling_config import resolve_kling_model_name
 
 
 LOGGER = logging.getLogger(__name__)
@@ -126,9 +127,14 @@ class ImageGenerationHandler:
                 raise SiliconFlowVideoError("prompt is required")
 
             client = self.image_client or self._image_client(provider, model_config)
+            resolved_model = (
+                resolve_kling_model_name(params, model_config)
+                if provider_protocol == "kling_video"
+                else model_config.get("modelName")
+            )
             image_request: dict[str, Any] = {
                 "prompt": prompt,
-                "model": model_config.get("modelName"),
+                "model": resolved_model,
                 "image_size": _resolve_image_size(params),
                 "batch_size": max(1, min(4, _as_int(params.get("count") or params.get("batchSize"), 1))),
                 "negative_prompt": str(params.get("negativePrompt") or params.get("negative_prompt") or ""),
