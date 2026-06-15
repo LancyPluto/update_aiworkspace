@@ -1,7 +1,7 @@
 {
  "format": "ai-tool-market-config-bundle",
  "version": 1,
- "exportedAt": "2026-06-12T18:09:21+08:00",
+ "exportedAt": "2026-06-15T14:30:00+08:00",
  "exportedBy": "1",
  "secretsRedacted": false,
  "settings": {
@@ -72,7 +72,8 @@
   "agent.runtime.tool_stream_relay_enabled": "true",
   "agent.runtime.video_tool_execution_timeout_seconds": "3600",
   "happyHorseSource": "HappyHorse DashScope API",
-  "happyHorseNote": "导入后在统一 API 设置的阿里云百炼（qwen）厂商账户中填入 DashScope API Key。HappyHorse 按秒计费：720P 0.9元/秒、1080P 1.6元/秒（中国内地）；执行 sql/062_seed_happyhorse_pricing.sql 写入单价与定价规则。"
+  "happyHorseNote": "导入后在统一 API 设置的阿里云百炼（qwen）厂商账户中填入 DashScope API Key。HappyHorse 按秒计费：720P 0.9元/秒、1080P 1.6元/秒（中国内地）；执行 sql/062_seed_happyhorse_pricing.sql 写入单价与定价规则。",
+  "dev.postMergeHook": "仓库根目录 npm install 启用 Husky；git pull/merge dev 后 post-merge 自动执行 deploy/scripts/post_merge_dev_sync.sh（幂等 SQL + 有新增迁移时重启 backend/agent-service/worker/admin-frontend/user-web/nginx）。跳过：AI_TOOL_MARKET_SKIP_POST_MERGE=1 git pull"
  },
  "vendorAccounts": [
   {

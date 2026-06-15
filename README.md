@@ -92,6 +92,8 @@ Copy-Item .env.example .env
 | RabbitMQ | `127.0.0.1:5672`, `guest/guest` |
 | Redis | `127.0.0.1:6379` |
 
+4. **（推荐）启用 Git Hook**：在仓库根目录执行 `npm install`，Husky 会在 `git pull` / `git merge`（产生 merge commit）后自动执行未跑过的 `sql/*.sql` 迁移；若有新 SQL 则重启 `backend/agent-service/worker/admin-frontend/user-web/nginx`。跳过：`AI_TOOL_MARKET_SKIP_POST_MERGE=1 git pull`。手动：`npm run post-merge:dev-sync`。
+
 ### 启动命令
 
 推荐使用一键开发脚本。脚本会检查基础依赖、按需启动 MySQL/RabbitMQ/Redis、检查 SQL 变更、安装前后端依赖，并分别打开后端、Agent、Worker、用户端和管理端窗口。

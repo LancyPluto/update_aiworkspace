@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+# After `git pull` / `git merge` (merge commit): apply pending sql/*.sql and restart Docker if needed.
+# Skip: AI_TOOL_MARKET_SKIP_POST_MERGE=1 git pull
+bash deploy/scripts/post_merge_dev_sync.sh
