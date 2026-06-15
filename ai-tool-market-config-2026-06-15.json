@@ -682,6 +682,41 @@
    "isDefault": false,
    "capabilities": [
     "IMAGE_GENERATION"
+   ],
+   "pricingRules": [
+    {
+     "paramKey": "count",
+     "ruleType": "MULTIPLIER",
+     "matchOp": "VALUE",
+     "matchValue": null,
+     "factor": 1.0,
+     "extraCredits": 0,
+     "priority": 40,
+     "enabled": true,
+     "remark": "按生成数量 count 倍率（参数值即倍数）"
+    },
+    {
+     "paramKey": "quality",
+     "ruleType": "MULTIPLIER",
+     "matchOp": "EQ",
+     "matchValue": "medium",
+     "factor": 8.8333,
+     "extraCredits": 0,
+     "priority": 50,
+     "enabled": true,
+     "remark": "GPT Image 2 medium $0.053 vs low $0.006 (1024x1024)"
+    },
+    {
+     "paramKey": "quality",
+     "ruleType": "MULTIPLIER",
+     "matchOp": "EQ",
+     "matchValue": "high",
+     "factor": 35.1667,
+     "extraCredits": 0,
+     "priority": 51,
+     "enabled": true,
+     "remark": "GPT Image 2 high $0.211 vs low $0.006 (1024x1024)"
+    }
    ]
   },
   {
@@ -2052,6 +2087,19 @@
    "isDefault": false,
    "capabilities": [
     "VIDEO_GENERATION"
+   ],
+   "pricingRules": [
+    {
+     "paramKey": "resolution",
+     "ruleType": "MULTIPLIER",
+     "matchOp": "EQ",
+     "matchValue": "1080P",
+     "factor": 1.7778,
+     "extraCredits": 0,
+     "priority": 50,
+     "enabled": true,
+     "remark": "HappyHorse 1080P 1.6 CNY/s vs 720P 0.9 CNY/s"
+    }
    ]
   },
   {
@@ -2085,6 +2133,19 @@
    "isDefault": false,
    "capabilities": [
     "VIDEO_GENERATION"
+   ],
+   "pricingRules": [
+    {
+     "paramKey": "resolution",
+     "ruleType": "MULTIPLIER",
+     "matchOp": "EQ",
+     "matchValue": "1080P",
+     "factor": 1.7778,
+     "extraCredits": 0,
+     "priority": 50,
+     "enabled": true,
+     "remark": "HappyHorse 1080P 1.6 CNY/s vs 720P 0.9 CNY/s"
+    }
    ]
   },
   {
@@ -2118,6 +2179,19 @@
    "isDefault": false,
    "capabilities": [
     "VIDEO_GENERATION"
+   ],
+   "pricingRules": [
+    {
+     "paramKey": "resolution",
+     "ruleType": "MULTIPLIER",
+     "matchOp": "EQ",
+     "matchValue": "1080P",
+     "factor": 1.7778,
+     "extraCredits": 0,
+     "priority": 50,
+     "enabled": true,
+     "remark": "HappyHorse 1080P 1.6 CNY/s vs 720P 0.9 CNY/s"
+    }
    ]
   },
   {
@@ -2151,6 +2225,30 @@
    "isDefault": false,
    "capabilities": [
     "VIDEO_GENERATION"
+   ],
+   "pricingRules": [
+    {
+     "paramKey": "sourceVideo",
+     "ruleType": "MULTIPLIER",
+     "matchOp": "ANY",
+     "matchValue": null,
+     "factor": 2.0,
+     "extraCredits": 0,
+     "priority": 40,
+     "enabled": true,
+     "remark": "Video edit bills input+output seconds, estimate x2 when source video present"
+    },
+    {
+     "paramKey": "resolution",
+     "ruleType": "MULTIPLIER",
+     "matchOp": "EQ",
+     "matchValue": "1080P",
+     "factor": 1.7778,
+     "extraCredits": 0,
+     "priority": 50,
+     "enabled": true,
+     "remark": "HappyHorse 1080P 1.6 CNY/s vs 720P 0.9 CNY/s"
+    }
    ]
   }
  ],
