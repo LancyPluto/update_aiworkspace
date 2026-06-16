@@ -122,8 +122,10 @@ async def test_deep_agents_engine_invokes_deep_agent_and_completes_run():
     }
     assert module.invocations[0]["messages"][-1] == {"role": "user", "content": "plan a long task"}
     assert backend.events[0][1].eventType == MESSAGE_DELTA
-    assert backend.events[1][1].eventType == MESSAGE_COMPLETED
-    assert backend.events[1][1].eventText == "Deep plan ready"
+    delta_events = [event for _, event in backend.events if event.eventType == MESSAGE_DELTA]
+    assert "".join(event.eventText for event in delta_events) == "Deep plan ready"
+    completed_events = [event for _, event in backend.events if event.eventType == MESSAGE_COMPLETED]
+    assert completed_events and completed_events[-1].eventText == "Deep plan ready"
     assert backend.completed_runs[0][0] == 11
     assert backend.completed_runs[0][1].finalAnswer == "Deep plan ready"
     assert backend.completed_runs[0][1].intent == "deep_agents"

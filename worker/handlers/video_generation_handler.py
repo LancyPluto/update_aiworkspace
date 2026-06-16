@@ -92,31 +92,7 @@ class VideoGenerationHandler:
                     if provider_protocol == "kling_video"
                     else str(model_config.get("modelName") or "")
                 )
-                video_request = {
-                    "prompt": prompt,
-                    "image_size": _resolve_image_size(params),
-                    "negative_prompt": str(params.get("negativePrompt") or params.get("negative_prompt") or ""),
-                    "model": resolved_model,
-                    "image": _first_text(
-                        params,
-                        "image",
-                        "imageUrl",
-                        "image_url",
-                        "referenceImage",
-                        "referenceImageUrl",
-                        "firstFrameImage",
-                        "firstFrameUrl",
-                        "first_frame_image",
-                        "first_frame_url",
-                    ),
-                    "image_tail": _first_text(params, "imageTail", "image_tail", "tailImage", "tailImageUrl", "lastFrameUrl"),
-                    "seed": _optional_int(params.get("seed")),
-                    "duration": str(params.get("duration") or ""),
-                    "aspect_ratio": str(params.get("aspectRatio") or params.get("aspect_ratio") or ""),
-                    "resolution": str(params.get("resolution") or ""),
-                }
-                if provider_protocol in {"kling_video", "agnes_video"}:
-                    video_request["mode"] = str(params.get("mode") or params.get("qualityMode") or "")
+                video_request = _build_video_request(params, resolved_model, provider_protocol)
                 if provider_protocol == "kling_video":
                     create_path, result_path = resolve_kling_video_paths(model_config)
                     video_request.update(
@@ -310,6 +286,35 @@ def _first_text(params: dict[str, Any], *keys: str) -> str:
         if isinstance(value, str) and value.strip():
             return value.strip()
     return ""
+
+
+def _build_video_request(params: dict[str, Any], model: str, provider_protocol: str) -> dict[str, Any]:
+    request = {
+        "prompt": _build_prompt(params),
+        "image_size": _resolve_image_size(params),
+        "negative_prompt": str(params.get("negativePrompt") or params.get("negative_prompt") or ""),
+        "model": model,
+        "image": _first_text(
+            params,
+            "image",
+            "imageUrl",
+            "image_url",
+            "referenceImage",
+            "referenceImageUrl",
+            "firstFrameImage",
+            "firstFrameUrl",
+            "first_frame_image",
+            "first_frame_url",
+        ),
+        "seed": _optional_int(params.get("seed")),
+        "duration": str(params.get("duration") or ""),
+        "aspect_ratio": str(params.get("aspectRatio") or params.get("aspect_ratio") or ""),
+        "resolution": str(params.get("resolution") or ""),
+    }
+    if provider_protocol in {"kling_video", "agnes_video"}:
+        request["image_tail"] = _first_text(params, "imageTail", "image_tail", "tailImage", "tailImageUrl", "lastFrameUrl")
+        request["mode"] = str(params.get("mode") or params.get("qualityMode") or "")
+    return request
 
 
 def _build_happyhorse_payload(params: dict[str, Any], model_name: Any) -> dict[str, Any]:
