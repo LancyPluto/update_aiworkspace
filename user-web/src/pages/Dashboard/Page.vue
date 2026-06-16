@@ -80,6 +80,7 @@ const auth = useAuthStore()
 const route = useRoute()
 const router = useRouter()
 const HISTORY_VIEW_KEY = "ai_tool_market_dashboard_history_view"
+const DASHBOARD_FEATURED_PREVIEW_LIMIT = 12
 
 const loading = ref(false)
 const credit = ref<CreditAccount | null>(null)
@@ -115,6 +116,7 @@ const submitError = ref("")
 const submitNotice = ref("")
 const activePanel = ref<"models" | "tasks">("models")
 const historyView = ref<"cards" | "feed">("cards")
+const featuredToolsExpanded = ref(false)
 const modalityDockOpen = ref(true)
 const historySentinelRef = ref<HTMLElement | null>(null)
 const historyFeedStartRef = ref<HTMLElement | null>(null)
@@ -262,10 +264,24 @@ const liveCreditView = computed(() =>
 
 const creditInsufficient = computed(() => liveCreditView.value.insufficient)
 
-const featuredTools = computed(() => {
-  const list = currentTools.value.length > 0 ? currentTools.value : tools.value
-  return list.slice(0, 6)
+const sortedCurrentTools = computed(() => {
+  const list = currentTools.value.length > 0 ? [...currentTools.value] : [...tools.value]
+  return list.sort((a, b) => a.id - b.id)
 })
+
+const visibleFeaturedTools = computed(() => {
+  const list = sortedCurrentTools.value
+  if (featuredToolsExpanded.value || list.length <= DASHBOARD_FEATURED_PREVIEW_LIMIT) {
+    return list
+  }
+  return list.slice(0, DASHBOARD_FEATURED_PREVIEW_LIMIT)
+})
+
+const hiddenFeaturedToolCount = computed(() =>
+  Math.max(0, sortedCurrentTools.value.length - DASHBOARD_FEATURED_PREVIEW_LIMIT),
+)
+
+const hasMoreFeaturedTools = computed(() => hiddenFeaturedToolCount.value > 0)
 
 const recentTasks = computed(() => tasks.value)
 const taskMaterials = computed(() =>
@@ -516,6 +532,7 @@ function normalizeModality(value?: string | null) {
 function selectModality(key: string) {
   selectedModality.value = key
   selectedToolCode.value = toolsByModality.value.get(key)?.[0]?.toolCode || null
+  featuredToolsExpanded.value = false
   modelSearch.value = ""
   modelPickerOpen.value = false
   replayParams.value = null
@@ -1734,7 +1751,7 @@ onUnmounted(() => {
               <div v-if="activePanel === 'models'" class="space-y-6">
                 <div class="grid gap-6 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
                 <article
-                  v-for="tool in featuredTools"
+                  v-for="tool in visibleFeaturedTools"
                   :key="tool.id"
                   class="marketplace-tool-card"
                   @click="selectTool(tool)"
@@ -1775,6 +1792,23 @@ onUnmounted(() => {
                     </div>
                   </div>
                 </article>
+                </div>
+                <div v-if="hasMoreFeaturedTools" class="flex justify-center pt-2">
+                  <button
+                    type="button"
+                    class="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-5 py-2.5 text-sm text-white/70 transition hover:border-white/18 hover:bg-white/[0.07] hover:text-white"
+                    @click="featuredToolsExpanded = !featuredToolsExpanded"
+                  >
+                    {{
+                      featuredToolsExpanded
+                        ? "收起"
+                        : `查看更多 (${hiddenFeaturedToolCount})`
+                    }}
+                    <ChevronDown
+                      class="h-4 w-4 transition"
+                      :class="featuredToolsExpanded ? 'rotate-180' : ''"
+                    />
+                  </button>
                 </div>
               </div>
 

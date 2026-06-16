@@ -47,6 +47,7 @@ KLING_TOOL_CODES = {
     "kling-image-to-video",
     "kling-motion-control",
     "kling-image-generation",
+    "kling-omni-image",
     "kling-v3-motion-control",
     "kling-v2-6-image-to-video",
     "kling-v2-6-motion-control",
@@ -113,6 +114,31 @@ KLING_IMAGE_PRICING_RULES = [
 ]
 
 
+KLING_OMNI_IMAGE_PRICING_RULES = [
+    {
+        "paramKey": "count",
+        "ruleType": "MULTIPLIER",
+        "matchOp": "VALUE",
+        "factor": 1,
+        "extraCredits": 0,
+        "priority": 40,
+        "enabled": True,
+        "remark": "按生成数量 count 倍率",
+    },
+    {
+        "paramKey": "resolution",
+        "ruleType": "MULTIPLIER",
+        "matchOp": "EQ",
+        "matchValue": "2k",
+        "factor": 1.5,
+        "extraCredits": 0,
+        "priority": 50,
+        "enabled": True,
+        "remark": "2K 相对 1K 倍率",
+    },
+]
+
+
 def _field(
     key: str,
     name: str,
@@ -160,11 +186,43 @@ def _select_field(key: str, name: str, options: list[dict], default: str, sort_o
     return _field(key, name, "select", sort_order=sort_order, options=payload, options_json=json.dumps(payload, ensure_ascii=False), default_value=default)
 
 
-def _radio_field(key: str, name: str, options: list[dict], sort_order: int, *, required: bool = True, default: str | None = None) -> dict:
-    payload = {"options": options}
+def _radio_field(
+    key: str,
+    name: str,
+    options: list[dict],
+    sort_order: int,
+    *,
+    required: bool = True,
+    default: str | None = None,
+    visible_when: dict[str, list[str]] | None = None,
+) -> dict:
+    payload: dict[str, Any] = {"options": options}
     if default:
         payload["defaultValue"] = default
+    if visible_when:
+        payload["visibleWhen"] = visible_when
     return _field(key, name, "radio", required=required, sort_order=sort_order, options=payload, options_json=json.dumps(payload, ensure_ascii=False), default_value=default)
+
+
+_SOUND_VISIBLE_WHEN = {"model": ["kling-v2-6", "kling-v2-5-turbo", "kling-v3"]}
+_DURATION_V3_OPTIONS = [{"label": f"{value}秒", "value": str(value)} for value in range(3, 16)]
+_DURATION_LEGACY_OPTIONS = [{"label": "5秒", "value": "5"}, {"label": "10秒", "value": "10"}]
+_DURATION_OMNI_O1_OPTIONS = [{"label": "5秒", "value": "5"}, {"label": "10秒", "value": "10"}]
+_RESOLUTION_OPTIONS = [
+    {"label": "720P", "value": "720p"},
+    {"label": "1080P", "value": "1080p"},
+]
+
+
+def _model_options_text2video() -> list[dict]:
+    return [
+        {"label": "V3（推荐）", "value": "kling-v3"},
+        {"label": "V2.5 Turbo", "value": "kling-v2-5-turbo"},
+        {"label": "V2.1 Master", "value": "kling-v2-1-master"},
+        {"label": "V2 Master", "value": "kling-v2-master"},
+        {"label": "V1.6", "value": "kling-v1-6"},
+        {"label": "V1", "value": "kling-v1"},
+    ]
 
 
 def _model_options_image2video() -> list[dict]:
@@ -177,14 +235,6 @@ def _model_options_image2video() -> list[dict]:
         {"label": "V2 Master", "value": "kling-v2-master"},
         {"label": "V1.6", "value": "kling-v1-6"},
         {"label": "V1.5", "value": "kling-v1-5"},
-        {"label": "V1", "value": "kling-v1"},
-    ]
-
-
-def _model_options_text2video() -> list[dict]:
-    return [
-        {"label": "V3（推荐）", "value": "kling-v3"},
-        {"label": "V2 Master", "value": "kling-v2-master"},
         {"label": "V1", "value": "kling-v1"},
     ]
 
@@ -207,7 +257,23 @@ def _model_options_image_gen() -> list[dict]:
     return [
         {"label": "V3（推荐）", "value": "kling-v3"},
         {"label": "V2.1", "value": "kling-v2-1"},
+        {"label": "V2 New", "value": "kling-v2-new"},
+        {"label": "V2", "value": "kling-v2"},
+        {"label": "V1.5", "value": "kling-v1-5"},
         {"label": "V1", "value": "kling-v1"},
+    ]
+
+
+def _model_options_multi_image() -> list[dict]:
+    return [
+        {"label": "V1.6（官方）", "value": "kling-v1-6"},
+    ]
+
+
+def _model_options_omni_image() -> list[dict]:
+    return [
+        {"label": "Image O1（推荐）", "value": "kling-image-o1"},
+        {"label": "V3 Omni", "value": "kling-v3-omni"},
     ]
 
 
@@ -216,37 +282,85 @@ _KLING_VIDEO_LIST_OPTIONS = '{"maxCount":4,"accept":"video/*","libraryEnabled":t
 _KLING_ELEMENT_LIST_OPTIONS = '{"maxCount":7,"libraryEnabled":true,"uiTier":"advanced"}'
 
 
-def _common_video_fields(*, include_image: bool = False, include_omni: bool = False) -> list[dict]:
-    fields: list[dict] = []
+def _text2video_fields() -> list[dict]:
     order = 1
-    if include_image:
-        fields.append(_field("imageUrl", "首帧图片", "image", required=True, sort_order=order, placeholder="上传后的 URL 或可访问的图片链接"))
-        order += 1
-        fields.append(_field("imageTail", "尾帧图片", "image", sort_order=order, placeholder="可选，尾帧图 URL"))
-        order += 1
-    fields.append(_field("prompt", "画面描述", "textarea", required=not include_image, sort_order=order, placeholder="描述主体、场景、镜头语言和细节", options_json='{"core": true}', core=True))
+    fields = [
+        _field("prompt", "画面描述", "textarea", required=True, sort_order=order, placeholder="描述主体、场景、镜头语言和细节", options_json='{"core": true}', core=True),
+    ]
     order += 1
     fields.append(_radio_field("aspectRatio", "画面比例", [{"label": "16:9", "value": "16:9"}, {"label": "9:16", "value": "9:16"}, {"label": "1:1", "value": "1:1"}], order))
     order += 1
-    fields.append(_radio_field("duration", "时长", [{"label": "5秒", "value": "5"}, {"label": "10秒", "value": "10"}, {"label": "15秒", "value": "15"}], order, default="5"))
+    fields.append(_radio_field("duration", "时长", _DURATION_V3_OPTIONS, order, default="5"))
     order += 1
     fields.append(_radio_field("mode", "质量档位", [{"label": "标准（std）", "value": "std"}, {"label": "高质量（pro）", "value": "pro"}], order, default="std"))
     order += 1
+    fields.append(_radio_field("resolution", "分辨率", _RESOLUTION_OPTIONS, order, required=False))
+    order += 1
+    fields.append(_radio_field("sound", "音频", [{"label": "关闭", "value": "off"}, {"label": "开启", "value": "on"}], order, required=False, default="off", visible_when=_SOUND_VISIBLE_WHEN))
+    order += 1
+    fields.append(_radio_field("multiShot", "多镜头", [{"label": "关闭", "value": "false"}, {"label": "开启", "value": "true"}], order, required=True, default="false"))
+    order += 1
+    fields.append(_field("shotType", "分镜类型", "select", sort_order=order, options={"options": [{"label": "自定义", "value": "customize"}], "visibleWhen": {"multiShot": ["true"]}}, options_json='{"options": [{"label": "自定义", "value": "customize"}], "visibleWhen": {"multiShot": ["true"]}}'))
+    order += 1
+    fields.append(_field("multiPrompt", "分镜提示词", "textarea", sort_order=order, placeholder="多镜头时的分镜描述", options_json='{"visibleWhen": {"multiShot": ["true"]}}'))
+    order += 1
+    fields.append(_field("cfgScale", "CFG 强度", "number", sort_order=order, placeholder="可选，默认 0.5"))
+    order += 1
+    fields.append(_field("negativePrompt", "反向提示词", "textarea", sort_order=order, placeholder="不希望出现的元素"))
+    return fields
+
+
+def _image2video_fields() -> list[dict]:
+    order = 1
+    fields = [
+        _field("imageUrl", "首帧图片", "image", required=True, sort_order=order, placeholder="上传后的 URL 或可访问的图片链接"),
+        _field("imageTail", "尾帧图片", "image", sort_order=order + 1, placeholder="可选，需 pro 模式"),
+    ]
+    order += 2
+    fields.append(_field("prompt", "画面描述", "textarea", sort_order=order, placeholder="描述主体、场景、镜头语言和细节", options_json='{"core": true}', core=True))
+    order += 1
+    fields.append(_radio_field("aspectRatio", "画面比例", [{"label": "16:9", "value": "16:9"}, {"label": "9:16", "value": "9:16"}, {"label": "1:1", "value": "1:1"}], order))
+    order += 1
+    fields.append(_radio_field("duration", "时长", _DURATION_V3_OPTIONS, order, default="5"))
+    order += 1
+    fields.append(_radio_field("mode", "质量档位", [{"label": "标准（std）", "value": "std"}, {"label": "高质量（pro）", "value": "pro"}], order, default="std"))
+    order += 1
+    fields.append(_radio_field("resolution", "分辨率", _RESOLUTION_OPTIONS, order, required=False))
+    order += 1
+    fields.append(_radio_field("sound", "音频", [{"label": "关闭", "value": "off"}, {"label": "开启", "value": "on"}], order, required=False, default="off", visible_when=_SOUND_VISIBLE_WHEN))
+    order += 1
+    fields.append(_field("negativePrompt", "反向提示词", "textarea", sort_order=order, placeholder="不希望出现的元素"))
+    return fields
+
+
+def _omni_video_fields() -> list[dict]:
+    order = 1
+    fields = [
+        _field("prompt", "画面描述", "textarea", required=True, sort_order=order, placeholder="描述主体、场景、镜头语言和细节", options_json='{"core": true}', core=True),
+    ]
+    order += 1
+    fields.append(_radio_field("aspectRatio", "画面比例", [{"label": "16:9", "value": "16:9"}, {"label": "9:16", "value": "9:16"}, {"label": "1:1", "value": "1:1"}], order))
+    order += 1
+    fields.append(_radio_field("duration", "时长", _DURATION_V3_OPTIONS, order, default="5"))
+    order += 1
+    fields.append(_radio_field("mode", "质量档位", [{"label": "标准（std）", "value": "std"}, {"label": "高质量（pro）", "value": "pro"}], order, default="std"))
+    order += 1
+    fields.append(_radio_field("resolution", "分辨率", _RESOLUTION_OPTIONS, order, required=False))
+    order += 1
     fields.append(_radio_field("sound", "音频", [{"label": "关闭", "value": "off"}, {"label": "开启", "value": "on"}], order, required=False, default="off"))
     order += 1
-    if include_omni:
-        fields.append(_field("imageList", "参考图片列表", "multi_image", sort_order=order, placeholder="选择参考图片", options_json=_KLING_IMAGE_LIST_OPTIONS))
-        order += 1
-        fields.append(_field("videoList", "参考视频列表", "multi_video", sort_order=order, placeholder="选择参考视频", options_json=_KLING_VIDEO_LIST_OPTIONS))
-        order += 1
-        fields.append(_field("elementList", "主体参考列表", "subject_element_list", sort_order=order, placeholder="添加主体参考", options_json=_KLING_ELEMENT_LIST_OPTIONS))
-        order += 1
-        fields.append(_radio_field("multiShot", "多镜头", [{"label": "关闭", "value": "false"}, {"label": "开启", "value": "true"}], order, required=False, default="false"))
-        order += 1
-        fields.append(_field("shotType", "分镜类型", "select", sort_order=order, options={"options": [{"label": "自动", "value": "auto"}, {"label": "自定义", "value": "customize"}]}, options_json='{"options": [{"label": "自动", "value": "auto"}, {"label": "自定义", "value": "customize"}]}'))
-        order += 1
-        fields.append(_field("multiPrompt", "分镜提示词", "textarea", sort_order=order, placeholder="多镜头时的分镜描述"))
-        order += 1
+    fields.append(_field("imageList", "参考图片列表", "multi_image", sort_order=order, placeholder="选择参考图片", options_json=_KLING_IMAGE_LIST_OPTIONS))
+    order += 1
+    fields.append(_field("videoList", "参考视频列表", "multi_video", sort_order=order, placeholder="选择参考视频", options_json=_KLING_VIDEO_LIST_OPTIONS))
+    order += 1
+    fields.append(_field("elementList", "主体参考列表", "subject_element_list", sort_order=order, placeholder="添加主体参考", options_json=_KLING_ELEMENT_LIST_OPTIONS))
+    order += 1
+    fields.append(_radio_field("multiShot", "多镜头", [{"label": "关闭", "value": "false"}, {"label": "开启", "value": "true"}], order, required=True, default="false"))
+    order += 1
+    fields.append(_field("shotType", "分镜类型", "select", sort_order=order, options={"options": [{"label": "自定义", "value": "customize"}], "visibleWhen": {"multiShot": ["true"]}}, options_json='{"options": [{"label": "自定义", "value": "customize"}], "visibleWhen": {"multiShot": ["true"]}}'))
+    order += 1
+    fields.append(_field("multiPrompt", "分镜提示词", "textarea", sort_order=order, placeholder="多镜头时的分镜描述", options_json='{"visibleWhen": {"multiShot": ["true"]}}'))
+    order += 1
     fields.append(_field("negativePrompt", "反向提示词", "textarea", sort_order=order, placeholder="不希望出现的元素"))
     return fields
 
@@ -256,8 +370,8 @@ def _motion_fields() -> list[dict]:
         _field("imageUrl", "人物图片", "image", required=True, sort_order=1, placeholder="角色参考图 URL"),
         _field("videoUrl", "动作视频", "file", required=True, sort_order=2, placeholder="驱动动作的视频 URL"),
         _field("prompt", "补充描述", "textarea", sort_order=3, placeholder="可选的动作或场景补充"),
-        _radio_field("duration", "时长", [{"label": "5秒", "value": "5"}, {"label": "10秒", "value": "10"}], 4, default="5"),
-        _radio_field("mode", "质量档位", [{"label": "标准（std）", "value": "std"}, {"label": "高质量（pro）", "value": "pro"}], 5, default="std"),
+        _radio_field("mode", "质量档位", [{"label": "标准（std）", "value": "std"}, {"label": "高质量（pro）", "value": "pro"}], 4, default="std"),
+        _radio_field("keepOriginalSound", "保留原声", [{"label": "否", "value": "no"}, {"label": "是", "value": "yes"}], 5, required=False, default="no"),
         _field("characterOrientation", "角色朝向", "select", sort_order=6, options={"options": [{"label": "跟随视频", "value": "video"}, {"label": "跟随图片", "value": "image"}]}, options_json='{"options": [{"label": "跟随视频", "value": "video"}, {"label": "跟随图片", "value": "image"}]}', default_value="video"),
         _field("staticMask", "静态遮罩", "image", sort_order=7, placeholder="可选"),
         _field("dynamicMasks", "动态遮罩", "textarea", sort_order=8, placeholder="JSON 数组"),
@@ -268,12 +382,10 @@ def _multi_image_fields() -> list[dict]:
     return [
         _field("prompt", "画面描述", "textarea", required=True, sort_order=1, placeholder="描述镜头与主体", options_json='{"core": true}', core=True),
         _field("imageList", "参考图片列表", "multi_image", required=True, sort_order=2, placeholder="选择参考图片", options_json=_KLING_IMAGE_LIST_OPTIONS),
-        _field("elementList", "主体参考列表", "subject_element_list", sort_order=3, placeholder="添加主体参考", options_json=_KLING_ELEMENT_LIST_OPTIONS),
-        _radio_field("duration", "时长", [{"label": "5秒", "value": "5"}, {"label": "10秒", "value": "10"}], 4, default="5"),
+        _radio_field("aspectRatio", "画面比例", [{"label": "16:9", "value": "16:9"}, {"label": "9:16", "value": "9:16"}, {"label": "1:1", "value": "1:1"}], 3, required=False),
+        _radio_field("duration", "时长", _DURATION_LEGACY_OPTIONS, 4, default="5"),
         _radio_field("mode", "质量档位", [{"label": "标准（std）", "value": "std"}, {"label": "高质量（pro）", "value": "pro"}], 5, default="std"),
-        _radio_field("multiShot", "多镜头", [{"label": "关闭", "value": "false"}, {"label": "开启", "value": "true"}], 6, required=False, default="false"),
-        _field("shotType", "分镜类型", "select", sort_order=7, options={"options": [{"label": "自动", "value": "auto"}, {"label": "自定义", "value": "customize"}]}, options_json='{"options": [{"label": "自动", "value": "auto"}, {"label": "自定义", "value": "customize"}]}'),
-        _field("multiPrompt", "分镜提示词", "textarea", sort_order=8, placeholder="多镜头时的分镜描述"),
+        _field("negativePrompt", "反向提示词", "textarea", sort_order=6, placeholder="不希望出现的元素"),
     ]
 
 
@@ -281,10 +393,32 @@ def _image_gen_fields() -> list[dict]:
     return [
         _field("prompt", "画面描述", "textarea", required=True, sort_order=1, placeholder="描述主体、场景、风格、构图与细节", options_json='{"core": true}', core=True),
         _radio_field("aspectRatio", "画面比例", [{"label": "1:1", "value": "1:1"}, {"label": "16:9", "value": "16:9"}, {"label": "9:16", "value": "9:16"}], 2, default="1:1"),
-        _field("count", "生成数量", "select", sort_order=3, options={"options": [{"label": "1", "value": "1"}, {"label": "2", "value": "2"}, {"label": "3", "value": "3"}, {"label": "4", "value": "4"}], "defaultValue": "1"}, options_json='{"options": [{"label": "1", "value": "1"}, {"label": "2", "value": "2"}, {"label": "3", "value": "3"}, {"label": "4", "value": "4"}], "defaultValue": "1"}', default_value="1"),
-        _field("negativePrompt", "反向提示词", "textarea", sort_order=4, placeholder="不希望出现的元素"),
-        _field("imageUrl", "参考图", "image", sort_order=5, placeholder="可选参考图 URL"),
-        _field("seed", "随机种子", "number", sort_order=6, placeholder="可选"),
+        _radio_field("resolution", "清晰度", [{"label": "1K", "value": "1k"}, {"label": "2K", "value": "2k"}], 3, required=False, default="1k"),
+        _field("count", "生成数量", "select", sort_order=4, options={"options": [{"label": "1", "value": "1"}, {"label": "2", "value": "2"}, {"label": "3", "value": "3"}, {"label": "4", "value": "4"}], "defaultValue": "1"}, options_json='{"options": [{"label": "1", "value": "1"}, {"label": "2", "value": "2"}, {"label": "3", "value": "3"}, {"label": "4", "value": "4"}], "defaultValue": "1"}', default_value="1"),
+        _field("negativePrompt", "反向提示词", "textarea", sort_order=5, placeholder="不希望出现的元素"),
+        _field("imageUrl", "参考图", "image", sort_order=6, placeholder="可选参考图 URL"),
+        _field("seed", "随机种子", "number", sort_order=7, placeholder="可选"),
+    ]
+
+
+def _omni_image_fields() -> list[dict]:
+    return [
+        _field("prompt", "画面描述", "textarea", required=True, sort_order=1, placeholder="描述主体、场景、风格与细节", options_json='{"core": true}', core=True),
+        _field("imageList", "参考图片列表", "multi_image", sort_order=2, placeholder="可选参考图", options_json='{"minCount":0,"maxCount":7,"accept":"image/*","libraryEnabled":true,"libraryKind":"image","uiTier":"advanced"}'),
+        _radio_field("aspectRatio", "画面比例", [
+            {"label": "16:9", "value": "16:9"},
+            {"label": "9:16", "value": "9:16"},
+            {"label": "1:1", "value": "1:1"},
+            {"label": "4:3", "value": "4:3"},
+            {"label": "3:4", "value": "3:4"},
+            {"label": "3:2", "value": "3:2"},
+            {"label": "2:3", "value": "2:3"},
+            {"label": "21:9", "value": "21:9"},
+            {"label": "自动", "value": "auto"},
+        ], 3, required=False, default="16:9"),
+        _radio_field("resolution", "清晰度", [{"label": "1K", "value": "1k"}, {"label": "2K", "value": "2k"}], 4, required=False, default="1k"),
+        _field("count", "生成数量", "select", sort_order=5, options={"options": [{"label": str(n), "value": str(n)} for n in range(1, 10)], "defaultValue": "1"}, options_json=json.dumps({"options": [{"label": str(n), "value": str(n)} for n in range(1, 10)], "defaultValue": "1"}, ensure_ascii=False), default_value="1"),
+        _radio_field("resultType", "输出类型", [{"label": "单图", "value": "single"}, {"label": "组图", "value": "series"}], 6, required=False, default="single"),
     ]
 
 
@@ -379,7 +513,8 @@ def _gateway_model(
 
 def _extract_kling_extra_auth(model_configs: list[dict]) -> dict[str, str]:
     for row in model_configs:
-        if row.get("configCode") not in KLING_MODEL_CONFIG_CODES:
+        code = str(row.get("configCode") or "")
+        if row.get("provider") != "kling_video" and code not in KLING_MODEL_CONFIG_CODES:
             continue
         raw = row.get("extraAuthJson") or ""
         if not isinstance(raw, str) or not raw.strip():
@@ -443,7 +578,7 @@ def build_kling_gateways(extra_auth: dict[str, str]) -> list[dict]:
         _gateway_model(
             config_code="kling-gateway-multi-image-to-video",
             display_name="可灵 · 多图参考生视频",
-            model_name="kling-v3",
+            model_name="kling-v1-6",
             api_task="multi_image2video",
             create_path="/v1/videos/multi-image2video",
             result_path="/v1/videos/multi-image2video/{task_id}",
@@ -482,6 +617,20 @@ def build_kling_gateways(extra_auth: dict[str, str]) -> list[dict]:
             pricing_rules=KLING_IMAGE_PRICING_RULES,
             extra_auth=extra_auth,
         ),
+        _gateway_model(
+            config_code="kling-gateway-omni-image",
+            display_name="可灵 · Omni 生图",
+            model_name="kling-image-o1",
+            api_task="omni_image",
+            create_path="/v1/images/omni-image",
+            result_path="/v1/images/omni-image/{task_id}",
+            docs_url="https://www.klingai.com/document-api/apiReference/model/OmniImage",
+            capabilities=["IMAGE_GENERATION"],
+            billing_unit="PER_CALL",
+            unit_price=0.019998,
+            pricing_rules=KLING_OMNI_IMAGE_PRICING_RULES,
+            extra_auth=extra_auth,
+        ),
     ]
 
 
@@ -491,7 +640,7 @@ def build_kling_tools() -> list[dict]:
             tool_code="kling-text-to-video",
             tool_name="可灵文生视频",
             model_config_code="kling-gateway-text-to-video",
-            fields=_common_video_fields(),
+            fields=_text2video_fields(),
             model_field=_select_field("model", "可灵模型版本", _model_options_text2video(), "kling-v3", 99),
             status="OFFLINE",
             tool_type="VIDEO_GENERATION",
@@ -502,7 +651,7 @@ def build_kling_tools() -> list[dict]:
             tool_code="kling-image-to-video",
             tool_name="可灵图生视频",
             model_config_code="kling-gateway-image-to-video",
-            fields=_common_video_fields(include_image=True),
+            fields=_image2video_fields(),
             model_field=_select_field("model", "可灵模型版本", _model_options_image2video(), "kling-v3", 99),
             status="ONLINE",
             tool_type="VIDEO_GENERATION",
@@ -526,7 +675,7 @@ def build_kling_tools() -> list[dict]:
             tool_name="可灵多图参考生视频",
             model_config_code="kling-gateway-multi-image-to-video",
             fields=_multi_image_fields(),
-            model_field=_select_field("model", "可灵模型版本", [{"label": "V3（推荐）", "value": "kling-v3"}], "kling-v3", 99),
+            model_field=_select_field("model", "可灵模型版本", _model_options_multi_image(), "kling-v1-6", 99),
             status="OFFLINE",
             tool_type="VIDEO_GENERATION",
             input_modality="IMAGE",
@@ -536,7 +685,7 @@ def build_kling_tools() -> list[dict]:
             tool_code="kling-omni-video",
             tool_name="可灵 Omni 视频",
             model_config_code="kling-gateway-omni-video",
-            fields=_common_video_fields(include_omni=True),
+            fields=_omni_video_fields(),
             model_field=_select_field("model", "可灵模型版本", _model_options_omni(), "kling-v3-omni", 99),
             status="ONLINE",
             tool_type="VIDEO_GENERATION",
@@ -555,6 +704,18 @@ def build_kling_tools() -> list[dict]:
             input_modality="TEXT",
             category_code="ai-image",
             cover_url="/generated/tool-covers/可灵生图-V3-kling-image-generation-v3-可灵-V3-Omni-20260608010301.png",
+            estimated_credit_cost=3,
+        ),
+        _tool(
+            tool_code="kling-omni-image",
+            tool_name="可灵 Omni 生图",
+            model_config_code="kling-gateway-omni-image",
+            fields=_omni_image_fields(),
+            model_field=_select_field("model", "可灵模型版本", _model_options_omni_image(), "kling-image-o1", 99),
+            status="ONLINE",
+            tool_type="IMAGE_GENERATION",
+            input_modality="TEXT",
+            category_code="ai-image",
             estimated_credit_cost=3,
         ),
     ]
@@ -577,7 +738,7 @@ def patch_bundle(bundle: dict[str, Any]) -> dict[str, Any]:
     bundle["modelConfigs"] = kept_models
     bundle["tools"] = kept_tools
     settings = bundle.setdefault("settings", {})
-    settings["scope"] = "可灵网关配置（6 任务类型 + 表单 model 版本选择）"
+    settings["scope"] = "可灵网关配置（7 任务类型 + 表单 model 版本选择）"
     settings["source"] = "kling gateway consolidation patch"
     settings["sourceDoc"] = "可灵模型配置.md"
     return bundle

@@ -7,6 +7,7 @@ from handlers.image_generation_handler import ImageGenerationHandler
 from handlers.music_generation_handler import MusicGenerationHandler
 from handlers.text_task_handler import TextTaskHandler
 from handlers.text_to_speech_handler import TextToSpeechHandler
+from handlers.subject_sync_handler import SubjectSyncHandler
 from handlers.video_generation_handler import VideoGenerationHandler
 from handlers.workflow_step_handler import WorkflowStepHandler
 
@@ -25,6 +26,7 @@ class TaskHandlerRouter:
         music_generation_handler: MusicGenerationHandler | None = None,
         text_to_speech_handler: TextToSpeechHandler | None = None,
         video_generation_handler: VideoGenerationHandler | None = None,
+        subject_sync_handler: SubjectSyncHandler | None = None,
         workflow_step_handler: WorkflowStepHandler | None = None,
         backend_client: BackendClient | None = None,
     ) -> None:
@@ -34,10 +36,15 @@ class TaskHandlerRouter:
         self.music_generation_handler = music_generation_handler or MusicGenerationHandler()
         self.text_to_speech_handler = text_to_speech_handler or TextToSpeechHandler()
         self.video_generation_handler = video_generation_handler or VideoGenerationHandler()
+        self.subject_sync_handler = subject_sync_handler or SubjectSyncHandler()
         self.workflow_step_handler = workflow_step_handler or WorkflowStepHandler()
         self.backend_client = backend_client or BackendClient()
 
     def handle(self, message: dict[str, Any]) -> dict[str, Any]:
+        message_type = str(message.get("messageType") or "").strip().lower()
+        if message_type == "subject_sync":
+            return self.subject_sync_handler.handle(message)
+
         task_id = int(message["taskId"])
         trace_id = message.get("traceId")
         context = self.backend_client.get_execution_context(task_id, trace_id=trace_id)

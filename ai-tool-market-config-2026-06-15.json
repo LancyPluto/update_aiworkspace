@@ -27,7 +27,7 @@
   "platform.description": "一站式 AI 运营助手，帮助企业提升内容生产与运营效率。",
   "platform.name": "AI 工具超市",
   "pricingDisclaimer": "价格与可用模型以可灵官方控制台与账单为准。含密钥时勿提交 Git。",
-  "scope": "可灵网关配置（6 任务类型 + 表单 model 版本选择）",
+  "scope": "可灵网关配置（7 任务类型 + 表单 model 版本选择）",
   "security.allowedCors": "http://127.0.0.1:5173\nhttp://127.0.0.1:5174",
   "security.jwtHours": "24",
   "source": "kling gateway consolidation patch",
@@ -2043,7 +2043,7 @@
    "channelLabel": "可灵 Kling",
    "channelIconAsset": "kling",
    "provider": "kling_video",
-   "modelName": "kling-v3",
+   "modelName": "kling-v1-6",
    "baseUrl": "https://api-beijing.klingai.com",
    "apiKey": "",
    "extraAuthJson": "{\"apiTask\": \"multi_image2video\", \"createPath\": \"/v1/videos/multi-image2video\", \"resultPath\": \"/v1/videos/multi-image2video/{task_id}\"}",
@@ -2214,6 +2214,62 @@
      "priority": 40,
      "enabled": true,
      "remark": "按生成数量 count 倍率"
+    }
+   ]
+  },
+  {
+   "displayName": "可灵 · Omni 生图",
+   "configCode": "kling-gateway-omni-image",
+   "vendorAccountRef": "kling::默认账户",
+   "channelCode": "kling",
+   "channelLabel": "可灵 Kling",
+   "channelIconAsset": "kling",
+   "provider": "kling_video",
+   "modelName": "kling-image-o1",
+   "baseUrl": "https://api-beijing.klingai.com",
+   "apiKey": "",
+   "extraAuthJson": "{\"apiTask\": \"omni_image\", \"createPath\": \"/v1/images/omni-image\", \"resultPath\": \"/v1/images/omni-image/{task_id}\"}",
+   "secretsRedacted": false,
+   "minimaxGroupId": null,
+   "consoleUrl": "https://app.klingai.com/cn/dev/api-key",
+   "balanceUrl": "https://app.klingai.com/cn/dev/resource-pack",
+   "docsUrl": "https://www.klingai.com/document-api/apiReference/model/OmniImage",
+   "timeoutSeconds": 600,
+   "connectTimeoutSeconds": null,
+   "readTimeoutSeconds": null,
+   "inputTokenPricePer1k": 0,
+   "outputTokenPricePer1k": 0,
+   "inputTokenPricePer1m": 0,
+   "outputTokenPricePer1m": 0,
+   "billingUnit": "PER_CALL",
+   "unitPrice": 0.019998,
+   "enabled": true,
+   "agentEnabled": false,
+   "isDefault": false,
+   "capabilities": [
+    "IMAGE_GENERATION"
+   ],
+   "pricingRules": [
+    {
+     "paramKey": "count",
+     "ruleType": "MULTIPLIER",
+     "matchOp": "VALUE",
+     "factor": 1,
+     "extraCredits": 0,
+     "priority": 40,
+     "enabled": true,
+     "remark": "按生成数量 count 倍率"
+    },
+    {
+     "paramKey": "resolution",
+     "ruleType": "MULTIPLIER",
+     "matchOp": "EQ",
+     "matchValue": "2k",
+     "factor": 1.5,
+     "extraCredits": 0,
+     "priority": 50,
+     "enabled": true,
+     "remark": "2K 相对 1K 倍率"
     }
    ]
   }
@@ -3855,12 +3911,52 @@
      "options": {
       "options": [
        {
+        "label": "3秒",
+        "value": "3"
+       },
+       {
+        "label": "4秒",
+        "value": "4"
+       },
+       {
         "label": "5秒",
         "value": "5"
        },
        {
+        "label": "6秒",
+        "value": "6"
+       },
+       {
+        "label": "7秒",
+        "value": "7"
+       },
+       {
+        "label": "8秒",
+        "value": "8"
+       },
+       {
+        "label": "9秒",
+        "value": "9"
+       },
+       {
         "label": "10秒",
         "value": "10"
+       },
+       {
+        "label": "11秒",
+        "value": "11"
+       },
+       {
+        "label": "12秒",
+        "value": "12"
+       },
+       {
+        "label": "13秒",
+        "value": "13"
+       },
+       {
+        "label": "14秒",
+        "value": "14"
        },
        {
         "label": "15秒",
@@ -3869,7 +3965,7 @@
       ],
       "defaultValue": "5"
      },
-     "optionsJson": "{\"options\": [{\"label\": \"5秒\", \"value\": \"5\"}, {\"label\": \"10秒\", \"value\": \"10\"}, {\"label\": \"15秒\", \"value\": \"15\"}], \"defaultValue\": \"5\"}",
+     "optionsJson": "{\"options\": [{\"label\": \"3秒\", \"value\": \"3\"}, {\"label\": \"4秒\", \"value\": \"4\"}, {\"label\": \"5秒\", \"value\": \"5\"}, {\"label\": \"6秒\", \"value\": \"6\"}, {\"label\": \"7秒\", \"value\": \"7\"}, {\"label\": \"8秒\", \"value\": \"8\"}, {\"label\": \"9秒\", \"value\": \"9\"}, {\"label\": \"10秒\", \"value\": \"10\"}, {\"label\": \"11秒\", \"value\": \"11\"}, {\"label\": \"12秒\", \"value\": \"12\"}, {\"label\": \"13秒\", \"value\": \"13\"}, {\"label\": \"14秒\", \"value\": \"14\"}, {\"label\": \"15秒\", \"value\": \"15\"}], \"defaultValue\": \"5\"}",
      "required": true,
      "executionRequired": true,
      "userRequired": true,
@@ -3906,6 +4002,32 @@
      "sortOrder": 4
     },
     {
+     "fieldKey": "resolution",
+     "fieldName": "分辨率",
+     "fieldType": "radio",
+     "placeholder": null,
+     "options": {
+      "options": [
+       {
+        "label": "720P",
+        "value": "720p"
+       },
+       {
+        "label": "1080P",
+        "value": "1080p"
+       }
+      ]
+     },
+     "optionsJson": "{\"options\": [{\"label\": \"720P\", \"value\": \"720p\"}, {\"label\": \"1080P\", \"value\": \"1080p\"}]}",
+     "required": false,
+     "executionRequired": false,
+     "userRequired": false,
+     "defaultValue": null,
+     "agentFillStrategy": "default",
+     "riskLevel": "LOW",
+     "sortOrder": 5
+    },
+    {
      "fieldKey": "sound",
      "fieldName": "音频",
      "fieldType": "radio",
@@ -3921,16 +4043,113 @@
         "value": "on"
        }
       ],
-      "defaultValue": "off"
+      "defaultValue": "off",
+      "visibleWhen": {
+       "model": [
+        "kling-v2-6",
+        "kling-v2-5-turbo",
+        "kling-v3"
+       ]
+      }
      },
-     "optionsJson": "{\"options\": [{\"label\": \"关闭\", \"value\": \"off\"}, {\"label\": \"开启\", \"value\": \"on\"}], \"defaultValue\": \"off\"}",
+     "optionsJson": "{\"options\": [{\"label\": \"关闭\", \"value\": \"off\"}, {\"label\": \"开启\", \"value\": \"on\"}], \"defaultValue\": \"off\", \"visibleWhen\": {\"model\": [\"kling-v2-6\", \"kling-v2-5-turbo\", \"kling-v3\"]}}",
      "required": false,
      "executionRequired": false,
      "userRequired": false,
      "defaultValue": "off",
      "agentFillStrategy": "default",
      "riskLevel": "LOW",
-     "sortOrder": 5
+     "sortOrder": 6
+    },
+    {
+     "fieldKey": "multiShot",
+     "fieldName": "多镜头",
+     "fieldType": "radio",
+     "placeholder": null,
+     "options": {
+      "options": [
+       {
+        "label": "关闭",
+        "value": "false"
+       },
+       {
+        "label": "开启",
+        "value": "true"
+       }
+      ],
+      "defaultValue": "false"
+     },
+     "optionsJson": "{\"options\": [{\"label\": \"关闭\", \"value\": \"false\"}, {\"label\": \"开启\", \"value\": \"true\"}], \"defaultValue\": \"false\"}",
+     "required": true,
+     "executionRequired": true,
+     "userRequired": true,
+     "defaultValue": "false",
+     "agentFillStrategy": "ask_user",
+     "riskLevel": "LOW",
+     "sortOrder": 7
+    },
+    {
+     "fieldKey": "shotType",
+     "fieldName": "分镜类型",
+     "fieldType": "select",
+     "placeholder": null,
+     "options": {
+      "options": [
+       {
+        "label": "自定义",
+        "value": "customize"
+       }
+      ],
+      "visibleWhen": {
+       "multiShot": [
+        "true"
+       ]
+      }
+     },
+     "optionsJson": "{\"options\": [{\"label\": \"自定义\", \"value\": \"customize\"}], \"visibleWhen\": {\"multiShot\": [\"true\"]}}",
+     "required": false,
+     "executionRequired": false,
+     "userRequired": false,
+     "defaultValue": null,
+     "agentFillStrategy": "default",
+     "riskLevel": "LOW",
+     "sortOrder": 8
+    },
+    {
+     "fieldKey": "multiPrompt",
+     "fieldName": "分镜提示词",
+     "fieldType": "textarea",
+     "placeholder": "多镜头时的分镜描述",
+     "options": {
+      "visibleWhen": {
+       "multiShot": [
+        "true"
+       ]
+      }
+     },
+     "optionsJson": "{\"visibleWhen\": {\"multiShot\": [\"true\"]}}",
+     "required": false,
+     "executionRequired": false,
+     "userRequired": false,
+     "defaultValue": null,
+     "agentFillStrategy": "default",
+     "riskLevel": "LOW",
+     "sortOrder": 9
+    },
+    {
+     "fieldKey": "cfgScale",
+     "fieldName": "CFG 强度",
+     "fieldType": "number",
+     "placeholder": "可选，默认 0.5",
+     "options": null,
+     "optionsJson": null,
+     "required": false,
+     "executionRequired": false,
+     "userRequired": false,
+     "defaultValue": null,
+     "agentFillStrategy": "default",
+     "riskLevel": "LOW",
+     "sortOrder": 10
     },
     {
      "fieldKey": "negativePrompt",
@@ -3945,7 +4164,7 @@
      "defaultValue": null,
      "agentFillStrategy": "default",
      "riskLevel": "LOW",
-     "sortOrder": 6
+     "sortOrder": 11
     },
     {
      "fieldKey": "model",
@@ -3962,8 +4181,20 @@
         "value": "kling-v3"
        },
        {
+        "label": "V2.5 Turbo",
+        "value": "kling-v2-5-turbo"
+       },
+       {
+        "label": "V2.1 Master",
+        "value": "kling-v2-1-master"
+       },
+       {
         "label": "V2 Master",
         "value": "kling-v2-master"
+       },
+       {
+        "label": "V1.6",
+        "value": "kling-v1-6"
        },
        {
         "label": "V1",
@@ -3971,14 +4202,14 @@
        }
       ]
      },
-     "optionsJson": "{\"uiTier\": \"all\", \"uiGroup\": \"meta\", \"defaultValue\": \"kling-v3\", \"options\": [{\"label\": \"V3（推荐）\", \"value\": \"kling-v3\"}, {\"label\": \"V2 Master\", \"value\": \"kling-v2-master\"}, {\"label\": \"V1\", \"value\": \"kling-v1\"}]}",
+     "optionsJson": "{\"uiTier\": \"all\", \"uiGroup\": \"meta\", \"defaultValue\": \"kling-v3\", \"options\": [{\"label\": \"V3（推荐）\", \"value\": \"kling-v3\"}, {\"label\": \"V2.5 Turbo\", \"value\": \"kling-v2-5-turbo\"}, {\"label\": \"V2.1 Master\", \"value\": \"kling-v2-1-master\"}, {\"label\": \"V2 Master\", \"value\": \"kling-v2-master\"}, {\"label\": \"V1.6\", \"value\": \"kling-v1-6\"}, {\"label\": \"V1\", \"value\": \"kling-v1\"}]}",
      "required": false,
      "executionRequired": false,
      "userRequired": false,
      "defaultValue": "kling-v3",
      "agentFillStrategy": "default",
      "riskLevel": "LOW",
-     "sortOrder": 7
+     "sortOrder": 12
     }
    ],
    "prompts": [],
@@ -4019,7 +4250,7 @@
      "fieldKey": "imageTail",
      "fieldName": "尾帧图片",
      "fieldType": "image",
-     "placeholder": "可选，尾帧图 URL",
+     "placeholder": "可选，需 pro 模式",
      "options": null,
      "optionsJson": null,
      "required": false,
@@ -4085,12 +4316,52 @@
      "options": {
       "options": [
        {
+        "label": "3秒",
+        "value": "3"
+       },
+       {
+        "label": "4秒",
+        "value": "4"
+       },
+       {
         "label": "5秒",
         "value": "5"
        },
        {
+        "label": "6秒",
+        "value": "6"
+       },
+       {
+        "label": "7秒",
+        "value": "7"
+       },
+       {
+        "label": "8秒",
+        "value": "8"
+       },
+       {
+        "label": "9秒",
+        "value": "9"
+       },
+       {
         "label": "10秒",
         "value": "10"
+       },
+       {
+        "label": "11秒",
+        "value": "11"
+       },
+       {
+        "label": "12秒",
+        "value": "12"
+       },
+       {
+        "label": "13秒",
+        "value": "13"
+       },
+       {
+        "label": "14秒",
+        "value": "14"
        },
        {
         "label": "15秒",
@@ -4099,7 +4370,7 @@
       ],
       "defaultValue": "5"
      },
-     "optionsJson": "{\"options\": [{\"label\": \"5秒\", \"value\": \"5\"}, {\"label\": \"10秒\", \"value\": \"10\"}, {\"label\": \"15秒\", \"value\": \"15\"}], \"defaultValue\": \"5\"}",
+     "optionsJson": "{\"options\": [{\"label\": \"3秒\", \"value\": \"3\"}, {\"label\": \"4秒\", \"value\": \"4\"}, {\"label\": \"5秒\", \"value\": \"5\"}, {\"label\": \"6秒\", \"value\": \"6\"}, {\"label\": \"7秒\", \"value\": \"7\"}, {\"label\": \"8秒\", \"value\": \"8\"}, {\"label\": \"9秒\", \"value\": \"9\"}, {\"label\": \"10秒\", \"value\": \"10\"}, {\"label\": \"11秒\", \"value\": \"11\"}, {\"label\": \"12秒\", \"value\": \"12\"}, {\"label\": \"13秒\", \"value\": \"13\"}, {\"label\": \"14秒\", \"value\": \"14\"}, {\"label\": \"15秒\", \"value\": \"15\"}], \"defaultValue\": \"5\"}",
      "required": true,
      "executionRequired": true,
      "userRequired": true,
@@ -4136,6 +4407,32 @@
      "sortOrder": 6
     },
     {
+     "fieldKey": "resolution",
+     "fieldName": "分辨率",
+     "fieldType": "radio",
+     "placeholder": null,
+     "options": {
+      "options": [
+       {
+        "label": "720P",
+        "value": "720p"
+       },
+       {
+        "label": "1080P",
+        "value": "1080p"
+       }
+      ]
+     },
+     "optionsJson": "{\"options\": [{\"label\": \"720P\", \"value\": \"720p\"}, {\"label\": \"1080P\", \"value\": \"1080p\"}]}",
+     "required": false,
+     "executionRequired": false,
+     "userRequired": false,
+     "defaultValue": null,
+     "agentFillStrategy": "default",
+     "riskLevel": "LOW",
+     "sortOrder": 7
+    },
+    {
      "fieldKey": "sound",
      "fieldName": "音频",
      "fieldType": "radio",
@@ -4151,16 +4448,23 @@
         "value": "on"
        }
       ],
-      "defaultValue": "off"
+      "defaultValue": "off",
+      "visibleWhen": {
+       "model": [
+        "kling-v2-6",
+        "kling-v2-5-turbo",
+        "kling-v3"
+       ]
+      }
      },
-     "optionsJson": "{\"options\": [{\"label\": \"关闭\", \"value\": \"off\"}, {\"label\": \"开启\", \"value\": \"on\"}], \"defaultValue\": \"off\"}",
+     "optionsJson": "{\"options\": [{\"label\": \"关闭\", \"value\": \"off\"}, {\"label\": \"开启\", \"value\": \"on\"}], \"defaultValue\": \"off\", \"visibleWhen\": {\"model\": [\"kling-v2-6\", \"kling-v2-5-turbo\", \"kling-v3\"]}}",
      "required": false,
      "executionRequired": false,
      "userRequired": false,
      "defaultValue": "off",
      "agentFillStrategy": "default",
      "riskLevel": "LOW",
-     "sortOrder": 7
+     "sortOrder": 8
     },
     {
      "fieldKey": "negativePrompt",
@@ -4175,7 +4479,7 @@
      "defaultValue": null,
      "agentFillStrategy": "default",
      "riskLevel": "LOW",
-     "sortOrder": 8
+     "sortOrder": 9
     },
     {
      "fieldKey": "model",
@@ -4232,7 +4536,7 @@
      "defaultValue": "kling-v3",
      "agentFillStrategy": "default",
      "riskLevel": "LOW",
-     "sortOrder": 9
+     "sortOrder": 10
     }
    ],
    "prompts": [],
@@ -4300,33 +4604,6 @@
      "sortOrder": 3
     },
     {
-     "fieldKey": "duration",
-     "fieldName": "时长",
-     "fieldType": "radio",
-     "placeholder": null,
-     "options": {
-      "options": [
-       {
-        "label": "5秒",
-        "value": "5"
-       },
-       {
-        "label": "10秒",
-        "value": "10"
-       }
-      ],
-      "defaultValue": "5"
-     },
-     "optionsJson": "{\"options\": [{\"label\": \"5秒\", \"value\": \"5\"}, {\"label\": \"10秒\", \"value\": \"10\"}], \"defaultValue\": \"5\"}",
-     "required": true,
-     "executionRequired": true,
-     "userRequired": true,
-     "defaultValue": "5",
-     "agentFillStrategy": "ask_user",
-     "riskLevel": "LOW",
-     "sortOrder": 4
-    },
-    {
      "fieldKey": "mode",
      "fieldName": "质量档位",
      "fieldType": "radio",
@@ -4350,6 +4627,33 @@
      "userRequired": true,
      "defaultValue": "std",
      "agentFillStrategy": "ask_user",
+     "riskLevel": "LOW",
+     "sortOrder": 4
+    },
+    {
+     "fieldKey": "keepOriginalSound",
+     "fieldName": "保留原声",
+     "fieldType": "radio",
+     "placeholder": null,
+     "options": {
+      "options": [
+       {
+        "label": "否",
+        "value": "no"
+       },
+       {
+        "label": "是",
+        "value": "yes"
+       }
+      ],
+      "defaultValue": "no"
+     },
+     "optionsJson": "{\"options\": [{\"label\": \"否\", \"value\": \"no\"}, {\"label\": \"是\", \"value\": \"yes\"}], \"defaultValue\": \"no\"}",
+     "required": false,
+     "executionRequired": false,
+     "userRequired": false,
+     "defaultValue": "no",
+     "agentFillStrategy": "default",
      "riskLevel": "LOW",
      "sortOrder": 5
     },
@@ -4498,16 +4802,27 @@
      "sortOrder": 2
     },
     {
-     "fieldKey": "elementList",
-     "fieldName": "主体参考列表",
-     "fieldType": "subject_element_list",
-     "placeholder": "添加主体参考",
+     "fieldKey": "aspectRatio",
+     "fieldName": "画面比例",
+     "fieldType": "radio",
+     "placeholder": null,
      "options": {
-      "maxCount": 7,
-      "libraryEnabled": true,
-      "uiTier": "advanced"
+      "options": [
+       {
+        "label": "16:9",
+        "value": "16:9"
+       },
+       {
+        "label": "9:16",
+        "value": "9:16"
+       },
+       {
+        "label": "1:1",
+        "value": "1:1"
+       }
+      ]
      },
-     "optionsJson": "{\"maxCount\":7,\"libraryEnabled\":true,\"uiTier\":\"advanced\"}",
+     "optionsJson": "{\"options\": [{\"label\": \"16:9\", \"value\": \"16:9\"}, {\"label\": \"9:16\", \"value\": \"9:16\"}, {\"label\": \"1:1\", \"value\": \"1:1\"}]}",
      "required": false,
      "executionRequired": false,
      "userRequired": false,
@@ -4571,63 +4886,10 @@
      "sortOrder": 5
     },
     {
-     "fieldKey": "multiShot",
-     "fieldName": "多镜头",
-     "fieldType": "radio",
-     "placeholder": null,
-     "options": {
-      "options": [
-       {
-        "label": "关闭",
-        "value": "false"
-       },
-       {
-        "label": "开启",
-        "value": "true"
-       }
-      ],
-      "defaultValue": "false"
-     },
-     "optionsJson": "{\"options\": [{\"label\": \"关闭\", \"value\": \"false\"}, {\"label\": \"开启\", \"value\": \"true\"}], \"defaultValue\": \"false\"}",
-     "required": false,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": "false",
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 6
-    },
-    {
-     "fieldKey": "shotType",
-     "fieldName": "分镜类型",
-     "fieldType": "select",
-     "placeholder": null,
-     "options": {
-      "options": [
-       {
-        "label": "自动",
-        "value": "auto"
-       },
-       {
-        "label": "自定义",
-        "value": "customize"
-       }
-      ]
-     },
-     "optionsJson": "{\"options\": [{\"label\": \"自动\", \"value\": \"auto\"}, {\"label\": \"自定义\", \"value\": \"customize\"}]}",
-     "required": false,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 7
-    },
-    {
-     "fieldKey": "multiPrompt",
-     "fieldName": "分镜提示词",
+     "fieldKey": "negativePrompt",
+     "fieldName": "反向提示词",
      "fieldType": "textarea",
-     "placeholder": "多镜头时的分镜描述",
+     "placeholder": "不希望出现的元素",
      "options": null,
      "optionsJson": null,
      "required": false,
@@ -4636,7 +4898,7 @@
      "defaultValue": null,
      "agentFillStrategy": "default",
      "riskLevel": "LOW",
-     "sortOrder": 8
+     "sortOrder": 6
     },
     {
      "fieldKey": "model",
@@ -4646,22 +4908,22 @@
      "options": {
       "uiTier": "all",
       "uiGroup": "meta",
-      "defaultValue": "kling-v3",
+      "defaultValue": "kling-v1-6",
       "options": [
        {
-        "label": "V3（推荐）",
-        "value": "kling-v3"
+        "label": "V1.6（官方）",
+        "value": "kling-v1-6"
        }
       ]
      },
-     "optionsJson": "{\"uiTier\": \"all\", \"uiGroup\": \"meta\", \"defaultValue\": \"kling-v3\", \"options\": [{\"label\": \"V3（推荐）\", \"value\": \"kling-v3\"}]}",
+     "optionsJson": "{\"uiTier\": \"all\", \"uiGroup\": \"meta\", \"defaultValue\": \"kling-v1-6\", \"options\": [{\"label\": \"V1.6（官方）\", \"value\": \"kling-v1-6\"}]}",
      "required": false,
      "executionRequired": false,
      "userRequired": false,
-     "defaultValue": "kling-v3",
+     "defaultValue": "kling-v1-6",
      "agentFillStrategy": "default",
      "riskLevel": "LOW",
-     "sortOrder": 9
+     "sortOrder": 7
     }
    ],
    "prompts": [],
@@ -4738,12 +5000,52 @@
      "options": {
       "options": [
        {
+        "label": "3秒",
+        "value": "3"
+       },
+       {
+        "label": "4秒",
+        "value": "4"
+       },
+       {
         "label": "5秒",
         "value": "5"
        },
        {
+        "label": "6秒",
+        "value": "6"
+       },
+       {
+        "label": "7秒",
+        "value": "7"
+       },
+       {
+        "label": "8秒",
+        "value": "8"
+       },
+       {
+        "label": "9秒",
+        "value": "9"
+       },
+       {
         "label": "10秒",
         "value": "10"
+       },
+       {
+        "label": "11秒",
+        "value": "11"
+       },
+       {
+        "label": "12秒",
+        "value": "12"
+       },
+       {
+        "label": "13秒",
+        "value": "13"
+       },
+       {
+        "label": "14秒",
+        "value": "14"
        },
        {
         "label": "15秒",
@@ -4752,7 +5054,7 @@
       ],
       "defaultValue": "5"
      },
-     "optionsJson": "{\"options\": [{\"label\": \"5秒\", \"value\": \"5\"}, {\"label\": \"10秒\", \"value\": \"10\"}, {\"label\": \"15秒\", \"value\": \"15\"}], \"defaultValue\": \"5\"}",
+     "optionsJson": "{\"options\": [{\"label\": \"3秒\", \"value\": \"3\"}, {\"label\": \"4秒\", \"value\": \"4\"}, {\"label\": \"5秒\", \"value\": \"5\"}, {\"label\": \"6秒\", \"value\": \"6\"}, {\"label\": \"7秒\", \"value\": \"7\"}, {\"label\": \"8秒\", \"value\": \"8\"}, {\"label\": \"9秒\", \"value\": \"9\"}, {\"label\": \"10秒\", \"value\": \"10\"}, {\"label\": \"11秒\", \"value\": \"11\"}, {\"label\": \"12秒\", \"value\": \"12\"}, {\"label\": \"13秒\", \"value\": \"13\"}, {\"label\": \"14秒\", \"value\": \"14\"}, {\"label\": \"15秒\", \"value\": \"15\"}], \"defaultValue\": \"5\"}",
      "required": true,
      "executionRequired": true,
      "userRequired": true,
@@ -4789,6 +5091,32 @@
      "sortOrder": 4
     },
     {
+     "fieldKey": "resolution",
+     "fieldName": "分辨率",
+     "fieldType": "radio",
+     "placeholder": null,
+     "options": {
+      "options": [
+       {
+        "label": "720P",
+        "value": "720p"
+       },
+       {
+        "label": "1080P",
+        "value": "1080p"
+       }
+      ]
+     },
+     "optionsJson": "{\"options\": [{\"label\": \"720P\", \"value\": \"720p\"}, {\"label\": \"1080P\", \"value\": \"1080p\"}]}",
+     "required": false,
+     "executionRequired": false,
+     "userRequired": false,
+     "defaultValue": null,
+     "agentFillStrategy": "default",
+     "riskLevel": "LOW",
+     "sortOrder": 5
+    },
+    {
      "fieldKey": "sound",
      "fieldName": "音频",
      "fieldType": "radio",
@@ -4813,7 +5141,7 @@
      "defaultValue": "off",
      "agentFillStrategy": "default",
      "riskLevel": "LOW",
-     "sortOrder": 5
+     "sortOrder": 6
     },
     {
      "fieldKey": "imageList",
@@ -4835,7 +5163,7 @@
      "defaultValue": null,
      "agentFillStrategy": "default",
      "riskLevel": "LOW",
-     "sortOrder": 6
+     "sortOrder": 7
     },
     {
      "fieldKey": "videoList",
@@ -4856,7 +5184,7 @@
      "defaultValue": null,
      "agentFillStrategy": "default",
      "riskLevel": "LOW",
-     "sortOrder": 7
+     "sortOrder": 8
     },
     {
      "fieldKey": "elementList",
@@ -4875,7 +5203,7 @@
      "defaultValue": null,
      "agentFillStrategy": "default",
      "riskLevel": "LOW",
-     "sortOrder": 8
+     "sortOrder": 9
     },
     {
      "fieldKey": "multiShot",
@@ -4896,13 +5224,13 @@
       "defaultValue": "false"
      },
      "optionsJson": "{\"options\": [{\"label\": \"关闭\", \"value\": \"false\"}, {\"label\": \"开启\", \"value\": \"true\"}], \"defaultValue\": \"false\"}",
-     "required": false,
-     "executionRequired": false,
-     "userRequired": false,
+     "required": true,
+     "executionRequired": true,
+     "userRequired": true,
      "defaultValue": "false",
-     "agentFillStrategy": "default",
+     "agentFillStrategy": "ask_user",
      "riskLevel": "LOW",
-     "sortOrder": 9
+     "sortOrder": 10
     },
     {
      "fieldKey": "shotType",
@@ -4912,31 +5240,17 @@
      "options": {
       "options": [
        {
-        "label": "自动",
-        "value": "auto"
-       },
-       {
         "label": "自定义",
         "value": "customize"
        }
-      ]
+      ],
+      "visibleWhen": {
+       "multiShot": [
+        "true"
+       ]
+      }
      },
-     "optionsJson": "{\"options\": [{\"label\": \"自动\", \"value\": \"auto\"}, {\"label\": \"自定义\", \"value\": \"customize\"}]}",
-     "required": false,
-     "executionRequired": false,
-     "userRequired": false,
-     "defaultValue": null,
-     "agentFillStrategy": "default",
-     "riskLevel": "LOW",
-     "sortOrder": 10
-    },
-    {
-     "fieldKey": "multiPrompt",
-     "fieldName": "分镜提示词",
-     "fieldType": "textarea",
-     "placeholder": "多镜头时的分镜描述",
-     "options": null,
-     "optionsJson": null,
+     "optionsJson": "{\"options\": [{\"label\": \"自定义\", \"value\": \"customize\"}], \"visibleWhen\": {\"multiShot\": [\"true\"]}}",
      "required": false,
      "executionRequired": false,
      "userRequired": false,
@@ -4944,6 +5258,27 @@
      "agentFillStrategy": "default",
      "riskLevel": "LOW",
      "sortOrder": 11
+    },
+    {
+     "fieldKey": "multiPrompt",
+     "fieldName": "分镜提示词",
+     "fieldType": "textarea",
+     "placeholder": "多镜头时的分镜描述",
+     "options": {
+      "visibleWhen": {
+       "multiShot": [
+        "true"
+       ]
+      }
+     },
+     "optionsJson": "{\"visibleWhen\": {\"multiShot\": [\"true\"]}}",
+     "required": false,
+     "executionRequired": false,
+     "userRequired": false,
+     "defaultValue": null,
+     "agentFillStrategy": "default",
+     "riskLevel": "LOW",
+     "sortOrder": 12
     },
     {
      "fieldKey": "negativePrompt",
@@ -4958,7 +5293,7 @@
      "defaultValue": null,
      "agentFillStrategy": "default",
      "riskLevel": "LOW",
-     "sortOrder": 12
+     "sortOrder": 13
     },
     {
      "fieldKey": "model",
@@ -4987,7 +5322,7 @@
      "defaultValue": "kling-v3-omni",
      "agentFillStrategy": "default",
      "riskLevel": "LOW",
-     "sortOrder": 13
+     "sortOrder": 14
     }
    ],
    "prompts": [],
@@ -5058,6 +5393,33 @@
      "sortOrder": 2
     },
     {
+     "fieldKey": "resolution",
+     "fieldName": "清晰度",
+     "fieldType": "radio",
+     "placeholder": null,
+     "options": {
+      "options": [
+       {
+        "label": "1K",
+        "value": "1k"
+       },
+       {
+        "label": "2K",
+        "value": "2k"
+       }
+      ],
+      "defaultValue": "1k"
+     },
+     "optionsJson": "{\"options\": [{\"label\": \"1K\", \"value\": \"1k\"}, {\"label\": \"2K\", \"value\": \"2k\"}], \"defaultValue\": \"1k\"}",
+     "required": false,
+     "executionRequired": false,
+     "userRequired": false,
+     "defaultValue": "1k",
+     "agentFillStrategy": "default",
+     "riskLevel": "LOW",
+     "sortOrder": 3
+    },
+    {
      "fieldKey": "count",
      "fieldName": "生成数量",
      "fieldType": "select",
@@ -5090,7 +5452,7 @@
      "defaultValue": "1",
      "agentFillStrategy": "default",
      "riskLevel": "LOW",
-     "sortOrder": 3
+     "sortOrder": 4
     },
     {
      "fieldKey": "negativePrompt",
@@ -5105,7 +5467,7 @@
      "defaultValue": null,
      "agentFillStrategy": "default",
      "riskLevel": "LOW",
-     "sortOrder": 4
+     "sortOrder": 5
     },
     {
      "fieldKey": "imageUrl",
@@ -5120,7 +5482,7 @@
      "defaultValue": null,
      "agentFillStrategy": "default",
      "riskLevel": "LOW",
-     "sortOrder": 5
+     "sortOrder": 6
     },
     {
      "fieldKey": "seed",
@@ -5135,7 +5497,7 @@
      "defaultValue": null,
      "agentFillStrategy": "default",
      "riskLevel": "LOW",
-     "sortOrder": 6
+     "sortOrder": 7
     },
     {
      "fieldKey": "model",
@@ -5156,16 +5518,280 @@
         "value": "kling-v2-1"
        },
        {
+        "label": "V2 New",
+        "value": "kling-v2-new"
+       },
+       {
+        "label": "V2",
+        "value": "kling-v2"
+       },
+       {
+        "label": "V1.5",
+        "value": "kling-v1-5"
+       },
+       {
         "label": "V1",
         "value": "kling-v1"
        }
       ]
      },
-     "optionsJson": "{\"uiTier\": \"all\", \"uiGroup\": \"meta\", \"defaultValue\": \"kling-v3\", \"options\": [{\"label\": \"V3（推荐）\", \"value\": \"kling-v3\"}, {\"label\": \"V2.1\", \"value\": \"kling-v2-1\"}, {\"label\": \"V1\", \"value\": \"kling-v1\"}]}",
+     "optionsJson": "{\"uiTier\": \"all\", \"uiGroup\": \"meta\", \"defaultValue\": \"kling-v3\", \"options\": [{\"label\": \"V3（推荐）\", \"value\": \"kling-v3\"}, {\"label\": \"V2.1\", \"value\": \"kling-v2-1\"}, {\"label\": \"V2 New\", \"value\": \"kling-v2-new\"}, {\"label\": \"V2\", \"value\": \"kling-v2\"}, {\"label\": \"V1.5\", \"value\": \"kling-v1-5\"}, {\"label\": \"V1\", \"value\": \"kling-v1\"}]}",
      "required": false,
      "executionRequired": false,
      "userRequired": false,
      "defaultValue": "kling-v3",
+     "agentFillStrategy": "default",
+     "riskLevel": "LOW",
+     "sortOrder": 8
+    }
+   ],
+   "prompts": [],
+   "workflow": null
+  },
+  {
+   "toolCode": "kling-omni-image",
+   "toolName": "可灵 Omni 生图",
+   "categoryCode": "ai-image",
+   "description": null,
+   "coverUrl": null,
+   "toolType": "IMAGE_GENERATION",
+   "inputModality": "TEXT",
+   "outputModality": "IMAGE",
+   "configNote": "可灵 可灵 Omni 生图\n\n<!-- ai-tool-ui:{\"primaryColor\":\"#3b82f6\",\"welcomeMessage\":\"\",\"mediaDisplayMode\":\"effect\"} -->",
+   "status": "ONLINE",
+   "estimatedCreditCost": 3,
+   "modelConfigCode": "kling-gateway-omni-image",
+   "executionHandler": "IMAGE_GENERATION",
+   "agentEnabled": true,
+   "fields": [
+    {
+     "fieldKey": "prompt",
+     "fieldName": "画面描述",
+     "fieldType": "textarea",
+     "placeholder": "描述主体、场景、风格与细节",
+     "options": {
+      "core": true
+     },
+     "optionsJson": "{\"core\": true}",
+     "required": true,
+     "executionRequired": true,
+     "userRequired": true,
+     "defaultValue": null,
+     "agentFillStrategy": "ask_user",
+     "riskLevel": "LOW",
+     "sortOrder": 1
+    },
+    {
+     "fieldKey": "imageList",
+     "fieldName": "参考图片列表",
+     "fieldType": "multi_image",
+     "placeholder": "可选参考图",
+     "options": {
+      "minCount": 0,
+      "maxCount": 7,
+      "accept": "image/*",
+      "libraryEnabled": true,
+      "libraryKind": "image",
+      "uiTier": "advanced"
+     },
+     "optionsJson": "{\"minCount\":0,\"maxCount\":7,\"accept\":\"image/*\",\"libraryEnabled\":true,\"libraryKind\":\"image\",\"uiTier\":\"advanced\"}",
+     "required": false,
+     "executionRequired": false,
+     "userRequired": false,
+     "defaultValue": null,
+     "agentFillStrategy": "default",
+     "riskLevel": "LOW",
+     "sortOrder": 2
+    },
+    {
+     "fieldKey": "aspectRatio",
+     "fieldName": "画面比例",
+     "fieldType": "radio",
+     "placeholder": null,
+     "options": {
+      "options": [
+       {
+        "label": "16:9",
+        "value": "16:9"
+       },
+       {
+        "label": "9:16",
+        "value": "9:16"
+       },
+       {
+        "label": "1:1",
+        "value": "1:1"
+       },
+       {
+        "label": "4:3",
+        "value": "4:3"
+       },
+       {
+        "label": "3:4",
+        "value": "3:4"
+       },
+       {
+        "label": "3:2",
+        "value": "3:2"
+       },
+       {
+        "label": "2:3",
+        "value": "2:3"
+       },
+       {
+        "label": "21:9",
+        "value": "21:9"
+       },
+       {
+        "label": "自动",
+        "value": "auto"
+       }
+      ],
+      "defaultValue": "16:9"
+     },
+     "optionsJson": "{\"options\": [{\"label\": \"16:9\", \"value\": \"16:9\"}, {\"label\": \"9:16\", \"value\": \"9:16\"}, {\"label\": \"1:1\", \"value\": \"1:1\"}, {\"label\": \"4:3\", \"value\": \"4:3\"}, {\"label\": \"3:4\", \"value\": \"3:4\"}, {\"label\": \"3:2\", \"value\": \"3:2\"}, {\"label\": \"2:3\", \"value\": \"2:3\"}, {\"label\": \"21:9\", \"value\": \"21:9\"}, {\"label\": \"自动\", \"value\": \"auto\"}], \"defaultValue\": \"16:9\"}",
+     "required": false,
+     "executionRequired": false,
+     "userRequired": false,
+     "defaultValue": "16:9",
+     "agentFillStrategy": "default",
+     "riskLevel": "LOW",
+     "sortOrder": 3
+    },
+    {
+     "fieldKey": "resolution",
+     "fieldName": "清晰度",
+     "fieldType": "radio",
+     "placeholder": null,
+     "options": {
+      "options": [
+       {
+        "label": "1K",
+        "value": "1k"
+       },
+       {
+        "label": "2K",
+        "value": "2k"
+       }
+      ],
+      "defaultValue": "1k"
+     },
+     "optionsJson": "{\"options\": [{\"label\": \"1K\", \"value\": \"1k\"}, {\"label\": \"2K\", \"value\": \"2k\"}], \"defaultValue\": \"1k\"}",
+     "required": false,
+     "executionRequired": false,
+     "userRequired": false,
+     "defaultValue": "1k",
+     "agentFillStrategy": "default",
+     "riskLevel": "LOW",
+     "sortOrder": 4
+    },
+    {
+     "fieldKey": "count",
+     "fieldName": "生成数量",
+     "fieldType": "select",
+     "placeholder": null,
+     "options": {
+      "options": [
+       {
+        "label": "1",
+        "value": "1"
+       },
+       {
+        "label": "2",
+        "value": "2"
+       },
+       {
+        "label": "3",
+        "value": "3"
+       },
+       {
+        "label": "4",
+        "value": "4"
+       },
+       {
+        "label": "5",
+        "value": "5"
+       },
+       {
+        "label": "6",
+        "value": "6"
+       },
+       {
+        "label": "7",
+        "value": "7"
+       },
+       {
+        "label": "8",
+        "value": "8"
+       },
+       {
+        "label": "9",
+        "value": "9"
+       }
+      ],
+      "defaultValue": "1"
+     },
+     "optionsJson": "{\"options\": [{\"label\": \"1\", \"value\": \"1\"}, {\"label\": \"2\", \"value\": \"2\"}, {\"label\": \"3\", \"value\": \"3\"}, {\"label\": \"4\", \"value\": \"4\"}, {\"label\": \"5\", \"value\": \"5\"}, {\"label\": \"6\", \"value\": \"6\"}, {\"label\": \"7\", \"value\": \"7\"}, {\"label\": \"8\", \"value\": \"8\"}, {\"label\": \"9\", \"value\": \"9\"}], \"defaultValue\": \"1\"}",
+     "required": false,
+     "executionRequired": false,
+     "userRequired": false,
+     "defaultValue": "1",
+     "agentFillStrategy": "default",
+     "riskLevel": "LOW",
+     "sortOrder": 5
+    },
+    {
+     "fieldKey": "resultType",
+     "fieldName": "输出类型",
+     "fieldType": "radio",
+     "placeholder": null,
+     "options": {
+      "options": [
+       {
+        "label": "单图",
+        "value": "single"
+       },
+       {
+        "label": "组图",
+        "value": "series"
+       }
+      ],
+      "defaultValue": "single"
+     },
+     "optionsJson": "{\"options\": [{\"label\": \"单图\", \"value\": \"single\"}, {\"label\": \"组图\", \"value\": \"series\"}], \"defaultValue\": \"single\"}",
+     "required": false,
+     "executionRequired": false,
+     "userRequired": false,
+     "defaultValue": "single",
+     "agentFillStrategy": "default",
+     "riskLevel": "LOW",
+     "sortOrder": 6
+    },
+    {
+     "fieldKey": "model",
+     "fieldName": "可灵模型版本",
+     "fieldType": "select",
+     "placeholder": null,
+     "options": {
+      "uiTier": "all",
+      "uiGroup": "meta",
+      "defaultValue": "kling-image-o1",
+      "options": [
+       {
+        "label": "Image O1（推荐）",
+        "value": "kling-image-o1"
+       },
+       {
+        "label": "V3 Omni",
+        "value": "kling-v3-omni"
+       }
+      ]
+     },
+     "optionsJson": "{\"uiTier\": \"all\", \"uiGroup\": \"meta\", \"defaultValue\": \"kling-image-o1\", \"options\": [{\"label\": \"Image O1（推荐）\", \"value\": \"kling-image-o1\"}, {\"label\": \"V3 Omni\", \"value\": \"kling-v3-omni\"}]}",
+     "required": false,
+     "executionRequired": false,
+     "userRequired": false,
+     "defaultValue": "kling-image-o1",
      "agentFillStrategy": "default",
      "riskLevel": "LOW",
      "sortOrder": 7

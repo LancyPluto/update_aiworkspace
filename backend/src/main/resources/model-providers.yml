@@ -171,6 +171,10 @@ providers:
     billingDefault: PER_CALL
     testStrategy: accept_only
     workerReady: true
+    subjectElementSupport: true
+    subjectSyncModes:
+      - image_refer
+      - video_refer
     description: Kling official text/image-to-video and image generation API. Configure AK/SK in extra auth JSON.
 
   - code: bailian_happyhorse
