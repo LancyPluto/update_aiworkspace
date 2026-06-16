@@ -39,7 +39,7 @@ class Settings:
     rabbitmq_heartbeat_seconds: int = int(os.getenv('RABBITMQ_HEARTBEAT_SECONDS', '1800'))
     rabbitmq_blocked_connection_timeout_seconds: int = int(os.getenv('RABBITMQ_BLOCKED_CONNECTION_TIMEOUT_SECONDS', '1800'))
     backend_internal_base_url: str = os.getenv('BACKEND_INTERNAL_BASE_URL', 'http://localhost:8080')
-    internal_api_token: str = os.getenv('INTERNAL_API_TOKEN', 'replace-with-internal-token')
+    internal_api_token: str = os.getenv('INTERNAL_API_TOKEN', 'local-internal-token')
     model_provider: str = os.getenv('MODEL_PROVIDER', 'deepseek')
     model_api_base_url: str = os.getenv('MODEL_API_BASE_URL', 'https://api.deepseek.com')
     model_api_key: str = os.getenv('MODEL_API_KEY', 'replace-with-model-key')

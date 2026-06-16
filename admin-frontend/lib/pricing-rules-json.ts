@@ -111,6 +111,30 @@ export const KLING_IMAGE_PRICING_RULES_EXAMPLE: PricingRuleJsonItem[] = [
   },
 ]
 
+export const KLING_OMNI_IMAGE_PRICING_RULES_EXAMPLE: PricingRuleJsonItem[] = [
+  {
+    paramKey: "count",
+    ruleType: "MULTIPLIER",
+    matchOp: "VALUE",
+    factor: 1,
+    extraCredits: 0,
+    priority: 40,
+    enabled: true,
+    remark: "按生成数量 count 倍率",
+  },
+  {
+    paramKey: "resolution",
+    ruleType: "MULTIPLIER",
+    matchOp: "EQ",
+    matchValue: "2k",
+    factor: 1.5,
+    extraCredits: 0,
+    priority: 50,
+    enabled: true,
+    remark: "2K 相对 1K 倍率",
+  },
+]
+
 export function pricingRulesForModelExport(rules: PricingRule[], modelConfigId: number): PricingRuleJsonItem[] {
   return rules
     .filter((rule) => rule.scopeType === "MODEL" && (rule.scopeRef ?? 0) === modelConfigId)

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue"
-import { RouterLink } from "vue-router"
+import { RouterLink, useRoute } from "vue-router"
 import {
   Filter,
   Globe2,
@@ -30,6 +30,9 @@ import { useAuthStore } from "@/store/authStore"
 import { assetFromTask, taskPromptPreview } from "@/utils/assetPreviewAdapter"
 import { openCreateWithAssetRecommendation } from "@/utils/assetReplay"
 import { buildTaskResultBlocks } from "@/utils/taskResultBlocks"
+import SubjectLibraryPanel from "@/pages/MaterialLibrary/SubjectLibraryPanel.vue"
+
+type AssetTab = "works" | "subjects"
 
 type MaterialModality = "all" | "IMAGE" | "VIDEO" | "AUDIO" | "TEXT" | "OTHER"
 
@@ -44,6 +47,12 @@ type MaterialAssetItem = MaterialItem & {
 }
 
 const auth = useAuthStore()
+const route = useRoute()
+const assetTab = computed<AssetTab>(() => (route.path.startsWith("/library/subjects") ? "subjects" : "works"))
+const assetTabOptions: Array<{ value: AssetTab; label: string; to: string }> = [
+  { value: "works", label: "作品", to: "/library" },
+  { value: "subjects", label: "主体", to: "/library/subjects" },
+]
 const loading = ref(false)
 const error = ref("")
 const tasks = ref<TaskDetail[]>([])
@@ -112,6 +121,15 @@ const toolOptions = computed(() => {
 })
 const previewRecommendations = computed<AssetPreviewRecommendation[]>(() =>
   previewAsset.value ? recommendToolsForAsset(previewAsset.value) : [],
+)
+
+watch(
+  () => assetTab.value,
+  (tab) => {
+    if (tab === "works" && tasks.value.length === 0 && !loading.value) {
+      loadMaterials()
+    }
+  },
 )
 
 watch(selectedModality, () => {
@@ -319,15 +337,32 @@ async function removeMaterial(item: MaterialItem) {
   }
 }
 
-onMounted(loadMaterials)
+onMounted(() => {
+  if (assetTab.value === "works") loadMaterials()
+})
 </script>
 
 <template>
   <AppShell
-    title="素材库"
-    description="按生成模态和工具浏览作品，快速复用你的 AI 创造成果"
+    title="资产"
+    description="管理 AI 生成作品与可复用的 Omni 视频主体"
   >
     <div class="mx-auto h-full w-full max-w-[1540px] px-5 py-7">
+      <div class="mb-7 flex rounded-2xl border border-white/10 bg-black/20 p-1">
+        <RouterLink
+          v-for="option in assetTabOptions"
+          :key="option.value"
+          :to="option.to"
+          class="flex-1 rounded-xl px-4 py-2.5 text-center text-sm font-medium transition"
+          :class="assetTab === option.value ? 'bg-white/10 text-primary shadow-sm' : 'text-white/45 hover:text-white'"
+        >
+          {{ option.label }}
+        </RouterLink>
+      </div>
+
+      <SubjectLibraryPanel v-if="assetTab === 'subjects'" />
+
+      <template v-else>
       <div class="mb-7 rounded-3xl border border-white/8 bg-white/[0.04] p-5 shadow-[0_18px_50px_rgb(0_0_0_/_0.24)]">
         <div class="flex flex-wrap items-center justify-between gap-4">
           <div class="flex items-center gap-2 text-sm text-white/60">
@@ -464,6 +499,7 @@ onMounted(loadMaterials)
           加载更多
         </button>
       </div>
+      </template>
     </div>
     <AssetPreviewModal
       :asset="previewAsset"

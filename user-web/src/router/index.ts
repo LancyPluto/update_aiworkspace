@@ -94,6 +94,16 @@ const router = createRouter({
       component: MaterialLibraryPage,
     },
     {
+      path: "/library/subjects",
+      name: "SubjectLibrary",
+      meta: { requiresAuth: true },
+      component: MaterialLibraryPage,
+    },
+    {
+      path: "/subjects",
+      redirect: "/library/subjects",
+    },
+    {
       path: "/profile",
       name: "Profile",
       meta: { requiresAuth: true },

@@ -25,7 +25,11 @@ from prompt.renderer import PromptRenderError, render_prompt
 from providers import registry as provider_registry
 from providers.registry import ProviderRegistryError
 from utils.input_image import InputImageError, resolve_reference_image_data_url
-from utils.kling_config import resolve_kling_model_name
+from utils.kling_config import (
+    resolve_kling_image_api_task,
+    resolve_kling_image_paths,
+    resolve_kling_model_name,
+)
 
 
 LOGGER = logging.getLogger(__name__)
@@ -126,17 +130,19 @@ class ImageGenerationHandler:
             if not prompt:
                 raise SiliconFlowVideoError("prompt is required")
 
-            client = self.image_client or self._image_client(provider, model_config)
+            client = self.image_client or self._image_client(provider, model_config, params)
             resolved_model = (
                 resolve_kling_model_name(params, model_config)
                 if provider_protocol == "kling_video"
                 else model_config.get("modelName")
             )
+            api_task = resolve_kling_image_api_task(model_config, params) if provider_protocol == "kling_video" else ""
+            max_batch = 9 if api_task == "omni_image" else 4
             image_request: dict[str, Any] = {
                 "prompt": prompt,
                 "model": resolved_model,
                 "image_size": _resolve_image_size(params),
-                "batch_size": max(1, min(4, _as_int(params.get("count") or params.get("batchSize"), 1))),
+                "batch_size": max(1, min(max_batch, _as_int(params.get("count") or params.get("batchSize"), 1))),
                 "negative_prompt": str(params.get("negativePrompt") or params.get("negative_prompt") or ""),
                 "seed": _optional_int(params.get("seed")),
                 "guidance_scale": _optional_float(params.get("guidanceScale") or params.get("guidance_scale")),
@@ -160,8 +166,16 @@ class ImageGenerationHandler:
                         "image_reference": _resolve_kling_image_reference(params),
                         "image_fidelity": _optional_float(params.get("imageFidelity") or params.get("image_fidelity")),
                         "human_fidelity": _optional_float(params.get("humanFidelity") or params.get("human_fidelity")),
+                        "resolution": str(params.get("resolution") or ""),
                     }
                 )
+                if api_task == "omni_image":
+                    image_request.update(
+                        {
+                            "image_list": params.get("imageList") or params.get("image_list"),
+                            "result_type": str(params.get("resultType") or params.get("result_type") or ""),
+                        }
+                    )
             if provider_protocol == "openai_images":
                 image_request["quality"] = _first_text(params, "quality", "imageQuality", "image_quality")
                 image_request["style"] = _first_text(params, "style", "imageStyle", "image_style")
@@ -243,7 +257,12 @@ class ImageGenerationHandler:
             if progress_ticker is not None:
                 progress_ticker.stop()
 
-    def _image_client(self, provider: str, model_config: dict[str, Any]) -> Any:
+    def _image_client(
+        self,
+        provider: str,
+        model_config: dict[str, Any],
+        params: dict[str, Any] | None = None,
+    ) -> Any:
         provider_protocol = provider_registry.provider_protocol(provider)
         if provider_protocol == "kling_video":
             access_key, secret_key = resolve_kling_credentials(model_config)
@@ -257,13 +276,14 @@ class ImageGenerationHandler:
                 bool(secret_key),
                 bool(resolve_kling_api_key(model_config)),
             )
+            create_path, result_path = resolve_kling_image_paths(model_config, params or {})
             return KlingVideoClient(
                 base_url=model_config.get("baseUrl"),
                 api_key=resolve_kling_api_key(model_config),
                 access_key=access_key,
                 secret_key=secret_key,
-                image_generation_path=model_config.get("imagePath") or model_config.get("endpointPath"),
-                image_generation_result_path=model_config.get("imageResultPath"),
+                image_generation_path=model_config.get("imagePath") or model_config.get("endpointPath") or create_path,
+                image_generation_result_path=model_config.get("imageResultPath") or result_path,
                 timeout_seconds=model_config.get("timeoutSeconds"),
             )
         if provider_protocol == "openai_images":

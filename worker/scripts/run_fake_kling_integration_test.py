@@ -358,6 +358,67 @@ def test_kling_client_polls_async_image_generation() -> None:
     assert client.requests[1] == ("GET", "/v1/images/generations/image-task-123", None)
 
 
+def test_kling_client_polls_async_omni_image_generation() -> None:
+    class RecordingKlingClient(KlingVideoClient):
+        def __init__(self) -> None:
+            super().__init__(
+                access_key="fake-ak",
+                secret_key="fake-sk",
+                poll_interval_seconds=0.01,
+                timeout_seconds=1,
+                image_generation_path="/v1/images/omni-image",
+                image_generation_result_path="/v1/images/omni-image/{task_id}",
+            )
+            self.requests: list[tuple[str, str, dict | None]] = []
+
+        def _request(self, method: str, path: str, payload: dict | None) -> dict:
+            self.requests.append((method, path, payload))
+            if method == "POST":
+                return {"code": 0, "data": {"task_id": "omni-image-task-1", "task_status": "submitted"}}
+            return {
+                "code": 0,
+                "data": {
+                    "task_id": "omni-image-task-1",
+                    "task_status": "succeed",
+                    "task_result": {
+                        "images": [{"url": "https://example.com/omni-image.png"}],
+                    },
+                },
+            }
+
+        def _image_to_base64(self, value: str) -> str:
+            return "ZmFrZQ=="
+
+    client = RecordingKlingClient()
+    result = client.generate_images(
+        prompt="海边跳舞",
+        model="kling-image-o1",
+        batch_size=2,
+        aspect_ratio="16:9",
+        resolution="2k",
+        result_type="single",
+        image_list=[
+            {"image": "https://example.com/ref.png"},
+            "http://backend:8080/generated/uploads/20260614/ref.png",
+        ],
+    )
+    assert result == ["https://example.com/omni-image.png"]
+    assert client.requests[0] == (
+        "POST",
+        "/v1/images/omni-image",
+        {
+            "model_name": "kling-image-o1",
+            "prompt": "海边跳舞",
+            "n": 2,
+            "aspect_ratio": "16:9",
+            "image_list": [{"image": "ZmFrZQ=="}, {"image": "ZmFrZQ=="}],
+            "resolution": "2k",
+            "result_type": "single",
+        },
+    )
+    assert client.requests[1] == ("GET", "/v1/images/omni-image/omni-image-task-1", None)
+
+
 def test_kling_image_generation_accepts_success_reason_with_failed_status() -> None:
     class RecordingKlingClient(KlingVideoClient):
         def __init__(self) -> None:
@@ -580,6 +641,7 @@ if __name__ == "__main__":
     test_kling_client_encodes_input_images()
     test_kling_client_uses_image2video_result_path()
     test_kling_client_polls_async_image_generation()
+    test_kling_client_polls_async_omni_image_generation()
     test_kling_image_generation_accepts_success_reason_with_failed_status()
     test_kling_image_generation_accepts_signed_image_url_without_extension()
     test_kling_image_generation_accepts_plural_result_urls_without_extension()

@@ -1,0 +1,21 @@
+CREATE TABLE IF NOT EXISTS user_generation_subjects (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  user_id BIGINT NOT NULL,
+  subject_code VARCHAR(64) NOT NULL,
+  display_name VARCHAR(128) NOT NULL,
+  description VARCHAR(512) NULL,
+  provider_code VARCHAR(64) NOT NULL,
+  vendor_account_ref VARCHAR(128) NOT NULL,
+  reference_type VARCHAR(32) NOT NULL,
+  preview_url VARCHAR(1024) NULL,
+  reference_json JSON NOT NULL,
+  upstream_element_id VARCHAR(128) NULL,
+  sync_task_id VARCHAR(128) NULL,
+  sync_status VARCHAR(32) NOT NULL,
+  sync_error VARCHAR(512) NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_user_subject_code (user_id, subject_code),
+  KEY idx_user_provider (user_id, provider_code, sync_status, id)
+);

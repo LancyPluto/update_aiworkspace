@@ -113,9 +113,15 @@ class VideoGenerationHandler:
                             "image_list": params.get("imageList") or params.get("image_list"),
                             "video_list": params.get("videoList") or params.get("video_list"),
                             "element_list": params.get("elementList") or params.get("element_list"),
-                            "multi_shot": str(params.get("multiShot") or params.get("multi_shot") or ""),
+                            "multi_shot": str(params.get("multiShot") or params.get("multi_shot") or "false"),
                             "shot_type": str(params.get("shotType") or params.get("shot_type") or ""),
                             "multi_prompt": params.get("multiPrompt") or params.get("multi_prompt"),
+                            "cfg_scale": _optional_float(params.get("cfgScale") or params.get("cfg_scale")),
+                            "keep_original_sound": _first_text(
+                                params,
+                                "keepOriginalSound",
+                                "keep_original_sound",
+                            ),
                         }
                     )
                 if provider_protocol == "agnes_video":
@@ -491,6 +497,15 @@ def _optional_int(value: Any) -> int | None:
         return None
     try:
         return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _optional_float(value: Any) -> float | None:
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
     except (TypeError, ValueError):
         return None
 
