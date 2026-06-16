@@ -1185,8 +1185,9 @@ defineExpose({ adjustComposerTextareaHeight })
   bottom: calc(100% + 8px);
   z-index: 30;
   display: grid;
-  grid-template-columns: 148px minmax(240px, 1fr);
-  width: min(520px, calc(100vw - 32px));
+  grid-template-columns: max-content minmax(240px, 1fr);
+  width: max-content;
+  max-width: calc(100vw - 32px);
   max-height: min(360px, 52vh);
   overflow: hidden;
   border: 1px solid rgb(255 255 255 / 0.08);
@@ -1207,12 +1208,13 @@ defineExpose({ adjustComposerTextareaHeight })
 }
 
 .model-picker-groups {
+  width: max-content;
+  min-width: max-content;
   border-right: 1px solid rgb(255 255 255 / 0.07);
 }
 
 .model-provider-item,
 .model-detail-item {
-  width: 100%;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1223,6 +1225,10 @@ defineExpose({ adjustComposerTextareaHeight })
   padding: 8px;
   cursor: pointer;
   text-align: left;
+}
+
+.model-detail-item {
+  width: 100%;
 }
 
 .model-provider-item.active,
@@ -1282,9 +1288,6 @@ defineExpose({ adjustComposerTextareaHeight })
 .model-provider-icon--relay { background: rgb(100 116 139 / 0.35); }
 
 .model-provider-label {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 

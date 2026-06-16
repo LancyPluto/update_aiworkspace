@@ -497,8 +497,7 @@ watch(
         <div class="min-w-0 flex-1 lg:max-w-[360px]">
           <h1
             v-if="title"
-            class="truncate text-base font-semibold"
-            :class="isAgentRoute ? 'app-shell-agent-brand' : ''"
+            class="truncate text-base font-bold text-white"
           >
             {{ title }}
           </h1>
