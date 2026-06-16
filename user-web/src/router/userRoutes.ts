@@ -53,4 +53,7 @@ export const userRoutes = {
   taskResult(taskId: string) {
     return { name: "TaskResult", params: { taskId } }
   },
+  workflowStudio(taskId: string) {
+    return { name: "WorkflowStudio", params: { taskId } }
+  },
 } as const
