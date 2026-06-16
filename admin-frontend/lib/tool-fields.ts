@@ -54,6 +54,8 @@ export type OptionPresetKey =
   | "kling_model_motion"
   | "kling_model_omni"
   | "kling_model_image_gen"
+  | "kling_model_multi_image"
+  | "kling_model_omni_image"
 
 export const OPTION_PRESETS: Record<
   OptionPresetKey,
