@@ -144,6 +144,13 @@ const router = createRouter({
       component: () => import("@/pages/TaskResult/Page.vue"),
       props: true,
     },
+    {
+      path: "/workflow/studio/:taskId",
+      name: "WorkflowStudio",
+      meta: { requiresAuth: true },
+      component: () => import("@/pages/WorkflowStudio/Page.vue"),
+      props: true,
+    },
   ],
 })
 

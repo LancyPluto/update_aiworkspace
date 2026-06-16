@@ -27,6 +27,7 @@ import {
   Video,
   Volume2,
   WandSparkles,
+  Workflow,
   X,
   Zap,
 } from "lucide-vue-next"
@@ -71,6 +72,7 @@ import {
 } from "./dashboardAttribution"
 import { buildDashboardTaskParams, buildOptimisticDashboardTask } from "./dashboardTaskFactory"
 import { normalizeMediaUrl } from "@/utils/toolCoverMedia"
+import { isWorkflowToolCode } from "@/adapters/toolPresentationAdapter"
 import { taskFailureHint, taskProgressMessage } from "@/utils/taskStatusLabels"
 import { buildTaskProgressView } from "@/utils/taskProgressView"
 
@@ -2321,6 +2323,15 @@ onUnmounted(() => {
                     </section>
 
                     <footer class="mt-5 flex flex-wrap items-center gap-2">
+                      <RouterLink
+                        v-if="isWorkflowToolCode(item.task.toolCode)"
+                        :to="userRoutes.workflowStudio(String(item.task.taskId))"
+                        class="dashboard-feed-action dashboard-feed-action--primary"
+                        @click.stop
+                      >
+                        <Workflow class="h-3.5 w-3.5" />
+                        进入工作台
+                      </RouterLink>
                       <button
                         v-if="canCancelTask(item.task.status)"
                         type="button"
@@ -2537,6 +2548,15 @@ onUnmounted(() => {
                       </div>
                       <div class="flex items-center justify-between gap-3">
                         <div class="flex flex-wrap items-center gap-2">
+                          <RouterLink
+                            v-if="isWorkflowToolCode(item.task.toolCode)"
+                            :to="userRoutes.workflowStudio(String(item.task.taskId))"
+                            class="inline-flex items-center gap-1.5 rounded-full bg-primary/15 px-3 py-1.5 text-xs font-medium text-primary ring-1 ring-primary/25 transition hover:bg-primary hover:text-white"
+                            @click.stop
+                          >
+                            <Workflow class="h-3.5 w-3.5" />
+                            进入工作台
+                          </RouterLink>
                           <button
                             v-if="canCancelTask(item.task.status)"
                             type="button"
@@ -3115,6 +3135,20 @@ onUnmounted(() => {
 .dashboard-feed-action:disabled {
   cursor: not-allowed;
   opacity: 0.46;
+}
+
+.dashboard-feed-action--primary {
+  border-color: rgb(168 85 247 / 0.3);
+  background: rgb(168 85 247 / 0.12);
+  color: rgb(192 132 252);
+  text-decoration: none;
+}
+
+.dashboard-feed-action--primary:hover {
+  border-color: rgb(168 85 247 / 0.5);
+  background: rgb(168 85 247 / 0.25);
+  color: #fff;
+  transform: translateY(-1px);
 }
 
 .dashboard-feed-action--danger {

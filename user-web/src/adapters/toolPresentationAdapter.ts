@@ -10,13 +10,17 @@ export const INTERNAL_DEFAULT_CREATION_TOOL_CODES = new Set([
   "gpt_image_text_to_image",
   "agnes_text_to_video",
 ])
-const WORKFLOW_TOOL_CODES = new Set([
+export const WORKFLOW_TOOL_CODES = new Set([
   "digital_human_agent",
   "ai_comic_drama_agent",
   "enterprise_diagnosis_agent",
   "social_media_comment_insights_agent",
   "tts_mm",
 ])
+
+export function isWorkflowToolCode(toolCode?: string | null): boolean {
+  return WORKFLOW_TOOL_CODES.has((toolCode || "").trim().toLowerCase())
+}
 const PUBLIC_TOOL_DESCRIPTION_FALLBACK = "点击进入工具并开始创作"
 
 export interface ToolCardModel {

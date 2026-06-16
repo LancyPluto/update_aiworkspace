@@ -154,7 +154,7 @@ if internal in ("", DEFAULT_INTERNAL):
     upsert("INTERNAL_API_TOKEN", secrets.token_urlsafe(32))
     print("bootstrapped INTERNAL_API_TOKEN for production")
 
-# docker compose interpolates ${JWT_SECRET} from deploy/.env — mirror secrets there.
+# docker compose interpolates JWT_SECRET from deploy/.env — mirror secrets there.
 root = read_env()
 deploy = Path("/root/ai_tool_market/deploy/.env")
 lines = deploy.read_text(encoding="utf-8", errors="replace").splitlines() if deploy.exists() else []

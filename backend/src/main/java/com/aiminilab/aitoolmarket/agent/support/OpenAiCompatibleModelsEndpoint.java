@@ -26,6 +26,9 @@ public final class OpenAiCompatibleModelsEndpoint {
         if (normalized.endsWith("/models")) {
             return normalized;
         }
+        if (normalized.equals("https://ark.cn-beijing.volces.com")) {
+            return normalized + "/api/v3/models";
+        }
         if (normalized.endsWith("/v1") || normalized.endsWith("/api/v3")) {
             return normalized + "/models";
         }

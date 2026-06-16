@@ -1,13 +1,14 @@
 <script setup lang="ts">
 // 任务状态页：漫剧工作流支持逐分镜预览与逐分镜意见
 import { computed, onMounted, onUnmounted, ref, watch } from "vue"
-import { RouterLink } from "vue-router"
+import { RouterLink, useRouter } from "vue-router"
 import { ArrowLeft, CheckCircle2, ChevronRight, Loader2, Sparkles, Workflow, X as XIcon } from "lucide-vue-next"
 import AppShell from "@/components/AppShell.vue"
 import TaskStatusTag from "@/components/TaskStatusTag/TaskStatusTag.vue"
 import { fetchTaskById, fetchTaskStatus, streamTaskStatus, submitWorkflowFeedback } from "@/api/taskApi"
 import type { TaskDetail, TaskStatus, TaskStatusPayload, WorkflowStagePreview } from "@/api/types"
 import { normalizeMediaUrl } from "@/utils/toolCoverMedia"
+import { isWorkflowToolCode } from "@/adapters/toolPresentationAdapter"
 import { userRoutes } from "@/router/userRoutes"
 import { useAuthStore } from "@/store/authStore"
 import { taskFailureHint, taskProgressMessage, taskStatusDocLabel, taskStatusViewKind } from "@/utils/taskStatusLabels"
@@ -16,6 +17,7 @@ const props = defineProps<{
   taskId: string
 }>()
 
+const router = useRouter()
 const auth = useAuthStore()
 
 const statusData = ref<TaskStatusPayload | null>(null)
@@ -34,6 +36,10 @@ const toolCode = computed(
 )
 
 const isComicDrama = computed(() => toolCode.value === "ai_comic_drama_agent")
+
+watch(toolCode, (code) => {
+  if (isWorkflowToolCode(code)) router.replace(userRoutes.workflowStudio(props.taskId))
+}, { immediate: false })
 
 const FEEDBACK_LABEL_TO_KEY: Record<string, string> = {
   脚本意见: "scriptFeedback",
