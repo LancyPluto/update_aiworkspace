@@ -75,6 +75,7 @@ const vendorCatalog: CatalogEntry[] = [
   { key: "vendor:alibabacloud", label: "阿里云", mark: "ALI", iconAsset: "alibabacloud", patterns: ["alibabacloud", "alibaba cloud"] },
   { key: "vendor:tencent", label: "鑵捐娣峰厓", mark: "HY", iconAsset: "tencent", patterns: ["hunyuan", "tencent"] },
   { key: "vendor:kling", label: "鍙伒 Kling", mark: "KL", iconAsset: "kling", patterns: ["kling"] },
+  { key: "vendor:agnes", label: "Agnes AI", mark: "A", iconAsset: "agnes", patterns: ["agnes", "apihub.agnes-ai.com", "agnes-ai.com"] },
   { key: "vendor:mineru", label: "MinerU", mark: "M", iconAsset: "mineru", patterns: ["mineru"] },
   { key: "vendor:stepfun", label: "阶跃 StepFun", mark: "SF", iconAsset: "stepfun", patterns: ["stepfun", "step-"] },
   { key: "vendor:yi", label: "闆朵竴涓囩墿 Yi", mark: "Y", iconAsset: "yi", patterns: ["yi-lightning", "01.ai", "lingyi"] },

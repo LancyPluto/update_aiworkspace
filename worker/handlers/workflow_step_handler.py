@@ -8,7 +8,10 @@ from client.backend_client import BackendClient, BackendClientError
 from client.model_client import ModelClient, ModelClientError
 from client.seedance_video_client import SeedanceVideoClient, SeedanceVideoError, SeedanceVideoTimeoutError
 from client.siliconflow_video_client import SiliconFlowVideoClient, SiliconFlowVideoError
+from client.openai_images_client import OpenAIImagesClient
+from client.agnes_video_client import AgnesVideoClient
 from config import resolve_siliconflow_api_key
+from providers import registry as provider_registry
 from handlers.digital_human_postprocessor import DigitalHumanPostprocessError, DigitalHumanPostprocessor
 from handlers.digital_human_video_handler import DigitalHumanVideoHandler
 from handlers.generated_image_persister import GeneratedImagePersister
@@ -160,15 +163,12 @@ class WorkflowStepHandler:
         task_id: int,
         trace_id: str | None,
     ) -> dict[str, Any]:
-        script = workflow_inputs.get("script-planner") or {}
+        script = _find_script_payload(workflow_inputs)
         scenes = _scenes_from_script(script, form)
         script_global, _ = _parse_per_scene_feedback(form.get("scriptFeedback") or form.get("scriptRevision"))
         storyboard_global, storyboard_per_scene = _parse_per_scene_feedback(form.get("storyboardFeedback"))
 
-        image_client = SiliconFlowVideoClient(
-            api_key=resolve_siliconflow_api_key(model_config),
-            base_url=model_config.get("baseUrl"),
-        )
+        gen_image = _resolve_image_generator(model_config)
         total = len(scenes)
         source_urls: list[str] = []
         prompts: list[str] = []
@@ -189,13 +189,7 @@ class WorkflowStepHandler:
                 progress_message=f"正在生成关键帧 {position}/{total}",
                 trace_id=trace_id,
             )
-            source_urls.append(
-                image_client.generate_image(
-                    prompt=prompt,
-                    model=model_config.get("modelName"),
-                    image_size="1024x576",
-                )
-            )
+            source_urls.append(gen_image(prompt))
             prompts.append(prompt)
 
         persisted = GeneratedImagePersister().persist_images(task_id=task_id, urls=source_urls)
@@ -227,7 +221,7 @@ class WorkflowStepHandler:
         task_id: int,
         trace_id: str | None,
     ) -> dict[str, Any]:
-        script = workflow_inputs.get("script-planner") or {}
+        script = _find_script_payload(workflow_inputs)
         scenes = _scenes_from_script(script, form)
         client = SiliconFlowVideoClient(
             api_key=resolve_siliconflow_api_key(model_config),
@@ -280,8 +274,8 @@ class WorkflowStepHandler:
         task_id: int,
         trace_id: str | None,
     ) -> dict[str, Any]:
-        keyframe = workflow_inputs.get("keyframe") or {}
-        script = workflow_inputs.get("script-planner") or {}
+        keyframe = _find_upstream(workflow_inputs, "images")
+        script = _find_script_payload(workflow_inputs)
         scenes = _scenes_from_script(script, form)
         keyframe_images = keyframe.get("images")
         if not isinstance(keyframe_images, list) or not keyframe_images:
@@ -291,7 +285,7 @@ class WorkflowStepHandler:
             keyframe_images = [{"sceneIndex": index + 1, "imageUrl": single} for index in range(len(scenes))]
         scene_global, scene_per_scene = _parse_per_scene_feedback(form.get("sceneFeedback"))
 
-        video_client = SeedanceVideoClient.from_model_config(model_config)
+        gen_video = _resolve_video_generator(model_config)
         persister = GeneratedVideoPersister()
         total = len(scenes)
         clips: list[dict[str, Any]] = []
@@ -312,15 +306,7 @@ class WorkflowStepHandler:
                 progress_message=f"正在生成分镜视频 {position}/{total}",
                 trace_id=trace_id,
             )
-            result = video_client.generate_video(
-                prompt=prompt,
-                image=image_url,
-                model=model_config.get("modelName"),
-                duration=str(SCENE_SECONDS),
-                resolution="480p",
-                aspect_ratio="16:9",
-                image_size="1024x576",
-            )
+            result = gen_video(prompt=prompt, image=image_url)
             persisted = persister.persist_video_url(task_id=task_id, source_url=result["videoUrl"], index=position)
             clips.append(
                 {
@@ -333,7 +319,7 @@ class WorkflowStepHandler:
         return {
             "clips": clips,
             "sceneCount": total,
-            "provider": "seedance",
+            "provider": str(model_config.get("provider") or "seedance"),
             # 向后兼容字段
             "videoUrl": first.get("videoUrl") or "",
             "sourceVideoUrl": first.get("sourceVideoUrl") or "",
@@ -346,9 +332,9 @@ class WorkflowStepHandler:
         task_id: int,
         trace_id: str | None,
     ) -> dict[str, Any]:
-        video = workflow_inputs.get("clip-video") or {}
-        tts = workflow_inputs.get("tts") or {}
-        script = workflow_inputs.get("script-planner") or {}
+        video = _find_upstream(workflow_inputs, "clips")
+        tts = _find_upstream(workflow_inputs, "audios")
+        script = _find_script_payload(workflow_inputs)
         scenes = _scenes_from_script(script, form)
 
         clips = video.get("clips")
@@ -410,12 +396,12 @@ class WorkflowStepHandler:
             subtitle_url = segments[0]["subtitleUrl"]
 
         title = script.get("title") or script.get("sceneTitle") or form.get("storyTheme") or "AI 漫剧成片"
-        keyframe_images = (workflow_inputs.get("keyframe") or {}).get("images")
+        keyframe_images = _find_upstream(workflow_inputs, "images").get("images")
         first_image_url = ""
         if isinstance(keyframe_images, list) and keyframe_images:
             first_image_url = (keyframe_images[0] or {}).get("imageUrl") or ""
         else:
-            first_image_url = (workflow_inputs.get("keyframe") or {}).get("imageUrl") or ""
+            first_image_url = _find_upstream(workflow_inputs, "images").get("imageUrl") or ""
         markdown = _build_delivery_markdown(
             title=title,
             final_video_url=final_video_url,
@@ -496,6 +482,142 @@ def _merge_form(workflow_inputs: dict[str, Any]) -> dict[str, Any]:
     if isinstance(direct_form, dict):
         form.update(direct_form)
     return form
+
+
+def _find_upstream(workflow_inputs: dict[str, Any] | None, key: str) -> dict[str, Any]:
+    """在所有上游节点产出里找首个包含非空 `key` 的产出。
+
+    工作流节点 id 可能因画布编排而异（如 image-to-video / clip-video、voice-tts / tts），
+    按内容查找而非硬编码节点 id，使各步骤对拓扑健壮（QC/审核等中间节点不会截断数据）。
+    """
+    if not isinstance(workflow_inputs, dict):
+        return {}
+    for value in workflow_inputs.values():
+        if isinstance(value, dict) and value.get(key):
+            return value
+    return {}
+
+
+def _find_script_payload(workflow_inputs: dict[str, Any] | None) -> dict[str, Any]:
+    found = _find_upstream(workflow_inputs, "scenes")
+    if found:
+        return found
+    if isinstance(workflow_inputs, dict):
+        return workflow_inputs.get("script-planner") or {}
+    return {}
+
+
+def _provider_protocol(model_config: dict[str, Any]) -> str:
+    provider = str(model_config.get("provider") or "").lower()
+    try:
+        return str(provider_registry.provider_protocol(provider) or "").lower()
+    except Exception:
+        return ""
+
+
+def _retry_transient(call, *, attempts: int = 3, backoff: float = 3.0):
+    """对生图/生视频调用做瞬时错误重试。
+
+    本地/生产经代理访问外部媒体网关时偶发连接抖动（Max retries / proxy connection
+    failed）；逐镜生成多次并发会放大该问题。命中连接类错误时重试，避免整条工作流因
+    单次抖动失败。
+    """
+    import time
+
+    last_error: Exception | None = None
+    for attempt in range(1, max(1, attempts) + 1):
+        try:
+            return call()
+        except Exception as error:  # noqa: BLE001 - 需对所有客户端异常统一重试
+            message = str(error).lower()
+            transient = any(
+                token in message
+                for token in ("max retries", "connection", "timed out", "timeout", "proxy", "temporarily", "reset")
+            )
+            last_error = error
+            if not transient or attempt >= attempts:
+                raise
+            LOGGER.warning("transient media call failure (attempt %s/%s): %s", attempt, attempts, message[:160])
+            time.sleep(backoff * attempt)
+    if last_error:
+        raise last_error
+
+
+def _resolve_image_generator(model_config: dict[str, Any]):
+    """按模型 provider 返回 (prompt)->url 的生图函数。
+
+    漫剧关键帧节点可绑定任意生图模型：agnes(openai_images 协议) 走 OpenAIImagesClient，
+    其余(siliconflow 等)沿用 SiliconFlowVideoClient。修复此前硬编码 SiliconFlow 导致
+    绑定 agnes 时拼出 /v1/v1/images/generations → 404 的问题。
+    """
+    protocol = _provider_protocol(model_config)
+    model_name = model_config.get("modelName")
+    if protocol == "openai_images":
+        client = OpenAIImagesClient(
+            base_url=model_config.get("baseUrl"),
+            api_key=model_config.get("apiKey"),
+            endpoint_path=model_config.get("imagePath") or model_config.get("endpointPath"),
+            timeout_seconds=model_config.get("timeoutSeconds"),
+            extra_auth_json=model_config.get("extraAuthJson"),
+        )
+
+        def _gen(prompt: str) -> str:
+            urls = _retry_transient(
+                lambda: client.generate_images(prompt=prompt, model=model_name, image_size="1024x576", batch_size=1)
+            )
+            return urls[0] if urls else ""
+
+        return _gen
+
+    sf_client = SiliconFlowVideoClient(
+        api_key=resolve_siliconflow_api_key(model_config),
+        base_url=model_config.get("baseUrl"),
+    )
+
+    def _gen(prompt: str) -> str:
+        return _retry_transient(
+            lambda: sf_client.generate_image(prompt=prompt, model=model_name, image_size="1024x576")
+        )
+
+    return _gen
+
+
+def _resolve_video_generator(model_config: dict[str, Any]):
+    """按模型 provider 返回 (prompt,image)->result 的生视频函数。
+
+    agnes_video 走 AgnesVideoClient(/v1/videos 异步轮询)，其余沿用 SeedanceVideoClient。
+    """
+    protocol = _provider_protocol(model_config)
+    model_name = model_config.get("modelName")
+    if protocol == "agnes_video":
+        client = AgnesVideoClient(
+            base_url=model_config.get("baseUrl"),
+            api_key=model_config.get("apiKey"),
+            extra_auth_json=model_config.get("extraAuthJson"),
+            timeout_seconds=model_config.get("timeoutSeconds"),
+        )
+
+        def _gen(*, prompt: str, image: str):
+            return _retry_transient(
+                lambda: client.generate_video(
+                    prompt=prompt, image=image, model=model_name, image_size="1024x576",
+                    duration=str(SCENE_SECONDS), resolution="480p", aspect_ratio="16:9",
+                )
+            )
+
+        return _gen
+
+    seedance = SeedanceVideoClient.from_model_config(model_config)
+
+    def _gen(*, prompt: str, image: str):
+        return _retry_transient(
+            lambda: seedance.generate_video(
+                prompt=prompt, image=image, model=model_name, duration=str(SCENE_SECONDS),
+                resolution="480p", aspect_ratio="16:9", image_size="1024x576",
+            )
+        )
+
+    return _gen
 
 
 def _resolve_scene_count(form: dict[str, Any], workflow_inputs: dict[str, Any] | None = None) -> int:

@@ -118,6 +118,6 @@ class VendorCodeResolverTest {
         assertThat(resolver.resolveVendorCode("agnes_video", "https://apihub.agnes-ai.com", "Agnes Video", "agnes-video-v2.0"))
                 .isEqualTo("agnes");
         assertThat(resolver.vendorLabel("agnes")).isEqualTo("Agnes AI");
-        assertThat(resolver.vendorIconAsset("agnes")).isEqualTo("api");
+        assertThat(resolver.vendorIconAsset("agnes")).isEqualTo("agnes");
     }
 }

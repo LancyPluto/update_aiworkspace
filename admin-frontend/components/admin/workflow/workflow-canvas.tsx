@@ -898,7 +898,6 @@ function buildComicDramaDefaultWorkflow(
   tool?: ToolSummary | null,
   modelConfigs: AgentModelConfig[] = [],
 ): { nodes: WFNode[]; edges: WFEdge[] } {
-  const fieldSlots = slotsFromFields(COMIC_DRAMA_FIELD_DRAFT)
   const textModelId = findModelConfigId(modelConfigs, "text_generation")
   const imageModelId = findModelConfigId(modelConfigs, "image_generation")
   const ttsModelId = findModelConfigId(modelConfigs, "text_to_speech")
@@ -913,7 +912,7 @@ function buildComicDramaDefaultWorkflow(
     title: "初始表单",
     detail: "用户首次提交的主题、画风、比例等参数。",
     inputSlots: [{ name: "context", type: "json", label: "会话上下文" }],
-    outputSlots: [{ name: "params", type: "json", label: "用户填写参数" }, ...fieldSlots],
+    outputSlots: [{ name: "params", type: "json", label: "用户填写参数" }],
   })
   const scriptPlanner = fixedNode("script-planner", "llm_text", { x: 780, y: 280 }, {
     title: "剧本与分镜",
@@ -1041,6 +1040,21 @@ function shouldReloadComicWorkflow(tool: ToolSummary | null | undefined, nodes: 
   return !opinionNodeIds.every((id) => nodes.some((node) => node.id === id))
 }
 
+function normalizeComicFieldInputSlots(node: WFNode): WFNode {
+  if (getNodeDef(node.data)?.type !== "field_input") return node
+  const inputSlots = node.data.inputSlots?.length
+    ? node.data.inputSlots
+    : [{ name: "context", type: "json", label: "会话上下文" }]
+  return {
+    ...node,
+    data: {
+      ...node.data,
+      inputSlots,
+      outputSlots: [{ name: "params", type: "json", label: "用户填写参数" }],
+    },
+  }
+}
+
 function hasGarbledWorkflowText(nodes: WFNode[]): boolean {
   const text = nodes
     .map((node) => {
@@ -1070,8 +1084,8 @@ function mergeComicWorkflowWithTemplate(
   // 以管理员保存的节点为准（标题/槽位/新增节点都保留），模板只用于补齐缺失的元数据，避免每次加载覆盖管理员编辑
   const nodes = savedNodes.map((saved) => {
     const templateNode = templateById.get(saved.id)
-    if (!templateNode) return saved
-    return {
+    if (!templateNode) return normalizeComicFieldInputSlots(saved)
+    return normalizeComicFieldInputSlots({
       ...saved,
       data: {
         ...templateNode.data,
@@ -1083,7 +1097,7 @@ function mergeComicWorkflowWithTemplate(
           ...saved.data.parameters,
         },
       },
-    }
+    })
   })
   const edges =
     savedEdges.length > 0
@@ -1450,6 +1464,10 @@ export function WorkflowCanvas({
 
   useEffect(() => {
     if (fieldDraft.length === 0) return
+    if (isComicDramaTool(tool)) {
+      setNodes((current: WFNode[]) => current.map(normalizeComicFieldInputSlots))
+      return
+    }
     const fieldSlots = slotsFromFields(fieldDraft)
     setNodes((current: WFNode[]) =>
       current.map((node) => {
