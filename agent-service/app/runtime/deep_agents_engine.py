@@ -1,3 +1,4 @@
+import asyncio
 import importlib.util
 import inspect
 import json
@@ -1028,9 +1029,12 @@ class DeepAgentsRuntimeEngine:
             memory_tool = MemoryTool(self.backend, context.workspaceId, context.userId, run_id=context.runId)
             messages.append(ChatMessage(role="system", content=_memory_tool_prompt(context)))
             messages.append(ChatMessage(role="system", content=MEMORY_MANAGEMENT_TURN_PROMPT))
-        elif context.workspaceId and _memory_auto_save_enabled(context):
-            memory_tool = MemoryTool(self.backend, context.workspaceId, context.userId, run_id=context.runId)
-            messages.append(ChatMessage(role="system", content=_memory_tool_prompt(context)))
+        # 之前这里有一个 elif：只要 workspaceId 存在就给普通聊天注入 memory_tool。这会让
+        # _stream_model_answer 进入 AgentToolCallLoopExecutor 先用非流式的 chat_turn 探测一次
+        # tool_calls，再决定是否流式 —— 用户感受为"等很久才有第一个 token，且首段流式后剩下
+        # 一大段瞬出"。普通聊天根本不需要 LLM 主动调用 memory_add/replace/remove，记忆的
+        # 后置整理由 _curate_memory_after_run / MemoryCurator 兜底处理，因此这里不再注入
+        # memory_tool，让通用聊天直接走底部真 token 级流式分支。
 
         messages.extend(_history_for_chat(context, memory_management=memory_management_turn))
         messages.append(ChatMessage(role="user", content=context.message))
@@ -1203,14 +1207,18 @@ class DeepAgentsRuntimeEngine:
                     max_tool_calls_per_turn=4,
                 )
                 result = await loop.run(messages_list, explicit_memory_request=explicit_memory_request)
+                # 当 loop 没有触发任何 memory 工具时（通用聊天的常见场景），跳过这里返回的
+                # 完整答案 + 32 字假流式，落到下方 chat_stream 真 token 流式分支，让用户能
+                # 看到逐字输出的实时打字效果。代价是模型多调用一次，但仅在 memory loop
+                # 没有工作可做的情况下发生。
                 if result.executed_tool_calls > 0:
                     self._memory_tool_executed_runs.add(run_id)
-                answer = finalize_loop_answer(result.answer.strip(), explicit_memory_request=explicit_memory_request)
-                if not answer and fallback_answer:
-                    answer = fallback_answer
-                if answer:
-                    await self._emit_answer_events(run_id, answer)
-                    return answer
+                    answer = finalize_loop_answer(result.answer.strip(), explicit_memory_request=explicit_memory_request)
+                    if not answer and fallback_answer:
+                        answer = fallback_answer
+                    if answer:
+                        await self._emit_answer_events(run_id, answer)
+                        return answer
             except Exception as exc:
                 LOGGER.debug("memory tool-call loop skipped runId=%s error=%s", run_id, exc)
         if budget is not None:
@@ -1300,11 +1308,19 @@ class DeepAgentsRuntimeEngine:
             LOGGER.exception("failed to persist streaming answer preview, runId=%s", run_id)
 
     async def _emit_answer_events(self, run_id: int, answer: str) -> None:
-        for chunk in _chunks(answer, 32):
+        # 这是"伪流式"分支：当某些场景（安全拒绝、澄清、记忆工具循环已完成等）只能拿到
+        # 整段完整答案时使用。chunk 取较小值并在 chunk 之间让出事件循环，避免一次性把全部
+        # delta 同步灌入数据库 / SseEmitter，让前端能产生自然的打字机效果。
+        chunk_size = 6
+        inter_chunk_delay_seconds = 0.025
+        chunks = list(_chunks(answer, chunk_size))
+        for index, chunk in enumerate(chunks):
             await self.backend.append_event(
                 run_id,
                 RunEventCreate(eventType=MESSAGE_DELTA, eventText=chunk, eventJson={"delta": chunk}),
             )
+            if index < len(chunks) - 1 and inter_chunk_delay_seconds > 0:
+                await asyncio.sleep(inter_chunk_delay_seconds)
         await self.backend.append_event(
             run_id,
             RunEventCreate(eventType=MESSAGE_COMPLETED, eventText=answer, eventJson={"content": answer}),
