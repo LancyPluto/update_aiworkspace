@@ -595,6 +595,18 @@ GPT_IMAGE_2_4K_ALLOWED_SIZES = [
 ]
 
 
+SEEDREAM_5_0_ALLOWED_SIZES = [
+    # All entries are >= 3,686,400 px (Volcengine Seedream 5.0 hard minimum).
+    "2048x2048",
+    "2560x1440",
+    "1440x2560",
+    "2304x1728",
+    "1728x2304",
+    "2400x1600",
+    "1600x2400",
+]
+
+
 def _openai_allowed_image_sizes(model_config: dict[str, Any]) -> list[str]:
     extra_auth = _parse_json_object(model_config.get("extraAuthJson"))
     for key in ("allowedSizes", "allowedImageSizes", "imageSizes"):
@@ -606,6 +618,11 @@ def _openai_allowed_image_sizes(model_config: dict[str, Any]) -> list[str]:
     model_name = str(model_config.get("modelName") or model_config.get("model") or "").strip().lower()
     if model_name == "gpt-image-2-4k":
         return GPT_IMAGE_2_4K_ALLOWED_SIZES
+    # Seedream 5.0 / 5.0-lite hard-require image area >= 3,686,400 px.
+    # Worker default 1024x1024 / 1536x1024 violates that constraint, so fall back
+    # to a vetted size list when the model name matches the seedream-5-0 family.
+    if "seedream-5-0" in model_name:
+        return SEEDREAM_5_0_ALLOWED_SIZES
     return []
 
 

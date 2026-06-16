@@ -16,6 +16,8 @@ tmp_*.json
 .tmp/
 data/generated-media/
 docs/superpowers/plans/
+engines/banana-slides/backend/.temp/
+engines/banana-slides/.env
 
 # Java
 target/
@@ -34,6 +36,7 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+*.egg-info/
 
 # IDE
 .idea/
@@ -56,3 +59,6 @@ Thumbs.db
 engines/banana-slides/backend/instance/database.db
 engines/banana-slides/backend/instance/database.db-shm
 engines/banana-slides/backend/instance/database.db-wal
+
+# 含真实密钥的导出/导入配置包（按日期或厂商命名的本地文件，统一忽略）
+ai-tool-market-config-*.json
