@@ -49,6 +49,10 @@ const BRAND_RULES: Array<{ patterns: string[]; brand: ModelBrand }> = [
     brand: { name: "Kling", iconUrl: "https://app.klingai.com/favicon.ico", color: "#111827" },
   },
   {
+    patterns: ["agnes"],
+    brand: { name: "Agnes AI", iconUrl: "/assets/vendor-icons/agnes.svg", color: "#ff2f6d" },
+  },
+  {
     patterns: ["siliconflow"],
     brand: { name: "SiliconFlow", iconUrl: "https://siliconflow.cn/favicon.ico", color: "#111827" },
   },

@@ -2,7 +2,7 @@
 // 任务状态页：漫剧工作流支持逐分镜预览与逐分镜意见
 import { computed, onMounted, onUnmounted, ref, watch } from "vue"
 import { RouterLink } from "vue-router"
-import { ArrowLeft, CheckCircle2, ChevronRight, Loader2, X as XIcon } from "lucide-vue-next"
+import { ArrowLeft, CheckCircle2, ChevronRight, Loader2, Sparkles, Workflow, X as XIcon } from "lucide-vue-next"
 import AppShell from "@/components/AppShell.vue"
 import TaskStatusTag from "@/components/TaskStatusTag/TaskStatusTag.vue"
 import { fetchTaskById, fetchTaskStatus, streamTaskStatus, submitWorkflowFeedback } from "@/api/taskApi"
@@ -107,20 +107,21 @@ function previewHelpText(preview: WorkflowStagePreview | null, stageLabel: strin
   if (stageLabel.includes("场景")) {
     return "请逐镜查看关键帧画面，可对每个分镜单独说明构图、光影或人物表情等修改意见；满意可跳过。"
   }
-  if (stageLabel.includes("BGM") || stageLabel.includes("配音")) {
-    return "请试听配音音频，说明语速、情绪或背景音乐风格；满意可跳过。（当前为角色配音预览）"
+  if (stageLabel.includes("配音")) {
+    return "请试听角色配音，说明语速、情绪或停顿；满意可跳过。"
   }
   return "可填写修改意见，或点「跳过继续」进入下一步。"
 }
 
 const taskStages = computed(() => {
   if (isComicDrama.value) {
+    // 对齐 15 节点 SOP（剧本→分镜→角色/场景/关键帧→质检→图生视频→质检→配音→字幕合成→人审→成片）
     return [
-      { label: "剧本与分镜", progress: 15 },
-      { label: "脚本/分镜确认", progress: 28 },
-      { label: "关键帧生成", progress: 42 },
-      { label: "配音与视频", progress: 68 },
-      { label: "合成输出", progress: 92 },
+      { label: "剧本策划与分镜", progress: 15 },
+      { label: "角色/场景/关键帧", progress: 40 },
+      { label: "逐镜图生视频", progress: 65 },
+      { label: "配音与字幕合成", progress: 88 },
+      { label: "人工审核与成片", progress: 96 },
     ]
   }
   if (toolCode.value === "digital_human_agent") {
@@ -137,6 +138,12 @@ const taskStages = computed(() => {
     { label: "AI 生成内容", progress: 60 },
     { label: "结果整理输出", progress: 96 },
   ]
+})
+
+const activeStageIndex = computed(() => {
+  const progress = statusData.value?.progress ?? 0
+  const index = taskStages.value.findIndex((stage) => progress < stage.progress)
+  return index === -1 ? taskStages.value.length - 1 : Math.max(0, index)
 })
 
 function stageState(stageProgress: number): "done" | "current" | "pending" {
@@ -310,7 +317,7 @@ onUnmounted(() => {
 
 <template>
   <AppShell title="任务状态" :description="'任务 ' + taskId + ' · 实时进度'">
-    <div class="px-6 py-6 max-w-4xl mx-auto space-y-5">
+    <div class="px-6 py-6 mx-auto max-w-6xl space-y-5">
       <nav class="flex items-center gap-1.5 text-xs text-muted-foreground flex-wrap">
         <RouterLink :to="userRoutes.dashboard" class="hover:text-foreground inline-flex items-center gap-1">
           <ArrowLeft class="h-3 w-3" /> 生成工作台
@@ -329,7 +336,7 @@ onUnmounted(() => {
 
       <div
         v-else-if="statusData"
-        class="rounded-xl border"
+        class="overflow-hidden rounded-xl border"
         :class="
           taskStatusViewKind(statusData.status) === 'success'
             ? 'border-success/30 bg-success/5'
@@ -340,6 +347,56 @@ onUnmounted(() => {
                 : 'border-primary/20 bg-accent/30'
         "
       >
+        <div
+          v-if="isComicDrama"
+          class="relative overflow-hidden border-b border-white/10 bg-[#08070d] px-6 py-5 text-white"
+        >
+          <div class="pointer-events-none absolute inset-0 opacity-60">
+            <div class="absolute left-10 top-0 h-32 w-32 rounded-full bg-primary/25 blur-3xl" />
+            <div class="absolute right-20 bottom-0 h-36 w-36 rounded-full bg-fuchsia-500/20 blur-3xl" />
+          </div>
+          <div class="relative flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <div class="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-3 py-1 text-xs text-white/75">
+                <Workflow class="h-3.5 w-3.5" />
+                AI 漫剧生成链条
+              </div>
+              <h2 class="mt-3 text-2xl font-semibold tracking-normal">实时中间结果与人工调整</h2>
+              <p class="mt-1 max-w-2xl text-sm leading-6 text-white/55">
+                剧本、关键帧、配音、视频片段会按节点刷新；需要调整时在当前阶段提交意见，系统会从对应节点继续生成。
+              </p>
+            </div>
+            <div class="rounded-lg border border-white/10 bg-white/[0.06] px-4 py-3 text-right">
+              <p class="text-xs text-white/45">当前节点</p>
+              <p class="mt-1 text-sm font-medium">{{ taskStages[activeStageIndex]?.label || previewStageLabel }}</p>
+              <p class="mt-1 text-xs" :class="streamConnected ? 'text-emerald-300' : 'text-amber-200'">
+                {{ streamConnected ? 'SSE 实时连接中' : '轮询兜底中' }}
+              </p>
+            </div>
+          </div>
+          <div class="relative mt-6 grid gap-2 md:grid-cols-5">
+            <div
+              v-for="(stage, index) in taskStages"
+              :key="stage.label"
+              class="relative min-h-20 rounded-lg border px-3 py-3"
+              :class="
+                stageState(stage.progress) === 'done'
+                  ? 'border-emerald-300/35 bg-emerald-300/10 text-emerald-100'
+                  : index === activeStageIndex
+                    ? 'border-primary/60 bg-primary/20 text-white shadow-[0_0_28px_rgba(168,85,247,0.25)]'
+                    : 'border-white/10 bg-white/[0.04] text-white/45'
+              "
+            >
+              <div class="flex items-center justify-between gap-2">
+                <span class="grid h-7 w-7 place-items-center rounded-full bg-white/10 text-xs font-semibold">{{ index + 1 }}</span>
+                <Sparkles v-if="index === activeStageIndex && !isTerminal(statusData.status)" class="h-4 w-4 text-primary" />
+                <CheckCircle2 v-else-if="stageState(stage.progress) === 'done'" class="h-4 w-4 text-emerald-300" />
+              </div>
+              <p class="mt-2 text-xs font-medium leading-5">{{ stage.label }}</p>
+            </div>
+          </div>
+        </div>
+
         <div class="p-6 shadow-sm">
           <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
             <div class="flex items-center gap-2">
@@ -385,7 +442,7 @@ onUnmounted(() => {
 
           <div
             v-if="(awaitingFeedback || workflowPreview) && isComicDrama"
-            class="mt-5 rounded-lg border border-primary/25 bg-background p-4 space-y-4"
+            class="mt-5 rounded-lg border border-primary/25 bg-background p-4 shadow-sm space-y-4"
           >
             <div>
               <p class="text-sm font-medium">交互式短剧 · {{ previewStageLabel }}</p>
@@ -533,7 +590,7 @@ onUnmounted(() => {
           </div>
 
           <div
-            v-if="!isTerminal(statusData.status) && !awaitingFeedback"
+            v-if="!isTerminal(statusData.status) && !awaitingFeedback && !isComicDrama"
             class="mt-5 grid gap-2"
             :class="taskStages.length >= 5 ? 'sm:grid-cols-5' : 'sm:grid-cols-3'"
           >
