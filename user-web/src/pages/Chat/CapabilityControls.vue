@@ -14,6 +14,20 @@ import {
   parseFieldMeta,
   resolveMaxLength,
 } from "@/utils/fieldUiMeta"
+import {
+  isMediaListField,
+  mediaListMax,
+  mediaListMin,
+  mediaListUnitLabel,
+  parseMediaListValue,
+} from "@/utils/mediaListField"
+import {
+  parseSubjectElementEditorItems,
+  serializeSubjectElementItems,
+  subjectElementMax,
+  validateSubjectElementItems,
+} from "@/utils/subjectElementList"
+import SubjectElementListField from "@/components/DynamicForm/SubjectElementListField.vue"
 import { Check, ChevronDown, Clock, FileAudio, FileVideo, ImageIcon, ImageUp, Loader2, Mic, Plus, UploadCloud, X } from "lucide-vue-next"
 import { BookOpen } from 'lucide-vue-next'
 
@@ -367,30 +381,20 @@ function strField(key: string): string {
 }
 
 function isMultiImageField(field: ToolField): boolean {
-  return field.fieldType === "multi_image"
+  return isMediaListField(field)
+}
+
+function isSubjectElementListField(field: ToolField): boolean {
+  return field.fieldType === "subject_element_list"
 }
 
 function multiImageLimit(field: ToolField): number {
-  return parseFieldMeta(field).maxCount ?? MULTI_IMAGE_LIMIT
+  return isMediaListField(field) ? mediaListMax(field) : parseFieldMeta(field).maxCount ?? MULTI_IMAGE_LIMIT
 }
 
 function multiImageValues(field: ToolField): string[] {
   const value = state.value.fields[field.fieldKey]
-  const limit = multiImageLimit(field)
-  if (Array.isArray(value)) {
-    return value.map((item) => String(item).trim()).filter(Boolean).slice(0, limit)
-  }
-  if (typeof value === "string" && value.trim()) {
-    try {
-      const parsed = JSON.parse(value) as unknown
-      if (Array.isArray(parsed)) {
-        return parsed.map((item) => String(item).trim()).filter(Boolean).slice(0, limit)
-      }
-    } catch {
-      return value.split(",").map((item) => item.trim()).filter(Boolean).slice(0, limit)
-    }
-  }
-  return []
+  return parseMediaListValue(value, multiImageLimit(field))
 }
 
 function setMultiImageValues(field: ToolField, urls: string[]) {
@@ -441,6 +445,7 @@ function imagePreviewUrl(field: ToolField): string {
 }
 
 function materialKindForField(field: ToolField): MaterialKind {
+  if (field.fieldType === "multi_video") return "video"
   if (field.fieldType === "image" || field.fieldType === "multi_image") return "image"
   const text = `${field.fieldKey} ${field.fieldName} ${field.placeholder || ""}`.toLowerCase()
   if (/image|img|picture|photo|frame|cover|avatar|poster|图片|图像|照片|帧|封面|首图/.test(text)) return "image"
@@ -465,7 +470,7 @@ function materialKindLabel(kind: MaterialKind): string {
 }
 
 function isReferenceMediaField(field: ToolField): boolean {
-  return field.fieldType === "image" || field.fieldType === "multi_image" || field.fieldType === "file" || field.fieldType === "image_upload"
+  return field.fieldType === "image" || isMediaListField(field) || field.fieldType === "file" || field.fieldType === "image_upload"
 }
 
 function isAdvancedOnlyField(field: ToolField): boolean {
@@ -529,7 +534,7 @@ watch(
 )
 
 function fieldShellClass(field: ToolField): string {
-  if (isMultiImageField(field)) return "sm:col-span-2 lg:col-span-1"
+  if (isMultiImageField(field) || isSubjectElementListField(field)) return "sm:col-span-2 lg:col-span-1"
   if (field.fieldType === "slider") return "min-w-0"
   return "min-w-0"
 }
@@ -986,20 +991,35 @@ function validate(): { valid: boolean; message?: string } {
       return { valid: false, message: `${field.fieldName} 上传中，请稍后提交` }
     }
     if (isMultiImageField(field)) {
-      const minCount = parseFieldMeta(field).minCount ?? 0
+      const minCount = mediaListMin(field)
       const count = multiImageValues(field).length
       if (count < minCount) {
-        return { valid: false, message: `${field.fieldName} 至少需要 ${minCount} 张` }
+        return { valid: false, message: `${field.fieldName} 至少需要 ${minCount} ${mediaListUnitLabel(field)}` }
       }
       if (count > multiImageLimit(field)) {
-        return { valid: false, message: `${field.fieldName} 最多选择 ${multiImageLimit(field)} 张` }
+        return { valid: false, message: `${field.fieldName} 最多选择 ${multiImageLimit(field)} ${mediaListUnitLabel(field)}` }
       }
+    }
+    if (isSubjectElementListField(field)) {
+      const items = parseSubjectElementEditorItems(state.value.fields[field.fieldKey], subjectElementMax(field))
+      const check = validateSubjectElementItems(items, {
+        ...field,
+        required: field.required,
+      })
+      if (!check.valid) return check
     }
     if (!field.required) continue
     if (field.fieldType === "checkbox") continue
     if (isMultiImageField(field)) {
-      const minCount = Math.max(1, parseFieldMeta(field).minCount ?? 0)
+      const minCount = Math.max(1, mediaListMin(field))
       if (multiImageValues(field).length < minCount) {
+        return { valid: false, message: `请填写：${field.fieldName}` }
+      }
+      continue
+    }
+    if (isSubjectElementListField(field)) {
+      const items = parseSubjectElementEditorItems(state.value.fields[field.fieldKey], subjectElementMax(field))
+      if (serializeSubjectElementItems(items).length === 0) {
         return { valid: false, message: `请填写：${field.fieldName}` }
       }
       continue
@@ -1028,6 +1048,10 @@ function getRequestParams(): Record<string, unknown> {
     } else if (isMultiImageField(field)) {
       const urls = multiImageValues(field)
       if (urls.length > 0) params[field.fieldKey] = urls
+    } else if (isSubjectElementListField(field)) {
+      const items = parseSubjectElementEditorItems(value, subjectElementMax(field))
+      const serialized = serializeSubjectElementItems(items)
+      if (serialized.length > 0) params[field.fieldKey] = serialized
     } else if (field.fieldType === "number" || field.fieldType === "slider") {
       if (value !== "" && value !== undefined && value !== null && !Number.isNaN(Number(value))) {
         params[field.fieldKey] = Number(value)
@@ -1132,8 +1156,8 @@ defineExpose({
             class="min-h-8 rounded-full border px-3 py-1 text-xs font-medium transition"
             :class="
               strField(field.fieldKey) === optionValue(option)
-                ? 'border-purple-400/30 bg-purple-500/20 text-purple-300 shadow-[0_0_18px_rgb(168_85_247_/_0.12)]'
-                : 'border-white/8 bg-white/[0.05] text-white/58 hover:border-white/16 hover:bg-white/[0.07] hover:text-white'
+                ? 'border-purple-500/30 bg-purple-500/10 text-purple-300'
+                : 'border-transparent bg-white/[0.04] text-white/40 hover:bg-white/10 hover:text-white/80'
             "
             @click="setField(field.fieldKey, optionValue(option))"
           >
@@ -1233,7 +1257,8 @@ defineExpose({
               :key="url"
               class="group relative h-16 w-16 overflow-hidden rounded-xl border border-border bg-muted"
             >
-              <img :src="normalizeMediaUrl(url)" alt="" class="h-full w-full object-cover" />
+              <img v-if="field.fieldType !== 'multi_video'" :src="normalizeMediaUrl(url)" alt="" class="h-full w-full object-cover" />
+              <video v-else :src="normalizeMediaUrl(url)" class="h-full w-full object-cover" muted playsinline preload="metadata" />
               <button
                 type="button"
                 class="absolute right-1 top-1 rounded-full bg-black/60 p-1 text-white opacity-0 transition group-hover:opacity-100"
@@ -1254,7 +1279,7 @@ defineExpose({
             </button>
           </div>
           <p class="text-[11px] text-muted-foreground">
-            已选 {{ multiImageValues(field).length }}/{{ multiImageLimit(field) }} 张参考图
+            已选 {{ multiImageValues(field).length }}/{{ multiImageLimit(field) }} {{ mediaListUnitLabel(field) }}
           </p>
           <p v-if="uploadState(field.fieldKey).error" class="text-[11px] text-destructive">
             {{ uploadState(field.fieldKey).error }}
@@ -1316,6 +1341,24 @@ defineExpose({
           </p>
         </div>
 
+        <SubjectElementListField
+          v-else-if="isSubjectElementListField(field)"
+          :field="field"
+          :model-value="state.fields[field.fieldKey]"
+          compact
+          @update:model-value="setField(field.fieldKey, $event)"
+        />
+
+        <textarea
+          v-else-if="field.fieldType === 'textarea'"
+          :value="strField(field.fieldKey)"
+          :placeholder="field.placeholder || field.fieldName"
+          :maxlength="resolveMaxLength(field, state.fields)"
+          rows="3"
+          class="min-h-20 w-full resize-none rounded-lg border border-border/60 bg-background px-2 py-1.5 text-xs"
+          @input="setField(field.fieldKey, ($event.target as HTMLTextAreaElement).value)"
+        />
+
         <input
           v-else
           type="text"
@@ -1333,7 +1376,7 @@ defineExpose({
       <label v-if="hasAspectRatioControl" class="block text-[11px] font-medium text-muted-foreground">比例</label>
       <div
         v-if="hasAspectRatioControl"
-        class="grid min-h-14 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04] p-1"
+        class="grid min-h-14 overflow-hidden rounded-2xl bg-white/[0.02] p-1"
         :style="{ gridTemplateColumns: `repeat(${aspectRatioOptions.length}, minmax(0, 1fr))` }"
         title="图片比例"
       >
@@ -1341,11 +1384,11 @@ defineExpose({
           v-for="option in aspectRatioOptions"
           :key="option.value"
           type="button"
-          class="flex min-w-0 flex-col items-center justify-center gap-0.5 rounded-lg text-xs font-medium transition"
+          class="flex min-w-0 flex-col items-center justify-center gap-0.5 rounded-lg border border-transparent text-xs font-medium transition"
           :class="
             normalizeAspectRatio(state.imageRatio) === option.value
-              ? 'bg-purple-500/20 text-purple-200 shadow-[0_10px_24px_rgb(0_0_0_/_0.18),inset_0_0_0_1px_rgb(168_85_247_/_0.18)]'
-              : 'text-white/52 hover:bg-white/[0.06] hover:text-white'
+              ? 'border-purple-500/30 bg-purple-500/10 text-purple-300'
+              : 'text-white/40 hover:bg-white/10 hover:text-white/80'
           "
           @click="state.imageRatio = option.value"
         >

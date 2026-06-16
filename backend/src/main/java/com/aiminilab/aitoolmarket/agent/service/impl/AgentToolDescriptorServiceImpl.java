@@ -378,10 +378,15 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
         schema.put("type", "object");
         for (ToolFieldResponse field : fields) {
             ObjectNode property = objectMapper.createObjectNode();
-            if ("multi_image".equalsIgnoreCase(field.fieldType())) {
+            if ("multi_image".equalsIgnoreCase(field.fieldType()) || "multi_video".equalsIgnoreCase(field.fieldType())) {
                 property.put("type", "array");
                 ObjectNode itemSchema = objectMapper.createObjectNode();
                 itemSchema.put("type", "string");
+                property.set("items", itemSchema);
+            } else if ("subject_element_list".equalsIgnoreCase(field.fieldType())) {
+                property.put("type", "array");
+                ObjectNode itemSchema = objectMapper.createObjectNode();
+                itemSchema.put("type", "object");
                 property.set("items", itemSchema);
             } else {
                 property.put("type", jsonType(field.fieldType()));

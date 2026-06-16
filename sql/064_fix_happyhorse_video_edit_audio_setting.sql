@@ -2,7 +2,7 @@ SET NAMES utf8mb4;
 
 -- Align happyhorse_video_edit audioSetting with DashScope API (auto | origin only).
 
-UPDATE tool_field_definitions f
+UPDATE tool_field_schema_items f
 JOIN tool_field_schemas s ON f.schema_id = s.id AND s.schema_version = 'v1'
 JOIN ai_tools t ON t.id = s.tool_id
 SET

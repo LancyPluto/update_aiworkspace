@@ -22,7 +22,6 @@ import { fetchTools } from "@/api/toolApi"
 import { fetchTasks } from "@/api/taskApi"
 import type { CommunityPost, PageResult, TaskDetail, ToolSummary } from "@/api/types"
 import { useAuthStore } from "@/store/authStore"
-import { getApiOrigin } from "@/api/client"
 import { userRoutes } from "@/router/userRoutes"
 import { communityDisplayTitle } from "@/utils/communityDisplay"
 import { resolveCommunityPrompt } from "@/utils/communityPostNormalize"
@@ -32,6 +31,7 @@ import {
   resolveCommunityPostKind,
 } from "@/utils/communityPostMedia"
 import { useTypingPlaceholder } from "@/composables/useTypingPlaceholder"
+import { isVideoPreviewUrl, normalizeMediaUrl } from "@/utils/toolCoverMedia"
 
 type HomeTab = "ALL" | "IMAGE" | "VIDEO" | "AUDIO"
 
@@ -160,19 +160,6 @@ function modalityLabel(value?: string | null) {
 function dateValue(value?: string | null) {
   const time = value ? new Date(value).getTime() : 0
   return Number.isFinite(time) ? time : 0
-}
-
-function normalizeMediaUrl(value?: string | null) {
-  const raw = value?.trim()
-  if (!raw) return ""
-  if (/^(https?:)?\/\//i.test(raw) || raw.startsWith("data:")) return raw
-  const path = raw.startsWith("/") ? raw : `/${raw}`
-  const apiOrigin = getApiOrigin()
-  return apiOrigin ? `${apiOrigin}${path}` : path
-}
-
-function isVideoUrl(value?: string | null) {
-  return /\.(mp4|webm|mov|m4v)(?:[?#].*)?$/i.test(value?.trim() || "")
 }
 
 function repeatWallItems(items: CommunityPost[]) {
@@ -401,10 +388,11 @@ watch(
                   @click="openCommunityPreview(post)"
                 >
                   <video
-                    v-if="isVideoUrl(communityPostMediaUrl(post))"
+                    v-if="isVideoPreviewUrl(communityPostMediaUrl(post))"
                     :src="communityPostMediaUrl(post)"
                     muted
                     loop
+                    autoplay
                     playsinline
                     preload="metadata"
                   />
@@ -442,10 +430,11 @@ watch(
           <article v-for="entry in recentTools" :key="entry.tool.toolCode" class="recent-card">
             <div class="recent-thumb">
               <video
-                v-if="isVideoUrl(toolCover(entry.tool))"
+                v-if="isVideoPreviewUrl(toolCover(entry.tool))"
                 :src="toolCover(entry.tool)"
                 muted
                 loop
+                autoplay
                 playsinline
                 preload="metadata"
               />
@@ -491,10 +480,11 @@ watch(
           <article v-for="tool in featuredTools" :key="tool.toolCode" class="tool-card" @click="quickLaunch(tool)">
             <div class="tool-cover">
               <video
-                v-if="isVideoUrl(toolCover(tool))"
+                v-if="isVideoPreviewUrl(toolCover(tool))"
                 :src="toolCover(tool)"
                 muted
                 loop
+                autoplay
                 playsinline
                 preload="metadata"
               />
@@ -544,7 +534,7 @@ watch(
             </button>
             <div class="community-preview-media">
               <video
-                v-if="isVideoUrl(selectedCommunityMediaUrl)"
+                v-if="isVideoPreviewUrl(selectedCommunityMediaUrl)"
                 :src="selectedCommunityMediaUrl"
                 controls
                 autoplay
@@ -1147,6 +1137,9 @@ watch(
 .tool-cover video {
   position: absolute;
   inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
   transform: scale(1);
   transition: transform 520ms ease;
 }

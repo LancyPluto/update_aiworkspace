@@ -84,6 +84,18 @@ class KlingVideoClient:
         sound: str = "",
         callback_url: str = "",
         external_task_id: str = "",
+        create_path: str = "",
+        result_path_template: str = "",
+        video_url: str = "",
+        character_orientation: str = "",
+        static_mask: str = "",
+        dynamic_masks: Any = None,
+        image_list: Any = None,
+        video_list: Any = None,
+        element_list: Any = None,
+        multi_shot: str = "",
+        shot_type: str = "",
+        multi_prompt: Any = None,
     ) -> dict[str, Any]:
         if not self._has_auth():
             raise KlingVideoError("Kling credentials are not configured")
@@ -103,12 +115,28 @@ class KlingVideoClient:
             sound=sound,
             callback_url=callback_url,
             external_task_id=external_task_id,
+            video_url=video_url,
+            character_orientation=character_orientation,
+            static_mask=static_mask,
+            dynamic_masks=dynamic_masks,
+            image_list=image_list,
+            video_list=video_list,
+            element_list=element_list,
+            multi_shot=multi_shot,
+            shot_type=shot_type,
+            multi_prompt=multi_prompt,
         )
-        create_path = self.image_path if image.strip() else self.text_path
-        created = self._request("POST", create_path, payload)
+        resolved_create_path, resolved_result_path = self._resolve_video_paths(
+            create_path=create_path,
+            result_path_template=result_path_template,
+            image=image,
+            video_url=video_url,
+            image_list=image_list,
+            video_list=video_list,
+        )
+        created = self._request("POST", resolved_create_path, payload)
         task_id = self._extract_task_id(created)
-        result_path_template = self.image_result_path if create_path == self.image_path else self.text_result_path
-        finished = self.wait_for_video(task_id, result_path_template=result_path_template)
+        finished = self.wait_for_video(task_id, result_path_template=resolved_result_path)
         return {
             "requestId": task_id,
             "status": self._extract_status(finished),
@@ -254,6 +282,32 @@ class KlingVideoClient:
             return cleaned.replace("{taskId}", task_id)
         return f"{cleaned.rstrip('/')}/{task_id}"
 
+    def _resolve_video_paths(
+        self,
+        *,
+        create_path: str,
+        result_path_template: str,
+        image: str,
+        video_url: str,
+        image_list: Any,
+        video_list: Any,
+    ) -> tuple[str, str]:
+        if create_path.strip() and result_path_template.strip():
+            return create_path.strip(), result_path_template.strip()
+        if image.strip() or self._has_media_list(image_list):
+            return self.image_path, self.image_result_path
+        if video_url.strip() or self._has_media_list(video_list):
+            return self.image_path, self.image_result_path
+        return self.text_path, self.text_result_path
+
+    @staticmethod
+    def _has_media_list(value: Any) -> bool:
+        if isinstance(value, list):
+            return any(str(item).strip() for item in value)
+        if isinstance(value, str):
+            return bool(value.strip())
+        return False
+
     def _build_video_payload(
         self,
         *,
@@ -271,11 +325,22 @@ class KlingVideoClient:
         sound: str,
         callback_url: str,
         external_task_id: str,
+        video_url: str = "",
+        character_orientation: str = "",
+        static_mask: str = "",
+        dynamic_masks: Any = None,
+        image_list: Any = None,
+        video_list: Any = None,
+        element_list: Any = None,
+        multi_shot: str = "",
+        shot_type: str = "",
+        multi_prompt: Any = None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "model_name": model,
-            "prompt": prompt.strip(),
         }
+        if prompt.strip():
+            payload["prompt"] = prompt.strip()
         duration_seconds = self._duration_seconds(duration)
         if duration_seconds is not None:
             payload["duration"] = str(duration_seconds)
@@ -298,9 +363,95 @@ class KlingVideoClient:
             payload["callback_url"] = callback_url.strip()
         if external_task_id.strip():
             payload["external_task_id"] = external_task_id.strip()
+        if video_url.strip():
+            payload["video_url"] = video_url.strip()
+        if character_orientation.strip():
+            payload["character_orientation"] = character_orientation.strip()
+        if static_mask.strip():
+            payload["static_mask"] = self._image_to_base64(static_mask.strip())
+        if dynamic_masks not in (None, "", []):
+            payload["dynamic_masks"] = self._parse_json_array(dynamic_masks)
+        encoded_image_list = self._encode_media_list(image_list)
+        if encoded_image_list:
+            payload["image_list"] = encoded_image_list
+        encoded_video_list = self._encode_video_list(video_list)
+        if encoded_video_list:
+            payload["video_list"] = encoded_video_list
+        normalized_element_list = self._normalize_element_list(element_list)
+        if normalized_element_list not in (None, "", []):
+            payload["element_list"] = normalized_element_list
+        if multi_shot.strip():
+            payload["multi_shot"] = multi_shot.strip()
+        if shot_type.strip():
+            payload["shot_type"] = shot_type.strip()
+        if multi_prompt not in (None, "", []):
+            payload["multi_prompt"] = multi_prompt
         if seed is not None:
             payload["seed"] = seed
         return payload
+
+    def _parse_json_array(self, value: Any) -> Any:
+        if value in (None, "", []):
+            return value
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return value
+            if text.startswith("[") or text.startswith("{"):
+                try:
+                    return json.loads(text)
+                except json.JSONDecodeError:
+                    return value
+        return value
+
+    def _encode_video_list(self, value: Any) -> list[str]:
+        parsed = self._parse_json_array(value)
+        if parsed in (None, "", []):
+            return []
+        items = parsed if isinstance(parsed, list) else [parsed]
+        urls: list[str] = []
+        for item in items:
+            if isinstance(item, dict):
+                for key in ("video_url", "video", "url"):
+                    raw = item.get(key)
+                    if isinstance(raw, str) and raw.strip():
+                        urls.append(raw.strip())
+                        break
+                continue
+            text = str(item).strip()
+            if text:
+                urls.append(text)
+        return urls
+
+    def _normalize_element_list(self, value: Any) -> Any:
+        parsed = self._parse_json_array(value)
+        if parsed in (None, "", []):
+            return parsed
+        return parsed
+
+    def _encode_media_list(self, value: Any) -> list[Any]:
+        parsed = self._parse_json_array(value)
+        if parsed in (None, "", []):
+            return []
+        items = parsed if isinstance(parsed, list) else [parsed]
+        encoded: list[Any] = []
+        for item in items:
+            if isinstance(item, dict):
+                row = dict(item)
+                for key in ("image", "url", "image_url"):
+                    raw = row.get(key)
+                    if isinstance(raw, str) and raw.strip():
+                        row[key] = self._image_to_base64(raw.strip()) if key != "url" or not raw.startswith("http") else raw.strip()
+                encoded.append(row)
+                continue
+            text = str(item).strip()
+            if not text:
+                continue
+            if text.startswith("http://") or text.startswith("https://"):
+                encoded.append(text)
+            else:
+                encoded.append(self._image_to_base64(text))
+        return encoded
 
     def _image_to_base64(self, value: str) -> str:
         raw = value.strip()

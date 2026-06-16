@@ -531,6 +531,63 @@ export function FieldSchemaEditor({ fields, onChange, disabled }: FieldSchemaEdi
                     </div>
                   </div>
                 ) : null}
+                {isMediaListFieldType(field.fieldType) ? (
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                    <div className="space-y-1.5">
+                      <Label>最小数量 minCount</Label>
+                      <Input
+                        type="number"
+                        value={field.uiMeta.minCount ?? ""}
+                        disabled={disabled}
+                        placeholder="如 1"
+                        onChange={(e) =>
+                          updateUiMeta(index, {
+                            minCount: e.target.value.trim() ? Number(e.target.value) : undefined,
+                          })
+                        }
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>最大数量 maxCount</Label>
+                      <Input
+                        type="number"
+                        value={field.uiMeta.maxCount ?? ""}
+                        disabled={disabled}
+                        placeholder={field.fieldType === "subject_element_list" ? "如 7" : "如 8"}
+                        onChange={(e) =>
+                          updateUiMeta(index, {
+                            maxCount: e.target.value.trim() ? Number(e.target.value) : undefined,
+                          })
+                        }
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>素材库 libraryEnabled</Label>
+                      <Select
+                        value={field.uiMeta.libraryEnabled === false ? "false" : "true"}
+                        disabled={disabled}
+                        onValueChange={(value) => updateUiMeta(index, { libraryEnabled: value === "true" })}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="true">启用</SelectItem>
+                          <SelectItem value="false">关闭</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>素材类型 libraryKind</Label>
+                      <Input
+                        value={field.uiMeta.libraryKind || ""}
+                        disabled={disabled}
+                        placeholder={field.fieldType === "multi_video" ? "video" : "image"}
+                        onChange={(e) => updateUiMeta(index, { libraryKind: e.target.value.trim() || undefined })}
+                      />
+                    </div>
+                  </div>
+                ) : null}
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <Label>条件显隐 visibleWhen</Label>
@@ -725,7 +782,7 @@ function PreviewField({ field, index }: { field: EditableField; index: number })
           <span className="h-4 w-4 rounded border border-border bg-background" />
           <span>{field.placeholder.trim() || label}</span>
         </div>
-      ) : field.fieldType === "image" || field.fieldType === "multi_image" || field.fieldType === "file" ? (
+      ) : field.fieldType === "image" || field.fieldType === "multi_image" || field.fieldType === "multi_video" || field.fieldType === "subject_element_list" || field.fieldType === "file" ? (
         <div className="flex h-10 items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm text-muted-foreground">
           {field.fieldType === "file" ? <FileUp className="h-4 w-4" /> : <ImageUp className="h-4 w-4" />}
           <span className="truncate">{placeholder}</span>
@@ -772,6 +829,12 @@ function PreviewField({ field, index }: { field: EditableField; index: number })
 function defaultPlaceholder(field: EditableField) {
   if (field.fieldType === "number" || field.fieldType === "slider") return "请输入数字"
   if (field.fieldType === "multi_image") return "选择多张参考图"
+  if (field.fieldType === "multi_video") return "选择多个参考视频"
+  if (field.fieldType === "subject_element_list") return "添加主体参考"
   if (field.fieldType === "image" || field.fieldType === "file") return "请输入资源 URL"
   return `请输入${field.fieldName.trim() || "内容"}`
+}
+
+function isMediaListFieldType(fieldType: FieldTypeValue): boolean {
+  return fieldType === "multi_image" || fieldType === "multi_video" || fieldType === "subject_element_list"
 }

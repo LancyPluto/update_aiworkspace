@@ -78,7 +78,7 @@ class MusicGenerationHandler:
                 {
                     "resourceType": "AUDIO",
                     "contentText": content,
-                    "billableUnits": max(len(audios), 1),
+                    "billableUnits": 1,
                 },
                 trace_id=trace_id,
             )
@@ -99,7 +99,7 @@ class MusicGenerationHandler:
 
     def _persist_audios(self, task_id: int, result: SunoGenerationResult) -> list[dict[str, Any]]:
         audios: list[dict[str, Any]] = []
-        for index, track in enumerate(result.tracks[:1], start=1):
+        for index, track in enumerate(result.tracks[:2], start=1):
             audio = self.audio_persister.persist_audio_url(task_id=task_id, source_url=track.audio_url, index=index)
             if track.title:
                 audio["title"] = track.title

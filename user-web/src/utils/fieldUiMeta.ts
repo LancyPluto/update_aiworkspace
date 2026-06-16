@@ -202,7 +202,7 @@ export function defaultFieldValue(field: ToolField): unknown {
     return typeof first === "string" ? first : first.value
   }
   if (field.fieldType === "checkbox") return false
-  if (field.fieldType === "multi_image") return []
+  if (field.fieldType === "multi_image" || field.fieldType === "multi_video" || field.fieldType === "subject_element_list") return []
   if (field.fieldType === "slider") {
     const slider = meta.slider
     if (slider) return slider.min + (slider.max - slider.min) / 2

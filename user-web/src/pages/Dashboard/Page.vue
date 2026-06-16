@@ -72,6 +72,7 @@ import {
 import { buildDashboardTaskParams, buildOptimisticDashboardTask } from "./dashboardTaskFactory"
 import { normalizeMediaUrl } from "@/utils/toolCoverMedia"
 import { taskFailureHint, taskProgressMessage } from "@/utils/taskStatusLabels"
+import { buildTaskProgressView } from "@/utils/taskProgressView"
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -127,6 +128,8 @@ let historyFeedAnchorHeight = 0
 let historyScrollContainer: HTMLElement | null = null
 const taskPollTimers = new Map<number, number>()
 const taskStatusStreamControllers = new Map<number, AbortController>()
+const progressNow = ref(Date.now())
+let progressClockTimer: number | null = null
 const retryingTaskIds = ref<Set<number>>(new Set())
 const deletingTaskIds = ref<Set<number>>(new Set())
 const cancellingTaskIds = ref<Set<number>>(new Set())
@@ -295,7 +298,11 @@ watch(recentTasks, () => {
 })
 
 watch(runningCount, (count) => {
-  if (count === 0) stopAllTaskStatusStreams()
+  if (count > 0) startProgressClock()
+  else {
+    stopProgressClock()
+    stopAllTaskStatusStreams()
+  }
 })
 const audioTaskMaterials = computed(() =>
   taskMaterials.value.filter((item) => item.task.status === "SUCCESS" && primaryBlock(item.blocks)?.type === "audio"),
@@ -905,6 +912,24 @@ function taskProgressSubtitle(task: TaskDetail, runningFallback: string): string
     return taskFailureHint(task.status, [task.progressMessage]) || runningFallback
   }
   return taskProgressMessage(task.status, task.progressMessage) || runningFallback
+}
+
+function startProgressClock() {
+  if (progressClockTimer) return
+  progressNow.value = Date.now()
+  progressClockTimer = window.setInterval(() => {
+    progressNow.value = Date.now()
+  }, 1000)
+}
+
+function stopProgressClock() {
+  if (!progressClockTimer) return
+  window.clearInterval(progressClockTimer)
+  progressClockTimer = null
+}
+
+function taskProgressView(task: TaskDetail) {
+  return buildTaskProgressView(task, progressNow.value)
 }
 
 function taskStatusLabel(status?: TaskStatus): string {
@@ -1596,13 +1621,14 @@ onUnmounted(() => {
   historyObserver?.disconnect()
   for (const timer of taskPollTimers.values()) window.clearInterval(timer)
   taskPollTimers.clear()
+  stopProgressClock()
   stopAllTaskStatusStreams()
 })
 </script>
 
 <template>
   <AppShell title="工作台" description="像 SeaArt 一样选择模态、模型，然后开始创作">
-    <div class="flex min-h-[calc(100vh-5rem)] bg-black text-white">
+    <div class="flex h-full min-h-0 bg-black text-white">
       <DashboardModalityDock
         v-model:open="modalityDockOpen"
         :tabs="modalityTabs"
@@ -1614,7 +1640,7 @@ onUnmounted(() => {
         @select="selectModality"
       />
 
-      <section class="relative flex min-w-0 flex-1 flex-col">
+      <section class="relative flex min-h-0 min-w-0 flex-1 flex-col">
         <div
           class="mx-auto mt-4 flex h-9 w-full max-w-5xl items-center justify-center rounded-full border border-[#d7b77a]/12 bg-[#d7b77a]/[0.055] px-5 text-xs font-medium text-[#ead7aa]/85 shadow-[inset_0_1px_0_rgb(255_255_255_/_0.04)] backdrop-blur-xl"
         >
@@ -1640,38 +1666,70 @@ onUnmounted(() => {
           @scroll="handleDashboardScroll"
         >
           <div class="mx-auto w-full max-w-[1380px]">
-            <div class="sticky top-0 z-20 -mx-5 mb-8 border-b border-transparent bg-transparent px-5 py-4 backdrop-blur-0 xl:-mx-10 xl:px-10">
-              <div class="flex flex-wrap items-center justify-between gap-4">
+            <div class="relative w-full">
+              <div
+                class="flex flex-wrap items-center justify-between gap-4"
+                :class="activePanel === 'tasks' ? 'mb-8' : 'mb-4'"
+              >
                 <div class="min-w-0">
-                  <p class="text-xs font-medium uppercase tracking-[0.18em] text-white/32">{{ activePanel === 'tasks' ? 'HISTORY' : modalityLabel(selectedModality) }}</p>
-                  <h2 class="mt-1 text-xl font-semibold text-white">{{ activePanel === 'tasks' ? '工作历史' : '开始创作' }}</h2>
+                  <template v-if="activePanel === 'tasks'">
+                    <p class="text-xs font-medium uppercase tracking-[0.18em] text-white/32">HISTORY</p>
+                    <h2 class="mt-1 text-xl font-semibold text-white">工作历史</h2>
+                    <p class="mt-1 hidden font-mono text-[12px] leading-5 text-white/36 sm:block">
+                      {{ currentTools.length }} 个可用模型 · 可用算力 {{ credit?.available ?? "--" }} · 进行中 {{ runningCount }}
+                    </p>
+                  </template>
+                  <div v-else class="flex min-w-0 flex-col">
+                    <h1 class="text-2xl font-bold tracking-wide text-white/90">
+                      {{ modalityLabel(selectedModality) }}创作
+                    </h1>
+                    <p class="mt-1 text-xs text-white/40">
+                      挑选一个适合的 AI 模型，开启你的创作灵感。
+                    </p>
+                  </div>
                 </div>
                 <div class="flex flex-wrap items-center justify-end gap-3">
-                  <div class="hidden text-right font-mono text-[12px] leading-5 text-white/36 sm:block">
+                  <div
+                    v-if="activePanel !== 'tasks'"
+                    class="hidden text-right font-mono text-[12px] leading-5 text-white/36 sm:block"
+                  >
                     <p>{{ currentTools.length }} 个可用模型 · 可用算力 {{ credit?.available ?? "--" }} · 进行中 {{ runningCount }}</p>
                   </div>
+                  <div
+                    v-if="activePanel === 'tasks'"
+                    class="h-8 w-[110px] shrink-0"
+                    aria-hidden="true"
+                  />
                   <button
+                    v-else
                     type="button"
-                    class="rounded-full border border-white/10 px-5 py-2.5 text-sm font-medium transition"
-                    :class="activePanel === 'tasks' ? 'bg-white/[0.08] text-white shadow-[0_10px_28px_rgb(0_0_0_/_0.22)]' : 'bg-white/[0.035] text-white/55 hover:bg-white/[0.06] hover:text-white'"
-                    @click="activePanel = activePanel === 'tasks' ? 'models' : 'tasks'"
+                    class="rounded-full border border-white/10 bg-white/[0.035] px-5 py-2.5 text-sm font-medium text-white/55 transition hover:bg-white/[0.06] hover:text-white"
+                    @click="activePanel = 'tasks'"
                   >
-                    {{ activePanel === 'tasks' ? '返回创作' : '工作历史' }}
+                    工作历史
                     <span class="ml-1 text-xs opacity-70">{{ recentTasks.length }}</span>
                   </button>
                 </div>
               </div>
-            </div>
+
+              <div
+                v-if="activePanel === 'tasks'"
+                class="pointer-events-none absolute right-0 top-4 bottom-0 z-30 w-[120px]"
+              >
+                <div class="pointer-events-auto sticky top-4 flex justify-end">
+                  <button
+                    type="button"
+                    class="rounded-full border border-white/10 bg-zinc-800 px-4 py-2 text-xs font-semibold text-white/90 shadow-[0_4px_20px_rgba(0,0,0,0.5)] transition-all hover:scale-[1.02] hover:bg-zinc-700 active:scale-[0.98]"
+                    @click="activePanel = 'models'"
+                  >
+                    返回创作
+                    <span class="ml-1 opacity-70">{{ recentTasks.length }}</span>
+                  </button>
+                </div>
+              </div>
 
             <section>
-              <div v-if="activePanel === 'models'" class="space-y-8">
-                <div class="flex items-end justify-between gap-5">
-                  <div>
-                    <p class="text-sm text-white/45">当前模态</p>
-                    <h2 class="mt-1 text-4xl font-semibold">{{ modalityLabel(selectedModality) }}创作</h2>
-                  </div>
-                </div>
-
+              <div v-if="activePanel === 'models'" class="space-y-6">
                 <div class="grid gap-6 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
                 <article
                   v-for="tool in featuredTools"
@@ -1773,13 +1831,13 @@ onUnmounted(() => {
                               {{ taskProgressSubtitle(item.task, canRetryTask(item.task.status) ? "任务生成失败，可以重试。" : "任务正在生成，完成后自动展开版本。") }}
                             </p>
                           </div>
-                          <span class="text-xs tabular-nums text-white/40">{{ item.task.progress ?? 0 }}%</span>
+                          <span class="text-xs tabular-nums text-white/40">{{ taskProgressView(item.task).percentLabel }}</span>
                         </div>
                         <div class="mt-3 h-1.5 overflow-hidden rounded-full bg-white/10">
                           <div
                             class="h-full rounded-full transition-all"
                             :class="canRetryTask(item.task.status) ? 'bg-red-400' : 'bg-primary'"
-                            :style="{ width: `${Math.max(6, Math.min(item.task.progress ?? (isTaskRunning(item.task.status) ? 12 : 100), 100))}%` }"
+                            :style="{ width: `${Math.max(6, taskProgressView(item.task).percent)}%` }"
                           />
                         </div>
                         <div class="mt-3 flex items-center justify-between gap-2">
@@ -2078,7 +2136,7 @@ onUnmounted(() => {
                             <div
                               class="h-full rounded-full transition-all"
                               :class="canRetryTask(primaryAudioStatusItem?.task.status) ? 'bg-red-400' : 'bg-primary'"
-                              :style="{ width: `${Math.max(6, Math.min(primaryAudioStatusItem?.task.progress ?? (isTaskRunning(primaryAudioStatusItem?.task.status) ? 12 : 100), 100))}%` }"
+                              :style="{ width: `${Math.max(6, primaryAudioStatusItem ? taskProgressView(primaryAudioStatusItem.task).percent : 0)}%` }"
                             />
                           </div>
                           <div class="mt-4 flex flex-wrap items-center justify-between gap-3">
@@ -2207,13 +2265,13 @@ onUnmounted(() => {
                           <p class="text-sm text-white/62">
                             {{ taskProgressSubtitle(item.task, canRetryTask(item.task.status) ? "任务生成失败，可以复用本次参数重试。" : "任务正在生成，完成后会追加到信息流底部。") }}
                           </p>
-                          <span class="text-xs tabular-nums text-white/38">{{ item.task.progress ?? 0 }}%</span>
+                          <span class="text-xs tabular-nums text-white/38">{{ taskProgressView(item.task).percentLabel }}</span>
                         </div>
                         <div class="mt-3 h-1.5 overflow-hidden rounded-full bg-white/10">
                           <div
                             class="h-full rounded-full transition-all"
                             :class="canRetryTask(item.task.status) ? 'bg-red-400' : 'bg-primary'"
-                            :style="{ width: `${Math.max(6, Math.min(item.task.progress ?? (isTaskRunning(item.task.status) ? 12 : 100), 100))}%` }"
+                            :style="{ width: `${Math.max(6, taskProgressView(item.task).percent)}%` }"
                           />
                         </div>
                       </div>
@@ -2370,7 +2428,7 @@ onUnmounted(() => {
                                   <X v-else class="h-3 w-3" />
                                   {{ cancellingTaskIds.has(item.task.taskId) ? "取消中" : "取消" }}
                                 </button>
-                                <span class="text-xs text-white/35">{{ item.task.progress ?? 0 }}%</span>
+                                <span class="text-xs text-white/35">{{ taskProgressView(item.task).percentLabel }}</span>
                               </div>
                             </div>
 
@@ -2383,7 +2441,7 @@ onUnmounted(() => {
                                 <div
                                   class="h-full rounded-full transition-all"
                                   :class="canRetryTask(item.task.status) ? 'bg-red-400' : 'bg-primary'"
-                                  :style="{ width: `${Math.max(6, Math.min(item.task.progress ?? (isTaskRunning(item.task.status) ? 12 : 100), 100))}%` }"
+                                  :style="{ width: `${Math.max(6, taskProgressView(item.task).percent)}%` }"
                                 />
                               </div>
                             </div>
@@ -2552,6 +2610,7 @@ onUnmounted(() => {
                 </div>
               </div>
             </section>
+            </div>
           </div>
         </main>
 
@@ -2650,7 +2709,7 @@ onUnmounted(() => {
               </div>
             </div>
 
-            <div class="relative rounded-3xl border border-white/10 bg-[#1e1e24]/92 p-4 shadow-[0_24px_90px_rgb(0_0_0_/_0.58)] backdrop-blur-2xl">
+            <div class="relative rounded-3xl border border-white/[0.06] bg-[#0f0f14]/70 p-4 shadow-[0_20px_60px_rgb(0_0_0_/_0.45)] backdrop-blur-lg">
               <button
                 type="button"
                 class="absolute right-3 top-3 inline-flex h-8 w-8 items-center justify-center rounded-full text-white/45 transition hover:bg-white/8 hover:text-white"
@@ -2659,7 +2718,7 @@ onUnmounted(() => {
               >
                 <X class="h-4 w-4" />
               </button>
-              <div class="relative">
+              <div class="relative rounded-2xl bg-black/30">
                 <div class="pointer-events-none absolute left-0 top-1 z-10 flex h-10 w-10 items-center justify-center text-white/48">
                   <MessageSquareText v-if="!primaryReferenceInfo.available" class="h-6 w-6" />
                 </div>
@@ -2719,7 +2778,7 @@ onUnmounted(() => {
 
               <div
                 v-if="selectedToolDetailLoading"
-                class="mt-3 flex items-center gap-2 rounded-2xl border border-white/8 bg-black/20 px-3 py-2 text-xs text-white/45"
+                class="mt-3 flex items-center gap-2 rounded-2xl bg-black/20 px-3 py-2 text-xs text-white/45"
               >
                 <Loader2 class="h-3.5 w-3.5 animate-spin" />
                 正在读取后台字段配置...
@@ -2732,7 +2791,7 @@ onUnmounted(() => {
                 :core-field-key="coreField?.fieldKey"
                 :tool-id="selectedChatTool.id"
                 :initial-params="replayParams"
-                class="mt-3 rounded-2xl border border-white/8 bg-black/18 px-3 py-2"
+                class="mt-3 rounded-2xl bg-white/[0.02] px-3 py-2"
                 @primary-reference-change="updatePrimaryReferenceInfo"
                 @params-change="onCapabilityParamsChange"
               />

@@ -78,7 +78,6 @@ GITHUB_SHA="${GITHUB_SHA:-unknown}"
 python3 - <<'PY'
 from pathlib import Path
 
-path = Path("/root/ai_tool_market/.env")
 patch_lines = """
 APP_PRODUCTION_MODE=true
 VITE_API_BASE_URL=
@@ -98,19 +97,76 @@ for line in patch_lines:
     key, value = line.split("=", 1)
     patch[key] = value
 
-lines = path.read_text(encoding="utf-8", errors="replace").splitlines() if path.exists() else []
-keys = set(patch)
-out = []
-for line in lines:
-    key = line.split("=", 1)[0].strip()
-    if key in keys:
-        continue
-    out.append(line)
-for key, value in patch.items():
+def patch_env(path: Path) -> None:
+    lines = path.read_text(encoding="utf-8", errors="replace").splitlines() if path.exists() else []
+    keys = set(patch)
+    out = []
+    for line in lines:
+        key = line.split("=", 1)[0].strip()
+        if key in keys:
+            continue
+        out.append(line)
+    for key, value in patch.items():
+        out.append(f"{key}={value}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(out) + "\n", encoding="utf-8")
+    print("patched", path)
+
+# docker compose interpolates deploy/.env and overrides env_file; patch both.
+patch_env(Path("/root/ai_tool_market/.env"))
+patch_env(Path("/root/ai_tool_market/deploy/.env"))
+PY
+
+python3 - <<'PY'
+import secrets
+from pathlib import Path
+
+DEFAULT_JWT = "local-dev-secret"
+DEFAULT_INTERNAL = "local-internal-token"
+MIN_JWT_LEN = 32
+env = Path("/root/ai_tool_market/.env")
+
+def read_env() -> dict[str, str]:
+    if not env.exists():
+        return {}
+    out: dict[str, str] = {}
+    for line in env.read_text(encoding="utf-8", errors="replace").splitlines():
+        if "=" not in line or line.strip().startswith("#"):
+            continue
+        key, value = line.split("=", 1)
+        out[key.strip()] = value
+    return out
+
+def upsert(key: str, value: str) -> None:
+    lines = env.read_text(encoding="utf-8", errors="replace").splitlines() if env.exists() else []
+    out = [line for line in lines if not line.startswith(f"{key}=")]
     out.append(f"{key}={value}")
-path.parent.mkdir(parents=True, exist_ok=True)
-path.write_text("\n".join(out) + "\n", encoding="utf-8")
-print("patched", path)
+    env.parent.mkdir(parents=True, exist_ok=True)
+    env.write_text("\n".join(out) + "\n", encoding="utf-8")
+
+data = read_env()
+jwt = data.get("JWT_SECRET", "")
+internal = data.get("INTERNAL_API_TOKEN", "")
+if jwt in ("", DEFAULT_JWT) or len(jwt) < MIN_JWT_LEN:
+    upsert("JWT_SECRET", secrets.token_urlsafe(48))
+    print("bootstrapped JWT_SECRET for production")
+if internal in ("", DEFAULT_INTERNAL):
+    upsert("INTERNAL_API_TOKEN", secrets.token_urlsafe(32))
+    print("bootstrapped INTERNAL_API_TOKEN for production")
+
+# docker compose interpolates ${JWT_SECRET} from deploy/.env — mirror secrets there.
+root = read_env()
+deploy = Path("/root/ai_tool_market/deploy/.env")
+lines = deploy.read_text(encoding="utf-8", errors="replace").splitlines() if deploy.exists() else []
+for key in ("JWT_SECRET", "INTERNAL_API_TOKEN"):
+    value = root.get(key)
+    if not value:
+        continue
+    lines = [line for line in lines if not line.startswith(f"{key}=")]
+    lines.append(f"{key}={value}")
+deploy.parent.mkdir(parents=True, exist_ok=True)
+deploy.write_text("\n".join(lines) + "\n", encoding="utf-8")
+print("mirrored secrets to deploy/.env")
 PY
 
 if [ -f "\$REMOTE_DIR/deploy/logs/last-deploy.json" ]; then
@@ -129,6 +185,14 @@ if echo "\$DEPLOY_SERVICES" | grep -qw banana-slides; then
 fi
 
 echo "DEPLOY_SERVICES=\$DEPLOY_SERVICES" | tee -a "\$REMOTE_DIR/deploy/logs/deploy-history.log"
+
+# Apply pending DB migrations BEFORE rebuilding app containers, so the backend
+# always boots against an up-to-date schema. MySQL is long-lived; ensure it is up
+# first. A real migration failure aborts the deploy (set -e) instead of shipping a
+# backend that crashes on a missing table.
+echo "Applying pending SQL migrations ..."
+docker compose "\${COMPOSE_ARGS[@]}" up -d mysql
+bash "\$REMOTE_DIR/deploy/scripts/apply_sql_migrations.sh"
 
 for svc in \$DEPLOY_SERVICES; do
   echo "Building \$svc ..."

@@ -87,8 +87,8 @@ async def test_preferred_tool_overrides_rule_structured_tool_selection():
             return IntentResult(
                 intent=Intent.TOOL_USE,
                 confidence=0.85,
-                selectedToolCode="kling-image-generation-v3",
-                candidateToolCodes=["kling-image-generation-v3", "gpt_image2"],
+                selectedToolCode="kling-image-generation",
+                candidateToolCodes=["kling-image-generation", "gpt_image2"],
                 reason="structured_tool_arguments",
             )
 
@@ -100,7 +100,7 @@ async def test_preferred_tool_overrides_rule_structured_tool_selection():
         preferredToolCode="gpt_image2",
         availableTools=[
             ToolDescriptor(
-                toolCode="kling-image-generation-v3",
+                toolCode="kling-image-generation",
                 toolName="可灵生图 V3",
                 description="图片生成工具",
                 autoCallable=True,
