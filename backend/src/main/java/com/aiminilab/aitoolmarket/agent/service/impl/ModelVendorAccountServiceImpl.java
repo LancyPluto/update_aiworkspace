@@ -450,6 +450,13 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
                 default -> "agnes_chat";
             };
         }
+        if (isVolcengineModelOrAccount(account, modelName)) {
+            return switch (capability) {
+                case "IMAGE_GENERATION" -> "volcengine_images";
+                case "VIDEO_GENERATION" -> "seedance";
+                default -> "openai_compatible";
+            };
+        }
         return switch (capability) {
             case "IMAGE_GENERATION" -> "openai_images_gateway";
             case "VIDEO_GENERATION" -> "worker_video";
@@ -471,7 +478,28 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
                 || model.startsWith("agnes-");
     }
 
+    private boolean isVolcengineModelOrAccount(ModelVendorAccount account, String modelName) {
+        String vendorCode = account == null || account.getVendorCode() == null
+                ? ""
+                : account.getVendorCode().trim().toLowerCase(Locale.ROOT);
+        String baseUrl = account == null || account.getBaseUrl() == null
+                ? ""
+                : account.getBaseUrl().trim().toLowerCase(Locale.ROOT);
+        String model = modelName == null ? "" : modelName.trim().toLowerCase(Locale.ROOT);
+        return "volcengine".equals(vendorCode)
+                || baseUrl.contains("volces.com")
+                || baseUrl.contains("volcengine")
+                || model.contains("doubao-seedream")
+                || model.contains("seedream-")
+                || model.contains("seedance");
+    }
+
     private String defaultExtraAuthJson(String provider, String modelName) {
+        if ("volcengine_images".equals(provider)) {
+            return """
+                    {"imageInputMode":"jsonImageArray","endpointPath":"/images/generations","responseFormat":"url","readTimeoutSeconds":600,"connectionRetries":2,"sslEofRetries":2}
+                    """.trim();
+        }
         if ("agnes_images".equals(provider)) {
             return """
                     {"responseFormatLocation":"extra_body","imageInputMode":"jsonImageArray","endpointPath":"/images/generations","readTimeoutSeconds":600}
@@ -649,7 +677,8 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
                                                                          String providerCode,
                                                                          ModelProviderDefinition provider) {
         long startedAt = System.currentTimeMillis();
-        if (!hasCredential(account)) {
+        String apiKey = resolveApiKey(account);
+        if (!hasUsableCredential(account)) {
             account.setHealthStatus("ERROR");
             account.setBalanceErrorMessage("账号凭据未配置");
             account.setUpdatedAt(LocalDateTime.now());
@@ -667,7 +696,7 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
         if (baseUrl == null || baseUrl.isBlank()) {
             baseUrl = provider.defaultBaseUrl();
         }
-        MediaGatewayProbeResult probe = probeMediaGateway(baseUrl, account.getApiKey());
+        MediaGatewayProbeResult probe = probeMediaGateway(baseUrl, apiKey);
         long latencyMs = Math.max(0L, System.currentTimeMillis() - startedAt);
         boolean success = probe.success();
         String message = probe.message();
@@ -730,7 +759,7 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
     private ModelVendorAccountTestResponse testAcceptOnlyVendorAccount(ModelVendorAccount account,
                                                                        String providerCode,
                                                                        ModelProviderDefinition provider) {
-        if (!hasCredential(account)) {
+        if (!hasUsableCredential(account)) {
             account.setHealthStatus("ERROR");
             account.setBalanceErrorMessage("账号凭据未配置");
             account.setUpdatedAt(LocalDateTime.now());
@@ -901,6 +930,33 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
         return account != null
                 && ((account.getApiKey() != null && !account.getApiKey().isBlank())
                 || (account.getExtraAuthJson() != null && !account.getExtraAuthJson().isBlank()));
+    }
+
+    private boolean hasUsableCredential(ModelVendorAccount account) {
+        if (account == null) {
+            return false;
+        }
+        if (!resolveApiKey(account).isBlank()) {
+            return true;
+        }
+        return hasKlingAccessSecretPair(account.getExtraAuthJson());
+    }
+
+    private boolean hasKlingAccessSecretPair(String extraAuthJson) {
+        if (extraAuthJson == null || extraAuthJson.isBlank()) {
+            return false;
+        }
+        try {
+            JsonNode parsed = objectMapper.readTree(extraAuthJson);
+            if (parsed == null || !parsed.isObject()) {
+                return false;
+            }
+            String accessKey = textValue(parsed.get("accessKey"), parsed.get("access_key"));
+            String secretKey = textValue(parsed.get("secretKey"), parsed.get("secret_key"));
+            return accessKey != null && secretKey != null;
+        } catch (Exception ignored) {
+            return false;
+        }
     }
 
     private ModelVendorAccountResponse toResponse(ModelVendorAccount account) {

@@ -10,3 +10,7 @@ export function fetchModelVendors() {
 export function upsertModelVendor(payload: ModelVendorPayload) {
   return http.put<ModelVendor>(BASE, payload)
 }
+
+export function deleteModelVendor(vendorCode: string) {
+  return http.delete<void>(`${BASE}/${encodeURIComponent(vendorCode)}`)
+}

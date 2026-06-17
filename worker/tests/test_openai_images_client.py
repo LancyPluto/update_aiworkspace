@@ -364,3 +364,37 @@ def test_openai_images_can_send_source_images_as_json_array(monkeypatch):
     assert captured["path"] == "/images/generations"
     assert captured["payload"]["image"] == ["https://storage.example/input.png"]
     assert captured["payload"]["extra_body"] == {"response_format": "url"}
+
+
+def test_volcengine_seedream_reference_images_use_json_generation_endpoint(monkeypatch):
+    client = OpenAIImagesClient(
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        api_key="test-key",
+        extra_auth_json='{"imageInputMode":"jsonImageArray","endpointPath":"/images/generations","responseFormat":"url"}',
+    )
+    captured = {}
+
+    def fake_post(path, payload):
+        captured["path"] = path
+        captured["payload"] = payload
+        return {"data": [{"url": "https://cdn.example/seedream.png"}]}
+
+    def fail_multipart(*_args, **_kwargs):
+        raise AssertionError("Volcengine Seedream JSON image mode must not use multipart edits")
+
+    monkeypatch.setattr(client, "_post", fake_post)
+    monkeypatch.setattr(client, "_post_multipart", fail_multipart)
+
+    urls = client.generate_images(
+        prompt="make it sharper",
+        model="doubao-seedream-4-5-251128",
+        image_size="auto",
+        response_format="url",
+        image=["https://storage.example/input.png"],
+    )
+
+    assert urls == ["https://cdn.example/seedream.png"]
+    assert captured["path"] == "/images/generations"
+    assert captured["payload"]["image"] == ["https://storage.example/input.png"]
+    assert captured["payload"]["response_format"] == "url"
+    assert captured["payload"]["stream"] is False

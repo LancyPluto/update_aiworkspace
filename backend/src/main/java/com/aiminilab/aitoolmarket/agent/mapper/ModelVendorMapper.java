@@ -4,6 +4,7 @@ import com.aiminilab.aitoolmarket.agent.entity.ModelVendor;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Update;
 
 import java.util.List;
 
@@ -24,5 +25,13 @@ public interface ModelVendorMapper extends BaseMapper<ModelVendor> {
             LIMIT 1
             """)
     ModelVendor findByCode(@Param("vendorCode") String vendorCode);
+
+    @Update("""
+            UPDATE model_vendors
+            SET enabled = 0,
+                updated_at = NOW()
+            WHERE vendor_code = #{vendorCode}
+            """)
+    int disableByCode(@Param("vendorCode") String vendorCode);
 }
 

@@ -1,6 +1,8 @@
 package com.aiminilab.aitoolmarket.agent.service.impl;
 
 import com.aiminilab.aitoolmarket.agent.dto.ModelVendorResponse;
+import com.aiminilab.aitoolmarket.agent.mapper.AgentModelConfigMapper;
+import com.aiminilab.aitoolmarket.agent.mapper.ModelVendorAccountMapper;
 import com.aiminilab.aitoolmarket.common.cache.BypassCacheService;
 import com.aiminilab.aitoolmarket.common.cache.CacheNamespaces;
 import com.fasterxml.jackson.databind.JavaType;
@@ -9,6 +11,7 @@ import com.aiminilab.aitoolmarket.agent.dto.UpsertModelVendorRequest;
 import com.aiminilab.aitoolmarket.agent.entity.ModelVendor;
 import com.aiminilab.aitoolmarket.agent.mapper.ModelVendorMapper;
 import com.aiminilab.aitoolmarket.agent.service.ModelVendorService;
+import com.aiminilab.aitoolmarket.tool.mapper.ToolMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -20,13 +23,22 @@ import java.util.List;
 public class ModelVendorServiceImpl implements ModelVendorService {
 
     private final ModelVendorMapper modelVendorMapper;
+    private final ModelVendorAccountMapper modelVendorAccountMapper;
+    private final AgentModelConfigMapper agentModelConfigMapper;
+    private final ToolMapper toolMapper;
     private final BypassCacheService bypassCacheService;
     private final ObjectMapper objectMapper;
 
     public ModelVendorServiceImpl(ModelVendorMapper modelVendorMapper,
+                                  ModelVendorAccountMapper modelVendorAccountMapper,
+                                  AgentModelConfigMapper agentModelConfigMapper,
+                                  ToolMapper toolMapper,
                                   BypassCacheService bypassCacheService,
                                   ObjectMapper objectMapper) {
         this.modelVendorMapper = modelVendorMapper;
+        this.modelVendorAccountMapper = modelVendorAccountMapper;
+        this.agentModelConfigMapper = agentModelConfigMapper;
+        this.toolMapper = toolMapper;
         this.bypassCacheService = bypassCacheService;
         this.objectMapper = objectMapper;
     }
@@ -82,6 +94,21 @@ public class ModelVendorServiceImpl implements ModelVendorService {
         modelVendorMapper.updateById(existing);
         bypassCacheService.invalidateModelVendors();
         return ModelVendorResponse.from(existing);
+    }
+
+    @Override
+    @Transactional
+    public void adminDelete(String vendorCode, Long operatorId) {
+        String normalized = vendorCode == null ? "" : vendorCode.trim().toLowerCase();
+        if (normalized.isBlank()) {
+            throw new IllegalArgumentException("vendorCode is required");
+        }
+        Long safeOperatorId = operatorId == null ? 0L : operatorId;
+        toolMapper.softDeleteByVendorCode(normalized, safeOperatorId);
+        agentModelConfigMapper.softDeleteByVendorCode(normalized);
+        modelVendorAccountMapper.softDeleteByVendorCode(normalized);
+        modelVendorMapper.disableByCode(normalized);
+        bypassCacheService.invalidateModelVendors();
     }
 }
 

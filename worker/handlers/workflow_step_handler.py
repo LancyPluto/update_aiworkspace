@@ -164,8 +164,9 @@ class WorkflowStepHandler:
                 max_tokens=max(2400, 800 * scene_count),
             )
             parsed = _extract_json(raw)
-        except ModelClientError:
-            LOGGER.warning("script planner model call failed, using fallback scenes")
+        except ModelClientError as exc:
+            LOGGER.warning("script planner model call failed, using fallback scenes: %s | model_config keys=%s provider=%s model=%s",
+                           exc, list(model_config.keys()), model_config.get("provider"), model_config.get("modelName"))
 
         scenes = _normalize_scenes(parsed, scene_count, form)
         title = ""
@@ -386,27 +387,29 @@ class WorkflowStepHandler:
         clips = video.get("clips")
         if not isinstance(clips, list) or not clips:
             if not video.get("videoUrl"):
-                raise DigitalHumanPostprocessError("video and audio are required for compose")
+                raise DigitalHumanPostprocessError("video clips are required for compose")
             clips = [{"sceneIndex": 1, "videoUrl": video.get("videoUrl")}]
-        audios = tts.get("audios")
-        audio_data_urls = tts.get("audioDataUrls") if isinstance(tts.get("audioDataUrls"), list) else []
-        if not isinstance(audios, list) or not audios:
-            if not tts.get("audioUrl") and not tts.get("audioDataUrl"):
-                raise DigitalHumanPostprocessError("video and audio are required for compose")
-            audios = [{"sceneIndex": 1, "audioUrl": tts.get("audioUrl") or "", "speechText": tts.get("speechText") or ""}]
-            audio_data_urls = [tts.get("audioDataUrl") or ""]
+        has_tts = bool(tts and (tts.get("audios") or tts.get("audioUrl") or tts.get("audioDataUrl")))
+        audios: list[dict[str, Any]] = []
+        audio_data_urls: list[str] = []
+        if has_tts:
+            audios = tts.get("audios") or []
+            audio_data_urls = tts.get("audioDataUrls") if isinstance(tts.get("audioDataUrls"), list) else []
+            if not audios:
+                audios = [{"sceneIndex": 1, "audioUrl": tts.get("audioUrl") or "", "speechText": tts.get("speechText") or ""}]
+                audio_data_urls = [tts.get("audioDataUrl") or ""]
 
         total = len(clips)
         segment_paths = []
         segments: list[dict[str, Any]] = []
         for position, clip in enumerate(clips, start=1):
             scene = scenes[position - 1] if position <= len(scenes) else (scenes[-1] if scenes else {})
-            audio_entry = audios[position - 1] if position <= len(audios) else (audios[-1] if audios else {})
+            audio_entry = audios[position - 1] if position <= len(audios) else {}
             audio_data_url = audio_data_urls[position - 1] if position <= len(audio_data_urls) else ""
             video_url = (clip or {}).get("videoUrl")
             audio_url = (audio_entry or {}).get("audioUrl") or ""
-            if not video_url or (not audio_url and not audio_data_url):
-                raise DigitalHumanPostprocessError(f"video and audio are required for compose (scene {position})")
+            if not video_url:
+                raise DigitalHumanPostprocessError(f"video clip missing for scene {position}")
             subtitle_text = scene.get("subtitleZh") or scene.get("dialogue") or (audio_entry or {}).get("speechText") or ""
             self.backend_client.mark_processing(
                 task_id,

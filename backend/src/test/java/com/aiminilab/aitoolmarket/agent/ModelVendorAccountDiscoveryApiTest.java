@@ -9,6 +9,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -18,7 +19,9 @@ import java.nio.charset.StandardCharsets;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -39,6 +42,9 @@ class ModelVendorAccountDiscoveryApiTest {
 
     @Autowired
     private AgentModelConfigMapper agentModelConfigMapper;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @Test
     void adminCanDiscoverOpenAiCompatibleModelsAndUpsertConfigs() throws Exception {
@@ -122,6 +128,178 @@ class ModelVendorAccountDiscoveryApiTest {
         } finally {
             server.stop(0);
         }
+    }
+
+    @Test
+    void adminCanDiscoverVolcengineSeedreamWithJsonImageInputDefaults() throws Exception {
+        HttpServer server = modelsServer("""
+                {
+                  "object": "list",
+                  "data": [
+                    {"id": "doubao-seedream-4-5-251128", "object": "model"}
+                  ]
+                }
+                """);
+        try {
+            String adminToken = loginAdmin();
+            Long accountId = createVendorAccount(
+                    adminToken,
+                    "volcengine",
+                    "Volcengine Images",
+                    "http://127.0.0.1:%d/v1".formatted(server.getAddress().getPort())
+            );
+
+            mockMvc.perform(post("/api/admin/v1/model-vendor-accounts/{id}/discover-models", accountId)
+                            .header("Authorization", "Bearer " + adminToken))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.imported").value(1))
+                    .andExpect(jsonPath("$.data.models[0].provider").value("volcengine_images"));
+
+            AgentModelConfig image = agentModelConfigMapper.findActiveByVendorAccountAndModelName(accountId, "doubao-seedream-4-5-251128");
+            assertThat(image.getExtraAuthJson()).contains("jsonImageArray", "/images/generations", "responseFormat");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void adminCanDeleteVendorAndCascadeBoundToolsModelsAndAccounts() throws Exception {
+        HttpServer server = modelsServer("""
+                {
+                  "object": "list",
+                  "data": [
+                    {"id": "gpt-4o-mini", "object": "model"}
+                  ]
+                }
+                """);
+        try {
+            String adminToken = loginAdmin();
+            mockMvc.perform(put("/api/admin/v1/model-vendors")
+                            .header("Authorization", "Bearer " + adminToken)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {
+                                      "vendorCode": "openai_gateway",
+                                      "vendorLabel": "OpenAI Gateway",
+                                      "iconAsset": "openrouter",
+                                      "sortOrder": 10,
+                                      "enabled": true
+                                    }
+                                    """))
+                    .andExpect(status().isOk());
+            Long accountId = createVendorAccount(adminToken, "http://127.0.0.1:%d/v1".formatted(server.getAddress().getPort()));
+
+            mockMvc.perform(post("/api/admin/v1/model-vendor-accounts/{id}/discover-models", accountId)
+                            .header("Authorization", "Bearer " + adminToken))
+                    .andExpect(status().isOk());
+            AgentModelConfig config = agentModelConfigMapper.findActiveByVendorAccountAndModelName(accountId, "gpt-4o-mini");
+            assertThat(config).isNotNull();
+            jdbcTemplate.update("""
+                    INSERT INTO ai_tools(tool_code, tool_name, category_id, description, tool_type, input_modality,
+                                         output_modality, status, estimated_credit_cost, model_config_id, created_by,
+                                         updated_by, is_deleted)
+                    VALUES('cascade_delete_tool', 'Cascade Delete Tool', NULL, 'test', 'TEXT_GENERATION', 'TEXT',
+                           'TEXT', 'ONLINE', 1, ?, 1, 1, 0)
+                    """, config.getId());
+
+            mockMvc.perform(delete("/api/admin/v1/model-vendors/{vendorCode}", "openai_gateway")
+                            .header("Authorization", "Bearer " + adminToken))
+                    .andExpect(status().isOk());
+
+            Integer activeTools = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(1) FROM ai_tools WHERE tool_code='cascade_delete_tool' AND is_deleted=0",
+                    Integer.class);
+            Integer activeModels = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(1) FROM agent_model_configs WHERE vendor_account_id=? AND COALESCE(is_deleted,0)=0",
+                    Integer.class,
+                    accountId);
+            Integer activeAccounts = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(1) FROM model_vendor_accounts WHERE vendor_code='openai_gateway' AND COALESCE(is_deleted,0)=0",
+                    Integer.class);
+            Integer enabledVendors = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(1) FROM model_vendors WHERE vendor_code='openai_gateway' AND enabled=1",
+                    Integer.class);
+            assertThat(activeTools).isZero();
+            assertThat(activeModels).isZero();
+            assertThat(activeAccounts).isZero();
+            assertThat(enabledVendors).isZero();
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void acceptOnlyAccountTestRequiresRealCredentialNotJustExtraAuthSettings() throws Exception {
+        String adminToken = loginAdmin();
+        String response = mockMvc.perform(post("/api/admin/v1/model-vendor-accounts")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "vendorCode": "local_media_mock",
+                                  "accountName": "No Credential Media",
+                                  "baseUrl": "http://127.0.0.1:1/v1",
+                                  "extraAuthJson": "{\\"responseFormat\\":\\"url\\"}",
+                                  "balanceQueryMode": "MANUAL",
+                                  "enabled": true
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        Long accountId = Long.parseLong(response.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
+
+        mockMvc.perform(post("/api/admin/v1/model-vendor-accounts/{id}/test", accountId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.success").value(false))
+                .andExpect(jsonPath("$.data.account.healthStatus").value("ERROR"));
+    }
+
+    @Test
+    void modelTestByIdPersistsFailureWhenConnectivityCheckThrows() throws Exception {
+        String adminToken = loginAdmin();
+        String response = mockMvc.perform(post("/api/admin/v1/model-vendor-accounts")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "vendorCode": "openai_gateway",
+                                  "accountName": "Broken Gateway",
+                                  "baseUrl": "http://127.0.0.1:1/v1",
+                                  "extraAuthJson": "{\\"responseFormat\\":\\"url\\"}",
+                                  "balanceQueryMode": "MANUAL",
+                                  "enabled": true
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        Long accountId = Long.parseLong(response.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
+        jdbcTemplate.update("""
+                INSERT INTO agent_model_configs(vendor_account_id, display_name, config_code, provider, model_name,
+                                                base_url, api_key, extra_auth_json, billing_unit, capabilities,
+                                                enabled, agent_enabled, last_test_success)
+                VALUES(?, 'Broken Chat', 'broken-chat-test', 'openai_compatible', 'broken-chat',
+                       'http://127.0.0.1:1/v1', '', NULL, 'TOKEN_PER_M', 'TEXT_GENERATION',
+                       1, 0, 1)
+                """, accountId);
+        Long modelId = jdbcTemplate.queryForObject(
+                "SELECT id FROM agent_model_configs WHERE config_code='broken-chat-test'",
+                Long.class);
+
+        mockMvc.perform(post("/api/admin/v1/agent/model-config/{id}/test", modelId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.success").value(false));
+
+        Boolean lastTestSuccess = jdbcTemplate.queryForObject(
+                "SELECT last_test_success FROM agent_model_configs WHERE id=?",
+                Boolean.class,
+                modelId);
+        assertThat(lastTestSuccess).isFalse();
     }
 
     private HttpServer modelsServer(String body) throws Exception {
