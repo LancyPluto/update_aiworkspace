@@ -205,6 +205,30 @@ export const OPTION_PRESETS: Record<
       { label: "V3 Omni", value: "kling-v3-omni" },
     ],
   },
+  volcengine_model_video: {
+    label: "Seedance 视频模型",
+    options: [
+      { label: "Seedance 1.5 Pro（推荐）", value: "doubao-seedance-1-5-pro-251215" },
+      { label: "Seedance 1.0 Pro", value: "doubao-seedance-1-0-pro-250528" },
+      { label: "Seedance 1.0 Pro Fast", value: "doubao-seedance-1-0-pro-fast-251015" },
+    ],
+  },
+  volcengine_model_image: {
+    label: "Seedream 图像模型",
+    options: [
+      { label: "Seedream 4.5（推荐）", value: "doubao-seedream-4-5-251128" },
+      { label: "Seedream 5.0", value: "doubao-seedream-5-0-260128" },
+    ],
+  },
+  volcengine_model_chat: {
+    label: "豆包 Seed 2.0 对话模型",
+    options: [
+      { label: "Seed 2.0 Pro（推荐）", value: "doubao-seed-2-0-pro-260215" },
+      { label: "Seed 2.0 Lite", value: "doubao-seed-2-0-lite-260215" },
+      { label: "Seed 2.0 Mini", value: "doubao-seed-2-0-mini-260215" },
+      { label: "Seed 2.0 Code", value: "doubao-seed-2-0-code-preview-260215" },
+    ],
+  },
 }
 
 export type FieldOptionRow = { label: string; value: string; promptPrefix?: string }

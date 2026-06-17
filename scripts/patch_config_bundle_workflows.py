@@ -219,7 +219,7 @@ def digital_human_workflow() -> dict:
             "requiredModelConfigCodes": [
                 "siliconflow_voice_tts",
                 "siliconflow_image_turbo",
-                "seedance_video_generation",
+                "volcengine-gateway-video",
                 "siliconflow_asr_teleai",
             ],
             "audioVideoSyncStrategy": "audio_driven_reference_image_to_video_then_ffmpeg_mux",
@@ -251,7 +251,7 @@ def main() -> None:
             tool["workflow"] = digital_human_workflow()
             tool["status"] = "ONLINE"
             tool["estimatedCreditCost"] = 0
-            tool["modelConfigCode"] = "seedance_video_generation"
+            tool["modelConfigCode"] = "volcengine-gateway-video"
     CONFIG_PATH.write_text(json.dumps(bundle, ensure_ascii=False, indent=4), encoding="utf-8")
     print(f"Patched {CONFIG_PATH}")
 

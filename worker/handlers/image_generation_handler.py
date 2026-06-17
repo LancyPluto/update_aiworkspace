@@ -30,6 +30,7 @@ from utils.kling_config import (
     resolve_kling_image_paths,
     resolve_kling_model_name,
 )
+from utils.volcengine_config import is_volcengine_model_config, resolve_volcengine_task_model
 
 
 LOGGER = logging.getLogger(__name__)
@@ -131,11 +132,12 @@ class ImageGenerationHandler:
                 raise SiliconFlowVideoError("prompt is required")
 
             client = self.image_client or self._image_client(provider, model_config, params)
-            resolved_model = (
-                resolve_kling_model_name(params, model_config)
-                if provider_protocol == "kling_video"
-                else model_config.get("modelName")
-            )
+            if provider_protocol == "kling_video":
+                resolved_model = resolve_kling_model_name(params, model_config)
+            elif is_volcengine_model_config(model_config):
+                resolved_model = resolve_volcengine_task_model(params, model_config)
+            else:
+                resolved_model = model_config.get("modelName")
             api_task = resolve_kling_image_api_task(model_config, params) if provider_protocol == "kling_video" else ""
             max_batch = 9 if api_task == "omni_image" else 4
             image_request: dict[str, Any] = {

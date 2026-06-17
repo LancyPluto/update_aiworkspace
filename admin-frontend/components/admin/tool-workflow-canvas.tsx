@@ -84,7 +84,7 @@ const MODEL_SEED_CODES = {
   voice: "siliconflow_voice_tts",
   asr: "siliconflow_asr_teleai",
   image: "siliconflow_image_turbo",
-  seedance: "seedance_video_generation",
+  seedance: "volcengine-gateway-video",
 }
 
 const workflowPalette: Array<{

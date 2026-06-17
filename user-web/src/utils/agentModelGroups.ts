@@ -45,18 +45,11 @@ const vendorCatalog: CatalogEntry[] = [
   { key: "vendor:openai", label: "OpenAI", mark: "OA", iconAsset: "openai", patterns: ["api.openai.com", "openai.com/v1", "gpt-", "o1-", "o3-", "chatgpt"] },
   { key: "vendor:deepseek", label: "DeepSeek", mark: "DS", iconAsset: "deepseek", patterns: ["deepseek"] },
   {
-    key: "vendor:doubao",
-    label: "璞嗗寘",
-    mark: "DB",
-    iconAsset: "doubao",
-    patterns: ["doubao", "seedance", "seedream", "bytedance"],
-  },
-  {
     key: "vendor:volcengine",
-    label: "鐏北寮曟搸",
+    label: "火山引擎 / 豆包",
     mark: "VE",
-    iconAsset: "volcengine",
-    patterns: ["volc", "volces.com", "volcengine", "ark.cn-beijing"],
+    iconAsset: "doubao",
+    patterns: ["doubao", "seedance", "seedream", "bytedance", "volc", "volces.com", "volcengine", "ark.cn-beijing"],
   },
   {
     key: "vendor:qwen",

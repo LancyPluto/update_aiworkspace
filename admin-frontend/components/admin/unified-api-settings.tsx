@@ -396,6 +396,15 @@ const executionTaskOptions: Record<string, Array<{ value: string; label: string;
     { value: "image_generation", label: "图像生成", capabilities: ["IMAGE_GENERATION"], createPath: "/v1/images/generations", resultPath: "/v1/images/generations/{task_id}" },
     { value: "omni_image", label: "Omni 生图", capabilities: ["IMAGE_GENERATION"], createPath: "/v1/images/omni-image", resultPath: "/v1/images/omni-image/{task_id}" },
   ],
+  seedance: [
+    { value: "video_generation", label: "视频生成", capabilities: ["VIDEO_GENERATION", "DIGITAL_HUMAN"], createPath: "/contents/generations/tasks", resultPath: "/contents/generations/tasks/{task_id}" },
+  ],
+  volcengine_images: [
+    { value: "image_generation", label: "图像生成", capabilities: ["IMAGE_GENERATION"], createPath: "/images/generations", resultPath: "/images/generations" },
+  ],
+  openai_compatible: [
+    { value: "chat", label: "对话 Chat", capabilities: ["TEXT_GENERATION"], createPath: "/chat/completions", resultPath: "/chat/completions" },
+  ],
 }
 
 const emptyVendorForm = (): ModelVendorPayload => ({

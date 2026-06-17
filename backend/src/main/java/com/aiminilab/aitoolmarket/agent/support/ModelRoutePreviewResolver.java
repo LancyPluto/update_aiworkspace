@@ -20,6 +20,12 @@ public class ModelRoutePreviewResolver {
             "omni_image", new RoutePair("/v1/images/omni-image", "/v1/images/omni-image/{task_id}")
     );
 
+    private static final Map<String, RoutePair> VOLCENGINE_ROUTES = Map.of(
+            "video_generation", new RoutePair("/contents/generations/tasks", "/contents/generations/tasks/{task_id}"),
+            "image_generation", new RoutePair("/images/generations", "/images/generations"),
+            "chat", new RoutePair("/chat/completions", "/chat/completions")
+    );
+
     private final ObjectMapper objectMapper;
 
     public ModelRoutePreviewResolver(ObjectMapper objectMapper) {
@@ -97,14 +103,29 @@ public class ModelRoutePreviewResolver {
         if ("kling_video".equalsIgnoreCase(provider)) {
             return KLING_ROUTES.get(normalizeTask(task));
         }
+        if ("seedance".equalsIgnoreCase(provider)) {
+            return VOLCENGINE_ROUTES.get(normalizeTask(task.isBlank() ? "video_generation" : task));
+        }
+        if ("volcengine_images".equalsIgnoreCase(provider)) {
+            return VOLCENGINE_ROUTES.get(normalizeTask(task.isBlank() ? "image_generation" : task));
+        }
+        if ("openai_compatible".equalsIgnoreCase(provider) && "chat".equals(normalizeTask(task))) {
+            return VOLCENGINE_ROUTES.get("chat");
+        }
         return null;
     }
 
     private RoutePair defaultPair(AgentModelConfig config) {
-        if (!"kling_video".equalsIgnoreCase(config.getProvider())) {
-            return null;
+        if ("kling_video".equalsIgnoreCase(config.getProvider())) {
+            return KLING_ROUTES.get("text2video");
         }
-        return KLING_ROUTES.get("text2video");
+        if ("seedance".equalsIgnoreCase(config.getProvider())) {
+            return VOLCENGINE_ROUTES.get("video_generation");
+        }
+        if ("volcengine_images".equalsIgnoreCase(config.getProvider())) {
+            return VOLCENGINE_ROUTES.get("image_generation");
+        }
+        return null;
     }
 
     private JsonNode parse(String raw) {

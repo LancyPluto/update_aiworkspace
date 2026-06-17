@@ -131,6 +131,12 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
             "kling-image-generation-v2-1",
             "kling-image-generation-v1"
     );
+    private static final Set<String> LEGACY_VOLCENGINE_MODEL_CONFIG_CODES = Set.of(
+            "volcengine-seedance",
+            "seedance_video_generation",
+            "volcengine-seedream"
+    );
+    private static final Set<String> LEGACY_VOLCENGINE_TOOL_CODES = Set.of();
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     private final SystemSettingService systemSettingService;
@@ -619,6 +625,11 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                         + ": use consolidated kling-gateway-* configs instead");
                 continue;
             }
+            if (LEGACY_VOLCENGINE_MODEL_CONFIG_CODES.contains(config.configCode().trim())) {
+                warnings.add("Skipped legacy Volcengine model config " + config.configCode()
+                        + ": use consolidated volcengine-gateway-* configs instead");
+                continue;
+            }
             if (!modelProviderRegistry.isSupported(config.provider())) {
                 warnings.add("Skipped model config " + config.configCode()
                         + ": unsupported provider " + config.provider());
@@ -936,6 +947,11 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
         if (LEGACY_KLING_TOOL_CODES.contains(item.toolCode().trim())) {
             warnings.add("Skipped legacy Kling tool " + item.toolCode()
                     + ": use consolidated kling-* gateway tools instead");
+            return;
+        }
+        if (LEGACY_VOLCENGINE_TOOL_CODES.contains(item.toolCode().trim())) {
+            warnings.add("Skipped legacy Volcengine tool " + item.toolCode()
+                    + ": use consolidated volcengine-* gateway tools instead");
             return;
         }
         Long categoryId = categoryIdsByCode.get(item.categoryCode());

@@ -334,6 +334,28 @@ Suno 这类上游确实需要 `customMode` 的工具，保留该字段：
 
 详见 [可灵模型配置.md](../可灵模型配置.md)、[同系列模型版本表单配置规范](./同系列模型版本表单配置规范.md)。
 
+### 9.3 火山 / 豆包模型版本字段（按模态拆工具）
+
+火山视频/图像各一张工具卡，**同一工具内**用 `model` 选 Seedance / Seedream 版本。选项预设见 `volcengine_model_video`、`volcengine_model_image`。
+
+```json
+{
+  "fieldKey": "model",
+  "fieldName": "Seedance 模型",
+  "fieldType": "select",
+  "optionsJson": {
+    "uiTier": "all",
+    "uiGroup": "meta",
+    "defaultValue": "doubao-seedance-1-5-pro-251215",
+    "options": [
+      { "label": "Seedance 1.5 Pro（推荐）", "value": "doubao-seedance-1-5-pro-251215" }
+    ]
+  }
+}
+```
+
+详见 [火山模型配置.md](../火山模型配置.md)。
+
 ## 十、配置检查清单
 
 - 主 Prompt 字段标记 `core: true` 或作为工具的核心字段传入。

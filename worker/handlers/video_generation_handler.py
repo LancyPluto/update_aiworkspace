@@ -12,6 +12,7 @@ from handlers.generated_video_persister import GeneratedVideoPersistError, Gener
 from providers import registry as provider_registry
 from utils.input_image import InputImageError, resolve_reference_image_data_url
 from utils.kling_config import resolve_kling_api_task, resolve_kling_model_name, resolve_kling_video_paths
+from utils.volcengine_config import resolve_volcengine_task_model
 
 
 LOGGER = logging.getLogger(__name__)
@@ -87,11 +88,12 @@ class VideoGenerationHandler:
                 payload = _build_happyhorse_payload(params, model_config.get("modelName"))
                 result = client.generate_video(payload)
             else:
-                resolved_model = (
-                    resolve_kling_model_name(params, model_config)
-                    if provider_protocol == "kling_video"
-                    else str(model_config.get("modelName") or "")
-                )
+                if provider_protocol == "kling_video":
+                    resolved_model = resolve_kling_model_name(params, model_config)
+                elif provider == "seedance":
+                    resolved_model = resolve_volcengine_task_model(params, model_config)
+                else:
+                    resolved_model = str(model_config.get("modelName") or "")
                 video_request = _build_video_request(params, resolved_model, provider_protocol)
                 if provider_protocol == "kling_video":
                     create_path, result_path = resolve_kling_video_paths(model_config)
