@@ -163,7 +163,7 @@ export function AdminSidebar() {
         <div className="flex h-16 items-center gap-3 border-b border-sidebar-border px-6">
           <img src={`${basePath}/logo.svg`} alt="AI Tool Market" className="h-9 w-9 rounded-xl object-contain" />
           <div>
-            <h1 className="text-base font-semibold text-sidebar-foreground">AI 工具超市</h1>
+            <h1 className="text-base font-semibold text-sidebar-foreground">科创点AI</h1>
             <p className="text-xs text-muted-foreground">管理后台</p>
           </div>
         </div>
