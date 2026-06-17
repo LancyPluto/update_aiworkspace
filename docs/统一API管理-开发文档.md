@@ -220,7 +220,7 @@ ALTER TABLE agent_model_configs
 | `deepseek` | `deepseek` |
 | `openai` | `openai_compatible`（upstream 为 OpenAI 时） |
 | `siliconflow` | `siliconflow_images`, `siliconflow_speech`, `siliconflow_asr` |
-| `volcengine` | `volcengine_images`, `seedance` |
+| `volcengine` | `volcengine_images`, `seedance`, `openai_compatible`（方舟 Chat，按 baseUrl / vendor 归属） |
 | `kling` | `kling_video` |
 | `minimax` | `minimax`, `minimax_speech`, `minimax_music`, `anthropic_compatible`（按 baseUrl 归属可配置） |
 | `openai_gateway` | `ofox_openai_images`, `openai_images_gateway`（`vendorKind=gateway`） |

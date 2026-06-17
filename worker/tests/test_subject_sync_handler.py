@@ -78,6 +78,26 @@ class SubjectSyncHandlerTest(unittest.TestCase):
             trace_id=None,
         )
 
+    @patch("handlers.subject_sync_handler.KlingVideoClient")
+    def test_delete_subject_requests_remote_delete(self, kling_video_client: MagicMock) -> None:
+        backend = MagicMock()
+        backend.get_subject_sync_context.side_effect = BackendClientError("deleted locally")
+        client = MagicMock()
+        client.delete_element.return_value = {"data": {"task_id": "delete_task"}}
+        kling_video_client.return_value = client
+
+        handler = SubjectSyncHandler(backend_client=backend)
+        result = handler.handle(
+            {
+                "messageType": "subject_delete",
+                "subjectCode": "subj003",
+                "upstreamElementId": "elem_123",
+            }
+        )
+
+        self.assertEqual(result["status"], "SUCCESS")
+        client.delete_element.assert_called_once_with("elem_123")
+
 
 if __name__ == "__main__":
     unittest.main()

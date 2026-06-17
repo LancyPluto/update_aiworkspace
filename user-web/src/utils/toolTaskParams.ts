@@ -1,4 +1,5 @@
 import type { ToolField } from "@/api/types"
+import { parseFieldMeta } from "@/utils/fieldUiMeta"
 
 /**
  * 将动态表单原始值转换为后端任务所需的 params。
@@ -10,6 +11,7 @@ export function buildTaskParams(
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {}
   for (const f of fields) {
+    if (parseFieldMeta(f).submitPolicy === "ui_only") continue
     const v = raw[f.fieldKey]
     if (f.fieldType === "number") {
       if (v === "" || v === undefined || v === null) {
@@ -19,13 +21,15 @@ export function buildTaskParams(
       if (!Number.isNaN(n)) out[f.fieldKey] = n
     } else if (f.fieldType === "checkbox") {
       out[f.fieldKey] = Boolean(v)
-    } else if ((f.fieldType === "select" || f.fieldType === "radio") && v === "__none__") {
+    } else if ((f.fieldType === "select" || f.fieldType === "radio" || f.fieldType === "aspect_ratio") && v === "__none__") {
       continue
-    } else if ((f.fieldType === "select" || f.fieldType === "radio") && v === "__custom__") {
+    } else if ((f.fieldType === "select" || f.fieldType === "radio" || f.fieldType === "aspect_ratio") && v === "__custom__") {
       const custom = raw[`${f.fieldKey}Custom`]
       if (custom !== undefined && custom !== null && String(custom).trim() !== "") {
         out[f.fieldKey] = String(custom).trim()
       }
+    } else if (Array.isArray(v)) {
+      if (v.length > 0) out[f.fieldKey] = v
     } else if (v !== undefined && v !== null && v !== "") {
       out[f.fieldKey] = typeof v === "string" ? v.trim() : v
     }

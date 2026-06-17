@@ -166,13 +166,15 @@ public interface AgentModelConfigMapper extends BaseMapper<AgentModelConfig> {
 
     @Insert("""
             INSERT INTO agent_model_configs(vendor_account_id, display_name, config_code, provider, model_name, base_url, api_key,
-                                            extra_auth_json, minimax_group_id, console_url, balance_url, docs_url,
+                                            extra_auth_json, execution_task, execution_options_json,
+                                            minimax_group_id, console_url, balance_url, docs_url,
                                             timeout_seconds, input_token_price_per_1k, output_token_price_per_1k,
                                             input_token_price_per_1m, output_token_price_per_1m,
                                             billing_unit, unit_price, capabilities, enabled, agent_enabled,
                                             is_default, created_at, updated_at)
             VALUES(#{config.vendorAccountId}, #{config.displayName}, #{config.configCode}, #{config.provider}, #{config.modelName},
-                   #{config.baseUrl}, #{config.apiKey}, #{config.extraAuthJson}, #{config.minimaxGroupId},
+                   #{config.baseUrl}, #{config.apiKey}, #{config.extraAuthJson}, #{config.executionTask},
+                   #{config.executionOptionsJson}, #{config.minimaxGroupId},
                    #{config.consoleUrl}, #{config.balanceUrl}, #{config.docsUrl}, #{config.timeoutSeconds},
                    #{config.inputTokenPricePer1k}, #{config.outputTokenPricePer1k},
                    #{config.inputTokenPricePer1m}, #{config.outputTokenPricePer1m},
@@ -193,6 +195,8 @@ public interface AgentModelConfigMapper extends BaseMapper<AgentModelConfig> {
                 base_url = #{config.baseUrl},
                 api_key = #{config.apiKey},
                 extra_auth_json = #{config.extraAuthJson},
+                execution_task = #{config.executionTask},
+                execution_options_json = #{config.executionOptionsJson},
                 minimax_group_id = #{config.minimaxGroupId},
                 console_url = #{config.consoleUrl},
                 balance_url = #{config.balanceUrl},

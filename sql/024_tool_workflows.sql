@@ -129,7 +129,7 @@ SELECT
         'iconName', 'video',
         'color', '#f97316',
         'parameters', JSON_OBJECT(
-          'modelConfigId', (SELECT id FROM agent_model_configs WHERE config_code = 'seedance_video_generation' LIMIT 1),
+          'modelConfigId', (SELECT id FROM agent_model_configs WHERE config_code = 'volcengine-gateway-video' LIMIT 1),
           'resolution', '480p',
           'durationSeconds', 5,
           'aspectRatio', '16:9',
@@ -183,7 +183,7 @@ SELECT
   NULL,
   JSON_OBJECT(
     'requiredModelConfigCodes',
-    JSON_ARRAY('siliconflow_voice_tts', 'siliconflow_image_turbo', 'seedance_video_generation', 'siliconflow_asr_teleai'),
+    JSON_ARRAY('siliconflow_voice_tts', 'siliconflow_image_turbo', 'volcengine-gateway-video', 'siliconflow_asr_teleai'),
     'audioVideoSyncStrategy',
     'audio_driven_reference_image_to_video_then_ffmpeg_mux',
     'referenceProject',

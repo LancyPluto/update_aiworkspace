@@ -279,7 +279,9 @@ def _model_options_omni_image() -> list[dict]:
 
 _KLING_IMAGE_LIST_OPTIONS = '{"minCount":1,"maxCount":7,"accept":"image/*","libraryEnabled":true,"libraryKind":"image","uiTier":"advanced"}'
 _KLING_VIDEO_LIST_OPTIONS = '{"maxCount":4,"accept":"video/*","libraryEnabled":true,"libraryKind":"video","uiTier":"advanced"}'
+_KLING_OMNI_VIDEO_LIST_OPTIONS = '{"maxCount":4,"accept":"video/*","libraryEnabled":true,"libraryKind":"video","uiTier":"advanced"}'
 _KLING_ELEMENT_LIST_OPTIONS = '{"maxCount":7,"libraryEnabled":true,"uiTier":"advanced"}'
+_KLING_OMNI_DURATION_OPTIONS = '{"slider":{"min":3,"max":15,"step":1},"defaultValue":5,"unit":"秒"}'
 
 
 def _text2video_fields() -> list[dict]:
@@ -341,17 +343,15 @@ def _omni_video_fields() -> list[dict]:
     order += 1
     fields.append(_radio_field("aspectRatio", "画面比例", [{"label": "16:9", "value": "16:9"}, {"label": "9:16", "value": "9:16"}, {"label": "1:1", "value": "1:1"}], order))
     order += 1
-    fields.append(_radio_field("duration", "时长", _DURATION_V3_OPTIONS, order, default="5"))
+    fields.append(_field("duration", "时长", "slider", sort_order=order, required=True, options_json=_KLING_OMNI_DURATION_OPTIONS, default_value="5"))
     order += 1
     fields.append(_radio_field("mode", "质量档位", [{"label": "标准（std）", "value": "std"}, {"label": "高质量（pro）", "value": "pro"}], order, default="std"))
-    order += 1
-    fields.append(_radio_field("resolution", "分辨率", _RESOLUTION_OPTIONS, order, required=False))
     order += 1
     fields.append(_radio_field("sound", "音频", [{"label": "关闭", "value": "off"}, {"label": "开启", "value": "on"}], order, required=False, default="off"))
     order += 1
     fields.append(_field("imageList", "参考图片列表", "multi_image", sort_order=order, placeholder="选择参考图片", options_json=_KLING_IMAGE_LIST_OPTIONS))
     order += 1
-    fields.append(_field("videoList", "参考视频列表", "multi_video", sort_order=order, placeholder="选择参考视频", options_json=_KLING_VIDEO_LIST_OPTIONS))
+    fields.append(_field("videoList", "参考视频列表", "omni_video_list", sort_order=order, placeholder="上传或选择参考视频", options_json=_KLING_OMNI_VIDEO_LIST_OPTIONS))
     order += 1
     fields.append(_field("elementList", "主体参考列表", "subject_element_list", sort_order=order, placeholder="添加主体参考", options_json=_KLING_ELEMENT_LIST_OPTIONS))
     order += 1
@@ -367,14 +367,15 @@ def _omni_video_fields() -> list[dict]:
 
 def _motion_fields() -> list[dict]:
     return [
-        _field("imageUrl", "人物图片", "image", required=True, sort_order=1, placeholder="角色参考图 URL"),
-        _field("videoUrl", "动作视频", "file", required=True, sort_order=2, placeholder="驱动动作的视频 URL"),
-        _field("prompt", "补充描述", "textarea", sort_order=3, placeholder="可选的动作或场景补充"),
-        _radio_field("mode", "质量档位", [{"label": "标准（std）", "value": "std"}, {"label": "高质量（pro）", "value": "pro"}], 4, default="std"),
-        _radio_field("keepOriginalSound", "保留原声", [{"label": "否", "value": "no"}, {"label": "是", "value": "yes"}], 5, required=False, default="no"),
-        _field("characterOrientation", "角色朝向", "select", sort_order=6, options={"options": [{"label": "跟随视频", "value": "video"}, {"label": "跟随图片", "value": "image"}]}, options_json='{"options": [{"label": "跟随视频", "value": "video"}, {"label": "跟随图片", "value": "image"}]}', default_value="video"),
-        _field("staticMask", "静态遮罩", "image", sort_order=7, placeholder="可选"),
-        _field("dynamicMasks", "动态遮罩", "textarea", sort_order=8, placeholder="JSON 数组"),
+        _field("imageUrl", "人物图片", "image_upload", required=True, sort_order=1, placeholder="上传角色参考图，人物比例尽量与动作视频一致", options_json='{"uiGroup":"core","uiGroupLabel":"核心输入","uiTier":"all","uiRole":"character_image","uiOrder":1,"layoutHint":"paired_media","accept":"image/jpeg,image/png,.jpg,.jpeg,.png","maxSizeMb":10,"helpText":"上传角色参考图，人物比例尽量与动作视频一致"}'),
+        _field("videoUrl", "动作视频", "video_upload", required=True, sort_order=2, placeholder="上传公网可访问的 MP4/MOV 动作视频；3 秒起，不超过 100MB", options_json='{"uiGroup":"core","uiGroupLabel":"核心输入","uiTier":"all","uiRole":"motion_video","uiOrder":2,"layoutHint":"paired_media","accept":".mp4,.mov,video/mp4,video/quicktime","maxSizeMb":100,"requiresPublicUrl":true,"minDuration":3,"durationByOrientation":{"image":10,"video":30},"helpText":"MP4/MOV，公网可访问，3 秒起，不超过 100MB"}'),
+        _field("elementList", "主体参考", "subject_element_list", sort_order=3, placeholder="可选：选择 1 个已就绪主体", options_json='{"uiGroup":"subject","uiGroupLabel":"主体参考","uiTier":"all","uiRole":"subject_element","uiOrder":3,"layoutHint":"full_width","maxCount":1,"maxItems":1,"libraryEnabled":true,"allowedModes":["library_ref","element_id"],"forceCharacterOrientation":"video","helpText":"可选：使用主体库保持角色一致性；引用主体时角色朝向会锁定为跟随视频"}'),
+        _field("prompt", "补充描述", "textarea", sort_order=4, placeholder="可选：补充角色服装、场景或镜头效果", options_json='{"uiGroup":"settings","uiGroupLabel":"常用设置","uiTier":"all","uiRole":"motion_prompt","uiOrder":4,"layoutHint":"full_width","maxLength":2500,"helpText":"可通过描述补充服装、场景、镜头或想保留的细节"}'),
+        _field("characterOrientation", "角色朝向", "select", required=True, sort_order=5, options={"options": [{"label": "跟随视频", "value": "video"}, {"label": "跟随图片", "value": "image"}]}, options_json='{"uiGroup":"settings","uiGroupLabel":"常用设置","uiTier":"all","uiRole":"character_orientation","uiOrder":5,"options":[{"label":"跟随视频","value":"video"},{"label":"跟随图片","value":"image"}],"helpText":"跟随图片最长 10 秒；跟随视频最长 30 秒。引用主体时只能跟随视频"}', default_value="video"),
+        _field("mode", "质量档位", "radio", required=True, sort_order=6, options_json='{"uiGroup":"settings","uiGroupLabel":"常用设置","uiTier":"all","uiRole":"quality_mode","uiOrder":6,"options":[{"label":"标准（std）","value":"std"},{"label":"高质量（pro）","value":"pro"}],"defaultValue":"std"}', default_value="std"),
+        _field("keepOriginalSound", "保留原声", "radio", sort_order=7, options_json='{"uiGroup":"settings","uiGroupLabel":"常用设置","uiTier":"all","uiRole":"keep_original_sound","uiOrder":7,"options":[{"label":"是","value":"yes"},{"label":"否","value":"no"}],"defaultValue":"yes"}', default_value="yes"),
+        _field("staticMask", "静态遮罩", "image_upload", sort_order=8, placeholder="高级实验项：当前动作控制接口暂不提交遮罩参数", options_json='{"uiGroup":"advanced","uiGroupLabel":"高级参数","uiTier":"advanced","uiRole":"static_mask","uiOrder":8,"layoutHint":"paired_media","submitPolicy":"ui_only","accept":"image/jpeg,image/png,.jpg,.jpeg,.png","helpText":"当前动作控制接口暂不提交遮罩参数，确认官方字段后可改为 submit"}'),
+        _field("dynamicMasks", "动态遮罩", "textarea", sort_order=9, placeholder="高级实验项：当前动作控制接口暂不提交遮罩参数", options_json='{"uiGroup":"advanced","uiGroupLabel":"高级参数","uiTier":"advanced","uiRole":"dynamic_mask","uiOrder":9,"layoutHint":"paired_media","submitPolicy":"ui_only","helpText":"当前动作控制接口暂不提交遮罩参数，确认官方字段后可改为 submit"}'),
     ]
 
 
@@ -476,7 +477,7 @@ def _gateway_model(
     pricing_rules: list[dict],
     extra_auth: dict,
 ) -> dict[str, Any]:
-    extra = {**extra_auth, "apiTask": api_task, "createPath": create_path, "resultPath": result_path}
+    extra = {**extra_auth}
     return {
         "displayName": display_name,
         "configCode": config_code,
@@ -489,6 +490,8 @@ def _gateway_model(
         "baseUrl": "https://api-beijing.klingai.com",
         "apiKey": "",
         "extraAuthJson": json.dumps(extra, ensure_ascii=False),
+        "executionTask": api_task,
+        "executionOptionsJson": None,
         "secretsRedacted": False,
         "minimaxGroupId": None,
         "consoleUrl": "https://app.klingai.com/cn/dev/api-key",
@@ -665,7 +668,7 @@ def build_kling_tools() -> list[dict]:
             model_config_code="kling-gateway-motion-control",
             fields=_motion_fields(),
             model_field=_select_field("model", "可灵模型版本", _model_options_motion(), "kling-v3", 99),
-            status="OFFLINE",
+            status="ONLINE",
             tool_type="VIDEO_GENERATION",
             input_modality="IMAGE",
             estimated_credit_cost=360,

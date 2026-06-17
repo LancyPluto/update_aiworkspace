@@ -45,6 +45,7 @@ import com.aiminilab.aitoolmarket.tool.mapper.ToolMapper;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolPromptVersionMapper;
 import com.aiminilab.aitoolmarket.tool.service.ToolService;
 import com.aiminilab.aitoolmarket.tool.service.WorkflowService;
+import com.aiminilab.aitoolmarket.tool.support.ConfigNoteMergeSupport;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -87,6 +88,55 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
             "costAffectingParams",
             "defaultBillingParams"
     );
+    private static final Set<String> LEGACY_KLING_MODEL_CONFIG_CODES = Set.of(
+            "kling-v3-omni",
+            "kling_image_to_video",
+            "kling-v1-image-to-video",
+            "kling-v2-master-image-to-video",
+            "kling-image-generation-v1-model",
+            "kling-image-generation-v3-model",
+            "kling-v1-5-image-to-video",
+            "kling-v1-6-image-to-video",
+            "kling-v2-1-image-to-video",
+            "kling-v2-1-master-image-to-video",
+            "kling-v2-5-turbo-image-to-video",
+            "kling-v2-6-motion-control",
+            "kling-v2-6-image-to-video",
+            "kling-v3-motion-control",
+            "kling-v3-image-to-video",
+            "kling-v3-text-to-video",
+            "kling-video-o1-omni",
+            "8"
+    );
+    private static final Set<String> LEGACY_KLING_TOOL_CODES = Set.of(
+            "v2_1",
+            "tool",
+            "kling_image_to_video",
+            "kling-v3-omni",
+            "kling-video-o1-omni",
+            "kling-v3-text-to-video",
+            "kling-v3-image-to-video",
+            "kling-v3-multi-image-reference",
+            "kling-v3-motion-control",
+            "kling-v2-6-image-to-video",
+            "kling-v2-6-motion-control",
+            "kling-v2-5-turbo-image-to-video",
+            "kling-v2-1-master-image-to-video",
+            "kling-v2-1-image-to-video",
+            "kling-v2-master-image-to-video",
+            "kling-v1-6-image-to-video",
+            "kling-v1-5-image-to-video",
+            "kling-v1-image-to-video",
+            "kling-image-generation-v3",
+            "kling-image-generation-v2-1",
+            "kling-image-generation-v1"
+    );
+    private static final Set<String> LEGACY_VOLCENGINE_MODEL_CONFIG_CODES = Set.of(
+            "volcengine-seedance",
+            "seedance_video_generation",
+            "volcengine-seedream"
+    );
+    private static final Set<String> LEGACY_VOLCENGINE_TOOL_CODES = Set.of();
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     private final SystemSettingService systemSettingService;
@@ -313,6 +363,7 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                 : accountRefById.get(config.vendorAccountId());
         String modelApiKey = "";
         String modelExtraAuth = "";
+        String executionOptionsJson = secretSource == null ? null : secretSource.getExecutionOptionsJson();
         if (includeSecrets && secretSource != null) {
             if (vendorAccountRef != null && config.vendorAccountId() != null) {
                 ModelVendorAccount account = vendorAccountMapper.findActiveById(config.vendorAccountId());
@@ -340,6 +391,8 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                 config.baseUrl(),
                 modelApiKey,
                 modelExtraAuth,
+                config.executionTask(),
+                executionOptionsJson,
                 !includeSecrets,
                 config.minimaxGroupId(),
                 config.consoleUrl(),
@@ -567,6 +620,16 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                 warnings.add("Skipped model config with missing configCode/provider/modelName");
                 continue;
             }
+            if (LEGACY_KLING_MODEL_CONFIG_CODES.contains(config.configCode().trim())) {
+                warnings.add("Skipped legacy Kling model config " + config.configCode()
+                        + ": use consolidated kling-gateway-* configs instead");
+                continue;
+            }
+            if (LEGACY_VOLCENGINE_MODEL_CONFIG_CODES.contains(config.configCode().trim())) {
+                warnings.add("Skipped legacy Volcengine model config " + config.configCode()
+                        + ": use consolidated volcengine-gateway-* configs instead");
+                continue;
+            }
             if (!modelProviderRegistry.isSupported(config.provider())) {
                 warnings.add("Skipped model config " + config.configCode()
                         + ": unsupported provider " + config.provider());
@@ -638,6 +701,8 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                 secretsRedacted ? null : nullToEmpty(config.apiKey()),
                 null,
                 secretsRedacted ? null : cleanExtraAuthJson(config.extraAuthJson(), null, "model config " + config.configCode()),
+                config.executionTask(),
+                config.executionOptionsJson(),
                 config.minimaxGroupId(),
                 config.consoleUrl(),
                 config.balanceUrl(),
@@ -879,6 +944,16 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
             warnings.add("Skipped tool with missing toolCode/toolName");
             return;
         }
+        if (LEGACY_KLING_TOOL_CODES.contains(item.toolCode().trim())) {
+            warnings.add("Skipped legacy Kling tool " + item.toolCode()
+                    + ": use consolidated kling-* gateway tools instead");
+            return;
+        }
+        if (LEGACY_VOLCENGINE_TOOL_CODES.contains(item.toolCode().trim())) {
+            warnings.add("Skipped legacy Volcengine tool " + item.toolCode()
+                    + ": use consolidated volcengine-* gateway tools instead");
+            return;
+        }
         Long categoryId = categoryIdsByCode.get(item.categoryCode());
         if (categoryId == null) {
             warnings.add("Skipped tool " + item.toolCode() + ": categoryCode not found: " + item.categoryCode());
@@ -891,6 +966,12 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
 
         AiTool existing = findImportTargetTool(item.toolCode(), operatorId, warnings).orElse(null);
         String coverUrl = importedCoverUrl(item, existing, warnings);
+        String configNote = item.configNote();
+        if (existing != null) {
+            configNote = ConfigNoteMergeSupport.mergePreservingMediaUrls(
+                    existing.getConfigNote(), configNote, OBJECT_MAPPER);
+        }
+
         boolean restoreDisabledModelBinding = isDisabledModelConfig(modelConfigId);
         UpsertToolRequest request = new UpsertToolRequest(
                 item.toolCode(),
@@ -901,7 +982,7 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                 item.toolType(),
                 item.inputModality(),
                 item.outputModality(),
-                item.configNote(),
+                configNote,
                 item.estimatedCreditCost() == null ? 0 : item.estimatedCreditCost(),
                 restoreDisabledModelBinding ? null : modelConfigId,
                 item.executionHandler(),

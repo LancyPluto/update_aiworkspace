@@ -25,8 +25,22 @@ import {
   normalizeMediaListValues,
   parseMediaListValue,
 } from "@/utils/mediaListField"
-import { validateSubjectElementItems, parseSubjectElementEditorItems, subjectElementMax } from "@/utils/subjectElementList"
+import {
+  validateSubjectElementItems,
+  parseSubjectElementEditorItems,
+  serializeSubjectElementItems,
+  subjectElementMax,
+} from "@/utils/subjectElementList"
 import SubjectElementListField from "@/components/DynamicForm/SubjectElementListField.vue"
+import {
+  hasBaseKlingOmniVideo,
+  klingOmniVideoMax,
+  parseKlingOmniVideoEditorItems,
+  serializeKlingOmniVideoItems,
+  validateKlingOmniVideoItems,
+  type KlingOmniVideoReference,
+} from "@/utils/klingOmniVideoList"
+import KlingOmniVideoListField from "@/components/DynamicForm/KlingOmniVideoListField.vue"
 
 const props = defineProps<{
   fields: ToolField[]
@@ -85,22 +99,23 @@ const uniqueFields = computed(() => {
   })
 })
 
-const visibleFields = computed(() => filterFieldsForUi(uniqueFields.value, model.value))
-
 const modeField = computed(() => uniqueFields.value.find((field) => field.fieldKey === "customMode"))
+
+const visibleFields = computed(() =>
+  filterFieldsForUi(uniqueFields.value, model.value, {
+    advancedModeEnabled: Boolean(modeField.value),
+  }),
+)
 
 const groupedFields = computed(() => {
   const withoutMode = visibleFields.value.filter((field) => field.fieldKey !== "customMode")
-  if (!advancedMode.value) {
-    return [{ key: "__default__", label: "参数", fields: withoutMode }]
-  }
   return groupVisibleFields(withoutMode)
 })
 
 const collapsedGroups = ref<Record<string, boolean>>({})
 
 function isGroupCollapsed(key: string): boolean {
-  if (key === "more") return collapsedGroups.value[key] ?? true
+  if (key === "more" || key === "advanced") return collapsedGroups.value[key] ?? true
   return collapsedGroups.value[key] ?? false
 }
 
@@ -161,16 +176,71 @@ function uploadedPreviewUrl(value: string): string {
   return apiOrigin ? `${apiOrigin}${path}` : path
 }
 
-async function onFilePicked(key: string, ev: Event) {
+function isLikelyPublicUrl(value: string): boolean {
+  const text = value.trim()
+  if (!/^https?:\/\//i.test(text)) return false
+  try {
+    const url = new URL(text)
+    const host = url.hostname.toLowerCase()
+    if (!host || host === "localhost" || host === "backend" || host.endsWith(".local")) return false
+    if (/^(127\.|10\.|192\.168\.|169\.254\.)/.test(host)) return false
+    if (/^172\.(1[6-9]|2\d|3[0-1])\./.test(host)) return false
+    return true
+  } catch {
+    return false
+  }
+}
+
+function uploadHelpText(field: ToolField): string {
+  const meta = parseFieldMeta(field)
+  const rows: string[] = [meta.helpText || "支持点击选择文件"]
+  if (meta.accept) rows.push(`格式：${meta.accept}`)
+  if (meta.maxSizeMb) rows.push(`不超过 ${meta.maxSizeMb}MB`)
+  if (meta.minDuration) rows.push(`不少于 ${meta.minDuration} 秒`)
+  return rows.join("，")
+}
+
+function fieldHelpText(field: ToolField): string {
+  return parseFieldMeta(field).helpText || field.placeholder || ""
+}
+
+function showFieldHelpText(field: ToolField): boolean {
+  if (isUploadField(field) || isMediaListFieldType(field) || field.fieldType === "subject_element_list" || isOmniVideoListField(field)) {
+    return false
+  }
+  return Boolean(fieldHelpText(field))
+}
+
+function groupHasPairedMedia(fields: ToolField[]): boolean {
+  return fields.some((field) => parseFieldMeta(field).layoutHint === "paired_media")
+}
+
+function groupBodyClass(fields: ToolField[]): string {
+  return groupHasPairedMedia(fields) ? "grid gap-5 md:grid-cols-2" : "space-y-5"
+}
+
+function fieldWrapperClass(field: ToolField): string {
+  const meta = parseFieldMeta(field)
+  if (meta.layoutHint === "full_width") return "space-y-2 md:col-span-2"
+  return "space-y-2"
+}
+
+async function onFilePicked(field: ToolField, ev: Event) {
   const input = ev.target as HTMLInputElement
   const file = input.files?.[0]
   if (!file) return
-  uploading[key] = true
+  const meta = parseFieldMeta(field)
+  if (meta.maxSizeMb && file.size > meta.maxSizeMb * 1024 * 1024) {
+    window.alert(`${field.fieldName} 不能超过 ${meta.maxSizeMb}MB`)
+    input.value = ""
+    return
+  }
+  uploading[field.fieldKey] = true
   try {
     const uploaded = await uploadToolFile(file)
-    if (uploaded?.url) setField(key, uploaded.url)
+    if (uploaded?.url) setField(field.fieldKey, uploaded.url)
   } finally {
-    uploading[key] = false
+    uploading[field.fieldKey] = false
     input.value = ""
   }
 }
@@ -178,6 +248,59 @@ async function onFilePicked(key: string, ev: Event) {
 function isMediaListFieldType(field: ToolField): boolean {
   return isMediaListField(field)
 }
+
+function isOmniVideoListField(field: ToolField): boolean {
+  return field.fieldType === "omni_video_list"
+}
+
+function omniVideoItems(field: ToolField) {
+  return parseKlingOmniVideoEditorItems(model.value[field.fieldKey], klingOmniVideoMax(field))
+}
+
+function hasBaseOmniVideo(field: ToolField): boolean {
+  return hasBaseKlingOmniVideo(omniVideoItems(field))
+}
+
+function hasAnyOmniVideoReferences(): boolean {
+  return uniqueFields.value
+    .filter(isOmniVideoListField)
+    .some((field) => serializeKlingOmniVideoItems(omniVideoItems(field)).length > 0)
+}
+
+function isSoundLockedField(field: ToolField): boolean {
+  return field.fieldKey === "sound" && hasAnyOmniVideoReferences()
+}
+
+function setOmniVideoListField(key: string, value: KlingOmniVideoReference[]) {
+  const next = { ...model.value, [key]: value }
+  if (value.length > 0 && "sound" in next) next.sound = "off"
+  model.value = next
+}
+
+function serializedSubjectElementCount(field: ToolField): number {
+  const items = parseSubjectElementEditorItems(model.value[field.fieldKey], subjectElementMax(field))
+  return serializeSubjectElementItems(items).length
+}
+
+function forcedCharacterOrientation(): string | null {
+  for (const field of uniqueFields.value) {
+    const forced = parseFieldMeta(field).forceCharacterOrientation
+    if (field.fieldType === "subject_element_list" && forced && serializedSubjectElementCount(field) > 0) {
+      return forced
+    }
+  }
+  return null
+}
+
+watch(
+  () => uniqueFields.value.map((field) => `${field.fieldKey}:${JSON.stringify(model.value[field.fieldKey])}`).join("|"),
+  () => {
+    const forced = forcedCharacterOrientation()
+    if (forced && model.value.characterOrientation !== forced) {
+      model.value = { ...model.value, characterOrientation: forced }
+    }
+  },
+)
 
 function multiImageValues(field: ToolField): string[] {
   return parseMediaListValue(model.value[field.fieldKey], multiImageMax(field))
@@ -306,9 +429,19 @@ function previewImage(url: string) {
 }
 
 function setOptionField(key: string, val: string) {
+  if (key === "sound" && val !== "off" && hasAnyOmniVideoReferences()) return
+  if (key === "characterOrientation") {
+    const forced = forcedCharacterOrientation()
+    if (forced && val !== forced) return
+  }
   const next = { ...model.value, [key]: val }
   if (val !== "__custom__") delete next[`${key}Custom`]
   model.value = next
+}
+
+function isCharacterOrientationLockedField(field: ToolField, value: string): boolean {
+  const forced = forcedCharacterOrientation()
+  return field.fieldKey === "characterOrientation" && Boolean(forced) && value !== forced
 }
 
 function onNumberInput(key: string, ev: Event) {
@@ -370,6 +503,14 @@ function validate(): { valid: boolean; message?: string } {
       })
       if (!check.valid) return check
     }
+    if (isOmniVideoListField(f)) {
+      const items = omniVideoItems(f)
+      const check = validateKlingOmniVideoItems(items, {
+        ...f,
+        required: isEffectivelyRequired(f),
+      })
+      if (!check.valid) return check
+    }
     if (!isEffectivelyRequired(f)) continue
     const v = model.value[f.fieldKey]
     if (v === undefined || v === null) {
@@ -380,6 +521,13 @@ function validate(): { valid: boolean; message?: string } {
     }
     if ((f.fieldType === "number" || f.fieldType === "slider") && v === "") {
       return { valid: false, message: `请填写：${f.fieldName}` }
+    }
+    if (isUploadField(f)) {
+      const text = typeof v === "string" ? v.trim() : ""
+      const meta = parseFieldMeta(f)
+      if (meta.requiresPublicUrl && text && !isLikelyPublicUrl(text)) {
+        return { valid: false, message: `${f.fieldName} 必须是公网可访问 URL，请配置公网素材存储或使用外部 MP4/MOV 地址` }
+      }
     }
     if (f.fieldType === "textarea") {
       const maxLen = maxLengthFor(f)
@@ -434,7 +582,7 @@ defineExpose({ validate })
     <div v-else class="space-y-6">
       <section v-for="group in groupedFields" :key="group.key" class="space-y-4">
         <button
-          v-if="group.key !== '__default__' && advancedMode"
+          v-if="group.key !== '__default__'"
           type="button"
           class="flex w-full items-center justify-between rounded-lg border border-border/70 bg-secondary/20 px-3 py-2 text-left"
           @click="toggleGroup(group.key)"
@@ -443,9 +591,9 @@ defineExpose({ validate })
           <span class="text-xs text-muted-foreground">{{ isGroupCollapsed(group.key) ? "展开" : "收起" }}</span>
         </button>
 
-        <div v-show="group.key === '__default__' || !isGroupCollapsed(group.key)" class="space-y-5">
-          <div v-for="f in group.fields" :key="f.fieldKey" class="space-y-2">
-            <label v-if="!isMediaListFieldType(f) && f.fieldType !== 'subject_element_list'" class="text-sm font-medium">
+        <div v-show="group.key === '__default__' || !isGroupCollapsed(group.key)" :class="groupBodyClass(group.fields)">
+          <div v-for="f in group.fields" :key="f.fieldKey" :class="fieldWrapperClass(f)">
+            <label v-if="!isMediaListFieldType(f) && f.fieldType !== 'subject_element_list' && !isOmniVideoListField(f)" class="text-sm font-medium">
               {{ f.fieldName }}
               <span v-if="isEffectivelyRequired(f)" class="text-destructive"> *</span>
             </label>
@@ -466,10 +614,13 @@ defineExpose({ validate })
                 :key="optionValue(opt)"
                 type="button"
                 class="rounded-md border px-3 py-1.5 text-xs font-medium transition"
+                :disabled="(isSoundLockedField(f) && optionValue(opt) !== 'off') || isCharacterOrientationLockedField(f, optionValue(opt))"
                 :class="
                   strVal(f.fieldKey) === optionValue(opt)
                     ? 'border-primary bg-primary/10 text-primary'
-                    : 'border-border bg-background text-foreground/70 hover:border-primary/40'
+                    : (isSoundLockedField(f) && optionValue(opt) !== 'off') || isCharacterOrientationLockedField(f, optionValue(opt))
+                      ? 'cursor-not-allowed border-border bg-muted text-muted-foreground opacity-45'
+                      : 'border-border bg-background text-foreground/70 hover:border-primary/40'
                 "
                 @click="setOptionField(f.fieldKey, optionValue(opt))"
               >
@@ -495,9 +646,9 @@ defineExpose({ validate })
                 @input="setField(f.fieldKey, Number(($event.target as HTMLInputElement).value))"
               />
               <div class="flex items-center justify-between text-xs text-muted-foreground">
-                <span>{{ sliderConfig(f).min }}</span>
-                <span class="font-medium text-foreground">{{ model[f.fieldKey] ?? sliderConfig(f).min }}</span>
-                <span>{{ sliderConfig(f).max }}</span>
+                <span>{{ sliderConfig(f).min }}{{ parseFieldMeta(f).unit || "" }}</span>
+                <span class="font-medium text-foreground">{{ model[f.fieldKey] ?? sliderConfig(f).min }}{{ parseFieldMeta(f).unit || "" }}</span>
+                <span>{{ sliderConfig(f).max }}{{ parseFieldMeta(f).unit || "" }}</span>
               </div>
             </div>
 
@@ -627,6 +778,17 @@ defineExpose({ validate })
               @update:model-value="setField(f.fieldKey, $event)"
             />
 
+            <div v-else-if="isOmniVideoListField(f)" class="space-y-2">
+              <KlingOmniVideoListField
+                :field="f"
+                :model-value="model[f.fieldKey]"
+                @update:model-value="setOmniVideoListField(f.fieldKey, $event)"
+              />
+              <p v-if="hasBaseOmniVideo(f)" class="text-xs text-amber-500">
+                已选择 base 参考视频：输出会按参考视频时长，时长滑杆不生效。
+              </p>
+            </div>
+
             <div v-else-if="isUploadField(f)" class="space-y-2">
               <div
                 v-if="strVal(f.fieldKey) && !uploading[f.fieldKey]"
@@ -654,7 +816,7 @@ defineExpose({ validate })
                 <div class="absolute inset-x-0 bottom-0 flex items-center justify-end gap-2 bg-gradient-to-t from-black/70 to-transparent p-2 opacity-0 transition group-hover:opacity-100">
                   <label class="inline-flex cursor-pointer items-center gap-1 rounded-md bg-white/15 px-2.5 py-1 text-xs font-medium text-white backdrop-blur transition hover:bg-white/25">
                     重新上传
-                    <input class="hidden" type="file" :accept="uploadAccept(f)" @change="onFilePicked(f.fieldKey, $event)" />
+                    <input class="hidden" type="file" :accept="uploadAccept(f)" @change="onFilePicked(f, $event)" />
                   </label>
                   <button
                     type="button"
@@ -682,14 +844,14 @@ defineExpose({ validate })
                   {{ uploading[f.fieldKey] ? "上传中..." : uploadPrompt(f) }}
                 </span>
                 <span v-if="!uploading[f.fieldKey]" class="text-xs text-muted-foreground/70">
-                  支持点击选择文件
+                  {{ uploadHelpText(f) }}
                 </span>
                 <input
                   class="hidden"
                   type="file"
                   :accept="uploadAccept(f)"
                   :disabled="uploading[f.fieldKey]"
-                  @change="onFilePicked(f.fieldKey, $event)"
+                  @change="onFilePicked(f, $event)"
                 />
               </label>
             </div>
@@ -707,7 +869,7 @@ defineExpose({ validate })
                   :accept="f.fieldType === 'image' ? 'image/*' : 'video/*,audio/*,image/*'"
                   type="file"
                   class="text-xs"
-                  @change="onFilePicked(f.fieldKey, $event)"
+                  @change="onFilePicked(f, $event)"
                 />
                 <span v-if="uploading[f.fieldKey]" class="text-xs text-muted-foreground">上传中...</span>
               </div>
@@ -726,7 +888,7 @@ defineExpose({ validate })
               最多 {{ maxLengthFor(f) }} 字
               <span v-if="f.fieldType === 'textarea'">（当前 {{ strVal(f.fieldKey).length }} 字）</span>
             </p>
-            <p v-else-if="f.placeholder" class="text-[11px] text-muted-foreground">{{ f.placeholder }}</p>
+            <p v-else-if="showFieldHelpText(f)" class="text-[11px] text-muted-foreground">{{ fieldHelpText(f) }}</p>
           </div>
         </div>
       </section>

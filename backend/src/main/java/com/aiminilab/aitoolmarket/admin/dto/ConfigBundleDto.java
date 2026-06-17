@@ -53,6 +53,8 @@ public record ConfigBundleDto(
             String baseUrl,
             String apiKey,
             String extraAuthJson,
+            String executionTask,
+            String executionOptionsJson,
             Boolean secretsRedacted,
             String minimaxGroupId,
             String consoleUrl,

@@ -3,6 +3,7 @@ package com.aiminilab.aitoolmarket.agent.dto;
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
 
 import com.aiminilab.aitoolmarket.agent.support.ModelCapabilitiesCodec;
+import com.aiminilab.aitoolmarket.agent.support.ModelRoutePreviewResolver;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -21,6 +22,9 @@ public record AgentModelConfigResponse(
         String baseUrl,
         String apiKeyMasked,
         String extraAuthJsonMasked,
+        String executionTask,
+        String executionOptionsJsonMasked,
+        ModelRoutePreviewResolver.RoutePreview routePreview,
         String minimaxGroupId,
         String consoleUrl,
         String balanceUrl,
@@ -89,6 +93,18 @@ public record AgentModelConfigResponse(
                                                 String channelIconAsset,
                                                 boolean chatSelectable,
                                                 String providerMetadataVersion) {
+        return from(config, codec, vendorAccountName, channelCode, channelLabel, channelIconAsset, chatSelectable, providerMetadataVersion, null);
+    }
+
+    public static AgentModelConfigResponse from(AgentModelConfig config,
+                                                ModelCapabilitiesCodec codec,
+                                                String vendorAccountName,
+                                                String channelCode,
+                                                String channelLabel,
+                                                String channelIconAsset,
+                                                boolean chatSelectable,
+                                                String providerMetadataVersion,
+                                                ModelRoutePreviewResolver.RoutePreview routePreview) {
         return new AgentModelConfigResponse(
                 config.getId(),
                 config.getVendorAccountId(),
@@ -100,6 +116,9 @@ public record AgentModelConfigResponse(
                 config.getBaseUrl(),
                 mask(config.getApiKey()),
                 maskJsonSecret(config.getExtraAuthJson()),
+                config.getExecutionTask(),
+                maskJsonSecret(config.getExecutionOptionsJson()),
+                routePreview,
                 config.getMinimaxGroupId(),
                 config.getConsoleUrl(),
                 config.getBalanceUrl(),

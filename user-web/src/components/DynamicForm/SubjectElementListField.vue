@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue"
+import { computed, nextTick, ref, watch } from "vue"
 import { Loader2, Plus, Trash2, Video, X } from "lucide-vue-next"
 import type { ToolField } from "@/api/types"
 import { uploadToolFile } from "@/api/toolApi"
@@ -9,6 +9,7 @@ import {
   createEmptySubjectElementItem,
   parseSubjectElementEditorItems,
   serializeSubjectElementItems,
+  subjectElementAllowedModes,
   subjectElementMax,
   type SubjectElementEditorItem,
   type SubjectElementMode,
@@ -33,6 +34,10 @@ const pickerOpen = ref(false)
 const pickerIndex = ref<number | null>(null)
 
 const limit = computed(() => subjectElementMax(props.field))
+const modeOptions = computed(() => {
+  const allowed = new Set(subjectElementAllowedModes(props.field))
+  return SUBJECT_ELEMENT_MODE_OPTIONS.filter((option) => allowed.has(option.value))
+})
 
 watch(
   () => props.modelValue,
@@ -51,7 +56,9 @@ function syncValue(nextItems: SubjectElementEditorItem[]) {
   syncing.value = true
   items.value = nextItems
   emit("update:modelValue", serializeSubjectElementItems(nextItems))
-  syncing.value = false
+  nextTick(() => {
+    syncing.value = false
+  })
 }
 
 function addItem() {
@@ -59,7 +66,7 @@ function addItem() {
     window.alert(`最多添加 ${limit.value} 个主体`)
     return
   }
-  syncValue([...items.value, createEmptySubjectElementItem()])
+  items.value = [...items.value, createEmptySubjectElementItem(modeOptions.value[0]?.value || "library_ref")]
 }
 
 function removeItem(index: number) {
@@ -143,12 +150,12 @@ async function uploadImageForItem(index: number, target: "frontal" | "refer") {
     updateItem(index, { frontalImage: url })
     return
   }
-  const nextRefer = [...item.referImages, url].slice(0, 4)
+  const nextRefer = [...item.referImages, url].slice(0, 3)
   updateItem(index, { referImages: nextRefer })
 }
 
 async function uploadVideoForItem(index: number) {
-  const url = await uploadSingle("video/*")
+  const url = await uploadSingle("video/mp4,video/quicktime,video/*")
   if (!url) return
   updateItem(index, { referVideo: url })
 }
@@ -179,7 +186,7 @@ function removeReferImage(index: number, referIndex: number) {
     </div>
 
     <div v-if="items.length === 0" class="rounded-lg border border-dashed border-white/10 px-3 py-4 text-xs text-[#a8a6b5]">
-      暂无主体，点击「添加主体」创建参考对象
+      暂无主体，点击“添加主体”创建参考对象
     </div>
 
     <div
@@ -196,7 +203,7 @@ function removeReferImage(index: number, referIndex: number) {
 
       <div class="flex flex-wrap gap-2">
         <button
-          v-for="option in SUBJECT_ELEMENT_MODE_OPTIONS"
+          v-for="option in modeOptions"
           :key="option.value"
           type="button"
           class="rounded-full border px-2.5 py-1 text-[11px] transition"
@@ -259,12 +266,12 @@ function removeReferImage(index: number, referIndex: number) {
         </div>
 
         <div class="space-y-1">
-          <label class="text-[11px] text-white/45">参考图（最多 4 张）</label>
+          <label class="text-[11px] text-white/45">参考图（1-3 张）</label>
           <div class="flex flex-wrap gap-2">
             <button
               type="button"
               class="inline-flex h-14 w-14 items-center justify-center rounded-lg border border-dashed border-white/15 bg-[#07070c] text-white/45"
-              :disabled="uploading || item.referImages.length >= 4"
+              :disabled="uploading || item.referImages.length >= 3"
               @click="uploadImageForItem(index, 'refer')"
             >
               <Plus class="h-4 w-4" />
@@ -284,6 +291,7 @@ function removeReferImage(index: number, referIndex: number) {
               </button>
             </div>
           </div>
+          <p class="text-[11px] text-white/35">需包含正面图和 1-3 张角度不同的参考图，支持 JPG、JPEG、PNG。</p>
         </div>
       </div>
 
@@ -311,6 +319,7 @@ function removeReferImage(index: number, referIndex: number) {
             </button>
           </div>
         </div>
+        <p class="text-[11px] text-white/35">支持 MP4/MOV，建议 3-8 秒、16:9 或 9:16、1080P，大小不超过 200MB。</p>
       </div>
     </div>
 

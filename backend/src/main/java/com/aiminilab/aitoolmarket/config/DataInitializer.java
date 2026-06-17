@@ -516,6 +516,48 @@ public class DataInitializer implements CommandLineRunner {
         ensureColumn("agent_model_configs", "balance_url", "ALTER TABLE agent_model_configs ADD COLUMN balance_url VARCHAR(512) NULL");
         ensureColumn("agent_model_configs", "docs_url", "ALTER TABLE agent_model_configs ADD COLUMN docs_url VARCHAR(512) NULL");
         ensureColumn("agent_model_configs", "extra_auth_json", "ALTER TABLE agent_model_configs ADD COLUMN extra_auth_json TEXT NULL");
+        ensureColumn("agent_model_configs", "execution_task", "ALTER TABLE agent_model_configs ADD COLUMN execution_task VARCHAR(64) NULL");
+        ensureColumn("agent_model_configs", "execution_options_json", "ALTER TABLE agent_model_configs ADD COLUMN execution_options_json TEXT NULL");
+        executeSql("""
+                UPDATE agent_model_configs
+                SET execution_task = CASE
+                    WHEN config_code = 'kling-gateway-omni-video' THEN 'omni_video'
+                    WHEN config_code = 'kling-gateway-omni-image' THEN 'omni_image'
+                    WHEN config_code LIKE '%multi-image%' OR config_code LIKE '%multi_image%' THEN 'multi_image2video'
+                    WHEN config_code LIKE '%motion%' THEN 'motion_control'
+                    WHEN config_code LIKE '%image-to-video%' OR config_code LIKE '%image2video%' THEN 'image2video'
+                    WHEN provider = 'kling_video' AND capabilities LIKE '%IMAGE_GENERATION%' THEN 'image_generation'
+                    WHEN provider = 'kling_video' AND capabilities LIKE '%VIDEO_GENERATION%' THEN 'text2video'
+                    ELSE execution_task
+                END
+                WHERE is_deleted = 0
+                  AND provider = 'kling_video'
+                  AND (execution_task IS NULL OR execution_task = '')
+                """);
+        executeSqlIgnore("""
+                UPDATE agent_model_configs
+                SET execution_task = LOWER(REPLACE(
+                    REPLACE(CAST(JSON_EXTRACT(extra_auth_json, '$.apiTask') AS CHAR), '"', ''),
+                    '-', '_'))
+                WHERE is_deleted = 0
+                  AND (execution_task IS NULL OR execution_task = '')
+                  AND extra_auth_json IS NOT NULL
+                  AND JSON_VALID(extra_auth_json)
+                  AND JSON_EXTRACT(extra_auth_json, '$.apiTask') IS NOT NULL
+                """);
+        executeSqlIgnore("""
+                UPDATE agent_model_configs
+                SET execution_options_json = JSON_OBJECT(
+                    'createPath', REPLACE(CAST(JSON_EXTRACT(extra_auth_json, '$.createPath') AS CHAR), '"', ''),
+                    'resultPath', REPLACE(CAST(JSON_EXTRACT(extra_auth_json, '$.resultPath') AS CHAR), '"', '')
+                )
+                WHERE is_deleted = 0
+                  AND (execution_options_json IS NULL OR execution_options_json = '')
+                  AND extra_auth_json IS NOT NULL
+                  AND JSON_VALID(extra_auth_json)
+                  AND JSON_EXTRACT(extra_auth_json, '$.createPath') IS NOT NULL
+                  AND JSON_EXTRACT(extra_auth_json, '$.resultPath') IS NOT NULL
+                """);
         ensureColumn("agent_model_configs", "input_token_price_per_1k", "ALTER TABLE agent_model_configs ADD COLUMN input_token_price_per_1k DECIMAL(18,8) NOT NULL DEFAULT 0");
         ensureColumn("agent_model_configs", "output_token_price_per_1k", "ALTER TABLE agent_model_configs ADD COLUMN output_token_price_per_1k DECIMAL(18,8) NOT NULL DEFAULT 0");
         ensureColumn("agent_model_configs", "input_token_price_per_1m", "ALTER TABLE agent_model_configs ADD COLUMN input_token_price_per_1m DECIMAL(18,8) NOT NULL DEFAULT 0");

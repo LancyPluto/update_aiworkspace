@@ -36,7 +36,7 @@ SET
         'parameters', JSON_OBJECT('modelConfigId', (SELECT id FROM agent_model_configs WHERE config_code = 'siliconflow_voice_tts' LIMIT 1)))),
     JSON_OBJECT('id', 'clip-video', 'type', 'workflowNode', 'position', JSON_OBJECT('x', 1860, 'y', 360),
       'data', JSON_OBJECT('title', '图生视频', 'nodeDefType', 'video_model', 'kind', 'model', 'color', '#f97316',
-        'parameters', JSON_OBJECT('modelConfigId', (SELECT id FROM agent_model_configs WHERE config_code = 'seedance_video_generation' LIMIT 1), 'resolution', '480p', 'durationSeconds', 5))),
+        'parameters', JSON_OBJECT('modelConfigId', (SELECT id FROM agent_model_configs WHERE config_code = 'volcengine-gateway-video' LIMIT 1), 'resolution', '480p', 'durationSeconds', 5))),
     JSON_OBJECT('id', 'compose', 'type', 'workflowNode', 'position', JSON_OBJECT('x', 2120, 'y', 220),
       'data', JSON_OBJECT('title', '字幕合成', 'nodeDefType', 'subtitle', 'kind', 'tool', 'color', '#f97316')),
     JSON_OBJECT('id', 'output', 'type', 'workflowNode', 'position', JSON_OBJECT('x', 2380, 'y', 220),

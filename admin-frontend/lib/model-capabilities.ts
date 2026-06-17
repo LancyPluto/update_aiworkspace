@@ -12,7 +12,6 @@ export const fallbackProviderCapabilities: Record<string, string[]> = {
   siliconflow: ["IMAGE_GENERATION", "DIGITAL_HUMAN"],
   siliconflow_images: ["IMAGE_GENERATION", "DIGITAL_HUMAN"],
   volcengine_images: ["IMAGE_GENERATION"],
-  volcengine: ["TEXT_GENERATION", "IMAGE_GENERATION", "VIDEO_GENERATION"],
   seedance: ["VIDEO_GENERATION", "DIGITAL_HUMAN"],
   minimax_speech: ["TEXT_TO_SPEECH"],
   siliconflow_speech: ["TEXT_TO_SPEECH"],

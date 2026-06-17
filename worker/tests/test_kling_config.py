@@ -32,6 +32,27 @@ class KlingConfigTests(unittest.TestCase):
         self.assertEqual(result_path, "/v1/videos/motion-control/{task_id}")
         self.assertEqual(resolve_kling_api_task(model_config), "motion_control")
 
+    def test_execution_task_routes_omni_video_before_legacy_extra_auth(self) -> None:
+        model_config = {
+            "executionTask": "omni_video",
+            "extraAuthJson": '{"apiTask":"text2video"}',
+        }
+        create_path, result_path = resolve_kling_video_paths(model_config)
+        self.assertEqual(create_path, "/v1/videos/omni-video")
+        self.assertEqual(result_path, "/v1/videos/omni-video/{task_id}")
+        self.assertEqual(resolve_kling_api_task(model_config), "omni_video")
+
+    def test_execution_options_override_paths(self) -> None:
+        model_config = {
+            "executionTask": "text2video",
+            "executionOptionsJson": (
+                '{"createPath":"/v1/videos/omni-video","resultPath":"/v1/videos/omni-video/{task_id}"}'
+            ),
+        }
+        create_path, result_path = resolve_kling_video_paths(model_config)
+        self.assertEqual(create_path, "/v1/videos/omni-video")
+        self.assertEqual(result_path, "/v1/videos/omni-video/{task_id}")
+
     def test_resolve_custom_paths_from_extra_auth(self) -> None:
         model_config = {
             "extraAuthJson": (

@@ -18,6 +18,8 @@ public class AgentModelConfig {
     private String baseUrl;
     private String apiKey;
     private String extraAuthJson;
+    private String executionTask;
+    private String executionOptionsJson;
     private String minimaxGroupId;
     private String consoleUrl;
     private String balanceUrl;
@@ -57,6 +59,10 @@ public class AgentModelConfig {
     public void setApiKey(String apiKey) { this.apiKey = apiKey; }
     public String getExtraAuthJson() { return extraAuthJson; }
     public void setExtraAuthJson(String extraAuthJson) { this.extraAuthJson = extraAuthJson; }
+    public String getExecutionTask() { return executionTask; }
+    public void setExecutionTask(String executionTask) { this.executionTask = executionTask; }
+    public String getExecutionOptionsJson() { return executionOptionsJson; }
+    public void setExecutionOptionsJson(String executionOptionsJson) { this.executionOptionsJson = executionOptionsJson; }
     public String getMinimaxGroupId() { return minimaxGroupId; }
     public void setMinimaxGroupId(String minimaxGroupId) { this.minimaxGroupId = minimaxGroupId; }
     public String getConsoleUrl() { return consoleUrl; }

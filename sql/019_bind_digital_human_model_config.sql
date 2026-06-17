@@ -97,7 +97,7 @@ VALUES
 ),
 (
   'Seedance video - Doubao Seedance',
-  'seedance_video_generation',
+  'volcengine-gateway-video',
   'seedance',
   'doubao-seedance-1-5-pro-251215',
   'https://ark.cn-beijing.volces.com',

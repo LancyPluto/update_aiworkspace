@@ -31,6 +31,8 @@ public class MarketModelConfigBridge {
                 resolved.getApiKey(),
                 null,
                 resolved.getExtraAuthJson(),
+                resolved.getExecutionTask(),
+                resolved.getExecutionOptionsJson(),
                 resolved.getMinimaxGroupId(),
                 resolved.getConsoleUrl(),
                 resolved.getBalanceUrl(),

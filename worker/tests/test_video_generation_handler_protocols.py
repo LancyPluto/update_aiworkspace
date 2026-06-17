@@ -86,6 +86,36 @@ class FakeVideoPersister:
         return {"url": f"/generated/video/{task_id}/video-1.mp4", "sourceUrl": source_url}
 
 
+def test_seedance_video_handler_uses_params_model_override() -> None:
+    backend = FakeBackendClient()
+    backend.get_execution_context = lambda task_id, trace_id=None: {
+        "traceId": trace_id,
+        "status": "QUEUED",
+        "params": {
+            "prompt": "扣篮",
+            "duration": 3,
+            "aspectRatio": "16:9",
+            "model": "doubao-seedance-1-0-pro-fast-251015",
+        },
+        "modelConfig": {
+            "provider": "seedance",
+            "modelName": "doubao-seedance-1-5-pro-251215",
+        },
+    }
+    seedance = StrictSeedanceClient()
+    handler = VideoGenerationHandler(
+        backend_client=backend,
+        seedance_client=seedance,
+        video_persister=FakeVideoPersister(),
+    )
+
+    result = handler.handle({"taskId": 130, "traceId": "trace-seedance-model"})
+
+    assert result["status"] == "SUCCESS"
+    assert seedance.request is not None
+    assert seedance.request["model"] == "doubao-seedance-1-0-pro-fast-251015"
+
+
 def test_seedance_video_handler_omits_tail_frame_protocol_field() -> None:
     backend = FakeBackendClient()
     seedance = StrictSeedanceClient()

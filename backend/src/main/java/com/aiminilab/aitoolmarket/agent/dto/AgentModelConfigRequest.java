@@ -17,6 +17,8 @@ public record AgentModelConfigRequest(
         String apiKey,
         Boolean clearApiKey,
         String extraAuthJson,
+        String executionTask,
+        String executionOptionsJson,
         String minimaxGroupId,
         String consoleUrl,
         String balanceUrl,

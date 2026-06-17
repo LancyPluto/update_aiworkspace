@@ -1,9 +1,9 @@
 package com.aiminilab.aitoolmarket.subject.service;
 
+import com.aiminilab.aitoolmarket.agent.entity.ModelVendorAccount;
 import com.aiminilab.aitoolmarket.common.dto.PageResponse;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
-import com.aiminilab.aitoolmarket.agent.entity.ModelVendorAccount;
 import com.aiminilab.aitoolmarket.subject.dto.CreateSubjectRequest;
 import com.aiminilab.aitoolmarket.subject.dto.SubjectResponse;
 import com.aiminilab.aitoolmarket.subject.dto.SubjectSyncContextResponse;
@@ -28,6 +28,10 @@ public class SubjectServiceImpl implements SubjectService {
     private static final String DEFAULT_KLING_BASE_URL = "https://api-beijing.klingai.com";
     private static final String REF_IMAGE = "image_refer";
     private static final String REF_VIDEO = "video_refer";
+    private static final int MAX_ELEMENT_NAME_LENGTH = 20;
+    private static final int MAX_ELEMENT_DESCRIPTION_LENGTH = 100;
+    private static final int MAX_REFER_IMAGES = 3;
+    private static final int MAX_REFER_VIDEOS = 1;
 
     private final GenerationSubjectMapper subjectMapper;
     private final SubjectVendorAccountResolver vendorAccountResolver;
@@ -35,9 +39,9 @@ public class SubjectServiceImpl implements SubjectService {
     private final ObjectMapper objectMapper;
 
     public SubjectServiceImpl(GenerationSubjectMapper subjectMapper,
-                                SubjectVendorAccountResolver vendorAccountResolver,
-                                SubjectQueuePublisher subjectQueuePublisher,
-                                ObjectMapper objectMapper) {
+                              SubjectVendorAccountResolver vendorAccountResolver,
+                              SubjectQueuePublisher subjectQueuePublisher,
+                              ObjectMapper objectMapper) {
         this.subjectMapper = subjectMapper;
         this.vendorAccountResolver = vendorAccountResolver;
         this.subjectQueuePublisher = subjectQueuePublisher;
@@ -65,6 +69,7 @@ public class SubjectServiceImpl implements SubjectService {
 
     @Override
     public SubjectResponse create(Long userId, CreateSubjectRequest request) {
+        validateElementText(request);
         String referenceType = normalizeReferenceType(request.referenceType());
         validateReference(referenceType, request.referenceJson());
         String vendorAccountRef = vendorAccountResolver.normalizeRef(request.vendorAccountRef());
@@ -114,10 +119,13 @@ public class SubjectServiceImpl implements SubjectService {
 
     @Override
     public void delete(Long userId, String subjectCode) {
-        requireSubject(userId, subjectCode);
+        GenerationSubject subject = requireSubject(userId, subjectCode);
         int updated = subjectMapper.softDelete(userId, subjectCode, LocalDateTime.now());
         if (updated == 0) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "主体不存在");
+        }
+        if (subject.getUpstreamElementId() != null && !subject.getUpstreamElementId().isBlank()) {
+            subjectQueuePublisher.publishDelete(subjectCode, userId, subject.getUpstreamElementId());
         }
     }
 
@@ -193,6 +201,20 @@ public class SubjectServiceImpl implements SubjectService {
         }
     }
 
+    private void validateElementText(CreateSubjectRequest request) {
+        String displayName = trimToNull(request.displayName());
+        if (displayName == null) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "主体名称不能为空");
+        }
+        if (displayName.length() > MAX_ELEMENT_NAME_LENGTH) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "主体名称不能超过 20 个字符");
+        }
+        String description = trimToNull(request.description());
+        if (description != null && description.length() > MAX_ELEMENT_DESCRIPTION_LENGTH) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "主体描述不能超过 100 个字符");
+        }
+    }
+
     private void validateReference(String referenceType, JsonNode referenceJson) {
         if (referenceJson == null || referenceJson.isNull()) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "referenceJson 不能为空");
@@ -202,12 +224,15 @@ public class SubjectServiceImpl implements SubjectService {
             ArrayNode referImages = referenceJson.path("referImages").isArray()
                     ? (ArrayNode) referenceJson.get("referImages")
                     : null;
-            boolean hasRefer = referImages != null && referImages.size() > 0;
+            int referImageCount = countNonBlank(referImages);
             if (frontal == null) {
                 throw new BusinessException(ErrorCode.PARAM_ERROR, "图片主体需提供 frontalImage 正面图");
             }
-            if (!hasRefer) {
+            if (referImageCount == 0) {
                 throw new BusinessException(ErrorCode.PARAM_ERROR, "图片主体需至少提供 1 张参考图 referImages");
+            }
+            if (referImageCount > MAX_REFER_IMAGES) {
+                throw new BusinessException(ErrorCode.PARAM_ERROR, "图片主体最多提供 3 张参考图 referImages");
             }
             return;
         }
@@ -215,8 +240,12 @@ public class SubjectServiceImpl implements SubjectService {
             ArrayNode referVideos = referenceJson.path("referVideos").isArray()
                     ? (ArrayNode) referenceJson.get("referVideos")
                     : null;
-            if (referVideos == null || referVideos.isEmpty()) {
+            int referVideoCount = countNonBlank(referVideos);
+            if (referVideoCount == 0) {
                 throw new BusinessException(ErrorCode.PARAM_ERROR, "视频主体需提供 referVideos");
+            }
+            if (referVideoCount > MAX_REFER_VIDEOS) {
+                throw new BusinessException(ErrorCode.PARAM_ERROR, "视频主体最多提供 1 个参考视频 referVideos");
             }
         }
     }
@@ -276,6 +305,19 @@ public class SubjectServiceImpl implements SubjectService {
         }
         String text = node.asText("").trim();
         return text.isEmpty() ? null : text;
+    }
+
+    private static int countNonBlank(ArrayNode nodes) {
+        if (nodes == null) {
+            return 0;
+        }
+        int count = 0;
+        for (JsonNode node : nodes) {
+            if (textValue(node) != null) {
+                count++;
+            }
+        }
+        return count;
     }
 
     private static String firstNonBlank(String first, String second) {

@@ -16,6 +16,7 @@ import com.aiminilab.aitoolmarket.agent.service.ModelCapabilityService;
 import com.aiminilab.aitoolmarket.agent.service.ModelProviderMetadataService;
 import com.aiminilab.aitoolmarket.agent.support.ModelCapabilitiesCodec;
 import com.aiminilab.aitoolmarket.agent.support.ModelConfigCredentialResolver;
+import com.aiminilab.aitoolmarket.agent.support.ModelRoutePreviewResolver;
 import com.aiminilab.aitoolmarket.agent.support.VendorCodeResolver;
 import com.aiminilab.aitoolmarket.agent.support.VolcengineEndpointSupport;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
@@ -49,6 +50,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
     private final ModelCapabilityService modelCapabilityService;
     private final ModelCapabilitiesCodec capabilitiesCodec;
     private final ModelConfigCredentialResolver credentialResolver;
+    private final ModelRoutePreviewResolver routePreviewResolver;
     private final VendorCodeResolver vendorCodeResolver;
     private final ObjectMapper objectMapper;
 
@@ -60,6 +62,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                                        ModelCapabilityService modelCapabilityService,
                                        ModelCapabilitiesCodec capabilitiesCodec,
                                        ModelConfigCredentialResolver credentialResolver,
+                                       ModelRoutePreviewResolver routePreviewResolver,
                                        VendorCodeResolver vendorCodeResolver,
                                        ObjectMapper objectMapper) {
         this.agentModelConfigMapper = agentModelConfigMapper;
@@ -70,6 +73,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         this.modelCapabilityService = modelCapabilityService;
         this.capabilitiesCodec = capabilitiesCodec;
         this.credentialResolver = credentialResolver;
+        this.routePreviewResolver = routePreviewResolver;
         this.vendorCodeResolver = vendorCodeResolver;
         this.objectMapper = objectMapper;
     }
@@ -182,6 +186,8 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         config.setModelName(request.modelName().trim());
         config.setBaseUrl(blankToNull(request.baseUrl()));
         config.setExtraAuthJson(mergeExtraAuthJson(request, existing));
+        config.setExecutionTask(resolveExecutionTask(request, existing));
+        config.setExecutionOptionsJson(resolveExecutionOptionsJson(request, existing));
         if (request.vendorAccountId() != null) {
             config.setApiKey("");
         } else if (request.apiKey() != null && !request.apiKey().isBlank()) {
@@ -462,6 +468,8 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                 null,
                 false,
                 null,
+                config.getExecutionTask(),
+                config.getExecutionOptionsJson(),
                 config.getMinimaxGroupId(),
                 config.getConsoleUrl(),
                 config.getBalanceUrl(),
@@ -601,7 +609,8 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                 vendorCodeResolver.vendorLabel(channelCode),
                 vendorCodeResolver.vendorIconAsset(channelCode),
                 chatSelectable,
-                providerMetadataService.metadataVersion(config.getProvider())
+                providerMetadataService.metadataVersion(config.getProvider()),
+                routePreviewResolver.resolve(config)
         );
     }
 
@@ -714,6 +723,16 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                 objectMapper.readTree(request.extraAuthJson());
             } catch (com.fasterxml.jackson.core.JsonProcessingException exception) {
                 throw new BusinessException(ErrorCode.PARAM_ERROR, "extraAuthJson must be valid JSON");
+            }
+        }
+        if (request.executionOptionsJson() != null && !request.executionOptionsJson().isBlank()) {
+            try {
+                JsonNode parsed = objectMapper.readTree(request.executionOptionsJson());
+                if (parsed == null || !parsed.isObject()) {
+                    throw new BusinessException(ErrorCode.PARAM_ERROR, "executionOptionsJson must be a JSON object");
+                }
+            } catch (com.fasterxml.jackson.core.JsonProcessingException exception) {
+                throw new BusinessException(ErrorCode.PARAM_ERROR, "executionOptionsJson must be valid JSON");
             }
         }
         if (request.vendorAccountId() != null) {
@@ -836,6 +855,8 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                 hasApiKey ? request.apiKey() : existing.getApiKey(),
                 request.clearApiKey(),
                 hasExtraAuth ? request.extraAuthJson() : existing.getExtraAuthJson(),
+                request.executionTask(),
+                request.executionOptionsJson(),
                 request.minimaxGroupId(),
                 request.consoleUrl(),
                 request.balanceUrl(),
@@ -886,6 +907,8 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                 apiKey,
                 request.clearApiKey(),
                 extraAuthJson,
+                request.executionTask(),
+                request.executionOptionsJson(),
                 request.minimaxGroupId(),
                 request.consoleUrl(),
                 request.balanceUrl(),
@@ -932,6 +955,8 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                 hasApiKey ? request.apiKey() : "",
                 request.clearApiKey(),
                 hasExtraAuth ? request.extraAuthJson() : "",
+                request.executionTask(),
+                request.executionOptionsJson(),
                 request.minimaxGroupId(),
                 request.consoleUrl(),
                 request.balanceUrl(),
@@ -967,6 +992,8 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                 request.apiKey(),
                 request.clearApiKey(),
                 request.extraAuthJson(),
+                request.executionTask(),
+                request.executionOptionsJson(),
                 request.minimaxGroupId(),
                 request.consoleUrl(),
                 request.balanceUrl(),
@@ -1027,6 +1054,42 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
             node.put("readTimeoutSeconds", request.readTimeoutSeconds());
         }
         return node.isEmpty() ? null : node.toString();
+    }
+
+    private String resolveExecutionTask(AgentModelConfigRequest request, AgentModelConfig existing) {
+        String requested = ModelRoutePreviewResolver.normalizeTask(request.executionTask());
+        if (!requested.isBlank()) {
+            return requested;
+        }
+        if (existing != null && existing.getExecutionTask() != null && !existing.getExecutionTask().isBlank()) {
+            return ModelRoutePreviewResolver.normalizeTask(existing.getExecutionTask());
+        }
+        String legacy = routePreviewResolver.taskFromJson(request.extraAuthJson());
+        if (legacy.isBlank() && existing != null) {
+            legacy = routePreviewResolver.taskFromJson(existing.getExtraAuthJson());
+        }
+        return legacy.isBlank() ? null : legacy;
+    }
+
+    private String resolveExecutionOptionsJson(AgentModelConfigRequest request, AgentModelConfig existing) {
+        String requested = blankToNull(request.executionOptionsJson());
+        if (requested != null) {
+            return requested;
+        }
+        if (existing != null && existing.getExecutionOptionsJson() != null && !existing.getExecutionOptionsJson().isBlank()) {
+            return existing.getExecutionOptionsJson();
+        }
+        ModelRoutePreviewResolver.RoutePair legacyPair = routePreviewResolver.pairFromOptions(request.extraAuthJson());
+        if (legacyPair == null && existing != null) {
+            legacyPair = routePreviewResolver.pairFromOptions(existing.getExtraAuthJson());
+        }
+        if (legacyPair == null) {
+            return null;
+        }
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("createPath", legacyPair.createPath());
+        node.put("resultPath", legacyPair.resultPath());
+        return node.toString();
     }
 
     private void mergeObject(ObjectNode target, String json) {

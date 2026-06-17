@@ -64,7 +64,7 @@ class RedisConsumer:
             return
 
         message_type = str(message.get("messageType") or "").strip().lower()
-        if message_type != "subject_sync" and "taskId" not in message:
+        if message_type not in {"subject_sync", "subject_delete"} and "taskId" not in message:
             LOGGER.error("redis message missing taskId: %s", message)
             return
 

@@ -77,7 +77,7 @@ class RabbitMqConsumer:
         try:
             message = json.loads(body.decode("utf-8"))
             message_type = str(message.get("messageType") or "").strip().lower()
-            if message_type != "subject_sync" and "taskId" not in message:
+            if message_type not in {"subject_sync", "subject_delete"} and "taskId" not in message:
                 raise ValueError(f"message missing taskId: {message}")
             result = self.handler.handle(message)
             LOGGER.info("task handled result=%s", result)

@@ -19,9 +19,10 @@ KLING_API_TASK_PATHS: dict[str, tuple[str, str]] = {
 KLING_OMNI_IMAGE_MODELS = frozenset({"kling-image-o1", "kling-v3-omni"})
 
 KLING_ELEMENT_PATHS: dict[str, str] = {
-    "create": "/v1/general/advanced-custom-elements",
+    "create": "/v1/general/advanced-custom-elements/",
     "get": "/v1/general/advanced-custom-elements/{task_id}",
     "list": "/v1/general/advanced-custom-elements",
+    "preset_list": "/v1/general/advanced-presets-elements",
     "delete": "/v1/general/delete-elements",
 }
 
@@ -39,6 +40,9 @@ def parse_extra_auth_json(raw: Any) -> dict[str, Any]:
 
 
 def resolve_kling_api_task(model_config: dict[str, Any]) -> str:
+    direct = str(model_config.get("executionTask") or model_config.get("execution_task") or "").strip().lower()
+    if direct:
+        return direct.replace("-", "_")
     extra = parse_extra_auth_json(model_config.get("extraAuthJson"))
     for key in ("apiTask", "api_task", "taskType", "task_type"):
         value = str(extra.get(key) or "").strip().lower()
@@ -48,6 +52,11 @@ def resolve_kling_api_task(model_config: dict[str, Any]) -> str:
 
 
 def resolve_kling_video_paths(model_config: dict[str, Any]) -> tuple[str, str]:
+    options = parse_extra_auth_json(model_config.get("executionOptionsJson") or model_config.get("execution_options_json"))
+    create_path = str(options.get("createPath") or options.get("create_path") or "").strip()
+    result_path = str(options.get("resultPath") or options.get("result_path") or "").strip()
+    if create_path and result_path:
+        return create_path, result_path
     extra = parse_extra_auth_json(model_config.get("extraAuthJson"))
     api_task = resolve_kling_api_task(model_config)
     if api_task in KLING_API_TASK_PATHS:
@@ -76,6 +85,11 @@ def resolve_kling_image_paths(
     model_config: dict[str, Any],
     params: dict[str, Any] | None = None,
 ) -> tuple[str, str]:
+    options = parse_extra_auth_json(model_config.get("executionOptionsJson") or model_config.get("execution_options_json"))
+    create_path = str(options.get("createPath") or options.get("create_path") or "").strip()
+    result_path = str(options.get("resultPath") or options.get("result_path") or "").strip()
+    if create_path and result_path:
+        return create_path, result_path
     extra = parse_extra_auth_json(model_config.get("extraAuthJson"))
     api_task = resolve_kling_image_api_task(model_config, params)
     if api_task in {"image_generation", "omni_image"}:

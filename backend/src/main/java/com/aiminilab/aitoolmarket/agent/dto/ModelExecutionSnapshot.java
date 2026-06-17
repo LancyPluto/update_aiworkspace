@@ -15,6 +15,8 @@ public record ModelExecutionSnapshot(
         String baseUrl,
         String apiKey,
         String extraAuthJson,
+        String executionTask,
+        String executionOptionsJson,
         String minimaxGroupId,
         Integer timeoutSeconds,
         BigDecimal inputTokenPricePer1k,
@@ -40,6 +42,8 @@ public record ModelExecutionSnapshot(
                 config.getBaseUrl(),
                 config.getApiKey(),
                 config.getExtraAuthJson(),
+                config.getExecutionTask(),
+                config.getExecutionOptionsJson(),
                 config.getMinimaxGroupId(),
                 config.getTimeoutSeconds(),
                 config.getInputTokenPricePer1k(),
@@ -64,6 +68,8 @@ public record ModelExecutionSnapshot(
         config.setBaseUrl(baseUrl);
         config.setApiKey(apiKey);
         config.setExtraAuthJson(extraAuthJson);
+        config.setExecutionTask(executionTask);
+        config.setExecutionOptionsJson(executionOptionsJson);
         config.setMinimaxGroupId(minimaxGroupId);
         config.setTimeoutSeconds(timeoutSeconds);
         config.setInputTokenPricePer1k(inputTokenPricePer1k);
