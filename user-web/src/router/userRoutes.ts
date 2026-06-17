@@ -35,6 +35,9 @@ export const userRoutes = {
   get materialLibrary() {
     return { name: "MaterialLibrary" }
   },
+  get subjectLibrary() {
+    return { name: "SubjectLibrary" }
+  },
   get community() {
     return { name: "CommunityDiscover" }
   },
@@ -52,5 +55,8 @@ export const userRoutes = {
   },
   taskResult(taskId: string) {
     return { name: "TaskResult", params: { taskId } }
+  },
+  workflowStudio(taskId: string) {
+    return { name: "WorkflowStudio", params: { taskId } }
   },
 } as const

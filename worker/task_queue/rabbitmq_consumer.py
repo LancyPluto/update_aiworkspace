@@ -76,7 +76,8 @@ class RabbitMqConsumer:
     def _process_message(self, connection, channel, method, properties, body: bytes) -> None:
         try:
             message = json.loads(body.decode("utf-8"))
-            if "taskId" not in message:
+            message_type = str(message.get("messageType") or "").strip().lower()
+            if message_type != "subject_sync" and "taskId" not in message:
                 raise ValueError(f"message missing taskId: {message}")
             result = self.handler.handle(message)
             LOGGER.info("task handled result=%s", result)
@@ -112,16 +113,22 @@ class RabbitMqConsumer:
                 next_retry = retry_count + 1
                 headers["x-retry-count"] = next_retry
                 retry_queue = f"{self.retry_queue_prefix}.{next_retry}"
-                LOGGER.exception(
-                    "rabbitmq task handling failed, retry=%s/%s queue=%s",
+                self._log_task_exception(
+                    exc,
+                    "rabbitmq task handling failed, retry=%s/%s queue=%s error=%s",
                     next_retry,
                     self.max_retries,
                     retry_queue,
+                    exc,
                 )
                 self._publish(channel, retry_queue, body, headers)
             else:
                 headers["x-dead-reason"] = "max-retries-exceeded"
-                LOGGER.exception("rabbitmq task handling failed, moved to dead queue")
+                self._log_task_exception(
+                    exc,
+                    "rabbitmq task handling failed, moved to dead queue error=%s",
+                    exc,
+                )
                 self._publish(channel, self.dead_queue_name, body, headers)
             self._ack(channel, method.delivery_tag)
         except UnroutableError:
@@ -149,6 +156,10 @@ class RabbitMqConsumer:
             connection.close()
         except ConnectionWrongStateError:
             LOGGER.debug("rabbitmq connection already closed before close()")
+
+    @staticmethod
+    def _log_task_exception(exc: Exception, message: str, *args) -> None:
+        LOGGER.error(message, *args, exc_info=(type(exc), exc, exc.__traceback__))
 
     @staticmethod
     def _retry_count(headers: dict) -> int:

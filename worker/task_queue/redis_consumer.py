@@ -63,12 +63,19 @@ class RedisConsumer:
             LOGGER.exception("invalid redis message: %s", raw_message)
             return
 
-        if "taskId" not in message:
+        message_type = str(message.get("messageType") or "").strip().lower()
+        if message_type != "subject_sync" and "taskId" not in message:
             LOGGER.error("redis message missing taskId: %s", message)
             return
 
         try:
-            LOGGER.info("processing redis message taskId=%s traceId=%s", message.get("taskId"), message.get("traceId", "-"))
+            LOGGER.info(
+                "processing redis message type=%s taskId=%s subjectCode=%s traceId=%s",
+                message_type or "task",
+                message.get("taskId"),
+                message.get("subjectCode"),
+                message.get("traceId", "-"),
+            )
             result = self.handler.handle(message)
             LOGGER.info("task handled result=%s", result)
         except Exception:

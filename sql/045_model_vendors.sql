@@ -21,7 +21,7 @@ VALUES
   ('suno', 'Suno', 'suno', 55, 1),
   ('openai', 'OpenAI', 'openai', 60, 1),
   ('openai_gateway', 'OpenAI 兼容网关', 'openrouter', 70, 1),
-  ('agnes', 'Agnes AI', 'api', 80, 1),
+  ('agnes', 'Agnes AI', 'agnes', 80, 1),
   ('infinitetalk', 'InfiniteTalk', 'infinitetalk', 90, 1),
   ('mock', 'Mock', 'api', 999, 1)
 ON DUPLICATE KEY UPDATE

@@ -598,7 +598,8 @@ public class DataInitializer implements CommandLineRunner {
                 INSERT INTO model_vendors(vendor_code, vendor_label, icon_asset, sort_order, enabled)
                 VALUES
                   ('qwen', '阿里云百炼', 'qwen', 45, 1),
-                  ('suno', 'Suno', 'suno', 55, 1)
+                  ('suno', 'Suno', 'suno', 55, 1),
+                  ('agnes', 'Agnes AI', 'agnes', 80, 1)
                 ON DUPLICATE KEY UPDATE
                   vendor_label = VALUES(vendor_label),
                   icon_asset = VALUES(icon_asset),

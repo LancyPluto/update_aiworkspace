@@ -10,7 +10,7 @@ import { useAuthStore } from "@/store/authStore"
 import { userRoutes } from "@/router/userRoutes"
 import { randomUUID } from "@/utils/randomUUID"
 import { buildTaskParams } from "@/utils/toolTaskParams"
-import { isVideoPreviewUrl } from "@/adapters/toolPresentationAdapter"
+import { isVideoPreviewUrl, isWorkflowToolCode } from "@/adapters/toolPresentationAdapter"
 import { cleanToolDisplayText } from "@/utils/toolDisplayText"
 import { formatToolCreditHint, formatToolCreditLabel } from "@/utils/toolCreditLabel"
 
@@ -105,7 +105,7 @@ async function handleGenerate() {
 
   submitting.value = true
   try {
-    await createTask(
+    const task = await createTask(
       {
         toolCode: tool.value.toolCode,
         params,
@@ -114,7 +114,11 @@ async function handleGenerate() {
       { token: auth.token },
     )
     emit("close")
-    await router.push({ path: "/create", query: { tool: tool.value.toolCode } })
+    await router.push(
+      isWorkflowToolCode(tool.value.toolCode)
+        ? userRoutes.workflowStudio(String(task.taskId))
+        : userRoutes.taskStatus(String(task.taskId)),
+    )
   } catch (e) {
     if (e instanceof ApiBusinessError) {
       if (e.code === "CREDIT_NOT_ENOUGH" || e.code === "AGENT_CREDIT_NOT_ENOUGH") {

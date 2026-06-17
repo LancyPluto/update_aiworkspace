@@ -179,6 +179,9 @@ function isActive(item: NavLink) {
   if (item.href === "/agent") {
     return route.path === item.href || route.path.startsWith(item.href + "/")
   }
+  if (item.href === "/library") {
+    return route.path === "/library" || route.path.startsWith("/library/")
+  }
   if (item.href === "/community") {
     return route.path === item.href || route.path.startsWith("/community/posts/")
   }

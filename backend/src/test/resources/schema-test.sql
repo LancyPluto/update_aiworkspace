@@ -951,6 +951,38 @@ CREATE TABLE tool_workflow_versions (
   CONSTRAINT uk_workflow_version UNIQUE (workflow_id, version)
 );
 
+CREATE TABLE IF NOT EXISTS user_generation_subjects (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  user_id BIGINT NOT NULL,
+  subject_code VARCHAR(64) NOT NULL,
+  display_name VARCHAR(128) NOT NULL,
+  description VARCHAR(512) NULL,
+  provider_code VARCHAR(64) NOT NULL,
+  vendor_account_ref VARCHAR(128) NOT NULL,
+  reference_type VARCHAR(32) NOT NULL,
+  preview_url VARCHAR(1024) NULL,
+  reference_json CLOB NOT NULL,
+  upstream_element_id VARCHAR(128) NULL,
+  sync_task_id VARCHAR(128) NULL,
+  sync_status VARCHAR(32) NOT NULL,
+  sync_error VARCHAR(512) NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+INSERT INTO model_vendor_accounts (
+  vendor_code, account_name, base_url, api_key, extra_auth_json, enabled, is_deleted
+) VALUES (
+  'kling',
+  'test-default',
+  'https://api-beijing.klingai.com',
+  '',
+  '{"accessKey":"test-access","secretKey":"test-secret"}',
+  1,
+  0
+);
+
 INSERT INTO credit_recharge_packages (
   package_code,
   package_name,

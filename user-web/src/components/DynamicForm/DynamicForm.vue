@@ -75,9 +75,19 @@ watch(
 
 const advancedMode = computed(() => isCustomModeAdvanced(model.value))
 
-const visibleFields = computed(() => filterFieldsForUi(props.fields, model.value))
+const uniqueFields = computed(() => {
+  const seen = new Set<string>()
+  return props.fields.filter((field) => {
+    const key = field.fieldKey || `${field.fieldName}:${field.sortOrder}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+})
 
-const modeField = computed(() => props.fields.find((field) => field.fieldKey === "customMode"))
+const visibleFields = computed(() => filterFieldsForUi(uniqueFields.value, model.value))
+
+const modeField = computed(() => uniqueFields.value.find((field) => field.fieldKey === "customMode"))
 
 const groupedFields = computed(() => {
   const withoutMode = visibleFields.value.filter((field) => field.fieldKey !== "customMode")

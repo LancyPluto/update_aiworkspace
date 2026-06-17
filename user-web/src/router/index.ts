@@ -94,6 +94,16 @@ const router = createRouter({
       component: MaterialLibraryPage,
     },
     {
+      path: "/library/subjects",
+      name: "SubjectLibrary",
+      meta: { requiresAuth: true },
+      component: MaterialLibraryPage,
+    },
+    {
+      path: "/subjects",
+      redirect: "/library/subjects",
+    },
+    {
       path: "/profile",
       name: "Profile",
       meta: { requiresAuth: true },
@@ -142,6 +152,13 @@ const router = createRouter({
       name: "TaskResult",
       meta: { requiresAuth: true },
       component: () => import("@/pages/TaskResult/Page.vue"),
+      props: true,
+    },
+    {
+      path: "/workflow/studio/:taskId",
+      name: "WorkflowStudio",
+      meta: { requiresAuth: true },
+      component: () => import("@/pages/WorkflowStudio/Page.vue"),
       props: true,
     },
   ],

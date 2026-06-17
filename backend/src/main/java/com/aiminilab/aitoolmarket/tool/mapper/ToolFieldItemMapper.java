@@ -15,7 +15,15 @@ public interface ToolFieldItemMapper extends BaseMapper<ToolFieldItem> {
             SELECT i.*
             FROM tool_field_schemas s
             JOIN tool_field_schema_items i ON i.schema_id = s.id
-            WHERE s.tool_id = #{toolId} AND s.status = 'ACTIVE' AND i.status = 'ACTIVE'
+            WHERE s.tool_id = #{toolId}
+              AND s.status = 'ACTIVE'
+              AND s.id = (
+                SELECT MAX(active_s.id)
+                FROM tool_field_schemas active_s
+                WHERE active_s.tool_id = #{toolId}
+                  AND active_s.status = 'ACTIVE'
+              )
+              AND i.status = 'ACTIVE'
             ORDER BY i.sort_order ASC, i.id ASC
             """)
     List<ToolFieldItem> findActiveFields(@Param("toolId") Long toolId);

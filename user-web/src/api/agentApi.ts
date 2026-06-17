@@ -163,7 +163,7 @@ export async function streamAgentRunEvents(
     token?: string | null
     afterEventId?: number
     signal?: AbortSignal
-    onEvent: (event: AgentRunEvent) => void
+    onEvent: (event: AgentRunEvent) => void | Promise<void>
   },
 ) {
   const path = `/api/v1/agent/runs/${runId}/events/stream`
@@ -201,12 +201,22 @@ export async function streamAgentRunEvents(
       const data = dataLines.join("\n")
       if (data === "ok") continue
       try {
-        options.onEvent(JSON.parse(data) as AgentRunEvent)
+        const event = JSON.parse(data) as AgentRunEvent
+        await options.onEvent(event)
+        await yieldForRenderableAgentEvent(event)
       } catch {
         // Ignore keepalive or malformed event frames.
       }
     }
   }
+}
+
+function yieldForRenderableAgentEvent(event: AgentRunEvent): Promise<void> | undefined {
+  if (event.eventType !== "message.delta" && event.eventType !== "reasoning.delta") return undefined
+  if (typeof window === "undefined") return undefined
+  return new Promise((resolve) => {
+    window.requestAnimationFrame(() => resolve())
+  })
 }
 
 export function confirmAgentTool(

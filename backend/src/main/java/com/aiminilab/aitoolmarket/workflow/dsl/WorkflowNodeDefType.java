@@ -28,18 +28,26 @@ public enum WorkflowNodeDefType {
         return switch (normalized) {
             case "start" -> Optional.of(START);
             case "field_input", "input" -> Optional.of(FIELD_INPUT);
-            case "llm_text", "text_model", "llm_model" -> Optional.of(LLM_TEXT);
+            // 文本生成类（剧本/分镜/系列策划，见 AI漫剧交付计划书 §5）。
+            case "llm_text", "text_model", "llm_model",
+                 "script_planner", "storyboard_generator" -> Optional.of(LLM_TEXT);
             case "model_call" -> Optional.of(MODEL_CALL);
             case "backend_tool" -> Optional.of(TOOL_CALL);
-            case "image_model", "image_generation" -> Optional.of(IMAGE_MODEL);
-            case "tts_model", "voice_model" -> Optional.of(TTS_MODEL);
-            case "video_model", "video_generation" -> Optional.of(VIDEO_MODEL);
-            case "subtitle", "compose" -> Optional.of(SUBTITLE);
+            // 图像生成类（角色定妆/场景设定/关键帧）。
+            case "image_model", "image_generation",
+                 "character_design", "scene_design", "keyframe_generator" -> Optional.of(IMAGE_MODEL);
+            // 音频类（角色配音 / BGM 音效）。
+            case "tts_model", "voice_model", "voice_tts", "music_sfx" -> Optional.of(TTS_MODEL);
+            // 视频生成类（图生视频 / 片段接力）。
+            case "video_model", "video_generation", "image_to_video" -> Optional.of(VIDEO_MODEL);
+            case "subtitle", "compose", "video_composer" -> Optional.of(SUBTITLE);
             case "tool_call" -> Optional.of(TOOL_CALL);
             case "video_output", "output", "final_output" -> Optional.of(VIDEO_OUTPUT);
             case "user_input", "user_input_node" -> Optional.of(USER_INPUT);
-            case "user_confirm", "user_confirm_node" -> Optional.of(USER_CONFIRM);
-            case "condition", "condition_node" -> Optional.of(CONDITION);
+            // 人工审核 / 质检确认 → 内联确认节点（不触发付费生成）。
+            case "user_confirm", "user_confirm_node", "human_review" -> Optional.of(USER_CONFIRM);
+            // 帧/片段质检 → 内联条件分支（不触发付费生成）。
+            case "condition", "condition_node", "frame_qc", "clip_qc" -> Optional.of(CONDITION);
             case "scene_loop", "loop", "scene_split" -> Optional.of(SCENE_LOOP);
             default -> Optional.empty();
         };

@@ -21,7 +21,10 @@ SET
   billing_unit = 'PER_CALL',
   unit_price = 0.01999800,
   updated_at = CURRENT_TIMESTAMP
-WHERE config_code = 'kling-gateway-image-generation';
+WHERE config_code IN (
+  'kling-gateway-image-generation',
+  'kling-gateway-omni-image'
+);
 
 DELETE r FROM pricing_rules r
 INNER JOIN agent_model_configs m ON r.scope_type = 'MODEL' AND r.scope_ref = m.id
@@ -115,13 +118,35 @@ SELECT
   1,
   'Kling image generation count multiplier'
 FROM agent_model_configs m
-WHERE m.config_code = 'kling-gateway-image-generation';
+WHERE m.config_code IN (
+  'kling-gateway-image-generation',
+  'kling-gateway-omni-image'
+);
+
+INSERT INTO pricing_rules (
+  scope_type, scope_ref, param_key, rule_type, match_op, match_value,
+  factor, extra_credits, priority, enabled, remark
+)
+SELECT
+  'MODEL',
+  m.id,
+  'resolution',
+  'MULTIPLIER',
+  'EQ',
+  '2k',
+  1.5000,
+  0,
+  50,
+  1,
+  'Kling Omni image 2K vs 1K'
+FROM agent_model_configs m
+WHERE m.config_code = 'kling-gateway-omni-image';
 
 UPDATE ai_tools t
 JOIN agent_model_configs m ON t.model_config_id = m.id
 SET
   t.estimated_credit_cost = CASE
-    WHEN m.config_code = 'kling-gateway-image-generation' THEN 3
+    WHEN m.config_code IN ('kling-gateway-image-generation', 'kling-gateway-omni-image') THEN 3
     ELSE 360
   END,
   t.updated_at = CURRENT_TIMESTAMP

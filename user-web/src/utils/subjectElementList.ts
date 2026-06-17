@@ -1,18 +1,22 @@
 import type { ToolField } from "@/api/types"
 import { parseFieldMeta } from "@/utils/fieldUiMeta"
 
-export type SubjectElementMode = "element_id" | "image_element" | "video_element"
+export type SubjectElementMode = "element_id" | "library_ref" | "image_element" | "video_element"
 
 export interface SubjectElementEditorItem {
   id: string
   mode: SubjectElementMode
   elementId: string
+  librarySubjectCode?: string
+  libraryDisplayName?: string
+  upstreamElementId?: string
   frontalImage: string
   referImages: string[]
   referVideo: string
 }
 
 export const SUBJECT_ELEMENT_MODE_OPTIONS: Array<{ label: string; value: SubjectElementMode }> = [
+  { label: "从主体库选择", value: "library_ref" },
   { label: "已有主体 ID", value: "element_id" },
   { label: "图片主体", value: "image_element" },
   { label: "视频主体", value: "video_element" },
@@ -26,11 +30,14 @@ export function subjectElementMin(field: Pick<ToolField, "options" | "optionsJso
   return parseFieldMeta(field).minCount ?? 0
 }
 
-function createEditorItem(mode: SubjectElementMode = "element_id"): SubjectElementEditorItem {
+function createEditorItem(mode: SubjectElementMode = "library_ref"): SubjectElementEditorItem {
   return {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     mode,
     elementId: "",
+    librarySubjectCode: "",
+    libraryDisplayName: "",
+    upstreamElementId: "",
     frontalImage: "",
     referImages: [],
     referVideo: "",
@@ -76,6 +83,9 @@ export function parseSubjectElementEditorItems(value: unknown, limit: number): S
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         mode,
         elementId: row.element_id !== undefined && row.element_id !== null ? String(row.element_id).trim() : "",
+        librarySubjectCode: "",
+        libraryDisplayName: "",
+        upstreamElementId: "",
         frontalImage: typeof row.frontal_image === "string" ? row.frontal_image.trim() : "",
         referImages,
         referVideo: referVideos[0] || "",
@@ -84,12 +94,16 @@ export function parseSubjectElementEditorItems(value: unknown, limit: number): S
 }
 
 export function createEmptySubjectElementItem(): SubjectElementEditorItem {
-  return createEditorItem("element_id")
+  return createEditorItem("library_ref")
 }
 
 export function serializeSubjectElementItems(items: SubjectElementEditorItem[]): Record<string, unknown>[] {
   return items
     .map((item) => {
+      if (item.mode === "library_ref") {
+        const elementId = (item.upstreamElementId || item.elementId).trim()
+        return elementId ? { element_id: elementId } : null
+      }
       if (item.mode === "element_id") {
         const elementId = item.elementId.trim()
         return elementId ? { element_id: elementId } : null
@@ -123,6 +137,9 @@ export function validateSubjectElementItems(
     return { valid: false, message: `${field.fieldName} 最多 ${maxCount} 个主体` }
   }
   for (const item of items) {
+    if (item.mode === "library_ref" && !(item.upstreamElementId || item.elementId).trim()) {
+      return { valid: false, message: `${field.fieldName} 中存在未选择的主体库条目` }
+    }
     if (item.mode === "element_id" && !item.elementId.trim()) {
       return { valid: false, message: `${field.fieldName} 中存在未填写的主体 ID` }
     }

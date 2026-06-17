@@ -89,6 +89,30 @@ class BackendClient:
         )
         return self._parse_response(response)
 
+    def get_subject_sync_context(self, subject_code: str, trace_id: str | None = None) -> dict[str, Any]:
+        response = self._request(
+            "GET",
+            f"/api/internal/v1/subjects/{subject_code}/sync-context",
+            timeout=self.timeout,
+            trace_id=trace_id,
+        )
+        return self._parse_response(response)
+
+    def report_subject_sync_result(
+        self,
+        subject_code: str,
+        payload: dict[str, Any],
+        trace_id: str | None = None,
+    ) -> dict[str, Any]:
+        response = self._request(
+            "POST",
+            f"/api/internal/v1/subjects/{subject_code}/sync-result",
+            json_body=payload,
+            timeout=self.timeout,
+            trace_id=trace_id,
+        )
+        return self._parse_response(response)
+
     def _url(self, path: str) -> str:
         return f"{self.base_url}{path}"
 

@@ -22,6 +22,7 @@ import java.time.LocalDateTime;
         "com.aiminilab.aitoolmarket.user.mapper",
         "com.aiminilab.aitoolmarket.market.mapper",
         "com.aiminilab.aitoolmarket.ppt.mapper",
+        "com.aiminilab.aitoolmarket.subject.mapper",
         "com.aiminilab.aitoolmarket.workflow.mapper"
 })
 public class MybatisPlusConfig {

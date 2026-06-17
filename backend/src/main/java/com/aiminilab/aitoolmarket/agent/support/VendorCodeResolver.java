@@ -147,9 +147,6 @@ public class VendorCodeResolver {
         if ("openai_gateway".equalsIgnoreCase(vendorCode)) {
             return "openrouter";
         }
-        if ("agnes".equalsIgnoreCase(vendorCode)) {
-            return "api";
-        }
         if ("volcengine".equalsIgnoreCase(vendorCode)) {
             return "doubao";
         }

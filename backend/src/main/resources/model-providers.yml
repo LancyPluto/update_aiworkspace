@@ -171,6 +171,10 @@ providers:
     billingDefault: PER_CALL
     testStrategy: accept_only
     workerReady: true
+    subjectElementSupport: true
+    subjectSyncModes:
+      - image_refer
+      - video_refer
     description: Kling official text/image-to-video and image generation API. Configure AK/SK in extra auth JSON.
 
   - code: bailian_happyhorse
@@ -264,3 +268,32 @@ providers:
     testStrategy: accept_only
     workerReady: true
     description: Video generation worker placeholder until provider API is wired.
+
+  - code: vidu_video
+    label: Vidu video
+    capabilities:
+      - VIDEO_GENERATION
+      - IMAGE_GENERATION
+    defaultBaseUrl: https://api.vidu.com
+    defaultModel: viduq3-pro
+    billingDefault: PER_CALL
+    providerProtocol: vidu_async
+    vendorKind: direct
+    upstreamVendor: vidu
+    testStrategy: accept_only
+    workerReady: false
+    description: Vidu (Shengshu) async video generation API. Endpoints under /ent/v2/* (text2video / img2video / reference2video / start-end2video / extend / multi-frame / upscale / lipsync / motion-sync / digital-human / text2image / reference2image). Token auth, 24h result URL TTL.
+
+  - code: vidu_audio
+    label: Vidu audio
+    capabilities:
+      - AUDIO_GENERATION
+    defaultBaseUrl: https://api.vidu.com
+    defaultModel: audio-1.0
+    billingDefault: PER_CALL
+    providerProtocol: vidu_async
+    vendorKind: direct
+    upstreamVendor: vidu
+    testStrategy: accept_only
+    workerReady: false
+    description: Vidu audio capabilities (text2audio / timing2audio / text2speech / voice-clone). Token auth.

@@ -103,6 +103,8 @@ services:
       RABBITMQ_DEAD_QUEUE: ${RABBITMQ_DEAD_QUEUE:-ai.tool.normal.dead}
       RABBITMQ_RETRY_QUEUE_PREFIX: ${RABBITMQ_RETRY_QUEUE_PREFIX:-ai.tool.normal.retry}
       RABBITMQ_RETRY_DELAYS_MS: ${RABBITMQ_RETRY_DELAYS_MS:-5000,30000,120000}
+      SERVER_FORWARD_HEADERS_STRATEGY: native
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174,http://127.0.0.1,http://localhost},https://wlcloudai.com,http://wlcloudai.com,https://www.wlcloudai.com,http://www.wlcloudai.com
       APP_PRODUCTION_MODE: ${APP_PRODUCTION_MODE:-false}
       JWT_SECRET: ${JWT_SECRET:-local-dev-secret}
       INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-local-internal-token}
@@ -115,10 +117,10 @@ services:
       AGENT_DEFAULT_CREDIT_BUDGET: ${AGENT_DEFAULT_CREDIT_BUDGET:-20}
       GENERATED_MEDIA_DIR: /data/generated-media
       # OSS / ASSET_STORAGE_* 由 env_file ../.env 注入，勿在此写默认值以免覆盖
-      # Clash fake-ip (198.18.x.x) breaks direct HTTPS from containers; route via host proxy when set in deploy/.env
-      HTTP_PROXY: ${HTTP_PROXY:-}
-      HTTPS_PROXY: ${HTTPS_PROXY:-}
-      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,mysql,redis,rabbitmq,backend,agent-service,admin-frontend,user-web,nginx,host.docker.internal}
+      # Use explicit container proxy vars only. Host HTTP_PROXY often points at 127.0.0.1, which is invalid inside containers.
+      HTTP_PROXY: ${CONTAINER_HTTP_PROXY:-}
+      HTTPS_PROXY: ${CONTAINER_HTTPS_PROXY:-}
+      NO_PROXY: ${CONTAINER_NO_PROXY:-localhost,127.0.0.1,mysql,redis,rabbitmq,backend,agent-service,admin-frontend,user-web,nginx,host.docker.internal}
     ports:
       - "127.0.0.1:${BACKEND_PORT:-8080}:8080"
     volumes:
@@ -243,9 +245,9 @@ services:
       GENERATED_MEDIA_DIR: /data/generated-media
       GENERATED_MEDIA_PUBLIC_BASE_URL: /generated
       # OSS / ASSET_STORAGE_* 由 env_file ../.env 注入，勿在此写默认值以免覆盖
-      HTTP_PROXY: ${HTTP_PROXY:-}
-      HTTPS_PROXY: ${HTTPS_PROXY:-}
-      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,mysql,redis,rabbitmq,backend,agent-service,admin-frontend,user-web,nginx,host.docker.internal}
+      HTTP_PROXY: ${CONTAINER_HTTP_PROXY:-}
+      HTTPS_PROXY: ${CONTAINER_HTTPS_PROXY:-}
+      NO_PROXY: ${CONTAINER_NO_PROXY:-localhost,127.0.0.1,mysql,redis,rabbitmq,backend,agent-service,admin-frontend,user-web,nginx,host.docker.internal}
     volumes:
       - ../worker:/app
       - ../data/generated-media:/data/generated-media
@@ -287,9 +289,9 @@ services:
       AGENT_MAX_MODEL_CALLS: ${AGENT_MAX_MODEL_CALLS:-5}
       AGENT_MODEL_CALL_COST: ${AGENT_MODEL_CALL_COST:-1}
       AGENT_DEFAULT_CONSUMED_CREDITS: ${AGENT_DEFAULT_CONSUMED_CREDITS:-1}
-      HTTP_PROXY: ${HTTP_PROXY:-}
-      HTTPS_PROXY: ${HTTPS_PROXY:-}
-      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,mysql,redis,rabbitmq,backend,agent-service,admin-frontend,user-web,nginx,host.docker.internal}
+      HTTP_PROXY: ${CONTAINER_HTTP_PROXY:-}
+      HTTPS_PROXY: ${CONTAINER_HTTPS_PROXY:-}
+      NO_PROXY: ${CONTAINER_NO_PROXY:-localhost,127.0.0.1,mysql,redis,rabbitmq,backend,agent-service,admin-frontend,user-web,nginx,host.docker.internal}
     ports:
       - "127.0.0.1:${AGENT_SERVICE_PORT:-8090}:8090"
     volumes:
