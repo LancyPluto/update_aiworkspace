@@ -534,20 +534,22 @@ public class DataInitializer implements CommandLineRunner {
                   AND provider = 'kling_video'
                   AND (execution_task IS NULL OR execution_task = '')
                 """);
-        executeSql("""
+        executeSqlIgnore("""
                 UPDATE agent_model_configs
-                SET execution_task = LOWER(REPLACE(JSON_UNQUOTE(JSON_EXTRACT(extra_auth_json, '$.apiTask')), '-', '_'))
+                SET execution_task = LOWER(REPLACE(
+                    REPLACE(CAST(JSON_EXTRACT(extra_auth_json, '$.apiTask') AS CHAR), '"', ''),
+                    '-', '_'))
                 WHERE is_deleted = 0
                   AND (execution_task IS NULL OR execution_task = '')
                   AND extra_auth_json IS NOT NULL
                   AND JSON_VALID(extra_auth_json)
                   AND JSON_EXTRACT(extra_auth_json, '$.apiTask') IS NOT NULL
                 """);
-        executeSql("""
+        executeSqlIgnore("""
                 UPDATE agent_model_configs
                 SET execution_options_json = JSON_OBJECT(
-                    'createPath', JSON_UNQUOTE(JSON_EXTRACT(extra_auth_json, '$.createPath')),
-                    'resultPath', JSON_UNQUOTE(JSON_EXTRACT(extra_auth_json, '$.resultPath'))
+                    'createPath', REPLACE(CAST(JSON_EXTRACT(extra_auth_json, '$.createPath') AS CHAR), '"', ''),
+                    'resultPath', REPLACE(CAST(JSON_EXTRACT(extra_auth_json, '$.resultPath') AS CHAR), '"', '')
                 )
                 WHERE is_deleted = 0
                   AND (execution_options_json IS NULL OR execution_options_json = '')
