@@ -209,6 +209,21 @@ public interface TaskMapper extends BaseMapper<AiTask> {
         return Optional.ofNullable(selectFirstResult(taskId));
     }
 
+    @Select("""
+            SELECT id, task_id, user_id, resource_type, content_text, sort_order
+            FROM ai_result_resources
+            WHERE task_id = #{taskId}
+            ORDER BY sort_order ASC, id ASC
+            """)
+    List<AiResultResource> findResultResources(@Param("taskId") Long taskId);
+
+    @Update("""
+            UPDATE ai_result_resources
+            SET content_text = #{contentText}
+            WHERE id = #{id}
+            """)
+    int updateResultContent(@Param("id") Long id, @Param("contentText") String contentText);
+
     @Update("""
             <script>
             UPDATE ai_tasks

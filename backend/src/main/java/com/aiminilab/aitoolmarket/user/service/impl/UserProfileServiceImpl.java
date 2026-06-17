@@ -85,7 +85,7 @@ public class UserProfileServiceImpl implements UserProfileService {
 
         String timestamp = LocalDateTime.now().format(AVATAR_FILENAME_TIME);
         String filename = timestamp + "-" + UUID.randomUUID().toString().replace("-", "") + "." + extension;
-        StoredAsset stored = assetStorageService.storeMultipart("avatars/" + userId + "/" + filename, file);
+        StoredAsset stored = assetStorageService.storeMultipartPublic("avatars/" + userId + "/" + filename, file);
         String avatarUrl = stored.publicUrl();
         userMapper.updateAvatarUrl(userId, avatarUrl);
         UserProfileResponse user = UserProfileResponse.from(requireUser(userId));
