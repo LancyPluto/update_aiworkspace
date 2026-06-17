@@ -56,6 +56,9 @@ export type OptionPresetKey =
   | "kling_model_image_gen"
   | "kling_model_multi_image"
   | "kling_model_omni_image"
+  | "volcengine_model_video"
+  | "volcengine_model_image"
+  | "volcengine_model_chat"
 
 export const OPTION_PRESETS: Record<
   OptionPresetKey,
