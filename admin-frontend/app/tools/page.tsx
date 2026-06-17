@@ -43,6 +43,7 @@ import {
   Loader2,
   MessageSquare,
   MoreHorizontal,
+  Music,
   Pencil,
   Plus,
   Search,
@@ -126,6 +127,7 @@ interface ToolRow {
   modelIconUrl: string
   comparisonOriginalUrl: string
   comparisonEffectUrl: string
+  audioPreviewUrl: string
   icon: LucideIcon
   credits: number
   status: boolean
@@ -150,6 +152,7 @@ interface ToolForm {
   modelIconUrl: string
   comparisonOriginalUrl: string
   comparisonEffectUrl: string
+  audioPreviewUrl: string
   estimatedCreditCost: string
   pricingRulesJson: string
   modelConfigId: string
@@ -170,6 +173,7 @@ const initialForm: ToolForm = {
   modelIconUrl: "",
   comparisonOriginalUrl: "",
   comparisonEffectUrl: "",
+  audioPreviewUrl: "",
   estimatedCreditCost: "5",
   pricingRulesJson: "[]",
   modelConfigId: "",
@@ -329,6 +333,14 @@ function normalizeToolMediaUrl(url?: string | null): string {
   return baseUrl ? `${baseUrl}${path}` : path
 }
 
+function textFromEffectPayload(payload: Record<string, unknown>, ...keys: string[]): string {
+  for (const key of keys) {
+    const value = payload[key]
+    if (typeof value === "string" && value.trim()) return value.trim()
+  }
+  return ""
+}
+
 function safePreviewFields(json: string): EditableField[] {
   try {
     return parseFieldsJson(json)
@@ -456,6 +468,7 @@ function mapTool(tool: ToolSummary): ToolRow {
     modelIconUrl: style.modelIconUrl,
     comparisonOriginalUrl: style.comparisonOriginalUrl,
     comparisonEffectUrl: style.comparisonEffectUrl,
+    audioPreviewUrl: style.audioPreviewUrl,
     icon: pickIcon(tool.categoryName),
     credits: tool.estimatedCreditCost ?? 0,
     status: (tool.status || "").toUpperCase() === "ONLINE",
@@ -613,6 +626,31 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
       setError(err instanceof ApiError ? err.message : "导入配置包失败，请确认 JSON 格式正确")
     } finally {
       setImportingBundle(false)
+    }
+  }
+
+  async function handleImportEffectAsset(file: File | undefined) {
+    if (!file) return
+    setFormError(null)
+    try {
+      const payload = JSON.parse(await file.text()) as Record<string, unknown>
+      const coverUrl =
+        textFromEffectPayload(payload, "coverUrl", "imageUrl", "image_url", "thumbnailUrl", "thumbnail_url") ||
+        textFromEffectPayload((payload.media || {}) as Record<string, unknown>, "coverUrl", "imageUrl", "image_url")
+      const audioUrl =
+        textFromEffectPayload(payload, "audioUrl", "audio_url", "url") ||
+        textFromEffectPayload((payload.media || {}) as Record<string, unknown>, "audioUrl", "audio_url", "url")
+      if (!coverUrl && !audioUrl) {
+        throw new Error("Imported file does not contain coverUrl/imageUrl or audioUrl.")
+      }
+      if (coverUrl) updateForm("coverUrl", coverUrl)
+      if (audioUrl) updateForm("audioPreviewUrl", audioUrl)
+      updateForm("mediaDisplayMode", "effect")
+      toast.success("Effect asset imported")
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Import effect asset failed"
+      setFormError(message)
+      toast.error("Import effect asset failed", { description: message })
     }
   }
 
@@ -892,6 +930,7 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
       modelIconUrl: tool.modelIconUrl || "",
       comparisonOriginalUrl: tool.comparisonOriginalUrl || "",
       comparisonEffectUrl: tool.comparisonEffectUrl || "",
+      audioPreviewUrl: tool.audioPreviewUrl || "",
       estimatedCreditCost: String(tool.credits),
       pricingRulesJson: "[]",
       modelConfigId: modelId,
@@ -949,6 +988,7 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
         modelIconUrl: form.modelIconUrl,
         comparisonOriginalUrl: form.comparisonOriginalUrl,
         comparisonEffectUrl: form.comparisonEffectUrl,
+        audioPreviewUrl: form.audioPreviewUrl,
       }
       let preservedMarkers: string[] | undefined
       if (integrationPluginId && editingTool) {
@@ -1349,6 +1389,20 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
                       }}
                     />
                   </label>
+                  <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-xs font-medium hover:bg-secondary">
+                    <Upload className="h-3.5 w-3.5" />
+                    导入模型效果素材 JSON
+                    <input
+                      type="file"
+                      accept="application/json,.json"
+                      className="hidden"
+                      onChange={(event) => {
+                        const file = event.target.files?.[0]
+                        void handleImportEffectAsset(file)
+                        event.currentTarget.value = ""
+                      }}
+                    />
+                  </label>
                   {form.coverUrl.trim() ? (
                     <div className="overflow-hidden rounded-lg border border-border bg-muted/40">
                       {isVideoPreviewUrl(form.coverUrl) ? (
@@ -1406,6 +1460,19 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
                         onChange={(event) => updateForm("modelIconUrl", event.target.value)}
                         placeholder="用于模型卡片；不填则按绑定模型或展示素材自动生成"
                       />
+                    </div>
+                    <div className="space-y-2 sm:col-span-2">
+                      <Label>音频预览 URL</Label>
+                      <Input
+                        value={form.audioPreviewUrl}
+                        onChange={(event) => updateForm("audioPreviewUrl", event.target.value)}
+                        placeholder="Suno 生成的 mp3/m4a 地址；配合展示素材 URL 作为封面"
+                      />
+                      {form.audioPreviewUrl.trim() ? (
+                        <audio src={normalizeToolMediaUrl(form.audioPreviewUrl)} controls preload="metadata" className="w-full" />
+                      ) : (
+                        <p className="text-xs text-muted-foreground">音频工具可填入试听地址，保存后会写入 ai-tool-ui.audioPreviewUrl。</p>
+                      )}
                     </div>
                     {form.mediaDisplayMode === "comparison" ? (
                       <div className="space-y-3 rounded-lg border border-border bg-card p-3 sm:col-span-2">
@@ -1483,6 +1550,10 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
                         ) : (
                           <img src={normalizeToolMediaUrl(form.coverUrl)} alt="effect preview" className="h-full w-full object-cover" />
                         )}
+                      </div>
+                    ) : form.audioPreviewUrl.trim() ? (
+                      <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full ring-1 ring-border bg-muted/40">
+                        <Music className="h-5 w-5 text-primary" />
                       </div>
                     ) : (
                     <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full ring-1 ring-border bg-muted/40">

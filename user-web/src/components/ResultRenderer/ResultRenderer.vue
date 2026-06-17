@@ -154,6 +154,29 @@ function previewAudio(block: Extract<ResultBlock, { type: "audio" }>, track: Aud
   })
 }
 
+function exportAudioEffectAsset(block: Extract<ResultBlock, { type: "audio" }>, track: AudioTrackItem, index: number) {
+  const title = track.title || block.title || `audio-${index + 1}`
+  const payload = {
+    format: "ai-tool-market-effect-asset",
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    title,
+    coverUrl: track.coverUrl || "",
+    audioUrl: track.url,
+    media: {
+      coverUrl: track.coverUrl || "",
+      audioUrl: track.url,
+    },
+    suggestedFrontendStyle: {
+      mediaDisplayMode: "effect",
+      audioPreviewUrl: track.url,
+      demoThumbnails: track.coverUrl ? [track.coverUrl] : [],
+    },
+  }
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" })
+  downloadBlob(blob, `${sanitizeDownloadName(title)}-effect-asset.json`)
+}
+
 function audioTracks(block: Extract<ResultBlock, { type: "audio" }>) {
   return resolveAudioTracks(block)
 }
@@ -340,6 +363,10 @@ function downloadBlob(blob: Blob, filename: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
+function sanitizeDownloadName(value: string) {
+  return value.trim().replace(/[\\/:*?"<>|]+/g, "-").slice(0, 80) || "audio"
+}
+
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, "&amp;")
@@ -465,15 +492,25 @@ function escapeXml(value: string): string {
                   <p class="truncate text-sm font-semibold text-foreground">{{ track.title || `版本 ${trackIndex + 1}` }}</p>
                   <p class="text-xs text-muted-foreground">{{ b.title }}</p>
                 </div>
-                <a
-                  :href="track.url"
-                  :download="track.downloadName ?? `audio-${trackIndex + 1}`"
-                  class="inline-flex h-8 shrink-0 items-center gap-1 rounded-md border border-border px-2.5 text-xs hover:bg-secondary"
-                  @click.stop
-                >
-                  <Download class="h-3.5 w-3.5" />
-                  下载
-                </a>
+                <div class="flex shrink-0 flex-wrap justify-end gap-2">
+                  <a
+                    :href="track.url"
+                    :download="track.downloadName ?? `audio-${trackIndex + 1}`"
+                    class="inline-flex h-8 items-center gap-1 rounded-md border border-border px-2.5 text-xs hover:bg-secondary"
+                    @click.stop
+                  >
+                    <Download class="h-3.5 w-3.5" />
+                    下载
+                  </a>
+                  <button
+                    type="button"
+                    class="inline-flex h-8 items-center gap-1 rounded-md border border-border px-2.5 text-xs hover:bg-secondary"
+                    @click.stop="exportAudioEffectAsset(b, track, trackIndex)"
+                  >
+                    <Download class="h-3.5 w-3.5" />
+                    导出展示
+                  </button>
+                </div>
               </div>
               <audio :src="track.url" controls preload="metadata" class="w-full">
                 当前浏览器不支持音频播放。

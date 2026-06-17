@@ -30,8 +30,10 @@ SET
     {"id":"e-confirm-keyframe","source":"user-input-script","target":"keyframe","sourceHandle":"out-scriptFeedback","targetHandle":"in-script","type":"smoothstep"},
     {"id":"e-field-keyframe","source":"field-input","target":"keyframe","sourceHandle":"out-params","targetHandle":"in-form","type":"smoothstep"},
     {"id":"e-keyframe-scene","source":"keyframe","target":"user-input-scene","sourceHandle":"out-keyframe","targetHandle":"in-upstream","type":"smoothstep"},
+    {"id":"e-script-keyframe","source":"script-planner","target":"keyframe","sourceHandle":"out-script","targetHandle":"in-script","type":"smoothstep","label":"剧本数据"},
     {"id":"e-scene-clip","source":"user-input-scene","target":"clip-video","sourceHandle":"out-sceneFeedback","targetHandle":"in-keyframe","type":"smoothstep"},
     {"id":"e-keyframe-clip","source":"keyframe","target":"clip-video","sourceHandle":"out-keyframe","targetHandle":"in-keyframe","type":"smoothstep","label":"关键帧"},
+    {"id":"e-script-clip","source":"script-planner","target":"clip-video","sourceHandle":"out-script","targetHandle":"in-script","type":"smoothstep","label":"剧本数据"},
     {"id":"e-clip-compose","source":"clip-video","target":"compose","sourceHandle":"out-clip","targetHandle":"in-clip","type":"smoothstep"},
     {"id":"e-script-compose","source":"script-planner","target":"compose","sourceHandle":"out-script","targetHandle":"in-script","type":"smoothstep"},
     {"id":"e-compose-output","source":"compose","target":"output","sourceHandle":"out-finalVideo","targetHandle":"in-finalVideo","type":"smoothstep"}

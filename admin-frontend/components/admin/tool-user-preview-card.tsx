@@ -1,13 +1,14 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { Sparkles } from "lucide-react"
+import { Music, Sparkles } from "lucide-react"
 import { cn } from "@/lib/utils"
 import {
   isVideoPreviewUrl,
   mediaDisplayModeLabel,
   modalityLabel,
   normalizeMediaUrl,
+  normalizeOutputModality,
   resolveMediaDisplayMode,
   resolveModelBrand,
   resolvePreviewCoverUrl,
@@ -30,6 +31,8 @@ export function ToolUserPreviewCard({ tool, baseUrl, className }: ToolUserPrevie
   const displayMode = resolveMediaDisplayMode(tool)
   const brand = useMemo(() => resolveModelBrand(tool, baseUrl), [tool, baseUrl])
   const coverUrl = resolvePreviewCoverUrl(tool, baseUrl)
+  const audioPreviewUrl = normalizeMediaUrl(tool.audioPreviewUrl, baseUrl)
+  const isAudioEffect = normalizeOutputModality(tool.outputModality) === "AUDIO" && Boolean(audioPreviewUrl)
   const displayCover = coverFailed ? "" : coverUrl
   const description = tool.description && tool.description !== "暂无描述" ? tool.description : "点击进入对话"
 
@@ -106,7 +109,20 @@ export function ToolUserPreviewCard({ tool, baseUrl, className }: ToolUserPrevie
       ) : variant === "effect" ? (
         <div className="flex flex-col">
           <div className="relative aspect-[3/4] w-full overflow-hidden bg-muted">
-            {displayCover && isVideoPreviewUrl(displayCover) ? (
+            {isAudioEffect ? (
+              displayCover ? (
+                <img
+                  src={displayCover}
+                  alt={tool.name}
+                  className="h-full w-full object-cover"
+                  onError={() => setCoverFailed(true)}
+                />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-white/10 to-primary/20">
+                  <Music className="h-12 w-12 text-white/45" />
+                </div>
+              )
+            ) : displayCover && isVideoPreviewUrl(displayCover) ? (
               <video
                 src={displayCover}
                 className="h-full w-full object-cover"
@@ -148,6 +164,14 @@ export function ToolUserPreviewCard({ tool, baseUrl, className }: ToolUserPrevie
               <div className="min-w-0">
                 <h3 className="truncate text-lg font-semibold text-white drop-shadow">{tool.name}</h3>
                 <p className="mt-0.5 line-clamp-1 text-[11px] text-white/75">{description}</p>
+                {isAudioEffect ? (
+                  <audio
+                    src={audioPreviewUrl}
+                    controls
+                    preload="metadata"
+                    className="mt-2 h-8 w-full max-w-[220px]"
+                  />
+                ) : null}
               </div>
               <span className="shrink-0 rounded-full bg-white/18 px-2 py-0.5 text-[10px] font-medium text-white ring-1 ring-white/25 backdrop-blur">
                 {modalityLabel(tool.outputModality)}

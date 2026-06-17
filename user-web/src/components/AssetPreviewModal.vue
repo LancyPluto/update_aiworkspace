@@ -70,6 +70,8 @@ const downloadUrl = computed(() => mediaUrl.value)
 
 const canDownload = computed(() => Boolean(downloadUrl.value))
 
+const canExportEffectAsset = computed(() => props.asset?.kind === "audio" && Boolean(mediaUrl.value))
+
 const canReportCommunity = computed(() => {
   const asset = props.asset
   if (!asset || asset.source !== "community" || !asset.communityPostId) return false
@@ -197,6 +199,45 @@ async function copyPrompt() {
     }, 1800)
   }
 }
+
+function exportEffectAsset() {
+  const asset = activeAsset.value
+  if (!asset || asset.kind !== "audio" || !asset.url) return
+  const payload = {
+    format: "ai-tool-market-effect-asset",
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    title: asset.title,
+    coverUrl: asset.coverUrl || "",
+    audioUrl: asset.url,
+    media: {
+      coverUrl: asset.coverUrl || "",
+      audioUrl: asset.url,
+    },
+    suggestedFrontendStyle: {
+      mediaDisplayMode: "effect",
+      audioPreviewUrl: asset.url,
+      demoThumbnails: asset.coverUrl ? [asset.coverUrl] : [],
+    },
+  }
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" })
+  downloadBlob(blob, `${sanitizeDownloadName(asset.title)}-effect-asset.json`)
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement("a")
+  anchor.href = url
+  anchor.download = filename
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  URL.revokeObjectURL(url)
+}
+
+function sanitizeDownloadName(value: string) {
+  return value.trim().replace(/[\\/:*?"<>|]+/g, "-").slice(0, 80) || "audio"
+}
 </script>
 
 <template>
@@ -274,6 +315,12 @@ async function copyPrompt() {
                   class="relative z-10 max-h-full max-w-full rounded-2xl bg-black shadow-[0_24px_90px_rgb(0_0_0_/_0.62)]"
                 />
                 <div v-else-if="asset.kind === 'audio' && mediaUrl" class="relative z-10 w-full max-w-xl rounded-[28px] border border-white/10 bg-black/35 p-8">
+                  <img
+                    v-if="asset.coverUrl"
+                    :src="normalizeMediaUrl(asset.coverUrl)"
+                    :alt="asset.title"
+                    class="mb-6 aspect-[4/3] w-full rounded-2xl object-cover shadow-[0_20px_70px_rgb(0_0_0_/_0.42)]"
+                  />
                   <div class="mb-8 flex items-center gap-4">
                     <div class="grid h-16 w-16 place-items-center rounded-3xl bg-primary/15 text-primary shadow-[0_0_40px_rgb(176_92_255_/_0.18)]">
                       <Music class="h-8 w-8" />
@@ -352,6 +399,15 @@ async function copyPrompt() {
                   <Download class="h-4 w-4" />
                   下载作品
                 </a>
+                <button
+                  v-if="canExportEffectAsset"
+                  type="button"
+                  class="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-2.5 text-sm font-semibold text-white/82 shadow-[inset_0_1px_0_rgb(255_255_255_/_0.08)] transition hover:border-primary/40 hover:text-white"
+                  @click="exportEffectAsset"
+                >
+                  <Download class="h-4 w-4" />
+                  导出展示素材
+                </button>
               </div>
             </aside>
           </section>

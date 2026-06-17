@@ -318,6 +318,7 @@ export interface ToolFrontendStyle {
   modelIconUrl?: string | null
   comparisonOriginalUrl?: string | null
   comparisonEffectUrl?: string | null
+  audioPreviewUrl?: string | null
   heroTitle?: string | null
   heroSubtitle?: string | null
   demoThumbnails?: string[] | null

@@ -12,7 +12,7 @@ const FRONTEND_STYLE_PATTERN = /<!-- ai-tool-ui:(.*?) -->/s
 
 function parseFrontendStyle(
   configNote?: string | null,
-): Pick<AITool, "primaryColor" | "welcomeMessage" | "mediaDisplayMode" | "modelIconUrl" | "comparisonOriginalUrl" | "comparisonEffectUrl"> {
+): Pick<AITool, "primaryColor" | "welcomeMessage" | "mediaDisplayMode" | "modelIconUrl" | "comparisonOriginalUrl" | "comparisonEffectUrl" | "audioPreviewUrl"> {
   const match = (configNote || "").match(FRONTEND_STYLE_PATTERN)
   if (!match) return {}
 
@@ -24,6 +24,7 @@ function parseFrontendStyle(
       modelIconUrl?: unknown
       comparisonOriginalUrl?: unknown
       comparisonEffectUrl?: unknown
+      audioPreviewUrl?: unknown
     }
     return {
       primaryColor: typeof parsed.primaryColor === "string" ? parsed.primaryColor : undefined,
@@ -32,6 +33,7 @@ function parseFrontendStyle(
       modelIconUrl: typeof parsed.modelIconUrl === "string" ? parsed.modelIconUrl : undefined,
       comparisonOriginalUrl: typeof parsed.comparisonOriginalUrl === "string" ? parsed.comparisonOriginalUrl : undefined,
       comparisonEffectUrl: typeof parsed.comparisonEffectUrl === "string" ? parsed.comparisonEffectUrl : undefined,
+      audioPreviewUrl: typeof parsed.audioPreviewUrl === "string" ? parsed.audioPreviewUrl : undefined,
     }
   } catch {
     return {}
@@ -84,6 +86,7 @@ export function mapToolToAITool(tool: ToolSummary | ToolDetail): AITool {
     modelIconUrl: style.modelIconUrl,
     comparisonOriginalUrl: style.comparisonOriginalUrl,
     comparisonEffectUrl: style.comparisonEffectUrl,
+    audioPreviewUrl: style.audioPreviewUrl,
     capabilities: capabilitiesFromTool(tool),
     inputModality: tool.inputModality,
     outputModality: tool.outputModality,

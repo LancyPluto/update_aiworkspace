@@ -220,7 +220,7 @@ class VideoGenerationHandler:
                 extra_auth_json=model_config.get("extraAuthJson"),
             )
         if provider_protocol == "seedance":
-            return self.seedance_client or SeedanceVideoClient()
+            return self.seedance_client or SeedanceVideoClient.from_model_config(model_config)
         if provider == "bailian_happyhorse":
             return self.dashscope_client or DashScopeVideoClient(
                 base_url=model_config.get("baseUrl"),

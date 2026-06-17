@@ -13,6 +13,7 @@ export interface FrontendStyleConfig {
   modelIconUrl: string
   comparisonOriginalUrl: string
   comparisonEffectUrl: string
+  audioPreviewUrl: string
   heroTitle: string
   heroSubtitle: string
   demoThumbnails: string[]
@@ -30,6 +31,7 @@ const defaultFrontendStyle: FrontendStyleConfig = {
   modelIconUrl: "",
   comparisonOriginalUrl: "",
   comparisonEffectUrl: "",
+  audioPreviewUrl: "",
   heroTitle: "",
   heroSubtitle: "",
   demoThumbnails: [],
@@ -87,6 +89,7 @@ export function extractFrontendStyle(configNote?: string | null): { note: string
         modelIconUrl: typeof parsed.modelIconUrl === "string" ? parsed.modelIconUrl : "",
         comparisonOriginalUrl: typeof parsed.comparisonOriginalUrl === "string" ? parsed.comparisonOriginalUrl : "",
         comparisonEffectUrl: typeof parsed.comparisonEffectUrl === "string" ? parsed.comparisonEffectUrl : "",
+        audioPreviewUrl: typeof parsed.audioPreviewUrl === "string" ? parsed.audioPreviewUrl : "",
         heroTitle: typeof parsed.heroTitle === "string" ? parsed.heroTitle : "",
         heroSubtitle: typeof parsed.heroSubtitle === "string" ? parsed.heroSubtitle : "",
         demoThumbnails: stringList(parsed.demoThumbnails),
@@ -113,6 +116,7 @@ export function serializeConfigNote(note: string, style: Partial<FrontendStyleCo
     modelIconUrl: style.modelIconUrl || "",
     comparisonOriginalUrl: style.comparisonOriginalUrl || "",
     comparisonEffectUrl: style.comparisonEffectUrl || "",
+    audioPreviewUrl: style.audioPreviewUrl || "",
     heroTitle: style.heroTitle || "",
     heroSubtitle: style.heroSubtitle || "",
     demoThumbnails: cleanStringList(style.demoThumbnails),

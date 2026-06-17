@@ -43,3 +43,17 @@ test("serializes Pollo-style display fields into ai-tool-ui config", () => {
   assert.deepEqual(parsed.steps, ["上传", "生成", "下载"])
   assert.deepEqual(parsed.recommendedToolCodes, ["style_transfer"])
 })
+
+test("preserves audio preview url in ai-tool-ui config", () => {
+  const serialized = configNote.serializeConfigNote("", {
+    mediaDisplayMode: "effect",
+    audioPreviewUrl: "/generated/music/demo.mp3",
+    demoThumbnails: ["/generated/music/demo.png"],
+  })
+
+  const parsed = configNote.extractFrontendStyle(serialized).style
+
+  assert.equal(parsed.mediaDisplayMode, "effect")
+  assert.equal(parsed.audioPreviewUrl, "/generated/music/demo.mp3")
+  assert.deepEqual(parsed.demoThumbnails, ["/generated/music/demo.png"])
+})

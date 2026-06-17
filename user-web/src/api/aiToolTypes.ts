@@ -25,6 +25,7 @@ export interface AITool {
   modelIconUrl?: string
   comparisonOriginalUrl?: string
   comparisonEffectUrl?: string
+  audioPreviewUrl?: string
   frontendStyle?: ToolFrontendStyle | null
   heroTitle?: string | null
   heroSubtitle?: string | null
