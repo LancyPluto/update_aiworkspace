@@ -9,7 +9,7 @@ from requests.exceptions import ConnectionError as RequestsConnectionError
 from requests.exceptions import SSLError
 
 from config import settings
-from volcengine_model import resolve_volcengine_model_name
+from volcengine_model import normalize_volcengine_openai_base_url, resolve_volcengine_model_name
 
 
 class ModelClientError(RuntimeError):
@@ -85,7 +85,7 @@ class ModelClient:
         max_tokens: int | None = None,
     ) -> ModelGenerationResult:
         effective_provider = provider or settings.model_provider
-        effective_base_url = (base_url or self.base_url).rstrip("/")
+        effective_base_url = normalize_volcengine_openai_base_url((base_url or self.base_url).rstrip("/"))
         effective_api_key = api_key or self.api_key
         effective_model_name = resolve_volcengine_model_name(
             model_name or self.default_model_name,
@@ -186,7 +186,7 @@ class ModelClient:
                 yield chunk
             return
 
-        effective_base_url = (base_url or self.base_url).rstrip("/")
+        effective_base_url = normalize_volcengine_openai_base_url((base_url or self.base_url).rstrip("/"))
         effective_api_key = api_key or self.api_key
         effective_model_name = resolve_volcengine_model_name(
             model_name or self.default_model_name,

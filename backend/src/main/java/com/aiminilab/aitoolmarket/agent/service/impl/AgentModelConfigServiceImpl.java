@@ -17,6 +17,7 @@ import com.aiminilab.aitoolmarket.agent.service.ModelProviderMetadataService;
 import com.aiminilab.aitoolmarket.agent.support.ModelCapabilitiesCodec;
 import com.aiminilab.aitoolmarket.agent.support.ModelConfigCredentialResolver;
 import com.aiminilab.aitoolmarket.agent.support.VendorCodeResolver;
+import com.aiminilab.aitoolmarket.agent.support.VolcengineEndpointSupport;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -275,7 +276,9 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
     public AgentModelConfigTestResponse adminTest(AgentModelConfigRequest request) {
         validate(request);
         AgentModelConfig existing = findExistingForTest(request);
-        AgentModelConfigRequest merged = mergeInheritedCredentialFields(mergeSecretFields(request, existing), existing);
+        AgentModelConfigRequest merged = normalizeProviderBaseUrl(
+                mergeInheritedCredentialFields(mergeSecretFields(request, existing), existing)
+        );
         ModelProviderDefinition provider = providerRegistry.findByCode(merged.provider())
                 .orElseThrow(() -> new BusinessException(ErrorCode.PARAM_ERROR, "unsupported model provider"));
         if (shouldUseAcceptOnlyShortcut(merged, provider)) {
@@ -358,6 +361,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         if (baseUrl == null || baseUrl.isBlank()) {
             baseUrl = provider.defaultBaseUrl();
         }
+        baseUrl = VolcengineEndpointSupport.normalizeProviderBaseUrl(merged.provider(), baseUrl);
         MediaGatewayProbeResult probe = probeMediaGateway(baseUrl, executable.getApiKey());
         long latencyMs = Math.max(0L, System.currentTimeMillis() - startedAt);
         return new AgentModelConfigTestResponse(
@@ -427,7 +431,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
 
     private AgentModelConfigRequest toTestRequest(AgentModelConfig config) {
         List<String> capabilities = capabilitiesCodec.parse(config.getCapabilities());
-        return new AgentModelConfigRequest(
+        return normalizeProviderBaseUrl(new AgentModelConfigRequest(
                 config.getVendorAccountId(),
                 config.getDisplayName(),
                 config.getConfigCode(),
@@ -454,7 +458,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                 config.getAgentEnabled(),
                 config.getDefault(),
                 capabilities.isEmpty() ? null : capabilities
-        );
+        ));
     }
 
     private AgentModelConfig findExistingForTest(AgentModelConfigRequest request) {
@@ -826,7 +830,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         String baseUrl = blankToNull(request.baseUrl()) != null ? request.baseUrl() : resolved.getBaseUrl();
         String apiKey = blankToNull(request.apiKey()) != null ? request.apiKey() : resolved.getApiKey();
         String extraAuthJson = blankToNull(request.extraAuthJson()) != null ? request.extraAuthJson() : resolved.getExtraAuthJson();
-        return new AgentModelConfigRequest(
+        return normalizeProviderBaseUrl(new AgentModelConfigRequest(
                 accountId,
                 request.displayName(),
                 request.configCode(),
@@ -853,7 +857,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                 request.agentEnabled(),
                 request.isDefault(),
                 request.capabilities()
-        );
+        ));
     }
 
     private AgentModelConfigRequest mergeFromVendorAccount(AgentModelConfigRequest request, AgentModelConfig existing) {
@@ -871,7 +875,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         boolean hasApiKey = request.apiKey() != null && !request.apiKey().isBlank();
         boolean hasExtraAuth = request.extraAuthJson() != null && !request.extraAuthJson().isBlank();
         boolean hasBaseUrl = request.baseUrl() != null && !request.baseUrl().isBlank();
-        return new AgentModelConfigRequest(
+        return normalizeProviderBaseUrl(new AgentModelConfigRequest(
                 accountId,
                 request.displayName(),
                 request.configCode(),
@@ -882,6 +886,41 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                 hasApiKey ? request.apiKey() : "",
                 request.clearApiKey(),
                 hasExtraAuth ? request.extraAuthJson() : "",
+                request.minimaxGroupId(),
+                request.consoleUrl(),
+                request.balanceUrl(),
+                request.docsUrl(),
+                request.timeoutSeconds(),
+                request.connectTimeoutSeconds(),
+                request.readTimeoutSeconds(),
+                request.inputTokenPricePer1k(),
+                request.outputTokenPricePer1k(),
+                request.inputTokenPricePer1m(),
+                request.outputTokenPricePer1m(),
+                request.billingUnit(),
+                request.unitPrice(),
+                request.enabled(),
+                request.agentEnabled(),
+                request.isDefault(),
+                request.capabilities()
+        ));
+    }
+
+    private AgentModelConfigRequest normalizeProviderBaseUrl(AgentModelConfigRequest request) {
+        String normalizedBaseUrl = VolcengineEndpointSupport.normalizeProviderBaseUrl(request.provider(), request.baseUrl());
+        if (sameText(normalizedBaseUrl, request.baseUrl())) {
+            return request;
+        }
+        return new AgentModelConfigRequest(
+                request.vendorAccountId(),
+                request.displayName(),
+                request.configCode(),
+                request.provider(),
+                request.modelName(),
+                normalizedBaseUrl,
+                request.apiKey(),
+                request.clearApiKey(),
+                request.extraAuthJson(),
                 request.minimaxGroupId(),
                 request.consoleUrl(),
                 request.balanceUrl(),
