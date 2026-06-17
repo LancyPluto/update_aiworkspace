@@ -366,11 +366,10 @@ def test_openai_images_can_send_source_images_as_json_array(monkeypatch):
     assert captured["payload"]["extra_body"] == {"response_format": "url"}
 
 
-def test_volcengine_seedream_reference_images_use_json_generation_endpoint(monkeypatch):
+def test_volcengine_images_reference_defaults_to_generation_json(monkeypatch):
     client = OpenAIImagesClient(
         base_url="https://ark.cn-beijing.volces.com/api/v3",
         api_key="test-key",
-        extra_auth_json='{"imageInputMode":"jsonImageArray","endpointPath":"/images/generations","responseFormat":"url"}',
     )
     captured = {}
 
@@ -380,21 +379,18 @@ def test_volcengine_seedream_reference_images_use_json_generation_endpoint(monke
         return {"data": [{"url": "https://cdn.example/seedream.png"}]}
 
     def fail_multipart(*_args, **_kwargs):
-        raise AssertionError("Volcengine Seedream JSON image mode must not use multipart edits")
+        raise AssertionError("volcengine seedream references must use /images/generations json input")
 
     monkeypatch.setattr(client, "_post", fake_post)
     monkeypatch.setattr(client, "_post_multipart", fail_multipart)
 
     urls = client.generate_images(
-        prompt="make it sharper",
-        model="doubao-seedream-4-5-251128",
-        image_size="auto",
-        response_format="url",
-        image=["https://storage.example/input.png"],
+        prompt="换成雪原背景",
+        model="doubao-seedream-5-0-260128",
+        image_size="2048x2048",
+        image=["data:image/png;base64,ZmFrZQ=="],
     )
 
     assert urls == ["https://cdn.example/seedream.png"]
     assert captured["path"] == "/images/generations"
-    assert captured["payload"]["image"] == ["https://storage.example/input.png"]
-    assert captured["payload"]["response_format"] == "url"
-    assert captured["payload"]["stream"] is False
+    assert captured["payload"]["image"] == ["data:image/png;base64,ZmFrZQ=="]
