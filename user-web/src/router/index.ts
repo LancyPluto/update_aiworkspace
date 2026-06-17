@@ -2,17 +2,18 @@ import { createRouter, createWebHistory } from "vue-router"
 import { useAuthStore } from "@/store/authStore"
 
 import LoginPage from "@/pages/Login/Page.vue"
-import HomePage from "@/pages/Home/Page.vue"
-import DashboardPage from "@/pages/Dashboard/Page.vue"
-import AgentHomePage from "@/pages/AgentHome/Page.vue"
-import ToolListPage from "@/pages/ToolList/Page.vue"
-import MyTasksPage from "@/pages/MyTasks/Page.vue"
-import MaterialLibraryPage from "@/pages/MaterialLibrary/Page.vue"
-import BillingPage from "@/pages/Billing/Page.vue"
-import ProfilePage from "@/pages/Profile/Page.vue"
-import PublicProfilePage from "@/pages/PublicProfile/Page.vue"
-import CommunityDiscoverPage from "@/pages/CommunityDiscover/Page.vue"
-import InspirationCollectionsPage from "@/pages/InspirationCollections/Page.vue"
+
+const HomePage = () => import("@/pages/Home/Page.vue")
+const DashboardPage = () => import("@/pages/Dashboard/Page.vue")
+const AgentHomePage = () => import("@/pages/AgentHome/Page.vue")
+const ToolListPage = () => import("@/pages/ToolList/Page.vue")
+const MyTasksPage = () => import("@/pages/MyTasks/Page.vue")
+const MaterialLibraryPage = () => import("@/pages/MaterialLibrary/Page.vue")
+const BillingPage = () => import("@/pages/Billing/Page.vue")
+const ProfilePage = () => import("@/pages/Profile/Page.vue")
+const PublicProfilePage = () => import("@/pages/PublicProfile/Page.vue")
+const CommunityDiscoverPage = () => import("@/pages/CommunityDiscover/Page.vue")
+const InspirationCollectionsPage = () => import("@/pages/InspirationCollections/Page.vue")
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),

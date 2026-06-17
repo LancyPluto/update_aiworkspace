@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue"
+import { computed, onMounted, onUnmounted, ref, watch } from "vue"
 import { RouterLink, useRoute } from "vue-router"
 import {
+  ChevronDown,
   Filter,
   Globe2,
   LoaderCircle,
@@ -60,6 +61,10 @@ const tools = ref<ToolSummary[]>([])
 const selectedModality = ref<MaterialModality>("all")
 const selectTool = ref("all")
 const sortType = ref("desc")
+const toolDropdownOpen = ref(false)
+const sortDropdownOpen = ref(false)
+const toolDropdownRef = ref<HTMLElement | null>(null)
+const sortDropdownRef = ref<HTMLElement | null>(null)
 const currentPage = ref(1)
 const hasNextPage = ref(false)
 const loadingMore = ref(false)
@@ -77,6 +82,11 @@ const modalityOptions: Array<{ value: MaterialModality; label: string }> = [
   { value: "TEXT", label: "文本" },
   { value: "OTHER", label: "其他" },
 ]
+
+const sortOptions = [
+  { label: "最新时间", value: "desc" },
+  { label: "最早时间", value: "asc" },
+] as const
 
 const originMaterials = computed<MaterialItem[]>(() =>
   tasks.value
@@ -119,6 +129,19 @@ const toolOptions = computed(() => {
       : originMaterials.value.filter((item) => item.modality === selectedModality.value)
   return Array.from(new Set(source.map((item) => item.task.toolName).filter(Boolean)))
 })
+
+const toolFilterOptions = computed(() => [
+  { label: "全部工具", value: "all" },
+  ...toolOptions.value.map((tool) => ({ label: tool, value: tool })),
+])
+
+const currentToolLabel = computed(
+  () => toolFilterOptions.value.find((item) => item.value === selectTool.value)?.label || "全部工具",
+)
+
+const currentSortLabel = computed(
+  () => sortOptions.find((item) => item.value === sortType.value)?.label || "最新时间",
+)
 const previewRecommendations = computed<AssetPreviewRecommendation[]>(() =>
   previewAsset.value ? recommendToolsForAsset(previewAsset.value) : [],
 )
@@ -135,6 +158,28 @@ watch(
 watch(selectedModality, () => {
   selectTool.value = "all"
 })
+
+function selectToolFilter(value: string) {
+  selectTool.value = value
+  toolDropdownOpen.value = false
+}
+
+function selectSortType(value: string) {
+  sortType.value = value
+  sortDropdownOpen.value = false
+}
+
+function closeDropdowns() {
+  toolDropdownOpen.value = false
+  sortDropdownOpen.value = false
+}
+
+function handleDocumentClick(event: MouseEvent) {
+  const target = event.target
+  if (!(target instanceof Node)) return
+  if (toolDropdownRef.value?.contains(target) || sortDropdownRef.value?.contains(target)) return
+  closeDropdowns()
+}
 
 async function loadMaterials(reset = true) {
   if (reset) {
@@ -339,6 +384,11 @@ async function removeMaterial(item: MaterialItem) {
 
 onMounted(() => {
   if (assetTab.value === "works") loadMaterials()
+  document.addEventListener("click", handleDocumentClick)
+})
+
+onUnmounted(() => {
+  document.removeEventListener("click", handleDocumentClick)
 })
 </script>
 
@@ -382,22 +432,60 @@ onMounted(() => {
                 {{ option.label }}
               </button>
             </div>
-            <select
-              v-model="selectTool"
-              class="h-10 rounded-2xl border border-white/10 bg-white/[0.05] px-3 text-sm text-white outline-none focus:border-primary"
-            >
-              <option value="all">全部工具</option>
-              <option v-for="tool in toolOptions" :key="tool" :value="tool">
-                {{ tool }}
-              </option>
-            </select>
-            <select
-              v-model="sortType"
-              class="h-10 rounded-2xl border border-white/10 bg-white/[0.05] px-3 text-sm text-white outline-none focus:border-primary"
-            >
-              <option value="desc">最新时间</option>
-              <option value="asc">最早时间</option>
-            </select>
+            <div ref="toolDropdownRef" class="filter-dropdown">
+              <button
+                type="button"
+                class="filter-dropdown-trigger"
+                aria-label="筛选工具"
+                aria-haspopup="listbox"
+                :aria-expanded="toolDropdownOpen"
+                @click.stop="toolDropdownOpen = !toolDropdownOpen"
+              >
+                <span>{{ currentToolLabel }}</span>
+                <ChevronDown class="h-4 w-4" :class="{ rotated: toolDropdownOpen }" />
+              </button>
+              <div v-show="toolDropdownOpen" class="filter-dropdown-menu" role="listbox">
+                <button
+                  v-for="item in toolFilterOptions"
+                  :key="item.value"
+                  type="button"
+                  class="filter-dropdown-option"
+                  :class="{ active: selectTool === item.value }"
+                  role="option"
+                  :aria-selected="selectTool === item.value"
+                  @click.stop="selectToolFilter(item.value)"
+                >
+                  {{ item.label }}
+                </button>
+              </div>
+            </div>
+            <div ref="sortDropdownRef" class="filter-dropdown">
+              <button
+                type="button"
+                class="filter-dropdown-trigger"
+                aria-label="排序"
+                aria-haspopup="listbox"
+                :aria-expanded="sortDropdownOpen"
+                @click.stop="sortDropdownOpen = !sortDropdownOpen"
+              >
+                <span>{{ currentSortLabel }}</span>
+                <ChevronDown class="h-4 w-4" :class="{ rotated: sortDropdownOpen }" />
+              </button>
+              <div v-show="sortDropdownOpen" class="filter-dropdown-menu" role="listbox">
+                <button
+                  v-for="item in sortOptions"
+                  :key="item.value"
+                  type="button"
+                  class="filter-dropdown-option"
+                  :class="{ active: sortType === item.value }"
+                  role="option"
+                  :aria-selected="sortType === item.value"
+                  @click.stop="selectSortType(item.value)"
+                >
+                  {{ item.label }}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -519,3 +607,78 @@ onMounted(() => {
     />
   </AppShell>
 </template>
+
+<style scoped>
+.filter-dropdown {
+  position: relative;
+}
+
+.filter-dropdown-trigger {
+  display: inline-flex;
+  height: 40px;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgb(255 255 255 / 0.1);
+  border-radius: 16px;
+  background: rgb(255 255 255 / 0.05);
+  padding: 0 12px;
+  color: #fff;
+  font-size: 14px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.18s ease, background-color 0.18s ease;
+}
+
+.filter-dropdown-trigger:hover,
+.filter-dropdown-trigger:focus-visible {
+  border-color: var(--primary);
+  outline: none;
+}
+
+.filter-dropdown-trigger svg {
+  color: rgb(255 255 255 / 0.42);
+  transition: transform 0.18s ease;
+}
+
+.filter-dropdown-trigger svg.rotated {
+  transform: rotate(180deg);
+}
+
+.filter-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 50;
+  min-width: 100%;
+  width: max-content;
+  max-height: 280px;
+  overflow-y: auto;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 14px;
+  background: #121216;
+  padding: 6px;
+  box-shadow: 0 22px 60px rgb(0 0 0 / 0.45);
+}
+
+.filter-dropdown-option {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  padding: 9px 12px;
+  color: rgb(255 255 255 / 0.72);
+  font-size: 14px;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 0.16s ease, color 0.16s ease;
+}
+
+.filter-dropdown-option:hover,
+.filter-dropdown-option.active {
+  background: rgb(255 255 255 / 0.08);
+  color: #fff;
+}
+</style>
