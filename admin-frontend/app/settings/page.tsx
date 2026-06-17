@@ -39,7 +39,7 @@ interface SettingsForm {
 }
 
 const defaults: SettingsForm = {
-  platformName: "AI 工具超市",
+  platformName: "科创点AI",
   platformDescription: "一站式 AI 运营助手，帮助企业提升内容生产与运营效率。",
   signupGrant: "100",
   taskMaxRetry: "3",

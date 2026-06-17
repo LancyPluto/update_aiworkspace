@@ -4,8 +4,8 @@ import { Toaster } from '@/components/ui/sonner'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'AI 工具超市 - 管理后台',
-  description: 'AI 工具超市管理员控制台',
+  title: '科创点AI - 管理后台',
+  description: '科创点AI管理员控制台',
   generator: 'v0.app',
   icons: {
     icon: [

@@ -88,7 +88,7 @@ export default function LoginPage() {
               <img src="/logo.svg" alt="AI Tool Market" className="w-12 h-12 rounded-2xl object-contain" />
               <div className="absolute -inset-1 bg-primary/20 rounded-2xl blur-sm -z-10" />
             </div>
-            <span className="text-2xl font-semibold tracking-tight">AI 工具超市</span>
+            <span className="text-2xl font-semibold tracking-tight">科创点AI</span>
           </div>
 
           {/* Headline */}
@@ -131,7 +131,7 @@ export default function LoginPage() {
           {/* Mobile Logo */}
           <div className="flex items-center gap-3 mb-8 lg:hidden">
             <img src="/logo.svg" alt="AI Tool Market" className="w-10 h-10 rounded-xl object-contain" />
-            <span className="text-xl font-semibold">AI 工具超市</span>
+            <span className="text-xl font-semibold">科创点AI</span>
           </div>
 
           {/* Form Header */}

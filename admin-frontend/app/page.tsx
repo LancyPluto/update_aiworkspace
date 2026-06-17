@@ -171,7 +171,7 @@ export default function DashboardPage() {
     <AdminLayout>
       <AdminHeader
         title="数据概览"
-        description={error ? `加载失败：${error}` : "AI 工具超市运营数据一览"}
+        description={error ? `加载失败：${error}` : "科创点AI运营数据一览"}
       />
 
       <div className="p-6 space-y-6">

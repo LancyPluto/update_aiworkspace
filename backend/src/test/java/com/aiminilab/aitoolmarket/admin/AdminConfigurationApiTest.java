@@ -636,6 +636,99 @@ class AdminConfigurationApiTest {
                 .andExpect(jsonPath("$.data[?(@.fieldKey=='prompt')].fieldName").value("Prompt"));
     }
 
+    @Test
+    void configBundleImportPreservesExistingToolCoverWhenImportedCoverIsEmpty() throws Exception {
+        String adminToken = loginAdmin();
+
+        String categoryResponse = mockMvc.perform(post("/api/admin/v1/tool-categories")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "categoryCode": "cover_preserve_test",
+                                  "categoryName": "Cover Preserve Test",
+                                  "sortOrder": 1,
+                                  "status": "ACTIVE"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        Long categoryId = Long.parseLong(categoryResponse.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
+
+        mockMvc.perform(post("/api/admin/v1/tools")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "toolCode": "cover_preserve_tool",
+                                  "toolName": "Cover Preserve Tool",
+                                  "categoryId": %d,
+                                  "description": "Existing cover should survive empty imports",
+                                  "coverUrl": "https://wlcloudai-assets-prod.oss-cn-guangzhou.aliyuncs.com/tool-covers/existing.png",
+                                  "toolType": "IMAGE_GENERATION",
+                                  "inputModality": "TEXT",
+                                  "outputModality": "IMAGE",
+                                  "status": "DRAFT",
+                                  "estimatedCreditCost": 1,
+                                  "executionHandler": "IMAGE_GENERATION",
+                                  "agentEnabled": false
+                                }
+                                """.formatted(categoryId)))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/admin/v1/config-bundles/import")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "format": "ai-tool-market-config-bundle",
+                                  "version": 1,
+                                  "secretsRedacted": true,
+                                  "settings": {},
+                                  "modelConfigs": [],
+                                  "categories": [
+                                    {
+                                      "categoryCode": "cover_preserve_test",
+                                      "categoryName": "Cover Preserve Test",
+                                      "sortOrder": 1,
+                                      "status": "ACTIVE"
+                                    }
+                                  ],
+                                  "tools": [
+                                    {
+                                      "toolCode": "cover_preserve_tool",
+                                      "toolName": "Cover Preserve Tool Imported",
+                                      "categoryCode": "cover_preserve_test",
+                                      "description": "Imported without a cover",
+                                      "coverUrl": "",
+                                      "toolType": "IMAGE_GENERATION",
+                                      "inputModality": "TEXT",
+                                      "outputModality": "IMAGE",
+                                      "status": "DRAFT",
+                                      "estimatedCreditCost": 2,
+                                      "executionHandler": "IMAGE_GENERATION",
+                                      "agentEnabled": false,
+                                      "fields": [],
+                                      "prompts": []
+                                    }
+                                  ]
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.warnings").value(hasItem(
+                        "Preserved existing coverUrl for tool cover_preserve_tool because imported coverUrl was empty")));
+
+        mockMvc.perform(get("/api/admin/v1/tools?page=1&pageSize=50&keyword=cover_preserve_tool")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].toolName").value("Cover Preserve Tool Imported"))
+                .andExpect(jsonPath("$.data.list[0].coverUrl").value(
+                        "https://wlcloudai-assets-prod.oss-cn-guangzhou.aliyuncs.com/tool-covers/existing.png"))
+                .andExpect(jsonPath("$.data.list[0].estimatedCreditCost").value(2));
+    }
+
     private String loginAdmin() throws Exception {
         String response = mockMvc.perform(post("/api/admin/v1/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
