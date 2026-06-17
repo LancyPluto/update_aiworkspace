@@ -3,22 +3,22 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue"
 import { useRoute, useRouter } from "vue-router"
 import { ArrowLeft, ChevronLeft, ChevronRight, Copy, Download, Flag, Heart, Loader2, Lock, Pause, Play, Send, Star, Volume2, VolumeX } from "lucide-vue-next"
 import CommunityAudioMedia from "@/components/community/CommunityAudioMedia.vue"
+import CommunityCollectionPickerModal from "@/components/community/CommunityCollectionPickerModal.vue"
 import CommunityReportModal from "@/components/CommunityReportModal.vue"
 import UserAvatar from "@/components/UserAvatar.vue"
 import {
-  favoriteCommunityPost,
   fetchCommunityPost,
   likeCommunityPost,
   markCommunityPostSameStyle,
   reportCommunityPost,
   trackCommunityEvent,
-  unfavoriteCommunityPost,
   unlikeCommunityPost,
 } from "@/api/communityApi"
 import { fetchTaskById } from "@/api/taskApi"
-import { syncFavoriteToInspirationCollection } from "@/utils/communitySync"
+import { favoritePostToCollection, unfavoritePostFromAllCollections } from "@/utils/communitySync"
 import type { CommunityPost } from "@/api/types"
 import { useAuthStore } from "@/store/authStore"
+import { getSessionBearerJwt } from "@/api/sessionBearer"
 import { assetFromCommunityPost } from "@/utils/assetPreviewAdapter"
 import { communityDisplayTitle } from "@/utils/communityDisplay"
 import { resolveCommunityAuthorAvatar, resolveCommunityAuthorName, resolveCommunityPrompt } from "@/utils/communityPostNormalize"
@@ -34,9 +34,15 @@ import { resolveCommunityAudioMedia } from "@/utils/communityAudioMedia"
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
+
+function resolveAuthToken() {
+  return auth.token ?? getSessionBearerJwt()
+}
 const post = ref<CommunityPost | null>(null)
 const loading = ref(false)
 const acting = ref(false)
+const favoritePickerOpen = ref(false)
+const favoritePickerSubmitting = ref(false)
 const sameStyleLoading = ref(false)
 const error = ref("")
 const audioPlaying = ref(false)
@@ -118,7 +124,7 @@ async function enrichPostImagesFromTask(current: CommunityPost) {
   if (existing.length > 1) return
 
   try {
-    const task = await fetchTaskById(current.taskId, { token: auth.token })
+    const task = await fetchTaskById(current.taskId, { token: resolveAuthToken() })
     const fromTask = extractImageUrlsFromTask(task)
     if (fromTask.length <= existing.length) return
     extraImageUrls.value = fromTask
@@ -133,7 +139,7 @@ async function load() {
   error.value = ""
   extraImageUrls.value = []
   try {
-    const loaded = await fetchCommunityPost(postId.value, { token: auth.token })
+    const loaded = await fetchCommunityPost(postId.value, { token: resolveAuthToken() })
     post.value = loaded
     activeImageIndex.value = 0
     await enrichPostImagesFromTask(loaded)
@@ -145,32 +151,51 @@ async function load() {
 }
 
 async function toggleLike() {
-  if (!post.value || !auth.token) return router.push({ name: "Login", query: { redirect: route.fullPath } })
+  const sessionToken = resolveAuthToken()
+  if (!post.value || !sessionToken) return router.push({ name: "Login", query: { redirect: route.fullPath } })
   acting.value = true
   try {
     post.value = post.value.liked
-      ? await unlikeCommunityPost(post.value.id, { token: auth.token })
-      : await likeCommunityPost(post.value.id, { token: auth.token })
+      ? await unlikeCommunityPost(post.value.id, { token: sessionToken })
+      : await likeCommunityPost(post.value.id, { token: sessionToken })
   } finally {
     acting.value = false
   }
 }
 
 async function toggleFavorite() {
-  if (!post.value || !auth.token) return router.push({ name: "Login", query: { redirect: route.fullPath } })
-  acting.value = true
-  const wasFavorited = post.value.favorited
-  const currentPostId = post.value.id
-  try {
-    post.value = wasFavorited
-      ? await unfavoriteCommunityPost(currentPostId, { token: auth.token })
-      : await favoriteCommunityPost(currentPostId, { token: auth.token })
+  const sessionToken = resolveAuthToken()
+  if (!post.value || !sessionToken) return router.push({ name: "Login", query: { redirect: route.fullPath } })
+
+  if (post.value.favorited) {
+    acting.value = true
     try {
-      await syncFavoriteToInspirationCollection(currentPostId, !wasFavorited, { token: auth.token })
-    } catch {
-      // 作品收藏状态已更新；同步灵感收藏夹失败时不阻断主流程
+      post.value = await unfavoritePostFromAllCollections(post.value.id, { token: sessionToken })
+    } finally {
+      acting.value = false
     }
+    return
+  }
+
+  favoritePickerOpen.value = true
+}
+
+function closeFavoritePicker() {
+  if (favoritePickerSubmitting.value) return
+  favoritePickerOpen.value = false
+}
+
+async function confirmFavoritePicker(collectionId: number | null) {
+  const sessionToken = resolveAuthToken()
+  if (!post.value || !sessionToken) return
+
+  favoritePickerSubmitting.value = true
+  acting.value = true
+  try {
+    post.value = await favoritePostToCollection(post.value.id, collectionId, { token: sessionToken })
+    favoritePickerOpen.value = false
   } finally {
+    favoritePickerSubmitting.value = false
     acting.value = false
   }
 }
@@ -357,8 +382,6 @@ function onDetailVideoPause() {
   videoPlaying.value = false
 }
 
-watch(() => auth.token, () => void load())
-
 watch(postId, () => {
   audioPlaying.value = false
   videoPlaying.value = false
@@ -369,14 +392,20 @@ watch(postId, () => {
     detailAudioRef.value.pause()
     detailAudioRef.value.removeAttribute("src")
   }
-  void load()
 })
+
+watch(
+  [() => auth.bootstrapComplete, () => auth.token, postId],
+  ([ready]) => {
+    if (ready) void load()
+  },
+  { immediate: true },
+)
 
 watch([mediaVolume, mediaMuted], () => applyMediaPreferences())
 
 onMounted(() => {
   restoreMediaPreferences()
-  void load()
 })
 
 onUnmounted(() => {
@@ -409,6 +438,14 @@ onUnmounted(() => {
       :submitting="reportSubmitting"
       @close="reportModalOpen = false"
       @confirm="submitReport"
+    />
+
+    <CommunityCollectionPickerModal
+      :open="favoritePickerOpen"
+      :post-title="displayTitle"
+      :submitting="favoritePickerSubmitting"
+      @close="closeFavoritePicker"
+      @confirm="confirmFavoritePicker"
     />
 
     <div v-if="loading" class="state-panel">
@@ -503,9 +540,7 @@ onUnmounted(() => {
             :cover-url="audioMedia.coverUrl"
             :audio-url="audioMedia.audioUrl"
             :title="displayTitle"
-            :playing="audioPlaying"
             variant="detail"
-            @toggle-play="toggleDetailAudio"
           />
           <div v-if="audioMedia.audioUrl" class="audio-controls">
             <audio

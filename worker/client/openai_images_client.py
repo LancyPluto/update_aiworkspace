@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 import requests
 
 from utils.input_image import InputImageError, decode_reference_image_data_url
+from volcengine_model import resolve_volcengine_images_paths
 from requests.exceptions import (
     ChunkedEncodingError,
     ConnectionError as RequestsConnectionError,
@@ -53,8 +54,13 @@ class OpenAIImagesClient:
         self.api_key = (api_key or "").strip()
         self.extra_auth = self._parse_json(extra_auth_json)
         self.timeout = self._resolve_timeout(timeout_seconds)
-        self.endpoint_path = str(endpoint_path or self.extra_auth.get("endpointPath") or "/images/generations")
-        self.edit_endpoint_path = str(self.extra_auth.get("editEndpointPath") or "/images/edits")
+        endpoint_value = str(endpoint_path or self.extra_auth.get("endpointPath") or "/images/generations")
+        edit_endpoint_value = str(self.extra_auth.get("editEndpointPath") or "/images/edits")
+        self.endpoint_path, self.edit_endpoint_path = resolve_volcengine_images_paths(
+            self.base_url,
+            endpoint_value,
+            edit_endpoint_value,
+        )
         self.ssl_eof_retries = self._resolve_ssl_eof_retries()
         self.connection_retries = self._resolve_connection_retries()
         self.retry_backoff_seconds = _as_float(self.extra_auth.get("retryBackoffSeconds"), 2.0)
@@ -1085,4 +1091,4 @@ def _redact_url(url: str) -> str:
 
 def _is_volcengine_ark_base_url(base_url: str) -> bool:
     host = (urlparse(base_url).hostname or "").lower()
-    return host.endswith("volces.com") or host.endswith("ark.cn-beijing.volces.com")
+    return host.endswith("volces.com") or host.endswith("volcengine.com")

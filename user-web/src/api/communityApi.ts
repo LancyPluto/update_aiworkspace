@@ -168,10 +168,14 @@ export async function fetchCommunityCollections(options?: { token?: string | nul
   try {
     const collections = await apiRequest<CommunityCollection[]>("GET", "/api/v1/community/collections", {
       token: options?.token,
+      skipAuthRedirect: true,
     })
     return { collections, supported: true }
   } catch (error) {
     if (isCommunityEndpointMissing(error, "community/collections")) {
+      return { collections: [], supported: false }
+    }
+    if (error instanceof ApiBusinessError && error.code === "UNAUTHORIZED") {
       return { collections: [], supported: false }
     }
     throw error
@@ -312,25 +316,25 @@ export async function resolvePublishedCommunityPostId(
 export function likeCommunityPost(postId: number | string, options?: { token?: string | null }) {
   return apiRequest<CommunityPost>("POST", `/api/v1/community/posts/${encodeURIComponent(String(postId))}/like`, {
     token: options?.token,
-  })
+  }).then((post) => normalizeCommunityPost(post as CommunityPost))
 }
 
 export function unlikeCommunityPost(postId: number | string, options?: { token?: string | null }) {
   return apiRequest<CommunityPost>("DELETE", `/api/v1/community/posts/${encodeURIComponent(String(postId))}/like`, {
     token: options?.token,
-  })
+  }).then((post) => normalizeCommunityPost(post as CommunityPost))
 }
 
 export function favoriteCommunityPost(postId: number | string, options?: { token?: string | null }) {
   return apiRequest<CommunityPost>("POST", `/api/v1/community/posts/${encodeURIComponent(String(postId))}/favorite`, {
     token: options?.token,
-  })
+  }).then((post) => normalizeCommunityPost(post as CommunityPost))
 }
 
 export function unfavoriteCommunityPost(postId: number | string, options?: { token?: string | null }) {
   return apiRequest<CommunityPost>("DELETE", `/api/v1/community/posts/${encodeURIComponent(String(postId))}/favorite`, {
     token: options?.token,
-  })
+  }).then((post) => normalizeCommunityPost(post as CommunityPost))
 }
 
 export function markCommunityPostSameStyle(postId: number | string, options?: { token?: string | null }) {

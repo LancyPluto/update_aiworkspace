@@ -809,6 +809,37 @@ class AdminAgentApiTest {
     }
 
     @Test
+    void volcengineRootBaseUrlIsNormalizedBeforeAgentServiceTest() throws Exception {
+        mockExternalAuthDependencies();
+        String adminToken = login("/api/admin/v1/auth/login", "admin");
+
+        Mockito.when(agentServiceClient.testModelConfig(any()))
+                .thenAnswer(invocation -> {
+                    var forwarded = invocation.getArgument(0, com.aiminilab.aitoolmarket.agent.dto.AgentModelConfigRequest.class);
+                    assertThat(forwarded.baseUrl()).isEqualTo("https://ark.cn-beijing.volces.com/api/v3");
+                    return new AgentModelConfigTestResponse(true, forwarded.provider(), forwarded.modelName(), 9L, "ok", "pong");
+                });
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/admin/v1/agent/model-config/test")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "provider": "openai_compatible",
+                                  "modelName": "doubao-seed-2.0-lite",
+                                  "baseUrl": "https://ark.cn-beijing.volces.com",
+                                  "apiKey": "ark-test",
+                                  "timeoutSeconds": 30,
+                                  "enabled": true,
+                                  "capabilities": ["TEXT_GENERATION"]
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.success").value(true))
+                .andExpect(jsonPath("$.data.modelName").value("doubao-seed-2.0-lite"));
+    }
+
+    @Test
     void siliconflowImageModelConfigTestDoesNotCallAgentService() throws Exception {
         mockExternalAuthDependencies();
         String adminToken = login("/api/admin/v1/auth/login", "admin");

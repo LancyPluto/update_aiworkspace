@@ -51,6 +51,8 @@ export interface RequestOptions {
   query?: Record<string, string | number | boolean | undefined>
   /** 取消进行中的请求（如离开页面、发起新请求前） */
   signal?: AbortSignal
+  /** 401 时不强制跳转登录页（用于公开页上的会话探测、可选预加载） */
+  skipAuthRedirect?: boolean
 }
 
 function buildUrl(path: string, query?: RequestOptions["query"]): string {
@@ -138,15 +140,20 @@ export async function apiRequest<T>(
   try {
     json = (rawText ? JSON.parse(rawText) : {}) as ApiResponse<T>
   } catch {
-    if (res.status === 401) {
+    if (res.status === 401 && !options?.skipAuthRedirect) {
       redirectToLoginPage()
+      throw new ApiBusinessError("UNAUTHORIZED", "登录已失效，请重新登录", undefined)
+    }
+    if (res.status === 401) {
       throw new ApiBusinessError("UNAUTHORIZED", "登录已失效，请重新登录", undefined)
     }
     throw new ApiBusinessError("SYSTEM_ERROR", `无效响应 (${res.status})`, undefined)
   }
 
   if (res.status === 401 || json.code === "UNAUTHORIZED") {
-    redirectToLoginPage()
+    if (!options?.skipAuthRedirect) {
+      redirectToLoginPage()
+    }
     throw new ApiBusinessError(json.code ?? "UNAUTHORIZED", json.message ?? "登录已失效，请重新登录", json.requestId)
   }
 

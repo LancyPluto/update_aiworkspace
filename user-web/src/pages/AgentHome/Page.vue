@@ -257,7 +257,7 @@
 </script>
 
 <template>
-  <AppShell title="科创点AI" description="用自然语言让系统推荐、确认并调用工具">
+  <AppShell title="智能对话" description="用自然语言让系统推荐、确认并调用工具">
     <div class="agent-page" :class="{ 'agent-page--session-collapsed': !sessionSidebarOpen }">
       <button class="sidebar-toggle-btn" type="button" @click="toggleSessionSidebar">
         <ChevronRight v-if="!sessionSidebarOpen" class="h-4 w-4" />

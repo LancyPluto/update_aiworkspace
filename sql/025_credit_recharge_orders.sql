@@ -47,9 +47,9 @@ CREATE TABLE IF NOT EXISTS credit_recharge_orders (
 INSERT INTO credit_recharge_packages(package_code, package_name, credits, price_amount, currency, validity_days,
                                      benefits_json, recommended, sort_order, status)
 VALUES
-  ('starter_1000', 'Starter credits', 1000, 10.00, 'CNY', 30, JSON_ARRAY('Priority queue'), 0, 10, 'ACTIVE'),
-  ('growth_5000', 'Growth credits', 5000, 45.00, 'CNY', 90, JSON_ARRAY('Priority queue', 'API acceleration'), 1, 20, 'ACTIVE'),
-  ('pro_12000', 'Pro credits', 12000, 99.00, 'CNY', 180, JSON_ARRAY('Priority queue', 'API acceleration', 'Model consulting'), 0, 30, 'ACTIVE')
+  ('starter_1000', '入门套餐', 1000, 10.00, 'CNY', 30, JSON_ARRAY('优先排队'), 0, 10, 'ACTIVE'),
+  ('growth_5000', '成长套餐', 5000, 45.00, 'CNY', 90, JSON_ARRAY('优先排队', 'API 加速'), 1, 20, 'ACTIVE'),
+  ('pro_12000', '专业套餐', 12000, 99.00, 'CNY', 180, JSON_ARRAY('优先排队', 'API 加速', '模型咨询服务'), 0, 30, 'ACTIVE')
 ON DUPLICATE KEY UPDATE
   package_name = VALUES(package_name),
   credits = VALUES(credits),

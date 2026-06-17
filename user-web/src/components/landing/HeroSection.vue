@@ -1,29 +1,19 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted } from 'vue'
 import Button from '@/components/ui/Button.vue'
 import { ArrowRight } from 'lucide-vue-next'
 import AnimatedSphere from './AnimatedSphere.vue'
+import HeroInteractiveHeadline from './HeroInteractiveHeadline.vue'
 
 const emit = defineEmits<{
   'open-login': []
 }>()
 
-const words = ['创造', '构建', '扩展', '交付']
 const isVisible = ref(false)
-
-const wordIndex = ref(0)
 
 onMounted(() => {
   isVisible.value = true
-  
-  const interval = setInterval(() => {
-    wordIndex.value = (wordIndex.value + 1) % words.length
-  }, 2500)
-  
-  return () => clearInterval(interval)
 })
-
-const currentWord = computed(() => words[wordIndex.value])
 </script>
 
 <template>
@@ -58,38 +48,15 @@ const currentWord = computed(() => words[wordIndex.value])
       </div>
       
       <!-- Main headline -->
-      <div class="mb-12">
-        <h1 
-          :class="[
-            'text-[clamp(3rem,12vw,10rem)] font-display leading-[0.9] tracking-tight transition-all duration-1000',
-            isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8'
-          ]"
-        >
-          <span class="block">让团队</span>
-          <span class="block">
-            尽情
-            <span class="relative inline-block">
-              <span class="inline-flex">
-                <span 
-                  v-for="(char, i) in currentWord" 
-                  :key="`${wordIndex}-${i}`"
-                  class="inline-block hero-char-in"
-                  :style="{ animationDelay: `${i * 50}ms` }"
-                >
-                  {{ char }}
-                </span>
-              </span>
-              <span class="absolute -bottom-2 left-0 right-0 h-3 bg-foreground/10" />
-            </span>
-          </span>
-        </h1>
+      <div class="mt-4 lg:mt-18 mb-20">
+        <HeroInteractiveHeadline />
       </div>
       
       <!-- Description -->
-      <div class="grid lg:grid-cols-2 gap-12 lg:gap-24 items-end">
+      <div class="grid lg:grid-cols-2 gap-12 lg:gap-24 items-end mt-6 lg:mt-25">
         <p 
           :class="[
-            'text-xl lg:text-2xl text-muted-foreground leading-relaxed max-w-xl transition-all duration-700 delay-200',
+            'text-lg lg:text-2xl text-muted-foreground leading-relaxed max-w-xl transition-all duration-700 delay-200',
             isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'
           ]"
         >
@@ -164,20 +131,5 @@ const currentWord = computed(() => words[wordIndex.value])
 
 .animate-marquee {
   animation: marquee 30s linear infinite;
-}
-
-@keyframes heroCharIn {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.hero-char-in {
-  animation: heroCharIn 0.3s ease forwards;
 }
 </style>

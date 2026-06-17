@@ -18,6 +18,7 @@ import com.aiminilab.aitoolmarket.agent.mapper.ModelVendorAccountMapper;
 import com.aiminilab.aitoolmarket.agent.service.ModelVendorAccountService;
 import com.aiminilab.aitoolmarket.agent.support.ModelCapabilitiesCodec;
 import com.aiminilab.aitoolmarket.agent.support.VendorCodeResolver;
+import com.aiminilab.aitoolmarket.agent.support.VolcengineEndpointSupport;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -592,7 +593,7 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
                                                        ModelProviderDefinition provider,
                                                        AgentModelConfig linked) {
         if (linked != null) {
-            return new AgentModelConfigRequest(
+            return normalizeProviderBaseUrl(new AgentModelConfigRequest(
                     account.getId(),
                     linked.getDisplayName() == null || linked.getDisplayName().isBlank()
                             ? account.getAccountName()
@@ -626,9 +627,9 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
                             .map(String::trim)
                             .filter(value -> !value.isBlank())
                             .toList()
-            );
+            ));
         }
-        return new AgentModelConfigRequest(
+        return normalizeProviderBaseUrl(new AgentModelConfigRequest(
                 account.getId(),
                 account.getAccountName(),
                 "vendor_account_test",
@@ -655,6 +656,41 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
                 false,
                 false,
                 provider.capabilities()
+        ));
+    }
+
+    private AgentModelConfigRequest normalizeProviderBaseUrl(AgentModelConfigRequest request) {
+        String normalizedBaseUrl = VolcengineEndpointSupport.normalizeProviderBaseUrl(request.provider(), request.baseUrl());
+        if (sameText(normalizedBaseUrl, request.baseUrl())) {
+            return request;
+        }
+        return new AgentModelConfigRequest(
+                request.vendorAccountId(),
+                request.displayName(),
+                request.configCode(),
+                request.provider(),
+                request.modelName(),
+                normalizedBaseUrl,
+                request.apiKey(),
+                request.clearApiKey(),
+                request.extraAuthJson(),
+                request.minimaxGroupId(),
+                request.consoleUrl(),
+                request.balanceUrl(),
+                request.docsUrl(),
+                request.timeoutSeconds(),
+                request.connectTimeoutSeconds(),
+                request.readTimeoutSeconds(),
+                request.inputTokenPricePer1k(),
+                request.outputTokenPricePer1k(),
+                request.inputTokenPricePer1m(),
+                request.outputTokenPricePer1m(),
+                request.billingUnit(),
+                request.unitPrice(),
+                request.enabled(),
+                request.agentEnabled(),
+                request.isDefault(),
+                request.capabilities()
         );
     }
 
@@ -696,7 +732,8 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
         if (baseUrl == null || baseUrl.isBlank()) {
             baseUrl = provider.defaultBaseUrl();
         }
-        MediaGatewayProbeResult probe = probeMediaGateway(baseUrl, apiKey);
+        baseUrl = VolcengineEndpointSupport.normalizeProviderBaseUrl(providerCode, baseUrl);
+        MediaGatewayProbeResult probe = probeMediaGateway(baseUrl, account.getApiKey());
         long latencyMs = Math.max(0L, System.currentTimeMillis() - startedAt);
         boolean success = probe.success();
         String message = probe.message();
@@ -973,6 +1010,12 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
             throw new BusinessException(ErrorCode.PARAM_ERROR, "vendor account not found");
         }
         return account;
+    }
+
+    private boolean sameText(String left, String right) {
+        String l = left == null ? "" : left.trim();
+        String r = right == null ? "" : right.trim();
+        return l.equalsIgnoreCase(r);
     }
 
     private static String blankToNull(String value) {
