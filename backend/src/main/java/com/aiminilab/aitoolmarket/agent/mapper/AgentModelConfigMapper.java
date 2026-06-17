@@ -261,4 +261,25 @@ public interface AgentModelConfigMapper extends BaseMapper<AgentModelConfig> {
               AND COALESCE(enabled, 0) = 0
             """)
     int enableByVendorAccountId(@Param("vendorAccountId") Long vendorAccountId);
+
+    @Update("""
+            UPDATE agent_model_configs
+            SET config_code = CASE
+                    WHEN config_code IS NULL THEN NULL
+                    ELSE CONCAT(SUBSTRING(config_code, 1, 40), '__deleted_', id)
+                END,
+                enabled = 0,
+                agent_enabled = 0,
+                is_default = 0,
+                is_deleted = 1,
+                updated_at = NOW()
+            WHERE vendor_account_id IN (
+                SELECT id
+                FROM model_vendor_accounts
+                WHERE vendor_code = #{vendorCode}
+                  AND COALESCE(is_deleted, 0) = 0
+            )
+              AND COALESCE(is_deleted, 0) = 0
+            """)
+    int softDeleteByVendorCode(@Param("vendorCode") String vendorCode);
 }

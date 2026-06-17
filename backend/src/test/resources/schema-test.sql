@@ -642,6 +642,16 @@ CREATE TABLE agent_file_chunks (
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE model_vendors (
+  vendor_code VARCHAR(64) PRIMARY KEY,
+  vendor_label VARCHAR(128) NOT NULL,
+  icon_asset VARCHAR(128) NOT NULL,
+  sort_order INT NOT NULL DEFAULT 0,
+  enabled TINYINT NOT NULL DEFAULT 1,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE model_vendor_accounts (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   vendor_code VARCHAR(64) NOT NULL,
@@ -688,12 +698,15 @@ CREATE TABLE agent_model_configs (
   unit_price DECIMAL(18,8) NOT NULL DEFAULT 0,
   capabilities TEXT,
   enabled TINYINT NOT NULL DEFAULT 1,
-  agent_enabled TINYINT NOT NULL DEFAULT 1,
-  is_default TINYINT NOT NULL DEFAULT 0,
-  is_deleted TINYINT NOT NULL DEFAULT 0,
-  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
+    agent_enabled TINYINT NOT NULL DEFAULT 1,
+    is_default TINYINT NOT NULL DEFAULT 0,
+    last_test_success TINYINT,
+    last_test_message VARCHAR(500),
+    last_test_at DATETIME,
+    is_deleted TINYINT NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
 
 CREATE TABLE model_provider_metadata (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,

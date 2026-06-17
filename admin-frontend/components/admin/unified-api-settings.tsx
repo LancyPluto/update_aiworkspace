@@ -35,7 +35,7 @@ import {
   updateModelVendorAccount,
 } from "@/lib/api/model-vendor-account"
 import { fetchModelProviders } from "@/lib/api/model-providers"
-import { upsertModelVendor } from "@/lib/api/model-vendors"
+import { deleteModelVendor, upsertModelVendor } from "@/lib/api/model-vendors"
 import { fetchUnifiedApiOverview } from "@/lib/api/unified-api"
 import type {
   AgentModelConfigPayload,
@@ -686,6 +686,24 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
     }
   }
 
+  async function deleteVendor(vendor: UnifiedApiVendorGroup) {
+    const confirmed = window.confirm(
+      `是否确认删除 ${vendor.label}？该操作会一键删除该厂商绑定的工具和该厂商的所有模型。`,
+    )
+    if (!confirmed) return
+    setError(null)
+    const toastId = toast.loading(`${vendor.label}：正在删除厂商…`)
+    try {
+      await deleteModelVendor(vendor.vendorCode)
+      await refreshOverviewSilently()
+      toast.success(`${vendor.label}：厂商已删除`, { id: toastId })
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : "删除厂商失败"
+      setError(message)
+      toast.error(`${vendor.label}：删除失败`, { id: toastId, description: message })
+    }
+  }
+
   const runRefreshBalance = useCallback(
     async (account: ModelVendorAccount, vendorLabel: string) => {
       setError(null)
@@ -1253,14 +1271,13 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                 <Button type="button" variant="outline" size="icon" className="h-8 w-8" title="刷新该厂商余额" onClick={() => runRefreshBalance(primaryAccount, vendor.label)}>
                   <RefreshCw className="h-4 w-4" />
                 </Button>
-                <Button type="button" variant="outline" size="icon" className="h-8 w-8" title={"添加 API 账户"} onClick={() => openCreateAccount(vendor.vendorCode, vendor.label)}>
-                  <Plus className="h-4 w-4" />
+                <Button type="button" variant="outline" size="icon" className="h-8 w-8 text-destructive" title="删除厂商" onClick={() => deleteVendor(vendor)}>
+                  <Trash2 className="h-4 w-4" />
                 </Button>
               </div>
             ) : (
-              <Button type="button" variant="outline" size="sm" onClick={() => openCreateAccount(vendor.vendorCode, vendor.label)}>
-                <Plus className="mr-1 h-3 w-3" />
-                接入 API
+              <Button type="button" variant="outline" size="icon" className="h-8 w-8 text-destructive" title="删除厂商" onClick={() => deleteVendor(vendor)}>
+                <Trash2 className="h-4 w-4" />
               </Button>
             )}
           </div>
@@ -1557,7 +1574,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
       {error ? (
         <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />
-          <AlertTitle>操作澶辫触</AlertTitle>
+          <AlertTitle>操作失败</AlertTitle>
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       ) : null}

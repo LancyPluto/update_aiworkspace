@@ -9,5 +9,6 @@ public interface ModelVendorService {
     List<ModelVendorResponse> listEnabled();
     List<ModelVendorResponse> adminListAll();
     ModelVendorResponse adminUpsert(UpsertModelVendorRequest request);
+    void adminDelete(String vendorCode, Long operatorId);
 }
 

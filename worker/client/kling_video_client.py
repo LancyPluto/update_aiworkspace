@@ -408,7 +408,7 @@ class KlingVideoClient:
             payload["element_list"] = normalized_element_list
         if multi_shot.strip():
             payload["multi_shot"] = multi_shot.strip()
-        if shot_type.strip():
+        if shot_type.strip() and shot_type.strip().lower() not in {"auto", "智能", "default", "adaptive"}:
             payload["shot_type"] = shot_type.strip()
         if multi_prompt not in (None, "", []):
             payload["multi_prompt"] = multi_prompt

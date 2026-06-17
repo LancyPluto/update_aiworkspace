@@ -10,6 +10,7 @@ export interface ToolPreviewInput {
   modelIconUrl?: string | null
   comparisonOriginalUrl?: string | null
   comparisonEffectUrl?: string | null
+  audioPreviewUrl?: string | null
   modelConfigName?: string | null
   modelName?: string | null
   primaryColor?: string | null
@@ -114,6 +115,7 @@ export function usesComparisonMedia(tool: ToolPreviewInput): boolean {
 export function shouldUseEffectCard(tool: ToolPreviewInput): boolean {
   const output = normalizeOutputModality(tool.outputModality)
   if (output === "VIDEO") return true
+  if (output === "AUDIO" && Boolean(tool.audioPreviewUrl?.trim())) return true
   return resolveMediaDisplayMode(tool) === "effect" && Boolean(tool.coverUrl?.trim())
 }
 

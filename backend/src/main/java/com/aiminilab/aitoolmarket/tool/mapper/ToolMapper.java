@@ -209,4 +209,26 @@ public interface ToolMapper extends BaseMapper<AiTool> {
             """)
     int softDeleteTool(@Param("toolId") Long toolId,
                        @Param("operatorId") Long operatorId);
+
+    @Update("""
+            UPDATE ai_tools
+            SET is_deleted = 1,
+                status = 'OFFLINE',
+                updated_by = #{operatorId},
+                updated_at = CURRENT_TIMESTAMP
+            WHERE is_deleted = 0
+              AND model_config_id IN (
+                  SELECT id
+                  FROM agent_model_configs
+                  WHERE vendor_account_id IN (
+                      SELECT id
+                      FROM model_vendor_accounts
+                      WHERE vendor_code = #{vendorCode}
+                        AND COALESCE(is_deleted, 0) = 0
+                  )
+                  AND COALESCE(is_deleted, 0) = 0
+              )
+            """)
+    int softDeleteByVendorCode(@Param("vendorCode") String vendorCode,
+                               @Param("operatorId") Long operatorId);
 }

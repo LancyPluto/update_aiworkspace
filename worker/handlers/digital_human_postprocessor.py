@@ -59,17 +59,26 @@ class DigitalHumanPostprocessor:
 
         self._download(video_url, source_video)
         self._validate_video_file(source_video)
+        has_audio = False
         if audio_data_url:
             self._write_data_url(audio_data_url, audio_path)
+            has_audio = True
         elif audio_url:
             self._download(audio_url, audio_path)
+            has_audio = True
+
+        if has_audio:
+            audio_duration = self._probe_duration(audio_path)
+            source_duration = self._probe_duration(source_video)
+            duration = audio_duration or source_duration or 5.0
         else:
-            raise DigitalHumanPostprocessError("audio is required for compose")
-        audio_duration = self._probe_duration(audio_path)
-        source_duration = self._probe_duration(source_video)
-        duration = audio_duration or source_duration or 5.0
+            duration = self._probe_duration(source_video) or 5.0
+
         subtitle_path.write_text(self._build_srt(subtitle_text, duration), encoding="utf-8")
-        self._run_ffmpeg(ffmpeg_binary, source_video, audio_path, subtitle_path, final_video, duration)
+        if has_audio:
+            self._run_ffmpeg(ffmpeg_binary, source_video, audio_path, subtitle_path, final_video, duration)
+        else:
+            self._run_ffmpeg_video_only(ffmpeg_binary, source_video, subtitle_path, final_video, duration)
         self._validate_video_file(final_video)
 
         return DigitalHumanPostprocessResult(
@@ -183,6 +192,45 @@ class DigitalHumanPostprocessor:
         if completed.returncode != 0:
             raise DigitalHumanPostprocessError(
                 f"ffmpeg failed: {completed.stderr.strip() or completed.stdout.strip()}"
+            )
+
+    def _run_ffmpeg_video_only(
+        self,
+        ffmpeg_binary: str,
+        source_video: Path,
+        subtitle_path: Path,
+        final_video: Path,
+        duration_seconds: float,
+    ) -> None:
+        subtitle_filter = (
+            f"subtitles='{self._escape_filter_path(subtitle_path)}':"
+            f"fontsdir='{self._escape_filter_path(Path(self.subtitle_fonts_dir))}':"
+            f"force_style='FontName={self.subtitle_font_name},FontSize=20,"
+            "PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,"
+            "BorderStyle=1,Outline=2,Shadow=1,Alignment=2,MarginV=32'"
+        )
+        command = [
+            ffmpeg_binary,
+            "-y",
+            "-i",
+            str(source_video),
+            "-vf",
+            subtitle_filter,
+            "-t",
+            f"{max(duration_seconds, 1.0):.3f}",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-an",
+            "-movflags",
+            "+faststart",
+            str(final_video),
+        ]
+        completed = subprocess.run(command, capture_output=True, text=True, timeout=900)
+        if completed.returncode != 0:
+            raise DigitalHumanPostprocessError(
+                f"ffmpeg video-only failed: {completed.stderr.strip() or completed.stdout.strip()}"
             )
 
     def _probe_duration(self, path: Path) -> float | None:

@@ -73,11 +73,13 @@ class SeedanceVideoClient:
         negative_prompt: str = "",
         model: str | None = None,
         image: str = "",
+        image_tail: str = "",
         audio_data_url: str = "",
         seed: int | None = None,
         duration: str = "",
         aspect_ratio: str = "",
         resolution: str = "480p",
+        mode: str = "",
     ) -> dict[str, Any]:
         if not self._has_auth():
             raise SeedanceVideoError("SEEDANCE_API_KEY is not configured")

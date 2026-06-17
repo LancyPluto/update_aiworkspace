@@ -128,9 +128,9 @@ function sceneAudioFor(index: number): { audioUrl: string; speechText?: string }
 
 const taskStages = [
   { label: "剧本策划", progress: 18 },
-  { label: "关键帧生成", progress: 46 },
-  { label: "配音与视频", progress: 65 },
-  { label: "字幕合成", progress: 95 },
+  { label: "生成场景图", progress: 46 },
+  { label: "逐镜生成视频", progress: 65 },
+  { label: "字幕合成与拼接", progress: 95 },
   { label: "成片输出", progress: 100 },
 ]
 
@@ -790,7 +790,7 @@ const playheadPosition = computed(() => {
                       分镜 {{ scene.index ?? idx + 1 }}
                       <template v-if="scene.sceneTitle"> · {{ scene.sceneTitle }}</template>
                     </p>
-                    <p v-if="scene.sceneDescription" class="text-xs text-white/45 line-clamp-2">{{ scene.sceneDescription }}</p>
+                    <p v-if="scene.plot || scene.cameraLanguage" class="text-xs text-white/45 line-clamp-2">{{ scene.plot }}{{ scene.cameraLanguage ? ` · ${scene.cameraLanguage}` : '' }}</p>
                     <p v-if="scene.dialogue" class="text-xs text-white/60">{{ scene.dialogue }}</p>
                     <p class="text-[11px] text-white/25">
                       {{ scene.durationSeconds ?? 5 }}s · {{ scene.presenterGender ?? "自动" }}

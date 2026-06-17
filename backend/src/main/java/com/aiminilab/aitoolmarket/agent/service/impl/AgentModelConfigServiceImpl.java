@@ -254,10 +254,31 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
     @Override
     public AgentModelConfigTestResponse adminTestById(Long id) {
         AgentModelConfig existing = findActiveOrThrow(id);
-        AgentModelConfig executable = credentialResolver.resolveForExecution(existing);
-        AgentModelConfigTestResponse response = adminTest(toTestRequest(executable));
+        AgentModelConfigTestResponse response;
+        try {
+            AgentModelConfig executable = credentialResolver.resolveForExecution(existing);
+            response = adminTest(toTestRequest(executable));
+        } catch (BusinessException exception) {
+            response = failedModelTestResponse(existing, exception.getMessage());
+        } catch (RuntimeException exception) {
+            response = failedModelTestResponse(existing, rootMessage(exception));
+        }
         recordModelConnectivityTest(existing, response);
         return response;
+    }
+
+    private AgentModelConfigTestResponse failedModelTestResponse(AgentModelConfig config, String message) {
+        String detail = message == null || message.isBlank()
+                ? "Model connectivity test failed"
+                : message;
+        return new AgentModelConfigTestResponse(
+                false,
+                config.getProvider(),
+                config.getModelName(),
+                0L,
+                detail,
+                ""
+        );
     }
 
     private void recordModelConnectivityTest(AgentModelConfig config, AgentModelConfigTestResponse response) {
@@ -723,7 +744,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "vendor account must be enabled before enabling this model");
         }
         if (usesAcceptOnlyTestStrategy(providerCode)) {
-            if (!hasExecutableSecret(account.getApiKey()) && !hasExecutableSecret(account.getExtraAuthJson())) {
+            if (!hasAccountExecutableCredential(account)) {
                 throw new BusinessException(ErrorCode.PARAM_ERROR, "vendor account credential must be configured before enabling this model");
             }
             return;
@@ -741,6 +762,31 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         try {
             return TEST_STRATEGY_ACCEPT_ONLY.equalsIgnoreCase(providerMetadataService.get(providerCode.trim()).testStrategy());
         } catch (BusinessException exception) {
+            return false;
+        }
+    }
+
+    private boolean hasAccountExecutableCredential(ModelVendorAccount account) {
+        if (account == null) {
+            return false;
+        }
+        if (hasExecutableSecret(account.getApiKey())) {
+            return true;
+        }
+        if (!hasExecutableSecret(account.getExtraAuthJson())) {
+            return false;
+        }
+        try {
+            JsonNode parsed = objectMapper.readTree(account.getExtraAuthJson());
+            String apiKey = textValue(parsed.get("apiKey"), parsed.get("api_key"));
+            if (apiKey == null) {
+                apiKey = textValue(parsed.get("token"), parsed.get("accessToken"));
+            }
+            if (apiKey == null) {
+                apiKey = textValue(parsed.get("access_token"), parsed.get("key"));
+            }
+            return apiKey != null || hasKlingAccessSecretPair(account.getExtraAuthJson());
+        } catch (com.fasterxml.jackson.core.JsonProcessingException exception) {
             return false;
         }
     }

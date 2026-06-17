@@ -103,4 +103,14 @@ public interface ModelVendorAccountMapper extends BaseMapper<ModelVendorAccount>
             WHERE id = #{id}
             """)
     void softDelete(@Param("id") Long id);
+
+    @Update("""
+            UPDATE model_vendor_accounts
+            SET is_deleted = 1,
+                enabled = 0,
+                updated_at = NOW()
+            WHERE vendor_code = #{vendorCode}
+              AND COALESCE(is_deleted, 0) = 0
+            """)
+    int softDeleteByVendorCode(@Param("vendorCode") String vendorCode);
 }

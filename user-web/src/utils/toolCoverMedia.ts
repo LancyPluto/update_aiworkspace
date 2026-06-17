@@ -84,5 +84,6 @@ export function resolveToolCoverFallback(tool: AITool): string {
 export function shouldUseEffectCard(tool: AITool): boolean {
   const output = normalizeOutputModality(tool.outputModality)
   if (output === "VIDEO") return true
+  if (output === "AUDIO" && Boolean(tool.audioPreviewUrl?.trim())) return true
   return tool.mediaDisplayMode === "effect" && Boolean(tool.iconUrl?.trim())
 }
