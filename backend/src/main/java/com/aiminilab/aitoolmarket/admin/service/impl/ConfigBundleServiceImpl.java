@@ -889,13 +889,15 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
             warnings.add("Tool " + item.toolCode() + " imported without model binding; modelConfigCode not found: " + item.modelConfigCode());
         }
 
+        AiTool existing = findImportTargetTool(item.toolCode(), operatorId, warnings).orElse(null);
+        String coverUrl = importedCoverUrl(item, existing, warnings);
         boolean restoreDisabledModelBinding = isDisabledModelConfig(modelConfigId);
         UpsertToolRequest request = new UpsertToolRequest(
                 item.toolCode(),
                 item.toolName(),
                 categoryId,
                 item.description(),
-                item.coverUrl(),
+                coverUrl,
                 item.toolType(),
                 item.inputModality(),
                 item.outputModality(),
@@ -905,7 +907,6 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                 item.executionHandler(),
                 null
         );
-        AiTool existing = findImportTargetTool(item.toolCode(), operatorId, warnings).orElse(null);
         ToolSummaryResponse saved = existing == null
                 ? toolService.createTool(request, operatorId)
                 : toolService.updateTool(existing.getId(), request, operatorId);
@@ -956,6 +957,18 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
         } else if ("OFFLINE".equals(status)) {
             toolService.offlineTool(saved.id(), operatorId);
         }
+    }
+
+    private String importedCoverUrl(ConfigBundleDto.Tool item, AiTool existing, List<String> warnings) {
+        if (!isBlank(item.coverUrl())) {
+            return item.coverUrl();
+        }
+        if (existing == null || isBlank(existing.getCoverUrl())) {
+            return item.coverUrl();
+        }
+        warnings.add("Preserved existing coverUrl for tool " + item.toolCode()
+                + " because imported coverUrl was empty");
+        return existing.getCoverUrl();
     }
 
     private String importPublishWarningMessage(BusinessException exception) {
