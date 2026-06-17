@@ -26,3 +26,13 @@ def test_resolve_images_paths_keeps_custom_paths() -> None:
     )
     assert endpoint_path == "/custom/images"
     assert edit_endpoint_path == "/custom/edits"
+
+
+def test_resolve_images_paths_skips_api_v3_when_base_already_contains_it() -> None:
+    endpoint_path, edit_endpoint_path = resolve_volcengine_images_paths(
+        "https://ark.cn-beijing.volces.com/api/v3",
+        "/images/generations",
+        "/images/edits",
+    )
+    assert endpoint_path == "/images/generations"
+    assert edit_endpoint_path == "/images/edits"

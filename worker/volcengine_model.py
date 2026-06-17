@@ -38,9 +38,12 @@ def resolve_volcengine_images_paths(
     edit_path = edit_endpoint_path if edit_endpoint_path.startswith("/") else f"/{edit_endpoint_path}"
     if not is_volcengine_ark_base_url(normalized_base):
         return generation_path, edit_path
-    if generation_path == "/images/generations":
+    # base_url 可能已经带 /api/v3 后缀（管理后台允许两种写法），此时再把 endpoint 改成
+    # /api/v3/images/generations 会拼出 /api/v3/api/v3/... 导致 404。
+    base_has_api_v3 = normalized_base.endswith("/api/v3")
+    if generation_path == "/images/generations" and not base_has_api_v3:
         generation_path = "/api/v3/images/generations"
-    if edit_path == "/images/edits":
+    if edit_path == "/images/edits" and not base_has_api_v3:
         edit_path = "/api/v3/images/edits"
     return generation_path, edit_path
 
