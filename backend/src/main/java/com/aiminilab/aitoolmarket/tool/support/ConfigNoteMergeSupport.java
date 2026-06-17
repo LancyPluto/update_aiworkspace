@@ -2,6 +2,7 @@ package com.aiminilab.aitoolmarket.tool.support;
 
 import com.aiminilab.aitoolmarket.ppt.PptConstants;
 import com.aiminilab.aitoolmarket.tool.integration.ToolIntegrationConstants;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -16,9 +17,37 @@ public final class ConfigNoteMergeSupport {
     private ConfigNoteMergeSupport() {
     }
 
-  /**
-   * 若请求体未携带集成块、但库中已有，则把库中的集成块追加回新 config_note。
-   */
+    /**
+     * 配置包导入更新已有工具时，保留库中已配置的 ai-tool-ui 媒体 URL（图标、模型效果、对比图等）。
+     */
+    public static String mergePreservingMediaUrls(String existingConfigNote,
+                                                  String incomingConfigNote,
+                                                  ObjectMapper objectMapper) {
+        if (incomingConfigNote == null) {
+            return null;
+        }
+        if (existingConfigNote == null || existingConfigNote.isBlank()) {
+            return incomingConfigNote;
+        }
+        ToolFrontendStyleConfig existingStyle = ToolFrontendStyleConfig.fromConfigNote(existingConfigNote, objectMapper);
+        ToolFrontendStyleConfig incomingStyle = ToolFrontendStyleConfig.fromConfigNote(incomingConfigNote, objectMapper);
+        ToolFrontendStyleConfig merged = incomingStyle.mergePreservingMediaUrls(existingStyle);
+        return ToolFrontendStyleConfig.replaceOrAppendFrontendStyleMarker(incomingConfigNote, merged, objectMapper);
+    }
+
+    public static String preferNonBlankUrl(String existingUrl, String incomingUrl) {
+        if (incomingUrl != null && !incomingUrl.isBlank()) {
+            return incomingUrl;
+        }
+        if (existingUrl != null && !existingUrl.isBlank()) {
+            return existingUrl;
+        }
+        return incomingUrl;
+    }
+
+    /**
+     * 若请求体未携带集成块、但库中已有，则把库中的集成块追加回新 config_note。
+     */
     public static String mergePreservingIntegrationMarkers(String existingConfigNote, String incomingConfigNote) {
         if (incomingConfigNote == null) {
             return null;

@@ -84,10 +84,29 @@ async function uploadReference(file: File | undefined, target: "frontal" | "refe
   }
 }
 
+function resetCreateForm() {
+  form.value = {
+    displayName: "",
+    description: "",
+    referenceType: "image_refer",
+    frontalImage: "",
+    referImages: [],
+    referVideo: "",
+  }
+}
+
 async function submitCreate() {
   if (!auth.token) return
   if (!form.value.displayName.trim()) {
     window.alert("请填写主体名称")
+    return
+  }
+  if (form.value.displayName.trim().length > 20) {
+    window.alert("主体名称不能超过 20 个字符")
+    return
+  }
+  if (form.value.description.trim().length > 100) {
+    window.alert("主体描述不能超过 100 个字符")
     return
   }
   if (form.value.referenceType === "image_refer") {
@@ -96,7 +115,7 @@ async function submitCreate() {
       return
     }
     if (form.value.referImages.length === 0) {
-      window.alert("请至少上传 1 张参考图（可灵要求正面图 + 1~3 张其他角度参考图）")
+      window.alert("请至少上传 1 张参考图")
       return
     }
   } else if (!form.value.referVideo.trim()) {
@@ -107,7 +126,7 @@ async function submitCreate() {
     form.value.referenceType === "image_refer"
       ? {
           frontalImage: form.value.frontalImage.trim(),
-          referImages: form.value.referImages.filter(Boolean),
+          referImages: form.value.referImages.filter(Boolean).slice(0, 3),
         }
       : { referVideos: form.value.referVideo.trim() ? [form.value.referVideo.trim()] : [] }
 
@@ -124,14 +143,7 @@ async function submitCreate() {
       },
     })
     showCreate.value = false
-    form.value = {
-      displayName: "",
-      description: "",
-      referenceType: "image_refer",
-      frontalImage: "",
-      referImages: [],
-      referVideo: "",
-    }
+    resetCreateForm()
     await loadSubjects()
   } catch (err) {
     error.value = err instanceof Error ? err.message : "创建主体失败"
@@ -155,7 +167,7 @@ async function handleRetry(subject: GenerationSubject) {
 
 async function handleDelete(subject: GenerationSubject) {
   if (!auth.token) return
-  const confirmed = await confirmDelete(`确定删除主体「${subject.displayName}」吗？`)
+  const confirmed = await confirmDelete(`确定删除主体“${subject.displayName}”吗？`)
   if (!confirmed) return
   deletingCode.value = subject.subjectCode
   try {
@@ -176,7 +188,7 @@ function useForOmni(subject: GenerationSubject) {
   router.push({
     name: userRoutes.dashboard.name,
     query: {
-      tool: "kling-video-o1-omni",
+      tool: "kling-omni-video",
       subjectCode: subject.subjectCode,
       elementId: subject.upstreamElementId,
     },
@@ -208,7 +220,7 @@ onMounted(loadSubjects)
     </div>
 
     <div v-else-if="subjects.length === 0" class="rounded-2xl border border-dashed border-white/10 px-6 py-16 text-center text-white/50">
-      暂无主体，点击「添加主体」创建参考对象
+      暂无主体，点击“添加主体”创建可复用参考对象
     </div>
 
     <div v-else class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
@@ -230,8 +242,8 @@ onMounted(loadSubjects)
         </div>
         <div class="space-y-3 p-4">
           <div class="flex items-start justify-between gap-3">
-            <div>
-              <h3 class="font-medium text-white">{{ subject.displayName }}</h3>
+            <div class="min-w-0">
+              <h3 class="truncate font-medium text-white">{{ subject.displayName }}</h3>
               <p class="mt-1 text-xs text-white/50">
                 {{ subject.referenceType === "video_refer" ? "视频主体" : "图片主体" }}
               </p>
@@ -285,12 +297,12 @@ onMounted(loadSubjects)
         <h2 class="text-lg font-semibold text-white">添加主体</h2>
         <div class="mt-4 space-y-4">
           <label class="block space-y-1">
-            <span class="text-sm text-white/70">名称</span>
-            <input v-model="form.displayName" class="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-white" />
+            <span class="text-sm text-white/70">名称（最多 20 个字符）</span>
+            <input v-model="form.displayName" maxlength="20" class="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-white" />
           </label>
           <label class="block space-y-1">
-            <span class="text-sm text-white/70">描述</span>
-            <textarea v-model="form.description" rows="2" class="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-white" />
+            <span class="text-sm text-white/70">描述（最多 100 个字符）</span>
+            <textarea v-model="form.description" maxlength="100" rows="2" class="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-white" />
           </label>
           <label class="block space-y-1">
             <span class="text-sm text-white/70">参考类型</span>
@@ -302,17 +314,19 @@ onMounted(loadSubjects)
           <div v-if="form.referenceType === 'image_refer'" class="space-y-3">
             <label class="block space-y-1">
               <span class="text-sm text-white/70">正面图（必填）</span>
-              <input type="file" accept="image/*" @change="(e) => uploadReference((e.target as HTMLInputElement).files?.[0], 'frontal')" />
+              <input type="file" accept="image/jpeg,image/png,image/*" @change="(e) => uploadReference((e.target as HTMLInputElement).files?.[0], 'frontal')" />
             </label>
             <label class="block space-y-1">
-              <span class="text-sm text-white/70">参考图（必填 1~3 张，与正面图角度不同）</span>
-              <input type="file" accept="image/*" @change="(e) => uploadReference((e.target as HTMLInputElement).files?.[0], 'refer')" />
+              <span class="text-sm text-white/70">参考图（必填 1-3 张，需与正面图角度不同）</span>
+              <input type="file" accept="image/jpeg,image/png,image/*" @change="(e) => uploadReference((e.target as HTMLInputElement).files?.[0], 'refer')" />
             </label>
             <p v-if="form.referImages.length" class="text-xs text-white/50">已上传 {{ form.referImages.length }} 张参考图</p>
+            <p class="text-xs text-white/40">可灵要求 JPG/JPEG/PNG，单图不超过 10MB，宽高不小于 300px，宽高比 1:2.5 到 2.5:1。</p>
           </div>
           <label v-else class="block space-y-1">
             <span class="text-sm text-white/70">参考视频</span>
-            <input type="file" accept="video/*" @change="(e) => uploadReference((e.target as HTMLInputElement).files?.[0], 'video')" />
+            <input type="file" accept="video/mp4,video/quicktime,video/*" @change="(e) => uploadReference((e.target as HTMLInputElement).files?.[0], 'video')" />
+            <span class="block text-xs text-white/40">支持 MP4/MOV，建议 3-8 秒、16:9 或 9:16、1080P，大小不超过 200MB。</span>
           </label>
         </div>
         <div class="mt-5 flex justify-end gap-2">

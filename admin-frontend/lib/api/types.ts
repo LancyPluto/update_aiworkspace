@@ -355,6 +355,9 @@ export interface AgentModelConfig {
   baseUrl?: string | null
   apiKeyMasked?: string | null
   extraAuthJsonMasked?: string | null
+  executionTask?: string | null
+  executionOptionsJsonMasked?: string | null
+  routePreview?: ModelRoutePreview | null
   minimaxGroupId?: string | null
   consoleUrl?: string | null
   balanceUrl?: string | null
@@ -526,6 +529,9 @@ export interface UnifiedApiModelItem {
   consoleUrl?: string | null
   balanceUrl?: string | null
   docsUrl?: string | null
+  executionTask?: string | null
+  executionOptionsJsonMasked?: string | null
+  routePreview?: ModelRoutePreview | null
   timeoutSeconds?: number | null
   connectTimeoutSeconds?: number | null
   readTimeoutSeconds?: number | null
@@ -580,6 +586,8 @@ export interface AgentModelConfigPayload {
   apiKey?: string
   clearApiKey?: boolean
   extraAuthJson?: string
+  executionTask?: string
+  executionOptionsJson?: string
   minimaxGroupId?: string
   consoleUrl?: string
   balanceUrl?: string
@@ -597,6 +605,12 @@ export interface AgentModelConfigPayload {
   agentEnabled?: boolean
   isDefault?: boolean
   capabilities?: string[]
+}
+
+export interface ModelRoutePreview {
+  createPath: string
+  resultPath: string
+  source: "executionTask" | "executionOptionsJson" | "legacyExtraAuthJson" | "default"
 }
 
 export interface AgentModelConfigTestResult {

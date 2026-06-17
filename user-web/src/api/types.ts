@@ -295,6 +295,7 @@ export interface ToolField {
     | "multi_image"
     | "multi_video"
     | "subject_element_list"
+    | "omni_video_list"
     | "file"
     | "image_upload"
     | "video_upload"

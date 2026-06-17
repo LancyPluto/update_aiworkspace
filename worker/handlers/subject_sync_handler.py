@@ -16,6 +16,10 @@ class SubjectSyncHandler:
         self.backend_client = backend_client or BackendClient()
 
     def handle(self, message: dict[str, Any]) -> dict[str, Any]:
+        message_type = str(message.get("messageType") or "").strip().lower()
+        if message_type == "subject_delete":
+            return self.handle_delete(message)
+
         subject_code = str(message.get("subjectCode") or "").strip()
         trace_id = message.get("traceId")
         if not subject_code:
@@ -57,6 +61,31 @@ class SubjectSyncHandler:
             )
             self._report_failure(subject_code, exc, trace_id)
             raise
+
+    def handle_delete(self, message: dict[str, Any]) -> dict[str, Any]:
+        subject_code = str(message.get("subjectCode") or "").strip()
+        element_id = str(message.get("upstreamElementId") or message.get("elementId") or "").strip()
+        trace_id = message.get("traceId")
+        if not element_id:
+            LOGGER.info("skip subject remote delete without element id subjectCode=%s", subject_code or "-")
+            return {"status": "SKIPPED", "subjectCode": subject_code, "reason": "missing element id"}
+        try:
+            context = self.backend_client.get_subject_sync_context(subject_code, trace_id=trace_id) if subject_code else {}
+        except Exception:
+            context = {
+                "baseUrl": None,
+                "apiKey": None,
+                "extraAuthJson": None,
+            }
+            LOGGER.warning(
+                "failed to load deleted subject context, fallback to worker credentials subjectCode=%s",
+                subject_code or "-",
+                exc_info=True,
+            )
+        client = self._client(context)
+        response = client.delete_element(element_id)
+        LOGGER.info("subject remote delete requested subjectCode=%s elementId=%s response=%s", subject_code or "-", element_id, response)
+        return {"status": "SUCCESS", "subjectCode": subject_code, "upstreamElementId": element_id}
 
     def _report_failure(
         self,

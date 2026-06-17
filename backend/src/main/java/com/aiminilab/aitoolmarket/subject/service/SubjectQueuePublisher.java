@@ -9,6 +9,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 @Component
@@ -37,12 +38,23 @@ public class SubjectQueuePublisher {
     }
 
     public boolean publish(String subjectCode, Long userId) {
+        return publishMessage("subject_sync", subjectCode, userId, null);
+    }
+
+    public boolean publishDelete(String subjectCode, Long userId, String upstreamElementId) {
+        return publishMessage("subject_delete", subjectCode, userId, upstreamElementId);
+    }
+
+    private boolean publishMessage(String messageType, String subjectCode, Long userId, String upstreamElementId) {
         try {
-            String message = objectMapper.writeValueAsString(Map.of(
-                    "messageType", "subject_sync",
-                    "subjectCode", subjectCode,
-                    "userId", userId
-            ));
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("messageType", messageType);
+            payload.put("subjectCode", subjectCode);
+            payload.put("userId", userId);
+            if (upstreamElementId != null && !upstreamElementId.isBlank()) {
+                payload.put("upstreamElementId", upstreamElementId);
+            }
+            String message = objectMapper.writeValueAsString(payload);
             if ("rabbitmq".equalsIgnoreCase(appProperties.getTaskQueueBackend())) {
                 rabbitTemplate.convertAndSend(
                         appProperties.getRabbitmq().getTaskExchange(),
@@ -54,7 +66,13 @@ public class SubjectQueuePublisher {
             }
             return true;
         } catch (Exception exception) {
-            LOGGER.warn("failed to publish subject sync, subjectCode={}, userId={}", subjectCode, userId, exception);
+            LOGGER.warn(
+                    "failed to publish subject message type={}, subjectCode={}, userId={}",
+                    messageType,
+                    subjectCode,
+                    userId,
+                    exception
+            );
             return false;
         }
     }

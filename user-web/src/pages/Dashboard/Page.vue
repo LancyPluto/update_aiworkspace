@@ -1510,6 +1510,28 @@ function buildAssetReplayParams(fields: ToolField[], asset: AssetPreviewItem): R
   return params
 }
 
+function routeQueryString(name: string): string {
+  const value = route.query[name]
+  const raw = Array.isArray(value) ? value[0] : value
+  return typeof raw === "string" ? raw.trim() : ""
+}
+
+function buildSubjectReplayParams(fields: ToolField[]): Record<string, unknown> | null {
+  const elementId = routeQueryString("elementId")
+  if (!elementId) return null
+  const subjectField = fields.find((field) => field.fieldType === "subject_element_list")
+  if (!subjectField) return null
+  const subjectCode = routeQueryString("subjectCode")
+  return {
+    [subjectField.fieldKey]: [
+      {
+        element_id: elementId,
+        subject_code: subjectCode || undefined,
+      },
+    ],
+  }
+}
+
 function consumePendingAssetFromStorage(): AssetPreviewItem | null {
   return consumeDashboardPendingAsset()
 }
@@ -1604,7 +1626,11 @@ async function loadSelectedToolDetail(toolCode: string) {
   selectedToolDetailLoading.value = true
   try {
     selectedChatTool.value = await fetchAIToolById(toolCode, { token: auth.token })
-    if (pendingAssetReplay.value) {
+    const subjectReplay = buildSubjectReplayParams(selectedChatTool.value.fields || [])
+    if (subjectReplay) {
+      replayParams.value = subjectReplay
+      expandComposer()
+    } else if (pendingAssetReplay.value) {
       replayParams.value = buildAssetReplayParams(selectedChatTool.value.fields || [], pendingAssetReplay.value)
       if (pendingAssetReplay.value.prompt) promptText.value = pendingAssetReplay.value.prompt
     }

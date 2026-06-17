@@ -87,6 +87,8 @@ public class ModelConfigCredentialResolver {
         copy.setBaseUrl(source.getBaseUrl());
         copy.setApiKey(source.getApiKey());
         copy.setExtraAuthJson(source.getExtraAuthJson());
+        copy.setExecutionTask(source.getExecutionTask());
+        copy.setExecutionOptionsJson(source.getExecutionOptionsJson());
         copy.setMinimaxGroupId(source.getMinimaxGroupId());
         copy.setConsoleUrl(source.getConsoleUrl());
         copy.setBalanceUrl(source.getBalanceUrl());

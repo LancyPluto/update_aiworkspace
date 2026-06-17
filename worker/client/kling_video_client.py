@@ -2,6 +2,7 @@ import json
 import base64
 import hashlib
 import hmac
+import ipaddress
 import logging
 import time
 from pathlib import Path
@@ -98,10 +99,12 @@ class KlingVideoClient:
         multi_prompt: Any = None,
         cfg_scale: float | None = None,
         keep_original_sound: str = "",
+        api_task: str = "",
     ) -> dict[str, Any]:
         if not self._has_auth():
             raise KlingVideoError("Kling credentials are not configured")
 
+        normalized_api_task = self._normalize_api_task(api_task)
         payload = self._build_video_payload(
             prompt=prompt,
             image_size=image_size,
@@ -129,14 +132,24 @@ class KlingVideoClient:
             multi_prompt=multi_prompt,
             cfg_scale=cfg_scale,
             keep_original_sound=keep_original_sound,
+            api_task=api_task,
         )
-        resolved_create_path, resolved_result_path = self._resolve_video_paths(
-            create_path=create_path,
-            result_path_template=result_path_template,
-            image=image,
-            video_url=video_url,
-            image_list=image_list,
-            video_list=video_list,
+        if normalized_api_task == "motion_control":
+            resolved_create_path = create_path.strip() or "/v1/videos/motion-control"
+            resolved_result_path = result_path_template.strip() or "/v1/videos/motion-control/{task_id}"
+        else:
+            resolved_create_path, resolved_result_path = self._resolve_video_paths(
+                create_path=create_path,
+                result_path_template=result_path_template,
+                image=image,
+                video_url=video_url,
+                image_list=image_list,
+                video_list=video_list,
+            )
+        LOGGER.info(
+            "kling video request path=%s payload=%s",
+            resolved_create_path,
+            _json_for_log(payload),
         )
         created = self._request("POST", resolved_create_path, payload)
         task_id = self._extract_task_id(created)
@@ -356,7 +369,24 @@ class KlingVideoClient:
         multi_prompt: Any = None,
         cfg_scale: float | None = None,
         keep_original_sound: str = "",
+        api_task: str = "",
     ) -> dict[str, Any]:
+        normalized_api_task = self._normalize_api_task(api_task)
+        if normalized_api_task == "motion_control":
+            return self._build_motion_control_payload(
+                prompt=prompt,
+                model=model,
+                image=image,
+                video_url=video_url,
+                callback_url=callback_url,
+                external_task_id=external_task_id,
+                character_orientation=character_orientation,
+                element_list=element_list,
+                mode=mode,
+                keep_original_sound=keep_original_sound,
+            )
+        is_omni_video = self._is_omni_video_model(model)
+        is_multi_image2video = normalized_api_task == "multi_image2video"
         payload: dict[str, Any] = {
             "model_name": model,
         }
@@ -381,9 +411,9 @@ class KlingVideoClient:
                 payload["image"] = encoded_image
         if image_tail.strip():
             payload["image_tail"] = self._image_to_base64(image_tail.strip())
-        if resolution.strip():
+        if resolution.strip() and not is_omni_video and not is_multi_image2video:
             payload["resolution"] = resolution.strip()
-        if sound.strip():
+        if sound.strip() and not is_multi_image2video:
             payload["sound"] = sound.strip()
         if callback_url.strip():
             payload["callback_url"] = callback_url.strip()
@@ -397,20 +427,46 @@ class KlingVideoClient:
             payload["static_mask"] = self._image_to_base64(static_mask.strip())
         if dynamic_masks not in (None, "", []):
             payload["dynamic_masks"] = self._parse_json_array(dynamic_masks)
-        encoded_image_list = self._encode_media_list(image_list)
+        if is_omni_video:
+            encoded_image_list = self._encode_omni_video_image_list(image_list)
+        elif is_multi_image2video:
+            encoded_image_list = self._encode_multi_image_video_image_list(image_list)
+        else:
+            encoded_image_list = self._encode_media_list(image_list)
         if encoded_image_list:
             payload["image_list"] = encoded_image_list
         encoded_video_list = self._encode_video_list(video_list)
         if encoded_video_list:
             payload["video_list"] = encoded_video_list
+            if self._has_base_video_reference(encoded_video_list):
+                payload.pop("duration", None)
+                payload.pop("aspect_ratio", None)
+            if payload.get("sound") and payload["sound"] != "off":
+                payload["sound"] = "off"
         normalized_element_list = self._normalize_element_list(element_list)
         if normalized_element_list not in (None, "", []):
             payload["element_list"] = normalized_element_list
-        if multi_shot.strip():
-            payload["multi_shot"] = multi_shot.strip()
-        if shot_type.strip() and shot_type.strip().lower() not in {"auto", "智能", "default", "adaptive"}:
+        has_multi_prompt = multi_prompt not in (None, "", [])
+        if multi_shot.strip() and not is_multi_image2video:
+            if is_omni_video:
+                multi_shot_value = self._optional_bool(multi_shot)
+                if multi_shot_value:
+                    normalized_shot_type = shot_type.strip() or "customize"
+                    if normalized_shot_type == "customize" and not has_multi_prompt:
+                        LOGGER.warning(
+                            "kling omni multi_shot=true with customize shot_type requires multi_prompt; falling back to single-shot payload"
+                        )
+                    else:
+                        payload["multi_shot"] = True
+            else:
+                payload["multi_shot"] = multi_shot.strip()
+        if (
+            shot_type.strip()
+            and shot_type.strip().lower() not in {"auto", "智能", "default", "adaptive"}
+            and (not is_omni_video or payload.get("multi_shot") is True)
+        ):
             payload["shot_type"] = shot_type.strip()
-        if multi_prompt not in (None, "", []):
+        if has_multi_prompt and (not is_omni_video or payload.get("multi_shot") is True):
             payload["multi_prompt"] = multi_prompt
         if cfg_scale is not None:
             payload["cfg_scale"] = cfg_scale
@@ -419,6 +475,115 @@ class KlingVideoClient:
         if seed is not None:
             payload["seed"] = seed
         return payload
+
+    def _build_motion_control_payload(
+        self,
+        *,
+        prompt: str,
+        model: str,
+        image: str,
+        video_url: str,
+        callback_url: str,
+        external_task_id: str,
+        character_orientation: str,
+        element_list: Any,
+        mode: str,
+        keep_original_sound: str,
+    ) -> dict[str, Any]:
+        image_value = image.strip()
+        if not image_value:
+            raise KlingVideoError("image_url is required for Kling motion control")
+        video_value = video_url.strip()
+        if not video_value:
+            raise KlingVideoError("video_url is required for Kling motion control")
+        if not self._is_public_http_url(video_value):
+            raise KlingVideoError(
+                "Kling motion control video_url must be a public HTTP(S) URL; configure public asset storage or use an external MP4/MOV URL"
+            )
+
+        if self._is_public_http_url(image_value):
+            encoded_image = image_value
+        else:
+            encoded_image = self._image_to_base64(image_value)
+
+        orientation = character_orientation.strip() or "video"
+        if orientation not in {"image", "video"}:
+            raise KlingVideoError("character_orientation must be image or video for Kling motion control")
+
+        normalized_elements = self._normalize_element_list(element_list)
+        element_rows: list[dict[str, Any]] = []
+        if normalized_elements not in (None, "", []):
+            rows = normalized_elements if isinstance(normalized_elements, list) else [normalized_elements]
+            for row in rows:
+                if not isinstance(row, dict) or row.get("element_id") in (None, ""):
+                    raise KlingVideoError("Kling motion control element_list only supports existing element_id references")
+                element_rows.append({"element_id": row["element_id"]})
+            if len(element_rows) > 1:
+                raise KlingVideoError("Kling motion control supports at most one subject element")
+            orientation = "video"
+
+        payload: dict[str, Any] = {
+            "model_name": model,
+            "image_url": encoded_image,
+            "video_url": video_value,
+            "character_orientation": orientation,
+            "mode": mode.strip() or "std",
+        }
+        if prompt.strip():
+            payload["prompt"] = prompt.strip()
+        sound_value = keep_original_sound.strip() or "yes"
+        payload["keep_original_sound"] = sound_value if sound_value in {"yes", "no"} else "yes"
+        if element_rows:
+            payload["element_list"] = element_rows
+        if callback_url.strip():
+            payload["callback_url"] = callback_url.strip()
+        if external_task_id.strip():
+            payload["external_task_id"] = external_task_id.strip()
+        return payload
+
+    @staticmethod
+    def _is_public_http_url(value: str) -> bool:
+        parsed = urlparse(value.strip())
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            return False
+        host = parsed.hostname.lower()
+        if host in {"localhost", "backend"} or host.endswith(".local"):
+            return False
+        try:
+            ip = ipaddress.ip_address(host)
+            return not (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast)
+        except ValueError:
+            return True
+
+    @staticmethod
+    def _is_omni_video_model(model: str) -> bool:
+        normalized = str(model or "").strip().lower()
+        return normalized in {"kling-video-o1", "kling-v3-omni"} or "omni" in normalized
+
+    @staticmethod
+    def _normalize_api_task(value: Any) -> str:
+        return str(value or "").strip().lower().replace("-", "_")
+
+    @staticmethod
+    def _optional_bool(value: Any) -> bool | None:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return bool(value)
+        text = str(value or "").strip().lower()
+        if text in {"true", "1", "yes", "y", "on"}:
+            return True
+        if text in {"false", "0", "no", "n", "off"}:
+            return False
+        return None
+
+    @staticmethod
+    def _has_base_video_reference(value: list[Any]) -> bool:
+        return any(
+            isinstance(item, dict)
+            and str(item.get("refer_type") or item.get("referType") or "base").strip().lower() == "base"
+            for item in value
+        )
 
     def _parse_json_array(self, value: Any) -> Any:
         if value in (None, "", []):
@@ -434,24 +599,35 @@ class KlingVideoClient:
                     return value
         return value
 
-    def _encode_video_list(self, value: Any) -> list[str]:
+    def _encode_video_list(self, value: Any) -> list[Any]:
         parsed = self._parse_json_array(value)
         if parsed in (None, "", []):
             return []
         items = parsed if isinstance(parsed, list) else [parsed]
-        urls: list[str] = []
+        encoded: list[Any] = []
         for item in items:
             if isinstance(item, dict):
+                video_url = ""
                 for key in ("video_url", "video", "url"):
                     raw = item.get(key)
                     if isinstance(raw, str) and raw.strip():
-                        urls.append(raw.strip())
+                        video_url = raw.strip()
                         break
+                if not video_url:
+                    continue
+                row: dict[str, str] = {"video_url": video_url}
+                refer_type = str(item.get("refer_type") or item.get("referType") or "base").strip()
+                keep_original_sound = str(
+                    item.get("keep_original_sound") or item.get("keepOriginalSound") or "no"
+                ).strip()
+                row["refer_type"] = refer_type if refer_type in {"base", "feature"} else "base"
+                row["keep_original_sound"] = keep_original_sound if keep_original_sound in {"yes", "no"} else "no"
+                encoded.append(row)
                 continue
             text = str(item).strip()
             if text:
-                urls.append(text)
-        return urls
+                encoded.append(text)
+        return encoded
 
     def _normalize_element_list(self, value: Any) -> Any:
         parsed = self._parse_json_array(value)
@@ -465,6 +641,7 @@ class KlingVideoClient:
                 continue
             row = dict(item)
             if row.get("element_id") is not None:
+                row["element_id"] = self._normalize_element_id(row.get("element_id"))
                 encoded.append(row)
                 continue
             frontal = row.get("frontal_image")
@@ -479,6 +656,18 @@ class KlingVideoClient:
                 ]
             encoded.append(row)
         return encoded
+
+    @staticmethod
+    def _normalize_element_id(value: Any) -> Any:
+        if isinstance(value, int):
+            return value
+        text = str(value or "").strip()
+        if text.isdigit():
+            try:
+                return int(text)
+            except ValueError:
+                return text
+        return value
 
     def _encode_media_list(self, value: Any) -> list[Any]:
         parsed = self._parse_json_array(value)
@@ -499,6 +688,53 @@ class KlingVideoClient:
             if not text:
                 continue
             encoded.append(self._image_payload_value(text))
+        return encoded
+
+    def _encode_omni_video_image_list(self, value: Any) -> list[dict[str, str]]:
+        parsed = self._parse_json_array(value)
+        if parsed in (None, "", []):
+            return []
+        items = parsed if isinstance(parsed, list) else [parsed]
+        encoded: list[dict[str, str]] = []
+        for item in items:
+            raw = ""
+            frame_type = ""
+            if isinstance(item, dict):
+                for key in ("image_url", "imageUrl", "image", "url"):
+                    candidate = item.get(key)
+                    if isinstance(candidate, str) and candidate.strip():
+                        raw = candidate.strip()
+                        break
+                frame_type = str(item.get("type") or "").strip()
+            else:
+                raw = str(item).strip()
+            if not raw:
+                continue
+            row = {"image_url": self._image_to_base64(raw)}
+            if frame_type in {"first_frame", "end_frame"}:
+                row["type"] = frame_type
+            encoded.append(row)
+        return encoded
+
+    def _encode_multi_image_video_image_list(self, value: Any) -> list[dict[str, str]]:
+        parsed = self._parse_json_array(value)
+        if parsed in (None, "", []):
+            return []
+        items = parsed if isinstance(parsed, list) else [parsed]
+        encoded: list[dict[str, str]] = []
+        for item in items[:4]:
+            raw = ""
+            if isinstance(item, dict):
+                for key in ("image", "url", "image_url", "imageUrl"):
+                    candidate = item.get(key)
+                    if isinstance(candidate, str) and candidate.strip():
+                        raw = candidate.strip()
+                        break
+            else:
+                raw = str(item).strip()
+            if not raw:
+                continue
+            encoded.append({"image": self._image_to_base64(raw)})
         return encoded
 
     def _encode_omni_image_list(self, value: Any) -> list[dict[str, str]]:
@@ -1068,6 +1304,13 @@ class KlingVideoClient:
             if element_id:
                 return element_id
             status = self._extract_status(last_payload).lower()
+            if status in SUCCESS_STATUSES:
+                raise KlingVideoError(
+                    self._describe_response_problem(
+                        "kling element response reached terminal success but no element id",
+                        last_payload,
+                    )
+                )
             if status in FAILED_STATUSES:
                 raise KlingVideoError(
                     self._describe_response_problem("kling element creation failed", last_payload)
@@ -1079,6 +1322,30 @@ class KlingVideoClient:
                 last_payload,
             )
         )
+
+    def list_custom_elements(self, *, page_num: int = 1, page_size: int = 30) -> dict[str, Any]:
+        from utils.kling_config import KLING_ELEMENT_PATHS
+
+        page_num = max(1, min(1000, int(page_num)))
+        page_size = max(1, min(500, int(page_size)))
+        path = f"{KLING_ELEMENT_PATHS['list']}?pageNum={page_num}&pageSize={page_size}"
+        return self._request("GET", path, None)
+
+    def list_preset_elements(self, *, page_num: int = 1, page_size: int = 30) -> dict[str, Any]:
+        from utils.kling_config import KLING_ELEMENT_PATHS
+
+        page_num = max(1, min(1000, int(page_num)))
+        page_size = max(1, min(500, int(page_size)))
+        path = f"{KLING_ELEMENT_PATHS['preset_list']}?pageNum={page_num}&pageSize={page_size}"
+        return self._request("GET", path, None)
+
+    def delete_element(self, element_id: str) -> dict[str, Any]:
+        from utils.kling_config import KLING_ELEMENT_PATHS
+
+        element_id = str(element_id or "").strip()
+        if not element_id:
+            raise KlingVideoError("element_id is required")
+        return self._request("POST", KLING_ELEMENT_PATHS["delete"], {"element_id": element_id})
 
     @classmethod
     def _extract_element_id(cls, payload: dict[str, Any]) -> str:

@@ -42,7 +42,7 @@ class TaskHandlerRouter:
 
     def handle(self, message: dict[str, Any]) -> dict[str, Any]:
         message_type = str(message.get("messageType") or "").strip().lower()
-        if message_type == "subject_sync":
+        if message_type in {"subject_sync", "subject_delete"}:
             return self.subject_sync_handler.handle(message)
 
         task_id = int(message["taskId"])

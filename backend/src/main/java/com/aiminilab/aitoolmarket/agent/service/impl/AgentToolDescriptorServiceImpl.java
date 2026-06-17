@@ -383,6 +383,16 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
                 ObjectNode itemSchema = objectMapper.createObjectNode();
                 itemSchema.put("type", "string");
                 property.set("items", itemSchema);
+            } else if ("omni_video_list".equalsIgnoreCase(field.fieldType())) {
+                property.put("type", "array");
+                ObjectNode itemSchema = objectMapper.createObjectNode();
+                itemSchema.put("type", "object");
+                ObjectNode itemProperties = objectMapper.createObjectNode();
+                itemProperties.putObject("video_url").put("type", "string");
+                itemProperties.putObject("refer_type").put("type", "string");
+                itemProperties.putObject("keep_original_sound").put("type", "string");
+                itemSchema.set("properties", itemProperties);
+                property.set("items", itemSchema);
             } else if ("subject_element_list".equalsIgnoreCase(field.fieldType())) {
                 property.put("type", "array");
                 ObjectNode itemSchema = objectMapper.createObjectNode();

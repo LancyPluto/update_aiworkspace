@@ -8,10 +8,11 @@ import TaskStatusTag from "@/components/TaskStatusTag/TaskStatusTag.vue"
 import { getApiOrigin } from "@/api/client"
 import { userRoutes } from "@/router/userRoutes"
 import { fetchToolByCode, createTask, ApiBusinessError } from "@/api"
-import type { ToolDetail, ToolField } from "@/api/types"
+import type { ToolDetail } from "@/api/types"
 import { useAuthStore } from "@/store/authStore"
 import { randomUUID } from "@/utils/randomUUID"
 import { formatToolCreditHint, formatToolCreditLabel } from "@/utils/toolCreditLabel"
+import { buildTaskParams } from "@/utils/toolTaskParams"
 import { useTaskEstimate, type UseTaskEstimateInput } from "@/composables/useTaskEstimate"
 
 const props = defineProps<{
@@ -70,34 +71,6 @@ const creditInsufficient = computed(() => {
   const result = liveEstimate.value
   return !!result && !result.variable && !result.sufficient
 })
-
-function buildTaskParams(fields: ToolField[], raw: Record<string, unknown>): Record<string, unknown> {
-  const out: Record<string, unknown> = {}
-  for (const f of fields) {
-    const v = raw[f.fieldKey]
-    if (f.fieldType === "number") {
-      if (v === "" || v === undefined || v === null) {
-        if (!f.required) continue
-      }
-      const n = typeof v === "number" ? v : Number(v)
-      if (!Number.isNaN(n)) out[f.fieldKey] = n
-    } else if (f.fieldType === "checkbox") {
-      out[f.fieldKey] = Boolean(v)
-    } else if ((f.fieldType === "select" || f.fieldType === "radio" || f.fieldType === "aspect_ratio") && v === "__none__") {
-      continue
-    } else if ((f.fieldType === "select" || f.fieldType === "radio" || f.fieldType === "aspect_ratio") && v === "__custom__") {
-      const custom = raw[`${f.fieldKey}Custom`]
-      if (custom !== undefined && custom !== null && String(custom).trim() !== "") {
-        out[f.fieldKey] = String(custom).trim()
-      }
-    } else if (Array.isArray(v)) {
-      if (v.length > 0) out[f.fieldKey] = v
-    } else if (v !== undefined && v !== null && v !== "") {
-      out[f.fieldKey] = typeof v === "string" ? v.trim() : v
-    }
-  }
-  return out
-}
 
 function normalizeToolMediaUrl(value?: string | null): string {
   const raw = value?.trim()

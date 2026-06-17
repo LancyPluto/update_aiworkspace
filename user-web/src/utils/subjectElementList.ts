@@ -23,11 +23,21 @@ export const SUBJECT_ELEMENT_MODE_OPTIONS: Array<{ label: string; value: Subject
 ]
 
 export function subjectElementMax(field: Pick<ToolField, "options" | "optionsJson">): number {
-  return parseFieldMeta(field).maxCount ?? 7
+  const meta = parseFieldMeta(field)
+  const maxCount = Number(meta.maxCount ?? meta.maxItems)
+  return Number.isFinite(maxCount) && maxCount > 0 ? maxCount : 7
 }
 
 export function subjectElementMin(field: Pick<ToolField, "options" | "optionsJson">): number {
   return parseFieldMeta(field).minCount ?? 0
+}
+
+export function subjectElementAllowedModes(field: Pick<ToolField, "options" | "optionsJson">): SubjectElementMode[] {
+  const raw = parseFieldMeta(field).allowedModes || []
+  const allowed = raw.filter((mode): mode is SubjectElementMode =>
+    ["element_id", "library_ref", "image_element", "video_element"].includes(mode),
+  )
+  return allowed.length > 0 ? allowed : SUBJECT_ELEMENT_MODE_OPTIONS.map((option) => option.value)
 }
 
 function createEditorItem(mode: SubjectElementMode = "library_ref"): SubjectElementEditorItem {
@@ -74,7 +84,7 @@ export function parseSubjectElementEditorItems(value: unknown, limit: number): S
     .map((row) => {
       const mode = inferMode(row)
       const referImages = Array.isArray(row.refer_images)
-        ? row.refer_images.map((item) => String(item).trim()).filter(Boolean).slice(0, 4)
+        ? row.refer_images.map((item) => String(item).trim()).filter(Boolean).slice(0, 3)
         : []
       const referVideos = Array.isArray(row.refer_videos)
         ? row.refer_videos.map((item) => String(item).trim()).filter(Boolean)
@@ -93,8 +103,8 @@ export function parseSubjectElementEditorItems(value: unknown, limit: number): S
     })
 }
 
-export function createEmptySubjectElementItem(): SubjectElementEditorItem {
-  return createEditorItem("library_ref")
+export function createEmptySubjectElementItem(mode: SubjectElementMode = "library_ref"): SubjectElementEditorItem {
+  return createEditorItem(mode)
 }
 
 export function serializeSubjectElementItems(items: SubjectElementEditorItem[]): Record<string, unknown>[] {
@@ -110,7 +120,7 @@ export function serializeSubjectElementItems(items: SubjectElementEditorItem[]):
       }
       if (item.mode === "image_element") {
         const frontalImage = item.frontalImage.trim()
-        const referImages = item.referImages.map((url) => url.trim()).filter(Boolean).slice(0, 4)
+        const referImages = item.referImages.map((url) => url.trim()).filter(Boolean).slice(0, 3)
         if (!frontalImage && referImages.length === 0) return null
         const row: Record<string, unknown> = {}
         if (frontalImage) row.frontal_image = frontalImage
@@ -136,15 +146,27 @@ export function validateSubjectElementItems(
   if (serialized.length > maxCount) {
     return { valid: false, message: `${field.fieldName} 最多 ${maxCount} 个主体` }
   }
+  const allowedModes = new Set(subjectElementAllowedModes(field))
   for (const item of items) {
+    if (!allowedModes.has(item.mode)) {
+      return { valid: false, message: `${field.fieldName} 不支持当前主体类型` }
+    }
     if (item.mode === "library_ref" && !(item.upstreamElementId || item.elementId).trim()) {
       return { valid: false, message: `${field.fieldName} 中存在未选择的主体库条目` }
     }
     if (item.mode === "element_id" && !item.elementId.trim()) {
       return { valid: false, message: `${field.fieldName} 中存在未填写的主体 ID` }
     }
-    if (item.mode === "image_element" && !item.frontalImage.trim() && item.referImages.length === 0) {
-      return { valid: false, message: `${field.fieldName} 中的图片主体需至少上传一张参考图` }
+    if (item.mode === "image_element") {
+      if (!item.frontalImage.trim()) {
+        return { valid: false, message: `${field.fieldName} 中的图片主体需上传正面图` }
+      }
+      if (item.referImages.length === 0) {
+        return { valid: false, message: `${field.fieldName} 中的图片主体需至少上传 1 张参考图` }
+      }
+      if (item.referImages.length > 3) {
+        return { valid: false, message: `${field.fieldName} 中的图片主体最多上传 3 张参考图` }
+      }
     }
     if (item.mode === "video_element" && !item.referVideo.trim()) {
       return { valid: false, message: `${field.fieldName} 中的视频主体需上传参考视频` }

@@ -10,6 +10,7 @@ import { buildTaskResultBlocks, resolveAudioTracks } from "@/utils/taskResultBlo
 import {
   defaultFieldValue as resolveDefaultFieldValue,
   fieldOptionsFromMeta,
+  groupVisibleFields,
   isFieldVisible,
   parseFieldMeta,
   resolveMaxLength,
@@ -28,6 +29,15 @@ import {
   validateSubjectElementItems,
 } from "@/utils/subjectElementList"
 import SubjectElementListField from "@/components/DynamicForm/SubjectElementListField.vue"
+import {
+  hasBaseKlingOmniVideo,
+  klingOmniVideoMax,
+  parseKlingOmniVideoEditorItems,
+  serializeKlingOmniVideoItems,
+  validateKlingOmniVideoItems,
+  type KlingOmniVideoReference,
+} from "@/utils/klingOmniVideoList"
+import KlingOmniVideoListField from "@/components/DynamicForm/KlingOmniVideoListField.vue"
 import { Check, ChevronDown, Clock, FileAudio, FileVideo, ImageIcon, ImageUp, Loader2, Mic, Plus, UploadCloud, X } from "lucide-vue-next"
 import { BookOpen } from 'lucide-vue-next'
 
@@ -285,6 +295,7 @@ function toggleSelectDropdown(key: string) {
 }
 
 function selectDropdownOption(key: string, value: string) {
+  if (key === "sound" && value !== "off" && hasAnyOmniVideoReferences()) return
   setField(key, value)
   openSelectKey.value = null
 }
@@ -388,6 +399,34 @@ function isSubjectElementListField(field: ToolField): boolean {
   return field.fieldType === "subject_element_list"
 }
 
+function isOmniVideoListField(field: ToolField): boolean {
+  return field.fieldType === "omni_video_list"
+}
+
+function omniVideoItems(field: ToolField) {
+  return parseKlingOmniVideoEditorItems(state.value.fields[field.fieldKey], klingOmniVideoMax(field))
+}
+
+function hasBaseOmniVideo(field: ToolField): boolean {
+  return hasBaseKlingOmniVideo(omniVideoItems(field))
+}
+
+function hasAnyOmniVideoReferences(): boolean {
+  return requestFields.value
+    .filter(isOmniVideoListField)
+    .some((field) => serializeKlingOmniVideoItems(omniVideoItems(field)).length > 0)
+}
+
+function isSoundLockedField(field: ToolField): boolean {
+  return field.fieldKey === "sound" && hasAnyOmniVideoReferences()
+}
+
+function setOmniVideoListField(key: string, value: KlingOmniVideoReference[]) {
+  const next = { ...state.value.fields, [key]: value }
+  if (value.length > 0 && "sound" in next) next.sound = "off"
+  state.value.fields = next
+}
+
 function multiImageLimit(field: ToolField): number {
   return isMediaListField(field) ? mediaListMax(field) : parseFieldMeta(field).maxCount ?? MULTI_IMAGE_LIMIT
 }
@@ -432,6 +471,7 @@ function pickerIsSelected(url: string) {
 }
 
 function setField(key: string, value: unknown) {
+  if (key === "sound" && value !== "off" && hasAnyOmniVideoReferences()) return
   state.value.fields = { ...state.value.fields, [key]: value }
 }
 
@@ -445,7 +485,7 @@ function imagePreviewUrl(field: ToolField): string {
 }
 
 function materialKindForField(field: ToolField): MaterialKind {
-  if (field.fieldType === "multi_video") return "video"
+  if (field.fieldType === "multi_video" || field.fieldType === "omni_video_list") return "video"
   if (field.fieldType === "image" || field.fieldType === "multi_image") return "image"
   const text = `${field.fieldKey} ${field.fieldName} ${field.placeholder || ""}`.toLowerCase()
   if (/image|img|picture|photo|frame|cover|avatar|poster|图片|图像|照片|帧|封面|首图/.test(text)) return "image"
@@ -470,7 +510,7 @@ function materialKindLabel(kind: MaterialKind): string {
 }
 
 function isReferenceMediaField(field: ToolField): boolean {
-  return field.fieldType === "image" || isMediaListField(field) || field.fieldType === "file" || field.fieldType === "image_upload"
+  return field.fieldType === "image" || isMediaListField(field) || isOmniVideoListField(field) || field.fieldType === "file" || field.fieldType === "image_upload"
 }
 
 function isAdvancedOnlyField(field: ToolField): boolean {
@@ -493,10 +533,19 @@ const requestFields = computed(() => {
   }
   return fields
 })
-const fieldSections = computed(() => [
-  { key: "normal", advanced: false, fields: normalFields.value },
-  { key: "advanced", advanced: true, fields: advancedFields.value },
-].filter((section) => section.fields.length > 0 || (section.advanced && customModeField.value)))
+const fieldSections = computed(() => {
+  const normalGroups = groupVisibleFields(normalFields.value).map((group) => ({
+    key: group.key,
+    label: group.label,
+    advanced: false,
+    fields: group.fields,
+  }))
+  const sections = [
+    ...normalGroups,
+    { key: "advanced", label: "高级配置", advanced: true, fields: advancedFields.value },
+  ]
+  return sections.filter((section) => section.fields.length > 0 || (section.advanced && customModeField.value))
+})
 
 const primaryReferenceInfo = computed<PrimaryReferenceMaterialInfo>(() => {
   const field = primaryReferenceField.value
@@ -534,7 +583,7 @@ watch(
 )
 
 function fieldShellClass(field: ToolField): string {
-  if (isMultiImageField(field) || isSubjectElementListField(field)) return "sm:col-span-2 lg:col-span-1"
+  if (isMultiImageField(field) || isSubjectElementListField(field) || isOmniVideoListField(field)) return "sm:col-span-2 lg:col-span-1"
   if (field.fieldType === "slider") return "min-w-0"
   return "min-w-0"
 }
@@ -982,6 +1031,7 @@ function onNumberInput(key: string, event: Event) {
 
 function validate(): { valid: boolean; message?: string } {
   for (const field of requestFields.value) {
+    if (parseFieldMeta(field).submitPolicy === "ui_only") continue
     const value = state.value.fields[field.fieldKey]
     const maxLength = resolveMaxLength(field, state.value.fields)
     if (maxLength !== undefined && typeof value === "string" && value.length > maxLength) {
@@ -1008,6 +1058,14 @@ function validate(): { valid: boolean; message?: string } {
       })
       if (!check.valid) return check
     }
+    if (isOmniVideoListField(field)) {
+      const items = omniVideoItems(field)
+      const check = validateKlingOmniVideoItems(items, {
+        ...field,
+        required: field.required,
+      })
+      if (!check.valid) return check
+    }
     if (!field.required) continue
     if (field.fieldType === "checkbox") continue
     if (isMultiImageField(field)) {
@@ -1020,6 +1078,12 @@ function validate(): { valid: boolean; message?: string } {
     if (isSubjectElementListField(field)) {
       const items = parseSubjectElementEditorItems(state.value.fields[field.fieldKey], subjectElementMax(field))
       if (serializeSubjectElementItems(items).length === 0) {
+        return { valid: false, message: `请填写：${field.fieldName}` }
+      }
+      continue
+    }
+    if (isOmniVideoListField(field)) {
+      if (serializeKlingOmniVideoItems(omniVideoItems(field)).length === 0) {
         return { valid: false, message: `请填写：${field.fieldName}` }
       }
       continue
@@ -1052,14 +1116,21 @@ function getRequestParams(): Record<string, unknown> {
       const items = parseSubjectElementEditorItems(value, subjectElementMax(field))
       const serialized = serializeSubjectElementItems(items)
       if (serialized.length > 0) params[field.fieldKey] = serialized
+    } else if (isOmniVideoListField(field)) {
+      const serialized = serializeKlingOmniVideoItems(parseKlingOmniVideoEditorItems(value, klingOmniVideoMax(field)))
+      if (serialized.length > 0) params[field.fieldKey] = serialized
     } else if (field.fieldType === "number" || field.fieldType === "slider") {
       if (value !== "" && value !== undefined && value !== null && !Number.isNaN(Number(value))) {
         params[field.fieldKey] = Number(value)
       }
+    } else if ((field.fieldType === "select" || field.fieldType === "radio") && value === "__none__") {
+      continue
     } else if (value !== "" && value !== undefined && value !== null) {
       params[field.fieldKey] = typeof value === "string" ? value.trim() : value
     }
   }
+  if (Array.isArray(params.videoList) && params.videoList.length > 0) params.sound = "off"
+  if (Array.isArray(params.video_list) && params.video_list.length > 0) params.sound = "off"
   return params
 }
 
@@ -1112,6 +1183,13 @@ defineExpose({
   <div v-if="configuredFields.length > 0 || capabilities.length > 0" class="mt-2 space-y-2">
     <div class="space-y-3">
       <section v-for="section in fieldSections" :key="section.key" class="space-y-2">
+        <div
+          v-if="!section.advanced && section.key !== '__default__'"
+          class="flex items-center justify-between"
+        >
+          <h3 class="text-xs font-medium text-white/62">{{ section.label }}</h3>
+        </div>
+
         <button
           v-if="section.advanced"
           type="button"
@@ -1154,10 +1232,13 @@ defineExpose({
             :key="optionValue(option)"
             type="button"
             class="min-h-8 rounded-full border px-3 py-1 text-xs font-medium transition"
+            :disabled="isSoundLockedField(field) && optionValue(option) !== 'off'"
             :class="
               strField(field.fieldKey) === optionValue(option)
                 ? 'border-purple-500/30 bg-purple-500/10 text-purple-300'
-                : 'border-transparent bg-white/[0.04] text-white/40 hover:bg-white/10 hover:text-white/80'
+                : isSoundLockedField(field) && optionValue(option) !== 'off'
+                  ? 'cursor-not-allowed border-transparent bg-white/[0.03] text-white/25'
+                  : 'border-transparent bg-white/[0.04] text-white/40 hover:bg-white/10 hover:text-white/80'
             "
             @click="setField(field.fieldKey, optionValue(option))"
           >
@@ -1190,10 +1271,13 @@ defineExpose({
               :key="optionValue(option)"
               type="button"
               class="flex w-full items-center rounded-lg px-3 py-2 text-left text-xs transition"
+              :disabled="isSoundLockedField(field) && optionValue(option) !== 'off'"
               :class="
                 strField(field.fieldKey) === optionValue(option)
                   ? 'bg-purple-500/20 text-purple-200'
-                  : 'text-white/72 hover:bg-white/[0.06] hover:text-white'
+                  : isSoundLockedField(field) && optionValue(option) !== 'off'
+                    ? 'cursor-not-allowed text-white/25'
+                    : 'text-white/72 hover:bg-white/[0.06] hover:text-white'
               "
               @click="selectDropdownOption(field.fieldKey, optionValue(option))"
             >
@@ -1212,7 +1296,7 @@ defineExpose({
             class="capability-slider w-full"
             @input="onSliderInput(field, $event)"
           />
-          <span class="text-[10px] text-muted-foreground">{{ state.fields[field.fieldKey] ?? sliderConfig(field).min }}</span>
+          <span class="text-[10px] text-muted-foreground">{{ state.fields[field.fieldKey] ?? sliderConfig(field).min }}{{ parseFieldMeta(field).unit || "" }}</span>
         </div>
 
         <input
@@ -1348,6 +1432,18 @@ defineExpose({
           compact
           @update:model-value="setField(field.fieldKey, $event)"
         />
+
+        <div v-else-if="isOmniVideoListField(field)" class="space-y-2">
+          <KlingOmniVideoListField
+            :field="field"
+            :model-value="state.fields[field.fieldKey]"
+            compact
+            @update:model-value="setOmniVideoListField(field.fieldKey, $event)"
+          />
+          <p v-if="hasBaseOmniVideo(field)" class="text-[11px] text-amber-300/85">
+            已选择 base 参考视频：输出会按参考视频时长，时长滑杆不生效。
+          </p>
+        </div>
 
         <textarea
           v-else-if="field.fieldType === 'textarea'"

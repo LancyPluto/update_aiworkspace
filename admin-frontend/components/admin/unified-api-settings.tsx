@@ -279,6 +279,25 @@ function modelCapabilitiesForProvider(
   return compatible.length > 0 ? compatible : [...defaults]
 }
 
+function routeTasksForModel(provider: string | undefined, capabilities: string[] | null | undefined) {
+  const tasks = executionTaskOptions[(provider || "").trim()]
+  if (!tasks) return []
+  const caps = new Set((capabilities || []).map((capability) => capability.toUpperCase()))
+  if (caps.size === 0) return tasks
+  return tasks.filter((task) => task.capabilities.some((capability) => caps.has(capability)))
+}
+
+function routeTaskLabel(provider: string | undefined, task: string | null | undefined) {
+  const normalized = (task || "").trim()
+  return executionTaskOptions[(provider || "").trim()]?.find((item) => item.value === normalized)?.label || normalized || "未配置"
+}
+
+function routePreviewForForm(form: AgentModelConfigPayload & { id?: number }) {
+  const task = routeTasksForModel(form.provider, form.capabilities).find((item) => item.value === form.executionTask)
+  if (task) return { createPath: task.createPath, resultPath: task.resultPath, source: "executionTask" }
+  return null
+}
+
 function renderModelCost(model: UnifiedApiModelItem) {
   const billingUnit = (model.billingUnit || "").toString().trim().toUpperCase()
   if (!billingUnit) {
@@ -354,6 +373,8 @@ const emptyModelForm = (): AgentModelConfigPayload & { id?: number } => ({
   modelName: "",
   baseUrl: "",
   docsUrl: "",
+  executionTask: "",
+  executionOptionsJson: "",
   timeoutSeconds: 60,
   inputTokenPricePer1m: 0,
   outputTokenPricePer1m: 0,
@@ -364,6 +385,18 @@ const emptyModelForm = (): AgentModelConfigPayload & { id?: number } => ({
   isDefault: false,
   capabilities: ["TEXT_GENERATION"],
 })
+
+const executionTaskOptions: Record<string, Array<{ value: string; label: string; capabilities: string[]; createPath: string; resultPath: string }>> = {
+  kling_video: [
+    { value: "text2video", label: "文生视频", capabilities: ["VIDEO_GENERATION"], createPath: "/v1/videos/text2video", resultPath: "/v1/videos/text2video/{task_id}" },
+    { value: "image2video", label: "图生视频", capabilities: ["VIDEO_GENERATION"], createPath: "/v1/videos/image2video", resultPath: "/v1/videos/image2video/{task_id}" },
+    { value: "multi_image2video", label: "多图参考生视频", capabilities: ["VIDEO_GENERATION"], createPath: "/v1/videos/multi-image2video", resultPath: "/v1/videos/multi-image2video/{task_id}" },
+    { value: "motion_control", label: "动作控制", capabilities: ["VIDEO_GENERATION"], createPath: "/v1/videos/motion-control", resultPath: "/v1/videos/motion-control/{task_id}" },
+    { value: "omni_video", label: "Omni 视频", capabilities: ["VIDEO_GENERATION"], createPath: "/v1/videos/omni-video", resultPath: "/v1/videos/omni-video/{task_id}" },
+    { value: "image_generation", label: "图像生成", capabilities: ["IMAGE_GENERATION"], createPath: "/v1/images/generations", resultPath: "/v1/images/generations/{task_id}" },
+    { value: "omni_image", label: "Omni 生图", capabilities: ["IMAGE_GENERATION"], createPath: "/v1/images/omni-image", resultPath: "/v1/images/omni-image/{task_id}" },
+  ],
+}
 
 const emptyVendorForm = (): ModelVendorPayload => ({
   vendorCode: "",
@@ -1085,6 +1118,8 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
       baseUrl: "",
       docsUrl: "",
       capabilities: modelCapabilitiesForProvider(undefined, meta),
+      executionTask: routeTasksForModel(defaultProvider, modelCapabilitiesForProvider(undefined, meta))[0]?.value || "",
+      executionOptionsJson: "",
       billingUnit: (meta?.billingDefault as AgentModelConfigPayload["billingUnit"]) || "TOKEN_PER_M",
     })
     setModelDialogOpen(true)
@@ -1102,6 +1137,8 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
       modelName: model.modelName,
       baseUrl: model.baseUrl || "",
       docsUrl: model.docsUrl || "",
+      executionTask: model.executionTask || "",
+      executionOptionsJson: "",
       enabled: model.enabled,
       agentEnabled: model.agentEnabled ?? true,
       isDefault: model.isDefault ?? false,
@@ -1127,7 +1164,11 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
       const next = exists
         ? base.filter((item) => item.toUpperCase() !== capability.toUpperCase())
         : [...base, capability]
-      return { ...current, capabilities: next }
+      const compatibleTasks = routeTasksForModel(current.provider, next)
+      const executionTask = compatibleTasks.some((task) => task.value === current.executionTask)
+        ? current.executionTask
+        : compatibleTasks[0]?.value || ""
+      return { ...current, capabilities: next, executionTask }
     })
   }
 
@@ -1155,7 +1196,6 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
       const payload: AgentModelConfigPayload = {
         ...modelForm,
         apiKey: "",
-        extraAuthJson: "",
         inputTokenPricePer1m: numberOrZero(modelForm.inputTokenPricePer1m),
         outputTokenPricePer1m: numberOrZero(modelForm.outputTokenPricePer1m),
         unitPrice: numberOrZero(modelForm.unitPrice),
@@ -2008,6 +2048,54 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
               <p className="text-xs text-muted-foreground">
                 能力决定工具页可绑定范围和 Worker 执行路由；音乐模型请选择“文生音乐”。
               </p>
+            </div>
+            <div className="space-y-3 rounded-md border p-3">
+              <div className="flex items-center justify-between gap-3">
+                <Label>执行任务类型</Label>
+                <span className="text-xs text-muted-foreground">模型级路由，不填写 Key</span>
+              </div>
+              {routeTasksForModel(modelForm.provider, modelForm.capabilities).length > 0 ? (
+                <Select
+                  value={modelForm.executionTask || undefined}
+                  onValueChange={(value) => setModelForm((f) => ({ ...f, executionTask: value }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="选择 API 任务类型" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {routeTasksForModel(modelForm.provider, modelForm.capabilities).map((task) => (
+                      <SelectItem key={task.value} value={task.value}>
+                        {task.label} · {task.value}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <div className="rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground">
+                  当前供应商暂未定义结构化路由任务，将使用 Worker 默认路由。
+                </div>
+              )}
+              {(() => {
+                const preview = routePreviewForForm(modelForm)
+                return preview ? (
+                  <div className="space-y-1 rounded-md bg-muted/30 p-3 text-xs text-muted-foreground">
+                    <div>POST <span className="font-mono text-foreground">{preview.createPath}</span></div>
+                    <div>GET <span className="font-mono text-foreground">{preview.resultPath}</span></div>
+                  </div>
+                ) : null
+              })()}
+              <details className="rounded-md border border-dashed p-3">
+                <summary className="cursor-pointer text-sm text-muted-foreground">高级执行选项 JSON</summary>
+                <Textarea
+                  className="mt-3 min-h-24 font-mono text-xs"
+                  value={modelForm.executionOptionsJson || ""}
+                  placeholder={'{"createPath":"/v1/custom","resultPath":"/v1/custom/{task_id}"}'}
+                  onChange={(e) => setModelForm((f) => ({ ...f, executionOptionsJson: e.target.value }))}
+                />
+                <p className="mt-2 text-xs text-muted-foreground">
+                  仅用于 endpoint 覆盖或执行参数扩展，不要填写 API Key、AK/SK、Token。
+                </p>
+              </details>
             </div>
             <div className="space-y-2">
               <Label>API 文档页</Label>
