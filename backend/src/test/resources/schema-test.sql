@@ -996,12 +996,12 @@ INSERT INTO credit_recharge_packages (
   status
 ) VALUES (
   'ci_recharge_1000',
-  'Test credits',
+  '测试套餐',
   1000,
   10.00,
   'CNY',
   30,
-  '["Priority queue"]',
+  '["优先排队"]',
   1,
   10,
   'ACTIVE'

@@ -486,9 +486,7 @@
   onMounted(() => {
     if (auth.isLoggedIn) {
       router.replace(resolvePostLoginRedirect());
-      return;
     }
-    loginModalVisible.value = true;
   });
   onBeforeUnmount(() => {
     if (countdownTimer) clearInterval(countdownTimer);

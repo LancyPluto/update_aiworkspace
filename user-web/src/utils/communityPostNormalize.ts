@@ -17,11 +17,15 @@ export function getCachedCommunityAuthorProfile(userId: number) {
 }
 
 export function normalizeCommunityPost(post: RawCommunityPost): CommunityPost {
+  const liked = post.liked ?? (post as { is_liked?: boolean }).is_liked
+  const favorited = post.favorited ?? (post as { is_favorited?: boolean }).is_favorited
   return {
     ...post,
     authorNickname: post.authorNickname ?? post.author_nickname ?? null,
     authorAvatarUrl: post.authorAvatarUrl ?? post.author_avatar_url ?? null,
     promptPreview: post.promptPreview ?? post.prompt_preview ?? null,
+    liked: liked === true,
+    favorited: favorited === true,
   }
 }
 

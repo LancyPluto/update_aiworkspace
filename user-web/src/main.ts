@@ -2,7 +2,6 @@ import { createApp } from "vue"
 import { createPinia } from "pinia"
 import App from "./App.vue"
 import router from "./router"
-import { useAuthStore } from "./store/authStore"
 import { applyAppTheme, getStoredTheme } from "./utils/theme"
 import "./styles/main.css"
 import "./styles/workspace.css"
@@ -18,11 +17,8 @@ async function bootstrap() {
   app.use(router)
   await router.isReady()
 
-  // 先挂载再恢复会话，避免有 token 时长时间白屏（/me 在后台完成）
+  // 会话恢复由 router.beforeEach 中的 auth.init() 完成；此处勿重复 init，避免 /me 二次失败误清 token
   app.mount("#app")
-
-  const auth = useAuthStore()
-  void auth.init()
 }
 
 bootstrap()

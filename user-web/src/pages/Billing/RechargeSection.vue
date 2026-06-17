@@ -103,8 +103,29 @@ function formatMoney(value: number | string | undefined | null) {
   return Number.isInteger(amount) ? String(amount) : amount.toFixed(2)
 }
 
+const PACKAGE_NAME_ZH: Record<string, string> = {
+  "Starter credits": "入门套餐",
+  "Growth credits": "成长套餐",
+  "Pro credits": "专业套餐",
+  "Test credits": "测试套餐",
+}
+
+const BENEFIT_ZH: Record<string, string> = {
+  "Priority queue": "优先排队",
+  "API acceleration": "API 加速",
+  "Model consulting": "模型咨询服务",
+}
+
+function localizePackageName(name: string | undefined | null) {
+  if (!name) return ""
+  const trimmed = name.trim()
+  return PACKAGE_NAME_ZH[trimmed] ?? trimmed
+}
+
 function localizeBenefit(benefit: string) {
-  return benefit
+  const trimmed = benefit.trim()
+  if (BENEFIT_ZH[trimmed]) return BENEFIT_ZH[trimmed]
+  return trimmed
     .replace(/valid\s+for\s+(\d+)\s+days?/gi, "有效期 $1 天")
     .replace(/(\d+)\s+days?/gi, "$1 天")
     .replace(/\bcredits?\b/gi, "算力")
@@ -112,6 +133,9 @@ function localizeBenefit(benefit: string) {
     .replace(/\bpackage\b/gi, "套餐")
     .replace(/\brecharge\b/gi, "充值")
     .replace(/\bvalidity\b/gi, "有效期")
+    .replace(/\bpriority\s+queue\b/gi, "优先排队")
+    .replace(/\bapi\s+acceleration\b/gi, "API 加速")
+    .replace(/\bmodel\s+consulting\b/gi, "模型咨询服务")
 }
 
 function packageBenefits(pkg: RechargePackage) {
@@ -353,7 +377,8 @@ onUnmounted(clearPolling)
           >
             推荐
           </span>
-          <p class="text-3xl font-bold tabular-nums">
+          <p class="text-sm font-medium text-muted-foreground">{{ localizePackageName(pkg.packageName) }}</p>
+          <p class="mt-1 text-3xl font-bold tabular-nums">
             {{ pkg.credits.toLocaleString() }}
             <span class="text-sm font-normal text-muted-foreground">算力</span>
           </p>
@@ -442,7 +467,7 @@ onUnmounted(clearPolling)
               <h3 id="payment-channel-title" class="text-lg font-semibold text-foreground">选择支付方式</h3>
               <p class="mt-1 text-sm text-muted-foreground">
                 <template v-if="isCustomRecharge">自定义充值 · {{ customCredits.toLocaleString() }} 算力</template>
-              <template v-else>{{ pendingPackage?.packageName }} · {{ pendingPackage?.credits.toLocaleString() }} 算力</template>
+              <template v-else>{{ localizePackageName(pendingPackage?.packageName) }} · {{ pendingPackage?.credits.toLocaleString() }} 算力</template>
               </p>
             </div>
             <button

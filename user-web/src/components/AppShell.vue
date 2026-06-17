@@ -347,7 +347,11 @@ watch(
       class="hidden h-full w-[248px] shrink-0 flex-col border-r border-white/[0.06] bg-[#08090d]"
       :class="sidebarOpen ? 'lg:flex' : 'lg:hidden'"
     >
-      <div class="flex h-[76px] shrink-0 items-center gap-3 px-3">
+      <div class="flex h-[76px] shrink-0 items-center gap-2 px-3">
+        <RouterLink to="/agent" class="flex min-w-0 flex-1 items-center gap-2.5 overflow-hidden">
+          <img src="/logo.svg" class="h-8 w-8 shrink-0 rounded-lg object-contain" alt="" />
+          <span class="app-shell-agent-brand truncate text-xl leading-none">科创点AI</span>
+        </RouterLink>
         <button
           type="button"
           class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-white/[0.06] bg-white/[0.035] text-white/58 transition hover:border-[rgb(255_63_121_/_0.36)] hover:bg-[#32101c] hover:text-[#ff3f79]"
@@ -357,9 +361,6 @@ watch(
         >
           <PanelLeftClose class="h-[18px] w-[18px]" aria-hidden="true" />
         </button>
-        <RouterLink to="/agent" class="min-w-0 text-[29px] font-black leading-none tracking-[0] text-white">
-          科创点AI
-        </RouterLink>
       </div>
 
       <nav class="sidebar-nav min-h-0 flex-1 overflow-y-auto px-3 pb-4 pt-1">
@@ -499,8 +500,7 @@ watch(
         <div class="min-w-0 flex-1 lg:max-w-[360px]">
           <h1
             v-if="title"
-            class="truncate text-base font-semibold"
-            :class="isAgentRoute ? 'app-shell-agent-brand' : ''"
+            class="truncate text-base font-bold text-white"
           >
             {{ title }}
           </h1>

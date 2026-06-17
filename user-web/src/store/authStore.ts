@@ -12,6 +12,7 @@ import {
   updateCommunitySettings,
   uploadCurrentUserAvatar,
 } from "@/api"
+import { ApiBusinessError } from "@/api/client"
 import { SESSION_TOKEN_STORAGE_KEY } from "@/constants/authStorage"
 import { clearSessionBearerJwt, setSessionBearerJwt } from "@/api/sessionBearer"
 
@@ -74,11 +75,15 @@ export const useAuthStore = defineStore("auth", () => {
     if (!token.value) return null
     const clearOnFailure = options?.clearOnFailure !== false
     try {
-      const u = await getCurrentUser({ token: token.value })
+      const u = await getCurrentUser({ token: token.value, skipAuthRedirect: true })
       user.value = u
       return u
-    } catch {
-      if (clearOnFailure) clearAuth()
+    } catch (err) {
+      const shouldClear =
+        clearOnFailure &&
+        err instanceof ApiBusinessError &&
+        (err.code === "UNAUTHORIZED" || err.code === "FORBIDDEN")
+      if (shouldClear) clearAuth()
       return null
     }
   }
