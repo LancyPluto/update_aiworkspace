@@ -5,6 +5,7 @@ from typing import Any
 import requests
 
 from config import settings
+from volcengine_model import normalize_volcengine_openai_base_url
 
 
 class SeedanceVideoError(RuntimeError):
@@ -46,7 +47,7 @@ class SeedanceVideoClient:
     @staticmethod
     def _normalize_endpoint(base_url: str, path: str) -> tuple[str, str]:
         normalized_path = path if path.startswith("/") else f"/{path}"
-        normalized_base = base_url.rstrip("/")
+        normalized_base = normalize_volcengine_openai_base_url(base_url.rstrip("/"))
         # Model configs often store baseUrl with /api/v3 while worker defaults include the same prefix.
         if normalized_base.endswith("/api/v3") and normalized_path.startswith("/api/v3/"):
             normalized_path = normalized_path[len("/api/v3") :] or "/contents/generations/tasks"
