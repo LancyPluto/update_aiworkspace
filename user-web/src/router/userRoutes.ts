@@ -35,6 +35,9 @@ export const userRoutes = {
   get materialLibrary() {
     return { name: "MaterialLibrary" }
   },
+  get subjectLibrary() {
+    return { name: "SubjectLibrary" }
+  },
   get community() {
     return { name: "CommunityDiscover" }
   },

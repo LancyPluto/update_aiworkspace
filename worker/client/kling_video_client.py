@@ -96,6 +96,8 @@ class KlingVideoClient:
         multi_shot: str = "",
         shot_type: str = "",
         multi_prompt: Any = None,
+        cfg_scale: float | None = None,
+        keep_original_sound: str = "",
     ) -> dict[str, Any]:
         if not self._has_auth():
             raise KlingVideoError("Kling credentials are not configured")
@@ -125,6 +127,8 @@ class KlingVideoClient:
             multi_shot=multi_shot,
             shot_type=shot_type,
             multi_prompt=multi_prompt,
+            cfg_scale=cfg_scale,
+            keep_original_sound=keep_original_sound,
         )
         resolved_create_path, resolved_result_path = self._resolve_video_paths(
             create_path=create_path,
@@ -165,34 +169,49 @@ class KlingVideoClient:
         image_reference: str = "",
         image_fidelity: float | None = None,
         human_fidelity: float | None = None,
+        image_list: Any = None,
+        resolution: str = "",
+        result_type: str = "",
     ) -> list[str]:
         if not self._has_auth():
             raise KlingVideoError("Kling credentials are not configured")
 
+        omni_image = "omni-image" in str(self.image_generation_path or "")
         resolved_aspect_ratio = self._aspect_ratio(aspect_ratio, image_size)
         payload: dict[str, Any] = {
             "model_name": model or settings.kling_image_model,
             "prompt": prompt,
-            "n": max(1, batch_size),
+            "n": max(1, min(9 if omni_image else 4, batch_size)),
         }
         if resolved_aspect_ratio:
             payload["aspect_ratio"] = resolved_aspect_ratio
-        if image.strip():
-            payload["image"] = self._image_to_base64(image.strip())
-        if negative_prompt.strip():
-            payload["negative_prompt"] = negative_prompt.strip()
-        if image_reference.strip():
-            payload["image_reference"] = image_reference.strip()
-        if image_fidelity is not None:
-            payload["image_fidelity"] = image_fidelity
-        if human_fidelity is not None:
-            payload["human_fidelity"] = human_fidelity
-        if seed is not None:
-            payload["seed"] = seed
-        if guidance_scale is not None:
-            payload["guidance_scale"] = guidance_scale
-        if num_inference_steps is not None:
-            payload["num_inference_steps"] = num_inference_steps
+        if omni_image:
+            encoded_image_list = self._encode_omni_image_list(image_list)
+            if encoded_image_list:
+                payload["image_list"] = encoded_image_list
+            if resolution.strip():
+                payload["resolution"] = resolution.strip()
+            if result_type.strip():
+                payload["result_type"] = result_type.strip()
+        else:
+            if image.strip():
+                payload["image"] = self._image_to_base64(image.strip())
+            if negative_prompt.strip():
+                payload["negative_prompt"] = negative_prompt.strip()
+            if image_reference.strip():
+                payload["image_reference"] = image_reference.strip()
+            if image_fidelity is not None:
+                payload["image_fidelity"] = image_fidelity
+            if human_fidelity is not None:
+                payload["human_fidelity"] = human_fidelity
+            if seed is not None:
+                payload["seed"] = seed
+            if guidance_scale is not None:
+                payload["guidance_scale"] = guidance_scale
+            if num_inference_steps is not None:
+                payload["num_inference_steps"] = num_inference_steps
+            if resolution.strip():
+                payload["resolution"] = resolution.strip()
         LOGGER.info(
             "kling image generation request path=%s payload=%s",
             self.image_generation_path,
@@ -335,6 +354,8 @@ class KlingVideoClient:
         multi_shot: str = "",
         shot_type: str = "",
         multi_prompt: Any = None,
+        cfg_scale: float | None = None,
+        keep_original_sound: str = "",
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "model_name": model,
@@ -352,7 +373,15 @@ class KlingVideoClient:
         if negative_prompt.strip():
             payload["negative_prompt"] = negative_prompt.strip()
         if image.strip():
-            payload["image"] = self._image_to_base64(image.strip())
+            image_value = image.strip()
+            if image_value.startswith("http://") or image_value.startswith("https://"):
+                encoded_image = image_value
+            else:
+                encoded_image = self._image_to_base64(image_value)
+            if video_url.strip() or character_orientation.strip():
+                payload["image_url"] = encoded_image
+            else:
+                payload["image"] = encoded_image
         if image_tail.strip():
             payload["image_tail"] = self._image_to_base64(image_tail.strip())
         if resolution.strip():
@@ -386,6 +415,10 @@ class KlingVideoClient:
             payload["shot_type"] = shot_type.strip()
         if multi_prompt not in (None, "", []):
             payload["multi_prompt"] = multi_prompt
+        if cfg_scale is not None:
+            payload["cfg_scale"] = cfg_scale
+        if keep_original_sound.strip():
+            payload["keep_original_sound"] = keep_original_sound.strip()
         if seed is not None:
             payload["seed"] = seed
         return payload
@@ -427,7 +460,28 @@ class KlingVideoClient:
         parsed = self._parse_json_array(value)
         if parsed in (None, "", []):
             return parsed
-        return parsed
+        items = parsed if isinstance(parsed, list) else [parsed]
+        encoded: list[Any] = []
+        for item in items:
+            if not isinstance(item, dict):
+                encoded.append(item)
+                continue
+            row = dict(item)
+            if row.get("element_id") is not None:
+                encoded.append(row)
+                continue
+            frontal = row.get("frontal_image")
+            if isinstance(frontal, str) and frontal.strip():
+                row["frontal_image"] = self._image_to_base64(frontal.strip())
+            refer_images = row.get("refer_images")
+            if isinstance(refer_images, list):
+                row["refer_images"] = [
+                    self._image_to_base64(str(image).strip())
+                    for image in refer_images
+                    if isinstance(image, str) and str(image).strip()
+                ]
+            encoded.append(row)
+        return encoded
 
     def _encode_media_list(self, value: Any) -> list[Any]:
         parsed = self._parse_json_array(value)
@@ -441,7 +495,11 @@ class KlingVideoClient:
                 for key in ("image", "url", "image_url"):
                     raw = row.get(key)
                     if isinstance(raw, str) and raw.strip():
-                        row[key] = self._image_to_base64(raw.strip()) if key != "url" or not raw.startswith("http") else raw.strip()
+                        text = raw.strip()
+                        if text.startswith("http://") or text.startswith("https://"):
+                            row[key] = text
+                        else:
+                            row[key] = self._image_to_base64(text)
                 encoded.append(row)
                 continue
             text = str(item).strip()
@@ -451,6 +509,27 @@ class KlingVideoClient:
                 encoded.append(text)
             else:
                 encoded.append(self._image_to_base64(text))
+        return encoded
+
+    def _encode_omni_image_list(self, value: Any) -> list[dict[str, str]]:
+        parsed = self._parse_json_array(value)
+        if parsed in (None, "", []):
+            return []
+        items = parsed if isinstance(parsed, list) else [parsed]
+        encoded: list[dict[str, str]] = []
+        for item in items:
+            raw = ""
+            if isinstance(item, dict):
+                for key in ("image", "url", "image_url", "imageUrl"):
+                    candidate = item.get(key)
+                    if isinstance(candidate, str) and candidate.strip():
+                        raw = candidate.strip()
+                        break
+            else:
+                raw = str(item).strip()
+            if not raw:
+                continue
+            encoded.append({"image": self._image_to_base64(raw)})
         return encoded
 
     def _image_to_base64(self, value: str) -> str:
@@ -952,6 +1031,79 @@ class KlingVideoClient:
         if size in {"480x480", "960x960", "1024x1024"}:
             return "1:1"
         return "16:9"
+
+    def create_element(
+        self,
+        *,
+        element_name: str,
+        element_description: str,
+        reference_type: str,
+        element_image_list: dict[str, Any] | None = None,
+        element_video_list: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        from utils.kling_config import KLING_ELEMENT_PATHS
+
+        payload: dict[str, Any] = {
+            "element_name": element_name.strip(),
+            "element_description": element_description.strip(),
+            "reference_type": reference_type.strip(),
+        }
+        if element_image_list:
+            payload["element_image_list"] = element_image_list
+        if element_video_list:
+            payload["element_video_list"] = element_video_list
+        response = self._request("POST", KLING_ELEMENT_PATHS["create"], payload)
+        return response
+
+    def get_element_task(self, task_id: str) -> dict[str, Any]:
+        from utils.kling_config import KLING_ELEMENT_PATHS
+
+        path = KLING_ELEMENT_PATHS["get"].format(task_id=task_id)
+        return self._request("GET", path, None)
+
+    def wait_for_element(self, task_id: str) -> str:
+        deadline = time.monotonic() + self.timeout_seconds
+        last_payload: dict[str, Any] = {}
+        while time.monotonic() < deadline:
+            last_payload = self.get_element_task(task_id)
+            element_id = self._extract_element_id(last_payload)
+            if element_id:
+                return element_id
+            status = self._extract_status(last_payload).lower()
+            if status in FAILED_STATUSES:
+                raise KlingVideoError(
+                    self._describe_response_problem("kling element creation failed", last_payload)
+                )
+            time.sleep(self.poll_interval_seconds)
+        raise KlingVideoTimeoutError(
+            self._describe_response_problem(
+                f"kling element creation timed out, taskId={task_id}, lastStatus={self._extract_status(last_payload)}",
+                last_payload,
+            )
+        )
+
+    @classmethod
+    def _extract_element_id(cls, payload: dict[str, Any]) -> str:
+        for key in ("element_id", "elementId"):
+            value = payload.get(key)
+            if isinstance(value, (str, int)) and str(value).strip():
+                return str(value).strip()
+        task_result = payload.get("task_result")
+        if isinstance(task_result, dict):
+            elements = task_result.get("elements")
+            if isinstance(elements, list):
+                for item in elements:
+                    if isinstance(item, dict):
+                        element_id = cls._extract_element_id(item)
+                        if element_id:
+                            return element_id
+            nested = cls._extract_element_id(task_result)
+            if nested:
+                return nested
+        data = payload.get("data")
+        if isinstance(data, dict):
+            return cls._extract_element_id(data)
+        return ""
 
 
 def _json_for_log(value: Any) -> str:

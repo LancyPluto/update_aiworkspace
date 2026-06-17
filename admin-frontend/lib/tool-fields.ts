@@ -54,6 +54,8 @@ export type OptionPresetKey =
   | "kling_model_motion"
   | "kling_model_omni"
   | "kling_model_image_gen"
+  | "kling_model_multi_image"
+  | "kling_model_omni_image"
 
 export const OPTION_PRESETS: Record<
   OptionPresetKey,
@@ -146,7 +148,10 @@ export const OPTION_PRESETS: Record<
     label: "可灵文生视频模型",
     options: [
       { label: "V3（推荐）", value: "kling-v3" },
+      { label: "V2.5 Turbo", value: "kling-v2-5-turbo" },
+      { label: "V2.1 Master", value: "kling-v2-1-master" },
       { label: "V2 Master", value: "kling-v2-master" },
+      { label: "V1.6", value: "kling-v1-6" },
       { label: "V1", value: "kling-v1" },
     ],
   },
@@ -183,7 +188,21 @@ export const OPTION_PRESETS: Record<
     options: [
       { label: "V3（推荐）", value: "kling-v3" },
       { label: "V2.1", value: "kling-v2-1" },
+      { label: "V2 New", value: "kling-v2-new" },
+      { label: "V2", value: "kling-v2" },
+      { label: "V1.5", value: "kling-v1-5" },
       { label: "V1", value: "kling-v1" },
+    ],
+  },
+  kling_model_multi_image: {
+    label: "可灵多图参考生视频模型",
+    options: [{ label: "V1.6（官方）", value: "kling-v1-6" }],
+  },
+  kling_model_omni_image: {
+    label: "可灵 Omni 生图模型",
+    options: [
+      { label: "Image O1（推荐）", value: "kling-image-o1" },
+      { label: "V3 Omni", value: "kling-v3-omni" },
     ],
   },
 }

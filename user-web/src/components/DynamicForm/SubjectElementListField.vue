@@ -13,6 +13,8 @@ import {
   type SubjectElementEditorItem,
   type SubjectElementMode,
 } from "@/utils/subjectElementList"
+import SubjectPickerModal from "@/components/DynamicForm/SubjectPickerModal.vue"
+import type { GenerationSubject } from "@/api/subjectApi"
 
 const props = defineProps<{
   field: ToolField
@@ -27,6 +29,8 @@ const emit = defineEmits<{
 const uploading = ref(false)
 const items = ref<SubjectElementEditorItem[]>([])
 const syncing = ref(false)
+const pickerOpen = ref(false)
+const pickerIndex = ref<number | null>(null)
 
 const limit = computed(() => subjectElementMax(props.field))
 
@@ -71,10 +75,31 @@ function setMode(index: number, mode: SubjectElementMode) {
   updateItem(index, {
     mode,
     elementId: "",
+    librarySubjectCode: "",
+    libraryDisplayName: "",
+    upstreamElementId: "",
     frontalImage: "",
     referImages: [],
     referVideo: "",
   })
+}
+
+function openPicker(index: number) {
+  pickerIndex.value = index
+  pickerOpen.value = true
+}
+
+function handlePickerSelect(subject: GenerationSubject) {
+  if (pickerIndex.value === null) return
+  updateItem(pickerIndex.value, {
+    mode: "library_ref",
+    librarySubjectCode: subject.subjectCode,
+    libraryDisplayName: subject.displayName,
+    upstreamElementId: subject.upstreamElementId || "",
+    elementId: subject.upstreamElementId || "",
+  })
+  pickerOpen.value = false
+  pickerIndex.value = null
 }
 
 function previewUrl(url: string): string {
@@ -196,6 +221,17 @@ function removeReferImage(index: number, referIndex: number) {
         />
       </div>
 
+      <div v-else-if="item.mode === 'library_ref'" class="space-y-2">
+        <button
+          type="button"
+          class="inline-flex items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs text-white/80 hover:border-violet-500/30 hover:bg-violet-500/10"
+          @click="openPicker(index)"
+        >
+          {{ item.libraryDisplayName || "选择主体库条目" }}
+        </button>
+        <p v-if="item.upstreamElementId" class="text-[11px] text-white/45">element_id: {{ item.upstreamElementId }}</p>
+      </div>
+
       <div v-else-if="item.mode === 'image_element'" class="space-y-3">
         <div class="space-y-1">
           <label class="text-[11px] text-white/45">正面图</label>
@@ -279,5 +315,6 @@ function removeReferImage(index: number, referIndex: number) {
     </div>
 
     <p class="text-[11px] text-[#a8a6b5]">已添加 {{ items.length }}/{{ limit }} 个主体</p>
+    <SubjectPickerModal :open="pickerOpen" @close="pickerOpen = false" @select="handlePickerSelect" />
   </div>
 </template>
