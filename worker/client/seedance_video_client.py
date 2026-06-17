@@ -1,10 +1,12 @@
 import json
 import time
 from typing import Any
+from urllib.parse import urlparse
 
 import requests
 
 from config import settings
+from utils.input_image import InputImageError, resolve_reference_image_data_url
 from volcengine_model import normalize_volcengine_openai_base_url
 
 
@@ -144,7 +146,7 @@ class SeedanceVideoClient:
             text = f"{text}\nNegative prompt: {negative_prompt.strip()}"
         content: list[dict[str, Any]] = [{"type": "text", "text": text}]
         if image.strip():
-            content.append({"type": "image_url", "image_url": {"url": image.strip()}})
+            content.append({"type": "image_url", "image_url": {"url": self._image_payload_value(image.strip())}})
         audio_payload = self._audio_payload(audio_data_url)
         if audio_payload:
             content.append(audio_payload)
@@ -168,6 +170,40 @@ class SeedanceVideoClient:
         if seed is not None:
             payload["seed"] = seed
         return payload
+
+    def _image_payload_value(self, value: str) -> str:
+        raw = (value or "").strip()
+        if not raw:
+            return raw
+        if not self._should_inline_image(raw):
+            return raw
+        try:
+            return resolve_reference_image_data_url(raw, session=self.session)
+        except InputImageError as exc:
+            raise SeedanceVideoError(f"seedance image must be a valid image or public URL: {exc}") from exc
+
+    @staticmethod
+    def _should_inline_image(value: str) -> bool:
+        raw = (value or "").strip()
+        if not raw:
+            return False
+        if raw.startswith("data:") or raw.startswith("/"):
+            return True
+        if not raw.startswith(("http://", "https://")):
+            return True
+        parsed = urlparse(raw)
+        internal_hosts = {
+            host
+            for host in (
+                urlparse(settings.backend_internal_base_url).hostname,
+                "backend",
+                "localhost",
+                "127.0.0.1",
+                "host.docker.internal",
+            )
+            if host
+        }
+        return parsed.hostname in internal_hosts
 
     @staticmethod
     def _audio_payload(audio_data_url: str) -> dict[str, Any] | None:
