@@ -2,6 +2,7 @@ package com.aiminilab.aitoolmarket.storage;
 
 import com.aliyun.oss.OSS;
 import com.aliyun.oss.OSSClientBuilder;
+import com.aliyun.oss.model.CopyObjectRequest;
 import com.aliyun.oss.model.ObjectMetadata;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
@@ -20,7 +21,12 @@ import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
+import java.util.Set;
 
 @Service
 public class AssetStorageService {
@@ -44,11 +50,12 @@ public class AssetStorageService {
             return;
         }
         if (storage.getOssEndpoint().isBlank()
-                || storage.getOssBucket().isBlank()
+                || storage.getOssPrivateBucket().isBlank()
+                || storage.getOssPublicBucket().isBlank()
                 || storage.getOssAccessKeyId().isBlank()
                 || storage.getOssAccessKeySecret().isBlank()) {
             throw new IllegalStateException(
-                    "ASSET_STORAGE_PROVIDER=oss requires OSS_ENDPOINT, OSS_BUCKET, OSS_ACCESS_KEY_ID, OSS_ACCESS_KEY_SECRET"
+                    "ASSET_STORAGE_PROVIDER=oss requires OSS_ENDPOINT, OSS_PUBLIC_BUCKET, OSS_PRIVATE_BUCKET, OSS_ACCESS_KEY_ID, OSS_ACCESS_KEY_SECRET"
             );
         }
         ossClient = new OSSClientBuilder().build(
@@ -56,7 +63,8 @@ public class AssetStorageService {
                 storage.getOssAccessKeyId(),
                 storage.getOssAccessKeySecret()
         );
-        log.info("Asset storage: OSS bucket={}, prefix={}", storage.getOssBucket(), storage.getOssKeyPrefix());
+        log.info("Asset storage: OSS publicBucket={}, privateBucket={}, prefix={}",
+                storage.getOssPublicBucket(), storage.getOssPrivateBucket(), storage.getOssKeyPrefix());
     }
 
     @PreDestroy
@@ -78,22 +86,51 @@ public class AssetStorageService {
         return appProperties.getAssetStorage().getPublicBaseUrl().replaceAll("/+$", "");
     }
 
+    public String getPrivateBaseUrl() {
+        return appProperties.getAssetStorage().getPrivateBaseUrl().replaceAll("/+$", "");
+    }
+
     public StoredAsset storeMultipart(String relativeKey, MultipartFile file) {
+        return storeMultipartPrivate(relativeKey, file);
+    }
+
+    public StoredAsset storeMultipartPublic(String relativeKey, MultipartFile file) {
+        return storeMultipartForVisibility(relativeKey, file, AssetVisibility.PUBLIC);
+    }
+
+    public StoredAsset storeMultipartPrivate(String relativeKey, MultipartFile file) {
+        return storeMultipartForVisibility(relativeKey, file, AssetVisibility.PRIVATE);
+    }
+
+    private StoredAsset storeMultipartForVisibility(String relativeKey, MultipartFile file, AssetVisibility visibility) {
         try {
-            return storeBytes(
+            return storeBytesForVisibility(
                     relativeKey,
                     file.getBytes(),
-                    file.getContentType() == null ? "application/octet-stream" : file.getContentType()
+                    file.getContentType() == null ? "application/octet-stream" : file.getContentType(),
+                    visibility
             );
         } catch (IOException exception) {
-            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "文件保存失败");
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "file save failed");
         }
     }
 
     public StoredAsset storeBytes(String relativeKey, byte[] data, String contentType) {
+        return storeBytesPrivate(relativeKey, data, contentType);
+    }
+
+    public StoredAsset storeBytesPublic(String relativeKey, byte[] data, String contentType) {
+        return storeBytesForVisibility(relativeKey, data, contentType, AssetVisibility.PUBLIC);
+    }
+
+    public StoredAsset storeBytesPrivate(String relativeKey, byte[] data, String contentType) {
+        return storeBytesForVisibility(relativeKey, data, contentType, AssetVisibility.PRIVATE);
+    }
+
+    private StoredAsset storeBytesForVisibility(String relativeKey, byte[] data, String contentType, AssetVisibility visibility) {
         String normalizedKey = normalizeRelativeKey(relativeKey);
         if (isOssMode()) {
-            return storeToOss(normalizedKey, data, contentType);
+            return storeToOss(normalizedKey, data, contentType, visibility);
         }
         return storeToLocal(normalizedKey, data);
     }
@@ -103,9 +140,9 @@ public class AssetStorageService {
         if (isOssMode()) {
             try {
                 byte[] data = stream.readAllBytes();
-                return storeToOss(normalizedKey, data, contentType);
+                return storeToOss(normalizedKey, data, contentType, AssetVisibility.PRIVATE);
             } catch (IOException exception) {
-                throw new BusinessException(ErrorCode.SYSTEM_ERROR, "文件保存失败");
+                throw new BusinessException(ErrorCode.SYSTEM_ERROR, "file save failed");
             }
         }
         Path target = localAbsolutePath(normalizedKey);
@@ -114,17 +151,31 @@ public class AssetStorageService {
             Files.copy(stream, target);
             return new StoredAsset(normalizedKey, publicUrlForKey(normalizedKey), target.toString());
         } catch (IOException exception) {
-            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "文件保存失败");
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "file save failed");
         }
     }
 
     public String publicUrlForKey(String relativeKey) {
-        String normalizedKey = normalizeRelativeKey(relativeKey);
-        String base = getPublicBaseUrl();
-        if (base.startsWith("http://") || base.startsWith("https://")) {
-            return base + "/" + normalizedKey;
+        return urlForKey(relativeKey, AssetVisibility.PRIVATE);
+    }
+
+    public String publicUrlForKey(String relativeKey, AssetVisibility visibility) {
+        return urlForKey(relativeKey, visibility);
+    }
+
+    public Optional<String> maybeMoveUrl(String url, boolean publish) {
+        if (url == null || url.isBlank() || parseManagedAssetUrl(url) == null) {
+            return Optional.empty();
         }
-        return GENERATED_PREFIX + normalizedKey;
+        return Optional.of(publish ? moveUrlToPublic(url) : moveUrlToPrivate(url));
+    }
+
+    public String moveUrlToPublic(String url) {
+        return moveUrl(url, AssetVisibility.PUBLIC);
+    }
+
+    public String moveUrlToPrivate(String url) {
+        return moveUrl(url, AssetVisibility.PRIVATE);
     }
 
     public String resolveExistingPublicUrl(String url) {
@@ -191,33 +242,62 @@ public class AssetStorageService {
         try {
             Files.createDirectories(target.getParent());
             Files.write(target, data);
-            return new StoredAsset(relativeKey, publicUrlForKey(relativeKey), target.toString());
+            return new StoredAsset(relativeKey, urlForKey(relativeKey, AssetVisibility.PRIVATE), target.toString());
         } catch (IOException exception) {
-            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "文件保存失败");
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "file save failed");
         }
     }
 
-    private StoredAsset storeToOss(String relativeKey, byte[] data, String contentType) {
+    private StoredAsset storeToOss(String relativeKey, byte[] data, String contentType, AssetVisibility visibility) {
         AppProperties.AssetStorage storage = appProperties.getAssetStorage();
         String objectKey = storage.getOssKeyPrefix() + relativeKey;
+        String bucket = bucketFor(visibility, storage);
         ObjectMetadata metadata = new ObjectMetadata();
         metadata.setContentLength(data.length);
         if (contentType != null && !contentType.isBlank()) {
             metadata.setContentType(contentType);
         }
         try {
-            ossClient.putObject(
-                    storage.getOssBucket(),
-                    objectKey,
-                    new ByteArrayInputStream(data),
-                    metadata
-            );
+            ossClient.putObject(bucket, objectKey, new ByteArrayInputStream(data), metadata);
         } catch (RuntimeException exception) {
-            log.warn("OSS upload failed: key={}", objectKey, exception);
-            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "云端文件保存失败");
+            log.warn("OSS upload failed: bucket={}, key={}", bucket, objectKey, exception);
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "cloud file save failed");
         }
-        String storagePath = "oss://" + storage.getOssBucket() + "/" + objectKey;
-        return new StoredAsset(relativeKey, publicUrlForKey(relativeKey), storagePath);
+        return new StoredAsset(relativeKey, urlForKey(relativeKey, visibility), "oss://" + bucket + "/" + objectKey);
+    }
+
+    private String moveUrl(String url, AssetVisibility targetVisibility) {
+        if (url == null || url.isBlank() || !isOssMode()) {
+            return url;
+        }
+        AssetReference source = parseManagedAssetUrl(url);
+        if (source == null) {
+            return url;
+        }
+        AppProperties.AssetStorage storage = appProperties.getAssetStorage();
+        String targetBucket = bucketFor(targetVisibility, storage);
+        String targetKey = storage.getOssKeyPrefix() + source.relativeKey();
+        if (source.bucket().equals(targetBucket) && source.objectKey().equals(targetKey)) {
+            return urlForKey(source.relativeKey(), targetVisibility);
+        }
+        try {
+            ossClient.copyObject(new CopyObjectRequest(source.bucket(), source.objectKey(), targetBucket, targetKey));
+            ossClient.deleteObject(source.bucket(), source.objectKey());
+        } catch (RuntimeException exception) {
+            log.warn("OSS asset move failed: source=oss://{}/{} target=oss://{}/{}",
+                    source.bucket(), source.objectKey(), targetBucket, targetKey, exception);
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "cloud file move failed");
+        }
+        return urlForKey(source.relativeKey(), targetVisibility);
+    }
+
+    private String urlForKey(String relativeKey, AssetVisibility visibility) {
+        String normalizedKey = normalizeRelativeKey(relativeKey);
+        String base = visibility == AssetVisibility.PUBLIC ? getPublicBaseUrl() : getPrivateBaseUrl();
+        if (base.startsWith("http://") || base.startsWith("https://")) {
+            return base + "/" + normalizedKey;
+        }
+        return GENERATED_PREFIX + normalizedKey;
     }
 
     private String relativeKeyFromPublicUrl(String url) {
@@ -230,6 +310,87 @@ public class AssetStorageService {
             return null;
         }
         return normalizeRelativeKey(url.substring(normalizedBase.length() + 1));
+    }
+
+    private AssetReference parseManagedAssetUrl(String url) {
+        if (url == null || url.isBlank()) {
+            return null;
+        }
+        String normalized = stripQueryAndFragment(url.trim());
+        AppProperties.AssetStorage storage = appProperties.getAssetStorage();
+        for (ConfiguredBase base : configuredBases(storage)) {
+            String prefix = base.baseUrl().replaceAll("/+$", "") + "/";
+            if (normalized.startsWith(prefix)) {
+                String relative = normalizeRelativeKey(normalized.substring(prefix.length()));
+                return new AssetReference(base.bucket(), storage.getOssKeyPrefix() + relative, relative);
+            }
+        }
+        String bucketFromHost = bucketFromOssHost(normalized);
+        if (bucketFromHost == null || !knownBuckets(storage).contains(bucketFromHost)) {
+            return null;
+        }
+        int pathStart = normalized.indexOf('/', normalized.indexOf("://") + 3);
+        if (pathStart <= 0 || pathStart + 1 >= normalized.length()) {
+            return null;
+        }
+        String objectKey = normalizeRelativeKey(normalized.substring(pathStart + 1));
+        String prefix = storage.getOssKeyPrefix();
+        String relative = prefix.isBlank() || !objectKey.startsWith(prefix)
+                ? objectKey
+                : objectKey.substring(prefix.length());
+        return new AssetReference(bucketFromHost, objectKey, normalizeRelativeKey(relative));
+    }
+
+    private static List<ConfiguredBase> configuredBases(AppProperties.AssetStorage storage) {
+        List<ConfiguredBase> bases = new ArrayList<>();
+        addBase(bases, storage.getPublicBaseUrl(), storage.getOssPublicBucket());
+        addBase(bases, storage.getPrivateBaseUrl(), storage.getOssPrivateBucket());
+        if (!storage.getOssLegacyBucket().isBlank() && !storage.getOssEndpoint().isBlank()) {
+            addBase(bases, "https://" + storage.getOssLegacyBucket() + "." + storage.getOssEndpoint(), storage.getOssLegacyBucket());
+        }
+        return bases;
+    }
+
+    private static void addBase(List<ConfiguredBase> bases, String baseUrl, String bucket) {
+        if (baseUrl != null && !baseUrl.isBlank()
+                && (baseUrl.startsWith("http://") || baseUrl.startsWith("https://"))
+                && bucket != null && !bucket.isBlank()) {
+            bases.add(new ConfiguredBase(baseUrl, bucket));
+        }
+    }
+
+    private static Set<String> knownBuckets(AppProperties.AssetStorage storage) {
+        LinkedHashSet<String> buckets = new LinkedHashSet<>();
+        if (!storage.getOssBucket().isBlank()) buckets.add(storage.getOssBucket());
+        if (!storage.getOssPublicBucket().isBlank()) buckets.add(storage.getOssPublicBucket());
+        if (!storage.getOssPrivateBucket().isBlank()) buckets.add(storage.getOssPrivateBucket());
+        if (!storage.getOssLegacyBucket().isBlank()) buckets.add(storage.getOssLegacyBucket());
+        return buckets;
+    }
+
+    private static String bucketFor(AssetVisibility visibility, AppProperties.AssetStorage storage) {
+        return visibility == AssetVisibility.PUBLIC ? storage.getOssPublicBucket() : storage.getOssPrivateBucket();
+    }
+
+    private static String bucketFromOssHost(String url) {
+        String lower = url == null ? "" : url.trim().toLowerCase(Locale.ROOT);
+        if (!lower.startsWith("http://") && !lower.startsWith("https://")) {
+            return null;
+        }
+        int hostStart = lower.indexOf("://") + 3;
+        int hostEnd = lower.indexOf('/', hostStart);
+        String host = hostEnd > hostStart ? lower.substring(hostStart, hostEnd) : lower.substring(hostStart);
+        int marker = host.indexOf(".oss-");
+        return marker > 0 ? host.substring(0, marker) : null;
+    }
+
+    private static String stripQueryAndFragment(String value) {
+        int query = value.indexOf('?');
+        int hash = value.indexOf('#');
+        int end = value.length();
+        if (query >= 0) end = Math.min(end, query);
+        if (hash >= 0) end = Math.min(end, hash);
+        return value.substring(0, end);
     }
 
     private static String normalizeRelativeKey(String relativeKey) {
@@ -252,5 +413,16 @@ public class AssetStorageService {
             return value;
         }
         return "https://" + value;
+    }
+
+    public enum AssetVisibility {
+        PUBLIC,
+        PRIVATE
+    }
+
+    private record AssetReference(String bucket, String objectKey, String relativeKey) {
+    }
+
+    private record ConfiguredBase(String baseUrl, String bucket) {
     }
 }

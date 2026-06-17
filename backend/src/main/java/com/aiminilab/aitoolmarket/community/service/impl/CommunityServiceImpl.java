@@ -24,6 +24,8 @@ import com.aiminilab.aitoolmarket.community.mapper.CommunityEventMapper;
 import com.aiminilab.aitoolmarket.community.mapper.CommunityPostMapper;
 import com.aiminilab.aitoolmarket.community.mapper.CommunityPostReportMapper;
 import com.aiminilab.aitoolmarket.community.service.CommunityService;
+import com.aiminilab.aitoolmarket.storage.AssetStorageService;
+import com.aiminilab.aitoolmarket.task.entity.AiResultResource;
 import com.aiminilab.aitoolmarket.task.entity.AiTask;
 import com.aiminilab.aitoolmarket.task.mapper.TaskMapper;
 import com.aiminilab.aitoolmarket.user.entity.User;
@@ -55,6 +57,8 @@ public class CommunityServiceImpl implements CommunityService {
     private static final int MAX_TAG_LENGTH = 32;
     private static final int MAX_TAGS = 6;
     private static final int MAX_COLLECTION_NAME_LENGTH = 80;
+    private static final java.util.regex.Pattern MEDIA_URL_PATTERN = java.util.regex.Pattern
+            .compile("(https?://[^\\s\\\"'<>\\])},]+|/generated/[^\\s\\\"'<>\\])},]+)");
 
     private static final int MAX_REPORT_REASON_LENGTH = 500;
 
@@ -65,10 +69,12 @@ public class CommunityServiceImpl implements CommunityService {
     private final TaskMapper taskMapper;
     private final UserMapper userMapper;
     private final ObjectMapper objectMapper;
+    private final AssetStorageService assetStorageService;
 
     public CommunityServiceImpl(CommunityPostMapper postMapper, CommunityCollectionMapper collectionMapper,
                                 CommunityEventMapper eventMapper, CommunityPostReportMapper reportMapper,
-                                TaskMapper taskMapper, UserMapper userMapper, ObjectMapper objectMapper) {
+                                TaskMapper taskMapper, UserMapper userMapper, ObjectMapper objectMapper,
+                                AssetStorageService assetStorageService) {
         this.postMapper = postMapper;
         this.collectionMapper = collectionMapper;
         this.eventMapper = eventMapper;
@@ -76,6 +82,7 @@ public class CommunityServiceImpl implements CommunityService {
         this.taskMapper = taskMapper;
         this.userMapper = userMapper;
         this.objectMapper = objectMapper;
+        this.assetStorageService = assetStorageService;
     }
 
     @EventListener(ApplicationReadyEvent.class)
@@ -141,6 +148,7 @@ public class CommunityServiceImpl implements CommunityService {
             if (!post.getUserId().equals(userId)) {
                 throw new BusinessException(ErrorCode.FORBIDDEN, "Post owner mismatch");
             }
+            migratePostAssets(post, true);
             postMapper.updateOwnerStatus(post.getId(), userId, "PUBLISHED");
             postMapper.updateOwnerMetadata(
                     post.getId(),
@@ -164,6 +172,8 @@ public class CommunityServiceImpl implements CommunityService {
                 ? Boolean.TRUE.equals(request.promptVisible())
                 : Boolean.TRUE.equals(user.getPromptPublicByDefault());
         CommunityPost post = createPost(task, null, null, title, request.description(), promptVisible, "PUBLISHED");
+        migratePostAssets(post, true);
+        post = requirePost(post.getId());
         if (request.topic() != null) {
             postMapper.updateTopic(post.getId(), normalizeTopic(request.topic()));
         }
@@ -199,7 +209,8 @@ public class CommunityServiceImpl implements CommunityService {
     @Override
     @Transactional
     public void unpublish(Long userId, Long postId) {
-        requireOwnedPost(postId, userId);
+        CommunityPost post = requireOwnedPost(postId, userId);
+        migratePostAssets(post, false);
         if (postMapper.updateOwnerStatus(postId, userId, "UNPUBLISHED") == 0) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "Post not found");
         }
@@ -700,6 +711,72 @@ public class CommunityServiceImpl implements CommunityService {
         addDefaultTags(post.getId(), task, post.getModality(), post.getTopic());
         postMapper.refreshQualityScore(post.getId());
         return requirePost(post.getId());
+    }
+
+    private void migratePostAssets(CommunityPost post, boolean publish) {
+        if (post == null || post.getTaskId() == null) {
+            return;
+        }
+        Map<String, String> migratedUrls = new java.util.HashMap<>();
+        String coverUrl = moveMediaUrl(post.getCoverUrl(), publish, migratedUrls);
+        String mediaUrl = moveMediaUrl(post.getMediaUrl(), publish, migratedUrls);
+        boolean mediaChanged = !Objects.equals(coverUrl, post.getCoverUrl()) || !Objects.equals(mediaUrl, post.getMediaUrl());
+
+        for (AiResultResource resource : taskMapper.findResultResources(post.getTaskId())) {
+            if (resource.getContentText() == null || resource.getContentText().isBlank()) {
+                continue;
+            }
+            String migrated = migrateUrlsInText(resource.getContentText(), publish, migratedUrls);
+            if (!Objects.equals(migrated, resource.getContentText())) {
+                taskMapper.updateResultContent(resource.getId(), migrated);
+                if (Objects.equals(coverUrl, post.getCoverUrl())) {
+                    coverUrl = moveMediaUrl(extractCoverUrl(migrated), publish, migratedUrls);
+                }
+                if (Objects.equals(mediaUrl, post.getMediaUrl())) {
+                    AudioMediaRefs audioMedia = extractAudioMedia(migrated);
+                    mediaUrl = moveMediaUrl(audioMedia.mediaUrl(), publish, migratedUrls);
+                    if (coverUrl == null || coverUrl.isBlank()) {
+                        coverUrl = moveMediaUrl(audioMedia.coverUrl(), publish, migratedUrls);
+                    }
+                }
+                mediaChanged = true;
+            }
+        }
+        if (mediaChanged) {
+            postMapper.updateMedia(post.getId(), coverUrl, mediaUrl);
+        }
+    }
+
+    private String migrateUrlsInText(String contentText, boolean publish, Map<String, String> migratedUrls) {
+        java.util.regex.Matcher matcher = MEDIA_URL_PATTERN.matcher(contentText);
+        StringBuffer buffer = new StringBuffer();
+        boolean changed = false;
+        while (matcher.find()) {
+            String original = trimUrl(matcher.group(1));
+            String migrated = moveMediaUrl(original, publish, migratedUrls);
+            if (migrated != null && !Objects.equals(original, migrated)) {
+                matcher.appendReplacement(buffer, java.util.regex.Matcher.quoteReplacement(migrated));
+                changed = true;
+            }
+        }
+        if (!changed) {
+            return contentText;
+        }
+        matcher.appendTail(buffer);
+        return buffer.toString();
+    }
+
+    private String moveMediaUrl(String url, boolean publish, Map<String, String> migratedUrls) {
+        if (url == null || url.isBlank()) {
+            return url;
+        }
+        String normalized = trimUrl(url);
+        if (migratedUrls.containsKey(normalized)) {
+            return migratedUrls.get(normalized);
+        }
+        String migrated = assetStorageService.maybeMoveUrl(normalized, publish).orElse(url);
+        migratedUrls.put(normalized, migrated);
+        return migrated;
     }
 
     private CommunityPost requirePost(Long postId) {

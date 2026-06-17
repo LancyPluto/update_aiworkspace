@@ -23,7 +23,7 @@ import oss2  # noqa: E402
 
 def main() -> int:
     endpoint = os.getenv("OSS_ENDPOINT", "oss-cn-guangzhou.aliyuncs.com").strip()
-    bucket_name = os.getenv("OSS_BUCKET", "").strip()
+    bucket_name = (os.getenv("OSS_PUBLIC_BUCKET") or os.getenv("OSS_BUCKET") or "").strip()
     access_key = (
         os.getenv("OSS_ACCESS_KEY_ID")
         or os.getenv("ALIYUN_ACCESS_KEY_ID")
@@ -39,7 +39,7 @@ def main() -> int:
     public_base = os.getenv("ASSET_STORAGE_PUBLIC_BASE_URL", "").rstrip("/")
 
     if not all([bucket_name, access_key, secret]):
-        print("Missing OSS_BUCKET or access key in .env", file=sys.stderr)
+        print("Missing OSS_PUBLIC_BUCKET/OSS_BUCKET or access key in .env", file=sys.stderr)
         return 1
 
     if not endpoint.startswith("http"):

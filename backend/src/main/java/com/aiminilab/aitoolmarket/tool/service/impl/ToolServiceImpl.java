@@ -336,7 +336,7 @@ public class ToolServiceImpl implements ToolService {
         String filename = baseName + "-" + LocalDateTime.now().format(COVER_FILENAME_TIME) + "." + extension;
         StoredAsset stored;
         try {
-            stored = assetStorageService.storeMultipart("tool-covers/" + filename, file);
+            stored = assetStorageService.storeMultipartPublic("tool-covers/" + filename, file);
         } catch (BusinessException ex) {
             throw ex;
         } catch (RuntimeException ex) {
@@ -369,6 +369,9 @@ public class ToolServiceImpl implements ToolService {
         tool.setId(toolId);
         AiTool existing = toolMapper.findById(toolId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在"));
+        if (tool.getCoverUrl() == null || tool.getCoverUrl().isBlank()) {
+            tool.setCoverUrl(existing.getCoverUrl());
+        }
         if (tool.getExecutionHandler() == null || tool.getExecutionHandler().isBlank()) {
             tool.setExecutionHandler(existing.getExecutionHandler());
         }

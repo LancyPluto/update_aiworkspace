@@ -630,4 +630,15 @@ public interface CommunityPostMapper extends BaseMapper<CommunityPost> {
     int updateAudioMedia(@Param("postId") Long postId,
                          @Param("coverUrl") String coverUrl,
                          @Param("mediaUrl") String mediaUrl);
+
+    @Update("""
+            UPDATE community_posts
+            SET cover_url = #{coverUrl},
+                media_url = #{mediaUrl},
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{postId}
+            """)
+    int updateMedia(@Param("postId") Long postId,
+                    @Param("coverUrl") String coverUrl,
+                    @Param("mediaUrl") String mediaUrl);
 }

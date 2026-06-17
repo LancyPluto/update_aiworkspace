@@ -84,6 +84,21 @@ class ToolApiTest {
                 .andExpect(jsonPath("$.data.coverUrl").value("https://cdn.example.com/tools/xiaohongshu-preview.mp4"))
                 .andExpect(jsonPath("$.data.estimatedCreditCost").value(12));
 
+        mockMvc.perform(put("/api/admin/v1/tools/" + toolId)
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "toolName": "XHS Copywriting Assistant",
+                                  "categoryId": 1,
+                                  "description": "update text without clearing preview",
+                                  "coverUrl": "",
+                                  "estimatedCreditCost": 12
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.coverUrl").value("https://cdn.example.com/tools/xiaohongshu-preview.mp4"));
+
         mockMvc.perform(post("/api/admin/v1/tools/" + toolId + "/publish")
                         .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isOk())
@@ -93,7 +108,7 @@ class ToolApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.list[0].toolCode").value("xiaohongshu_copywriting"))
                 .andExpect(jsonPath("$.data.list[0].coverUrl").value("https://cdn.example.com/tools/xiaohongshu-preview.mp4"))
-                .andExpect(jsonPath("$.data.list[0].toolName").value("小红书文案助手"));
+                .andExpect(jsonPath("$.data.list[0].toolName").value("XHS Copywriting Assistant"));
 
         mockMvc.perform(get("/api/v1/tools/xiaohongshu_copywriting"))
                 .andExpect(status().isOk())

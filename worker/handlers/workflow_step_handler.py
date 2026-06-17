@@ -92,7 +92,7 @@ class WorkflowStepHandler:
 
     def _run_script_planner(self, form: dict[str, Any], workflow_inputs: dict[str, Any], model_config: dict[str, Any]) -> dict[str, Any]:
         story_theme = form.get("storyTheme") or "温情漫剧"
-        plot_outline = form.get("plotOutline") or "祖孙之间的暖心对话"
+        plot_outline = form.get("plotOutline") or ""
         visual_style = form.get("visualStyle") or "电影感写实"
         genre = form.get("genre") or ""
         scene_count = _resolve_scene_count(form, workflow_inputs)
@@ -108,16 +108,48 @@ class WorkflowStepHandler:
             feedback_lines.append(f"分镜{index}意见：{text}")
 
         prompt = (
-            "你是 AI 漫剧分镜编剧。请把用户故事改编成完整可拍的多分镜短剧脚本，一次性输出全部分镜的脚本和台词。\n"
-            f"目标时长约 {scene_count * SCENE_SECONDS} 秒，必须正好输出 {scene_count} 个分镜，每个分镜时长 5 秒。\n"
-            "只输出 JSON 对象，不要 markdown。格式：\n"
-            '{"title": "整集标题", "scenes": [{"index": 1, "sceneTitle": "...", "sceneDescription": "...", '
-            '"dialogue": "...", "subtitleZh": "...", "subtitleEn": "...", "narration": "...", "presenterGender": "female|male"}]}\n'
-            "要求：分镜之间剧情连贯有起承转合；sceneDescription 为电影感画面描述（人物、镜头、光线），适合图生视频；"
-            "dialogue 为该镜台词（5 秒内能说完，简短自然）；subtitleZh 与 dialogue 一致；subtitleEn 为地道英文翻译。\n"
+            "你是专业的AI漫剧分镜编剧。请根据用户提供的主题和梗概，创作一部完整可拍的多分镜短剧脚本。\n"
+            f"目标时长约 {scene_count * SCENE_SECONDS} 秒，必须正好输出 {scene_count} 个分镜，每个分镜约 {SCENE_SECONDS} 秒。\n\n"
+            "只输出 JSON 对象，不要 markdown，不要解释。JSON 格式如下：\n"
+            '{\n'
+            '  "title": "整集标题",\n'
+            '  "synopsis": "故事梗概（2-3句话概述整个故事线）",\n'
+            '  "genre": "题材类型描述，例如：生活/职场喜剧",\n'
+            '  "characters": [\n'
+            '    {"name": "角色名", "appearance": "外貌特征、服装、体态的详细描述", "personality": "性格特点简述"}\n'
+            '  ],\n'
+            '  "locations": [\n'
+            '    {"name": "场景名称", "description": "场景的详细环境描述（时间、光线、陈设、氛围）"}\n'
+            '  ],\n'
+            '  "scenes": [\n'
+            '    {\n'
+            '      "index": 1,\n'
+            '      "sceneTitle": "分镜标题",\n'
+            '      "durationSeconds": 5,\n'
+            '      "characterScene": "角色名 / 场景名",\n'
+            '      "cameraLanguage": "镜头类型（特写/中景/全景/远景），机位（俯视/平视/仰视），运动（固定/推进/摇移/跟随）",\n'
+            '      "sceneDescription": "详细的画面描述：人物的动作表情、环境细节、光影效果、构图要素，适合AI图生视频的英文提示词风格",\n'
+            '      "plot": "这个分镜的情节描述（中文，说明发生了什么）",\n'
+            '      "dialogue": "角色台词（5秒内能说完，简短自然）",\n'
+            '      "narration": "旁白文字（如无旁白可留空）",\n'
+            '      "voiceDirection": "配音指导，格式示例：【说话人=角色名｜性别｜年龄段】台词内容",\n'
+            '      "subtitleZh": "中文字幕（与dialogue一致）",\n'
+            '      "subtitleEn": "English subtitle translation",\n'
+            '      "presenterGender": "female 或 male（主要说话人性别）"\n'
+            '    }\n'
+            '  ]\n'
+            '}\n\n'
+            "创作要求：\n"
+            "1. 角色设计要具体鲜明，包含外貌、服装、体态等可视化细节\n"
+            "2. 场景描述要详细，包含时间、光线、陈设、氛围等环境要素\n"
+            "3. 分镜之间剧情连贯，有起承转合的叙事节奏\n"
+            "4. sceneDescription 必须是电影感画面描述（英文），包含人物动作、镜头角度、光线效果，适合AI生图\n"
+            "5. 每个分镜标注镜头语言（景别+机位+运动）\n"
+            "6. dialogue 简短自然，5秒内能说完\n"
+            "7. voiceDirection 标注说话人、性别和情感\n\n"
             f"主题：{story_theme}\n题材：{genre or '未指定'}\n梗概：{plot_outline}\n画风：{visual_style}\n"
             + ("\n".join(feedback_lines) + "\n" if feedback_lines else "")
-            + "若用户未指定角色，可生成祖孙温情室内对话场景。"
+            + "请围绕用户给定的主题进行创作，充分发挥想象力，设计有趣的角色和场景。"
         )
         parsed: dict[str, Any] | None = None
         try:
@@ -129,7 +161,7 @@ class WorkflowStepHandler:
                 base_url=model_config.get("baseUrl"),
                 api_key=model_config.get("apiKey"),
                 timeout_seconds=model_config.get("timeoutSeconds") or 120,
-                max_tokens=max(1200, 400 * scene_count),
+                max_tokens=max(2400, 800 * scene_count),
             )
             parsed = _extract_json(raw)
         except ModelClientError:
@@ -142,8 +174,22 @@ class WorkflowStepHandler:
         if not title:
             title = str(story_theme)
 
+        synopsis = ""
+        characters: list[dict[str, Any]] = []
+        locations: list[dict[str, Any]] = []
+        if isinstance(parsed, dict):
+            synopsis = str(parsed.get("synopsis") or "").strip()
+            if isinstance(parsed.get("characters"), list):
+                characters = [c for c in parsed["characters"] if isinstance(c, dict)]
+            if isinstance(parsed.get("locations"), list):
+                locations = [loc for loc in parsed["locations"] if isinstance(loc, dict)]
+
         output: dict[str, Any] = {
             "title": title,
+            "synopsis": synopsis,
+            "genre": genre or (parsed.get("genre") if isinstance(parsed, dict) else "") or "",
+            "characters": characters,
+            "locations": locations,
             "sceneCount": len(scenes),
             "sceneSeconds": SCENE_SECONDS,
             "totalSeconds": len(scenes) * SCENE_SECONDS,
@@ -185,7 +231,7 @@ class WorkflowStepHandler:
                 prompt = f"{prompt}\nUser revision notes: {'；'.join(feedback_parts)}"
             self.backend_client.mark_processing(
                 task_id,
-                progress=20 + int(60 * position / max(total, 1)),
+                progress=20 + int(25 * position / max(total, 1)),
                 progress_message=f"正在生成关键帧 {position}/{total}",
                 trace_id=trace_id,
             )
@@ -235,7 +281,7 @@ class WorkflowStepHandler:
             voice = DigitalHumanVideoHandler._resolve_voice(form, presenter_gender)
             self.backend_client.mark_processing(
                 task_id,
-                progress=20 + int(60 * position / max(total, 1)),
+                progress=48 + int(15 * position / max(total, 1)),
                 progress_message=f"正在生成角色配音 {position}/{total}",
                 trace_id=trace_id,
             )
@@ -302,7 +348,7 @@ class WorkflowStepHandler:
                 prompt = f"{prompt}\nUser revision notes: {'；'.join(feedback_parts)}"
             self.backend_client.mark_processing(
                 task_id,
-                progress=15 + int(70 * position / max(total, 1)),
+                progress=48 + int(15 * position / max(total, 1)),
                 progress_message=f"正在生成分镜视频 {position}/{total}",
                 trace_id=trace_id,
             )
@@ -713,18 +759,30 @@ def _normalize_scenes(parsed: dict[str, Any] | None, count: int, form: dict[str,
     scenes: list[dict[str, Any]] = []
     for position in range(1, count + 1):
         source = scenes_raw[position - 1] if position <= len(scenes_raw) and isinstance(scenes_raw[position - 1], dict) else {}
-        dialogue = str(source.get("dialogue") or fallback["dialogue"])
+        dialogue = str(source.get("dialogue") or "")
+        if not dialogue:
+            dialogue = f"这是{theme}第{position}幕的精彩台词。"
+        scene_desc = str(source.get("sceneDescription") or "")
+        if not scene_desc:
+            scene_desc = (
+                f"Cinematic shot for scene {position} of '{theme}', "
+                f"expressive character, atmospheric lighting, shallow depth of field, 16:9."
+            )
         scenes.append(
             {
                 "index": position,
                 "sceneTitle": str(source.get("sceneTitle") or f"{theme} · 分镜{position}"),
-                "sceneDescription": str(source.get("sceneDescription") or fallback["sceneDescription"]),
+                "sceneDescription": scene_desc,
                 "dialogue": dialogue,
                 "subtitleZh": str(source.get("subtitleZh") or dialogue),
-                "subtitleEn": str(source.get("subtitleEn") or fallback["subtitleEn"]),
+                "subtitleEn": str(source.get("subtitleEn") or f"Scene {position} of {theme}."),
                 "narration": str(source.get("narration") or ""),
                 "presenterGender": str(source.get("presenterGender") or fallback["presenterGender"]),
-                "durationSeconds": SCENE_SECONDS,
+                "durationSeconds": int(source.get("durationSeconds") or SCENE_SECONDS),
+                "characterScene": str(source.get("characterScene") or ""),
+                "cameraLanguage": str(source.get("cameraLanguage") or ""),
+                "plot": str(source.get("plot") or ""),
+                "voiceDirection": str(source.get("voiceDirection") or ""),
             }
         )
     return scenes
@@ -752,17 +810,20 @@ def _extract_json(raw: str) -> dict[str, Any] | None:
 
 def _fallback_script(form: dict[str, Any]) -> dict[str, Any]:
     theme = form.get("storyTheme") or "温情漫剧"
+    outline = form.get("plotOutline") or ""
+    style = form.get("visualStyle") or "电影感写实"
+    desc_hint = outline if outline else theme
     return {
         "sceneTitle": theme,
         "sceneDescription": (
-            "Warm cinematic indoor close-up of a gentle elderly grandmother with grey hair and a colorful scarf, "
-            "smiling softly at a child in the foreground, traditional wooden door and peeling wall in background, "
-            "shallow depth of field, film lighting."
+            f"Cinematic close-up shot, {style} style, depicting a scene about '{desc_hint}'. "
+            f"Expressive character in focus, atmospheric lighting, shallow depth of field, "
+            f"detailed background matching the story theme, no text, no watermark, 16:9 composition."
         ),
-        "dialogue": "奶就放心了。",
-        "subtitleZh": "奶就放心了",
-        "subtitleEn": "so Grandma won't worry.",
-        "narration": "奶奶慈祥地看着孩子，轻轻说出一句安心的话。",
+        "dialogue": f"这就是关于{theme}的故事。",
+        "subtitleZh": f"这就是关于{theme}的故事",
+        "subtitleEn": f"This is a story about {theme}.",
+        "narration": f"一段关于{theme}的精彩故事正在展开。",
         "presenterGender": "female",
     }
 
