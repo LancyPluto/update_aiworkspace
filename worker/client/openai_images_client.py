@@ -871,7 +871,11 @@ class OpenAIImagesClient:
 
     def _uses_json_image_array_input(self) -> bool:
         mode = _normalized_option(self.extra_auth.get("imageInputMode"))
-        return mode in {"jsonarray", "jsonimagearray"}
+        if mode in {"multipart", "editmultipart", "openai"}:
+            return False
+        if mode in {"jsonarray", "jsonimagearray"}:
+            return True
+        return _is_volcengine_ark_base_url(self.base_url)
 
     @staticmethod
     def _parse_json(value: str | None) -> dict[str, Any]:

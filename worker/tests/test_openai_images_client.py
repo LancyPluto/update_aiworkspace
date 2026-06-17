@@ -364,3 +364,33 @@ def test_openai_images_can_send_source_images_as_json_array(monkeypatch):
     assert captured["path"] == "/images/generations"
     assert captured["payload"]["image"] == ["https://storage.example/input.png"]
     assert captured["payload"]["extra_body"] == {"response_format": "url"}
+
+
+def test_volcengine_images_reference_defaults_to_generation_json(monkeypatch):
+    client = OpenAIImagesClient(
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        api_key="test-key",
+    )
+    captured = {}
+
+    def fake_post(path, payload):
+        captured["path"] = path
+        captured["payload"] = payload
+        return {"data": [{"url": "https://cdn.example/seedream.png"}]}
+
+    def fail_multipart(*_args, **_kwargs):
+        raise AssertionError("volcengine seedream references must use /images/generations json input")
+
+    monkeypatch.setattr(client, "_post", fake_post)
+    monkeypatch.setattr(client, "_post_multipart", fail_multipart)
+
+    urls = client.generate_images(
+        prompt="换成雪原背景",
+        model="doubao-seedream-5-0-260128",
+        image_size="2048x2048",
+        image=["data:image/png;base64,ZmFrZQ=="],
+    )
+
+    assert urls == ["https://cdn.example/seedream.png"]
+    assert captured["path"] == "/images/generations"
+    assert captured["payload"]["image"] == ["data:image/png;base64,ZmFrZQ=="]

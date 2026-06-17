@@ -11,6 +11,18 @@ def test_openai_gateway_4k_image_model_uses_allowed_sizes():
     assert _resolve_openai_image_size({"aspectRatio": "9:16"}, model_config) == "1728x3072"
 
 
+def test_volcengine_seedream_auto_size_uses_aspect_ratio_size():
+    model_config = {
+        "provider": "volcengine_images",
+        "modelName": "doubao-seedream-4-5-251128",
+        "baseUrl": "https://ark.cn-beijing.volces.com/api/v3",
+    }
+
+    assert _resolve_openai_image_size({"imageSize": "auto", "aspectRatio": "16:9"}, model_config) == "2560x1440"
+    assert _resolve_openai_image_size({"imageSize": "auto", "aspectRatio": "9:16"}, model_config) == "1440x2560"
+    assert _resolve_openai_image_size({"aspectRatio": "16:9"}, model_config) == "2560x1440"
+
+
 class RecordingBackendClient:
     def __init__(self) -> None:
         self.processing = []

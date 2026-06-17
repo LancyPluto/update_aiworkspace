@@ -557,19 +557,53 @@ def _resolve_image_size(params: dict[str, Any]) -> str:
 
 
 def _resolve_openai_image_size(params: dict[str, Any], model_config: dict[str, Any] | None = None) -> str:
-    allowed_sizes = _openai_allowed_image_sizes(model_config or {})
+    config = model_config or {}
+    allowed_sizes = _openai_allowed_image_sizes(config)
     explicit = params.get("imageSize") or params.get("image_size") or params.get("size")
     if isinstance(explicit, str) and explicit.strip():
         requested = _openai_image_size_from_ratio_or_size(explicit.strip())
         if requested == "auto":
-            return _preferred_allowed_image_size("auto", allowed_sizes) if allowed_sizes else requested
+            if allowed_sizes:
+                return _preferred_allowed_image_size(_openai_aspect_ratio(params), allowed_sizes)
+            if _is_volcengine_image_model(config):
+                return _volcengine_image_size_from_aspect_ratio(params)
+            return requested
         if allowed_sizes and requested not in allowed_sizes:
             return _closest_allowed_image_size(requested, allowed_sizes)
         return requested
     aspect_ratio = _normalize_aspect_ratio(params.get("aspectRatio") or params.get("aspect_ratio") or params.get("imageRatio") or "auto")
     if allowed_sizes:
         return _preferred_allowed_image_size(aspect_ratio, allowed_sizes)
+    if _is_volcengine_image_model(config):
+        return _volcengine_image_size_from_aspect_ratio(params)
     return _openai_image_size_from_ratio_or_size(aspect_ratio)
+
+
+def _openai_aspect_ratio(params: dict[str, Any]) -> str:
+    return _normalize_aspect_ratio(params.get("aspectRatio") or params.get("aspect_ratio") or params.get("imageRatio") or "auto")
+
+
+def _is_volcengine_image_model(model_config: dict[str, Any]) -> bool:
+    provider = str(model_config.get("provider") or "").strip().lower()
+    base_url = str(model_config.get("baseUrl") or "").strip().lower()
+    model_name = str(model_config.get("modelName") or model_config.get("model") or "").strip().lower()
+    return provider == "volcengine_images" or "volces.com" in base_url or "volcengine.com" in base_url or "seedream" in model_name
+
+
+def _volcengine_image_size_from_aspect_ratio(params: dict[str, Any]) -> str:
+    aspect_ratio = _openai_aspect_ratio(params)
+    if _is_auto_aspect_ratio(aspect_ratio):
+        aspect_ratio = "1:1"
+    return {
+        "1:1": "2048x2048",
+        "16:9": "2560x1440",
+        "9:16": "1440x2560",
+        "4:3": "2304x1728",
+        "3:4": "1728x2304",
+        "3:2": "2400x1600",
+        "2:3": "1600x2400",
+        "21:9": "2560x1080",
+    }.get(aspect_ratio, "2048x2048")
 
 
 def _openai_image_size_from_ratio_or_size(value: Any) -> str:

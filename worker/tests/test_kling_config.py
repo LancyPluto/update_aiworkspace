@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import base64
 import unittest
 
+from client.kling_video_client import KlingVideoClient
+from config import settings
 from utils.kling_config import (
     resolve_kling_api_task,
     resolve_kling_image_api_task,
@@ -66,6 +69,44 @@ class KlingConfigTests(unittest.TestCase):
         create_path, result_path = resolve_kling_image_paths(model_config, params)
         self.assertEqual(create_path, "/v1/images/omni-image")
         self.assertEqual(result_path, "/v1/images/omni-image/{task_id}")
+
+    def test_kling_local_backend_generated_image_is_encoded(self) -> None:
+        previous_dir = settings.generated_media_dir
+        previous_public_base = settings.generated_media_public_base_url
+        try:
+            import tempfile
+            from pathlib import Path
+
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                image_path = root / "uploads" / "20260617" / "ref.png"
+                image_path.parent.mkdir(parents=True)
+                image_path.write_bytes(b"fake-image")
+                settings.generated_media_dir = str(root)
+                settings.generated_media_public_base_url = "/generated"
+
+                client = KlingVideoClient(api_key="fake")
+                payload = client._build_video_payload(
+                    prompt="动起来",
+                    image_size="1280x720",
+                    negative_prompt="",
+                    model="kling-v3",
+                    image="http://backend:8080/generated/uploads/20260617/ref.png",
+                    image_tail="",
+                    seed=None,
+                    duration="5",
+                    aspect_ratio="16:9",
+                    resolution="",
+                    mode="",
+                    sound="",
+                    callback_url="",
+                    external_task_id="",
+                )
+
+            self.assertEqual(payload["image"], base64.b64encode(b"fake-image").decode("ascii"))
+        finally:
+            settings.generated_media_dir = previous_dir
+            settings.generated_media_public_base_url = previous_public_base
 
 
 if __name__ == "__main__":

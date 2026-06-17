@@ -374,10 +374,7 @@ class KlingVideoClient:
             payload["negative_prompt"] = negative_prompt.strip()
         if image.strip():
             image_value = image.strip()
-            if image_value.startswith("http://") or image_value.startswith("https://"):
-                encoded_image = image_value
-            else:
-                encoded_image = self._image_to_base64(image_value)
+            encoded_image = self._image_payload_value(image_value)
             if video_url.strip() or character_orientation.strip():
                 payload["image_url"] = encoded_image
             else:
@@ -495,20 +492,13 @@ class KlingVideoClient:
                 for key in ("image", "url", "image_url"):
                     raw = row.get(key)
                     if isinstance(raw, str) and raw.strip():
-                        text = raw.strip()
-                        if text.startswith("http://") or text.startswith("https://"):
-                            row[key] = text
-                        else:
-                            row[key] = self._image_to_base64(text)
+                        row[key] = self._image_payload_value(raw.strip())
                 encoded.append(row)
                 continue
             text = str(item).strip()
             if not text:
                 continue
-            if text.startswith("http://") or text.startswith("https://"):
-                encoded.append(text)
-            else:
-                encoded.append(self._image_to_base64(text))
+            encoded.append(self._image_payload_value(text))
         return encoded
 
     def _encode_omni_image_list(self, value: Any) -> list[dict[str, str]]:
@@ -531,6 +521,14 @@ class KlingVideoClient:
                 continue
             encoded.append({"image": self._image_to_base64(raw)})
         return encoded
+
+    def _image_payload_value(self, value: str) -> str:
+        raw = value.strip()
+        if not raw:
+            return ""
+        if raw.startswith(("http://", "https://")) and self._local_media_path(raw) is None:
+            return raw
+        return self._image_to_base64(raw)
 
     def _image_to_base64(self, value: str) -> str:
         raw = value.strip()
