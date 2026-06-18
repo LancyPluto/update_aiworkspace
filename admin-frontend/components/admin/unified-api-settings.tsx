@@ -87,19 +87,21 @@ function VendorIcon({ iconAsset, label }: { iconAsset: string; label: string }) 
     </span>
   )
 }
+
+function isNegativeBalance(account: ModelVendorAccount) {
+  return account.balanceAmount != null && account.balanceAmount < 0
+}
+
 function balanceStatusBadge(account: ModelVendorAccount) {
   const status = account.balanceStatus
-  if (status === "OK") {
+  if (isNegativeBalance(account)) {
+    return <Badge variant="destructive">欠费</Badge>
+  }
+  if (account.balanceAmount != null) {
     return <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100">正常</Badge>
   }
-  if (status === "LOW") {
-    return <Badge variant="destructive">低余额</Badge>
-  }
-  if (status === "SUSPECTED_INSUFFICIENT") {
-    return <Badge variant="destructive">疑似欠费</Badge>
-  }
   if (status === "ERROR") {
-    return <Badge variant="destructive">查询失败</Badge>
+    return null
   }
   if (account.balanceQueryMode === "NONE") {
     return <Badge variant="outline">仅外链</Badge>
@@ -150,7 +152,7 @@ function diagnoseProviderIssue(
     return `${stageLabel}接口不存在：Base URL 或余额/模型探测路径可能不适配该供应商。原始错误：${raw}`
   }
   if (stage === "balance" && account?.balanceQueryMode === "REST_API") {
-    return `余额查询失败：${raw}。如果该供应商没有稳定余额接口，请把余额查询方式改成“手填”或“仅外链”，不要让余额探测承担连通性判断。`
+    return `未获取到余额：${raw}。如果该供应商没有稳定余额接口，请把余额查询方式改成“手填”或“仅外链”，不要让余额探测承担连通性判断。`
   }
   return `${stageLabel}失败：${raw}`
 }
@@ -937,7 +939,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
     if (!overview) return []
     const keyword = modelKeyword.trim().toLowerCase()
     const issueScore = (vendor: UnifiedApiVendorGroup) => {
-      const lowBalance = vendor.accounts.filter((a) => a.balanceStatus === "LOW" || a.balanceStatus === "SUSPECTED_INSUFFICIENT").length
+      const lowBalance = vendor.accounts.filter(isNegativeBalance).length
       const unhealthy = vendor.accounts.filter((a) => a.healthStatus === "ERROR").length
       const disabled = vendor.accounts.filter((a) => !a.enabled).length
       const unbound = vendor.models.filter((m) => !m.vendorAccountId).length
@@ -966,7 +968,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
       .filter((vendor) => {
         if (keyword && vendor.models.length === 0 && !vendor.label.toLowerCase().includes(keyword)) return false
         if (vendorFilter === "LOW_BALANCE") {
-          return vendor.accounts.some((a) => a.balanceStatus === "LOW" || a.balanceStatus === "SUSPECTED_INSUFFICIENT")
+          return vendor.accounts.some(isNegativeBalance)
         }
         if (vendorFilter === "UNHEALTHY") return vendor.accounts.some((a) => a.healthStatus === "ERROR")
         if (vendorFilter === "DISABLED") return vendor.accounts.some((a) => !a.enabled)
@@ -1213,7 +1215,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
     const primaryAccount = pickPrimaryAccount(vendor.accounts)
     const isOpen = openVendors[vendor.vendorCode] ?? false
     const accountIdForNewModel = primaryAccount?.id
-    const lowBalanceCount = vendor.accounts.filter((account) => account.balanceStatus === "LOW" || account.balanceStatus === "SUSPECTED_INSUFFICIENT").length
+    const lowBalanceCount = vendor.accounts.filter(isNegativeBalance).length
     const unhealthyCount = vendor.accounts.filter((account) => account.healthStatus === "ERROR").length
 
     return (
@@ -1253,14 +1255,6 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                 ) : null}
                 {formatBalanceUpdatedAt(primaryAccount.balanceUpdatedAt) ? (
                   <span className="text-xs text-muted-foreground">{formatBalanceUpdatedAt(primaryAccount.balanceUpdatedAt)}</span>
-                ) : null}
-                {primaryAccount.balanceErrorMessage ? (
-                  <span
-                    className="max-w-[260px] truncate text-xs text-destructive"
-                    title={diagnoseProviderIssue(primaryAccount.balanceErrorMessage, "balance", primaryAccount)}
-                  >
-                    {diagnoseProviderIssue(primaryAccount.balanceErrorMessage, "balance", primaryAccount)}
-                  </span>
                 ) : null}
                 <EmbeddedOnOffSwitch
                   checked={primaryAccount.enabled}

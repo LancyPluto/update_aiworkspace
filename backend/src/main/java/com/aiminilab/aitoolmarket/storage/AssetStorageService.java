@@ -17,11 +17,13 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.URL;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -413,6 +415,22 @@ public class AssetStorageService {
             return value;
         }
         return "https://" + value;
+    }
+
+    public String generateSignedUrl(String relativeKey, AssetVisibility visibility, int expirationSeconds) {
+        if (!isOssMode() || ossClient == null) {
+            return urlForKey(relativeKey, visibility);
+        }
+        AppProperties.AssetStorage storage = appProperties.getAssetStorage();
+        String bucket = bucketFor(visibility, storage);
+        String objectKey = storage.getOssKeyPrefix() + normalizeRelativeKey(relativeKey);
+        Date expiration = new Date(System.currentTimeMillis() + (long) expirationSeconds * 1000);
+        URL url = ossClient.generatePresignedUrl(bucket, objectKey, expiration);
+        return url.toString();
+    }
+
+    public String generateSignedPrivateUrl(String relativeKey) {
+        return generateSignedUrl(relativeKey, AssetVisibility.PRIVATE, 3600);
     }
 
     public enum AssetVisibility {

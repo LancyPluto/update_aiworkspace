@@ -21,6 +21,7 @@ class AssetStorage:
     provider: str
     local_root: Path
     public_base_url: str
+    private_base_url: str
     oss_endpoint: str
     oss_bucket_name: str
     oss_access_key_id: str
@@ -36,6 +37,9 @@ class AssetStorage:
             or settings.generated_media_public_base_url
             or "/generated"
         ).rstrip("/")
+        private_base_url = (
+            os.getenv("ASSET_STORAGE_PRIVATE_BASE_URL") or public_base_url
+        ).rstrip("/")
         oss_prefix = (os.getenv("OSS_KEY_PREFIX") or "").strip().replace("\\", "/")
         while oss_prefix.startswith("/"):
             oss_prefix = oss_prefix[1:]
@@ -45,6 +49,7 @@ class AssetStorage:
             provider=provider,
             local_root=Path(settings.generated_media_dir).resolve(),
             public_base_url=public_base_url,
+            private_base_url=private_base_url,
             oss_endpoint=(os.getenv("OSS_ENDPOINT") or "").strip(),
             oss_bucket_name=(
                 os.getenv("OSS_PRIVATE_BUCKET")
@@ -80,9 +85,8 @@ class AssetStorage:
 
     def public_url(self, relative_key: str) -> str:
         key = self._normalize_relative_key(relative_key)
-        if self.public_base_url.startswith("http://") or self.public_base_url.startswith("https://"):
-            return f"{self.public_base_url}/{key}"
-        return f"{self.public_base_url}/{key}"
+        base = self.private_base_url
+        return f"{base}/{key}"
 
     def local_path(self, relative_key: str) -> Path:
         key = self._normalize_relative_key(relative_key)

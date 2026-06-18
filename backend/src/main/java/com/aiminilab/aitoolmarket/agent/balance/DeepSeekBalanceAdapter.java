@@ -53,7 +53,7 @@ public class DeepSeekBalanceAdapter implements VendorBalanceAdapter {
             return BalanceQueryResult.failed("DeepSeek 余额字段为空");
         }
         BalanceQueryResult result = BalanceQueryResult.ok(total, currency);
-        if (!available) {
+        if (!available && total.signum() < 0) {
             return new BalanceQueryResult(true, total, currency, "SUSPECTED_INSUFFICIENT", "账户余额不足（is_available=false）");
         }
         return result;

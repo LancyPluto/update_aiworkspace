@@ -3,6 +3,7 @@ import logging
 from typing import Any
 
 from client.backend_client import BackendClient, BackendClientError
+from handlers.error_classifier import classify_model_error
 from client.suno_music_client import (
     SunoGenerationResult,
     SunoMusicClient,
@@ -87,9 +88,9 @@ class MusicGenerationHandler:
         except SunoMusicTimeoutError as exc:
             return self._mark_failed(task_id, "MODEL_TIMEOUT", str(exc), trace_id)
         except ProviderRegistryError as exc:
-            return self._mark_failed(task_id, "MODEL_CALL_FAILED", str(exc), trace_id)
+            return self._mark_failed(task_id, classify_model_error(str(exc)), str(exc), trace_id)
         except SunoMusicError as exc:
-            return self._mark_failed(task_id, "MODEL_CALL_FAILED", str(exc), trace_id)
+            return self._mark_failed(task_id, classify_model_error(str(exc)), str(exc), trace_id)
         except GeneratedAudioPersistError as exc:
             return self._mark_failed(task_id, "MEDIA_PERSIST_FAILED", str(exc), trace_id)
         except BackendClientError:

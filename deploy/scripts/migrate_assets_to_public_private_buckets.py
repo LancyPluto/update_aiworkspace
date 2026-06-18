@@ -28,7 +28,7 @@ PRIVATE_BUCKET = os.getenv("OSS_PRIVATE_BUCKET", "wlcloudai-assets-private").str
 ENDPOINT = os.getenv("OSS_ENDPOINT", "oss-cn-guangzhou.aliyuncs.com").strip()
 LEGACY_BASE = f"https://{LEGACY_BUCKET}.oss-cn-guangzhou.aliyuncs.com"
 PUBLIC_BASE = os.getenv("ASSET_STORAGE_PUBLIC_BASE_URL", f"https://{PUBLIC_BUCKET}.oss-cn-guangzhou.aliyuncs.com").rstrip("/")
-PRIVATE_BASE = os.getenv("ASSET_STORAGE_PRIVATE_BASE_URL", f"https://{PRIVATE_BUCKET}.oss-cn-guangzhou.aliyuncs.com").rstrip("/")
+PRIVATE_BASE = os.getenv("ASSET_STORAGE_PRIVATE_BASE_URL", "/api/v1/assets/private").rstrip("/")
 MEDIA_URL_RE = re.compile(r"(https?://[^\s\"'<>\])},]+|/generated/[^\s\"'<>\])},]+)")
 
 

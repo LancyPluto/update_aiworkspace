@@ -1,6 +1,7 @@
 package com.aiminilab.aitoolmarket.task.dto;
 
 import com.aiminilab.aitoolmarket.task.entity.AiTask;
+import com.aiminilab.aitoolmarket.task.support.TaskFailureMessage;
 import com.fasterxml.jackson.databind.JsonNode;
 
 import java.time.LocalDateTime;
@@ -58,7 +59,7 @@ public record TaskDetailResponse(
                 defaultValue(task.getOutputModality(), "TEXT"),
                 task.getStatus(),
                 task.getProgress(),
-                task.getProgressMessage(),
+                TaskFailureMessage.userFacingProgressMessage(task.getErrorCode(), task.getProgressMessage()),
                 task.getErrorCode(),
                 task.getErrorMessage(),
                 params,
