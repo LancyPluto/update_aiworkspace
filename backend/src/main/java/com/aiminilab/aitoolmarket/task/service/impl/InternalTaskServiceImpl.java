@@ -31,12 +31,16 @@ import com.aiminilab.aitoolmarket.task.metrics.TaskMetrics;
 import com.aiminilab.aitoolmarket.task.service.InternalTaskService;
 import com.aiminilab.aitoolmarket.task.support.TaskFailureMessage;
 import com.aiminilab.aitoolmarket.task.service.TaskStateMachine;
+import com.aiminilab.aitoolmarket.storage.PrivateAssetAccessService;
 import com.aiminilab.aitoolmarket.workflow.service.WorkflowExecutionService;
 import com.aiminilab.aitoolmarket.tool.dto.ToolFieldResponse;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolFieldItemMapper;
 import com.aiminilab.aitoolmarket.tool.support.ToolRuntimeConfig;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.databind.node.TextNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -63,6 +67,7 @@ public class InternalTaskServiceImpl implements InternalTaskService {
     private final TaskMetrics taskMetrics;
     private final CommunityService communityService;
     private final WorkflowExecutionService workflowExecutionService;
+    private final PrivateAssetAccessService privateAssetAccessService;
 
     public InternalTaskServiceImpl(TaskMapper taskMapper, ToolMapper toolMapper,
                                    AgentModelConfigMapper agentModelConfigMapper,
@@ -74,7 +79,8 @@ public class InternalTaskServiceImpl implements InternalTaskService {
                                    CreditService creditService, PricingService pricingService,
                                    BillingService billingService,
                                    TaskMetrics taskMetrics, CommunityService communityService,
-                                   WorkflowExecutionService workflowExecutionService) {
+                                   WorkflowExecutionService workflowExecutionService,
+                                   PrivateAssetAccessService privateAssetAccessService) {
         this.taskMapper = taskMapper;
         this.toolMapper = toolMapper;
         this.agentModelConfigMapper = agentModelConfigMapper;
@@ -90,11 +96,13 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         this.taskMetrics = taskMetrics;
         this.communityService = communityService;
         this.workflowExecutionService = workflowExecutionService;
+        this.privateAssetAccessService = privateAssetAccessService;
     }
 
     @Override
     public ExecutionContextResponse executionContext(Long taskId) {
         AiTask task = findTask(taskId);
+        JsonNode workerParams = resolveParamsForWorker(task.getUserId(), parseParams(task.getParamsJson()));
         List<ToolFieldResponse> fields = toolFieldItemMapper.findActiveFields(task.getToolId()).stream()
                 .map(field -> ToolFieldResponse.from(field, objectMapper))
                 .toList();
@@ -103,7 +111,7 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         ModelExecutionSnapshot snapshot = modelExecutionSnapshotService.parse(task.getModelSnapshotJson());
         ToolRuntimeConfig runtimeConfig = ToolRuntimeConfig.fromConfigNote(tool.getConfigNote(), objectMapper);
         if (snapshot != null) {
-            return ExecutionContextResponse.of(task, parseParams(task.getParamsJson()),
+            return ExecutionContextResponse.of(task, workerParams,
                     ExecutionModelConfigResponse.from(snapshot), snapshot, fields,
                     runtimeConfig.systemPrompt(), runtimeConfig.adminPrompt());
         }
@@ -111,7 +119,7 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         modelCapabilityService.validateExecution(tool, modelConfig);
         List<String> caps = modelCapabilityService.resolveCapabilities(modelConfig);
         AgentModelConfig executionConfig = agentModelConfigService.resolveForExecution(modelConfig);
-        return ExecutionContextResponse.of(task, parseParams(task.getParamsJson()),
+        return ExecutionContextResponse.of(task, workerParams,
                 ExecutionModelConfigResponse.from(executionConfig, caps), fields,
                 runtimeConfig.systemPrompt(), runtimeConfig.adminPrompt());
     }
@@ -304,6 +312,46 @@ public class InternalTaskServiceImpl implements InternalTaskService {
             return node;
         } catch (Exception exception) {
             return objectMapper.createObjectNode();
+        }
+    }
+
+    private JsonNode resolveParamsForWorker(Long userId, JsonNode params) {
+        JsonNode resolved = params == null ? objectMapper.createObjectNode() : params.deepCopy();
+        rewritePrivateAssetUrls(userId, resolved);
+        return resolved;
+    }
+
+    private void rewritePrivateAssetUrls(Long userId, JsonNode node) {
+        if (node instanceof ObjectNode objectNode) {
+            objectNode.fields().forEachRemaining(entry -> {
+                JsonNode value = entry.getValue();
+                if (value != null && value.isTextual()) {
+                    String raw = value.asText();
+                    if (privateAssetAccessService.privateRelativeKey(raw) != null) {
+                        objectNode.set(entry.getKey(), TextNode.valueOf(
+                                privateAssetAccessService.resolveForWorker(userId, raw)
+                        ));
+                    }
+                } else if (value != null) {
+                    rewritePrivateAssetUrls(userId, value);
+                }
+            });
+            return;
+        }
+        if (node instanceof ArrayNode arrayNode) {
+            for (int i = 0; i < arrayNode.size(); i++) {
+                JsonNode value = arrayNode.get(i);
+                if (value != null && value.isTextual()) {
+                    String raw = value.asText();
+                    if (privateAssetAccessService.privateRelativeKey(raw) != null) {
+                        arrayNode.set(i, TextNode.valueOf(
+                                privateAssetAccessService.resolveForWorker(userId, raw)
+                        ));
+                    }
+                } else if (value != null) {
+                    rewritePrivateAssetUrls(userId, value);
+                }
+            }
         }
     }
 

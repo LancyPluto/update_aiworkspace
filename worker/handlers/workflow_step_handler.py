@@ -865,7 +865,8 @@ def _normalize_scenes(parsed: dict[str, Any] | None, count: int, form: dict[str,
     for position in range(1, count + 1):
         source = scenes_raw[position - 1] if position <= len(scenes_raw) and isinstance(scenes_raw[position - 1], dict) else {}
         dialogue = str(source.get("dialogue") or "")
-        if not dialogue:
+        narration = str(source.get("narration") or "")
+        if not dialogue and not narration:
             dialogue = f"这是{theme}第{position}幕的精彩台词。"
         scene_desc = str(source.get("sceneDescription") or "")
         if not scene_desc:
@@ -881,7 +882,7 @@ def _normalize_scenes(parsed: dict[str, Any] | None, count: int, form: dict[str,
                 "dialogue": dialogue,
                 "subtitleZh": str(source.get("subtitleZh") or dialogue),
                 "subtitleEn": str(source.get("subtitleEn") or f"Scene {position} of {theme}."),
-                "narration": str(source.get("narration") or ""),
+                "narration": narration,
                 "presenterGender": str(source.get("presenterGender") or fallback["presenterGender"]),
                 "durationSeconds": int(source.get("durationSeconds") or SCENE_SECONDS),
                 "characterScene": str(source.get("characterScene") or ""),

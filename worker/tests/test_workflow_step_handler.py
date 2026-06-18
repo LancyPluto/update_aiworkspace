@@ -194,6 +194,31 @@ def _valid_script(scene_count: int = 2) -> dict:
 
 
 
+def test_normalize_scenes_keeps_dialogue_empty_when_narration_exists():
+    from handlers.workflow_step_handler import _normalize_scenes
+
+    scenes = _normalize_scenes(
+        {
+            "scenes": [
+                {
+                    "sceneTitle": "旁白镜头",
+                    "sceneDescription": "A detailed cinematic establishing shot with atmospheric light.",
+                    "plot": "主角发现关键线索。",
+                    "dialogue": "",
+                    "narration": "在混乱中，主角注意到了角落里的异常。",
+                    "cameraLanguage": "全景，缓慢推进",
+                }
+            ]
+        },
+        1,
+        {"storyTheme": "测试故事"},
+    )
+
+    assert scenes[0]["dialogue"] == ""
+    assert scenes[0]["narration"] == "在混乱中，主角注意到了角落里的异常。"
+    assert scenes[0]["subtitleZh"] == ""
+
+
 class SequenceModelClient:
     def __init__(self, responses: list[str]):
         self.responses = list(responses)

@@ -37,6 +37,15 @@ public interface AiMarketFileMapper extends BaseMapper<AiMarketFile> {
             """)
     List<AiMarketFile> findByFileIdsAndUser(@Param("userId") Long userId, @Param("fileIds") List<String> fileIds);
 
+    @Select("""
+            SELECT COUNT(1)
+            FROM ai_market_files
+            WHERE user_id = #{userId}
+              AND storage_path LIKE CONCAT('%/', #{relativeKey})
+            """)
+    long countByUserAndRelativeKey(@Param("userId") Long userId,
+                                   @Param("relativeKey") String relativeKey);
+
     @Insert("""
             INSERT INTO ai_market_files (
               file_id, user_id, tool_id, original_name, storage_path, content_type, file_size, created_at

@@ -136,6 +136,16 @@ public interface AgentFileMapper extends BaseMapper<AgentFile> {
         return Optional.ofNullable(selectByIdSessionAndUser(fileId, sessionId, userId));
     }
 
+    @Select("""
+            SELECT COUNT(1)
+            FROM agent_files
+            WHERE id = #{fileId}
+              AND user_id = #{userId}
+              AND status = 'READY'
+            """)
+    long countReadyByIdAndUser(@Param("fileId") Long fileId,
+                               @Param("userId") Long userId);
+
     @Delete("""
             DELETE FROM agent_files
             WHERE id = #{fileId} AND session_id = #{sessionId} AND user_id = #{userId}

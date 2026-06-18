@@ -8,6 +8,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -39,6 +40,9 @@ class WorkerInternalApiTest {
 
     @Autowired
     private ObjectMapper objectMapper;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @Test
     void workerCanReadContextMarkProcessingAndWriteSuccessResult() throws Exception {
@@ -491,6 +495,14 @@ class WorkerInternalApiTest {
         publishTool(adminToken, toolId);
 
         String userToken = login("/api/v1/auth/login", "user1");
+        jdbcTemplate.update("""
+                INSERT INTO user_upload_assets(
+                  user_id, file_id, asset_kind, original_filename, content_type,
+                  file_size, url, storage_path, status, created_at, updated_at
+                ) VALUES (2, 'worker-person-image', 'image', 'person.png', 'image/png',
+                          3, '/generated/uploads/person.png', 'local/uploads/person.png',
+                          'ACTIVE', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """);
         String response = mockMvc.perform(post("/api/v1/tasks")
                         .header("Authorization", "Bearer " + userToken)
                         .contentType(MediaType.APPLICATION_JSON)
