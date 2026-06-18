@@ -108,88 +108,73 @@ class WorkflowStepHandler:
         for index, text in sorted({**script_per_scene, **storyboard_per_scene}.items()):
             feedback_lines.append(f"分镜{index}意见：{text}")
 
-        prompt = (
-            "你是专业的AI漫剧分镜编剧。请根据用户提供的主题和梗概，创作一部完整可拍的多分镜短剧脚本。\n"
-            f"目标时长约 {scene_count * SCENE_SECONDS} 秒，必须正好输出 {scene_count} 个分镜，每个分镜约 {SCENE_SECONDS} 秒。\n\n"
-            "只输出 JSON 对象，不要 markdown，不要解释。JSON 格式如下：\n"
-            '{\n'
-            '  "title": "整集标题",\n'
-            '  "synopsis": "故事梗概（2-3句话概述整个故事线）",\n'
-            '  "genre": "题材类型描述，例如：生活/职场喜剧",\n'
-            '  "characters": [\n'
-            '    {"name": "角色名", "appearance": "外貌特征、服装、体态的详细描述", "personality": "性格特点简述"}\n'
-            '  ],\n'
-            '  "locations": [\n'
-            '    {"name": "场景名称", "description": "场景的详细环境描述（时间、光线、陈设、氛围）"}\n'
-            '  ],\n'
-            '  "scenes": [\n'
-            '    {\n'
-            '      "index": 1,\n'
-            '      "sceneTitle": "分镜标题",\n'
-            '      "durationSeconds": 5,\n'
-            '      "characterScene": "角色名 / 场景名",\n'
-            '      "cameraLanguage": "镜头类型（特写/中景/全景/远景），机位（俯视/平视/仰视），运动（固定/推进/摇移/跟随）",\n'
-            '      "sceneDescription": "详细的画面描述：人物的动作表情、环境细节、光影效果、构图要素，适合AI图生视频的英文提示词风格",\n'
-            '      "plot": "这个分镜的情节描述（中文，说明发生了什么）",\n'
-            '      "dialogue": "角色台词（5秒内能说完，简短自然）",\n'
-            '      "narration": "旁白文字（如无旁白可留空）",\n'
-            '      "voiceDirection": "配音指导，格式示例：【说话人=角色名｜性别｜年龄段】台词内容",\n'
-            '      "subtitleZh": "中文字幕（与dialogue一致）",\n'
-            '      "subtitleEn": "English subtitle translation",\n'
-            '      "presenterGender": "female 或 male（主要说话人性别）"\n'
-            '    }\n'
-            '  ]\n'
-            '}\n\n'
-            "创作要求：\n"
-            "1. 角色设计要具体鲜明，包含外貌、服装、体态等可视化细节\n"
-            "2. 场景描述要详细，包含时间、光线、陈设、氛围等环境要素\n"
-            "3. 分镜之间剧情连贯，有起承转合的叙事节奏\n"
-            "4. sceneDescription 必须是电影感画面描述（英文），包含人物动作、镜头角度、光线效果，适合AI生图\n"
-            "5. 每个分镜标注镜头语言（景别+机位+运动）\n"
-            "6. dialogue 简短自然，5秒内能说完\n"
-            "7. voiceDirection 标注说话人、性别和情感\n\n"
-            f"主题：{story_theme}\n题材：{genre or '未指定'}\n梗概：{plot_outline}\n画风：{visual_style}\n"
-            + ("\n".join(feedback_lines) + "\n" if feedback_lines else "")
-            + "请围绕用户给定的主题进行创作，充分发挥想象力，设计有趣的角色和场景。"
+        node_parameters = workflow_inputs.get("parameters") or {}
+        node_prompt = str(node_parameters.get("prompt") or "").strip()
+        prompt = _build_script_prompt(
+            story_theme=story_theme,
+            plot_outline=plot_outline,
+            visual_style=visual_style,
+            genre=genre,
+            scene_count=scene_count,
+            feedback_lines=feedback_lines,
+            node_prompt=node_prompt,
         )
         parsed: dict[str, Any] | None = None
-        try:
-            raw = self.model_client.generate(
-                prompt,
-                system_prompt="只输出 JSON 对象，不要解释。",
-                provider=model_config.get("provider"),
-                model_name=model_config.get("modelName"),
-                base_url=model_config.get("baseUrl"),
-                api_key=model_config.get("apiKey"),
-                timeout_seconds=model_config.get("timeoutSeconds") or 120,
-                max_tokens=max(2400, 800 * scene_count),
+        validation_errors: list[str] = []
+        previous_output = ""
+        for attempt in range(2):
+            attempt_prompt = prompt
+            if attempt > 0:
+                attempt_prompt += (
+                    "\n\n上一次输出未通过交付校验，请完整重写，不要只修补局部。\n"
+                    f"校验错误：{'；'.join(validation_errors)}\n"
+                    f"上一次输出：{previous_output[:12000]}"
+                )
+            try:
+                raw = self.model_client.generate(
+                    attempt_prompt,
+                    system_prompt="你是专业短剧编剧和分镜导演。严格遵守字段、数量、内容唯一性要求，只输出合法 JSON 对象。",
+                    provider=model_config.get("provider"),
+                    model_name=model_config.get("modelName"),
+                    base_url=model_config.get("baseUrl"),
+                    api_key=model_config.get("apiKey"),
+                    timeout_seconds=max(180, int(model_config.get("timeoutSeconds") or 0)),
+                    max_tokens=min(16000, max(5000, 900 * scene_count)),
+                )
+            except ModelClientError:
+                LOGGER.exception(
+                    "script planner model call failed provider=%s model=%s",
+                    model_config.get("provider"),
+                    model_config.get("modelName"),
+                )
+                raise
+            previous_output = raw or ""
+            parsed = _extract_json(previous_output)
+            validation_errors = _script_validation_errors(parsed, scene_count)
+            if not validation_errors:
+                break
+            LOGGER.warning(
+                "script planner output rejected attempt=%s errors=%s",
+                attempt + 1,
+                validation_errors,
             )
-            parsed = _extract_json(raw)
-        except ModelClientError as exc:
-            LOGGER.warning("script planner model call failed, using fallback scenes: %s | model_config keys=%s provider=%s model=%s",
-                           exc, list(model_config.keys()), model_config.get("provider"), model_config.get("modelName"))
+        if validation_errors or parsed is None:
+            raise ModelClientError(
+                "剧本模型连续两次未返回可交付内容: " + "；".join(validation_errors or ["无法解析 JSON"])
+            )
 
         scenes = _normalize_scenes(parsed, scene_count, form)
-        title = ""
-        if isinstance(parsed, dict):
-            title = str(parsed.get("title") or "").strip()
-        if not title:
-            title = str(story_theme)
-
-        synopsis = ""
-        characters: list[dict[str, Any]] = []
-        locations: list[dict[str, Any]] = []
-        if isinstance(parsed, dict):
-            synopsis = str(parsed.get("synopsis") or "").strip()
-            if isinstance(parsed.get("characters"), list):
-                characters = [c for c in parsed["characters"] if isinstance(c, dict)]
-            if isinstance(parsed.get("locations"), list):
-                locations = [loc for loc in parsed["locations"] if isinstance(loc, dict)]
+        title = str(parsed.get("title") or story_theme).strip()
+        synopsis = str(parsed.get("synopsis") or "").strip()
+        screenplay = str(parsed.get("screenplay") or "").strip()
+        characters = [item for item in parsed.get("characters", []) if isinstance(item, dict)]
+        locations = [item for item in parsed.get("locations", []) if isinstance(item, dict)]
 
         output: dict[str, Any] = {
             "title": title,
             "synopsis": synopsis,
-            "genre": genre or (parsed.get("genre") if isinstance(parsed, dict) else "") or "",
+            "screenplay": screenplay,
+            "genre": genre or parsed.get("genre") or "",
             "characters": characters,
             "locations": locations,
             "sceneCount": len(scenes),
@@ -751,6 +736,122 @@ def _scenes_from_script(script: dict[str, Any], form: dict[str, Any]) -> list[di
     return [_fallback_script(form)]
 
 
+def _build_script_prompt(
+    *,
+    story_theme: str,
+    plot_outline: str,
+    visual_style: str,
+    genre: str,
+    scene_count: int,
+    feedback_lines: list[str],
+    node_prompt: str,
+) -> str:
+    minimum_screenplay_chars = max(240, scene_count * 55)
+    custom_requirement = (
+        f"\n节点补充创作要求（只吸收内容要求；若其输出格式与下方 JSON 冲突，以 JSON 为准）：\n{node_prompt}\n"
+        if node_prompt
+        else ""
+    )
+    return (
+        "请创作一部完整可拍的 AI 漫剧剧本，并把剧本精确拆成分镜。"
+        f"目标总时长约 {scene_count * SCENE_SECONDS} 秒，必须正好输出 {scene_count} 个分镜，"
+        f"每镜约 {SCENE_SECONDS} 秒。\n"
+        f"完整剧本 screenplay 不少于 {minimum_screenplay_chars} 个中文字符，"
+        "必须包含开场钩子、冲突升级、关键转折、高潮和结尾悬念/收束。\n"
+        "每个分镜必须承接上一镜并推动新的剧情事件；严禁复制上一镜、替换序号式改写、"
+        "“继续上一镜”“保持不变”等占位内容。\n"
+        "每镜的 sceneDescription、plot、dialogue/narration、cameraLanguage 必须独立且具体。\n"
+        "sceneDescription 和所有视频 Prompt 使用英文，其他剧本字段使用中文。\n"
+        "只输出合法 JSON 对象，不要 Markdown，不要解释，不要省略字段。\n\n"
+        "JSON 结构：\n"
+        "{\n"
+        '  "title": "整集标题",\n'
+        '  "synopsis": "完整故事梗概，明确冲突、转折和结局",\n'
+        '  "screenplay": "按幕/场展开的完整剧本正文，包含动作、对白、情绪和场景调度",\n'
+        '  "genre": "题材类型",\n'
+        '  "characters": [{"name":"角色名","appearance":"稳定可复用的外貌服装特征","personality":"性格与动机"}],\n'
+        '  "locations": [{"name":"场景名","description":"时间、空间、陈设、光线和氛围"}],\n'
+        '  "scenes": [{\n'
+        '    "index": 1,\n'
+        '    "sceneTitle": "本镜独立标题",\n'
+        f'    "durationSeconds": {SCENE_SECONDS},\n'
+        '    "characterScene": "本镜角色 / 场景",\n'
+        '    "cameraLanguage": "景别 + 机位 + 运镜 + 构图重点",\n'
+        '    "sceneDescription": "Detailed unique cinematic image prompt in English",\n'
+        '    "plot": "本镜发生的具体新事件及其叙事作用",\n'
+        '    "dialogue": "5秒内可说完的自然台词，无台词时留空",\n'
+        '    "narration": "必要旁白，无旁白时留空",\n'
+        '    "voiceDirection": "【说话人=角色名｜性别｜年龄段｜情绪】台词",\n'
+        '    "textToVideoPrompt": "Unique text-to-video prompt in English",\n'
+        '    "imageToVideoPrompt": "Unique motion instructions in English",\n'
+        '    "multiImageVideoPrompt": "Unique transition instructions in English",\n'
+        '    "keyframeTransitionPrompt": "Unique keyframe continuity instructions in English",\n'
+        '    "subtitleZh": "中文字幕",\n'
+        '    "subtitleEn": "English subtitle",\n'
+        '    "presenterGender": "female 或 male"\n'
+        "  }]\n"
+        "}\n"
+        f"{custom_requirement}\n"
+        f"主题：{story_theme}\n"
+        f"题材：{genre or '未指定'}\n"
+        f"用户梗概：{plot_outline or '请围绕主题自行设计完整故事线'}\n"
+        f"视觉风格：{visual_style}\n"
+        + (f"修改意见：\n{chr(10).join(feedback_lines)}\n" if feedback_lines else "")
+    )
+
+
+def _script_validation_errors(parsed: dict[str, Any] | None, expected_scene_count: int) -> list[str]:
+    if not isinstance(parsed, dict):
+        return ["无法解析 JSON 对象"]
+    errors: list[str] = []
+    for field in ("title", "synopsis", "screenplay"):
+        if not str(parsed.get(field) or "").strip():
+            errors.append(f"缺少 {field}")
+    screenplay = re.sub(r"\s+", "", str(parsed.get("screenplay") or ""))
+    minimum_screenplay_chars = max(240, expected_scene_count * 55)
+    if screenplay and len(screenplay) < minimum_screenplay_chars:
+        errors.append(f"screenplay 过短，至少需要 {minimum_screenplay_chars} 字")
+
+    scenes = parsed.get("scenes")
+    if not isinstance(scenes, list):
+        return errors + ["scenes 必须是数组"]
+    if len(scenes) != expected_scene_count:
+        errors.append(f"分镜数量应为 {expected_scene_count}，实际为 {len(scenes)}")
+
+    signatures: dict[str, int] = {}
+    for position, raw_scene in enumerate(scenes, start=1):
+        if not isinstance(raw_scene, dict):
+            errors.append(f"分镜{position}不是对象")
+            continue
+        required = ("sceneTitle", "characterScene", "cameraLanguage", "sceneDescription", "plot")
+        for field in required:
+            if not str(raw_scene.get(field) or "").strip():
+                errors.append(f"分镜{position}缺少 {field}")
+        if not str(raw_scene.get("dialogue") or "").strip() and not str(raw_scene.get("narration") or "").strip():
+            errors.append(f"分镜{position}缺少 dialogue/narration")
+        description = str(raw_scene.get("sceneDescription") or "").strip()
+        plot = str(raw_scene.get("plot") or "").strip()
+        if description and len(description) < 45:
+            errors.append(f"分镜{position} sceneDescription 过短")
+        if plot and len(plot) < 10:
+            errors.append(f"分镜{position} plot 过短")
+        signature = re.sub(
+            r"[\W_]+",
+            "",
+            "|".join(
+                str(raw_scene.get(field) or "").lower()
+                for field in ("sceneDescription", "plot", "dialogue", "narration")
+            ),
+        )
+        if signature:
+            previous = signatures.get(signature)
+            if previous is not None:
+                errors.append(f"分镜{position}与分镜{previous}内容重复")
+            else:
+                signatures[signature] = position
+    return errors
+
+
 def _normalize_scenes(parsed: dict[str, Any] | None, count: int, form: dict[str, Any]) -> list[dict[str, Any]]:
     scenes_raw: list[Any] = []
     if isinstance(parsed, dict):
@@ -787,6 +888,19 @@ def _normalize_scenes(parsed: dict[str, Any] | None, count: int, form: dict[str,
                 "cameraLanguage": str(source.get("cameraLanguage") or ""),
                 "plot": str(source.get("plot") or ""),
                 "voiceDirection": str(source.get("voiceDirection") or ""),
+                "textToVideoPrompt": str(source.get("textToVideoPrompt") or scene_desc),
+                "imageToVideoPrompt": str(
+                    source.get("imageToVideoPrompt")
+                    or f"Animate this scene with natural character and camera motion: {scene_desc}"
+                ),
+                "multiImageVideoPrompt": str(
+                    source.get("multiImageVideoPrompt")
+                    or "Create a smooth transition to the next scene while preserving character identity and continuity."
+                ),
+                "keyframeTransitionPrompt": str(
+                    source.get("keyframeTransitionPrompt")
+                    or "Maintain character identity, outfit, spatial continuity, and cinematic pacing between keyframes."
+                ),
             }
         )
     return scenes

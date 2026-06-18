@@ -37,8 +37,10 @@ class AssetStorage:
             or settings.generated_media_public_base_url
             or "/generated"
         ).rstrip("/")
+        configured_private_base_url = os.getenv("ASSET_STORAGE_PRIVATE_BASE_URL")
         private_base_url = (
-            os.getenv("ASSET_STORAGE_PRIVATE_BASE_URL") or public_base_url
+            configured_private_base_url
+            or ("/api/v1/assets/private" if provider == "oss" else public_base_url)
         ).rstrip("/")
         oss_prefix = (os.getenv("OSS_KEY_PREFIX") or "").strip().replace("\\", "/")
         while oss_prefix.startswith("/"):

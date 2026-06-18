@@ -688,6 +688,17 @@ const playheadPosition = computed(() => {
                   </div>
                 </div>
 
+                <!-- 完整剧本正文 -->
+                <div
+                  v-if="workflowPreview?.script?.screenplay"
+                  class="rounded-lg border border-white/10 bg-white/[0.03] p-4"
+                >
+                  <p class="mb-3 text-xs font-medium text-white/50">完整剧本</p>
+                  <p class="whitespace-pre-wrap text-sm leading-7 text-white/70">
+                    {{ workflowPreview.script.screenplay }}
+                  </p>
+                </div>
+
                 <!-- 角色列表 -->
                 <div v-if="workflowPreview?.script?.characters?.length" class="rounded-lg border border-white/10 bg-white/[0.03] p-4 space-y-2">
                   <p class="text-xs font-medium text-white/50 mb-2">角色设计</p>

@@ -467,6 +467,14 @@ export interface WorkflowSceneScript {
   subtitleEn?: string
   presenterGender?: string
   durationSeconds?: number
+  characterScene?: string
+  cameraLanguage?: string
+  plot?: string
+  voiceDirection?: string
+  textToVideoPrompt?: string
+  imageToVideoPrompt?: string
+  multiImageVideoPrompt?: string
+  keyframeTransitionPrompt?: string
 }
 
 export interface WorkflowStagePreview {
@@ -475,6 +483,11 @@ export interface WorkflowStagePreview {
   currentNodeId?: string
   script?: {
     title?: string
+    synopsis?: string
+    screenplay?: string
+    genre?: string
+    characters?: Array<{ name?: string; appearance?: string; personality?: string }>
+    locations?: Array<{ name?: string; description?: string }>
     sceneTitle?: string
     sceneDescription?: string
     dialogue?: string

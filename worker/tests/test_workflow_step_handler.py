@@ -1,4 +1,14 @@
-from handlers.workflow_step_handler import _extract_json, _fallback_script, _merge_form
+import json
+
+import pytest
+
+from client.model_client import ModelClientError
+from handlers.workflow_step_handler import (
+    WorkflowStepHandler,
+    _extract_json,
+    _fallback_script,
+    _merge_form,
+)
 
 
 def test_extract_json_from_markdown_wrapped_payload():
@@ -143,3 +153,82 @@ def test_scene_loop_node_overrides_episode_length():
     assert _resolve_scene_count({"episodeLength": "90s"}, workflow_inputs) == 4
     # 没有 scene_loop 输出时回退到时长推断
     assert _resolve_scene_count({"episodeLength": "90s"}, {"form": {}}) == 18
+
+
+def _valid_script(scene_count: int = 2) -> dict:
+    scenes = []
+    for index in range(1, scene_count + 1):
+        scenes.append(
+            {
+                "index": index,
+                "sceneTitle": f"剧情推进{index}",
+                "durationSeconds": 5,
+                "characterScene": f"主角 / 场景{index}",
+                "cameraLanguage": f"{'全景' if index == 1 else '特写'}，平视，缓慢推进",
+                "sceneDescription": (
+                    f"Cinematic scene {index}: the protagonist performs action {index} "
+                    f"in a distinct environment with unique lighting and composition."
+                ),
+                "plot": f"第{index}镜发生独立的剧情事件并推动冲突发展。",
+                "dialogue": f"第{index}镜的独立台词。",
+                "narration": "",
+                "voiceDirection": f"【说话人=主角｜男｜青年】第{index}镜的独立台词。",
+                "subtitleZh": f"第{index}镜的独立台词。",
+                "subtitleEn": f"Unique line for scene {index}.",
+                "presenterGender": "male",
+            }
+        )
+    return {
+        "title": "完整测试剧本",
+        "synopsis": "主角遭遇危机，采取行动并完成反转。",
+        "screenplay": "".join(
+            f"第{index}幕：主角在场景{index}经历独立事件，动作、情绪和环境持续变化。"
+            for index in range(1, scene_count + 1)
+        )
+        * 5,
+        "genre": "都市逆袭",
+        "characters": [{"name": "主角", "appearance": "黑发青年，深色夹克", "personality": "果断"}],
+        "locations": [{"name": "城市", "description": "雨夜霓虹街道"}],
+        "scenes": scenes,
+    }
+
+
+
+class SequenceModelClient:
+    def __init__(self, responses: list[str]):
+        self.responses = list(responses)
+        self.prompts: list[str] = []
+
+    def generate(self, prompt: str, **kwargs):
+        self.prompts.append(prompt)
+        return self.responses.pop(0)
+
+
+def test_script_planner_retries_invalid_output_and_returns_detailed_script():
+    valid = _valid_script()
+    model_client = SequenceModelClient(["not-json", json.dumps(valid, ensure_ascii=False)])
+    handler = WorkflowStepHandler(model_client=model_client)
+
+    result = handler._run_script_planner(
+        {"storyTheme": "测试逆袭", "episodeLength": "10s"},
+        {"parameters": {"prompt": "强调强冲突和结尾反转"}},
+        {"provider": "agnes_chat", "modelName": "agnes-2.0-flash"},
+    )
+
+    assert len(model_client.prompts) == 2
+    assert "强调强冲突和结尾反转" in model_client.prompts[0]
+    assert "只输出合法 JSON" in model_client.prompts[0]
+    assert result["screenplay"] == valid["screenplay"]
+    assert result["scenes"][0]["plot"] != result["scenes"][1]["plot"]
+
+
+def test_script_planner_does_not_report_template_success_after_two_invalid_outputs():
+    model_client = SequenceModelClient(["not-json", "{}"])
+    handler = WorkflowStepHandler(model_client=model_client)
+
+    with pytest.raises(ModelClientError, match="剧本模型连续两次未返回可交付内容"):
+        handler._run_script_planner(
+            {"storyTheme": "测试逆袭", "episodeLength": "10s"},
+            {},
+            {"provider": "agnes_chat", "modelName": "agnes-2.0-flash"},
+        )

@@ -54,7 +54,7 @@ app:
   asset-storage:
     provider: ${ASSET_STORAGE_PROVIDER:local}
     public-base-url: ${ASSET_STORAGE_PUBLIC_BASE_URL:${GENERATED_MEDIA_PUBLIC_BASE_URL:/generated}}
-    private-base-url: ${ASSET_STORAGE_PRIVATE_BASE_URL:${ASSET_STORAGE_PUBLIC_BASE_URL:${GENERATED_MEDIA_PUBLIC_BASE_URL:/generated}}}
+    private-base-url: ${ASSET_STORAGE_PRIVATE_BASE_URL:}
     oss-endpoint: ${OSS_ENDPOINT:}
     oss-bucket: ${OSS_BUCKET:}
     oss-public-bucket: ${OSS_PUBLIC_BUCKET:${OSS_BUCKET:}}
