@@ -391,7 +391,7 @@ public class TaskServiceImpl implements TaskService {
                 return;
             }
             if (value.isTextual() && looksLikeMediaField(key)) {
-                String resolved = agentAttachmentUrlResolver.resolveForWorker(userId, value.asText());
+                String resolved = agentAttachmentUrlResolver.resolveForTaskInput(userId, value.asText());
                 node.set(key, TextNode.valueOf(resolved));
                 return;
             }
@@ -404,7 +404,7 @@ public class TaskServiceImpl implements TaskService {
                 for (int i = 0; i < array.size(); i++) {
                     JsonNode item = array.get(i);
                     if (item != null && item.isTextual() && looksLikeMediaField(key)) {
-                        array.set(i, TextNode.valueOf(agentAttachmentUrlResolver.resolveForWorker(userId, item.asText())));
+                        array.set(i, TextNode.valueOf(agentAttachmentUrlResolver.resolveForTaskInput(userId, item.asText())));
                     } else if (item != null && item.isObject()) {
                         rewriteAttachmentUrls(userId, (ObjectNode) item);
                     }

@@ -1,5 +1,6 @@
 package com.aiminilab.aitoolmarket.storage;
 
+import com.aiminilab.aitoolmarket.auth.security.AuthContext;
 import com.aiminilab.aitoolmarket.storage.AssetStorageService.AssetVisibility;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
@@ -20,9 +21,12 @@ import java.net.URI;
 public class AssetProxyController {
 
     private final AssetStorageService assetStorageService;
+    private final PrivateAssetAccessService privateAssetAccessService;
 
-    public AssetProxyController(AssetStorageService assetStorageService) {
+    public AssetProxyController(AssetStorageService assetStorageService,
+                                PrivateAssetAccessService privateAssetAccessService) {
         this.assetStorageService = assetStorageService;
+        this.privateAssetAccessService = privateAssetAccessService;
     }
 
     @GetMapping("/private/**")
@@ -36,6 +40,10 @@ public class AssetProxyController {
         String relativeKey = fullPath.substring(idx + prefix.length());
         if (relativeKey.isBlank() || relativeKey.contains("..")) {
             return ResponseEntity.badRequest().build();
+        }
+        if (AuthContext.get() == null
+                || !privateAssetAccessService.canAccess(AuthContext.get().userId(), relativeKey)) {
+            return ResponseEntity.notFound().build();
         }
         String signedUrl = assetStorageService.generateSignedUrl(relativeKey, AssetVisibility.PRIVATE, 3600);
         return ResponseEntity.status(HttpStatus.FOUND).location(URI.create(signedUrl)).build();

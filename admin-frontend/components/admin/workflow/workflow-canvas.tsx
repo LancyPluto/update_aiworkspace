@@ -127,6 +127,28 @@ function findModelConfigId(modelConfigs: AgentModelConfig[], role: string): numb
   return enabled.find((config) => config.isDefault)?.id || enabled[0]?.id || null
 }
 
+function findComicDramaModelConfigId(modelConfigs: AgentModelConfig[], role: string): number | null {
+  const capability = capabilityForApiRole(role)
+  const providerPriority: Record<string, string[]> = {
+    text_generation: ["agnes_chat"],
+    image_generation: ["agnes_images"],
+    text_to_speech: ["minimax_speech", "siliconflow_speech"],
+    video_generation: ["agnes_video", "seedance"],
+  }
+  const candidates = modelConfigs
+    .filter((config) => config.enabled !== false)
+    .filter((config) =>
+      !capability || (config.capabilities || []).some((cap) => cap.toUpperCase() === capability),
+    )
+  for (const provider of providerPriority[role] || []) {
+    const matched = candidates
+      .filter((config) => config.provider.toLowerCase() === provider)
+      .sort((left, right) => right.id - left.id)[0]
+    if (matched) return matched.id
+  }
+  return findModelConfigId(modelConfigs, role)
+}
+
 function modelLabel(model: AgentModelConfig): string {
   return model.displayName || model.configCode || model.modelName
 }
@@ -898,10 +920,10 @@ function buildComicDramaDefaultWorkflow(
   tool?: ToolSummary | null,
   modelConfigs: AgentModelConfig[] = [],
 ): { nodes: WFNode[]; edges: WFEdge[] } {
-  const textModelId = findModelConfigId(modelConfigs, "text_generation")
-  const imageModelId = findModelConfigId(modelConfigs, "image_generation")
-  const ttsModelId = findModelConfigId(modelConfigs, "text_to_speech")
-  const videoModelId = findModelConfigId(modelConfigs, "video_generation")
+  const textModelId = findComicDramaModelConfigId(modelConfigs, "text_generation")
+  const imageModelId = findComicDramaModelConfigId(modelConfigs, "image_generation")
+  const ttsModelId = findComicDramaModelConfigId(modelConfigs, "text_to_speech")
+  const videoModelId = findComicDramaModelConfigId(modelConfigs, "video_generation")
 
   const start = fixedNode("start", "start", { x: 40, y: 280 }, {
     title: "Start",

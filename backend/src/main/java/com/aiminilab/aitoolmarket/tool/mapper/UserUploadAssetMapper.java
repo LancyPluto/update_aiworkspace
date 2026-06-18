@@ -35,6 +35,19 @@ public interface UserUploadAssetMapper extends BaseMapper<UserUploadAsset> {
                                            @Param("kind") String kind,
                                            @Param("limit") int limit);
 
+    @Select("""
+            SELECT COUNT(1)
+            FROM user_upload_assets
+            WHERE user_id = #{userId}
+              AND status = 'ACTIVE'
+              AND (
+                url LIKE CONCAT('%/', #{relativeKey})
+                OR storage_path LIKE CONCAT('%/', #{relativeKey})
+              )
+            """)
+    long countActiveByUserAndRelativeKey(@Param("userId") Long userId,
+                                         @Param("relativeKey") String relativeKey);
+
     @Update("""
             UPDATE user_upload_assets
             SET status = 'DELETED', updated_at = #{updatedAt}

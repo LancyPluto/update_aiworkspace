@@ -5,6 +5,7 @@ import com.aiminilab.aitoolmarket.agent.mapper.AgentFileMapper;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.storage.AssetStorageService;
+import com.aiminilab.aitoolmarket.storage.PrivateAssetAccessService;
 import com.aiminilab.aitoolmarket.storage.StoredAsset;
 import org.springframework.stereotype.Service;
 
@@ -30,22 +31,25 @@ public class AgentAttachmentUrlResolver {
     private final AgentFileMapper agentFileMapper;
     private final AgentFileService agentFileService;
     private final AssetStorageService assetStorageService;
+    private final PrivateAssetAccessService privateAssetAccessService;
 
     public AgentAttachmentUrlResolver(AgentFileMapper agentFileMapper,
                                       AgentFileService agentFileService,
-                                      AssetStorageService assetStorageService) {
+                                      AssetStorageService assetStorageService,
+                                      PrivateAssetAccessService privateAssetAccessService) {
         this.agentFileMapper = agentFileMapper;
         this.agentFileService = agentFileService;
         this.assetStorageService = assetStorageService;
+        this.privateAssetAccessService = privateAssetAccessService;
     }
 
-    public String resolveForWorker(Long userId, String rawUrl) {
+    public String resolveForTaskInput(Long userId, String rawUrl) {
         if (rawUrl == null || rawUrl.isBlank()) {
             return rawUrl;
         }
         String trimmed = rawUrl.trim();
         if (trimmed.startsWith("/generated/") || trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
-            return assetStorageService.workerAccessibleUrl(trimmed);
+            return privateAssetAccessService.requireOwnedStableUrl(userId, trimmed);
         }
         Optional<AgentFileRef> ref = parseAgentFileRef(trimmed);
         if (ref.isEmpty()) {
@@ -83,7 +87,7 @@ public class AgentAttachmentUrlResolver {
                     file.getFileSize() == null ? -1 : file.getFileSize(),
                     file.getContentType()
             );
-            return assetStorageService.workerAccessibleUrl(stored.publicUrl());
+            return stored.publicUrl();
         } catch (IOException exception) {
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "failed to publish agent attachment");
         }
