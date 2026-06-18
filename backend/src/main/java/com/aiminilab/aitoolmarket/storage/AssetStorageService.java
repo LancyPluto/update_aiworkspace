@@ -29,12 +29,16 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Service
 public class AssetStorageService {
 
     private static final Logger log = LoggerFactory.getLogger(AssetStorageService.class);
     private static final String GENERATED_PREFIX = "/generated/";
+    private static final Set<String> IMAGE_EXTENSIONS = Set.of("png", "jpg", "jpeg", "gif", "webp", "avif", "bmp");
+    private static final Pattern CF_IMAGE_TRANSFORM = Pattern.compile("^(https?://[^/]+)/cdn-cgi/image/[^/]+(/.*)");
 
     private final AppProperties appProperties;
     private final Path localRoot;
@@ -297,9 +301,31 @@ public class AssetStorageService {
         String normalizedKey = normalizeRelativeKey(relativeKey);
         String base = visibility == AssetVisibility.PUBLIC ? getPublicBaseUrl() : getPrivateBaseUrl();
         if (base != null && !base.isBlank()) {
-            return base.replaceAll("/+$", "") + "/" + normalizedKey;
+            String rawUrl = base.replaceAll("/+$", "") + "/" + normalizedKey;
+            if (visibility == AssetVisibility.PUBLIC && isImageKey(normalizedKey)) {
+                return applyImageTransform(rawUrl);
+            }
+            return rawUrl;
         }
         return GENERATED_PREFIX + normalizedKey;
+    }
+
+    private static boolean isImageKey(String key) {
+        int dot = key.lastIndexOf('.');
+        if (dot < 0 || dot == key.length() - 1) return false;
+        return IMAGE_EXTENSIONS.contains(key.substring(dot + 1).toLowerCase(Locale.ROOT));
+    }
+
+    private String applyImageTransform(String url) {
+        String options = appProperties.getAssetStorage().getImageTransformOptions();
+        if (options.isBlank()) return url;
+        try {
+            java.net.URI uri = java.net.URI.create(url);
+            String authority = uri.getScheme() + "://" + uri.getAuthority();
+            return authority + "/cdn-cgi/image/" + options + uri.getPath();
+        } catch (Exception e) {
+            return url;
+        }
     }
 
     private String relativeKeyFromPublicUrl(String url) {
@@ -318,7 +344,7 @@ public class AssetStorageService {
         if (url == null || url.isBlank()) {
             return null;
         }
-        String normalized = stripQueryAndFragment(url.trim());
+        String normalized = stripImageTransformPrefix(stripQueryAndFragment(url.trim()));
         AppProperties.AssetStorage storage = appProperties.getAssetStorage();
         for (ConfiguredBase base : configuredBases(storage)) {
             String prefix = base.baseUrl().replaceAll("/+$", "") + "/";
@@ -398,6 +424,11 @@ public class AssetStorageService {
         String host = hostEnd > hostStart ? lower.substring(hostStart, hostEnd) : lower.substring(hostStart);
         int marker = host.indexOf(".oss-");
         return marker > 0 ? host.substring(0, marker) : null;
+    }
+
+    private static String stripImageTransformPrefix(String url) {
+        Matcher m = CF_IMAGE_TRANSFORM.matcher(url);
+        return m.matches() ? m.group(1) + m.group(2) : url;
     }
 
     private static String stripQueryAndFragment(String value) {

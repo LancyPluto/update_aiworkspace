@@ -871,6 +871,8 @@ public class AppProperties {
         private String ossAccessKeySecret = "";
         /** Optional key prefix inside the bucket, e.g. {@code prod/} or {@code dev/}. */
         private String ossKeyPrefix = "";
+        /** Cloudflare Image Transformations options, e.g. {@code format=auto,quality=85}. When set, public image URLs use {@code /cdn-cgi/image/<options>/} prefix. */
+        private String imageTransformOptions = "";
 
         public String getProvider() {
             return provider == null || provider.isBlank() ? "local" : provider.trim().toLowerCase(Locale.ROOT);
@@ -968,6 +970,14 @@ public class AppProperties {
 
         public void setOssKeyPrefix(String ossKeyPrefix) {
             this.ossKeyPrefix = ossKeyPrefix;
+        }
+
+        public String getImageTransformOptions() {
+            return imageTransformOptions == null ? "" : imageTransformOptions.trim();
+        }
+
+        public void setImageTransformOptions(String imageTransformOptions) {
+            this.imageTransformOptions = imageTransformOptions;
         }
 
         public boolean isOss() {
