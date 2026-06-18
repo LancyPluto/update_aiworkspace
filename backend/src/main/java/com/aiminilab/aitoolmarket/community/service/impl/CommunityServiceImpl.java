@@ -58,7 +58,7 @@ public class CommunityServiceImpl implements CommunityService {
     private static final int MAX_TAGS = 6;
     private static final int MAX_COLLECTION_NAME_LENGTH = 80;
     private static final java.util.regex.Pattern MEDIA_URL_PATTERN = java.util.regex.Pattern
-            .compile("(https?://[^\\s\\\"'<>\\])},]+|/generated/[^\\s\\\"'<>\\])},]+)");
+            .compile("(https?://[^\\s\\\"'<>\\])},]+|/generated/[^\\s\\\"'<>\\])},]+|/api/v1/assets/[^\\s\\\"'<>\\])},]+)");
 
     private static final int MAX_REPORT_REASON_LENGTH = 500;
 
@@ -536,6 +536,27 @@ public class CommunityServiceImpl implements CommunityService {
                 .toList();
         long total = reportMapper.countForAdmin(normalizedStatus);
         return PageResponse.of(list, total, pageNo, pageSize);
+    }
+
+    @Override
+    @Transactional
+    public int adminMigratePublishedAssets() {
+        if (!assetStorageService.isOssMode()) {
+            return 0;
+        }
+        var wrapper = new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<CommunityPost>()
+                .eq("status", "PUBLISHED");
+        List<CommunityPost> posts = postMapper.selectList(wrapper);
+        int migrated = 0;
+        for (CommunityPost post : posts) {
+            try {
+                migratePostAssets(post, true);
+                migrated++;
+            } catch (Exception e) {
+                // skip failed post, continue with others
+            }
+        }
+        return migrated;
     }
 
     @Override
@@ -1417,7 +1438,7 @@ public class CommunityServiceImpl implements CommunityService {
             // Plain text results can still contain a URL.
         }
         java.util.regex.Matcher matcher = java.util.regex.Pattern
-                .compile("(https?://\\S+|/generated/\\S+)")
+                .compile("(https?://\\S+|/generated/\\S+|/api/v1/assets/\\S+)")
                 .matcher(contentText);
         return matcher.find() ? trimUrl(matcher.group(1)) : null;
     }
@@ -1439,7 +1460,7 @@ public class CommunityServiceImpl implements CommunityService {
             return new ArrayList<>(urls);
         }
         java.util.regex.Matcher matcher = java.util.regex.Pattern
-                .compile("(https?://\\S+|/generated/\\S+)")
+                .compile("(https?://\\S+|/generated/\\S+|/api/v1/assets/\\S+)")
                 .matcher(contentText);
         while (matcher.find()) {
             String candidate = trimUrl(matcher.group(1));

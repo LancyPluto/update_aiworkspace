@@ -296,8 +296,8 @@ public class AssetStorageService {
     private String urlForKey(String relativeKey, AssetVisibility visibility) {
         String normalizedKey = normalizeRelativeKey(relativeKey);
         String base = visibility == AssetVisibility.PUBLIC ? getPublicBaseUrl() : getPrivateBaseUrl();
-        if (base.startsWith("http://") || base.startsWith("https://")) {
-            return base + "/" + normalizedKey;
+        if (base != null && !base.isBlank()) {
+            return base.replaceAll("/+$", "") + "/" + normalizedKey;
         }
         return GENERATED_PREFIX + normalizedKey;
     }
@@ -326,6 +326,20 @@ public class AssetStorageService {
                 String relative = normalizeRelativeKey(normalized.substring(prefix.length()));
                 return new AssetReference(base.bucket(), storage.getOssKeyPrefix() + relative, relative);
             }
+        }
+        // Handle relative proxy paths (e.g. /api/v1/assets/private/images/51/image-1.png)
+        String privateBase = storage.getPrivateBaseUrl();
+        if (privateBase != null && !privateBase.isBlank() && !privateBase.startsWith("http")) {
+            String prefix = privateBase.replaceAll("/+$", "") + "/";
+            if (normalized.startsWith(prefix) && !storage.getOssPrivateBucket().isBlank()) {
+                String relative = normalizeRelativeKey(normalized.substring(prefix.length()));
+                return new AssetReference(storage.getOssPrivateBucket(), storage.getOssKeyPrefix() + relative, relative);
+            }
+        }
+        // Handle legacy /generated/ paths
+        if (normalized.startsWith(GENERATED_PREFIX) && !storage.getOssPrivateBucket().isBlank()) {
+            String relative = normalizeRelativeKey(normalized.substring(GENERATED_PREFIX.length()));
+            return new AssetReference(storage.getOssPrivateBucket(), storage.getOssKeyPrefix() + relative, relative);
         }
         String bucketFromHost = bucketFromOssHost(normalized);
         if (bucketFromHost == null || !knownBuckets(storage).contains(bucketFromHost)) {

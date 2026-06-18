@@ -85,6 +85,12 @@ public class AdminCommunityController {
         ));
     }
 
+    @PostMapping("/migrate-assets")
+    public ApiResponse<java.util.Map<String, Object>> migrateAssets() {
+        int count = communityService.adminMigratePublishedAssets();
+        return ApiResponse.success(java.util.Map.of("migrated", count));
+    }
+
     public record AdminCommunityActionRequest(Boolean enabled, String reason, String topic, java.util.List<String> tags) {
     }
 }
