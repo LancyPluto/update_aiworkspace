@@ -992,6 +992,11 @@ public class WorkflowExecutionService {
         copyTextField(summary, source, "script");
         copyTextField(summary, source, "markdown");
         copyTextField(summary, source, "title");
+        copyTextField(summary, source, "synopsis");
+        copyTextField(summary, source, "screenplay");
+        copyTextField(summary, source, "genre");
+        copyArrayField(summary, source, "characters");
+        copyArrayField(summary, source, "locations");
         JsonNode sceneCount = source.get("sceneCount");
         if (sceneCount != null && sceneCount.isNumber()) {
             summary.put("sceneCount", sceneCount.asInt());
@@ -1015,6 +1020,14 @@ public class WorkflowExecutionService {
                 copyTextField(sceneSummary, scene, "subtitleZh");
                 copyTextField(sceneSummary, scene, "subtitleEn");
                 copyTextField(sceneSummary, scene, "presenterGender");
+                copyTextField(sceneSummary, scene, "characterScene");
+                copyTextField(sceneSummary, scene, "cameraLanguage");
+                copyTextField(sceneSummary, scene, "plot");
+                copyTextField(sceneSummary, scene, "voiceDirection");
+                copyTextField(sceneSummary, scene, "textToVideoPrompt");
+                copyTextField(sceneSummary, scene, "imageToVideoPrompt");
+                copyTextField(sceneSummary, scene, "multiImageVideoPrompt");
+                copyTextField(sceneSummary, scene, "keyframeTransitionPrompt");
                 JsonNode durationSeconds = scene.get("durationSeconds");
                 if (durationSeconds != null && durationSeconds.isNumber()) {
                     sceneSummary.put("durationSeconds", durationSeconds.asInt());
@@ -1037,6 +1050,13 @@ public class WorkflowExecutionService {
         JsonNode value = source.get(field);
         if (value != null && value.isTextual()) {
             target.put(field, value.asText());
+        }
+    }
+
+    private void copyArrayField(ObjectNode target, JsonNode source, String field) {
+        JsonNode value = source.get(field);
+        if (value != null && value.isArray()) {
+            target.set(field, value);
         }
     }
 

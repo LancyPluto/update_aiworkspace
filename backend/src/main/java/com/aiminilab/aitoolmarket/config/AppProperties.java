@@ -889,7 +889,10 @@ public class AppProperties {
         }
 
         public String getPrivateBaseUrl() {
-            return privateBaseUrl == null || privateBaseUrl.isBlank() ? getPublicBaseUrl() : privateBaseUrl.trim();
+            if (privateBaseUrl != null && !privateBaseUrl.isBlank()) {
+                return privateBaseUrl.trim();
+            }
+            return isOss() ? "/api/v1/assets/private" : getPublicBaseUrl();
         }
 
         public void setPrivateBaseUrl(String privateBaseUrl) {

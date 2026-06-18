@@ -39,6 +39,18 @@ class AssetStorageServiceTest {
     }
 
     @Test
+    void ossWithoutExplicitPrivateBaseUsesBackendProxy() {
+        AppProperties properties = new AppProperties();
+        properties.getAssetStorage().setProvider("oss");
+        properties.getAssetStorage().setPublicBaseUrl(
+                "https://wlcloudai-assets-public.oss-cn-guangzhou.aliyuncs.com"
+        );
+        properties.getAssetStorage().setPrivateBaseUrl("");
+
+        assertEquals("/api/v1/assets/private", properties.getAssetStorage().getPrivateBaseUrl());
+    }
+
+    @Test
     void movesPrivateOssUrlToPublicBucketAndReturnsPublicUrl() throws Exception {
         AppProperties properties = new AppProperties();
         properties.getAssetStorage().setProvider("oss");

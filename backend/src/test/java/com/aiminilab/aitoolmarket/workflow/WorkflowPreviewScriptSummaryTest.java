@@ -24,6 +24,14 @@ class WorkflowPreviewScriptSummaryTest {
         script.put("narration", "奶奶轻声安慰");
         script.put("subtitleZh", "奶就放心了");
         script.put("subtitleEn", "so Grandma won't worry.");
+        script.put("title", "雨夜归家");
+        script.put("synopsis", "祖孙在雨夜互相安慰。");
+        script.put("screenplay", "第一幕：奶奶坐在窗边，孙女推门回家。");
+        script.put("genre", "家庭温情");
+        script.set("characters", objectMapper.createArrayNode()
+                .add(objectMapper.createObjectNode().put("name", "奶奶")));
+        script.set("locations", objectMapper.createArrayNode()
+                .add(objectMapper.createObjectNode().put("name", "客厅")));
 
         JsonNode summary = summarize(script);
 
@@ -32,6 +40,12 @@ class WorkflowPreviewScriptSummaryTest {
         assertEquals("奶就放心了。", summary.get("dialogue").asText());
         assertEquals("奶奶轻声安慰", summary.get("narration").asText());
         assertEquals("奶就放心了", summary.get("subtitleZh").asText());
+        assertEquals("雨夜归家", summary.get("title").asText());
+        assertEquals("祖孙在雨夜互相安慰。", summary.get("synopsis").asText());
+        assertEquals("第一幕：奶奶坐在窗边，孙女推门回家。", summary.get("screenplay").asText());
+        assertEquals("家庭温情", summary.get("genre").asText());
+        assertEquals("奶奶", summary.get("characters").get(0).get("name").asText());
+        assertEquals("客厅", summary.get("locations").get(0).get("name").asText());
     }
 
     @Test
@@ -75,11 +89,18 @@ class WorkflowPreviewScriptSummaryTest {
         ObjectNode summary = objectMapper.createObjectNode();
         for (String field : new String[]{
                 "contentText", "sceneTitle", "sceneDescription", "dialogue", "narration",
-                "subtitleZh", "subtitleEn", "presenterGender", "script", "markdown", "title"
+                "subtitleZh", "subtitleEn", "presenterGender", "script", "markdown", "title",
+                "synopsis", "screenplay", "genre"
         }) {
             JsonNode value = source.get(field);
             if (value != null && value.isTextual()) {
                 summary.put(field, value.asText());
+            }
+        }
+        for (String field : new String[]{"characters", "locations"}) {
+            JsonNode value = source.get(field);
+            if (value != null && value.isArray()) {
+                summary.set(field, value);
             }
         }
         return summary.isEmpty() ? script : summary;

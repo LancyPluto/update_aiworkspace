@@ -159,7 +159,7 @@ class WorkerInternalApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("FAILED"))
                 .andExpect(jsonPath("$.data.progress").value(100))
-                .andExpect(jsonPath("$.data.progressMessage").value("任务失败：MODEL_CALL_FAILED"));
+                .andExpect(jsonPath("$.data.progressMessage").value("模型调用失败，请稍后重试"));
 
         mockMvc.perform(get("/api/v1/tasks/{taskId}", taskId)
                         .header("Authorization", "Bearer " + userToken))
@@ -250,7 +250,7 @@ class WorkerInternalApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("TIMEOUT"))
                 .andExpect(jsonPath("$.data.progress").value(100))
-                .andExpect(jsonPath("$.data.progressMessage").value("任务超时：MODEL_TIMEOUT"));
+                .andExpect(jsonPath("$.data.progressMessage").value("模型响应超时，请稍后重试"));
     }
 
     @Test
@@ -287,7 +287,7 @@ class WorkerInternalApiTest {
                         .content(failedBody))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("FAILED"))
-                .andExpect(jsonPath("$.data.progressMessage").value("任务失败：MODEL_CALL_FAILED"));
+                .andExpect(jsonPath("$.data.progressMessage").value("模型调用失败，请稍后重试"));
 
         mockMvc.perform(get("/api/v1/tasks/{taskId}", taskId)
                         .header("Authorization", "Bearer " + userToken))
