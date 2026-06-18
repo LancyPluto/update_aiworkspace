@@ -5,6 +5,7 @@ import re
 from typing import Any
 
 from client.backend_client import BackendClient, BackendClientError
+from handlers.error_classifier import classify_model_error
 from client.model_client import ModelClient, ModelClientError
 from client.seedance_video_client import SeedanceVideoClient, SeedanceVideoError, SeedanceVideoTimeoutError
 from client.siliconflow_video_client import SiliconFlowVideoClient, SiliconFlowVideoError
@@ -482,7 +483,7 @@ class WorkflowStepHandler:
             self.backend_client.mark_failed(
                 task_id,
                 {
-                    "errorCode": "MODEL_CALL_FAILED",
+                    "errorCode": classify_model_error(str(error)),
                     "errorMessage": str(error),
                 },
                 trace_id=trace_id,

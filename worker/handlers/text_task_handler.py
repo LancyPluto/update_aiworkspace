@@ -3,6 +3,7 @@ import time
 from typing import Any
 
 from client.backend_client import BackendClient, BackendClientError
+from handlers.error_classifier import classify_model_error
 from config import settings
 from client.model_client import (
     ModelClient,
@@ -181,7 +182,7 @@ class TextTaskHandler:
         except ModelClientError as exc:
             return self._mark_failed(
                 task_id,
-                error_code="MODEL_CALL_FAILED",
+                error_code=classify_model_error(str(exc)),
                 error_message=str(exc),
                 trace_id=trace_id,
             )

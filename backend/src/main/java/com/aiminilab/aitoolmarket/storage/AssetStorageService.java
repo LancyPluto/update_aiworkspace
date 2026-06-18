@@ -17,11 +17,13 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.URL;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -294,8 +296,8 @@ public class AssetStorageService {
     private String urlForKey(String relativeKey, AssetVisibility visibility) {
         String normalizedKey = normalizeRelativeKey(relativeKey);
         String base = visibility == AssetVisibility.PUBLIC ? getPublicBaseUrl() : getPrivateBaseUrl();
-        if (base.startsWith("http://") || base.startsWith("https://")) {
-            return base + "/" + normalizedKey;
+        if (base != null && !base.isBlank()) {
+            return base.replaceAll("/+$", "") + "/" + normalizedKey;
         }
         return GENERATED_PREFIX + normalizedKey;
     }
@@ -324,6 +326,20 @@ public class AssetStorageService {
                 String relative = normalizeRelativeKey(normalized.substring(prefix.length()));
                 return new AssetReference(base.bucket(), storage.getOssKeyPrefix() + relative, relative);
             }
+        }
+        // Handle relative proxy paths (e.g. /api/v1/assets/private/images/51/image-1.png)
+        String privateBase = storage.getPrivateBaseUrl();
+        if (privateBase != null && !privateBase.isBlank() && !privateBase.startsWith("http")) {
+            String prefix = privateBase.replaceAll("/+$", "") + "/";
+            if (normalized.startsWith(prefix) && !storage.getOssPrivateBucket().isBlank()) {
+                String relative = normalizeRelativeKey(normalized.substring(prefix.length()));
+                return new AssetReference(storage.getOssPrivateBucket(), storage.getOssKeyPrefix() + relative, relative);
+            }
+        }
+        // Handle legacy /generated/ paths
+        if (normalized.startsWith(GENERATED_PREFIX) && !storage.getOssPrivateBucket().isBlank()) {
+            String relative = normalizeRelativeKey(normalized.substring(GENERATED_PREFIX.length()));
+            return new AssetReference(storage.getOssPrivateBucket(), storage.getOssKeyPrefix() + relative, relative);
         }
         String bucketFromHost = bucketFromOssHost(normalized);
         if (bucketFromHost == null || !knownBuckets(storage).contains(bucketFromHost)) {
@@ -413,6 +429,22 @@ public class AssetStorageService {
             return value;
         }
         return "https://" + value;
+    }
+
+    public String generateSignedUrl(String relativeKey, AssetVisibility visibility, int expirationSeconds) {
+        if (!isOssMode() || ossClient == null) {
+            return urlForKey(relativeKey, visibility);
+        }
+        AppProperties.AssetStorage storage = appProperties.getAssetStorage();
+        String bucket = bucketFor(visibility, storage);
+        String objectKey = storage.getOssKeyPrefix() + normalizeRelativeKey(relativeKey);
+        Date expiration = new Date(System.currentTimeMillis() + (long) expirationSeconds * 1000);
+        URL url = ossClient.generatePresignedUrl(bucket, objectKey, expiration);
+        return url.toString();
+    }
+
+    public String generateSignedPrivateUrl(String relativeKey) {
+        return generateSignedUrl(relativeKey, AssetVisibility.PRIVATE, 3600);
     }
 
     public enum AssetVisibility {

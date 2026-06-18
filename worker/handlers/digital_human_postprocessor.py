@@ -285,8 +285,20 @@ class DigitalHumanPostprocessor:
         return imageio_ffmpeg.get_ffmpeg_exe()
 
     def _download(self, url: str, destination: Path) -> None:
+        local = self._resolve_local_path(url)
+        if local is not None:
+            shutil.copy2(local, destination)
+            return
+        fetch_url = url
+        if url.startswith("/"):
+            backend = (settings.backend_internal_base_url or "").rstrip("/")
+            if not backend:
+                raise DigitalHumanPostprocessError(
+                    "relative media URL requires BACKEND_INTERNAL_BASE_URL"
+                )
+            fetch_url = f"{backend}{url}"
         try:
-            with requests.get(url, stream=True, timeout=self.timeout) as response:
+            with requests.get(fetch_url, stream=True, timeout=self.timeout) as response:
                 response.raise_for_status()
                 with destination.open("wb") as file:
                     for chunk in response.iter_content(chunk_size=1024 * 512):
@@ -294,6 +306,24 @@ class DigitalHumanPostprocessor:
                             file.write(chunk)
         except requests.RequestException as exc:
             raise DigitalHumanPostprocessError(f"download media failed: {exc}") from exc
+
+    @staticmethod
+    def _resolve_local_path(url: str) -> Path | None:
+        parsed_path = url
+        if url.startswith(("http://", "https://")):
+            parsed_path = urlparse(url).path
+        public_base = (settings.generated_media_public_base_url or "/generated").rstrip("/")
+        if public_base.startswith(("http://", "https://")):
+            public_base = urlparse(public_base).path.rstrip("/")
+        public_base = public_base or "/generated"
+        if not parsed_path.startswith(public_base + "/"):
+            return None
+        relative = parsed_path.removeprefix(public_base + "/")
+        media_root = Path(settings.generated_media_dir).resolve()
+        candidate = media_root.joinpath(relative).resolve()
+        if candidate.is_file() and candidate.is_relative_to(media_root):
+            return candidate
+        return None
 
     @staticmethod
     def _validate_video_file(path: Path) -> None:

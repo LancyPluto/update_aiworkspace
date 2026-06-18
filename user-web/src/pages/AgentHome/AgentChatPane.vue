@@ -1554,7 +1554,7 @@ function formatAgentError(error: unknown) {
     return `模型连接验证失败。请在管理端检查 provider、baseUrl、API Key、模型名称和 MiniMax Group ID 后重试。${detail}`
   }
   if (error instanceof ApiBusinessError && error.code === "MODEL_RISK_CONTROL_REJECTED") {
-    return "第三方模型平台的内容风控未通过，本次没有扣除生成结果。请换一种更安全、明确的描述后重试。"
+    return "您的提示词包含违禁词"
   }
   if (error instanceof ApiBusinessError && error.code === "AGENT_ACTIVE_RUN_LIMIT") {
     return "上一次 Agent 任务尚未结束，占用了运行名额。请点击下方「取消进行中的任务」后再发送；若任务仍在进行，也可等待其完成。"
@@ -1997,7 +1997,7 @@ function appendRunEvent(event: AgentRunEvent) {
       return
     }
     if (errorCode === "MODEL_RISK_CONTROL_REJECTED") {
-      agentError.value = "第三方模型平台的内容风控未通过，本次没有生成结果。请换一种更安全、明确的描述后重试。"
+      agentError.value = "您的提示词包含违禁词"
       return
     }
     if (errorCode === "MODEL_CALL_FAILED") {

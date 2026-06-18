@@ -7,7 +7,8 @@ from requests.exceptions import SSLError
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from handlers.image_generation_handler import ImageGenerationHandler, _model_call_error_code
+from handlers.image_generation_handler import ImageGenerationHandler
+from handlers.error_classifier import classify_model_error
 from handlers.generated_image_persister import GeneratedImagePersister
 from client.openai_images_client import OpenAIImagesClient
 from config import settings
@@ -207,9 +208,9 @@ def test_failure_is_marked_processing_before_failed() -> None:
 
 
 def test_model_auth_failure_error_code_is_specific() -> None:
-    assert _model_call_error_code('siliconflow request failed: status=401, body="Invalid token"') == "MODEL_AUTH_FAILED"
-    assert _model_call_error_code("API Key is required for model provider") == "MODEL_AUTH_FAILED"
-    assert _model_call_error_code("task_status_msg=Failure to pass the risk control system") == "MODEL_RISK_CONTROL_REJECTED"
+    assert classify_model_error('siliconflow request failed: status=401, body="Invalid token"') == "MODEL_AUTH_FAILED"
+    assert classify_model_error("API Key is required for model provider") == "MODEL_AUTH_FAILED"
+    assert classify_model_error("task_status_msg=Failure to pass the risk control system") == "MODEL_RISK_CONTROL_REJECTED"
 
 
 def test_data_url_image_is_persisted() -> None:

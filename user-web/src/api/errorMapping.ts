@@ -44,7 +44,19 @@ export function formatAgentRunFailure(errorCode?: string, errorMessage?: string)
     return errorMessage || "Agent 服务暂时不可用，请稍后重试。"
   }
   if (errorCode === "MODEL_RISK_CONTROL_REJECTED") {
-    return "第三方模型平台的内容风控未通过，本次没有生成结果。请换一种更安全、明确的描述后重试。"
+    return "您的提示词包含违禁词"
+  }
+  if (errorCode === "MODEL_AUTH_FAILED") {
+    return "模型认证失败，请联系管理员检查 API Key"
+  }
+  if (errorCode === "MODEL_CREDIT_INSUFFICIENT") {
+    return "模型账户余额不足，请联系管理员充值"
+  }
+  if (errorCode === "MODEL_RATE_LIMITED") {
+    return errorMessage || "请求过于频繁，请稍后重试"
+  }
+  if (errorCode === "MODEL_TIMEOUT") {
+    return errorMessage || "模型响应超时，请稍后重试"
   }
   if (errorCode === "MODEL_CALL_FAILED") {
     return errorMessage || "模型调用失败，请稍后重试。"

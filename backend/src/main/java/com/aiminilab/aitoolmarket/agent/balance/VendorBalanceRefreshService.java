@@ -103,9 +103,6 @@ public class VendorBalanceRefreshService {
     }
 
     private void recalculateFromManualAmount(ModelVendorAccount account) {
-        if ("SUSPECTED_INSUFFICIENT".equals(account.getBalanceStatus())) {
-            return;
-        }
         var amount = account.getBalanceAmount();
         var threshold = account.getBalanceLowThreshold();
         if (amount == null) {

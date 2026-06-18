@@ -8,6 +8,7 @@ from client.dashscope_video_client import DashScopeVideoClient, DashScopeVideoEr
 from client.kling_video_client import KlingVideoClient, KlingVideoError, KlingVideoTimeoutError
 from client.seedance_video_client import SeedanceVideoClient, SeedanceVideoError, SeedanceVideoTimeoutError
 from config import resolve_kling_api_key, resolve_kling_credentials, resolve_kling_credentials_source
+from handlers.error_classifier import classify_model_error
 from handlers.generated_video_persister import GeneratedVideoPersistError, GeneratedVideoPersister
 from providers import registry as provider_registry
 from utils.input_image import InputImageError, resolve_reference_image_data_url
@@ -188,7 +189,7 @@ class VideoGenerationHandler:
         except InputImageError as exc:
             return self._mark_failed(task_id, "INVALID_TASK_PARAMS", str(exc), trace_id)
         except (KlingVideoError, SeedanceVideoError, AgnesVideoError, DashScopeVideoError, provider_registry.ProviderRegistryError) as exc:
-            return self._mark_failed(task_id, _model_call_error_code(str(exc)), str(exc), trace_id)
+            return self._mark_failed(task_id, classify_model_error(str(exc)), str(exc), trace_id)
         except GeneratedVideoPersistError as exc:
             return self._mark_failed(task_id, "MEDIA_PERSIST_FAILED", str(exc), trace_id)
         except BackendClientError:
@@ -531,24 +532,3 @@ def _optional_float(value: Any) -> float | None:
         return None
 
 
-def _model_call_error_code(message: str) -> str:
-    normalized = message.lower()
-    if (
-        "risk control" in normalized
-        or "content policy" in normalized
-        or "safety policy" in normalized
-        or "sensitive" in normalized
-        or ("task_status_msg" in normalized and "failed" in normalized)
-    ):
-        return "MODEL_RISK_CONTROL_REJECTED"
-    if "status=401" in normalized or "status=403" in normalized:
-        return "MODEL_AUTH_FAILED"
-    if "invalid token" in normalized or "unauthorized" in normalized or "api key" in normalized:
-        return "MODEL_AUTH_FAILED"
-    if "account balance not enough" in normalized or "balance not enough" in normalized or "insufficient balance" in normalized or '"code":1102' in normalized:
-        return "MODEL_CREDIT_INSUFFICIENT"
-    if "status=429" in normalized or "rate limit" in normalized or "too many requests" in normalized:
-        return "MODEL_RATE_LIMITED"
-    if "timed out" in normalized or "timeout" in normalized:
-        return "MODEL_TIMEOUT"
-    return "MODEL_CALL_FAILED"

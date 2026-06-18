@@ -118,8 +118,7 @@ public class UnifiedApiOverviewServiceImpl implements UnifiedApiOverviewService 
                 .toList();
 
         int lowBalance = (int) accounts.stream()
-                .filter(account -> "LOW".equalsIgnoreCase(account.getBalanceStatus())
-                        || "SUSPECTED_INSUFFICIENT".equalsIgnoreCase(account.getBalanceStatus()))
+                .filter(UnifiedApiOverviewServiceImpl::isNegativeBalance)
                 .count();
         int unhealthy = (int) accounts.stream()
                 .filter(account -> "ERROR".equalsIgnoreCase(account.getHealthStatus()))
@@ -136,6 +135,10 @@ public class UnifiedApiOverviewServiceImpl implements UnifiedApiOverviewService 
         );
 
         return new UnifiedApiOverviewResponse(summary, vendorGroups, unconfigured);
+    }
+
+    static boolean isNegativeBalance(ModelVendorAccount account) {
+        return account.getBalanceAmount() != null && account.getBalanceAmount().signum() < 0;
     }
 
     private String resolveConfigVendorCode(AgentModelConfig config, Map<Long, ModelVendorAccount> accountById) {

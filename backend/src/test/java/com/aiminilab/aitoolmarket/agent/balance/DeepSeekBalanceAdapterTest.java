@@ -34,12 +34,27 @@ class DeepSeekBalanceAdapterTest {
     }
 
     @Test
-    void parseBody_marksInsufficientWhenNotAvailable() throws Exception {
+    void parseBody_doesNotMarkPositiveBalanceAsInsufficientWhenNotAvailable() throws Exception {
         String json = """
                 {
                   "is_available": false,
                   "balance_infos": [
                     {"currency": "CNY", "total_balance": "0.01"}
+                  ]
+                }
+                """;
+        BalanceQueryResult result = DeepSeekBalanceAdapter.parseBody(objectMapper, json);
+        assertTrue(result.success());
+        assertEquals(null, result.balanceStatus());
+    }
+
+    @Test
+    void parseBody_marksNegativeBalanceAsInsufficient() throws Exception {
+        String json = """
+                {
+                  "is_available": false,
+                  "balance_infos": [
+                    {"currency": "CNY", "total_balance": "-0.01"}
                   ]
                 }
                 """;

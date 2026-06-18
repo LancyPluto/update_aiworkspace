@@ -7,6 +7,7 @@ from client.seedance_video_client import SeedanceVideoClient, SeedanceVideoError
 from client.siliconflow_video_client import SiliconFlowVideoClient, SiliconFlowVideoError, SiliconFlowVideoTimeoutError
 from config import resolve_infinitetalk_api_key, resolve_siliconflow_api_key, settings
 from handlers.digital_human_postprocessor import DigitalHumanPostprocessError, DigitalHumanPostprocessor
+from handlers.error_classifier import classify_model_error
 from providers import registry as provider_registry
 
 
@@ -124,15 +125,15 @@ class DigitalHumanVideoHandler:
         except SiliconFlowVideoTimeoutError as exc:
             return self._mark_failed(task_id, error_code="MODEL_TIMEOUT", error_message=str(exc))
         except SiliconFlowVideoError as exc:
-            return self._mark_failed(task_id, error_code="MODEL_CALL_FAILED", error_message=str(exc))
+            return self._mark_failed(task_id, error_code=classify_model_error(str(exc)), error_message=str(exc))
         except SeedanceVideoTimeoutError as exc:
             return self._mark_failed(task_id, error_code="MODEL_TIMEOUT", error_message=str(exc))
         except SeedanceVideoError as exc:
-            return self._mark_failed(task_id, error_code="MODEL_CALL_FAILED", error_message=str(exc))
+            return self._mark_failed(task_id, error_code=classify_model_error(str(exc)), error_message=str(exc))
         except InfiniteTalkVideoTimeoutError as exc:
             return self._mark_failed(task_id, error_code="MODEL_TIMEOUT", error_message=str(exc))
         except InfiniteTalkVideoError as exc:
-            return self._mark_failed(task_id, error_code="MODEL_CALL_FAILED", error_message=str(exc))
+            return self._mark_failed(task_id, error_code=classify_model_error(str(exc)), error_message=str(exc))
         except DigitalHumanPostprocessError as exc:
             return self._mark_failed(task_id, error_code="POSTPROCESS_FAILED", error_message=str(exc))
         except BackendClientError:

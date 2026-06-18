@@ -166,6 +166,7 @@ public class AuthInterceptor implements HandlerInterceptor, Filter {
                 || ("GET".equalsIgnoreCase(method) && path.equals("/api/v1/community/posts"))
                 || ("GET".equalsIgnoreCase(method) && path.matches("/api/v1/community/posts/\\d+"))
                 || ("POST".equalsIgnoreCase(method) && path.equals("/api/v1/community/events"))
+                || path.startsWith("/api/v1/assets/private/")
                 || isAdminAuthLoginPath(path);
     }
 

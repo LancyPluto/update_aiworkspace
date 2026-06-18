@@ -29,6 +29,7 @@ import com.aiminilab.aitoolmarket.task.entity.AiTask;
 import com.aiminilab.aitoolmarket.task.mapper.TaskMapper;
 import com.aiminilab.aitoolmarket.task.metrics.TaskMetrics;
 import com.aiminilab.aitoolmarket.task.service.InternalTaskService;
+import com.aiminilab.aitoolmarket.task.support.TaskFailureMessage;
 import com.aiminilab.aitoolmarket.task.service.TaskStateMachine;
 import com.aiminilab.aitoolmarket.workflow.service.WorkflowExecutionService;
 import com.aiminilab.aitoolmarket.tool.dto.ToolFieldResponse;
@@ -245,7 +246,10 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         String errorMessage = request.errorMessage() == null || request.errorMessage().isBlank()
                 ? "Worker execution failed"
                 : limitText(request.errorMessage(), 4000);
-        String progressMessage = limitText(("MODEL_TIMEOUT".equals(errorCode) ? "任务超时：" : "任务失败：") + errorCode, 240);
+        String progressMessage = TaskFailureMessage.userFacingProgressMessage(
+                errorCode,
+                limitText(("MODEL_TIMEOUT".equals(errorCode) ? "任务超时：" : "任务失败：") + errorCode, 240)
+        );
         if (TaskStatus.FAILED.name().equals(task.getStatus()) || TaskStatus.TIMEOUT.name().equals(task.getStatus())
                 || TaskStatus.SUCCESS.name().equals(task.getStatus())
                 || TaskStatus.CANCELLED.name().equals(task.getStatus())) {

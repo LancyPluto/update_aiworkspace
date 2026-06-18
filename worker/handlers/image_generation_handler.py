@@ -20,6 +20,7 @@ from config import (
     resolve_siliconflow_api_key,
     settings,
 )
+from handlers.error_classifier import classify_model_error
 from handlers.generated_image_persister import GeneratedImagePersistError, GeneratedImagePersister
 from prompt.renderer import PromptRenderError, render_prompt
 from providers import registry as provider_registry
@@ -248,7 +249,7 @@ class ImageGenerationHandler:
         except InputImageError as exc:
             return self._mark_failed(task_id, "INVALID_TASK_PARAMS", str(exc), trace_id)
         except (SiliconFlowVideoError, KlingVideoError, OpenAIImagesError) as exc:
-            return self._mark_failed(task_id, _model_call_error_code(str(exc)), str(exc), trace_id)
+            return self._mark_failed(task_id, classify_model_error(str(exc)), str(exc), trace_id)
         except GeneratedImagePersistError as exc:
             return self._mark_failed(task_id, "MEDIA_PERSIST_FAILED", str(exc), trace_id)
         except BackendClientError:
@@ -841,29 +842,6 @@ def _limit_text(value: str, max_length: int) -> str:
     if len(value) <= max_length:
         return value
     return value[: max(0, max_length - 16)] + "...[truncated]"
-
-
-def _model_call_error_code(message: str) -> str:
-    normalized = message.lower()
-    if (
-        "risk control" in normalized
-        or "content policy" in normalized
-        or "safety policy" in normalized
-        or "sensitive" in normalized
-        or "task_status_msg" in normalized and "failed" in normalized
-    ):
-        return "MODEL_RISK_CONTROL_REJECTED"
-    if "status=401" in normalized or "status=403" in normalized:
-        return "MODEL_AUTH_FAILED"
-    if "invalid token" in normalized or "unauthorized" in normalized or "api key" in normalized:
-        return "MODEL_AUTH_FAILED"
-    if "account balance not enough" in normalized or "balance not enough" in normalized or "insufficient balance" in normalized or '"code":1102' in normalized:
-        return "MODEL_CREDIT_INSUFFICIENT"
-    if "status=429" in normalized or "rate limit" in normalized or "too many requests" in normalized:
-        return "MODEL_RATE_LIMITED"
-    if "timed out" in normalized or "timeout" in normalized:
-        return "MODEL_TIMEOUT"
-    return "MODEL_CALL_FAILED"
 
 
 def _json_for_log(value: Any) -> str:

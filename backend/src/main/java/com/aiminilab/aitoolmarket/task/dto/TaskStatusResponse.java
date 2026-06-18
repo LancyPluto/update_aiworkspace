@@ -1,6 +1,7 @@
 package com.aiminilab.aitoolmarket.task.dto;
 
 import com.aiminilab.aitoolmarket.task.entity.AiTask;
+import com.aiminilab.aitoolmarket.task.support.TaskFailureMessage;
 import com.fasterxml.jackson.databind.JsonNode;
 
 public record TaskStatusResponse(
@@ -23,7 +24,7 @@ public record TaskStatusResponse(
                 task.getToolCode(),
                 task.getStatus(),
                 task.getProgress(),
-                task.getProgressMessage(),
+                TaskFailureMessage.userFacingProgressMessage(task.getErrorCode(), task.getProgressMessage()),
                 workflowPreview
         );
     }

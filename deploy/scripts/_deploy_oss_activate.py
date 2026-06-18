@@ -15,10 +15,10 @@ REMOTE_ENV = f"{REMOTE}/.env"
 BUNDLE = ROOT / "ai-tool-market-config-2026-06-09.json"
 
 OSS_BLOCK = """
-# 统一资产存储 OSS（生产 Bucket：wlcloudai-assets-prod）
+# 统一资产存储 OSS（双桶：public + private，签名代理访问私有资源）
 ASSET_STORAGE_PROVIDER=oss
 ASSET_STORAGE_PUBLIC_BASE_URL=https://wlcloudai-assets-public.oss-cn-guangzhou.aliyuncs.com
-ASSET_STORAGE_PRIVATE_BASE_URL=https://wlcloudai-assets-private.oss-cn-guangzhou.aliyuncs.com
+ASSET_STORAGE_PRIVATE_BASE_URL=/api/v1/assets/private
 OSS_ENDPOINT=oss-cn-guangzhou.aliyuncs.com
 OSS_PUBLIC_BUCKET=wlcloudai-assets-public
 OSS_PRIVATE_BUCKET=wlcloudai-assets-private

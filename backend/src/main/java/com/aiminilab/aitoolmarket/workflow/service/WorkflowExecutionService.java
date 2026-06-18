@@ -417,6 +417,18 @@ public class WorkflowExecutionService {
         if (finalVideoUrl == null) {
             finalVideoUrl = text(compose, "videoUrl");
         }
+        if (finalVideoUrl == null) {
+            JsonNode clipVideo = context.path("clip-video");
+            if (!clipVideo.isMissingNode()) {
+                finalVideoUrl = text(clipVideo, "videoUrl");
+                if (finalVideoUrl == null) {
+                    JsonNode clips = clipVideo.path("clips");
+                    if (clips.isArray() && !clips.isEmpty()) {
+                        finalVideoUrl = text(clips.get(0), "videoUrl");
+                    }
+                }
+            }
+        }
         String markdown = text(compose, "markdown");
         if (markdown == null || markdown.isBlank()) {
             markdown = buildFallbackMarkdown(context, finalVideoUrl);
