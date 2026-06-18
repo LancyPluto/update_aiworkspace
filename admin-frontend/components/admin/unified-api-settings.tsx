@@ -406,6 +406,14 @@ function numberOrZero(value: unknown) {
   return Number.isFinite(parsed) ? parsed : 0
 }
 
+function normalizeOptionalUrl(value?: string | null) {
+  return (value || "").trim().replace(/\/+$/, "")
+}
+
+function sameBaseUrl(left?: string | null, right?: string | null) {
+  return normalizeOptionalUrl(left) === normalizeOptionalUrl(right)
+}
+
 function parseExtraAuthObject(extraAuthJson?: string | null): Record<string, unknown> {
   const raw = (extraAuthJson || "").trim()
   if (!raw) return {}
@@ -1074,6 +1082,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
       configCode: model.configCode || "",
       provider: model.provider,
       modelName: model.modelName,
+      baseUrl: model.baseUrl || "",
       docsUrl: model.docsUrl || "",
       enabled: model.enabled,
       agentEnabled: model.agentEnabled ?? true,
@@ -1868,11 +1877,9 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                 value={modelForm.vendorAccountId ? String(modelForm.vendorAccountId) : undefined}
                 onValueChange={(value) => {
                   const accountId = Number(value)
-                  const account = modelAccountOptions.find((item) => item.id === accountId)
                   setModelForm((form) => ({
                     ...form,
                     vendorAccountId: Number.isFinite(accountId) ? accountId : undefined,
-                    baseUrl: account?.baseUrl || "",
                   }))
                 }}
               >
@@ -1890,12 +1897,49 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
               </Select>
               {modelForm.vendorAccountId ? (() => {
                 const account = accountById.get(modelForm.vendorAccountId)
+                const modelOverrideBaseUrl = normalizeOptionalUrl(modelForm.baseUrl)
+                const accountBaseUrl = normalizeOptionalUrl(account?.baseUrl)
+                const inherited = !modelOverrideBaseUrl
+                const sameAsAccount = !!modelOverrideBaseUrl && !!accountBaseUrl && sameBaseUrl(modelOverrideBaseUrl, accountBaseUrl)
                 return (
-                  <p className={`text-xs ${account && hasAccountCredential(account) ? "text-muted-foreground" : "text-amber-700"}`}>
-                    {account
-                      ? `${account.vendorLabel || account.vendorCode} · ${accountCredentialLabel(account)} · ${account.healthStatus || "UNKNOWN"}`
-                      : `账号 #${modelForm.vendorAccountId} 详情未加载，请重新选择一个可用账户`}
-                  </p>
+                  <div className="space-y-2">
+                    <p className={`text-xs ${account && hasAccountCredential(account) ? "text-muted-foreground" : "text-amber-700"}`}>
+                      {account
+                        ? `${account.vendorLabel || account.vendorCode} · ${accountCredentialLabel(account)} · ${account.healthStatus || "UNKNOWN"}`
+                        : `账号 #${modelForm.vendorAccountId} 详情未加载，请重新选择一个可用账户`}
+                    </p>
+                    <div className="rounded-md border bg-muted/30 p-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant={inherited ? "outline" : "secondary"} className="text-xs">
+                          {inherited ? "继承账号地址" : "模型覆盖地址"}
+                        </Badge>
+                        {!inherited && sameAsAccount ? (
+                          <Badge variant="outline" className="text-xs text-amber-700">
+                            覆盖值与账号当前地址一致
+                          </Badge>
+                        ) : null}
+                        {!inherited ? (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 px-2 text-xs"
+                            onClick={() => setModelForm((form) => ({ ...form, baseUrl: "" }))}
+                          >
+                            改回继承账号地址
+                          </Button>
+                        ) : null}
+                      </div>
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        生效地址：{inherited ? (accountBaseUrl || "未配置") : modelOverrideBaseUrl}
+                      </p>
+                      {!inherited ? (
+                        <p className="mt-1 text-xs text-amber-700">
+                          当前模型保存了独立 baseUrl；切换账号后它不会自动跟随账号地址变化。
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
                 )
               })() : (
                 <p className="text-xs text-amber-700">必须绑定一个厂商账户；API Key/AK/SK 只在账户里维护。</p>

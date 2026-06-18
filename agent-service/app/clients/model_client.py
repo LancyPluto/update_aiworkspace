@@ -8,7 +8,7 @@ import httpx
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from app.clients.chat_model_factory import ChatModelFactory, ChatModelProviderError
-from app.clients.volcengine_model import resolve_volcengine_model_name
+from app.clients.volcengine_model import normalize_volcengine_openai_base_url, resolve_volcengine_model_name
 from app.config import Settings, settings as default_settings
 from app.core.schemas import ChatMessage
 
@@ -189,7 +189,7 @@ class ModelClient:
         messages: list[ChatMessage],
         tools: list[dict[str, Any]] | None = None,
     ) -> str:
-        base_url = self.settings.model_api_base_url.rstrip("/")
+        base_url = normalize_volcengine_openai_base_url(self.settings.model_api_base_url.rstrip("/"))
         payload: dict[str, Any] = {
             "model": resolve_volcengine_model_name(self.settings.model_name, base_url),
             "messages": [_to_openai_message(message) for message in messages],
@@ -216,7 +216,7 @@ class ModelClient:
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
     ) -> ChatTurnResult:
-        base_url = self.settings.model_api_base_url.rstrip("/")
+        base_url = normalize_volcengine_openai_base_url(self.settings.model_api_base_url.rstrip("/"))
         payload: dict[str, Any] = {
             "model": resolve_volcengine_model_name(self.settings.model_name, base_url),
             "messages": [_to_openai_message(message) for message in messages],
@@ -255,7 +255,7 @@ class ModelClient:
         *,
         emit_parts: bool = False,
     ) -> AsyncIterator[str | StreamPart]:
-        base_url = self.settings.model_api_base_url.rstrip("/")
+        base_url = normalize_volcengine_openai_base_url(self.settings.model_api_base_url.rstrip("/"))
         if not base_url and self.settings.model_provider.strip().lower() in {"deepseek", "deepseek_compatible"}:
             base_url = "https://api.deepseek.com"
         payload: dict[str, Any] = {

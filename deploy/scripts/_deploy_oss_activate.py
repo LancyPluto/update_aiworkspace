@@ -17,17 +17,24 @@ BUNDLE = ROOT / "ai-tool-market-config-2026-06-09.json"
 OSS_BLOCK = """
 # 统一资产存储 OSS（生产 Bucket：wlcloudai-assets-prod）
 ASSET_STORAGE_PROVIDER=oss
-ASSET_STORAGE_PUBLIC_BASE_URL=https://wlcloudai-assets-prod.oss-cn-guangzhou.aliyuncs.com
+ASSET_STORAGE_PUBLIC_BASE_URL=https://wlcloudai-assets-public.oss-cn-guangzhou.aliyuncs.com
+ASSET_STORAGE_PRIVATE_BASE_URL=https://wlcloudai-assets-private.oss-cn-guangzhou.aliyuncs.com
 OSS_ENDPOINT=oss-cn-guangzhou.aliyuncs.com
-OSS_BUCKET=wlcloudai-assets-prod
+OSS_PUBLIC_BUCKET=wlcloudai-assets-public
+OSS_PRIVATE_BUCKET=wlcloudai-assets-private
+OSS_LEGACY_BUCKET=wlcloudai-assets-prod
 OSS_KEY_PREFIX=
 """.strip()
 
 OSS_KEYS = [
     "ASSET_STORAGE_PROVIDER",
     "ASSET_STORAGE_PUBLIC_BASE_URL",
+    "ASSET_STORAGE_PRIVATE_BASE_URL",
     "OSS_ENDPOINT",
     "OSS_BUCKET",
+    "OSS_PUBLIC_BUCKET",
+    "OSS_PRIVATE_BUCKET",
+    "OSS_LEGACY_BUCKET",
     "OSS_KEY_PREFIX",
 ]
 

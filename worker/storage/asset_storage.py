@@ -46,7 +46,11 @@ class AssetStorage:
             local_root=Path(settings.generated_media_dir).resolve(),
             public_base_url=public_base_url,
             oss_endpoint=(os.getenv("OSS_ENDPOINT") or "").strip(),
-            oss_bucket_name=(os.getenv("OSS_BUCKET") or "").strip(),
+            oss_bucket_name=(
+                os.getenv("OSS_PRIVATE_BUCKET")
+                or os.getenv("OSS_BUCKET")
+                or ""
+            ).strip(),
             oss_access_key_id=(
                 os.getenv("OSS_ACCESS_KEY_ID")
                 or os.getenv("ALIYUN_ACCESS_KEY_ID")

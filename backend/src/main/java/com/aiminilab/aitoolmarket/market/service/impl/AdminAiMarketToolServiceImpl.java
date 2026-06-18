@@ -99,7 +99,7 @@ public class AdminAiMarketToolServiceImpl implements AdminAiMarketToolService {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "仅支持 jpg/png/svg/webp 图标");
         }
         String filename = UUID.randomUUID() + "." + extension;
-        StoredAsset stored = assetStorageService.storeMultipart("icons/" + filename, file);
+        StoredAsset stored = assetStorageService.storeMultipartPublic("icons/" + filename, file);
         return new UploadIconResponse(stored.publicUrl());
     }
 

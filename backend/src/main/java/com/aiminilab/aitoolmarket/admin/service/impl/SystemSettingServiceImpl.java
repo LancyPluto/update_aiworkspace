@@ -139,7 +139,7 @@ public class SystemSettingServiceImpl implements SystemSettingService {
         String filename = "customer-service-" + LocalDateTime.now().format(QR_FILENAME_TIME) + "." + extension;
         StoredAsset stored;
         try {
-            stored = assetStorageService.storeMultipart("customer-service/" + filename, file);
+            stored = assetStorageService.storeMultipartPublic("customer-service/" + filename, file);
         } catch (BusinessException ex) {
             throw ex;
         } catch (RuntimeException ex) {

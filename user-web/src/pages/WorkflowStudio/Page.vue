@@ -52,7 +52,7 @@ const loading = ref(true)
 const error = ref<string | null>(null)
 const streamConnected = ref(false)
 
-const activeTab = ref<"script" | "storyboard" | "character" | "scene" | "video">("script")
+const activeTab = ref<"script" | "storyboard" | "scene" | "video">("script")
 
 const feedbackText = ref("")
 const sceneFeedbackTexts = ref<Record<number, string>>({})
@@ -127,11 +127,11 @@ function sceneAudioFor(index: number): { audioUrl: string; speechText?: string }
 }
 
 const taskStages = [
-  { label: "剧本策划与分镜", progress: 15, key: "scriptFeedback" },
-  { label: "角色/场景/关键帧", progress: 40, key: "sceneFeedback" },
-  { label: "逐镜图生视频", progress: 65, key: null },
-  { label: "配音与字幕合成", progress: 88, key: null },
-  { label: "人工审核与成片", progress: 96, key: null },
+  { label: "剧本策划", progress: 18 },
+  { label: "关键帧生成", progress: 46 },
+  { label: "配音与视频", progress: 65 },
+  { label: "字幕合成", progress: 95 },
+  { label: "成片输出", progress: 100 },
 ]
 
 const activeStageIndex = computed(() => {
@@ -143,7 +143,10 @@ const activeStageIndex = computed(() => {
 function stageState(stageProgress: number): "done" | "current" | "pending" {
   const progress = statusData.value?.progress ?? 0
   if (progress >= stageProgress) return "done"
-  if (progress >= stageProgress - 18) return "current"
+  const prevStage = taskStages.find((s) => s.progress === stageProgress)
+  const prevIndex = prevStage ? taskStages.indexOf(prevStage) : -1
+  const prevProgress = prevIndex > 0 ? taskStages[prevIndex - 1].progress : 0
+  if (progress >= prevProgress) return "current"
   return "pending"
 }
 
@@ -294,9 +297,9 @@ async function submitFeedback(skip = false) {
 
 function autoActivateTab() {
   const key = awaitingFieldKey.value
-  if (key === "scriptFeedback") activeTab.value = "script"
-  else if (key === "storyboardFeedback") activeTab.value = "storyboard"
+  if (key === "scriptFeedback" || key === "storyboardFeedback") activeTab.value = "script"
   else if (key === "sceneFeedback") activeTab.value = "scene"
+  else if (previewSceneImages.value.length > 0 && previewScenes.value.length > 0) activeTab.value = "storyboard"
 }
 
 // -- Timeline --
@@ -422,10 +425,9 @@ onUnmounted(() => {
 })
 
 const tabs = [
-  { key: "script" as const, label: "剧本脚本", icon: "📜" },
-  { key: "storyboard" as const, label: "分镜脚本", icon: "🎬" },
-  { key: "character" as const, label: "人物造型图片", icon: "👤" },
-  { key: "scene" as const, label: "场景图片", icon: "🎨" },
+  { key: "script" as const, label: "剧本与分镜", icon: "📜" },
+  { key: "storyboard" as const, label: "分镜画面", icon: "🎬" },
+  { key: "scene" as const, label: "场景关键帧", icon: "🎨" },
   { key: "video" as const, label: "分镜视频", icon: "🎥" },
 ]
 
@@ -671,57 +673,94 @@ const playheadPosition = computed(() => {
                 </div>
               </div>
 
-              <!-- Tab: 剧本脚本 -->
+              <!-- Tab: 剧本与分镜 -->
               <div v-if="activeTab === 'script'" class="space-y-4">
-                <div v-if="workflowPreview?.script?.title" class="mb-3">
+                <!-- 剧本概述 -->
+                <div v-if="workflowPreview?.script?.title" class="rounded-lg border border-white/10 bg-white/[0.03] p-4 space-y-3">
                   <h4 class="text-lg font-semibold text-white/90">{{ workflowPreview.script.title }}</h4>
+                  <div v-if="workflowPreview.script.synopsis" class="text-sm text-white/60">
+                    <span class="text-white/30 text-xs font-medium">故事梗概：</span>
+                    {{ workflowPreview.script.synopsis }}
+                  </div>
+                  <div v-if="workflowPreview.script.genre" class="text-sm text-white/50">
+                    <span class="text-white/30 text-xs font-medium">题材类型：</span>
+                    {{ workflowPreview.script.genre }}
+                  </div>
                 </div>
-                <div
-                  v-if="previewScenes.length > 0"
-                  v-for="(scene, idx) in previewScenes"
-                  :key="scene.index ?? idx"
-                  class="rounded-lg border border-white/10 bg-white/[0.03] p-4 space-y-2"
-                >
-                  <div class="flex items-center justify-between">
-                    <p class="text-sm font-medium text-white/80">
-                      分镜 {{ scene.index ?? idx + 1 }}
-                      <template v-if="scene.sceneTitle"> · {{ scene.sceneTitle }}</template>
-                    </p>
+
+                <!-- 角色列表 -->
+                <div v-if="workflowPreview?.script?.characters?.length" class="rounded-lg border border-white/10 bg-white/[0.03] p-4 space-y-2">
+                  <p class="text-xs font-medium text-white/50 mb-2">角色设计</p>
+                  <div
+                    v-for="(char, ci) in workflowPreview.script.characters"
+                    :key="ci"
+                    class="flex gap-3 py-2 border-b border-white/5 last:border-0"
+                  >
+                    <div class="flex-1 space-y-1">
+                      <p class="text-sm font-medium text-white/80">{{ char.name }}</p>
+                      <p v-if="char.appearance" class="text-xs text-white/50">{{ char.appearance }}</p>
+                      <p v-if="char.personality" class="text-xs text-white/40 italic">{{ char.personality }}</p>
+                    </div>
                   </div>
-                  <p v-if="scene.sceneDescription" class="text-sm text-white/50 whitespace-pre-wrap">
-                    {{ scene.sceneDescription }}
-                  </p>
-                  <div v-if="scene.dialogue" class="text-sm">
-                    <span class="text-white/30 text-xs">台词：</span>
-                    <span class="text-white/70">{{ scene.dialogue }}</span>
-                  </div>
-                  <div v-if="scene.narration" class="text-sm">
-                    <span class="text-white/30 text-xs">旁白：</span>
-                    <span class="text-white/70">{{ scene.narration }}</span>
-                  </div>
-                  <div v-if="scene.subtitleZh" class="text-sm">
-                    <span class="text-white/30 text-xs">字幕：</span>
-                    <span class="text-white/70">{{ scene.subtitleZh }}</span>
-                  </div>
-                  <textarea
-                    v-if="awaitingFeedback && awaitingFieldKey === 'scriptFeedback'"
-                    v-model="sceneFeedbackTexts[scene.index ?? idx + 1]"
-                    rows="2"
-                    class="w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder:text-white/25 focus:border-primary focus:outline-none"
-                    :placeholder="`分镜 ${scene.index ?? idx + 1} 修改意见（可选）`"
-                  />
                 </div>
-                <div
-                  v-else-if="workflowPreview?.script"
-                  class="rounded-lg border border-white/10 bg-white/[0.03] p-4 space-y-2"
-                >
-                  <p v-if="workflowPreview.script.sceneDescription" class="text-sm text-white/50 whitespace-pre-wrap">
-                    {{ workflowPreview.script.sceneDescription }}
-                  </p>
-                  <p v-if="workflowPreview.script.dialogue" class="text-sm text-white/70">
-                    <span class="text-white/30 text-xs">对白：</span>{{ workflowPreview.script.dialogue }}
-                  </p>
+
+                <!-- 场景列表 -->
+                <div v-if="workflowPreview?.script?.locations?.length" class="rounded-lg border border-white/10 bg-white/[0.03] p-4 space-y-2">
+                  <p class="text-xs font-medium text-white/50 mb-2">场景设计</p>
+                  <div
+                    v-for="(loc, li) in workflowPreview.script.locations"
+                    :key="li"
+                    class="py-2 border-b border-white/5 last:border-0 space-y-1"
+                  >
+                    <p class="text-sm font-medium text-white/80">{{ loc.name }}</p>
+                    <p v-if="loc.description" class="text-xs text-white/50">{{ loc.description }}</p>
+                  </div>
                 </div>
+
+                <!-- 分镜详情 -->
+                <template v-if="previewScenes.length > 0">
+                  <p class="text-xs font-medium text-white/50">分镜脚本</p>
+                  <div
+                    v-for="(scene, idx) in previewScenes"
+                    :key="scene.index ?? idx"
+                    class="rounded-lg border border-white/10 bg-white/[0.03] p-4 space-y-2"
+                  >
+                    <div class="flex items-center justify-between">
+                      <p class="text-sm font-medium text-white/80">
+                        S{{ scene.index ?? idx + 1 }}
+                        <template v-if="scene.sceneTitle"> · {{ scene.sceneTitle }}</template>
+                      </p>
+                      <span class="text-[11px] text-white/30">{{ scene.durationSeconds ?? 5 }}s</span>
+                    </div>
+                    <div v-if="scene.characterScene" class="text-xs text-white/45">
+                      <span class="text-white/30">角色/场景：</span>{{ scene.characterScene }}
+                    </div>
+                    <div v-if="scene.cameraLanguage" class="text-xs text-white/45">
+                      <span class="text-white/30">镜头语言：</span>{{ scene.cameraLanguage }}
+                    </div>
+                    <div v-if="scene.plot" class="text-sm text-white/60">
+                      <span class="text-white/30 text-xs">情节：</span>{{ scene.plot }}
+                    </div>
+                    <div v-if="scene.dialogue" class="text-sm">
+                      <span class="text-white/30 text-xs">台词：</span>
+                      <span class="text-white/70">{{ scene.dialogue }}</span>
+                    </div>
+                    <div v-if="scene.narration" class="text-sm">
+                      <span class="text-white/30 text-xs">旁白：</span>
+                      <span class="text-white/70">{{ scene.narration }}</span>
+                    </div>
+                    <div v-if="scene.voiceDirection" class="text-xs text-white/40 italic">
+                      {{ scene.voiceDirection }}
+                    </div>
+                    <textarea
+                      v-if="awaitingFeedback && (awaitingFieldKey === 'scriptFeedback' || awaitingFieldKey === 'storyboardFeedback')"
+                      v-model="sceneFeedbackTexts[scene.index ?? idx + 1]"
+                      rows="2"
+                      class="w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder:text-white/25 focus:border-primary focus:outline-none"
+                      :placeholder="`分镜 ${scene.index ?? idx + 1} 修改意见（可选）`"
+                    />
+                  </div>
+                </template>
                 <p v-else class="text-sm text-white/30 py-8 text-center">剧本脚本生成中，请稍候...</p>
               </div>
 
@@ -768,30 +807,7 @@ const playheadPosition = computed(() => {
                 <p v-else class="text-sm text-white/30 py-8 text-center">分镜脚本生成中...</p>
               </div>
 
-              <!-- Tab: 人物造型图片 -->
-              <div v-else-if="activeTab === 'character'" class="space-y-4">
-                <div
-                  v-if="previewSceneImages.length > 0"
-                  class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4"
-                >
-                  <figure
-                    v-for="image in previewSceneImages"
-                    :key="image.sceneIndex ?? image.imageUrl"
-                    class="group relative overflow-hidden rounded-lg border border-white/10 bg-white/[0.03]"
-                  >
-                    <img
-                      :src="normalizeMediaUrl(image.imageUrl)"
-                      class="aspect-square w-full object-cover"
-                    />
-                    <figcaption class="px-2 py-1.5 text-center text-xs text-white/50">
-                      分镜 {{ image.sceneIndex }}
-                    </figcaption>
-                  </figure>
-                </div>
-                <p v-else class="text-sm text-white/30 py-8 text-center">人物造型图片生成中...</p>
-              </div>
-
-              <!-- Tab: 场景图片 -->
+              <!-- Tab: 场景关键帧 -->
               <div v-else-if="activeTab === 'scene'" class="space-y-4">
                 <div
                   v-if="previewSceneImages.length > 0"

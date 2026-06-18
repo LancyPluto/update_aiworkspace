@@ -861,8 +861,12 @@ public class AppProperties {
          * OSS: full base such as {@code https://bucket.oss-cn-hangzhou.aliyuncs.com/prod}.
          */
         private String publicBaseUrl = "/generated";
+        private String privateBaseUrl = "";
         private String ossEndpoint = "";
         private String ossBucket = "";
+        private String ossPublicBucket = "";
+        private String ossPrivateBucket = "";
+        private String ossLegacyBucket = "";
         private String ossAccessKeyId = "";
         private String ossAccessKeySecret = "";
         /** Optional key prefix inside the bucket, e.g. {@code prod/} or {@code dev/}. */
@@ -884,6 +888,14 @@ public class AppProperties {
             this.publicBaseUrl = publicBaseUrl;
         }
 
+        public String getPrivateBaseUrl() {
+            return privateBaseUrl == null || privateBaseUrl.isBlank() ? getPublicBaseUrl() : privateBaseUrl.trim();
+        }
+
+        public void setPrivateBaseUrl(String privateBaseUrl) {
+            this.privateBaseUrl = privateBaseUrl;
+        }
+
         public String getOssEndpoint() {
             return ossEndpoint == null ? "" : ossEndpoint.trim();
         }
@@ -898,6 +910,30 @@ public class AppProperties {
 
         public void setOssBucket(String ossBucket) {
             this.ossBucket = ossBucket;
+        }
+
+        public String getOssPublicBucket() {
+            return ossPublicBucket == null || ossPublicBucket.isBlank() ? getOssBucket() : ossPublicBucket.trim();
+        }
+
+        public void setOssPublicBucket(String ossPublicBucket) {
+            this.ossPublicBucket = ossPublicBucket;
+        }
+
+        public String getOssPrivateBucket() {
+            return ossPrivateBucket == null || ossPrivateBucket.isBlank() ? getOssBucket() : ossPrivateBucket.trim();
+        }
+
+        public void setOssPrivateBucket(String ossPrivateBucket) {
+            this.ossPrivateBucket = ossPrivateBucket;
+        }
+
+        public String getOssLegacyBucket() {
+            return ossLegacyBucket == null ? "" : ossLegacyBucket.trim();
+        }
+
+        public void setOssLegacyBucket(String ossLegacyBucket) {
+            this.ossLegacyBucket = ossLegacyBucket;
         }
 
         public String getOssAccessKeyId() {
