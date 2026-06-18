@@ -4,6 +4,7 @@ import { useRouter } from "vue-router"
 import {
   ArrowRight,
   Check,
+  ChevronDown,
   Copy,
   FolderHeart,
   Heart,
@@ -40,6 +41,13 @@ import { resolveCommunityAuthorName, resolveCommunityPrompt } from "@/utils/comm
 
 type SortKey = "collected_newest" | "collected_oldest" | "usage_most" | "usage_least"
 
+const sortOptions: { label: string; value: SortKey }[] = [
+  { label: "收藏时间 · 最新", value: "collected_newest" },
+  { label: "收藏时间 · 最早", value: "collected_oldest" },
+  { label: "使用次数 · 最多", value: "usage_most" },
+  { label: "使用次数 · 最少", value: "usage_least" },
+]
+
 const PAGE_SIZE = 12
 
 const auth = useAuthStore()
@@ -54,6 +62,8 @@ const error = ref("")
 const copyHint = ref("")
 
 const sortKey = ref<SortKey>("collected_newest")
+const sortDropdownOpen = ref(false)
+const sortDropdownRef = ref<HTMLElement | null>(null)
 const filterKeyword = ref("")
 const visibleCount = ref(PAGE_SIZE)
 const selectedIds = ref<Set<number>>(new Set())
@@ -71,6 +81,10 @@ const collectionMenuId = ref<number | null>(null)
 
 const activeCollection = computed(
   () => collections.value.find((item) => item.id === activeId.value) || collections.value[0] || null,
+)
+
+const currentSortLabel = computed(
+  () => sortOptions.find((item) => item.value === sortKey.value)?.label || "排序",
 )
 
 const sortedPosts = computed(() => {
@@ -377,9 +391,15 @@ function loadMore() {
   visibleCount.value += PAGE_SIZE
 }
 
+function selectSort(value: SortKey) {
+  sortKey.value = value
+  sortDropdownOpen.value = false
+}
+
 function closeMenus() {
   cardMenuPostId.value = null
   collectionMenuId.value = null
+  sortDropdownOpen.value = false
 }
 
 onMounted(() => {
@@ -462,12 +482,33 @@ onUnmounted(() => {
             <Search class="h-4 w-4" />
             <input v-model="filterKeyword" type="search" placeholder="筛选标题或标签" />
           </div>
-          <select v-model="sortKey" class="sort-select" aria-label="排序">
-            <option value="collected_newest">收藏时间 · 最新</option>
-            <option value="collected_oldest">收藏时间 · 最早</option>
-            <option value="usage_most">使用次数 · 最多</option>
-            <option value="usage_least">使用次数 · 最少</option>
-          </select>
+          <div ref="sortDropdownRef" class="sort-dropdown">
+            <button
+              type="button"
+              class="sort-select sort-dropdown-trigger"
+              aria-label="排序"
+              aria-haspopup="listbox"
+              :aria-expanded="sortDropdownOpen"
+              @click.stop="sortDropdownOpen = !sortDropdownOpen"
+            >
+              <span>{{ currentSortLabel }}</span>
+              <ChevronDown class="h-4 w-4" :class="{ rotated: sortDropdownOpen }" />
+            </button>
+            <div v-show="sortDropdownOpen" class="sort-dropdown-menu" role="listbox">
+              <button
+                v-for="item in sortOptions"
+                :key="item.value"
+                type="button"
+                class="sort-dropdown-option"
+                :class="{ active: sortKey === item.value }"
+                role="option"
+                :aria-selected="sortKey === item.value"
+                @click.stop="selectSort(item.value)"
+              >
+                {{ item.label }}
+              </button>
+            </div>
+          </div>
         </div>
       </header>
 
@@ -929,7 +970,14 @@ onUnmounted(() => {
   font-size: 13px;
 }
 
+.sort-dropdown {
+  position: relative;
+}
+
 .sort-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   height: 38px;
   border: 1px solid rgb(255 255 255 / 0.1);
   border-radius: 999px;
@@ -937,6 +985,60 @@ onUnmounted(() => {
   color: rgb(255 255 255 / 0.84);
   padding: 0 14px;
   font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.18s ease, background-color 0.18s ease, color 0.18s ease;
+}
+
+.sort-dropdown-trigger:hover {
+  border-color: rgb(255 255 255 / 0.2);
+  background: rgb(255 255 255 / 0.08);
+  color: #fff;
+}
+
+.sort-dropdown-trigger svg {
+  color: rgb(255 255 255 / 0.42);
+  transition: transform 0.18s ease;
+}
+
+.sort-dropdown-trigger svg.rotated {
+  transform: rotate(180deg);
+}
+
+.sort-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 50;
+  min-width: 100%;
+  width: max-content;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 14px;
+  background: #121216;
+  padding: 6px;
+  box-shadow: 0 22px 60px rgb(0 0 0 / 0.45);
+}
+
+.sort-dropdown-option {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  padding: 9px 12px;
+  color: rgb(255 255 255 / 0.72);
+  font-size: 13px;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 0.16s ease, color 0.16s ease;
+}
+
+.sort-dropdown-option:hover,
+.sort-dropdown-option.active {
+  background: rgb(255 255 255 / 0.08);
+  color: #fff;
 }
 
 .inline-hint {
