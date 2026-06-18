@@ -63,6 +63,7 @@ app:
     oss-access-key-id: ${OSS_ACCESS_KEY_ID:${ALIYUN_ACCESS_KEY_ID:${ALIYUN_CAPTCHA_ACCESS_KEY_ID:}}}
     oss-access-key-secret: ${OSS_ACCESS_KEY_SECRET:${ALIYUN_ACCESS_KEY_SECRET:${ALIYUN_CAPTCHA_ACCESS_KEY_SECRET:}}}
     oss-key-prefix: ${OSS_KEY_PREFIX:}
+    image-transform-options: ${ASSET_STORAGE_IMAGE_TRANSFORM_OPTIONS:}
   rabbitmq:
     task-exchange: ${RABBITMQ_TASK_EXCHANGE:ai.task.exchange}
     task-routing-key: ${RABBITMQ_TASK_ROUTING_KEY:tool.normal}
