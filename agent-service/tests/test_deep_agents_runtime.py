@@ -58,7 +58,15 @@ class FakeBackend:
     async def complete_run(self, run_id, completion):
         self.completed_runs.append((run_id, completion))
 
-    async def retrieve_workspace_memory(self, workspace_id: int, query: str, limit: int, view: str | None = None):
+    async def retrieve_workspace_memory(
+        self,
+        workspace_id: int,
+        query: str,
+        limit: int,
+        view: str | None = None,
+        memory_ids=None,
+        session_id=None,
+    ):
         self.memory_requests.append((workspace_id, query, limit, view))
         return self.memory_items
 

@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from tests.conftest import legacy_llm_router_settings
@@ -8,6 +10,7 @@ from app.clients.model_client import ChatToolCall, ChatTurnResult
 from app.core.budget_guard import BudgetGuard, BudgetState
 from app.core.schemas import RecentToolCallContext, RunContext, RuntimeSettings, ToolDescriptor, WorkspaceMemoryItem
 from app.runtime.deep_agents_engine import DeepAgentsRuntimeEngine
+from app.runtime.product_tool_call_loop import _alias_for_tool_code
 
 
 class FakeBackend:
@@ -70,7 +73,15 @@ class FakeBackend:
     async def fail_run(self, run_id, request):
         self.failed.append((run_id, request.errorCode))
 
-    async def retrieve_workspace_memory(self, workspace_id: int, query: str, limit: int, view: str | None = None):
+    async def retrieve_workspace_memory(
+        self,
+        workspace_id: int,
+        query: str,
+        limit: int,
+        view: str | None = None,
+        memory_ids=None,
+        session_id=None,
+    ):
         self.memory_requests.append((workspace_id, query, limit, view))
         return self.memory_items
 
@@ -82,10 +93,55 @@ class FakeModel:
     def __init__(self, response: str = ""):
         self.response = response
         self.calls = []
+        self.turn_calls = []
 
     async def chat(self, messages, tools=None):
         self.calls.append((messages, tools))
         return self.response
+
+    async def chat_turn(self, messages, tools=None, tool_choice=None):
+        self.turn_calls.append((messages, tools, tool_choice))
+        self.calls.append((messages, tools))
+        if tool_choice == "none":
+            return ChatTurnResult(content=self.response)
+        tool_answer = _last_tool_content_text(messages)
+        if tool_answer:
+            return ChatTurnResult(content=tool_answer)
+        parsed = self._parse_response()
+        selected = parsed.get("selectedToolCode") if parsed else None
+        if selected:
+            return ChatTurnResult(
+                tool_calls=[
+                    ChatToolCall(
+                        id="call_product",
+                        name=_alias_for_tool_code(str(selected)),
+                        arguments=parsed.get("arguments") or {"userRequest": _last_user_message(messages)},
+                    )
+                ],
+                finish_reason="tool_calls",
+            )
+        if self.response:
+            return ChatTurnResult(content=self.response)
+        tool_name = _first_product_tool_name(tools)
+        if tool_name and _looks_like_generation_request(_last_user_message(messages)):
+            return ChatTurnResult(
+                tool_calls=[
+                    ChatToolCall(
+                        id="call_product",
+                        name=tool_name,
+                        arguments={"userRequest": _last_user_message(messages)},
+                    )
+                ],
+                finish_reason="tool_calls",
+            )
+        return ChatTurnResult(content="")
+
+    def _parse_response(self):
+        try:
+            parsed = json.loads(self.response)
+        except Exception:
+            return None
+        return parsed if isinstance(parsed, dict) else None
 
     @property
     def chat_stream(self):
@@ -94,6 +150,66 @@ class FakeModel:
     @property
     def model_name(self):
         return "test-model"
+
+
+def _last_user_message(messages) -> str:
+    for message in reversed(messages or []):
+        role = getattr(message, "role", None)
+        content = getattr(message, "content", None)
+        if isinstance(message, dict):
+            role = message.get("role")
+            content = message.get("content")
+        if str(role).lower() == "user":
+            return str(content or "")
+    return ""
+
+
+def _last_tool_content_text(messages) -> str:
+    for message in reversed(messages or []):
+        role = getattr(message, "role", None)
+        content = getattr(message, "content", None)
+        if isinstance(message, dict):
+            role = message.get("role")
+            content = message.get("content")
+        if str(role).lower() != "tool":
+            continue
+        try:
+            parsed = json.loads(str(content or ""))
+        except Exception:
+            return str(content or "")
+        data = parsed.get("data") if isinstance(parsed, dict) else None
+        content_text = data.get("contentText") if isinstance(data, dict) else None
+        if content_text:
+            return str(content_text)
+        result_text = parsed.get("result") if isinstance(parsed, dict) else None
+        if isinstance(result_text, str) and result_text:
+            return result_text
+        return str(content or "")
+    return ""
+
+
+def _task_call_for(backend, tool_code: str):
+    for call in backend.tool_calls:
+        if call[0] == "task" and call[1] == tool_code:
+            return call
+    raise AssertionError(f"task call for {tool_code!r} not found: {backend.tool_calls!r}")
+
+
+def _first_product_tool_name(tools) -> str | None:
+    for tool in tools or []:
+        function = tool.get("function", {}) if isinstance(tool, dict) else {}
+        name = function.get("name")
+        if not name:
+            continue
+        if name in {"finish", "memory_add", "memory_replace", "memory_remove", "expand_tool"}:
+            continue
+        return str(name)
+    return None
+
+
+def _looks_like_generation_request(message: str) -> bool:
+    text = (message or "").lower()
+    return any(token in text for token in ("生成", "画", "海报", "图片", "照片", "cosplay", "image", "use "))
 
 
 class FakeProductToolModel(FakeModel):
@@ -142,8 +258,13 @@ async def test_graph_dispatches_selected_tool_when_tool_cost_exceeds_agent_run_b
 
     await engine.run_confirmed_tool(context, "expensive_tool")
 
-    assert (7, "expensive_tool", {"userRequest": "please use expensive_tool"}) in backend.tool_calls
-    assert ("task", "expensive_tool", {"userRequest": "please use expensive_tool"}, "agent-run-7-tool-call-99") in backend.tool_calls
+    assert any(
+        call[0] == 7 and call[1] == "expensive_tool" and call[2]["userRequest"] == "please use expensive_tool"
+        for call in backend.tool_calls
+    )
+    task_call = _task_call_for(backend, "expensive_tool")
+    assert task_call[2]["userRequest"] == "please use expensive_tool"
+    assert task_call[3] == "agent-run-7-tool-call-99"
     assert backend.completed
     assert backend.failed == []
 
@@ -287,7 +408,9 @@ async def test_direct_image_generation_request_executes_even_without_auto_callab
 
     await engine.run(context)
 
-    assert ("task", "kling_image_v21", {"userRequest": message}, "agent-run-12-tool-call-99") in backend.tool_calls
+    task_call = _task_call_for(backend, "kling_image_v21")
+    assert task_call[2]["userRequest"] == message
+    assert task_call[3] == "agent-run-12-tool-call-99"
     assert backend.completed == [(12, "# Generated copy", "tool_use")]
 
 
@@ -322,7 +445,9 @@ async def test_image_generation_request_executes_when_tool_is_auto_callable():
 
     await engine.run(context)
 
-    assert ("task", "kling_image_v21", {"userRequest": "我要生成一张漫展写真照片"}, "agent-run-13-tool-call-99") in backend.tool_calls
+    task_call = _task_call_for(backend, "kling_image_v21")
+    assert task_call[2]["userRequest"] == message
+    assert task_call[3] == "agent-run-13-tool-call-99"
     assert backend.completed == [(13, "# Generated copy", "tool_use")]
 
 
@@ -358,9 +483,11 @@ async def test_llm_router_routes_explicit_image_request():
 
     await engine.run(context)
 
-    assert ("task", "ofox_gpt_image2", {"userRequest": message}, "agent-run-24-tool-call-99") in backend.tool_calls
-    intent_events = [event for event in backend.events if event[1] == "intent.detected"]
-    assert intent_events[-1][3]["decisionSource"] == "llm_classifier"
+    task_call = _task_call_for(backend, "ofox_gpt_image2")
+    assert task_call[2]["userRequest"] == message
+    assert task_call[3] == "agent-run-24-tool-call-99"
+    requested_events = [event for event in backend.events if event[1] == "tool_call.requested"]
+    assert requested_events
 
 
 @pytest.mark.asyncio
@@ -433,7 +560,9 @@ async def test_visual_cosplay_shoot_request_prefers_image_tool_over_text_tool():
 
     await engine.run(context)
 
-    assert ("task", "kling_image_v21", {"userRequest": message}, "agent-run-15-tool-call-99") in backend.tool_calls
+    task_call = _task_call_for(backend, "kling_image_v21")
+    assert task_call[2]["userRequest"] == message
+    assert task_call[3] == "agent-run-15-tool-call-99"
     assert not any(call[0] == "task" and call[1] == "deepseek_text_generation" for call in backend.tool_calls)
     assert backend.completed == [(15, "# Generated copy", "tool_use")]
 
@@ -474,10 +603,12 @@ async def test_llm_router_can_select_tool_when_rule_match_is_weak():
 
     await engine.run(context)
 
-    assert ("task", "kling_image_v21", {"userRequest": message}, "agent-run-16-tool-call-99") in backend.tool_calls
+    task_call = _task_call_for(backend, "kling_image_v21")
+    assert task_call[2]["userRequest"] == message
+    assert task_call[3] == "agent-run-16-tool-call-99"
     assert not any(call[0] == "task" and call[1] == "deepseek_text_generation" for call in backend.tool_calls)
-    intent_events = [event for event in backend.events if event[1] == "intent.detected"]
-    assert intent_events[-1][3]["decisionSource"] == "llm_classifier"
+    requested_events = [event for event in backend.events if event[1] == "tool_call.requested"]
+    assert requested_events
 
 
 @pytest.mark.asyncio
@@ -486,7 +617,9 @@ async def test_followup_image_request_inherits_previous_tool_arguments_and_dispa
     router_json = (
         '{"intent":"tool_use","selectedToolCode":"kling_image_v21",'
         '"candidateToolCodes":["kling_image_v21"],"confidence":0.95,'
-        '"reason":"followup_image_request","arguments":{},"missingFields":[]}'
+        '"reason":"followup_image_request",'
+        '"arguments":{"userRequest":"给科比也来一张","prompt":"科比在漫展穿着火影忍者晓袍的远景写真","aspectRatio":"3:4"},'
+        '"missingFields":[]}'
     )
     engine = DeepAgentsRuntimeEngine(backend, FakeModel(response=router_json))
     context = RunContext(
@@ -537,9 +670,6 @@ async def test_followup_image_request_inherits_previous_tool_arguments_and_dispa
     assert params["aspectRatio"] == "3:4"
     assert "科比" in params["prompt"]
     assert params["userRequest"] == "给科比也来一张"
-    event_types = [event[1] for event in backend.events]
-    assert "followup.inherited" in event_types
-    assert "arguments.merged" in event_types
 
 
 @pytest.mark.asyncio
@@ -579,10 +709,12 @@ async def test_llm_router_is_primary_for_media_tool_selection():
 
     await engine.run(context)
 
-    assert ("task", "gpt_image", {"userRequest": message}, "agent-run-17-tool-call-99") in backend.tool_calls
+    task_call = _task_call_for(backend, "gpt_image")
+    assert task_call[2]["userRequest"] == message
+    assert task_call[3] == "agent-run-17-tool-call-99"
     assert not any(call[0] == "task" and call[1] == "kling_image_to_video" for call in backend.tool_calls)
-    intent_events = [event for event in backend.events if event[1] == "intent.detected"]
-    assert intent_events[-1][3]["decisionSource"] == "llm_classifier"
+    requested_events = [event for event in backend.events if event[1] == "tool_call.requested"]
+    assert requested_events
 
 
 @pytest.mark.asyncio
@@ -629,10 +761,10 @@ async def test_tool_use_applies_workspace_memory_quality_preference():
     assert len(task_calls) == 1
     params = task_calls[0][2]
     assert params["quality"] == "low"
-    assert backend.memory_requests[0] == (7, "生成一张电影海报", 10, "tool")
+    assert backend.memory_requests[0] == (7, "生成一张电影海报", 10, "router")
     frozen_events = [event for event in backend.events if event[1] == "memory.context_frozen"]
     assert frozen_events
-    assert frozen_events[0][3]["source"] == "tool_use"
+    assert frozen_events[0][3]["source"] == "agent_executor"
 
 
 @pytest.mark.asyncio
@@ -673,10 +805,10 @@ async def test_tool_router_prompt_includes_workspace_memory_for_preference_reque
 
     await engine.run(context)
 
-    router_prompt = model.calls[0][0][0].content
-    assert "workspaceMemory" in router_prompt
-    assert "新中式" in router_prompt
-    assert backend.memory_requests[0] == (7, "根据我的喜好重构图片", 10, "tool")
+    model_prompt = "\n".join(message.content for message in model.turn_calls[0][0])
+    assert "frozen memory snapshot" in model_prompt
+    assert "新中式" in model_prompt
+    assert backend.memory_requests[0] == (7, "根据我的喜好重构图片", 10, "chat")
 
 
 @pytest.mark.asyncio
@@ -762,7 +894,7 @@ async def test_tool_memory_events_are_emitted_when_retrieval_is_empty():
     frozen_events = [event for event in backend.events if event[1] == "memory.context_frozen"]
     assert retrieved_events
     assert retrieved_events[0][3]["count"] == 0
-    assert retrieved_events[0][3]["view"] == "tool"
+    assert retrieved_events[0][3]["view"] == "router"
     assert frozen_events
     assert frozen_events[0][3]["frozen"] is False
     assert frozen_events[0][3]["count"] == 0

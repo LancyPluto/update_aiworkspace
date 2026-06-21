@@ -246,7 +246,7 @@ class FakeMemoryBackend:
     async def append_event(self, run_id, event):
         self.events.append((run_id, event))
 
-    async def retrieve_workspace_memory(self, workspace_id, query, limit, view=None):
+    async def retrieve_workspace_memory(self, workspace_id, query, limit, view=None, memory_ids=None, session_id=None):
         return getattr(self, "memory_items", [])
 
     async def create_workspace_memory(self, **kwargs):

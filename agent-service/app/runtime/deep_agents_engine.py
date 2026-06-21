@@ -224,6 +224,12 @@ class DeepAgentsRuntimeEngine:
             await self._run_deep_agents_or_chat(context, None)
             return
 
+        direct_answer = _direct_session_recap_answer(context)
+        if direct_answer:
+            await self._emit_answer_events(context.runId, direct_answer)
+            await self._complete_run(context, direct_answer, intent=Intent.GENERAL_CHAT.value)
+            return
+
         await self._run_agent_executor(context)
 
     def _build_agent_executor(self) -> AgentExecutor:
@@ -316,8 +322,8 @@ class DeepAgentsRuntimeEngine:
         if pending_args:
             execution_args.update({key: value for key, value in pending_args.items() if value not in (None, "")})
         execution_args = apply_user_selected_attachment_priority(context, tool, execution_args)
-        execution_args = _apply_workspace_memory_argument_overrides(context, tool, execution_args, workspace_memory_items)
         execution_args = enforce_locked_field_defaults(tool, execution_args, user_message=context.message)
+        execution_args = _apply_workspace_memory_argument_overrides(context, tool, execution_args, workspace_memory_items)
         execution_args = finalize_generation_arguments(context, tool, execution_args, prompt_mode=prompt_mode)
         if workspace_memory_context or pending_args:
             await self._emit_arguments_merged(context, tool, IntentResult(
@@ -832,8 +838,8 @@ class DeepAgentsRuntimeEngine:
         )
         extracted_args = self._merge_tool_arguments(current_args, extracted_args, {}, user_request=context.message)
         extracted_args = apply_user_selected_attachment_priority(context, tool, extracted_args)
-        extracted_args = _apply_workspace_memory_argument_overrides(context, tool, extracted_args, workspace_memory_items)
         extracted_args = enforce_locked_field_defaults(tool, extracted_args, user_message=context.message)
+        extracted_args = _apply_workspace_memory_argument_overrides(context, tool, extracted_args, workspace_memory_items)
         extracted_args = finalize_generation_arguments(context, tool, extracted_args, prompt_mode=prompt_mode)
         await self._emit_arguments_preview(context, tool, extracted_args, [], not auto_call)
         await self._emit_arguments_merged(context, tool, intent, extracted_args)

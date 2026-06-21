@@ -93,7 +93,7 @@ class FakeBackend:
     async def fail_tool_call(self, tool_call_id, payload):
         return None
 
-    async def retrieve_workspace_memory(self, workspace_id, query, limit, view=None):
+    async def retrieve_workspace_memory(self, workspace_id, query, limit, view=None, memory_ids=None, session_id=None):
         return []
 
 

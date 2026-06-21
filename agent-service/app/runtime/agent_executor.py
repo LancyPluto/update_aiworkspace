@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -59,7 +60,13 @@ from app.runtime.tool_disclosure import EXPAND_TOOL, build_disclosed_definitions
 from app.runtime.tool_orchestrator import ToolOrchestrator
 from app.tools.backend_tool import BackendToolBridge, ToolExecutionError, enforce_locked_field_defaults, finalize_generation_arguments
 from app.tools.memory_tool import MemoryTool
-from app.tools.registry import ToolRegistry, infer_output_modality, requested_output_modality, resolve_canonical_tool_code
+from app.tools.registry import (
+    ToolRegistry,
+    infer_output_modality,
+    requested_output_modality,
+    resolve_canonical_tool_code,
+    tool_supports_modality,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -91,7 +98,7 @@ class PendingConfirmation:
 @dataclass(slots=True)
 class AgentExecutorResult:
     final_answer: str = ""
-    intent: str = "agent_executor"
+    intent: str = Intent.GENERAL_CHAT.value
     pending_confirmation: PendingConfirmation | None = None
     messages: list[ChatMessage] = field(default_factory=list)
     iterations: int = 0
@@ -130,6 +137,8 @@ class AgentExecutor:
         self._tool_failures: dict[str, int] = {}
         self._max_tool_retries = 2
         self._memory_tool: MemoryTool | None = None
+        self._workspace_memory_items = []
+        self._workspace_memory_context = ""
         self._tool_defs: list[dict[str, Any]] = []
         self._aliases: dict[str, Any] = {}
 
@@ -163,12 +172,7 @@ class AgentExecutor:
             try:
                 self._guard.reserve_model_call(self._budget)
             except BudgetExceeded:
-                return AgentExecutorResult(
-                    final_answer=last_content or MAX_ITER_FALLBACK,
-                    messages=messages,
-                    iterations=iteration - 1,
-                    stop_reason="budget_exceeded",
-                )
+                raise
 
             turn = await self._chat_turn(messages)
             tool_calls = list(getattr(turn, "tool_calls", []) or [])
@@ -198,6 +202,7 @@ class AgentExecutor:
                 await self._emit_loop_completed(context.runId, iteration, executed_tools)
                 return AgentExecutorResult(
                     final_answer=answer,
+                    intent=Intent.TOOL_USE.value if executed_tools > 0 else Intent.GENERAL_CHAT.value,
                     messages=messages,
                     iterations=iteration,
                     stop_reason="final_answer",
@@ -240,6 +245,7 @@ class AgentExecutor:
         fallback = strip_pseudo_tool_calls(last_content) or MAX_ITER_FALLBACK
         return AgentExecutorResult(
             final_answer=fallback,
+            intent=Intent.TOOL_USE.value if executed_tools > 0 else Intent.GENERAL_CHAT.value,
             messages=messages,
             iterations=self._max_iterations,
             stop_reason="max_iterations",
@@ -286,6 +292,8 @@ class AgentExecutor:
         self._artifacts = []
         self._tool_failures = {}
         self._expanded_tool_codes = set()
+        self._workspace_memory_items = []
+        self._workspace_memory_context = ""
         self._max_iterations = runtime_int(
             context,
             "maxToolCalls",
@@ -350,7 +358,9 @@ class AgentExecutor:
             ChatMessage(role="system", content=configured),
         ]
         memory_items = await self.memory_runtime.fetch_items(context)
+        self._workspace_memory_items = memory_items
         memory_context = format_workspace_memory_context(memory_items)
+        self._workspace_memory_context = memory_context
         if memory_context:
             messages.append(ChatMessage(role="system", content=f"<!-- frozen memory snapshot -->\n{memory_context}"))
             await self.backend.append_event(
@@ -358,6 +368,14 @@ class AgentExecutor:
                 RunEventCreate(
                     eventType=MEMORY_CONTEXT_FROZEN,
                     eventJson=memory_context_trace_payload(memory_context, source="agent_executor", items=memory_items),
+                ),
+            )
+        elif context.workspaceId is not None:
+            await self.backend.append_event(
+                context.runId,
+                RunEventCreate(
+                    eventType=MEMORY_CONTEXT_FROZEN,
+                    eventJson=memory_context_trace_payload("", source="agent_executor", items=[]),
                 ),
             )
         file_context = _format_file_context(context)
@@ -565,7 +583,12 @@ class AgentExecutor:
         tool: ToolDescriptor,
         model_args: dict[str, Any],
     ) -> dict[str, Any]:
-        prepared = self.tool_bridge.build_arguments(context, tool, apply_placeholder_defaults=True)
+        prepared = self.tool_bridge.build_arguments(
+            context,
+            tool,
+            apply_placeholder_defaults=True,
+            workspace_memory_context=self._workspace_memory_context,
+        )
         for key, value in (model_args or {}).items():
             if value not in (None, ""):
                 prepared[key] = value
@@ -575,6 +598,7 @@ class AgentExecutor:
                 prepared.setdefault("prompt", prompt_value)
         prepared = self._backfill_artifacts(tool, prepared)
         prepared = enforce_locked_field_defaults(tool, prepared, user_message=context.message)
+        prepared = _apply_workspace_memory_argument_overrides(context, tool, prepared, self._workspace_memory_items)
         prepared = apply_user_selected_attachment_priority(context, tool, prepared)
         return finalize_generation_arguments(context, tool, prepared)
 
@@ -778,6 +802,106 @@ class AgentExecutor:
             await clearer(context.runId)
         except Exception:
             LOGGER.debug("failed to clear agent executor checkpoint runId=%s", context.runId, exc_info=True)
+
+
+def _apply_workspace_memory_argument_overrides(
+    context: RunContext,
+    tool: ToolDescriptor,
+    arguments: dict[str, Any],
+    memory_items,
+) -> dict[str, Any]:
+    if not memory_items:
+        return arguments
+    normalized = dict(arguments)
+    quality_key = _quality_argument_key(tool, normalized)
+    if quality_key and _memory_prefers_gpt_image_low_quality(context, tool, memory_items):
+        normalized[quality_key] = "low"
+    return normalized
+
+
+def _quality_argument_key(tool: ToolDescriptor, arguments: dict[str, Any]) -> str | None:
+    properties = tool.inputSchema.get("properties", {}) if isinstance(tool.inputSchema, dict) else {}
+    candidate_keys: list[str] = []
+    if isinstance(properties, dict):
+        candidate_keys.extend(key for key in properties if isinstance(key, str) and "quality" in key.lower())
+    candidate_keys.extend(field.fieldKey for field in tool.fields if "quality" in (field.fieldKey or "").lower())
+    candidate_keys.extend(key for key in arguments if isinstance(key, str) and "quality" in key.lower())
+    seen: set[str] = set()
+    for key in candidate_keys:
+        if key in seen:
+            continue
+        seen.add(key)
+        if _quality_key_accepts_value(tool, key, "low"):
+            return key
+    return None
+
+
+def _quality_key_accepts_value(tool: ToolDescriptor, key: str, value: str) -> bool:
+    properties = tool.inputSchema.get("properties", {}) if isinstance(tool.inputSchema, dict) else {}
+    prop = properties.get(key) if isinstance(properties, dict) else None
+    enum_values = prop.get("enum") if isinstance(prop, dict) else None
+    if isinstance(enum_values, list) and enum_values:
+        return value in {str(item).strip().lower() for item in enum_values}
+    field = next((item for item in tool.fields if item.fieldKey == key), None)
+    options = getattr(field, "options", None) if field is not None else None
+    if isinstance(options, list) and options:
+        values = set()
+        for option in options:
+            raw = option.get("value") if isinstance(option, dict) else option
+            if raw not in (None, ""):
+                values.add(str(raw).strip().lower())
+        return value in values
+    return True
+
+
+def _memory_prefers_gpt_image_low_quality(context: RunContext, tool: ToolDescriptor, memory_items) -> bool:
+    if _current_request_explicitly_sets_quality(context.message):
+        return False
+    tool_text = f"{tool.toolCode} {tool.toolName or ''} {tool.description or ''}".lower()
+    if "gpt" not in tool_text or not tool_supports_modality(tool, "image"):
+        return False
+    memory_text = "\n".join(f"{getattr(item, 'title', '')}\n{getattr(item, 'content', '')}" for item in memory_items).lower()
+    compact = re.sub(r"\s+", "", memory_text)
+    if "gpt" not in compact or not any(token in compact for token in ("生图", "image", "图片", "生成图")):
+        return False
+    return any(
+        token in compact
+        for token in (
+            "qualitylow",
+            "质量low",
+            "低质量",
+            "最低质量",
+            "低档",
+            "low档",
+            "用low",
+            "使用low",
+            "一律使用low",
+            "一定用质量low",
+        )
+    )
+
+
+def _current_request_explicitly_sets_quality(message: str) -> bool:
+    compact = re.sub(r"\s+", "", (message or "").lower())
+    if not compact:
+        return False
+    return any(
+        token in compact
+        for token in (
+            "qualityhigh",
+            "quality=high",
+            "高质量",
+            "最高质量",
+            "高档",
+            "qualitymedium",
+            "quality=medium",
+            "中等质量",
+            "qualitylow",
+            "quality=low",
+            "低质量",
+            "最低质量",
+        )
+    )
 
 
 async def emit_executor_answer(backend, run_id: int, answer: str) -> None:

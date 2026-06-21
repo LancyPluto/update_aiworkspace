@@ -43,20 +43,19 @@ class WorkspaceMemoryRuntime:
                 view=view,
                 session_id=context.sessionId,
             )
-            if items:
-                await self.backend.append_event(
-                    context.runId,
-                    RunEventCreate(
-                        eventType=MEMORY_RETRIEVED,
-                        eventJson={
-                            "count": len(items),
-                            "view": view,
-                            "memoryIds": [item.id for item in items],
-                            "types": [item.memoryType for item in items],
-                            "items": memory_trace_items(items),
-                        },
-                    ),
-                )
+            await self.backend.append_event(
+                context.runId,
+                RunEventCreate(
+                    eventType=MEMORY_RETRIEVED,
+                    eventJson={
+                        "count": len(items),
+                        "view": view,
+                        "memoryIds": [item.id for item in items],
+                        "types": [item.memoryType for item in items],
+                        "items": memory_trace_items(items),
+                    },
+                ),
+            )
             return items
         except Exception:
             return []

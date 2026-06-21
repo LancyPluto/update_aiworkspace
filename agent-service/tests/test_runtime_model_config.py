@@ -1,5 +1,6 @@
 import pytest
 
+from app.clients.model_client import ChatTurnResult
 from app.config import Settings
 from app.core.runtime import AgentRuntime
 from app.core.schemas import AgentModelConfig, RunContext
@@ -44,6 +45,9 @@ class FakeModelClient:
 
     async def chat(self, messages):
         return "real model answer"
+
+    async def chat_turn(self, messages, tools=None, tool_choice=None):
+        return ChatTurnResult(content="real model answer")
 
     async def chat_stream(self, messages):
         yield await self.chat(messages)
